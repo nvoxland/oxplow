@@ -25,7 +25,7 @@ true for the tasks you work.
 2. One task in progress at a time per thread. When you stop on it, move it
    back (`ready`, or `blocked` with a comment that says why).
 3. Work you find that the task does not cover: file it as a follow-up on
-   the backlog (`oxtask.task.create`, the `tasks` skill), linked
+   the backlog (`oxtask.task.create`, the `oxtask` skill), linked
    `discovered_from` the task. Don't do it unasked.
 
 ## When it is done

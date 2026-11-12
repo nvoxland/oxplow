@@ -19,7 +19,7 @@ answered, a one-line fix or a command run is not: it needs no task.
    (`oxplow_thread_tasks { thread }`), then the open ones
    (`SELECT uri, title, state FROM v_oxplow_task WHERE state NOT IN ('done','canceled')`
    through `oxplow_query_sql`, or `oxplow_search` with kind `task`).
-2. None says it: file one (`oxtask.task.create`, the `tasks` skill), a
+2. None says it: file one (`oxtask.task.create`, the `oxtask` skill), a
    title the person would recognize.
 3. Move it to `in_progress` before you edit:
 

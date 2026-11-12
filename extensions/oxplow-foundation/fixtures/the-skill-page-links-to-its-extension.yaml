@@ -3,7 +3,7 @@ requires: [oxplow-bundled]
 when:
   page: oxplow/skill
   params:
-    uri: "oxplow:oxplow/skill?skill=oxplow/track-work"
+    uri: "oxplow:oxplow/skill?skill=oxplow/tasks"
 expect:
   see_also:
     contains:

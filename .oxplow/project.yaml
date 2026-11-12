@@ -117,6 +117,7 @@ metrics:
   target: 10.0
 extensions:
 - oxplow-bundled
+- oxtask
 - project
 # What hasn't moved into oxplow-bundled yet: kept here, off.
 disableExtensions:

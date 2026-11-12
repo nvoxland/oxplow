@@ -1,55 +1,36 @@
 ---
 name: tasks
-description: The project's tasks — when filing a task is worth it, oxtask's commands (create, move, update, comment, link, delete), assigning and reordering, stages and buckets, epics and link types, and reading items (read, the next-task page, v_oxplow_task). Loads on the oxplow `run_command` tool with oxtask.task.* or oxplow.tasks.*, and on v_oxplow_task.
+description: Reading the project's tasks, whichever store keeps them — the task model (v_oxplow_task, v_oxplow_task_link, v_oxplow_task_comment, v_oxplow_request_link, v_model_stage), buckets and stages, link types, assigning and reordering, and which requests worked on an item. Loads on the oxplow `run_command` tool with oxplow.tasks.*, and on v_oxplow_task.
 ---
 
 # Tasks
 
-The project keeps its tasks in oxtask, a task store. How much of your work to
-track as tasks is the project's choice (`track-work` or `work-tasks` says
-so when it applies); with neither, file only what the person asks for or a
+The project's tasks are rows of one shared model (`oxplow/task_record`),
+filled by a task store. The store's own skill teaches its commands (find it
+in the skills list); this one teaches how to read the model. How much of
+your work to track as tasks is the project's choice (a workflow skill says
+so when it applies); with none, file only what the person asks for or a
 follow-up. oxplow records your turns and requests either way.
 
-## When an item is worth filing
+## Stages and buckets
 
-File one when it helps the person follow the work:
-
-- a plan of several separately reviewable steps (an epic and children,
-  each child filed with `"parent": "<the epic's id>"`);
-- work the person wants done in a later turn;
-- a follow-up you noticed but can't do now.
-
-```json
-{ "id": "oxtask.task.create",
-  "input": { "title": "Fix login redirect loop", "body": "…", "stage": "ready" } }
-```
-
-The answer names the id it minted (`tsk12`); undo deletes the task. It is
-assigned to nobody. Title: imperative, ≤60 chars. One reviewable concern per
-item. An epic is an item with children: file one when the change has three or
-more steps a reviewer would inspect separately; otherwise file a single item.
-
-Starting an item (`oxtask.task.move { id, stage: "in_progress" }`) assigns it
-to your thread, at the end of its queue; the request you are on is linked to
-it. oxplow never marks an item done. If you're tracking one, move it to
-`done` when it ships.
-
-**Stages and buckets.** oxtask's stages, in order: `backlog`, `ready`,
-`in_progress`, `blocked`, `done`, `canceled` (`v_model_stage` lists any
-store's: `id`, `title`, `bucket`). Every stage is in one of six buckets,
+A store has its own stages (`v_model_stage` lists any store's: `model`,
+`store`, `id`, `title`, `bucket`). Every stage is in one of six buckets,
 which is what oxplow acts on: `backlog` (filed, not ready yet), `todo`
-(`ready`), `in_progress`, `blocked` (needs an answer), `done`, `canceled`
+(ready), `in_progress`, `blocked` (needs an answer), `done`, `canceled`
 (decided against: keep the row, with the reasoning). Put the stage in the
 stage, never in the title.
 
-When the person rejects your last attempt at an item, reopen that item
-rather than filing a new one.
+Changing a task is the store's job: its commands act through the task action
+points (`oxplow/task.new`, `task.move`, `task.edit`, `task.unparent`,
+`task.delete`, `task.comment`, `task.link`, `task.unlink`), which every
+store answers for its own tasks. oxplow never marks an item done.
 
 ## Assigning items
 
 Who is going to work on an item is its assignee: a thread, the person, or
-nobody. An unassigned `ready` item is the pool any thread may take.
-`oxplow.tasks.assign { uri, to }` gives it to a thread
+nobody. An unassigned item in the `todo` bucket is the pool any thread may
+take. `oxplow.tasks.assign { uri, to }` gives it to a thread
 (`oxplow:oxplow/thread?id=thr3`) or the person (`oxplow:oxplow/person`;
 `to: null`: nobody) at the end of their queue; `oxplow.tasks.reorder { uri,
 before? | after? }` moves it within its queue. A controller thread routes
@@ -58,16 +39,7 @@ they should do them. A done or canceled item is nobody's (closing it
 releases it, and so does closing its thread); who worked on it is its
 requests (`v_oxplow_request_link`, below).
 
-## Changing items
-
-By the task's id (`tsk12`): `oxtask.task.move { id, stage }`,
-`oxtask.task.update { id, title?, body?, priority?, parent? }`,
-`oxtask.task.link { id, to, type }` (`to`: a task id or any uri) and
-`oxtask.task.unlink` (the same input), `oxtask.task.comment { id, body }` (the
-answer names the comment), `oxtask.task.delete { id }` (it can be restored).
-Each is undoable.
-
-Link types:
+## Link types
 
 - **blocks**: the item must finish before the target can start (a
   migration before the feature that uses it).
@@ -85,11 +57,6 @@ Link types:
 ## Reading items
 
 - `oxplow_read { uri }` — one item: its row, its links and its comments.
-- `oxplow_next_task { thread: "thr3" }` — what to pick up next: the ready
-  items assigned to the thread (an epic with its ready descendants, or the
-  ready items), else the pool (`role: pool`), most pressing first. Every
-  thread's ready queue is `v_oxplow_ready_queue` (`thread_id` NULL for the
-  pool, `ord` 1 next).
 - `oxplow_thread_tasks { thread }` — what is assigned to a thread and what
   it finished, with the requests that worked on each.
 - `oxplow_query_sql` over `v_oxplow_task` (`uri`, `title`, `body`, `state` —

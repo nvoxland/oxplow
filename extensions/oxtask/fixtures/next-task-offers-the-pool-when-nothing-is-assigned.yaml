@@ -2,7 +2,7 @@
 # ready items assigned to nobody, the most pressing first. Another
 # thread's items, the backlog and blocked ones aren't offered. Starting one
 # assigns it to the thread that started it.
-requires: [oxtask]
+requires: [oxplow-bundled, oxtask]
 when: { page: next-task, params: { thread: thr1 } }
 given:
   - { command: oxplow.thread.create, input: { stream: str1, title: Other }, bind: other }

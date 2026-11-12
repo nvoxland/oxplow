@@ -180,7 +180,7 @@ export type MenuEntry =
  *  values, who it's assigned to (an open card: a thread, the person or
  *  nobody), then Make top-level and Delete — only what its gates allow.
  *  The agent's live card has none. */
-export function cardMenu(card: Rec, { fields, assignees, stages }: MenuContext): MenuEntry[] {
+export function cardMenu(card: Rec, { assignees, stages }: MenuContext): MenuEntry[] {
   if (card.uri == null) return [];
   const uri = String(card.uri);
   const out: MenuEntry[] = [{ kind: "item", id: "open", label: "Open", open: uri }];
@@ -191,18 +191,6 @@ export function cardMenu(card: Rec, { fields, assignees, stages }: MenuContext):
     kind: "item" as const, id: `to-${s.value}`, label: `Mark ${s.label}`,
     act: { point: "oxplow/task.move", context: { uri, stage: s.value } },
   })));
-  const native = parseObject(card.native);
-  // `oxplow/task.edit` carries a title, description, priority and epic: the
-  // board sets a task's priority from its menu, whichever store holds it.
-  for (const f of fields.filter((f) => f.name === "priority")) {
-    group([
-      { kind: "heading", label: f.title },
-      ...f.values.map((v) => ({
-        kind: "item" as const, id: `${f.name}-${v}`, label: humanize(v), checked: native[f.name] === v,
-        act: { point: "oxplow/task.edit", context: { uri, [f.name]: v } },
-      })),
-    ]);
-  }
   // A closed card is nobody's: no one to give it to.
   if (truthy(card.is_open)) {
     const assign = (id: string, label: string, to: string | null): MenuEntry => ({
@@ -280,7 +268,3 @@ function parseObject(v: unknown): Record<string, unknown> {
   }
 }
 
-function humanize(v: string): string {
-  const s = v.replace(/_/g, " ");
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}

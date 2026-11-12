@@ -96,7 +96,7 @@ intent:
       input: { page: command, params: { uri: "oxplow:oxplow/command?command=oxplow.agent.draft" } }
       expect: a command's permission, whether it asks first and can be undone, and where it is declared
     - name: the-skill-page-says-what-a-skill-is
-      input: { page: skill, params: { uri: "oxplow:oxplow/skill?skill=oxplow/track-work" } }
+      input: { page: skill, params: { uri: "oxplow:oxplow/skill?skill=oxplow/tasks" } }
       expect: a skill's description and whether it is a skill or a slash command
     - name: the-component-page-links-the-commands-it-may-run
       input: { page: custom-component, params: { uri: "oxplow:oxplow/custom_component?custom_component=oxplow/integrations" } }
@@ -219,7 +219,7 @@ intent:
       input: { page: command, params: { uri: 'oxplow:oxplow/command?command=oxplow.agent.draft' } }
       expect: its see-also links name the extension that declares it
     - name: the-skill-page-links-to-its-extension
-      input: { page: skill, params: { uri: 'oxplow:oxplow/skill?skill=oxplow/track-work' } }
+      input: { page: skill, params: { uri: 'oxplow:oxplow/skill?skill=oxplow/tasks' } }
       expect: its see-also links name the extension that declares it
     - name: the-custom-component-page-links-to-its-extension
       input: { page: custom-component, params: { uri: 'oxplow:oxplow/custom_component?custom_component=oxplow/integrations' } }
@@ -312,7 +312,7 @@ intent:
       input: { page: resource-data, params: {uri:"oxplow:oxplow/resource?resource=oxplow/stream"} }
       expect: its description is a paragraph above the facts
     - name: the-skill-page-says-what-it-is-in-a-paragraph-above-its-facts
-      input: { page: skill, params: {uri:"oxplow:oxplow/skill?skill=oxplow/track-work"} }
+      input: { page: skill, params: {uri:"oxplow:oxplow/skill?skill=oxplow/tasks"} }
       expect: its description is a paragraph above the facts
     - name: the-dataset-definition-page-says-what-it-is-in-a-paragraph-above-its-facts
       input: { page: dataset-definition, params: {uri:"oxplow:oxplow/dataset?dataset=thread"} }

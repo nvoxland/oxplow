@@ -1,7 +1,7 @@
 # oxtask
 
 oxplow's own task tracker, as an extension in its own namespace
-(`oxtask`). It requires `oxplow-bundled` and is off by default.
+(`oxtask`). It requires `oxplow-bundled` and is on by default (a project's `extensions:` list or a person's `disableExtensions` turns it off).
 
 - **A store.** Tasks, their links and comments are rows of the extension's
   SQLite file (`storage/migrations/V1__tasks.sql`). Triggers give every

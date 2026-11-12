@@ -4,8 +4,8 @@ requires: [oxplow-bundled]
 when:
   page: oxplow/skill
   params:
-    uri: "oxplow:oxplow/skill?skill=oxplow/track-work"
+    uri: "oxplow:oxplow/skill?skill=oxplow/tasks"
 expect:
   nodes:
     - { id: about, kind: viz, viz: detail }
-  text: { contains: ["## About [node about]\n\nHow to keep oxtask, the project's task tracker"] }
+  text: { contains: ["## About [node about]\n\nReading the project's tasks, whichever store keeps them"] }

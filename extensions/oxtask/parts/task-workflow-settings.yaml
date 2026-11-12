@@ -3,11 +3,10 @@ description: "How this project's agents use tasks, and what done means here. For
 needs:
 - model:oxplow/task_record
 loaders:
-  # The four workflows while oxtask is the active tracker (the setting is
-  # oxtask's), the current one marked.
+  # The four workflows (the setting is oxtask's), the current one marked.
   workflows:
     sql: |
-      WITH cur(choice) AS (SELECT workflow FROM v_oxplow_task_workflow)
+      WITH cur(choice) AS (SELECT workflow FROM v_oxtask_task_workflow)
       SELECT w.value, w.label, w.says,
              (w.value = cur.choice) AS current,
              (w.value <> cur.choice) AS can_use
@@ -21,10 +20,9 @@ loaders:
         UNION ALL SELECT 'off', 'Off',
                'oxtask tells the agent nothing about tasks.', 3
       ) w
-      WHERE EXISTS (SELECT 1 FROM v_model_stage WHERE model = 'oxplow/task_record' AND store = 'oxtask')
       ORDER BY w.ord
   done_means:
-    sql: SELECT definition_of_done FROM v_oxplow_task_workflow
+    sql: SELECT definition_of_done FROM v_oxtask_task_workflow
 view:
   stack:
   - id: workflows
@@ -37,11 +35,10 @@ view:
       label: Workflow
     - key: says
       label: What the agent does
-    empty: The task workflow is oxtask's; another task tracker is in use.
     actions:
     - id: use
       label: Use This
-      command: oxplow.tasks.set_workflow
+      command: oxtask.tasks.set_workflow
       row: true
       when: can_use
       input:
@@ -51,7 +48,7 @@ view:
     from: done_means
     viz: form
     form:
-      command: oxplow.tasks.set_workflow
+      command: oxtask.tasks.set_workflow
       mode: edit
       fields:
       - definition_of_done

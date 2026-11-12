@@ -1,4 +1,4 @@
-# oxplow.tasks.set_workflow { workflow?, definition_of_done? }: how this
+# oxtask.tasks.set_workflow { workflow?, definition_of_done? }: how this
 # project's agents use tasks (oxtask's workflow preset) and what "done"
 # means here, written to the project's settings. It reads the settings'
 # stamps and composes the extension's compare-and-swap write, so a change
@@ -27,7 +27,7 @@ def transform(x):
         result["personal_workflow"] = personal["workflow"]
     return {
         "commands": [{
-            "name": "oxplow.settings.write",
+            "name": "oxtask.settings.write",
             "input": {
                 "schema_version": read["schema_version"],
                 "project": {"expected": read["project"], "values": layer},

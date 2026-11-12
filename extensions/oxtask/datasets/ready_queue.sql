@@ -6,11 +6,11 @@
 -- pool (`thread_id` NULL): ready items assigned to nobody that aren't
 -- epics, by priority.
 WITH held AS (
-  SELECT l.to_uri FROM ref('task_link') l JOIN ref('task') b ON b.uri = l.from_uri
+  SELECT l.to_uri FROM ref('oxplow/task_link') l JOIN ref('oxplow/task') b ON b.uri = l.from_uri
   WHERE l.link_type = 'blocks' AND b.state NOT IN ('done', 'canceled')),
 items AS (
   SELECT t.id AS thread_id, w.uri, w.title, w.native_id, w.state, w.parent_uri, w.rank, w.created_at
-  FROM ref('task') w JOIN ref('thread') t ON t.uri = w.assignee),
+  FROM ref('oxplow/task') w JOIN ref('thread') t ON t.uri = w.assignee),
 epics AS (SELECT DISTINCT thread_id, parent_uri AS uri FROM items WHERE parent_uri IS NOT NULL),
 ready AS (
   SELECT * FROM items WHERE state = 'todo' AND uri NOT IN (SELECT to_uri FROM held)),
@@ -37,10 +37,10 @@ pool AS (
   SELECT p.uri, p.title, p.native_id, p.rank, p.created_at,
          CASE json_extract(CASE WHEN json_valid(p.native) THEN p.native END, '$.priority')
            WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'low' THEN 3 ELSE 2 END AS urgency
-  FROM ref('task') p
+  FROM ref('oxplow/task') p
   WHERE p.assignee IS NULL AND p.state = 'todo'
     AND p.uri NOT IN (SELECT to_uri FROM held)
-    AND p.uri NOT IN (SELECT parent_uri FROM ref('task') WHERE parent_uri IS NOT NULL))
+    AND p.uri NOT IN (SELECT parent_uri FROM ref('oxplow/task') WHERE parent_uri IS NOT NULL))
 SELECT thread_id, uri, title, native_id, CAST(role AS TEXT) AS role,
        CAST(row_number() OVER (PARTITION BY thread_id ORDER BY role = 'child', rank IS NULL, rank, created_at) AS INTEGER) AS ord
 FROM mine
