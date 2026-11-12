@@ -62,16 +62,80 @@ pub type Composer = dyn Fn(&Composing<'_>, &oxplow_domain::run::RunContext, &Val
     + Send
     + Sync;
 
-/// A composite's handler: its composer. The bus composes it, routes the
-/// calls and runs them (`steps.rs`).
+/// What one step of a run answered, as an extension script's `finish`
+/// sees it: the call's name and input and the answer it gave (a store
+/// write's carries `rows`, its `RETURNING` rows).
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct StepAnswer {
+    pub name: String,
+    pub input: Value,
+    pub result: Value,
+}
+
+/// What a composite's `finish` decided once all its steps landed: the
+/// run's `result` and the `inverse` calls that undo it. A part it leaves
+/// out keeps what the composer said.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Finished {
+    pub result: Option<Value>,
+    pub inverse: Option<Vec<CommandCall>>,
+}
+
+/// Say, after every step of a composite landed, what its run answers and
+/// how it is undone: given the input the run was called with and each
+/// step's answer, reading through `Composing` (what the composer reads
+/// through) as part of `run`. Pure: it writes nothing and composes nothing.
+/// `None` for the reads: the run is inside the bus's transaction, which
+/// holds the database, so `finish` can't read (a read would wait for it).
+pub type Finisher = dyn Fn(
+        Option<&Composing<'_>>,
+        &oxplow_domain::run::RunContext,
+        &Value,
+        &[StepAnswer],
+    ) -> Result<Finished, CommandError>
+    + Send
+    + Sync;
+
+/// What a [`Composing`] borrows, owned: the bus keeps one with a routed
+/// composition so a `finish` that runs later, in a transaction or after
+/// the steps, can read as the composer did.
+#[derive(Clone)]
+pub struct Reads {
+    pub sql: crate::sql_gateway::SqlGateway,
+    pub db: oxplow_db::Database,
+    pub runtime: tokio::runtime::Handle,
+}
+
+impl Reads {
+    pub fn composing(&self) -> Composing<'_> {
+        Composing {
+            sql: &self.sql,
+            db: &self.db,
+            runtime: &self.runtime,
+        }
+    }
+}
+
+/// A composite's handler: its composer, and its `finish` when it has
+/// one. The bus composes it, routes the calls and runs them (`steps.rs`).
 pub struct Compose {
     pub compose: Arc<Composer>,
+    /// Called after all its steps landed (an extension script's `finish`).
+    pub finish: Option<Arc<Finisher>>,
 }
 
 impl Compose {
     /// The composite over `compose`.
     pub fn handler(compose: Arc<Composer>) -> Handler {
-        Handler::Compose(Arc::new(Compose { compose }))
+        Handler::Compose(Arc::new(Compose {
+            compose,
+            finish: None,
+        }))
+    }
+
+    /// The composite over `compose`, whose run `finish` answers.
+    pub fn handler_finishing(compose: Arc<Composer>, finish: Option<Arc<Finisher>>) -> Handler {
+        Handler::Compose(Arc::new(Compose { compose, finish }))
     }
 }
 

@@ -119,6 +119,20 @@ pub(super) async fn run_steps(
             host.settle().await;
             continue;
         }
+        // An extension's own SQLite file, written from outside.
+        if let Some(spec) = step.get("store_sql") {
+            if let Err(e) = given_store_sql(host, spec) {
+                report.errors.push(error(
+                    shown,
+                    None,
+                    "fixture.step",
+                    format!("`{key}[{index}]` `store_sql`: {e}"),
+                ));
+                return false;
+            }
+            host.settle().await;
+            continue;
+        }
         // Project files a tool would have written, removed or moved.
         let on_files = [
             (

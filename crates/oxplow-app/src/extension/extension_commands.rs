@@ -868,6 +868,127 @@ pub fn composed(value: Value) -> Result<Composed, String> {
     }
 }
 
+/// What a script's `finish` decided: `{ result?, inverse?: { commands: [{
+/// name, input }] } }`. It runs after the steps landed, so it composes
+/// nothing: `commands`, `calls`, `events` and `refuse` are refused.
+pub fn finished(value: Value) -> Result<crate::commands::compose::Finished, String> {
+    const SHAPE: &str =
+        "finish must return `{ result?, inverse?: { commands: [{ name, input }] } }`";
+    let Value::Object(map) = &value else {
+        return Err(format!("{SHAPE}, not {value}"));
+    };
+    for key in ["commands", "calls", "events", "refuse"] {
+        if map.contains_key(key) {
+            return Err(format!(
+                "{SHAPE}: it runs after the steps landed, so it can't return `{key}` — \
+                 compose in `transform`"
+            ));
+        }
+    }
+    if let Some(unknown) = map
+        .keys()
+        .find(|k| !["result", "inverse"].contains(&k.as_str()))
+    {
+        return Err(format!("{SHAPE}: `{unknown}` isn't one of them"));
+    }
+    // Both parts may be None / left out: that keeps what `transform` said.
+    let result = map.get("result").filter(|v| !v.is_null()).cloned();
+    let inverse = match map.get("inverse").filter(|v| !v.is_null()) {
+        None => None,
+        Some(inverse) => {
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Inverse {
+                commands: Vec<FinishCall>,
+            }
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct FinishCall {
+                name: String,
+                #[serde(default = "empty_input")]
+                input: Value,
+            }
+            fn empty_input() -> Value {
+                json!({})
+            }
+            let inverse: Inverse = serde_json::from_value(inverse.clone())
+                .map_err(|e| format!("{SHAPE}: `inverse` is bad: {e}"))?;
+            if inverse.commands.is_empty() {
+                return Err(format!(
+                    "{SHAPE}: `inverse.commands` needs at least one call (leave `inverse` out \
+                     when there is nothing to undo)"
+                ));
+            }
+            if let Some(bad) = inverse.commands.iter().position(|c| !c.input.is_object()) {
+                return Err(format!(
+                    "{SHAPE}: `inverse.commands[{bad}].input` must be an object"
+                ));
+            }
+            Some(
+                inverse
+                    .commands
+                    .into_iter()
+                    .map(|c| CommandCall {
+                        name: c.name,
+                        input: c.input,
+                    })
+                    .collect(),
+            )
+        }
+    };
+    Ok(crate::commands::compose::Finished { result, inverse })
+}
+
+/// Who runs a script, as `x["actor"]` shows it: `{ kind: agent | person |
+/// system, thread?: <thread uri>, uri: <the actor's uri> }`.
+///
+/// - `Human` is a `person`, `oxplow:oxplow/person`.
+/// - An `Agent` (also an `Effect` or a `Job` that carries a thread) is an
+///   `agent`: `thread` and `uri` are its thread's URI. An agent with no
+///   thread but a session is an `agent` at the session's URI; with neither
+///   it is `system`.
+/// - A `Page` or `Component` is the actor it acts for.
+/// - `System`, and an `Effect` or `Job` with no thread, is `system`: an
+///   effect's `uri` is its extension's; oxplow itself has none (`uri` is
+///   null: no extension stands for it).
+pub fn script_actor(actor: &oxplow_domain::Actor) -> Value {
+    use oxplow_domain::uri::build;
+    use oxplow_domain::Actor;
+    let thread_agent = |thread: oxplow_domain::ThreadId| {
+        let uri = build::thread_uri(thread);
+        json!({ "kind": "agent", "thread": uri, "uri": uri })
+    };
+    let system = |uri: Option<String>| json!({ "kind": "system", "uri": uri });
+    match actor {
+        Actor::Human => json!({ "kind": "person", "uri": build::person_uri(None) }),
+        Actor::Agent {
+            thread_id: Some(thread),
+            ..
+        } => thread_agent(*thread),
+        Actor::Agent {
+            session_id: Some(session),
+            ..
+        } => json!({ "kind": "agent", "uri": build::agent_session_uri(*session) }),
+        Actor::Agent { .. } => system(None),
+        Actor::Page { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
+            script_actor(on_behalf_of)
+        }
+        Actor::System => system(None),
+        Actor::Effect {
+            thread_id: Some(thread),
+            ..
+        }
+        | Actor::Job {
+            thread_id: Some(thread),
+            ..
+        } => thread_agent(*thread),
+        Actor::Effect { effect, .. } => system(Some(build::extension_uri(
+            effect.split('/').next().unwrap_or(effect),
+        ))),
+        Actor::Job { .. } => system(None),
+    }
+}
+
 /// An event a script emits: one of its own extension's declared types, at
 /// that type's newest version, appended caused by the run's
 /// `command.executed`.
@@ -952,11 +1073,24 @@ pub fn run_command_script(
     serve: &mut oxplow_script::workers::Serve<'_>,
     run: &oxplow_domain::run::RunContext,
 ) -> Result<Value, oxplow_script::CollectError> {
+    run_command_fn(script, "transform", input, given, serve, run)
+}
+
+/// [`run_command_script`] for the script's function `func` (`transform`,
+/// or `finish`).
+pub fn run_command_fn(
+    script: &str,
+    func: &str,
+    input: Value,
+    given: crate::services::Given,
+    serve: &mut oxplow_script::workers::Serve<'_>,
+    run: &oxplow_domain::run::RunContext,
+) -> Result<Value, oxplow_script::CollectError> {
     use oxplow_script::workers::{shared, ScriptRun};
     shared()
         .run(
             &COMMAND_SCRIPT_BUDGET,
-            given.onto(ScriptRun::starlark(script, input), Some(serve)),
+            given.onto(ScriptRun::starlark_fn(script, func, input), Some(serve)),
             Some(run.cancel()),
         )
         .map(|ran| {
@@ -980,6 +1114,49 @@ pub fn compose_calls(
     input: Value,
     calls: &mut crate::scope_calls::Calls<'_>,
 ) -> Result<Composed, oxplow_domain::CommandError> {
+    let actor = script_actor(calls.run().actor());
+    let out = run_script_fn(
+        script,
+        "transform",
+        json!({ "input": input, "actor": actor }),
+        calls,
+    )?;
+    composed(out).map_err(|message| oxplow_domain::CommandError::Invalid {
+        field: None,
+        message,
+    })
+}
+
+/// A command script's `finish` over the run's `input` and what its
+/// `steps` answered (`[{ name, input, result }]`), in the same sandbox,
+/// budget and reads as `transform`; read as `finish` may return.
+pub fn finish_calls(
+    script: &str,
+    input: Value,
+    steps: &[crate::commands::compose::StepAnswer],
+    calls: &mut crate::scope_calls::Calls<'_>,
+) -> Result<crate::commands::compose::Finished, oxplow_domain::CommandError> {
+    let actor = script_actor(calls.run().actor());
+    let out = run_script_fn(
+        script,
+        "finish",
+        json!({ "input": input, "actor": actor, "steps": steps }),
+        calls,
+    )?;
+    finished(out).map_err(|message| oxplow_domain::CommandError::Invalid {
+        field: None,
+        message,
+    })
+}
+
+/// Run `script`'s function `func` over `x` with the services it was
+/// given, its `scope(…)` calls answered by `calls`; its answer.
+fn run_script_fn(
+    script: &str,
+    func: &str,
+    x: Value,
+    calls: &mut crate::scope_calls::Calls<'_>,
+) -> Result<Value, oxplow_domain::CommandError> {
     let run = calls.run().clone();
     let given = crate::services::decide(&run, script, calls.needs())
         .and_then(crate::services::Wanted::scopes_only)
@@ -987,17 +1164,13 @@ pub fn compose_calls(
             message: format!("the script failed: {message}"),
         })?;
     let mut serve = |id: &str, args: Value| calls.serve(id, args);
-    let out = run_command_script(script, json!({ "input": input }), given, &mut serve, &run);
+    let out = run_command_fn(script, func, x, given, &mut serve, &run);
     // The database was busy answering a read: the run is retried.
     if let Some(message) = calls.take_busy() {
         return Err(oxplow_domain::CommandError::Busy { message });
     }
-    let out = out.map_err(|e| oxplow_domain::CommandError::Failed {
+    out.map_err(|e| oxplow_domain::CommandError::Failed {
         message: format!("the script failed: {e}"),
-    })?;
-    composed(out).map_err(|message| oxplow_domain::CommandError::Invalid {
-        field: None,
-        message,
     })
 }
 
@@ -1069,6 +1242,9 @@ pub fn extension_command(
         CommandHandler::Script { script, .. } => script.clone(),
     };
     let (needs, reads) = (decl.needs.clone(), decl.access.reads_only());
+    let finish_script = script.clone();
+    let has_finish = oxplow_script::runtime::top_level_defs(&decl.name, &script)
+        .is_ok_and(|defs| defs.iter().any(|d| d == "finish"));
     let (vocabulary, extension) = (bus.vocabulary().clone(), extension.to_string());
     let source = oxplow_domain::uri::build::command_uri(&decl.name);
     let compose: std::sync::Arc<Composer> = std::sync::Arc::new(
@@ -1113,7 +1289,38 @@ pub fn extension_command(
             }
         },
     );
-    let handler = Compose::handler(compose);
+    // A script that defines `finish` has it called once its steps landed.
+    let finish: Option<std::sync::Arc<crate::commands::compose::Finisher>> =
+        has_finish.then(|| {
+            let (script, needs) = (finish_script, decl.needs.clone());
+            std::sync::Arc::new(
+                move |composing: Option<&crate::commands::compose::Composing<'_>>,
+                      run: &oxplow_domain::run::RunContext,
+                      input: &Value,
+                      steps: &[crate::commands::compose::StepAnswer]| {
+                    let Some(composing) = composing else {
+                        // Inside the bus's transaction: nothing to read through.
+                        let read = Box::new(|_: oxplow_db::SqlQuery| {
+                            Err(oxplow_domain::DomainError::Invalid(
+                                "finish can't read in a run that stays in oxplow's records: its \
+                                 transaction holds the database. Read in `transform`, or have the \
+                                 step answer it"
+                                    .into(),
+                            ))
+                        });
+                        let mut calls = crate::scope_calls::Calls::new(run, &needs, read);
+                        return finish_calls(&script, input.clone(), steps, &mut calls);
+                    };
+                    let (sql, runtime) = (composing.sql, composing.runtime);
+                    let read =
+                        Box::new(|q: oxplow_db::SqlQuery| runtime.block_on(sql.run_in(run, q)));
+                    let mut calls = crate::scope_calls::Calls::new(run, &needs, read)
+                        .with_host(Some(sql), runtime);
+                    finish_calls(&script, input.clone(), steps, &mut calls)
+                },
+            ) as std::sync::Arc<crate::commands::compose::Finisher>
+        });
+    let handler = Compose::handler_finishing(compose, finish);
     Command::new(spec, handler)
 }
 
@@ -2706,6 +2913,529 @@ mod tests {
                 .unwrap_err();
             assert!(err.to_string().contains(says), "{inverse}: {err}");
             assert_eq!(task(&fx).await.status, before, "{inverse}: nothing ran");
+        }
+    }
+
+    /// `with_script` for a script that reads (`needs: [sql.read]`).
+    async fn with_reading_script(
+        fx: &crate::test_fixtures::ThreadFixture,
+        permissions: &str,
+        script: &str,
+    ) {
+        let root = fx._dir.path();
+        write(
+            root,
+            ".oxplow/extensions/my-review/extension.yaml",
+            &format!("manifest: 2\nname: my-review\nintent:\n  purpose: p\npermissions: [sql.read, {permissions}]\ncommands:\n  - name: review.finish\n    summary: Finish the task.\n    input_schema: {{ type: object, required: [uri], properties: {{ uri: {{ type: string }} }}, additionalProperties: false }}\n    entry: finish.star\n    needs: [sql.read]\n"),
+        );
+        write(root, ".oxplow/extensions/my-review/finish.star", script);
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
+    }
+
+    /// A steps run's `finish` sees what its steps answered and the actor,
+    /// and its `result` and `inverse` become the run's: the undo is the
+    /// one `transform` could not name before the steps ran.
+    const FINISHING: &str = "def transform(x):
+    uri = x[\"input\"][\"uri\"]
+    return {
+        \"commands\": [{\"name\": \"oxplow.task.transition\", \"input\": {\"uri\": uri, \"to\": \"done\"}}],
+        \"result\": {\"from\": \"transform\"},
+        \"inverse\": {\"commands\": [{\"name\": \"oxplow.task.transition\", \"input\": {\"uri\": uri, \"to\": \"in_progress\"}}]},
+    }
+
+def finish(x):
+    uri = x[\"input\"][\"uri\"]
+    return {
+        \"result\": {\"input\": x[\"input\"], \"steps\": x[\"steps\"], \"actor\": x[\"actor\"]},
+        \"inverse\": {\"commands\": [{\"name\": \"oxplow.task.transition\", \"input\": {\"uri\": uri, \"to\": \"todo\"}}]},
+    }
+";
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_steps_run_finish_sets_the_runs_result_and_undo_from_its_steps() {
+        let fx = crate::test_fixtures::services_with_task().await;
+        with_script(&fx, "commands:oxplow.task.*", FINISHING).await;
+        let r = oxplow_oxtask::task_ref(fx.task);
+        let out = fx
+            .svc
+            .commands
+            .run(
+                &agent(&fx),
+                "my_review.review.finish",
+                json!({ "uri": r }),
+                false,
+            )
+            .await
+            .unwrap();
+        let result = &out.result["result"];
+        assert_eq!(result["input"], json!({ "uri": r }), "{result}");
+        let steps = result["steps"].as_array().unwrap();
+        assert_eq!(steps.len(), 1, "{result}");
+        assert_eq!(steps[0]["name"], "oxplow.task.transition");
+        assert_eq!(steps[0]["input"], json!({ "uri": r, "to": "done" }));
+        assert!(steps[0].get("result").is_some(), "{result}");
+        assert_eq!(result["actor"]["kind"], "agent", "{result}");
+        let kept = out.inverse.clone().expect("finish named the undo");
+        assert_eq!(
+            kept.input,
+            json!({ "uri": r, "to": "todo" }),
+            "finish's inverse replaces transform's"
+        );
+        let row = fx
+            .svc
+            .commands
+            .audit_store()
+            .get(out.audit_id.unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.inverse, Some(kept));
+    }
+
+    /// A part `finish` leaves out keeps what `transform` said.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_finish_that_leaves_a_part_out_keeps_the_transforms() {
+        let fx = crate::test_fixtures::services_with_task().await;
+        let script = FINISHING.replace(
+            "        \"result\": {\"input\": x[\"input\"], \"steps\": x[\"steps\"], \"actor\": x[\"actor\"]},\n",
+            "",
+        );
+        with_script(&fx, "commands:oxplow.task.*", &script).await;
+        let r = oxplow_oxtask::task_ref(fx.task);
+        let out = fx
+            .svc
+            .commands
+            .run(
+                &agent(&fx),
+                "my_review.review.finish",
+                json!({ "uri": r }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(out.result["result"], json!({ "from": "transform" }));
+        assert_eq!(out.inverse.unwrap().input["to"], "todo");
+    }
+
+    /// A step that fails stops the run: `finish` is not called, and the
+    /// error is the step's, not finish's.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_run_that_stops_partway_calls_no_finish() {
+        let fx = crate::test_fixtures::services_with_task().await;
+        let missing = oxplow_domain::uri::build::task_uri("oxtask", "tsk99999");
+        let script = format!(
+            "def transform(x):
+    uri = x[\"input\"][\"uri\"]
+    return {{\"commands\": [
+        {{\"name\": \"oxplow.task.transition\", \"input\": {{\"uri\": uri, \"to\": \"done\"}}}},
+        {{\"name\": \"oxplow.task.transition\", \"input\": {{\"uri\": \"{missing}\", \"to\": \"done\"}}}},
+    ]}}
+
+def finish(x):
+    fail(\"finish ran\")
+"
+        );
+        with_script(&fx, "commands:oxplow.task.*", &script).await;
+        let r = oxplow_oxtask::task_ref(fx.task);
+        let err = fx
+            .svc
+            .commands
+            .run(
+                &agent(&fx),
+                "my_review.review.finish",
+                json!({ "uri": r }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        let said = err.to_string();
+        assert!(said.contains("they stand"), "{said}");
+        assert!(!said.contains("finish ran"), "{said}");
+        assert_eq!(task(&fx).await.status, oxplow_oxtask::OxtaskStatus::Done);
+    }
+
+    /// A finish whose `inverse` fails the routing-time checks fails the
+    /// run, and says the steps stand.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_bad_finish_inverse_fails_the_run_and_says_the_steps_stand() {
+        let fx = crate::test_fixtures::services_with_task().await;
+        let r = oxplow_oxtask::task_ref(fx.task);
+        let cases = [
+            (
+                r#"{"commands": [{"name": "oxplow.nope", "input": {}}]}"#,
+                "oxplow.nope",
+            ),
+            (
+                r#"{"commands": [{"name": "oxplow.task.transition", "input": {"to": 3}}]}"#,
+                "oxplow.task.transition",
+            ),
+            (
+                r#"{"commands": [{"name": "oxplow.extension_store.write", "input": {"batch": []}}]}"#,
+                "own command",
+            ),
+            (r#"{"commands": []}"#, "at least one"),
+        ];
+        for (inverse, says) in cases {
+            let script = format!(
+                "def transform(x):
+    return {{\"commands\": [{{\"name\": \"oxplow.task.transition\", \"input\": {{\"uri\": x[\"input\"][\"uri\"], \"to\": \"done\"}}}}]}}
+
+def finish(x):
+    return {{\"inverse\": {inverse}}}
+"
+            );
+            with_script(
+                &fx,
+                "commands:oxplow.task.*, commands:oxplow.extension_store.write",
+                &script,
+            )
+            .await;
+            let err = fx
+                .svc
+                .commands
+                .run(
+                    &agent(&fx),
+                    "my_review.review.finish",
+                    json!({ "uri": r }),
+                    false,
+                )
+                .await
+                .unwrap_err();
+            let said = err.to_string();
+            assert!(said.contains(says), "{inverse}: {said}");
+            assert!(
+                said.contains("finish failed") && said.contains("they stand"),
+                "{inverse}: {said}"
+            );
+            assert_eq!(task(&fx).await.status, oxplow_oxtask::OxtaskStatus::Done);
+            // Put it back for the next case.
+            fx.svc
+                .commands
+                .run(
+                    &agent(&fx),
+                    "oxplow.task.transition",
+                    json!({ "uri": r, "to": "in_progress" }),
+                    false,
+                )
+                .await
+                .unwrap();
+        }
+    }
+
+    /// `finish` composes nothing: `commands`, `events` and unknown keys
+    /// are refused with a message that says why.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_finish_that_composes_or_returns_unknown_keys_is_refused() {
+        let fx = crate::test_fixtures::services_with_task().await;
+        let r = oxplow_oxtask::task_ref(fx.task);
+        for (ret, says) in [
+            ("{\"commands\": []}", "can't return `commands`"),
+            ("{\"events\": []}", "can't return `events`"),
+            ("{\"note\": 1}", "`note` isn't one of them"),
+            ("[1]", "finish must return"),
+        ] {
+            let script = format!(
+                "def transform(x):
+    return {{\"commands\": [{{\"name\": \"oxplow.task.transition\", \"input\": {{\"uri\": x[\"input\"][\"uri\"], \"to\": \"done\"}}}}]}}
+
+def finish(x):
+    return {ret}
+"
+            );
+            with_script(&fx, "commands:oxplow.task.*", &script).await;
+            let err = fx
+                .svc
+                .commands
+                .run(
+                    &agent(&fx),
+                    "my_review.review.finish",
+                    json!({ "uri": r }),
+                    false,
+                )
+                .await
+                .unwrap_err();
+            assert!(err.to_string().contains(says), "{ret}: {err}");
+            fx.svc
+                .commands
+                .run(
+                    &agent(&fx),
+                    "oxplow.task.transition",
+                    json!({ "uri": r, "to": "in_progress" }),
+                    false,
+                )
+                .await
+                .unwrap();
+        }
+    }
+
+    /// An in-transaction composition calls `finish` too: its `result`
+    /// replaces the script's and it sees the children's answers. It can't
+    /// read: the transaction holds the database, and says so.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_in_transaction_run_calls_finish_for_its_result() {
+        let fx = crate::test_fixtures::services_with_task().await;
+        let script = format!(
+            "def transform(x):
+    return {{\"commands\": [{{\"name\": \"oxplow.thread.mark\", \"input\": {{\"thread\": \"{t}\", \"mark\": \"red\"}}}}], \"result\": {{\"from\": \"transform\"}}}}
+
+def finish(x):
+    return {{\"result\": {{\"steps\": [s[\"name\"] for s in x[\"steps\"]]}}}}
+",
+            t = fx.thread
+        );
+        with_reading_script(&fx, "commands:oxplow.thread.*", &script).await;
+        let r = oxplow_oxtask::task_ref(fx.task);
+        let out = fx
+            .svc
+            .commands
+            .run(
+                &agent(&fx),
+                "my_review.review.finish",
+                json!({ "uri": r }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            out.result["result"],
+            json!({ "steps": ["oxplow.thread.mark"] }),
+            "{}",
+            out.result
+        );
+        assert!(out.inverse.is_some(), "the reversed children undo it");
+    }
+
+    /// An in-transaction run undoes itself, so a `finish` `inverse` is a
+    /// contradiction. `finish` runs inside the transaction, so the run
+    /// is refused, naming the command, and nothing it did is left.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_finish_inverse_on_an_in_transaction_run_rolls_the_run_back() {
+        let fx = crate::test_fixtures::services_with_task().await;
+        let script = format!(
+            "def transform(x):
+    return {{\"commands\": [{{\"name\": \"oxplow.thread.mark\", \"input\": {{\"thread\": \"{t}\", \"mark\": \"red\"}}}}]}}
+
+def finish(x):
+    return {{\"inverse\": {{\"commands\": [{{\"name\": \"oxplow.thread.mark\", \"input\": {{\"thread\": \"{t}\"}}}}]}}}}
+",
+            t = fx.thread
+        );
+        with_script(&fx, "commands:oxplow.thread.*", &script).await;
+        let r = oxplow_oxtask::task_ref(fx.task);
+        let err = fx
+            .svc
+            .commands
+            .run(
+                &agent(&fx),
+                "my_review.review.finish",
+                json!({ "uri": r }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        let said = err.to_string();
+        assert!(
+            said.contains("my_review.review.finish")
+                && said.contains("finish returned an `inverse`")
+                && said.contains("Nothing ran"),
+            "{said}"
+        );
+        let after = fx.svc.commands.audit_store().list_recent(50).await.unwrap();
+        assert!(
+            after
+                .iter()
+                .all(|a| a.outcome != oxplow_domain::events::schema::CommandOutcome::Ok),
+            "nothing landed: {after:?}"
+        );
+    }
+
+    /// A `finish` that reads in an in-transaction run is refused with a
+    /// reason (it used to wait on the database forever), and nothing
+    /// lands.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_in_transaction_finish_that_reads_says_it_cannot() {
+        let fx = crate::test_fixtures::services_with_task().await;
+        let script = format!(
+            "def transform(x):
+    return {{\"commands\": [{{\"name\": \"oxplow.thread.mark\", \"input\": {{\"thread\": \"{t}\", \"mark\": \"red\"}}}}]}}
+
+def finish(x):
+    return {{\"result\": scope(\"sql.read\", {{\"sql\": \"SELECT 1 AS n\"}})}}
+",
+            t = fx.thread
+        );
+        with_reading_script(&fx, "commands:oxplow.thread.*", &script).await;
+        let err = fx
+            .svc
+            .commands
+            .run(
+                &agent(&fx),
+                "my_review.review.finish",
+                json!({ "uri": oxplow_oxtask::task_ref(fx.task) }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("transaction holds the database"),
+            "{err}"
+        );
+    }
+
+    /// `finish` reads through its scopes in a steps run too.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_steps_finish_reads_through_its_scopes() {
+        let fx = crate::test_fixtures::services_with_task().await;
+        let script = "def transform(x):
+    return {\"commands\": [{\"name\": \"oxplow.task.transition\", \"input\": {\"uri\": x[\"input\"][\"uri\"], \"to\": \"done\"}}]}
+
+def finish(x):
+    rows = scope(\"sql.read\", {\"sql\": \"SELECT count(*) AS n FROM v_task WHERE uri = :uri\", \"params\": {\"uri\": x[\"input\"][\"uri\"]}})
+    return {\"result\": {\"n\": rows[0][\"n\"]}}
+";
+        with_reading_script(&fx, "commands:oxplow.task.*", script).await;
+        let r = oxplow_oxtask::task_ref(fx.task);
+        let out = fx
+            .svc
+            .commands
+            .run(
+                &agent(&fx),
+                "my_review.review.finish",
+                json!({ "uri": r }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(out.result["result"], json!({ "n": 1 }));
+    }
+
+    /// `x["actor"]` in `transform`, for each way a command is run.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn transform_sees_who_runs_it() {
+        let fx = crate::test_fixtures::services_with_task().await;
+        with_script(
+            &fx,
+            "commands:oxplow.task.*",
+            "def transform(x):\n    return {\"commands\": [], \"result\": x[\"actor\"]}\n",
+        )
+        .await;
+        let r = oxplow_oxtask::task_ref(fx.task);
+        let person = fx
+            .svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                "my_review.review.finish",
+                json!({ "uri": r }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            person.result["result"],
+            json!({ "kind": "person", "uri": "oxplow:oxplow/person" })
+        );
+        let thread = format!("oxplow:oxplow/thread?id={}", fx.thread);
+        let by_agent = fx
+            .svc
+            .commands
+            .run(
+                &agent(&fx),
+                "my_review.review.finish",
+                json!({ "uri": r }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            by_agent.result["result"],
+            json!({ "kind": "agent", "thread": thread, "uri": thread })
+        );
+    }
+
+    /// The mapping of every actor to `x["actor"]`.
+    #[test]
+    fn an_actor_maps_to_a_person_an_agent_or_the_system() {
+        use oxplow_domain::Actor;
+        let thread = oxplow_domain::ThreadId::new(7);
+        let t = oxplow_domain::uri::build::thread_uri(thread);
+        let agent = Actor::Agent {
+            session_id: None,
+            thread_id: Some(thread),
+            stream_id: None,
+        };
+        let agent_json = json!({ "kind": "agent", "thread": t, "uri": t });
+        let oxplow_itself: Option<String> = None;
+        assert_eq!(script_actor(&agent), agent_json);
+        assert_eq!(
+            script_actor(&Actor::Page {
+                page_id: "a/b".into(),
+                on_behalf_of: Box::new(agent.clone())
+            }),
+            agent_json,
+            "a page is whoever it acts for"
+        );
+        assert_eq!(
+            script_actor(&Actor::Component {
+                component: "a/b".into(),
+                on_behalf_of: Box::new(Actor::Human)
+            })["kind"],
+            "person"
+        );
+        assert_eq!(
+            script_actor(&Actor::System),
+            json!({ "kind": "system", "uri": oxplow_itself })
+        );
+        assert_eq!(
+            script_actor(&Actor::Effect {
+                effect: "my-review/e".into(),
+                thread_id: None,
+                stream_id: None
+            }),
+            json!({ "kind": "system", "uri": oxplow_domain::uri::build::extension_uri("my-review") })
+        );
+        assert_eq!(
+            script_actor(&Actor::Effect {
+                effect: "my-review/e".into(),
+                thread_id: Some(thread),
+                stream_id: None
+            }),
+            agent_json,
+            "an effect in a thread acts as its agent"
+        );
+        assert_eq!(
+            script_actor(&Actor::Agent {
+                session_id: None,
+                thread_id: None,
+                stream_id: None
+            }),
+            json!({ "kind": "system", "uri": oxplow_itself })
+        );
+    }
+
+    /// The shape of `finish`'s answer.
+    #[test]
+    fn the_answer_of_a_finish_has_a_shape() {
+        let ok = finished(json!({
+            "result": { "id": "x" },
+            "inverse": { "commands": [{ "name": "a.b.c", "input": { "k": 1 } }] },
+        }))
+        .unwrap();
+        assert_eq!(ok.result, Some(json!({ "id": "x" })));
+        assert_eq!(ok.inverse.unwrap()[0].name, "a.b.c");
+        let none = finished(json!({})).unwrap();
+        assert!(none.result.is_none() && none.inverse.is_none());
+        for bad in [
+            json!({ "commands": [] }),
+            json!({ "calls": [] }),
+            json!({ "events": [] }),
+            json!({ "x": 1 }),
+            json!({ "inverse": { "commands": [] } }),
+            json!({ "inverse": { "commands": [{ "name": "a", "input": [] }] } }),
+            json!({ "inverse": { "calls": [] } }),
+            json!(3),
+        ] {
+            assert!(finished(bad.clone()).is_err(), "{bad}");
         }
     }
 

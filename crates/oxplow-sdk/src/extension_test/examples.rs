@@ -535,17 +535,25 @@ pub(super) async fn command_run(
     // its own answer, and the commands it ran.
     let mut composed = Vec::new();
     let mut got = match outcome {
-        Ok(out) => match (out.result.get("result"), out.result.get("children")) {
-            (Some(result), Some(Value::Array(children))) => {
-                composed = children
-                    .iter()
-                    .filter_map(|c| c.get("name").and_then(Value::as_str))
-                    .map(str::to_string)
-                    .collect();
-                json!({ "ok": true, "result": result })
+        Ok(out) => {
+            let mut got = match (out.result.get("result"), out.result.get("children")) {
+                (Some(result), Some(Value::Array(children))) => {
+                    composed = children
+                        .iter()
+                        .filter_map(|c| c.get("name").and_then(Value::as_str))
+                        .map(str::to_string)
+                        .collect();
+                    json!({ "ok": true, "result": result })
+                }
+                _ => json!({ "ok": true, "result": out.result }),
+            };
+            // The run's undo, as a dry run shows it (`{ commands: [{ name, input }] }`).
+            if let Some(inverse) = &out.inverse {
+                got["inverse"] =
+                    json!({ "commands": [{ "name": inverse.name, "input": inverse.input }] });
             }
-            _ => json!({ "ok": true, "result": out.result }),
-        },
+            got
+        }
         Err(e) => json!({ "ok": false, "refused": e.to_string() }),
     };
     let mut audited: Vec<(String, Option<i64>)> = host
@@ -575,7 +583,7 @@ pub(super) async fn command_run(
     let ran = composed;
     got["commands"] = json!(ran);
     if let Some((path, want, at)) = compare(&ex.expect, &got) {
-        report.errors.push(error(shown, ex.line("expect"), "fixture.compare", format!("command `{command}` gave {at} at `{path}`, the example expects {want}")).fix("the command's input or the steps before it, or the example's `expect` (`{ ok, result?, commands? }` or `{ ok: false, refused }`)").mismatch(path, want, at));
+        report.errors.push(error(shown, ex.line("expect"), "fixture.compare", format!("command `{command}` gave {at} at `{path}`, the example expects {want}")).fix("the command's input or the steps before it, or the example's `expect` (`{ ok, result?, inverse?, commands? }` or `{ ok: false, refused }`)").mismatch(path, want, at));
     }
 }
 

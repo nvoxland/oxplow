@@ -1,11 +1,18 @@
 # A store write is observed at once, as its command: the row is in the model
 # when the command returns, with the stage, its title, the bucket as `state`
-# and the priority as a field. The id was minted by the insert.
+# and the priority as a field. The id was minted by the insert; the command
+# answers it and returns the inverse that deletes the task. The author is who
+# ran the command (a person here).
 requires: [oxplow-bundled, oxtask]
 when:
   command: oxtask.task.create
-  input: { title: Fix the greeting, body: It says helo., stage: ready, priority: high, author: nate }
-expect: { ok: true, result: { stage: ready } }
+  input: { title: Fix the greeting, body: It says helo., stage: ready, priority: high }
+expect:
+  ok: true
+  result: { id: tsk1, stage: ready }
+  inverse:
+    commands:
+      - { name: oxtask.task.delete, input: { id: tsk1 } }
 steps:
   - when:
       sql: |
@@ -23,4 +30,4 @@ steps:
           stage_title: Ready
           store: oxtask
           priority: high
-          author: nate
+          author: "oxplow:oxplow/person"

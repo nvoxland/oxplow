@@ -111,7 +111,7 @@ checked at load, its error at its line (`entry_line`: the line whose
 and datasets find their lines the same way): the name, `access`, `confirm`,
 the schema compiles, each `needs` entry is a scope or a
 capability / feature, and the entry is a file in the
-extension that parses and defines `transform` (`check_starlark`), and
+extension that parses and defines `transform` (`check_starlark`; a `finish` is optional and called by name, and its answer is checked when it runs), and
 it declares at most `MAX_EXAMPLES` (10) examples. The
 script's text is kept on the `ExtensionCommand` (not serialized).
 `check_extension` (the Extensions page, `oxplow extension check`) runs
@@ -131,6 +131,54 @@ calls served on the calling thread (`run_command_script` with
 `ScriptRun::with_scope`, through `scope_calls::Calls`; a busy database
 retries the run), then the
 `{ commands, result? }` shape (`composed`; any other key is `Invalid`).
+
+**`x["actor"]`** (`script_actor`): `transform` and `finish` get who runs the
+command, `{ kind: agent | person | system, thread?: <thread uri>, uri: <the
+actor's uri> }`, so a store can record its author reliably (oxtask's `author` is
+`x["actor"]["uri"]`). The mapping: a `Human` is a `person`
+(`oxplow:oxplow/person`); an `Agent` is an `agent` whose `thread` and `uri` are
+its thread's URI (no thread, a session: an `agent` at the session's URI; neither:
+`system`); a `Page` or `Component` is the actor it acts for, at any depth; an
+`Effect` or `Job` that carries a thread is that thread's `agent`; `System`,
+and an `Effect` / `Job` with no thread, is `system` (an effect's `uri` is its
+extension's; oxplow itself has a null `uri`: core names none of its own
+extensions). The URIs come from `oxplow_domain::uri::build`. The actor of an
+undo is the one who undoes.
+
+**`finish(x)`** (a script command's second, optional function; decided
+2026-11-12, `.context/models.md` "A script that composes a store's write"): a
+script runs once, before its steps, so its `result` and `inverse` can't use what
+the steps answered (a minted id). A script that also defines `def finish(x):`
+has it called after **all** its steps landed — a steps run and an
+in-transaction composition both — with `x["input"]`, `x["actor"]` and
+`x["steps"]`, `[{ name, input, result }]`, each child's answer (a store write's
+carries `rows`, the `RETURNING` rows). It returns `{ result?, inverse?: {
+commands: [...] } }` (`finished`): a part it returns replaces the run's
+`result` / undo; a part it leaves out (or sets to `None`) keeps what `transform`
+said. Anything else is `Invalid` with a message (`commands`, `calls`, `events`
+and `refuse` say that finish runs after the steps, so it composes nothing; an
+unknown key is named). It is pure like `transform`: same sandbox and
+`COMMAND_SCRIPT_BUDGET`, no writes, no composed commands; the `scope(...)`
+reads its `needs` declare work **in a steps run** (they see the landed steps).
+A run that stops partway (a step failed) calls no finish.
+
+- **Steps run.** `finish`'s `inverse` is checked as `transform`'s is
+  (`route_inverse`: a known command that writes, `commands:` permission, needs,
+  input validator, not the host's own-script-only writes), but **after** finish
+  returns, so a bad one fails the run — and the steps **stay landed**: the run is
+  audited as an error naming the steps and says "they stand, and the run can't
+  be undone". Nothing is undone for the person. A finish that throws is the
+  same.
+- **In-transaction run.** The composition undoes itself (the reversed
+  children), so a finish `inverse` is a contradiction, as a `transform` one is.
+  `finish` runs **inside the transaction**, so the run is refused — the error
+  names the command and says "Nothing ran" — and everything the children did
+  rolls back. Finish may set `result` (its answer replaces the script's). Its
+  `scope(...)` reads are refused there ("the transaction holds the database";
+  they would wait on it): read in `transform`, or let the step answer it.
+- **Examples** (`dry_run`) run `transform` only: no step landed, so there is
+  no finish to call. A fixture (`when: { command }`) runs the real bus path, so
+  `expect.result` is finish's result and `expect.inverse` the run's undo.
 
 **Running** (`extension_command`): each is a composite
 (`Handler::Compose`, atomicity `Dispatch`) `<namespace>.<name>`

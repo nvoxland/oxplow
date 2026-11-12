@@ -47,6 +47,8 @@ mod extension_run_pin_tests;
 pub(crate) mod extension_runtime_adapters;
 pub(crate) mod extension_secrets;
 pub(crate) mod extension_services;
+/// Where an extension's own SQLite file is (a fixture writes it from outside).
+pub use extension_services::store_path;
 #[cfg(test)]
 mod extension_sql_config_tests;
 pub(crate) mod extension_state;

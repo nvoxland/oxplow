@@ -367,13 +367,13 @@ pub(super) const KINDS: &[Kind] = &[
     },
     Kind {
         key: "collector",
-        when: "{ collector: <id>, rows?, event? } | { collector: <id>, files } | { collector: <id>, trigger: start | sqlite | { files: [{ path, op }] } } (run for real, as that trigger fires)",
-        expect: "{ entities?, events? } | { facts } | { ok?, result?, problems? }",
+        when: "{ collector: <id>, rows?, event? } | { collector: <id>, files } | { collector: <id>, trigger: start | sqlite | { files: [{ path, op }] } } (run for real, as that trigger fires; `given: - { store_sql: { extension, sql, params? } }` writes an extension's own SQLite file first)",
+        expect: "{ entities?, events? } | { facts } | { ok?, result?, problems? } (`problems` also checks the rows an ok run quarantined; `[]` says none)",
     },
     Kind {
         key: "command",
         when: "{ command, input?, as?, confirmed? } (with answers: the extension's own, a dry run)",
-        expect: "{ ok, result?, commands? } | { ok: false, refused }",
+        expect: "{ ok, result?, inverse?, commands? } | { ok: false, refused }",
     },
     Kind {
         key: "undo",

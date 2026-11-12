@@ -1,0 +1,18 @@
+# The undo of a comment removes it from the task; removing a comment by hand
+# is the same command.
+requires: [oxplow-bundled, oxtask]
+given:
+  - { command: oxtask.task.create, input: { title: A } }
+  - { command: oxtask.task.comment, input: { id: tsk1, body: Keep } }
+  - { command: oxtask.task.comment, input: { id: tsk1, body: Drop } }
+when: { sql: "SELECT id, body FROM v_oxplow_task_record_comments ORDER BY id" }
+expect: { rows: [{ id: cmt1, body: Keep }, { id: cmt2, body: Drop }] }
+steps:
+  - when: { undo: oxtask.task.comment }
+    expect: { ok: true }
+  - when: { sql: "SELECT id, body FROM v_oxplow_task_record_comments ORDER BY id" }
+    expect: { rows: [{ id: cmt1, body: Keep }] }
+  - when: { command: oxtask.task.uncomment, input: { comment: cmt1 } }
+    expect: { ok: true, result: { comment: cmt1 } }
+  - when: { sql: "SELECT id FROM v_oxplow_task_record_comments" }
+    expect: { rows: [] }

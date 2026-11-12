@@ -1,0 +1,18 @@
+# oxtask's file can be written by anything (`oxplow-dev task`, a person's
+# sqlite3): its triggers number the row, and the collector's next `sqlite`
+# run states it. Live triggers are off in a fixture, so the row is not in the
+# model until that run.
+requires: [oxplow-bundled, oxtask]
+given:
+  - { command: oxtask.task.create, input: { title: First } }
+  - { store_sql: { extension: oxtask, sql: "INSERT INTO task (title, stage) VALUES (?1, ?2)", params: [Outside, ready] } }
+when: { sql: "SELECT id, title FROM v_oxplow_task_record ORDER BY id" }
+expect: { rows: [{ id: tsk1, title: First }] }
+steps:
+  - when: { collector: tasks, trigger: sqlite }
+    expect: { ok: true }
+  - when: { sql: "SELECT id, title, state FROM v_oxplow_task_record ORDER BY id" }
+    expect:
+      rows:
+        - { id: tsk1, title: First, state: backlog }
+        - { id: tsk2, title: Outside, state: todo }

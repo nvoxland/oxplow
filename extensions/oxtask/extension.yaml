@@ -57,7 +57,7 @@ collectors:
     on: [start, { sqlite: own }]
 commands:
   - name: task.create
-    summary: File a task. Its id (tsk and a number) is minted by the write; read it from the write's rows in the run's children, or find the task by title.
+    summary: File a task. The result names its id (tsk and a number); undo deletes it. Its author is who runs the command.
     input_schema:
       type: object
       required: [title]
@@ -67,7 +67,6 @@ commands:
         stage: { type: string, enum: [backlog, ready, in_progress, blocked, done, canceled] }
         parent: { type: string, pattern: "^tsk[0-9]+$" }
         priority: { type: string, enum: [urgent, high, medium, low] }
-        author: { type: string }
       additionalProperties: false
     entry: handlers/create.star
     needs: [store.sql]
@@ -131,19 +130,29 @@ commands:
     access: write
     example: { id: tsk1, to: tsk2, type: blocks }
   - name: task.comment
-    summary: Add a comment to a task. A comment has no undo (its id is minted by the write).
+    summary: Add a comment to a task. The result names the comment's id (cmt and a number); undo removes it. Its author is who runs the command.
     input_schema:
       type: object
       required: [id, body]
       properties:
         id: { type: string, pattern: "^tsk[0-9]+$" }
         body: { type: string, minLength: 1 }
-        author: { type: string }
       additionalProperties: false
     entry: handlers/comment.star
     needs: [store.sql]
     access: write
     example: { id: tsk1, body: Reproduced on main. }
+  - name: task.uncomment
+    summary: Remove a comment from its task. It is the undo of task.comment.
+    input_schema:
+      type: object
+      required: [comment]
+      properties:
+        comment: { type: string, pattern: "^cmt[0-9]+$" }
+      additionalProperties: false
+    entry: handlers/uncomment.star
+    access: write
+    example: { comment: cmt1 }
   - name: task.delete
     summary: Delete a task (it can be restored). Undo restores it.
     input_schema:

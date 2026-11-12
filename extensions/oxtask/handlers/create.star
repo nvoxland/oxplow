@@ -1,8 +1,7 @@
-# oxtask.task.create { title, body?, stage?, parent?, priority?, author? }:
-# insert a row. The id is minted by the insert (`tsk` + the row number), so
-# it is in the write's `rows` (the run's children), not in this script's
-# `result`: the script runs before the write. That is also why create has no
-# `inverse`: it can't name the row it makes.
+# oxtask.task.create { title, body?, stage?, parent?, priority? }: insert a
+# row. The insert mints the id (`tsk` + the row number) and returns it, so the
+# result and the inverse come from `finish`, which sees the write's `rows`
+# once it landed. The author is who ran the command (`x["actor"]["uri"]`).
 
 def transform(x):
     i = x["input"]
@@ -17,10 +16,17 @@ def transform(x):
                "VALUES (?1, ?2, ?3, ?4, ?5, ?6, " +
                "CASE WHEN ?3 IN ('done', 'canceled') THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') END) " +
                "RETURNING id",
-        "params": [i["title"], i.get("body"), stage, i.get("parent"), i.get("priority"), i.get("author")],
+        "params": [i["title"], i.get("body"), stage, i.get("parent"), i.get("priority"), x["actor"]["uri"]],
     }
     return {
         "commands": [{"name": "oxplow.extension_store.write", "input": {"batch": [write]}}],
         "events": [],
         "result": {"stage": stage},
+    }
+
+def finish(x):
+    id = x["steps"][0]["result"]["rows"][0][0]["id"]
+    return {
+        "result": {"id": id, "stage": x["input"].get("stage", "backlog")},
+        "inverse": {"commands": [{"name": "oxtask.task.delete", "input": {"id": id}}]},
     }

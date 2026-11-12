@@ -1,0 +1,11 @@
+# The undo of a create deletes the task it made: its row leaves the model.
+requires: [oxplow-bundled, oxtask]
+given:
+  - { command: oxtask.task.create, input: { title: Fix it } }
+when: { sql: "SELECT id FROM v_oxplow_task_record" }
+expect: { rows: [{ id: tsk1 }] }
+steps:
+  - when: { undo: oxtask.task.create }
+    expect: { ok: true }
+  - when: { sql: "SELECT id FROM v_oxplow_task_record" }
+    expect: { rows: [] }

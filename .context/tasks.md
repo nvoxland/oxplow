@@ -677,7 +677,7 @@ bundled's `task_record` model. It uses only what any extension can use.
   `oxtask.task.create { title, body?, stage?, parent?, priority? }`,
   `oxtask.task.update { id, title?, body?, priority?, parent? }`,
   `oxtask.task.move { id, stage }`, `oxtask.task.link { id, to, type }` /
-  `unlink`, `oxtask.task.comment { id, body }`, `oxtask.task.delete { id }`.
+  `unlink`, `oxtask.task.comment { id, body }` (and `uncomment { comment }`, its undo), `oxtask.task.delete { id }`. `create` and `comment` answer the id they minted (their script's `finish` reads the insert's `RETURNING` row) and return the inverse that deletes the task / removes the comment; the author of either is who ran the command (`x["actor"]["uri"]`).
   Each composes `oxplow.extension_store.write`, and returns an `inverse`
   (its own command that makes the opposite write) where one exists, so
   each is undoable. Assignment and rank are not oxtask's: they are
