@@ -120,6 +120,7 @@ pub async fn move_to_oxtask(
     project: &Path,
     dry_run: bool,
     replace: bool,
+    force_discard: bool,
 ) -> Result<String, String> {
     let layout = oxplow_app::AppLayout::for_project(project);
     let running =
@@ -143,8 +144,27 @@ pub async fn move_to_oxtask(
     } else {
         real_file.clone()
     };
-    if replace && !dry_run {
-        remove_store(&store_file);
+    if replace && real_file.exists() {
+        // New work is not the move's to lose: a store task core's tables
+        // lack was made since the first move.
+        let lacking = tasks_core_lacks(&real_file, &layout.state_db_path)?;
+        if !lacking.is_empty() && !force_discard {
+            return Err(format!(
+                "oxtask's file has {} task(s) core's tables lack ({}): `--replace` would \
+                 lose them. Keep them, or pass `--force-discard` (the file is kept as a \
+                 backup either way)",
+                lacking.len(),
+                lacking
+                    .iter()
+                    .take(10)
+                    .map(|n| format!("tsk{n}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        if !dry_run {
+            keep_as_backup(&real_file)?;
+        }
     }
     let existed = store_file.exists();
     let result = run(&layout.state_db_path, &store_file, dry_run, replace).await;
@@ -152,6 +172,61 @@ pub async fn move_to_oxtask(
         remove_store(&store_file);
     }
     result
+}
+
+/// The numbers of the tasks in the store's file that core's `oxtask` table
+/// has no row for.
+fn tasks_core_lacks(store_file: &Path, db_path: &Path) -> Result<Vec<i64>, String> {
+    let store = Connection::open_with_flags(store_file, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(err)?;
+    let has_tasks: bool = store
+        .query_row(
+            "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'task')",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(err)?;
+    if !has_tasks {
+        return Ok(Vec::new());
+    }
+    let ours: Vec<i64> = store
+        .prepare("SELECT n FROM task ORDER BY n")
+        .map_err(err)?
+        .query_map([], |r| r.get(0))
+        .map_err(err)?
+        .collect::<Result<_, _>>()
+        .map_err(err)?;
+    let core = Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(err)?;
+    let theirs: std::collections::BTreeSet<i64> = core
+        .prepare("SELECT id FROM oxtask")
+        .map_err(err)?
+        .query_map([], |r| r.get(0))
+        .map_err(err)?
+        .collect::<Result<_, _>>()
+        .map_err(err)?;
+    Ok(ours.into_iter().filter(|n| !theirs.contains(n)).collect())
+}
+
+/// Rename the store's file (and its journal files) to a backup next to it:
+/// `oxtask.sqlite.bak-<unix seconds>`.
+fn keep_as_backup(store_file: &Path) -> Result<(), String> {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(err)?
+        .as_secs();
+    for suffix in ["", "-wal", "-shm"] {
+        let mut from = store_file.to_path_buf().into_os_string();
+        from.push(suffix);
+        let from = std::path::PathBuf::from(from);
+        if !from.exists() {
+            continue;
+        }
+        let mut to = store_file.to_path_buf().into_os_string();
+        to.push(format!(".bak-{stamp}{suffix}"));
+        std::fs::rename(&from, std::path::PathBuf::from(to)).map_err(err)?;
+    }
+    Ok(())
 }
 
 fn remove_store(store_file: &Path) {
@@ -808,7 +883,9 @@ mod tests {
     async fn core_tasks_move_into_the_store_the_fields_and_the_entity() {
         let dir = project().await;
         seed(dir.path());
-        let said = move_to_oxtask(dir.path(), false, false).await.unwrap();
+        let said = move_to_oxtask(dir.path(), false, false, false)
+            .await
+            .unwrap();
         assert!(said.contains("5 tasks (1 soft-deleted), 1 links, 4 notes, 2 assignments (1 with an assignee), 5 request links"), "{said}");
         let s = store(dir.path());
         let rows: Vec<TaskRow> = s
@@ -1001,7 +1078,9 @@ mod tests {
         assert!(uri.starts_with("oxplow:oxplow/request_task_next?"), "{uri}");
 
         // A second run is refused (the store has the three and the new one).
-        let e = move_to_oxtask(dir.path(), false, false).await.unwrap_err();
+        let e = move_to_oxtask(dir.path(), false, false, false)
+            .await
+            .unwrap_err();
         assert!(e.contains("already has 6 tasks"), "{e}");
     }
 
@@ -1009,7 +1088,9 @@ mod tests {
     async fn a_dry_run_keeps_nothing() {
         let dir = project().await;
         seed(dir.path());
-        let said = move_to_oxtask(dir.path(), true, false).await.unwrap();
+        let said = move_to_oxtask(dir.path(), true, false, false)
+            .await
+            .unwrap();
         assert!(said.starts_with("dry run, nothing kept: 5 tasks"), "{said}");
         assert!(!dir
             .path()
@@ -1033,7 +1114,9 @@ mod tests {
             .unwrap();
         assert_eq!(n, 0);
         // The real run still works after it.
-        move_to_oxtask(dir.path(), false, false).await.unwrap();
+        move_to_oxtask(dir.path(), false, false, false)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -1042,7 +1125,9 @@ mod tests {
         main_db(dir.path())
             .execute_batch(&format!("DROP TABLE {LINK_MODEL_TABLE}"))
             .unwrap();
-        let e = move_to_oxtask(dir.path(), false, false).await.unwrap_err();
+        let e = move_to_oxtask(dir.path(), false, false, false)
+            .await
+            .unwrap_err();
         assert!(e.contains("boot the new oxplow once first"), "{e}");
     }
 
@@ -1055,7 +1140,7 @@ mod tests {
             .unwrap()
             .unwrap();
         for dry_run in [true, false] {
-            let e = move_to_oxtask(dir.path(), dry_run, false)
+            let e = move_to_oxtask(dir.path(), dry_run, false, false)
                 .await
                 .unwrap_err();
             assert!(e.contains("oxplow is running"), "{e}");
@@ -1066,7 +1151,9 @@ mod tests {
     async fn replace_redoes_the_move_over_what_a_first_run_left() {
         let dir = project().await;
         seed(dir.path());
-        move_to_oxtask(dir.path(), false, false).await.unwrap();
+        move_to_oxtask(dir.path(), false, false, false)
+            .await
+            .unwrap();
         // Something the old run left that the new one no longer makes, and
         // another namespace's field that is not the move's to touch.
         let m = main_db(dir.path());
@@ -1080,16 +1167,20 @@ mod tests {
         ))
         .unwrap();
         // Without --replace the second run is still refused.
-        let e = move_to_oxtask(dir.path(), false, false).await.unwrap_err();
+        let e = move_to_oxtask(dir.path(), false, false, false)
+            .await
+            .unwrap_err();
         assert!(e.contains("already has"), "{e}");
         // A dry run of it changes nothing on disk.
-        let said = move_to_oxtask(dir.path(), true, true).await.unwrap();
+        let said = move_to_oxtask(dir.path(), true, true, false).await.unwrap();
         assert!(said.starts_with("dry run, nothing kept: 5 tasks"), "{said}");
         let have: i64 = store(dir.path())
             .query_row("SELECT count(*) FROM task", [], |r| r.get(0))
             .unwrap();
         assert_eq!(have, 5);
-        let said = move_to_oxtask(dir.path(), false, true).await.unwrap();
+        let said = move_to_oxtask(dir.path(), false, true, false)
+            .await
+            .unwrap();
         assert!(said.starts_with("moved 5 tasks"), "{said}");
         let have: i64 = store(dir.path())
             .query_row("SELECT count(*) FROM task", [], |r| r.get(0))
@@ -1121,5 +1212,68 @@ mod tests {
             )),
             1
         );
+    }
+
+    /// `--replace` keeps what it replaces: the old store file is renamed to
+    /// a backup, not deleted.
+    #[tokio::test]
+    async fn replace_keeps_the_old_store_as_a_backup() {
+        let dir = project().await;
+        seed(dir.path());
+        move_to_oxtask(dir.path(), false, false, false)
+            .await
+            .unwrap();
+        move_to_oxtask(dir.path(), false, true, false)
+            .await
+            .unwrap();
+        let backups: Vec<_> = std::fs::read_dir(dir.path().join(".oxplow/extensions-data"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| {
+                n.starts_with("oxtask.sqlite.bak-") && !n.ends_with("-wal") && !n.ends_with("-shm")
+            })
+            .collect();
+        assert_eq!(backups.len(), 1, "{backups:?}");
+        let old =
+            Connection::open(dir.path().join(".oxplow/extensions-data").join(&backups[0])).unwrap();
+        let n: i64 = old
+            .query_row("SELECT count(*) FROM task", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 5);
+    }
+
+    /// A store task core's tables lack is new work: `--replace` refuses to
+    /// lose it unless `--force-discard` says so.
+    #[tokio::test]
+    async fn replace_refuses_when_the_store_has_tasks_core_lacks() {
+        let dir = project().await;
+        seed(dir.path());
+        move_to_oxtask(dir.path(), false, false, false)
+            .await
+            .unwrap();
+        // The seed's highest number is 9, so tsk10 is new work.
+        store(dir.path())
+            .execute("INSERT INTO task (title) VALUES ('made since')", [])
+            .unwrap();
+        let e = move_to_oxtask(dir.path(), false, true, false)
+            .await
+            .unwrap_err();
+        assert!(e.contains("tsk10") && e.contains("--force-discard"), "{e}");
+        // Nothing changed: the store is as it was, no backup made.
+        let have: i64 = store(dir.path())
+            .query_row("SELECT count(*) FROM task", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(have, 6);
+        let e = move_to_oxtask(dir.path(), true, true, false)
+            .await
+            .unwrap_err();
+        assert!(e.contains("--force-discard"), "a dry run says so too: {e}");
+        // Forced: it goes, into the backup.
+        move_to_oxtask(dir.path(), false, true, true).await.unwrap();
+        let have: i64 = store(dir.path())
+            .query_row("SELECT count(*) FROM task", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(have, 5);
     }
 }
