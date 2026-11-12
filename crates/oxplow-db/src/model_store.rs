@@ -92,6 +92,9 @@ pub struct ModelDecl {
     pub resource: String,
     /// The column holding the store's native id (the URI's `id`).
     pub key: String,
+    /// The URI param that names the store (`store`; tasks keep
+    /// `provider`).
+    pub store_param: String,
     pub columns: Vec<ModelColumn>,
 }
 
@@ -110,14 +113,22 @@ impl ModelDecl {
         format!("model__{}__{}", self.ns(), self.name)
     }
 
-    /// `v_<ns>_<name>`.
+    /// `v_<ns>_<name>`: the live rows.
     pub fn view(&self) -> String {
         format!("v_{}_{}", self.ns(), self.name)
     }
 
+    /// `v_<ns>_<name>_all`: the removed rows too.
+    pub fn view_all(&self) -> String {
+        format!("{}_all", self.view())
+    }
+
     /// The URI of `store`'s item `id`.
     pub fn uri(&self, store: &str, id: &str) -> String {
-        oxplow_domain::uri::build::of(&self.resource, &[("store", store), ("id", id)])
+        oxplow_domain::uri::build::of(
+            &self.resource,
+            &[(self.store_param.as_str(), store), ("id", id)],
+        )
     }
 
     fn column(&self, name: &str) -> Option<&ModelColumn> {
@@ -143,19 +154,31 @@ pub type ModelRow = serde_json::Map<String, Value>;
 /// What a store writes.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ModelWrite {
-    /// Write these rows by key, and remove these ids.
+    /// Write these rows by key, remove these ids, and re-key these items
+    /// (`(from, to)`).
     Upsert {
         rows: Vec<ModelRow>,
         delete: Vec<String>,
+        rename: Vec<(String, String)>,
     },
-    /// These are every row the store has: the rest of its rows go.
-    Snapshot(Vec<ModelRow>),
+    /// These are every row the store has: the rest of its rows go. One
+    /// that would remove more than half of the store's rows, and more than
+    /// [`REMOVAL_GUARD`], is refused unless `confirm_removals`.
+    Snapshot {
+        rows: Vec<ModelRow>,
+        confirm_removals: bool,
+    },
 }
+
+/// A snapshot may remove this many of a store's rows (or half of them)
+/// without saying `confirm_removals`.
+pub const REMOVAL_GUARD: usize = 10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChangeOp {
     Upserted,
     Removed,
+    Renamed,
 }
 
 impl ChangeOp {
@@ -163,6 +186,7 @@ impl ChangeOp {
         match self {
             ChangeOp::Upserted => "upserted",
             ChangeOp::Removed => "removed",
+            ChangeOp::Renamed => "renamed",
         }
     }
 }
@@ -175,8 +199,36 @@ pub struct ModelChange {
     pub id: String,
     pub op: ChangeOp,
     /// The columns (and `fields`) that changed; every column for a new
-    /// row, none for a removal.
+    /// (or revived) row, none for a removal.
     pub changed: Vec<String>,
+    /// The changed non-markdown columns' values before and after.
+    pub before: serde_json::Map<String, Value>,
+    pub after: serde_json::Map<String, Value>,
+    /// A rename's old id.
+    pub renamed_from: Option<String>,
+}
+
+impl ModelChange {
+    fn new(uri: String, store: &str, id: String, op: ChangeOp) -> Self {
+        Self {
+            uri,
+            store: store.to_string(),
+            id,
+            op,
+            changed: Vec::new(),
+            before: serde_json::Map::new(),
+            after: serde_json::Map::new(),
+            renamed_from: None,
+        }
+    }
+}
+
+/// A row a write skipped: where it was, its id when it had one, why.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Quarantined {
+    pub at: usize,
+    pub id: Option<String>,
+    pub message: String,
 }
 
 /// What a write did.
@@ -184,10 +236,11 @@ pub struct ModelChange {
 pub struct Written {
     pub changes: Vec<ModelChange>,
     pub unchanged: usize,
+    pub quarantined: Vec<Quarantined>,
 }
 
 /// The columns every row has besides the declared ones.
-const IMPLICIT: [&str; 4] = ["uri", "store", "fields", "written_at"];
+const IMPLICIT: [&str; 6] = ["uri", "store", "fields", "written_at", "removed_at", "refs"];
 
 fn invalid(message: String) -> DomainError {
     DomainError::Invalid(message)
@@ -236,6 +289,7 @@ fn shape(decl: &ModelDecl) -> Vec<(String, &'static str)> {
     let mut out = vec![("uri".to_string(), "TEXT"), ("store".to_string(), "TEXT")];
     out.extend(decl.columns.iter().map(|c| (c.name.clone(), c.ty.sql())));
     out.push(("written_at".to_string(), "TEXT"));
+    out.push(("removed_at".to_string(), "TEXT"));
     out
 }
 
@@ -305,24 +359,28 @@ pub fn ensure_model_tx(conn: &rusqlite::Connection, decl: &ModelDecl) -> Result<
             }
         }
     }
-    let select = view_sql(decl);
-    let current: Option<String> = conn
-        .query_row(
-            "SELECT sql FROM sqlite_master WHERE type = 'view' AND name = ?1",
-            [decl.view()],
-            |r| r.get(0),
-        )
-        .optional()
-        .map_err(map_sql_err)?;
-    let create_view = format!("CREATE VIEW {} AS {select}", quote(&decl.view()));
-    if current.as_deref() != Some(create_view.as_str()) {
-        conn.execute_batch(&format!(
-            "DROP VIEW IF EXISTS {}; {create_view};",
-            quote(&decl.view())
-        ))
-        .map_err(map_sql_err)?;
+    for all in [false, true] {
+        let view = if all { decl.view_all() } else { decl.view() };
+        let select = view_sql(decl, all);
+        let current: Option<String> = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'view' AND name = ?1",
+                [&view],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(map_sql_err)?;
+        let create_view = format!("CREATE VIEW {} AS {select}", quote(&view));
+        if current.as_deref() != Some(create_view.as_str()) {
+            conn.execute_batch(&format!(
+                "DROP VIEW IF EXISTS {}; {create_view};",
+                quote(&view)
+            ))
+            .map_err(map_sql_err)?;
+        }
+        register_tx(conn, decl, &view, &select, all)?;
     }
-    register_tx(conn, decl, &select)
+    Ok(())
 }
 
 /// A SQL string literal.
@@ -332,7 +390,7 @@ fn sql_text(s: &str) -> String {
 
 /// The view: the table's columns, and `fields` as `{namespace: {name:
 /// value}}` (NULL with none).
-fn view_sql(decl: &ModelDecl) -> String {
+fn view_sql(decl: &ModelDecl, all: bool) -> String {
     let cols: Vec<String> = std::iter::once("t.uri".to_string())
         .chain(std::iter::once("t.store".to_string()))
         .chain(decl.columns.iter().map(|c| format!("t.{}", quote(&c.name))))
@@ -341,11 +399,17 @@ fn view_sql(decl: &ModelDecl) -> String {
         "SELECT {}, (SELECT json_group_object(ns.namespace, json(ns.vals)) FROM \
          (SELECT f.namespace, json_group_object(f.name, json(f.value)) AS vals \
          FROM model_field_value f WHERE f.model = {} AND f.uri = t.uri \
-         GROUP BY f.namespace ORDER BY f.namespace) ns) AS fields, t.written_at \
-         FROM {} t",
+         GROUP BY f.namespace ORDER BY f.namespace) ns) AS fields, t.written_at{} \
+         FROM {} t{}",
         cols.join(", "),
         sql_text(&decl.id()),
-        quote(&decl.table())
+        if all { ", t.removed_at" } else { "" },
+        quote(&decl.table()),
+        if all {
+            ""
+        } else {
+            " WHERE t.removed_at IS NULL"
+        }
     )
 }
 
@@ -355,7 +419,9 @@ fn view_sql(decl: &ModelDecl) -> String {
 fn register_tx(
     conn: &rusqlite::Connection,
     decl: &ModelDecl,
+    view: &str,
     select: &str,
+    all: bool,
 ) -> Result<(), DomainError> {
     let mut columns: Vec<Value> = vec![
         serde_json::json!({"name": "uri", "type": "TEXT", "doc": "The item's URI."}),
@@ -366,15 +432,30 @@ fn register_tx(
     }));
     columns.push(serde_json::json!({"name": "fields", "type": "TEXT", "doc": "Fields, by the namespace that wrote them."}));
     columns.push(serde_json::json!({"name": "written_at", "type": "TEXT", "doc": "When oxplow last wrote it."}));
+    if all {
+        columns.push(serde_json::json!({"name": "removed_at", "type": "TEXT", "doc": "When its store removed it (kept 30 days)."}));
+    }
     let contract = Value::Array(columns).to_string();
-    let description = format!("The shared model `{}`: every store's items.", decl.id());
+    let description = if all {
+        format!(
+            "The shared model `{}`: every store's items, removed ones too.",
+            decl.id()
+        )
+    } else {
+        format!("The shared model `{}`: every store's items.", decl.id())
+    };
+    let name = if all {
+        format!("{}_all", decl.name)
+    } else {
+        decl.name.clone()
+    };
     let now = ts_to_string(oxplow_domain::Timestamp::now());
     let current: Option<(String, Option<String>)> = conn
         .query_row(
             "SELECT m.sql, c.columns_json FROM dataset m
              LEFT JOIN dataset_contract c ON c.view = m.view AND c.version = m.version
              WHERE m.view = ?1",
-            [decl.view()],
+            [view],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .optional()
@@ -387,14 +468,7 @@ fn register_tx(
          VALUES (?1, ?2, ?3, 1, ?4, ?5, ?6, 'entity')
          ON CONFLICT (view) DO UPDATE SET description = excluded.description,
              sql = excluded.sql, compiled_at = excluded.compiled_at",
-        params![
-            decl.view(),
-            decl.name,
-            decl.extension,
-            description,
-            select,
-            now
-        ],
+        params![view, name, decl.extension, description, select, now],
     )
     .map_err(map_sql_err)?;
     conn.execute(
@@ -402,13 +476,13 @@ fn register_tx(
          VALUES (?1, 1, ?2, ?3)
          ON CONFLICT (view, version) DO UPDATE SET columns_json = excluded.columns_json,
              recorded_at = excluded.recorded_at",
-        params![decl.view(), contract, now],
+        params![view, contract, now],
     )
     .map_err(map_sql_err)?;
     for input in [decl.table(), "model_field_value".to_string()] {
         conn.execute(
             "INSERT OR IGNORE INTO dataset_input (view, input, kind) VALUES (?1, ?2, 'source')",
-            params![decl.view(), input],
+            params![view, input],
         )
         .map_err(map_sql_err)?;
     }
@@ -527,23 +601,26 @@ fn check_row(
     Ok(Checked { id, cells, fields })
 }
 
-/// The stored row of `uri`: its cells in declaration order.
+/// The stored row of `uri`: its cells in declaration order, and whether
+/// it is a tombstone.
 fn stored_tx(
     conn: &rusqlite::Connection,
     decl: &ModelDecl,
     uri: &str,
-) -> Result<Option<Vec<rusqlite::types::Value>>, DomainError> {
+) -> Result<Option<(Vec<rusqlite::types::Value>, bool)>, DomainError> {
     let cols: Vec<String> = decl.columns.iter().map(|c| quote(&c.name)).collect();
+    let n = decl.columns.len();
     conn.prepare_cached(&format!(
-        "SELECT {} FROM {} WHERE uri = ?1",
+        "SELECT {}, removed_at IS NOT NULL FROM {} WHERE uri = ?1",
         cols.join(", "),
         quote(&decl.table())
     ))
     .and_then(|mut st| {
         st.query_row([uri], |r| {
-            (0..decl.columns.len())
+            let cells = (0..n)
                 .map(|i| r.get::<_, rusqlite::types::Value>(i))
-                .collect()
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok((cells, r.get::<_, bool>(n)?))
         })
         .optional()
     })
@@ -593,29 +670,80 @@ fn put_fields_tx(
     Ok(true)
 }
 
+/// Tombstone `uri`: the row is hidden, its fields and edges kept for
+/// revival (`.context/models.md` "Removal"). Whether a live row went.
 fn remove_tx(
     conn: &rusqlite::Connection,
     decl: &ModelDecl,
     uri: &str,
+    now: &str,
 ) -> Result<bool, DomainError> {
     let n = conn
         .execute(
-            &format!("DELETE FROM {} WHERE uri = ?1", quote(&decl.table())),
-            [uri],
+            &format!(
+                "UPDATE {} SET removed_at = ?2 WHERE uri = ?1 AND removed_at IS NULL",
+                quote(&decl.table())
+            ),
+            params![uri, now],
         )
         .map_err(map_sql_err)?;
-    conn.execute(
-        "DELETE FROM model_field_value WHERE model = ?1 AND uri = ?2",
-        params![decl.id(), uri],
-    )
-    .map_err(map_sql_err)?;
     Ok(n > 0)
 }
 
+/// Delete the rows removed before `before`, with their fields.
+pub fn sweep_tombstones_tx(
+    conn: &rusqlite::Connection,
+    decl: &ModelDecl,
+    before: &str,
+) -> Result<usize, DomainError> {
+    validate(decl)?;
+    conn.execute(
+        &format!(
+            "DELETE FROM model_field_value WHERE model = ?1 AND uri IN
+               (SELECT uri FROM {} WHERE removed_at IS NOT NULL AND removed_at < ?2)",
+            quote(&decl.table())
+        ),
+        params![decl.id(), before],
+    )
+    .map_err(map_sql_err)?;
+    conn.execute(
+        &format!(
+            "DELETE FROM {} WHERE removed_at IS NOT NULL AND removed_at < ?1",
+            quote(&decl.table())
+        ),
+        [before],
+    )
+    .map_err(map_sql_err)
+}
+
+/// A stored cell as JSON (for a change event's `before` / `after`).
+fn json_of(column: &ModelColumn, v: &rusqlite::types::Value) -> Value {
+    use rusqlite::types::Value as V;
+    match (column.ty, v) {
+        (_, V::Null) => Value::Null,
+        (ModelType::Bool, V::Integer(n)) => Value::Bool(*n != 0),
+        (ModelType::Uris, V::Text(t)) => serde_json::from_str(t).unwrap_or(Value::Null),
+        (_, V::Integer(n)) => Value::from(*n),
+        (_, V::Real(f)) => Value::from(*f),
+        (_, V::Text(t)) => Value::String(t.clone()),
+        (_, V::Blob(_)) => Value::Null,
+    }
+}
+
+fn id_text(v: rusqlite::types::Value) -> String {
+    match v {
+        rusqlite::types::Value::Integer(n) => n.to_string(),
+        rusqlite::types::Value::Text(t) => t,
+        other => format!("{other:?}"),
+    }
+}
+
 /// Write `store`'s rows of `decl` (its table must exist: [`ensure_model_tx`]);
-/// `fields` are what the store declared, kept under the store's id. Every
-/// row is checked first, so a bad one writes nothing. Only what changed is
-/// written.
+/// `fields` are what the store declared, kept under the store's id. A row
+/// that fails its checks is quarantined (skipped, reported, and never
+/// removed by a snapshot); the rest is written. Only what changed is
+/// written. A snapshot that would remove too much is refused (nothing
+/// written) unless it confirms.
 pub fn write_tx(
     conn: &rusqlite::Connection,
     decl: &ModelDecl,
@@ -630,25 +758,119 @@ pub fn write_tx(
             decl.id()
         )));
     }
-    let (rows, delete, snapshot) = match write {
-        ModelWrite::Upsert { rows, delete } => (rows, delete.as_slice(), false),
-        ModelWrite::Snapshot(rows) => (rows, &[][..], true),
+    let (rows, delete, rename, snapshot) = match write {
+        ModelWrite::Upsert {
+            rows,
+            delete,
+            rename,
+        } => (rows, delete.as_slice(), rename.as_slice(), None),
+        ModelWrite::Snapshot {
+            rows,
+            confirm_removals,
+        } => (rows, &[][..], &[][..], Some(*confirm_removals)),
     };
-    let checked: Vec<Checked> = rows
-        .iter()
-        .enumerate()
-        .map(|(i, r)| check_row(decl, fields, i, r))
-        .collect::<Result<_, _>>()?;
-    let model = decl.id();
-    let now = ts_to_string(oxplow_domain::Timestamp::now());
     let mut out = Written::default();
     let mut kept = std::collections::BTreeSet::new();
+    let mut checked = Vec::new();
+    for (at, row) in rows.iter().enumerate() {
+        match check_row(decl, fields, at, row) {
+            Ok(c) => checked.push(c),
+            Err(e) => {
+                let id = match row.get(&decl.key) {
+                    Some(Value::String(s)) => Some(s.clone()),
+                    Some(Value::Number(n)) => Some(n.to_string()),
+                    _ => None,
+                };
+                if let Some(id) = &id {
+                    kept.insert(decl.uri(store, id));
+                }
+                out.quarantined.push(Quarantined {
+                    at,
+                    id,
+                    message: e.to_string(),
+                });
+            }
+        }
+    }
+    let model = decl.id();
+    let now = ts_to_string(oxplow_domain::Timestamp::now());
+    let table = quote(&decl.table());
+
+    // A snapshot's removals, decided before anything is written.
+    let gone: Vec<(String, String)> = match snapshot {
+        Some(confirm) => {
+            for row in &checked {
+                kept.insert(decl.uri(store, &row.id));
+            }
+            let mut st = conn
+                .prepare(&format!(
+                    "SELECT uri, {} FROM {table} WHERE store = ?1 AND removed_at IS NULL",
+                    quote(&decl.key)
+                ))
+                .map_err(map_sql_err)?;
+            let live = st
+                .query_map([store], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, rusqlite::types::Value>(1)?,
+                    ))
+                })
+                .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+                .map_err(map_sql_err)?;
+            let total = live.len();
+            let gone: Vec<(String, String)> = live
+                .into_iter()
+                .filter(|(uri, _)| !kept.contains(uri))
+                .map(|(uri, id)| (uri, id_text(id)))
+                .collect();
+            if !confirm && gone.len() > REMOVAL_GUARD && gone.len() * 2 > total {
+                return Err(invalid(format!(
+                    "model `{model}`: store `{store}`'s snapshot would remove {} of its {total} items; \
+                     held — send it with confirm_removals when that is meant",
+                    gone.len()
+                )));
+            }
+            gone
+        }
+        None => delete
+            .iter()
+            .map(|id| (decl.uri(store, id), id.clone()))
+            .collect(),
+    };
+
+    for (from, to) in rename {
+        let (old, new) = (decl.uri(store, from), decl.uri(store, to));
+        let moved = conn
+            .execute(
+                &format!(
+                    "UPDATE {table} SET uri = ?2, {} = ?3, written_at = ?4
+                     WHERE uri = ?1 AND NOT EXISTS (SELECT 1 FROM {table} WHERE uri = ?2)",
+                    quote(&decl.key)
+                ),
+                params![old, new, to, now],
+            )
+            .map_err(map_sql_err)?;
+        if moved == 0 {
+            continue;
+        }
+        for sql in [
+            "UPDATE model_field_value SET uri = ?2 WHERE model = ?3 AND uri = ?1",
+            "UPDATE page_ref SET source_uri = ?2 WHERE source_uri = ?1 AND ?3 = ?3",
+            "UPDATE page_ref SET target_uri = ?2 WHERE target_uri = ?1 AND ?3 = ?3",
+        ] {
+            conn.execute(sql, params![old, new, model])
+                .map_err(map_sql_err)?;
+        }
+        let mut change = ModelChange::new(new, store, to.clone(), ChangeOp::Renamed);
+        change.renamed_from = Some(from.clone());
+        out.changes.push(change);
+    }
+
     let cols: Vec<String> = decl.columns.iter().map(|c| quote(&c.name)).collect();
     let placeholders: Vec<String> = (0..cols.len()).map(|i| format!("?{}", i + 4)).collect();
     let insert = format!(
-        "INSERT INTO {} (uri, store, written_at, {}) VALUES (?1, ?2, ?3, {})
-         ON CONFLICT (uri) DO UPDATE SET written_at = excluded.written_at, {}",
-        quote(&decl.table()),
+        "INSERT INTO {table} (uri, store, written_at, removed_at, {}) VALUES (?1, ?2, ?3, NULL, {})
+         ON CONFLICT (uri) DO UPDATE SET written_at = excluded.written_at, removed_at = NULL, {}",
         cols.join(", "),
         placeholders.join(", "),
         cols.iter()
@@ -658,19 +880,31 @@ pub fn write_tx(
     );
     for row in checked {
         let uri = decl.uri(store, &row.id);
-        kept.insert(uri.clone());
         let before = stored_tx(conn, decl, &uri)?;
-        let mut changed: Vec<String> = match &before {
-            None => decl.columns.iter().map(|c| c.name.clone()).collect(),
-            Some(cells) => decl
-                .columns
-                .iter()
-                .zip(cells.iter().zip(&row.cells))
-                .filter(|(_, (a, b))| a != b)
-                .map(|(c, _)| c.name.clone())
-                .collect(),
-        };
-        if before.is_none() || !changed.is_empty() {
+        let mut change = ModelChange::new(uri.clone(), store, row.id.clone(), ChangeOp::Upserted);
+        match &before {
+            // New, or back from removal: every column.
+            None | Some((_, true)) => {
+                change.changed = decl.columns.iter().map(|c| c.name.clone()).collect();
+                for (c, v) in decl.columns.iter().zip(&row.cells) {
+                    if c.markdown.is_none() {
+                        change.after.insert(c.name.clone(), json_of(c, v));
+                    }
+                }
+            }
+            Some((cells, false)) => {
+                for (c, (a, b)) in decl.columns.iter().zip(cells.iter().zip(&row.cells)) {
+                    if a != b {
+                        change.changed.push(c.name.clone());
+                        if c.markdown.is_none() {
+                            change.before.insert(c.name.clone(), json_of(c, a));
+                            change.after.insert(c.name.clone(), json_of(c, b));
+                        }
+                    }
+                }
+            }
+        }
+        if !change.changed.is_empty() {
             let mut values: Vec<rusqlite::types::Value> = vec![
                 uri.clone().into(),
                 store.to_string().into(),
@@ -682,61 +916,18 @@ pub fn write_tx(
                 .map_err(map_sql_err)?;
         }
         if put_fields_tx(conn, &model, &uri, store, &row.fields)? {
-            changed.push("fields".into());
+            change.changed.push("fields".into());
         }
-        if changed.is_empty() {
+        if change.changed.is_empty() {
             out.unchanged += 1;
         } else {
-            out.changes.push(ModelChange {
-                uri,
-                store: store.to_string(),
-                id: row.id,
-                op: ChangeOp::Upserted,
-                changed,
-            });
+            out.changes.push(change);
         }
     }
-    let gone: Vec<(String, String)> = if snapshot {
-        let mut st = conn
-            .prepare(&format!(
-                "SELECT uri, {} FROM {} WHERE store = ?1",
-                quote(&decl.key),
-                quote(&decl.table())
-            ))
-            .map_err(map_sql_err)?;
-        let all = st
-            .query_map([store], |r| {
-                let id: rusqlite::types::Value = r.get(1)?;
-                Ok((r.get::<_, String>(0)?, id))
-            })
-            .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
-            .map_err(map_sql_err)?;
-        all.into_iter()
-            .filter(|(uri, _)| !kept.contains(uri))
-            .map(|(uri, id)| {
-                let id = match id {
-                    rusqlite::types::Value::Integer(n) => n.to_string(),
-                    rusqlite::types::Value::Text(t) => t,
-                    other => format!("{other:?}"),
-                };
-                (uri, id)
-            })
-            .collect()
-    } else {
-        delete
-            .iter()
-            .map(|id| (decl.uri(store, id), id.clone()))
-            .collect()
-    };
     for (uri, id) in gone {
-        if remove_tx(conn, decl, &uri)? {
-            out.changes.push(ModelChange {
-                uri,
-                store: store.to_string(),
-                id,
-                op: ChangeOp::Removed,
-                changed: Vec::new(),
-            });
+        if remove_tx(conn, decl, &uri, &now)? {
+            out.changes
+                .push(ModelChange::new(uri, store, id, ChangeOp::Removed));
         }
     }
     Ok(out)
@@ -757,7 +948,7 @@ pub fn write_fields_tx(
     let item: Option<(String, rusqlite::types::Value)> = conn
         .query_row(
             &format!(
-                "SELECT store, {} FROM {} WHERE uri = ?1",
+                "SELECT store, {} FROM {} WHERE uri = ?1 AND removed_at IS NULL",
                 quote(&decl.key),
                 quote(&decl.table())
             ),
@@ -781,18 +972,9 @@ pub fn write_fields_tx(
     if !put_fields_tx(conn, &decl.id(), uri, namespace, &merged)? {
         return Ok(None);
     }
-    let id = match id {
-        rusqlite::types::Value::Integer(n) => n.to_string(),
-        rusqlite::types::Value::Text(t) => t,
-        other => format!("{other:?}"),
-    };
-    Ok(Some(ModelChange {
-        uri: uri.to_string(),
-        store,
-        id,
-        op: ChangeOp::Upserted,
-        changed: vec!["fields".into()],
-    }))
+    let mut change = ModelChange::new(uri.to_string(), &store, id_text(id), ChangeOp::Upserted);
+    change.changed = vec!["fields".into()];
+    Ok(Some(change))
 }
 
 #[cfg(test)]
@@ -812,6 +994,7 @@ mod tests {
             name: "book".into(),
             resource: "shelf/book".into(),
             key: "id".into(),
+            store_param: "store".into(),
             columns: vec![
                 ModelColumn::new("id", ModelType::Text),
                 ModelColumn::new("title", ModelType::Text),
@@ -878,6 +1061,7 @@ mod tests {
             ModelWrite::Upsert {
                 rows: vec![row(json!({"id": "b1", "title": "Dune", "pages": 412}))],
                 delete: vec![],
+                rename: vec![],
             },
         )
         .await
@@ -895,6 +1079,7 @@ mod tests {
             ModelWrite::Upsert {
                 rows: vec![row(json!({"id": "b1", "title": "Dune", "pages": 412}))],
                 delete: vec![],
+                rename: vec![],
             },
         )
         .await
@@ -910,11 +1095,14 @@ mod tests {
                     json!({"id": "b1", "title": "Dune Messiah", "pages": 412}),
                 )],
                 delete: vec![],
+                rename: vec![],
             },
         )
         .await
         .unwrap();
         assert_eq!(moved.changes[0].changed, vec!["title".to_string()]);
+        assert_eq!(moved.changes[0].before["title"], json!("Dune"));
+        assert_eq!(moved.changes[0].after["title"], json!("Dune Messiah"));
 
         let gone = write(
             &db,
@@ -923,6 +1111,7 @@ mod tests {
             ModelWrite::Upsert {
                 rows: vec![],
                 delete: vec!["b1".into()],
+                rename: vec![],
             },
         )
         .await
@@ -941,15 +1130,26 @@ mod tests {
                 .iter()
                 .map(|id| row(json!({"id": id, "title": format!("{store}{id}")})))
                 .collect();
-            write(&db, store, vec![], ModelWrite::Snapshot(rows))
-                .await
-                .unwrap();
+            write(
+                &db,
+                store,
+                vec![],
+                ModelWrite::Snapshot {
+                    rows,
+                    confirm_removals: false,
+                },
+            )
+            .await
+            .unwrap();
         }
         let w = write(
             &db,
             "a",
             vec![],
-            ModelWrite::Snapshot(vec![row(json!({"id": "1", "title": "a1"}))]),
+            ModelWrite::Snapshot {
+                rows: vec![row(json!({"id": "1", "title": "a1"}))],
+                confirm_removals: false,
+            },
         )
         .await
         .unwrap();
@@ -962,33 +1162,254 @@ mod tests {
 
     /// A row is checked against the declaration: an undeclared column, a
     /// value of the wrong type, an enum value not allowed, a missing key or
-    /// an undeclared field fail the whole write, naming the row and column.
+    /// an undeclared field quarantines it (skipped, named), and the rest of
+    /// the write lands. A snapshot never removes a quarantined key.
     #[tokio::test]
-    async fn a_bad_row_fails_the_write_naming_it() {
+    async fn a_bad_row_is_quarantined_and_the_rest_written() {
         let db = Database::in_memory();
-        db.transaction(|tx| ensure_model_tx(tx, &book())).await.unwrap();
-        for (bad, says) in [
+        for (n, (bad, says)) in [
             (json!({"id": "b1", "colour": "red"}), "colour"),
             (json!({"id": "b1", "pages": "many"}), "pages"),
             (json!({"id": "b1", "state": "lost"}), "state"),
             (json!({"title": "no id"}), "id"),
             (json!({"id": "b1", "fields": {"mood": 3}}), "mood"),
-        ] {
-            let err = write(
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let ok = format!("ok{n}");
+            let w = write(
                 &db,
                 "s",
                 rating(),
                 ModelWrite::Upsert {
-                    rows: vec![row(json!({"id": "ok", "title": "fine"})), row(bad)],
+                    rows: vec![row(json!({"id": ok, "title": "fine"})), row(bad)],
                     delete: vec![],
+                    rename: vec![],
                 },
             )
             .await
-            .unwrap_err()
-            .to_string();
-            assert!(err.contains(says), "{err}");
+            .unwrap();
+            assert_eq!(w.changes.len(), 1, "the good row lands");
+            assert_eq!(w.quarantined.len(), 1);
+            assert!(
+                w.quarantined[0].message.contains(says),
+                "{:?}",
+                w.quarantined
+            );
         }
-        assert!(rows(&db).await.is_empty(), "nothing of a bad write lands");
+        // b1 exists; a snapshot whose b1 row is bad keeps it.
+        write(
+            &db,
+            "q",
+            vec![],
+            ModelWrite::Snapshot {
+                rows: vec![row(json!({"id": "b1", "title": "Dune"}))],
+                confirm_removals: false,
+            },
+        )
+        .await
+        .unwrap();
+        let w = write(
+            &db,
+            "q",
+            vec![],
+            ModelWrite::Snapshot {
+                rows: vec![row(json!({"id": "b1", "pages": "many"}))],
+                confirm_removals: false,
+            },
+        )
+        .await
+        .unwrap();
+        assert!(w.changes.is_empty(), "{:?}", w.changes);
+        assert!(rows(&db).await.iter().any(|r| r.1.contains("store=q")));
+    }
+
+    /// A removed row is a tombstone: hidden from the view, kept in the
+    /// `_all` view with its fields; the same id coming back revives it with
+    /// them, as a change of every column. A sweep deletes old tombstones.
+    #[tokio::test]
+    async fn a_removed_row_is_a_tombstone_until_it_comes_back() {
+        let db = Database::in_memory();
+        let upsert = |rows: Vec<ModelRow>, delete: Vec<String>| ModelWrite::Upsert {
+            rows,
+            delete,
+            rename: vec![],
+        };
+        write(
+            &db,
+            "s",
+            rating(),
+            upsert(
+                vec![row(
+                    json!({"id": "b1", "title": "Dune", "fields": {"rating": 4}}),
+                )],
+                vec![],
+            ),
+        )
+        .await
+        .unwrap();
+        write(&db, "s", rating(), upsert(vec![], vec!["b1".into()]))
+            .await
+            .unwrap();
+        assert!(rows(&db).await.is_empty());
+        let all: i64 = db
+            .read(|tx| {
+                tx.query_row(
+                    "SELECT count(*) FROM v_shelf_book_all WHERE removed_at IS NOT NULL AND fields IS NOT NULL",
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(all, 1);
+        let back = write(
+            &db,
+            "s",
+            rating(),
+            upsert(vec![row(json!({"id": "b1", "title": "Dune"}))], vec![]),
+        )
+        .await
+        .unwrap();
+        assert_eq!(back.changes[0].op, ChangeOp::Upserted);
+        assert!(back.changes[0].changed.contains(&"title".to_string()));
+        let live = rows(&db).await;
+        assert_eq!(live.len(), 1, "revived");
+
+        write(&db, "s", rating(), upsert(vec![], vec!["b1".into()]))
+            .await
+            .unwrap();
+        let swept = db
+            .transaction(|tx| sweep_tombstones_tx(tx, &book(), "9999-01-01"))
+            .await
+            .unwrap();
+        assert_eq!(swept, 1);
+        let left: i64 = db
+            .read(|tx| {
+                tx.query_row("SELECT count(*) FROM model_field_value", [], |r| r.get(0))
+                    .map_err(map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(left, 0, "a swept row's fields go with it");
+    }
+
+    /// A rename re-keys an item: its URI, its fields and its edges move,
+    /// and one renamed change names the old id.
+    #[tokio::test]
+    async fn a_rename_moves_the_item_its_fields_and_edges() {
+        let db = Database::in_memory();
+        write(
+            &db,
+            "s",
+            rating(),
+            ModelWrite::Upsert {
+                rows: vec![row(
+                    json!({"id": "old", "title": "Dune", "fields": {"rating": 4}}),
+                )],
+                delete: vec![],
+                rename: vec![],
+            },
+        )
+        .await
+        .unwrap();
+        let (old, new) = (
+            "oxplow:shelf/book?id=old&store=s",
+            "oxplow:shelf/book?id=new&store=s",
+        );
+        db.transaction(move |tx| {
+            crate::page_ref_store::upsert_edge_tx(
+                tx,
+                &crate::page_ref_store::PageRefEdge::new(
+                    old,
+                    "oxplow:oxplow/file?path=a.rs",
+                    "file_mention",
+                ),
+            )
+        })
+        .await
+        .unwrap();
+        let w = write(
+            &db,
+            "s",
+            rating(),
+            ModelWrite::Upsert {
+                rows: vec![],
+                delete: vec![],
+                rename: vec![("old".into(), "new".into())],
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(w.changes.len(), 1);
+        assert_eq!(w.changes[0].op, ChangeOp::Renamed);
+        assert_eq!(w.changes[0].renamed_from.as_deref(), Some("old"));
+        let live = rows(&db).await;
+        assert_eq!(live[0].1, new);
+        assert!(live[0].3.as_deref().unwrap().contains("rating"));
+        let edges: i64 = db
+            .read(move |tx| {
+                tx.query_row(
+                    "SELECT count(*) FROM page_ref WHERE source_uri = ?1",
+                    [new],
+                    |r| r.get(0),
+                )
+                .map_err(map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(edges, 1);
+    }
+
+    /// A snapshot that would remove more than half of a store's rows, and
+    /// more than the guard, is refused (nothing written) unless it confirms.
+    #[tokio::test]
+    async fn a_snapshot_that_empties_a_store_needs_confirming() {
+        let db = Database::in_memory();
+        let rows_of = |n: usize| -> Vec<ModelRow> {
+            (0..n)
+                .map(|i| row(json!({"id": format!("b{i}"), "title": "t"})))
+                .collect()
+        };
+        write(
+            &db,
+            "s",
+            vec![],
+            ModelWrite::Snapshot {
+                rows: rows_of(12),
+                confirm_removals: false,
+            },
+        )
+        .await
+        .unwrap();
+        let err = write(
+            &db,
+            "s",
+            vec![],
+            ModelWrite::Snapshot {
+                rows: vec![],
+                confirm_removals: false,
+            },
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("confirm_removals"), "{err}");
+        assert_eq!(rows(&db).await.len(), 12, "nothing applied");
+        let w = write(
+            &db,
+            "s",
+            vec![],
+            ModelWrite::Snapshot {
+                rows: vec![],
+                confirm_removals: true,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(w.changes.len(), 12);
     }
 
     /// Fields are kept apart by namespace: a store writes its own in its
@@ -1003,9 +1424,12 @@ mod tests {
             &db,
             "shelf-db",
             rating(),
-            ModelWrite::Snapshot(vec![row(
-                json!({"id": "b1", "title": "Dune", "fields": {"rating": 4}}),
-            )]),
+            ModelWrite::Snapshot {
+                rows: vec![row(
+                    json!({"id": "b1", "title": "Dune", "fields": {"rating": 4}}),
+                )],
+                confirm_removals: false,
+            },
         )
         .await
         .unwrap();
@@ -1042,9 +1466,12 @@ mod tests {
             &db,
             "shelf-db",
             rating(),
-            ModelWrite::Snapshot(vec![row(
-                json!({"id": "b1", "title": "Dune", "fields": {"rating": 5}}),
-            )]),
+            ModelWrite::Snapshot {
+                rows: vec![row(
+                    json!({"id": "b1", "title": "Dune", "fields": {"rating": 5}}),
+                )],
+                confirm_removals: false,
+            },
         )
         .await
         .unwrap();
@@ -1054,9 +1481,17 @@ mod tests {
             "a reconcile keeps another namespace's values"
         );
 
-        write(&db, "shelf-db", rating(), ModelWrite::Snapshot(vec![]))
-            .await
-            .unwrap();
+        write(
+            &db,
+            "shelf-db",
+            rating(),
+            ModelWrite::Snapshot {
+                rows: vec![],
+                confirm_removals: false,
+            },
+        )
+        .await
+        .unwrap();
         let left: i64 = db
             .read(|tx| {
                 tx.query_row("SELECT count(*) FROM model_field_value", [], |r| r.get(0))
@@ -1064,7 +1499,7 @@ mod tests {
             })
             .await
             .unwrap();
-        assert_eq!(left, 0, "values go when the item goes");
+        assert_eq!(left, 2, "a removed item keeps its values until it is swept");
     }
 
     /// Fields on an item that doesn't exist are refused.
