@@ -70,14 +70,10 @@ where
     .is_some()
 }
 
-use oxplow_oxtask::task_ref;
 use std::path::Path;
 use std::sync::Arc;
 
 use oxplow_domain::ThreadId;
-use oxplow_oxtask::OxtaskId;
-use oxplow_oxtask::OxtaskStore as _;
-use oxplow_oxtask::{Oxtask, OxtaskActorKind, OxtaskAuthor, OxtaskPriority, OxtaskStatus};
 
 /// A git repo with one empty commit on `main`, whatever the machine's
 /// `init.defaultBranch` (stream setup refuses non-git dirs).
@@ -296,117 +292,6 @@ async fn with_thread(dir: tempfile::TempDir, svc: Arc<crate::Services>) -> Threa
         thread,
         session,
     }
-}
-
-/// [`ThreadFixture`] with an in-progress oxplow task on the thread: for a
-/// test about tasks.
-pub struct TaskFixture {
-    pub fx: ThreadFixture,
-    pub task: OxtaskId,
-}
-
-impl std::ops::Deref for TaskFixture {
-    type Target = ThreadFixture;
-
-    fn deref(&self) -> &ThreadFixture {
-        &self.fx
-    }
-}
-
-/// In-memory services over a fresh repo with a primary stream, its first
-/// thread and an in-progress task assigned to it.
-pub async fn services_with_task() -> TaskFixture {
-    let dir = tempfile::tempdir().unwrap();
-    init_git_repo(dir.path());
-    let svc = crate::Services::in_memory(dir.path()).await.unwrap();
-    let fx = with_thread(dir, svc).await;
-    let task = in_progress_task(&fx.svc, fx.thread).await;
-    TaskFixture { fx, task }
-}
-
-/// An in-progress oxplow task assigned to `thread`.
-async fn in_progress_task(svc: &crate::Services, thread: ThreadId) -> OxtaskId {
-    let now = oxplow_domain::Timestamp::now();
-    let task = svc
-        .task_store
-        .insert(&Oxtask {
-            id: OxtaskId::placeholder(),
-            parent_id: None,
-            title: "t".into(),
-            description: String::new(),
-            status: OxtaskStatus::InProgress,
-            priority: OxtaskPriority::Medium,
-            created_by: OxtaskActorKind::User,
-            created_at: now,
-            updated_at: now,
-            completed_at: None,
-            deleted_at: None,
-            note_count: 0,
-            author: Some(OxtaskAuthor::User),
-        })
-        .await
-        .unwrap();
-    restate_task(svc, task).await;
-    assign_to(svc, &task_ref(task), Some(thread)).await;
-    task
-}
-
-/// A task filed as a person through `oxplow.task.create` with
-/// `input` (assigned to nobody unless it names an `assignee`): its id.
-pub async fn file_item(svc: &crate::Services, input: serde_json::Value) -> OxtaskId {
-    let out = svc
-        .commands
-        .run(
-            &oxplow_domain::Actor::Human,
-            crate::commands::task::CREATE,
-            input,
-            false,
-        )
-        .await
-        .unwrap();
-    oxplow_oxtask::oxtask_of_task_ref(out.result["uri"].as_str().unwrap()).unwrap()
-}
-
-/// Restate task `task` in the task interface, as its list does after
-/// a write: its `task.recorded`, logged and projected. For a test
-/// that writes the task store directly rather than through the
-/// `oxplow.task.*` commands.
-pub async fn restate_task(svc: &crate::Services, task: OxtaskId) {
-    let record = svc
-        .db
-        .read(move |tx| oxplow_oxtask::record::record_tx(tx, task))
-        .await
-        .unwrap();
-    svc.event_log_store
-        .append(oxplow_oxtask::provider::recorded(record))
-        .await
-        .unwrap();
-    svc.event_pump.deliver_projections().await.unwrap();
-}
-
-/// Assign `item` to `thread` (`None`: nobody) in the task interface,
-/// as `oxplow.task.assign` does: its `task.assigned`, logged and
-/// projected. For a fixture that sets up who works on what without a
-/// run to count.
-pub async fn assign_to(svc: &crate::Services, item: &str, thread: Option<ThreadId>) {
-    use oxplow_domain::events::schema::{TaskAssigned, TaskAssignedV1};
-    svc.event_log_store
-        .append(
-            oxplow_domain::Envelope::typed::<TaskAssigned>(
-                "human",
-                &TaskAssignedV1 {
-                    task: item.to_string(),
-                    from: None,
-                    to: thread.map(oxplow_domain::uri::build::thread_uri),
-                    before: None,
-                    after: None,
-                },
-            )
-            .with_subject([item]),
-        )
-        .await
-        .unwrap();
-    svc.event_pump.deliver_projections().await.unwrap();
 }
 
 /// A new thread on `stream`, made as a person through `oxplow.thread.create`.
