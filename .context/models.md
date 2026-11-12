@@ -231,7 +231,17 @@ fills:
     enum value, a wrong type, an undeclared field) is skipped and
     reported as a problem naming the row and column; the rest is
     written. A quarantined key is never counted as removed by a snapshot.
-    A malformed output (not the shape above) fails the run.
+    **A quarantine stays open** (table `model_quarantine`, V31, read as
+    `v_model_quarantine`: model, store, key, uri, message, source, at),
+    because an incremental store states a row once and the next run would
+    have no problem. `write_tx` upserts it in the write's transaction, one
+    per (model, store, key) (a row with no usable key is `#<position>`),
+    and clears it when the key is written good (even unchanged), deleted,
+    or renamed from or to, or when a snapshot of that store is applied
+    (what it still states badly is quarantined again; what it leaves out
+    is cleared). Another store's or an unrelated write keeps it. The run's
+    `problems` and warning log are unchanged; nothing else (collector
+    health, advisories) reads the view yet. A malformed output (not the shape above) fails the run.
   - It diffs against what is stored and writes only what changed (the
     rule of the asset refill and the page-ref repair), and logs one
     change event per changed row, in the run's transaction (with its

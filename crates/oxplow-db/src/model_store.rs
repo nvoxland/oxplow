@@ -2050,16 +2050,33 @@ fn restate_child_edges_tx(
     crate::page_ref_store::replace_source_for_ref_types_tx(conn, parent, &types, edges)
 }
 
+fn clear_quarantine_tx(
+    conn: &rusqlite::Connection,
+    model: &str,
+    store: &str,
+    key: &str,
+) -> Result<(), DomainError> {
+    conn.execute(
+        "DELETE FROM model_quarantine WHERE model = ?1 AND store = ?2 AND key = ?3",
+        params![model, store, key],
+    )
+    .map_err(map_sql_err)?;
+    Ok(())
+}
+
 /// Write `store`'s rows of `decl` (its table must exist: [`ensure_model_tx`]);
 /// `fields` are what the store declared, kept under the store's id. A row
 /// that fails its checks is quarantined (skipped, reported, and never
-/// removed by a snapshot); the rest is written. Only what changed is
-/// written. A snapshot that would remove too much is refused (nothing
+/// removed by a snapshot); the rest is written. A quarantine stays open
+/// (`model_quarantine`, from `source`) until its key is written good,
+/// deleted, renamed, or left out of a snapshot of the store. Only what
+/// changed is written. A snapshot that would remove too much is refused (nothing
 /// written) unless it confirms.
 pub fn write_tx(
     conn: &rusqlite::Connection,
     decl: &ModelDecl,
     kinds: &oxplow_domain::uri::resources::ResourceRegistry,
+    source: &str,
     store: &str,
     fields: &[FieldDecl],
     write: &ModelWrite,
@@ -2085,6 +2102,8 @@ pub fn write_tx(
     let mut out = Written::default();
     let mut kept = std::collections::BTreeSet::new();
     let mut checked = Vec::new();
+    // (key, uri, message) of what to leave open once the write is done.
+    let mut open: Vec<(String, Option<String>, String)> = Vec::new();
     for (at, row) in rows.iter().enumerate() {
         match check_row(decl, fields, at, row) {
             Ok(c) => checked.push(c),
@@ -2097,6 +2116,11 @@ pub fn write_tx(
                 if let Some(id) = &id {
                     kept.insert(decl.uri(store, id));
                 }
+                open.push((
+                    id.clone().unwrap_or_else(|| format!("#{at}")),
+                    id.as_ref().map(|id| decl.uri(store, id)),
+                    e.to_string(),
+                ));
                 out.quarantined.push(Quarantined {
                     at,
                     id,
@@ -2143,6 +2167,13 @@ pub fn write_tx(
                     gone.len()
                 )));
             }
+            // A snapshot states the whole store: what it leaves out is
+            // no longer a problem.
+            conn.execute(
+                "DELETE FROM model_quarantine WHERE model = ?1 AND store = ?2",
+                params![model, store],
+            )
+            .map_err(map_sql_err)?;
             gone
         }
         None => delete
@@ -2153,6 +2184,7 @@ pub fn write_tx(
 
     for (at, (from, to)) in rename.iter().enumerate() {
         let (old, new) = (decl.uri(store, from), decl.uri(store, to));
+        clear_quarantine_tx(conn, &model, store, from)?;
         let state = |uri: &str| -> Result<Option<bool>, DomainError> {
             conn.query_row(
                 &format!("SELECT removed_at IS NOT NULL FROM {table} WHERE uri = ?1"),
@@ -2168,12 +2200,13 @@ pub fn write_tx(
         }
         match state(&new)? {
             Some(false) => {
+                let message =
+                    format!("model `{model}`: rename `{from}` → `{to}`: `{to}` is already an item");
+                open.push((from.clone(), Some(old.clone()), message.clone()));
                 out.quarantined.push(Quarantined {
                     at,
                     id: Some(from.clone()),
-                    message: format!(
-                        "model `{model}`: rename `{from}` → `{to}`: `{to}` is already an item"
-                    ),
+                    message,
                 });
                 continue;
             }
@@ -2226,6 +2259,7 @@ pub fn write_tx(
             conn.execute(sql, params![old, new, model])
                 .map_err(map_sql_err)?;
         }
+        clear_quarantine_tx(conn, &model, store, to)?;
         let mut change = ModelChange::new(new, store, to.clone(), ChangeOp::Renamed);
         change.renamed_from = Some(from.clone());
         out.changes.push(change);
@@ -2245,6 +2279,7 @@ pub fn write_tx(
     );
     for row in checked {
         let uri = decl.uri(store, &row.id);
+        clear_quarantine_tx(conn, &model, store, &row.id)?;
         let before = stored_tx(conn, decl, &uri)?;
         let mut change = ModelChange::new(uri.clone(), store, row.id.clone(), ChangeOp::Upserted);
         match &before {
@@ -2313,10 +2348,22 @@ pub fn write_tx(
         }
     }
     for (uri, id) in gone {
+        clear_quarantine_tx(conn, &model, store, &id)?;
         if remove_tx(conn, decl, &uri, &now)? {
             out.changes
                 .push(ModelChange::new(uri, store, id, ChangeOp::Removed));
         }
+    }
+    for (key, uri, message) in open {
+        conn.execute(
+            "INSERT INTO model_quarantine (model, store, key, uri, message, source, at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT (model, store, key) DO UPDATE SET
+               uri = excluded.uri, message = excluded.message,
+               source = excluded.source, at = excluded.at",
+            params![model, store, key, uri, message, source, now],
+        )
+        .map_err(map_sql_err)?;
     }
     Ok(out)
 }
@@ -2456,7 +2503,7 @@ mod tests {
     ) -> Result<Written, DomainError> {
         db.transaction(move |tx| {
             ensure_model_tx(tx, &book())?;
-            write_tx(tx, &book(), &kinds(), store, &fields, &w)
+            write_tx(tx, &book(), &kinds(), "test", store, &fields, &w)
         })
         .await
     }
@@ -2652,6 +2699,98 @@ mod tests {
         .unwrap();
         assert!(w.changes.is_empty(), "{:?}", w.changes);
         assert!(rows(&db).await.iter().any(|r| r.1.contains("store=q")));
+    }
+
+    async fn open_quarantines(db: &Database) -> Vec<(String, String, String)> {
+        db.read(|tx| {
+            let mut st = tx
+                .prepare("SELECT store, key, source FROM v_model_quarantine ORDER BY store, key")
+                .map_err(map_sql_err)?;
+            let out = st
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .map_err(map_sql_err)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(map_sql_err)?;
+            Ok(out)
+        })
+        .await
+        .unwrap()
+    }
+
+    fn upsert(rows: Vec<Value>, delete: Vec<&str>) -> ModelWrite {
+        ModelWrite::Upsert {
+            rows: rows.into_iter().map(row).collect(),
+            delete: delete.into_iter().map(String::from).collect(),
+            rename: vec![],
+        }
+    }
+
+    fn q(store: &str, key: &str) -> (String, String, String) {
+        (store.into(), key.into(), "test".into())
+    }
+
+    /// A quarantined row stays an open problem until its key is restated
+    /// good, deleted, renamed away or left out of a snapshot; an unrelated
+    /// incremental write keeps it; a repeat of the same bad row keeps one.
+    #[tokio::test]
+    async fn a_quarantine_stays_open_until_the_row_is_restated() {
+        let db = Database::in_memory();
+        let bad = |id: &str| json!({"id": id, "pages": "many"});
+        let go = |w: ModelWrite| write(&db, "s", vec![], w);
+        go(upsert(vec![bad("b1"), bad("b2"), bad("b3")], vec![]))
+            .await
+            .unwrap();
+        go(upsert(vec![bad("b1")], vec![])).await.unwrap();
+        assert_eq!(
+            open_quarantines(&db).await,
+            vec![q("s", "b1"), q("s", "b2"), q("s", "b3")]
+        );
+        // Unrelated incremental write (and another store's) keeps them.
+        go(upsert(vec![json!({"id": "x", "title": "x"})], vec![]))
+            .await
+            .unwrap();
+        write(&db, "other", vec![], upsert(vec![bad("b9")], vec![]))
+            .await
+            .unwrap();
+        assert_eq!(open_quarantines(&db).await.len(), 4);
+        // Restated good clears.
+        go(upsert(vec![json!({"id": "b1", "title": "ok"})], vec![]))
+            .await
+            .unwrap();
+        // Delete clears.
+        go(upsert(vec![], vec!["b2"])).await.unwrap();
+        assert_eq!(
+            open_quarantines(&db).await,
+            vec![q("other", "b9"), q("s", "b3")]
+        );
+        // A snapshot that no longer states the key clears it (its own
+        // store only); one that states it badly again keeps it.
+        go(ModelWrite::Snapshot {
+            rows: vec![row(json!({"id": "x", "title": "x"}))],
+            confirm_removals: false,
+        })
+        .await
+        .unwrap();
+        assert_eq!(open_quarantines(&db).await, vec![q("other", "b9")]);
+        go(ModelWrite::Snapshot {
+            rows: vec![row(bad("x"))],
+            confirm_removals: false,
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            open_quarantines(&db).await,
+            vec![q("other", "b9"), q("s", "x")]
+        );
+        // A rename of the key away clears it.
+        go(ModelWrite::Upsert {
+            rows: vec![],
+            delete: vec![],
+            rename: vec![("x".into(), "y".into())],
+        })
+        .await
+        .unwrap();
+        assert_eq!(open_quarantines(&db).await, vec![q("other", "b9")]);
     }
 
     /// A removed row is a tombstone: hidden from the view, kept in the
@@ -2980,6 +3119,7 @@ mod tests {
                 tx,
                 &decl,
                 &kinds(),
+                "test",
                 "s",
                 &[],
                 &ModelWrite::Upsert {
@@ -3609,6 +3749,7 @@ mod tests {
                 tx,
                 &d,
                 &kinds(),
+                "test",
                 "s",
                 &[],
                 &ModelWrite::Snapshot {
@@ -3720,6 +3861,7 @@ mod tests {
                 tx,
                 &linked_book(),
                 &kinds(),
+                "test",
                 "s",
                 &[],
                 &ModelWrite::Upsert {
@@ -3739,6 +3881,7 @@ mod tests {
                 tx,
                 &linked_book(),
                 &kinds(),
+                "test",
                 "s",
                 &[],
                 &ModelWrite::Upsert {
@@ -3778,6 +3921,7 @@ mod tests {
                 tx,
                 &linked_book(),
                 &kinds(),
+                "test",
                 "s",
                 &[],
                 &ModelWrite::Upsert {

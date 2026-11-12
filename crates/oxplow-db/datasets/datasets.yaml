@@ -2112,6 +2112,19 @@
     - { name: "kind", type: "TEXT", doc: "`enum`, `text` or `number`." }
     - { name: "values", type: "TEXT", doc: "An enum's values, as a JSON list; NULL otherwise." }
     - { name: "read_only", type: "INT", doc: "1 when screens show it but don't edit it." }
+- name: model_quarantine
+  version: 1
+  description: "The shared-model rows a write skipped because they failed their checks and have not been restated since: an open problem until the key is written good, deleted, renamed away, or left out of a snapshot of its store. A collector run reports the same rows once; this keeps them."
+  fields:
+    - { name: "model", type: "TEXT", doc: "The model (`<owner namespace>/<model>`)." }
+    - { name: "store", type: "TEXT", doc: "The store whose write was skipped." }
+    - { name: "key", type: "TEXT", doc: "The row's key; `#<position>` for a row with no usable key (only a snapshot of the store clears it)." }
+    - { name: "uri", type: "TEXT", doc: "The row's URI; NULL when it had no key." }
+    - { name: "message", type: "TEXT", doc: "Why it was skipped: the row, the column, what was wrong." }
+    - { name: "source", type: "TEXT", doc: "The writer's event source (the collector's URI)." }
+    - { name: "at", type: "TEXT", doc: "When it was last quarantined (RFC 3339)." }
+  tests:
+    - { not_null: message }
 - name: ref_pin
   version: 1
   description: "Every pinned ref of any source (a shared model's pinned markdown column: `file_pin` / `dir_pin` edges) and how current it is: the generic definition of staleness. A reader filters on `source_resource`."
