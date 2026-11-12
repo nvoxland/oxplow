@@ -104,6 +104,7 @@ pub mod metric_visibility;
 #[cfg(test)]
 mod metrics_authoring_tests;
 pub mod metrics_service;
+pub mod models;
 pub mod net_sandbox;
 pub mod observe_conformance;
 pub mod on_demand;
