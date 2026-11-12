@@ -32871,5 +32871,52 @@
       ],
       "key": []
     }
+  },
+  "model_field_decl": {
+    "1": {
+      "columns": [
+        {
+          "name": "model",
+          "type": "TEXT",
+          "doc": "The model (`<owner namespace>/<model>`)."
+        },
+        {
+          "name": "namespace",
+          "type": "TEXT",
+          "doc": "Whose values they are: a store id, or an extension's namespace."
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "The field."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension that declares it."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "What a screen calls it."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`enum`, `text` or `number`."
+        },
+        {
+          "name": "values",
+          "type": "TEXT",
+          "doc": "An enum's values, as a JSON list; NULL otherwise."
+        },
+        {
+          "name": "read_only",
+          "type": "INT",
+          "doc": "1 when screens show it but don't edit it."
+        }
+      ],
+      "key": []
+    }
   }
 }
