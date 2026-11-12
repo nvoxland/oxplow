@@ -2694,6 +2694,7 @@ mod tests {
             "model_field_value",
             "model_field_decl",
             "model_stage_decl",
+            "model_store_decl",
             "model_quarantine",
             "page_ref",
             "comment",

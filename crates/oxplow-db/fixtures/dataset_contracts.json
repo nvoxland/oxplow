@@ -33002,5 +33002,37 @@
       ],
       "key": []
     }
+  },
+  "model_store": {
+    "1": {
+      "columns": [
+        {
+          "name": "model",
+          "type": "TEXT",
+          "doc": "The model (`<owner namespace>/<model>`)."
+        },
+        {
+          "name": "store",
+          "type": "TEXT",
+          "doc": "The store id."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension that fills it (a provider instance's extension for its store)."
+        },
+        {
+          "name": "provider",
+          "type": "INT",
+          "doc": "1 when a running provider instance's (the read adapter writes it), else 0."
+        },
+        {
+          "name": "id_pattern",
+          "type": "TEXT",
+          "doc": "How its items' ids look in text, a regex matched whole (`tsk[0-9]+`); NULL when it doesn't say."
+        }
+      ],
+      "key": []
+    }
   }
 }

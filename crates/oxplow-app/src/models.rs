@@ -285,6 +285,26 @@ impl ModelRegistry {
     /// Every declared field as `(model, namespace, extension, field)`: a
     /// store's under each of its store ids, another extension's under its
     /// namespace (`v_model_field_decl`).
+    /// Each live store of each model: `(model, store, extension, provider,
+    /// id_pattern)`.
+    pub fn store_decls(&self) -> Vec<(String, String, String, bool, Option<String>)> {
+        self.fills
+            .iter()
+            .filter(|f| self.models.contains_key(&f.model))
+            .flat_map(|f| {
+                f.stores.iter().map(move |store| {
+                    (
+                        f.model.clone(),
+                        store.clone(),
+                        f.extension.clone(),
+                        f.provider,
+                        f.id_pattern.clone(),
+                    )
+                })
+            })
+            .collect()
+    }
+
     /// Each filled store's stages: `(model, store, extension, stages)`.
     pub fn stage_decls(
         &self,

@@ -2112,6 +2112,15 @@
     - { name: "kind", type: "TEXT", doc: "`enum`, `text` or `number`." }
     - { name: "values", type: "TEXT", doc: "An enum's values, as a JSON list; NULL otherwise." }
     - { name: "read_only", type: "INT", doc: "1 when screens show it but don't edit it." }
+- name: model_store
+  version: 1
+  description: "Each live store of a shared model, as the enabled extensions fill it and the running provider instances state it: who fills it, whether it is a provider instance's, and how its ids look in text (a loose `tsk12` is a link to its item)."
+  fields:
+    - { name: "model", type: "TEXT", doc: "The model (`<owner namespace>/<model>`)." }
+    - { name: "store", type: "TEXT", doc: "The store id." }
+    - { name: "extension", type: "TEXT", doc: "The extension that fills it (a provider instance's extension for its store)." }
+    - { name: "provider", type: "INT", doc: "1 when a running provider instance's (the read adapter writes it), else 0." }
+    - { name: "id_pattern", type: "TEXT", doc: "How its items' ids look in text, a regex matched whole (`tsk[0-9]+`); NULL when it doesn't say." }
 - name: model_stage
   version: 1
   description: "Each store's workflow on a shared model, in order, as the enabled extensions declare it (`fills.stages`) and the running provider instances state it: what a shared screen draws a store's columns from without knowing the store."
