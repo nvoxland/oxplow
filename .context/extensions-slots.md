@@ -332,7 +332,9 @@ Part of the shared-models work. Built: named action points, the object
 form of `ui.about` with its store filter, and the SDK fixture kinds that
 test them. **Not built:** the per-point default setting (Settings, then a
 split button) and "a store's item commands default to their own stores"
-(it needs `fills:`, which does not exist yet).
+(`fills:` exists now; the default is still to build). The store filter
+reads the store from the item URI's param the item's shared model names
+(`store_param`: tasks keep `provider`), falling back to `store`.
 
 **A named action point** is a place where several extensions offer the
 same kind of action ("New Task") and none of them owns the page.

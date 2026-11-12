@@ -450,8 +450,8 @@ fn shape(decl: &ModelDecl) -> Vec<(String, &'static str)> {
 
 /// Create (or bring up to date) `decl`'s table and view, and record the
 /// view as its owner's dataset. A new column is added in place; a removed
-/// or retyped one rebuilds the table, which its stores refill at their
-/// next start (`.context/models.md` "Rebuilds").
+/// or retyped one rebuilds the table in place, its rows and their fields
+/// kept (`.context/models.md` "Removal").
 pub fn ensure_model_tx(conn: &rusqlite::Connection, decl: &ModelDecl) -> Result<(), DomainError> {
     ensure_model_for_stores_tx(conn, decl, None)
 }

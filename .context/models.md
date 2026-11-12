@@ -24,7 +24,11 @@ searched through it unless it names its own `searchable:`),
 `oxplow.model.set_fields`, and the observer triggers (F2,
 [extensions-jobs.md](./extensions-jobs.md) "Triggers for observers").
 
-Not yet: child models, `oxplow.refs.verify` and the owner's
+Also built: `oxplow.refs.verify`; a rebuild copies the rows in place; a
+disabled store's rows are hidden; a store id two extensions claim refuses
+the later one; a run names the rows it quarantined.
+
+Not yet: child models, the owner's
 `oxplow.model.write`, bare-link patterns, the boot repair over models, the
 tombstone sweep's schedule, and the shipped-extension plumbing (F7).
 This doc is the contract for the rest. The other pieces
@@ -228,6 +232,18 @@ fills:
   same output for its instance's store. `TasksProjection` and
   `KnowledgeRecords` go.
 
+## Attribution (to settle in Phase 3)
+
+A store's collector writes the model, so its change events carry the
+collector run's anchors: an event-triggered run has its event's, a
+`files` / `sqlite` run has none, and it can land after the command (and the
+turn) that changed the tool. Linking a request to a task "by the change
+falling in a turn's window" needs better: the plan is that
+`oxplow.extension_store.write` and `oxplow.extension_files.write` fire the
+composing extension's observers directly with the command's anchors and
+cause, so the change event is the command's. `oxplow.model.set_fields`
+should carry the command's anchors too (it carries none today).
+
 ## Removal
 
 - A removed row is a **tombstone**: `removed_at` is set and the view
@@ -253,7 +269,8 @@ Every open model keeps per-item values beyond its columns.
   (model, uri, namespace, name, value)`; the view's `fields` column is
   built from it as `{ "<namespace>": { "<name>": value } }`. The
   namespace is the store id for a store's own fields, else the writing
-  extension's namespace (as written in its manifest, dashes kept).
+  extension's namespace (a dashed name's default namespace uses
+  underscores: `shelf-score` writes as `shelf_score`).
   - a store writes its fields in its rows (`"fields": {...}`), into its
     store id;
   - another extension returns `{"fields": [{"model", "uri", "values":
