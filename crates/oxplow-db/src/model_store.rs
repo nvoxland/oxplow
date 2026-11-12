@@ -105,6 +105,69 @@ pub struct ModelDecl {
     /// searchable view `v_<ns>_search_<name>`.
     #[serde(default)]
     pub search: Option<ModelSearch>,
+    /// The rows that belong to one row of this model (a task's links and
+    /// comments), written nested in the row as the whole set.
+    #[serde(default)]
+    pub children: Vec<ChildDecl>,
+}
+
+/// A set of rows owned by one row of a model (`.context/models.md`
+/// "Children"): stored in `model__<ns>__<model>__<name>`, read through
+/// `v_<ns>_<model>_<name>` (`parent`, `store`, the columns).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChildDecl {
+    pub name: String,
+    /// The columns that name a child among its parent's (unique within
+    /// the parent).
+    pub key: Vec<String>,
+    pub columns: Vec<ModelColumn>,
+    /// Each child is an edge from its parent's URI.
+    #[serde(default)]
+    pub edge: Option<ChildEdge>,
+}
+
+/// How a child projects an edge from its parent: to the URI in column
+/// `to`, typed `prefix` + the value of `type_from` (a text column with
+/// `values:`), or the fixed `ref_type`. Exactly one of the two.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChildEdge {
+    pub to: String,
+    #[serde(default)]
+    pub type_from: Option<String>,
+    #[serde(default)]
+    pub ref_type: Option<String>,
+    #[serde(default)]
+    pub prefix: Option<String>,
+}
+
+impl ChildEdge {
+    /// Every ref type this edge can project.
+    fn types(&self, child: &ChildDecl) -> Vec<String> {
+        if let Some(fixed) = &self.ref_type {
+            return vec![fixed.clone()];
+        }
+        let prefix = self.prefix.as_deref().unwrap_or_default();
+        self.type_from
+            .as_deref()
+            .and_then(|c| child.column(c))
+            .and_then(|c| c.values.as_ref())
+            .map(|vs| vs.iter().map(|v| format!("{prefix}{v}")).collect())
+            .unwrap_or_default()
+    }
+}
+
+impl ChildDecl {
+    fn column(&self, name: &str) -> Option<&ModelColumn> {
+        self.columns.iter().find(|c| c.name == name)
+    }
+
+    fn index(&self, name: &str) -> Option<usize> {
+        self.columns.iter().position(|c| c.name == name)
+    }
+
+    fn key_indexes(&self) -> Vec<usize> {
+        self.key.iter().filter_map(|k| self.index(k)).collect()
+    }
 }
 
 /// What a model's generated searchable view indexes.
@@ -155,6 +218,16 @@ impl ModelDecl {
 
     fn column(&self, name: &str) -> Option<&ModelColumn> {
         self.columns.iter().find(|c| c.name == name)
+    }
+
+    /// `model__<ns>__<name>__<child>`.
+    pub fn child_table(&self, child: &ChildDecl) -> String {
+        format!("{}__{}", self.table(), child.name)
+    }
+
+    /// `v_<ns>_<name>_<child>`: the children of the live rows.
+    pub fn child_view(&self, child: &ChildDecl) -> String {
+        format!("{}_{}", self.view(), child.name)
     }
 }
 
@@ -306,14 +379,139 @@ fn validate(decl: &ModelDecl) -> Result<(), DomainError> {
             }
         }
     }
-    match decl.column(&decl.key) {
-        Some(c) if matches!(c.ty, ModelType::Text | ModelType::Int) => Ok(()),
-        _ => Err(invalid(format!(
+    if !decl
+        .column(&decl.key)
+        .is_some_and(|c| matches!(c.ty, ModelType::Text | ModelType::Int))
+    {
+        return Err(invalid(format!(
             "model `{}`: key `{}` must be a text or int column",
             decl.id(),
             decl.key
-        ))),
+        )));
     }
+    for (i, child) in decl.children.iter().enumerate() {
+        validate_child(decl, child, &decl.children[..i])?;
+    }
+    Ok(())
+}
+
+/// The columns every child row has besides the declared ones.
+const CHILD_IMPLICIT: [&str; 3] = ["parent", "store", "written_at"];
+
+/// The rules for one child (`.context/models.md` "Children"). A child's
+/// edge ref types are its model's own, so they cannot be a core type:
+/// `prefix` is `<model>_<word>:` (core's types are plain words, and the
+/// colon keeps a prefixed type apart from them) and a fixed `ref_type` is
+/// `<model>.<word>`, as a column's `edge` is.
+fn validate_child(
+    decl: &ModelDecl,
+    child: &ChildDecl,
+    before: &[ChildDecl],
+) -> Result<(), DomainError> {
+    let bad = |what: String| {
+        invalid(format!(
+            "model `{}`: child `{}`: {what}",
+            decl.id(),
+            child.name
+        ))
+    };
+    if !is_ident(&child.name)
+        || IMPLICIT.contains(&child.name.as_str())
+        || matches!(child.name.as_str(), "all" | "field")
+        || decl.column(&child.name).is_some()
+        || before.iter().any(|b| b.name == child.name)
+    {
+        return Err(bad("is not a name a child may take".into()));
+    }
+    if child.columns.is_empty() {
+        return Err(bad("declares no columns".into()));
+    }
+    for (i, c) in child.columns.iter().enumerate() {
+        if !is_ident(&c.name)
+            || CHILD_IMPLICIT.contains(&c.name.as_str())
+            || child.columns[..i].iter().any(|o| o.name == c.name)
+        {
+            return Err(bad(format!(
+                "column `{}` is not a name it may declare",
+                c.name
+            )));
+        }
+        if c.edge.is_some() {
+            return Err(bad(format!(
+                "column `{}`: a child's edge is declared on the child, not a column",
+                c.name
+            )));
+        }
+        if c.markdown.is_some_and(|m| m.pins) {
+            return Err(bad(format!(
+                "column `{}`: a child's markdown can't pin",
+                c.name
+            )));
+        }
+    }
+    if child.key.is_empty() {
+        return Err(bad("needs a key".into()));
+    }
+    for (i, k) in child.key.iter().enumerate() {
+        let ok = child.column(k).is_some_and(|c| {
+            matches!(
+                c.ty,
+                ModelType::Text | ModelType::Int | ModelType::Uri | ModelType::Time
+            )
+        });
+        if !ok || child.key[..i].contains(k) {
+            return Err(bad(format!(
+                "key `{k}` must be a text, int, uri or time column of the child, once"
+            )));
+        }
+    }
+    let Some(edge) = &child.edge else {
+        return Ok(());
+    };
+    if !child
+        .column(&edge.to)
+        .is_some_and(|c| c.ty == ModelType::Uri)
+    {
+        return Err(bad(format!("edge `to: {}` must be a uri column", edge.to)));
+    }
+    match (&edge.type_from, &edge.ref_type) {
+        (Some(from), None) => {
+            if !child.column(from).is_some_and(|c| {
+                c.ty == ModelType::Text && c.values.as_ref().is_some_and(|v| !v.is_empty())
+            }) {
+                return Err(bad(format!(
+                    "edge `type_from: {from}` must be a text column with `values:`"
+                )));
+            }
+            let model = format!("{}_", decl.name);
+            let ok = edge.prefix.as_deref().is_some_and(|p| {
+                p.strip_suffix(':')
+                    .is_some_and(|w| w.starts_with(&model) && is_ident(w))
+            });
+            if !ok {
+                return Err(bad(format!(
+                    "edge `prefix` must be `{model}<word>:` (its model's own ref types)"
+                )));
+            }
+        }
+        (None, Some(fixed)) => {
+            let own = fixed
+                .strip_prefix(&format!("{}.", decl.name))
+                .is_some_and(is_ident);
+            if !own || edge.prefix.is_some() {
+                return Err(bad(format!(
+                    "edge `ref_type: {fixed}` must be `{}.<word>` and takes no prefix",
+                    decl.name
+                )));
+            }
+        }
+        _ => {
+            return Err(bad(
+                "edge needs exactly one of `type_from` and `ref_type`".into()
+            ))
+        }
+    }
+    Ok(())
 }
 
 /// Replace every published field declaration with `decls`: `(model,
@@ -500,12 +698,16 @@ pub fn ensure_model_for_stores_tx(
             // Rebuilt in place: the rows (and every extension's field
             // values, which are keyed by URI) are kept, the columns both
             // shapes have copied, no event logged.
-            for view in [
+            let mut views = vec![
                 decl.view(),
                 decl.view_all(),
                 format!("{}_field", decl.view()),
                 decl.search_view(),
-            ] {
+            ];
+            // The children's views read this table: a rename onto its name
+            // would find them broken.
+            views.extend(decl.children.iter().map(|c| decl.child_view(c)));
+            for view in views {
                 conn.execute_batch(&format!("DROP VIEW IF EXISTS {};", quote(&view)))
                     .map_err(map_sql_err)?;
             }
@@ -634,6 +836,140 @@ pub fn ensure_model_for_stores_tx(
             ]),
         )?;
     }
+    for child in &decl.children {
+        ensure_child_tx(conn, decl, child, live)?;
+    }
+    Ok(())
+}
+
+/// The child's stored shape: (column, SQL type), `parent` first.
+fn child_shape(child: &ChildDecl) -> Vec<(String, &'static str)> {
+    let mut out = vec![
+        ("parent".to_string(), "TEXT"),
+        ("store".to_string(), "TEXT"),
+    ];
+    out.extend(child.columns.iter().map(|c| (c.name.clone(), c.ty.sql())));
+    out.push(("written_at".to_string(), "TEXT"));
+    out
+}
+
+/// Create the child's table and view, and record the view as its owner's
+/// dataset. A child table is a cache of its store, like the parent's, but
+/// its rows have no URI to keep annotations by: a changed shape drops and
+/// recreates it, and the next write or `start` of the store refills it.
+fn ensure_child_tx(
+    conn: &rusqlite::Connection,
+    decl: &ModelDecl,
+    child: &ChildDecl,
+    live: Option<&[String]>,
+) -> Result<(), DomainError> {
+    let table = decl.child_table(child);
+    let view = decl.child_view(child);
+    let want = child_shape(child);
+    // The primary key: `parent`, then the key columns in order.
+    let pk_of = |name: &str| -> i64 {
+        if name == "parent" {
+            1
+        } else {
+            child
+                .key
+                .iter()
+                .position(|k| k == name)
+                .map_or(0, |i| i as i64 + 2)
+        }
+    };
+    let have: Vec<(String, String, i64)> = conn
+        .prepare(&format!(
+            "SELECT name, type, pk FROM pragma_table_info({})",
+            sql_text(&table)
+        ))
+        .and_then(|mut st| {
+            st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .map_err(map_sql_err)?;
+    let same = have.len() == want.len()
+        && want.iter().all(|(n, t)| {
+            have.iter()
+                .any(|(h, ht, pk)| h == n && ht.eq_ignore_ascii_case(t) && *pk == pk_of(n))
+        });
+    if !same {
+        let mut cols: Vec<String> = want
+            .iter()
+            .map(|(n, t)| match n.as_str() {
+                "parent" | "store" | "written_at" => format!("{n} {t} NOT NULL"),
+                _ => format!("{} {t}", quote(n)),
+            })
+            .collect();
+        let mut pk = vec!["parent".to_string()];
+        pk.extend(child.key.iter().map(|k| quote(k)));
+        cols.push(format!("PRIMARY KEY ({})", pk.join(", ")));
+        conn.execute_batch(&format!(
+            "DROP VIEW IF EXISTS {v}; DROP TABLE IF EXISTS {t}; CREATE TABLE {t} ({c});",
+            v = quote(&view),
+            t = quote(&table),
+            c = cols.join(", ")
+        ))
+        .map_err(map_sql_err)?;
+    }
+    let mut filters = vec!["t.removed_at IS NULL".to_string()];
+    filters.extend(store_filter(live));
+    let cols: Vec<String> = ["parent", "store"]
+        .into_iter()
+        .map(str::to_string)
+        .chain(child.columns.iter().map(|c| quote(&c.name)))
+        .chain(std::iter::once("written_at".to_string()))
+        .map(|c| format!("c.{c}"))
+        .collect();
+    let select = format!(
+        "SELECT {} FROM {} c JOIN {} t ON t.uri = c.parent WHERE {}",
+        cols.join(", "),
+        quote(&table),
+        quote(&decl.table()),
+        filters.join(" AND ")
+    );
+    let create_view = format!("CREATE VIEW {} AS {select}", quote(&view));
+    let current: Option<String> = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'view' AND name = ?1",
+            [&view],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(map_sql_err)?;
+    if current.as_deref() != Some(create_view.as_str()) {
+        conn.execute_batch(&format!(
+            "DROP VIEW IF EXISTS {}; {create_view};",
+            quote(&view)
+        ))
+        .map_err(map_sql_err)?;
+    }
+    let mut columns: Vec<Value> = vec![
+        serde_json::json!({"name": "parent", "type": "TEXT", "doc": "The item's URI."}),
+        serde_json::json!({"name": "store", "type": "TEXT", "doc": "The store that keeps it."}),
+    ];
+    columns.extend(child.columns.iter().map(|c| {
+        serde_json::json!({"name": c.name, "type": c.ty.sql(), "doc": if c.doc.is_empty() { c.ty.name().to_string() } else { c.doc.clone() }})
+    }));
+    columns.push(serde_json::json!({"name": "written_at", "type": "TEXT", "doc": "When oxplow last wrote it."}));
+    register_view_tx(
+        conn,
+        decl,
+        &view,
+        &format!("{}_{}", decl.name, child.name),
+        &format!(
+            "The `{}` of the shared model `{}`'s items, one row each.",
+            child.name,
+            decl.id()
+        ),
+        &select,
+        Value::Array(columns),
+    )?;
+    conn.execute(
+        "INSERT OR IGNORE INTO dataset_input (view, input, kind) VALUES (?1, ?2, 'source')",
+        params![view, table],
+    )
+    .map_err(map_sql_err)?;
     Ok(())
 }
 
@@ -751,10 +1087,9 @@ fn sql_text(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
 }
 
-/// The view: the table's columns, and `fields` as `{namespace: {name:
-/// value}}` (NULL with none).
-fn view_sql(decl: &ModelDecl, all: bool, live: Option<&[String]>) -> String {
-    let stores = live.map(|stores| {
+/// The filter that hides a disabled store's rows (`t` the model's table).
+fn store_filter(live: Option<&[String]>) -> Option<String> {
+    live.map(|stores| {
         let list: Vec<String> = stores.iter().map(|s| sql_text(s)).collect();
         format!(
             "t.store IN ({})",
@@ -764,12 +1099,17 @@ fn view_sql(decl: &ModelDecl, all: bool, live: Option<&[String]>) -> String {
                 list.join(", ")
             }
         )
-    });
+    })
+}
+
+/// The view: the table's columns, and `fields` as `{namespace: {name:
+/// value}}` (NULL with none).
+fn view_sql(decl: &ModelDecl, all: bool, live: Option<&[String]>) -> String {
     let mut filters: Vec<String> = Vec::new();
     if !all {
         filters.push("t.removed_at IS NULL".into());
     }
-    filters.extend(stores);
+    filters.extend(store_filter(live));
     let filter = if filters.is_empty() {
         String::new()
     } else {
@@ -876,6 +1216,57 @@ struct Checked {
     fields: BTreeMap<String, String>,
     /// The refs the store states, instead of parsing its markdown.
     refs: Option<Vec<String>>,
+    /// The whole set of each child the row names: (child index, rows as
+    /// stored, the child's columns in order).
+    children: Vec<(usize, Vec<Vec<rusqlite::types::Value>>)>,
+}
+
+/// A child's set as the row states it, checked, or why not.
+fn check_children(
+    child: &ChildDecl,
+    value: &Value,
+) -> Result<Vec<Vec<rusqlite::types::Value>>, String> {
+    let Value::Array(items) = value else {
+        return Err(format!("expected a list of objects, got {value}"));
+    };
+    let keys = child.key_indexes();
+    let mut seen = std::collections::BTreeSet::new();
+    let mut out = Vec::with_capacity(items.len());
+    for (i, item) in items.iter().enumerate() {
+        let Value::Object(map) = item else {
+            return Err(format!("[{i}]: expected an object, got {item}"));
+        };
+        if let Some(name) = map.keys().find(|k| child.column(k).is_none()) {
+            return Err(format!("[{i}]: column `{name}` isn't declared"));
+        }
+        let mut cells = Vec::with_capacity(child.columns.len());
+        for column in &child.columns {
+            let value = map.get(&column.name).unwrap_or(&Value::Null);
+            cells.push(cell(column, value).map_err(|e| format!("[{i}] `{}`: {e}", column.name))?);
+        }
+        if keys
+            .iter()
+            .any(|k| cells[*k] == rusqlite::types::Value::Null)
+        {
+            return Err(format!("[{i}]: key `{}` is missing", child.key.join(", ")));
+        }
+        if !seen.insert(key_of(&cells, &keys)) {
+            return Err(format!(
+                "[{i}]: key `{}` is there twice",
+                child.key.join(", ")
+            ));
+        }
+        out.push(cells);
+    }
+    Ok(out)
+}
+
+/// The key cells of a child row, as one comparable string.
+fn key_of(cells: &[rusqlite::types::Value], keys: &[usize]) -> String {
+    keys.iter()
+        .map(|k| format!("{:?}", cells[*k]))
+        .collect::<Vec<_>>()
+        .join("\u{1f}")
 }
 
 /// `value` as `column` stores it, or why not.
@@ -960,7 +1351,11 @@ fn check_row(
         invalid(format!("model `{}`: row {at} (id {id}): {what}", decl.id()))
     };
     for name in row.keys() {
-        if name != "fields" && name != "refs" && decl.column(name).is_none() {
+        if name != "fields"
+            && name != "refs"
+            && decl.column(name).is_none()
+            && !decl.children.iter().any(|c| &c.name == name)
+        {
             return Err(fail(format!("column `{name}` isn't declared")));
         }
     }
@@ -989,11 +1384,23 @@ fn check_row(
         ),
         Some(other) => return Err(fail(format!("`refs` must be a list of URIs, got {other}"))),
     };
+    let mut children = Vec::new();
+    for (i, child) in decl.children.iter().enumerate() {
+        match row.get(&child.name) {
+            None | Some(Value::Null) => {}
+            Some(value) => children.push((
+                i,
+                check_children(child, value)
+                    .map_err(|e| fail(format!("child `{}`: {e}", child.name)))?,
+            )),
+        }
+    }
     Ok(Checked {
         id,
         cells,
         fields,
         refs,
+        children,
     })
 }
 
@@ -1093,6 +1500,18 @@ pub fn sweep_tombstones_tx(
     before: &str,
 ) -> Result<usize, DomainError> {
     validate(decl)?;
+    for child in &decl.children {
+        conn.execute(
+            &format!(
+                "DELETE FROM {} WHERE parent IN
+                   (SELECT uri FROM {} WHERE removed_at IS NOT NULL AND removed_at < ?1)",
+                quote(&decl.child_table(child)),
+                quote(&decl.table())
+            ),
+            [before],
+        )
+        .map_err(map_sql_err)?;
+    }
     conn.execute(
         &format!(
             "DELETE FROM model_field_value WHERE model = ?1 AND uri IN
@@ -1283,6 +1702,200 @@ fn restate_edges_tx(
     crate::page_ref_store::replace_source_for_ref_types_tx(conn, uri, &types, edges)
 }
 
+/// A child's stored rows of `parent`, cells in the child's column order.
+fn child_rows_tx(
+    conn: &rusqlite::Connection,
+    decl: &ModelDecl,
+    child: &ChildDecl,
+    parent: &str,
+) -> Result<Vec<Vec<rusqlite::types::Value>>, DomainError> {
+    let cols: Vec<String> = child.columns.iter().map(|c| quote(&c.name)).collect();
+    let n = cols.len();
+    conn.prepare_cached(&format!(
+        "SELECT {} FROM {} WHERE parent = ?1",
+        cols.join(", "),
+        quote(&decl.child_table(child))
+    ))
+    .and_then(|mut st| {
+        st.query_map([parent], |r| {
+            (0..n)
+                .map(|i| r.get::<_, rusqlite::types::Value>(i))
+                .collect::<rusqlite::Result<Vec<_>>>()
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()
+    })
+    .map_err(map_sql_err)
+}
+
+/// Restate `child` of `parent` to exactly `rows`: new keys are inserted,
+/// changed rows updated, missing ones deleted. Whether anything moved.
+fn restate_children_tx(
+    conn: &rusqlite::Connection,
+    decl: &ModelDecl,
+    child: &ChildDecl,
+    store: &str,
+    parent: &str,
+    rows: &[Vec<rusqlite::types::Value>],
+    now: &str,
+) -> Result<bool, DomainError> {
+    let keys = child.key_indexes();
+    let table = quote(&decl.child_table(child));
+    let mut stored: BTreeMap<String, Vec<rusqlite::types::Value>> =
+        child_rows_tx(conn, decl, child, parent)?
+            .into_iter()
+            .map(|cells| (key_of(&cells, &keys), cells))
+            .collect();
+    let cols: Vec<String> = child.columns.iter().map(|c| quote(&c.name)).collect();
+    let key_where: Vec<String> = keys
+        .iter()
+        .enumerate()
+        .map(|(n, k)| format!("{} = ?{}", cols[*k], n + 2))
+        .collect();
+    let mut moved = false;
+    for cells in rows {
+        match stored.remove(&key_of(cells, &keys)) {
+            Some(old) if &old == cells => {}
+            Some(_) => {
+                moved = true;
+                let sets: Vec<String> = (0..cols.len())
+                    .filter(|i| !keys.contains(i))
+                    .map(|i| format!("{} = ?{}", cols[i], keys.len() + 3 + i))
+                    .collect();
+                if sets.is_empty() {
+                    continue;
+                }
+                let mut values: Vec<rusqlite::types::Value> = vec![parent.to_string().into()];
+                values.extend(keys.iter().map(|k| cells[*k].clone()));
+                values.push(now.to_string().into());
+                values.extend(cells.iter().cloned());
+                conn.execute(
+                    &format!(
+                        "UPDATE {table} SET written_at = ?{}, {} WHERE parent = ?1 AND {}",
+                        keys.len() + 2,
+                        sets.join(", "),
+                        key_where.join(" AND ")
+                    ),
+                    rusqlite::params_from_iter(values),
+                )
+                .map_err(map_sql_err)?;
+            }
+            None => {
+                moved = true;
+                let placeholders: Vec<String> =
+                    (0..cols.len()).map(|i| format!("?{}", i + 4)).collect();
+                let mut values: Vec<rusqlite::types::Value> = vec![
+                    parent.to_string().into(),
+                    store.to_string().into(),
+                    now.to_string().into(),
+                ];
+                values.extend(cells.iter().cloned());
+                conn.execute(
+                    &format!(
+                        "INSERT INTO {table} (parent, store, written_at, {}) VALUES (?1, ?2, ?3, {})",
+                        cols.join(", "),
+                        placeholders.join(", ")
+                    ),
+                    rusqlite::params_from_iter(values),
+                )
+                .map_err(map_sql_err)?;
+            }
+        }
+    }
+    for cells in stored.values() {
+        moved = true;
+        let mut values: Vec<rusqlite::types::Value> = vec![parent.to_string().into()];
+        values.extend(keys.iter().map(|k| cells[*k].clone()));
+        conn.execute(
+            &format!(
+                "DELETE FROM {table} WHERE parent = ?1 AND {}",
+                key_where.join(" AND ")
+            ),
+            rusqlite::params_from_iter(values),
+        )
+        .map_err(map_sql_err)?;
+    }
+    Ok(moved)
+}
+
+/// Restate the edges `parent`'s children project, by diff: each child
+/// `edge` (one per row), and the `comment_*` mentions of every child
+/// markdown column (one slice for the parent, like a task's comments).
+fn restate_child_edges_tx(
+    conn: &rusqlite::Connection,
+    decl: &ModelDecl,
+    kinds: &oxplow_domain::uri::resources::ResourceRegistry,
+    parent: &str,
+) -> Result<(), DomainError> {
+    use crate::page_ref_store::{PageRefEdge, SourceSlice};
+    let mut types: Vec<String> = Vec::new();
+    let mut edges: Vec<PageRefEdge> = Vec::new();
+    let mut bodies: Vec<String> = Vec::new();
+    let mut comments = false;
+    for child in &decl.children {
+        let markdown: Vec<usize> = (0..child.columns.len())
+            .filter(|i| child.columns[*i].markdown.is_some())
+            .collect();
+        if child.edge.is_none() && markdown.is_empty() {
+            continue;
+        }
+        let rows = child_rows_tx(conn, decl, child, parent)?;
+        if let Some(edge) = &child.edge {
+            types.extend(edge.types(child));
+            let to = child.index(&edge.to);
+            let from = edge.type_from.as_deref().and_then(|c| child.index(c));
+            for cells in &rows {
+                let Some(rusqlite::types::Value::Text(target)) = to.map(|i| &cells[i]) else {
+                    continue;
+                };
+                let ref_type = match (&edge.ref_type, from.map(|i| &cells[i])) {
+                    (Some(fixed), _) => fixed.clone(),
+                    (None, Some(rusqlite::types::Value::Text(v))) => {
+                        format!("{}{v}", edge.prefix.as_deref().unwrap_or_default())
+                    }
+                    _ => continue,
+                };
+                if oxplow_domain::uri::OxplowUri::parse(target).is_ok() {
+                    edges.push(PageRefEdge::new(parent, target, ref_type));
+                }
+            }
+        }
+        if !markdown.is_empty() {
+            comments = true;
+            for cells in &rows {
+                for i in &markdown {
+                    if let rusqlite::types::Value::Text(t) = &cells[*i] {
+                        bodies.push(t.clone());
+                    }
+                }
+            }
+        }
+    }
+    if comments {
+        types.extend(crate::page_ref_projections::task_comment_ref_types());
+        edges.extend(crate::page_ref_projections::task_comment_edges(
+            kinds,
+            parent,
+            bodies.iter().map(String::as_str),
+        ));
+    }
+    types.sort();
+    types.dedup();
+    if types.is_empty() {
+        return Ok(());
+    }
+    edges.sort_by(|a, b| (&a.target, &a.ref_type).cmp(&(&b.target, &b.ref_type)));
+    edges.dedup_by(|a, b| a.target == b.target && a.ref_type == b.ref_type);
+    let slice = SourceSlice {
+        source: parent.to_string(),
+        ref_types: Some(types.clone()),
+        edges: edges.clone(),
+    };
+    if crate::page_ref_store::slice_is_stored_tx(conn, &slice)? {
+        return Ok(());
+    }
+    crate::page_ref_store::replace_source_for_ref_types_tx(conn, parent, &types, edges)
+}
+
 /// Write `store`'s rows of `decl` (its table must exist: [`ensure_model_tx`]);
 /// `fields` are what the store declared, kept under the store's id. A row
 /// that fails its checks is quarantined (skipped, reported, and never
@@ -1419,8 +2032,28 @@ pub fn write_tx(
                     params![model, new],
                 )
                 .map_err(map_sql_err)?;
+                for child in &decl.children {
+                    conn.execute(
+                        &format!(
+                            "DELETE FROM {} WHERE parent = ?1",
+                            quote(&decl.child_table(child))
+                        ),
+                        [&new],
+                    )
+                    .map_err(map_sql_err)?;
+                }
             }
             None => {}
+        }
+        for child in &decl.children {
+            conn.execute(
+                &format!(
+                    "UPDATE {} SET parent = ?2 WHERE parent = ?1",
+                    quote(&decl.child_table(child))
+                ),
+                params![old, new],
+            )
+            .map_err(map_sql_err)?;
         }
         conn.execute(
             &format!(
@@ -1495,6 +2128,17 @@ pub fn write_tx(
         }
         if !change.changed.is_empty() || row.refs.is_some() {
             restate_edges_tx(conn, decl, kinds, &uri, &row)?;
+        }
+        let mut children_moved = false;
+        for (i, set) in &row.children {
+            let child = &decl.children[*i];
+            if restate_children_tx(conn, decl, child, store, &uri, set, &now)? {
+                change.changed.push(child.name.clone());
+                children_moved = true;
+            }
+        }
+        if children_moved {
+            restate_child_edges_tx(conn, decl, kinds, &uri)?;
         }
         if put_fields_tx(conn, &model, &uri, store, &row.fields)? {
             change.changed.push("fields".into());
@@ -1587,7 +2231,36 @@ mod tests {
                 state,
                 body,
             ],
+            children: vec![],
         }
+    }
+
+    /// `book` with children: `links` (an edge typed by `kind`) and
+    /// `notes` (a markdown body).
+    fn linked_book() -> ModelDecl {
+        let mut d = book();
+        let mut kind = ModelColumn::new("kind", ModelType::Text);
+        kind.values = Some(vec!["blocks".into(), "relates_to".into()]);
+        d.children.push(ChildDecl {
+            name: "links".into(),
+            key: vec!["to".into(), "kind".into()],
+            columns: vec![ModelColumn::new("to", ModelType::Uri), kind],
+            edge: Some(ChildEdge {
+                to: "to".into(),
+                type_from: Some("kind".into()),
+                ref_type: None,
+                prefix: Some("book_link:".into()),
+            }),
+        });
+        let mut text = ModelColumn::new("text", ModelType::Text);
+        text.markdown = Some(Markdown { pins: false });
+        d.children.push(ChildDecl {
+            name: "notes".into(),
+            key: vec!["id".into()],
+            columns: vec![ModelColumn::new("id", ModelType::Text), text],
+            edge: None,
+        });
+        d
     }
 
     fn kinds() -> oxplow_domain::uri::resources::ResourceRegistry {
@@ -2647,5 +3320,394 @@ mod tests {
         assert_eq!(stale(db.clone()).await, 0);
         file_at(db.clone(), "my_dir/a.md").await;
         assert_eq!(stale(db.clone()).await, 1);
+    }
+
+    // ---- children ----
+
+    async fn put(db: &Database, rows: Vec<ModelRow>) -> Written {
+        write_decl(db, linked_book(), rows).await
+    }
+
+    /// The children in `view`, one string per row.
+    async fn kids(db: &Database, sql: &'static str) -> Vec<String> {
+        db.read(move |tx| {
+            let mut st = tx.prepare(sql).map_err(map_sql_err)?;
+            let out = st
+                .query_map([], |r| r.get::<_, String>(0))
+                .map_err(map_sql_err)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(map_sql_err)?;
+            Ok(out)
+        })
+        .await
+        .unwrap()
+    }
+
+    const LINKS: &str = "SELECT \"to\" || '|' || kind FROM v_shelf_book_links ORDER BY 1";
+    const NOTES: &str = "SELECT id || '|' || text FROM v_shelf_book_notes ORDER BY 1";
+    const A_URI: &str = "oxplow:oxplow/file?path=src/a.rs";
+    const B_URI: &str = "oxplow:oxplow/file?path=src/b.rs";
+
+    /// A key named like a child holds its whole set: new ones are inserted,
+    /// changed ones updated, missing ones deleted; the same set again
+    /// changes nothing; the parent's change names the child.
+    #[tokio::test]
+    async fn a_child_set_is_restated_by_diff() {
+        let db = Database::in_memory();
+        let first = put(
+            &db,
+            vec![row(json!({"id": "b1", "title": "t",
+                "links": [{"to": A_URI, "kind": "blocks"}, {"to": B_URI, "kind": "relates_to"}],
+                "notes": [{"id": "n1", "text": "one"}, {"id": "n2", "text": "two"}]}))],
+        )
+        .await;
+        assert!(first.changes[0].changed.contains(&"links".to_string()));
+        assert!(first.changes[0].changed.contains(&"notes".to_string()));
+        assert_eq!(kids(&db, LINKS).await.len(), 2);
+        assert_eq!(kids(&db, NOTES).await, vec!["n1|one", "n2|two"]);
+
+        let same = put(
+            &db,
+            vec![row(json!({"id": "b1", "title": "t",
+                "links": [{"to": B_URI, "kind": "relates_to"}, {"to": A_URI, "kind": "blocks"}],
+                "notes": [{"id": "n1", "text": "one"}, {"id": "n2", "text": "two"}]}))],
+        )
+        .await;
+        assert_eq!((same.changes.len(), same.unchanged), (0, 1));
+
+        let moved = put(
+            &db,
+            vec![row(json!({"id": "b1", "title": "t",
+                "links": [{"to": A_URI, "kind": "blocks"}],
+                "notes": [{"id": "n1", "text": "uno"}, {"id": "n3", "text": "three"}]}))],
+        )
+        .await;
+        assert_eq!(
+            moved.changes[0].changed,
+            vec!["links".to_string(), "notes".to_string()]
+        );
+        assert_eq!(kids(&db, LINKS).await, vec![format!("{A_URI}|blocks")]);
+        assert_eq!(kids(&db, NOTES).await, vec!["n1|uno", "n3|three"]);
+        let parent: Vec<String> = kids(&db, "SELECT DISTINCT parent FROM v_shelf_book_notes").await;
+        assert_eq!(parent, vec![B1.to_string()]);
+
+        let emptied = put(
+            &db,
+            vec![row(json!({"id": "b1", "title": "t", "links": []}))],
+        )
+        .await;
+        assert_eq!(emptied.changes[0].changed, vec!["links".to_string()]);
+        assert!(kids(&db, LINKS).await.is_empty());
+        assert_eq!(kids(&db, NOTES).await.len(), 2, "notes were not restated");
+    }
+
+    /// A row without the key keeps its children, in an upsert and in a
+    /// snapshot.
+    #[tokio::test]
+    async fn a_row_without_the_key_keeps_its_children() {
+        let db = Database::in_memory();
+        put(
+            &db,
+            vec![row(json!({"id": "b1", "title": "t",
+                "notes": [{"id": "n1", "text": "one"}]}))],
+        )
+        .await;
+        let w = put(&db, vec![row(json!({"id": "b1", "title": "renamed"}))]).await;
+        assert_eq!(w.changes[0].changed, vec!["title".to_string()]);
+        assert_eq!(kids(&db, NOTES).await, vec!["n1|one"]);
+        db.transaction(|tx| {
+            let d = linked_book();
+            ensure_model_tx(tx, &d)?;
+            write_tx(
+                tx,
+                &d,
+                &kinds(),
+                "s",
+                &[],
+                &ModelWrite::Snapshot {
+                    rows: vec![row(json!({"id": "b1", "title": "again"}))],
+                    confirm_removals: false,
+                },
+            )
+        })
+        .await
+        .unwrap();
+        assert_eq!(kids(&db, NOTES).await, vec!["n1|one"]);
+    }
+
+    async fn child_edges(db: &Database) -> Vec<(String, String, Option<i64>)> {
+        edges(db, B1).await
+    }
+
+    /// The child edge is the parent's: one per child, typed by prefix and
+    /// the `values:` value; a changed set restates the slice by diff.
+    #[tokio::test]
+    async fn child_edges_take_their_type_from_a_column() {
+        let db = Database::in_memory();
+        put(
+            &db,
+            vec![row(json!({"id": "b1", "title": "t",
+                "links": [{"to": A_URI, "kind": "blocks"}, {"to": B_URI, "kind": "relates_to"}]}))],
+        )
+        .await;
+        let got: Vec<(String, String)> = child_edges(&db)
+            .await
+            .into_iter()
+            .map(|(t, ty, _)| (t, ty))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (A_URI.to_string(), "book_link:blocks".to_string()),
+                (B_URI.to_string(), "book_link:relates_to".to_string()),
+            ]
+        );
+        put(
+            &db,
+            vec![row(json!({"id": "b1", "title": "t",
+                "links": [{"to": B_URI, "kind": "blocks"}]}))],
+        )
+        .await;
+        let got: Vec<(String, String)> = child_edges(&db)
+            .await
+            .into_iter()
+            .map(|(t, ty, _)| (t, ty))
+            .collect();
+        assert_eq!(
+            got,
+            vec![(B_URI.to_string(), "book_link:blocks".to_string())]
+        );
+    }
+
+    /// A child's markdown mentions are `comment_*` edges from the parent,
+    /// one slice over every child body; the parent's own body edges stay.
+    #[tokio::test]
+    async fn child_markdown_projects_comment_mentions_on_the_parent() {
+        let db = Database::in_memory();
+        put(
+            &db,
+            vec![row(
+                json!({"id": "b1", "title": "t", "body": "see [[file:src/b.rs]]",
+                "notes": [{"id": "n1", "text": "look at [[file:src/a.rs]]"},
+                          {"id": "n2", "text": "and [[file:src/a.rs]] again"}]}),
+            )],
+        )
+        .await;
+        let got: Vec<(String, String)> = child_edges(&db)
+            .await
+            .into_iter()
+            .map(|(t, ty, _)| (t, ty))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (A_URI.to_string(), "comment_file_ref".to_string()),
+                (B_URI.to_string(), "file_mention".to_string()),
+            ]
+        );
+        put(
+            &db,
+            vec![row(
+                json!({"id": "b1", "title": "t", "body": "see [[file:src/b.rs]]",
+                "notes": [{"id": "n2", "text": "plain"}]}),
+            )],
+        )
+        .await;
+        let got: Vec<String> = child_edges(&db).await.into_iter().map(|e| e.1).collect();
+        assert_eq!(got, vec!["file_mention".to_string()]);
+    }
+
+    /// A tombstoned parent hides its children and brings them back with
+    /// it; the sweep deletes them.
+    #[tokio::test]
+    async fn a_tombstoned_parent_hides_its_children() {
+        let db = Database::in_memory();
+        put(
+            &db,
+            vec![row(json!({"id": "b1", "title": "t",
+                "notes": [{"id": "n1", "text": "one"}]}))],
+        )
+        .await;
+        db.transaction(|tx| {
+            write_tx(
+                tx,
+                &linked_book(),
+                &kinds(),
+                "s",
+                &[],
+                &ModelWrite::Upsert {
+                    rows: vec![],
+                    delete: vec!["b1".into()],
+                    rename: vec![],
+                },
+            )
+        })
+        .await
+        .unwrap();
+        assert!(kids(&db, NOTES).await.is_empty());
+        put(&db, vec![row(json!({"id": "b1", "title": "t"}))]).await;
+        assert_eq!(kids(&db, NOTES).await, vec!["n1|one"], "back with it");
+        db.transaction(|tx| {
+            write_tx(
+                tx,
+                &linked_book(),
+                &kinds(),
+                "s",
+                &[],
+                &ModelWrite::Upsert {
+                    rows: vec![],
+                    delete: vec!["b1".into()],
+                    rename: vec![],
+                },
+            )?;
+            sweep_tombstones_tx(tx, &linked_book(), "9999-01-01")
+        })
+        .await
+        .unwrap();
+        let left: i64 = db
+            .read(|tx| {
+                tx.query_row("SELECT count(*) FROM model__shelf__book__notes", [], |r| {
+                    r.get(0)
+                })
+                .map_err(map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(left, 0, "swept with its parent");
+    }
+
+    /// A rename moves the children with the item.
+    #[tokio::test]
+    async fn a_rename_moves_the_children() {
+        let db = Database::in_memory();
+        put(
+            &db,
+            vec![row(json!({"id": "b1", "title": "t",
+                "notes": [{"id": "n1", "text": "one"}]}))],
+        )
+        .await;
+        db.transaction(|tx| {
+            write_tx(
+                tx,
+                &linked_book(),
+                &kinds(),
+                "s",
+                &[],
+                &ModelWrite::Upsert {
+                    rows: vec![],
+                    delete: vec![],
+                    rename: vec![("b1".into(), "b2".into())],
+                },
+            )
+        })
+        .await
+        .unwrap();
+        assert_eq!(kids(&db, NOTES).await, vec!["n1|one"]);
+        assert_eq!(
+            kids(&db, "SELECT parent FROM v_shelf_book_notes").await,
+            vec!["oxplow:shelf/book?id=b2&store=s".to_string()]
+        );
+    }
+
+    /// A bad child row quarantines the parent row, whole: nothing of it
+    /// is written, and a snapshot does not remove it.
+    #[tokio::test]
+    async fn a_bad_child_quarantines_the_parent_row() {
+        let db = Database::in_memory();
+        put(
+            &db,
+            vec![row(json!({"id": "b1", "title": "t",
+                "notes": [{"id": "n1", "text": "one"}]}))],
+        )
+        .await;
+        for bad in [
+            json!([{"id": "n1", "text": "x"}, {"id": "n1", "text": "dup"}]),
+            json!([{"text": "no key"}]),
+            json!([{"id": "n1", "nope": 1}]),
+            json!([{"id": "n1", "text": 5}]),
+            json!([{"id": "n1", "parent": "x"}]),
+            json!("not a list"),
+        ] {
+            let w = put(
+                &db,
+                vec![row(json!({"id": "b1", "title": "changed", "notes": bad}))],
+            )
+            .await;
+            assert_eq!(w.quarantined.len(), 1, "{bad}");
+            assert!(w.changes.is_empty(), "{bad}");
+        }
+        assert_eq!(kids(&db, NOTES).await, vec!["n1|one"]);
+        assert_eq!(rows(&db).await[0].2, "t");
+        let bad_kind = put(
+            &db,
+            vec![row(
+                json!({"id": "b1", "links": [{"to": A_URI, "kind": "nope"}]}),
+            )],
+        )
+        .await;
+        assert_eq!(bad_kind.quarantined.len(), 1);
+    }
+
+    /// A child's names, key and edge are checked against the model.
+    #[test]
+    fn a_bad_child_declaration_is_refused() {
+        let edit = |f: &dyn Fn(&mut ChildDecl)| {
+            let mut d = linked_book();
+            f(&mut d.children[0]);
+            check_decl(&d).unwrap_err().to_string()
+        };
+        assert!(edit(&|c| c.key = vec!["nope".into()]).contains("key"));
+        assert!(edit(&|c| c.name = "all".into()).contains("name"));
+        assert!(edit(&|c| c.edge.as_mut().unwrap().to = "kind".into()).contains("uri"));
+        assert!(edit(&|c| c.edge.as_mut().unwrap().type_from = None).contains("exactly one"));
+        assert!(
+            edit(&|c| c.edge.as_mut().unwrap().prefix = Some("file_mention:".into()))
+                .contains("prefix")
+        );
+        assert!(
+            edit(&|c| c.edge.as_mut().unwrap().prefix = Some("book_link".into()))
+                .contains("prefix")
+        );
+        let mut d = linked_book();
+        d.children[1].name = "title".into();
+        assert!(check_decl(&d).is_err(), "a column's name");
+        assert!(check_decl(&linked_book()).is_ok());
+    }
+
+    /// A changed child shape rebuilds its table (a cache the next write
+    /// refills); a same shape keeps its rows.
+    #[tokio::test]
+    async fn a_changed_child_shape_rebuilds_its_table() {
+        let db = Database::in_memory();
+        put(
+            &db,
+            vec![row(json!({"id": "b1", "title": "t",
+                "notes": [{"id": "n1", "text": "one"}]}))],
+        )
+        .await;
+        db.transaction(|tx| ensure_model_tx(tx, &linked_book()))
+            .await
+            .unwrap();
+        assert_eq!(kids(&db, NOTES).await, vec!["n1|one"], "same shape keeps");
+        let mut wider = linked_book();
+        wider.children[1]
+            .columns
+            .push(ModelColumn::new("at", ModelType::Time));
+        db.transaction(move |tx| ensure_model_tx(tx, &wider))
+            .await
+            .unwrap();
+        assert!(kids(&db, NOTES).await.is_empty(), "rebuilt empty");
+        let published: i64 = db
+            .read(|tx| {
+                tx.query_row(
+                    "SELECT count(*) FROM dataset WHERE view = 'v_shelf_book_notes' AND owner = 'shelf' AND kind = 'entity'",
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(published, 1);
     }
 }

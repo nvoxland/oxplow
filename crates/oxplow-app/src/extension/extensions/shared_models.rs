@@ -29,7 +29,9 @@
 
 use std::collections::BTreeMap;
 
-use oxplow_db::model_store::{FieldDecl, Markdown, ModelColumn, ModelDecl, ModelType};
+use oxplow_db::model_store::{
+    ChildDecl, ChildEdge, FieldDecl, Markdown, ModelColumn, ModelDecl, ModelType,
+};
 use oxplow_domain::diagnostic::Diagnostic;
 use serde::Deserialize;
 use serde_yaml::Value;
@@ -64,6 +66,31 @@ pub struct ModelFile {
     /// own `searchable:`.
     #[serde(default)]
     search: Option<SearchFile>,
+    /// Rows that belong to one row of the model, by name.
+    #[serde(default)]
+    children: BTreeMap<String, ChildFile>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ChildFile {
+    key: Vec<String>,
+    #[schemars(with = "BTreeMap<String, serde_json::Value>")]
+    columns: BTreeMap<String, Value>,
+    #[serde(default)]
+    edge: Option<ChildEdgeFile>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ChildEdgeFile {
+    to: String,
+    #[serde(default)]
+    type_from: Option<String>,
+    #[serde(default)]
+    ref_type: Option<String>,
+    #[serde(default)]
+    prefix: Option<String>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -222,8 +249,63 @@ fn model_of(raw: ModelFile, extension: &str, namespace: &str) -> Result<ModelSpe
             ));
         }
     }
+    let columns = columns_of(raw.columns, &raw.name)?;
+    let children = raw
+        .children
+        .into_iter()
+        .map(|(name, c)| child_of(name, c, &raw.name))
+        .collect::<Result<Vec<_>, _>>()?;
+    if let Some(event) = &raw.change_event {
+        if !event.starts_with(&format!("{namespace}.")) {
+            return Err(format!(
+                "change_event `{event}` must be in this extension's namespace (`{namespace}.…`)"
+            ));
+        }
+    }
+    let decl = ModelDecl {
+        extension: extension.to_string(),
+        namespace: namespace.to_string(),
+        name: raw.name,
+        resource: format!("{namespace}/{}", raw.resource),
+        key: raw.key,
+        store_param: raw.store_param.unwrap_or_else(|| "store".into()),
+        columns,
+        search: raw.search.map(|s| oxplow_db::model_store::ModelSearch {
+            title: s.title,
+            body: s.body,
+        }),
+        children,
+    };
+    // The store's rules for names, key and implicit columns.
+    oxplow_db::model_store::check_decl(&decl).map_err(|e| e.to_string())?;
+    Ok(ModelSpec {
+        decl,
+        open: raw.open,
+        change_event: raw.change_event,
+    })
+}
+
+fn child_of(name: String, raw: ChildFile, model: &str) -> Result<ChildDecl, String> {
+    Ok(ChildDecl {
+        columns: columns_of(raw.columns, model).map_err(|e| format!("child `{name}`: {e}"))?,
+        name,
+        key: raw.key,
+        edge: raw.edge.map(|e| ChildEdge {
+            to: e.to,
+            type_from: e.type_from,
+            ref_type: e.ref_type,
+            prefix: e.prefix,
+        }),
+    })
+}
+
+/// The columns of a model (or a child) from its manifest map.
+fn columns_of(
+    raw_columns: BTreeMap<String, Value>,
+    model: &str,
+) -> Result<Vec<ModelColumn>, String> {
     let mut columns = Vec::new();
-    for (name, v) in raw.columns {
+    for (name, v) in raw_columns {
         let col = match &v {
             Value::String(ty) => ColumnFile {
                 ty: ty.clone(),
@@ -257,13 +339,10 @@ fn model_of(raw: ModelFile, extension: &str, namespace: &str) -> Result<ModelSpe
             ));
         }
         if let Some(edge) = &col.edge {
-            let own = edge
-                .strip_prefix(&format!("{}.", raw.name))
-                .is_some_and(word);
+            let own = edge.strip_prefix(&format!("{model}.")).is_some_and(word);
             if !own {
                 return Err(format!(
-                    "column `{name}`: edge `{edge}` must be `{}.<word>` (its model's own ref type)",
-                    raw.name
+                    "column `{name}`: edge `{edge}` must be `{model}.<word>` (its model's own ref type)"
                 ));
             }
         }
@@ -276,33 +355,7 @@ fn model_of(raw: ModelFile, extension: &str, namespace: &str) -> Result<ModelSpe
             doc: col.doc.unwrap_or_default(),
         });
     }
-    if let Some(event) = &raw.change_event {
-        if !event.starts_with(&format!("{namespace}.")) {
-            return Err(format!(
-                "change_event `{event}` must be in this extension's namespace (`{namespace}.…`)"
-            ));
-        }
-    }
-    let decl = ModelDecl {
-        extension: extension.to_string(),
-        namespace: namespace.to_string(),
-        name: raw.name,
-        resource: format!("{namespace}/{}", raw.resource),
-        key: raw.key,
-        store_param: raw.store_param.unwrap_or_else(|| "store".into()),
-        columns,
-        search: raw.search.map(|s| oxplow_db::model_store::ModelSearch {
-            title: s.title,
-            body: s.body,
-        }),
-    };
-    // The store's rules for names, key and implicit columns.
-    oxplow_db::model_store::check_decl(&decl).map_err(|e| e.to_string())?;
-    Ok(ModelSpec {
-        decl,
-        open: raw.open,
-        change_event: raw.change_event,
-    })
+    Ok(columns)
 }
 
 fn list<'a>(
@@ -467,6 +520,84 @@ mod tests {
         let events = change_events(&d, "extension.yaml");
         assert_eq!(events[0].event_type, "shelf.book.changed");
         assert_eq!(events[0].schema, crate::models::change_event_schema());
+    }
+
+    const TASK: &str = "models:\n  - name: task\n    resource: task\n    open: true\n    key: id\n    columns:\n      id: text\n    children:\n      links:\n        key: [to, type]\n        columns:\n          to: uri\n          type: { type: text, values: [blocks, relates_to] }\n        edge: { to: to, type_from: type, prefix: \"task_link:\" }\n      comments:\n        key: [id]\n        columns: { id: text, body: { type: text, markdown: {} } }\n";
+
+    /// A model's children parse into `ModelDecl.children`, edge included.
+    #[test]
+    fn children_parse_into_the_decl() {
+        let (d, errors) = parse_text(TASK);
+        assert!(errors.is_empty(), "{errors:?}");
+        let kids = &d.models[0].decl.children;
+        assert_eq!(kids.len(), 2);
+        let links = kids.iter().find(|c| c.name == "links").unwrap();
+        assert_eq!(links.key, vec!["to".to_string(), "type".to_string()]);
+        assert_eq!(links.columns.len(), 2);
+        let edge = links.edge.as_ref().unwrap();
+        assert_eq!(edge.to, "to");
+        assert_eq!(edge.type_from.as_deref(), Some("type"));
+        assert_eq!(edge.prefix.as_deref(), Some("task_link:"));
+        let comments = kids.iter().find(|c| c.name == "comments").unwrap();
+        assert!(comments.edge.is_none());
+        assert!(comments.columns.iter().any(|c| c.markdown.is_some()));
+    }
+
+    /// A child's names, key and edge are checked; the rule for an edge's
+    /// ref types keeps core's out.
+    #[test]
+    fn a_bad_child_is_named_and_left_out() {
+        for (from, to, says) in [
+            ("key: [to, type]", "key: [nope]", "key `nope`"),
+            (
+                "edge: { to: to,",
+                "edge: { to: type,",
+                "must be a uri column",
+            ),
+            (
+                "type_from: type, prefix: \"task_link:\"",
+                "prefix: \"task_link:\"",
+                "exactly one",
+            ),
+            (
+                "type_from: type, prefix: \"task_link:\"",
+                "type_from: type, prefix: \"file_mention:\"",
+                "prefix",
+            ),
+            (
+                "type_from: type, prefix: \"task_link:\"",
+                "type_from: type, prefix: \"task_link\"",
+                "prefix",
+            ),
+            (
+                "type_from: type, prefix: \"task_link:\"",
+                "ref_type: file_mention",
+                "ref_type",
+            ),
+            ("type_from: type,", "type_from: to,", "type_from"),
+            ("      links:", "      Links:", "may take"),
+        ] {
+            let manifest = TASK.replacen(from, to, 1);
+            let (d, errors) = parse_text(&manifest);
+            assert!(d.models.is_empty(), "{to}");
+            assert!(format!("{errors:?}").contains(says), "{to}: {errors:?}");
+        }
+        // A fixed ref type of the model's own is fine.
+        let (d, errors) = parse_text(&TASK.replacen(
+            "type_from: type, prefix: \"task_link:\"",
+            "ref_type: task.link",
+            1,
+        ));
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(
+            d.models[0].decl.children[1]
+                .edge
+                .as_ref()
+                .unwrap()
+                .ref_type
+                .as_deref(),
+            Some("task.link")
+        );
     }
 
     /// What is wrong is named at its line, and the rest still parses.

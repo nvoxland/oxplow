@@ -296,6 +296,7 @@ mod tests {
                     store_param: "provider".into(),
                     search: None,
                     columns: vec![],
+                    children: vec![],
                 },
                 open: true,
                 change_event: None,

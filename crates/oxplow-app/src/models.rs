@@ -453,7 +453,7 @@ mod e2e_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_db::model_store::{ensure_model_tx, Markdown, ModelColumn, ModelType};
+    use oxplow_db::model_store::{ensure_model_tx, ChildDecl, Markdown, ModelColumn, ModelType};
 
     const EVENT: &str = "shelf.book.changed";
 
@@ -473,6 +473,15 @@ mod tests {
                 ModelColumn::new("title", ModelType::Text),
                 body,
             ],
+            children: vec![ChildDecl {
+                name: "notes".into(),
+                key: vec!["id".into()],
+                columns: vec![
+                    ModelColumn::new("id", ModelType::Text),
+                    ModelColumn::new("text", ModelType::Text),
+                ],
+                edge: None,
+            }],
         };
         let mut r = ModelRegistry::default();
         r.models.insert(
@@ -622,6 +631,45 @@ mod tests {
             2,
             "an unchanged snapshot logs nothing"
         );
+    }
+
+    /// A change to a row's children is the row's change, naming the child.
+    #[tokio::test]
+    async fn a_changed_child_set_is_named_in_the_change_event() {
+        let db = oxplow_db::Database::in_memory();
+        let write = |notes: Value| {
+            output(json!({"model": "shelf/book", "store": "shelf-folder",
+                "upsert": [{"id": "dune", "title": "Dune", "notes": notes}]}))
+        };
+        apply(
+            &db,
+            "shelf-folder",
+            Cause::Trigger,
+            vec![write(json!([{"id": "n1", "text": "good"}]))],
+            vec![],
+        )
+        .await
+        .unwrap();
+        apply(
+            &db,
+            "shelf-folder",
+            Cause::Trigger,
+            vec![write(json!([{"id": "n1", "text": "great"}]))],
+            vec![],
+        )
+        .await
+        .unwrap();
+        let logged = changes(&db).await;
+        assert_eq!(logged.len(), 2);
+        assert_eq!(logged[1]["changed"], json!(["notes"]));
+        let text: String = db
+            .read(|tx| {
+                tx.query_row("SELECT text FROM v_shelf_book_notes", [], |r| r.get(0))
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(text, "great");
     }
 
     /// Only a filler may write a model, and only as its own stores.

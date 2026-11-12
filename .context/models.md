@@ -28,7 +28,9 @@ Also built: `oxplow.refs.verify`; a rebuild copies the rows in place; a
 disabled store's rows are hidden; a store id two extensions claim refuses
 the later one; a run names the rows it quarantined.
 
-Not yet: the provider `read` adapter, child models, the owner's
+Also built: children ("Children" below).
+
+Not yet: the provider `read` adapter, the owner's
 `oxplow.model.write`, bare-link patterns, the boot repair over models, the
 tombstone sweep's schedule, and the shipped-extension plumbing (F7).
 This doc is the contract for the rest. The other pieces
@@ -285,7 +287,43 @@ should carry the command's anchors too (it carries none today).
   (the child `edge`, its markdown's `comment_*` mentions) are restated from
   the parent's URI, by diff.
 - A child table is a cache of its store like the parent's: a changed shape
-  rebuilds it, and the next write or `start` refills it.
+  rebuilds it (dropped and recreated, empty), and the next write or `start`
+  refills it.
+
+Built (`model_store.rs` `ChildDecl` / `ChildEdge`, `ModelDecl.children`;
+manifest parsing in `shared_models.rs`):
+
+- **Rules, checked on load** (`validate_child`): a child's name is a
+  snake_case word that is not a parent column, `all` or `field`; its key
+  columns exist (text, int, uri or time); its columns may not be named
+  `parent`, `store` or `written_at`, and carry no `edge:` (the child's
+  `edge` is declared on the child) and no `pins:` (a child's markdown
+  projects `comment_*`, never pinned refs).
+- **The edge:** `to` is a `uri` column, and exactly one of `type_from` (a
+  text column with `values:`; `prefix` is then required) or a fixed
+  `ref_type`. The ref types must be the model's own, so core's are out of
+  reach: a `prefix` is `<model>_<word>:` (ends in one `:`, starts with the
+  model's name, so a core plain-word type can't match and `task_link:`
+  is the task model's), and a `ref_type` is `<model>.<word>` with no
+  prefix, as a column's `edge` is.
+- **Storage and reads:** `model__<ns>__<model>__<child>` (`parent`, `store`,
+  the columns, `written_at`; primary key `parent` then the key), read as
+  `v_<ns>_<model>_<child>`, which joins the parent table with the parent
+  view's filters (live row, live store). It is the owner's entity dataset
+  and one of its published views (`public_contracts.rs`).
+- **Writes:** a key named like a child holds its whole set, restated by
+  diff (insert, update, delete). A bad child row (not an object, an
+  undeclared column, a bad value, a missing or repeated key) quarantines
+  the parent row. A changed set adds the child's name to `changed`. A
+  rename moves the children; the tombstone sweep deletes them.
+- **Edges:** after a set changes, the parent's child-edge types (prefix +
+  each `values:` value, or the fixed type) and, with a child markdown
+  column, the `comment_*` types are restated as one slice from the
+  parent's URI, from every child's stored rows. The parent's own column
+  edges are a separate slice.
+- **Not done:** a child removed from a declaration leaves its table and
+  view until the database is rebuilt; the boot repair does not cover
+  children's edges yet.
 
 ## Removal
 

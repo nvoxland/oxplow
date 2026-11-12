@@ -775,6 +775,9 @@ fn prune_mounts(extensions: &mut [Extension], blocked: &BTreeSet<String>) {
                 if model.decl.search.is_some() {
                     datasets.insert(model.decl.search_view());
                 }
+                for child in &model.decl.children {
+                    datasets.insert(model.decl.child_view(child));
+                }
             }
             let core = ext.namespace == super::CORE_NAMESPACE;
             ext.resources.retain(|resource| {
