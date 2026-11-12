@@ -317,7 +317,18 @@ Every open model keeps per-item values beyond its columns.
 ## Rules
 
 - No generic write verbs: no `task.create` that routes to a store, and no
-  standard bindings. Confirm, undo and audit are each store's job.
+  standard bindings. Confirm and audit are the bus's, as for any command.
+- **Undo is optional and per store (decided 2026-11-12).** A store's
+  command may offer one; it doesn't have to (a web app's write often can't
+  be taken back). A script that composes a write which leaves oxplow's own
+  records (`oxplow.extension_store.write`, `oxplow.extension_files.write`,
+  a provider call) runs as steps, which have no automatic undo; it may
+  return `"inverse": {"commands": [...]}` beside its `commands`, the calls
+  that reverse what it did, and the bus keeps that as the run's undo — the
+  same place, the same Undo, the same policy, confirm and audit as a
+  built-in one. A run whose script returns no inverse has none. oxtask
+  offers one for each of its writes. (To build: the `inverse` key on a
+  script command's output and the bus keeping it for a steps run.)
 - With the owner extension off, its models do not exist; a store that
   requires it is held. The shell still starts.
 - A model's contract (columns, key, types, its change event) is
