@@ -429,9 +429,7 @@ pub fn instance_id_problem(id: &str) -> Option<String> {
         Some(format!(
             "`{id}` must be lowercase letters, digits and underscores, starting with a letter"
         ))
-    } else if id == "oxplow"
-        || id == "oxtask"
-        || crate::events::schema::CORE_NAMESPACES.contains(&id)
+    } else if id == "oxplow" || crate::events::schema::CORE_NAMESPACES.contains(&id)
     {
         Some(format!("`{id}` is reserved for oxplow"))
     } else {

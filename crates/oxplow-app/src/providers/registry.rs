@@ -6,9 +6,8 @@
 //! [`ProviderRegistry::reconcile`] makes the running set match it — at
 //! boot and on every config change. Starting an instance checks consent,
 //! spawns, handshakes and `check`s its config; only then is its
-//! capability's provider (`ExternalTaskTracker`) registered in the
-//! capability's registry — its verbs run as the dispatching
-//! `task.<verb>` — and its other declared commands on the bus as
+//! capability's provider registered in the capability's registry — its
+//! verbs run as the dispatching `<noun>.<verb>` — and its other declared commands on the bus as
 //! `<id>.<name>` (`Atomicity::External`), under the namespace `<id>` it
 //! then holds. Every restart goes through consent again.
 //!
@@ -1384,8 +1383,8 @@ fn instance_in(resource: &str, r: &str) -> Option<String> {
 }
 
 /// One capability's side of the host: what turns a started instance into
-/// the capability's implementation (the task tracker's `ExternalTaskTracker`,
-/// an external snapshots provider) and takes it out again.
+/// the capability's implementation (an external snapshots provider or
+/// filesystem) and takes it out again.
 /// Validated capability adapter awaiting registration. Construction cannot
 /// mutate a live registry; publication is a synchronous map change only.
 pub struct PreparedProviderCapability {

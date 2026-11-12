@@ -1,5 +1,5 @@
 //! Script implementations (`providers::script`) of the capabilities other
-//! than the task tracker: each is a small extension written here, activated,
+//! than the ones a script cannot hold: each is a small extension written here, activated,
 //! called through its capability's host, and held to that capability's
 //! conformance suite. A capability whose host can't take a pure script is
 //! refused at activation, with a diagnostic that says why.

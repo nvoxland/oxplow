@@ -1,13 +1,11 @@
 //! Reading a provider's collectors (P7.A3, `.context/providers.md`): how
-//! another tracker's items reach `v_task` when oxplow didn't write
-//! them.
+//! an instance's collected records reach the datasets.
 //!
 //! [`Instance::read`] runs one collector's `read`, resuming from the
 //! checkpoint it last stored. What the provider streams about the request
 //! (`Peer::start_streaming`) is checked as it arrives — a `$/record` must
-//! be the collector's entity and, for a task tracker provider, a
-//! `TaskRecord` of its own item — and kept as `task.recorded@1`
-//! envelopes until the next `$/state`, which commits them **with** the
+//! be the collector's entity, one of the instance's own — and kept as
+//! the capability contract's event envelopes until the next `$/state`, which commits them **with** the
 //! checkpoint in one transaction (`provider_collector_state`). So a read
 //! that fails midway keeps exactly what its last checkpoint covered. The
 //! read's result must count what was streamed; a read that sends nothing

@@ -8,8 +8,6 @@
 //!   with backoff and automatic disable;
 //! - [`endpoint`] — what a capability's adapter calls: an instance, or
 //!   [`script`] — a script implementation an extension declares;
-//! - [`tasks`] — `ExternalTaskTracker`, the task tracker capability over
-//!   an endpoint;
 //! - [`filesystems`] — `ExternalFileSystem`, a filesystem over an instance;
 //! - [`sync`] — reading an instance's collectors (`oxplow.provider.sync`, the
 //!   schedule), checkpointed.

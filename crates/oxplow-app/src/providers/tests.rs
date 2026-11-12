@@ -1,6 +1,6 @@
 //! P5.D3: the host over the real fake provider process — consent before
 //! execution, the handshake against the approved declarations, and the
-//! task tracker conformance suite through `ExternalTaskTracker`.
+//! snapshots conformance suite through its host adapter.
 
 use std::path::{Path, PathBuf};
 

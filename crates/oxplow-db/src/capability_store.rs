@@ -15,7 +15,7 @@ use crate::database::{map_sql_err, Database};
 /// One implementation of a capability.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CapabilityProvider {
-    /// `task_tracker`, `snapshots`, `vcs`, `knowledge`.
+    /// `snapshots`, `vcs`, `knowledge`.
     pub capability: String,
     /// The implementation's id (`oxplow`, `git`, `issues`, `none`).
     pub provider: String,
@@ -182,12 +182,12 @@ mod tests {
         let db = Database::in_memory();
         let store = SqliteCapabilityStore::new(db.clone());
         let reset = |rows: Vec<CapabilityProvider>| db.transaction(move |tx| reset_tx(tx, &rows));
-        let mut fake = row("task_tracker", "fake", json!({ "comments": false }));
+        let mut fake = row("snapshots", "fake", json!({ "contents": false }));
         fake.extension = Some("tracker".into());
         fake.available = false;
         fake.chosen_by = None;
         reset(vec![
-            row("task_tracker", "oxtask", json!({ "comments": true })),
+            row("snapshots", "hashes", json!({ "contents": true })),
             fake.clone(),
         ])
         .await
@@ -196,7 +196,7 @@ mod tests {
             store.list().await.unwrap(),
             vec![
                 fake,
-                row("task_tracker", "oxtask", json!({ "comments": true }))
+                row("snapshots", "hashes", json!({ "contents": true }))
             ]
         );
         reset(vec![row("vcs", "git", json!({ "remotes": true }))])

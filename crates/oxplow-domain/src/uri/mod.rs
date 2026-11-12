@@ -793,10 +793,10 @@ mod tests {
             .unwrap()
     }
 
-    /// The registry recognizes the task tracker's own ids it's told of, as
+    /// The registry recognizes the task store's own ids it's told of, as
     /// whole tokens and in `[[…]]`; told of none, it recognizes none.
     #[test]
-    fn a_task_trackers_ids_are_recognized_as_it_declares_them() {
+    fn a_task_stores_ids_are_recognized_as_it_declares_them() {
         let issues = resources::foundation()
             .clone()
             .with_task_ids("issues", r"[A-Z]+-\d+")

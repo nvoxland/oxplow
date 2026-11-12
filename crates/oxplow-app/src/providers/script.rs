@@ -5,7 +5,7 @@
 //! [`Endpoint`] its capability's host adapts — the same host, adapter and
 //! checks as an external provider's instance — so core calls it through
 //! the one verb dispatch every implementation of the capability has
-//! (`task.<verb>` → `TaskVerbs::invoke` for a task tracker).
+//! (`<noun>.<verb>`, such as `snapshots.mark`).
 //!
 //! **The call.** Each verb is the script's function of that name, called
 //! with one dict:
@@ -27,8 +27,8 @@
 //! (`COMMAND_SCRIPT_BUDGET`), as its own contribution
 //! (`oxplow:oxplow/implementation?…`, kind `implementation`) under its
 //! extension's permissions, given only the scopes its `needs` names — what
-//! it keeps between calls it reads back through them (a task tracker's
-//! own items through `sql.read` on `v_task`, recorded by the events it
+//! it keeps between calls it reads back through them (what it holds
+//! on its own through `sql.read`, recorded by the events it
 //! answered).
 //!
 //! **Lifecycle.** Its adapter is prepared with the extension generation's
