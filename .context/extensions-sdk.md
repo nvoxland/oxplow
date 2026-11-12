@@ -279,6 +279,10 @@ check already reported is not repeated.
   run not yet undone, through the bus, `expect: { ok: true }` or
   `{ ok: false, refused }`; `examples/extensions/shelf-db` removes a book,
   undoes it and finds the book again).
+  A `{ command, input }` with no `answers` runs for real too (`command_run`):
+  a script's `finish` is called, so `expect.result` is what it returned (a
+  minted id) and `expect.inverse` the run's undo; a dry run (`answers`) calls
+  `transform` only — no step landed, so there is no `finish`.
   **One rule compares every `expect`** (`compare`): an object only on the
   keys it names (a key the result lacks matches only `null`, not even
   `$any`); a list every item, in order; `{ contains: [..] }` the items a
@@ -656,13 +660,24 @@ New fixture forms for the shared-models work ([models.md](./models.md)):
   a path is relative to the throwaway's project root, no `..`, not
   under `.git`; it is a `given` step, so it also runs inside a scenario's
   `steps: - given: [..]`).
+- `given: - { store_sql: { extension: <name>, sql, params? } }` (built,
+  `observers::given_store_sql`) runs one statement on that extension's own
+  SQLite file from outside, as a person's sqlite3 or `oxplow-dev` would: no
+  command, run or event. The extension must be loaded (the fixture's, or one
+  it `requires:`) with `storage: { sqlite: true }`; when its file isn't made
+  yet its migrations run first, as its first use would. It proves a store
+  sees a write that wasn't its own command's: the next `when: { collector,
+  trigger: sqlite }` states the row (oxtask's fixture does).
 - `when: { collector: <id>, trigger: start | sqlite | { files: [{ path,
   op }] } }` (built) runs a collector for real, through `run_collector`, as
   that trigger fires, and applies its output (rows, models, cursor, as a
   live run does). `expect: { ok?, result?, problems? }`: `ok` defaults to
   `true`; `result` is the run's counts (entity rows, `<model>.<op>`)
-  compared on the keys named; `problems` are texts the failure message
-  holds (with `ok: false`). The trigger must be one the collector's `on:`
+  compared on the keys named; `problems` are texts the run's problems hold:
+  the failure message (with `ok: false`) or, on an ok run, the rows it
+  quarantined (`CollectorRunReport.problems`, each naming the row and
+  column). `problems: [..]` an ok run with none doesn't match is a finding;
+  `problems: []` says it quarantined nothing. The trigger must be one the collector's `on:`
   lists and a files change must match its glob, else a finding at the
   fixture (`fixture.trigger`). Live triggers are off in a fixture, but a
   store command's own write is observed when the command runs (its

@@ -105,8 +105,8 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
 | context | `{ context: <id>, thread? }` | `{ text: <string> \| null }` |
 | sql | `{ sql, params? }` | `{ rows, columns? }` |
 | wikilink | `{ wikilink }` | `{ uri }` |
-| collector | `{ collector: <id>, rows?, event? } \| { collector: <id>, files } \| { collector: <id>, trigger: start \| sqlite \| { files: [{ path, op }] } } (run for real, as that trigger fires)` | `{ entities?, events? } \| { facts } \| { ok?, result?, problems? }` |
-| command | `{ command, input?, as?, confirmed? } (with answers: the extension's own, a dry run)` | `{ ok, result?, commands? } \| { ok: false, refused }` |
+| collector | `{ collector: <id>, rows?, event? } \| { collector: <id>, files } \| { collector: <id>, trigger: start \| sqlite \| { files: [{ path, op }] } } (run for real, as that trigger fires; `given: - { store_sql: { extension, sql, params? } }` writes an extension's own SQLite file first)` | `{ entities?, events? } \| { facts } \| { ok?, result?, problems? } (`problems` also checks the rows an ok run quarantined; `[]` says none)` |
+| command | `{ command, input?, as?, confirmed? } (with answers: the extension's own, a dry run)` | `{ ok, result?, inverse?, commands? } \| { ok: false, refused }` |
 | undo | `{ undo: <command>, as?, confirmed? } (runs the undo of that command's newest run not yet undone)` | `{ ok: true } \| { ok: false, refused }` |
 <!-- /fixture-kinds -->
 
@@ -311,7 +311,10 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      `expect: { ok?, result?, problems? }`: `ok` (default `true`) that it ran
      well, `result` the counts it stored (`{ book: 2 }`, an entity's rows, or
      `<model>.<op>` for shared models; only the keys you name), `problems`
-     text its failure holds when `ok: false`. The trigger must be one its
+     text its problems hold: a failed run's message (`ok: false`), or the
+     rows an ok run quarantined (a shared-model row bundled refused, with its
+     column); a `problems: [..]` an ok run with none doesn't match is a
+     finding, and `problems: []` says the run quarantined nothing. The trigger must be one its
      `on:` lists, and a changed path must match its glob. `collector:
      <namespace>/<id>` runs a collector of a required extension (a store
      the fixture's extension owns the model for). Live triggers are
@@ -320,14 +323,24 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      project files it follows in `given:` first — `- { files: { "<path>":
      "<body>" } }` writes them, `- { remove_files: ["<path>"] }` removes
      them, `- { rename_files: [{ from, to }] }` moves them (paths from the
-     project root);
+     project root). A store that follows its own SQLite file
+     (`on: [{ sqlite: own }]`) is written from outside with `- { store_sql: {
+     extension: <name>, sql: "INSERT …", params: [..] } }` — one statement on
+     that extension's file (the fixture's own or a required one with `storage:
+     { sqlite: true }`; its migrations run first if the file isn't made yet),
+     as a person's sqlite3 would: no command, no event. The model shows the
+     row after a later `when: { collector: <id>, trigger: sqlite }` step;
    - a fact collector (one with `facts:`): `when: { collector: <id>,
      files: { "src/a.ts": "…" } }` (the tree its `files()` sees),
      `expect: { facts: [{ measure, value, path? }] }` — each fact is
      compared on the keys you name, in order;
    - a command: `when: { command: <id>, input: {...}, answers? }`,
      `expect: { commands: [names], result: {...}, inverse: { commands:
-     [{ name, input }] } }` (any of them; `result` is compared on the keys
+     [{ name, input }] } }` (any of them; a fixture that has `when: { command
+     }` with no `answers:` runs for real through the bus, so a script's `finish`
+     is called and `result` / `inverse` are what it returned, with a store
+     write's minted id; a dry run — an intent example's — calls `transform`
+     only, no step landed; `result` is compared on the keys
      you name, so a read command's example checks its answer; `inverse`
      is what the script returns to undo a run that leaves oxplow's records,
      such as a store write) or `{ refused: <part of the reason> }` —

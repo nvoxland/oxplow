@@ -3790,3 +3790,212 @@ expect: { ok: true }
         "{errors}"
     );
 }
+
+/// The ledger extension: a collector that states the rows of its own SQLite
+/// file on `start` and on a `sqlite` change, and the fixtures that write
+/// the file from outside.
+fn ledger(root: &Path, fixtures: &[(&str, &str)]) {
+    write(
+        root,
+        ".oxplow/extensions/ledger/extension.yaml",
+        "manifest: 2
+name: ledger
+intent:
+  purpose: Follow a table in the extension's own file.
+  examples:
+    - { name: seen, input: { collector: entries }, expect: the row an outside write made }
+    - { name: bad, input: { collector: entries }, expect: a finding }
+    - { name: missing, input: { collector: entries }, expect: a finding }
+storage: { sqlite: true }
+collectors:
+  - id: entries
+    runtime: starlark
+    entry: collectors/entries.star
+    needs: [store.sql]
+    on: [start, { sqlite: own }]
+    sync: upsert
+    entities:
+      - { name: entry, key: id, columns: { id: text, title: text } }
+",
+    );
+    write(
+        root,
+        ".oxplow/extensions/ledger/storage/migrations/V1__entry.sql",
+        "CREATE TABLE entry (id TEXT PRIMARY KEY, title TEXT);",
+    );
+    write(
+        root,
+        ".oxplow/extensions/ledger/collectors/entries.star",
+        "def transform(x):
+    rows = scope(\"store.sql\", {\"sql\": \"SELECT id, title FROM entry\"})[\"rows\"]
+    return {\"entities\": {\"entry\": rows}}
+",
+    );
+    for (name, body) in fixtures {
+        write(
+            root,
+            &format!(".oxplow/extensions/ledger/fixtures/{name}.yaml"),
+            body,
+        );
+    }
+}
+
+/// `given: store_sql` writes an extension's own file from outside, as a
+/// person's sqlite3 would, and the next `sqlite` trigger sees the row.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_given_store_sql_is_an_outside_write_the_next_sqlite_trigger_sees() {
+    let dir = tempfile::tempdir().unwrap();
+    ledger(
+        dir.path(),
+        &[
+            (
+                "seen",
+                "given:
+  - { store_sql: { extension: ledger, sql: \"INSERT INTO entry (id, title) VALUES (?1, ?2)\", params: [e1, Dune] } }
+when: { collector: entries, trigger: sqlite }
+expect: { ok: true, result: { entry: 1 } }
+",
+            ),
+            (
+                "bad",
+                "given:
+  - { store_sql: { extension: ledger, sql: \"INSERT INTO nope (id) VALUES (1)\" } }
+when: { collector: entries, trigger: sqlite }
+expect: { ok: true }
+",
+            ),
+            (
+                "missing",
+                "given:
+  - { store_sql: { extension: nobody, sql: \"SELECT 1\" } }
+when: { collector: entries, trigger: sqlite }
+expect: { ok: true }
+",
+            ),
+        ],
+    );
+    let report = test_extension(dir.path(), "ledger", false).await.unwrap();
+    let errors = report.error_lines().join("\n");
+    assert!(
+        report.ran.iter().any(|r| r == "example seen"),
+        "{:?}",
+        report.ran
+    );
+    assert!(
+        !errors.contains("fixtures/seen.yaml"),
+        "the outside write is seen: {errors}"
+    );
+    assert!(
+        errors.contains("fixtures/bad.yaml") && errors.contains("`store_sql`"),
+        "{errors}"
+    );
+    assert!(
+        errors.contains("fixtures/missing.yaml") && errors.contains("no loaded extension `nobody`"),
+        "{errors}"
+    );
+}
+
+/// The quarantine extension: two collectors filling a store of bundled's
+/// task model, one with only good rows and one with a row bundled
+/// quarantines (a state that isn't a bucket).
+fn quarantine(root: &Path, fixtures: &[(&str, &str)]) {
+    write(
+        root,
+        ".oxplow/extensions/quarantine/extension.yaml",
+        "manifest: 2
+name: quarantine
+requires: [oxplow-bundled]
+intent:
+  purpose: Fill a store with a row that is quarantined.
+  examples:
+    - { name: said, input: { collector: mixed }, expect: the quarantine said }
+    - { name: none, input: { collector: good }, expect: no quarantine }
+    - { name: none-but-some, input: { collector: mixed }, expect: a finding }
+    - { name: some-but-none, input: { collector: good }, expect: a finding }
+    - { name: wrong-text, input: { collector: mixed }, expect: a finding }
+fills:
+  - model: oxplow/task_record
+    stores: [qstore]
+    id_pattern: \"q[0-9]+\"
+    stages:
+      - { id: backlog, title: Backlog, state: backlog }
+collectors:
+  - id: good
+    runtime: starlark
+    entry: collectors/good.star
+    on: [start]
+  - id: mixed
+    runtime: starlark
+    entry: collectors/mixed.star
+    on: [start]
+",
+    );
+    for (collector, extra) in [
+        ("good", ""),
+        ("mixed", "\n    rows.append(row(\"q2\", \"bogus\"))"),
+    ] {
+        write(
+            root,
+            &format!(".oxplow/extensions/quarantine/collectors/{collector}.star"),
+            &format!(
+                "def row(id, state):
+    return {{\"id\": id, \"title\": id, \"state\": state, \"stage\": \"backlog\", \"stage_title\": \"Backlog\", \"created_at\": \"2026-01-01T00:00:00Z\", \"updated_at\": \"2026-01-01T00:00:00Z\", \"links\": [], \"comments\": []}}
+
+def transform(x):
+    rows = [row(\"q1\", \"backlog\")]{extra}
+    return {{\"models\": [{{\"model\": \"oxplow/task_record\", \"store\": \"qstore\", \"snapshot\": rows}}]}}
+"
+            ),
+        );
+    }
+    for (name, body) in fixtures {
+        write(
+            root,
+            &format!(".oxplow/extensions/quarantine/fixtures/{name}.yaml"),
+            body,
+        );
+    }
+}
+
+/// A collector fixture's `problems` are checked on an ok run too: what the
+/// run quarantined. A list that names text the run didn't say, or any text
+/// on a run that quarantined nothing, is a finding; an empty list says
+/// "none".
+#[tokio::test(flavor = "multi_thread")]
+async fn a_collector_fixtures_problems_are_checked_on_an_ok_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = |collector: &str, problems: &str| {
+        format!(
+            "requires: [oxplow-bundled]
+when: {{ collector: {collector}, trigger: start }}
+expect: {{ ok: true, problems: {problems} }}
+"
+        )
+    };
+    quarantine(
+        dir.path(),
+        &[
+            ("said", &fixture("mixed", "[bogus]")),
+            ("none", &fixture("good", "[]")),
+            ("none-but-some", &fixture("mixed", "[]")),
+            ("some-but-none", &fixture("good", "[oops]")),
+            ("wrong-text", &fixture("mixed", "[nothing like this]")),
+        ],
+    );
+    let report = test_extension(dir.path(), "quarantine", false)
+        .await
+        .unwrap();
+    let errors = report.error_lines().join("\n");
+    for passing in ["said", "none"] {
+        assert!(
+            !errors.contains(&format!("fixtures/{passing}.yaml")),
+            "{passing}: {errors}"
+        );
+    }
+    for failing in ["none-but-some", "some-but-none", "wrong-text"] {
+        assert!(
+            errors.contains(&format!("fixtures/{failing}.yaml")) && errors.contains("problems"),
+            "{failing}: {errors}"
+        );
+    }
+}

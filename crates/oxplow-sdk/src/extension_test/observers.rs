@@ -35,6 +35,54 @@ pub(super) fn given_files(host: &Host, files: &Value) -> Result<(), String> {
     Ok(())
 }
 
+/// `store_sql: { extension, sql, params? }`: one statement run on that
+/// extension's own SQLite file from outside it, as a person's sqlite3 or
+/// `oxplow-dev` would — no command, no run, no event; a collector that
+/// follows the file (`on: [{ sqlite: own }]`) sees it on its next `sqlite`
+/// trigger. The extension must be loaded with `storage: { sqlite: true }`
+/// (the fixture's own, or one it requires); its migrations are run first
+/// when the file isn't made yet, as its first use would.
+pub(super) fn given_store_sql(host: &Host, spec: &Value) -> Result<(), String> {
+    let fix = "`store_sql: { extension: <name>, sql: \"INSERT …\", params: [..] }`";
+    let text = |key: &str| spec.get(key).and_then(Value::as_str);
+    let (Some(extension), Some(sql)) = (text("extension"), text("sql")) else {
+        return Err(format!("names `extension` and `sql` — fix: {fix}"));
+    };
+    let params = match spec.get("params") {
+        None => Vec::new(),
+        Some(Value::Array(params)) => params.clone(),
+        Some(_) => return Err(format!("`params` is a list — fix: {fix}")),
+    };
+    let catalog = host.svc.extension_catalog.get(&host.root);
+    let Some(loaded) = catalog
+        .iter()
+        .find(|e| e.name == extension && e.errors.is_empty())
+    else {
+        return Err(format!(
+            "no loaded extension `{extension}` has a SQLite file — fix: the fixture's own \
+             extension, or one it `requires:`"
+        ));
+    };
+    if !loaded.storage.sqlite {
+        return Err(format!(
+            "`{extension}` has no SQLite file — fix: declare `storage: {{ sqlite: true }}` in it"
+        ));
+    }
+    let path = oxplow_app::extension::store_path(&host.root, extension);
+    let store = oxplow_db::extension_store::ExtensionStore::open(&path)
+        .map_err(|e| format!("`{extension}`: {e}"))?;
+    store
+        .migrate(&loaded.storage.migrations)
+        .map_err(|e| format!("`{extension}`: {e}"))?;
+    store
+        .write(&[oxplow_db::extension_store::Statement {
+            sql: sql.to_string(),
+            params,
+        }])
+        .map(|_| ())
+        .map_err(|e| format!("`{extension}`: {e}"))
+}
+
 /// `remove_files: ["<path>"]`: project files removed; one that isn't there is
 /// an error (a fixture removes what it made).
 pub(super) fn given_remove_files(host: &Host, files: &Value) -> Result<(), String> {
@@ -131,8 +179,8 @@ fn listens_to(
 /// that trigger fires, its output applied (rows, models, cursor), checked
 /// against `expect: { ok?, result?, problems? }`: `ok` (default true) that it
 /// ran well, `result` the counts it stored (an entity's rows, `<model>.<op>`
-/// for shared models) on the keys named, `problems` text its failure
-/// holds. Live triggers are off in a fixture, but a store command's own
+/// for shared models) on the keys named, `problems` text its problems hold
+/// (a failure's, or the rows an ok run quarantined; `[]` says none). Live triggers are off in a fixture, but a store command's own
 /// write is observed when the command runs; any other run needs a step.
 pub(super) async fn observer_example(
     host: &Host,
@@ -227,15 +275,29 @@ pub(super) async fn observer_example(
     if want.get("ok").is_none() {
         want["ok"] = json!(true);
     }
-    // `problems` are texts the failure holds, not whole messages.
+    // `problems` are texts the run's problems hold, not whole messages: the
+    // failure's, or what an ok run quarantined. An empty list says none.
     let wanted_problems = want
         .as_object_mut()
         .and_then(|o| o.remove("problems"))
-        .and_then(|p| p.as_array().cloned())
-        .unwrap_or_default();
+        .and_then(|p| p.as_array().cloned());
     let said = got["problems"].to_string();
+    if wanted_problems.as_ref().is_some_and(Vec::is_empty)
+        && got["problems"].as_array().is_some_and(|p| !p.is_empty())
+    {
+        report.errors.push(
+            error(
+                shown,
+                ex.line("expect"),
+                "fixture.compare",
+                format!("collector `{id}`'s problems are {said}, the example expects none"),
+            )
+            .fix("the script, or the example's `expect.problems`"),
+        );
+    }
     if let Some(missing) = wanted_problems
         .iter()
+        .flatten()
         .filter_map(Value::as_str)
         .find(|text| !said.contains(text))
     {
