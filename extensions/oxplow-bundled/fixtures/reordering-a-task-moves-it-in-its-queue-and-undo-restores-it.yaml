@@ -11,7 +11,7 @@ given:
 when:
   command: oxplow.tasks.reorder
   input: { uri: "oxplow:oxplow/task?id=tsk3&provider=oxtask", before: "oxplow:oxplow/task?id=tsk2&provider=oxtask" }
-expect: { ok: true, result: { rank: 1.5 } }
+expect: { ok: true, result: { rank: 0.5 } }
 steps:
   - when: { sql: "SELECT group_concat(title, '') AS order_ FROM (SELECT title FROM v_oxplow_task_next WHERE assignee IS NOT NULL ORDER BY rank)" }
     expect: { rows: [{ order_: ACB }] }
@@ -20,7 +20,7 @@ steps:
   - when: { sql: "SELECT group_concat(title, '') AS order_ FROM (SELECT title FROM v_oxplow_task_next WHERE assignee IS NOT NULL ORDER BY rank)" }
     expect: { rows: [{ order_: ABC }] }
   - when: { command: oxplow.tasks.reorder, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", after: "oxplow:oxplow/task?id=tsk3&provider=oxtask" } }
-    expect: { ok: true, result: { rank: 4 } }
+    expect: { ok: true, result: { rank: 3 } }
   - when: { sql: "SELECT group_concat(title, '') AS order_ FROM (SELECT title FROM v_oxplow_task_next WHERE assignee IS NOT NULL ORDER BY rank)" }
     expect: { rows: [{ order_: BCA }] }
   - when: { command: oxplow.tasks.reorder, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", before: "oxplow:oxplow/task?id=tsk1&provider=oxtask" } }

@@ -35,6 +35,7 @@ CREATE TABLE task_link (
   to_uri  TEXT NOT NULL,
   type    TEXT NOT NULL
           CHECK (type IN ('blocks', 'discovered_from', 'relates_to', 'duplicates', 'supersedes', 'replies_to', 'about')),
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   seq     INTEGER NOT NULL DEFAULT 0,
   deleted INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (task_id, to_uri, type)

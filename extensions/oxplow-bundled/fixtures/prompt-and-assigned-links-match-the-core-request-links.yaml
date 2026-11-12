@@ -1,0 +1,29 @@
+# The request links core writes for a person's prompt that names a task
+# (`prompt`) and for a turn that ends while its thread holds a task in
+# progress (`assigned`) are written by bundled's collectors too: the same
+# request, task and basis, here for the same tasks made through core's
+# tracker and through oxtask (they share the URIs tsk1 and tsk2).
+requires: [oxtask]
+given:
+  - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude }, bind: ses }
+  - { command: oxplow.task.create, input: { title: Named, stage: todo }, bind: cn }
+  - { command: oxplow.task.create, input: { title: Held, stage: in_progress, assignee: thr1 }, bind: ch }
+  - { command: oxtask.task.create, input: { title: Named, stage: ready } }
+  - { command: oxtask.task.create, input: { title: Held, stage: in_progress } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - observe: { turn: { session: $ses.id, prompt: "see [oxplow uri oxplow:oxplow/task?id=tsk1&provider=oxtask] please", answer: done } }
+when:
+  sql: |
+    SELECT c.basis, c.request = n.request AS request, c.task = n.task AS task,
+           n.thread = (SELECT uri FROM v_thread LIMIT 1) AS thread, n.turn_id IS NOT NULL AS turn, n.at IS NOT NULL AS timed
+      FROM v_request_task c
+      JOIN v_oxplow_request_task_next n ON n.task = c.task AND n.basis = c.basis AND n.request = c.request
+     WHERE c.basis IN ('prompt', 'assigned') ORDER BY c.basis
+expect:
+  rows:
+    - { basis: assigned, request: 1, task: 1, thread: 1, turn: 1, timed: 1 }
+    - { basis: prompt, request: 1, task: 1, thread: 1, turn: 1, timed: 1 }
+steps:
+  # Only a person's prompt, and only a task in progress on the thread.
+  - when: { sql: "SELECT basis, task FROM v_oxplow_request_task_next WHERE basis IN ('prompt', 'assigned') ORDER BY basis" }
+    expect: { rows: [{ basis: assigned, task: "oxplow:oxplow/task?id=tsk2&provider=oxtask" }, { basis: prompt, task: "oxplow:oxplow/task?id=tsk1&provider=oxtask" }] }

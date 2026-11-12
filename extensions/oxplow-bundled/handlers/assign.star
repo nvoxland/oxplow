@@ -32,7 +32,7 @@ def transform(x):
     else:
         last = scope("sql.read", {"sql": "SELECT MAX(rank) AS last FROM v_oxplow_task_next WHERE assignee = :t", "params": {"t": to}})
     top = last[0]["last"]
-    rank = 1.0 if top == None else top + 1.0
+    rank = 0.0 if top == None else top + 1.0
     return {
         "commands": [{"name": "oxplow.model.set_fields", "input": {
             "model": "oxplow/task_record", "uri": i["uri"],
