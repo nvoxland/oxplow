@@ -4,7 +4,7 @@ namespace: oxplow
 description: What comes with oxplow beyond its foundation, cleaned up. Holds the review and analysis datasets, their settings and the Work board so far; the rest moves here from oxplow-bundled-todo one piece at a time.
 engine: ">=0.7"
 # Its task tracker's skill is written to the agent's runtime (`/oxplow:next-task`).
-permissions: [files.read, agent.write]
+permissions: [files.read, agent.write, 'commands:oxplow.model.set_fields']
 # Its Work board is a custom component in TypeScript (src/board/), built
 # into dist/ when oxplow is built and on every deploy; dist/ isn't committed.
 build: { run: "bun run build", output: dist, exclude: [node_modules] }
@@ -86,6 +86,34 @@ datasets:
     fields:
       - { name: thread_id, type: INT, doc: "The thread (v_thread.id)." }
       - { name: cleared_at, type: TEXT, doc: "When it was last cleared (RFC 3339)." }
+  - name: task_next
+    version: 1
+    description: "TEMPORARY (the switch renames it `task`): the tasks of every store in `v_task`'s shape, over the shared task model. `native` is the store's own fields, `assignee` and `rank` oxplow's."
+    fields:
+      - { name: uri, type: TEXT, doc: "The task's URI." }
+      - { name: provider, type: TEXT, doc: "Its store." }
+      - { name: native_id, type: TEXT, doc: "The store's own id." }
+      - { name: title, type: TEXT, doc: "Title." }
+      - { name: body, type: TEXT, doc: "Markdown body." }
+      - { name: state, type: TEXT, doc: "Its bucket." }
+      - { name: stage, type: TEXT, doc: "The store's own stage." }
+      - { name: stage_title, type: TEXT, doc: "How the store names its stage." }
+      - { name: native, type: TEXT, doc: "The store's own fields as JSON." }
+      - { name: parent_uri, type: TEXT, doc: "The parent task's URI; NULL at top level." }
+      - { name: assignee, type: TEXT, doc: "A thread's or the person's URI; NULL for nobody." }
+      - { name: rank, type: REAL, doc: "Its place in the assignee's queue." }
+      - { name: closed_at, type: TEXT, doc: "When it was closed; NULL while open." }
+      - { name: created_at, type: TEXT, doc: "Created (RFC 3339)." }
+      - { name: updated_at, type: TEXT, doc: "Updated (RFC 3339)." }
+  - name: task_link_next
+    version: 1
+    description: "TEMPORARY (the switch renames it `task_link`): the links of every store's tasks, in `v_task_link`'s shape (`created_at` is not kept by the model)."
+    fields:
+      - { name: from_uri, type: TEXT, doc: "The task the link is from." }
+      - { name: to_uri, type: TEXT, doc: "What it points at." }
+      - { name: to_kind, type: TEXT, doc: "The target's resource kind." }
+      - { name: link_type, type: TEXT, doc: "The link type." }
+      - { name: created_at, type: TEXT, doc: "Always NULL for now." }
   - name: thread_tasks
     version: 9
     description: "Each thread's Work panel, one row per line in display order: the tasks the thread is working on (a project-manager view of tasks, never of turns or requests). In progress is the tasks assigned to it in progress (under their epic with the epic's other children); Up next is the ready and blocked tasks assigned to the thread, in its queue's order; Finished is the done tasks a request on the thread worked on (each once) and the knowledge pages it touched, since the list was cleared. It reads no request, so it changes only when tasks, their requests' links or the thread's knowledge touches do; what a thread's request is doing now is v_request's (the Work panel reads it for its own thread)."
@@ -99,6 +127,12 @@ datasets:
       - { name: uri, type: TEXT, doc: "What the line opens (a task's URI, a knowledge page's)." }
       - { name: depth, type: INT, doc: "1 for an epic's child, else 0." }
       - { name: active, type: INT, doc: "1 for a task in progress on this thread." }
+effects:
+  - id: assign-on-start
+    summary: Assign a task to the thread that started it; clear the assignment when it is done or canceled.
+    on: [oxplow.task_record.changed]
+    where: { cause: trigger }
+    entry: effects/assign_on_start.star
 # The shared task and knowledge models every store fills, and oxplow's
 # own fields on a task (who it is assigned to, its place in their queue).
 # Stores write them through their collectors; nothing here writes a row.
@@ -372,6 +406,25 @@ collectors:
          AND EXISTS (SELECT 1 FROM v_tool_call_path p JOIN v_agent_turn pt ON pt.id = p.turn_id
                       WHERE pt.request_id = t.request_id)
     facts: [oxplow.request_tracked]
+  - id: oxplow.request_task_next
+    doc: "TEMPORARY (the switch renames it `request_task`): links the request of the turn a task changed in to the task, when the change's cause is a command or a field write (a reconcile links nothing)."
+    runtime: starlark
+    entry: collectors/request/task_links.star
+    on: [oxplow.task_record.changed]
+    where: { cause: [trigger, fields] }
+    input: |
+      SELECT r.uri AS request, t.thread_id AS thread_id, th.uri AS thread_uri,
+             (SELECT json_extract(f.fields, '$.oxplow.assignee') FROM v_oxplow_task_record f WHERE f.uri = json_extract(ev.payload, '$.uri')) AS assignee
+        FROM v_agent_turn t
+        JOIN v_request r ON r.id = t.request_id
+        LEFT JOIN v_thread th ON th.id = t.thread_id
+        JOIN v_event ev ON ev.id = :event_id
+       WHERE t.id = :turn_id
+    sync: upsert
+    entities:
+      - name: request_task_next
+        key: key
+        columns: { key: text, request: text, task: text, basis: text, thread_id: int }
   # What the project knows: the pages it keeps, restated whenever a page is
   # written, recorded or deleted, and whether a request read any.
   - id: oxplow.knowledge_pages

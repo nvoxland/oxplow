@@ -1,0 +1,36 @@
+# An agent mid-turn files a task and starts it: the task is assigned to the
+# agent's thread and linked to the turn's request; finishing it clears the
+# assignment and keeps the link.
+requires: [oxtask]
+given:
+  - observe:
+      turn:
+        prompt: Fix the greeting
+        during:
+          - { command: oxtask.task.create, input: { title: The fix, stage: ready }, as: agent }
+          - { command: oxtask.task.move, input: { id: tsk1, stage: in_progress }, as: agent }
+when:
+  sql: |
+    SELECT t.title, t.state, t.provider, t.native_id,
+           t.assignee = (SELECT uri FROM v_thread LIMIT 1) AS on_thread
+      FROM v_oxplow_task_next t
+expect:
+  rows: [{ title: The fix, state: in_progress, provider: oxtask, native_id: tsk1, on_thread: 1 }]
+steps:
+  - when:
+      sql: |
+        SELECT r.task = t.uri AS same_task, r.request = (SELECT uri FROM v_request LIMIT 1) AS this_request,
+               r.thread_id = (SELECT id FROM v_thread LIMIT 1) AS this_thread
+          FROM v_oxplow_request_task_next r JOIN v_oxplow_task_next t ON t.uri = r.task
+         WHERE r.basis = 'transition'
+    expect: { rows: [{ same_task: 1, this_request: 1, this_thread: 1 }] }
+  - when: { command: oxtask.task.move, input: { id: tsk1, stage: done } }
+    expect: { ok: true }
+  - when: { sql: "SELECT state, assignee FROM v_oxplow_task_next" }
+    expect: { rows: [{ state: done, assignee: null }] }
+  - when: { sql: "SELECT basis, thread_id FROM v_oxplow_request_task_next ORDER BY basis" }
+    expect: { rows: [{ basis: assigned, thread_id: 1 }, { basis: transition, thread_id: 1 }] }
+  # The first write of a row logs cause `reconcile`, even from a command in a
+  # turn: so a create links nothing (a gap, see the report).
+  - when: { sql: "SELECT group_concat(cause) AS causes FROM (SELECT json_extract(payload, '$.cause') AS cause FROM v_event WHERE type = 'oxplow.task_record.changed' ORDER BY seq)" }
+    expect: { rows: [{ causes: 'reconcile,trigger,fields,trigger,fields' }] }

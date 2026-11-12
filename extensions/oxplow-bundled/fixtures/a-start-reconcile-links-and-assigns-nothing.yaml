@@ -1,0 +1,13 @@
+# A task the store's start reconcile states is in the model, but it is
+# linked to no request and assigned to nobody (a reconcile means "catching
+# up", not "this happened now").
+requires: [oxtask]
+given:
+  - observe: { turn: { prompt: File it, during: [{ command: oxtask.task.create, input: { title: Filed, stage: ready }, as: agent }] } }
+when: { collector: oxtask/tasks, trigger: start }
+expect: { ok: true }
+steps:
+  - when: { sql: "SELECT count(*) AS n FROM v_oxplow_request_task_next" }
+    expect: { rows: [{ n: 0 }] }
+  - when: { sql: "SELECT state, assignee FROM v_oxplow_task_next" }
+    expect: { rows: [{ state: todo, assignee: null }] }
