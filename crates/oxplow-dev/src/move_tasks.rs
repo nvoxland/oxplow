@@ -2,7 +2,7 @@
 //! the oxtask extension's own file and bundled's fields.
 //!
 //! Run with oxplow quit, after the new binary has booted once (so the
-//! migrations ran and bundled's `task_record` and `request_task_next` model
+//! migrations ran and bundled's `task_record` and `request_task` model
 //! tables exist). Core's rows (`oxtask`, `oxtask_link`,
 //! `oxtask_note`, `task_assignment`, `request_task`) are only read; nothing
 //! of core's is deleted.
@@ -14,7 +14,7 @@
 //!   number).
 //! - Assignments are `oxplow` fields of the task (`assignee`, `rank`),
 //!   stored as `oxplow.model.set_fields` stores them.
-//! - Request links are rows of bundled's `request_task_next` model (TEMPORARY, the flip renames it `request_task`), store
+//! - Request links are rows of bundled's `request_task` model, store
 //!   `oxplow`, with core's `at` and `turn_id` (an old
 //!   basis `command` is `edited` there).
 //!
@@ -51,8 +51,11 @@ const STORE: &str = "oxtask";
 const TASK_RESOURCE: &str = "oxplow/task";
 const MODEL: &str = "oxplow/task_record";
 const MODEL_TABLE: &str = "model__oxplow__task_record";
-const LINK_MODEL_TABLE: &str = "model__oxplow__request_task_next";
-const LINK_RESOURCE: &str = "oxplow/request_task_next";
+const LINK_MODEL_TABLE: &str = "model__oxplow__request_task";
+/// The table an earlier build of bundled made for this model while the flip
+/// was in progress; the move drops it.
+const LEGACY_LINK_MODEL_TABLE: &str = "model__oxplow__request_task_next";
+const LINK_RESOURCE: &str = "oxplow/request_task";
 const PERSON: &str = "oxplow:oxplow/person";
 
 struct Task {
@@ -325,11 +328,18 @@ fn sql(e: rusqlite::Error) -> DomainError {
 fn main_half(tx: &Transaction<'_>, replace: bool) -> Result<Moved, DomainError> {
     if !table_exists(tx, MODEL_TABLE)? || !table_exists(tx, LINK_MODEL_TABLE)? {
         return Err(DomainError::Invalid(
-            "bundled's task or request_task_next model is missing: \
+            "bundled's task or request_task model is missing: \
              boot the new oxplow once first, with oxplow-bundled enabled"
                 .into(),
         ));
     }
+    // A build of bundled from before the model was renamed left its table
+    // behind; links written there would never be read.
+    tx.execute(
+        &format!("DROP TABLE IF EXISTS {LEGACY_LINK_MODEL_TABLE}"),
+        [],
+    )
+    .map_err(sql)?;
     if replace {
         // What an earlier run wrote: oxplow's two fields of the task model
         // and the request-link entity (nothing of another namespace's).
@@ -779,6 +789,7 @@ mod tests {
         let c = main_db(dir.path());
         c.execute_batch(&format!(
             "CREATE TABLE {MODEL_TABLE} (uri TEXT PRIMARY KEY);
+             CREATE TABLE {LEGACY_LINK_MODEL_TABLE} (uri TEXT PRIMARY KEY);
              CREATE TABLE {LINK_MODEL_TABLE} (uri TEXT PRIMARY KEY, store TEXT NOT NULL, key TEXT, request TEXT, task TEXT, basis TEXT, thread TEXT, turn_id INTEGER, at TEXT, written_at TEXT NOT NULL, removed_at TEXT, refs TEXT);"
         ))
         .unwrap();
@@ -906,6 +917,14 @@ mod tests {
             .await
             .unwrap();
         assert!(said.contains("5 tasks (1 soft-deleted), 1 links, 4 notes, 2 assignments (1 with an assignee), 5 request links"), "{said}");
+        let legacy: bool = main_db(dir.path())
+            .query_row(
+                "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE name = ?1)",
+                [LEGACY_LINK_MODEL_TABLE],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(!legacy, "the table of the renamed model is dropped");
         let s = store(dir.path());
         let rows: Vec<TaskRow> = s
             .prepare("SELECT n, id, title, stage, parent, author, closed_at, deleted, body, author_kind FROM task ORDER BY n")
@@ -1094,7 +1113,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert!(uri.starts_with("oxplow:oxplow/request_task_next?"), "{uri}");
+        assert!(uri.starts_with("oxplow:oxplow/request_task?"), "{uri}");
 
         // A second run is refused (the store has the three and the new one).
         let e = move_to_oxtask(dir.path(), false, false, false)

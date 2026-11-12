@@ -607,6 +607,15 @@ mod tests {
         dir
     }
 
+    /// Turn oxtask on for the project: the `task` subcommands reach its file.
+    fn with_oxtask(dir: &Path) {
+        std::fs::write(
+            dir.join(".oxplow/personal.yaml"),
+            "enableExtensions: [oxtask]\n",
+        )
+        .unwrap();
+    }
+
     async fn dev(dir: &Path, args: &[&str]) -> Result<String, String> {
         let mut all = vec!["--project".to_string(), dir.display().to_string()];
         all.extend(args.iter().map(|a| a.to_string()));
@@ -619,6 +628,7 @@ mod tests {
     async fn tasks_are_managed_through_the_task_systems_commands() {
         let dir = project().await;
         let p = dir.path();
+        with_oxtask(p);
         let created: Value = serde_json::from_str(
             &dev(
                 p,
@@ -655,20 +665,6 @@ mod tests {
             shown.contains("state: done") && shown.contains("All of them"),
             "{shown}"
         );
-        let db =
-            Database::open_existing(oxplow_app::AppLayout::for_project(p).state_db_path).unwrap();
-        let logged: i64 = db
-            .read(|c| {
-                c.query_row(
-                    "SELECT count(*) FROM event_log WHERE type = 'task.state_changed'",
-                    [],
-                    |r| r.get(0),
-                )
-                .map_err(oxplow_db::map_sql_err)
-            })
-            .await
-            .unwrap();
-        assert!(logged >= 2, "{logged}");
     }
 
     /// `--help` anywhere prints how to call, before the database is
@@ -694,6 +690,7 @@ mod tests {
     #[tokio::test]
     async fn an_unknown_option_is_refused() {
         let dir = project().await;
+        with_oxtask(dir.path());
         let err = dev(dir.path(), &["task", "create", "--titel", "x"])
             .await
             .unwrap_err();
@@ -709,6 +706,7 @@ mod tests {
     #[tokio::test]
     async fn a_bad_call_says_how_to_call() {
         let dir = project().await;
+        with_oxtask(dir.path());
         let err = dev(dir.path(), &["task", "frobnicate"]).await.unwrap_err();
         assert!(err.contains("usage"), "{err}");
         let err = dev(dir.path(), &["task", "transition", "ENG-1", "done"])
@@ -1125,14 +1123,15 @@ mod tests {
         oxplow_app::extension::store_path(p, "oxtask")
     }
 
-    /// With oxtask off the tasks are core's tables and oxtask's file is not
+    /// With oxtask off there is no task tracker to reach and its file is not
     /// made.
     #[tokio::test]
-    async fn with_oxtask_off_the_tasks_are_cores_and_its_file_is_not_made() {
+    async fn with_oxtask_off_there_is_no_tracker_and_its_file_is_not_made() {
         let dir = project().await;
-        dev(dir.path(), &["task", "create", "In core"])
+        let err = dev(dir.path(), &["task", "create", "Nowhere"])
             .await
-            .unwrap();
+            .unwrap_err();
+        assert!(err.contains("oxtask"), "{err}");
         assert!(!store_file(dir.path()).exists());
     }
 
