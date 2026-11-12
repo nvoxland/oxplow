@@ -42,7 +42,7 @@ use serde_json::Value;
 
 /// oxtask's first migration: the move writes the tables it makes. (Later
 /// migrations are applied by the extension's own boot.)
-const STORE_MIGRATIONS: &[(&str, &str)] = &[(
+pub(crate) const STORE_MIGRATIONS: &[(&str, &str)] = &[(
     "V1__tasks.sql",
     include_str!("../../../extensions/oxtask/storage/migrations/V1__tasks.sql"),
 )];

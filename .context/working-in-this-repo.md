@@ -126,6 +126,21 @@ cargo run -q -p oxplow-dev -- extension deploy oxplow-foundation   # one extensi
 cargo run -q -p oxplow-dev -- --help
 ```
 
+**Which backend `task` uses.** By the project's config: when the oxtask
+extension is enabled (`extensions:` / `enableExtensions` in
+`.oxplow/project.yaml` and `.oxplow/personal.yaml`, less `disableExtensions`;
+`oxplow_config::extension_settings(..).is_enabled("oxtask")`), the same
+subcommands read and write oxtask's own file
+(`.oxplow/extensions-data/oxtask.sqlite`, created and migrated with oxtask's
+migrations as the move tool does) and print the same shapes (`tsk12`,
+`state:`, the pretty JSON with `id` and `uri`); `--state todo` is oxtask's
+`ready`, and a run is `person`, or with `--thread` that thread's `agent`
+(the author columns). Each write is one statement through the file's own
+triggers (a change number, the delete guard), so the app's collector sees
+it on its next `sqlite` trigger. The SQL is the one in
+`extensions/oxtask/handlers/*.star`. Otherwise (oxtask off) the commands run
+over core's tables as described below, and oxtask's file is not made.
+
 `task move-to-oxtask` is the one-off move of core's tasks into the oxtask
 extension's own file (`.oxplow/extensions-data/oxtask.sqlite`) and bundled's
 fields (`.context/models.md` "The switch"). Run it with oxplow quit, after

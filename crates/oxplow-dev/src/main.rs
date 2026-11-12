@@ -4,7 +4,9 @@
 //! pages, through the `knowledge.*` commands, with oxwiki as the store
 //! (`--store oxwiki`, the one it runs), whatever the project has enabled.
 //!
-//! `oxplow-dev task …` reads and changes oxtask while the project
+//! `oxplow-dev task …` over oxtask's own file when the project has the oxtask
+//! extension enabled (`oxtask_file.rs`); else, as below, over core's tables.
+//! It reads and changes oxtask while the project
 //! has no task tracker active (none chosen in Settings → Capabilities). It runs oxplow's own `task.*` commands on a command
 //! bus over the project's database, as the app would — validation, audit,
 //! events and all — on a bus that doesn't check what's active. So the rows
@@ -20,6 +22,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 mod move_tasks;
+mod oxtask_file;
 
 use oxplow_app::commands::CommandBus;
 use oxplow_db::{Database, SqliteEventLogStore};
@@ -117,6 +120,11 @@ async fn run(mut args: Vec<String>, env_thread: Option<String>) -> Result<String
     }
     match args.first().map(String::as_str) {
         Some("task") => {
+            // With oxtask on, the tasks are its file's; else core's tables.
+            if oxplow_config::extension_settings(&project).is_enabled("oxtask") {
+                let file = oxtask_file::OxtaskFile::open(&project, thread.as_deref())?;
+                return file.run(&args[1..], USAGE);
+            }
             let tasks = Tasks::open(&project, thread.as_deref())?;
             tasks.run(args.split_off(1)).await
         }
@@ -717,6 +725,7 @@ fn put(input: &mut Map<String, Value>, key: &str, value: Option<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusqlite::Connection;
 
     /// A project the app has set up: its database migrated with its
     /// models compiled, and its primary stream.
@@ -1251,5 +1260,169 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.contains("no example `two`"), "{err}");
+    }
+
+    fn store_file(p: &Path) -> PathBuf {
+        oxplow_app::extension::store_path(p, "oxtask")
+    }
+
+    /// With oxtask off the tasks are core's tables and oxtask's file is not
+    /// made.
+    #[tokio::test]
+    async fn with_oxtask_off_the_tasks_are_cores_and_its_file_is_not_made() {
+        let dir = project().await;
+        dev(dir.path(), &["task", "create", "In core"])
+            .await
+            .unwrap();
+        assert!(!store_file(dir.path()).exists());
+    }
+
+    /// With oxtask enabled the same subcommands work on its file, through
+    /// its triggers: a change number on every write, a soft delete only.
+    #[tokio::test]
+    async fn with_oxtask_on_the_tasks_are_its_files() {
+        let dir = project().await;
+        let p = dir.path();
+        std::fs::write(
+            p.join(".oxplow/personal.yaml"),
+            "enableExtensions: [oxtask]\n",
+        )
+        .unwrap();
+        let created: Value = serde_json::from_str(
+            &dev(
+                p,
+                &["task", "create", "Write the docs", "--body", "All of them"],
+            )
+            .await
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(created["id"], "tsk1");
+        assert_eq!(created["uri"], "oxplow:oxplow/task?id=tsk1&provider=oxtask");
+        dev(
+            p,
+            &[
+                "task",
+                "create",
+                "Child",
+                "--parent",
+                "tsk1",
+                "--state",
+                "in_progress",
+            ],
+        )
+        .await
+        .unwrap();
+        dev(p, &["task", "transition", "tsk1", "in_progress"])
+            .await
+            .unwrap();
+        let commented: Value = serde_json::from_str(
+            &dev(p, &["task", "comment", "tsk1", "Started."])
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(commented["comment"], "cmt1");
+        dev(p, &["task", "update", "tsk2", "--title", "Child, renamed"])
+            .await
+            .unwrap();
+        dev(p, &["task", "link", "tsk2", "tsk1", "blocks"])
+            .await
+            .unwrap();
+        let list = dev(p, &["task", "list"]).await.unwrap();
+        assert!(
+            list.contains("tsk1\tin_progress\tWrite the docs")
+                && list.contains("tsk2\tin_progress\tChild, renamed"),
+            "{list}"
+        );
+        dev(p, &["task", "transition", "tsk1", "done"])
+            .await
+            .unwrap();
+        assert!(!dev(p, &["task", "list"])
+            .await
+            .unwrap()
+            .contains("Write the docs"));
+        assert!(dev(p, &["task", "list", "--all"])
+            .await
+            .unwrap()
+            .contains("Write the docs"));
+        let shown = dev(p, &["task", "show", "tsk1"]).await.unwrap();
+        assert!(
+            shown.contains("state: done") && shown.contains("All of them"),
+            "{shown}"
+        );
+        let child = dev(p, &["task", "show", "tsk2"]).await.unwrap();
+        assert!(child.contains("parent: tsk1"), "{child}");
+        dev(p, &["task", "unlink", "tsk2", "tsk1", "blocks"])
+            .await
+            .unwrap();
+        // A missing task or link, and a bad stage, are refused.
+        for args in [
+            vec!["task", "transition", "tsk99", "done"],
+            vec!["task", "comment", "tsk99", "x"],
+            vec!["task", "unlink", "tsk2", "tsk1", "blocks"],
+            vec!["task", "transition", "tsk1", "sideways"],
+        ] {
+            assert!(dev(p, &args).await.is_err(), "{args:?}");
+        }
+
+        // The file's own triggers numbered every write (the collector
+        // follows `seq`) and guard it against a hard delete; core's tables
+        // were not touched.
+        let file = Connection::open(store_file(p)).unwrap();
+        let (top, seq): (i64, i64) = file
+            .query_row(
+                "SELECT (SELECT v FROM change_seq), (SELECT seq FROM task WHERE id = 'tsk1')",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert!(seq > 1 && top >= seq, "{seq} {top}");
+        assert!(file
+            .execute("DELETE FROM task WHERE id = 'tsk1'", [])
+            .is_err());
+        let author: (String, String) = file
+            .query_row(
+                "SELECT author, author_kind FROM task WHERE id = 'tsk1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(author, ("oxplow:oxplow/person".into(), "person".into()));
+        let db =
+            Database::open_existing(oxplow_app::AppLayout::for_project(p).state_db_path).unwrap();
+        let core: i64 = db
+            .read(|c| {
+                c.query_row("SELECT count(*) FROM oxtask", [], |r| r.get(0))
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(core, 0);
+    }
+
+    /// A run with `--thread` writes as that thread's agent.
+    #[tokio::test]
+    async fn with_oxtask_on_a_thread_run_is_that_agents() {
+        let dir = project().await;
+        let p = dir.path();
+        std::fs::write(
+            p.join(".oxplow/personal.yaml"),
+            "enableExtensions: [oxtask]\n",
+        )
+        .unwrap();
+        dev(p, &["--thread", "thr1", "task", "create", "By the agent"])
+            .await
+            .unwrap();
+        let author: (String, String) = Connection::open(store_file(p))
+            .unwrap()
+            .query_row("SELECT author, author_kind FROM task", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(
+            author,
+            ("oxplow:oxplow/thread?id=thr1".into(), "agent".into())
+        );
     }
 }
