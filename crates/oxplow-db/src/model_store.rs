@@ -418,6 +418,18 @@ pub fn verify_pins_tx(
         .with_version(snapshot, pin.revision.clone(), pin.revision.is_some());
         upsert_edge_tx(conn, &edge)?;
     }
+    // Verifying all of it re-pins its directories too: what it says of
+    // them holds as of now.
+    if files.is_none() {
+        for (uri, _) in pinned.iter().filter(|(_, t)| t == RT_DIR_PIN) {
+            let edge = PageRefEdge::new(source, uri, RT_DIR_PIN).with_version(
+                snapshot,
+                pin.revision.clone(),
+                pin.revision.is_some(),
+            );
+            upsert_edge_tx(conn, &edge)?;
+        }
+    }
     Ok(wanted)
 }
 
@@ -441,6 +453,17 @@ fn shape(decl: &ModelDecl) -> Vec<(String, &'static str)> {
 /// or retyped one rebuilds the table, which its stores refill at their
 /// next start (`.context/models.md` "Rebuilds").
 pub fn ensure_model_tx(conn: &rusqlite::Connection, decl: &ModelDecl) -> Result<(), DomainError> {
+    ensure_model_for_stores_tx(conn, decl, None)
+}
+
+/// [`ensure_model_tx`], its views showing only the rows of `live` stores
+/// (the enabled ones'), when given: a disabled store's rows are kept but
+/// hidden, as tombstones are.
+pub fn ensure_model_for_stores_tx(
+    conn: &rusqlite::Connection,
+    decl: &ModelDecl,
+    live: Option<&[String]>,
+) -> Result<(), DomainError> {
     validate(decl)?;
     let table = decl.table();
     let want = shape(decl);
@@ -454,7 +477,7 @@ pub fn ensure_model_tx(conn: &rusqlite::Connection, decl: &ModelDecl) -> Result<
                 .collect::<rusqlite::Result<Vec<_>>>()
         })
         .map_err(map_sql_err)?;
-    let create = || {
+    let create = |name: &str| {
         let cols: Vec<String> = want
             .iter()
             .map(|(n, t)| match n.as_str() {
@@ -463,32 +486,47 @@ pub fn ensure_model_tx(conn: &rusqlite::Connection, decl: &ModelDecl) -> Result<
                 _ => format!("{} {t}", quote(n)),
             })
             .collect();
-        format!(
-            "CREATE TABLE {} ({});
-             CREATE INDEX {} ON {} (store);",
-            quote(&table),
-            cols.join(", "),
-            quote(&format!("{table}_store")),
-            quote(&table)
-        )
+        format!("CREATE TABLE {} ({});", quote(name), cols.join(", "))
     };
     if have.is_empty() {
-        conn.execute_batch(&create()).map_err(map_sql_err)?;
+        conn.execute_batch(&create(&table)).map_err(map_sql_err)?;
     } else {
-        let kept_or_retyped = have.iter().any(|(n, t)| {
+        let removed_or_retyped = have.iter().any(|(n, t)| {
             want.iter()
                 .find(|(w, _)| w == n)
                 .is_none_or(|(_, wt)| !wt.eq_ignore_ascii_case(t))
         });
-        if kept_or_retyped {
-            conn.execute_batch(&format!("DROP TABLE {};", quote(&table)))
-                .map_err(map_sql_err)?;
-            conn.execute(
-                "DELETE FROM model_field_value WHERE model = ?1",
-                [decl.id()],
-            )
+        if removed_or_retyped {
+            // Rebuilt in place: the rows (and every extension's field
+            // values, which are keyed by URI) are kept, the columns both
+            // shapes have copied, no event logged.
+            for view in [
+                decl.view(),
+                decl.view_all(),
+                format!("{}_field", decl.view()),
+                decl.search_view(),
+            ] {
+                conn.execute_batch(&format!("DROP VIEW IF EXISTS {};", quote(&view)))
+                    .map_err(map_sql_err)?;
+            }
+            let rebuilt = format!("{table}__rebuilt");
+            let common: Vec<String> = want
+                .iter()
+                .filter(|(n, _)| have.iter().any(|(h, _)| h == n))
+                .map(|(n, _)| quote(n))
+                .collect();
+            conn.execute_batch(&format!(
+                "DROP TABLE IF EXISTS {r};
+                 {create}
+                 INSERT INTO {r} ({cols}) SELECT {cols} FROM {t};
+                 DROP TABLE {t};
+                 ALTER TABLE {r} RENAME TO {t};",
+                r = quote(&rebuilt),
+                create = create(&rebuilt),
+                cols = common.join(", "),
+                t = quote(&table),
+            ))
             .map_err(map_sql_err)?;
-            conn.execute_batch(&create()).map_err(map_sql_err)?;
         } else {
             for (n, t) in &want {
                 if !have.iter().any(|(h, _)| h == n) {
@@ -502,9 +540,15 @@ pub fn ensure_model_tx(conn: &rusqlite::Connection, decl: &ModelDecl) -> Result<
             }
         }
     }
+    conn.execute_batch(&format!(
+        "CREATE INDEX IF NOT EXISTS {} ON {} (store);",
+        quote(&format!("{table}_store")),
+        quote(&table)
+    ))
+    .map_err(map_sql_err)?;
     for all in [false, true] {
         let view = if all { decl.view_all() } else { decl.view() };
-        let select = view_sql(decl, all);
+        let select = view_sql(decl, all, live);
         let current: Option<String> = conn
             .query_row(
                 "SELECT sql FROM sqlite_master WHERE type = 'view' AND name = ?1",
@@ -709,7 +753,28 @@ fn sql_text(s: &str) -> String {
 
 /// The view: the table's columns, and `fields` as `{namespace: {name:
 /// value}}` (NULL with none).
-fn view_sql(decl: &ModelDecl, all: bool) -> String {
+fn view_sql(decl: &ModelDecl, all: bool, live: Option<&[String]>) -> String {
+    let stores = live.map(|stores| {
+        let list: Vec<String> = stores.iter().map(|s| sql_text(s)).collect();
+        format!(
+            "t.store IN ({})",
+            if list.is_empty() {
+                "NULL".to_string()
+            } else {
+                list.join(", ")
+            }
+        )
+    });
+    let mut filters: Vec<String> = Vec::new();
+    if !all {
+        filters.push("t.removed_at IS NULL".into());
+    }
+    filters.extend(stores);
+    let filter = if filters.is_empty() {
+        String::new()
+    } else {
+        format!(" WHERE {}", filters.join(" AND "))
+    };
     let cols: Vec<String> = std::iter::once("t.uri".to_string())
         .chain(std::iter::once("t.store".to_string()))
         .chain(decl.columns.iter().map(|c| format!("t.{}", quote(&c.name))))
@@ -724,11 +789,7 @@ fn view_sql(decl: &ModelDecl, all: bool) -> String {
         sql_text(&decl.id()),
         if all { ", t.removed_at" } else { "" },
         quote(&decl.table()),
-        if all {
-            ""
-        } else {
-            " WHERE t.removed_at IS NULL"
-        }
+        filter
     )
 }
 
@@ -1323,25 +1384,57 @@ pub fn write_tx(
             .collect(),
     };
 
-    for (from, to) in rename {
+    for (at, (from, to)) in rename.iter().enumerate() {
         let (old, new) = (decl.uri(store, from), decl.uri(store, to));
-        let moved = conn
-            .execute(
-                &format!(
-                    "UPDATE {table} SET uri = ?2, {} = ?3, written_at = ?4
-                     WHERE uri = ?1 AND NOT EXISTS (SELECT 1 FROM {table} WHERE uri = ?2)",
-                    quote(&decl.key)
-                ),
-                params![old, new, to, now],
+        let state = |uri: &str| -> Result<Option<bool>, DomainError> {
+            conn.query_row(
+                &format!("SELECT removed_at IS NOT NULL FROM {table} WHERE uri = ?1"),
+                [uri],
+                |r| r.get::<_, bool>(0),
             )
-            .map_err(map_sql_err)?;
-        if moved == 0 {
+            .optional()
+            .map_err(map_sql_err)
+        };
+        // Only a live item moves; onto a live one it can't.
+        if state(&old)? != Some(false) {
             continue;
         }
+        match state(&new)? {
+            Some(false) => {
+                out.quarantined.push(Quarantined {
+                    at,
+                    id: Some(from.clone()),
+                    message: format!(
+                        "model `{model}`: rename `{from}` → `{to}`: `{to}` is already an item"
+                    ),
+                });
+                continue;
+            }
+            // A tombstone at the new id gives way.
+            Some(true) => {
+                conn.execute(&format!("DELETE FROM {table} WHERE uri = ?1"), [&new])
+                    .map_err(map_sql_err)?;
+                conn.execute(
+                    "DELETE FROM model_field_value WHERE model = ?1 AND uri = ?2",
+                    params![model, new],
+                )
+                .map_err(map_sql_err)?;
+            }
+            None => {}
+        }
+        conn.execute(
+            &format!(
+                "UPDATE {table} SET uri = ?2, {} = ?3, written_at = ?4 WHERE uri = ?1",
+                quote(&decl.key)
+            ),
+            params![old, new, to, now],
+        )
+        .map_err(map_sql_err)?;
+        // A source that cites both the old and the new URI keeps one edge.
         for sql in [
             "UPDATE model_field_value SET uri = ?2 WHERE model = ?3 AND uri = ?1",
-            "UPDATE page_ref SET source_uri = ?2 WHERE source_uri = ?1 AND ?3 = ?3",
-            "UPDATE page_ref SET target_uri = ?2 WHERE target_uri = ?1 AND ?3 = ?3",
+            "UPDATE OR REPLACE page_ref SET source_uri = ?2 WHERE source_uri = ?1 AND ?3 = ?3",
+            "UPDATE OR REPLACE page_ref SET target_uri = ?2 WHERE target_uri = ?1 AND ?3 = ?3",
         ] {
             conn.execute(sql, params![old, new, model])
                 .map_err(map_sql_err)?;
@@ -2347,11 +2440,212 @@ mod tests {
             ]
         );
         assert_ne!(first, later);
+        let dir: Vec<(String, String, Option<i64>)> = edges(&db, B1)
+            .await
+            .into_iter()
+            .filter(|e| e.1 == "dir_pin")
+            .collect();
+        assert_eq!(
+            dir[0].2,
+            Some(later),
+            "verifying all re-pins its directories"
+        );
         let err = db
             .transaction(|tx| verify_pins_tx(tx, B1, Some(&["src/zzz.rs".to_string()])))
             .await
             .unwrap_err()
             .to_string();
         assert!(err.contains("src/zzz.rs"), "{err}");
+    }
+
+    /// A removed or retyped column rebuilds the table in place: the rows
+    /// and every extension's field values stay.
+    #[tokio::test]
+    async fn a_rebuild_keeps_the_rows_and_their_fields() {
+        let db = Database::in_memory();
+        write(
+            &db,
+            "s",
+            rating(),
+            ModelWrite::Snapshot {
+                rows: vec![row(
+                    json!({"id": "b1", "title": "Dune", "pages": 412, "fields": {"rating": 4}}),
+                )],
+                confirm_removals: false,
+            },
+        )
+        .await
+        .unwrap();
+        let mut changed = book();
+        changed.columns.retain(|c| c.name != "pages");
+        changed
+            .columns
+            .push(ModelColumn::new("pages", ModelType::Text));
+        db.transaction(move |tx| ensure_model_tx(tx, &changed))
+            .await
+            .unwrap();
+        let live = rows(&db).await;
+        assert_eq!(live.len(), 1);
+        assert_eq!(live[0].2, "Dune");
+        assert!(live[0].3.as_deref().unwrap().contains("rating"), "{live:?}");
+    }
+
+    /// With the live stores named, a store not among them is hidden from
+    /// the views (its rows kept).
+    #[tokio::test]
+    async fn a_store_that_isnt_live_is_hidden() {
+        let db = Database::in_memory();
+        for store in ["a", "b"] {
+            write(
+                &db,
+                store,
+                vec![],
+                ModelWrite::Snapshot {
+                    rows: vec![row(json!({"id": "1", "title": store}))],
+                    confirm_removals: false,
+                },
+            )
+            .await
+            .unwrap();
+        }
+        db.transaction(|tx| ensure_model_for_stores_tx(tx, &book(), Some(&["a".to_string()])))
+            .await
+            .unwrap();
+        let titles: Vec<String> = rows(&db).await.into_iter().map(|r| r.2).collect();
+        assert_eq!(titles, vec!["a"]);
+    }
+
+    /// A rename replaces a tombstone at its new id, keeps one edge when a
+    /// source cites both URIs, and is reported (not done) onto a live item.
+    #[tokio::test]
+    async fn a_rename_handles_tombstones_shared_edges_and_live_targets() {
+        let db = Database::in_memory();
+        let upsert = |rows: Vec<ModelRow>, delete: Vec<String>, rename: Vec<(String, String)>| {
+            ModelWrite::Upsert {
+                rows,
+                delete,
+                rename,
+            }
+        };
+        write(
+            &db,
+            "s",
+            vec![],
+            upsert(
+                vec![
+                    row(json!({"id": "a", "title": "A"})),
+                    row(json!({"id": "b", "title": "B"})),
+                ],
+                vec![],
+                vec![],
+            ),
+        )
+        .await
+        .unwrap();
+        write(&db, "s", vec![], upsert(vec![], vec!["b".into()], vec![]))
+            .await
+            .unwrap();
+        let (a, b) = (
+            "oxplow:shelf/book?id=a&store=s",
+            "oxplow:shelf/book?id=b&store=s",
+        );
+        db.transaction(move |tx| {
+            for target in [a, b] {
+                crate::page_ref_store::upsert_edge_tx(
+                    tx,
+                    &crate::page_ref_store::PageRefEdge::new(
+                        "oxplow:oxplow/file?path=x.md",
+                        target,
+                        "file_mention",
+                    ),
+                )?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let w = write(
+            &db,
+            "s",
+            vec![],
+            upsert(vec![], vec![], vec![("a".into(), "b".into())]),
+        )
+        .await
+        .unwrap();
+        assert_eq!(w.changes.len(), 1, "{w:?}");
+        assert_eq!(
+            rows(&db)
+                .await
+                .iter()
+                .map(|r| r.2.clone())
+                .collect::<Vec<_>>(),
+            vec!["A"]
+        );
+        assert_eq!(edges(&db, "oxplow:oxplow/file?path=x.md").await.len(), 1);
+
+        write(
+            &db,
+            "s",
+            vec![],
+            upsert(vec![row(json!({"id": "c", "title": "C"}))], vec![], vec![]),
+        )
+        .await
+        .unwrap();
+        let onto_live = write(
+            &db,
+            "s",
+            vec![],
+            upsert(vec![], vec![], vec![("b".into(), "c".into())]),
+        )
+        .await
+        .unwrap();
+        assert!(onto_live.changes.is_empty());
+        assert!(onto_live.quarantined[0].message.contains("already an item"));
+    }
+
+    /// A directory pin matches the files under it by their exact prefix:
+    /// `my_dir` isn't stale for a change to `myXdir/a.md` (`_` is no
+    /// wildcard), only for one under `my_dir/`.
+    #[tokio::test]
+    async fn a_directory_pin_matches_only_files_under_it() {
+        let db = Database::in_memory();
+        snapshot(&db).await;
+        write_decl(
+            &db,
+            pinned_book(),
+            vec![row(
+                json!({"id": "b1", "title": "t", "body": "see [[dir:my_dir]]"}),
+            )],
+        )
+        .await;
+        let stale = |db: Database| async move {
+            db.read(|tx| {
+                tx.query_row(
+                    "SELECT stale FROM v_ref_pin WHERE source = ?1 AND kind = 'dir'",
+                    [B1],
+                    |r| r.get::<_, i64>(0),
+                )
+                .map_err(map_sql_err)
+            })
+            .await
+            .unwrap()
+        };
+        let file_at = |db: Database, path: &'static str| async move {
+            let id = snapshot(&db).await;
+            db.transaction(move |tx| {
+                tx.execute(
+                    "INSERT INTO file_snapshot (stream_id, path, blob_hash, size_bytes, captured_at, storage, snapshot_id)
+                     VALUES (1, ?1, 'h', 1, '2026-01-02T00:00:00Z', 'oxplow', ?2)",
+                    params![path, id],
+                )
+                .map_err(map_sql_err)
+            })
+            .await
+            .unwrap();
+        };
+        file_at(db.clone(), "myXdir/a.md").await;
+        assert_eq!(stale(db.clone()).await, 0);
+        file_at(db.clone(), "my_dir/a.md").await;
+        assert_eq!(stale(db.clone()).await, 1);
     }
 }

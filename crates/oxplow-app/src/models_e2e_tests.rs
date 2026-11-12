@@ -130,3 +130,29 @@ async fn a_collector_with_nowhere_to_write_is_refused() {
         "{text}"
     );
 }
+
+/// Two extensions can't write one store id into one model: the later one
+/// is refused, naming the store and who writes it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_store_id_two_extensions_claim_is_refused() {
+    let fx = services_with_thread().await;
+    let root = fx._dir.path();
+    write(root, ".oxplow/extensions/shelf/extension.yaml", OWNER);
+    write(root, ".oxplow/extensions/shelves/extension.yaml", STORE);
+    write(
+        root,
+        ".oxplow/extensions/shelves/books.star",
+        "def transform(x):\n    return {}\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/squatter/extension.yaml",
+        "manifest: 2\nname: squatter\nintent:\n  purpose: p\nrequires: [shelf]\nfills:\n  - model: shelf/book\n    stores: [shelves]\n",
+    );
+    let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
+    let text = format!("{problems:?}");
+    assert!(
+        text.contains("model.store_taken") && text.contains("shelves"),
+        "{text}"
+    );
+}

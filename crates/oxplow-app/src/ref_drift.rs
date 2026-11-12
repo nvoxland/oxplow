@@ -51,7 +51,9 @@ impl crate::event_pump::EventConsumer for RefDrift {
                    JOIN file_snapshot fs ON fs.snapshot_id = s.id
                    JOIN page_ref pr
                      ON (pr.ref_type = 'file_pin' AND uri_param(pr.target_uri, 'path') = fs.path)
-                     OR (pr.ref_type = 'dir_pin' AND fs.path LIKE uri_param(pr.target_uri, 'path') || '/%')
+                     OR (pr.ref_type = 'dir_pin'
+                         AND substr(fs.path, 1, length(uri_param(pr.target_uri, 'path')) + 1)
+                             = uri_param(pr.target_uri, 'path') || '/')
                   WHERE s.id = ?1
                   ORDER BY pr.source_uri, fs.path",
             )

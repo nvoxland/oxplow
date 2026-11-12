@@ -133,6 +133,10 @@ impl PreparedExtensionDatabase {
                 )],
             )]));
         }
+        let conflicts = crate::models::ModelRegistry::conflicts(snapshot.extensions());
+        if !conflicts.is_empty() {
+            return Err(conflicts);
+        }
         let vocabulary = PreparedVocabulary::prepare(snapshot, capabilities.recognizers())?;
         Ok(Self::with_vocabulary(
             snapshot,
@@ -269,8 +273,9 @@ impl PreparedExtensionDatabase {
             .map_err(oxplow_db::map_sql_err)?;
         let result = (|| {
             oxplow_db::collector_store::ensure_entities_tx(tx, &self.entities)?;
-            for spec in self.models.models.values() {
-                oxplow_db::model_store::ensure_model_tx(tx, &spec.decl)?;
+            for (id, spec) in &self.models.models {
+                let live = self.models.live_stores(id);
+                oxplow_db::model_store::ensure_model_for_stores_tx(tx, &spec.decl, Some(&live))?;
             }
             oxplow_db::model_store::replace_field_decls_tx(tx, &self.models.field_decls())?;
             let mut candidate = self.datasets.clone();
