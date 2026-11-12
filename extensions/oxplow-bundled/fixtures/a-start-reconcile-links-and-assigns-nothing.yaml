@@ -7,7 +7,7 @@ given:
 when: { collector: oxtask/tasks, trigger: start }
 expect: { ok: true }
 steps:
-  - when: { sql: "SELECT group_concat(basis) AS bases FROM v_oxplow_request_task" }
+  - when: { sql: "SELECT group_concat(basis) AS bases FROM v_oxplow_request_task_next" }
     expect: { rows: [{ bases: filed }] }
   - when: { sql: "SELECT state, assignee FROM v_oxplow_task_next" }
     expect: { rows: [{ state: todo, assignee: null }] }

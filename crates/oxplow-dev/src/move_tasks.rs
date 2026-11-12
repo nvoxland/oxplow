@@ -2,7 +2,7 @@
 //! the oxtask extension's own file and bundled's fields.
 //!
 //! Run with oxplow quit, after the new binary has booted once (so the
-//! migrations ran and bundled's `task_record` and `request_task` model
+//! migrations ran and bundled's `task_record` and `request_task_next` model
 //! tables exist). Core's rows (`oxtask`, `oxtask_link`,
 //! `oxtask_note`, `task_assignment`, `request_task`) are only read; nothing
 //! of core's is deleted.
@@ -14,7 +14,7 @@
 //!   number).
 //! - Assignments are `oxplow` fields of the task (`assignee`, `rank`),
 //!   stored as `oxplow.model.set_fields` stores them.
-//! - Request links are rows of bundled's `request_task` model, store
+//! - Request links are rows of bundled's `request_task_next` model (TEMPORARY, the flip renames it `request_task`), store
 //!   `oxplow`, with core's `at` and `turn_id` (an old
 //!   basis `command` is `edited` there).
 //!
@@ -51,8 +51,8 @@ const STORE: &str = "oxtask";
 const TASK_RESOURCE: &str = "oxplow/task";
 const MODEL: &str = "oxplow/task_record";
 const MODEL_TABLE: &str = "model__oxplow__task_record";
-const LINK_MODEL_TABLE: &str = "model__oxplow__request_task";
-const LINK_RESOURCE: &str = "oxplow/request_task";
+const LINK_MODEL_TABLE: &str = "model__oxplow__request_task_next";
+const LINK_RESOURCE: &str = "oxplow/request_task_next";
 const PERSON: &str = "oxplow:oxplow/person";
 
 struct Task {
@@ -249,7 +249,7 @@ fn sql(e: rusqlite::Error) -> DomainError {
 fn main_half(tx: &Transaction<'_>, replace: bool) -> Result<Moved, DomainError> {
     if !table_exists(tx, MODEL_TABLE)? || !table_exists(tx, LINK_MODEL_TABLE)? {
         return Err(DomainError::Invalid(
-            "bundled's task or request_task model is missing: \
+            "bundled's task or request_task_next model is missing: \
              boot the new oxplow once first, with oxplow-bundled enabled"
                 .into(),
         ));
@@ -988,7 +988,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert!(uri.starts_with("oxplow:oxplow/request_task?"), "{uri}");
+        assert!(uri.starts_with("oxplow:oxplow/request_task_next?"), "{uri}");
 
         // A second run is refused (the store has the three and the new one).
         let e = move_to_oxtask(dir.path(), false, false).await.unwrap_err();

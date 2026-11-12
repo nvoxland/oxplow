@@ -130,10 +130,10 @@ cargo run -q -p oxplow-dev -- --help
 extension's own file (`.oxplow/extensions-data/oxtask.sqlite`) and bundled's
 fields (`.context/models.md` "The switch"). Run it with oxplow quit, after
 the new binary booted once on the project (so bundled's `task_record` model
-and `request_task` model tables exist). Each task keeps its
+and `request_task_next` model tables exist). Each task keeps its
 number (so `tsk<N>` and its URI), links and notes go to the store, an
 assignment becomes the `oxplow` fields `assignee` and `rank`, and request
-links go to the `oxplow/request_task` model's table (basis `command` becomes `edited`; core's `at` and `turn_id` are kept). It reads core's
+links go to the `oxplow/request_task_next` model's table (TEMPORARY, renamed at the flip) (basis `command` becomes `edited`; core's `at` and `turn_id` are kept). It reads core's
 tables and deletes nothing there; it refuses when the store already has
 tasks; `--dry-run` does it all and keeps nothing.
 
@@ -143,7 +143,7 @@ instance lock as `extension deploy` does and refuses while oxplow runs.
 The main database commits first (every write in it is idempotent), then
 the store file; `--replace` deletes the store file, the `oxplow`-namespace
 fields of the `oxplow/task_record` model and every row of the
-`oxplow/request_task` model (store `oxplow`) first, in the same transactions, so a move made earlier can be
+`oxplow/request_task_next` model (store `oxplow`) first, in the same transactions, so a move made earlier can be
 redone (with `--dry-run` it works on a scratch file and keeps nothing).
 Its rules:
 

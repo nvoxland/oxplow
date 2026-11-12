@@ -1,5 +1,5 @@
 # Links the request of the turn a task changed in to that task (a row of the
-# `oxplow/request_task` model, store `oxplow`). It runs for a task_record
+# `oxplow/request_task_next` model, store `oxplow`; TEMPORARY, the flip renames it `request_task`). It runs for a task_record
 # change whose cause is `trigger` or `fields` (the manifest's `where:`), so
 # a reconcile links nothing.
 #
@@ -27,7 +27,7 @@ def transform(x):
         basis = "assigned"
     else:
         basis = "edited"
-    return {"models": [{"model": "oxplow/request_task", "store": "oxplow", "upsert": [{
+    return {"models": [{"model": "oxplow/request_task_next", "store": "oxplow", "upsert": [{
         "key": r["request"] + "|" + p["uri"] + "|" + basis,
         "request": r["request"],
         "task": p["uri"],

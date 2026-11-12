@@ -1,19 +1,15 @@
 # The rail's Work panel run whole: the body groups the thread's tasks, the
 # collapsed line is the task in progress, and the header has no count.
-requires: [oxtask]
 given:
-  - { command: oxtask.task.create, input: { title: Shipped, stage: ready } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Doing it, stage: ready } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Next up, stage: ready } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk3&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxplow.task.create, input: { title: Shipped, stage: todo, assignee: thr1 }, bind: shipped }
+  - { command: oxplow.task.create, input: { title: Doing it, stage: todo, assignee: thr1 }, bind: doing }
+  - { command: oxplow.task.create, input: { title: Next up, stage: todo, assignee: thr1 } }
   - observe:
       turn:
         prompt: Ship it, then start the next one
         during:
-          - { command: oxtask.task.move, input: { id: tsk1, stage: done }, as: agent }
-          - { command: oxtask.task.move, input: { id: tsk2, stage: in_progress }, as: agent }
+          - { command: oxplow.task.transition, input: { uri: $shipped.uri, to: done }, as: agent }
+          - { command: oxplow.task.transition, input: { uri: $doing.uri, to: in_progress }, as: agent }
 when: { panel: work }
 expect:
   body:

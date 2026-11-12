@@ -442,8 +442,10 @@ fields:                        # oxplow's own annotations on every store's tasks
   `native_id` = id, `native` = the store's own fields, `assignee`, `rank`,
   `stage_title`…), so its readers move with no change. Core's `v_task`
   goes in the same publication (two can't both exist).
-- **Request links** are bundled's own model, `oxplow/request_task`
-  (`v_oxplow_request_task`; table `model__oxplow__request_task`), written
+- **Request links** are bundled's own model, `oxplow/request_task_next`
+  (TEMPORARY, the flip renames it `request_task`; view
+  `v_oxplow_request_task_next`, table `model__oxplow__request_task_next`,
+  as `task_next` is the temporary `task`), written
   by its collector `oxplow.request_task` as a reaction to
   `oxplow.task_record.changed` events with `cause: trigger` or `fields`.
   It is owner-only (not `open`), with one store, `oxplow`, named in
@@ -456,9 +458,13 @@ fields:                        # oxplow's own annotations on every store's tasks
   change, where an entity table is dropped and rebuilt empty, and links
   moved from core can't be rebuilt from anything. No edge is stated: a
   column's edge projects from the row's own URI, not from the request to
-  the task, so none fits. Until the flip it shadows core's `request_task`
-  dataset inside bundled, so bundled's `thread_tasks` and `deviation`
-  read it, with `task_next` for the tasks.
+  the task, so none fits. Until the flip it has the `_next` name so that,
+  inside bundled, `ref('request_task')` is still core's dataset (a
+  bundled dataset of the same name would shadow it): `thread_tasks` and
+  `deviation` keep reading core's `request_task` and `task`, which is
+  what the live app (core's tracker, oxtask off) fills. The flip's
+  `move --replace` rewrites every link from core's table, so the rename
+  costs nothing.
 
 ## The switch, as decided after the 2026-11-12 review
 
@@ -486,6 +492,30 @@ fields:                        # oxplow's own annotations on every store's tasks
   with a before/after comparison), then flips the reads (bundled's `task`
   dataset, the resources' `resolve` / `searchable`), and only then deletes
   core's task verbs, tables and projection.
+- **At the flip, `thread_tasks` and `deviation` move to the models.** They
+  read `ref('request_task')` and `ref('task')` of core; at the flip they
+  read the renamed model `request_task` (`thread` is a thread URI where
+  core had `thread_id`; `request` a URI where core had `request_id`, so
+  they join `ref('thread')` / `ref('request')` on `uri`) and `task`
+  (the model-based dataset). Their fixtures move from core's
+  `oxplow.task.*` commands to oxtask's (`requires: [oxtask]`,
+  `oxtask.task.create` / `move` / `update` / `comment`, assignees through
+  `oxplow.tasks.assign`, stage `todo` is `ready`). These fixtures: the
+  Work panel and line ones (`work-panel-collapses-to-the-active-task`,
+  `work-panel-finished-needs-a-transition-by-the-thread`,
+  `work-panel-groups-a-threads-work`,
+  `work-panel-lists-every-ready-task-and-the-last-20-finished`,
+  `work-panel-now-is-the-threads-latest-request`,
+  `work-panel-orders-an-epic-with-its-children-before-stand-alone-tasks`,
+  `work-panel-shows-the-active-item-under-its-epic`,
+  `work-line-shows-the-last-finished-when-nothing-is-in-progress`,
+  `work-shows-only-the-active-task-tracker`) and the deviation ones
+  (`deviation-lists-files-a-request-changed-outside-its-tasks-area`,
+  `what-deviated-lists-files-outside-the-tasks-stated-area`). The
+  converted text is in git history: commit `b790396f4` (the datasets'
+  `ref('task_next')` lines and these fixtures' oxtask versions), the
+  dropped tracker-none step of `work-shows-only-the-active-task-tracker`
+  returns with them, since `task` follows the active tracker.
 - **Before the deletes:** the provider `read` adapter, and the boot repair
   over models and their children (core's repair goes with the task
   projection).

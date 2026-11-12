@@ -1,101 +1,66 @@
 # Grown to the whole rail, the Work panel has the thread's whole queue:
 # every task assigned to it next, and the last 20 done tasks its requests
 # worked on (the rail itself shows 8 rows and "+N more" until it grows).
-requires: [oxtask]
 given:
-  - { command: oxtask.task.create, input: { title: Ready 1, stage: ready } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Ready 2, stage: ready } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Ready 3, stage: ready } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk3&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Ready 4, stage: ready } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk4&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Ready 5, stage: ready } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk5&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Ready 6, stage: ready } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk6&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Ready 7, stage: ready } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk7&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Ready 8, stage: ready } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk8&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Ready 9, stage: ready } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk9&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Ready 10, stage: ready } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk10&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Ready 11, stage: ready } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk11&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Ready 12, stage: ready } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk12&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Done 1, stage: in_progress } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk13&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Done 2, stage: in_progress } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk14&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Done 3, stage: in_progress } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk15&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Done 4, stage: in_progress } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk16&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Done 5, stage: in_progress } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk17&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Done 6, stage: in_progress } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk18&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Done 7, stage: in_progress } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk19&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Done 8, stage: in_progress } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk20&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Done 9, stage: in_progress } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk21&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Done 10, stage: in_progress } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk22&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Done 11, stage: in_progress } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk23&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Done 12, stage: in_progress } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk24&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Done 13, stage: in_progress } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk25&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Done 14, stage: in_progress } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk26&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Done 15, stage: in_progress } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk27&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Done 16, stage: in_progress } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk28&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Done 17, stage: in_progress } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk29&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Done 18, stage: in_progress } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk30&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Done 19, stage: in_progress } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk31&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Done 20, stage: in_progress } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk32&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Done 21, stage: in_progress } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk33&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxplow.task.create, input: { title: Ready 1, stage: todo, assignee: thr1 } }
+  - { command: oxplow.task.create, input: { title: Ready 2, stage: todo, assignee: thr1 } }
+  - { command: oxplow.task.create, input: { title: Ready 3, stage: todo, assignee: thr1 } }
+  - { command: oxplow.task.create, input: { title: Ready 4, stage: todo, assignee: thr1 } }
+  - { command: oxplow.task.create, input: { title: Ready 5, stage: todo, assignee: thr1 } }
+  - { command: oxplow.task.create, input: { title: Ready 6, stage: todo, assignee: thr1 } }
+  - { command: oxplow.task.create, input: { title: Ready 7, stage: todo, assignee: thr1 } }
+  - { command: oxplow.task.create, input: { title: Ready 8, stage: todo, assignee: thr1 } }
+  - { command: oxplow.task.create, input: { title: Ready 9, stage: todo, assignee: thr1 } }
+  - { command: oxplow.task.create, input: { title: Ready 10, stage: todo, assignee: thr1 } }
+  - { command: oxplow.task.create, input: { title: Ready 11, stage: todo, assignee: thr1 } }
+  - { command: oxplow.task.create, input: { title: Ready 12, stage: todo, assignee: thr1 } }
+  - { command: oxplow.task.create, input: { title: Done 1, stage: in_progress, assignee: thr1 }, bind: d1 }
+  - { command: oxplow.task.create, input: { title: Done 2, stage: in_progress, assignee: thr1 }, bind: d2 }
+  - { command: oxplow.task.create, input: { title: Done 3, stage: in_progress, assignee: thr1 }, bind: d3 }
+  - { command: oxplow.task.create, input: { title: Done 4, stage: in_progress, assignee: thr1 }, bind: d4 }
+  - { command: oxplow.task.create, input: { title: Done 5, stage: in_progress, assignee: thr1 }, bind: d5 }
+  - { command: oxplow.task.create, input: { title: Done 6, stage: in_progress, assignee: thr1 }, bind: d6 }
+  - { command: oxplow.task.create, input: { title: Done 7, stage: in_progress, assignee: thr1 }, bind: d7 }
+  - { command: oxplow.task.create, input: { title: Done 8, stage: in_progress, assignee: thr1 }, bind: d8 }
+  - { command: oxplow.task.create, input: { title: Done 9, stage: in_progress, assignee: thr1 }, bind: d9 }
+  - { command: oxplow.task.create, input: { title: Done 10, stage: in_progress, assignee: thr1 }, bind: d10 }
+  - { command: oxplow.task.create, input: { title: Done 11, stage: in_progress, assignee: thr1 }, bind: d11 }
+  - { command: oxplow.task.create, input: { title: Done 12, stage: in_progress, assignee: thr1 }, bind: d12 }
+  - { command: oxplow.task.create, input: { title: Done 13, stage: in_progress, assignee: thr1 }, bind: d13 }
+  - { command: oxplow.task.create, input: { title: Done 14, stage: in_progress, assignee: thr1 }, bind: d14 }
+  - { command: oxplow.task.create, input: { title: Done 15, stage: in_progress, assignee: thr1 }, bind: d15 }
+  - { command: oxplow.task.create, input: { title: Done 16, stage: in_progress, assignee: thr1 }, bind: d16 }
+  - { command: oxplow.task.create, input: { title: Done 17, stage: in_progress, assignee: thr1 }, bind: d17 }
+  - { command: oxplow.task.create, input: { title: Done 18, stage: in_progress, assignee: thr1 }, bind: d18 }
+  - { command: oxplow.task.create, input: { title: Done 19, stage: in_progress, assignee: thr1 }, bind: d19 }
+  - { command: oxplow.task.create, input: { title: Done 20, stage: in_progress, assignee: thr1 }, bind: d20 }
+  - { command: oxplow.task.create, input: { title: Done 21, stage: in_progress, assignee: thr1 }, bind: d21 }
   - observe:
       turn:
         prompt: Finish them all
         during:
-          - { command: oxtask.task.move, input: { id: tsk13, stage: done }, as: agent }
-          - { command: oxtask.task.move, input: { id: tsk14, stage: done }, as: agent }
-          - { command: oxtask.task.move, input: { id: tsk15, stage: done }, as: agent }
-          - { command: oxtask.task.move, input: { id: tsk16, stage: done }, as: agent }
-          - { command: oxtask.task.move, input: { id: tsk17, stage: done }, as: agent }
-          - { command: oxtask.task.move, input: { id: tsk18, stage: done }, as: agent }
-          - { command: oxtask.task.move, input: { id: tsk19, stage: done }, as: agent }
-          - { command: oxtask.task.move, input: { id: tsk20, stage: done }, as: agent }
-          - { command: oxtask.task.move, input: { id: tsk21, stage: done }, as: agent }
-          - { command: oxtask.task.move, input: { id: tsk22, stage: done }, as: agent }
-          - { command: oxtask.task.move, input: { id: tsk23, stage: done }, as: agent }
-          - { command: oxtask.task.move, input: { id: tsk24, stage: done }, as: agent }
-          - { command: oxtask.task.move, input: { id: tsk25, stage: done }, as: agent }
-          - { command: oxtask.task.move, input: { id: tsk26, stage: done }, as: agent }
-          - { command: oxtask.task.move, input: { id: tsk27, stage: done }, as: agent }
-          - { command: oxtask.task.move, input: { id: tsk28, stage: done }, as: agent }
-          - { command: oxtask.task.move, input: { id: tsk29, stage: done }, as: agent }
-          - { command: oxtask.task.move, input: { id: tsk30, stage: done }, as: agent }
-          - { command: oxtask.task.move, input: { id: tsk31, stage: done }, as: agent }
-          - { command: oxtask.task.move, input: { id: tsk32, stage: done }, as: agent }
-          - { command: oxtask.task.move, input: { id: tsk33, stage: done }, as: agent }
-  - { command: oxtask.task.create, input: { title: Still going, stage: in_progress } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk34&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+          - { command: oxplow.task.transition, input: { uri: $d1.uri, to: done }, as: agent }
+          - { command: oxplow.task.transition, input: { uri: $d2.uri, to: done }, as: agent }
+          - { command: oxplow.task.transition, input: { uri: $d3.uri, to: done }, as: agent }
+          - { command: oxplow.task.transition, input: { uri: $d4.uri, to: done }, as: agent }
+          - { command: oxplow.task.transition, input: { uri: $d5.uri, to: done }, as: agent }
+          - { command: oxplow.task.transition, input: { uri: $d6.uri, to: done }, as: agent }
+          - { command: oxplow.task.transition, input: { uri: $d7.uri, to: done }, as: agent }
+          - { command: oxplow.task.transition, input: { uri: $d8.uri, to: done }, as: agent }
+          - { command: oxplow.task.transition, input: { uri: $d9.uri, to: done }, as: agent }
+          - { command: oxplow.task.transition, input: { uri: $d10.uri, to: done }, as: agent }
+          - { command: oxplow.task.transition, input: { uri: $d11.uri, to: done }, as: agent }
+          - { command: oxplow.task.transition, input: { uri: $d12.uri, to: done }, as: agent }
+          - { command: oxplow.task.transition, input: { uri: $d13.uri, to: done }, as: agent }
+          - { command: oxplow.task.transition, input: { uri: $d14.uri, to: done }, as: agent }
+          - { command: oxplow.task.transition, input: { uri: $d15.uri, to: done }, as: agent }
+          - { command: oxplow.task.transition, input: { uri: $d16.uri, to: done }, as: agent }
+          - { command: oxplow.task.transition, input: { uri: $d17.uri, to: done }, as: agent }
+          - { command: oxplow.task.transition, input: { uri: $d18.uri, to: done }, as: agent }
+          - { command: oxplow.task.transition, input: { uri: $d19.uri, to: done }, as: agent }
+          - { command: oxplow.task.transition, input: { uri: $d20.uri, to: done }, as: agent }
+          - { command: oxplow.task.transition, input: { uri: $d21.uri, to: done }, as: agent }
+  - { command: oxplow.task.create, input: { title: Still going, stage: in_progress, assignee: thr1 } }
 when: { part: oxplow/work-panel, params: { thread_id: 1 } }
 expect:
   loaders:

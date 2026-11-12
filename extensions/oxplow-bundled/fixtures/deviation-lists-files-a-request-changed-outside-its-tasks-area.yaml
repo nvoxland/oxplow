@@ -1,14 +1,13 @@
 # The files a request changed outside the area its task names: a file is in
 # the area when the task's title or body names it, or a directory of it at
 # least two levels deep. A request on a task that names no area has none.
-requires: [oxtask]
 given:
-  - { command: oxtask.task.create, input: { title: "Fix src/ui/panel.rs" } }
+  - { command: oxplow.task.create, input: { title: "Fix src/ui/panel.rs" }, bind: item }
   - observe:
       turn:
         prompt: Fix the panel
         during:
-          - { command: oxtask.task.move, input: { id: tsk1, stage: in_progress }, as: agent }
+          - { command: oxplow.task.transition, input: { uri: $item.uri, to: in_progress }, as: agent }
         tools:
           - { name: Edit, kind: edit, paths: [src/ui/panel.rs], ok: true }
           - { name: Edit, kind: edit, paths: [src/ui/other.rs], ok: true }

@@ -134,8 +134,11 @@ effects:
     where: { cause: trigger }
     entry: effects/assign_on_start.star
 # What a request's work touched: one row per request, task and basis.
+# TEMPORARY (the flip renames the model, its resource and its view
+# `request_task`): until then core's `request_task` dataset is still what
+# `ref('request_task')` reads.
 resources:
-  - name: request_task
+  - name: request_task_next
     label: Request link
     description: "A link from a request to a task its turns changed, and how (filed, transition, assigned, edited; prompt for a link moved from core, where a person's prompt named the task)."
     params:
@@ -144,13 +147,13 @@ resources:
 # The shared task and knowledge models every store fills, and oxplow's
 # own fields on a task (who it is assigned to, its place in their queue).
 # Stores write them through their collectors; this extension's own model
-# (`request_task`) is written by its own collector.
+# (`request_task_next`) is written by its own collector.
 fills:
-  - model: oxplow/request_task
+  - model: oxplow/request_task_next
     stores: [oxplow]
 models:
-  - name: request_task
-    resource: request_task
+  - name: request_task_next
+    resource: request_task_next
     key: key
     columns:
       # request|task|basis: the row's name.
@@ -462,7 +465,7 @@ collectors:
                       WHERE pt.request_id = t.request_id)
     facts: [oxplow.request_tracked]
   - id: oxplow.request_task
-    doc: "Links the request of the turn a task changed in to the task (the `oxplow/request_task` model), when the change's cause is a command or a field write (a reconcile links nothing)."
+    doc: "TEMPORARY (the flip renames its model `request_task`): links the request of the turn a task changed in to the task (the `oxplow/request_task_next` model), when the change's cause is a command or a field write (a reconcile links nothing)."
     runtime: starlark
     entry: collectors/request/task_links.star
     on: [oxplow.task_record.changed]

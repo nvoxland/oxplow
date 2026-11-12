@@ -2,19 +2,13 @@
 # stand-alone tasks, whatever their place in the queue; a sibling in
 # progress on another thread is shown but is not this thread's active task
 # and says nothing of what it is doing.
-requires: [oxtask]
 given:
   - { command: oxplow.thread.create, input: { stream: str1, title: Beta }, bind: beta }
-  - { command: oxtask.task.create, input: { title: Standalone first, stage: in_progress } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: The epic, stage: ready } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Mine, stage: in_progress, parent: tsk2 } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk3&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-  - { command: oxtask.task.create, input: { title: Theirs, stage: in_progress, parent: tsk2 } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk4&provider=oxtask", to: "oxplow:oxplow/thread?id=thr2" } }
-  - { command: oxtask.task.create, input: { title: Standalone last, stage: in_progress } }
-  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk5&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxplow.task.create, input: { title: Standalone first, stage: in_progress, assignee: thr1 } }
+  - { command: oxplow.task.create, input: { title: The epic, assignee: thr1 }, bind: epic }
+  - { command: oxplow.task.create, input: { title: Mine, stage: in_progress, assignee: thr1, parent_uri: $epic.uri } }
+  - { command: oxplow.task.create, input: { title: Theirs, stage: in_progress, assignee: $beta.id, parent_uri: $epic.uri } }
+  - { command: oxplow.task.create, input: { title: Standalone last, stage: in_progress, assignee: thr1 } }
 when: { part: oxplow/work-panel, params: { thread_id: 1 } }
 expect:
   loaders:
