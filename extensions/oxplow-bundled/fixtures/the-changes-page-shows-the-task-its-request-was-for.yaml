@@ -1,0 +1,24 @@
+# The Changes page of a request shows the first task its request worked on
+# and that task's description: bundled's two sections of foundation's page
+# (parts mounted in its `sections` slot, which reads no task). A turn's
+# changes, or a range picked with an end, show neither.
+given:
+  - { command: oxplow.task.create, input: { title: Fix the hover state, body: "Make the hover state clearer." }, bind: item }
+  - observe:
+      turn:
+        prompt: Fix the hover state
+        during:
+          - { command: oxplow.task.transition, input: { uri: $item.uri, to: in_progress }, as: agent }
+when: { part: change-task, params: { uri: "oxplow:oxplow/request?id=req1", end: "" } }
+expect:
+  loaders:
+    change_task: { rows: [{ item: Fix the hover state, item_ref: $item.uri }] }
+steps:
+  - when: { part: change-task-description, params: { uri: "oxplow:oxplow/request?id=req1", end: "" } }
+    expect: { loaders: { description: { rows: [{ body: Make the hover state clearer. }] } } }
+  - when: { part: change-task, params: { uri: "oxplow:oxplow/turn?id=trn1", end: "" } }
+    expect: { loaders: { change_task: { rows: 0 } } }
+  - when: { part: change-task, params: { uri: "oxplow:oxplow/request?id=req1", end: "working" } }
+    expect: { loaders: { change_task: { rows: 0 } } }
+  - when: { part: change-task-description, params: { uri: "oxplow:oxplow/turn?id=trn1", end: "" } }
+    expect: { loaders: { description: { rows: 0 } } }

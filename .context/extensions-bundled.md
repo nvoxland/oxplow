@@ -506,15 +506,29 @@ moved page, metric or dimension keeps its id.
   gated on `task_tracker`; it moves with them), the `task` resource and the
   `oxplow.task.*` descriptors.
 - **Pages:** none of `closed-threads`, `diff-view`, `local-history`,
-  `request-summary` and `thread-sessions` is a task page; each shows tasks
-  in part. `request-summary` is split: its Tasks section is bundled's part
-  `request-tasks`, mounted at `oxplow/request-summary.sections` after the
-  About section (same look, same position), and foundation's page reads no
-  task. The other four weave tasks into columns or SQL expressions
-  (closed-threads' and thread-sessions' Tasks column, the Changes page's
-  task column and item/body sections, local-history's take subjects built
-  from task titles), which a section cannot replace without changing the
-  page; they still read `v_task` / `v_request_task`.
+  `request-summary` and `thread-sessions` is a task page; each showed tasks
+  in part. Foundation's versions now read no task, and bundled adds the
+  task facts back through the existing extension points:
+  - `request-summary`: its Tasks section is bundled's part `request-tasks`,
+    mounted at `oxplow/request-summary.sections` after About (same look).
+  - `diff-view` (Changes): the hidden `task` column, the Task row of the
+    header and the Description section are gone; bundled's parts
+    `change-task` and `change-task-description` are mounted at
+    `oxplow/diff-view.sections` after the header (a request's, not a turn's
+    or a range's, as before).
+  - `closed-threads`: the Tasks column is gone, the thread title links to
+    the thread's URI, and bundled's decorator on `oxplow/thread` rows
+    (dataset `thread_work_badge`) puts "3 done · 1 open" after it.
+  - `thread-sessions`: the Tasks column is gone, the session name links to
+    the session's URI, a subagent's tool-call count has its own Activity
+    column, and a decorator on `oxplow/agent_session` rows (dataset
+    `session_task_badge`) puts one badge per task (its title) after it.
+  - `local-history`: a snapshot's subject names the turn that took it
+    ("completed: turn 2", "in flight: turn 3") and bundled's decorator on
+    `oxplow/snapshot` rows (dataset `snapshot_work_badge`) adds "completed: X"
+    / "in flight: X" badges per task. A small look change.
+  The decorators' limits hold: a label is at most 40 characters and an
+  extension puts at most 3 on one URI.
 
 ## Added for extraction
 

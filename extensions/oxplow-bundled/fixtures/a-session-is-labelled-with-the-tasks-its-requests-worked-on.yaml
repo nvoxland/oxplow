@@ -1,6 +1,7 @@
-# A session's `tasks` column names the tasks the requests of its turns
-# worked on, in the order they were first worked on.
-requires: [oxplow-bundled]
+# A session's tasks are bundled's labels after it in Thread sessions (a
+# `row-badge` decorator on agent session rows): one per task the requests of
+# its turns worked on, in the order they were first worked on. (Thread
+# sessions itself, foundation's, reads no task.)
 given:
   - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude }, bind: ses }
   - { command: oxplow.task.create, input: { title: First task }, bind: one }
@@ -17,9 +18,5 @@ given:
         prompt: do two
         during:
           - { command: oxplow.task.transition, input: { uri: $two.uri, to: in_progress }, as: agent }
-when: { page: oxplow/thread-sessions, params: { thread: thr1 } }
-expect:
-  loaders:
-    thread_sessions:
-      rows:
-        - { harness: claude, tasks: "First task; Second task" }
+when: { sql: "SELECT label FROM v_oxplow_session_task_badge ORDER BY label" }
+expect: { rows: [{ label: First task }, { label: Second task }] }
