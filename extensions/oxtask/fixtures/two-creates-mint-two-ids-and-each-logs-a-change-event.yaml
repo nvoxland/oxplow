@@ -4,7 +4,7 @@ requires: [oxplow-bundled, oxtask]
 given:
   - { command: oxtask.task.create, input: { title: First } }
 when: { command: oxtask.task.create, input: { title: Second } }
-expect: { ok: true }
+expect: { ok: true, result: { id: tsk2 } }
 steps:
   - when: { sql: "SELECT id, title, state FROM v_oxplow_task_record ORDER BY id" }
     expect:

@@ -18,13 +18,16 @@ oxplow's own task tracker, as an extension in its own namespace
   upserts, with their whole link and comment sets, and the deleted ones as
   deletes.
 - **Commands** `oxtask.task.create | update | move | link | unlink | comment
-  | delete | restore`. Each composes `oxplow.extension_store.write`.
-  `update`, `move`, `link`, `unlink`, `delete` and `restore` return an
-  `inverse`, so they are undoable. `create` and `comment` are not: they mint
-  their id in the insert, so the script cannot name the row it makes.
-- **A minted id** is in the write's `rows` (the run's children), not in the
-  command's `result`. A caller that needs it reads the run's children, or
-  finds the task by title.
+  | uncomment | delete | restore`. Each composes
+  `oxplow.extension_store.write`. All but `uncomment` return an `inverse`,
+  so they are undoable; `uncomment` is the undo of `comment`.
+- **A minted id** comes back in the command's `result`. `create` and
+  `comment` mint it in the insert (`RETURNING id`); the script's `finish`
+  reads it from the write's `rows` once the write landed, and returns it as
+  `result` (`{ id, stage }`, `{ id, comment }`) with the inverse that deletes
+  the task or removes the comment.
+- **Author** of a task or comment is who ran the command, `x["actor"]["uri"]`
+  (a person: `oxplow:oxplow/person`; an agent: its thread's URI).
 - Assignment and rank are bundled's fields, not oxtask's.
 
 Fixtures in `fixtures/` run on a throwaway oxplow with bundled on:
