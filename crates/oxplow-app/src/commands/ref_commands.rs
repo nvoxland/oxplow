@@ -43,10 +43,15 @@ pub fn key_of(ui: &CommandUi) -> Option<OfferKey> {
 }
 
 /// Whether `ui`'s store filter lets an item with `params` through: some
-/// entry of `accepts.store` is the item's `store` exactly, or holds for it
+/// entry of `accepts.store` is the item's store (the param `store_param`
+/// names) exactly, or holds for it
 /// as a renderer's `accepts: { store: <rule> }` does
 /// ([`crate::pages::renderers::takes`]). No filter: every item.
-pub fn store_accepted(ui: &CommandUi, params: &BTreeMap<String, String>) -> bool {
+pub fn store_accepted(
+    ui: &CommandUi,
+    params: &BTreeMap<String, String>,
+    store_param: &str,
+) -> bool {
     let Some(filter) = ui
         .about
         .as_ref()
@@ -55,7 +60,7 @@ pub fn store_accepted(ui: &CommandUi, params: &BTreeMap<String, String>) -> bool
     else {
         return true;
     };
-    let store = params.get("store");
+    let store = params.get(store_param);
     filter.rules().into_iter().any(|rule| {
         store.is_some_and(|s| s == rule)
             || crate::pages::renderers::takes(
@@ -63,6 +68,17 @@ pub fn store_accepted(ui: &CommandUi, params: &BTreeMap<String, String>) -> bool
                 params,
             )
     })
+}
+
+/// The param that names an item's store: the one its shared model declares
+/// (`store_param`) when a model's resource is `resource`, else `store`.
+pub fn store_param_of(registry: &crate::models::ModelRegistry, resource: &str) -> String {
+    registry
+        .models
+        .values()
+        .find(|m| m.decl.resource == resource)
+        .map(|m| m.decl.store_param.clone())
+        .unwrap_or_else(|| "store".to_string())
 }
 
 /// The commands of `specs` offered under `key`: for an item key, those of
@@ -73,6 +89,7 @@ pub fn offered<'a>(
     specs: &'a [CommandSpec],
     key: &OfferKey,
     params: &BTreeMap<String, String>,
+    store_param: &str,
 ) -> Vec<&'a CommandSpec> {
     specs
         .iter()
@@ -80,7 +97,7 @@ pub fn offered<'a>(
             let Some(ui) = &s.ui else { return false };
             key_of(ui).as_ref() == Some(key)
                 && match key {
-                    OfferKey::Item(_) => store_accepted(ui, params),
+                    OfferKey::Item(_) => store_accepted(ui, params, store_param),
                     OfferKey::Point(_) => true,
                 }
         })
@@ -99,7 +116,8 @@ pub async fn ref_commands(svc: &Services, uri: &str) -> Result<Vec<String>, Stri
     };
     let key = OfferKey::Item(parsed.resource().to_string());
     let all = svc.commands.list(&Actor::Human);
-    let about = offered(&all, &key, parsed.params());
+    let store_param = store_param_of(&svc.models.current(), &parsed.resource().to_string());
+    let about = offered(&all, &key, parsed.params(), &store_param);
     // One read of the row, and only when some command's offer depends on it.
     let conditional = about
         .iter()
@@ -170,8 +188,12 @@ mod tests {
     }
 
     fn params(store: Option<&str>) -> BTreeMap<String, String> {
+        params_named("store", store)
+    }
+
+    fn params_named(name: &str, store: Option<&str>) -> BTreeMap<String, String> {
         store
-            .map(|s| ("store".to_string(), s.to_string()))
+            .map(|s| (name.to_string(), s.to_string()))
             .into_iter()
             .collect()
     }
@@ -187,13 +209,20 @@ mod tests {
         ];
         let item = OfferKey::Item("x/thing".into());
         let point = OfferKey::Point("x/thing.new".into());
-        assert_eq!(ids(offered(&specs, &item, &params(None))), ["a.item"]);
-        assert_eq!(ids(offered(&specs, &point, &params(None))), ["a.point"]);
+        assert_eq!(
+            ids(offered(&specs, &item, &params(None), "store")),
+            ["a.item"]
+        );
+        assert_eq!(
+            ids(offered(&specs, &point, &params(None), "store")),
+            ["a.point"]
+        );
         assert_eq!(
             ids(offered(
                 &specs,
                 &OfferKey::Point("x/other".into()),
-                &params(None)
+                &params(None),
+                "store"
             )),
             Vec::<&str>::new()
         );
@@ -226,7 +255,7 @@ mod tests {
         ];
         let key = OfferKey::Item("x/t".into());
         let at = |store| {
-            let mut found = ids(offered(&specs, &key, &params(store)));
+            let mut found = ids(offered(&specs, &key, &params(store), "store"));
             found.sort();
             found
         };
@@ -235,5 +264,44 @@ mod tests {
         assert_eq!(at(Some("git-hub")), ["any", "pat"]);
         assert_eq!(at(Some("other")), ["any"]);
         assert_eq!(at(None), ["any", "none"]);
+    }
+
+    /// A shared model may name its store by another param (tasks keep
+    /// `provider`): the filter reads that one, and the name comes from the
+    /// model whose resource the item is, else `store`.
+    #[test]
+    fn a_store_filter_reads_the_param_the_model_names_its_store_by() {
+        let specs = vec![spec(
+            "one",
+            json!({ "label": "One", "about": { "resource": "x/t", "accepts": { "store": "oxtask" } } }),
+        )];
+        let key = OfferKey::Item("x/t".into());
+        let by_provider = params_named("provider", Some("oxtask"));
+        assert_eq!(
+            ids(offered(&specs, &key, &by_provider, "provider")),
+            ["one"]
+        );
+        assert!(offered(&specs, &key, &by_provider, "store").is_empty());
+
+        let mut registry = crate::models::ModelRegistry::default();
+        registry.models.insert(
+            "x/t".into(),
+            crate::models::ModelSpec {
+                decl: oxplow_db::model_store::ModelDecl {
+                    extension: "x".into(),
+                    namespace: "x".into(),
+                    name: "t".into(),
+                    resource: "x/t".into(),
+                    key: "id".into(),
+                    store_param: "provider".into(),
+                    search: None,
+                    columns: vec![],
+                },
+                open: true,
+                change_event: None,
+            },
+        );
+        assert_eq!(store_param_of(&registry, "x/t"), "provider");
+        assert_eq!(store_param_of(&registry, "x/other"), "store");
     }
 }
