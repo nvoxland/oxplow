@@ -1007,6 +1007,7 @@ const TASK_IMPLEMENTATION: &[(&str, &str)] = &[
     ("crates/oxplow-app/src/tasks.rs", "the built-in factory: `oxplow:oxtask` is oxplow_oxtask's verbs"),
     ("crates/oxplow-app/src/lib.rs", "wires the task stores into Services"),
     ("crates/oxplow-dev/src/main.rs", "oxplow's own task CLI, over its tables"),
+    ("crates/oxplow-dev/src/move_tasks.rs", "the one-off move of core's tasks into the oxtask extension's file; goes with core's tables"),
 ];
 
 /// The implementation's own crate.
