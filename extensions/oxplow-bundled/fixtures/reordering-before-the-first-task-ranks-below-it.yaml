@@ -1,6 +1,6 @@
-# Tasks assigned by an agent starting them have no rank; the first reorder numbers the
-# queue in its shown order with the moved task in its new place, and undo
-# puts the missing ranks back.
+# An agent starting tasks puts each last in its thread's queue (ranks 0, 1,
+# 2); moving the last before the first ranks it just below, and undo puts
+# its rank back.
 requires: [oxtask]
 given:
   - observe:
@@ -16,11 +16,11 @@ given:
 when:
   command: oxplow.tasks.reorder
   input: { uri: "oxplow:oxplow/task?id=tsk3&provider=oxtask", before: "oxplow:oxplow/task?id=tsk1&provider=oxtask" }
-expect: { ok: true, result: { rank: 0 } }
+expect: { ok: true, result: { rank: -1 } }
 steps:
   - when: { sql: "SELECT title, rank FROM v_oxplow_task_next ORDER BY rank" }
-    expect: { rows: [{ title: C, rank: 0 }, { title: A, rank: 1 }, { title: B, rank: 2 }] }
+    expect: { rows: [{ title: C, rank: -1 }, { title: A, rank: 0 }, { title: B, rank: 1 }] }
   - when: { undo: oxplow.tasks.reorder }
     expect: { ok: true }
   - when: { sql: "SELECT title, rank FROM v_oxplow_task_next ORDER BY title" }
-    expect: { rows: [{ title: A, rank: null }, { title: B, rank: null }, { title: C, rank: null }] }
+    expect: { rows: [{ title: A, rank: 0 }, { title: B, rank: 1 }, { title: C, rank: 2 }] }

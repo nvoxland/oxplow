@@ -1,0 +1,31 @@
+# A link keeps the turn and time of the first evidence, as core's (insert or
+# ignore): a request of three turns (a prompt, then two reports of the
+# background jobs it started) on a task in progress and assigned to its
+# thread has one `assigned` link and one `prompt` link, both from the first
+# turn.
+requires: [oxtask]
+given:
+  - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude }, bind: ses }
+  - { command: oxtask.task.create, input: { title: Held, stage: in_progress } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - observe: { turn: { session: $ses.id, prompt: "work on [oxplow uri oxplow:oxplow/task?id=tsk1&provider=oxtask]", answer: one, tools: [{ name: Bash, kind: shell, command: sleep 1, ok: true, call_id: c1, started_job: j1 }, { name: Bash, kind: shell, command: sleep 2, ok: true, call_id: c2, started_job: j2 }] } }
+  - observe: { turn: { session: $ses.id, prompt: report one, job: c1, answer: two } }
+  - observe: { turn: { session: $ses.id, prompt: report two, job: c2, answer: three } }
+when:
+  sql: |
+    SELECT (SELECT count(DISTINCT request_id) FROM v_agent_turn) AS requests,
+           (SELECT count(*) FROM v_agent_turn) AS turns
+expect: { rows: [{ requests: 1, turns: 3 }] }
+steps:
+  - when:
+      sql: |
+        SELECT basis, turn_id, at <= (SELECT started_at FROM v_agent_turn WHERE id = 2) AS first_time
+          FROM v_oxplow_request_task_next WHERE basis IN ('assigned', 'prompt') ORDER BY basis
+    expect:
+      rows:
+        - { basis: assigned, turn_id: 1, first_time: 1 }
+        - { basis: prompt, turn_id: 1, first_time: 1 }
+  # Core keeps the same turn for the prompt link (the task is not in its
+  # tracker, so it has no `assigned` one).
+  - when: { sql: "SELECT basis, turn FROM v_request_task WHERE basis = 'prompt'" }
+    expect: { rows: [{ basis: prompt, turn: "oxplow:oxplow/turn?id=trn1" }] }

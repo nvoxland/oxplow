@@ -8,7 +8,8 @@
 # change made outside any turn). Returns the (request, task, basis) row,
 # from what the change event says: `filed` for a new item (no state
 # before), `transition` when it moved the state, `assigned` when oxplow's
-# assignee field became this thread, else `edited`. `at` is the change's
+# assignee field became this thread, else `edited` (a change by `fields`
+# links nothing else, and a link already there is left as it is). `at` is the change's
 # time and `turn_id` its turn. Rows accumulate (sync: upsert).
 
 def transform(x):
@@ -25,10 +26,19 @@ def transform(x):
         basis = "transition"
     elif "fields.oxplow.assignee" in changed and after.get("fields.oxplow.assignee") == r["thread_uri"]:
         basis = "assigned"
+    elif p.get("cause") == "fields":
+        # A fields-only change (a reorder, a close's clear of the assignee)
+        # is evidence of nothing; core linked on transition, create, update
+        # and comment only.
+        return {}
     else:
         basis = "edited"
+    key = r["request"] + "|" + p["uri"] + "|" + basis
+    # A link keeps the first evidence (core's insert or ignore).
+    if key in (r["known"] or "").split("\n"):
+        return {}
     return {"models": [{"model": "oxplow/request_task_next", "store": "oxplow", "upsert": [{
-        "key": r["request"] + "|" + p["uri"] + "|" + basis,
+        "key": key,
         "request": r["request"],
         "task": p["uri"],
         "basis": basis,

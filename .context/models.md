@@ -559,7 +559,19 @@ fields:                        # oxplow's own annotations on every store's tasks
     task state when the collector runs, just after the turn's end. The
     older change-event collector also writes `assigned` when an assignment
     to the thread is made in a turn, a superset of core's; the flip may
-    drop it.
+    drop it. After the flip review: **a link keeps its first evidence**
+    (core inserts or ignores): each collector leaves out a key already in
+    `request_task_next`, so a request's later turns don't move its `turn_id`
+    and `at`; **a fields-only change links nothing** (a reorder, the close's
+    clear of the assignee) unless the assignee became the turn's thread;
+    the **prompt link** goes by the prompt's own source (`person`), not the
+    turn's, so a person's prompt landing in a turn a report started links.
+  - The assign-on-start effect does what core's did: only an agent's start
+    (the change's source is `agent:<thread>`) assigns, through
+    `oxplow.tasks.assign`, so the task goes to the end of the thread's
+    queue; a close clears the assignee and the rank.
+  - The `task_record` model's `title` is markdown like `body`, so a title
+    naming a file or a task keeps its edge (core parsed both).
 - **Before the deletes:** the provider `read` adapter, and the boot repair
   over models and their children (core's repair goes with the task
   projection).

@@ -37,11 +37,14 @@ oxplow-dev task comment <id> <body>
 oxplow-dev task link <id> <target> <blocks|discovered_from|relates_to|duplicates|supersedes|replies_to|about>
 oxplow-dev task unlink <id> <target> <link type>
 
-oxplow-dev task move-to-oxtask [--dry-run] [--replace]
+oxplow-dev task move-to-oxtask [--dry-run] [--replace [--force-discard]]
                                              one-off: move core's tasks into oxtask's own file
                                              and bundled's fields (oxplow quit, the new
                                              binary booted once; --dry-run keeps nothing;
-                                             --replace redoes a move already made)
+                                             --replace redoes a move already made,
+                                             keeping the old file as a backup, and
+                                             refuses to lose tasks core lacks unless
+                                             --force-discard)
 
 oxplow-dev knowledge list [--store oxwiki]   the pages (id, title)
 oxplow-dev knowledge show <id> [--store S]
@@ -106,10 +109,11 @@ async fn run(mut args: Vec<String>, env_thread: Option<String>) -> Result<String
     {
         let dry_run = take_switch(&mut args, "--dry-run");
         let replace = take_switch(&mut args, "--replace");
+        let force_discard = take_switch(&mut args, "--force-discard");
         if args.len() != 2 {
             return Err(format!("usage:\n{USAGE}"));
         }
-        return move_tasks::move_to_oxtask(&project, dry_run, replace).await;
+        return move_tasks::move_to_oxtask(&project, dry_run, replace, force_discard).await;
     }
     match args.first().map(String::as_str) {
         Some("task") => {

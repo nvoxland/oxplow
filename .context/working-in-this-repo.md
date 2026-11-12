@@ -156,6 +156,11 @@ Its rules:
   inherits the task's author. A person's rows are `oxplow:oxplow/person`.
   `author_kind` is always core's old author column (`user` is `person`,
   `agent`, `system`).
+- **`--replace` keeps a backup.** It renames the old store file (and its
+  journal files) to `oxtask.sqlite.bak-<unix seconds>` instead of deleting
+  it, and refuses when the store has a task core's `oxtask` table lacks
+  (work made since the first move) unless `--force-discard` is given (a
+  dry run says so too).
 - **`closed_at`** is core's `task` row's `closed_at` for a done or canceled
   task (the old `completed_at` was set for done only), else the task's
   `updated_at`; an open task has none.
