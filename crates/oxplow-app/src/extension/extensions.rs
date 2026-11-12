@@ -1047,6 +1047,43 @@ pub(super) fn resolve_catalog(
     out
 }
 
+/// The page and viz actions of `ext` that name an action point (`point:`)
+/// none of `known` declares: a warning each, since the point's owner loads
+/// on its own and may be off — the action then does nothing, and says so
+/// when pressed.
+fn unknown_action_points(
+    ext: &Extension,
+    known: &std::collections::BTreeSet<String>,
+) -> Vec<Diagnostic> {
+    let mut out = Vec::new();
+    for page in &ext.page_files {
+        let node_actions = page.nodes().into_iter().filter_map(|n| match &n.kind {
+            crate::pages::schema::NodeKind::Viz { config, .. } => Some(&config.actions),
+            _ => None,
+        });
+        for actions in std::iter::once(&page.actions).chain(node_actions) {
+            for a in actions {
+                let Some(point) = a.point.as_deref().filter(|p| !known.contains(*p)) else {
+                    continue;
+                };
+                out.push(
+                    Diagnostic::warning(
+                        "action.unknown_point",
+                        format!(
+                            "page `{}`: action `{}` runs action point `{point}`, which no enabled \
+                             extension declares; it does nothing until one does",
+                            page.slug, a.id
+                        ),
+                    )
+                    .at(relative_to(&ext.path, &page.origin.running), None)
+                    .fix("enable the extension that declares it, or check the name"),
+                );
+            }
+        }
+    }
+    out
+}
+
 /// A slot mount whose host page isn't loaded, or has no slot by that name,
 /// shows nowhere: a warning on the mounting extension (the host may only
 /// be off).
@@ -1100,6 +1137,15 @@ fn warn_unplaced_mounts(out: &mut [Extension]) {
             })
             .collect();
         ext.warnings.extend(warnings);
+    }
+    let points: std::collections::BTreeSet<String> = out
+        .iter()
+        .filter(|e| e.enabled)
+        .flat_map(|e| e.action_points.iter().map(|p| p.id.clone()))
+        .collect();
+    for ext in out.iter_mut().filter(|e| e.enabled) {
+        let found = unknown_action_points(ext, &points);
+        ext.warnings.extend(found);
     }
 }
 
@@ -3705,6 +3751,13 @@ pub async fn validate_extension(
         check_measures(&mut ext, &declared, files.as_ref());
         check_dependencies(&mut ext, &declared, files.as_ref());
     }
+    let points: std::collections::BTreeSet<String> = declared
+        .iter()
+        .chain(std::iter::once(&ext))
+        .flat_map(|e| e.action_points.iter().map(|p| p.id.clone()))
+        .collect();
+    let found = unknown_action_points(&ext, &points);
+    ext.warnings.extend(found);
     Ok(ext)
 }
 
@@ -10573,5 +10626,38 @@ commands:
             "{:?}",
             started.elapsed()
         );
+    }
+
+    /// A page action naming an action point nobody declares is a warning
+    /// (its owner may be off); one a loaded extension declares is not.
+    #[test]
+    fn an_action_naming_an_undeclared_point_is_a_warning() {
+        let load = |name: &str, manifest: &str, page: Option<&str>| {
+            let mut files = vec![("extension.yaml".to_string(), manifest.to_string())];
+            if let Some(page) = page {
+                files.push(("pages/items.yaml".to_string(), page.to_string()));
+            }
+            Tree::new(files).load(name, &format!(".oxplow/extensions/{name}"))
+        };
+        let page = "title: Items\nloaders:\n  items: { sql: SELECT 1 AS n }\nview:\n  from: items\n  viz: table\n  actions:\n    - { id: go, label: Go, point: other/item.go, row: true, context: { n: '{{row.n}}' } }\n";
+        let user = load(
+            "acme",
+            "manifest: 2\nname: acme\nintent: { purpose: p, origin: null, examples: [] }\n",
+            Some(page),
+        );
+        let owner = load(
+            "other",
+            "manifest: 2\nname: other\nintent: { purpose: p, origin: null, examples: [] }\naction_points:\n  - { name: item.go, label: Go, context: { n: int } }\n",
+            None,
+        );
+        let known = |exts: &[&Extension]| -> std::collections::BTreeSet<String> {
+            exts.iter()
+                .flat_map(|e| e.action_points.iter().map(|p| p.id.clone()))
+                .collect()
+        };
+        let none = unknown_action_points(&user, &known(&[&user]));
+        assert_eq!(none.len(), 1, "{none:?}");
+        assert!(none[0].message.contains("other/item.go"), "{none:?}");
+        assert!(unknown_action_points(&user, &known(&[&user, &owner])).is_empty());
     }
 }
