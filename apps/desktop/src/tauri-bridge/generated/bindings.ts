@@ -161,6 +161,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	invokeComponentPoint: (id: string, point: string, context: unknown, command: string | null, confirmed: boolean, version: string) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("invoke_component_point", { id, point, context, command, confirmed, version })),
 	invokeComponentCommand: (id: string, command: string, input: unknown, confirmed: boolean, version: string) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("invoke_component_command", { id, command, input, confirmed, version })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the

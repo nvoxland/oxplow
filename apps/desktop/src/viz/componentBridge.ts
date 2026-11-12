@@ -8,6 +8,7 @@
 ///   frame → host  { type: "ready" }
 ///                 { type: "size", height }                   its content's height
 ///                 { id, method: "invoke", command, input }   a declared command
+///                 { id, method: "invokePoint", point, context, command? }   an action point it declares: the command that answers it
 ///                 { id, method: "navigate", uri, newTab, replace }    open a page
 ///                 { id, method: "querySql", sql, params }    its own SQL (`sql: read`)
 ///                 { id, method: "openForm", command, input } a declared command's form, in the host
@@ -164,6 +165,7 @@ export interface ViewInit {
 
 export type BridgeRequest =
   | { id: string; method: "invoke"; command: string; input: unknown }
+  | { id: string; method: "invokePoint"; point: string; context: unknown; command: string | null }
   | { id: string; method: "navigate"; uri: string; newTab: boolean; replace: boolean }
   | { id: string; method: "querySql"; sql: string; params: SqlCell[] }
   | { id: string; method: "openForm"; command: string; input: unknown }
@@ -197,6 +199,13 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
     case "invoke":
       if (typeof m.command !== "string") return null;
       return { type: "request", request: { id: m.id, method: "invoke", command: m.command, input: m.input ?? {} } };
+    case "invokePoint":
+      if (typeof m.point !== "string") return null;
+      if (m.command !== undefined && m.command !== null && typeof m.command !== "string") return null;
+      return {
+        type: "request",
+        request: { id: m.id, method: "invokePoint", point: m.point, context: m.context ?? {}, command: (m.command as string | null | undefined) ?? null },
+      };
     case "navigate":
       if (typeof m.uri !== "string") return null;
       if (m.newTab !== undefined && typeof m.newTab !== "boolean") return null;
@@ -332,6 +341,9 @@ export function initMessage(fed: HostedData, tokens: Record<string, string>, pag
 export interface BridgeDeps {
   /** Run a declared command as the viz for the person. */
   invoke(command: string, input: unknown, confirmed: boolean): Promise<CommandOutcome>;
+  /** Run the command that answers action point `point` for `context`, as
+   *  the viz for the person (`command` names one when several answer). */
+  invokePoint(point: string, context: unknown, command: string | null, confirmed: boolean): Promise<CommandOutcome>;
   /** Open `ref`'s page, in a new tab when asked; false when it isn't one
    *  a component may open (`componentMayOpen`). */
   navigate(ref: string, opts: { newTab: boolean; replace: boolean }): boolean;
@@ -443,6 +455,21 @@ export function createBridgeHost(
           }
           try {
             reply(r.id, (await deps.invoke(r.command, r.input, true)).result);
+          } catch (again) {
+            failWith(r.id, again);
+          }
+        }
+        return;
+      case "invokePoint":
+        try {
+          reply(r.id, (await deps.invokePoint(r.point, r.context, r.command, false)).result);
+        } catch (e) {
+          if (!needsConfirmation(e)) return failWith(r.id, e);
+          if (!(await deps.confirm(r.command ?? r.point, ipcErrorDetails(e)))) {
+            return fail(r.id, "CANCELLED", `The person didn't confirm \`${r.command ?? r.point}\`.`);
+          }
+          try {
+            reply(r.id, (await deps.invokePoint(r.point, r.context, r.command, true)).result);
           } catch (again) {
             failWith(r.id, again);
           }

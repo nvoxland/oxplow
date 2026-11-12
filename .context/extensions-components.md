@@ -111,7 +111,8 @@ them one value; only `frame-src`, since a fuller policy would bound what
 the page connects to, and a daemon over a tunnel is not on loopback).
 The host also ends the component on its second `load`. So a component
 reaches only what its page feeds it, its own read-only SQL (`sql:
-read`) and the commands it may invoke (`commands`).
+read`), the commands it may invoke (`commands`) and the action points it
+may run (`action_points`).
 
 **A component that acts runs under its extension's permissions.**
 `invoke` runs a command with the viewer's rights, so the commands a
@@ -209,6 +210,23 @@ warns when a custom viz also fills a kit role block (`chart`, `tree`,
 `terminal`) — the kit may already render it. That is the honest extent of
 a "this reimplements the kit" lint.
 
+**A component runs an action point** it declares in `action_points:
+[<point id>]` (any extension's point; each id is checked at load with
+`is_action_point_id`, `component.invalid_action_point`). The bundle records
+its points beside its commands, in its version hash, so what a person
+approved is what runs. `invoke_component_point { id, point, context,
+command?, confirmed, version }` (`viz_actions::invoke_component_point`)
+checks the bundle declares `point`, asks the point's offer as the viewer
+(`action_point_offer`, which applies `ui.accepts`), and runs the command
+the offer picks with the offer's bound input — `command` if given and
+offered, else the only one. Nothing offered is `Invalid` ("nothing answers
+`<point>` for this context"), several with none named is `Invalid` listing
+them. It runs exactly as `invoke_component_command` does (actor
+`Component { on_behalf_of: Human }`, the host's confirm path, audit) but
+needs no `commands:<pattern>` permission and no `commands:` entry: the
+store joining the point is its consent. The frame calls
+`invokePoint(point, context, command?)`.
+
 **The bridged calls** (`viz_actions.rs`; the frame reaches them only
 through the host). Each names the component by `id`, `<namespace>/<component
 id>` — the component itself, whatever shows it — and the bundle `version`
@@ -248,7 +266,8 @@ change follows as `{ type: update, run, data, params, changed }`, with
 did).
 
 Frame messages (`parseFrameMessage`): `ready`; `{ id, method: invoke,
-command, input }`; `{ id, method: navigate, uri }` (an oxplow page only:
+command, input }`; `{ id, method: invokePoint, point, context, command? }`
+(`invoke_component_point`); `{ id, method: navigate, uri }` (an oxplow page only:
 `componentMayOpen` refuses an external-url URI with `INVALID`, since an
 outside tab would carry whatever the frame put in its URL out); `{ id,
 method: querySql, sql, params }` (positional SqlCells;
@@ -321,7 +340,9 @@ around it** (`component_harness.rs`, `PageAt::ui`):
   build:harness`; `harnessBuild.test.ts` fails when the committed build is
   stale or pulls in React) mounts the frame with the app's own
   `createBridgeHost` / `initMessage` / `pageData`. What the core answers —
-  `invoke` (`invoke_component_command`, as the person), `querySql`
+  `invoke` (`invoke_component_command`, as the person), `invokePoint`
+  (`invoke_component_point`; recorded in `invoked` with `point` and
+  `context`), `querySql`
   (`run_component_sql`), `openForm` / `askForm`, `showView` — runs on the
   test's oxplow; what only the shell answers (`setTitle`, `setActions`,
   `setViewParams`, `setHistoryState`, `navigate`, a confirmation) is
@@ -448,7 +469,8 @@ served to a frame allows — the same reason a bundle's own scripts are
 classic. `oxplow.connect()` waits for `init`, answers `ready`, and
 resolves with `{ data, params, run (the latest of each), page, props,
 tokens, protocol, onUpdate(fn({ run, data, params, changed })) →
-unsubscribe, invoke(command, input), navigate(uri, { newTab, replace }),
+unsubscribe, invoke(command, input), invokePoint(point, context, command?),
+navigate(uri, { newTab, replace }),
 querySql, renderMarkdown(element, text, { inline? }), openForm (a
 command's, or `{ title, schema, values }`),
 signIn, cancelSignIn, setTitle, setActions, showView, onAction,

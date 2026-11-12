@@ -4010,6 +4010,14 @@
           },
           "default": []
         },
+        "action_points": {
+          "description": "Action points it may run (`invokePoint`), by id (`oxplow/task.move`).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
         "sql": {
           "description": "`read`: it runs its own read-only SQL over the datasets\n(`querySql`); its extension needs `sql.read` in `permissions:`.",
           "anyOf": [

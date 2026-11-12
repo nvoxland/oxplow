@@ -95,6 +95,26 @@ test("invoke and navigate resolve with the host's replies", async () => {
   h.close();
 });
 
+test("invokePoint sends the point, its context and the named command, and resolves with the result", async () => {
+  const seen: unknown[][] = [];
+  const h = harness({
+    invokePoint: async (point, context, command) => {
+      seen.push([point, context, command]);
+      return { result: { moved: true } } as never;
+    },
+  });
+  const connecting = connect({ target: h.frame });
+  h.init();
+  const c = await connecting;
+  expect(await c.invokePoint("oxplow/task.move", { uri: "u", stage: "done" })).toEqual({ moved: true });
+  expect(await c.invokePoint("oxplow/task.move", { uri: "u" }, "oxtask.task.move")).toEqual({ moved: true });
+  expect(seen).toEqual([
+    ["oxplow/task.move", { uri: "u", stage: "done" }, null],
+    ["oxplow/task.move", { uri: "u" }, "oxtask.task.move"],
+  ]);
+  h.close();
+});
+
 test("navigate can ask for a new tab", async () => {
   const opened: Array<[string, unknown]> = [];
   const h = harness({

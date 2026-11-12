@@ -13,6 +13,7 @@ import {
   awaitSignInRedirect,
   canCatchSignInRedirect,
   invokeComponentCommand,
+  invokeComponentPoint,
   listenForSignInRedirect,
   loadComponent,
   openInSystemBrowser,
@@ -284,6 +285,20 @@ export function ComponentFrame({
                 throw e;
               }),
             { anchor, command, showsFields: true },
+          );
+          if ("failure" in ran) throw thrown;
+          return ran.value;
+        },
+        invokePoint: async (point, context, command, confirmed) => {
+          let thrown: unknown = null;
+          const ran = await runnerRef.current.run(
+            title,
+            () =>
+              invokeComponentPoint(component, point, context, command, confirmed, version).catch((e: unknown) => {
+                thrown = e;
+                throw e;
+              }),
+            { anchor, command: command ?? point, showsFields: true },
           );
           if ("failure" in ran) throw thrown;
           return ran.value;

@@ -183,6 +183,10 @@
       // Run a command this component declares in `commands`, as the person
       // looking at it; one that asks is confirmed by them, in oxplow.
       invoke: (command, input) => call({ method: "invoke", command, input: input === undefined ? {} : input }),
+      // Run an action point this component declares in `action_points`: the
+      // command that answers it for `context`, as the person looking at it.
+      invokePoint: (point, context, command) =>
+        call({ method: "invokePoint", point, context: context === undefined ? {} : context, command: command === undefined ? null : command }),
       // Open one of oxplow's pages (`oxplow:oxplow/knowledge?id=intro&store=oxwiki`), as a
       // browser follows a link; `{ newTab: true }` opens it in a new tab (a
       // Cmd-click), `{ replace: true }` in place of the page (Back skips it).

@@ -896,6 +896,15 @@
         if (typeof m.command !== "string")
           return null;
         return { type: "request", request: { id: m.id, method: "invoke", command: m.command, input: m.input ?? {} } };
+      case "invokePoint":
+        if (typeof m.point !== "string")
+          return null;
+        if (m.command !== undefined && m.command !== null && typeof m.command !== "string")
+          return null;
+        return {
+          type: "request",
+          request: { id: m.id, method: "invokePoint", point: m.point, context: m.context ?? {}, command: m.command ?? null }
+        };
       case "navigate":
         if (typeof m.uri !== "string")
           return null;
@@ -1044,6 +1053,22 @@
             }
             try {
               reply(r.id, (await deps.invoke(r.command, r.input, true)).result);
+            } catch (again) {
+              failWith(r.id, again);
+            }
+          }
+          return;
+        case "invokePoint":
+          try {
+            reply(r.id, (await deps.invokePoint(r.point, r.context, r.command, false)).result);
+          } catch (e) {
+            if (!needsConfirmation(e))
+              return failWith(r.id, e);
+            if (!await deps.confirm(r.command ?? r.point, ipcErrorDetails(e))) {
+              return fail(r.id, "CANCELLED", `The person didn't confirm \`${r.command ?? r.point}\`.`);
+            }
+            try {
+              reply(r.id, (await deps.invokePoint(r.point, r.context, r.command, true)).result);
             } catch (again) {
               failWith(r.id, again);
             }
@@ -11698,6 +11723,7 @@
         const record = (kind) => (value) => server.record(kind, value);
         const bridge = createBridgeHost(channel.port1, {
           invoke: async (command, input, confirmed) => ({ result: await server.rpc("invoke", { command, input, confirmed }) }),
+          invokePoint: async (point, context, command, confirmed) => ({ result: await server.rpc("invokePoint", { point, context, command, confirmed }) }),
           navigate: (ref) => {
             server.record("navigate", ref);
             return true;
