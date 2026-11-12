@@ -7,6 +7,7 @@ def transform(x):
     write = {
         "sql": "UPDATE task_comment SET deleted = 1 WHERE id = ?1 AND deleted = 0",
         "params": [comment],
+        "expect_changes": 1,
     }
     return {
         "commands": [{"name": "oxplow.extension_store.write", "input": {"batch": [write]}}],

@@ -17,6 +17,7 @@ def transform(x):
         "sql": "INSERT INTO task_link (task_id, to_uri, type) VALUES (?1, ?2, ?3) " +
                "ON CONFLICT(task_id, to_uri, type) DO UPDATE SET deleted = 0",
         "params": [i["id"], to, i["type"]],
+        "expect_changes": 1,
     }
     out = {
         "commands": [{"name": "oxplow.extension_store.write", "input": {"batch": [write]}}],
