@@ -3,7 +3,6 @@
 # missing or null) — at the end of that queue. It writes oxplow's two
 # fields on the task, `assignee` and `rank`, through `oxplow.model.set_fields`
 # and answers the undo: the previous assignee and rank written back.
-# (The switch from the core verb renames it `oxplow.task.assign`.)
 
 PERSON = "oxplow:oxplow/person"
 

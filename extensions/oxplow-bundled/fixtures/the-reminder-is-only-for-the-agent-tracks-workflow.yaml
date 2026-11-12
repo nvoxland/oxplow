@@ -1,6 +1,7 @@
 # The untracked-work reminder is oxtask's "agent tracks everything"
 # workflow: with the workflow set to "person files, agent works" (or off,
 # or custom), an edit with no task is not reminded.
+requires: [oxtask]
 given:
   - { command: oxplow.tasks.set_workflow, input: { workflow: person_files } }
   - observe: { turn: { prompt: Fix the greeting, tools: [{ name: Edit, kind: edit, paths: [greeting.txt], ok: true }] } }

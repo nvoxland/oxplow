@@ -2,6 +2,7 @@
 # agent nothing (an agent told of a task before hears from core that it no
 # longer holds). A definition of done alone is said with "Nothing is in
 # progress". With the workflow off, nothing.
+requires: [oxtask]
 when: { context: task-state }
 expect: { text: null }
 steps:

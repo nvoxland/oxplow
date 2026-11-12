@@ -2,21 +2,22 @@
 # `row-badge` decorator on agent session rows): one per task the requests of
 # its turns worked on, in the order they were first worked on. (Thread
 # sessions itself, foundation's, reads no task.)
+requires: [oxtask]
 given:
   - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude }, bind: ses }
-  - { command: oxplow.task.create, input: { title: First task }, bind: one }
-  - { command: oxplow.task.create, input: { title: Second task }, bind: two }
+  - { command: oxtask.task.create, input: { title: First task, stage: ready } }
+  - { command: oxtask.task.create, input: { title: Second task, stage: ready } }
   - observe:
       turn:
         session: $ses.id
         prompt: do one
         during:
-          - { command: oxplow.task.transition, input: { uri: $one.uri, to: in_progress }, as: agent }
+          - { command: oxtask.task.move, input: { id: tsk1, stage: in_progress }, as: agent }
   - observe:
       turn:
         session: $ses.id
         prompt: do two
         during:
-          - { command: oxplow.task.transition, input: { uri: $two.uri, to: in_progress }, as: agent }
+          - { command: oxtask.task.move, input: { id: tsk2, stage: in_progress }, as: agent }
 when: { sql: "SELECT label FROM v_oxplow_session_task_badge ORDER BY label" }
 expect: { rows: [{ label: First task }, { label: Second task }] }

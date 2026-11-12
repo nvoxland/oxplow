@@ -1,4 +1,4 @@
--- The tasks of every store, in today's `v_task` shape, over the shared
+-- The tasks of every store, in today's `v_oxplow_task` shape, over the shared
 -- model. `native` is the
 -- store's own fields; assignee and rank are oxplow's. Fields are read by
 -- joining the field table (its key and value index), never through the

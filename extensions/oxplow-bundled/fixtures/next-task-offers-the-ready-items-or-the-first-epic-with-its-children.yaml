@@ -1,31 +1,39 @@
 # What to pick up next on a thread's list: ready items in list order, an
 # open blocker holding one until it closes, and a ready epic first coming
 # with its ready descendants as one unit.
+requires: [oxtask]
 when: { page: next-task, params: { thread: thr1 } }
 steps:
   - expect: { loaders: { next_task: { rows: 0 } } }
   - given:
-      - { command: oxplow.task.create, input: { title: a, assignee: thr1 }, bind: a }
-      - { command: oxplow.task.create, input: { title: b, assignee: thr1, stage: blocked } }
-      - { command: oxplow.task.create, input: { title: c, assignee: thr1 } }
+      - { command: oxtask.task.create, input: { title: a, stage: ready } }
+      - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+      - { command: oxtask.task.create, input: { title: b, stage: blocked } }
+      - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+      - { command: oxtask.task.create, input: { title: c, stage: ready } }
+      - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk3&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
   - expect: { loaders: { next_task: { rows: [{ title: a, role: ready }, { title: c, role: ready }] } } }
     bind: { c: 'loaders.next_task.rows[1].uri' }
   # An open blocker holds a; a closed one doesn't.
   - given:
-      - { command: oxplow.task.create, input: { title: z }, bind: z }
-      - { command: oxplow.task.link, input: { uri: $z.uri, target: $a.uri, link_type: blocks } }
+      - { command: oxtask.task.create, input: { title: z, stage: ready } }
+      - { command: oxtask.task.link, input: { id: tsk4, to: tsk1, type: blocks } }
   - expect: { loaders: { next_task: { rows: [{ title: c, role: ready }] } } }
-  - given: [{ command: oxplow.task.transition, input: { uri: $z.uri, to: done } }]
+  - given: [{ command: oxtask.task.move, input: { id: tsk4, stage: done } }]
   - expect: { loaders: { next_task: { rows: [{ title: a, role: ready }, { title: c, role: ready }] } } }
   # c is next, and becomes an epic once it has children.
   - given:
-      - { command: oxplow.task.transition, input: { uri: $a.uri, to: done } }
-      - { command: oxplow.task.create, input: { title: x, assignee: thr1 }, bind: x }
-      - { command: oxplow.task.transition, input: { uri: $x.uri, to: in_progress } }
-      - { command: oxplow.task.create, input: { title: c1, assignee: thr1, parent_uri: $c }, bind: c1 }
-      - { command: oxplow.task.create, input: { title: c2, assignee: thr1, parent_uri: $c, stage: done } }
-      - { command: oxplow.task.create, input: { title: g, assignee: thr1, parent_uri: $c1.uri } }
-      - { command: oxplow.task.create, input: { title: y, assignee: thr1 } }
+      - { command: oxtask.task.move, input: { id: tsk1, stage: done } }
+      - { command: oxtask.task.create, input: { title: x, stage: ready } }
+      - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk5&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+      - { command: oxtask.task.move, input: { id: tsk5, stage: in_progress } }
+      - { command: oxtask.task.create, input: { title: c1, stage: ready, parent: tsk3 } }
+      - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk6&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+      - { command: oxtask.task.create, input: { title: c2, stage: done, parent: tsk3 } }
+      - { command: oxtask.task.create, input: { title: g, stage: ready, parent: tsk6 } }
+      - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk8&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+      - { command: oxtask.task.create, input: { title: y, stage: ready } }
+      - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk9&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
   - expect:
       loaders:
         next_task: { rows: [{ title: c, role: epic }, { title: c1, role: child }, { title: g, role: child }] }

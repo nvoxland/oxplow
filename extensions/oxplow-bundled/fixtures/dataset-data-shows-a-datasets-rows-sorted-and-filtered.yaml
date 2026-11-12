@@ -1,15 +1,16 @@
 # The Dataset data page shows a dataset's rows as they are. Sort, direction and a
 # "field = value" filter come from its params; a field the dataset lacks is ignored.
+requires: [oxtask]
 given:
-  - { command: oxplow.task.create, input: { title: Alpha } }
-  - { command: oxplow.task.create, input: { title: Beta } }
+  - { command: oxtask.task.create, input: { title: Alpha, stage: ready } }
+  - { command: oxtask.task.create, input: { title: Beta, stage: ready } }
 when:
   page: oxplow/dataset-data
   params: { uri: "oxplow:oxplow/dataset?dataset=task" }
 expect:
-  label: v_task data
+  label: v_oxplow_task data
   loaders:
-    about: { rows: [{ view: v_task, owner: core }] }
+    about: { rows: [{ view: v_oxplow_task, owner: core }] }
     data: { rows: 2 }
 steps:
   - params: { sort: title, direction: desc }

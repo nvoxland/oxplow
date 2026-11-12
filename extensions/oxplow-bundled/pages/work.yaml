@@ -4,7 +4,7 @@ icon: columns-3
 category: Work
 keywords: work board kanban tasks columns state
 needs:
-- task_tracker
+- model:oxplow/task_record
 # The board's filters are its view (the tab's `#`): the board draws them
 # in its own toolbar, so the page has no rail.
 params:

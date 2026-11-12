@@ -2,16 +2,23 @@
 # the thread's task in progress, the next three in its ready queue (as
 # next-task picks: a task an open task blocks waits), and the project's
 # definition of done. Another thread's work is not in it.
+requires: [oxtask]
 given:
-  - { command: oxplow.task.create, input: { title: Fix login, assignee: thr1 }, bind: active }
-  - { command: oxplow.task.transition, input: { uri: $active.uri, to: in_progress } }
-  - { command: oxplow.task.create, input: { title: Write docs, assignee: thr1 }, bind: docs }
-  - { command: oxplow.task.create, input: { title: Add tests, assignee: thr1 } }
-  - { command: oxplow.task.create, input: { title: Refactor, assignee: thr1 } }
-  - { command: oxplow.task.create, input: { title: Someday, assignee: thr1 } }
+  - { command: oxtask.task.create, input: { title: Fix login, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.move, input: { id: tsk1, stage: in_progress } }
+  - { command: oxtask.task.create, input: { title: Write docs, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Add tests, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk3&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Refactor, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk4&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Someday, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk5&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
   - { command: oxplow.thread.create, input: { stream: str1, title: Other }, bind: other }
-  - { command: oxplow.task.create, input: { title: Not mine, assignee: $other.id }, bind: blocker }
-  - { command: oxplow.task.link, input: { uri: $blocker.uri, target: $docs.uri, link_type: blocks } }
+  - { command: oxtask.task.create, input: { title: Not mine, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk6&provider=oxtask", to: "oxplow:oxplow/thread?id=thr2" } }
+  - { command: oxtask.task.link, input: { id: tsk6, to: tsk2, type: blocks } }
   - { command: oxplow.tasks.set_workflow, input: { definition_of_done: "Tests pass.\nCommitted." } }
 when: { context: task-state }
 expect:

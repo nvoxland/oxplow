@@ -1,6 +1,6 @@
 ---
 name: track-work
-description: How to keep oxtask, the project's task tracker, showing what you work on — take or file a task when you start something new, move it to in progress at once, and to done only when it is fully done. Loads at the start of any work that will change files, and on the oxplow `run_command` tool with oxplow.task.transition or oxplow.task.create.
+description: How to keep oxtask, the project's task tracker, showing what you work on — take or file a task when you start something new, move it to in progress at once, and to done only when it is fully done. Loads at the start of any work that will change files, and on the oxplow `run_command` tool with oxtask.task.move or oxtask.task.create.
 ---
 
 # Track your work as tasks
@@ -17,15 +17,15 @@ answered, a one-line fix or a command run is not: it needs no task.
 
 1. Look for the task that already says it: the thread's own
    (`oxplow_thread_tasks { thread }`), then the open ones
-   (`SELECT uri, title, state FROM v_task WHERE state NOT IN ('done','canceled')`
+   (`SELECT uri, title, state FROM v_oxplow_task WHERE state NOT IN ('done','canceled')`
    through `oxplow_query_sql`, or `oxplow_search` with kind `task`).
-2. None says it: file one (`oxplow.task.create`, the `tasks` skill), a
+2. None says it: file one (`oxtask.task.create`, the `tasks` skill), a
    title the person would recognize.
 3. Move it to `in_progress` before you edit:
 
 ```json
-{ "id": "oxplow.task.transition",
-  "input": { "uri": "<the task's uri>", "to": "in_progress" } }
+{ "id": "oxtask.task.move",
+  "input": { "id": "<the task's id, tsk12>", "stage": "in_progress" } }
 ```
 
 That also takes it: it's assigned to your thread, and the Work panel shows
@@ -34,7 +34,7 @@ it under "In progress" at once.
 ## While you work
 
 One task in progress at a time per thread is the norm. When the work moves
-to something else, move the first task back (`todo`, or `blocked` with a
+to something else, move the first task back (`ready`, or `blocked` with a
 comment that says why) before you start the next. Work that belongs to an
 epic is its child task, not the epic.
 
@@ -52,7 +52,7 @@ not when you stop to ask the person something. If the person stops it,
 `canceled`.
 
 ```json
-{ "id": "oxplow.task.transition", "input": { "uri": "<the task's uri>", "to": "done" } }
+{ "id": "oxtask.task.move", "input": { "id": "<the task's id>", "stage": "done" } }
 ```
 
 oxplow links each task to the requests that worked on it from what it

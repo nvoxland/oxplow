@@ -4,7 +4,7 @@ icon: user
 category: Work
 keywords: assigned me my tasks queue person
 needs:
-- task_tracker
+- model:oxplow/task_record
 # Everything assigned to the person: a project-wide view (the panel is
 # project-scoped).
 loaders:
@@ -16,7 +16,7 @@ loaders:
     sql: |
       WITH mine AS (
         SELECT t.*, row_number() OVER (ORDER BY t.rank IS NULL, t.rank, t.created_at, t.uri) AS pos
-        FROM v_task t
+        FROM v_oxplow_task t
         WHERE t.assignee = uri('oxplow/person')
           AND t.state IN ('in_progress', 'todo', 'blocked')
       ),
@@ -32,7 +32,7 @@ loaders:
         FROM grouped WHERE parent_uri IS NULL
         UNION ALL
         SELECT e.g, e.first_pos, 0, p.title, 'epic', p.uri, 0, NULL
-        FROM epic e JOIN v_task p ON p.uri = e.parent_uri
+        FROM epic e JOIN v_oxplow_task p ON p.uri = e.parent_uri
         UNION ALL
         SELECT c.g, e.first_pos, c.pos, c.title, c.state, c.uri, 1, coalesce(c.stage_title, c.stage)
         FROM grouped c JOIN epic e ON e.g = c.g AND e.parent_uri = c.parent_uri
@@ -44,14 +44,14 @@ loaders:
   line:
     sql: |
       SELECT title, state AS icon, uri, 0 AS depth, coalesce(stage_title, stage) AS stage
-      FROM v_task
+      FROM v_oxplow_task
       WHERE assignee = uri('oxplow/person') AND state IN ('in_progress', 'todo', 'blocked')
       ORDER BY state <> 'in_progress', rank IS NULL, rank, created_at, uri
       LIMIT 1
   # The open ones, for the panel's header.
   open_count:
     sql: |
-      SELECT count(*) AS tasks FROM v_task
+      SELECT count(*) AS tasks FROM v_oxplow_task
       WHERE assignee = uri('oxplow/person') AND state IN ('in_progress', 'todo', 'blocked')
 view:
   from: lines

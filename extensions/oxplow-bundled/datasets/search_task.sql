@@ -1,4 +1,4 @@
--- What site search indexes for each task, in `v_search_task`'s shape, over
+-- What site search indexes for each task, in `v_oxplow_search_task`'s shape, over
 -- the shared task model. A task assigned to a thread is under that thread's
 -- stream; any other is project-wide. Archived work leaves search: a task
 -- assigned to an archived thread or stream isn't indexed. Its comments

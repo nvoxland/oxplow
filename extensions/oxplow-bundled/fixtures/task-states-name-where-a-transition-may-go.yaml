@@ -1,6 +1,7 @@
 # The stages a transition may move a task to: the active list's, in
 # its order, each as the list names it (the task page's
 # task_states loader, which feeds its State form).
+requires: [oxtask]
 when: { query: 'task-detail#task_states' }
 expect:
   rows:

@@ -1,15 +1,15 @@
 title: Comments
 description: "A task's comments, oldest first, and Comment… to add one: where its list keeps comments."
 needs:
-- task_tracker
-- task_tracker.comments
+- model:oxplow/task_record
 params:
 - name: uri
+- name: id
 loaders:
   comments:
     sql: |
       SELECT c.id, c.author, c.body, c.created_at
-      FROM v_task_comment c WHERE c.uri = :uri ORDER BY c.created_at, c.id
+      FROM v_oxplow_task_comment c WHERE c.uri = :uri ORDER BY c.created_at, c.id
 view:
   id: comments
   from: comments
@@ -27,9 +27,9 @@ view:
   actions:
   - id: comment
     label: Comment…
-    command: oxplow.task.comment
+    command: oxtask.task.comment
     form: true
     fixed:
-    - uri
+    - id
     input:
-      uri: '{{param.uri}}'
+      id: '{{param.id}}'

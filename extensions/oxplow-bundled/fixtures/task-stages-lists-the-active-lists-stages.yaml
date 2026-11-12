@@ -2,6 +2,7 @@
 # bucket's first stage is its default, and `filter` names it by its
 # bucket, the way commands take a bucket: a page's `todo` default is
 # the list's first to-do stage, whatever the list calls it.
+requires: [oxtask]
 when: { query: task-stages }
 expect:
   rows:

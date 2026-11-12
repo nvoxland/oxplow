@@ -2,15 +2,16 @@
 # tasks its request worked on: "completed: <task>"; a request that worked on
 # none is "Unlinked work". (A `row-badge` decorator on snapshot rows;
 # Local History itself reads no task.)
+requires: [oxtask]
 given:
-  - { command: oxplow.task.create, input: { title: Fix it }, bind: item }
+  - { command: oxtask.task.create, input: { title: Fix it, stage: ready } }
   - observe: { turn: { prompt: Chat } }
   - observe: { snapshot: { trigger: turn_end, branch: main, files: [{ path: a.txt, hash: h1 }] } }
   - observe:
       turn:
         prompt: Fix it
         during:
-          - { command: oxplow.task.transition, input: { uri: $item.uri, to: in_progress }, as: agent }
+          - { command: oxtask.task.move, input: { id: tsk1, stage: in_progress }, as: agent }
   - observe: { snapshot: { trigger: turn_end, branch: main, files: [{ path: a.txt, hash: h2 }] } }
 when: { sql: "SELECT label FROM v_oxplow_snapshot_work_badge ORDER BY label" }
 expect: { rows: [{ label: "completed: Fix it" }, { label: "completed: Unlinked work" }] }

@@ -3,12 +3,14 @@
 # (a file only when a turn's own call named it or it was the only turn
 # changing it: a file two concurrent turns could each have changed is not
 # evidence; here each turn's edit call names it).
+requires: [oxtask]
 given:
-  - { command: oxplow.task.create, input: { title: Shared item, assignee: thr1 }, bind: item }
-  - { command: oxplow.task.transition, input: { uri: $item.uri, to: in_progress } }
+  - { command: oxtask.task.create, input: { title: Shared item, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.move, input: { id: tsk1, stage: in_progress } }
   - observe: { turn: { prompt: alpha, tools: [{ name: Edit, kind: edit, paths: [src/shared.rs], ok: true }] } }
   - observe: { snapshot: { trigger: turn_end, files: [{ path: src/shared.rs, hash: a }] } }
-when: { part: item-shared-work, params: { uri: $item.uri } }
+when: { part: item-shared-work, params: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" } }
 expect: { loaders: { item_shared_work: { rows: 0 } } }
 steps:
   - given:
@@ -20,9 +22,9 @@ steps:
             thread: $beta.id
             prompt: beta
             tools: [{ name: Edit, kind: edit, paths: [src/shared.rs], ok: true }]
-            during: [{ command: oxplow.task.update, input: { uri: $item.uri, title: Shared item }, as: agent }]
+            during: [{ command: oxtask.task.update, input: { id: tsk1, title: Shared item }, as: agent }]
       - observe: { snapshot: { trigger: turn_end, files: [{ path: src/shared.rs, hash: b }] } }
-  - when: { part: item-shared-work, params: { uri: $item.uri } }
+  - when: { part: item-shared-work, params: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" } }
     expect:
       loaders:
         item_shared_work:

@@ -4,9 +4,11 @@
 # a card's menu sets a field and who it's for; the toolbar's Show is the
 # tab's view, and Back puts it back; a title opens the item and New Task…
 # the form.
+requires: [oxtask]
 given:
-  - { command: oxplow.task.create, input: { title: Next up, assignee: thr1, native: { priority: low } } }
-  - { command: oxplow.task.create, input: { title: Someday } }
+  - { command: oxtask.task.create, input: { title: Next up, stage: ready, priority: low } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Someday, stage: ready } }
 when: { page: work, params: { show: thread, priority: any, thread_id: 1, stream_id: 1 } }
 steps:
   - ui:
@@ -17,7 +19,7 @@ steps:
           text: { '[data-testid="column-ready"] h2': Ready, '[data-testid="column-in_progress"] h2': In Progress, '[data-testid="column-ready"] .card-title': Next up }
       - drag: { from: '[data-testid="column-ready"] .ox-card', to: '[data-testid="column-in_progress"]' }
       - expect:
-          invoked: [{ command: oxplow.task.transition, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: in_progress }, ok: true }]
+          invoked: [{ command: oxtask.task.move, input: { id: tsk1, stage: in_progress }, ok: true }]
           count: { '[data-testid="column-in_progress"] .ox-card': 1, '[data-testid="column-ready"] .ox-card': 0 }
       # The card's menu: its field's values, each an update.
       - click: '[data-testid="column-in_progress"] .card-menu'
@@ -25,8 +27,8 @@ steps:
       - click: '[data-id="priority-high"]'
       - expect:
           invoked:
-            - { command: oxplow.task.transition, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: in_progress }, ok: true }
-            - { command: oxplow.task.update, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", native: { priority: high } }, ok: true }
+            - { command: oxtask.task.move, input: { id: tsk1, stage: in_progress }, ok: true }
+            - { command: oxtask.task.update, input: { id: tsk1, priority: high }, ok: true }
       # Show is the tab's view: everyone's cards (the unassigned too); a
       # card's menu assigns one to this thread, and Back to the thread's
       # shows it there.
@@ -38,9 +40,9 @@ steps:
       - click: '[data-id="assign-oxplow:oxplow/thread?id=thr1"]'
       - expect:
           invoked:
-            - { command: oxplow.task.transition, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: in_progress }, ok: true }
-            - { command: oxplow.task.update, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", native: { priority: high } }, ok: true }
-            - { command: oxplow.task.assign, input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" }, ok: true }
+            - { command: oxtask.task.move, input: { id: tsk1, stage: in_progress }, ok: true }
+            - { command: oxtask.task.update, input: { id: tsk1, priority: high }, ok: true }
+            - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" }, ok: true }
       - view_params: { show: null }
       - expect: { count: { '[data-testid="column-ready"] .ox-card': 1, '[data-testid="column-in_progress"] .ox-card': 1 } }
       - click: '[data-testid="column-in_progress"] .card-title'

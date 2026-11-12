@@ -1,9 +1,10 @@
 # Task actions, the agents' page for one item: Mark done moves the
 # item it names, and Record a block asks which item it blocks.
+requires: [oxtask]
 given:
-  - { command: oxplow.task.create, input: { title: Fix it }, bind: item }
-  - { command: oxplow.task.create, input: { title: Other }, bind: other }
-when: { page: task-actions, params: { uri: $item.uri } }
+  - { command: oxtask.task.create, input: { title: Fix it, stage: ready } }
+  - { command: oxtask.task.create, input: { title: Other, stage: ready } }
+when: { page: task-actions, params: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" } }
 expect:
   loaders: { item: { rows: [{ title: Fix it, stage_title: Ready }] } }
   actions: [done, blocks]
@@ -11,5 +12,5 @@ steps:
   - press: { action: done }
     expect: { ok: true }
   - expect: { loaders: { item: { rows: [{ title: Fix it, stage_title: Done }] } } }
-  - when: { page: task-actions, params: { uri: $other.uri } }
+  - when: { page: task-actions, params: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask" } }
     expect: { loaders: { item: { rows: [{ title: Other, stage_title: Ready }] } } }

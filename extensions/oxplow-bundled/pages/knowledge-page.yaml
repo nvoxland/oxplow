@@ -48,7 +48,7 @@ loaders:
       -- on a view's uri column scans the whole view).
       SELECT coalesce(
                CASE r.source_resource
-                 WHEN 'oxplow/task' THEN (SELECT w.title FROM v_task w WHERE w.uri = r.source_uri)
+                 WHEN 'oxplow/task' THEN (SELECT w.title FROM v_oxplow_task w WHERE w.uri = r.source_uri)
                  WHEN 'oxplow/commit' THEN (SELECT c.subject FROM v_commit c WHERE c.sha = uri_param(r.source_uri, 'sha'))
                  WHEN 'oxplow/knowledge' THEN (SELECT k.title FROM v_knowledge_page k WHERE k.uri = r.source_uri)
                END, r.source_uri) AS title,

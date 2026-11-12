@@ -4,7 +4,6 @@
 # has no rank yet (the queue came from starts, not from this command) the
 # whole queue is numbered 0, 1, … in its shown order, the task in its new
 # place. The undo writes every rank it changed back.
-# (The switch from the core verb renames it `oxplow.task.reorder`.)
 
 def _set(uri, rank):
     return {"name": "oxplow.model.set_fields", "input": {

@@ -72,7 +72,7 @@ commands:
     entry: handlers/create.star
     needs: [store.sql]
     access: write
-    ui: { label: New Task, group: Tasks, at: oxplow/task.new, form: "oxplow:oxplow/page?page=oxtask/new-task", open_after: "oxplow:oxplow/task?id={{result.id}}&provider=oxtask" }
+    ui: { label: New Task, group: Tasks, at: oxplow/task.new, form: "oxplow:oxplow/page?page=new-task", open_after: "oxplow:oxplow/task?id={{result.id}}&provider=oxtask" }
     example: { title: Fix the greeting, stage: ready, priority: high }
   - name: task.update
     summary: Change a task's title, body, priority or parent (null clears the last three). Undo puts the old values back.

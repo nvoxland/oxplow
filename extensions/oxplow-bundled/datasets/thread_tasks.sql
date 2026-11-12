@@ -7,7 +7,7 @@
 -- order. It reads no request: what a thread's request is doing now changes
 -- on every tool call, and a reader that shows it (the Work panel's `now`)
 -- reads that for its own thread, so this list re-runs only when tasks do.
--- Finished is the done tasks the thread was working (v_request_task, basis
+-- Finished is the done tasks the thread was working (v_oxplow_request_link, basis
 -- assigned or transition: it held the task or moved it; filing, commenting
 -- or being prompted with its id is not working it) since the person last
 -- cleared the list, and the knowledge pages it touched. An epic is a task with

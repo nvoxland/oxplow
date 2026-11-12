@@ -1,4 +1,4 @@
--- The tasks each request worked on, in today's `v_request_task` shape, over
+-- The tasks each request worked on, in today's `v_oxplow_request_link` shape, over
 -- the `request_task` model. One row per (request,
 -- task, basis), with the request's totals so far. `basis` is the model's:
 -- `filed` and `edited` are core's `command`.

@@ -88,7 +88,7 @@ datasets:
       - { name: cleared_at, type: TEXT, doc: "When it was last cleared (RFC 3339)." }
   - name: task
     version: 1
-    description: "the tasks of every store in `v_task`'s shape, over the shared task model. `native` is the store's own fields, `assignee` and `rank` oxplow's."
+    description: "the tasks of every store over the shared task model (the read contract for tasks). `native` is the store's own fields, `assignee` and `rank` oxplow's."
     fields:
       - { name: uri, type: TEXT, doc: "The task's URI." }
       - { name: provider, type: TEXT, doc: "Its store." }
@@ -107,7 +107,7 @@ datasets:
       - { name: updated_at, type: TEXT, doc: "Updated (RFC 3339)." }
   - name: task_link
     version: 1
-    description: "the links of every store's tasks, in `v_task_link`'s shape."
+    description: "the links of every store's tasks."
     fields:
       - { name: from_uri, type: TEXT, doc: "The task the link is from." }
       - { name: to_uri, type: TEXT, doc: "What it points at." }
@@ -116,7 +116,7 @@ datasets:
       - { name: created_at, type: TEXT, doc: "When the link was made (RFC 3339)." }
   - name: task_comment
     version: 1
-    description: "the comments of every store's tasks, in `v_task_comment`'s shape, over the shared model's comments child. `id` is the store's own comment id (oxtask: `cmt3`; core's was `oxtask_note:3`)."
+    description: "the comments of every store's tasks, over the shared model's comments child. `id` is the store's own comment id (oxtask: `cmt3`; core's was `oxtask_note:3`)."
     fields:
       - { name: id, type: TEXT, doc: "The store's own id for the comment." }
       - { name: uri, type: TEXT, doc: "The task it's on." }
@@ -125,7 +125,7 @@ datasets:
       - { name: created_at, type: TEXT, doc: "RFC 3339 timestamp." }
   - name: search_task
     version: 1
-    description: "what site search indexes for each task, in `v_search_task`'s shape, over `task`: its own id, its body, then its comments; tasks assigned to an archived thread or stream are left out."
+    description: "what site search indexes for each task, in `v_oxplow_search_task`'s shape, over `task`: its own id, its body, then its comments; tasks assigned to an archived thread or stream are left out."
     fields:
       - { name: uri, type: TEXT, doc: "The task's canonical ref: what a hit opens." }
       - { name: title, type: TEXT, doc: "The task's title." }
@@ -133,7 +133,7 @@ datasets:
       - { name: stream_id, type: TEXT, doc: "Its thread's stream (`str1`); NULL for an unassigned task." }
   - name: request_link
     version: 1
-    description: "the tasks each request worked on, in `v_request_task`'s shape (request, task, basis, turn, thread_id, at, turns, started_at, last_ended_at, request_id), over the `request_task` model. `basis` keeps the model's names: `filed` and `edited` are core's `command`."
+    description: "the tasks each request worked on, in `v_oxplow_request_link`'s shape (request, task, basis, turn, thread_id, at, turns, started_at, last_ended_at, request_id), over the `request_task` model. `basis` keeps the model's names: `filed` and `edited` are core's `command`."
     fields:
       - { name: request, type: TEXT, doc: "The request (`v_request.uri`)." }
       - { name: task, type: TEXT, doc: "The task's URI; it may dangle." }
@@ -430,14 +430,6 @@ commands:
     entry: handlers/reorder.star
     needs: [sql.read]
     access: write
-  # The person's menu entry for foundation's `task.create`: an agent
-  # runs foundation's; this adds the label, shortcut and form a person uses.
-  - name: task.new
-    summary: "The person's menu entry for `oxplow.task.create`: New Task… opens the new-task form and shows the task it files."
-    scope: task_tracker.write
-    op: create
-    ui: {"label": "New Task…", "group": "Tasks", "keywords": ["task"], "form": "oxplow:oxplow/page?page=new-task", "shortcut": "Ctrl/Cmd+Shift+N", "open_after": "{{result.uri}}"}
-    example: {"title": "Fix the login redirect loop", "body": "Signing in from /settings bounces back to /login.", "stage": "todo"}
   # The person's menu entry for foundation's `knowledge.write_page`: an
   # agent runs foundation's; this adds the label and the form a person uses.
   - name: knowledge.new_page
@@ -453,7 +445,7 @@ custom_components:
     title: Board
     description: "The tasks as a kanban board: a column per stage of the list, drag a card to move it, a card's menu to set its stage, fields and assignee."
     bundle: dist/board
-    commands: [oxplow.task.transition, oxplow.task.update, oxplow.task.assign, oxplow.task.reorder, oxplow.task.delete]
+    commands: [oxplow.tasks.assign, oxplow.tasks.reorder]
 panels:
   # What the thread is working on: its open task (with its epic), the
   # items assigned to it next, and what it finished; collapsed, the task.
@@ -462,18 +454,19 @@ panels:
   # What is assigned to the person: their open tasks, counted; the header
   # opens the Assigned to you page. Project-wide, so the thread is not a param.
   - { id: assigned, title: Assigned to you, icon: user, scope: project, body: assigned-panel, collapsed: assigned-line, count: assigned-count, open: 'oxplow:oxplow/page?page=assigned-to-you' }
-# oxplow's own task tracker, oxtask, is declared here: with only
-# oxplow-foundation running there is no task tracker. Its agent skill is the
-# ready queue (`/oxplow:next-task`).
+# What the agent reads about tasks, while the task model has a live store
+# (oxtask on): their commands, and the project's workflow. The ready queue is
+# `/oxplow:next-task`.
 skills:
+  - { name: tasks, file: skills/tasks/SKILL.md, needs: [model:oxplow/task_record] }
   # How an agent uses tasks is the project's task workflow (`tasks.workflow`):
   # `off` offers none of these; `custom` only the queue, the project's own
   # skill saying the rest.
-  - { name: next-task, kind: command, file: commands/next-task.md, when: { config: /tasks/workflow, in: [person_files, agent_tracks, custom] } }
+  - { name: next-task, kind: command, file: commands/next-task.md, needs: [model:oxplow/task_record], when: { config: /tasks/workflow, in: [person_files, agent_tracks, custom] } }
   # The agent tracks what it works on as tasks (the default).
-  - { name: track-work, file: skills/track-work/SKILL.md, when: { config: /tasks/workflow, in: [agent_tracks] } }
+  - { name: track-work, file: skills/track-work/SKILL.md, needs: [model:oxplow/task_record], when: { config: /tasks/workflow, in: [agent_tracks] } }
   # The person files the tasks; the agent works them.
-  - { name: work-tasks, file: skills/work-tasks/SKILL.md, when: { config: /tasks/workflow, in: [person_files] } }
+  - { name: work-tasks, file: skills/work-tasks/SKILL.md, needs: [model:oxplow/task_record], when: { config: /tasks/workflow, in: [person_files] } }
 # What the agent should know now, while oxtask is the active tracker and
 # the project's workflow uses tasks: the thread's task in progress, the
 # next three in its queue, and the project's definition of done; nothing
@@ -483,13 +476,13 @@ skills:
 context:
   - id: task-state
     doc: "The thread's task in progress, the next three in its queue, and the project's definition of done."
-    needs: [task_tracker]
+    needs: [model:oxplow/task_record]
     when: { config: /tasks/workflow, in: [person_files, agent_tracks, custom] }
     query: |
       WITH here AS (SELECT uri('oxplow/thread', 'id', 'thr' || :thread_id) AS uri),
       mine AS (
         SELECT w.title, w.native_id, w.state, w.rank, w.created_at
-        FROM v_task w, here WHERE w.assignee = here.uri
+        FROM v_oxplow_task w, here WHERE w.assignee = here.uri
       ),
       active AS (
         SELECT group_concat('"' || title || '" (' || native_id || ')', ', ') AS s
@@ -506,10 +499,6 @@ context:
              || CASE WHEN done_means.d <> '' THEN char(10) || 'Done means:' || char(10) || done_means.d ELSE '' END AS text
       FROM active, up_next, done_means
       WHERE (active.s IS NOT NULL OR up_next.s IS NOT NULL OR done_means.d <> '')
-        AND EXISTS (SELECT 1 FROM v_capability_provider p
-                     WHERE p.capability = 'task_tracker' AND p.provider = 'oxtask' AND p.active = 1)
-implementations:
-  - { capability: task_tracker, id: oxtask, entry: "oxplow:oxtask", skills: [next-task, track-work, work-tasks], description: "The task tracker that oxplow keeps itself." }
 advisories:
   # oxtask's opinion (the `track-work` skill): an agent tracks what it works
   # on as tasks. At the first edit of a request (a file an edit call named or
@@ -528,12 +517,11 @@ advisories:
       WHERE :request_id IS NOT NULL
         -- Only in the workflow where the agent tracks everything.
         AND config('/tasks/workflow') = 'agent_tracks'
-        AND EXISTS (SELECT 1 FROM v_capability_provider
-                     WHERE capability = 'task_tracker' AND provider = 'oxtask' AND active = 1)
+        AND EXISTS (SELECT 1 FROM v_model_stage WHERE model = 'oxplow/task_record')
         AND EXISTS (SELECT 1 FROM v_tool_call_path p JOIN v_agent_turn t ON t.id = p.turn_id
                      WHERE t.request_id = :request_id)
-        AND NOT EXISTS (SELECT 1 FROM v_request_task rt WHERE rt.request_id = :request_id)
-        AND NOT EXISTS (SELECT 1 FROM v_task w JOIN v_thread th ON th.uri = w.assignee
+        AND NOT EXISTS (SELECT 1 FROM v_oxplow_request_link rt WHERE rt.request_id = :request_id)
+        AND NOT EXISTS (SELECT 1 FROM v_oxplow_task w JOIN v_thread th ON th.uri = w.assignee
                          WHERE th.id = :thread_id AND w.state = 'in_progress')
 # Whether the work was tracked: of the requests that changed files, the share
 # that has a task linked. It reads no workflow setting: it measures what
@@ -546,7 +534,7 @@ collectors:
     on: [agent.turn.ended]
     input: |
       SELECT r.uri AS request,
-             EXISTS (SELECT 1 FROM v_request_task rt WHERE rt.request_id = r.id) AS tracked,
+             EXISTS (SELECT 1 FROM v_oxplow_request_link rt WHERE rt.request_id = r.id) AS tracked,
              r.started_at AS placed_at
         FROM v_agent_turn t
         JOIN v_request r ON r.id = t.request_id
@@ -637,7 +625,7 @@ collectors:
                       WHERE pt.request_id = t.request_id)
     facts: [knowledge.read_requests]
 dimensions:
-  - {"key": "work.priority", "label": "Priority", "entity": "v_task", "expr": "json_extract(e.native, '$.priority')", "description": "The priority of a task."}
+  - {"key": "work.priority", "label": "Priority", "entity": "v_oxplow_task", "expr": "json_extract(e.native, '$.priority')", "description": "The priority of a task."}
   - {"key": "oxplow.knowledge_store", "label": "Knowledge store", "valueType": "categorical", "description": "The store that keeps a knowledge page, such as oxwiki."}
   - {"key": "oxplow.knowledge_bucket", "label": "Knowledge bucket", "valueType": "categorical", "description": "What a knowledge page is for: note, memory or instruction."}
 measures:
@@ -651,8 +639,8 @@ measures:
   # recorded again: 1 when tracked, 0 when not.
   - {"key": "oxplow.request_tracked", "title": "Request tracked", "unit": "count", "subjectKind": "request", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "1 when a request that changed files has a task linked, else 0, as of its latest turn."}
 metrics:
-  - {"key":"task.completed","title":"Tasks completed","entity":"v_task","where":"state = 'done'","time":"closed_at","aggregation":"count","unit":"tasks","category":"operational","description":"Tasks done, by the day they were closed."}
-  - {"key":"task.open","title":"Open tasks","entity":"v_task","where":"state IN ('todo', 'in_progress', 'blocked')","aggregation":"count","unit":"tasks","category":"operational","description":"Tasks ready, in progress or blocked, captured over time."}
+  - {"key":"task.completed","title":"Tasks completed","entity":"v_oxplow_task","where":"state = 'done'","time":"closed_at","aggregation":"count","unit":"tasks","category":"operational","description":"Tasks done, by the day they were closed."}
+  - {"key":"task.open","title":"Open tasks","entity":"v_oxplow_task","where":"state IN ('todo', 'in_progress', 'blocked')","aggregation":"count","unit":"tasks","category":"operational","description":"Tasks ready, in progress or blocked, captured over time."}
   - {"key":"tasks.tracked_requests_pct","title":"Tracked requests","measure": "oxplow.request_tracked", "expression": "RATIO(num, den)", "unit":"%","direction":"higher-better","displayKind":"gauge","category":"operational","description":"The share of the requests that changed files which have a task link.","sliceableDims":["oxplow.branch"]}
   - {"key":"knowledge.pages","title":"Knowledge pages","measure": "knowledge.pages", "expression": "SUM(value)", "unit":"count","direction":"neutral","displayKind":"gauge","category":"operational","description":"How many knowledge pages the enabled stores keep.","sliceableDims":["oxplow.knowledge_store","oxplow.knowledge_bucket"]}
   - {"key":"knowledge.stale_pct","title":"Stale knowledge","measure": "knowledge.stale_pages", "expression": "RATIO(num, den)", "unit":"%","direction":"lower-better","displayKind":"gauge","category":"operational","description":"The share of knowledge pages that cite a file which changed since the page was pinned.","sliceableDims":["oxplow.knowledge_store","oxplow.knowledge_bucket"]}

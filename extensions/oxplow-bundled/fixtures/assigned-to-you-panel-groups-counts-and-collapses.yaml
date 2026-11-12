@@ -1,11 +1,15 @@
 # The rail's Assigned to you panel run whole: the body groups the person's
 # open tasks, the collapsed line is the one in progress (else the next),
 # and the count is the open ones.
+requires: [oxtask]
 given:
-  - { command: oxplow.task.create, input: { title: Next, stage: todo, assignee: "oxplow:oxplow/person" } }
-  - { command: oxplow.task.create, input: { title: Going, stage: todo, assignee: "oxplow:oxplow/person" }, bind: going }
-  - { command: oxplow.task.create, input: { title: A thread's, stage: todo, assignee: thr1 } }
-  - { command: oxplow.task.transition, input: { uri: $going.uri, to: in_progress } }
+  - { command: oxtask.task.create, input: { title: Next, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/person" } }
+  - { command: oxtask.task.create, input: { title: Going, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", to: "oxplow:oxplow/person" } }
+  - { command: oxtask.task.create, input: { title: A thread's, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk3&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.move, input: { id: tsk2, stage: in_progress } }
 when: { panel: assigned }
 expect:
   body:
@@ -23,7 +27,7 @@ expect:
 steps:
   # Done leaves the open groups and the count.
   - given:
-      - { command: oxplow.task.transition, input: { uri: $going.uri, to: done } }
+      - { command: oxtask.task.move, input: { id: tsk2, stage: done } }
   - expect:
       body: { loaders: { lines: { rows: [{ grp: Up next, title: Next }] } } }
       collapsed: { loaders: { line: { rows: [{ title: Next }] } } }

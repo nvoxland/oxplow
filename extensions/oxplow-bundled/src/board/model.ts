@@ -183,13 +183,14 @@ export type MenuEntry =
 export function cardMenu(card: Rec, { fields, assignees, stages }: MenuContext): MenuEntry[] {
   if (card.uri == null) return [];
   const uri = String(card.uri);
+  const id = String(card.id);
   const out: MenuEntry[] = [{ kind: "item", id: "open", label: "Open", open: uri }];
   const group = (entries: MenuEntry[]) => {
     if (entries.length > 0) out.push({ kind: "separator" }, ...entries);
   };
   group(stages.filter((s) => s.value !== card.stage).map((s) => ({
     kind: "item" as const, id: `to-${s.value}`, label: `Mark ${s.label}`,
-    act: { command: "oxplow.task.transition", input: { uri, to: s.value } },
+    act: { command: "oxtask.task.move", input: { id, stage: s.value } },
   })));
   const native = parseObject(card.native);
   for (const f of fields) {
@@ -197,7 +198,7 @@ export function cardMenu(card: Rec, { fields, assignees, stages }: MenuContext):
       { kind: "heading", label: f.title },
       ...f.values.map((v) => ({
         kind: "item" as const, id: `${f.name}-${v}`, label: humanize(v), checked: native[f.name] === v,
-        act: { command: "oxplow.task.update", input: { uri, native: { [f.name]: v } } },
+        act: { command: "oxtask.task.update", input: { id, [f.name]: v } },
       })),
     ]);
   }
@@ -205,7 +206,7 @@ export function cardMenu(card: Rec, { fields, assignees, stages }: MenuContext):
   if (truthy(card.is_open)) {
     const assign = (id: string, label: string, to: string | null): MenuEntry => ({
       kind: "item", id, label, checked: (card.assignee ?? null) === to,
-      act: { command: "oxplow.task.assign", input: { uri, to } },
+      act: { command: "oxplow.tasks.assign", input: { uri, to } },
     });
     group([
       { kind: "heading", label: "Assign to" },
@@ -214,8 +215,8 @@ export function cardMenu(card: Rec, { fields, assignees, stages }: MenuContext):
     ]);
   }
   const moves: MenuEntry[] = [];
-  if (truthy(card.has_parent)) moves.push({ kind: "item", id: "unparent", label: "Make top-level", act: { command: "oxplow.task.update", input: { uri, parent_uri: "" } } });
-  if (truthy(card.can_delete)) moves.push({ kind: "item", id: "delete", label: "Delete", danger: true, act: { command: "oxplow.task.delete", input: { uri } } });
+  if (truthy(card.has_parent)) moves.push({ kind: "item", id: "unparent", label: "Make top-level", act: { command: "oxtask.task.update", input: { id, parent: null } } });
+  if (truthy(card.can_delete)) moves.push({ kind: "item", id: "delete", label: "Delete", danger: true, act: { command: "oxtask.task.delete", input: { id } } });
   group(moves);
   return out;
 }
@@ -226,9 +227,9 @@ export function cardMenu(card: Rec, { fields, assignees, stages }: MenuContext):
 export function dropAct(card: Rec, to: string, before: Rec | null): Act | null {
   if (card.uri == null) return null;
   const uri = String(card.uri);
-  if (to !== card.stage) return { command: "oxplow.task.transition", input: { uri, to } };
+  if (to !== card.stage) return { command: "oxtask.task.move", input: { id: String(card.id), stage: to } };
   if (before && before.uri === card.uri) return null;
-  return { command: "oxplow.task.reorder", input: before?.uri ? { uri, before: String(before.uri) } : { uri } };
+  return { command: "oxplow.tasks.reorder", input: before?.uri ? { uri, before: String(before.uri) } : { uri } };
 }
 
 export interface Filters {

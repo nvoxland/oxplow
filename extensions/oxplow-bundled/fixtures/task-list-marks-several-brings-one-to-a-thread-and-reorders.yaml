@@ -1,22 +1,23 @@
 # The Task List at the backlog: Mark changes an item's stage, Assign to
 # a thread gives one to it (it was nobody's), and a row dropped before another (the Reorder action's command) is placed there.
+requires: [oxtask]
 given:
-  - { command: oxplow.task.create, input: { title: Alpha item, stage: backlog }, bind: a }
-  - { command: oxplow.task.create, input: { title: Beta item, stage: backlog }, bind: b }
-  - { command: oxplow.task.create, input: { title: Gamma item, stage: backlog }, bind: c }
-  - { command: oxplow.task.create, input: { title: Pull me in, stage: backlog }, bind: pull }
+  - { command: oxtask.task.create, input: { title: Alpha item, stage: backlog } }
+  - { command: oxtask.task.create, input: { title: Beta item, stage: backlog } }
+  - { command: oxtask.task.create, input: { title: Gamma item, stage: backlog } }
+  - { command: oxtask.task.create, input: { title: Pull me in, stage: backlog } }
 when: { page: task-list, params: { state: backlog, priority: any, stream_id: 1 } }
 expect:
   loaders: { list: { rows: [{ title: Alpha item }, { title: Beta item }, { title: Gamma item }, { title: Pull me in }] } }
 steps:
   - given:
-      - { command: oxplow.task.reorder, input: { uri: $c.uri, before: $a.uri } }
+      - { command: oxplow.tasks.reorder, input: { uri: "oxplow:oxplow/task?id=tsk3&provider=oxtask", before: "oxplow:oxplow/task?id=tsk1&provider=oxtask" } }
   - expect: { loaders: { list: { rows: [{ title: Gamma item }, { title: Alpha item }, { title: Beta item }, { title: Pull me in }] } } }
-  - press: { action: mark, node: list, row: { uri: $a.uri }, option: blocked }
+  - press: { action: mark, node: list, row: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" }, option: blocked }
     expect: { ok: true }
-  - press: { action: mark, node: list, row: { uri: $b.uri }, option: done }
+  - press: { action: mark, node: list, row: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask" }, option: done }
     expect: { ok: true }
-  - press: { action: assign, node: list, row: { uri: $pull.uri }, option: "oxplow:oxplow/thread?id=thr1" }
+  - press: { action: assign, node: list, row: { uri: "oxplow:oxplow/task?id=tsk4&provider=oxtask" }, option: "oxplow:oxplow/thread?id=thr1" }
     expect: { ok: true }
   - expect: { loaders: { list: { rows: { contains: [{ title: Gamma item, assignee_shown: null }, { title: Pull me in, assignee_shown: Thread }] } } } }
   - params: { state: blocked }

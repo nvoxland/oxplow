@@ -1,16 +1,10 @@
 # Closing a thread releases what core released: its open tasks go to the end
 # of nobody's queue, in the order the thread held them, each with its assignee
 # cleared and a place; a done task (which has no assignee) is left, and so is
-# another thread's. The same setup through core's tracker gives the same
-# assignee and rank in `v_task` as in `task`.
+# another thread's.
 requires: [oxtask]
 given:
   - { command: oxplow.thread.create, input: { stream: str1, title: Old } }
-  - { command: oxplow.task.create, input: { title: First, stage: todo, assignee: thr2 } }
-  - { command: oxplow.task.create, input: { title: Second, stage: todo, assignee: thr2 } }
-  - { command: oxplow.task.create, input: { title: Finished, stage: todo, assignee: thr2 }, bind: cfin }
-  - { command: oxplow.task.create, input: { title: Mine, stage: todo, assignee: thr1 } }
-  - { command: oxplow.task.transition, input: { uri: $cfin.uri, to: done } }
   - { command: oxtask.task.create, input: { title: First, stage: ready } }
   - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr2" } }
   - { command: oxtask.task.create, input: { title: Second, stage: ready } }
@@ -21,21 +15,10 @@ given:
   - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk4&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
   - { command: oxtask.task.move, input: { id: tsk3, stage: done } }
   - { command: oxplow.thread.close, input: { thread: thr2 } }
-when:
-  sql: |
-    SELECT n.title, n.assignee IS c.assignee AS assignee, n.rank IS c.rank AS rank
-      FROM v_oxplow_task n JOIN v_task c ON c.title = n.title ORDER BY n.title
+when: { sql: "SELECT title, assignee, rank FROM v_oxplow_task ORDER BY title" }
 expect:
   rows:
-    - { title: Finished, assignee: 1, rank: 1 }
-    - { title: First, assignee: 1, rank: 1 }
-    - { title: Mine, assignee: 1, rank: 1 }
-    - { title: Second, assignee: 1, rank: 1 }
-steps:
-  - when: { sql: "SELECT title, assignee, rank FROM v_oxplow_task ORDER BY title" }
-    expect:
-      rows:
-        - { title: Finished, assignee: null, rank: null }
-        - { title: First, assignee: null, rank: 0 }
-        - { title: Mine, assignee: "oxplow:oxplow/thread?id=thr1", rank: 0 }
-        - { title: Second, assignee: null, rank: 1 }
+    - { title: Finished, assignee: null, rank: null }
+    - { title: First, assignee: null, rank: 0 }
+    - { title: Mine, assignee: "oxplow:oxplow/thread?id=thr1", rank: 0 }
+    - { title: Second, assignee: null, rank: 1 }

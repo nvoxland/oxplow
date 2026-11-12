@@ -1,6 +1,6 @@
 ---
 name: work-tasks
-description: How to work the tasks the person files in oxtask, the project's task tracker — work what is assigned or queued, move a task to in progress before you edit and to done only when it is fully done, and file a task only for a follow-up or when asked. Loads at the start of any work that will change files, and on the oxplow `run_command` tool with oxplow.task.transition or oxplow.task.create.
+description: How to work the tasks the person files in oxtask, the project's task tracker — work what is assigned or queued, move a task to in progress before you edit and to done only when it is fully done, and file a task only for a follow-up or when asked. Loads at the start of any work that will change files, and on the oxplow `run_command` tool with oxtask.task.move or oxtask.task.create.
 ---
 
 # Work the tasks the person files
@@ -20,12 +20,12 @@ true for the tasks you work.
 
 ## While you work a task
 
-1. Move it to `in_progress` before you edit (`oxplow.task.transition`,
-   `to: in_progress`). That also assigns it to your thread.
+1. Move it to `in_progress` before you edit (`oxtask.task.move`,
+   `stage: in_progress`). That also assigns it to your thread.
 2. One task in progress at a time per thread. When you stop on it, move it
-   back (`todo`, or `blocked` with a comment that says why).
+   back (`ready`, or `blocked` with a comment that says why).
 3. Work you find that the task does not cover: file it as a follow-up on
-   the backlog (`oxplow.task.create`, the `tasks` skill), linked
+   the backlog (`oxtask.task.create`, the `tasks` skill), linked
    `discovered_from` the task. Don't do it unasked.
 
 ## When it is done

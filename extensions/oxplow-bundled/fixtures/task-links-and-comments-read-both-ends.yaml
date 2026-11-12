@@ -1,18 +1,19 @@
 # A task's Links and Comments, each a part its page embeds where the
 # list keeps them: a link shows from both ends, and only its own end can
 # unlink it; comments in the order they were written.
+requires: [oxtask]
 given:
-  - { command: oxplow.task.create, input: { title: The item }, bind: item }
-  - { command: oxplow.task.create, input: { title: Its blocker }, bind: blocker }
-  - { command: oxplow.task.link, input: { uri: $item.uri, target: $blocker.uri, link_type: blocks } }
-  - { command: oxplow.task.comment, input: { uri: $item.uri, body: A note. } }
-  - { command: oxplow.task.comment, input: { uri: $item.uri, body: Another. } }
-when: { part: task-links, params: { uri: $item.uri } }
+  - { command: oxtask.task.create, input: { title: The item, stage: ready } }
+  - { command: oxtask.task.create, input: { title: Its blocker, stage: ready } }
+  - { command: oxtask.task.link, input: { id: tsk1, to: tsk2, type: blocks } }
+  - { command: oxtask.task.comment, input: { id: tsk1, body: A note. } }
+  - { command: oxtask.task.comment, input: { id: tsk1, body: Another. } }
+when: { part: task-links, params: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" } }
 expect:
   loaders:
     links: { rows: [{ item: Its blocker, link_type: blocks, direction: to, outbound: 1 }] }
 steps:
-  - when: { part: task-links, params: { uri: $blocker.uri } }
-    expect: { loaders: { links: { rows: [{ item: The item, direction: from, outbound: 0, other: $item.uri }] } } }
-  - when: { part: task-comments, params: { uri: $item.uri } }
+  - when: { part: task-links, params: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask" } }
+    expect: { loaders: { links: { rows: [{ item: The item, direction: from, outbound: 0, other: "oxplow:oxplow/task?id=tsk1&provider=oxtask" }] } } }
+  - when: { part: task-comments, params: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" } }
     expect: { loaders: { comments: { rows: [{ body: A note. }, { body: Another. }] } } }

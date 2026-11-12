@@ -1,19 +1,21 @@
 # A task's page: its Move to form transitions the item and its Details
 # form renames it; the board then shows it in its new stage under the new
 # title.
+requires: [oxtask]
 given:
-  - { command: oxplow.task.create, input: { title: Item to move, assignee: thr1 }, bind: item }
-when: { page: task-detail, params: { uri: $item.uri, thread_id: 1, stream_id: 1 } }
+  - { command: oxtask.task.create, input: { title: Item to move, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+when: { page: task-detail, params: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", thread_id: 1, stream_id: 1 } }
 expect:
-  loaders: { state: { rows: [{ to: ready }] }, fields: { rows: [{ title: Item to move }] } }
+  loaders: { state: { rows: [{ stage: ready }] }, fields: { rows: [{ title: Item to move }] } }
 steps:
-  - submit: { node: state, input: { uri: $item.uri, to: in_progress } }
+  - submit: { node: state, input: { id: tsk1, stage: in_progress } }
     expect: { ok: true }
-  - submit: { node: fields, input: { uri: $item.uri, title: Item moved and renamed } }
+  - submit: { node: fields, input: { id: tsk1, title: Item moved and renamed } }
     expect: { ok: true }
   - expect:
       loaders:
         row: { rows: [{ title: Item moved and renamed }] }
-        state: { rows: [{ to: in_progress }] }
+        state: { rows: [{ stage: in_progress }] }
   - when: { page: work, params: { show: thread, priority: any, thread_id: 1, stream_id: 1 } }
     expect: { loaders: { board: { rows: [{ title: Item moved and renamed, state: in_progress }] } } }

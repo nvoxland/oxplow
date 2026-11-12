@@ -10,6 +10,6 @@ the pool, `ord` 1 next). If it lists nothing, nothing is ready: say so
 and stop.
 
 Otherwise pick the item (or, for an epic, its first ready `child`), move
-it to `in_progress` with `oxplow.task.transition` — that assigns it to
+it to `in_progress` with `oxtask.task.move { id, stage: in_progress }` — that assigns it to
 your thread and links your work to it — and do it. Move it to `done` when
 it ships.

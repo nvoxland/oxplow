@@ -1,14 +1,15 @@
 # A task's Link… adds a link to another item and Unlink, on its own end,
 # removes it; the Links part reads each change.
+requires: [oxtask]
 given:
-  - { command: oxplow.task.create, input: { title: Item with notes }, bind: item }
-  - { command: oxplow.task.create, input: { title: Third item }, bind: other }
-when: { part: task-links, params: { uri: $item.uri } }
+  - { command: oxtask.task.create, input: { title: Item with notes, stage: ready } }
+  - { command: oxtask.task.create, input: { title: Third item, stage: ready } }
+when: { part: task-links, params: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", id: tsk1 } }
 expect: { loaders: { links: { rows: 0 } } }
 steps:
-  - press: { action: link, node: links, input: { target: $other.uri } }
+  - press: { action: link, node: links, input: { to: tsk2 } }
     expect: { ok: true }
   - expect: { loaders: { links: { rows: [{ item: Third item, link_type: relates_to, outbound: 1 }] } } }
-  - press: { action: unlink, node: links, row: { other: $other.uri, link_type: relates_to } }
+  - press: { action: unlink, node: links, row: { other: "oxplow:oxplow/task?id=tsk2&provider=oxtask", link_type: relates_to } }
     expect: { ok: true }
   - expect: { loaders: { links: { rows: 0 } } }

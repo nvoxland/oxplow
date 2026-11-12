@@ -1,4 +1,4 @@
-# "See also": a metric built on no measure (the task counts read `v_task`
+# "See also": a metric built on no measure (the task counts read `v_oxplow_task`
 # directly) links to the extension it comes from, bundled, and to no measure.
 when:
   page: oxplow/metric

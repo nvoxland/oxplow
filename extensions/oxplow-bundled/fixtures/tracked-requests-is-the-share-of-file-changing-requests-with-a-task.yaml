@@ -1,13 +1,15 @@
 # Two requests changed files; one took a task, one did not: 50% tracked.
+requires: [oxtask]
 given:
-  - { command: oxplow.task.create, input: { title: The fix, stage: todo, assignee: thr1 }, bind: fix }
+  - { command: oxtask.task.create, input: { title: The fix, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
   - observe:
       turn:
         prompt: Fix the greeting
         during:
-          - { command: oxplow.task.transition, input: { uri: $fix.uri, to: in_progress }, as: agent }
+          - { command: oxtask.task.move, input: { id: tsk1, stage: in_progress }, as: agent }
         tools: [{ name: Edit, kind: edit, paths: [a.txt], ok: true }]
-  - { command: oxplow.task.transition, input: { uri: $fix.uri, to: done } }
+  - { command: oxtask.task.move, input: { id: tsk1, stage: done } }
   - observe:
       turn:
         prompt: Tweak the farewell

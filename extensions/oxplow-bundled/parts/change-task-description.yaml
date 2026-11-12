@@ -7,9 +7,9 @@ loaders:
   description:
     sql: |
       SELECT coalesce(w.body, '') AS body
-      FROM v_task w
+      FROM v_oxplow_task w
       WHERE coalesce(:end, '') = '' AND uri_resource(:uri) = 'oxplow/request' AND trim(w.body) <> ''
-        AND w.uri = (SELECT x.task FROM v_request_task x
+        AND w.uri = (SELECT x.task FROM v_oxplow_request_link x
                       WHERE x.request_id = CAST(substr(uri_param(:uri, 'id'), 4) AS INTEGER)
                       ORDER BY x.at, x.task LIMIT 1)
 view:

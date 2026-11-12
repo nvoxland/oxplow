@@ -2,16 +2,19 @@
 # its stage, who it's for, its epic, its list, when it changed — with
 # Mark ▸ the list's stages, Assign to ▸ the stream's threads and you,
 # Unassign and Delete; its description and the items under it in the body.
+requires: [oxtask]
 given:
-  - { command: oxplow.task.create, input: { title: An epic, assignee: thr1 }, bind: epic }
-  - { command: oxplow.task.create, input: { title: The item, body: "Fix **it**.", assignee: thr1, parent_uri: $epic.uri }, bind: item }
-when: { page: task-detail, params: { uri: $item.uri, thread_id: 1, stream_id: 1 } }
+  - { command: oxtask.task.create, input: { title: An epic, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: The item, body: "Fix **it**.", stage: ready, parent: tsk1 } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+when: { page: task-detail, params: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", thread_id: 1, stream_id: 1 } }
 expect:
   loaders:
     # The page's row names its tab: the item's title.
     row: { rows: [{ title: The item }] }
     about: { rows: [{ stage: ready, stage_title: Ready, icon: todo, assigned_to: Thread, parent: An epic, id: tsk2, list: oxtask, is_open: 1, assigned: 1, can_delete: 1 }] }
-    state: { rows: [{ to: ready }] }
+    state: { rows: [{ stage: ready }] }
     body: { rows: [{ body: "Fix **it**." }] }
     children: { rows: 0 }
     marks: { rows: [{ value: backlog }, { value: ready, label: Ready }, { value: in_progress }, { value: blocked }, { value: done }, { value: canceled }] }
@@ -20,13 +23,13 @@ expect:
     - { id: about, kind: viz, actions: [mark, assign, unassign, delete] }
 steps:
   # An epic lists the items under it.
-  - params: { uri: $epic.uri }
+  - params: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" }
     expect: { loaders: { children: { rows: [{ title: The item, stage_title: Ready, assigned_to: Thread }] } } }
   # Mark ▸ Blocked, then Assign to ▸ You: each the option picked.
-  - press: { action: mark, node: about, row: { uri: $item.uri }, option: blocked }
+  - press: { action: mark, node: about, row: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask" }, option: blocked }
     expect: { ok: true }
   - expect: { loaders: { about: { rows: [{ stage: blocked, stage_title: Blocked, icon: blocked }] } } }
-  - press: { action: assign, node: about, row: { uri: $item.uri }, option: "oxplow:oxplow/person" }
+  - press: { action: assign, node: about, row: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask" }, option: "oxplow:oxplow/person" }
     expect: { ok: true }
   - expect: { loaders: { about: { rows: [{ assigned_to: You }] } } }
   # An item the active list doesn't hold: nothing to read.

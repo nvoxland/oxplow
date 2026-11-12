@@ -5,7 +5,7 @@ for: oxplow/task
 default: true
 comments: true
 needs:
-- task_tracker
+- model:oxplow/task_record
 params:
 - name: uri
 - name: thread_id
@@ -15,30 +15,29 @@ loaders:
   # The page's row names its tab: the item's title.
   row:
     sql: |
-      SELECT w.title AS title FROM v_task w WHERE w.uri = :uri
+      SELECT w.title AS title, w.native_id AS id FROM v_oxplow_task w WHERE w.uri = :uri
     columns:
     - key: title
+    - key: id
   # What it is, for the rail: its stage (by its list's name, its bucket's
   # glyph), who it's for, its epic, its list, when it changed; and what its
   # actions may do.
   about:
     sql: |
-      WITH feat AS (
-        SELECT p.features AS f FROM v_capability_provider p WHERE p.capability = 'task_tracker' AND p.active = 1
-      )
+      WITH feat AS (SELECT '{"delete":1}' AS f)
       SELECT w.uri, w.stage, coalesce(w.stage_title, w.stage) AS stage_title, w.state AS icon,
              w.assignee,
              CASE WHEN w.assignee IS NULL THEN 'Nobody'
                   WHEN w.assignee = uri('oxplow/person') THEN 'You'
                   ELSE coalesce((SELECT t.title FROM v_thread t WHERE t.uri = w.assignee), w.assignee) END AS assigned_to,
-             (SELECT p.title FROM v_task p WHERE p.uri = w.parent_uri) AS parent, w.parent_uri,
+             (SELECT p.title FROM v_oxplow_task p WHERE p.uri = w.parent_uri) AS parent, w.parent_uri,
              w.native_id AS id, w.provider AS list,
              w.created_at, w.updated_at, w.closed_at,
              -- A closed item is nobody's: no one to give it to.
              w.state NOT IN ('done', 'canceled') AS is_open,
              (w.state NOT IN ('done', 'canceled') AND w.assignee IS NOT NULL) AS assigned,
              coalesce((SELECT json_extract(f, '$.delete') FROM feat), 0) AS can_delete
-      FROM v_task w WHERE w.uri = :uri
+      FROM v_oxplow_task w WHERE w.uri = :uri
   # The list's stages: Mark's options and the Stage form's choices.
   stages:
     page: oxplow/task-stages
@@ -57,13 +56,14 @@ loaders:
       SELECT uri('oxplow/person'), 'You'
   state:
     sql: |
-      SELECT w.uri, w.stage AS "to" FROM v_task w WHERE w.uri = :uri
+      SELECT w.uri, w.native_id AS id, w.stage FROM v_oxplow_task w WHERE w.uri = :uri
   fields:
     sql: |
-      SELECT w.uri, w.title, w.native FROM v_task w WHERE w.uri = :uri
+      SELECT w.uri, w.native_id AS id, w.title, json_extract(w.native, '$.priority') AS priority
+      FROM v_oxplow_task w WHERE w.uri = :uri
   body:
     sql: |
-      SELECT w.uri, coalesce(w.body, '') AS body FROM v_task w WHERE w.uri = :uri
+      SELECT w.uri, w.native_id AS id, coalesce(w.body, '') AS body FROM v_oxplow_task w WHERE w.uri = :uri
   # The items under it (an epic's), in their list's stage order, then queue.
   children:
     sql: |
@@ -72,7 +72,7 @@ loaders:
                   WHEN c.assignee = uri('oxplow/person') THEN 'You'
                   ELSE (SELECT t.title FROM v_thread t WHERE t.uri = c.assignee) END AS assigned_to,
              first_sentence(c.body) AS summary
-      FROM v_task c
+      FROM v_oxplow_task c
       WHERE c.parent_uri = :uri
       ORDER BY CASE c.state WHEN 'in_progress' THEN 0 WHEN 'blocked' THEN 1 WHEN 'todo' THEN 2
                             WHEN 'backlog' THEN 3 WHEN 'done' THEN 4 ELSE 5 END,
@@ -99,11 +99,11 @@ loaders:
              CASE WHEN t.id IS NULL THEN 'The tasks in its stage'
                   ELSE 'The work assigned to its thread' END AS description,
              1 AS ord
-      FROM v_task w LEFT JOIN v_thread t ON t.uri = w.assignee
+      FROM v_oxplow_task w LEFT JOIN v_thread t ON t.uri = w.assignee
       WHERE w.uri = :uri
       UNION ALL
       SELECT p.title, p.uri, 'Its parent epic', 2
-      FROM v_task w JOIN v_task p ON p.uri = w.parent_uri WHERE w.uri = :uri
+      FROM v_oxplow_task w JOIN v_oxplow_task p ON p.uri = w.parent_uri WHERE w.uri = :uri
       ORDER BY ord
 # What it is and what can be done to it.
 rail:
@@ -138,22 +138,22 @@ rail:
       label: Closed
       format: relative
       when: closed_at
-    empty: This task isn't on the active task tracker.
+    empty: This task isn't in the task model.
     actions:
     # Mark ▸ the list's stages, its own checked.
     - id: mark
       label: Mark
-      command: oxplow.task.transition
+      command: oxtask.task.move
       row: true
       options_from: marks
       current: stage
       input:
-        uri: '{{row.uri}}'
-        to: '{{option.value}}'
+        id: '{{row.id}}'
+        stage: '{{option.value}}'
     # Assign to ▸ the stream's threads and you; a closed item is nobody's.
     - id: assign
       label: Assign to
-      command: oxplow.task.assign
+      command: oxplow.tasks.assign
       row: true
       when: is_open
       options_from: assignees
@@ -163,7 +163,7 @@ rail:
         to: '{{option.value}}'
     - id: unassign
       label: Unassign
-      command: oxplow.task.assign
+      command: oxplow.tasks.assign
       row: true
       when: assigned
       input:
@@ -171,36 +171,34 @@ rail:
         to: null
     - id: delete
       label: Delete
-      command: oxplow.task.delete
+      command: oxtask.task.delete
       row: true
       then: close
       when: can_delete
       input:
-        uri: '{{row.uri}}'
+        id: '{{row.id}}'
   - id: state
     replaceable: task.detail.state
     title: Stage
     from: state
     viz: form
     form:
-      command: oxplow.task.transition
+      command: oxtask.task.move
       mode: edit
       fields:
-      - { name: to, label: Move to }
+      - { name: stage, label: Move to }
       choices:
-        to: oxplow/task-detail#task_states
+        stage: oxplow/task-detail#task_states
   - id: fields
     title: Details
     from: fields
     viz: form
     form:
-      command: oxplow.task.update
+      command: oxtask.task.update
       mode: edit
       fields:
       - title
-      - name: native
-        label: Its list's fields
-        from: oxplow/task-fields
+      - priority
 view:
   stack:
   - id: body
@@ -213,12 +211,12 @@ view:
     actions:
     - id: save
       label: Save
-      command: oxplow.task.update
+      command: oxtask.task.update
       edit: true
       fixed:
-      - uri
+      - id
       input:
-        uri: '{{row.uri}}'
+        id: '{{row.id}}'
         body: '{{row.body}}'
   - id: children
     title: Tasks under it

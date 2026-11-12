@@ -2,18 +2,21 @@
 # ready items assigned to nobody, the most pressing first. Another
 # thread's items, the backlog and blocked ones aren't offered. Starting one
 # assigns it to the thread that started it.
+requires: [oxtask]
 when: { page: next-task, params: { thread: thr1 } }
 given:
   - { command: oxplow.thread.create, input: { stream: str1, title: Other }, bind: other }
-  - { command: oxplow.task.create, input: { title: later, stage: backlog } }
-  - { command: oxplow.task.create, input: { title: theirs, assignee: $other.id } }
-  - { command: oxplow.task.create, input: { title: whenever, native: { priority: low } } }
-  - { command: oxplow.task.create, input: { title: soon, native: { priority: urgent } }, bind: soon }
-  - { command: oxplow.task.create, input: { title: stuck, stage: blocked } }
+  - { command: oxtask.task.create, input: { title: later, stage: backlog } }
+  - { command: oxtask.task.create, input: { title: theirs, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", to: "oxplow:oxplow/thread?id=thr2" } }
+  - { command: oxtask.task.create, input: { title: whenever, stage: ready, priority: low } }
+  - { command: oxtask.task.create, input: { title: soon, stage: ready, priority: urgent } }
+  - { command: oxtask.task.create, input: { title: stuck, stage: blocked } }
 expect:
   loaders:
     next_task: { rows: [{ title: soon, role: pool }, { title: whenever, role: pool }] }
 steps:
   - given:
-      - { command: oxplow.task.create, input: { title: mine, assignee: thr1 } }
+      - { command: oxtask.task.create, input: { title: mine, stage: ready } }
+      - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk6&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
   - expect: { loaders: { next_task: { rows: [{ title: mine, role: ready }] } } }

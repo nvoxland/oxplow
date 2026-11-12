@@ -2,10 +2,14 @@
 # epic's own card is the heading), the loose ones after; a heading folds its items
 # away; a card shows its description's first sentence under its title,
 # its markdown drawn.
+requires: [oxtask]
 given:
-  - { command: oxplow.task.create, input: { title: An epic, assignee: thr1 }, bind: epic }
-  - { command: oxplow.task.create, input: { title: Its child, assignee: thr1, native: { priority: urgent }, parent_uri: $epic.uri } }
-  - { command: oxplow.task.create, input: { title: Loose item, assignee: thr1, native: { priority: low }, body: "## Why\n\nIt breaks **the build** in `ci.yml`. Then more." } }
+  - { command: oxtask.task.create, input: { title: An epic, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Its child, stage: ready, parent: tsk1, priority: urgent } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Loose item, body: "## Why\n\nIt breaks **the build** in `ci.yml`. Then more.", stage: ready, priority: low } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk3&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
 when: { page: work, params: { show: thread, priority: any, thread_id: 1, stream_id: 1 } }
 steps:
   - ui:

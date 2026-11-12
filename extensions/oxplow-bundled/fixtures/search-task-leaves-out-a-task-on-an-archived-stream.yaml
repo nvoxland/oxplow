@@ -7,8 +7,6 @@ given:
   - { command: oxplow.vcs.commit, input: { stream: str1, message: base } }
   - { command: oxplow.stream.create, input: { title: Side, source: new, new_branch: side, start_point: main } }
   - { command: oxplow.thread.create, input: { stream: str2, title: Side thread } }
-  - { command: oxplow.task.create, input: { title: Archived work, stage: todo, assignee: thr2 } }
-  - { command: oxplow.task.create, input: { title: Live work, stage: todo, assignee: thr1 } }
   - { command: oxtask.task.create, input: { title: Archived work, stage: ready } }
   - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr2" } }
   - { command: oxtask.task.create, input: { title: Live work, stage: ready } }
@@ -17,10 +15,7 @@ when: { sql: "SELECT title, stream_id FROM v_oxplow_search_task ORDER BY title" 
 expect: { rows: [{ title: Archived work, stream_id: str2 }, { title: Live work, stream_id: str1 }] }
 steps:
   - given: [{ command: oxplow.stream.archive, input: { stream: str2 }, confirmed: true }]
-  # Archiving also releases the stream's assignments (bundled's effect, as
-  # core's did): the task goes project-wide and stays in search, the same rows
-  # as core's.
+  # Archiving also releases the stream's assignments (bundled's effect): the task
+  # goes project-wide and stays in search.
   - when: { sql: "SELECT title, stream_id FROM v_oxplow_search_task ORDER BY title" }
-    expect: { rows: [{ title: Archived work, stream_id: null }, { title: Live work, stream_id: str1 }] }
-  - when: { sql: "SELECT title, stream_id FROM v_search_task ORDER BY title" }
     expect: { rows: [{ title: Archived work, stream_id: null }, { title: Live work, stream_id: str1 }] }

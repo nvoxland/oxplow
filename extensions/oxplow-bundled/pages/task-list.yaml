@@ -4,7 +4,7 @@ icon: check-square
 category: Work
 keywords: tasks list backlog history done finished in progress
 needs:
-- task_tracker
+- model:oxplow/task_record
 params:
 # One of the list's stages, as it names them; `todo` is its first to-do
 # stage (a bucket names its first stage).
@@ -60,9 +60,9 @@ loaders:
   # stage while it shows a started or closed one), for nobody.
   new_item:
     sql: |
-      SELECT coalesce((SELECT s.filter FROM stages s
+      SELECT coalesce((SELECT s.value FROM stages s
                         WHERE (s.filter = :state OR s.value = :state) AND s.bucket IN ('backlog', 'todo', 'blocked')),
-                      'todo') AS stage
+                      'ready') AS stage
   items:
     page: oxplow/task-rows
     loader: items
@@ -87,7 +87,7 @@ rail:
   from: new_item
   viz: form
   form:
-    command: oxplow.task.create
+    command: oxtask.task.create
     then: stay
     fields: [title]
 view:
@@ -117,7 +117,7 @@ view:
   actions:
   - id: reorder
     label: Reorder
-    command: oxplow.task.reorder
+    command: oxplow.tasks.reorder
     row: true
     drag: true
     input:
@@ -125,77 +125,73 @@ view:
       before: '{{before.uri}}'
   - id: nest
     label: Nest under
-    command: oxplow.task.update
+    command: oxtask.task.update
     row: true
     drag: true
     when: can_nest
     input:
-      uri: '{{row.uri}}'
-      parent_uri: '{{onto.uri}}'
+      id: '{{row.id}}'
+      parent: '{{onto.id}}'
   # Mark ▸ the list's stages, the row's own checked.
   - id: mark
     label: Mark
-    command: oxplow.task.transition
+    command: oxtask.task.move
     row: true
     bulk: true
     options_from: marks
     current: stage
     input:
-      uri: '{{row.uri}}'
-      to: '{{option.value}}'
+      id: '{{row.id}}'
+      stage: '{{option.value}}'
   - id: priority-urgent
     label: Priority Urgent
-    command: oxplow.task.update
+    command: oxtask.task.update
     row: true
     bulk: true
     when: can_prioritize
     input:
-      uri: '{{row.uri}}'
-      native:
-        priority: urgent
+      id: '{{row.id}}'
+      priority: urgent
   - id: priority-high
     label: Priority High
-    command: oxplow.task.update
+    command: oxtask.task.update
     row: true
     bulk: true
     when: can_prioritize
     input:
-      uri: '{{row.uri}}'
-      native:
-        priority: high
+      id: '{{row.id}}'
+      priority: high
   - id: priority-medium
     label: Priority Medium
-    command: oxplow.task.update
+    command: oxtask.task.update
     row: true
     bulk: true
     when: can_prioritize
     input:
-      uri: '{{row.uri}}'
-      native:
-        priority: medium
+      id: '{{row.id}}'
+      priority: medium
   - id: priority-low
     label: Priority Low
-    command: oxplow.task.update
+    command: oxtask.task.update
     row: true
     bulk: true
     when: can_prioritize
     input:
-      uri: '{{row.uri}}'
-      native:
-        priority: low
+      id: '{{row.id}}'
+      priority: low
   - id: unparent
     label: Make top-level
-    command: oxplow.task.update
+    command: oxtask.task.update
     row: true
     bulk: true
     when: has_parent
     input:
-      uri: '{{row.uri}}'
-      parent_uri: ''
+      id: '{{row.id}}'
+      parent: null
   # Assign to ▸ the stream's threads and you; a closed item is nobody's.
   - id: assign
     label: Assign to
-    command: oxplow.task.assign
+    command: oxplow.tasks.assign
     row: true
     bulk: true
     when: is_open
@@ -206,7 +202,7 @@ view:
       to: '{{option.value}}'
   - id: unassign
     label: Unassign
-    command: oxplow.task.assign
+    command: oxplow.tasks.assign
     row: true
     bulk: true
     when: assigned
@@ -215,9 +211,9 @@ view:
       to: null
   - id: delete
     label: Delete
-    command: oxplow.task.delete
+    command: oxtask.task.delete
     row: true
     bulk: true
     when: can_delete
     input:
-      uri: '{{row.uri}}'
+      id: '{{row.id}}'

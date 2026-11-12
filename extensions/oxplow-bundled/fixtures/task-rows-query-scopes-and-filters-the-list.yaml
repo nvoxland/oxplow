@@ -5,25 +5,32 @@
 # item that matches and its epic; open items by their queue with an
 # epic's children under it, then the closed ones, done before canceled,
 # the latest first; what each row's actions may do.
+requires: [oxtask]
 given:
-  - { command: oxplow.task.create, input: { title: An epic, assignee: thr1, native: { priority: low } }, bind: epic }
-  - { command: oxplow.task.create, input: { title: Urgent child, assignee: thr1, native: { priority: urgent }, parent_uri: $epic.uri } }
-  - { command: oxplow.task.create, input: { title: Plain child, assignee: thr1, native: { priority: low }, parent_uri: $epic.uri } }
-  - { command: oxplow.task.create, input: { title: Loose item, assignee: thr1, native: { priority: low }, body: "## Why\n\nIt started here. Then more." }, bind: loose }
-  - { command: oxplow.task.create, input: { title: Backlogged, stage: backlog } }
-  - { command: oxplow.task.create, input: { title: Shipped, assignee: thr1 }, bind: shipped }
-  - { command: oxplow.task.create, input: { title: Dropped, assignee: thr1 }, bind: dropped }
+  - { command: oxtask.task.create, input: { title: An epic, stage: ready, priority: low } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Urgent child, stage: ready, parent: tsk1, priority: urgent } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Plain child, stage: ready, parent: tsk1, priority: low } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk3&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Loose item, body: "## Why\n\nIt started here. Then more.", stage: ready, priority: low } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk4&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Backlogged, stage: backlog } }
+  - { command: oxtask.task.create, input: { title: Shipped, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk6&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Dropped, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk7&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
   # A closed item is the thread's when a request on the thread worked it.
   - observe:
       turn:
         prompt: Ship one, drop one
         during:
-          - { command: oxplow.task.transition, input: { uri: $shipped.uri, to: in_progress }, as: agent }
-          - { command: oxplow.task.transition, input: { uri: $shipped.uri, to: done }, as: agent }
-          - { command: oxplow.task.transition, input: { uri: $dropped.uri, to: in_progress }, as: agent }
-          - { command: oxplow.task.transition, input: { uri: $dropped.uri, to: canceled }, as: agent }
-  - { command: oxplow.task.transition, input: { uri: $loose.uri, to: in_progress } }
-  - { command: oxplow.task.comment, input: { uri: $loose.uri, body: Started. } }
+          - { command: oxtask.task.move, input: { id: tsk6, stage: in_progress }, as: agent }
+          - { command: oxtask.task.move, input: { id: tsk6, stage: done }, as: agent }
+          - { command: oxtask.task.move, input: { id: tsk7, stage: in_progress }, as: agent }
+          - { command: oxtask.task.move, input: { id: tsk7, stage: canceled }, as: agent }
+  - { command: oxtask.task.move, input: { id: tsk4, stage: in_progress } }
+  - { command: oxtask.task.comment, input: { id: tsk4, body: Started. } }
 when: { query: task-rows, params: { show: thread, state: all, priority: any, q: "", thread_id: 1, stream_id: 1 } }
 expect:
   rows:

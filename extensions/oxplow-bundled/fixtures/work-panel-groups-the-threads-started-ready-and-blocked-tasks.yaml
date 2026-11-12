@@ -1,0 +1,15 @@
+# The Work panel groups the thread's tasks: the one in progress, then the
+# ready and blocked ones assigned to it; a task nobody holds is not there.
+requires: [oxtask]
+given:
+  - { command: oxtask.task.create, input: { title: Doing it, stage: in_progress } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Next up, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Stuck, stage: blocked } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk3&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Someday, stage: ready } }
+when: { part: oxplow/work-panel, params: { thread_id: 1 } }
+expect:
+  loaders:
+    work: { rows: [{ grp: In progress, title: Doing it }, { grp: Up next, title: Next up }, { grp: Up next, title: Stuck }] }

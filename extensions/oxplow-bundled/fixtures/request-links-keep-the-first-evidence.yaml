@@ -25,7 +25,3 @@ steps:
       rows:
         - { basis: assigned, turn_id: 1, first_time: 1 }
         - { basis: prompt, turn_id: 1, first_time: 1 }
-  # Core keeps the same turn for the prompt link (the task is not in its
-  # tracker, so it has no `assigned` one).
-  - when: { sql: "SELECT basis, turn FROM v_request_task WHERE basis = 'prompt'" }
-    expect: { rows: [{ basis: prompt, turn: "oxplow:oxplow/turn?id=trn1" }] }

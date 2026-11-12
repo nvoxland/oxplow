@@ -1,7 +1,7 @@
 title: Task actions
 description: "One task's moves, for an agent: Mark done, or Record a block on another item."
 needs:
-- task_tracker
+- model:oxplow/task_record
 params:
 - name: uri
   label: Task
@@ -11,25 +11,25 @@ answers:
 loaders:
   item:
     sql: |
-      SELECT w.uri, w.title, coalesce(w.stage_title, w.stage) AS stage_title, w.state AS icon
-      FROM v_task w WHERE w.uri = :uri
+      SELECT w.uri, w.native_id AS id, w.title, coalesce(w.stage_title, w.stage) AS stage_title, w.state AS icon
+      FROM v_oxplow_task w WHERE w.uri = :uri
 actions:
 - id: done
   label: Mark done
-  command: oxplow.task.transition
+  command: oxtask.task.move
   input:
-    uri: '{{param.uri}}'
-    to: done
+    id: '{{row.id}}'
+    stage: done
 - id: blocks
   label: Record a block…
-  command: oxplow.task.link
+  command: oxtask.task.link
   form: true
   fixed:
-  - uri
-  - link_type
+  - id
+  - type
   input:
-    uri: '{{param.uri}}'
-    link_type: blocks
+    id: '{{row.id}}'
+    type: blocks
 view:
   id: item
   from: item

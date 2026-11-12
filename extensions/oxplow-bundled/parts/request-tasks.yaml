@@ -15,8 +15,8 @@ loaders:
              CASE min(CASE rt.basis WHEN 'prompt' THEN 0 WHEN 'transition' THEN 1 WHEN 'command' THEN 2 ELSE 3 END)
                WHEN 0 THEN 'prompt' WHEN 1 THEN 'transition' WHEN 2 THEN 'command' ELSE 'assigned' END AS basis,
              min(rt.at) AS at
-      FROM v_request_task rt
-      LEFT JOIN v_task w ON w.uri = rt.task
+      FROM v_oxplow_request_link rt
+      LEFT JOIN v_oxplow_task w ON w.uri = rt.task
       WHERE rt.request_id = :id
       GROUP BY rt.task
       ORDER BY min(rt.at), rt.task

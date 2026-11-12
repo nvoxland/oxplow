@@ -4,24 +4,30 @@
 # A row names who it is assigned to, when anyone is. Its quick add files
 # the stage it shows (to do for a closed one), for nobody. A row's Mark ▸
 # offers the list's stages and its Assign to ▸ the stream's threads and you.
+requires: [oxtask]
 given:
-  - { command: oxplow.task.create, input: { title: An epic, assignee: thr1 }, bind: epic }
-  - { command: oxplow.task.create, input: { title: Its child, assignee: thr1, parent_uri: $epic.uri } }
-  - { command: oxplow.task.create, input: { title: In the backlog, stage: backlog } }
-  - { command: oxplow.task.create, input: { title: Mine, assignee: "oxplow:oxplow/person" } }
-  - { command: oxplow.task.create, input: { title: Nobody's } }
-  - { command: oxplow.task.create, input: { title: First done, assignee: thr1 }, bind: first }
-  - { command: oxplow.task.create, input: { title: Second done, assignee: thr1 }, bind: second }
-  - { command: oxplow.task.create, input: { title: Done elsewhere, stage: done } }
-  - { command: oxplow.task.transition, input: { uri: $first.uri, to: in_progress }, as: agent }
-  - { command: oxplow.task.transition, input: { uri: $first.uri, to: done }, as: agent }
-  - { command: oxplow.task.transition, input: { uri: $second.uri, to: in_progress }, as: agent }
-  - { command: oxplow.task.transition, input: { uri: $second.uri, to: done }, as: agent }
+  - { command: oxtask.task.create, input: { title: An epic, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Its child, stage: ready, parent: tsk1 } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: In the backlog, stage: backlog } }
+  - { command: oxtask.task.create, input: { title: Mine, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk4&provider=oxtask", to: "oxplow:oxplow/person" } }
+  - { command: oxtask.task.create, input: { title: Nobody's, stage: ready } }
+  - { command: oxtask.task.create, input: { title: First done, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk6&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Second done, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk7&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Done elsewhere, stage: done } }
+  - { command: oxtask.task.move, input: { id: tsk6, stage: in_progress }, as: agent }
+  - { command: oxtask.task.move, input: { id: tsk6, stage: done }, as: agent }
+  - { command: oxtask.task.move, input: { id: tsk7, stage: in_progress }, as: agent }
+  - { command: oxtask.task.move, input: { id: tsk7, stage: done }, as: agent }
 when: { page: task-list, params: { state: todo, priority: any, stream_id: 1 } }
 expect:
   params: { state: todo, priority: any }
   loaders:
-    new_item: { rows: [{ stage: todo }] }
+    new_item: { rows: [{ stage: ready }] }
     marks: { rows: [{ value: backlog, label: Backlog }, { value: ready, label: Ready }, { value: in_progress }, { value: blocked }, { value: done }, { value: canceled }] }
     assignees: { rows: [{ value: "oxplow:oxplow/thread?id=thr1", label: Thread }, { value: "oxplow:oxplow/person", label: You }] }
     list:
@@ -44,12 +50,12 @@ steps:
   - params: { state: backlog }
     expect: { loaders: { list: { rows: [{ title: In the backlog, assignee_shown: null }] }, new_item: { rows: [{ stage: backlog }] } } }
   # Mark ▸ Blocked, then Assign to ▸ You: each the option picked.
-  - press: { action: mark, node: list, row: { uri: $epic.uri }, option: blocked }
+  - press: { action: mark, node: list, row: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" }, option: blocked }
     expect: { ok: true }
   - params: { state: blocked }
     expect: { loaders: { list: { rows: [{ title: An epic, stage: blocked, assignee_shown: Thread }] } } }
   - params: { state: blocked }
-    press: { action: assign, node: list, row: { uri: $epic.uri }, option: "oxplow:oxplow/person" }
+    press: { action: assign, node: list, row: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" }, option: "oxplow:oxplow/person" }
     expect: { ok: true }
   - params: { state: blocked }
     expect: { loaders: { list: { rows: [{ title: An epic, assignee_shown: You }] } } }

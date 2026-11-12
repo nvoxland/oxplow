@@ -1,16 +1,9 @@
 # Taking a handoff moves its task onto the recipient thread, at the end of its
 # queue, as core's `handoff.resolve` did; declining it, or a task already the
-# recipient's, changes nothing. The handoffs are sent while core's tracker is
-# the active one, which checks the task: the same four tasks are made through
-# core's commands too (their URIs are oxtask's), so the same setup through
-# core gives the same assignee and rank in `v_task` as in `task`.
+# recipient's, changes nothing.
 requires: [oxtask]
 given:
   - { command: oxplow.thread.create, input: { stream: str1, title: Docs } }
-  - { command: oxplow.task.create, input: { title: Already there, stage: todo, assignee: thr1 } }
-  - { command: oxplow.task.create, input: { title: Handed, stage: todo, assignee: thr2 } }
-  - { command: oxplow.task.create, input: { title: Declined, stage: todo, assignee: thr2 } }
-  - { command: oxplow.task.create, input: { title: Already the recipients, stage: todo, assignee: thr1 } }
   - { command: oxtask.task.create, input: { title: Already there, stage: ready } }
   - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
   - { command: oxtask.task.create, input: { title: Handed, stage: ready } }
@@ -32,14 +25,3 @@ expect:
     - { title: Already there, assignee: "oxplow:oxplow/thread?id=thr1", rank: 0 }
     - { title: Declined, assignee: "oxplow:oxplow/thread?id=thr2", rank: 1 }
     - { title: Handed, assignee: "oxplow:oxplow/thread?id=thr1", rank: 2 }
-steps:
-  - when:
-      sql: |
-        SELECT n.title, n.assignee IS c.assignee AS assignee, n.rank IS c.rank AS rank
-          FROM v_oxplow_task n JOIN v_task c ON c.title = n.title ORDER BY n.title
-    expect:
-      rows:
-        - { title: Already the recipients, assignee: 1, rank: 1 }
-        - { title: Already there, assignee: 1, rank: 1 }
-        - { title: Declined, assignee: 1, rank: 1 }
-        - { title: Handed, assignee: 1, rank: 1 }

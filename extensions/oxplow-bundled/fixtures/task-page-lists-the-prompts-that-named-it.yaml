@@ -1,11 +1,12 @@
 # A task's page lists the turns whose prompt named it, newest first: a
 # prompt pointing at it with `[oxplow uri …]` is a link from its turn.
+requires: [oxtask]
 given:
-  - { command: oxplow.task.create, input: { title: The item }, bind: item }
+  - { command: oxtask.task.create, input: { title: The item, stage: ready } }
   - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude }, bind: ses }
   - observe: { turn: { session: $ses.id, prompt: "unrelated ask", answer: one } }
   - observe: { turn: { session: $ses.id, prompt: "look at [oxplow uri oxplow:oxplow/task?id=tsk1&provider=oxtask] please", answer: two } }
-when: { page: task-detail, params: { uri: $item.uri, thread_id: 1, stream_id: 1 } }
+when: { page: task-detail, params: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", thread_id: 1, stream_id: 1 } }
 expect:
   loaders:
     prompted: { rows: [{ prompt: "look at [oxplow uri oxplow:oxplow/task?id=tsk1&provider=oxtask] please" }] }

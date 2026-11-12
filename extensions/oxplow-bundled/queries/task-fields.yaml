@@ -1,14 +1,12 @@
 title: Fields of the task tracker
-description: The active task tracker's own fields (priority, labels, ...), one row each, for a form to ask for. Read-only ones are marked.
+description: The task stores' own fields (priority, labels, ...), one row each, for a form to ask for. Read-only ones are marked.
 needs:
-- task_tracker
+- model:oxplow/task_record
 loaders:
   task_fields:
     sql: |
-      SELECT json_extract(f.value, '$.name') AS name,
-             json_extract(f.value, '$.title') AS title,
-             json_extract(f.value, '$.kind') AS kind,
-             json_extract(f.value, '$.values') AS "values",
-             coalesce(json_extract(f.value, '$.read_only'), 0) AS read_only
-      FROM v_capability_provider p, json_each(p.fields) f
-      WHERE p.capability = 'task_tracker' AND p.active = 1
+      SELECT d.name AS name, d.title AS title, d.kind AS kind, d."values" AS "values",
+             coalesce(d.read_only, 0) AS read_only
+      FROM v_model_field_decl d
+      WHERE d.model = 'oxplow/task_record' AND d.namespace <> 'oxplow'
+      ORDER BY d.name

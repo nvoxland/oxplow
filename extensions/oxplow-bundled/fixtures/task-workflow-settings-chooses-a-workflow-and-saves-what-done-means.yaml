@@ -2,6 +2,7 @@
 # what the agent will do, the current one marked (the default, agent
 # tracks everything). Use This picks another for the project; the form
 # saves the definition of done, and the workflow chosen stays.
+requires: [oxtask]
 when: { part: task-workflow-settings }
 expect:
   loaders:

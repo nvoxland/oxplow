@@ -11,12 +11,12 @@ loaders:
     sql: |
       -- `state` is the bucket; `stage` is how the list names it.
       SELECT w.uri, w.title, w.state, coalesce(w.stage_title, w.stage) AS stage,
-             coalesce((SELECT group_concat(DISTINCT rt.request) FROM v_request_task rt
+             coalesce((SELECT group_concat(DISTINCT rt.request) FROM v_oxplow_request_link rt
                         WHERE rt.task = w.uri), '') AS requests
-      FROM v_task w
+      FROM v_oxplow_task w
       WHERE w.assignee = uri('oxplow/thread', 'id', :thread)
          OR (w.state IN ('done', 'canceled')
-             AND EXISTS (SELECT 1 FROM v_request_task rt JOIN v_thread th ON th.id = rt.thread_id
+             AND EXISTS (SELECT 1 FROM v_oxplow_request_link rt JOIN v_thread th ON th.id = rt.thread_id
                           WHERE rt.task = w.uri AND th.uri = uri('oxplow/thread', 'id', :thread)))
       ORDER BY CASE w.state WHEN 'in_progress' THEN 0 WHEN 'todo' THEN 1 WHEN 'blocked' THEN 2
                             WHEN 'backlog' THEN 3 WHEN 'done' THEN 4 ELSE 5 END,

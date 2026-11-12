@@ -1,15 +1,18 @@
 # A task's About offers Mark ▸ Backlog; Delete removes the item from the task tracker (and from the board).
+requires: [oxtask]
 given:
-  - { command: oxplow.task.create, input: { title: Item to send, assignee: thr1 }, bind: item }
-  - { command: oxplow.task.create, input: { title: Card to keep, assignee: thr1 } }
-when: { page: task-detail, params: { uri: $item.uri, thread_id: 1, stream_id: 1 } }
+  - { command: oxtask.task.create, input: { title: Item to send, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Card to keep, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+when: { page: task-detail, params: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", thread_id: 1, stream_id: 1 } }
 expect:
   loaders: { about: { rows: [{ stage: ready, can_delete: 1 }] } }
 steps:
-  - press: { action: mark, node: about, row: { uri: $item.uri }, option: backlog }
+  - press: { action: mark, node: about, row: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" }, option: backlog }
     expect: { ok: true }
   - expect: { loaders: { about: { rows: [{ stage: backlog, stage_title: Backlog }] } } }
-  - press: { action: delete, node: about, row: { uri: $item.uri } }
+  - press: { action: delete, node: about, row: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" } }
     expect: { ok: true }
   - expect: { loaders: { about: { rows: 0 } } }
   - when: { page: work, params: { show: thread, priority: any, thread_id: 1, stream_id: 1 } }

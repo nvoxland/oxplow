@@ -4,32 +4,35 @@
 # list's stages (the board's columns are the ones but backlog and
 # canceled), each stage's count, the list's choice fields; wider than one assignee a card
 # names who it's for; with no thread, "this thread" is everything.
+requires: [oxtask]
 given:
-  - { command: oxplow.task.create, input: { title: Next up, assignee: thr1 } }
-  - { command: oxplow.task.create, input: { title: In the backlog, stage: backlog } }
-  - { command: oxplow.task.create, input: { title: Dropped, assignee: thr1 }, bind: dropped }
-  - { command: oxplow.task.transition, input: { uri: $dropped.uri, to: canceled } }
-  - { command: oxplow.task.create, input: { title: Done 1, stage: done } }
-  - { command: oxplow.task.create, input: { title: Done 2, stage: done } }
-  - { command: oxplow.task.create, input: { title: Done 3, stage: done } }
-  - { command: oxplow.task.create, input: { title: Done 4, stage: done } }
-  - { command: oxplow.task.create, input: { title: Done 5, stage: done } }
-  - { command: oxplow.task.create, input: { title: Done 6, stage: done } }
-  - { command: oxplow.task.create, input: { title: Done 7, stage: done } }
-  - { command: oxplow.task.create, input: { title: Done 8, stage: done } }
-  - { command: oxplow.task.create, input: { title: Done 9, stage: done } }
-  - { command: oxplow.task.create, input: { title: Done 10, stage: done } }
-  - { command: oxplow.task.create, input: { title: Done 11, stage: done } }
-  - { command: oxplow.task.create, input: { title: Done 12, stage: done } }
-  - { command: oxplow.task.create, input: { title: Done 13, stage: done } }
-  - { command: oxplow.task.create, input: { title: Done 14, stage: done } }
-  - { command: oxplow.task.create, input: { title: Done 15, stage: done } }
-  - { command: oxplow.task.create, input: { title: Done 16, stage: done } }
-  - { command: oxplow.task.create, input: { title: Done 17, stage: done } }
-  - { command: oxplow.task.create, input: { title: Done 18, stage: done } }
-  - { command: oxplow.task.create, input: { title: Done 19, stage: done } }
-  - { command: oxplow.task.create, input: { title: Done 20, stage: done } }
-  - { command: oxplow.task.create, input: { title: Done 21, stage: done } }
+  - { command: oxtask.task.create, input: { title: Next up, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: In the backlog, stage: backlog } }
+  - { command: oxtask.task.create, input: { title: Dropped, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk3&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.move, input: { id: tsk3, stage: canceled } }
+  - { command: oxtask.task.create, input: { title: Done 1, stage: done } }
+  - { command: oxtask.task.create, input: { title: Done 2, stage: done } }
+  - { command: oxtask.task.create, input: { title: Done 3, stage: done } }
+  - { command: oxtask.task.create, input: { title: Done 4, stage: done } }
+  - { command: oxtask.task.create, input: { title: Done 5, stage: done } }
+  - { command: oxtask.task.create, input: { title: Done 6, stage: done } }
+  - { command: oxtask.task.create, input: { title: Done 7, stage: done } }
+  - { command: oxtask.task.create, input: { title: Done 8, stage: done } }
+  - { command: oxtask.task.create, input: { title: Done 9, stage: done } }
+  - { command: oxtask.task.create, input: { title: Done 10, stage: done } }
+  - { command: oxtask.task.create, input: { title: Done 11, stage: done } }
+  - { command: oxtask.task.create, input: { title: Done 12, stage: done } }
+  - { command: oxtask.task.create, input: { title: Done 13, stage: done } }
+  - { command: oxtask.task.create, input: { title: Done 14, stage: done } }
+  - { command: oxtask.task.create, input: { title: Done 15, stage: done } }
+  - { command: oxtask.task.create, input: { title: Done 16, stage: done } }
+  - { command: oxtask.task.create, input: { title: Done 17, stage: done } }
+  - { command: oxtask.task.create, input: { title: Done 18, stage: done } }
+  - { command: oxtask.task.create, input: { title: Done 19, stage: done } }
+  - { command: oxtask.task.create, input: { title: Done 20, stage: done } }
+  - { command: oxtask.task.create, input: { title: Done 21, stage: done } }
 when: { page: work, params: { show: all, priority: any, thread_id: 1, stream_id: 1 } }
 expect:
   loaders:

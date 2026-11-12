@@ -2,9 +2,11 @@
 # threads' requests changed (a turn's own edit call names it, or it was the
 # only turn changing it), an epic whose children sit on different threads.
 # Filtered to a thread, it keeps what involves that thread.
+requires: [oxtask]
 given:
-  - { command: oxplow.task.create, input: { title: Shared item, assignee: thr1 }, bind: item }
-  - { command: oxplow.task.transition, input: { uri: $item.uri, to: in_progress } }
+  - { command: oxtask.task.create, input: { title: Shared item, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.move, input: { id: tsk1, stage: in_progress } }
   - observe: { turn: { prompt: alpha, tools: [{ name: Edit, kind: edit, paths: [src/shared.rs], ok: true }] } }
   - observe: { snapshot: { trigger: turn_end, files: [{ path: src/shared.rs, hash: a }] } }
 when: { page: oxplow/shared-work }
@@ -18,13 +20,15 @@ steps:
           turn:
             thread: $beta.id
             prompt: beta
-            during: [{ command: oxplow.task.update, input: { uri: $item.uri, title: Shared item }, as: agent }]
+            during: [{ command: oxtask.task.update, input: { id: tsk1, title: Shared item }, as: agent }]
             tools: [{ name: Edit, kind: edit, paths: [src/shared.rs], ok: true }]
       - observe: { snapshot: { trigger: turn_end, files: [{ path: src/shared.rs, hash: b }] } }
       # An epic whose children are on the two threads.
-      - { command: oxplow.task.create, input: { title: Epic }, bind: epic }
-      - { command: oxplow.task.create, input: { title: Child A, parent_uri: $epic.uri, assignee: thr1 } }
-      - { command: oxplow.task.create, input: { title: Child B, parent_uri: $epic.uri, assignee: $beta.id } }
+      - { command: oxtask.task.create, input: { title: Epic, stage: ready } }
+      - { command: oxtask.task.create, input: { title: Child A, stage: ready, parent: tsk2 } }
+      - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk3&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+      - { command: oxtask.task.create, input: { title: Child B, stage: ready, parent: tsk2 } }
+      - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk4&provider=oxtask", to: "oxplow:oxplow/thread?id=thr2" } }
   - when: { page: oxplow/shared-work }
     expect:
       loaders:

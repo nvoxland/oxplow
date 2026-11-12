@@ -3,16 +3,22 @@
 # in the person's queue order, a task of an epic under its epic. A thread's
 # task, nobody's and a closed one are not shown. Finished is left out:
 # a closed task is unassigned and nothing records who held it.
+requires: [oxtask]
 given:
-  - { command: oxplow.task.create, input: { title: Later, stage: todo, assignee: "oxplow:oxplow/person" }, bind: later }
-  - { command: oxplow.task.create, input: { title: Sooner, stage: todo, assignee: "oxplow:oxplow/person" }, bind: sooner }
-  - { command: oxplow.task.create, input: { title: Going, stage: todo, assignee: "oxplow:oxplow/person" }, bind: going }
-  - { command: oxplow.task.create, input: { title: Closing, stage: todo, assignee: "oxplow:oxplow/person" }, bind: closing }
-  - { command: oxplow.task.create, input: { title: A thread's, stage: todo, assignee: thr1 } }
-  - { command: oxplow.task.create, input: { title: Nobody's, stage: todo } }
-  - { command: oxplow.task.reorder, input: { uri: $sooner.uri, before: $later.uri } }
-  - { command: oxplow.task.transition, input: { uri: $going.uri, to: in_progress } }
-  - { command: oxplow.task.transition, input: { uri: $closing.uri, to: done } }
+  - { command: oxtask.task.create, input: { title: Later, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/person" } }
+  - { command: oxtask.task.create, input: { title: Sooner, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", to: "oxplow:oxplow/person" } }
+  - { command: oxtask.task.create, input: { title: Going, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk3&provider=oxtask", to: "oxplow:oxplow/person" } }
+  - { command: oxtask.task.create, input: { title: Closing, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk4&provider=oxtask", to: "oxplow:oxplow/person" } }
+  - { command: oxtask.task.create, input: { title: A thread's, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk5&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Nobody's, stage: todo, stage: ready } }
+  - { command: oxplow.tasks.reorder, input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", before: "oxplow:oxplow/task?id=tsk1&provider=oxtask" } }
+  - { command: oxtask.task.move, input: { id: tsk3, stage: in_progress } }
+  - { command: oxtask.task.move, input: { id: tsk4, stage: done } }
 when: { page: oxplow/assigned-to-you }
 expect:
   loaders:

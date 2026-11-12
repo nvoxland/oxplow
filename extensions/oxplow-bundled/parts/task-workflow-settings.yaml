@@ -1,7 +1,7 @@
 title: Task workflow
 description: "How this project's agents use tasks, and what done means here. For the project; applies to agent sessions started after a change."
 needs:
-- task_tracker
+- model:oxplow/task_record
 loaders:
   # The four workflows while oxtask is the active tracker (the setting is
   # oxtask's), the current one marked.
@@ -21,8 +21,7 @@ loaders:
         UNION ALL SELECT 'off', 'Off',
                'oxtask tells the agent nothing about tasks.', 3
       ) w
-      WHERE EXISTS (SELECT 1 FROM v_capability_provider p
-                     WHERE p.capability = 'task_tracker' AND p.provider = 'oxtask' AND p.active = 1)
+      WHERE EXISTS (SELECT 1 FROM v_model_stage WHERE model = 'oxplow/task_record' AND store = 'oxtask')
       ORDER BY w.ord
   done_means:
     sql: SELECT definition_of_done FROM v_oxplow_task_workflow
