@@ -6743,6 +6743,8 @@ commands:
                 "finished_cleared",
                 "ready_queue",
                 "struggle",
+                "task_link_next",
+                "task_next",
                 "task_workflow",
                 "thread_tasks"
             ]

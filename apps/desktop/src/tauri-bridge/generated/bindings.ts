@@ -2287,7 +2287,7 @@ export type EffectDecl = {
 	 *  Payload fields that must equal these values (the collectors'
 	 *  `where`).
 	 */
-	filter: { [key in string]: string },
+	filter: { [key in string]: string[] },
 	/**
 	 *  The scopes its script calls (`scope(id, args)`,
 	 *  `.context/commands.md` "Scopes"): `sql.read`.
@@ -6635,10 +6635,10 @@ export type Trigger =
 { kind: "every"; minutes: number } |
 /**
  *  When an event of one of these types is logged and its payload has
- *  each `filter` field equal to its value — after the consumers in
+ *  each `filter` field equal to one of its values — after the consumers in
  *  the collector's `after` have handled the event.
  */
-{ kind: "on"; events: string[]; filter: { [key in string]: string };
+{ kind: "on"; events: string[]; filter: { [key in string]: string[] };
 /**
  *  When the run happens after a triggering event: at
  *  once by default.

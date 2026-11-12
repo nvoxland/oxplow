@@ -493,9 +493,9 @@ mod tests {
             .is_some_and(invalid));
         let tree = fs.list(&cx(), None, None).await.unwrap();
         assert!(
-            !tree
-                .iter()
-                .any(|e| e.path.ends_with("link.txt") || e.path.contains("/up")),
+            !tree.iter().any(|e| e.path.ends_with("link.txt")
+                || e.path.ends_with("/up")
+                || e.path.contains("/up/")),
             "a walk doesn't follow or list a link"
         );
     }
