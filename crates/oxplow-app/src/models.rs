@@ -523,8 +523,16 @@ pub fn apply_tx(
                     .collect(),
             },
         };
-        let written = write_tx(conn, &spec.decl, kinds, &m.store, &fill.fields, &write)
-            .map_err(|e| e.to_string())?;
+        let written = write_tx(
+            conn,
+            &spec.decl,
+            kinds,
+            writer.source,
+            &m.store,
+            &fill.fields,
+            &write,
+        )
+        .map_err(|e| e.to_string())?;
         let counts = out.counts.entry(m.model.clone()).or_default();
         // A snapshot states the whole store: catching up, whatever ran it.
         let cause = match (writer.why, m.snapshot.is_some()) {
