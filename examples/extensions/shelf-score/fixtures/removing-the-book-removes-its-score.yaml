@@ -1,0 +1,19 @@
+requires: [shelf, shelf-db, shelf-score]
+given:
+  - { command: shelf_db.book.add, input: { title: Dune, rating: 4 } }
+when: { collector: shelf_db/books, trigger: sqlite }
+expect: { ok: true }
+steps:
+  - when: { command: shelf_score.book.score, input: { uri: "oxplow:shelf/book?id=dune&store=shelf-db", score: 9 } }
+    expect: { ok: true }
+  - when: { sql: "SELECT namespace, name, value FROM v_shelf_book_field ORDER BY namespace" }
+    expect:
+      rows:
+        - { namespace: shelf-db, name: rating, value: "4" }
+        - { namespace: shelf_score, name: score, value: "9" }
+  - when: { command: shelf_db.book.remove, input: { id: dune } }
+    expect: { ok: true }
+  - when: { collector: shelf_db/books, trigger: sqlite }
+    expect: { ok: true }
+  - when: { sql: "SELECT count(*) AS n FROM v_shelf_book_field" }
+    expect: { rows: [{ n: 0 }] }

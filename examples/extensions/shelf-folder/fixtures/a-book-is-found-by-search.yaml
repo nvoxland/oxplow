@@ -1,0 +1,11 @@
+requires: [shelf, shelf-folder]
+given:
+  - { files: { "shelf/dune.md": "# Dune\n\nA desert planet with spice." } }
+when: { collector: shelf_folder/books, trigger: start }
+expect: { ok: true }
+steps:
+  - when:
+      sql: |
+        SELECT title FROM v_shelf_search_book
+        WHERE body LIKE '%spice%'
+    expect: { rows: [{ title: Dune }] }

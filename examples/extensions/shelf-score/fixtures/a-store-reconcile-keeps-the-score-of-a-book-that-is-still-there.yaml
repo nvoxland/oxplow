@@ -1,0 +1,14 @@
+requires: [shelf, shelf-db, shelf-score]
+given:
+  - { command: shelf_db.book.add, input: { title: Dune, rating: 4 } }
+when: { collector: shelf_db/books, trigger: sqlite }
+expect: { ok: true }
+steps:
+  - when: { command: shelf_score.book.score, input: { uri: "oxplow:shelf/book?id=dune&store=shelf-db", score: 9 } }
+    expect: { ok: true }
+  - when: { collector: shelf_db/books, trigger: start }
+    expect: { ok: true }
+  - when: { sql: "SELECT json_extract(fields, '$.\"shelf-db\".rating') AS rating, json_extract(fields, '$.shelf_score.score') AS score FROM v_shelf_book" }
+    expect:
+      rows:
+        - { rating: 4, score: 9 }

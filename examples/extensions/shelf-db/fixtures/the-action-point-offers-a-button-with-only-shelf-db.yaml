@@ -1,0 +1,6 @@
+# One store on: one command joins shelf/book.new, so a button.
+requires: [shelf, shelf-db]
+when: { action_point: shelf/book.new, context: {} }
+expect:
+  draws: button
+  commands: [shelf_db.book.add]

@@ -307,7 +307,9 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      well, `result` the counts it stored (`{ book: 2 }`, an entity's rows, or
      `<model>.<op>` for shared models; only the keys you name), `problems`
      text its failure holds when `ok: false`. The trigger must be one its
-     `on:` lists, and a changed path must match its glob. Live triggers are
+     `on:` lists, and a changed path must match its glob. `collector:
+     <namespace>/<id>` runs a collector of a required extension (a store
+     the fixture's extension owns the model for). Live triggers are
      off in a fixture: the collector runs only when a step says so. Make the
      project files it follows in `given:` first — `- { files: { "<path>":
      "<body>" } }` writes them, `- { remove_files: ["<path>"] }` removes

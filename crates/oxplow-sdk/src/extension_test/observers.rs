@@ -142,6 +142,19 @@ pub(super) async fn observer_example(
     report: &mut TestReport,
 ) {
     let shown = ex.shown;
+    // `<namespace>/<id>` names a collector of another enabled extension
+    // (a store the fixture's extension requires); a bare id is its own.
+    let catalog = host.svc.extension_catalog.get(&host.root);
+    let (ext, id) = match id.split_once('/') {
+        Some((namespace, local)) => (
+            catalog
+                .iter()
+                .find(|e| e.namespace == namespace && e.errors.is_empty())
+                .unwrap_or(ext),
+            local,
+        ),
+        None => (ext, id),
+    };
     let Some(spec) = ext.collectors.iter().find(|c| c.id == id) else {
         report.errors.push(
             error(
@@ -153,7 +166,7 @@ pub(super) async fn observer_example(
                     ex.name, ext.name
                 ),
             )
-            .fix("the collector's `id`"),
+            .fix("the collector's `id`, or `<namespace>/<id>` for a required extension's"),
         );
         return;
     };

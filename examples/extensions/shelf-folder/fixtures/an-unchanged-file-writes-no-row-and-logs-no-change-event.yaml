@@ -1,0 +1,16 @@
+requires: [shelf, shelf-folder]
+given:
+  - { files: { "shelf/dune.md": "# Dune\n\nA desert planet." } }
+when: { collector: shelf_folder/books, trigger: start }
+expect: { ok: true }
+steps:
+  - when: { sql: "SELECT count(*) AS n FROM v_event WHERE type = 'shelf.book.changed'" }
+    expect: { rows: [{ n: 1 }] }
+  - when:
+      collector: shelf_folder/books
+      trigger: { files: [{ path: "shelf/dune.md", op: modified }] }
+    expect: { ok: true, result: { "shelf/book.unchanged": 1, "shelf/book.upserted": null, "shelf/book.removed": null } }
+  - when: { collector: shelf_folder/books, trigger: start }
+    expect: { ok: true, result: { "shelf/book.unchanged": 1, "shelf/book.upserted": null, "shelf/book.removed": null } }
+  - when: { sql: "SELECT count(*) AS n FROM v_event WHERE type = 'shelf.book.changed'" }
+    expect: { rows: [{ n: 1 }] }
