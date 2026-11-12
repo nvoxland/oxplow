@@ -1,11 +1,168 @@
 manifest: 2
 name: oxtask
 namespace: oxtask
-description: oxplow's own task tracker, as an extension. Plumbing only for now; the tasks store and its commands arrive later. Off by default.
+description: oxplow's own task tracker, as an extension. Tasks live in its own SQLite file and fill bundled's task_record model; its commands write the file. Off by default.
 engine: ">=0.7"
 requires: [oxplow-bundled]
 intent:
   purpose: >-
     Hold oxplow's own task tracker as an ordinary extension with its own
-    store, so tasks stop being special to core. It holds nothing yet.
+    store, so tasks stop being special to core. The tasks, their links and
+    comments are rows of the extension's SQLite file (triggers number every
+    write). A collector follows the file and fills bundled's task_record
+    model; commands write the file by composing
+    oxplow.extension_store.write and return the inverse that undoes them.
   origin: null
+  examples:
+    - name: creating-a-task-puts-a-row-in-the-model-with-its-bucket-and-priority
+      input: { command: oxtask.task.create }
+      expect: a row with the stage, its bucket as state and the priority field
+    - name: moving-a-task-changes-its-bucket-and-closing-sets-closed-at
+      input: { command: oxtask.task.move }
+      expect: the row's state follows the stage
+    - name: updating-a-task-changes-its-fields-and-undo-restores-them
+      input: { command: oxtask.task.update }
+      expect: the fields change, and undo puts the old ones back
+    - name: linking-and-unlinking-restate-the-links-of-the-task
+      input: { command: oxtask.task.link }
+      expect: the task's links child rows follow
+    - name: commenting-adds-a-comment-to-the-task
+      input: { command: oxtask.task.comment }
+      expect: the comment is a row of the comments child
+    - name: deleting-a-task-removes-its-row-and-undo-brings-it-back
+      input: { command: oxtask.task.delete }
+      expect: the row goes, and undo returns it with its children
+permissions: ['commands:oxplow.extension_store.write']
+storage: { sqlite: true }
+fills:
+  - model: oxplow/task_record
+    stores: [oxtask]
+    id_pattern: "tsk[0-9]+"
+    stages:
+      - { id: backlog, title: Backlog, state: backlog }
+      - { id: ready, title: Ready, state: todo }
+      - { id: in_progress, title: In progress, state: in_progress }
+      - { id: blocked, title: Blocked, state: blocked }
+      - { id: done, title: Done, state: done }
+      - { id: canceled, title: Canceled, state: canceled }
+    fields:
+      - { name: priority, title: Priority, kind: enum, values: [urgent, high, medium, low] }
+      - { name: author, title: Author, kind: text, read_only: true }
+collectors:
+  - id: tasks
+    doc: Reads the task tables of this extension's file and states the tasks of the oxtask store, each with its links and comments.
+    runtime: starlark
+    entry: collectors/tasks.star
+    needs: [store.sql]
+    on: [start, { sqlite: own }]
+commands:
+  - name: task.create
+    summary: File a task. Its id (tsk and a number) is minted by the write; read it from the write's rows in the run's children, or find the task by title.
+    input_schema:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string, minLength: 1 }
+        body: { type: string }
+        stage: { type: string, enum: [backlog, ready, in_progress, blocked, done, canceled] }
+        parent: { type: string, pattern: "^tsk[0-9]+$" }
+        priority: { type: string, enum: [urgent, high, medium, low] }
+        author: { type: string }
+      additionalProperties: false
+    entry: handlers/create.star
+    access: write
+    example: { title: Fix the greeting, stage: ready, priority: high }
+  - name: task.update
+    summary: Change a task's title, body, priority or parent (null clears the last three). Undo puts the old values back.
+    input_schema:
+      type: object
+      required: [id]
+      properties:
+        id: { type: string, pattern: "^tsk[0-9]+$" }
+        title: { type: string, minLength: 1 }
+        body: { type: [string, "null"] }
+        priority: { type: [string, "null"], enum: [urgent, high, medium, low, null] }
+        parent: { type: [string, "null"] }
+      additionalProperties: false
+    entry: handlers/update.star
+    needs: [store.sql]
+    access: write
+    example: { id: tsk1, title: A clearer title }
+  - name: task.move
+    summary: Put a task in a stage. done and canceled close it. Undo moves it back.
+    input_schema:
+      type: object
+      required: [id, stage]
+      properties:
+        id: { type: string, pattern: "^tsk[0-9]+$" }
+        stage: { type: string, enum: [backlog, ready, in_progress, blocked, done, canceled] }
+      additionalProperties: false
+    entry: handlers/move.star
+    needs: [store.sql]
+    access: write
+    example: { id: tsk1, stage: in_progress }
+  - name: task.link
+    summary: Link a task to another task (its id) or any URI, with a type. Undo removes the link.
+    input_schema:
+      type: object
+      required: [id, to, type]
+      properties:
+        id: { type: string, pattern: "^tsk[0-9]+$" }
+        to: { type: string, minLength: 1 }
+        type: { type: string, enum: [blocks, discovered_from, relates_to, duplicates, supersedes, replies_to, about] }
+      additionalProperties: false
+    entry: handlers/link.star
+    needs: [store.sql]
+    access: write
+    example: { id: tsk1, to: tsk2, type: blocks }
+  - name: task.unlink
+    summary: Remove a link from a task. Undo links it again.
+    input_schema:
+      type: object
+      required: [id, to, type]
+      properties:
+        id: { type: string, pattern: "^tsk[0-9]+$" }
+        to: { type: string, minLength: 1 }
+        type: { type: string, enum: [blocks, discovered_from, relates_to, duplicates, supersedes, replies_to, about] }
+      additionalProperties: false
+    entry: handlers/unlink.star
+    needs: [store.sql]
+    access: write
+    example: { id: tsk1, to: tsk2, type: blocks }
+  - name: task.comment
+    summary: Add a comment to a task. A comment has no undo (its id is minted by the write).
+    input_schema:
+      type: object
+      required: [id, body]
+      properties:
+        id: { type: string, pattern: "^tsk[0-9]+$" }
+        body: { type: string, minLength: 1 }
+        author: { type: string }
+      additionalProperties: false
+    entry: handlers/comment.star
+    access: write
+    example: { id: tsk1, body: Reproduced on main. }
+  - name: task.delete
+    summary: Delete a task (it can be restored). Undo restores it.
+    input_schema:
+      type: object
+      required: [id]
+      properties:
+        id: { type: string, pattern: "^tsk[0-9]+$" }
+      additionalProperties: false
+    entry: handlers/delete.star
+    needs: [store.sql]
+    access: write
+    example: { id: tsk1 }
+  - name: task.restore
+    summary: Bring a deleted task back. It is the undo of task.delete.
+    input_schema:
+      type: object
+      required: [id]
+      properties:
+        id: { type: string, pattern: "^tsk[0-9]+$" }
+      additionalProperties: false
+    entry: handlers/restore.star
+    needs: [store.sql]
+    access: write
+    example: { id: tsk1 }
