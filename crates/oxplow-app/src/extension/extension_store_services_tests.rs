@@ -9,7 +9,7 @@ use oxplow_domain::{Actor, CommandError};
 use serde_json::{json, Value};
 
 use super::extension_private_state_tests::{reconcile, run, write};
-use crate::test_fixtures::{services_with_effort, EffortFixture};
+use crate::test_fixtures::{services_with_thread, ThreadFixture};
 
 fn declare(root: &Path, name: &str) {
     let manifest = format!(
@@ -99,15 +99,15 @@ commands:
     );
 }
 
-async fn fixture() -> EffortFixture {
-    let fx = services_with_effort().await;
+async fn fixture() -> ThreadFixture {
+    let fx = services_with_thread().await;
     declare(fx._dir.path(), "alpha");
     declare(fx._dir.path(), "beta");
     reconcile(&fx).await;
     fx
 }
 
-fn store_file(fx: &EffortFixture, name: &str) -> std::path::PathBuf {
+fn store_file(fx: &ThreadFixture, name: &str) -> std::path::PathBuf {
     fx._dir
         .path()
         .join(format!(".oxplow/extensions-data/{name}.sqlite"))

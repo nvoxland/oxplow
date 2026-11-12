@@ -92,6 +92,12 @@ export interface OxplowComponent {
    *  `sql: read` on the component and `permissions.sql: read` on its
    *  extension. Rejects with an {@link OxplowError}. */
   querySql(sql: string, params?: OxplowCell[]): Promise<OxplowRows>;
+  /** Draw markdown into `element`, replacing its children, as oxplow reads
+   *  it (GFM, wikilinks, a link by its page's title); `{ inline: true }`
+   *  keeps one line. A link to an oxplow page opens it (Cmd/Ctrl-click: a
+   *  new tab); a web link is its text with the URL on hover. Adds the kit's
+   *  `ox-md` class (`ox-md-inline` for a line). Resolves once drawn. */
+  renderMarkdown(element: Element, text: string, options?: { inline?: boolean }): Promise<void>;
   /** Open the form of a command this component declares, in oxplow,
    *  starting from `input`: resolves with its result once submitted,
    *  rejects `CANCELLED` when the person closes it. A page only. */

@@ -587,7 +587,7 @@ export function Navigator({
         {removeStream ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 12, fontSize: "var(--text-xs)" }}>
             <p style={{ margin: 0, color: "var(--text-secondary)", lineHeight: 1.5 }}>
-              The stream and every thread under it will be archived (hidden from the rail). History — closed efforts, snapshots, and visit logs — stays intact.
+              The stream and every thread under it will be archived (hidden from the rail). History — requests, snapshots, and visit logs — stays intact.
             </p>
             <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <input

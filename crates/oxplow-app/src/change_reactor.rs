@@ -1,10 +1,12 @@
 //! The `change.analyze` pump consumer (P7.B4): keeps the mutable changes
-//! — a stream's working tree, its open efforts and its ranges headed at
-//! the working tree — analyzed as the stream moves.
+//! — a stream's working tree, its live requests and its
+//! ranges headed at the working tree — analyzed as the stream moves.
 //!
 //! On a `snapshot.taken` that recorded files (not `unchanged`) or a
 //! `vcs.head.moved`, it first lists the changed files of the event's
-//! stream's `working` change and each open effort's change on it (stage
+//! stream's `working` change and each
+//! live request's (a turn of it running there, or one ended whose change
+//! isn't at its end yet: [`live_requests`]) (stage
 //! one, [`change_analysis::refresh_files`](crate::change_analysis::refresh_files):
 //! cheap, so the lists are current before anything slow runs), then
 //! recomputes their deep analysis
@@ -15,11 +17,6 @@
 //! (the turn's end itself doesn't: its take says whether anything changed),
 //! and an analysis whose inputs haven't moved since it last ran keeps what's
 //! stored (`change.analyzed_from`).
-//! On `effort.finished` it recomputes that effort's change, now against its
-//! end snapshot: the effort closed before its end take, so no take event
-//! reached it while it was open (tsk710; what `effort_churn`, `after:
-//! [change.analyze]`, reads). An effort with no start snapshot (opened and
-//! closed at once, after the fact) has no change, so its finish is done.
 //! The results land in `v_change*` (`DatasetsChanged` announces them); an
 //! analysis already running for a change defers the event (`Busy`), and a
 //! failure is a dead letter naming the stream.
@@ -59,12 +56,11 @@ async fn working_targets(
 
 const SNAPSHOT_TAKEN: &str = "snapshot.taken";
 const HEAD_MOVED: &str = "vcs.head.moved";
-const EFFORT_FINISHED: &str = "effort.finished";
 /// When a mutable change's deep analysis runs: its file list is
 /// listed on every move (stage one); the deep analysis once a burst of
 /// takes settles (20 s), at most every 2 minutes, and at once when HEAD
 /// moves or an agent's turn ends with changes (its end take recorded
-/// files: [`forces`]). A finishing effort's runs at once.
+/// files: [`forces`]).
 pub fn deep_pacing() -> oxplow_config::collectors::Pacing {
     oxplow_config::collectors::Pacing {
         settle_secs: Some(20),
@@ -85,13 +81,16 @@ fn forces(event: &StoredEvent) -> bool {
 }
 
 /// The paced job of `target`'s deep analysis in `pending_run`: owner
-/// `core`, id `change/working/<stream>`, `change/effort/<effort>` or
-/// `change/range/<stream>/<base>..<head>` (a range of a known stream,
+/// `core`, id `change/working/<stream>`,
+/// `change/request/<stream>/<request>` or `change/range/<stream>/<base>..<head>` (a range of a known stream,
 /// its sides as its stored key spells them).
 pub fn job_id(target: &ChangeTarget) -> Option<String> {
     match target {
         ChangeTarget::Working { stream_id } => Some(format!("change/working/{stream_id}")),
-        ChangeTarget::Effort { effort_id } => Some(format!("change/effort/{effort_id}")),
+        ChangeTarget::Request {
+            request_id,
+            stream_id: Some(stream_id),
+        } => Some(format!("change/request/{stream_id}/{request_id}")),
         ChangeTarget::Range {
             stream_id: Some(stream_id),
             base,
@@ -112,9 +111,13 @@ pub fn target_of(job: &str) -> Option<ChangeTarget> {
         "working" => Some(ChangeTarget::Working {
             stream_id: id.to_string(),
         }),
-        "effort" => Some(ChangeTarget::Effort {
-            effort_id: id.to_string(),
-        }),
+        "request" => {
+            let (stream_id, request_id) = id.split_once('/')?;
+            Some(ChangeTarget::Request {
+                request_id: request_id.to_string(),
+                stream_id: Some(stream_id.to_string()),
+            })
+        }
         "range" => {
             let (stream_id, key) = id.split_once('/')?;
             let (base, head) = key.split_once("..")?;
@@ -311,34 +314,13 @@ impl AsyncEventConsumer for ChangeReactor {
     }
 
     fn handles(&self, event_type: &str) -> bool {
-        matches!(event_type, SNAPSHOT_TAKEN | HEAD_MOVED | EFFORT_FINISHED)
+        matches!(event_type, SNAPSHOT_TAKEN | HEAD_MOVED)
     }
 
     async fn handle(&self, event: &StoredEvent) -> Result<(), DomainError> {
         let Some(svc) = self.services.upgrade() else {
             return Err(DomainError::Busy("services are shutting down".into()));
         };
-        if event.envelope.event_type == EFFORT_FINISHED {
-            let effort = crate::effort_lifecycle::effort_of(event)?;
-            // One with no start snapshot (opened and closed at once, after
-            // the fact) has no change to analyze: done, not a dead letter.
-            let started = oxplow_db::EffortStore::get_effort(&*svc.effort_store, &effort).await?;
-            if started.is_none_or(|e| e.start_snapshot_id.is_none()) {
-                return Ok(());
-            }
-            return deep_now(
-                &svc,
-                ChangeTarget::Effort {
-                    effort_id: effort.to_string(),
-                },
-                event.seq,
-            )
-            .await
-            .map_err(|e| match e {
-                DomainError::Busy(_) => e,
-                e => DomainError::Invalid(format!("analyzing finished {effort}: {e}")),
-            });
-        }
         let Some(stream) = event.envelope.anchors.stream_id else {
             return Ok(());
         };
@@ -351,22 +333,19 @@ impl AsyncEventConsumer for ChangeReactor {
         };
         // Stage one first, for every mutable change: the file lists are
         // current before any deep analysis begins. A thread's take moves
-        // only its own effort's files; a take no thread made (the person's
-        // edits, a head move) may move any open effort's.
+        // only its own requests' files; a take no thread made (the person's
+        // edits, a head move) may move any live request's.
         let thread = event.envelope.anchors.thread_id;
-        let open: Vec<_> = svc
-            .effort_store
-            .list_open_for_stream(stream)
-            .await?
-            .into_iter()
-            .filter(|e| thread.is_none_or(|t| e.thread_id == t))
-            // An effort with no start snapshot has nothing to diff.
-            .filter(|e| e.start_snapshot_id.is_some())
-            .collect();
         let mut targets = working_targets(&svc, stream).await?;
-        targets.extend(open.into_iter().map(|e| ChangeTarget::Effort {
-            effort_id: e.id.to_string(),
-        }));
+        targets.extend(
+            live_requests(&svc, stream, thread)
+                .await?
+                .into_iter()
+                .map(|r| ChangeTarget::Request {
+                    request_id: oxplow_domain::RequestId::new(r).to_string(),
+                    stream_id: Some(stream.to_string()),
+                }),
+        );
         for target in &targets {
             crate::change_analysis::refresh_files(&svc, target.clone())
                 .await
@@ -389,6 +368,75 @@ impl AsyncEventConsumer for ChangeReactor {
     }
 }
 
+/// The requests a move of `stream` can change, by state rather than by
+/// which event came when: one with a turn on it still running (with
+/// `thread`, a take its turn made, only that thread's; with none — the
+/// person's edits, a head move — all of them), and one that ended there in
+/// the last day whose stored change isn't yet at the end its turns name now
+/// (`end_take`: its own end take can be logged after a later writer's take,
+/// whatever thread made the move). One that began before the stream's first
+/// take has no change.
+async fn live_requests(
+    svc: &Services,
+    stream: oxplow_domain::StreamId,
+    thread: Option<oxplow_domain::ThreadId>,
+) -> Result<Vec<i64>, DomainError> {
+    let (stream, thread) = (stream.value(), thread.map(|t| t.value()));
+    let since = oxplow_db::ts_to_string(oxplow_domain::Timestamp(
+        oxplow_domain::Timestamp::now().0 - time::Duration::days(1),
+    ));
+    svc.db
+        .read(move |c| {
+            let mut stmt = c
+                .prepare(
+                    "SELECT t.request_id, max(t.ended_at IS NULL),
+                            max(t.ended_at IS NULL AND (?2 IS NULL OR t.thread_id = ?2)),
+                            (SELECT ch.head_revision FROM change ch
+                              WHERE ch.stream_id = ?1 AND ch.kind = 'request'
+                                AND ch.target = CAST(t.request_id AS TEXT))
+                       FROM agent_turn t JOIN threads th ON th.id = t.thread_id
+                      WHERE th.stream_id = ?1 AND t.request_id IS NOT NULL
+                        AND (t.ended_at IS NULL OR t.ended_at >= ?3)
+                        -- One that began before the stream's first take has
+                        -- nothing to diff from.
+                        AND EXISTS (SELECT 1 FROM snapshot s
+                                     WHERE s.stream_id = ?1
+                                       AND s.created_at <= (
+                                         SELECT min(t2.started_at) FROM agent_turn t2
+                                           JOIN threads th2 ON th2.id = t2.thread_id
+                                          WHERE t2.request_id = t.request_id
+                                            AND th2.stream_id = ?1))
+                      GROUP BY t.request_id
+                      ORDER BY t.request_id",
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+            let rows: Vec<(i64, bool, bool, Option<String>)> = stmt
+                .query_map(rusqlite::params![stream, thread, since], |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+                })
+                .map_err(oxplow_db::map_sql_err)?
+                .collect::<Result<_, _>>()
+                .map_err(oxplow_db::map_sql_err)?;
+            let mut live = Vec::new();
+            for (request, running, mine, head) in rows {
+                if running {
+                    if mine {
+                        live.push(request);
+                    }
+                    continue;
+                }
+                let end = crate::change_analysis::request_span(c, request, Some(stream))?
+                    .and_then(|span| span.end)
+                    .map(|end| oxplow_domain::vcs::Revision::Snapshot(end).to_string());
+                if head.is_none() || head != end {
+                    live.push(request);
+                }
+            }
+            Ok(live)
+        })
+        .await
+}
+
 /// Analyze `target` now and clear its paced job: this run covers it.
 async fn deep_now(svc: &Services, target: ChangeTarget, seq: i64) -> Result<(), DomainError> {
     let job = job_id(&target);
@@ -403,7 +451,7 @@ async fn deep_now(svc: &Services, target: ChangeTarget, seq: i64) -> Result<(), 
 mod tests {
     use super::*;
     use oxplow_domain::events::schema::{
-        SnapshotTaken, SnapshotTakenV3, VcsHeadMoved, VcsHeadMovedV2,
+        SnapshotTaken, SnapshotTakenV3, VcsHeadMoved, VcsHeadMovedV3,
     };
     use oxplow_domain::events::Anchors;
     use oxplow_domain::{Envelope, StreamId};
@@ -452,11 +500,11 @@ mod tests {
     fn head_moved() -> Envelope {
         Envelope::typed::<VcsHeadMoved>(
             "system",
-            &VcsHeadMovedV2 {
+            &VcsHeadMovedV3 {
                 stream: "str1".into(),
-                snapshot: 1,
+                snapshot: Some(1),
                 from: None,
-                to: "abc".into(),
+                to: Some("abc".into()),
             },
         )
     }
@@ -483,55 +531,39 @@ mod tests {
         std::fs::write(root.join("src/lib.rs"), "fn a() -> i32 {\n    2\n}\n").unwrap();
     }
 
-    /// A take one thread's turn made refreshes that thread's effort, not
-    /// every open effort on the stream; a take no thread made (the
-    /// person's edits) refreshes them all.
+    /// A take refreshes the requests live on its stream: one with a turn
+    /// running there, or one that ended since the stream's previous take
+    /// (its end take). A take one thread's turn made refreshes that
+    /// thread's requests only; a take no thread made refreshes them all. A
+    /// request long finished isn't touched.
     #[tokio::test]
-    async fn a_threads_take_refreshes_only_its_effort() {
-        use oxplow_db::EffortStore as _;
+    async fn a_take_refreshes_the_requests_live_on_its_stream() {
         let f = crate::thread_checkpoint::tests::with_baseline().await;
-        let stream = StreamId::new(1);
-        let start = f
-            .svc
-            .snapshot_store
-            .latest_snapshot_id_for_stream(stream)
-            .await
-            .unwrap()
-            .unwrap();
-        f.svc
-            .effort_store
-            .set_start_snapshot(&f.effort, start)
-            .await
-            .unwrap();
         f.svc
             .db
             .transaction(|c| {
                 c.execute_batch(
                     "INSERT INTO threads (id, stream_id, title, created_at, updated_at)
                        VALUES (7, 1, 'other',
-                               '2026-01-01T00:00:00.000000Z', '2026-01-01T00:00:00.000000Z');",
+                               '2026-01-01T00:00:00.000000Z', '2026-01-01T00:00:00.000000Z');
+                     INSERT INTO request (id, thread_id) VALUES (1, 1), (2, 7), (3, 1);
+                     INSERT INTO agent_turn (thread_id, prompt, request_id, started_at, ended_at)
+                       VALUES (1, 'mine', 1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), NULL),
+                              (7, 'theirs', 2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), NULL),
+                              (1, 'old', 3, '2026-01-01T00:00:00.000000Z',
+                                            '2026-01-01T00:01:00.000000Z');",
                 )
                 .map_err(oxplow_db::map_sql_err)
             })
             .await
             .unwrap();
-        let other = f
-            .svc
-            .effort_store
-            .start(
-                "oxplow:oxplow/work_item?id=B-1&provider=issues",
-                &oxplow_domain::ThreadId::new(7),
-                Some(start),
-            )
-            .await
-            .unwrap();
         let reactor = ChangeReactor::new(Arc::downgrade(&f.svc));
-        let efforts_analyzed = || async {
+        let analyzed = || async {
             let out = f
                 .svc
                 .sql
                 .query_sql(
-                    "SELECT target FROM v_change WHERE kind = 'effort' ORDER BY target",
+                    "SELECT target FROM v_change WHERE kind = 'request' ORDER BY target",
                     vec![],
                     None,
                 )
@@ -542,20 +574,47 @@ mod tests {
         let mut mine = log(&f.svc, taken(false, 1)).await;
         mine.envelope.anchors.thread_id = Some(f.thread);
         reactor.handle(&mine).await.unwrap();
-        assert_eq!(
-            efforts_analyzed().await,
-            serde_json::json!([[f.effort.value().to_string()]])
-        );
+        assert_eq!(analyzed().await, serde_json::json!([["1"]]));
         reactor
             .handle(&log(&f.svc, taken(false, 1)).await)
             .await
             .unwrap();
+        assert_eq!(analyzed().await, serde_json::json!([["1"], ["2"]]));
+    }
+
+    /// A request that ended is refreshed by any move until its change is at
+    /// the end its turns name — whichever thread's take came first — and
+    /// then left alone.
+    #[tokio::test]
+    async fn an_ended_request_is_refreshed_until_its_change_is_at_its_end() {
+        let f = crate::thread_checkpoint::tests::with_baseline().await;
+        f.svc
+            .db
+            .transaction(|c| {
+                c.execute_batch(
+                    "INSERT INTO threads (id, stream_id, title, created_at, updated_at)
+                       VALUES (7, 1, 'other',
+                               '2026-01-01T00:00:00.000000Z', '2026-01-01T00:00:00.000000Z');
+                     INSERT INTO request (id, thread_id) VALUES (1, 1);
+                     INSERT INTO agent_turn (thread_id, prompt, request_id, started_at, ended_at)
+                       VALUES (1, 'mine', 1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                                             strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));",
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let stream = StreamId::new(1);
+        let other = Some(oxplow_domain::ThreadId::new(7));
+        assert_eq!(live_requests(&f.svc, stream, other).await.unwrap(), vec![1]);
+        let reactor = ChangeReactor::new(Arc::downgrade(&f.svc));
+        let mut theirs = log(&f.svc, taken(false, 1)).await;
+        theirs.envelope.anchors.thread_id = other;
+        reactor.handle(&theirs).await.unwrap();
         assert_eq!(
-            efforts_analyzed().await,
-            serde_json::json!([
-                [f.effort.value().to_string()],
-                [other.id.value().to_string()]
-            ])
+            live_requests(&f.svc, stream, other).await.unwrap(),
+            Vec::<i64>::new(),
+            "its change is at its end"
         );
     }
 
@@ -564,7 +623,7 @@ mod tests {
     /// defers, `Busy`), the file list is current.
     #[tokio::test]
     async fn a_move_lists_the_files_even_while_the_analysis_runs() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         repo(&f.svc.layout.project_dir);
         let reactor = ChangeReactor::new(Arc::downgrade(&f.svc));
         let ev = log(&f.svc, taken(false, 1)).await;
@@ -594,10 +653,10 @@ mod tests {
     }
 
     /// The working tree's files say which are staged and which untracked,
-    /// and a deep analysis of them keeps that; an effort's say neither.
+    /// and a deep analysis of them keeps that; a request's say neither.
     #[tokio::test]
     async fn the_working_files_say_which_are_staged_and_which_untracked() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
         repo(&root);
         std::fs::write(root.join("src/staged.rs"), "fn s() {}\n").unwrap();
@@ -666,7 +725,7 @@ mod tests {
     #[tokio::test]
     async fn a_relist_of_some_paths_gives_what_a_full_relist_gives() {
         use crate::change_analysis::{refresh_files, refresh_paths, ChangeTarget};
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         repo(&root);
@@ -738,6 +797,15 @@ mod tests {
         check("staged, then changed again", &["staged.txt"]).await;
         write("ignored.txt", "x\n");
         check("an ignored file", &["ignored.txt"]).await;
+        // Ignored by its own folder's `.gitignore` (`*`, as an installed
+        // skill's folder is), the ignore file itself among them.
+        write("skills/x/.gitignore", "*\n");
+        write("skills/x/.oxplow", "");
+        check(
+            "a file its folder's .gitignore ignores",
+            &["skills/x/.gitignore", "skills/x/.oxplow", "skills/x"],
+        )
+        .await;
         std::fs::rename(root.join("moved.txt"), root.join("renamed.txt")).unwrap();
         check("a rename", &["moved.txt", "renamed.txt"]).await;
         write("staged-moved.txt", "one\ntwo\nthree\nfour\n");
@@ -774,7 +842,7 @@ mod tests {
     #[tokio::test]
     async fn a_merge_in_progress_or_a_moved_head_takes_the_full_relist() {
         use crate::change_analysis::{refresh_files, refresh_paths, ChangeTarget};
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         repo(&root);
@@ -813,7 +881,7 @@ mod tests {
     #[tokio::test]
     async fn a_range_headed_at_the_working_tree_follows_by_paths() {
         use crate::change_analysis::{refresh_files, refresh_paths, ChangeTarget};
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         repo(&root);
@@ -851,7 +919,7 @@ mod tests {
     /// is quiet, which finds what no watch reports: `git add` from a terminal.
     #[tokio::test]
     async fn a_relist_by_paths_is_reconciled_once_the_stream_is_quiet() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
         repo(&root);
         std::fs::write(root.join("heard.txt"), "1\n").unwrap();
@@ -907,7 +975,7 @@ mod tests {
     /// is edited, and a stage moves its staged flag with no snapshot.
     #[tokio::test]
     async fn the_working_files_follow_the_index_and_exist_from_boot() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
         repo(&root);
         std::fs::write(root.join("src/new.rs"), "fn n() {}\n").unwrap();
@@ -968,7 +1036,7 @@ mod tests {
     /// it runs once settled, stamping what its inputs had seen.
     #[tokio::test]
     async fn a_snapshot_lists_files_and_paces_the_deep_analysis() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         repo(&f.svc.layout.project_dir);
         let reactor = ChangeReactor::new(Arc::downgrade(&f.svc));
         let ev = log(&f.svc, taken(false, 1)).await;
@@ -1013,7 +1081,7 @@ mod tests {
     /// anything changed.
     #[tokio::test]
     async fn a_turn_end_take_analyzes_at_once() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         repo(&f.svc.layout.project_dir);
         let reactor = ChangeReactor::new(Arc::downgrade(&f.svc));
         assert!(!reactor.handles("agent.turn.ended"));
@@ -1047,7 +1115,7 @@ mod tests {
     /// An unchanged take moves nothing.
     #[tokio::test]
     async fn an_unchanged_take_does_nothing() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         repo(&f.svc.layout.project_dir);
         let reactor = ChangeReactor::new(Arc::downgrade(&f.svc));
         reactor
@@ -1060,7 +1128,7 @@ mod tests {
     /// A burst analyzes once: an event a newer one supersedes is skipped.
     #[tokio::test]
     async fn a_burst_computes_once() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         repo(&f.svc.layout.project_dir);
         let reactor = ChangeReactor::new(Arc::downgrade(&f.svc));
         let first = log(&f.svc, taken(false, 1)).await;
@@ -1080,217 +1148,11 @@ mod tests {
         );
     }
 
-    /// An open effort on the stream is recomputed too — from its start
-    /// snapshot to the working tree.
-    #[tokio::test]
-    async fn a_snapshot_recomputes_open_efforts() {
-        let f = crate::test_fixtures::services_with_effort().await;
-        let root = f.svc.layout.project_dir.clone();
-        repo(&root);
-        let capture = crate::snapshot_capture::SnapshotCaptureService::new(
-            f.svc.snapshot_store.clone(),
-            f.svc.blobs.clone(),
-            root.clone(),
-            Arc::new(crate::vcs::GitProvider),
-            StreamId::new(1),
-            1_000_000,
-            oxplow_fs_watch::WorkspaceFilter::default(),
-        )
-        .with_settle_duration(std::time::Duration::ZERO)
-        .with_predrain_delay(std::time::Duration::ZERO);
-        capture.mark_dirty(
-            root.join("src/lib.rs"),
-            oxplow_fs_watch::WatchEventKind::Other,
-        );
-        let start = capture
-            .request_snapshot(crate::snapshot_capture::TakeRequest {
-                trigger: oxplow_domain::snapshot::SnapshotTrigger::Manual,
-                thread_id: None,
-                turn_id: None,
-                effort_id: None,
-                budget: None,
-                provider: None,
-            })
-            .await
-            .unwrap()
-            .unwrap();
-        f.svc
-            .effort_store
-            .set_start_snapshot(&f.effort, start)
-            .await
-            .unwrap();
-        std::fs::write(root.join("src/new.rs"), "fn n() {}\n").unwrap();
-        // The effort's own file: its change is limited to those.
-        oxplow_db::EffortStore::record_file(
-            &*f.svc.effort_store,
-            &f.effort,
-            "src/new.rs",
-            oxplow_db::EffortFileChange::Created,
-            oxplow_db::effort_store::FileRefVersion {
-                local_snapshot_id: 0,
-                closest_vcs_rev: None,
-                vcs_rev_exact: false,
-            },
-        )
-        .await
-        .unwrap();
-        let reactor = ChangeReactor::new(Arc::downgrade(&f.svc));
-        reactor
-            .handle(&log(&f.svc, taken(false, 1)).await)
-            .await
-            .unwrap();
-        let out = f
-            .svc
-            .sql
-            .query_sql(
-                "SELECT f.path FROM v_change c JOIN v_change_file f ON f.change_id = c.id
-                 WHERE c.kind = 'effort' ORDER BY f.path",
-                vec![],
-                None,
-            )
-            .await
-            .unwrap();
-        let paths = serde_json::to_value(out.rows).unwrap();
-        assert!(
-            paths
-                .as_array()
-                .unwrap()
-                .contains(&serde_json::json!(["src/new.rs"])),
-            "{paths}"
-        );
-    }
-
-    /// P7 review (tsk710): an effort that edits and finishes before any take
-    /// while it is open is recomputed against its end snapshot when
-    /// `effort.finished` arrives — what `effort_churn` (`after:
-    /// [change.analyze]`) reads.
-    #[tokio::test]
-    async fn a_finished_effort_is_recomputed_against_its_end_snapshot() {
-        let f = crate::test_fixtures::services_with_effort().await;
-        let root = f.svc.layout.project_dir.clone();
-        repo(&root);
-        let capture = crate::snapshot_capture::SnapshotCaptureService::new(
-            f.svc.snapshot_store.clone(),
-            f.svc.blobs.clone(),
-            root.clone(),
-            Arc::new(crate::vcs::GitProvider),
-            StreamId::new(1),
-            1_000_000,
-            oxplow_fs_watch::WorkspaceFilter::default(),
-        )
-        .with_settle_duration(std::time::Duration::ZERO)
-        .with_predrain_delay(std::time::Duration::ZERO);
-        let take = |path: &str| {
-            capture.mark_dirty(root.join(path), oxplow_fs_watch::WatchEventKind::Other);
-            capture.request_snapshot(crate::snapshot_capture::TakeRequest {
-                trigger: oxplow_domain::snapshot::SnapshotTrigger::Manual,
-                thread_id: None,
-                turn_id: None,
-                effort_id: None,
-                budget: None,
-                provider: None,
-            })
-        };
-        let start = take("src/lib.rs").await.unwrap().unwrap();
-        f.svc
-            .effort_store
-            .set_start_snapshot(&f.effort, start)
-            .await
-            .unwrap();
-        // Analyzed once while open, before the edit.
-        let reactor = ChangeReactor::new(Arc::downgrade(&f.svc));
-        reactor
-            .handle(&log(&f.svc, taken(false, 1)).await)
-            .await
-            .unwrap();
-        // The edit lands and the effort closes: its end snapshot holds it.
-        std::fs::write(root.join("src/late.rs"), "fn late() {}\n").unwrap();
-        oxplow_db::EffortStore::record_file(
-            &*f.svc.effort_store,
-            &f.effort,
-            "src/late.rs",
-            oxplow_db::EffortFileChange::Created,
-            oxplow_db::effort_store::FileRefVersion {
-                local_snapshot_id: 0,
-                closest_vcs_rev: None,
-                vcs_rev_exact: false,
-            },
-        )
-        .await
-        .unwrap();
-        let end = take("src/late.rs").await.unwrap().unwrap();
-        f.svc
-            .effort_store
-            .set_end_snapshot(&f.effort, end)
-            .await
-            .unwrap();
-        let effort = f.effort;
-        f.svc
-            .db
-            .transaction(move |c| {
-                c.execute(
-                    "UPDATE effort SET ended_at = '2026-10-02T00:00:00.000000Z' WHERE id = ?1",
-                    [effort.value()],
-                )
-                .map(|_| ())
-                .map_err(oxplow_db::map_sql_err)
-            })
-            .await
-            .unwrap();
-        assert!(reactor.handles("effort.finished"));
-        let finished = Envelope::typed::<oxplow_domain::events::schema::EffortFinished>(
-            "system",
-            &oxplow_domain::events::schema::EffortFinishedV3 {
-                effort: f.effort.to_string(),
-                work_item: Some("oxplow:oxplow/work_item?id=tsk1&provider=oxplow".into()),
-                end_snapshot: Some(end),
-            },
-        );
-        reactor.handle(&log(&f.svc, finished).await).await.unwrap();
-        let out = f
-            .svc
-            .sql
-            .query_sql(
-                "SELECT f.path FROM v_change c JOIN v_change_file f ON f.change_id = c.id
-                 WHERE c.kind = 'effort' ORDER BY f.path",
-                vec![],
-                None,
-            )
-            .await
-            .unwrap();
-        let paths = serde_json::to_value(out.rows).unwrap();
-        assert!(
-            paths
-                .as_array()
-                .unwrap()
-                .contains(&serde_json::json!(["src/late.rs"])),
-            "{paths}"
-        );
-    }
-
-    /// An effort that finished with no start snapshot (opened and closed
-    /// at once, after the fact) has no change to analyze: its
-    /// `effort.finished` is done, not a dead letter and an alert.
-    #[tokio::test]
-    async fn a_finished_effort_with_no_start_snapshot_is_skipped() {
-        let f = crate::test_fixtures::services_with_effort().await;
-        let reactor = ChangeReactor::new(Arc::downgrade(&f.svc));
-        let finished = Envelope::typed::<oxplow_domain::events::schema::EffortFinished>(
-            "system",
-            &oxplow_domain::events::schema::EffortFinishedV3 {
-                effort: f.effort.to_string(),
-                work_item: None,
-                end_snapshot: None,
-            },
-        );
-        reactor.handle(&log(&f.svc, finished).await).await.unwrap();
-    }
-
     /// A failed analysis is an error naming the stream (the pump makes it a
     /// dead letter).
     #[tokio::test]
     async fn a_failed_analysis_names_the_stream() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         std::fs::remove_dir_all(f.svc.layout.project_dir.join(".git")).unwrap();
         let reactor = ChangeReactor::new(Arc::downgrade(&f.svc));
         let err = reactor
@@ -1306,7 +1168,7 @@ mod tests {
     /// One between two fixed revisions is left as computed.
     #[tokio::test]
     async fn a_head_move_refreshes_the_ranges_headed_at_the_working_tree() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(root.join("src/lib.rs"), BEFORE).unwrap();
@@ -1356,7 +1218,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_head_move_recomputes_the_working_change() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         repo(&f.svc.layout.project_dir);
         let reactor = ChangeReactor::new(Arc::downgrade(&f.svc));
         reactor

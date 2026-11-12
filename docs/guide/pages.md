@@ -9,13 +9,13 @@ view are all pages.
 The quickest way to get one is to ask your agent: "make me a page of the
 tasks blocked in this stream". It knows the format. For a one-off answer
 it shows a page right beside the conversation (nothing is stored) and you
-can **Save to wiki** or **Save as Page** to keep it.
+can **Save as knowledge page** or **Save as Page** to keep it.
 
 ## The data
 
-Everything oxplow tracks is exposed as read-only SQL views: `v_work_item`
-(the active work list's items, whichever tracker holds them), `v_effort`,
-`v_thread`, `v_comment`, `v_wiki_page`, `v_effort_file`, `v_agent_turn`,
+Everything oxplow tracks is exposed as read-only SQL views: `v_task`
+(the active task tracker's items, whichever tracker holds them), `v_request`,
+`v_thread`, `v_comment`, `v_knowledge_page`, `v_turn_file`, `v_agent_turn`,
 `v_token_usage`, `v_fact`, and more.
 
 **Explore Data** (launcher → Data) lists every view in its rail. Pick one to
@@ -57,7 +57,7 @@ answers:
 loaders:
   blocked:
     sql: |
-      SELECT uri, title, updated_at FROM v_work_item
+      SELECT uri, title, updated_at FROM v_task
       WHERE state = 'blocked' AND thread_id = :thread_id
 view:
   viz: table            # table | list | sections | tree | number | markdown | bar | line | treemap | board | custom | ...
@@ -120,8 +120,8 @@ A table or list takes `columns:` for headers, order and links. `format`
 holds a JSON array whose elements are a string or `{ "text": ..., "hint"?:
 ..., "uri"?: ... }`: drawn inline separated by " · ", the hint on hover, the
 uri a link. `link: { kind, from }`
-makes a cell clickable: `page` (any oxplow URI, such as a work item's),
-`file` (with `line:`), `wiki`, `commit`, `metric`. `select: <param>` makes
+makes a cell clickable: `page` (any oxplow URI, such as a task's),
+`file` (with `line:`), `knowledge`, `commit`, `metric`. `select: <param>` makes
 a click set that param, so a detail section that reads it re-runs: master and
 detail with no code.
 
@@ -186,7 +186,7 @@ needs.
 
 | Slot | Page | Param |
 |---|---|---|
-| `oxplow/diff-view.sections` | an effort's or a range's diff | `effort_id`, `change_id` |
+| `oxplow/diff-view.sections` | a request's, a turn's or a range's diff | `change_id` |
 | `oxplow/commit.sections` | a commit's page | `change_id` (the page's row) |
 | `oxplow/uncommitted-changes.sections` | Uncommitted Changes; `at: { before: commit }` puts a strip above everything | `change_id` (the page's row) |
 | `oxplow/new-session.sections` | the New Session page (sections `start`, `earlier`) | `thread_id` |
@@ -201,9 +201,9 @@ and `v_change_duplicate`.
 A dashboard is a page whose view is a `grid` of tiles, in the Dashboards
 category: see [Dashboards](dashboards.md).
 
-### One-off pages in the wiki
+### One-off pages in knowledge
 
-A fenced ` ```oxplow-page ` block in a wiki page (or an agent's
+A fenced ` ```oxplow-page ` block in a knowledge page (or an agent's
 `oxplow_show_page { spec }`) is an inline page: the same YAML, read-only (no
 actions, forms or components), drawn live.
 
@@ -213,7 +213,7 @@ Settings → Extensions → **Disable** turns an extension off for the
 project, including the ones that ship with oxplow. Oxplow ships the required
 `oxplow-foundation` extension and the optional `oxplow-bundled` extension.
 The latter holds the Usage, Planning, Review, and Quality pages, Change
-Analysis, the effort's tests and coverage, the review packet, and the token
+Analysis, the request's tests and coverage, the review packet, and the token
 panels. With it off, oxplow is the plain workbench: the pages keep their
 file lists and diffs, and the Metrics pages and dashboards still work.
 Turning it off in Settings → Extensions changes your own choice
@@ -262,7 +262,7 @@ the commands it declares, and it is fed its page's data.
 # extension.yaml
 custom_components:
   - id: burndown
-    commands: [oxplow.work_item.transition]    # commands it may run
+    commands: [oxplow.task.transition]    # commands it may run
 ```
 
 ```yaml
@@ -297,8 +297,8 @@ oxplow.connect().then((component) => {
   component.onUpdate(({ data }) => render(data)); // a loader changed
 });
 // Elsewhere, with `component` in hand:
-//   await component.invoke("oxplow.work_item.transition", { uri, to: "done" })
-//   await component.navigate("oxplow:oxplow/work_item?id=tsk42&provider=oxplow")   // oxplow pages only
+//   await component.invoke("oxplow.task.transition", { uri, to: "done" })
+//   await component.navigate("oxplow:oxplow/task?id=tsk42&provider=oxtask")   // oxplow pages only
 //   await component.navigate(uri, { newTab: true })    // open it in a new tab
 //   await component.navigate(uri, { replace: true })   // take the place of this step in Back
 ```
@@ -315,7 +315,13 @@ oxplow.connect().then((component) => {
 can be picked up, plus `ox-dragging` while it is; `ox-drop-target` for
 where it may land), the states `ox-ok`, `ox-waiting`, `ox-running` and
 `ox-bad`, and chart series `ox-series-1` to `ox-series-8` (a `fill` for
-SVG, a `background` otherwise). They only work after `applyTheme()`, which also sets the app's `color-scheme` so the frame stays transparent. `invoke`
+SVG, a `background` otherwise). They only work after `applyTheme()`, which also sets the app's `color-scheme` so the frame stays transparent.
+To show markdown (an item's description, say), call
+`component.renderMarkdown(element, text)`, or with `{ inline: true }` for
+one line. Oxplow reads it the way its own views do: `[[wikilinks]]` and
+links to its pages show their titles and open them. A web link shows its
+text with the address on hover, because a component can't open anything
+outside oxplow. `invoke`
 resolves with the command's result; a command your extension writes as
 a script answers `{ result, children }` — its script's own `result`, and
 the commands it composed. A
@@ -371,8 +377,8 @@ actions in the bar and opens a command's form in oxplow:
 oxplow.connect().then(async (component) => {
   component.applyTheme();
   const { rows } = await component.querySql(
-    "SELECT uri, title FROM v_effort WHERE started_at >= ?1", [component.viewParams.from]);
-  await component.setTitle(`Efforts since ${component.viewParams.from}`);
+    "SELECT uri, title FROM v_request WHERE started_at >= ?1", [component.viewParams.from]);
+  await component.setTitle(`Requests since ${component.viewParams.from}`);
   await component.setActions([{ id: "refresh", label: "Refresh", primary: true }]);
   component.onAction((id) => { if (id === "refresh") location.reload(); });
   // Its view params live in its tab, so Back and a bookmark keep them:
@@ -383,7 +389,7 @@ oxplow.connect().then(async (component) => {
   // Its own memory for you, in every tab:
   //   await component.pageMemory.set("columns", ["title", "state"]);
   // A form oxplow shows; resolves with the result, or rejects CANCELLED:
-  //   await component.openForm("oxplow.work_item.create", { title: "" })
+  //   await component.openForm("oxplow.task.create", { title: "" })
 });
 ```
 
@@ -425,30 +431,31 @@ a bookmark doesn't freeze it to one date.
 ## Replacing a view
 
 An extension can put its own page where one of oxplow's views is: the
-Board's cards (`work_item.board`), the Tasks list (`work_item.list`) or a
-task's description editor (`work_item.detail`). It needs no work-items provider of its
-own: a view reads `v_work_item` and changes items through the work-item
-commands (`oxplow.work_item.update`, `transition`, `reorder`, `move`), so it
+Work board (`task.board`), the Task List's list (`task.list`) or a
+task's description editor (`task.detail`). It needs no task tracker of its
+own: a view reads `v_task` and changes items through the task
+commands (`oxplow.task.update`, `transition`, `reorder`, `move`), so it
 works with whichever list is active.
 
 ```yaml
 # extension.yaml
 ui:
   mounts:
-    - { page: swimlanes, at: work_item.board, version: 1 }
+    - { page: swimlanes, at: task.board, version: 2 }
 ```
 
 The part gets the view's props as params and must declare all of them: the
-Board gets `scope` (`thread`, `backlog` or `all`) and `thread_id`; the list
-gets `scope` (`thread`, `stream` or `all`) and `thread_id`, and its part may
-declare `stream_id`; the editor gets `uri`. Settings → Integrations lists
+board and the list get `scope` (`thread`, `stream`, `all` or `backlog`) and
+`thread_id`, and may declare `stream_id`; a board replacement also shares
+the board's filters (`show`, `priority`, `q`) as its view, since the board
+draws them itself; the editor gets `uri`. Settings → Integrations lists
 each replaced view with a choice of whose to show (Default, oxplow's own, or
 an extension); a small "replaced by" badge says whose it is, and if it can't
 load, oxplow's own shows with a line saying why. Some views also share
 their page's view params: Git History's graph (`vcs.history.graph`) has
 the page's `q`, `author` and `branch`, so a custom graph reads them from
 `component.viewParams`, writes them with `setViewParams` and follows
-`onViewParams` — the same address oxplow's own list keeps. A `viz: custom` view that
+`onViewParams` — the same address oxplow's own page keeps. A `viz: custom` view that
 changes items needs its commands declared like any component, and the
 extension must declare the permissions for them.
 
@@ -474,7 +481,7 @@ change it.
 An extension can declare a **collector**: a script that fetches records from
 somewhere else (GitHub, a team's tracker, your CI) and prints them as JSON. Oxplow
 stores them as a view like `v_github_pr` that pages can join with tasks and
-efforts.
+requests.
 
 ```yaml
 collectors:
@@ -533,7 +540,7 @@ collectors:
   - id: hot
     runtime: starlark            # or: jaq
     entry: collectors/hot.star
-    input: "SELECT uri, title FROM v_work_item WHERE json_extract(native, '$.priority') = 'high'"
+    input: "SELECT uri, title FROM v_task WHERE json_extract(native, '$.priority') = 'high'"
     entities:
       - { name: hot_item, key: uri, columns: { uri: text, title: text } }
 ```

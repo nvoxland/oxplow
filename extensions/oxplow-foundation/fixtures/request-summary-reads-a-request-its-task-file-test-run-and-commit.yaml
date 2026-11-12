@@ -1,0 +1,38 @@
+# A request at a glance: its facts, the task it worked on, the file it
+# changed, the test run it made and the commit that holds its file (the
+# commit's blob is the one the turn's end take captured). The agent reads
+# the same page as `oxplow_request_summary { request }`.
+# Its task is oxtask's, oxplow-bundled's.
+requires: [oxplow-bundled]
+given:
+  - { command: oxplow.task.create, input: { title: Fix the parser }, bind: item }
+  - observe: { snapshot: { trigger: startup, files: [{ path: parser.rs, hash: h0, blob: b0 }] } }
+  - observe:
+      turn:
+        prompt: Fix the parser
+        during:
+          - { command: oxplow.task.transition, input: { uri: $item.uri, to: in_progress }, as: agent }
+        tools:
+          - { name: Edit, kind: edit, paths: [parser.rs], ok: true }
+        runs:
+          - { cases: [{ name: parses, status: passed }, { name: rejects, status: failed }] }
+  - observe: { snapshot: { trigger: turn_end, files: [{ path: parser.rs, hash: h1, blob: b1 }] } }
+  - observe: { commit: { sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", subject: Fix the parser, files: [{ path: parser.rs, blob: b1 }] } }
+when: { page: request-summary, params: { request: req1 } }
+expect:
+  loaders:
+    request: { rows: [{ id: 1, uri: "oxplow:oxplow/request?id=req1", prompt: Fix the parser, state: finished, turns: 1 }] }
+    tasks: { rows: [{ task: $item.uri, title: Fix the parser, basis: transition }] }
+    files: { rows: [{ path: parser.rs, claimed: 1 }] }
+    tests: { rows: [{ kind: test-run, passed: 1, failed: 1, total: 2 }] }
+    commits: { rows: [{ sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", subject: Fix the parser, files: 1 }] }
+steps:
+  # A request nobody made reads nothing.
+  - params: { request: req9 }
+    expect:
+      loaders:
+        request: { rows: 0 }
+        tasks: { rows: 0 }
+        files: { rows: 0 }
+        tests: { rows: 0 }
+        commits: { rows: 0 }

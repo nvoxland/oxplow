@@ -160,10 +160,11 @@ mod tests {
         assert!(hits.is_empty(), "{}", hits.join("\n"));
     }
 
-    /// The default work list, effort policy, snapshots and wiki are
-    /// oxplow-foundation's: with oxplow-bundled off they still run.
+    /// oxtask is oxplow-bundled's, oxwiki is foundation's: with
+    /// oxplow-bundled off there is no task tracker (`task.*` is a sink that
+    /// tracks nothing) and oxwiki still runs.
     #[tokio::test(flavor = "multi_thread")]
-    async fn the_work_list_and_wiki_run_with_bundled_off() {
+    async fn oxwiki_runs_and_tasks_are_a_sink_with_bundled_off() {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
         std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
@@ -183,21 +184,66 @@ mod tests {
             .commands
             .run(
                 &human,
-                "oxplow.work_item.create",
+                "oxplow.task.create",
                 serde_json::json!({ "title": "Still here" }),
                 true,
             )
             .await
-            .expect("the work list runs with bundled off");
-        assert!(item.result["uri"].is_string(), "{}", item.result);
+            .expect("filing is a sink with bundled off, not a refusal");
+        assert_eq!(item.result["tracked"], false, "{}", item.result);
         svc.commands
             .run(
                 &human,
                 "oxplow.knowledge.write_page",
-                serde_json::json!({ "slug": "notes", "title": "Notes", "body": "Hello." }),
+                serde_json::json!({ "id": "notes", "title": "Notes", "body": "Hello." }),
                 true,
             )
             .await
-            .expect("the wiki runs with bundled off");
+            .expect("oxwiki runs with bundled off");
+    }
+
+    /// The `oxplow` namespace's settings hold bundled's keys (its task
+    /// workflow, say) as well as foundation's: with bundled off they are
+    /// still a valid layer, so oxwiki stays on rather than going off with
+    /// settings nobody can read.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn oxwiki_stays_on_with_bundled_off_and_its_settings_stored() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::test_fixtures::init_git_repo(dir.path());
+        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
+        std::fs::write(
+            dir.path().join(".oxplow/personal.yaml"),
+            format!(
+                "disableExtensions: [{}]\n",
+                crate::test_fixtures::optional_shipped()
+            ),
+        )
+        .unwrap();
+        let svc = crate::Services::in_memory(dir.path()).await.unwrap();
+        svc.db
+            .transaction(|tx| {
+                tx.execute(
+                    "INSERT INTO extension_config (namespace, scope, schema_version, revision, values_json)
+                     VALUES ('oxplow', 'project', 2, 1, '{\"tasks\":{\"workflow\":\"off\"}}')",
+                    [],
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        svc.streams.ensure_primary().await.unwrap();
+        crate::test_fixtures::activate(&svc).await;
+        assert_eq!(svc.knowledge.enabled(), ["oxwiki"]);
+        let read = svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                "oxplow.settings.read",
+                serde_json::json!({}),
+                false,
+            )
+            .await
+            .expect("the settings read with bundled off");
+        assert_eq!(read.result["values"]["oxwiki"], true, "{}", read.result);
     }
 }

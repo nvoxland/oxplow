@@ -89,7 +89,7 @@ mod tests {
     #[tokio::test]
     async fn query_sql_rejects_writes_as_invalid() {
         let (svc, _dir) = crate::test_support::services().await;
-        let err = crate::dispatch("query_sql", json!({ "sql": "DELETE FROM task" }), &svc)
+        let err = crate::dispatch("query_sql", json!({ "sql": "DELETE FROM oxtask" }), &svc)
             .await
             .unwrap_err();
         assert_eq!(err.code, "INVALID");
@@ -102,19 +102,19 @@ mod tests {
         let (svc, _dir) = crate::test_support::services().await;
         let err = crate::dispatch(
             "query_sql",
-            json!({ "sql": "SELECT count(*) FROM work_item" }),
+            json!({ "sql": "SELECT count(*) FROM task" }),
             &svc,
         )
         .await
         .unwrap_err();
-        assert!(err.message.contains("v_work_item"), "{}", err.message);
+        assert!(err.message.contains("v_task"), "{}", err.message);
         let out = crate::dispatch(
             "query_sql",
-            json!({ "sql": "SELECT count(*) FROM work_item", "raw": true }),
+            json!({ "sql": "SELECT count(*) FROM task", "raw": true }),
             &svc,
         )
         .await
         .unwrap();
-        assert_eq!(out["reads"]["tables"], json!(["work_item"]));
+        assert_eq!(out["reads"]["tables"], json!(["task"]));
     }
 }

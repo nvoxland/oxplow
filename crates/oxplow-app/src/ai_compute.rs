@@ -804,7 +804,7 @@ mod tests {
     /// reads the recorded result.
     #[tokio::test]
     async fn the_same_computation_twice_is_one_call_and_a_cached_result() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         with_model(&fx.svc, Role::SUMMARIZE, chat("  A short summary.  ")).await;
         let first = fx
             .svc
@@ -877,7 +877,7 @@ mod tests {
     /// reply that leaves a question unanswered isn't recorded.
     #[tokio::test]
     async fn decide_is_a_recorded_computation() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let reply = json!({ "answers": { "risky": { "type": "noul", "probability": 0.8 } } });
         with_model(&fx.svc, Role::DECIDE, chat(&reply.to_string())).await;
         let questions = BTreeMap::from([(
@@ -932,7 +932,7 @@ mod tests {
     /// to another provider serving the same model name computes afresh.
     #[tokio::test]
     async fn another_provider_of_the_same_model_computes_afresh() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         with_provider(&fx.svc, Role::SUMMARIZE, "local", chat("local says")).await;
         let local = fx
             .svc
@@ -967,7 +967,7 @@ mod tests {
 
     #[tokio::test]
     async fn extract_refuses_a_reply_that_breaks_the_schema_and_records_nothing() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         with_model(
             &fx.svc,
             Role::MAIN,
@@ -1024,7 +1024,7 @@ mod tests {
     #[tokio::test]
     async fn a_typed_completion_is_recorded_and_cached_with_provenance() {
         use oxplow_ai::parts::{FinishReasonV1, PartV1, UsageSourceV1};
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let reply = json!({ "choices": [{ "finish_reason": "tool_calls", "message": {
             "role": "assistant", "content": "checking",
             "tool_calls": [{ "id": "c1", "type": "function",
@@ -1090,7 +1090,7 @@ mod tests {
     #[tokio::test]
     async fn a_typed_completion_refuses_images_and_unknown_versions() {
         use oxplow_ai::parts::PartV1;
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         with_model(&fx.svc, Role::SUMMARIZE, chat("never sent")).await;
         let mut with_image = typed_request("see");
         with_image.messages[0].parts.push(PartV1::Image {

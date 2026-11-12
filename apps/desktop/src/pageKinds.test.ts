@@ -7,8 +7,8 @@ import { declaredPageIcon, kindForTabId, pageKindIconComponent, pageKindLabel } 
 describe("kindForTabId", () => {
   test("scheme-prefixed ids return the prefix", () => {
     expect(kindForTabId("oxplow:oxplow/file?path=src/foo.ts")).toBe("oxplow/file");
-    expect(kindForTabId("oxplow:oxplow/wiki?slug=url-schemes")).toBe("oxplow/wiki");
-    expect(kindForTabId("oxplow:oxplow/work_item?id=tsk42&provider=oxplow")).toBe("oxplow/work_item");
+    expect(kindForTabId("oxplow:oxplow/knowledge?id=url-schemes&store=oxwiki")).toBe("oxplow/knowledge");
+    expect(kindForTabId("oxplow:oxplow/task?id=tsk42&provider=oxtask")).toBe("oxplow/task");
     expect(kindForTabId("oxplow:oxplow/metric?metric=oxplow.todos")).toBe("oxplow/metric");
     expect(kindForTabId("oxplow:oxplow/dir?path=src/components")).toBe("oxplow/dir");
     expect(kindForTabId("oxplow:oxplow/commit?sha=abcdef0")).toBe("oxplow/commit");
@@ -30,7 +30,7 @@ describe("kindForTabId", () => {
 
 describe("pageKindIconComponent", () => {
   test("returns an icon for every entity kind", () => {
-    for (const k of ["file", "directory", "dir", "wiki", "work_item", "commit", "diff", "dashboard", "metric", "symbol"]) {
+    for (const k of ["file", "directory", "dir", "knowledge", "task", "commit", "diff", "dashboard", "metric", "symbol"]) {
       expect(pageKindIconComponent(k), k).not.toBeNull();
     }
   });
@@ -48,9 +48,9 @@ describe("pageKindIconComponent", () => {
 describe("pageKindLabel", () => {
   test("rewrites hyphenated kinds to space-separated phrases", () => {
     expect(pageKindLabel("commit")).toBe("commit");
-    expect(pageKindLabel("work_item")).toBe("work item");
+    expect(pageKindLabel("task")).toBe("task");
     expect(pageKindLabel("metric")).toBe("metric");
-    expect(pageKindLabel("wiki")).toBe("wiki page");
+    expect(pageKindLabel("knowledge")).toBe("knowledge page");
   });
 
   test("passes plain kinds through unchanged", () => {
@@ -70,14 +70,12 @@ describe("core kinds a search hit can be", () => {
       thread: "thread",
       agent_session: "agent session",
       turn: "turn",
-      effort: "effort",
-      decision: "decision",
       commit: "commit",
       dashboard: "dashboard",
       handoff: "handoff",
       comment: "comment",
-      work_item: "work item",
-      wiki: "wiki page",
+      task: "task",
+      knowledge: "knowledge page",
     };
     for (const [kind, word] of Object.entries(words)) {
       expect(pageKindIconComponent(kind), kind).not.toBeNull();

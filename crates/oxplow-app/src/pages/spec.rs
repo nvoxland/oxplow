@@ -22,6 +22,11 @@ pub enum Viz {
     /// One line per row: the first column (or the first `columns` entry)
     /// is the headline, the rest are secondary.
     List,
+    /// Each row as its icon alone, side by side: the first `columns`
+    /// entry's `icon`, its value the hover and accessible name, its `link`
+    /// what a click opens. A small view of a list (a rail panel's collapsed
+    /// view); an agent reads it as the list.
+    Icons,
     /// A single value: the first column of the first row.
     Number,
     /// The first row's text (`markdown: { text }`, else its first column), rendered as markdown; with an `edit` action, edited.
@@ -279,6 +284,18 @@ pub struct VizTree {
     pub id: Option<String>,
     pub parent: Option<String>,
     pub label: Option<String>,
+    /// A tree over paths, in place of `id`/`parent`/`label`: each row a
+    /// file (or a folder), its folders made from its path, a folder that
+    /// holds one folder and nothing else joined with it (`a/b`). A lazy
+    /// one reads id, parent and label from it alone (`pages/path_tree.rs`).
+    #[serde(default)]
+    pub path: Option<String>,
+    /// A column of core's change statuses (`added`, `modified`, `deleted`,
+    /// `renamed`, `untracked`, `conflicted`), each row's drawn as a
+    /// coloured letter at its end (A M D R U C); a made folder shows the
+    /// marks of what is under it.
+    #[serde(default)]
+    pub status: Option<String>,
     /// The column a row's value reads from, beside its label: one line, the
     /// whole of it on hover.
     #[serde(default)]
@@ -749,15 +766,17 @@ pub enum LauncherCategory {
 pub enum LinkKind {
     /// `oxplow:oxplow/file?path=<path>`; the value is a repo-relative path.
     File,
-    /// `oxplow:oxplow/wiki?slug=<slug>`.
-    Wiki,
-    /// The effort's diff view; the value is an effort id.
-    EffortDiff,
+    /// A knowledge page; the value is its URI
+    /// (`oxplow:oxplow/knowledge?id=<id>&store=<store>`).
+    Knowledge,
     /// A git commit; the value is a sha.
     Commit,
+    /// A request's Changes page; the value is a request id (`v_request.id`,
+    /// or `req<id>`).
+    Request,
     /// A metric's page; the value is a metric key.
     Metric,
-    /// Any oxplow page by its tab id (`oxplow:oxplow/work_item?id=<id>&provider=oxplow`,
+    /// Any oxplow page by its tab id (`oxplow:oxplow/task?id=<id>&provider=oxtask`,
     /// `oxplow:oxplow/commit?sha=<sha>`, `oxplow:oxplow/page?page=git-dashboard`, …),
     /// e.g. `v_page_visit.page_id`.
     Page,
@@ -807,7 +826,7 @@ pub struct PageColumn {
     #[serde(default)]
     pub unit: Option<String>,
     /// A column of the same row naming an icon drawn before the cell
-    /// (`done`, `in_progress`, `epic`, `wiki`, …; the UI's fixed
+    /// (`done`, `in_progress`, `epic`, `knowledge`, …; the UI's fixed
     /// vocabulary, `viz/vizIcons.tsx` — an unknown name draws none).
     #[serde(default)]
     pub icon: Option<String>,
@@ -868,11 +887,21 @@ pub enum ColumnFormat {
     Sparkline,
     /// A short value as a pill, in the column's `tone`.
     Badge,
+    /// Inline markdown (a description's `first_sentence`), drawn on its
+    /// line: emphasis, code and links (a wikilink opens its page, by its
+    /// title); a block's marks unwrap. An agent reads it as written.
+    Markdown,
     /// A list of items (a JSON array): each element is a string or
     /// `{ "text": …, "hint"?: …, "uri"?: … }`, drawn inline separated by
     /// ` · `; `hint` is the item's hover text, `uri` makes it a link. An
     /// agent reads them joined by ` · `, a hint in parentheses.
     Items,
+    /// Short marks (a JSON array): each element is a string or `{ "text":
+    /// …, "tone"?: …, "hint"?: … }`, drawn as small tight letters, each in
+    /// its own `tone` (`accent`, `success`, `warning`, `danger`, `muted`) —
+    /// a file's A/M/D, a change's `+3 −1`. `hint` is the mark's hover. An
+    /// agent reads them joined by spaces, a hint in parentheses.
+    Marks,
     /// Who caused it (a JSON object `{ "kind": "agent" | "you" |
     /// "extension" | "page", "label": …, "uri"?: … }`): a small chip with
     /// the kind's icon, a link when it has a `uri` (an agent's thread, an
@@ -902,6 +931,16 @@ pub struct VizGroup {
     /// progress`. A value with none shows as it is.
     #[serde(default)]
     pub labels: std::collections::BTreeMap<String, String>,
+    /// A list drawn compact (a rail panel): the rows a group shows, by
+    /// value (`Ready: 2`), then "+N more" after it, which grows the panel
+    /// (as the list's own "+N more" does). A group not named shows every
+    /// row, and the list isn't cut at the panel's row cap.
+    #[serde(default)]
+    pub compact: std::collections::BTreeMap<String, u32>,
+    /// The same, for a panel grown to the whole rail: there "+N more"
+    /// opens the page the panel's header opens. A page shows every row.
+    #[serde(default)]
+    pub grown: std::collections::BTreeMap<String, u32>,
 }
 
 /// A value the viewer (or an agent) can set when running the viz,
@@ -1021,6 +1060,10 @@ pub(crate) const RANGE_PRESETS: &[(&str, Option<i64>)] = &[
 pub struct ChoiceOption {
     pub value: String,
     pub label: String,
+    /// An icon oxplow draws (`ICONS`): where the choice is a panel header's
+    /// toggle, the option is that icon alone, its label the hover.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
 }
 
 impl PageParam {
@@ -1232,7 +1275,7 @@ pub struct PageAction {
     /// Unique within the viz; `oxplow_run_page_action` names it.
     pub id: String,
     pub label: String,
-    /// The command it runs (`oxplow.work_item.transition`). None for an
+    /// The command it runs (`oxplow.task.transition`). None for an
     /// `open` action, which runs none.
     #[serde(default)]
     pub command: Option<String>,
@@ -1347,6 +1390,17 @@ pub struct PageAction {
     /// never on a row, group, drag or edit action.
     #[serde(default)]
     pub all: bool,
+    /// A row action that is one entry per option: each a row of this page's
+    /// loader of that name (`value`, `label`, an optional `group`), the
+    /// one pressed bound as `{{option.value}}` / `{{option.label}}` (a Mark
+    /// ▸ menu of a list's stages, an Assign to ▸ of the open threads). The
+    /// server checks the pressed value is one of them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub options_from: Option<String>,
+    /// With `options_from`: the row's column holding the option it is in
+    /// now, drawn checked and not offered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current: Option<String>,
 }
 
 /// The `{{param.x}}` / `{{row.x}}` placeholders in `input`, as
@@ -1367,7 +1421,7 @@ pub(crate) struct ActionFile {
     /// Unique within the viz.
     id: String,
     label: String,
-    /// The command it runs (`oxplow.work_item.transition`). One of
+    /// The command it runs (`oxplow.task.transition`). One of
     /// `command` or `open`.
     #[serde(default)]
     command: Option<String>,
@@ -1442,6 +1496,14 @@ pub(crate) struct ActionFile {
     /// while there are rows.
     #[serde(default)]
     all: bool,
+    /// A row action that is one entry per row of this page's loader of
+    /// that name (`value`, `label`, `group`?): `{{option.value}}` /
+    /// `{{option.label}}` the one pressed.
+    #[serde(default)]
+    options_from: Option<String>,
+    /// With `options_from`: the row's column holding its option now.
+    #[serde(default)]
+    current: Option<String>,
 }
 
 /// The keys a row list keeps for itself: an action can't take one.
@@ -1624,12 +1686,8 @@ pub(crate) fn parse_actions(
                     .iter()
                     .any(|(scope, _)| scope == "row"));
         if let Some(icon) = &f.icon {
-            if !crate::extension::extension_resources::ICONS.contains(&icon.as_str()) {
-                return Err(format!(
-                    "actions: `{}`: `icon: {icon}` isn't one oxplow draws; use one of {}",
-                    f.id,
-                    crate::extension::extension_resources::ICONS.join(", ")
-                ));
+            if let Some(why) = crate::extension::extension_resources::icon_problem(icon) {
+                return Err(format!("actions: `{}`: {why}", f.id));
             }
         }
         if let Some(name) = &f.submenu {
@@ -1739,8 +1797,49 @@ pub(crate) fn parse_actions(
                 ));
             }
         }
+        if f.options_from.is_some() && (!f.row || f.drag || f.form || f.edit || f.group.is_some()) {
+            return Err(format!(
+                "actions: `{}`: `options_from` is for a row action (`row: true`, not `drag`, `form`, `edit` or `group`): one menu entry per option",
+                f.id
+            ));
+        }
+        if f.options_from.is_some() && f.key.is_some() {
+            return Err(format!(
+                "actions: `{}`: an action with `options_from` asks which option, so a `key` can't run it",
+                f.id
+            ));
+        }
+        if f.current.is_some() && f.options_from.is_none() {
+            return Err(format!(
+                "actions: `{}`: `current` names the option a row is in, so it needs `options_from`",
+                f.id
+            ));
+        }
+        if f.options_from.is_some()
+            && !action_templates(&input)
+                .iter()
+                .any(|(scope, _)| scope == "option")
+        {
+            return Err(format!(
+                "actions: `{}`: an action with `options_from` binds the option pressed: use `{{{{option.value}}}}` in its `input`",
+                f.id
+            ));
+        }
         for (scope, name) in action_templates(&input) {
             match scope.as_str() {
+                "option" if f.options_from.is_some() && (name == "value" || name == "label") => {}
+                "option" if f.options_from.is_some() => {
+                    return Err(format!(
+                        "actions: `{}`: `{{{{option.{name}}}}}` isn't `{{{{option.value}}}}` or `{{{{option.label}}}}`",
+                        f.id
+                    ))
+                }
+                "option" => {
+                    return Err(format!(
+                        "actions: `{}`: `{{{{option.{name}}}}}` needs `options_from` (the loader whose rows are its options)",
+                        f.id
+                    ))
+                }
                 "param"
                     if params.iter().any(|p| {
                         p.name == name || name.strip_suffix(".id") == Some(p.name.as_str())
@@ -1827,6 +1926,8 @@ pub(crate) fn parse_actions(
             edit_field,
             one_row,
             all: f.all,
+            options_from: f.options_from,
+            current: f.current,
         });
     }
     Ok(out)
@@ -1986,6 +2087,10 @@ pub struct VizConfig {
     pub emphasis: Option<String>,
     /// For `list` / `table`: a column whose integer value indents the row.
     pub depth: Option<String>,
+    /// For `list` / `table`: a column whose value is a tone (`danger`,
+    /// `warning`, …) drawn as a coloured bar down the row's left edge; a row
+    /// with none has an invisible one, so every row lines up.
+    pub edge: Option<String>,
     /// It takes its page's whole height: its viz does
     /// ([`Viz::fills`]), or it is a document whose last section's viz
     /// fills, so that section takes the height left (set once the catalog
@@ -2047,7 +2152,7 @@ impl VizConfig {
         }
         if let Some(t) = &self.tree {
             out.extend(
-                [&t.id, &t.parent, &t.label, &t.branch]
+                [&t.id, &t.parent, &t.label, &t.path, &t.status, &t.branch]
                     .into_iter()
                     .flatten()
                     .map(|k| ("tree", k)),
@@ -2147,6 +2252,7 @@ impl VizConfig {
         }
         out.extend(self.emphasis.iter().map(|k| ("emphasis", k)));
         out.extend(self.depth.iter().map(|k| ("depth", k)));
+        out.extend(self.edge.iter().map(|k| ("edge", k)));
         out
     }
 }

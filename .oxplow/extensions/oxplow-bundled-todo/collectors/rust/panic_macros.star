@@ -2,7 +2,7 @@
 # `unreachable!` macro invocations (deliberate-abort sites). Matches both the
 # bare form (`panic!`) and the path-qualified form (`std::panic!`,
 # `core::todo!`), where the macro is a `scoped_identifier`. Its facts are per-file
-# (subject "file:<path>", nonzero only), so an effort's change attributes
+# (subject "file:<path>", nonzero only), so a request's change attributes
 # through its files. and a per-file
 # `oxplow.ast_hit` FACT (rule="panic_macro") — the metric is the SPEC
 # Sum(oxplow.ast_hit) filtered by that rule (epic tsk12).

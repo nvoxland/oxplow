@@ -1,0 +1,26 @@
+# What deviated, a section of a request's Changes page: the request's files
+# outside the area its task names; a task that names no paths states no
+# area, so nothing deviates. On a turn's Changes it is empty.
+given:
+  - { command: oxplow.task.create, input: { title: Fix the hover state, body: "Fix the hover state in [[src/ui/button.ts]]." }, bind: item }
+  - observe:
+      turn:
+        prompt: Fix the hover state
+        during:
+          - { command: oxplow.task.transition, input: { uri: $item.uri, to: in_progress }, as: agent }
+        tools:
+          - { name: Edit, kind: edit, paths: [src/ui/button.ts], ok: true }
+          - { name: Edit, kind: edit, paths: [src/ui/panel.ts], ok: true }
+          - { name: Edit, kind: edit, paths: [crates/db/store.rs], ok: true }
+  - observe: { snapshot: { trigger: turn_end, files: [{ path: src/ui/button.ts, hash: h1 }, { path: src/ui/panel.ts, hash: h1 }, { path: crates/db/store.rs, hash: h1 }] } }
+when: { part: oxplow/what-deviated, params: { uri: "oxplow:oxplow/request?id=req1" } }
+expect:
+  loaders:
+    what_deviated: { rows: [{ path: crates/db/store.rs }] }
+steps:
+  - when: { part: oxplow/what-deviated, params: { uri: "oxplow:oxplow/turn?id=trn1" } }
+    expect: { loaders: { what_deviated: { rows: 0 } } }
+  - given:
+      - { command: oxplow.task.update, input: { uri: $item.uri, body: Make the buttons feel snappier. } }
+  - when: { part: oxplow/what-deviated, params: { uri: "oxplow:oxplow/request?id=req1" } }
+    expect: { loaders: { what_deviated: { rows: 0 } } }

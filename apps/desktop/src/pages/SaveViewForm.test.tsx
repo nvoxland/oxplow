@@ -1,12 +1,13 @@
 import { afterEach, expect, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { RememberedContext, createRememberedStore } from "../prefs/remembered.js";
+import { setKnowledgeStores } from "../knowledgeStores.js";
 import { SaveTempViewForm, SaveViewCommandContext, SaveViewForm, SaveViewSourceContext } from "./SaveViewForm.js";
 
 afterEach(cleanup);
 const spec = "# Comment\ntitle: View\nloaders: { items: { rows: [{ title: Alpha }] } }\nview: { viz: table, from: items }\n";
 
-function form(kind: "page" | "wiki", command: (name: string, input: unknown) => Promise<unknown>) {
+function form(kind: "page" | "knowledge", command: (name: string, input: unknown) => Promise<unknown>) {
   const opened: string[] = [];
   let closed = 0;
   const prefs = createRememberedStore({ load: async () => [], save: async () => {} });
@@ -30,13 +31,53 @@ test("Save as Page writes and deploys the exact view and remembers its extension
   expect(f.closed()).toBe(1);
 });
 
-test("Save to wiki writes the live block and navigates only after success", async () => {
+test("Save as knowledge page writes the live block, lets the store derive the id and navigates to the page the command names", async () => {
   const calls: [string, unknown][] = [];
-  const f = form("wiki", async (name, input) => { calls.push([name, input]); });
+  const f = form("knowledge", async (name, input) => { calls.push([name, input]); return { result: { page: "oxplow:oxplow/knowledge?id=busy-tasks&store=oxwiki" } }; });
   fireEvent.submit(f.view.getByTestId("save-view-form"));
-  await waitFor(() => expect(f.opened).toEqual(["oxplow:oxplow/wiki?slug=busy-tasks"]));
+  await waitFor(() => expect(f.opened).toEqual(["oxplow:oxplow/knowledge?id=busy-tasks&store=oxwiki"]));
   expect(calls[0][0]).toBe("oxplow.knowledge.write_page");
   expect((calls[0][1] as { body: string }).body).toContain("```oxplow-page\n# Comment");
+  expect(calls[0][1]).toMatchObject({ title: "Busy Tasks" });
+  expect(calls[0][1]).not.toHaveProperty("id");
+  expect(calls[0][1]).not.toHaveProperty("store");
+});
+
+test("with several stores that edit, a store is chosen and sent; one that cannot edit is not offered", async () => {
+  setKnowledgeStores([
+    { store: "oxwiki", title: "oxwiki", kinds: [], edit: true },
+    { store: "docs", title: "Docs", kinds: [], edit: true },
+    { store: "ro", title: "Read only", kinds: [], edit: false },
+  ]);
+  try {
+    const calls: [string, unknown][] = [];
+    const f = form("knowledge", async (name, input) => { calls.push([name, input]); return { result: { page: "oxplow:oxplow/knowledge?id=busy-tasks&store=docs" } }; });
+    const select = f.view.getByTestId("save-view-store") as HTMLSelectElement;
+    expect([...select.options].map((o) => o.value)).toEqual(["oxwiki", "docs"]);
+    fireEvent.change(select, { target: { value: "docs" } });
+    fireEvent.submit(f.view.getByTestId("save-view-form"));
+    await waitFor(() => expect(f.opened).toEqual(["oxplow:oxplow/knowledge?id=busy-tasks&store=docs"]));
+    expect(calls[0][1]).toMatchObject({ store: "docs" });
+  } finally {
+    setKnowledgeStores([]);
+  }
+});
+
+test("with one store that edits among several enabled, it is named without asking", async () => {
+  setKnowledgeStores([
+    { store: "oxwiki", title: "oxwiki", kinds: [], edit: true },
+    { store: "ro", title: "Read only", kinds: [], edit: false },
+  ]);
+  try {
+    const calls: [string, unknown][] = [];
+    const f = form("knowledge", async (name, input) => { calls.push([name, input]); return { result: { page: "oxplow:oxplow/knowledge?id=busy-tasks&store=oxwiki" } }; });
+    expect(f.view.queryByTestId("save-view-store")).toBeNull();
+    fireEvent.submit(f.view.getByTestId("save-view-form"));
+    await waitFor(() => expect(f.opened).toEqual(["oxplow:oxplow/knowledge?id=busy-tasks&store=oxwiki"]));
+    expect(calls[0][1]).toMatchObject({ store: "oxwiki" });
+  } finally {
+    setKnowledgeStores([]);
+  }
 });
 
 test("a refused save keeps the form and source for retry; Escape cancels", async () => {
@@ -53,9 +94,9 @@ function tempForm(source: string | null) {
   const reads: [string | null, string][] = [];
   const calls: [string, unknown][] = [];
   const prefs = createRememberedStore({ load: async () => [], save: async () => {} });
-  const view = render(<RememberedContext.Provider value={prefs}><SaveViewCommandContext.Provider value={async (name, input) => { calls.push([name, input]); }}>
+  const view = render(<RememberedContext.Provider value={prefs}><SaveViewCommandContext.Provider value={async (name, input) => { calls.push([name, input]); return { result: { page: "oxplow:oxplow/knowledge?id=x&store=oxwiki" } }; }}>
     <SaveViewSourceContext.Provider value={async (streamId, file) => { reads.push([streamId, file]); return source; }}>
-      <SaveTempViewForm kind="wiki" file="v1.yaml" streamId="str1" initialTitle="Busy Tasks" onClose={() => {}} onSaved={() => {}} />
+      <SaveTempViewForm kind="knowledge" file="v1.yaml" streamId="str1" initialTitle="Busy Tasks" onClose={() => {}} onSaved={() => {}} />
     </SaveViewSourceContext.Provider>
   </SaveViewCommandContext.Provider></RememberedContext.Provider>);
   return { view, reads, calls };

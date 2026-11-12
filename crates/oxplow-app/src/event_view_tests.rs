@@ -77,7 +77,7 @@ fn extensions(root: &Path, with_v2: bool) {
     write(
         root,
         ".oxplow/extensions/acme/note.star",
-        "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"uri\": \"work_item:oxplow:tsk1\", \"title\": json.encode(x[\"event\"])}}]}\n",
+        "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.task.update\", \"input\": {\"uri\": \"task:oxplow:tsk1\", \"title\": json.encode(x[\"event\"])}}]}\n",
     );
 }
 
@@ -108,7 +108,7 @@ async fn seen(svc: &Services, view: &str) -> Value {
 /// and an effect as one envelope — every field, at the newest version.
 #[tokio::test]
 async fn every_path_hands_over_the_same_envelope() {
-    let fx = crate::test_fixtures::services_with_task_effort().await;
+    let fx = crate::test_fixtures::services_with_task().await;
     let svc = &fx.svc;
     let root = svc.layout.project_dir.clone();
     extensions(&root, false);
@@ -131,12 +131,11 @@ async fn every_path_hands_over_the_same_envelope() {
         .unwrap()
         .with_anchors(Anchors {
             thread_id: Some(fx.thread),
-            effort_id: Some(fx.effort),
             turn_id: Some(7),
             agent_session_id: Some(fx.session),
             ..Anchors::default()
         })
-        .with_subject([oxplow_tasks::work_item_ref(fx.task)])
+        .with_subject([oxplow_oxtask::task_ref(fx.task)])
         .with_cause(cause.envelope.id.clone()),
     )
     .await;

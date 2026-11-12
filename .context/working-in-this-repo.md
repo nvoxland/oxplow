@@ -55,13 +55,14 @@ refactors — go straight to TDD.
 
 ## Tracking work
 
-oxplow infers the work ([work-tracking.md](./work-tracking.md)): it opens
-an effort when a turn changes files, links it to an item someone starts,
-and closes it when a commit lands its work. Nothing is filed or closed
-to be allowed to edit or stop, and an effort's files and test runs are
+oxplow infers the work ([work-tracking.md](./work-tracking.md)): it groups
+a turn and the turns that follow from it into a request, links the request
+to an item someone starts, and links a commit to the requests whose changes
+it holds. Nothing is filed or closed
+to be allowed to edit or stop, and a request's files and test runs are
 observed, never declared. A path in `generated.exclude`
 (`.oxplow/project.yaml`) is build output oxplow deliberately doesn't
-snapshot, so no effort owns it — e.g.
+snapshot, so no turn owns it — e.g.
 `apps/desktop/src/tauri-bridge/generated/bindings.ts`, which Tauri
 Specta rewrites on nearly every build.
 
@@ -92,15 +93,18 @@ was a read/append race: advancing to the latest Main message could skip a peer
 reply posted in between. If such a mailbox is reused, track and acknowledge
 peer message UUIDs individually. A file does not wake an idle session.
 
-### oxplow-dev: tasks and the wiki while the work list is none
+### oxplow-dev: tasks and knowledge while the task tracker is none
 
-The work list, effort policy, snapshots and wiki are `oxplow-foundation`'s
-defaults, so disabling `oxplow-bundled` (`disableExtensions: [oxplow-bundled]`
-in `.oxplow/personal.yaml`, never committed) no longer removes them. A
-project that chose no work list (Settings → Capabilities) has none:
-`work_item.*` is refused and the task tools are hidden. The
+Snapshots and oxwiki are `oxplow-foundation`'s defaults, but
+oxtask, oxplow's own task tracker, is `oxplow-bundled`'s: disabling it
+(`disableExtensions: [oxplow-bundled]` in `.oxplow/personal.yaml`, never
+committed) leaves no task tracker, as does a project that chose none
+(Settings → Capabilities). With no tracker `task.*` succeeds as a sink
+(`{ tracked: false }`: nothing is recorded) and the task tools
+(`oxplow_next_task`, `oxplow_thread_tasks`) and the `tasks` skill are not
+offered. The
 development helper `oxplow-dev` (`crates/oxplow-dev`, never shipped or
-bundled) keeps oxplow's own tasks usable meanwhile:
+bundled) keeps oxtask usable meanwhile:
 
 ```
 cargo run -q -p oxplow-dev -- task list [--all]
@@ -110,12 +114,11 @@ cargo run -q -p oxplow-dev -- task transition tsk12 done
 cargo run -q -p oxplow-dev -- task update tsk12 [--title …] [--body …] [--parent …]
 cargo run -q -p oxplow-dev -- task comment tsk12 "…"
 cargo run -q -p oxplow-dev -- task link tsk12 tsk13 blocks
-cargo run -q -p oxplow-dev -- wiki list
-cargo run -q -p oxplow-dev -- wiki show some-page
-cargo run -q -p oxplow-dev -- wiki write some-page [--title …] [--file body.md]   # body from stdin without --file
-cargo run -q -p oxplow-dev -- wiki delete some-page
-cargo run -q -p oxplow-dev -- --thread thr1 wiki note "…"
-cargo run -q -p oxplow-dev -- wiki search burrows
+cargo run -q -p oxplow-dev -- knowledge list [--store oxwiki]
+cargo run -q -p oxplow-dev -- knowledge show some-page [--store S]
+cargo run -q -p oxplow-dev -- knowledge write some-page [--title …] [--file body.md] [--store S]   # body from stdin without --file
+cargo run -q -p oxplow-dev -- knowledge delete some-page [--store S]
+cargo run -q -p oxplow-dev -- knowledge search burrows [--store S]
 cargo run -q -p oxplow-dev -- extension status
 cargo run -q -p oxplow-dev -- extension deploy                     # everything on whose source changed
 cargo run -q -p oxplow-dev -- extension deploy oxplow-foundation   # one extension
@@ -154,19 +157,18 @@ something is held; fix the source if the problem is in it; quit oxplow;
 back to an earlier deployment instead, use `oxplow.extension.rollback`
 from inside oxplow (it needs foundation running).
 
-`wiki` runs the `oxplow.knowledge.*` commands on the same bus with oxplow's
-wiki as the store, whatever the project has active (pages are
-`.oxplow/wiki/<slug>.md`, recorded as the app records them, links checked).
-`list`, `show` and `search` read the recorded `wiki_page` rows (`search` is a
-case-insensitive substring over slug, title and body, not the site search
-index). `wiki note` needs a thread (`--thread` or `$OXPLOW_THREAD_ID`).
-`wiki delete` is confirmed by being named.
+`knowledge` runs the `oxplow.knowledge.*` commands on the same bus with oxplow's
+oxwiki as the store (`--store` names it; the default is `oxwiki`), whatever the project has
+enabled (pages are `.oxplow/oxwiki/<slug>.md`, recorded as the app records them,
+links checked). `list`, `show` and `search` read the recorded `knowledge_page`
+rows (`search` is a case-insensitive substring over id, title and body, not
+the site search index). `knowledge delete` is confirmed by being named.
 
 `--help` / `-h` / `help` print this and do nothing, before the database
 is opened; an option a command doesn't take is refused (both used to
 become a task's title — tasks named `--help`).
 
-It runs the task system's own `work_item.*` commands on a command bus
+It runs the task system's own `task.*` commands on a command bus
 over the project's database (validation, audit and events as the app
 writes them; the acting thread is `$OXPLOW_THREAD_ID` or `--thread`), on
 a bus that checks nothing active. So it's the same tasks, and
@@ -174,8 +176,8 @@ re-enabling the extension shows everything done meanwhile. The database
 is opened as it is (`Database::open_existing`: no migrating, no dataset
 recompile under the running app; refused at another schema version).
 The running app picks up the new events with its next pump pass; with
-the work list none, no effort policy reacts to them. Its reads (`list`,
-`show`) are oxplow's `task` table itself, not the work-item interface
+the task tracker none, nothing reacts to them. Its reads (`list`,
+`show`) are oxplow's `task` table itself, not the task interface
 (which shows only the active list's items) — the one reader of oxplow's
 tables outside its implementation, on purpose.
 
@@ -196,9 +198,9 @@ The backend is Rust; the desktop frontend is React/Monaco/xterm.
   Building oxplow needs bun, as its extension builds use it.
 - `crates/` — reusable Rust libraries. `oxplow-domain` (pure types +
   store traits), `oxplow-db` (rusqlite stores + migrations),
-  `oxplow-tasks` (oxplow's own task list, one implementation of the
-  work-item interface: its store, service and status mapping; nothing
-  outside it names them — `.context/work-items.md`),
+  `oxplow-oxtask` (oxtask, one implementation of the
+  task interface: its store, service and status mapping; nothing
+  outside it names them — `.context/tasks.md`),
   `oxplow-config`, `oxplow-fs-watch`, `oxplow-git`, `oxplow-session`,
   `oxplow-runtime` (the write guard),
   `oxplow-pty`, `oxplow-lsp`, `oxplow-mcp`,
@@ -273,7 +275,7 @@ Use the report-emitting commands below, not bare `cargo test` /
 then `bun run --cwd apps/desktop test:junit` whether or not the Rust
 suite passed, failing if either did) is the configured `testing.command` — it's the only
 test run that emits the JUnit + lcov reports oxplow parses into the
-effort's "Coverage & tests" panel.
+request's "Coverage & tests" panel.
 
 **Which check for which change:**
 
@@ -292,7 +294,7 @@ datasets, a custom component's own code (`ui:` steps, "Testing a
 component"). Never a new Rust test: Rust tests are for core. A
 fixture runs on a throwaway oxplow — this build's schema, only the data
 it makes, only the extensions its own declares (a fixture's `requires:`
-adds more, e.g. `oxplow-bundled` for oxplow's work list) — never the
+adds more, e.g. `oxplow-bundled` for the review pages) — never the
 project's database. `ui:` steps need the app built once (`bun run build:dev`).
 **Every script run needs `target/debug/oxplow-script-worker`** (beside the
 executable that runs it). `cargo run -p oxplow-dev` builds only
@@ -329,7 +331,7 @@ instead of running every migration, ~330 ms → a few ms). A new migration
 or dataset needs nothing: a rebuilt test binary is a new template key.
 
 **Fixtures run the production activation.** `Services::in_memory`,
-`in_memory_on_machine` and the fixtures built on them (`test_fixtures::services_with_effort`, …) are
+`in_memory_on_machine` and the fixtures built on them (`test_fixtures::services_with_thread`, …) are
 async, return `Arc<Services>`, and end with `extension_activation.initialize`
 exactly as boot does; there is no test-only way to register commands, datasets or
 providers. A test that writes extension files or changes config after setup
@@ -339,11 +341,11 @@ what was) at that point. Declared entities need no seeding: activation creates
 them empty. (`in_memory_inactive` is crate-private, for a test of what happens
 before the first generation.)
 
-**An effort needs no task, and neither does its fixture.**
-`test_fixtures::services_with_effort()` opens an effort linked to nothing
-(through `oxplow.effort.open`, so its event is logged like a real one); a test
-about oxplow's tasks takes `services_with_task_effort()` instead (an
-in-progress task, the effort linked to it; it derefs to the plain
+**A thread needs no task, and neither does its fixture.**
+`test_fixtures::services_with_thread()` gives services over a primary
+stream, its first thread and its session; a test
+about oxtask takes `services_with_task()` instead (an
+in-progress task assigned to the thread; it derefs to the plain
 fixture, so helpers take either). Reach for the task one only when the
 test reads or relies on the task.
 
@@ -352,7 +354,7 @@ test reads or relies on the task.
 `tests-e2e/` drives the built frontend in Chromium (and, for custom
 components, WebKit) against `oxplow-daemon-sim` over a throwaway git
 project — the real app, a real daemon, the fake terminal harness and the fake
-work-item provider; `tests-e2e/README.md` has the harness. It isn't part
+task tracker; `tests-e2e/README.md` has the harness. It isn't part
 of `test:collect` (it builds the frontend and boots a daemon per test,
 ~70 s); CI runs it as its own `e2e` job, where a spec that passes only on
 its retry fails the run. Each checkout serves on a port of its

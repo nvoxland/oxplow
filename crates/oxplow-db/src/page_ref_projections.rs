@@ -7,37 +7,67 @@
 //! boot-time backfill replay the exact same mapping from existing rows.
 //!
 //! Every end is a URI (`.context/resources.md`), built here through
-//! `uri::build`: a wiki page's, a work item's, a file's, a directory's, a
+//! `uri::build`: a knowledge page's, a task's, a file's, a directory's, a
 //! finding's, a commit's, a thread note's.
 
+use crate::page_ref_store::PageRefEdge;
 use oxplow_domain::uri::build;
 use oxplow_domain::uri::resources::{self as r, ResourceRegistry};
 use oxplow_domain::uri::{extract, RefVersion};
-use oxplow_domain::EffortImpact;
 
-use crate::effort_store::FileRefVersion;
-use crate::page_ref_store::PageRefEdge;
-
-pub const RT_WIKI_FILE: &str = "wiki_file_ref";
-pub const RT_WIKI_DIR: &str = "wiki_dir_ref";
+pub const RT_KNOWLEDGE_FILE: &str = "knowledge_file_ref";
+pub const RT_KNOWLEDGE_DIR: &str = "knowledge_dir_ref";
 pub const RT_WIKILINK: &str = "wikilink";
-pub const RT_BODY_WORK_ITEM: &str = "work_item_mention";
+/// A text body (a task's, a handoff's) → a file or directory it names.
+pub const RT_BODY_FILE: &str = "file_mention";
+pub const RT_BODY_DIR: &str = "dir_mention";
+pub const RT_BODY_TASK: &str = "task_mention";
 pub const RT_BODY_FINDING: &str = "finding_mention";
 pub const RT_BODY_COMMIT: &str = "commit_mention";
+/// A pinned markdown column's file and directory refs (`.context/models.md`
+/// "Markdown bodies"): pinned to a snapshot, read by `v_ref_pin`.
+pub const RT_FILE_PIN: &str = "file_pin";
+pub const RT_DIR_PIN: &str = "dir_pin";
 pub const RT_TOUCHED_FILE: &str = "touched_file";
 pub const RT_FINDING_PATH: &str = "finding_path";
+/// An agent turn → what its prompt pointed at (`@path`, `[oxplow uri …]`,
+/// `[oxplow page …]`): written by the hook ingest as the prompt is
+/// delivered, a reprompt adding to its turn's.
+pub const RT_PROMPT_MENTION: &str = "prompt_mention";
 
-// Ref-types written by the effort store from union of all
-// `effort.summary` bodies for a task. Distinct from
-// `task_body_*` so the body slice (task_store) and the summary
-// slice (effort_store) can coexist under the same `(task, id)`
-// source without clobbering each other.
-pub const RT_SUMMARY_FILE: &str = "summary_file_ref";
+/// Snapshot-pinned version data for a file reference. The
+/// store/service layer computes this from a snapshot id at capture
+/// time and stamps it onto every per-file ref row.
+#[derive(Debug, Clone, Copy)]
+pub struct FileRefVersion<'a> {
+    pub local_snapshot_id: i64,
+    pub closest_vcs_rev: Option<&'a str>,
+    pub vcs_rev_exact: bool,
+}
+
+/// Owned variant of [`FileRefVersion`] for callers that need to move
+/// the triple into a `'static` transaction closure.
+#[derive(Debug, Clone)]
+pub struct OwnedFileRefVersion {
+    pub local_snapshot_id: i64,
+    pub closest_vcs_rev: Option<String>,
+    pub vcs_rev_exact: bool,
+}
+
+impl OwnedFileRefVersion {
+    pub fn as_ref(&self) -> FileRefVersion<'_> {
+        FileRefVersion {
+            local_snapshot_id: self.local_snapshot_id,
+            closest_vcs_rev: self.closest_vcs_rev.as_deref(),
+            vcs_rev_exact: self.vcs_rev_exact,
+        }
+    }
+}
 
 /// Stamp the supplied file-version triple onto every edge in
 /// `edges` whose target is a file or directory. Mutates in place
 /// because `with_version` consumes `self`. No-op for non-file
-/// targets — wiki↔task, wiki↔wiki, etc. don't carry a content
+/// targets — page↔task, page↔page, etc. don't carry a content
 /// version.
 pub fn stamp_file_versions(edges: &mut [PageRefEdge], version: FileRefVersion<'_>) {
     for edge in edges.iter_mut() {
@@ -50,43 +80,26 @@ pub fn stamp_file_versions(edges: &mut [PageRefEdge], version: FileRefVersion<'_
         edge.vcs_rev_exact = version.vcs_rev_exact;
     }
 }
-pub const RT_SUMMARY_DIR: &str = "summary_dir_ref";
-pub const RT_SUMMARY_WIKILINK: &str = "summary_wikilink";
-pub const RT_SUMMARY_WORK_ITEM: &str = "summary_work_item_mention";
-pub const RT_SUMMARY_FINDING: &str = "summary_finding_mention";
-pub const RT_SUMMARY_COMMIT: &str = "summary_commit_mention";
 
-/// Declared impacts (per-effort `EffortImpact` rows) — the action
-/// taken is carried in `source_extra` as `{"action": "..."}`.
-/// Single ref_type covers every impacted kind because the target
-/// kind already discriminates wiki vs task vs file vs etc.
-pub const RT_IMPACT: &str = "impact";
-
-/// A work item → the commit that holds its effort's work: the commit's
-/// version of every file they share is the effort's end version (tsk1035,
-/// `commit_links`). The effort is carried in `source_extra` as
-/// `{"effort": "eff12"}`.
-pub const RT_COMMITTED: &str = "committed";
-
-/// A work item's body slice: its title and body's mentions.
-pub fn work_item_body_ref_types() -> Vec<String> {
+/// A task's body slice: its title and body's mentions.
+pub fn task_body_ref_types() -> Vec<String> {
     BODY_MENTIONS.all()
 }
 
-/// A work item's comment slice: its comments' mentions, recorded as the
+/// A task's comment slice: its comments' mentions, recorded as the
 /// item's own edges (a comment lives on its item's page).
-pub fn work_item_comment_ref_types() -> Vec<String> {
+pub fn task_comment_ref_types() -> Vec<String> {
     COMMENT_MENTIONS.all()
 }
 
-/// A work item's link slice is every ref type with this prefix — one per
-/// link type, the list's own (`work_item_link:blocks`).
-pub const RT_LINK_PREFIX: &str = "work_item_link:";
+/// A task's link slice is every ref type with this prefix — one per
+/// link type, the list's own (`task_link:blocks`).
+pub const RT_LINK_PREFIX: &str = "task_link:";
 
 pub const RT_COMMENT_FILE: &str = "comment_file_ref";
 pub const RT_COMMENT_DIR: &str = "comment_dir_ref";
 pub const RT_COMMENT_WIKILINK: &str = "comment_wikilink";
-pub const RT_COMMENT_WORK_ITEM: &str = "comment_work_item_mention";
+pub const RT_COMMENT_TASK: &str = "comment_task_mention";
 pub const RT_COMMENT_FINDING: &str = "comment_finding_mention";
 pub const RT_COMMENT_COMMIT: &str = "comment_commit_mention";
 
@@ -94,8 +107,8 @@ pub const RT_COMMENT_COMMIT: &str = "comment_commit_mention";
 struct MentionTypes {
     file: &'static str,
     dir: &'static str,
-    wiki: &'static str,
-    work_item: &'static str,
+    knowledge: &'static str,
+    task: &'static str,
     finding: &'static str,
     commit: &'static str,
 }
@@ -105,8 +118,8 @@ impl MentionTypes {
         [
             self.file,
             self.dir,
-            self.wiki,
-            self.work_item,
+            self.knowledge,
+            self.task,
             self.finding,
             self.commit,
         ]
@@ -116,116 +129,59 @@ impl MentionTypes {
 }
 
 const BODY_MENTIONS: MentionTypes = MentionTypes {
-    file: RT_WIKI_FILE,
-    dir: RT_WIKI_DIR,
-    wiki: RT_WIKILINK,
-    work_item: RT_BODY_WORK_ITEM,
+    file: RT_BODY_FILE,
+    dir: RT_BODY_DIR,
+    knowledge: RT_WIKILINK,
+    task: RT_BODY_TASK,
     finding: RT_BODY_FINDING,
     commit: RT_BODY_COMMIT,
 };
 
-const COMMENT_MENTIONS: MentionTypes = MentionTypes {
-    file: RT_COMMENT_FILE,
-    dir: RT_COMMENT_DIR,
-    wiki: RT_COMMENT_WIKILINK,
-    work_item: RT_COMMENT_WORK_ITEM,
-    finding: RT_COMMENT_FINDING,
-    commit: RT_COMMENT_COMMIT,
+/// A knowledge page's body: its files and directories are what freshness
+/// pins (`v_knowledge_pin`).
+const KNOWLEDGE_MENTIONS: MentionTypes = MentionTypes {
+    file: RT_KNOWLEDGE_FILE,
+    dir: RT_KNOWLEDGE_DIR,
+    knowledge: RT_WIKILINK,
+    task: RT_BODY_TASK,
+    finding: RT_BODY_FINDING,
+    commit: RT_BODY_COMMIT,
 };
 
-/// Slice owned by the effort store: the union of touched-file
-/// edges across every effort on a task, the projection of every
-/// `effort.summary` body parsed for refs, and the declared
-/// `EffortImpact` rows for each effort.
-pub fn effort_ref_types() -> Vec<String> {
-    vec![
-        RT_TOUCHED_FILE.to_string(),
-        RT_SUMMARY_FILE.to_string(),
-        RT_SUMMARY_DIR.to_string(),
-        RT_SUMMARY_WIKILINK.to_string(),
-        RT_SUMMARY_WORK_ITEM.to_string(),
-        RT_SUMMARY_FINDING.to_string(),
-        RT_SUMMARY_COMMIT.to_string(),
-        RT_IMPACT.to_string(),
-    ]
-}
-
-const SUMMARY_MENTIONS: MentionTypes = MentionTypes {
-    file: RT_SUMMARY_FILE,
-    dir: RT_SUMMARY_DIR,
-    wiki: RT_SUMMARY_WIKILINK,
-    work_item: RT_SUMMARY_WORK_ITEM,
-    finding: RT_SUMMARY_FINDING,
-    commit: RT_SUMMARY_COMMIT,
+/// A shared model's pinned markdown column.
+const PINNED_MENTIONS: MentionTypes = MentionTypes {
+    file: RT_FILE_PIN,
+    dir: RT_DIR_PIN,
+    knowledge: RT_WIKILINK,
+    task: RT_BODY_TASK,
+    finding: RT_BODY_FINDING,
+    commit: RT_BODY_COMMIT,
 };
 
-/// The kinds a `EffortImpact` may name, as the agent's tools document them.
-pub const IMPACT_KINDS: [&str; 6] = [
-    "wiki",
-    "work_item",
-    "file",
-    "directory",
-    "git_commit",
-    "finding",
-];
-
-/// The URI an `EffortImpact` names: its `kind` (one of [`IMPACT_KINDS`])
-/// and `id`. A work item's id is its URI or one of the active list's own
-/// ids (`tsk7`); `None` for anything else (refused where impacts come in).
-pub fn impact_target(kinds: &ResourceRegistry, kind: &str, id: &str) -> Option<String> {
-    let id = id.trim();
-    if id.is_empty() {
-        return None;
-    }
-    Some(match kind {
-        "wiki" => build::wiki_uri(id),
-        "work_item" => match build::work_item_of_uri(id) {
-            Some((provider, item)) => build::work_item_uri(&provider, &item),
-            None => kinds.work_item_uri_of(id)?,
-        },
-        "file" => build::file_uri(id),
-        "directory" => build::dir_uri(id),
-        "git_commit" => build::commit_uri(id),
-        "finding" => build::finding_uri(id),
-        _ => return None,
-    })
+/// The ref types a shared model's markdown columns own on their row's
+/// source: what restating its body replaces.
+pub fn model_body_ref_types(pins: bool) -> Vec<String> {
+    if pins { PINNED_MENTIONS } else { BODY_MENTIONS }.all()
 }
 
-/// Edges contributed by the union of every effort's declared impacts,
-/// from the work item `source` (its URI). Self references are filtered
-/// out (an effort on tsk7 declaring it "completed" tsk7 is implicit).
-pub fn effort_impact_edges(
+/// A shared model's markdown body edges (`source` its row's URI): the
+/// body mentions, with file and dir refs as pinned refs when `pins`. A
+/// file edge carries the line and version the link named.
+pub fn model_body_edges(
     kinds: &ResourceRegistry,
     source: &str,
-    impacts: &[EffortImpact],
+    body: &str,
+    pins: bool,
 ) -> Vec<PageRefEdge> {
-    let mut out = Vec::new();
-    for imp in impacts {
-        let Some(target) = impact_target(kinds, &imp.kind, &imp.id) else {
-            continue;
-        };
-        if target == source {
-            continue;
-        }
-        let mut edge = PageRefEdge::new(source, target, RT_IMPACT);
-        if let Some(action) = &imp.action {
-            if !action.trim().is_empty() {
-                edge = edge.with_extra(serde_json::json!({ "action": action.trim() }).to_string());
-            }
-        }
-        out.push(edge);
-    }
-    out
-}
-
-/// Edges contributed by a wiki page body. Owned by `wiki_pages` sync.
-/// A file edge carries the line and version the link named.
-pub fn wiki_edges(kinds: &ResourceRegistry, slug: &str, body: &str) -> Vec<PageRefEdge> {
-    let source = build::wiki_uri(slug);
+    let types = if pins {
+        &PINNED_MENTIONS
+    } else {
+        &BODY_MENTIONS
+    };
     let refs = extract(kinds, body);
     let mut out = Vec::new();
     for fd in &refs.files_detail {
-        let mut edge = PageRefEdge::new(&source, build::file_uri(&fd.path), RT_WIKI_FILE);
+        let mut edge = PageRefEdge::new(source, build::file_uri(&fd.path), types.file);
         if !(fd.version == RefVersion::Disk && fd.line.is_none()) {
             edge = edge.with_extra(
                 serde_json::json!({
@@ -241,46 +197,110 @@ pub fn wiki_edges(kinds: &ResourceRegistry, slug: &str, body: &str) -> Vec<PageR
         out.push(edge);
     }
     out.extend(
-        mention_edges(kinds, &source, body, &BODY_MENTIONS)
+        mention_edges(kinds, source, body, types)
             .into_iter()
-            .filter(|e| e.ref_type != RT_WIKI_FILE),
+            .filter(|e| e.ref_type != types.file),
     );
     out
 }
 
-/// The ref type a wiki page's stated link to `target` is recorded under,
+/// A shared model's stated refs (a provider's), as the edges its markdown
+/// would have given: each URI typed by what it names.
+pub fn model_stated_edges(source: &str, uris: &[String], pins: bool) -> Vec<PageRefEdge> {
+    let types = if pins {
+        &PINNED_MENTIONS
+    } else {
+        &BODY_MENTIONS
+    };
+    uris.iter()
+        .filter_map(|u| {
+            let t = match build::resource_of(u)?.as_str() {
+                r::FILE => types.file,
+                r::DIR => types.dir,
+                r::KNOWLEDGE => types.knowledge,
+                r::TASK => types.task,
+                r::FINDING => types.finding,
+                r::COMMIT => types.commit,
+                _ => return None,
+            };
+            Some(PageRefEdge::new(source, u, t))
+        })
+        .collect()
+}
+
+const COMMENT_MENTIONS: MentionTypes = MentionTypes {
+    file: RT_COMMENT_FILE,
+    dir: RT_COMMENT_DIR,
+    knowledge: RT_COMMENT_WIKILINK,
+    task: RT_COMMENT_TASK,
+    finding: RT_COMMENT_FINDING,
+    commit: RT_COMMENT_COMMIT,
+};
+
+/// Edges contributed by a knowledge page's body (`page` its URI), parsed
+/// as oxplow's markdown. A file edge carries the line and version the link
+/// named.
+pub fn knowledge_edges(kinds: &ResourceRegistry, page: &str, body: &str) -> Vec<PageRefEdge> {
+    let source = page;
+    let refs = extract(kinds, body);
+    let mut out = Vec::new();
+    for fd in &refs.files_detail {
+        let mut edge = PageRefEdge::new(source, build::file_uri(&fd.path), RT_KNOWLEDGE_FILE);
+        if !(fd.version == RefVersion::Disk && fd.line.is_none()) {
+            edge = edge.with_extra(
+                serde_json::json!({
+                    "line": fd.line,
+                    "version": match &fd.version {
+                        RefVersion::Disk => "disk".to_string(),
+                        RefVersion::Ref(r) => format!("ref:{r}"),
+                    }
+                })
+                .to_string(),
+            );
+        }
+        out.push(edge);
+    }
+    out.extend(
+        mention_edges(kinds, source, body, &KNOWLEDGE_MENTIONS)
+            .into_iter()
+            .filter(|e| e.ref_type != RT_KNOWLEDGE_FILE),
+    );
+    out
+}
+
+/// The ref type a knowledge page's stated link to `target` is recorded under,
 /// by what it names; `None` for a resource that isn't a page's link.
 fn stated_type(target: &str) -> Option<&'static str> {
     Some(match build::resource_of(target)?.as_str() {
-        r::FILE => RT_WIKI_FILE,
-        r::DIR => RT_WIKI_DIR,
-        r::WIKI => RT_WIKILINK,
-        r::WORK_ITEM => RT_BODY_WORK_ITEM,
+        r::FILE => RT_KNOWLEDGE_FILE,
+        r::DIR => RT_KNOWLEDGE_DIR,
+        r::KNOWLEDGE => RT_WIKILINK,
+        r::TASK => RT_BODY_TASK,
         r::FINDING => RT_BODY_FINDING,
         r::COMMIT => RT_BODY_COMMIT,
         _ => return None,
     })
 }
 
-/// Edges of a wiki page whose store states its links (a provider's
-/// record: a file's URI, another page's, a work item's, …) rather than a
-/// body core parses. A URI of another resource isn't an edge a page has.
-pub fn stated_edges(slug: &str, uris: &[String]) -> Vec<PageRefEdge> {
-    let source = build::wiki_uri(slug);
+/// Edges of a knowledge page (`page` its URI) whose store states its links
+/// (a provider's record: a file's URI, another page's, a task's, …) rather
+/// than a body core parses. A URI of another resource isn't an edge a page
+/// has.
+pub fn stated_edges(page: &str, uris: &[String]) -> Vec<PageRefEdge> {
     uris.iter()
-        .filter_map(|u| Some(PageRefEdge::new(&source, u, stated_type(u)?)))
+        .filter_map(|u| Some(PageRefEdge::new(page, u, stated_type(u)?)))
         .collect()
 }
 
-/// Edges contributed by a note's body (`source` its URI). Single-owner
-/// source.
-pub fn note_edges(kinds: &ResourceRegistry, source: &str, body: &str) -> Vec<PageRefEdge> {
+/// Edges contributed by a text body (`source` its URI: a handoff's, …).
+/// Single-owner source.
+pub fn body_edges(kinds: &ResourceRegistry, source: &str, body: &str) -> Vec<PageRefEdge> {
     mention_edges(kinds, source, body, &BODY_MENTIONS)
 }
 
-/// A work item's body-mention edges — what its title and body name — for
+/// A task's body-mention edges — what its title and body name — for
 /// any list's item; `item` is its URI.
-pub fn work_item_edges(
+pub fn task_edges(
     kinds: &ResourceRegistry,
     item: &str,
     title: &str,
@@ -289,8 +309,8 @@ pub fn work_item_edges(
     mention_edges(kinds, item, &format!("{title}\n{body}"), &BODY_MENTIONS)
 }
 
-/// A work item's comment-mention edges: what its comments' bodies name.
-pub fn work_item_comment_edges<'a>(
+/// A task's comment-mention edges: what its comments' bodies name.
+pub fn task_comment_edges<'a>(
     kinds: &ResourceRegistry,
     item: &str,
     bodies: impl IntoIterator<Item = &'a str>,
@@ -309,10 +329,10 @@ pub fn work_item_comment_edges<'a>(
     out
 }
 
-/// A work item's link edges: one per `(target URI, link type)`, its ref
-/// type `work_item_link:<type>`. Any URI: another item, or what the item
+/// A task's link edges: one per `(target URI, link type)`, its ref
+/// type `task_link:<type>`. Any URI: another item, or what the item
 /// is about.
-pub fn work_item_link_edges(item: &str, links: &[(String, String)]) -> Vec<PageRefEdge> {
+pub fn task_link_edges(item: &str, links: &[(String, String)]) -> Vec<PageRefEdge> {
     links
         .iter()
         .filter(|(target, _)| oxplow_domain::uri::OxplowUri::parse(target).is_ok())
@@ -339,16 +359,12 @@ fn mention_edges(
             .map(|fd| edge(build::file_uri(&fd.path), types.file)),
     );
     out.extend(refs.dirs.iter().map(|d| edge(build::dir_uri(d), types.dir)));
+    out.extend(refs.knowledge.into_iter().map(|k| edge(k, types.knowledge)));
     out.extend(
-        refs.wikis
-            .iter()
-            .map(|w| edge(build::wiki_uri(w), types.wiki)),
-    );
-    out.extend(
-        refs.work_items
+        refs.tasks
             .into_iter()
             .filter(|t| t != source)
-            .map(|t| edge(t, types.work_item)),
+            .map(|t| edge(t, types.task)),
     );
     out.extend(
         refs.findings
@@ -362,41 +378,6 @@ fn mention_edges(
     );
     out.retain(|e| e.target != source);
     out
-}
-
-/// Touched-file edges for a work item (`source`, its URI).
-///
-/// `entries` is `(path, change_kind)` — the change_kind is one of
-/// the `effort_file.change_kind` values (`created` / `updated`
-/// / `deleted`) and is carried through `source_extra` as
-/// `{"change_kind":"..."}` so the renderer can display "created"
-/// / "modified" / "deleted" instead of a single "touched" label.
-/// The renderer normalizes `updated` → "modified" for display.
-pub fn effort_touched_file_edges(source: &str, entries: &[(String, String)]) -> Vec<PageRefEdge> {
-    entries
-        .iter()
-        .map(|(path, change_kind)| {
-            let extra = serde_json::json!({ "change_kind": change_kind }).to_string();
-            PageRefEdge::new(source, build::file_uri(path), RT_TOUCHED_FILE).with_extra(extra)
-        })
-        .collect()
-}
-
-/// Edges contributed by the union of every `effort.summary` body for one
-/// work item (`source`, its URI). Parsed via the shared ref extractor, so
-/// wikilinks (`[[some-slug]]`), file/dir refs, task/finding/commit
-/// mentions all flow through as outbound edges from the item.
-/// Owned slice = the `summary_*` ref_types above (paired with
-/// `RT_TOUCHED_FILE` under `effort_ref_types()`).
-pub fn effort_summary_edges(
-    kinds: &ResourceRegistry,
-    source: &str,
-    summaries: &[String],
-) -> Vec<PageRefEdge> {
-    if summaries.is_empty() {
-        return Vec::new();
-    }
-    mention_edges(kinds, source, &summaries.join("\n\n"), &SUMMARY_MENTIONS)
 }
 
 /// One edge per finding -> file. Owned by the findings writer.
@@ -413,16 +394,16 @@ mod tests {
     use super::*;
     use oxplow_domain::uri::build::resource_of;
 
-    /// Foundation's resources with oxplow's tasks as the work list (`tsk<n>`).
+    /// Foundation's resources with oxtask as the task tracker (`tsk<n>`).
     fn tasks_kinds() -> oxplow_domain::uri::resources::ResourceRegistry {
         oxplow_domain::uri::resources::foundation()
             .clone()
-            .with_work_item_ids("oxplow", r"tsk\d+")
+            .with_task_ids("oxtask", r"tsk\d+")
             .unwrap()
     }
 
     fn task(id: &str) -> String {
-        build::work_item_uri("oxplow", id)
+        build::task_uri("oxtask", id)
     }
 
     fn resource(e: &PageRefEdge) -> String {
@@ -430,11 +411,12 @@ mod tests {
     }
 
     #[test]
-    fn wiki_edges_cover_all_kinds() {
+    fn knowledge_edges_cover_all_kinds() {
         let body = "[[src/app.rs]] [[dir:src]] [[architecture]] [[tsk7]] [[finding:fnd-1]] [[git:abcdef0]]";
-        let edges = wiki_edges(&tasks_kinds(), "intro", body);
+        let intro = build::knowledge_uri("oxwiki", "intro");
+        let edges = knowledge_edges(&tasks_kinds(), &intro, body);
         let kinds: std::collections::BTreeSet<_> = edges.iter().map(resource).collect();
-        for k in ["file", "dir", "wiki", "work_item", "finding", "commit"] {
+        for k in ["file", "dir", "knowledge", "task", "finding", "commit"] {
             assert!(kinds.contains(&format!("oxplow/{k}")), "{k}: {kinds:?}");
         }
         // Every stored target is a URI foundation declares.
@@ -444,14 +426,14 @@ mod tests {
             tasks_kinds()
                 .validate(&r)
                 .unwrap_or_else(|err| panic!("{}: {err}", e.target));
-            assert_eq!(e.source, build::wiki_uri("intro"));
+            assert_eq!(e.source, intro);
         }
         assert!(edges.iter().any(|e| e.target == task("tsk7")));
     }
 
     #[test]
-    fn work_item_edges_parse_the_body() {
-        let edges = work_item_edges(
+    fn task_edges_parse_the_body() {
+        let edges = task_edges(
             &tasks_kinds(),
             &task("tsk1"),
             "fix something",
@@ -467,165 +449,21 @@ mod tests {
     }
 
     #[test]
-    fn effort_touched_file_edges_one_per_path() {
-        let entries = vec![
-            ("a.rs".to_string(), "created".to_string()),
-            ("b.rs".to_string(), "updated".to_string()),
-            ("c.rs".to_string(), "deleted".to_string()),
-        ];
-        let edges = effort_touched_file_edges(&task("tsk7"), &entries);
-        assert_eq!(edges.len(), 3);
-        assert_eq!(edges[0].source, task("tsk7"));
-        assert_eq!(edges[0].target, build::file_uri("a.rs"));
-        assert_eq!(edges[0].ref_type, "touched_file");
-        assert!(edges[0]
-            .source_extra
-            .as_deref()
-            .is_some_and(|s| s.contains("created")));
-        assert!(edges[1]
-            .source_extra
-            .as_deref()
-            .is_some_and(|s| s.contains("updated")));
-        assert!(edges[2]
-            .source_extra
-            .as_deref()
-            .is_some_and(|s| s.contains("deleted")));
-    }
-
-    #[test]
-    fn effort_summary_edges_extract_all_kinds() {
-        let summaries = vec![
-            "Filed [[url-schemes]] with refs to [[src/foo.rs]]".to_string(),
-            "Resolved tsk99 and finding:fnd-2; see [[git:abcdef0]] and [[dir:src/x]]".to_string(),
-        ];
-        let edges = effort_summary_edges(&tasks_kinds(), &task("tsk7"), &summaries);
-        let has =
-            |target: String, rt: &str| edges.iter().any(|e| e.target == target && e.ref_type == rt);
-        assert!(has(build::wiki_uri("url-schemes"), "summary_wikilink"));
-        assert!(has(build::file_uri("src/foo.rs"), "summary_file_ref"));
-        assert!(has(task("tsk99"), "summary_work_item_mention"));
-        assert!(has(build::finding_uri("fnd-2"), "summary_finding_mention"));
-        assert!(edges.iter().any(|e| resource(e) == "oxplow/commit"));
-        assert!(has(build::dir_uri("src/x"), "summary_dir_ref"));
-    }
-
-    #[test]
-    fn effort_summary_edges_filter_self_task() {
-        let summaries = vec!["wraps up tsk7 itself and references tsk9".into()];
-        let edges = effort_summary_edges(&tasks_kinds(), &task("tsk7"), &summaries);
-        let tasks: Vec<_> = edges
-            .iter()
-            .filter(|e| resource(e) == "oxplow/work_item")
-            .map(|e| e.target.clone())
-            .collect();
-        assert_eq!(tasks, vec![task("tsk9")]);
-    }
-
-    #[test]
-    fn effort_summary_edges_empty_input_yields_no_edges() {
-        assert!(effort_summary_edges(&tasks_kinds(), &task("tsk7"), &[]).is_empty());
-    }
-
-    #[test]
-    fn effort_impact_edges_normalize_kinds_and_carry_action() {
-        use oxplow_domain::EffortImpact;
-        let impacts = vec![
-            EffortImpact {
-                kind: "wiki".into(),
-                id: "url-schemes".into(),
-                action: Some("created".into()),
-            },
-            EffortImpact {
-                kind: "git_commit".into(),
-                id: "abc1234".into(),
-                action: Some("referenced".into()),
-            },
-            EffortImpact {
-                kind: "directory".into(),
-                id: "src/x".into(),
-                action: None,
-            },
-            EffortImpact {
-                kind: "dir".into(),
-                id: "src/y".into(),
-                action: None,
-            }, // not an impact kind — filtered
-            EffortImpact {
-                kind: "work_item".into(),
-                id: "tsk7".into(),
-                action: Some("completed".into()),
-            }, // self — filtered
-            EffortImpact {
-                kind: "bogus".into(),
-                id: "x".into(),
-                action: None,
-            }, // bad kind — filtered
-            EffortImpact {
-                kind: "work_item".into(),
-                id: "".into(),
-                action: None,
-            }, // empty id — filtered
-        ];
-        let edges = effort_impact_edges(&tasks_kinds(), &task("tsk7"), &impacts);
-        assert_eq!(edges.len(), 3, "got {edges:?}");
-        let wiki = edges
-            .iter()
-            .find(|e| e.target == build::wiki_uri("url-schemes"))
-            .expect("wiki edge");
-        assert!(wiki
-            .source_extra
-            .as_deref()
-            .is_some_and(|s| s.contains("created")));
-        assert!(edges
-            .iter()
-            .any(|e| e.target == build::commit_uri("abc1234")));
-        let dir = edges
-            .iter()
-            .find(|e| e.target == build::dir_uri("src/x"))
-            .expect("dir edge");
-        assert!(dir.source_extra.is_none());
-    }
-
-    /// A work-item impact names the active list's item: a loose id as the
-    /// list declares its ids, or its URI; stored canonical either way.
-    /// What isn't one of its ids names nothing.
-    #[test]
-    fn impact_work_items_are_stored_canonical_whatever_the_agent_wrote() {
-        use oxplow_domain::EffortImpact;
-        let impact = |id: &str| EffortImpact {
-            kind: "work_item".into(),
-            id: id.into(),
-            action: None,
-        };
-        let impacts = vec![
-            impact("tsk9"),
-            impact(&task("tsk11")),
-            impact("11"),
-            impact("ENG-12"),
-        ];
-        let targets: Vec<String> = effort_impact_edges(&tasks_kinds(), &task("tsk7"), &impacts)
-            .into_iter()
-            .map(|e| e.target)
-            .collect();
-        assert_eq!(targets, vec![task("tsk9"), task("tsk11")]);
-    }
-
-    #[test]
     fn link_edges_carry_the_lists_own_link_type() {
-        let item = build::work_item_uri("issues", "ENG-10");
-        let other = build::work_item_uri("issues", "ENG-20");
-        let edges = work_item_link_edges(&item, &[(other.clone(), "parent_of".into())]);
+        let item = build::task_uri("issues", "ENG-10");
+        let other = build::task_uri("issues", "ENG-20");
+        let edges = task_link_edges(&item, &[(other.clone(), "parent_of".into())]);
         assert_eq!(edges.len(), 1);
         assert_eq!(edges[0].source, item);
         assert_eq!(edges[0].target, other);
-        assert_eq!(edges[0].ref_type, "work_item_link:parent_of");
+        assert_eq!(edges[0].ref_type, "task_link:parent_of");
     }
 
     /// Comments' mentions are the item's own edges, under the comment
     /// ref types, each target once.
     #[test]
     fn comment_edges_are_the_items_under_comment_types() {
-        let edges = work_item_comment_edges(
+        let edges = task_comment_edges(
             &tasks_kinds(),
             &task("tsk1"),
             ["see [[src/app.rs]] and tsk2", "again [[src/app.rs]]"],
@@ -638,7 +476,7 @@ mod tests {
             got,
             vec![
                 (task("tsk1"), build::file_uri("src/app.rs"), RT_COMMENT_FILE),
-                (task("tsk1"), task("tsk2"), RT_COMMENT_WORK_ITEM),
+                (task("tsk1"), task("tsk2"), RT_COMMENT_TASK),
             ]
         );
     }

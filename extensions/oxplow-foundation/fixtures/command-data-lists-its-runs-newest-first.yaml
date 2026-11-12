@@ -1,15 +1,15 @@
 # The Command data page lists a command's runs from the audit, newest first, narrowed by
 # outcome, who ran it and when.
 given:
-  - { command: oxplow.work_item.create, input: { title: One } }
-  - { command: oxplow.work_item.create, input: { title: Two } }
+  - { command: oxplow.task.create, input: { title: One } }
+  - { command: oxplow.task.create, input: { title: Two } }
 when:
   page: oxplow/command-data
-  params: { uri: "oxplow:oxplow/command?command=oxplow.work_item.create" }
+  params: { uri: "oxplow:oxplow/command?command=oxplow.task.create" }
 expect:
-  label: oxplow.work_item.create data
+  label: oxplow.task.create data
   loaders:
-    about: { rows: [{ name: oxplow.work_item.create }] }
+    about: { rows: [{ name: oxplow.task.create }] }
     runs: { rows: 2 }
 steps:
   - params: { outcome: failed }

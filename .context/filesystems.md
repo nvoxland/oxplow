@@ -124,7 +124,7 @@ cap is refused.
   `ExtensionCatalog::find_page` reads the file again (cached by its modified
   time, and a look counts as a read for the GC). A view the GC removed is
   `NotFound`; the window says "This view is gone". Definition in About this page,
-  Save as Page and Save to wiki read the file as any file
+  Save as Page and Save as knowledge page read the file as any file
   (`filesystem=oxplow:temp`).
 
 ## Using one

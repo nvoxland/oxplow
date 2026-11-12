@@ -1,0 +1,14 @@
+enable: [shelf, shelf-db]
+when: { command: shelf-db.book.add, input: { title: Dune, author: Herbert, rating: 4 } }
+expect: { ok: true, result: { id: dune } }
+steps:
+  - when: { collector: shelf-db.books, trigger: sqlite }
+    expect: { ok: true, result: { cursor: { rowid: 1 } } }
+  - when: { sql: "SELECT id, title, author, store, fields FROM v_shelf_book" }
+    expect:
+      rows:
+        - id: dune
+          title: Dune
+          author: Herbert
+          store: shelf-db
+          fields: { "shelf-db": { rating: 4 } }

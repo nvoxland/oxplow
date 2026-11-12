@@ -1,0 +1,19 @@
+# The files a request changed outside the area its task names: a file is in
+# the area when the task's title or body names it, or a directory of it at
+# least two levels deep. A request on a task that names no area has none.
+given:
+  - { command: oxplow.task.create, input: { title: "Fix src/ui/panel.rs" }, bind: item }
+  - observe:
+      turn:
+        prompt: Fix the panel
+        during:
+          - { command: oxplow.task.transition, input: { uri: $item.uri, to: in_progress }, as: agent }
+        tools:
+          - { name: Edit, kind: edit, paths: [src/ui/panel.rs], ok: true }
+          - { name: Edit, kind: edit, paths: [src/ui/other.rs], ok: true }
+          - { name: Edit, kind: edit, paths: [docs/readme.md], ok: true }
+  - observe: { snapshot: { trigger: turn_end, files: [{ path: src/ui/panel.rs, hash: h1 }, { path: src/ui/other.rs, hash: h1 }, { path: docs/readme.md, hash: h1 }] } }
+when: { sql: "SELECT request_id, path FROM v_oxplow_deviation ORDER BY path" }
+expect:
+  rows:
+    - { request_id: 1, path: docs/readme.md }

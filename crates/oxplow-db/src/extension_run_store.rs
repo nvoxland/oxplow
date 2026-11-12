@@ -30,11 +30,11 @@ pub fn record_tx(
     conn.execute(
         "INSERT OR REPLACE INTO extension_run
            (run_id, parent_run_id, extension, contribution, kind, version, generation,
-            actor_kind, actor, stream_id, thread_id, effort_id, turn_id, agent_session_id,
+            actor_kind, actor, stream_id, thread_id, turn_id, agent_session_id,
             snapshot_id, cause_event_id, mode, started_at, finished_at, outcome, error,
             wall_ms, cpu_ms, peak_bytes, ai_calls, scopes_json, decisions_json)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
-                 ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
+                 ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
         params![
             run.run().as_str(),
             run.parent().map(|p| p.as_str().to_string()),
@@ -47,7 +47,6 @@ pub fn record_tx(
             actor.source(),
             anchors.stream_id.map(|s| s.value()),
             anchors.thread_id.map(|t| t.value()),
-            anchors.effort_id.map(|e| e.value()),
             anchors.turn_id,
             anchors.agent_session_id.map(|s| s.value()),
             anchors.snapshot_id,

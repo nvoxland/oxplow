@@ -681,9 +681,10 @@ fn a_replaceable_node_names_a_known_target_once() {
             "title: T\nloaders:\n  q: {{ sql: \"SELECT 1 AS n\" }}\nview:\n  stack:\n    - {{ id: a, title: A, viz: table, from: q, replaceable: {a} }}\n    - {{ id: b, title: B, viz: table, from: q, replaceable: {b} }}\n"
         )
     };
-    assert!(refused(&page_with("nope.thing", "work_item.board"))
-        .contains("isn't a replaceable component"));
-    assert!(refused(&page_with("work_item.board", "work_item.board")).contains("placed once"));
+    assert!(
+        refused(&page_with("nope.thing", "task.board")).contains("isn't a replaceable component")
+    );
+    assert!(refused(&page_with("task.board", "task.board")).contains("placed once"));
 }
 
 /// A page's params are checked though no viz node reads them, and an
@@ -1329,7 +1330,7 @@ fn a_button_may_name_the_fact_it_goes_with() {
     let head = "title: T\nloaders:\n  q: { sql: \"SELECT 1 AS id\" }\n";
     let with = |viz: &str, fact: &str| {
         page(&format!(
-            "{head}view:\n  viz: {viz}\n  from: q\n  columns: [{{ key: id }}]\n  actions:\n    - {{ id: a, label: A, command: oxplow.work_item.create, fact: {fact} }}\n"
+            "{head}view:\n  viz: {viz}\n  from: q\n  columns: [{{ key: id }}]\n  actions:\n    - {{ id: a, label: A, command: oxplow.task.create, fact: {fact} }}\n"
         ))
     };
     assert!(with("detail", "id").is_ok());

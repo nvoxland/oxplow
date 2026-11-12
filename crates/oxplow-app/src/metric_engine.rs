@@ -443,7 +443,7 @@ fn apply_window(points: Vec<SeriesPoint>, window: Option<TimeWindow>) -> Vec<Ser
 #[derive(Debug, Clone, Default)]
 pub struct SeriesRead {
     /// Slice by a dimension (conformed, `dims_json`, or a spine dim such as
-    /// `oxplow.work_item`).
+    /// `oxplow.task`).
     pub group_by: Option<String>,
     /// Scope to one stream; `None` reads all.
     pub stream: Option<i64>,
@@ -540,22 +540,22 @@ pub(crate) fn dim_value_cached(
         // The capture spine: who/where a fact was measured (tsk321).
         "oxplow.stream" => Some(f.stream_id.to_string()),
         "oxplow.thread" => f.thread_id.map(|v| v.to_string()),
-        "oxplow.effort" => f.effort_id.map(|v| v.to_string()),
-        "oxplow.work_item" => f.work_item.clone(),
+        "oxplow.request" => f.request_id.map(|v| v.to_string()),
+        "oxplow.task" => f.task.clone(),
         "oxplow.vcs_rev" => f.closest_vcs_rev.clone(),
         key => dims.get(f).and_then(|d| dim_from_map(d, key)),
     }
 }
 
-/// Dimensions read off the capture spine (stream, thread, effort, work item, git
+/// Dimensions read off the capture spine (stream, thread, request, task, git
 /// version). Sliceable on the fact path only: the cube never buckets by them,
-/// because a capture's effort is stamped when the effort closes, after the
-/// cube may already have folded it.
+/// because a capture's turn is linked to its request (and the request to its
+/// tasks) after the cube may already have folded it.
 pub(crate) const SPINE_DIMS: &[&str] = &[
     "oxplow.stream",
     "oxplow.thread",
-    "oxplow.effort",
-    "oxplow.work_item",
+    "oxplow.request",
+    "oxplow.task",
     "oxplow.vcs_rev",
 ];
 
@@ -627,7 +627,7 @@ fn aggregate_facts(facts: &[&FactRow], agg: Aggregation) -> (f64, Option<f64>, O
             // Carry (Σvalues, count) as ratio components so the non-additive
             // cross-time collapse (Σn/Σd in `range_value`) yields the mean
             // across ALL facts — the V47 mean-across-closes measures
-            // (cycle_time, effort) die to a den=0 → 0.0 otherwise.
+            // (cycle time, say) die to a den=0 → 0.0 otherwise.
             (sum / count, Some(sum), Some(count))
         }
         Aggregation::Min => (
@@ -667,11 +667,11 @@ fn aggregate_facts(facts: &[&FactRow], agg: Aggregation) -> (f64, Option<f64>, O
 ///
 /// The numerator is part of the test (tsk156): a zero denominator with a
 /// NON-zero numerator is a real numerator-only contribution, not an empty
-/// cell. `oxplow.token_waste` is built that way on purpose — an effort close
-/// appends (num 0 / den spend) and a detected revert appends (num spend /
-/// den 0), so Σn/Σd over the measure is the wasted share. Testing the
-/// denominator alone matched the revert leg exactly and dropped it, which
-/// pinned `task.tokens.wasted_pct` at 0% for every possible input.
+/// cell. A two-legged append-only ratio is built that way on purpose — one
+/// leg appends (num 0 / den spend) and the other (num spend / den 0), so
+/// Σn/Σd over the measure is the share. Testing the denominator alone
+/// matched the second leg exactly and dropped it, which pinned such a share
+/// at 0% for every possible input.
 ///
 /// Only `Ratio`: an `avg` cell's denominator is its fact count, which is
 /// nonzero whenever there is anything to emit.
@@ -2168,8 +2168,8 @@ impl MetricEngine {
 /// `None`. `neutral` metrics (no better/worse) never cross. The worse side is
 /// "higher" for `lower-better` and "lower" for `higher-better`. A value AT a
 /// threshold hasn't crossed it (`target: 80, warnAt: 80` means 80 is fine),
-/// as the Metrics page's `metricStatus` reads it too. Shared by the effort
-/// panel's read (`collection.rs`) and the fact finding view.
+/// as the Metrics page's `metricStatus` reads it too. Shared by a request's
+/// delta read (`collection.rs`) and the fact finding view.
 pub fn threshold_state(
     direction: &str,
     value: f64,
@@ -2274,8 +2274,9 @@ mod tests {
             snapshot_id: None,
             stream_id: 1,
             thread_id: None,
-            effort_id: None,
-            work_item: None,
+            turn_id: None,
+            request_id: None,
+            task: None,
             provenance: "observed".into(),
             source: "test".into(),
             producer: "test.gauge".into(),
@@ -2405,14 +2406,13 @@ mod tests {
     }
 
     #[test]
-    fn ratio_keeps_a_numerator_only_capture_so_token_waste_can_reach_100pct() {
-        // tsk156: `oxplow.token_waste` is a two-legged append-only ratio. An
-        // effort CLOSE contributes (num 0 / den spend); a detected revert
-        // contributes (num spend / den 0) in its OWN capture, so Σn/Σd across
-        // the measure is the wasted share. The tsk109 "zero-denominator ratio
-        // is no data" guard matched the revert leg's shape exactly and dropped
-        // it, pinning task.tokens.wasted_pct at 0% for every input. A cell
-        // carrying a numerator IS data; only 0/0 is empty.
+    fn ratio_keeps_a_numerator_only_capture_so_a_two_legged_share_can_reach_100pct() {
+        // tsk156: a two-legged append-only ratio. One leg contributes
+        // (num 0 / den spend); the other contributes (num spend / den 0) in
+        // its OWN capture, so Σn/Σd across the measure is the share. The
+        // tsk109 "zero-denominator ratio is no data" guard matched the second
+        // leg's shape exactly and dropped it, pinning the share at 0% for
+        // every input. A cell carrying a numerator IS data; only 0/0 is empty.
         let facts = vec![
             FactRow {
                 numerator: Some(0.0),
@@ -2429,16 +2429,16 @@ mod tests {
         assert_eq!(
             series.len(),
             2,
-            "the revert leg must survive as its own point"
+            "the second leg must survive as its own point"
         );
-        // Σnum/Σden = 5000/5000: all metered spend was later reverted.
+        // Σnum/Σden = 5000/5000: the whole share.
         assert_eq!(range_value(&series, Fold::Sum), Some(1.0));
     }
 
     #[test]
     fn range_value_sums_a_non_ratio_read_of_a_non_additive_measure() {
-        // tsk156, second symptom: `task.tokens.wasted` is a `sum` metric over
-        // the non-additive `oxplow.token_waste` measure. A summed point carries
+        // tsk156, second symptom: a `sum` metric over a non-additive
+        // measure. A summed point carries
         // no numerator/denominator, so the Σn/Σd branch found Σden = 0 and
         // reported NO DATA — the MCP headline read empty even with waste
         // recorded. (The desktop UI masked it by recomputing from the series.)
@@ -2613,8 +2613,8 @@ mod tests {
             subject_kind: Some(oxplow_domain::uri::resources::AI_MODEL.into()),
             branch: Some("feature/x".into()),
             thread_id: Some(4),
-            effort_id: Some(9),
-            work_item: Some("oxplow:oxplow/work_item?id=ENG-12&provider=issues".into()),
+            request_id: Some(9),
+            task: Some("oxplow:oxplow/task?id=ENG-12&provider=issues".into()),
             closest_vcs_rev: Some("abc123".into()),
             severity: Some("error".into()),
             rule: Some("E1".into()),
@@ -2655,8 +2655,8 @@ mod tests {
             "oxplow.model",
             "oxplow.stream",
             "oxplow.thread",
-            "oxplow.effort",
-            "oxplow.work_item",
+            "oxplow.request",
+            "oxplow.task",
             "oxplow.vcs_rev",
         ] {
             assert!(!dim_is_slice_key(key), "{key} reads outside the slice key");
@@ -2672,16 +2672,16 @@ mod tests {
     fn spine_dimensions_read_the_capture_it_came_from() {
         let f = FactRow {
             thread_id: Some(4),
-            effort_id: Some(9),
-            work_item: Some("oxplow:oxplow/work_item?id=tsk12&provider=oxplow".into()),
+            request_id: Some(9),
+            task: Some("oxplow:oxplow/task?id=tsk12&provider=oxtask".into()),
             closest_vcs_rev: Some("abc123".into()),
             ..fact(1, "2026-06-30T00:00:00Z", 1.0)
         };
         let got: Vec<_> = [
             "oxplow.stream",
             "oxplow.thread",
-            "oxplow.effort",
-            "oxplow.work_item",
+            "oxplow.request",
+            "oxplow.task",
             "oxplow.vcs_rev",
         ]
         .iter()
@@ -2693,15 +2693,15 @@ mod tests {
                 Some(f.stream_id.to_string()),
                 Some("4".into()),
                 Some("9".into()),
-                Some("oxplow:oxplow/work_item?id=tsk12&provider=oxplow".into()),
+                Some("oxplow:oxplow/task?id=tsk12&provider=oxtask".into()),
                 Some("abc123".into())
             ]
         );
-        // Unattributed facts have no effort/work-item group rather than a blank one.
+        // Unattributed facts have no request/task group rather than a blank one.
         let bare = fact(1, "2026-06-30T00:00:00Z", 1.0);
-        assert_eq!(dim_value(&bare, "oxplow.work_item"), None);
-        // The cube never buckets by these: an effort is stamped on its
-        // captures at close, after the cube may have folded them.
+        assert_eq!(dim_value(&bare, "oxplow.task"), None);
+        // The cube never buckets by these: a turn is linked to its request
+        // after the cube may have folded its captures.
         assert!(SPINE_DIMS.iter().all(|d| is_spine_dim(d)));
         assert!(!is_spine_dim("oxplow.language"));
     }
@@ -3108,7 +3108,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_spec_series_groups_by_work_item_filters_by_it_and_buckets_by_day() {
+    async fn a_spec_series_groups_by_task_filters_by_it_and_buckets_by_day() {
         let db = Database::in_memory();
         db.transaction(|c| {
             c.execute_batch(
@@ -3116,11 +3116,16 @@ mod tests {
                    VALUES (1, 'primary', 'p', 'main', 'refs/heads/main', 'local', '/r', '2026-01-01', '2026-01-01');
                  INSERT INTO threads (id, stream_id, title, created_at, updated_at)
                    VALUES (1, 1, 'T', '2026-01-01', '2026-01-01');
-                 INSERT INTO task (id, thread_id, title, status, priority, created_by, created_at, updated_at)
-                   VALUES (1, 1, 'One', 'done', 'medium', 'agent', '2026-01-01', '2026-01-01'),
-                          (2, 1, 'Two', 'done', 'medium', 'agent', '2026-01-01', '2026-01-01');
-                 INSERT INTO effort (id, work_item, thread_id, started_at, ended_at)
-                   VALUES (7, 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 1, '2026-01-01', '2026-01-02'), (8, 'oxplow:oxplow/work_item?id=tsk2&provider=oxplow', 1, '2026-01-01', '2026-01-02');",
+                 INSERT INTO oxtask (id, title, status, priority, created_by, created_at, updated_at)
+                   VALUES (1, 'One', 'done', 'medium', 'agent', '2026-01-01', '2026-01-01'),
+                          (2, 'Two', 'done', 'medium', 'agent', '2026-01-01', '2026-01-01');
+                 INSERT INTO agent_turn (id, thread_id, prompt, started_at)
+                   VALUES (7, 1, 'p', '2026-01-01'), (8, 1, 'q', '2026-01-01');
+                 INSERT INTO request (id, thread_id, first_turn_id) VALUES (7, 1, 7), (8, 1, 8);
+                 UPDATE agent_turn SET request_id = id;
+                 INSERT INTO request_task (request_id, task_uri, basis, turn_id, at)
+                   VALUES (7, 'oxplow:oxplow/task?id=tsk1&provider=oxtask', 'command', 7, '2026-01-01'),
+                          (8, 'oxplow:oxplow/task?id=tsk2&provider=oxtask', 'command', 8, '2026-01-01');",
             )
             .map_err(|e| DomainError::Invalid(e.to_string()))
         })
@@ -3131,14 +3136,14 @@ mod tests {
         m.temporal_semantics = "additive".into();
         m.fold = Some("sum".into());
         let tokens = facts.upsert_measure(m).await.unwrap();
-        for (at, effort, value) in [
+        for (at, turn, value) in [
             ("2026-06-30T10:00:00Z", 7, 10.0),
             ("2026-06-30T11:00:00Z", 8, 5.0),
             ("2026-06-30T12:00:00Z", 7, 3.0),
             ("2026-07-01T09:00:00Z", 7, 1.0),
         ] {
             let mut cap = cap_at(at);
-            cap.effort_id = Some(effort);
+            cap.turn_id = Some(turn);
             facts
                 .record_facts(cap, vec![NewFact::new(tokens, value)])
                 .await
@@ -3169,14 +3174,14 @@ mod tests {
             }
         };
         let task = |t: &str| {
-            Some(oxplow_domain::uri::build::work_item_uri(
-                "oxplow",
+            Some(oxplow_domain::uri::build::task_uri(
+                "oxtask",
                 &format!("tsk{t}"),
             ))
         };
         assert_eq!(
             read(SeriesRead {
-                group_by: Some("oxplow.work_item".into()),
+                group_by: Some("oxplow.task".into()),
                 ..SeriesRead::default()
             })
             .await,
@@ -3189,7 +3194,7 @@ mod tests {
         );
         assert_eq!(
             read(SeriesRead {
-                group_by: Some("oxplow.work_item".into()),
+                group_by: Some("oxplow.task".into()),
                 bucket: Some(crate::metric_bucket::TimeBucket::Day),
                 ..SeriesRead::default()
             })
@@ -3199,8 +3204,8 @@ mod tests {
         assert_eq!(
             read(SeriesRead {
                 dim_eq: Some((
-                    "oxplow.work_item".into(),
-                    "oxplow:oxplow/work_item?id=tsk2&provider=oxplow".into()
+                    "oxplow.task".into(),
+                    "oxplow:oxplow/task?id=tsk2&provider=oxtask".into()
                 )),
                 ..SeriesRead::default()
             })
@@ -3428,7 +3433,7 @@ mod tests {
 
     #[test]
     fn avg_series_carries_components_so_the_non_additive_collapse_is_the_mean() {
-        // Mean-across-closes measures (cycle time, efforts-per-task; V47) are
+        // Mean-across-closes measures (cycle time, say; V47) are
         // non-additive with `avg` aggregation: capture 1 has one close (100),
         // capture 2 has two (200, 400).
         let facts = vec![
@@ -3449,16 +3454,15 @@ mod tests {
 
     #[tokio::test]
     async fn avg_spec_over_non_additive_measure_headlines_the_mean_across_captures() {
-        // effort.cycle_time_ms's exact shape: aggregation `avg` over the
-        // non-additive oxplow.cycle_time measure, one fact per close carrying
-        // numerator=value / denominator=1 (tsk42).
+        // A cycle-time metric's shape: aggregation `avg` over a non-additive
+        // measure, one fact per close carrying numerator=value /
+        // denominator=1 (tsk42).
         let (engine, facts, _c) = engine_fixture().await;
-        let cycle = facts
-            .get_measure("oxplow.cycle_time")
-            .await
-            .unwrap()
-            .expect("migration seeds oxplow.cycle_time")
-            .id;
+        let mut m = oxplow_db::NewMeasure::new("acme.cycle_time", "Cycle time");
+        m.temporal_semantics = "non-additive".into();
+        m.fold = Some("sum".into());
+        m.capture_scope = "complete".into();
+        let cycle = facts.upsert_measure(m).await.unwrap();
         for (at, v) in [
             ("2026-06-30T10:00:00Z", 100.0),
             ("2026-06-30T11:00:00Z", 200.0),
@@ -3467,7 +3471,7 @@ mod tests {
                 .record_facts(
                     NewMetricCapture {
                         captured_at: Some(ts(at)),
-                        ..NewMetricCapture::done(1, "effort-lifecycle", "builtin")
+                        ..NewMetricCapture::done(1, "acme-lifecycle", "builtin")
                     },
                     vec![NewFact {
                         numerator: Some(v),
@@ -3478,7 +3482,7 @@ mod tests {
                 .await
                 .unwrap();
         }
-        let spec = NewMetricSpec::base("acme.cycle", "Cycle", "oxplow.cycle_time", "avg");
+        let spec = NewMetricSpec::base("acme.cycle", "Cycle", "acme.cycle_time", "avg");
         facts.upsert_spec(spec).await.unwrap();
         let spec = facts.get_spec("acme.cycle").await.unwrap().unwrap();
         assert_eq!(

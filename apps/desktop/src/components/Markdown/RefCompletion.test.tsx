@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { Editor } from "@tiptap/core";
 
-import { wikiUri } from "../../uri/uri.js";
+import { knowledgeUri } from "../../uri/uri.js";
 import { getMarkdown } from "./richTextExtensions.js";
 import type { RefOption } from "./refOptions.js";
 import { RichTextField } from "./RichTextField.js";
@@ -14,8 +14,8 @@ import { RichTextField } from "./RichTextField.js";
 afterEach(cleanup);
 
 const OPTIONS: RefOption[] = [
-  { uri: wikiUri("architecture"), title: "Architecture", kind: "wiki" },
-  { uri: wikiUri("arch-notes"), title: "Arch notes", kind: "wiki" },
+  { uri: knowledgeUri("oxwiki", "architecture"), title: "Architecture", kind: "knowledge" },
+  { uri: knowledgeUri("oxwiki", "arch-notes"), title: "Arch notes", kind: "knowledge" },
 ];
 const queries: string[] = [];
 const search = async (query: string) => {
@@ -46,7 +46,7 @@ test("[[ lists the matches and Enter puts the first in as its link", async () =>
     key(editor, "Enter");
   });
   await waitFor(() => expect(document.querySelector("[data-testid='ref-completion']")).toBeNull());
-  expect(getMarkdown(editor)).toBe(`See [architecture](${wikiUri("architecture")}) `);
+  expect(getMarkdown(editor)).toBe(`See [architecture](${knowledgeUri("oxwiki", "architecture")}) `);
 });
 
 test("Escape closes the list and keeps the typed text", async () => {

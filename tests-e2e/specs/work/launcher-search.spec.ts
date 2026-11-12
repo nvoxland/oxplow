@@ -5,22 +5,22 @@ import { deploy, extensionSource, run, searchable } from "../../support/daemon.j
 import { expect, test } from "../../support/fixtures.js";
 import { searchLauncher, load } from "../../support/ui.js";
 
-test("search finds a task and a wiki page, and opens them", async ({ page, daemon }) => {
-  const created = await run<{ result: { uri: string } }>(daemon, "oxplow.work_item.create", {
+test("search finds a task and a knowledge page, and opens them", async ({ page, daemon }) => {
+  const created = await run<{ result: { uri: string } }>(daemon, "oxplow.task.create", {
     title: "Quokka migration",
-    thread: daemon.thread,
+    assignee: daemon.thread,
   });
-  await run(daemon, "oxplow.knowledge.write_page", { slug: "quokka-notes", title: "Quokka notes", body: "# Quokka notes\n\nWhat we know.\n" });
-  await searchable(daemon, "quokka", "work_item");
-  await searchable(daemon, "quokka", "wiki");
+  await run(daemon, "oxplow.knowledge.write_page", { id: "quokka-notes", title: "Quokka notes", body: "# Quokka notes\n\nWhat we know.\n" });
+  await searchable(daemon, "quokka", "task");
+  await searchable(daemon, "quokka", "knowledge");
   await load(page);
   // A hit opens the foundation's resource page for its URI.
   await searchLauncher(page, "quokka");
   await page.getByTestId(`launcher-hit-${created.result.uri}`).click();
   await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toContainText("Quokka migration");
   await searchLauncher(page, "quokka");
-  await page.getByTestId("launcher-hit-oxplow:oxplow/wiki?slug=quokka-notes").click();
-  await expect(page.getByTestId("center-tab-oxplow:oxplow/wiki?slug=quokka-notes")).toBeVisible();
+  await page.getByTestId("launcher-hit-oxplow:oxplow/knowledge?id=quokka-notes&store=oxwiki").click();
+  await expect(page.getByTestId("center-tab-oxplow:oxplow/knowledge?id=quokka-notes&store=oxwiki")).toBeVisible();
   await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toContainText("Quokka notes");
 });
 
@@ -40,7 +40,7 @@ test("a page added while the window is open is in the launcher", async ({ page, 
   );
   writeFileSync(
     join(dir, "pages", "wombats.yaml"),
-    "title: Wombat Tasks\ncategory: Work\nloaders:\n  items: { sql: SELECT uri FROM v_work_item }\nview: { from: items, viz: table }\n",
+    "title: Wombat Tasks\ncategory: Work\nloaders:\n  items: { sql: SELECT uri FROM v_task }\nview: { from: items, viz: table }\n",
   );
   await deploy(daemon, "wombat");
   await expect(async () => {

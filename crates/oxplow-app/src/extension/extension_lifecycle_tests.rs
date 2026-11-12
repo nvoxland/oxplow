@@ -22,9 +22,9 @@ use crate::extension::extension_private_state_tests::{declare, write, write_stat
 use crate::test_fixtures::lifecycle::write_extension;
 use crate::test_fixtures::lifecycle::EXT;
 use crate::test_fixtures::lifecycle::{
-    booted, log_claim, page, problem, readable, CONFIGURATION_V2,
+    booted, log_task_done, page, problem, readable, CONFIGURATION_V2,
 };
-use crate::test_fixtures::EffortFixture;
+use crate::test_fixtures::ThreadFixture;
 
 const NAME: &str = "alpha";
 
@@ -120,19 +120,19 @@ impl Alpha {
   - id: seen
     runtime: starlark
     entry: collectors/seen.star
-    on: [effort.claim_verified]{settle}
+    on: [task.state_changed]{settle}
     input: \"SELECT :event_seq AS ev\"
     sync: upsert
     entities:
       - {{ name: seen, key: ev, columns: {{ ev: int, who: text }} }}
 effects:
   - id: note
-    summary: Note a verified claim.
-    on: [effort.claim_verified]
+    summary: Note a finished task.
+    on: [task.state_changed]
     entry: effects/note.star
 event_types:
   types:
-    - {{ type: alpha.noted, v: 1, schema: noted.json, summary: A claim was noted. }}
+    - {{ type: alpha.noted, v: 1, schema: noted.json, summary: A title was noted. }}
 "
         );
         std::fs::write(&manifest, text).unwrap();
@@ -157,8 +157,8 @@ event_types:
         );
         let sql = match (self.broken_dataset, self.sized) {
             (true, _) => "SELECT nope FROM no_such_table",
-            (false, true) => "SELECT uri, uri AS size FROM ref('work_item')",
-            (false, false) => "SELECT uri FROM ref('work_item')",
+            (false, true) => "SELECT uri, uri AS size FROM ref('task')",
+            (false, false) => "SELECT uri FROM ref('task')",
         };
         write(root, &format!("{dir}/datasets/items.sql"), sql);
         write(
@@ -204,13 +204,13 @@ async fn rollback(svc: &Arc<crate::Services>, name: &str) -> Result<Value, Comma
 }
 
 /// The rows of `sql` as a user's query reads them.
-async fn rows(fx: &EffortFixture, sql: &str) -> Vec<Vec<Value>> {
+async fn rows(fx: &ThreadFixture, sql: &str) -> Vec<Vec<Value>> {
     let out = fx.svc.sql.query_sql(sql, vec![], None).await.unwrap();
     serde_json::from_value(serde_json::to_value(out.rows).unwrap()).unwrap()
 }
 
 /// The columns of `view`, in order.
-async fn columns(fx: &EffortFixture, view: &str) -> Vec<String> {
+async fn columns(fx: &ThreadFixture, view: &str) -> Vec<String> {
     fx.svc
         .sql
         .query_sql(&format!("SELECT * FROM {view}"), vec![], None)
@@ -220,14 +220,14 @@ async fn columns(fx: &EffortFixture, view: &str) -> Vec<String> {
 }
 
 /// `alpha.state.peek`'s answer, or why it can't be asked.
-async fn peek(fx: &EffortFixture) -> Result<Value, CommandError> {
+async fn peek(fx: &ThreadFixture) -> Result<Value, CommandError> {
     bus(&fx.svc, "alpha.state.peek", json!({}))
         .await
         .map(|out| out["result"].clone())
 }
 
 /// The title of page `alpha/one` as the catalog runs it, if it does.
-fn page_title(fx: &EffortFixture) -> Option<String> {
+fn page_title(fx: &ThreadFixture) -> Option<String> {
     fx.svc
         .extension_catalog
         .find_page(&fx.svc.layout.project_dir, "alpha/one")
@@ -235,10 +235,10 @@ fn page_title(fx: &EffortFixture) -> Option<String> {
         .map(|l| l.title)
 }
 
-/// A claim is verified: the collector and the effect react to it, as the
+/// A task is done: the collector and the effect react to it, as the
 /// event pump runs them.
-async fn verified(fx: &EffortFixture) {
-    log_claim(&fx.svc, fx.effort, "reviewer").await;
+async fn verified(fx: &ThreadFixture) {
+    log_task_done(&fx.svc, fx.thread, "reviewer").await;
     assert!(
         fx.svc.event_pump.settle_all(Duration::from_secs(10)).await,
         "the consumers handled it"
@@ -246,7 +246,7 @@ async fn verified(fx: &EffortFixture) {
 }
 
 /// What the collector wrote: `(who)` per event, oldest first.
-async fn seen(fx: &EffortFixture) -> Vec<String> {
+async fn seen(fx: &ThreadFixture) -> Vec<String> {
     rows(fx, "SELECT who FROM v_alpha_seen ORDER BY ev")
         .await
         .into_iter()
@@ -255,7 +255,7 @@ async fn seen(fx: &EffortFixture) -> Vec<String> {
 }
 
 /// What the effect said, in order.
-async fn noted(fx: &EffortFixture) -> Vec<String> {
+async fn noted(fx: &ThreadFixture) -> Vec<String> {
     rows(
         fx,
         "SELECT json_extract(payload, '$.from') FROM v_event WHERE type = 'alpha.noted' ORDER BY seq",
@@ -333,7 +333,7 @@ fn dataset_ref(owner: &str) -> String {
 }
 
 /// Everything `alpha` gives, and `gamma` over it, is there.
-async fn all_there(fx: &EffortFixture) {
+async fn all_there(fx: &ThreadFixture) {
     assert!(readable(&fx.svc, "v_alpha_items").await, "dataset");
     assert!(readable(&fx.svc, "v_gamma_items").await, "consumer");
     assert!(page(&fx.svc, "alpha/one").await.is_ok(), "page");
@@ -627,20 +627,20 @@ async fn a_changed_export_keeps_the_open_consumer_and_holds_the_pinned_one() {
     assert!(problem(svc, "pinned").is_empty());
 }
 
-/// The titles `v_work_item` shows, in order: the active work list's.
-async fn titles(fx: &EffortFixture) -> Vec<String> {
-    rows(fx, "SELECT title FROM v_work_item ORDER BY title")
+/// The titles `v_task` shows, in order: the active task tracker's.
+async fn titles(fx: &ThreadFixture) -> Vec<String> {
+    rows(fx, "SELECT title FROM v_task ORDER BY title")
         .await
         .into_iter()
         .map(|r| r[0].as_str().unwrap().to_string())
         .collect()
 }
 
-/// The provider `v_capability_provider` says the work list is.
-async fn active_work_list(fx: &EffortFixture) -> String {
+/// The provider `v_capability_provider` says the task tracker is.
+async fn active_task_tracker(fx: &ThreadFixture) -> String {
     rows(
         fx,
-        "SELECT provider FROM v_capability_provider WHERE capability = 'work_items' AND active = 1",
+        "SELECT provider FROM v_capability_provider WHERE capability = 'task_tracker' AND active = 1",
     )
     .await[0][0]
         .as_str()
@@ -648,12 +648,12 @@ async fn active_work_list(fx: &EffortFixture) -> String {
         .to_string()
 }
 
-/// Choose `provider` as the work list, as a person's setting does.
-async fn choose_work_list(fx: &EffortFixture, provider: &str) {
+/// Choose `provider` as the task tracker, as a person's setting does.
+async fn choose_task_tracker(fx: &ThreadFixture, provider: &str) {
     bus(
         &fx.svc,
         "oxplow.capability.choose",
-        json!({ "capability": "work_items", "provider": provider }),
+        json!({ "capability": "task_tracker", "provider": provider }),
     )
     .await
     .unwrap();
@@ -666,22 +666,22 @@ async fn choose_work_list(fx: &EffortFixture, provider: &str) {
     crate::test_fixtures::activate_with_problems(&fx.svc).await;
 }
 
-async fn file_item(fx: &EffortFixture, title: &str) {
+async fn file_item(fx: &ThreadFixture, title: &str) {
     bus(
         &fx.svc,
-        crate::commands::work_item::CREATE,
+        crate::commands::task::CREATE,
         json!({ "title": title }),
     )
     .await
     .unwrap();
 }
 
-/// Switching the work list from oxplow's own to a provider's and back
+/// Switching the task tracker from oxplow's own to a provider's and back
 /// shows each list's items on its side, and the first list's items are
 /// there again when it is chosen again.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
-async fn switching_the_work_list_shows_each_providers_items_and_brings_the_other_back() {
+async fn switching_the_task_tracker_shows_each_providers_items_and_brings_the_other_back() {
     let fx = booted().await;
     write_extension(&fx.svc.layout.project_dir, "");
     deploy(&fx.svc, EXT).await.unwrap();
@@ -693,25 +693,25 @@ async fn switching_the_work_list_shows_each_providers_items_and_brings_the_other
     .await
     .unwrap();
     crate::test_fixtures::activate_with_problems(&fx.svc).await;
-    assert_eq!(active_work_list(&fx).await, "oxplow");
+    assert_eq!(active_task_tracker(&fx).await, "oxtask");
     file_item(&fx, "ours").await;
     assert_eq!(titles(&fx).await, ["ours"]);
 
-    choose_work_list(&fx, "fake").await;
-    assert_eq!(active_work_list(&fx).await, "fake");
+    choose_task_tracker(&fx, "fake").await;
+    assert_eq!(active_task_tracker(&fx).await, "fake");
     assert!(titles(&fx).await.is_empty(), "oxplow's items are not shown");
     file_item(&fx, "theirs").await;
     assert_eq!(titles(&fx).await, ["theirs"]);
 
-    choose_work_list(&fx, "oxplow").await;
-    assert_eq!(active_work_list(&fx).await, "oxplow");
+    choose_task_tracker(&fx, "oxtask").await;
+    assert_eq!(active_task_tracker(&fx).await, "oxtask");
     assert_eq!(
         titles(&fx).await,
         ["ours"],
         "the fake's items are not shown"
     );
 
-    choose_work_list(&fx, "fake").await;
+    choose_task_tracker(&fx, "fake").await;
     assert_eq!(titles(&fx).await, ["theirs"], "its items come back");
 }
 

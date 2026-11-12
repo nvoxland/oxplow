@@ -89,7 +89,6 @@ pub enum OxplowEvent {
         thread_id: Option<ThreadId>,
         #[specta(type = Option<oxplow_domain::JsNumber>)]
         turn_id: Option<i64>,
-        effort_id: Option<oxplow_domain::EffortId>,
     },
     /// An Assistant session changed (`assistant/`): its transcript, its
     /// status or its settings. The panel asks `assistant_snapshot { id,

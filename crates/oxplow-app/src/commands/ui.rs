@@ -191,7 +191,7 @@ mod tests {
     /// `output` body, readable by an agent of the thread's stream.
     #[tokio::test]
     async fn a_reported_error_is_readable_by_an_agent_through_v_op_error() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let out = fx
             .svc
             .commands
@@ -260,7 +260,7 @@ mod tests {
     /// thread has no anchors.
     #[tokio::test]
     async fn a_report_without_output_or_thread_has_neither() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         fx.svc
             .commands
             .run(
@@ -284,7 +284,7 @@ mod tests {
     /// both together are refused.
     #[tokio::test]
     async fn a_report_from_no_thread_is_anchored_to_its_stream() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let stream = oxplow_domain::StreamId::new(1);
         fx.svc
             .commands
@@ -331,7 +331,7 @@ mod tests {
     /// row — when it happened, where — with its details NULL.
     #[tokio::test]
     async fn an_expired_report_keeps_its_row_without_details() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         fx.svc
             .commands
             .run(
@@ -366,7 +366,7 @@ mod tests {
     /// run logs one.
     #[tokio::test]
     async fn an_agent_may_report_a_ui_error() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let agent = Actor::Agent {
             session_id: None,
             thread_id: Some(ThreadId::new(fx.thread.value())),

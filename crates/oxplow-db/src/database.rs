@@ -10,7 +10,7 @@ use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::Connection;
 use tracing::info;
 
-mod embedded {
+pub(crate) mod embedded {
     refinery::embed_migrations!("migrations");
 }
 
@@ -1517,8 +1517,8 @@ mod tests {
         let plain = write_caller(here, None);
         assert_eq!(plain, format!("{}:{}", here.file(), here.line()));
         assert_eq!(
-            write_caller(here, Some("search kind work_item")),
-            format!("{plain} (search kind work_item)")
+            write_caller(here, Some("search kind task")),
+            format!("{plain} (search kind task)")
         );
     }
 
@@ -1814,6 +1814,417 @@ mod tests {
         .await
         .unwrap();
         assert_eq!((count(&db).await, count(&copy).await), (1, 2));
+    }
+
+    /// V4 gives each ended turn the outcome its `agent.turn.ended` logged,
+    /// tells the three ends logged `interrupted` apart by the text oxplow
+    /// wrote into the answer, clears that text, and rewrites the events to
+    /// @4 with the turn's outcome.
+    #[test]
+    fn v4_gives_old_turns_their_outcome_and_clears_made_up_answers() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(3))
+            .run(&mut conn)
+            .unwrap();
+        // The turns' thread is beside the point here.
+        conn.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
+        let ended = [
+            (1, "done", "completed"),
+            (2, "interrupted", "interrupted"),
+            (3, "session ended", "interrupted"),
+            (4, "session restarted", "interrupted"),
+            (5, "session closed", "interrupted"),
+            (6, "interrupted_by_restart", "restart"),
+        ];
+        for (id, answer, outcome) in ended {
+            conn.execute(
+                "INSERT INTO agent_turn (id, thread_id, prompt, answer, started_at, ended_at)
+                 VALUES (?1, 1, 'p', ?2, 'a', 'b')",
+                rusqlite::params![id, answer],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO event_log (id, type, v, at, source, turn_id, subject, payload)
+                 VALUES (?1, 'agent.turn.ended', 3, 'b', 'system:test', ?2, '[]', ?3)",
+                rusqlite::params![
+                    format!("e{id}"),
+                    id,
+                    serde_json::json!({"turn": format!("trn{id}"), "thread": "thr1", "outcome": outcome})
+                        .to_string()
+                ],
+            )
+            .unwrap();
+        }
+        // An end no event recorded: told by its text, else unknown.
+        conn.execute_batch(
+            "INSERT INTO agent_turn (id, thread_id, prompt, started_at) VALUES (7, 1, 'p', 'a');
+             INSERT INTO agent_turn (id, thread_id, prompt, answer, started_at, ended_at)
+               VALUES (8, 1, 'p', 'session ended', 'a', 'b');
+             INSERT INTO agent_turn (id, thread_id, prompt, answer, started_at, ended_at)
+               VALUES (9, 1, 'p', 'all done', 'a', 'b');",
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let rows: Vec<(i64, Option<String>, Option<String>)> = conn
+            .prepare("SELECT id, outcome, answer FROM agent_turn ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let outcome = |o: &str| Some(o.to_string());
+        assert_eq!(
+            rows,
+            vec![
+                (1, outcome("completed"), Some("done".into())),
+                (2, outcome("interrupted"), None),
+                (3, outcome("session_ended"), None),
+                (4, outcome("session_restarted"), None),
+                (5, outcome("session_closed"), None),
+                (6, outcome("restart"), None),
+                (7, None, None),
+                (8, outcome("session_ended"), None),
+                (9, outcome("unknown"), Some("all done".into())),
+            ]
+        );
+        let events: Vec<(i64, String)> = conn
+            .prepare(
+                "SELECT v, json_extract(payload, '$.outcome') FROM event_log
+                  WHERE type = 'agent.turn.ended' ORDER BY turn_id",
+            )
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        // V9 later takes every logged end to @5.
+        assert_eq!(events[2], (5, "session_ended".to_string()));
+        assert!(events.iter().all(|(v, _)| *v == 5));
+    }
+
+    /// V9 lets a turn end `errored` with the harness's words in `error`,
+    /// keeps the outcomes already stored, and takes logged ends to @5.
+    #[test]
+    fn v90_adds_the_errored_outcome_and_keeps_stored_ones() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(6))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
+        conn.execute(
+            "INSERT INTO agent_turn (id, thread_id, prompt, started_at, outcome)
+             VALUES (1, 1, 'p', 'a', 'interrupted')",
+            [],
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        conn.execute(
+            "INSERT INTO agent_turn (id, thread_id, prompt, started_at, outcome, error)
+             VALUES (2, 1, 'p', 'a', 'errored', 'APIError: overloaded')",
+            [],
+        )
+        .unwrap();
+        let rows: Vec<(i64, String, Option<String>)> = conn
+            .prepare("SELECT id, outcome, error FROM agent_turn ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                (1, "interrupted".to_string(), None),
+                (
+                    2,
+                    "errored".to_string(),
+                    Some("APIError: overloaded".to_string())
+                ),
+            ]
+        );
+    }
+
+    /// V25 removes efforts and their data: the effort tables and every
+    /// `effort_id` column go, and so do the turn's snapshot columns; a token
+    /// row and a capture an effort was stamped on stay (the token row's
+    /// effort was ON DELETE CASCADE), an effort's event goes, an effort's
+    /// take stays as a manual one, and the database is consistent.
+    #[test]
+    fn v25_removes_efforts_and_keeps_what_they_were_stamped_on() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(24))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys = OFF;
+             INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+               VALUES (1, 'primary', 'p', 'main', 'refs/heads/main', 'local', '/r', 'a', 'a');
+             INSERT INTO threads (id, stream_id, title, created_at, updated_at) VALUES (1, 1, 't', 'a', 'a');
+             INSERT INTO snapshot (id, stream_id, created_at) VALUES (1, 1, 'a'), (2, 1, 'b');
+             INSERT INTO agent_turn (id, thread_id, prompt, started_at, ended_at, start_snapshot_id, snapshot_id, effort)
+               VALUES (1, 1, 'p', '2026-01-01T00:00:00Z', '2026-01-01T00:01:00Z', 1, 2, 'high');
+             INSERT INTO effort (id, thread_id, started_at) VALUES (1, 1, '2026-01-01T00:00:00Z');
+             INSERT INTO effort_file (effort_id, path, change_kind, local_snapshot_id)
+               VALUES (1, 'a.rs', 'updated', 1);
+             INSERT INTO agent_token_usage (id, stream_id, thread_id, effort_id, session_id, agent_kind,
+                 provenance, recorded_at, turn_id)
+               VALUES (1, 1, 1, 1, 's', 'claude', 'observed', 'a', 1);
+             INSERT INTO metric_capture (id, stream_id, thread_id, effort_id, producer, provenance, source, captured_at, turn_id)
+               VALUES (1, 1, 1, 1, 'tests', 'observed', 'hook', 'a', 1),
+                      (2, 1, 1, 1, 'effort-lifecycle', 'observed', 'builtin', 'a', NULL);
+             INSERT INTO fact (capture_id, measure_id, value)
+               SELECT 2, id, 1.0 FROM measure WHERE key = 'oxplow.cycle_time';
+             INSERT INTO snapshot_op (stream_id, snapshot_id, trigger, effort_id, at, elapsed_ms, file_count)
+               VALUES (1, 1, 'effort_start', 1, 'a', 1, 0);
+             INSERT INTO event_log (id, type, v, at, source, effort_id, subject, payload)
+               VALUES ('e1', 'effort.opened', 3, 'a', 's', 1, '[]', '{}'),
+                      ('e2', 'snapshot.taken', 3, 'a', 's', 1,
+                       '[\"oxplow:oxplow/effort?id=eff1\",\"oxplow:oxplow/snapshot?id=1\"]',
+                       '{\"trigger\":\"effort_start\"}');
+             INSERT INTO page_visit (page_kind, page_id, visited_at)
+               VALUES ('oxplow/effort', 'oxplow:oxplow/effort?id=eff1', 'a'),
+                      ('oxplow/task', 'oxplow:oxplow/task?id=tsk1&provider=oxtask', 'a');
+             INSERT INTO once_mark (thread_id, effort_id, mark, fired_at) VALUES (1, 1, 'x/a', 'a');
+             INSERT INTO \"change\" (id, stream_id, kind, target, status) VALUES (1, 1, 'effort', '1', 'done');
+             INSERT INTO change_file (change_id, path, status, additions, deletions, is_test)
+               VALUES (1, 'a.rs', 'modified', 1, 0, 0);",
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let count = |sql: &str| -> i64 { conn.query_row(sql, [], |r| r.get(0)).unwrap() };
+        let columns = |table: &str| -> Vec<String> {
+            conn.prepare(&format!("SELECT name FROM pragma_table_info('{table}')"))
+                .unwrap()
+                .query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        assert_eq!(
+            count("SELECT count(*) FROM agent_token_usage WHERE turn_id = 1"),
+            1
+        );
+        assert_eq!(
+            count("SELECT count(*) FROM metric_capture"),
+            1,
+            "the effort producer's goes"
+        );
+        assert_eq!(count("SELECT count(*) FROM fact"), 0);
+        assert_eq!(
+            count("SELECT count(*) FROM measure WHERE key = 'oxplow.cycle_time'"),
+            0
+        );
+        assert_eq!(
+            count("SELECT count(*) FROM snapshot_op WHERE trigger = 'manual'"),
+            1
+        );
+        assert_eq!(count("SELECT count(*) FROM event_log"), 1);
+        assert_eq!(
+            count("SELECT count(*) FROM event_log WHERE json_extract(payload, '$.trigger') = 'manual'"),
+            1
+        );
+        assert_eq!(
+            count("SELECT count(*) FROM once_mark"),
+            0,
+            "an effort's mark goes"
+        );
+        assert_eq!(count("SELECT count(*) FROM \"change\""), 0);
+        assert_eq!(count("SELECT count(*) FROM change_file"), 0);
+        assert_eq!(
+            count(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name LIKE 'effort%'"
+            ),
+            0
+        );
+        for table in [
+            "agent_nudge",
+            "agent_token_usage",
+            "agent_tool_call",
+            "metric_capture",
+            "once_mark",
+            "snapshot_op",
+            "event_log",
+            "extension_run",
+        ] {
+            assert!(
+                !columns(table).contains(&"effort_id".to_string()),
+                "{table}"
+            );
+        }
+        let turn = columns("agent_turn");
+        assert!(!turn.contains(&"snapshot_id".to_string()));
+        assert!(!turn.contains(&"start_snapshot_id".to_string()));
+        assert!(
+            turn.contains(&"effort".to_string()),
+            "the reasoning effort stays"
+        );
+        assert_eq!(
+            count("SELECT count(*) FROM agent_turn WHERE effort = 'high'"),
+            1
+        );
+        assert_eq!(
+            count("SELECT count(*) FROM sqlite_master WHERE name = 'snapshot_op_turn_file'"),
+            1
+        );
+        assert_eq!(
+            count("SELECT seq FROM sqlite_sequence WHERE name = 'metric_capture'"),
+            2,
+            "the deleted newest capture's id isn't used again"
+        );
+        assert_eq!(
+            count("SELECT count(*) FROM page_visit"),
+            1,
+            "Go To loses the effort"
+        );
+        assert_eq!(
+            conn.query_row("SELECT subject FROM event_log", [], |r| r
+                .get::<_, String>(0))
+                .unwrap(),
+            "[\"oxplow:oxplow/snapshot?id=1\"]"
+        );
+        assert_eq!(count("SELECT count(*) FROM pragma_foreign_key_check"), 0);
+    }
+
+    /// V23 carries what efforts knew into `request_task`: a request whose
+    /// turn overlapped an effort's window, on its thread, links to the
+    /// effort's task; a turn outside the window, or an effort with no task,
+    /// links nothing.
+    #[test]
+    fn v23_backfills_request_tasks_from_efforts() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(22))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys = OFF;
+             INSERT INTO request (id, thread_id) VALUES (1, 1), (2, 1), (3, 1), (4, 2), (5, 1);
+             INSERT INTO agent_turn (id, thread_id, prompt, started_at, ended_at, request_id) VALUES
+               (1, 1, 'p', '2026-01-01T00:10:00Z', '2026-01-01T00:11:00Z', 1),
+               (2, 1, 'p', '2026-01-01T00:50:00Z', '2026-01-01T00:51:00Z', 2),
+               (3, 1, 'p', '2026-01-01T02:00:00Z', '2026-01-01T02:01:00Z', 3),
+               (4, 2, 'p', '2026-01-01T00:20:00Z', '2026-01-01T00:21:00Z', 4),
+               -- Already running when the effort opened (efforts open mid-turn).
+               (5, 1, 'p', '2025-12-31T23:59:00Z', '2026-01-01T00:05:00Z', 5);
+             INSERT INTO effort (id, thread_id, started_at, ended_at, task) VALUES
+               (1, 1, '2026-01-01T00:00:00Z', '2026-01-01T01:00:00Z', 'oxplow:oxplow/task?id=tsk1&provider=oxtask'),
+               (2, 2, '2026-01-01T00:00:00Z', '2026-01-01T01:00:00Z', NULL);",
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let rows: Vec<(i64, String, String)> = conn
+            .prepare("SELECT request_id, task_uri, basis FROM request_task ORDER BY request_id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let task = "oxplow:oxplow/task?id=tsk1&provider=oxtask".to_string();
+        assert_eq!(
+            rows,
+            vec![
+                (1, task.clone(), "assigned".to_string()),
+                (2, task.clone(), "assigned".to_string()),
+                (5, task, "assigned".to_string())
+            ]
+        );
+    }
+
+    /// V6 gives each recorded call (a finished one) its request — its finish
+    /// event's cause — the time it was requested and how long it ran, and
+    /// moves the tool events to @4.
+    #[test]
+    fn v6_gives_recorded_calls_their_request_and_duration() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(5))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys = OFF;
+             INSERT INTO event_log (id, type, v, at, source, subject, payload)
+               VALUES ('req', 'agent.tool.requested', 3, '2026-01-01T00:00:00.000Z', 's', '[]', '{}');
+             INSERT INTO event_log (id, type, v, at, source, subject, payload, cause)
+               VALUES ('fin', 'agent.tool.finished', 3, '2026-01-01T00:00:02.500Z', 's', '[]', '{}', 'req');
+             INSERT INTO agent_tool_call (thread_id, tool, at, event_id, kind)
+               VALUES (1, 'Bash', '2026-01-01T00:00:02.500Z', 'fin', 'shell');
+             INSERT INTO agent_tool_call (thread_id, tool, at, kind)
+               VALUES (1, 'Read', '2026-01-01T00:00:03Z', 'read');",
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        type Row = (String, Option<String>, Option<String>, Option<i64>);
+        let rows: Vec<Row> = conn
+            .prepare(
+                "SELECT state, request_event_id, started_at, duration_ms FROM agent_tool_call ORDER BY id",
+            )
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                (
+                    "finished".into(),
+                    Some("req".into()),
+                    Some("2026-01-01T00:00:00.000Z".into()),
+                    Some(2500)
+                ),
+                ("finished".into(), None, None, None),
+            ]
+        );
+        let versions: Vec<i64> = conn
+            .prepare("SELECT v FROM event_log ORDER BY seq")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(versions, vec![4, 4]);
+    }
+
+    /// V8 makes every logged prompt and peer message one delivery event at
+    /// @3: an old prompt's source is unknown, a peer's message keeps its
+    /// sender.
+    #[test]
+    fn v8_folds_peer_messages_into_prompt_deliveries() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(7))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            r#"INSERT INTO event_log (id, type, v, at, source, subject, payload)
+                 VALUES ('p', 'agent.prompt.submitted', 2, 'a', 's', '[]',
+                         '{"thread":"thr1","turn":"trn1","reprompt":false}');
+               INSERT INTO event_log (id, type, v, at, source, subject, payload)
+                 VALUES ('m', 'agent.peer_message.received', 2, 'b', 's', '[]',
+                         '{"thread":"thr1","turn":"trn2","from":"oxplow-main"}');"#,
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let rows: Vec<(String, i64, String)> = conn
+            .prepare("SELECT type, v, payload FROM event_log ORDER BY seq")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let payload = |i: usize| serde_json::from_str::<serde_json::Value>(&rows[i].2).unwrap();
+        assert!(rows
+            .iter()
+            .all(|(t, v, _)| t == "agent.prompt.submitted" && *v == 3));
+        assert_eq!(payload(0)["source"], "unknown");
+        assert_eq!(
+            payload(1),
+            serde_json::json!({"thread": "thr1", "turn": "trn2", "reprompt": false,
+                               "source": "peer", "sender": "oxplow-main"})
+        );
     }
 
     /// A database restored from the migrated template is exactly what
@@ -2267,9 +2678,9 @@ mod tests {
             "runtime_state",
             "threads",
             "thread_selection",
-            "task_note",
+            "oxtask_note",
             "agent_turn",
-            "wiki_page",
+            "knowledge_page",
             "page_visit",
             "usage_event",
             "code_quality_scan",
@@ -2277,10 +2688,11 @@ mod tests {
             "file_snapshot",
             "snapshot",
             "task",
-            "task_link",
-            "effort",
-            "effort_file",
-            "wiki_page_thread_update",
+            "oxtask_link",
+            "knowledge_page_touch",
+            "knowledge_page_read",
+            "model_field_value",
+            "model_field_decl",
             "page_ref",
             "comment",
             "comment_message",
@@ -2323,12 +2735,21 @@ mod tests {
             "hook_event",
             "agent_status",
             "effort_observation",
+            // V25 removed efforts.
+            "effort",
+            "effort_file",
+            "effort_metric_delta",
+            "effort_observation_row",
+            "effort_evidence_state",
             "metric_definition",
             "metric_dimension",
             "metric_subject",
             "metric_run",
             "metric_sample",
             "metric_finding",
+            // V28: knowledge pages replace the wiki's.
+            "wiki_page",
+            "wiki_page_thread_update",
         ];
         let mut stmt = conn
             .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
@@ -2412,26 +2833,29 @@ mod tests {
         .unwrap();
         // Both null — must fail.
         let r = conn.execute(
-            "INSERT INTO task_note (body, author, created_at) VALUES ('b', 'u', ?1)",
+            "INSERT INTO oxtask_note (body, author, created_at) VALUES ('b', 'u', ?1)",
             [now],
         );
         assert!(
             r.is_err(),
-            "task_note with neither parent should fail CHECK"
+            "oxtask_note with neither parent should fail CHECK"
         );
         // Both set — must fail.
         let r = conn.execute(
-            "INSERT INTO task (title, status, priority, created_by, created_at, updated_at)
+            "INSERT INTO oxtask (title, status, priority, created_by, created_at, updated_at)
              VALUES ('t', 'ready', 'medium', 'user', ?1, ?1)",
             [now],
         );
         assert!(r.is_ok());
         let r = conn.execute(
-            "INSERT INTO task_note (task_id, thread_id, body, author, created_at)
+            "INSERT INTO oxtask_note (task_id, thread_id, body, author, created_at)
              VALUES (1, 1, 'b', 'u', ?1)",
             [now],
         );
-        assert!(r.is_err(), "task_note with both parents should fail CHECK");
+        assert!(
+            r.is_err(),
+            "oxtask_note with both parents should fail CHECK"
+        );
     }
 
     #[test]
@@ -2465,10 +2889,10 @@ mod tests {
         let db = Database::open_read_only(&path).unwrap();
         let conn = db.conn().unwrap();
         let n: i64 = conn
-            .query_row("SELECT count(*) FROM v_work_item", [], |r| r.get(0))
+            .query_row("SELECT count(*) FROM v_task", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 0);
-        assert!(conn.execute("DELETE FROM work_item", []).is_err());
+        assert!(conn.execute("DELETE FROM task", []).is_err());
     }
 
     /// Migrating refuses to open a database whose migrations left a row
@@ -2494,59 +2918,15 @@ mod tests {
         assert!(err.to_string().contains("`c`"), "{err}");
     }
 
-    /// Regression: the first version of V18 rebuilt the `task` table
-    /// via `task_new` + `DROP TABLE task` + rename, which under
-    /// `PRAGMA foreign_keys = ON` cascaded and wiped every
-    /// `task_effort` row (`task_effort.task_id REFERENCES task(id)
-    /// ON DELETE CASCADE`). The fixed migration uses
-    /// `ALTER TABLE … DROP COLUMN` instead, which leaves child rows
-    /// untouched. This test asserts an `effort` row created
-    /// AFTER all migrations have run (including V18) coexists with
-    /// its parent and the `acceptance_criteria` column is gone.
+    /// The task table's `acceptance_criteria` column is gone (V18 dropped
+    /// it with `ALTER TABLE … DROP COLUMN`, leaving child rows untouched).
     #[test]
-    fn v18_does_not_cascade_to_task_effort() {
+    fn oxtask_has_no_acceptance_criteria_column() {
         let db = Database::in_memory();
         let conn = db.conn().unwrap();
-        let now = "2026-04-29T00:00:00Z";
-        conn.execute(
-            "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
-             VALUES (1, 'primary', 'a', 'main', 'r', 'r', '/r', ?1, ?1)",
-            [now],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO threads (id, stream_id, title, created_at, updated_at)
-             VALUES (1, 1, 't', ?1, ?1)",
-            [now],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO task (thread_id, title, status, priority, created_by, created_at, updated_at)
-             VALUES (1, 't', 'in_progress', 'medium', 'user', ?1, ?1)",
-            [now],
-        )
-        .unwrap();
-        let task_id: i64 = conn.last_insert_rowid();
-        conn.execute(
-            "INSERT INTO effort (work_item, thread_id, started_at)
-             VALUES ('work_item:oxplow:tsk' || ?1, 1, ?2)",
-            (task_id, now),
-        )
-        .unwrap();
-
-        // effort row survives alongside its parent.
-        let n: i64 = conn
-            .query_row(
-                "SELECT count(*) FROM v_effort WHERE work_item = 'work_item:oxplow:tsk' || ?1",
-                [task_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(n, 1, "effort row must coexist with its parent task");
-
         // acceptance_criteria column is gone.
         let cols: Vec<String> = conn
-            .prepare("PRAGMA table_info(task)")
+            .prepare("PRAGMA table_info(oxtask)")
             .unwrap()
             .query_map([], |row| row.get::<_, String>(1))
             .unwrap()

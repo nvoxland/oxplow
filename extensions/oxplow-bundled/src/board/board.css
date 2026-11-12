@@ -1,0 +1,43 @@
+/* The Work board: the kit's board look (`.ox-board`, `.ox-board-column`,
+   `.ox-card`), its columns sharing the page's width. Tokens only. */
+/* The board fills the frame; each column scrolls on its own, so a long
+   To Do or Done never scrolls the page. */
+html, body { height: 100%; }
+body { box-sizing: border-box; padding: var(--space-3) var(--space-4); display: flex; flex-direction: column; overflow: hidden; }
+#toolbar { flex-wrap: wrap; flex: none; }
+#note { flex: none; }
+#board { flex: 1; min-height: 0; align-items: stretch; }
+#toolbar .ox-input { flex: 0 1 280px; }
+/* No box around a column: its heading and cards stand on the page. */
+.ox-board-column { flex: 1 1 0; min-width: 220px; min-height: 0; display: flex; flex-direction: column; background: transparent; border: 0; padding: 0; }
+.column-head { flex: none; display: flex; align-items: baseline; gap: var(--space-2); margin: 0 0 var(--space-1); }
+.column-head .ox-heading { margin: 0; }
+.cards { list-style: none; padding: 0 2px 0 0; margin: 0; min-height: 40px; flex: 1; overflow-y: auto; }
+/* A compact card: its title and its description's first sentence, two
+   lines each at most; an urgent or high priority a coloured left edge
+   (medium and low stay quiet, as most items are one of them); the rest in
+   its hover title. */
+.ox-card { position: relative; display: flex; flex-direction: column; gap: 2px; margin-top: var(--space-2); padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3); border-left: 3px solid var(--border-subtle); }
+.ox-card.live { cursor: default; border-style: dashed; }
+.ox-card.prio-urgent { border-left-color: var(--severity-critical); }
+.ox-card.prio-high { border-left-color: var(--status-waiting); }
+.card-title, .card-desc { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+.card-title { padding-right: var(--space-4); font-size: var(--text-sm); font-weight: var(--weight-bold); }
+.card-desc { font-size: var(--text-xs); color: var(--text-secondary); }
+/* An epic in To Do: the kit's nesting panel (`.ox-nest`, as a list's
+   parent and children), its heading the top line; its cards sit on the
+   page's colour inside it. */
+.epic-group { margin: var(--space-3) 0 0; padding: var(--space-1) var(--space-2) var(--space-2); }
+.epic-cards { list-style: none; padding: 0; margin: 0; }
+.epic { display: flex; align-items: flex-start; gap: var(--space-1); font-size: var(--text-sm); font-weight: var(--weight-bold); }
+.epic-toggle { font: inherit; width: 18px; padding: 0; color: var(--text-secondary); background: transparent; border: 0; cursor: pointer; flex: none; }
+.epic-title { flex: 1; min-width: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+.card-menu {
+  position: absolute; top: var(--space-1); right: var(--space-1);
+  font: inherit; line-height: 1; padding: 0 var(--space-1);
+  color: var(--text-secondary); background: transparent; border: 0; border-radius: var(--radius-sm);
+  cursor: pointer; opacity: 0;
+}
+.ox-card:hover .card-menu, .card-menu:focus-visible { opacity: 1; }
+.card-menu:hover { background: var(--accent-soft-bg); }
+.more { flex: none; align-self: flex-start; margin-top: var(--space-2); font-size: var(--text-sm); background: none; border: 0; padding: 0; }

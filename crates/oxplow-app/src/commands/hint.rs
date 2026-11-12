@@ -96,7 +96,6 @@ mod tests {
     fn raised(thread: String, audience: Audience, message: &str) -> NewAgentNudge {
         NewAgentNudge {
             thread_id: thread,
-            effort_id: None,
             kind: "x/muted".into(),
             message: message.into(),
             trigger: None,
@@ -110,7 +109,7 @@ mod tests {
     /// raised to an agent; with none left it records nothing.
     #[tokio::test(flavor = "multi_thread")]
     async fn dismiss_all_puts_away_every_hint_raised_to_the_person() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         for (audience, m) in [
             (Audience::Person, "one"),
             (Audience::Person, "two"),

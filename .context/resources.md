@@ -6,9 +6,9 @@ reads a URI, where URIs are stored, and the migration that moved every
 stored name onto them.
 
 **The words.** A **resource** is a kind of thing in oxplow — a file, a
-wiki page, an effort, a work item, an extension's pull request — named
+knowledge page, a request, a task, an extension's pull request — named
 `<namespace>/<name>` (`oxplow/file`, `github/pr`). A **URI** names one
-thing of a resource: `oxplow:oxplow/effort?id=eff12`. The direction is the
+thing of a resource: `oxplow:oxplow/request?id=req12`. The direction is the
 web's: a URI names the thing, a page that shows it is one **renderer** of
 it, and how that renderer shows it (a line, a filter, a pick, a mode, an
 open panel) is its **view**: the `#`, never part of the identity. A page's
@@ -20,15 +20,14 @@ fields that hold a URI are named `uri` (V101); prose says URI.
 
 1. **The owner spells a URI; everyone else carries it.** A URI is built in
    one place per language (the builders below) and passed along verbatim.
-   Nothing concatenates one (`"oxplow:oxplow/effort?id=" + id`,
+   Nothing concatenates one (`"oxplow:oxplow/request?id=" + id`,
    `'…' || id`) or takes one apart by hand (`strip_prefix`, `split`,
    `substr`): read it with the readers.
 2. **Links are URIs, and may dangle.** Store the URI. Extensions come and
    go and records get deleted; a URI nothing resolves is a dead link,
-   shown as its raw text, never an error. Reads never fail on one. A work
-   item says what it is about with a link `about` any URI
-   (`oxplow.work_item.link { uri, target, link_type: about }`); find the
-   items about a thing by that link (`v_work_item_link.to_uri`).
+   shown as its raw text, never an error. Reads never fail on one. A task says what it is about with a link `about` any URI
+   (`oxplow.task.link { uri, target, link_type: about }`); find the
+   items about a thing by that link (`v_task_link.to_uri`).
 3. **Two things stay strict:** the grammar (a malformed URI is refused at
    every write) and the event log (a subject must be a URI of a declared
    resource whose params hold).
@@ -37,10 +36,18 @@ fields that hold a URI are named `uri` (V101); prose says URI.
 
 | Where | Build | Read |
 |---|---|---|
-| Rust | `oxplow_domain::uri::build::{effort_uri, file_uri, wiki_uri, work_item_uri, …}`; `keyed(resource, value)` for a resource named by its key param; `of(resource, &[(k, v)])` / `of_with_view` for one known only at run time | `parse_as::<T>(uri, resource)` (the key, typed), `id_of` (the key), `param_of(uri, resource, name)`, `parse_resource` (keeps the view), `resource_of`, `work_item_of_uri` → `(provider, id)`, `file_of_uri` → `(path, rev, lines)`; resource names are `uri::resources::{EFFORT, FILE, …}` |
-| SQL (datasets, pages, scripts' queries) | the owning dataset's `uri` column; to build one, `uri('oxplow/effort', 'id', 'eff' \|\| id)` (a NULL value leaves its param out, so `uri()` is never NULL: over a `LEFT JOIN`, `CASE WHEN x.id IS NULL THEN NULL ELSE uri(…) END`) | `SELECT URI`, `WHERE uri = :uri`, `JOIN … ON x.uri = y.subject`; `uri_param(URI, 'id')`, `uri_resource(URI)` |
+| Rust | `oxplow_domain::uri::build::{request_uri, file_uri, knowledge_uri, task_uri, …}`; `keyed(resource, value)` for a resource named by its key param; `of(resource, &[(k, v)])` / `of_with_view` for one known only at run time | `parse_as::<T>(uri, resource)` (the key, typed), `id_of` (the key), `param_of(uri, resource, name)`, `parse_resource` (keeps the view), `resource_of`, `task_of_uri` → `(provider, id)`, `file_of_uri` → `(path, rev, lines)`; resource names are `uri::resources::{REQUEST, FILE, …}` |
+| SQL (datasets, pages, scripts' queries) | the owning dataset's `uri` column; to build one, `uri('oxplow/request', 'id', 'req' \|\| id)` (a NULL value leaves its param out, so `uri()` is never NULL: over a `LEFT JOIN`, `CASE WHEN x.id IS NULL THEN NULL ELSE uri(…) END`) | `SELECT URI`, `WHERE uri = :uri`, `JOIN … ON x.uri = y.subject`; `uri_param(URI, 'id')`, `uri_resource(URI)` |
 | Starlark (commands, effects, collectors, policies, mappings) | `uri.build("oxplow/file", path = p, view = {"lines": "3-9"})` (a param a string or an int; `None` leaves it out) | `uri.parse(u)` → `{resource, params, view}`, `uri.param(u, name, resource=)`, `uri.id(u, resource=)`, `uri.resource(u)`, `uri.is_uri(v)`, `uri.contribution(u)` |
-| TS (desktop) | `uri/uri.ts` builders (`effortUri`, `wikiUri`, `workItemUri(provider, id)`, `fileUri(path, rev)`, `fileLinesUri`, `pageUri(page, params, view)`, `metricUri`, `withUriView`, `viewParamsOfUri`, `resourceUri(resource, params, view)`, …) | `parseUri`, `identityOf`, `typeOf` (the resource), `paramOf`, `viewOf`, `idOf(uri, resource)`, `keyOf`, `workItemOf`, `isExternal` |
+| TS (desktop) | `uri/uri.ts` builders (`knowledgeUri(store, id)`, `taskUri(provider, id)`, `fileUri(path, rev)`, `fileLinesUri`, `pageUri(page, params, view)`, `metricUri`, `withUriView`, `viewParamsOfUri`, `resourceUri(resource, params, view)`, …) | `parseUri`, `identityOf`, `typeOf` (the resource), `paramOf`, `viewOf`, `idOf(uri, resource)`, `keyOf`, `taskOf`, `isExternal` |
+
+**Join two views by their ids, not their `uri` columns.** A dataset's
+`uri` is built per row, so `JOIN … ON x.uri = y.turn` reaches no index: it
+rebuilds the URI for every row of the other side, once for each row of
+this side. Over `v_turn_file` × `v_agent_turn` that took the Shared work
+part past `query_sql`'s 5 s; the same join on `turn_id` / `request_id` is
+instant. Compare a `uri` to a param (`WHERE uri = :uri`) freely; join by
+the id columns the views carry next to it (`request_id`, `turn_id`, `id`).
 
 **Guards.** `apps/desktop/src/uri/uri.guard.test.ts` (TS),
 `source_guards::refs_are_built_and_parsed_through_the_grammar` (Rust) and
@@ -60,22 +67,22 @@ saying the id it names.
 
 | Field | Bare id |
 |---|---|
-| `thread`, `from_thread`, `to_thread`, `stream`, `effort`, `turn`, `session` (an agent session), `note`, `handoff`, `comment` | the prefixed id: `thr3`, `str1`, `eff12`, `trn4`, `ses2`, `not3`, `hnd1`, `cmt5` |
-| `snapshot`, `parent`, `start_snapshot`, `end_snapshot`, `claim`, `decision`, `proposal`, `supersedes`, `answer`, `run` | a JSON integer |
+| `thread`, `from_thread`, `to_thread`, `stream`, `turn`, `request` (`oxplow/request`), `session` (an agent session), `note`, `handoff`, `comment` | the prefixed id: `thr3`, `str1`, `trn4`, `req2`, `ses2`, `not3`, `hnd1`, `cmt5` |
+| `snapshot`, `parent`, `start_snapshot`, `end_snapshot`, `proposal`, `supersedes`, `answer`, `run` | a JSON integer |
 | `event`, `job_run` | the UUID |
 | `collector`, `job` | the contribution id: `triage/todos` |
 | `commit`, vcs.head.moved `from` / `to` | the sha |
-| knowledge.page.* `page` | the slug |
+| knowledge.page.* `page` | the page's URI (`oxplow:oxplow/knowledge?id=…&store=…`) |
 
 **What stays a URI:** a field that can name anything (`uri` when it isn't
 fixed, `target`, `subject`, `evidence`, comment `context_chain` /
 `referenced`, impacts, navigate / bookmark / page targets, a metric's
-`subject`, `open_after`), event subjects, and **work items everywhere**
-(`work_item`, an item's `uri`, `parent_uri`, `before`, `after`): an item's
+`subject`, `open_after`), event subjects, and **tasks everywhere**
+(`task`, an item's `uri`, `parent_uri`, `before`, `after`): an item's
 id is unique only with its provider. Models keep integer ids
 (`v_thread.id = 3`); SQL that feeds a fixed input reads the key from the
 row's URI (`uri_param(t.uri, 'id')`), never `'thr' || id`. In Starlark,
-build the URI (`uri.build("oxplow/effort", id = e)`) only where a bare id
+build the URI (`uri.build("oxplow/request", id = r)`) only where a bare id
 becomes a link or is compared with a dataset's `uri`.
 
 ## The grammar
@@ -89,7 +96,7 @@ key          := [A-Za-z][A-Za-z0-9_.-]*
 ```
 
 ```
-oxplow:oxplow/work_item?id=tsk42&provider=oxplow
+oxplow:oxplow/task?id=tsk42&provider=oxtask
 oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-20
 oxplow:oxplow/page?page=acme/blocked&stream_id=2
 oxplow:github/pr?id=12
@@ -135,25 +142,27 @@ oxplow:github/pr?id=12
   expectation without changing both parsers.
 
 **Key params.** A resource named by one value has a key param
-(`build::key_param`): `id` for a stored record (`effort?id=eff1`,
+(`build::key_param`): `id` for a stored record (`request?id=req1`,
 `thread?id=thr3`, `turn?id=trn1`), a word for the value's shape
-(`commit?sha=`, `wiki?slug=`, `branch?name=`, `extension?name=`,
-`ai_model?name=`, `config?key=`, `nudge?kind=`, `consumer?name=`), and
-the resource's own name for a contribution (`page?page=tasks`, `command?command=oxplow.file.save`,
+(`commit?sha=`, `branch?name=`, `extension?name=`,
+`ai_model?name=`, `config?key=`, `nudge?kind=`, `consumer?name=`; a knowledge page has two, `knowledge?id=<id>&store=<store>`, built by `knowledge_uri(store, id)` and read by `knowledgeOf`), and
+the resource's own name for a contribution (`page?page=work`, `command?command=oxplow.file.save`,
 `collector?collector=triage/todos`, `effect?effect=acme/notify`,
 `resource?resource=github/pr`). Resources with several identity params
 have none: `file?path=&rev=&filesystem=`, `dir?path=&filesystem=`, `symbol?path=&symbol=`,
-`work_item?provider=&id=`, `subagent?session=&agent=`,
+`task?provider=&id=`, `subagent?session=&agent=`,
 `extension_deployment?name=&hash=`, `block?path=&lines=`,
-`test?class=&name=`. A page's own params ride beside its key
+`test?class=&name=`. `person` is the person using oxplow, with none
+(`oxplow:oxplow/person`, what a task is assigned to when it's theirs;
+an optional `id` names one of several, for later). A page's own params ride beside its key
 (`page?page=settings&area=agents`); `build::params_of` splits them.
 
 **Event sources aren't URIs.** An event's `source` says who emitted it —
 `human`, `system:<component>`, `agent:thr3`, `provider:<instance>`,
-`effect:<namespace>/<id>`, `effect:effort_policy:<id>` — built by
+`effect:<namespace>/<id>` — built by
 `uri::build::{system_source, effect_source, provider_source}` and
-`Actor::source()`, read with `effect_of_source`. A provider instance or
-an effort policy isn't a resource. Nor are a ui-preference scope's
+`Actor::source()`, read with `effect_of_source`. A provider instance
+isn't a resource. Nor are a ui-preference scope's
 `resource:<namespace>/<name>` and `component:<namespace>/<id>`.
 
 ## Resources are declared
@@ -201,13 +210,13 @@ resources:
   read from its manifest (`resources::foundation()`); manifest checks that
   run before any vocabulary (a decorator's `resource:`, a prompt's
   `about:`) read the same list (`extension_resources::resource_problem`).
-- **A work list's own ids.** The registry carries the active work list's
-  id recognizer (`with_work_item_ids(provider, id_pattern)`, set from the
+- **A task tracker's own ids.** The registry carries the active task tracker's
+  id recognizer (`with_task_ids(provider, id_pattern)`, set from the
   capability registry at every rebuild): `tsk42` in text, `[[…]]` or loose,
-  is `oxplow:oxplow/work_item?id=tsk42&provider=oxplow` while oxplow's tasks
-  are the list (`work_item_uri_of`, `find_work_item_uris`).
+  is `oxplow:oxplow/task?id=tsk42&provider=oxtask` while oxtask
+  are the list (`task_uri_of`, `find_task_uris`).
 - **What names a resource elsewhere** is its name: `ui.about` on a command
-  (`about: oxplow/work_item`), an intent prompt's `about:`, a decorator's
+  (`about: oxplow/task`), an intent prompt's `about:`, a decorator's
   `resource:`, a fact subject's `subject_kind` (`oxplow/file`), a search
   hit's `resource` and a search filter's `resources`, a provider
   capability's `resource` (`ProviderContract.resource`: a URI with a
@@ -216,14 +225,14 @@ resources:
 ## Resolving and reading
 
 `ref_resolver::resolve_ref(svc, uri)` → `RefSummary { uri, resource,
-title, detail, body_excerpt, resolved }`: richer resolvers for work items,
-commits, files, directories, wiki pages and findings; any other resource
+title, detail, body_excerpt, resolved }`: richer resolvers for tasks,
+commits, files, directories, knowledge pages and findings; any other resource
 through its declaration's `resolve` view and `title` column, by `uri`.
 Nothing resolves it → `resolved: false`.
 
 `ref_read::read` (`oxplow_read`, `records.read`) returns `{ uri, resource,
 row, related, content, truncated }`: the `resolve` row, the related lists
-of work items, commits and efforts, a file's text at its `rev` (its
+of tasks, commits and requests, a file's text at its `rev` (its
 `#lines=` view), an event's or model call's body (`#part=`), a page's
 definition.
 
@@ -240,10 +249,10 @@ dataset; `symbol_resolve` finds a symbol now (`v_symbol`) or at its `rev`.
 
 `uri::canonical_wikilink(resources, interior)` turns a wikilink interior
 into a URI: a URI passes through when its resource is declared; one of
-the active list's ids → its work item; `git:abc1234` and a bare sha → a
+the active list's ids → its task; `git:abc1234` and a bare sha → a
 commit; `dir:src/` → `dir?path=src`; `finding:fnd-1`; a declared
 `wikilink.prefix` (`pr:12` → `oxplow:github/pr?id=12`); `src/a.rs@HEAD:42`
-→ `file?path=src/a.rs&rev=git:HEAD#lines=42`; a kebab slug → a wiki page.
+→ `file?path=src/a.rs&rev=git:HEAD#lines=42`; a kebab slug → an oxwiki page; `<store>:<id>` with an enabled store's id → that store's page.
 `word:tail` with no declared prefix is not a slug; it names nothing.
 `ClassifiedWikilink` carries `canonical` and the typed `Reference`, so the
 graph writer and the link checker never drift. The desktop's
@@ -256,9 +265,10 @@ graph writer and the link checker never drift. The desktop's
   closest_vcs_rev, vcs_rev_exact)`, keyed `(source_uri, target_uri,
   ref_type)`; `PageRefEdge { source, target, … }`. Every end is an
   identity (no view); a file edge's version pin rides in its columns, not
-  its URI. The writers are `page_ref_projections` (wiki pages, notes,
-  handoffs, work items' bodies, comments and links, efforts' touched files,
-  summaries and impacts, findings, commits) — each owns its source's slice.
+  its URI. The writers are `page_ref_projections` (knowledge pages, notes,
+  handoffs, tasks' bodies, comments and links, findings, commits, and agent turns: a person's
+  prompt's references, `ref_type = prompt_mention`, written when the
+  prompt is delivered) — each owns its source's slice.
 - **`comment`** (V99): `target_uri` (and `target_resource`), a
   `context_chain_json` and `referenced_json` of URIs;
   `knowledge.comment.written@2` / `deleted@2` carry `{ comment, target }`.
@@ -267,8 +277,8 @@ graph writer and the link checker never drift. The desktop's
   asset `search:<resource>`), the `search.index` consumer the files.
   A hit is `{ resource, uri, stream_id, title, snippet, score }`.
 - **Everything else** stores the URI string where it stored the old ref:
-  every dataset's `uri` column, `work_item.uri` / `parent_uri`, links,
-  efforts' `work_item`, claims, decisions, handoffs, bookmarks, page
+  every dataset's `uri` column, `task.uri` / `parent_uri`, links,
+  handoffs, bookmarks, page
   visits, ui-preference scopes, fact subjects, event subjects and payload
   fields, command inverses and pending proposals.
 
@@ -285,15 +295,14 @@ they were.
 ## The rename (V101)
 
 `V101__uri_names.sql` renamed every name that said `ref` for a URI to
-`uri`. Tables: `work_item.uri` / `parent_uri`, `work_item_comment.uri`,
-`work_item_link.from_uri` / `to_uri`, `task_link.to_uri`,
+`uri`. Tables: `task.uri` / `parent_uri`, `task_comment.uri`,
+`task_link.from_uri` / `to_uri`, `oxtask_link.to_uri`,
 `fact_subject.uri`, `search_entry.uri` (was `ref_id`), `bookmark.uri`,
-`symbol.uri`, `change_function.uri`, `claim.evidence` (was
-`evidence_ref`; it can be the word `reviewer`, so it is no `*_uri`).
-`wiki_page.file_refs_json` / `dir_refs_json` became `files_json` /
-`dirs_json`: a wiki citation is a file path, so its names say `files`
+`symbol.uri`, `change_function.uri`.
+`wiki_page.file_refs_json` / `dir_refs_json` (the table is `knowledge_page` now) became `files_json` /
+`dirs_json`: a knowledge page's citation is a file path, so its names say `files`
 (`verify_refs` is now `oxplow.knowledge.verify_files`, with `files`,
-`verified_files`, `removed_files`). Events: stored `work_item.recorded`
+`verified_files`, `removed_files`). Events: stored `task.recorded`
 rows moved to v3 (`item.uri`, `item.parent_uri`) and
 `knowledge.page.recorded` rows to v2 (`page.uri`, `page.uris`). Undo
 inverses and pending proposals had their input keys renamed (`ref` to
@@ -337,14 +346,14 @@ tabs aren't migrated.
 
 ## Strict vocabulary candidates
 
-The activation API freezes declarations and the host work item recognizer
+The activation API freezes declarations and the host task recognizer
 from one catalog snapshot before writing. `PreparedVocabulary.replace_tx`
 rejects any event, resource, subscription or recognizer diagnostic and
 restores its database savepoint; it returns the candidate vocabulary
 without swapping `VocabularyHandle`. `PreparedExtensionDatabase` composes
 this with datasets and contribution descriptors, restoring the whole
 candidate on rejection. When prepared capabilities are included, its
-recognizer comes from the planned work-list selection rather than the
+recognizer comes from the planned task-tracker selection rather than the
 prior live registry, and capability rows and switch events share that
 transaction. Coordinated commit and publication and reader pinning remain
 the activation owner's unfinished work.

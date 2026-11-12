@@ -1,0 +1,69 @@
+title: Knowledge Freshness
+description: "The files a knowledge page cites, the ones that changed first, each with the snapshot it was pinned to and whether the file has changed since."
+icon: book-open
+category: Knowledge
+needs:
+- knowledge
+params:
+- name: store
+  role: filter
+  label: Store
+  default: oxwiki
+- name: id
+  role: filter
+  label: Knowledge page (its id)
+answers:
+- {"question":"Which files does this knowledge page cite, and which have changed?","params":{"store":"oxwiki","id":"auth-flow"},"skill":"oxplow-knowledge"}
+loaders:
+  freshness:
+    sql: |
+      SELECT p.uri, p.title,
+             p.title || ' — ' || sum(r.stale) OVER () || ' of ' || count(*) OVER () || ' stale' AS heading,
+             r.path,
+             CASE WHEN r.pinned_snapshot_id IS NULL THEN '—' ELSE 's-' || r.pinned_snapshot_id END
+               || CASE WHEN r.pinned_vcs_rev IS NULL THEN ''
+                       ELSE ' ' || CASE WHEN r.pinned_vcs_rev_exact THEN '=' ELSE '~' END || ' ' || substr(r.pinned_vcs_rev, 1, 8) END AS pinned,
+             CASE WHEN r.stale THEN 'stale' ELSE 'fresh' END AS status,
+             CASE WHEN r.stale THEN 'warning' ELSE 'success' END AS tone, r.stale
+      FROM v_knowledge_page p
+      JOIN v_knowledge_ref r ON r.page = p.uri
+      WHERE p.store = :store AND p.id = :id
+      ORDER BY r.stale DESC, r.path
+view:
+  from: freshness
+  viz: table
+  group:
+    by: heading
+    link:
+      kind: page
+      from: uri
+  columns:
+  - key: path
+    label: File
+    link:
+      kind: file
+  - key: pinned
+    label: Captured snapshot
+  - key: status
+    label: Status
+    tone: tone
+    width: 100
+  empty: This page cites no files.
+  actions:
+  - id: verify
+    label: Mark verified
+    command: oxplow.knowledge.verify_files
+    when: stale
+    input:
+      store: '{{param.store}}'
+      id: '{{param.id}}'
+      files:
+      - '{{row.path}}'
+    row: true
+actions:
+- id: verify-all
+  label: Mark all verified
+  command: oxplow.knowledge.verify_files
+  input:
+    store: '{{param.store}}'
+    id: '{{param.id}}'

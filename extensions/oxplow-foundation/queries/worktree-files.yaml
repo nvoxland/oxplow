@@ -1,0 +1,105 @@
+title: Worktree Files
+description: "A stream's files as a path tree reads them (`tree: { path, status }`), which ones the caller says. `show`: `changed` (the change's tracked files), `changed_untracked` (and the ones git doesn't track yet; only `changed` leaves those out, so a caller's other value, the Git panel's `overview`, counts them) or `all` (one folder of the worktree, `folder`, unchanged files among the changed; for a lazy tree). Ignored files are never in it. `target` names the change: `''` is the working tree against HEAD, a range target (`git:<base>..working`) the files since a base. `change` is that change, `files` its files (`path`, `status`, `is_dir`, `file_path` to open, `uri`, and the change's `base_revision`/`head_revision` for a diff), `line` its counts as coloured marks, `count` how many files. The one statement of which files a stream has changed, read by the Git panel, the Uncommitted page and Directory."
+params:
+- name: stream_id
+- name: show
+  default: changed_untracked
+- name: target
+  default: ''
+- name: folder
+  default: ''
+- name: filesystem
+  default: oxplow:local
+- name: rev
+  default: ''
+loaders:
+  change:
+    sql: |
+      SELECT id AS change_id, base_revision, head_revision, conflicted, in_progress
+      FROM v_change
+      WHERE stream_id = :stream_id AND target = :target
+        AND kind = CASE WHEN :target = '' THEN 'working' ELSE 'range' END
+  files:
+    sql: |
+      WITH change AS (
+        SELECT id, base_revision, head_revision FROM v_change
+        WHERE stream_id = :stream_id AND target = :target
+          AND kind = CASE WHEN :target = '' THEN 'working' ELSE 'range' END
+      ),
+      changed AS (
+        SELECT f.path, CASE WHEN f.untracked = 1 THEN 'untracked' ELSE f.status END AS status
+        FROM v_change_file f JOIN change c ON c.id = f.change_id
+        WHERE (:show <> 'changed' OR coalesce(f.untracked, 0) = 0)
+          AND (:folder = '' OR f.path LIKE :folder || '/%')
+      ),
+      -- One folder of the filesystem: `v_file` reads only that folder when
+      -- its conditions stand alone in a CTE of their own (`equality_filters`).
+      listing AS (
+        SELECT w.path, w.status, w.kind, w.uri FROM v_file w
+        WHERE w.stream_id = :stream_id AND w.filesystem = :filesystem AND w.rev = :rev AND w.parent = :folder
+      )
+      SELECT path, status, 0 AS is_dir,
+             CASE WHEN status = 'deleted' THEN NULL ELSE path END AS file_path,
+             uri('oxplow/file', 'path', path) AS uri,
+             (SELECT base_revision FROM change) AS base_revision,
+             (SELECT head_revision FROM change) AS head_revision
+      FROM changed WHERE :show IN ('changed', 'changed_untracked')
+      UNION ALL
+      SELECT path, status, (kind = 'dir'),
+             CASE WHEN kind = 'dir' OR status = 'deleted' THEN NULL ELSE path END,
+             uri, NULL, NULL
+      FROM listing WHERE :show = 'all'
+      ORDER BY 3 DESC, 1
+  # The counts as coloured marks: `4A 5M 2U +179 −175`, then a merge, a
+  # rebase or conflicts as a red line of their own.
+  line:
+    sql: |
+      WITH change AS (
+        SELECT id, conflicted, in_progress FROM v_change
+        WHERE stream_id = :stream_id AND target = :target
+          AND kind = CASE WHEN :target = '' THEN 'working' ELSE 'range' END
+      ),
+      f AS (
+        SELECT CASE WHEN f.untracked = 1 THEN 'untracked' ELSE f.status END AS status, f.additions, f.deletions
+        FROM v_change_file f JOIN change c ON c.id = f.change_id
+        WHERE :show <> 'changed' OR coalesce(f.untracked, 0) = 0
+      ),
+      n AS (
+        SELECT sum(status = 'added') AS a, sum(status IN ('modified', 'renamed')) AS m,
+               sum(status = 'deleted') AS d, sum(status = 'untracked') AS u,
+               coalesce(sum(additions), 0) AS plus, coalesce(sum(deletions), 0) AS minus, count(*) AS files
+        FROM f
+      ),
+      -- Three groups, each after a dot (`gap`): the tracked files' counts,
+      -- the lines', then the untracked files.
+      mark(ord, text, tone, hint, gap) AS (
+        SELECT 1, a || 'A', 'success', 'added', 0 FROM n WHERE a > 0
+        UNION ALL SELECT 2, m || 'M', 'warning', 'modified', 0 FROM n WHERE m > 0
+        UNION ALL SELECT 3, d || 'D', 'danger', 'deleted', 0 FROM n WHERE d > 0
+        UNION ALL SELECT 4, '+' || plus, 'success', 'lines added', 1 FROM n WHERE files > 0
+        UNION ALL SELECT 5, '−' || minus, 'danger', 'lines removed', 0 FROM n WHERE files > 0
+        UNION ALL SELECT 6, u || 'U', 'success', 'untracked', 1 FROM n WHERE u > 0
+      )
+      SELECT changes, 'oxplow:oxplow/page?page=uncommitted-changes' AS page FROM (
+        SELECT 0 AS ord, (SELECT json_group_array(CASE WHEN gap = 1
+                                   THEN json_object('text', text, 'tone', tone, 'hint', hint, 'gap', json('true'))
+                                   ELSE json_object('text', text, 'tone', tone, 'hint', hint) END)
+                          FROM (SELECT * FROM mark ORDER BY ord)) AS changes
+        FROM n WHERE files > 0
+        UNION ALL
+        SELECT 1, json_array(json_object('tone', 'danger', 'text',
+               CASE WHEN in_progress IS NOT NULL
+                    THEN replace(in_progress, '_', '-') || ' in progress'
+                         || CASE WHEN conflicted > 0 THEN ' — ' || conflicted || ' conflicted' ELSE '' END
+                    ELSE conflicted || ' conflict' || CASE conflicted WHEN 1 THEN '' ELSE 's' END
+               END))
+        FROM change WHERE in_progress IS NOT NULL OR conflicted > 0
+      )
+      ORDER BY ord
+  count:
+    sql: |
+      SELECT count(*) AS files
+      FROM v_change_file f JOIN v_change c ON c.id = f.change_id
+      WHERE c.stream_id = :stream_id AND c.target = :target
+        AND c.kind = CASE WHEN :target = '' THEN 'working' ELSE 'range' END
+        AND (:show <> 'changed' OR coalesce(f.untracked, 0) = 0)

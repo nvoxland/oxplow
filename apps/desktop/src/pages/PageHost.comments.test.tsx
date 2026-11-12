@@ -27,7 +27,7 @@ afterEach(() => {
   targets.length = 0;
 });
 
-const URI = "oxplow:oxplow/wiki?slug=notes";
+const URI = "oxplow:oxplow/knowledge?id=notes&store=oxwiki";
 
 function page(comments: boolean, viewParams: Record<string, string> = {}) {
   const run = fakeRun(

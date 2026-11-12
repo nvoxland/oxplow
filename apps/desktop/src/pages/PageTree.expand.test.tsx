@@ -90,7 +90,7 @@ test("an expanded row's page offers its viz's own actions as buttons, pressed on
   );
   fireEvent.click(getByLabelText("Expand"));
   fireEvent.click(await findByTestId("viz-action-backfill"));
-  await waitFor(() => expect(calls).toEqual([["run-1", "plan", "backfill", null, null, null, false]]));
+  await waitFor(() => expect(calls).toEqual([["run-1", "plan", "backfill", null, null, null, null, false]]));
 });
 
 function filesPage(folder: string, rows: (string | number)[][]): PageRun {

@@ -2,7 +2,7 @@
 when:
   page: oxplow/skill
   params:
-    uri: "oxplow:oxplow/skill?skill=oxplow/work-items"
+    uri: "oxplow:oxplow/skill?skill=oxplow/tasks"
 expect:
   see_also:
     contains:

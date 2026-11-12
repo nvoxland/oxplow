@@ -1,0 +1,9 @@
+{
+  "note": "Written by the desktop's rowMention (viz/vizModel.ts) and read by uri::prompt_refs::parse; both tests assert this text.",
+  "row_mention": {
+    "page": "acme/list#items",
+    "columns": ["id", "n"],
+    "row": ["a", 2],
+    "text": "[oxplow page acme/list#items row: id=\"a\", n=2] "
+  }
+}

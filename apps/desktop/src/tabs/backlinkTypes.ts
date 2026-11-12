@@ -16,6 +16,6 @@ export interface BacklinkEntry {
   /** Nothing resolves the ref (its extension is gone, its record
    *  deleted): shown as its raw text, muted. */
   dead?: boolean;
-  /** The work-item link type, when the edge is a work item's link. */
+  /** The task link type, when the edge is a task's link. */
   linkType?: string;
 }

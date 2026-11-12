@@ -182,6 +182,8 @@ pub(super) struct Actor {
     session_id: String,
     /// The prompt of the turn in flight.
     turn: Option<String>,
+    /// The agent's own id for the turn in flight, once it said.
+    harness_turn: Option<String>,
     pending: HashMap<String, Pending>,
     next_request: u64,
     /// Tool calls a person allowed (their writes are theirs to make).
@@ -191,6 +193,8 @@ pub(super) struct Actor {
     rejected: HashSet<String>,
     /// Tool calls already recorded as finished.
     recorded: HashSet<String>,
+    /// Tool calls whose start is on the record.
+    started: HashSet<String>,
     /// Paths written through `fs/write_text_file` this turn.
     fs_written: HashSet<String>,
     /// The system prompt, when it rides the first prompt.
@@ -222,11 +226,13 @@ impl Actor {
             events,
             session_id: String::new(),
             turn: None,
+            harness_turn: None,
             pending: HashMap::new(),
             next_request: 0,
             allowed: HashSet::new(),
             rejected: HashSet::new(),
             recorded: HashSet::new(),
+            started: HashSet::new(),
             fs_written: HashSet::new(),
             pending_system_prompt: None,
             replaying: false,
@@ -473,7 +479,12 @@ impl Actor {
             context: None,
         });
         self.host
-            .turn_started(self.thread(), &self.session_id, &text)
+            .turn_started_as(
+                self.thread(),
+                &self.session_id,
+                &text,
+                self.harness_turn.as_deref(),
+            )
             .await;
         self.fs_written.clear();
         self.turn = Some(text);
@@ -558,7 +569,24 @@ impl Actor {
             Incoming::Waiting(question) => self.host.awaiting_user(self.thread(), question).await,
             // A replayed history's children were recorded as they ran.
             Incoming::Subagent { .. } | Incoming::ChildCall { .. } if self.replaying => {}
-            Incoming::Subagent { change, id, kind } => {
+            Incoming::TurnStarted(id) if self.replaying => self.harness_turn = Some(id),
+            Incoming::TurnStarted(id) => {
+                // A turn oxplow's own prompt opened is already recorded: it
+                // takes the id now; one the person typed in the agent's UI
+                // is recorded with it.
+                if self.turn.is_some() {
+                    self.host
+                        .turn_identified(self.thread(), &self.session_id, &id)
+                        .await;
+                }
+                self.harness_turn = Some(id);
+            }
+            Incoming::Subagent {
+                change,
+                id,
+                kind,
+                spawned_in,
+            } => {
                 self.host
                     .subagent(
                         self.thread(),
@@ -566,6 +594,7 @@ impl Actor {
                         &change,
                         &id,
                         kind.as_deref(),
+                        spawned_in.as_deref(),
                     )
                     .await
             }
@@ -820,9 +849,18 @@ impl Actor {
         let Some(tool) = self.view.lock().transcript.tool(&id).cloned() else {
             return;
         };
-        if !matches!(tool.status, ToolStatus::Completed | ToolStatus::Failed)
-            || !self.recorded.insert(id.clone())
-        {
+        // A call the agent began is on the record from its start; its
+        // finish closes it.
+        if !matches!(tool.status, ToolStatus::Completed | ToolStatus::Failed) {
+            if let (true, Some(call)) = (self.started.insert(id.clone()), mapping::tool_use(&tool))
+            {
+                self.host
+                    .tool_started(self.thread(), &self.session_id, &call)
+                    .await;
+            }
+            return;
+        }
+        if !self.recorded.insert(id.clone()) {
             return;
         }
         // A write that finished after being rejected ignored the answer.
@@ -884,6 +922,7 @@ impl Actor {
     async fn on_turn_end(&mut self, result: Result<TurnEnd, String>) {
         // The turn is over (its prompt is on the `agent_turn` row).
         self.turn.take();
+        self.harness_turn.take();
         self.inject_due = true;
         // Clear the cards' "awaiting you" BEFORE the Stop is ingested, so
         // the Stop decides the status from the turn's final message.
@@ -891,13 +930,29 @@ impl Actor {
             self.cancel_pending();
             self.host.awaiting_user(self.thread(), None).await;
         }
+        // How the agent says it ended: a turn it cancelled is interrupted, a
+        // prompt that failed is errored with the agent's words.
         let (tokens, run) = match &result {
-            Ok(end) => (end.usage.clone(), end.run.clone()),
+            Ok(end) => {
+                let mut run = end.run.clone();
+                if matches!(end.stop_reason.as_str(), "cancelled" | "interrupted") {
+                    run.get_or_insert_with(Default::default).outcome =
+                        Some(oxplow_domain::hook::TurnOutcome::Interrupted);
+                }
+                (end.usage.clone(), run)
+            }
             Err(e) => {
                 self.push(ItemBody::Error {
                     message: format!("the prompt failed: {e}"),
                 });
-                (None, None)
+                (
+                    None,
+                    Some(oxplow_domain::hook::TurnRun {
+                        outcome: Some(oxplow_domain::hook::TurnOutcome::Errored),
+                        error: Some(e.clone()),
+                        ..Default::default()
+                    }),
+                )
             }
         };
         let answer = self.view.lock().transcript.last_answer();

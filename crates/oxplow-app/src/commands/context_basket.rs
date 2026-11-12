@@ -170,10 +170,10 @@ pub fn ops() -> Vec<Op> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_fixtures::services_with_effort;
+    use crate::test_fixtures::services_with_thread;
     use oxplow_domain::Actor;
 
-    async fn waiting(fx: &crate::test_fixtures::EffortFixture) -> Vec<(String, Option<String>)> {
+    async fn waiting(fx: &crate::test_fixtures::ThreadFixture) -> Vec<(String, Option<String>)> {
         let thread = fx.thread;
         fx.svc
             .db
@@ -189,7 +189,7 @@ mod tests {
     /// it back out.
     #[tokio::test]
     async fn add_and_undo() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let thread = fx.thread.to_string();
         fx.svc
             .commands
@@ -233,7 +233,7 @@ mod tests {
     /// Clearing empties what waits; undoing it puts everything back.
     #[tokio::test]
     async fn clear_and_undo() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let thread = fx.thread.to_string();
         for n in 0..2 {
             fx.svc
@@ -241,7 +241,7 @@ mod tests {
                 .run(
                     &Actor::Human,
                     ADD,
-                    json!({ "thread": thread, "uri": format!("oxplow:oxplow/wiki?slug=p{n}") }),
+                    json!({ "thread": thread, "uri": format!("oxplow:oxplow/knowledge?id=p{n}&store=oxwiki") }),
                     false,
                 )
                 .await
@@ -271,7 +271,7 @@ mod tests {
     /// The basket is the person's: an agent's add is refused.
     #[tokio::test]
     async fn an_agent_may_not_add() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let agent = Actor::Agent {
             session_id: None,
             thread_id: Some(fx.thread),
@@ -283,7 +283,7 @@ mod tests {
             .run(
                 &agent,
                 ADD,
-                json!({ "thread": fx.thread.to_string(), "uri": "oxplow:oxplow/wiki?slug=x" }),
+                json!({ "thread": fx.thread.to_string(), "uri": "oxplow:oxplow/knowledge?id=x&store=oxwiki" }),
                 false,
             )
             .await

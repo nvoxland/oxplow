@@ -1,0 +1,21 @@
+# The collapsed Work line: with nothing in progress it is the task the
+# thread finished last; once a task is in progress, that task alone.
+given:
+  - { command: oxplow.task.create, input: { title: First, stage: todo, assignee: thr1 }, bind: first }
+  - { command: oxplow.task.create, input: { title: Second, stage: todo, assignee: thr1 }, bind: second }
+  - { command: oxplow.task.create, input: { title: Later, stage: todo, assignee: thr1 }, bind: later }
+  - observe:
+      turn:
+        prompt: Do the first two
+        during:
+          - { command: oxplow.task.transition, input: { uri: $first.uri, to: done }, as: agent }
+          - { command: oxplow.task.transition, input: { uri: $second.uri, to: done }, as: agent }
+when: { part: oxplow/work-line, params: { thread_id: 1 } }
+expect: { loaders: { work_line: { rows: [{ title: Second, active: 0 }] } } }
+steps:
+  - given:
+      - observe:
+          turn:
+            prompt: Start the next one
+            during: [{ command: oxplow.task.transition, input: { uri: $later.uri, to: in_progress }, as: agent }]
+  - expect: { loaders: { work_line: { rows: [{ title: Later, active: 1 }] } } }

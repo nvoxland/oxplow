@@ -5,7 +5,7 @@
 //! carries its target plus a `context_chain` and `referenced` URIs;
 //! before the agent answers a comment we resolve each into a title +
 //! detail + body excerpt so the agent sees *what the highlighted thing
-//! is* (the commit subject, the task title+status, the wiki lead) without
+//! is* (the commit subject, the task title+status, the knowledge page lead) without
 //! a second tool round-trip. Lives in `oxplow-app` because it reaches
 //! across the store/VCS surfaces held by [`Services`].
 
@@ -23,14 +23,14 @@ use crate::Services;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RefSummary {
     pub uri: String,
-    /// Its resource (`oxplow/work_item`); empty when it isn't a URI.
+    /// Its resource (`oxplow/task`); empty when it isn't a URI.
     pub resource: String,
-    /// Primary human label — wiki/task title, commit subject.
+    /// Primary human label — knowledge page/task title, commit subject.
     pub title: Option<String>,
     /// Short secondary fact — task status, commit diffstat.
     pub detail: Option<String>,
     /// A lead excerpt of the body — task description, commit message
-    /// body, wiki lead — capped so it stays cheap in the agent's context.
+    /// body, knowledge page lead — capped so it stays cheap in the agent's context.
     pub body_excerpt: Option<String>,
     /// Whether anything resolved it. A URI whose resource or row is gone
     /// — an uninstalled extension's, a deleted record's — is a dead link:
@@ -57,8 +57,8 @@ impl RefSummary {
 /// gist, small enough not to bloat the agent's context.
 const EXCERPT_LEN: usize = 280;
 
-/// Resolve one URI into a [`RefSummary`]. Work items, commits, files,
-/// directories, wiki pages and findings have richer resolvers; any other
+/// Resolve one URI into a [`RefSummary`]. Tasks, commits, files,
+/// directories, knowledge pages and findings have richer resolvers; any other
 /// resource resolves through the view its declaration names (`resolve:`
 /// and `title:`), by its `ref`. Anything else — not a URI, an undeclared
 /// resource, a row that's gone — comes back `resolved: false`.
@@ -69,11 +69,11 @@ pub async fn resolve_ref(services: &Services, uri: &str) -> RefSummary {
     };
     let param = |name: &str| parsed.param(name).unwrap_or_default().to_string();
     let mut summary = match base.resource.as_str() {
-        r::WORK_ITEM => resolve_work_item(services, base, &parsed.identity()).await,
+        r::TASK => resolve_task(services, base, &parsed.identity()).await,
         r::COMMIT => resolve_commit(services, base, &param("sha")).await,
         r::FILE => resolve_file(services, base, &param("path")).await,
         r::DIR => resolve_directory(services, base, &param("path")).await,
-        r::WIKI => resolve_wiki(services, base, &param("slug")).await,
+        r::KNOWLEDGE => resolve_knowledge(services, base, &parsed.identity()).await,
         r::FINDING => resolve_finding(services, base, &param("id")).await,
         _ => resolve_owned(services, base, &parsed).await,
     };
@@ -127,13 +127,13 @@ pub async fn resolve_refs(services: &Services, uris: &[String]) -> Vec<RefSummar
     out
 }
 
-/// A work item, through the interface: the active list's items only,
+/// A task, through the interface: the active list's items only,
 /// whichever list it is; another stays bare.
-async fn resolve_work_item(services: &Services, mut summary: RefSummary, uri: &str) -> RefSummary {
+async fn resolve_task(services: &Services, mut summary: RefSummary, uri: &str) -> RefSummary {
     let row = services
         .sql
         .query_sql(
-            "SELECT title, state, body FROM v_work_item WHERE uri = ?1",
+            "SELECT title, state, body FROM v_task WHERE uri = ?1",
             vec![oxplow_db::SqlCell::Text(uri.to_string())],
             None,
         )
@@ -228,12 +228,18 @@ async fn resolve_directory(services: &Services, mut summary: RefSummary, path: &
     summary
 }
 
-async fn resolve_wiki(services: &Services, mut summary: RefSummary, slug: &str) -> RefSummary {
-    if let Ok(Some(page)) = services.wiki_page_store.get(slug).await {
+async fn resolve_knowledge(services: &Services, mut summary: RefSummary, uri: &str) -> RefSummary {
+    // A page of a store that isn't enabled is hidden: it resolves to nothing.
+    let enabled = oxplow_domain::uri::build::knowledge_of_uri(uri)
+        .is_some_and(|(store, _)| services.knowledge.get(&store).is_some());
+    if !enabled {
+        return summary;
+    }
+    if let Ok(Some(page)) = services.knowledge_pages.get(uri).await {
         summary.title = Some(page.title);
-        // body_excerpt is already a stored lead; re-cap defensively so a
+        // The excerpt is already a stored lead; re-cap defensively so a
         // long stored excerpt can't blow the agent's context budget.
-        summary.body_excerpt = excerpt(&page.body_excerpt);
+        summary.body_excerpt = excerpt(&page.excerpt);
     }
     summary
 }
@@ -321,14 +327,10 @@ mod tests {
     async fn resolves_task_title_and_status() {
         let dir = git_repo_with_commit("init", "");
         let services = Services::in_memory(dir.path()).await.unwrap();
-        let task = crate::test_fixtures::file_item(&services, serde_json::json!({ "title": "Fix the flaky test", "body": "It fails on CI only.\nSecond line.", "state": "in_progress" })).await;
+        let task = crate::test_fixtures::file_item(&services, serde_json::json!({ "title": "Fix the flaky test", "body": "It fails on CI only.\nSecond line.", "stage": "in_progress" })).await;
 
-        let summary = resolve_ref(
-            &services,
-            &build::work_item_uri("oxplow", &task.to_string()),
-        )
-        .await;
-        assert_eq!(summary.resource, "oxplow/work_item");
+        let summary = resolve_ref(&services, &build::task_uri("oxtask", &task.to_string())).await;
+        assert_eq!(summary.resource, "oxplow/task");
         assert_eq!(summary.title.as_deref(), Some("Fix the flaky test"));
         assert_eq!(summary.detail.as_deref(), Some("in_progress"));
         assert!(summary
@@ -338,10 +340,10 @@ mod tests {
             .starts_with("It fails on CI only."));
     }
 
-    /// A work item resolves through the interface: the active list's
+    /// A task resolves through the interface: the active list's
     /// items only — with none, even oxplow's task is bare.
     #[tokio::test]
-    async fn a_work_item_resolves_from_the_active_list_only() {
+    async fn a_task_resolves_from_the_active_list_only() {
         let dir = git_repo_with_commit("init", "");
         let services = Services::in_memory(dir.path()).await.unwrap();
         let task = crate::test_fixtures::file_item(
@@ -354,18 +356,14 @@ mod tests {
             .write()
             .unwrap()
             .personal_active_providers
-            .insert("work_items".into(), "none".into());
+            .insert("task_tracker".into(), "none".into());
         let config = crate::config_service::read_config(&services.config);
         services
             .capabilities
             .publish(&config, &services.db)
             .await
             .unwrap();
-        let summary = resolve_ref(
-            &services,
-            &build::work_item_uri("oxplow", &task.to_string()),
-        )
-        .await;
+        let summary = resolve_ref(&services, &build::task_uri("oxtask", &task.to_string())).await;
         assert_eq!(summary.title, None);
     }
 
@@ -373,10 +371,10 @@ mod tests {
     async fn unknown_task_id_is_bare() {
         let dir = git_repo_with_commit("init", "");
         let services = Services::in_memory(dir.path()).await.unwrap();
-        let summary = resolve_ref(&services, &build::work_item_uri("oxplow", "tsk999999")).await;
+        let summary = resolve_ref(&services, &build::task_uri("oxtask", "tsk999999")).await;
         assert_eq!(summary.title, None);
         assert_eq!(summary.detail, None);
-        assert_eq!(summary.uri, build::work_item_uri("oxplow", "tsk999999"));
+        assert_eq!(summary.uri, build::task_uri("oxtask", "tsk999999"));
     }
 
     #[tokio::test]
@@ -398,7 +396,7 @@ mod tests {
     }
 
     /// An old ref is no URI: a caller still saying `oxplow:oxplow/commit?sha=<sha>` or
-    /// `oxplow:oxplow/work_item?id=tsk1&provider=oxplow` gets a bare summary.
+    /// `oxplow:oxplow/task?id=tsk1&provider=oxtask` gets a bare summary.
     #[tokio::test]
     async fn old_refs_are_not_resolved() {
         let dir = git_repo_with_commit("Add the widget", "");
@@ -406,7 +404,7 @@ mod tests {
         let sha = head_sha(dir.path());
         for old in [
             format!("commit:{sha}"),
-            "work_item:oxplow:tsk1".into(),
+            "task:oxplow:tsk1".into(),
             "dir:.".into(),
         ] {
             let summary = resolve_ref(&services, &old).await;
@@ -420,13 +418,13 @@ mod tests {
     /// resource undeclared, its row gone — is a dead link, not an error.
     #[tokio::test]
     async fn a_resource_resolves_through_its_dataset_or_is_unresolved() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
-        let summary = resolve_ref(&fx.svc, &build::effort_uri(fx.effort)).await;
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let summary = resolve_ref(&fx.svc, &build::thread_uri(fx.thread)).await;
         assert!(summary.resolved, "{summary:?}");
         assert!(summary.title.is_some(), "{summary:?}");
 
         for uri in [
-            build::keyed(oxplow_domain::uri::resources::EFFORT, "eff999"),
+            build::keyed(oxplow_domain::uri::resources::REQUEST, "req999"),
             build::collector_uri("gone", "x"),
             "oxplow:mystery/thing?id=x".to_string(),
         ] {
@@ -486,29 +484,31 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resolves_wiki_title_and_lead() {
-        use oxplow_db::wiki_page_store::WikiPage;
+    async fn resolves_a_knowledge_pages_title_and_lead() {
         let dir = git_repo_with_commit("init", "");
         let services = Services::in_memory(dir.path()).await.unwrap();
         let now = oxplow_domain::Timestamp::now();
-        let page = WikiPage {
-            slug: "architecture".into(),
+        let page = oxplow_db::KnowledgePage {
+            uri: build::knowledge_uri("oxwiki", "architecture"),
+            store: "oxwiki".into(),
+            id: "architecture".into(),
+            kind: None,
             title: "System Architecture".into(),
-            body_path: "architecture.md".into(),
-            body_excerpt: "The workspace isolation rule.".into(),
+            url: None,
+            author: None,
+            excerpt: "The workspace isolation rule.".into(),
             body_size_bytes: 30,
             file_refs: vec![],
             dir_refs: vec![],
-            related_notes: vec![],
             created_at: now,
             updated_at: now,
         };
         services
             .db
-            .transaction(move |tx| oxplow_db::wiki_page_store::upsert_tx(tx, &page, "", ""))
+            .transaction(move |tx| oxplow_db::knowledge_page_store::upsert_tx(tx, &page, "", ""))
             .await
             .unwrap();
-        let summary = resolve_ref(&services, &build::wiki_uri("architecture")).await;
+        let summary = resolve_ref(&services, &build::knowledge_uri("oxwiki", "architecture")).await;
         assert_eq!(summary.title.as_deref(), Some("System Architecture"));
         assert_eq!(
             summary.body_excerpt.as_deref(),

@@ -1,5 +1,5 @@
 # triage/publish-summary: a finished summary run's answer, written to the
-# wiki page `triage-summary` (the run's result is read back through
+# knowledge page `triage-summary` (in the project's one knowledge store) (the run's result is read back through
 # `jobs.read`: the event carries only which run finished; `where:` in the
 # manifest keeps it to the summarize job).
 
@@ -14,5 +14,5 @@ def transform(x):
         return {"skip": "the model answered nothing"}
     return {"commands": [{
         "name": "oxplow.knowledge.write_page",
-        "input": {"slug": "triage-summary", "title": "TODO summary", "body": text},
+        "input": {"id": "triage-summary", "title": "TODO summary", "body": text},
     }]}

@@ -6,26 +6,30 @@
 //! - [`registry`] — the instances (`Services.providers`): reconciling
 //!   them with `extensionInstances`, their bus commands, health, restart
 //!   with backoff and automatic disable;
-//! - [`work_items`] — `ExternalWorkItems`, the work-items capability over
-//!   an instance;
-//! - [`effort_policy`] — `ExternalEffortPolicy`, the effort policy over an
-//!   instance;
+//! - [`endpoint`] — what a capability's adapter calls: an instance, or
+//!   [`script`] — a script implementation an extension declares;
+//! - [`tasks`] — `ExternalTaskTracker`, the task tracker capability over
+//!   an endpoint;
 //! - [`filesystems`] — `ExternalFileSystem`, a filesystem over an instance;
 //! - [`sync`] — reading an instance's collectors (`oxplow.provider.sync`, the
 //!   schedule), checkpointed.
 
 pub mod agent_harness;
-pub mod effort_policy;
+pub mod endpoint;
 pub mod filesystems;
 pub mod host;
 pub mod knowledge;
 pub mod oauth;
 pub mod registry;
+pub mod script;
 pub mod snapshots;
 pub mod spec;
 pub mod sync;
-pub mod work_items;
+pub mod tasks;
+pub mod worktree_tree;
 
+#[cfg(test)]
+mod script_capabilities;
 #[cfg(test)]
 mod tests;
 

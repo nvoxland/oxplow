@@ -191,7 +191,7 @@ async fn a_page_whose_needs_are_unmet_says_so_and_runs_nothing() {
     };
     let r = run_with(Some(crate::capabilities::Active::default())).await;
     let inactive = r.inactive.expect("unmet");
-    assert_eq!(inactive.needs, ["work_items"]);
+    assert_eq!(inactive.needs, ["task_tracker"]);
     assert!(!inactive.message.is_empty());
     assert!(r.loaders.is_empty());
     // Where nothing says what's active (a check), it runs.
@@ -279,6 +279,24 @@ async fn a_change_dirties_what_reads_it_and_what_follows() {
         dirty_loaders(&r.page, &r, &["v_dataset".to_string()], &none),
         ["q"]
     );
+}
+
+/// A page loader reads what its loader's chain on the other page read: a
+/// borrowed loader over a temp table still follows the dataset behind it,
+/// so an open run re-runs it (a worktree's Branch part borrows
+/// `branch-status`'s `facts`, which reads `v_branch_divergence` through
+/// `status` and `marks`).
+#[tokio::test]
+async fn a_page_loader_follows_what_its_borrowed_chain_read() {
+    let (_dir, svc) = fixture().await;
+    let r = run(&svc, "acme/borrows-after", &[]).await;
+    assert_eq!(r.loaders["borrowed"].error, None);
+    let none: [String; 0] = [];
+    assert_eq!(
+        dirty_loaders(&r.page, &r, &["v_dataset".to_string()], &none),
+        ["borrowed"]
+    );
+    assert!(unreached(&r, &["v_dataset".to_string()], &none).is_empty());
 }
 
 #[tokio::test]
@@ -479,11 +497,11 @@ async fn a_replaceable_node_runs_the_replacement_that_stands_in_for_it() {
     );
     write(
         ".oxplow/extensions/acme/pages/board.yaml",
-        "title: Board\nparams: [{ name: scope, default: all }, { name: thread_id }]\nloaders:\n  own: { sql: \"SELECT 1 AS n\" }\nview: { id: cards, viz: table, from: own, replaceable: work_item.board }\n",
+        "title: Board\nparams: [{ name: scope, default: all }, { name: thread_id }]\nloaders:\n  own: { sql: \"SELECT 1 AS n\" }\nview: { id: cards, viz: table, from: own, replaceable: task.board }\n",
     );
     write(
         ".oxplow/extensions/beta/extension.yaml",
-        "manifest: 2\nname: beta\nintent:\n  purpose: test\nui:\n  mounts:\n    - { page: lanes, at: work_item.board }\n",
+        "manifest: 2\nname: beta\nintent:\n  purpose: test\nui:\n  mounts:\n    - { page: lanes, at: task.board }\n",
     );
     write(
         ".oxplow/extensions/beta/pages/lanes.yaml",
@@ -508,7 +526,7 @@ async fn a_replaceable_node_runs_the_replacement_that_stands_in_for_it() {
         .write()
         .unwrap()
         .replacements
-        .insert("work_item.board".into(), "oxplow".into());
+        .insert("task.board".into(), "oxplow".into());
     let own = run(&svc, "acme/board", &[]).await;
     assert_eq!(own.tree.replaced_by, None);
     assert!(own.tree.embed.is_none(), "{:?}", own.tree);

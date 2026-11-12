@@ -114,7 +114,12 @@ impl AgentHarness for Codex {
         let program = query.resolve_program("codex").map(PathBuf::from);
         let socket = app_server::control_socket(&app_server::codex_home(home));
         let list = async {
-            let (server, _) = app_server::AppServer::connect(&socket, program.as_deref()).await?;
+            let (server, _) = app_server::AppServer::connect_for(
+                &socket,
+                program.as_deref(),
+                app_server::LISTING,
+            )
+            .await?;
             server
                 .request(
                     "thread/list",

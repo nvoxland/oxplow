@@ -151,12 +151,8 @@ pub const MANIFEST: &[Capability] = &[
     // A dry run for an agent writing a source in its worktree.
     agent("oxplow_preview_collector"),
     dataset("list_streams", &["v_stream"]),
-    // The work-item interface, read for the agent; the UI reads the
-    // datasets (`v_work_item`).
-    // Per-effort metric roll-up for the task-page panel (tsk250): the
-    // agent gets the same numbers as prompt text via oxplow-bundled's
-    // `metric-deltas` advisory (over `v_effort_metric_delta`).
-    dataset("list_efforts_in_window", &["v_effort"]),
+    // The task interface, read for the agent; the UI reads the
+    // datasets (`v_task`).
     // Metrics read through SQL (`v_metric_spec`, `v_fact`, `metric_grid()`)
     // on both surfaces, and change through the `metric.*` commands
     // (`run_command`); nothing metric-specific is left on MCP (P4.8).
@@ -327,8 +323,8 @@ pub const MANIFEST: &[Capability] = &[
     // ---- agent-only (orchestration / agent affordances) ----
     // One reader for anything a ref names.
     agent("oxplow_read"),
-    agent("oxplow_wiki_ref_drift"),
-    // ---- collection (effort-scoped observations) ----
+    agent("oxplow_knowledge_drift"),
+    // ---- collection (observations) ----
     agent("oxplow_code_definition"),
     agent("oxplow_code_hover"),
     agent("oxplow_code_references"),
@@ -336,10 +332,10 @@ pub const MANIFEST: &[Capability] = &[
     agent("oxplow_code_workspace_symbols"),
     agent("oxplow_code_call_hierarchy"),
     agent("oxplow_navigate"),
-    agent("oxplow_thread_work"),
-    agent("oxplow_work_next"),
-    agent("oxplow_effort_summary"),
+    agent("oxplow_thread_tasks"),
+    agent("oxplow_next_task"),
     agent("oxplow_catalog"),
+    agent("oxplow_request_summary"),
     // ---- git ----
     agent("oxplow_vcs_status"),
     agent("oxplow_diff"),
@@ -407,7 +403,7 @@ pub const MANIFEST: &[Capability] = &[
         "records the person's use of oxplow, as they work",
     ),
     // ---- snapshots (UI presentation helpers) ----
-    dataset("list_wiki_slugs_for_snapshots", &["v_snapshot_file"]),
+    dataset("list_knowledge_pages_for_snapshots", &["v_snapshot_file"]),
     ui(
         "get_blob_storage_bytes",
         "the blob store's size on disk, for Local History's storage card",
@@ -432,8 +428,6 @@ pub const MANIFEST: &[Capability] = &[
         "get_workspace_context",
         "the window's project path and VCS state, for the shell",
     ),
-    // ---- efforts ----
-    dataset("list_efforts_at_snapshots", &["v_effort"]),
     // ---- workspace file I/O (agent uses Read/Write tools) ----
     ui(
         "read_workspace_file",

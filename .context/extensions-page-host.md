@@ -115,7 +115,7 @@ the user guide is `docs/guide/pages.md`.
     the deployed entity collector. `oxplow.extension.deploy` names no
     stream: it deploys the main stream's copy.
     `site_search` is the exception by design: omitted, it searches every
-    stream; it indexes pages as well as the wiki.
+    stream; it indexes pages as well as knowledge pages.
   - **Over IPC (the UI)** they show the live set: `list_extensions`,
     `get_page`, `load_component` and `invoke_component_command` take no
     stream; `open_page`, `run_page` and `run_page_action` take one only for
@@ -147,8 +147,8 @@ the user guide is `docs/guide/pages.md`.
     action in that submenu (a prominent one can't be in one); the commands
     about the page's resource are not in a submenu, they sit among the
     actions at the top level, by label. Any action may name an `icon`
-    from `extension_resources::ICONS` (the desktop's `src/icons.ts`): alone
-    on its button in the bar, beside its label in a menu.
+    (one oxplow draws, or the extension's own svg; see below): alone on its
+    button in the bar, beside its label in a menu.
     **A page is a function of its tab entry** (`tabs/session.ts`): its
     params are its URI's (`oxplow:oxplow/page?page=<namespace>/<slug>&k=v#f=v`): the
     `?` holds its `resource` params, the `#` its filters and picks. A change
@@ -220,9 +220,17 @@ the user guide is `docs/guide/pages.md`.
     last path segment) and `|url` (a web page's host and path, cut to 40),
     refused if unknown. A renderer's label names params of what it renders
     (else a load error), a route's its `params`. A page's `icon` is one of
-    the resource icons (`ICONS`; an unknown one is a load error); the tab
-    strip, launcher, Go To lists and backlinks draw it (`PageKindIcon` by
-    the page's id). A **custom page** is a page whose `view:` is one
+    the resource icons (`ICONS`) or an `assets/<name>.svg` of the
+    extension's own; the tab strip, launcher, Go To lists and backlinks draw
+    it (`PageKindIcon` by the page's id). **Every icon a page names** (its
+    own, its choices' options', its sections', its actions':
+    `pages::refs::for_each_icon`) is resolved at load
+    (`extension_resources::resolve_icon`, the same check and svg reading as
+    a resource's icon): an svg becomes a `data:` URI, and an unknown name or
+    a missing or unsafe svg is a load error (`page.invalid_icon`) naming
+    where it is. `ICONS` only shrinks: an icon oxplow doesn't draw comes as
+    an svg in the extension (oxplow-foundation's `assets/file-diff.svg` and
+    `file-plus.svg`, the Git panel's toggle). A **custom page** is a page whose `view:` is one
     `component` node: the extension's own `custom_components` entry fills the
     page body under core's nav bar, told the page's view params, history
     state, stream and thread in `init.page`, setting its title and actions as
@@ -282,9 +290,17 @@ the user guide is `docs/guide/pages.md`.
     and the rail does not draw it). `body`, `badge`, `collapsed` and
     `count` name **pages of the same extension, by slug**. `open`, a
     `page` URI, is the page its header opens — a core page it summarizes,
-    as Comments opens the inbox; absent, the body page. `collapsed` is a
-    page shown compact while the panel is collapsed, as its summary
-    (absent, a collapsed panel is just its header). `count` is a page whose
+    as Comments opens the inbox; absent, the body page. `collapsed` is the
+    extension's own page shown while the panel is collapsed: the same view,
+    smaller (Go To's is its pages as `viz: icons`); absent, a collapsed panel
+    is just its header. A body with more rows than the rail shows ends in
+    "+N more", which grows the panel to the whole rail until its shrink
+    button or Escape (`pages-and-tabs.md` "A panel grows to the whole
+    rail"). Every part — collapsed, count, badge — takes the
+    body's toggles that its page declares, so it follows the header's pick
+    (Uncommitted's count counts what its tree shows). A body's choice param is the
+    header's toggle; an option with an `icon` is that icon alone there, its
+    label the hover (Go To: bookmarks, recent, most visited). `count` is a page whose
     first cell (else row count) is the header's count, raising no alert; with
     a `badge` too, the count page's number shows and the badge still feeds
     Alerts (`panelCount`). (`Extension.panels`, `ExtensionPanel`; checked at
@@ -295,7 +311,7 @@ the user guide is `docs/guide/pages.md`.
     (`crates/oxplow-app/src/pages/panels.rs`): which page each part runs
     (`page_of`), with what (`part_request`: the scope's id from the view —
     the stream and thread it's shown for, as every page takes them — and,
-    for the body only, the toggles in force), the toggles a body's choice
+    for every part, the toggles in force that its page declares), the toggles a body's choice
     params give (`choices`: the viewer's pick while the body offers it, else
     its default, else its first option), the header's count (the part it
     counts by, `counting_part`: the count page, else the badge; a count
@@ -316,8 +332,8 @@ the user guide is `docs/guide/pages.md`.
     panels stay ordinary open page runs: actions, visibility and reconnect
     work on them as on any page. The body renders compact; the badge's alert count shows
     on the panel, and the **Alerts** panel and page (the dock's bell) list
-    every firing badge. oxplow-bundled's Waiting on You is a panel whose
-    badge is its own page. A page dropped by `public_contracts` takes the
+    every firing badge. foundation's Waiting on you is a panel whose
+    count part reads its own page's loader. A page dropped by `public_contracts` takes the
     panel parts that name it with it.
   - **Actions are commands**: `actions:` on a page declares
     `{ id, label, command, input?, … }` — a button in the nav bar or its ☰

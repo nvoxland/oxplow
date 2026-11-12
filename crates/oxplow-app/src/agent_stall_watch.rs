@@ -218,18 +218,22 @@ mod tests {
         let (ty, v, body) = match kind {
             HookKind::UserPromptSubmit => (
                 "agent.prompt.submitted",
-                2,
-                serde_json::json!({"thread": "thr1", "reprompt": false}),
+                3,
+                serde_json::json!({"thread": "thr1", "reprompt": false, "source": "person"}),
             ),
             HookKind::PreToolUse => (
                 "agent.tool.requested",
-                1,
+                4,
                 serde_json::json!({"tool": tool, "decision": "allowed"}),
             ),
-            HookKind::PostToolUse => ("agent.tool.finished", 1, serde_json::json!({"tool": tool})),
+            HookKind::PostToolUse => (
+                "agent.tool.finished",
+                4,
+                serde_json::json!({"tool": tool, "kind": "shell"}),
+            ),
             HookKind::Stop => (
                 "agent.turn.ended",
-                3,
+                4,
                 serde_json::json!({"turn": "trn1", "thread": "thr1", "outcome": "completed"}),
             ),
             other => panic!("{other:?} is not logged in these tests"),

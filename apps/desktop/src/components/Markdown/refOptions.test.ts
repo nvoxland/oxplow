@@ -16,12 +16,12 @@ test("files match every word of the query: a name starting with one first, then 
 test("search hits come first, without file content matches, then files", () => {
   const hit = (resource: string, uri: string, title: string): SearchHit => ({ resource, uri, title, stream_id: null, snippet: "", score: 1 });
   const merged = mergeRefOptions(
-    [hit("oxplow/wiki", "oxplow:oxplow/wiki?slug=notes", "Notes"), hit("oxplow/file", "oxplow:oxplow/file?path=a.ts", "a.ts")],
+    [hit("oxplow/knowledge", "oxplow:oxplow/knowledge?id=notes&store=oxwiki", "Notes"), hit("oxplow/file", "oxplow:oxplow/file?path=a.ts", "a.ts")],
     fileOptions(["src/notes.ts"], "notes", 10),
     10,
   );
   expect(merged.map((o) => [o.kind, o.title])).toEqual([
-    ["wiki", "Notes"],
+    ["knowledge", "Notes"],
     ["file", "src/notes.ts"],
   ]);
 });

@@ -34,12 +34,12 @@ per recording, with a `capture_id` that joins `v_capture`); each
 `MEASURE('<key>')` is a metric's series on it, computed with the metric's
 own aggregation and time semantics. The optional `dim` slices it: any
 dimension the facts carry, or `oxplow.stream` / `oxplow.thread` /
-`oxplow.effort` / `oxplow.work_item` (the effort's work-item ref) /
-`oxplow.vcs_rev`. "Tokens per work item per week" is:
+`oxplow.task` /
+`oxplow.vcs_rev`. "Tokens per task per week" is:
 
 ```sql
-SELECT bucket, "oxplow.work_item", MEASURE('oxplow.tokens.total')
-FROM metric_grid('week', 'oxplow.work_item')
+SELECT bucket, "oxplow.task", MEASURE('oxplow.tokens.total')
+FROM metric_grid('week', 'oxplow.task')
 ```
 
 **What's behind a metric** — the located items, as they stand now — is

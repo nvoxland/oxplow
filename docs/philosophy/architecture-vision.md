@@ -15,7 +15,7 @@ explicitly not an IDE.
 
 Useful understanding requires more than a transcript or a diff. Oxplow
 connects development activity, code structure, changes, tests, metrics,
-decisions, claims, and knowledge. Collectors bring data in; datasets derive
+and knowledge. Collectors bring data in; datasets derive
 and connect it; measures, metrics, and dimensions make comparisons
 possible; pages and the agent turn it into useful explanations and views.
 
@@ -23,7 +23,7 @@ Built-in sources are a starting point. Every project has its own
 architecture, vocabulary, external systems, and questions. Developers
 and their agents should be able to add what gets collected and analyzed,
 then connect it to the existing record. A deployment event linked to a
-change, a test result linked to an effort, and a decision linked to the
+change, a test result linked to a request, and a knowledge page linked to the
 affected code together can explain more than any one source alone.
 
 Questions need not start with a dashboard. Ask the agent, inspect the
@@ -40,7 +40,7 @@ eventually, more broadly.
 The foundation should own the plumbing: identity, references, provenance,
 query contracts, scheduling, cancellation, permissions, consent, retries,
 state, lifecycle, and diagnostics. Extension authors should spend their
-effort on their unique analysis, presentation, or workflow.
+time on their unique analysis, presentation, or workflow.
 
 This is the design goal; the infrastructure is not equally complete for
 every contribution type today. See [Extensions](../reference/extensions.md)
@@ -72,14 +72,14 @@ analyses, interpretations, presentations, and replaceable workflow policy.
 Built-in features should exercise the same public mechanisms wherever
 practical.
 
-Effort attribution and command authorization need consistent rules.
+Request attribution and command authorization need consistent rules.
 Which review signals matter, how work is grouped, which AI prompt
-extracts a decision, or how a result is displayed should be replaceable.
+summarizes a request, or how a result is displayed should be replaceable.
 
 ## Current shape and future direction
 
 Today the product has isolated worktree streams; threads with agent
-sessions; turn/tool-call recording; optional effort and work-item
+sessions; turn/tool-call recording; request and optional task
 integration; snapshots; a semantic SQL layer; metrics and dimensions;
 declarative extensions; and code drill-down. A desktop shell connects to
 a per-project Rust daemon with SQLite state and an event log.

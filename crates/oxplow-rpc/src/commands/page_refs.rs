@@ -7,7 +7,7 @@
 //! - `list_outbound(source)` — what this page points to. Drives the
 //!   Outbound dropdown.
 //!
-//! The reader joins labels (wiki title, task title, commit subject) at
+//! The reader joins labels (knowledge page title, task title, commit subject) at
 //! read time so the renderer doesn't need a second round-trip per row.
 //! Labels are best-effort — when the other end is gone (e.g. a deleted
 //! task) the label is `None` and the renderer falls back to its URI.
@@ -30,7 +30,7 @@ pub struct BacklinkEdge {
     pub ref_type: String,
     pub source_extra: Option<String>,
     /// Human label for the other end (the source of a backlink, the
-    /// target of an outbound edge): wiki title, task title, commit
+    /// target of an outbound edge): knowledge page title, task title, commit
     /// subject, …. The renderer falls back to the URI when None.
     pub source_label: Option<String>,
     /// Whether anything resolves the row the label belongs to. A link to
@@ -95,7 +95,7 @@ mod tests {
         let (svc, _dir) = crate::test_support::services().await;
         let out = crate::dispatch(
             "list_backlinks",
-            serde_json::json!({ "target": "oxplow:oxplow/wiki?slug=some-slug" }),
+            serde_json::json!({ "target": "oxplow:oxplow/knowledge?id=some-slug&store=oxwiki" }),
             &svc,
         )
         .await
@@ -108,7 +108,7 @@ mod tests {
         let (svc, _dir) = crate::test_support::services().await;
         let out = crate::dispatch(
             "list_outbound",
-            serde_json::json!({ "source": "oxplow:oxplow/wiki?slug=some-slug", "limit": 5 }),
+            serde_json::json!({ "source": "oxplow:oxplow/knowledge?id=some-slug&store=oxwiki", "limit": 5 }),
             &svc,
         )
         .await
@@ -133,10 +133,10 @@ mod tests {
             .commands
             .run(
                 &oxplow_domain::Actor::Human,
-                "oxplow.work_item.create",
+                "oxplow.task.create",
                 serde_json::json!({
                     "title": "Fix it",
-                    "thread": thread.to_string(),
+                    "assignee": thread.to_string(),
                     "links": [{ "target": "oxplow:oxplow/collector?collector=ghost/none", "link_type": "about" }],
                 }),
                 false,

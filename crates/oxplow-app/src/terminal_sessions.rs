@@ -567,6 +567,12 @@ impl TerminalSessionRegistry {
                             let exit = crate::hook_ingest::HookEnvelope {
                                 session_title: None,
                                 turn_run: None,
+                                // The pane's process exited: the end the
+                                // session's harness would not have reported.
+                                reading: oxplow_domain::hook::HookReading {
+                                    end_reason: Some("exit".into()),
+                                    ..Default::default()
+                                },
                                 kind: oxplow_domain::HookKind::SessionEnd,
                                 thread_id: Some(pane.thread),
                                 stream_id: None,
@@ -577,7 +583,7 @@ impl TerminalSessionRegistry {
                                 decision: None,
                                 tool: None,
                                 subagent: None,
-                                peer: None,
+                                harness_turn: None,
                             };
                             if let Err(err) = ingest.ingest(exit).await {
                                 warn!(?err, "recording an agent's exit failed");
@@ -994,7 +1000,7 @@ mod tests {
     /// `SessionEnd` for its agent session (Codex posts none of its own).
     #[tokio::test]
     async fn an_agent_panes_exit_ends_its_session() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let session = svc
             .agent_session_store
@@ -1060,7 +1066,7 @@ mod tests {
     #[tokio::test]
     async fn an_agent_panes_pid_is_recorded_on_its_session() {
         use oxplow_domain::stores::AgentSessionStore as _;
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let session = svc
             .agent_session_store

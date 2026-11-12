@@ -98,14 +98,17 @@ impl ChatHost for Host {
         _s: &str,
         answer: Option<&str>,
         tokens: Option<&TurnTokens>,
-        _run: Option<&oxplow_domain::hook::TurnRun>,
+        run: Option<&oxplow_domain::hook::TurnRun>,
     ) {
         self.log.lock().push(format!(
-            "turn_ended {}{}",
+            "turn_ended {}{}{}",
             tokens
                 .map(|t| format!("{}/{}", t.input, t.output))
                 .unwrap_or_default(),
-            answer.map(|a| format!(" answer={a}")).unwrap_or_default()
+            answer.map(|a| format!(" answer={a}")).unwrap_or_default(),
+            run.and_then(|r| r.outcome)
+                .map(|o| format!(" outcome={}", o.as_str()))
+                .unwrap_or_default()
         ));
     }
     async fn named(&self, _t: &ThreadId, _s: &str, title: &str) {
@@ -118,6 +121,7 @@ impl ChatHost for Host {
         change: &crate::chat::conn::SubagentChange,
         id: &str,
         _kind: Option<&str>,
+        _spawned_in: Option<&str>,
     ) {
         let what = match change {
             crate::chat::conn::SubagentChange::Started => "started",
@@ -800,6 +804,22 @@ async fn cancel_answers_open_cards() {
     assert_eq!(rig.agent_text(), vec!["permission: cancelled".to_string()]);
 }
 
+/// A turn the agent cancelled ends `interrupted`, not `completed`.
+#[tokio::test]
+async fn a_cancelled_turn_is_recorded_interrupted() {
+    let mut rig = open(Host::default()).await;
+    rig.prompt("fake:wait").await;
+    rig.wait_status(ChatStatus::Running).await;
+    rig.mgr.cancel(&session()).unwrap();
+    rig.wait_status(ChatStatus::Idle).await;
+    let log = rig.host.log.lock().clone();
+    assert!(
+        log.iter()
+            .any(|l| l.starts_with("turn_ended") && l.ends_with(" outcome=interrupted")),
+        "{log:?}"
+    );
+}
+
 #[tokio::test]
 async fn a_second_prompt_during_a_turn_is_refused_not_queued() {
     let mut rig = open(Host::default()).await;
@@ -1292,10 +1312,196 @@ mod codex {
             sent[start..start + 3],
             ["thread/start", "thread/goal/set", "thread/goal/clear"]
         );
+        // The goal is set paused: an active goal makes Codex run a turn on
+        // its own with no prompt (recorded on 0.167.1 and checked live: an
+        // active goal starts one, a paused goal still writes the rollout and
+        // starts none), which costs quota and is nobody's turn.
+        let goal = fake
+            .received()
+            .into_iter()
+            .find(|v| v["method"] == "thread/goal/set")
+            .unwrap();
+        assert_eq!(goal["params"]["status"], "paused");
         let (rig, fake) = open_codex(Host::default(), "thread/resume").await;
         assert!(!methods(&fake).iter().any(|m| m.starts_with("thread/goal")));
         // Named once the session it names is recorded.
         assert_eq!(rig.host.log(), ["started thr-x", "named Earlier work"]);
+    }
+
+    /// A turn Codex starts by itself (no `userMessage`) is nobody's prompt:
+    /// its calls and end are recorded, but no person's turn opens for it.
+    #[tokio::test]
+    async fn a_turn_with_no_prompt_is_not_a_persons_turn() {
+        let (rig, fake) = open_codex(Host::default(), "thread/start").await;
+        fake.push(note("turn/started", json!({"turn": {"id": "u0"}})));
+        fake.push(note(
+            "turn/completed",
+            json!({"turn": {"id": "u0", "status": "completed"}}),
+        ));
+        for _ in 0..50 {
+            if rig.host.count("turn_ended") > 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(rig.host.count("turn_ended"), 1, "{:?}", rig.host.log());
+        assert_eq!(rig.host.count("turn_started"), 0, "{:?}", rig.host.log());
+    }
+
+    /// A recorded Codex session (a `tests/fixtures/codex/*.jsonl` file) pushed
+    /// through a real session on the scripted daemon, as the observer's
+    /// connection got it: every message the daemon sent, its thread renamed
+    /// to this session's. Returns the host's log once it stops growing.
+    async fn replay_fixture(text: &str) -> Vec<String> {
+        let (rig, fake) = open_codex(Host::default(), "thread/start").await;
+        let lines: Vec<serde_json::Value> = text
+            .lines()
+            .skip(1)
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        let ours = lines
+            .iter()
+            .find_map(|v| v.pointer("/response/thread/id")?.as_str())
+            .unwrap()
+            .to_string();
+        for v in &lines {
+            if v.get("method").is_some() {
+                let said = v.to_string().replace(&ours, THREAD);
+                let mut m: serde_json::Value = serde_json::from_str(&said).unwrap();
+                for k in ["conn", "purpose", "emittedAtMs"] {
+                    m.as_object_mut().unwrap().remove(k);
+                }
+                fake.push(m);
+            }
+        }
+        let mut seen = 0;
+        let mut steady = 0;
+        while steady < 8 {
+            tokio::time::sleep(Duration::from_millis(40)).await;
+            let now = rig.host.log().len();
+            steady = if now == seen { steady + 1 } else { 0 };
+            seen = now;
+        }
+        rig.host.log()
+    }
+
+    /// Codex starts an ephemeral naming thread after every user message (it
+    /// arrives as `thread/started`, goes idle or `systemError`, and closes a
+    /// minute later), and a thread of an earlier session on the same daemon
+    /// arrives as `notLoaded` and `thread/closed`. Neither is this session's:
+    /// no session, turn or tool call of the host's comes of them. Replays each
+    /// recording through a session: one session, and as many turns as the
+    /// person's prompts.
+    #[tokio::test]
+    async fn another_thread_on_the_daemon_is_not_this_sessions() {
+        for (name, text, turns) in [
+            (
+                "approval",
+                include_str!("../../tests/fixtures/codex/approval.jsonl"),
+                1,
+            ),
+            (
+                "interrupt",
+                include_str!("../../tests/fixtures/codex/interrupt.jsonl"),
+                1,
+            ),
+            (
+                "background_terminal",
+                include_str!("../../tests/fixtures/codex/background_terminal.jsonl"),
+                1,
+            ),
+            (
+                "subagent",
+                include_str!("../../tests/fixtures/codex/subagent.jsonl"),
+                1,
+            ),
+            (
+                "failed_turn",
+                include_str!("../../tests/fixtures/codex/failed_turn.jsonl"),
+                1,
+            ),
+        ] {
+            assert!(
+                text.contains("\"ephemeral\": true"),
+                "{name} shows the naming thread"
+            );
+            let log = replay_fixture(text).await;
+            assert_eq!(
+                log.iter().filter(|l| l.starts_with("started")).count(),
+                1,
+                "{name}: {log:?}"
+            );
+            assert_eq!(
+                log.iter().filter(|l| l.starts_with("turn_started")).count(),
+                turns,
+                "{name}: {log:?}"
+            );
+            assert!(
+                log.iter().filter(|l| l.starts_with("turn_ended")).count() <= 1,
+                "{name}: {log:?}"
+            );
+            assert_eq!(
+                log.iter().filter(|l| l.starts_with("named")).count(),
+                usize::from(name != "failed_turn"),
+                "only this thread's name counts: {name}: {log:?}"
+            );
+        }
+    }
+
+    /// The recorded failed turn through a session: one turn, ended once,
+    /// `errored` with the final error; the retries in between end nothing.
+    #[tokio::test]
+    async fn a_recorded_failed_turn_is_one_errored_turn() {
+        let log =
+            replay_fixture(include_str!("../../tests/fixtures/codex/failed_turn.jsonl")).await;
+        let ended: Vec<&String> = log.iter().filter(|l| l.starts_with("turn_ended")).collect();
+        assert_eq!(ended, ["turn_ended  outcome=errored"], "{log:?}");
+        assert!(!log.iter().any(|l| l.starts_with("awaiting")), "{log:?}");
+    }
+
+    /// Recorded on 0.167.1: Esc ends the turn `interrupted`, the command
+    /// goes on as a background terminal, and `/stop` fails its call later. The
+    /// late failure is recorded on its call; no turn starts or ends for it.
+    #[tokio::test]
+    async fn a_late_failed_call_after_an_interrupted_turn_opens_no_turn() {
+        let (rig, fake) = open_codex(Host::default(), "thread/start").await;
+        let cmd = |status: &str| {
+            note(
+                if status == "inProgress" {
+                    "item/started"
+                } else {
+                    "item/completed"
+                },
+                json!({"item": {"type": "commandExecution", "id": "c1", "command": "sleep 120",
+                    "status": status, "commandActions": [{"type": "unknown", "command": "sleep 120"}],
+                    "exitCode": if status == "failed" { json!(-1) } else { json!(null) }}}),
+            )
+        };
+        fake.push(note("turn/started", json!({"turn": {"id": "u1"}})));
+        fake.push(note("item/completed", json!({"item": {"type": "userMessage", "id": "m1", "content": [{"type": "text", "text": "sleep"}]}})));
+        fake.push(cmd("inProgress"));
+        fake.push(note(
+            "turn/completed",
+            json!({"turn": {"id": "u1", "status": "interrupted", "error": null}}),
+        ));
+        fake.push(cmd("failed"));
+        for _ in 0..100 {
+            if rig.host.count("tool shell") > 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let log = rig.host.log();
+        let tail: Vec<&String> = log.iter().filter(|l| !l.starts_with("started")).collect();
+        assert_eq!(
+            tail,
+            [
+                "turn_started sleep",
+                "turn_ended  outcome=interrupted",
+                "tool shell"
+            ],
+            "{log:?}"
+        );
     }
 
     /// How many context items the daemon was given so far.
@@ -1538,6 +1744,55 @@ mod codex {
         assert_eq!(thread, THREAD, "the same thread, not another");
         assert!(rig.mgr.is_open(&session()));
         assert!(methods(&back).contains(&"thread/resume".to_string()));
+    }
+
+    /// Codex's daemon updates itself in the middle of a session (0.166.0 to
+    /// 0.167.1, recorded: the restart killed a background process and its
+    /// `item/completed` never came). The observer ends with the connection;
+    /// the host is told, so the open turn ends interrupted (and with it
+    /// the call it left running, which is abandoned, never running for ever),
+    /// and the next open resumes the thread on the daemon that came back.
+    #[tokio::test]
+    async fn a_daemon_restart_mid_turn_interrupts_the_turn_and_the_call_in_flight() {
+        let (rig, fake) = open_codex(Host::default(), "thread/start").await;
+        fake.push(note("turn/started", json!({"turn": {"id": "u1"}})));
+        fake.push(note(
+            "item/completed",
+            json!({"item": {"type": "userMessage", "id": "m1", "content": [{"type": "text", "text": "wait"}]}}),
+        ));
+        fake.push(note(
+            "item/started",
+            json!({"item": {"type": "commandExecution", "id": "c1", "command": "sleep 40",
+                "status": "inProgress", "commandActions": [{"type": "unknown", "command": "sleep 40"}]}}),
+        ));
+        for _ in 0..100 {
+            if rig.host.count("turn_started") > 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert_eq!(rig.host.count("turn_started"), 1, "{:?}", rig.host.log());
+        fake.stop();
+        drop(fake);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while rig.mgr.is_open(&session()) {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the observer ends with its daemon");
+        let log = rig.host.log();
+        assert_eq!(
+            log.iter().filter(|l| *l == "interrupted").count(),
+            1,
+            "the host ends the open turn: {log:?}"
+        );
+        assert_eq!(
+            rig.host.count("tool "),
+            0,
+            "the call never finished: {log:?}"
+        );
     }
 
     /// An approval the TUI waits on shows as the agent waiting on the

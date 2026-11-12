@@ -8,11 +8,11 @@ use async_trait::async_trait;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use oxplow_domain::events::schema::{
-    AgentStatusChanged, AgentTurnEnded, AgentTurnEndedV3, AgentTurnStarted, AgentTurnStartedV2,
+    AgentStatusChanged, AgentTurnEnded, AgentTurnEndedV5, AgentTurnStarted, AgentTurnStartedV3,
     EventType,
 };
 use oxplow_domain::events::Anchors;
-use oxplow_domain::hook::TurnOutcome;
+use oxplow_domain::hook::{CauseBasis, TurnOutcome, TurnSource};
 use oxplow_domain::stores::{AgentStatusStore, AgentTurnStore};
 use oxplow_domain::uri::build::{thread_uri, turn_uri};
 use oxplow_domain::{
@@ -51,15 +51,17 @@ fn row_to_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTurn> {
             .map(|s| string_to_ts(&s))
             .transpose()
             .map_err(map_err_text)?,
-        start_snapshot_id: row.get("start_snapshot_id")?,
-        snapshot_id: row.get("snapshot_id")?,
+        source: row
+            .get::<_, Option<String>>("source")?
+            .as_deref()
+            .and_then(TurnSource::parse),
     })
 }
 
 /// The anchors agent activity in agent session `session` on `thread`
-/// carries (P3.3): the thread, its stream, the session, the session's open
-/// turn and the thread's open effort (at most one). `None` is activity no
-/// session claims (a hook from an agent oxplow didn't start).
+/// carries (P3.3): the thread, its stream, the session and the session's
+/// open turn. `None` is activity no session claims (a hook from an agent
+/// oxplow didn't start).
 pub fn activity_anchors_tx(
     conn: &Connection,
     thread: ThreadId,
@@ -70,8 +72,6 @@ pub fn activity_anchors_tx(
     anchors.turn_id = open_turn_ids_in_tx(conn, thread, session)?
         .first()
         .map(|t| t.value());
-    anchors.effort_id = crate::effort_store::open_for_thread_tx(conn, thread)
-        .map_err(crate::database::map_sql_err)?;
     Ok(anchors)
 }
 
@@ -158,33 +158,6 @@ pub fn turn_for_window_tx(
     }
 }
 
-/// The effort open on `thread` during `turn`: the one whose span overlaps
-/// the turn's, when exactly one does (tsk900).
-pub fn effort_during_turn_tx(
-    conn: &Connection,
-    thread: ThreadId,
-    turn: AgentTurnId,
-) -> Result<Option<i64>, DomainError> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT e.id FROM effort e JOIN agent_turn t ON t.id = ?2
-              WHERE e.thread_id = ?1
-                AND (t.ended_at IS NULL OR e.started_at <= t.ended_at)
-                AND (e.ended_at IS NULL OR e.ended_at >= t.started_at)",
-        )
-        .map_err(map_sql_err)?;
-    let ids = stmt
-        .query_map(params![thread.value(), turn.value()], |r| {
-            r.get::<_, i64>(0)
-        })
-        .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
-        .map_err(map_sql_err)?;
-    Ok(match ids.as_slice() {
-        [one] => Some(*one),
-        _ => None,
-    })
-}
-
 /// The thread's open turns, newest first.
 pub fn open_turn_ids_tx(
     conn: &Connection,
@@ -252,74 +225,172 @@ pub fn open_harness_turn_ids_tx(
     Ok(rows.into_iter().map(AgentTurnId::new).collect())
 }
 
-/// The agent sessions with a turn on `thread` running at any point of the
-/// window `from`..=`to` (a turn overlaps it when it began by `to` and
-/// hadn't ended before `from`): the sessions whose work a change seen over
-/// that window could be. A turn no session claims is `None`.
-pub fn sessions_active_tx(
+/// Give the open turn of `session` (on `thread`) the harness's own id for
+/// it, when it has none yet: a harness that names a turn only after the
+/// prompt that opened it was recorded (Codex's `turn/started`).
+pub fn set_harness_turn_tx(
     conn: &Connection,
     thread: ThreadId,
-    from: &str,
-    to: &str,
-) -> Result<Vec<Option<AgentSessionId>>, DomainError> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT DISTINCT agent_session_id FROM agent_turn
-              WHERE thread_id = ?1 AND started_at <= ?3
-                AND (ended_at IS NULL OR ended_at >= ?2)
-              ORDER BY agent_session_id",
-        )
-        .map_err(map_sql_err)?;
-    let rows = stmt
-        .query_map(params![thread.value(), from, to], |r| {
-            r.get::<_, Option<i64>>(0)
-        })
-        .map_err(map_sql_err)?;
-    rows.map(|r| r.map(|s| s.map(AgentSessionId::new)).map_err(map_sql_err))
-        .collect()
+    session: oxplow_domain::AgentSessionId,
+    harness_turn: &str,
+) -> Result<(), DomainError> {
+    conn.execute(
+        "UPDATE agent_turn SET harness_turn_id = ?3
+          WHERE thread_id = ?1 AND agent_session_id = ?2
+            AND ended_at IS NULL AND harness_turn_id IS NULL",
+        rusqlite::params![thread.value(), session.value(), harness_turn],
+    )
+    .map_err(map_sql_err)?;
+    Ok(())
+}
+
+/// The thread's turn the harness itself called `harness_turn` (its own id
+/// for the turn), newest first when several share it.
+pub fn turn_by_harness_id_tx(
+    conn: &Connection,
+    thread: ThreadId,
+    harness_turn: &str,
+) -> Result<Option<AgentTurnId>, DomainError> {
+    conn.query_row(
+        "SELECT id FROM agent_turn
+          WHERE thread_id = ?1 AND harness_turn_id = ?2
+          ORDER BY id DESC LIMIT 1",
+        rusqlite::params![thread.value(), harness_turn],
+        |r| r.get::<_, i64>(0),
+    )
+    .optional()
+    .map(|id| id.map(AgentTurnId::new))
+    .map_err(map_sql_err)
+}
+
+/// What opened a turn: who, the text delivered, and the turn whose work it
+/// goes on with, as far as the harness said.
+#[derive(Debug, Clone)]
+pub struct TurnOpening<'a> {
+    /// The text that opened it, as the harness delivered it.
+    pub prompt: &'a str,
+    pub source: TurnSource,
+    /// The harness's own id of the turn (Claude's `prompt_id`).
+    pub harness_turn: Option<&'a str>,
+    /// The turn whose tool call started the job, or in which the subagent
+    /// started.
+    pub cause_turn: Option<AgentTurnId>,
+    /// The harness's own name for the cause (a tool call id, a subagent
+    /// id, a sender's socket).
+    pub cause_ref: Option<&'a str>,
+    /// How `cause_turn` is known; `None` with no cause turn.
+    pub cause_basis: Option<CauseBasis>,
+    /// Another session's name for itself, on a peer's turn.
+    pub sender: Option<&'a str>,
+}
+
+impl<'a> TurnOpening<'a> {
+    /// A turn `source` opened with `prompt`, its cause unknown.
+    pub fn new(source: TurnSource, prompt: &'a str) -> Self {
+        TurnOpening {
+            prompt,
+            source,
+            harness_turn: None,
+            cause_turn: None,
+            cause_ref: None,
+            cause_basis: None,
+            sender: None,
+        }
+    }
+
+    /// The same, going on with `cause`, known as `basis`; unchanged with
+    /// no cause.
+    pub fn caused_by(self, cause: Option<AgentTurnId>, basis: CauseBasis) -> Self {
+        TurnOpening {
+            cause_turn: cause,
+            cause_basis: cause.map(|_| basis),
+            ..self
+        }
+    }
+}
+
+/// Turn `turn` joins its request: the request of `cause`, the turn it goes
+/// on with, when that has one; else a request it starts. The cause always
+/// opened first, so its request is known now.
+fn join_request_tx(
+    conn: &Connection,
+    thread: ThreadId,
+    turn: AgentTurnId,
+    cause: Option<AgentTurnId>,
+) -> Result<i64, DomainError> {
+    let joined: Option<i64> = match cause {
+        Some(cause) => conn
+            .query_row(
+                "SELECT request_id FROM agent_turn WHERE id = ?1",
+                [cause.value()],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(map_sql_err)?
+            .flatten(),
+        None => None,
+    };
+    let request = match joined {
+        Some(request) => request,
+        None => {
+            conn.execute(
+                "INSERT INTO request (thread_id, first_turn_id) VALUES (?1, ?2)",
+                params![thread.value(), turn.value()],
+            )
+            .map_err(map_sql_err)?;
+            conn.last_insert_rowid()
+        }
+    };
+    conn.execute(
+        "UPDATE agent_turn SET request_id = ?2 WHERE id = ?1",
+        params![turn.value(), request],
+    )
+    .map_err(map_sql_err)?;
+    Ok(request)
 }
 
 /// Open a turn in agent session `agent_session` on `thread` and log
 /// `agent.turn.started`, in the caller's transaction (`session` is the
-/// harness's own session id). The turn starts at its stream's current snapshot.
+/// harness's own session id).
 pub fn open_turn_tx(
     conn: &Connection,
     ev: &EventCtx<'_>,
     thread: ThreadId,
     agent_session: Option<AgentSessionId>,
-    prompt: &str,
+    opening: &TurnOpening<'_>,
     session: Option<&str>,
     started_at: Timestamp,
 ) -> Result<AgentTurnId, DomainError> {
     let anchors = activity_anchors_tx(conn, thread, agent_session)?;
     conn.execute(
-        "INSERT INTO agent_turn (thread_id, agent_session_id, prompt, session_id, started_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT INTO agent_turn (thread_id, agent_session_id, prompt, session_id, started_at,
+                                 source, harness_turn_id, cause_turn_id, cause_ref, cause_basis,
+                                 sender)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         params![
             thread.value(),
             anchors.agent_session_id.map(|s| s.value()),
-            prompt,
+            opening.prompt,
             session,
-            ts_to_string(started_at)
+            ts_to_string(started_at),
+            opening.source.as_str(),
+            opening.harness_turn,
+            opening.cause_turn.map(|t| t.value()),
+            opening.cause_ref,
+            opening.cause_basis.map(CauseBasis::as_str),
+            opening.sender,
         ],
     )
     .map_err(map_sql_err)?;
     let id = AgentTurnId::new(conn.last_insert_rowid());
-    if let Some(stream) = anchors.stream_id {
-        // Its diff runs from here to the snapshot it ends at.
-        let start =
-            crate::analytics_stores::current_snapshot_tx(conn, stream).map_err(map_sql_err)?;
-        conn.execute(
-            "UPDATE agent_turn SET start_snapshot_id = ?2 WHERE id = ?1",
-            params![id.value(), start],
-        )
-        .map_err(map_sql_err)?;
-    }
+    join_request_tx(conn, thread, id, opening.cause_turn)?;
     let env = ev
-        .typed::<AgentTurnStarted>(&AgentTurnStartedV2 {
+        .typed::<AgentTurnStarted>(&AgentTurnStartedV3 {
             turn: id.to_string(),
             thread: thread.to_string(),
             session: session.map(str::to_string),
+            source: opening.source,
+            cause_turn: opening.cause_turn.map(|t| t.to_string()),
         })
         .with_anchors(Anchors {
             turn_id: Some(id.value()),
@@ -348,6 +419,13 @@ pub struct TurnEnd<'a> {
     pub context_tokens: Option<i64>,
     /// The size of that context's window, when its harness said.
     pub context_window: Option<i64>,
+    /// The work still running when it ended, when its harness said: on
+    /// the event only (`agent_job` is the record of each job).
+    pub left_running: Option<&'a [oxplow_domain::hook::RunningWork]>,
+    /// The harness's own words for an error that ended it.
+    pub error: Option<&'a str>,
+    /// The question its final message ended on, when it did.
+    pub question: Option<&'a str>,
 }
 
 impl TurnEnd<'_> {
@@ -362,6 +440,9 @@ impl TurnEnd<'_> {
             effort: None,
             context_tokens: None,
             context_window: None,
+            left_running: None,
+            error: None,
+            question: None,
         }
     }
 }
@@ -378,7 +459,8 @@ pub fn close_turn_tx(
     let closed: Option<(i64, Option<i64>)> = conn
         .query_row(
             "UPDATE agent_turn SET ended_at = ?2, answer = COALESCE(?3, answer),
-                    model = ?4, effort = ?5, context_tokens = ?6, context_window = ?7
+                    model = ?4, effort = ?5, context_tokens = ?6, context_window = ?7,
+                    outcome = ?8, error = ?9, question = ?10
               WHERE id = ?1 AND ended_at IS NULL
               RETURNING thread_id, agent_session_id",
             params![
@@ -388,7 +470,10 @@ pub fn close_turn_tx(
                 end.model,
                 end.effort,
                 end.context_tokens,
-                end.context_window
+                end.context_window,
+                end.outcome.as_str(),
+                end.error,
+                end.question
             ],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
@@ -398,13 +483,18 @@ pub fn close_turn_tx(
         return Ok(None);
     };
     let (thread, session) = (ThreadId::new(thread), session.map(AgentSessionId::new));
+    // The tasks in progress for this thread as the turn ended are ones its
+    // request worked on (the weakest basis).
+    crate::request_links::link_assigned_tx(conn, thread, id, end.at)?;
     let env = ev
-        .typed::<AgentTurnEnded>(&AgentTurnEndedV3 {
+        .typed::<AgentTurnEnded>(&AgentTurnEndedV5 {
             turn: id.to_string(),
             thread: thread.to_string(),
             outcome: end.outcome,
             transcript_path: end.transcript_path.map(str::to_string),
             usage: end.usage.clone(),
+            left_running: end.left_running.map(<[_]>::to_vec),
+            error: end.error.map(str::to_string),
         })
         .with_anchors(Anchors {
             turn_id: Some(id.value()),
@@ -530,7 +620,7 @@ pub fn log_status_tx(
 }
 
 /// Close agent session `session`'s slot (`reason`), in the caller's
-/// transaction: its open turns end interrupted ("session closed") and it
+/// transaction: its open turns end `session_closed` and it
 /// logs `stopped`. Its process is the caller's to stop once this commits.
 /// `false` when it was already closed (nothing done).
 pub fn close_session_tx(
@@ -546,10 +636,9 @@ pub fn close_session_tx(
     if !crate::agent_session_store::close_tx(conn, session, reason, now)? {
         return Ok(false);
     }
-    let end = TurnEnd {
-        answer: Some("session closed"),
-        ..TurnEnd::new(now, TurnOutcome::Interrupted)
-    };
+    let end = TurnEnd::new(now, TurnOutcome::SessionClosed);
+    // Its jobs will never report.
+    crate::agent_job_store::lose_unreported_tx(conn, row.thread_id, Some(session), now)?;
     let mut closed = None;
     for id in open_turn_ids_in_tx(conn, row.thread_id, Some(session))? {
         if close_turn_tx(conn, ev, id, &end)?.is_some() && closed.is_none() {
@@ -623,21 +712,6 @@ impl SqliteAgentTurnStore {
     pub fn with_vocabulary(db: Database, vocabulary: VocabularyHandle) -> Self {
         Self { db, vocabulary }
     }
-
-    /// Whether any thread of `stream` has a turn open — the quiet-period
-    /// trigger's "is an agent working here?" probe.
-    pub async fn stream_has_open_turn(&self, stream: StreamId) -> Result<bool, DomainError> {
-        self.db
-            .call(move |conn| {
-                conn.query_row(
-                    "SELECT EXISTS (SELECT 1 FROM agent_turn t JOIN threads th ON th.id = t.thread_id
-                                     WHERE th.stream_id = ?1 AND t.ended_at IS NULL)",
-                    params![stream.value()],
-                    |r| r.get(0),
-                )
-            })
-            .await
-    }
 }
 
 #[async_trait]
@@ -650,12 +724,13 @@ impl AgentTurnStore for SqliteAgentTurnStore {
                 if turn.id.is_placeholder() {
                     let vocabulary = vocabulary.current();
                     let ev = EventCtx::system(&vocabulary, "hook_ingest");
+                    let source = turn.source.unwrap_or(TurnSource::Unknown);
                     return open_turn_tx(
                         tx,
                         &ev,
                         turn.thread_id,
                         turn.agent_session_id,
-                        &turn.prompt,
+                        &TurnOpening::new(source, &turn.prompt),
                         turn.session_id.as_deref(),
                         turn.started_at,
                     );
@@ -951,6 +1026,27 @@ mod tests {
         assert_eq!(all, vec![(Some(a), S::Idle), (Some(b), S::AwaitingUser)]);
     }
 
+    /// A subagent's start, finish, kind, turn and calls are read in one
+    /// pass over the subagent events and one over the calls that name one,
+    /// not by a subquery per subagent: that re-read the events (their id is
+    /// inside the payload) and scanned every tool call for each of
+    /// thousands of subagents, past `query_sql`'s 5 s.
+    #[test]
+    fn the_subagent_model_reads_events_and_calls_once() {
+        let db = Database::in_memory();
+        let plan: Vec<String> = db
+            .with_conn(|conn| {
+                let mut stmt = conn.prepare("EXPLAIN QUERY PLAN SELECT * FROM v_subagent")?;
+                let rows = stmt.query_map([], |r| r.get::<_, String>(3))?;
+                rows.collect()
+            })
+            .unwrap();
+        assert!(
+            !plan.iter().any(|step| step.contains("CORRELATED")),
+            "{plan:#?}"
+        );
+    }
+
     /// A session's status is found from its own events, newest first, not by
     /// walking every status change ever logged: the view backs what a person
     /// waits on, and the log only grows.
@@ -1034,6 +1130,46 @@ mod tests {
         }
     }
 
+    /// A turn the harness names only after it opened takes the id once, and
+    /// `turn_by_harness_id_tx` then finds it; a closed turn is left alone.
+    #[tokio::test]
+    async fn a_turn_named_after_it_opened_takes_the_harness_id() {
+        let (db, tid) = fixture().await;
+        let session = db
+            .transaction(move |tx| {
+                crate::agent_session_store::insert_tx(
+                    tx,
+                    &oxplow_domain::agent_session::NewAgentSession::terminal(tid, "codex"),
+                    Timestamp::from_unix_ms(1),
+                )
+            })
+            .await
+            .unwrap()
+            .id;
+        let store = SqliteAgentTurnStore::new(db.clone());
+        let turn = AgentTurn {
+            id: AgentTurnId::placeholder(),
+            thread_id: tid,
+            agent_session_id: Some(session),
+            prompt: "go".into(),
+            answer: None,
+            session_id: Some("s1".into()),
+            started_at: Timestamp::now(),
+            ended_at: None,
+            source: Some(oxplow_domain::hook::TurnSource::Person),
+        };
+        let id = store.open(&turn).await.unwrap();
+        let found = db
+            .transaction(move |tx| {
+                set_harness_turn_tx(tx, tid, session, "cx1")?;
+                set_harness_turn_tx(tx, tid, session, "cx2")?;
+                turn_by_harness_id_tx(tx, tid, "cx1")
+            })
+            .await
+            .unwrap();
+        assert_eq!(found, Some(id));
+    }
+
     #[tokio::test]
     async fn agent_turn_open_then_close() {
         let (db, tid) = fixture().await;
@@ -1058,8 +1194,7 @@ mod tests {
             session_id: Some("s1".into()),
             started_at: Timestamp::now(),
             ended_at: None,
-            start_snapshot_id: None,
-            snapshot_id: None,
+            source: Some(oxplow_domain::hook::TurnSource::Person),
         };
         let id = store.open(&turn).await.unwrap();
         let open = store.list_open(&tid).await.unwrap();
@@ -1081,11 +1216,9 @@ mod tests {
         // The turn ran in its thread's session.
         assert_eq!(got.agent_session_id, Some(session));
 
-        let stream = StreamId::new(r_stream(&db, tid));
-        assert!(!store.stream_has_open_turn(stream).await.unwrap());
-
         // Both edges are in the log, anchored to the turn, thread, stream
         // and session.
+        let stream = r_stream(&db, tid);
         let conn = db.conn().unwrap();
         let mut stmt = conn
             .prepare(
@@ -1119,7 +1252,7 @@ mod tests {
             let [turn, thread, stream_anchor, session_anchor] = r.anchors;
             assert_eq!(turn, Some(id.value()));
             assert_eq!(thread, Some(tid.value()));
-            assert_eq!(stream_anchor, Some(stream.value()));
+            assert_eq!(stream_anchor, Some(stream));
             assert_eq!(session_anchor, Some(session.value()));
         }
     }
@@ -1142,8 +1275,7 @@ mod tests {
                 session_id: None,
                 started_at: Timestamp::now(),
                 ended_at: None,
-                start_snapshot_id: None,
-                snapshot_id: None,
+                source: Some(oxplow_domain::hook::TurnSource::Person),
             };
             ids.push(store.open(&turn).await.unwrap());
         }
@@ -1230,8 +1362,7 @@ mod tests {
                 session_id: None,
                 started_at: Timestamp::now(),
                 ended_at: None,
-                start_snapshot_id: None,
-                snapshot_id: None,
+                source: Some(oxplow_domain::hook::TurnSource::Person),
             })
             .await
             .unwrap();

@@ -5,7 +5,7 @@ namespace: oxplow
 description: oxplow's own commands, declared like any extension's — each backed by an operation of a scope. Required; it can't be disabled.
 engine: ">=0.7"
 # What it reaches beyond the baseline: its AI providers call models, its
-# effort collector reads the datasets with its own SQL.
+# request collector reads the datasets with its own SQL.
 permissions: [sql.read, files.read, ai.compute, agent.write]
 custom_components:
   # Settings → Integrations: hand-written, with no build step.
@@ -29,12 +29,6 @@ intent:
     - name: definition-is-not-offered-for-a-yaml-that-is-not-a-page
       input: { command: oxplow.page.renderers, input: { uri: 'oxplow:oxplow/file?path=notes.yaml&filesystem=oxplow:temp' } }
       expect: the Text view alone, for YAML that holds no page or does not parse
-    - name: closed-threads-lists-closed-threads-with-their-work
-      input: { page: closed-threads, params: { stream_id: 1 } }
-      expect: the stream's closed threads only, each with a Reopen action
-    - name: work-next-offers-the-ready-items-or-the-first-epic-with-its-children
-      input: { page: work-next, params: { thread: thr1 } }
-      expect: ready items in list order, a blocked one held until its blocker closes, a ready epic with its ready descendants
     - name: catalog-lists-prompts-and-config-keys
       input: { page: catalog }
       expect: the questions grouped by who offers them with Ask on each, and the config keys
@@ -42,7 +36,7 @@ intent:
       input: { page: data-catalog, params: { dataset: "" } }
       expect: every dataset with its owner, what it holds and its fields
     - name: data-catalog-names-one-datasets-fields
-      input: { page: data-catalog, params: { dataset: effort } }
+      input: { page: data-catalog, params: { dataset: request } }
       expect: one dataset's fields with their docs and key
     - name: thread-settings-start-from-the-saved-prompt-and-list-open-sessions
       input: { page: thread-settings, params: { thread: thr1 } }
@@ -86,18 +80,9 @@ intent:
     - name: ai-provider-choices-list-the-configured-providers
       input: { query: 'settings#ai_provider_choices', params: { area: ai } }
       expect: the configured providers
-    - name: changes-frames-an-effort-and-a-picked-range
-      input: { page: diff-view, params: { uri: "oxplow:oxplow/effort?id=eff1", stream_id: 1 } }
-      expect: an effort's own bracket to the working tree, a picked end as a range, nothing without a URI
-    - name: changes-effort-names-the-effort-it-is-of
-      input: { part: changes-effort, params: { effort_id: 1, effort: eff1 } }
-      expect: the effort is open and named for Rename and Link to task
     - name: settings-data-area-lists-entities-collectors-and-effects
       input: { page: settings, params: { area: data } }
       expect: the entities, the collectors and the declared effects
-    - name: data-entity-rows-counts-an-open-entitys-rows
-      input: { part: data-entity-rows, params: { name: v_work_item } }
-      expect: the rows an open entity holds
     - name: data-effect-backfill-says-what-it-would-do
       input: { part: data-effect-backfill, params: { effect: review/store-reasoning } }
       expect: a backfill plan for an enabled effect, none for one nothing declares
@@ -111,13 +96,13 @@ intent:
       input: { page: command, params: { uri: "oxplow:oxplow/command?command=oxplow.agent.draft" } }
       expect: a command's permission, whether it asks first and can be undone, and where it is declared
     - name: the-skill-page-says-what-a-skill-is
-      input: { page: skill, params: { uri: "oxplow:oxplow/skill?skill=oxplow/work-items" } }
+      input: { page: skill, params: { uri: "oxplow:oxplow/skill?skill=oxplow/tasks" } }
       expect: a skill's description and whether it is a skill or a slash command
     - name: the-component-page-links-the-commands-it-may-run
       input: { page: custom-component, params: { uri: "oxplow:oxplow/custom_component?custom_component=oxplow/integrations" } }
       expect: a custom component's code, whether it reads data, and a link to each command it may run
     - name: the-collector-page-says-when-a-collector-runs-and-how-it-last-went
-      input: { page: collector, params: { uri: "oxplow:oxplow/collector?collector=oxplow/oxplow.effort_test_outcome" } }
+      input: { page: collector, params: { uri: "oxplow:oxplow/collector?collector=oxplow/oxplow.request_outcome" } }
       expect: when a collector runs, whether it is enabled and its last run
     - name: the-measure-page-says-what-a-measure-counts-and-lists-its-metrics
       input: { page: measure, params: { uri: "oxplow:oxplow/measure?measure=oxplow.tokens" } }
@@ -129,29 +114,17 @@ intent:
       input: { page: resource, params: { uri: "oxplow:oxplow/resource?resource=oxplow/commit" } }
       expect: a resource kind's URI form and the pages that draw it
     - name: the-implementation-page-says-whether-an-implementation-is-in-use
-      input: { page: implementation, params: { uri: "oxplow:oxplow/implementation?implementation=oxplow/work_items.oxplow" } }
+      input: { page: implementation, params: { uri: "oxplow:oxplow/implementation?implementation=oxplow/knowledge.oxwiki" } }
       expect: an implementation's capability, whether it is in use and what it can do
     - name: a-command-row-of-an-extension-links-to-the-commands-page
       input: { page: extension, params: { uri: "oxplow:oxplow/extension?name=oxplow-foundation", name: oxplow-foundation } }
       expect: each command row of the Extension page links to its own command page
-    - name: effort-files-lists-what-an-effort-claimed
-      input: { page: effort-files }
-      expect: the files an effort claimed, by path
-    - name: thread-work-lists-a-threads-items
-      input: { page: thread-work }
-      expect: a thread's items by state
-    - name: effort-summary-reads-an-effort-at-a-glance
-      input: { page: effort-summary }
-      expect: one effort at a glance
-    - name: the-test-outcome-says-how-an-efforts-tests-went
+    - name: the-test-outcome-says-how-a-requests-tests-went
       input: { sql: v_fact }
-      expect: four counts over an effort's runs, and the time from the first red to the next green
+      expect: four counts over a request's runs, and the time from the first red to the next green
     - name: asserted-failures-have-no-identity-so-distinct-falls-back-to-the-peak
       input: { sql: v_fact }
       expect: a run with only a failure count names no test, so distinct falls back to the peak
-    - name: a-project-with-no-test-runs-records-no-test-outcome
-      input: { sql: v_fact }
-      expect: an effort with no recorded test run makes no test outcome fact
     - name: a-single-green-run-is-all-zeros-with-no-time-to-green
       input: { sql: v_fact }
       expect: one passing run is four zeros and has no time to green
@@ -246,7 +219,7 @@ intent:
       input: { page: command, params: { uri: 'oxplow:oxplow/command?command=oxplow.agent.draft' } }
       expect: its see-also links name the extension that declares it
     - name: the-skill-page-links-to-its-extension
-      input: { page: skill, params: { uri: 'oxplow:oxplow/skill?skill=oxplow/work-items' } }
+      input: { page: skill, params: { uri: 'oxplow:oxplow/skill?skill=oxplow/tasks' } }
       expect: its see-also links name the extension that declares it
     - name: the-custom-component-page-links-to-its-extension
       input: { page: custom-component, params: { uri: 'oxplow:oxplow/custom_component?custom_component=oxplow/integrations' } }
@@ -258,13 +231,13 @@ intent:
       input: { page: resource, params: { uri: 'oxplow:oxplow/resource?resource=oxplow/commit' } }
       expect: its see-also links name the extension that declares it
     - name: the-implementation-page-links-to-its-extension
-      input: { page: implementation, params: { uri: 'oxplow:oxplow/implementation?implementation=oxplow/work_items.oxplow' } }
+      input: { page: implementation, params: { uri: 'oxplow:oxplow/implementation?implementation=oxplow/knowledge.oxwiki' } }
       expect: its see-also links name the extension that declares it
     - name: the-measure-page-links-to-its-extension
       input: { page: measure, params: { uri: 'oxplow:oxplow/measure?measure=oxplow.tokens' } }
       expect: its see-also links name the extension that declares it
     - name: the-collector-page-links-to-its-extension-and-the-list-it-belongs-to
-      input: { page: collector, params: { uri: 'oxplow:oxplow/collector?collector=oxplow/oxplow.effort_test_outcome' } }
+      input: { page: collector, params: { uri: 'oxplow:oxplow/collector?collector=oxplow/oxplow.request_outcome' } }
       expect: its see-also links name the extension that declares it and the list it belongs to
     - name: the-editor-links-to-the-files-history-and-its-folder
       input: { page: editor, params: { path: src/sub/c.rs } }
@@ -284,14 +257,14 @@ intent:
     - name: the-directory-links-to-its-parent-folder
       input: { page: directory, params: { stream_id: 1, path: src/sub } }
       expect: its see-also link opens the parent folder
-    - name: the-agent-session-links-to-its-threads-work-and-the-efforts-it-ran
+    - name: the-agent-session-links-to-its-threads-work-and-the-requests-it-ran
       input: { page: agent-session, params: { uri: 'oxplow:oxplow/agent_session?id=ses1' } }
-      expect: its see-also links open its thread's work and the efforts it ran
+      expect: its see-also links open its thread's work and the requests it ran
     - name: the-alerts-page-links-to-extension-problems-and-collectors
       input: { page: alerts }
       expect: its see-also links open the extension problems and the collectors
     - name: the-collector-page-links-to-its-extensions-problems-when-it-is-not-ok
-      input: { page: collector, params: { uri: 'oxplow:oxplow/collector?collector=oxplow/oxplow.effort_test_outcome' } }
+      input: { page: collector, params: { uri: 'oxplow:oxplow/collector?collector=oxplow/oxplow.request_outcome' } }
       expect: an unhealthy collector's see-also links open its extension's problems
     - name: the-extension-page-links-to-all-extensions-and-its-problems
       input: { page: extension, params: { uri: 'oxplow:oxplow/extension?name=oxplow-foundation', name: oxplow-foundation } }
@@ -300,7 +273,7 @@ intent:
       input: { page: commit, params: { uri: 'oxplow:oxplow/commit?sha=abc1234', sha: abc1234, stream_id: 1 } }
       expect: its see-also link is Git History
     - name: the-collector-page-says-what-it-is-in-a-paragraph-above-its-facts
-      input: { page: collector, params: {uri:"oxplow:oxplow/collector?collector=oxplow/oxplow.effort_test_outcome"} }
+      input: { page: collector, params: {uri:"oxplow:oxplow/collector?collector=oxplow/oxplow.request_outcome"} }
       expect: its description is a paragraph above the facts
     - name: the-command-page-says-what-it-is-in-a-paragraph-above-its-facts
       input: { page: command, params: {uri:"oxplow:oxplow/command?command=oxplow.agent.draft"} }
@@ -309,7 +282,7 @@ intent:
       input: { page: custom-component, params: {uri:"oxplow:oxplow/custom_component?custom_component=oxplow/integrations"} }
       expect: its description is a paragraph above the facts
     - name: the-implementation-page-says-what-it-is-in-a-paragraph-above-its-facts
-      input: { page: implementation, params: {uri:"oxplow:oxplow/implementation?implementation=oxplow/work_items.oxplow"} }
+      input: { page: implementation, params: {uri:"oxplow:oxplow/implementation?implementation=oxplow/knowledge.oxwiki"} }
       expect: its description is a paragraph above the facts
     - name: the-measure-page-says-what-it-is-in-a-paragraph-above-its-facts
       input: { page: measure, params: {uri:"oxplow:oxplow/measure?measure=oxplow.tokens"} }
@@ -321,7 +294,7 @@ intent:
       input: { page: measure-data, params: {uri:"oxplow:oxplow/measure?measure=oxplow.tokens"} }
       expect: its description is a paragraph above the facts
     - name: the-dataset-data-page-says-what-it-is-in-a-paragraph-above-its-facts
-      input: { page: dataset-data, params: {uri:"oxplow:oxplow/dataset?dataset=work_item"} }
+      input: { page: dataset-data, params: {uri:"oxplow:oxplow/dataset?dataset=task"} }
       expect: its description is a paragraph above the facts
     - name: the-metric-page-says-what-it-is-in-a-paragraph-above-its-facts
       input: { page: metric, params: {uri:"oxplow:oxplow/metric?metric=agent.tokens.total",metric:"agent.tokens.total"} }
@@ -339,10 +312,10 @@ intent:
       input: { page: resource-data, params: {uri:"oxplow:oxplow/resource?resource=oxplow/stream"} }
       expect: its description is a paragraph above the facts
     - name: the-skill-page-says-what-it-is-in-a-paragraph-above-its-facts
-      input: { page: skill, params: {uri:"oxplow:oxplow/skill?skill=oxplow/work-items"} }
+      input: { page: skill, params: {uri:"oxplow:oxplow/skill?skill=oxplow/tasks"} }
       expect: its description is a paragraph above the facts
     - name: the-dataset-definition-page-says-what-it-is-in-a-paragraph-above-its-facts
-      input: { page: dataset-definition, params: {uri:"oxplow:oxplow/dataset?dataset=work_item"} }
+      input: { page: dataset-definition, params: {uri:"oxplow:oxplow/dataset?dataset=task"} }
       expect: its description is a paragraph above the facts
     - name: the-extension-page-reads-a-shipped-extension
       input: { page: extension, params: { uri: 'oxplow:oxplow/extension?name=oxplow-foundation', name: oxplow-foundation } }
@@ -386,9 +359,6 @@ intent:
     - name: a-configured-language-server-is-listed-and-not-suggested-again
       input: { page: settings, params: { area: lsp } }
       expect: a language server of project.yaml is listed, can't be removed, and isn't suggested again
-    - name: dataset-data-shows-a-datasets-rows-sorted-and-filtered
-      input: { page: dataset-data, params: { uri: "oxplow:oxplow/dataset?dataset=work_item" } }
-      expect: a dataset's rows as they are, sorted and narrowed by its params
     - name: dataset-data-says-when-the-dataset-is-not-known
       input: { page: dataset-data, params: { uri: "oxplow:oxplow/dataset?dataset=nothing_like_it" } }
       expect: no query is built and the page says it is not a dataset
@@ -399,13 +369,13 @@ intent:
       input: { query: 'diff-view#changes_ends', params: { stream_id: 1 } }
       expect: the To choice offers the working tree
     - name: dataset-definition-names-a-datasets-fields
-      input: { page: dataset-definition, params: { uri: "oxplow:oxplow/dataset?dataset=work_item" } }
+      input: { page: dataset-definition, params: { uri: "oxplow:oxplow/dataset?dataset=task" } }
       expect: a dataset's description, owner, kind and each field with its type and doc
     - name: dataset-fields-lists-a-datasets-fields-as-choices
-      input: { query: 'dataset-data#dataset_fields', params: { uri: "oxplow:oxplow/dataset?dataset=work_item" } }
+      input: { query: 'dataset-data#dataset_fields', params: { uri: "oxplow:oxplow/dataset?dataset=task" } }
       expect: none, then each field of the dataset, as choices
     - name: data-catalog-links-each-dataset-to-its-definition
-      input: { page: data-catalog, params: { dataset: work_item } }
+      input: { page: data-catalog, params: { dataset: task } }
       expect: each dataset links to its definition page
     - name: measure-data-lists-its-facts-newest-first-and-folds-them-by-group
       input: { page: measure-data, params: { uri: "oxplow:oxplow/measure?measure=oxplow.tokens" } }
@@ -420,10 +390,10 @@ intent:
       input: { page: dimension-data, params: { uri: "oxplow:oxplow/dimension?dimension=oxplow.language" } }
       expect: all measures, then each whose facts carry the dimension
     - name: command-data-lists-its-runs-newest-first
-      input: { page: command-data, params: { uri: "oxplow:oxplow/command?command=oxplow.work_item.create" } }
+      input: { page: command-data, params: { uri: "oxplow:oxplow/command?command=oxplow.task.create" } }
       expect: a command's audited runs, newest first, narrowed by outcome, who and date
     - name: collector-data-lists-its-last-run-counts-and-the-facts-it-recorded
-      input: { page: collector-data, params: { uri: "oxplow:oxplow/collector?collector=oxplow/oxplow.effort_test_outcome", range: all } }
+      input: { page: collector-data, params: { uri: "oxplow:oxplow/collector?collector=oxplow/oxplow.request_outcome", range: all } }
       expect: the rows a collector's last run counted and the facts it recorded
     - name: resource-data-lists-the-instances-of-a-kind-that-a-dataset-holds
       input: { page: resource-data, params: { uri: "oxplow:oxplow/resource?resource=oxplow/stream" } }
@@ -442,23 +412,50 @@ intent:
       expect: each contribution table opens the definition, not the data
 panels:
   # The left nav's Go To, beside the Go To page its header opens: the
-  # thread's bookmarks, then its recent or most visited pages; collapsed,
-  # the bookmarks alone.
-  - { id: go-to, title: Go To, icon: compass, scope: thread, body: go-to-panel, collapsed: go-to-bookmarks, open: 'oxplow:oxplow/page?page=go-to' }
-# What the coding agent reads about the work list: its commands (with no
-# list they're a sink), and oxplow's tasks' ready queue while they are it.
+  # thread's bookmarks, recent or most visited pages, one kind at a time
+  # (its header's icons); collapsed, the same pages as icons.
+  - { id: go-to, title: Go To, icon: compass, scope: thread, body: go-to-panel, collapsed: go-to-icons, open: 'oxplow:oxplow/page?page=go-to' }
+  # The stream's git: its uncommitted files as a folder tree, or where its
+  # branch stands (the header picks); its header opens Git Status, which
+  # acts on both. Collapsed, one line of counts; counted by files.
+  - { id: git, title: Git, icon: git-branch, scope: stream, body: git, collapsed: git-line, count: git-count, open: 'oxplow:oxplow/page?page=git-dashboard' }
+  # What only the person can move: a question an agent waits on, a handoff
+  # no agent is there to take, an open note; counted in its header.
+  - { id: waiting, title: Waiting on you, icon: bell, scope: project, body: waiting-on-you, count: waiting-count, open: 'oxplow:oxplow/page?page=waiting-on-you' }
+# What the coding agent reads about the task tracker: its commands, while
+# there is one (oxtask's ready-queue skill is oxplow-bundled's).
 skills:
-  - { name: work-items, file: skills/work-items/SKILL.md }
-  - { name: work-next, kind: command, file: commands/work-next.md }
-# What oxplow runs by default: the work list, the effort policy, snapshots
-# and the wiki (a project chooses another provider in Settings), and the agent
-# harnesses and AI providers — core's built-ins, many of each at once (every
-# one of those declared here is active).
+  - { name: tasks, file: skills/tasks/SKILL.md, needs: [task_tracker] }
+# What oxplow runs by default: snapshots, oxwiki (a knowledge store beside
+# any an extension adds), and the agent harnesses and AI providers — core's
+# built-ins, many of each at once (every one of those declared here is
+# active).
+# Foundation's own settings (Settings): whether oxwiki is one of the
+# project's knowledge stores.
+configuration:
+  # oxplow's own extensions share the namespace's one configuration: its
+  # `version` is theirs too (oxplow-bundled's keys are its own).
+  version: 2
+  schema:
+    type: object
+    additionalProperties: false
+    properties:
+      oxwiki:
+        type: boolean
+        title: Keep pages in oxwiki
+        description: Whether oxwiki — a wiki of markdown pages in the project's .oxplow/oxwiki folder — is one of the project's knowledge stores. Off, its pages are hidden and its files left alone.
+  defaults:
+    oxwiki: true
 implementations:
-  - { capability: work_items, id: oxplow, entry: "oxplow:tasks", skills: [work-next], description: "The work list that oxplow keeps itself." }
-  - { capability: effort_policy, id: oxplow, entry: "oxplow:commit-or-switch", description: "Ends an effort when its work is committed or the agent switches to other work." }
   - { capability: snapshots, id: hashes, entry: "oxplow:snapshot-hashes", description: "Saves the project's files as snapshots named by their hashes." }
-  - { capability: knowledge, id: oxplow, entry: "oxplow:wiki", description: "The wiki that oxplow keeps in the project." }
+  - capability: knowledge
+    id: oxwiki
+    entry: "oxplow:oxwiki"
+    title: oxwiki
+    description: "oxplow's own knowledge store: a wiki of markdown pages kept in the project's .oxplow/oxwiki folder."
+    # Settings → Integrations → Knowledge stores turns it off (`oxplow.knowledge.set_oxwiki`):
+    # declared still, its pages hidden, its files left alone.
+    when: { config: /oxwiki, in: [true] }
   - { capability: agent_harness, id: claude, entry: "oxplow:claude-code", title: Claude, icon: icons/claude.svg, description: "Runs Claude Code as a coding agent." }
   - { capability: agent_harness, id: codex, entry: "oxplow:codex-cli", title: Codex, icon: icons/codex.svg, description: "Runs Codex as a coding agent." }
   - { capability: agent_harness, id: opencode, entry: "oxplow:opencode", title: OpenCode, icon: icons/opencode.svg, description: "Runs OpenCode as a coding agent." }
@@ -478,32 +475,50 @@ implementations:
   - { capability: ai_provider, id: llamacpp, title: llama.cpp server, provider: llamacpp, config: { baseUrl: "http://localhost:8080/v1" }, description: "Models that run in a local llama.cpp server." }
   - { capability: ai_provider, id: typesafe, title: TypeSafe, provider: typesafe, config: { baseUrl: "https://api.typesafe.ai" }, description: "A model service that only answers typed questions." }
 collectors:
-  # What an effort's test runs came to, recorded when it finishes: the
-  # quality gate, the worst run, the tests it broke, the red runs and the time
-  # to the first green (`oxplow.tests.*`, `effort.time_to_green_ms`). Its
-  # input is the effort's measured runs (`tests` captures) with their failed
-  # cases, oldest first.
-  - id: oxplow.effort_test_outcome
-    doc: How an effort's tests went, recorded when it finishes.
+  # A request's outcome, recorded each time one of its turns ends and none
+  # of its turns is still running (a request has no finished moment): its
+  # tokens, its cycle time, and what its turns' test runs came to. One
+  # capture per request, placed at `placed_at` (the request's start) and
+  # replacing the request's earlier one, so a period's point is the mean
+  # of the requests that started in it. After `token_usage.turns`, which
+  # records the turn's tokens from its transcript once it ends: before it,
+  # most of a turn's tokens aren't counted yet.
+  - id: oxplow.request_outcome
+    doc: How a request went — its tokens, its cycle time and its tests — recorded when a turn of it ends.
     runtime: starlark
-    entry: collectors/effort/test_outcome.star
-    on: [effort.finished]
+    entry: collectors/request/outcome.star
+    on: [agent.turn.ended]
+    after: [token_usage.turns]
     input: |
-      SELECT r.id AS run,
-             COALESCE(r.failed, 0) AS failed,
-             (SELECT count(*) FROM v_test_case a WHERE a.run_id = r.id) AS cases,
-             CAST(strftime('%s', cap.captured_at) AS INTEGER) * 1000
-               + CAST(substr(cap.captured_at, 21, 3) AS INTEGER) AS at_ms,
-             CASE WHEN c.name IS NULL THEN NULL
-                  ELSE uri('oxplow/test', 'class', c.classname, 'name', c.name) END AS "case",
-             uri_param(e.uri, 'id') AS effort
-      FROM v_capture cap
-      JOIN v_test_run r ON r.id = cap.id
-      JOIN v_effort e ON e.id = cap.effort_id
-      LEFT JOIN v_test_case c ON c.run_id = r.id AND c.status = 'failed'
-      WHERE cap.producer = 'tests' AND cap.effort_id = :effort_id
-      ORDER BY cap.captured_at, r.id
-    facts: [oxplow.effort_test_outcome, oxplow.effort_time_to_green]
+      WITH req AS (
+        SELECT t.request_id AS id FROM v_agent_turn t
+         WHERE t.id = :turn_id AND t.request_id IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM v_agent_turn o
+                            WHERE o.request_id = t.request_id AND o.ended_at IS NULL)
+      )
+      SELECT NULL AS run, NULL AS failed, NULL AS cases, NULL AS at_ms, NULL AS "case",
+             r.uri AS request, r.input_tokens + r.output_tokens AS tokens,
+             CAST(round((julianday(r.last_activity_at) - julianday(r.started_at)) * 86400000) AS INTEGER) AS cycle_ms,
+             r.started_at AS placed_at
+      FROM v_request r JOIN req ON r.id = req.id
+      UNION ALL
+      SELECT * FROM (
+        SELECT tr.id AS run,
+               COALESCE(tr.failed, 0) AS failed,
+               (SELECT count(*) FROM v_test_case a WHERE a.run_id = tr.id) AS cases,
+               CAST(strftime('%s', cap.captured_at) AS INTEGER) * 1000
+                 + CAST(substr(cap.captured_at, 21, 3) AS INTEGER) AS at_ms,
+               CASE WHEN c.name IS NULL THEN NULL
+                    ELSE uri('oxplow/test', 'class', c.classname, 'name', c.name) END AS "case",
+               NULL AS request, NULL AS tokens, NULL AS cycle_ms, NULL AS placed_at
+        FROM v_capture cap
+        JOIN v_test_run tr ON tr.id = cap.id
+        LEFT JOIN v_test_case c ON c.run_id = tr.id AND c.status = 'failed'
+        WHERE cap.producer = 'tests'
+          AND cap.turn_id IN (SELECT t.id FROM v_agent_turn t JOIN req ON t.request_id = req.id)
+        ORDER BY cap.captured_at, tr.id
+      )
+    facts: [oxplow.request_tokens, oxplow.request_cycle_time, oxplow.request_test_outcome, oxplow.request_time_to_green]
 metrics:
   # what oxplow records itself
   - {"key":"agent.tokens.input","title":"Input tokens","measure": "oxplow.tokens", "expression": "SUM(value) FILTER (WHERE dim('oxplow.token_kind') = 'input')", "unit":"tokens","direction":"neutral","displayKind":"gauge","category":"operational","description":"Input tokens consumed by the agent.","sliceableDims":["oxplow.model"]}
@@ -512,32 +527,28 @@ metrics:
   - {"key":"agent.tokens.cache_read","title":"Cache-read tokens","measure": "oxplow.cache_tokens", "expression": "SUM(value) FILTER (WHERE dim('oxplow.token_kind') = 'cache_read')", "unit":"tokens","direction":"neutral","displayKind":"gauge","category":"operational","description":"Prompt tokens served from cache instead of re-processed.","sliceableDims":["oxplow.model"]}
   - {"key":"agent.tokens.cache_creation","title":"Cache-write tokens","measure": "oxplow.cache_tokens", "expression": "SUM(value) FILTER (WHERE dim('oxplow.token_kind') = 'cache_creation')", "unit":"tokens","direction":"neutral","displayKind":"gauge","category":"operational","description":"Prompt tokens written into the cache (the cache-warming cost).","sliceableDims":["oxplow.model"]}
   - {"key":"agent.tokens.cache_hit_pct","title":"Cache hit ratio","measure": "oxplow.cache_usage", "expression": "RATIO(num, den)", "unit":"%","direction":"higher-better","displayKind":"gauge","category":"operational","description":"Prompt-side cache hit ratio: cache-read / (input + cache-read + cache-write).","sliceableDims":["oxplow.model"]}
-  - {"key":"task.tokens","title":"Tokens per effort","measure": "oxplow.effort_tokens", "expression": "AVG(value)", "unit":"tokens","direction":"lower-better","displayKind":"gauge","category":"operational","description":"Avg tokens (all kinds) a closed effort spent — the cost of a unit of work, in tokens.","sliceableDims":["oxplow.branch","oxplow.effort"]}
+  - {"key":"request.tokens","title":"Tokens per request","measure": "oxplow.request_tokens", "expression": "AVG(value)", "unit":"tokens","direction":"lower-better","displayKind":"gauge","category":"operational","description":"Avg tokens (input + output) a request spent over all its turns — the cost of a unit of work, in tokens.","sliceableDims":["oxplow.branch"]}
   - {"key":"agent.turns","title":"Agent turns","measure": "oxplow.turn", "expression": "SUM(value)", "unit":"count","direction":"neutral","displayKind":"gauge","category":"operational","description":"Number of agent turns.","sliceableDims":["oxplow.model"]}
-  - {"key":"effort.cycle_time_ms","title":"Effort cycle time","measure": "oxplow.cycle_time", "expression": "AVG(value)", "unit":"ms","direction":"lower-better","displayKind":"gauge","category":"operational","description":"How long an effort stayed open (close minus start).","sliceableDims":["oxplow.branch","oxplow.effort"]}
-  - {"key":"work_item.efforts","title":"Efforts per work item","measure": "oxplow.work_item_effort", "expression": "AVG(value)", "unit":"count","direction":"lower-better","displayKind":"gauge","category":"operational","description":"Number of efforts spent on a work item (the redo-rate signal).","sliceableDims":["oxplow.branch","oxplow.effort"]}
-  - {"key":"task.tokens.wasted","title":"Wasted tokens","measure": "oxplow.token_waste", "expression": "SUM(value)", "unit":"tokens","direction":"lower-better","displayKind":"gauge","category":"operational","description":"Tokens spent in closed efforts whose commits were later reverted.","sliceableDims":["oxplow.branch","oxplow.effort"]}
-  - {"key":"task.tokens.wasted_pct","title":"Wasted-token ratio","measure": "oxplow.token_waste", "expression": "RATIO(num, den)", "unit":"%","direction":"lower-better","displayKind":"gauge","category":"operational","description":"Share of effort token spend that was later reverted — wasted ÷ all metered spend, across closed efforts.","sliceableDims":["oxplow.branch","oxplow.effort"]}
-  - {"key":"task.steering","title":"Steering per effort","measure": "oxplow.effort_steering", "expression": "AVG(value)", "unit":"per effort","direction":"lower-better","displayKind":"gauge","category":"operational","description":"Avg steering events per closed effort (user prompts + Stop-hook nudges + review comments) — the autonomy number; lower means more autonomous.","sliceableDims":["oxplow.branch","oxplow.effort"]}
-  - {"key":"effort.time_to_green_ms","title":"Time to green","measure": "oxplow.effort_time_to_green", "expression": "AVG(value)", "unit":"ms","direction":"lower-better","displayKind":"gauge","category":"testing","description":"Avg wall-clock from an effort's first red test run to its first green — only efforts that went red and recovered count.","sliceableDims":["oxplow.branch","oxplow.effort"]}
+  - {"key":"request.cycle_time_ms","title":"Request cycle time","measure": "oxplow.request_cycle_time", "expression": "AVG(value)", "unit":"ms","direction":"lower-better","displayKind":"gauge","category":"operational","description":"How long a request ran, from its first prompt to its last activity.","sliceableDims":["oxplow.branch"]}
+  - {"key":"request.time_to_green_ms","title":"Time to green","measure": "oxplow.request_time_to_green", "expression": "AVG(value)", "unit":"ms","direction":"lower-better","displayKind":"gauge","category":"testing","description":"Avg wall-clock from a request's first red test run to its first green — only requests that went red and recovered count.","sliceableDims":["oxplow.branch"]}
   - {"key":"agent.nudges.fired","title":"Nudges fired","measure": "oxplow.nudge", "expression": "SUM(value)", "unit":"count","direction":"lower-better","displayKind":"event","category":"operational","description":"Count of nudges fired to the agent.","sliceableDims":["subject","oxplow.branch","oxplow.thread"]}
   - {"key":"oxplow.tests.passed","title":"Tests passed","measure": "oxplow.test_case", "expression": "COUNT(*) FILTER (WHERE dim('oxplow.status') = 'passed')", "unit":"count","direction":"higher-better","displayKind":"gauge","category":"testing","description":"Known tests currently passing — each test's latest recorded status, unioned across runners.","sliceableDims":["oxplow.branch"]}
   - {"key":"oxplow.tests.failed","title":"Tests failed","measure": "oxplow.test_case", "expression": "COUNT(*) FILTER (WHERE dim('oxplow.status') = 'failed')", "unit":"count","direction":"lower-better","displayKind":"gauge","category":"testing","description":"Known tests currently failing — each test's latest recorded status, unioned across runners.","sliceableDims":["oxplow.branch"]}
   - {"key":"oxplow.tests.total","title":"Tests total","measure": "oxplow.test_case", "expression": "COUNT(*)", "unit":"count","direction":"neutral","displayKind":"gauge","category":"testing","description":"All known tests — union across runners, each counted at its latest recorded status.","sliceableDims":["oxplow.branch"]}
   - {"key":"oxplow.tests.duration_ms","title":"Test suite duration","measure": "oxplow.test_duration", "expression": "SUM(value)", "unit":"ms","direction":"lower-better","displayKind":"gauge","category":"testing","description":"Total wall-clock time of the known test suite.","sliceableDims":["oxplow.branch"]}
   - {"key":"oxplow.tests.slowest_ms","title":"Slowest test","measure": "oxplow.test_duration", "expression": "MAX(value)", "unit":"ms","direction":"lower-better","displayKind":"gauge","category":"testing","description":"Wall-clock time of the slowest single test.","sliceableDims":["oxplow.branch"]}
-  - {"key":"oxplow.tests.failed_at_close","title":"Tests failed at close","measure": "oxplow.effort_test_outcome", "expression": "AVG(value) FILTER (WHERE dim('oxplow.tests_stat') = 'at_close')", "unit":"per effort","direction":"lower-better","displayKind":"gauge","category":"testing","description":"Failing tests in the effort's final run, averaged across closed efforts — did work close green.","sliceableDims":["oxplow.branch"]}
-  - {"key":"oxplow.tests.peak_failed","title":"Peak tests failed","measure": "oxplow.effort_test_outcome", "expression": "AVG(value) FILTER (WHERE dim('oxplow.tests_stat') = 'peak')", "unit":"per effort","direction":"lower-better","displayKind":"gauge","category":"testing","description":"Most tests failing in any single run during an effort, averaged across closed efforts.","sliceableDims":["oxplow.branch"]}
-  - {"key":"oxplow.tests.distinct_failed","title":"Distinct tests failed","measure": "oxplow.effort_test_outcome", "expression": "AVG(value) FILTER (WHERE dim('oxplow.tests_stat') = 'distinct_failed')", "unit":"per effort","direction":"lower-better","displayKind":"gauge","category":"testing","description":"Distinct tests that went red at least once during an effort, averaged across closed efforts.","sliceableDims":["oxplow.branch"]}
-  - {"key":"oxplow.tests.red_runs","title":"Red test runs","measure": "oxplow.effort_test_outcome", "expression": "AVG(value) FILTER (WHERE dim('oxplow.tests_stat') = 'red_runs')", "unit":"per effort","direction":"lower-better","displayKind":"gauge","category":"testing","description":"Test runs with at least one failure during an effort, averaged across closed efforts.","sliceableDims":["oxplow.branch"]}
+  - {"key":"oxplow.tests.failed_at_close","title":"Tests failed at the end","measure": "oxplow.request_test_outcome", "expression": "AVG(value) FILTER (WHERE dim('oxplow.tests_stat') = 'at_close')", "unit":"per request","direction":"lower-better","displayKind":"gauge","category":"testing","description":"Failing tests in a request's latest run, averaged across requests — did the work end green.","sliceableDims":["oxplow.branch"]}
+  - {"key":"oxplow.tests.peak_failed","title":"Peak tests failed","measure": "oxplow.request_test_outcome", "expression": "AVG(value) FILTER (WHERE dim('oxplow.tests_stat') = 'peak')", "unit":"per request","direction":"lower-better","displayKind":"gauge","category":"testing","description":"Most tests failing in any single run of a request, averaged across requests.","sliceableDims":["oxplow.branch"]}
+  - {"key":"oxplow.tests.distinct_failed","title":"Distinct tests failed","measure": "oxplow.request_test_outcome", "expression": "AVG(value) FILTER (WHERE dim('oxplow.tests_stat') = 'distinct_failed')", "unit":"per request","direction":"lower-better","displayKind":"gauge","category":"testing","description":"Distinct tests that went red at least once during a request, averaged across requests.","sliceableDims":["oxplow.branch"]}
+  - {"key":"oxplow.tests.red_runs","title":"Red test runs","measure": "oxplow.request_test_outcome", "expression": "AVG(value) FILTER (WHERE dim('oxplow.tests_stat') = 'red_runs')", "unit":"per request","direction":"lower-better","displayKind":"gauge","category":"testing","description":"Test runs with at least one failure during a request, averaged across requests.","sliceableDims":["oxplow.branch"]}
   - {"key":"oxplow.coverage.abs_pct","title":"Coverage","measure": "oxplow.coverage", "expression": "RATIO(num, den)", "unit":"%","direction":"higher-better","displayKind":"coverage","category":"coverage","description":"Whole-report coverage %.","sliceableDims":["oxplow.branch","oxplow.vcs_rev"],"target":80.0,"warnAt":80.0,"failAt":50.0}
   - {"key":"oxplow.coverage.branch_pct","title":"Branch coverage","measure": "oxplow.coverage.branch", "expression": "RATIO(num, den)", "unit":"%","direction":"higher-better","displayKind":"coverage","category":"coverage","description":"Whole-report branch coverage %.","sliceableDims":["oxplow.branch","oxplow.vcs_rev"]}
   - {"key":"oxplow.coverage.function_pct","title":"Function coverage","measure": "oxplow.coverage.function", "expression": "RATIO(num, den)", "unit":"%","direction":"higher-better","displayKind":"coverage","category":"coverage","description":"Whole-report function/method coverage %.","sliceableDims":["oxplow.branch","oxplow.vcs_rev"]}
   - {"key":"oxplow.coverage.untested_files","title":"Untested files","measure": "oxplow.coverage", "expression": "COUNT(*) FILTER (WHERE value <= 0)", "unit":"count","direction":"lower-better","displayKind":"findings","category":"coverage","description":"Instrumented files with 0% line coverage.","sliceableDims":["oxplow.branch","oxplow.vcs_rev"]}
   - {"key":"oxplow.analysis.errors","title":"Analysis errors","measure": "oxplow.lint_hit", "expression": "COUNT(*) FILTER (WHERE severity = 'error')", "unit":"count","direction":"lower-better","displayKind":"gauge","category":"static-quality","description":"Static-analysis errors in the latest run.","sliceableDims":["oxplow.branch","oxplow.vcs_rev"]}
   - {"key":"oxplow.analysis.warnings","title":"Analysis warnings","measure": "oxplow.lint_hit", "expression": "COUNT(*) FILTER (WHERE severity = 'warning')", "unit":"count","direction":"lower-better","displayKind":"gauge","category":"static-quality","description":"Static-analysis warnings in the latest run.","sliceableDims":["oxplow.branch","oxplow.vcs_rev"]}
-  - {"key":"work.tasks_completed","title":"Tasks completed","entity":"v_work_item","where":"state = 'done'","time":"closed_at","aggregation":"count","unit":"tasks","category":"operational","description":"Work items done, by the day they were closed."}
-  - {"key":"work.open_tasks","title":"Open tasks","entity":"v_work_item","where":"state IN ('todo', 'in_progress', 'blocked')","aggregation":"count","unit":"tasks","category":"operational","description":"Work items ready, in progress or blocked, captured over time."}
+  - {"key":"task.completed","title":"Tasks completed","entity":"v_task","where":"state = 'done'","time":"closed_at","aggregation":"count","unit":"tasks","category":"operational","description":"Tasks done, by the day they were closed."}
+  - {"key":"task.open","title":"Open tasks","entity":"v_task","where":"state IN ('todo', 'in_progress', 'blocked')","aggregation":"count","unit":"tasks","category":"operational","description":"Tasks ready, in progress or blocked, captured over time."}
 # What oxplow's URIs name (`oxplow:oxplow/<resource>?<params>`): declared
 # here like any extension's resources, so none is special
 # (the resource URI grammar). A param's `pattern` matches its decoded value.
@@ -560,13 +571,11 @@ resources:
     resolve: thread
     searchable: search_thread
     icon: message-square
-  - name: effort
-    description: "A stretch of one thread's work that oxplow tracks from its start to its finish."
-    label: Effort
-    params: { id: { required: true, pattern: '^eff[0-9]+$' } }
-    resolve: effort
-    searchable: search_effort
-    icon: flag
+  - name: person
+    description: "The person using oxplow: who a task is assigned to when it's theirs to do (`oxplow:oxplow/person`). An id names one person when there are several."
+    label: Person
+    params: { id: { pattern: '^[A-Za-z0-9._-]+$' } }
+    icon: user
   - name: turn
     description: "One turn of an agent's conversation: a prompt and the agent's reply."
     label: Agent turn
@@ -574,6 +583,13 @@ resources:
     resolve: agent_turn
     title: prompt
     searchable: search_turn
+    icon: activity
+  - name: request
+    description: "A request: the turn that started something and every turn that followed from it (a background job's report, a subagent's hand-back). It has no page of its own yet; other records link to it."
+    label: Request
+    params: { id: { required: true, pattern: '^req[0-9]+$' } }
+    resolve: request
+    title: prompt
     icon: activity
   - name: snapshot
     description: "A saved copy of the project's files at one moment."
@@ -616,19 +632,19 @@ resources:
     resolve: symbol
     title: name
     icon: list-tree
-  - name: work_item
-    description: "A task, epic or other item on the project's work list."
-    label: Work item
+  - name: task
+    description: "A task, epic or other item on the project's task tracker."
+    label: Task
     params: { provider: { required: true, pattern: '^[a-z][a-z0-9_-]*$' }, id: { required: true } }
-    resolve: work_item
-    searchable: search_work_item
+    resolve: task
+    searchable: search_task
     icon: check-square
-  - name: wiki
-    description: "A page of the project's wiki."
-    label: Wiki page
-    params: { slug: { required: true, pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$' } }
+  - name: knowledge
+    description: "A page of one of the project's knowledge stores (oxwiki, an extension's)."
+    label: Knowledge page
+    params: { store: { required: true, pattern: '^[a-z][a-z0-9_-]*$' }, id: { required: true } }
     resolve: knowledge_page
-    searchable: search_wiki
+    searchable: search_knowledge
     icon: book-open
   - name: comment
     description: "A comment a person left on a page or a record."
@@ -639,7 +655,7 @@ resources:
     searchable: search_comment
     icon: message-square
   - name: event
-    description: "A recorded event, such as an effort finishing."
+    description: "A recorded event, such as a request finishing."
     label: Event
     params: { id: { required: true, pattern: '^[0-9a-f-]{36}$' } }
     resolve: event
@@ -717,21 +733,6 @@ resources:
     resolve: command_proposal
     title: command
     icon: bell
-  - name: claim
-    description: "A statement an agent made about its work, which can be checked."
-    label: Claim
-    params: { id: { required: true, pattern: '^[0-9]+$' } }
-    resolve: claim
-    title: statement
-    icon: circle-dot
-  - name: decision
-    description: "A choice that an agent or a person made, with its reason."
-    label: Decision
-    params: { id: { required: true, pattern: '^[0-9]+$' } }
-    resolve: decision
-    title: question
-    searchable: search_decision
-    icon: circle-dot
   - name: job_run
     description: "One run of a durable job."
     label: Job run
@@ -846,8 +847,13 @@ resources:
     params: { skill: { required: true, pattern: '^[a-z][a-z0-9_]*/[a-z][a-z0-9_.-]*$' } }
     searchable: search_skill
     icon: book-open
+  - name: agent_context
+    description: "A short text that an extension puts in an agent's context when it changes."
+    label: Agent context
+    params: { agent_context: { required: true, pattern: '^[a-z][a-z0-9_]*/[a-z][a-z0-9_.-]*$' } }
+    icon: book-open
   - name: implementation
-    description: "One way to provide a capability, such as a work list or an agent."
+    description: "One way to provide a capability, such as a task tracker or an agent."
     label: Implementation
     params: { implementation: { required: true, pattern: '^[a-z][a-z0-9_]*/[a-z][a-z0-9_.-]*$' } }
     searchable: search_implementation
@@ -898,6 +904,18 @@ resources:
     params: { custom_component: { required: true, pattern: '^[a-z][a-z0-9_]*/[a-z][a-z0-9_.-]*$' } }
     icon: box
 commands:
+  # Foundation's own settings (`configuration:`): read with their stamps,
+  # written as a compare-and-swap on them.
+  - name: settings.read
+    summary: The effective settings of oxplow's own extensions (they share the namespace's one configuration — oxwiki on or off, the review policy, the task workflow), where each came from, and the stamps a write needs.
+    scope: extension_config.read
+    op: snapshot
+    example: {}
+  - name: settings.write
+    summary: Set the project or personal settings of oxplow's own extensions — oxwiki on or off, the review policy, the task workflow (a compare-and-swap on the stamps `oxplow.settings.read` returns).
+    scope: extension_config.write
+    op: compare_exchange
+    example: {"schema_version": 2, "project": {"expected": {"schema_version": 2, "revision": 0}, "values": {"oxwiki": false}}, "personal": null}
   # agent_input.write — the window's agent input.
   - name: agent.draft
     summary: "Put text in the shown thread's agent input, unsent."
@@ -1035,7 +1053,7 @@ commands:
     example: {"thread": "thr1"}
   # changes.read
   - name: change.ensure
-    summary: "Analyze a change and return its row (`v_change`). A commit vs its parent, an effort (start → end), or a stream's uncommitted work vs HEAD. Then read the analysis with oxplow_query_sql: v_change_file (files, zones), v_oxplow_change_interest (look-here-first scores, when oxplow-bundled is on), v_change_function (added/deleted/modified functions, deltas, churn), v_change_import (cross-zone imports), v_oxplow_change_co_change (files whose usual partners are missing, or that were dormant; oxplow-bundled), v_change_duplicate (copied blocks; arrives a little later). Cached: commits and closed efforts are analyzed once. It fills a derived cache and changes no record."
+    summary: "Analyze a change and return its row (`v_change`). A commit vs its parent, a request or a turn (first take → last take), or a stream's uncommitted work vs HEAD. Then read the analysis with oxplow_query_sql: v_change_file (files, zones), v_oxplow_change_interest (look-here-first scores, when oxplow-bundled is on), v_change_function (added/deleted/modified functions, deltas, churn), v_change_import (cross-zone imports), v_oxplow_change_co_change (files whose usual partners are missing, or that were dormant; oxplow-bundled), v_change_duplicate (copied blocks; arrives a little later). Cached: commits and ended requests are analyzed once. It fills a derived cache and changes no record."
     scope: changes.read
     op: ensure
     tool: ensure_change
@@ -1093,7 +1111,7 @@ commands:
     op: mark_generated
     example: {"entry": "dist"}
   - name: capability.choose
-    summary: "Choose which implementation a capability uses (`work_items`, `effort_policy`, `snapshots`, …): the project's choice in .oxplow/project.yaml (`activeProviders`), or with `layer: personal` this person's own in .oxplow/personal.yaml. Leave `provider` out to go back to the default (for a personal choice, the same as the project). Logged as config.changed, undoable."
+    summary: "Choose which implementation a capability uses (`task_tracker`, `snapshots`, …): the project's choice in .oxplow/project.yaml (`activeProviders`), or with `layer: personal` this person's own in .oxplow/personal.yaml. Leave `provider` out to go back to the default (for a personal choice, the same as the project). Logged as config.changed, undoable."
     scope: config.write
     op: choose_provider
     example: {"capability": "snapshots", "provider": "oxplow/diffs"}
@@ -1101,7 +1119,7 @@ commands:
     summary: "Choose whose component shows where an extension replaces a core one (`replacements` in .oxplow/project.yaml): an extension's name, or `oxplow` for oxplow's own. Leave `whose` out for the default. Logged as config.changed, undoable."
     scope: config.write
     op: choose_replacement
-    example: {"target": "work_item.board", "whose": "task-views"}
+    example: {"target": "task.board", "whose": "task-views"}
   - name: agent.set_agents
     summary: "Set which agent harnesses are on, by key, in priority order: the first is a new session's default. Each must be registered. Writes `agents` in .oxplow/project.yaml (logged as config.changed, undoable)."
     scope: config.write
@@ -1166,106 +1184,30 @@ commands:
     example: {}
   # editor.write — the window's; an agent saves in its own thread.
   - name: editor.save
-    summary: "Save a file's unsaved changes (`uri`: its tab, `oxplow:oxplow/file?path=src/a.rs`). With none it saves the page your thread shows: its file, or the page's own edits (a wiki page's draft)."
+    summary: "Save a file's unsaved changes (`uri`: its tab, `oxplow:oxplow/file?path=src/a.rs`). With none it saves the page your thread shows: its file, or the page's own edits (a knowledge page's draft)."
     scope: editor.write
     op: save
     ui: { label: Save, group: File, shortcut: "Ctrl/Cmd+S", while_typing: true, menu: { bar: file, group: 2_save, order: 10 }, when: "pageDirty" }
     example: {"uri": "oxplow:oxplow/file?path=src/main.rs"}
-  # efforts.write
-  - name: effort.close
-    summary: "Close an effort (by id, or a thread's open one), optionally as of a past point and with a summary."
-    scope: efforts.write
-    op: close
-    example: {"effort": "eff12", "summary": "Fixed the login redirect loop."}
-  - name: effort.confirm_decision
-    summary: "Confirm a decision oxplow inferred from an effort (`<id>`): it was made, as stated."
-    scope: efforts.write
-    op: confirm_decision
-    example: {"decision": 3}
-  - name: effort.dismiss_claim
-    summary: "Dismiss a claim oxplow read in an effort's answers (`<id>`): the agent didn't claim it, or didn't mean it. It stays dismissed when the effort is read again."
-    scope: efforts.write
-    op: dismiss_claim
-    example: {"claim": 7}
-  - name: effort.dismiss_decision
-    summary: "Dismiss a decision oxplow inferred from an effort (`<id>`): it wasn't made, or not like that."
-    scope: efforts.write
-    op: dismiss_decision
-    example: {"decision": 3}
-  - name: effort.link
-    summary: "Link an effort (by id, or a thread's open one) to a work item, or unlink it with `work_item: null`."
-    scope: efforts.write
-    op: link
-    example: {"effort": "eff12", "work_item": "oxplow:oxplow/work_item?id=tsk42&provider=oxplow"}
-  - name: effort.open
-    summary: "Open an effort — a span of a thread's work — on a thread (yours by default), optionally linked to a work item. The thread's current effort closes first. oxplow opens efforts itself; this is for policies, people and corrections."
-    scope: efforts.write
-    op: open
-    example: {"thread": "thr3", "work_item": "oxplow:oxplow/work_item?id=tsk42&provider=oxplow"}
-  - name: effort.record_decision
-    summary: "Record a DECISION you made while working: a fork where you picked one approach over others without asking (where to put something, which library, what to leave out, how to read an ambiguous ask). People review these first, so record the non-obvious ones as you make them — not trivia. Attaches to `work_item`'s open effort, else your thread's. Returns `{ id, effort }`."
-    scope: efforts.write
-    op: record_decision
-    example: {"question": "Where should the redirect target be validated?", "choice": "In the callback handler", "alternatives": ["In the login page", "In a middleware"], "why": "It is the only place that sees both the session and the requested path.", "confidence": "medium"}
-  - name: effort.reopen_claim
-    summary: "Take back a claim's dismissal (`<id>`): it's unreviewed again."
-    scope: efforts.write
-    op: reopen_claim
-    example: {"claim": 7}
-  - name: effort.reopen_decision
-    summary: "Take back a review of an inferred decision (`<id>`): it is unconfirmed again."
-    scope: efforts.write
-    op: reopen_decision
-    example: {"decision": 3}
-  - name: effort.replace_inferred_decisions
-    summary: "Replace an effort's inferred decisions (`eff<id>`) with a model's proposals — at most 8 forks the agent seems to have resolved without recording them. Its recorded and reviewed decisions stay. They wait for a person's review and are never shown to the agent. Returns `{ effort, count }`."
-    scope: efforts.write
-    op: replace_inferred_decisions
-    example: {"effort": "eff12", "decisions": [{"question": "Which CSV library?", "choice": "csv crate", "alternatives": ["hand-rolled writer"], "why": "Quoting rules are easy to get wrong.", "confidence": "medium"}]}
-  - name: effort.replace_inferred_claims
-    summary: "Replace an effort's claims (`eff<id>`) with the ones a model read in its answers — at most 8 statements like \"tests pass\" or \"no behavior change\", each with its kind and what it cites. Claims a reviewer dismissed or verified stay. Returns `{ effort, count }`."
-    scope: efforts.write
-    op: replace_inferred_claims
-    example: {"effort": "eff12", "claims": [{"statement": "The parser tests pass.", "kind": "tests_pass", "evidence": "oxplow:oxplow/run?id=42"}]}
-  - name: effort.report
-    summary: "Optional: describe the thread's current (else latest) effort. It takes a `summary` of what shipped, any `impacts` beyond the edits (a wiki page, a work item, a commit, a finding), and the `claims` you can back (each `{ statement, kind, evidence? }`; they replace the ones an earlier report stated that nobody reviewed). Without one, the summary is your last turn's final message; files and test runs are observed. Returns `{ effort, link_warnings }`."
-    scope: efforts.write
-    op: report
-    example: {"summary": "Fixed the login redirect loop: the callback kept the stale `next` parameter.", "impacts": [{"kind": "file", "id": "src/auth.rs", "action": "updated"}, {"kind": "work_item", "id": "oxplow:oxplow/work_item?id=tsk42&provider=oxplow", "action": "completed"}], "claims": [{"statement": "the auth tests pass", "kind": "tests_pass", "evidence": "oxplow:oxplow/run?id=12"}]}
-  - name: effort.unverify_claim
-    summary: "Take back a claim's verification (`<id>`): it's unreviewed again, citing `evidence` (what it cited before) or nothing."
-    scope: efforts.write
-    op: unverify_claim
-    example: {"claim": 7, "evidence": "oxplow:oxplow/run?id=12"}
-  - name: effort.update
-    summary: "Set an effort's own title, or clear it back to its default with `title: null`."
-    scope: efforts.write
-    op: update
-    example: {"effort": "eff12", "title": "Fix the login redirect loop"}
-  - name: effort.verify_claim
-    summary: "Verify a claim oxplow read in an agent's answers (`<id>`), citing what backs it (what it already cites, else `reviewer` when you checked it yourself)."
-    scope: efforts.write
-    op: verify_claim
-    example: {"claim": 7, "evidence": "oxplow:oxplow/run?id=12"}
   # effects.read
   - name: effect.backfill_plan
     summary: "How many events an `oxplow.effect.backfill` would have an effect react to: the matching ones it never reacted to, the log positions they span (pass `to_seq` to the backfill to run on just these), and how many one run reacts to (`batch`)."
     scope: effects.read
     op: backfill_plan
-    example: {"effect": "review/infer-reasoning", "since": "2026-10-01T00:00:00Z"}
+    example: {"effect": "review/notify", "since": "2026-10-01T00:00:00Z"}
   # effects.run
   - name: effect.backfill
     summary: "Have an effect react to the matching events it never reacted to — those logged before its approval, or while it waited to be approved again — oldest first, once each. The effect may call outside oxplow for every one of them. It runs as it is now; `oxplow.effect.backfill_plan` says how many events that is."
     scope: effects.run
     op: backfill
     confirm: always
-    example: {"effect": "review/infer-reasoning", "since": "2026-10-01T00:00:00Z"}
+    example: {"effect": "review/notify", "since": "2026-10-01T00:00:00Z"}
   - name: effect.retry
     summary: "Have an effect react again to an event its reaction to failed, as its next attempt. If the failed attempt was interrupted with a step outside oxplow under way, that step may already have run: retrying sends it again. It runs the effect as it is now, composing afresh from the event."
     scope: effects.run
     op: retry
     confirm: always
-    example: {"effect": "review/infer-reasoning", "event": "ev1042"}
+    example: {"effect": "review/notify", "event": "ev1042"}
   - name: effect.retry_all
     summary: "Have every effect whose latest reaction failed react again to that event, one by one, as `effect.retry` does one. A reaction that can't run (its effect disabled, its event gone) is reported as refused and the rest still run. Says how many came out right."
     scope: effects.run
@@ -1361,7 +1303,7 @@ commands:
     scope: extensions.enable
     op: enable
     lifecycle: experimental
-    example: {"namespace": "review", "kind": "effect", "contribution": "infer-reasoning"}
+    example: {"namespace": "review", "kind": "effect", "contribution": "notify"}
   - name: contribution.enable_all
     summary: "Enable every extension contribution that stopped after repeated failures on this machine again — one namespace's (`namespace`) or all — each as `oxplow.contribution.enable` does it. Returns the rows it enabled."
     scope: extensions.enable
@@ -1410,17 +1352,17 @@ commands:
     example: {"stream": "str1", "uri": "oxplow:oxplow/file?path=src/lib.rs", "line": 10, "col": 5, "new_name": "Gadget"}
   # handoffs.write
   - name: handoff.send
-    summary: "Hand work to another open thread (any stream's): what it is and what its agent needs to know, and the work item it hands over, if any. The thread's agent is given it at its next prompt; the person sees it at once. Nothing wakes an agent. Returns the handoff and `link_warnings`."
+    summary: "Hand work to another open thread (any stream's): what it is and what its agent needs to know, and the task it hands over, if any. The thread's agent is given it at its next prompt; the person sees it at once. Nothing wakes an agent. Returns the handoff and `link_warnings`."
     scope: handoffs.write
     op: send
-    example: {"to_thread": "thr4", "work_item": "oxplow:oxplow/work_item?id=tsk12&provider=oxplow", "body": "The parser fix is in; the remaining failure is the timezone case in [[src/dates.rs]]."}
+    example: {"to_thread": "thr4", "task": "oxplow:oxplow/task?id=tsk12&provider=oxtask", "body": "The parser fix is in; the remaining failure is the timezone case in [[src/dates.rs]]."}
   - name: handoff.resolve
-    summary: "Take or decline a handoff to your thread. Taking one moves its work item onto your thread. Its sender reads the note."
+    summary: "Take or decline a handoff to your thread. Taking one moves its task onto your thread. Its sender reads the note."
     scope: handoffs.write
     op: resolve
     example: {"handoff": "hnd3", "outcome": "taken"}
   - name: handoff.settle
-    summary: "Record how a handoff ended: `taken` or `declined` (its recipient; `oxplow.handoff.resolve` also moves its work item), `withdrawn` (its sender), each only while open; `open` again undoes it."
+    summary: "Record how a handoff ended: `taken` or `declined` (its recipient; `oxplow.handoff.resolve` also moves its task), `withdrawn` (its sender), each only while open; `open` again undoes it."
     scope: handoffs.write
     op: settle
     example: {"handoff": "hnd3", "state": "withdrawn", "note": "Fixed it here after all."}
@@ -1437,23 +1379,23 @@ commands:
     example: {}
   # knowledge.read
   - name: knowledge.comments
-    summary: "List comments. Threaded annotations the user anchored to a text selection in a page (wiki body, code file line, task detail). `id` is a thread (`thr…`) or stream (`str…`) id; `scope` is inferred from its prefix, so usually pass only `id`. `status` filters: \"all\" (default), \"open\", or \"needs_response\" (open follow-ups whose latest message isn't yours — what the user wants you to act on). Each result carries the anchored `quote`, the message thread, and `intent` (note vs followup). Reply with `oxplow.knowledge.reply_comment { comment, body }`; resolve with `oxplow.knowledge.update_comment { comment, status: \"resolved\" }`."
+    summary: "List comments. Threaded annotations the user anchored to a text selection in a page (knowledge page body, code file line, task detail). `id` is a thread (`thr…`) or stream (`str…`) id; `scope` is inferred from its prefix, so usually pass only `id`. `status` filters: \"all\" (default), \"open\", or \"needs_response\" (open follow-ups whose latest message isn't yours — what the user wants you to act on). Each result carries the anchored `quote`, the message thread, and `intent` (note vs followup). Reply with `oxplow.knowledge.reply_comment { comment, body }`; resolve with `oxplow.knowledge.update_comment { comment, status: \"resolved\" }`."
     scope: knowledge.read
     op: comments
     tool: list_comments
     example: {"id": "str1", "status": "needs_response"}
   - name: knowledge.drift
-    summary: "What a wiki page's file drifted. The unified diff between the snapshot the file was pinned to and the file's CURRENT on-disk content — so you can read just what drifted instead of re-opening the whole file. Find the drifted files with `oxplow.sql.query` over `v_knowledge_ref` (`stale = 1`; per page, `v_knowledge_page.stale_ref_count`), then call this per file. Returns `{ slug, path, pinned_snapshot_id, status, unified_diff, truncated }`; `status` is one of drifted | unchanged | not_a_ref | no_pin | binary | no_contents (the pin was taken by 'Track changes only', which keeps no text)."
+    summary: "What a knowledge page's file drifted. The unified diff between the snapshot the file was pinned to and the file's CURRENT on-disk content — so you can read just what drifted instead of re-opening the whole file. Find the drifted files with `oxplow.sql.query` over `v_knowledge_ref` (`stale = 1`; per page, `v_knowledge_page.stale_ref_count`), then call this per file. Returns `{ page, path, pinned_snapshot_id, status, unified_diff, truncated }`; `status` is one of drifted | unchanged | not_a_ref | no_pin | binary | no_contents (the pin was taken by 'Track changes only', which keeps no text)."
     scope: knowledge.read
     op: drift
-    tool: wiki_ref_drift
-    example: {"slug": "architecture", "path": "src/app/main.py"}
+    tool: knowledge_drift
+    example: {"store": "oxwiki", "id": "architecture", "path": "src/app/main.py"}
   # knowledge.write
   - name: knowledge.add_comment
     summary: "Comment on a span of a page (its `target`), with a first message. `intent`: `note` (the agent leaves it alone) or `followup` (the agent should act on it). An agent comments on its own stream, in its own thread."
     scope: knowledge.write
     op: add_comment
-    example: {"stream": "str1", "target": "oxplow:oxplow/wiki?slug=vcs-capability", "quote": "Every provider implements Vcs", "intent": "followup", "body": "This is out of date: GitProvider also implements WorkspaceFiles."}
+    example: {"stream": "str1", "target": "oxplow:oxplow/knowledge?id=vcs-capability&store=oxwiki", "quote": "Every provider implements Vcs", "intent": "followup", "body": "This is out of date: GitProvider also implements WorkspaceFiles."}
   - name: knowledge.delete_comment
     summary: "Delete a comment and its messages (`cmt12`). A person is asked first."
     scope: knowledge.write
@@ -1461,16 +1403,16 @@ commands:
     confirm: destructive
     example: {"comment": "cmt12"}
   - name: knowledge.delete_page
-    summary: "Delete a knowledge (wiki) page and its links."
+    summary: "Delete a knowledge page (`id`, of `store`: needed only when several stores are enabled) and its links."
     scope: knowledge.write
     op: delete_page
     confirm: destructive
-    example: {"slug": "auth-flow"}
+    example: {"id": "auth-flow"}
   - name: knowledge.link
-    summary: "Link a knowledge page to a page, file, directory, task or commit (added under its Related heading)."
+    summary: "Link a knowledge page (`id`, of `store`) to a page, file, directory, task or commit: added under its Related heading and written through its store."
     scope: knowledge.write
     op: link
-    example: {"page": "auth-flow", "target": "src/session.rs"}
+    example: {"id": "auth-flow", "target": "src/session.rs"}
   - name: knowledge.relocate_comment
     summary: "Store where a comment's quote (`cmt12`) sits in its page's content now (`selectors_json`), or that it is gone (`orphaned`). The renderer's, after it re-finds the quote."
     scope: knowledge.write
@@ -1482,10 +1424,22 @@ commands:
     op: reply_comment
     example: {"comment": "cmt4", "body": "Fixed in the page."}
   - name: knowledge.resync
-    summary: "Restate a knowledge page from its file on disk (the repair when a row and its file disagree); a missing file deletes the page."
+    summary: "Restate an oxwiki page from its file in .oxplow/oxwiki (the repair when a row and its file disagree); a missing file deletes the page."
     scope: knowledge.write
     op: resync
-    example: {"slug": "auth-flow"}
+    example: {"id": "auth-flow"}
+  - name: knowledge.set_oxwiki
+    summary: "Turn oxwiki — oxplow's own knowledge store, the wiki in .oxplow/oxwiki — on or off for the project. Off, its pages stay recorded but hidden and its files are left alone; on, they are back. A person's own setting, when there is one, still wins for them (the result says so)."
+    input_schema:
+      type: object
+      required: [on]
+      properties:
+        on: { type: boolean, description: "true: oxwiki is one of the project's knowledge stores; false: it is off." }
+      additionalProperties: false
+    example: {"on": false}
+    entry: handlers/set_oxwiki.star
+    needs: [extension_config.read]
+    access: write
   - name: knowledge.update_comment
     summary: "Change a comment (`cmt12`): its `intent`, its `status` (`open` / `resolved`), or re-attach it to a new span (`quote` and `selectors_json` together)."
     scope: knowledge.write
@@ -1495,12 +1449,12 @@ commands:
     summary: "Re-pin a page's files to now without rewriting it: `files` are the files you re-read against the page as it stands (all of the page's files when omitted). The page is the one core records; a file the page does not cite is refused."
     scope: knowledge.write
     op: verify_files
-    example: {"slug": "auth-flow", "files": ["src/auth.rs"]}
+    example: {"id": "auth-flow", "files": ["src/auth.rs"]}
   - name: knowledge.write_page
-    summary: "Write a knowledge (wiki) page: its body, every [[link]] resolving, and the files you re-read against it (verified_files) or took out (removed_files)."
+    summary: "Write a knowledge page: its body, every [[link]] resolving, and the files you re-read against it (verified_files) or took out (removed_files). `store` names where it's kept (needed only when several stores are enabled); `id` is the store's page id (omitted: derived from the title)."
     scope: knowledge.write
     op: write_page
-    example: {"slug": "auth-flow", "title": "Auth flow", "body": "# Auth flow\n\nThe callback validates `next` before redirecting. See [[src/auth.rs]].", "verified_files": ["src/auth.rs"]}
+    example: {"id": "auth-flow", "title": "Auth flow", "body": "# Auth flow\n\nThe callback validates `next` before redirecting. See [[src/auth.rs]].", "verified_files": ["src/auth.rs"]}
   - name: lsp.restart_server
     summary: "Restart a stream's language server for a language: the session is torn down and started again with the open documents replayed."
     scope: lsp.control
@@ -1591,7 +1545,7 @@ commands:
     tool: find_page
     example: {"question": "which tests failed this week"}
   - name: page.show
-    summary: "Show the person a page beside the conversation. Give `page` (`<extension>/<slug>`, from `oxplow.page.find`) with `params`, or `spec`: a page of your own as YAML (`title`, `loaders:` with sql / rows / page loaders, `view:` with table, list, chart, tree, number or markdown nodes; it only reads) — kept as a page file on `oxplow:temp` (`oxplow:oxplow/page?page=temp/<id>`) the person can save to the wiki or as a page. It opens as a tab of your thread when their window is open (`opened`), and returns the page's text so you can keep your prose short."
+    summary: "Show the person a page beside the conversation. Give `page` (`<extension>/<slug>`, from `oxplow.page.find`) with `params`, or `spec`: a page of your own as YAML (`title`, `loaders:` with sql / rows / page loaders, `view:` with table, list, chart, tree, number or markdown nodes; it only reads) — kept as a page file on `oxplow:temp` (`oxplow:oxplow/page?page=temp/<id>`) the person can save as a knowledge page or as a page. It opens as a tab of your thread when their window is open (`opened`), and returns the page's text so you can keep your prose short."
     scope: pages.show
     op: show
     tool: show_page
@@ -1613,7 +1567,7 @@ commands:
     tool: run_page_action
     example: {"page": "acme/review", "node": "items", "action": "finish", "row": {"id": "tsk12"}}
   - name: page.open
-    summary: "What the person is looking at in a thread. It is the page the thread has open in the window they were in last (`pageId` such as `oxplow:oxplow/work_item?id=tsk42&provider=oxplow`, `oxplow:oxplow/file?path=src/a.rs`, `oxplow:oxplow/page?page=review/waiting`; its kind; the detail the page publishes; which window, whether it's on screen, how fresh), and `others`, the page each other window has open there. When it's a page, `pageRun` is the window's own run of it as text (each node under `[node <id>]`), with `focus`, the node they are on: what is on their screen. `tab` reads one of the thread's tabs instead (an id `oxplow_list_tabs` listed). Use it when the person says \"this\", \"what I'm looking at\" or \"this page\". `open` is null when no window reported one."
+    summary: "What the person is looking at in a thread. It is the page the thread has open in the window they were in last (`pageId` such as `oxplow:oxplow/task?id=tsk42&provider=oxtask`, `oxplow:oxplow/file?path=src/a.rs`, `oxplow:oxplow/page?page=review/waiting`; its kind; the detail the page publishes; which window, whether it's on screen, how fresh), and `others`, the page each other window has open there. When it's a page, `pageRun` is the window's own run of it as text (each node under `[node <id>]`), with `focus`, the node they are on: what is on their screen. `tab` reads one of the thread's tabs instead (an id `oxplow_list_tabs` listed). Use it when the person says \"this\", \"what I'm looking at\" or \"this page\". `open` is null when no window reported one."
     scope: pages.read
     op: open
     tool: get_open_page
@@ -1700,25 +1654,25 @@ commands:
     example: {"instance": "issues/issues", "name": "TOKEN", "sign_in": 3}
   # records.read
   - name: records.read
-    summary: "Read what a uri names. Its dataset's row (every column), what sits beside it (a work item's links and comments, a commit's or an effort's files) and, for a body no dataset holds, its content. `oxplow:oxplow/file?path=src/a.rs` reads the working tree; `oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-40` a revision's lines (`@snap:<id>` a local-history snapshot); `oxplow:oxplow/event?id=<id>#part=output` (or `#input`, `#prompt`) one of your stream's events' stored bodies; `oxplow:oxplow/page?page=<ext>/<slug>` a page's definition (its YAML, source and deployment); `stream` reads a file or page in another stream's worktree. `oxplow:oxplow/ai_call?id=<id>#part=request` (or `#response`) a recorded dataset call's bodies. Any `uri` a dataset's column holds reads the same way (`work_item:…`, `oxplow:oxplow/commit?sha=…`, `oxplow:oxplow/effort?id=…`, `oxplow:oxplow/thread?id=…`, `oxplow:oxplow/wiki?slug=…`). Content stops at 64 KB, saying so."
+    summary: "Read what a uri names. Its dataset's row (every column), what sits beside it (a task's links and comments, a commit's or a request's files) and, for a body no dataset holds, its content. `oxplow:oxplow/file?path=src/a.rs` reads the working tree; `oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-40` a revision's lines (`@snap:<id>` a local-history snapshot); `oxplow:oxplow/event?id=<id>#part=output` (or `#input`, `#prompt`) one of your stream's events' stored bodies; `oxplow:oxplow/page?page=<ext>/<slug>` a page's definition (its YAML, source and deployment); `stream` reads a file or page in another stream's worktree. `oxplow:oxplow/ai_call?id=<id>#part=request` (or `#response`) a recorded dataset call's bodies. Any `uri` a dataset's column holds reads the same way (`task:…`, `oxplow:oxplow/commit?sha=…`, `oxplow:oxplow/request?id=…`, `oxplow:oxplow/thread?id=…`, `oxplow:oxplow/knowledge?id=…&store=…`). Content stops at 64 KB, saying so."
     scope: records.read
     op: read
     tool: read
     example: {"uri": "oxplow:oxplow/file?path=src/auth.rs&rev=git:HEAD#lines=10-40"}
   # search.read
   - name: search.find
-    summary: "Site-wide BM25 search across every searchable resource (`v_resource.searchable`: work items, wiki pages, comments, thread notes, an extension's) and file contents. Tokens match as stemmed prefixes. `stream_id` scopes file/stream-bound hits to one worktree (wiki etc. always included); omit it to search everything. `resources` optionally restricts to some of those (`oxplow/wiki`), or `oxplow/file`. Each hit names the `uri` it found and its `resource` (read it with `oxplow_read`, show it with `oxplow_navigate`); best first."
+    summary: "Site-wide BM25 search across every searchable resource (`v_resource.searchable`: tasks, knowledge pages, comments, an extension's) and file contents. Tokens match as stemmed prefixes. `stream_id` scopes file/stream-bound hits to one worktree (knowledge pages etc. always included); omit it to search everything. `resources` optionally restricts to some of those (`oxplow/knowledge`), or `oxplow/file`. Each hit names the `uri` it found and its `resource` (read it with `oxplow_read`, show it with `oxplow_navigate`); best first."
     scope: search.read
     op: search
     tool: search
-    example: {"query": "oauth redirect", "resources": ["oxplow/wiki", "oxplow/work_item"], "limit": 10}
+    example: {"query": "oauth redirect", "resources": ["oxplow/knowledge", "oxplow/task"], "limit": 10}
   # sql.read
   - name: sql.query
     summary: "Run ONE read-only SQL statement over the published `v_*` datasets. It takes `SELECT`/`WITH` over the views pages and the UI read (`v_dataset` lists them; physical tables are refused). Joins across views are fine. Metrics read as columns of a grid: `SELECT bucket, zone, MEASURE('<metric key>') FROM metric_grid('day'|'week'|'month'[, '<dimension>'])` (keys in v_metric_spec, dimensions in v_dimension). Positional params `?1`, `?2`, … bind from `params`. Returns `{columns, rows, truncated, reads, generation, coverage}`; rows are positional arrays; `truncated` means more rows existed than `limit`. `coverage` names the collector behind each collected model it read and how its last run stands (`current`, `stale`, `failed`, `disabled`, `needs_approval`, `never`): a complete result over a failed collector is still missing data. Writes, PRAGMA, ATTACH and multiple statements are rejected; queries time out after 5s. `v_field` documents every field (column)."
     scope: sql.read
     op: query
     tool: query_sql
-    example: {"sql": "SELECT uri, title, state FROM v_work_item WHERE state = ?1 LIMIT 20", "params": ["todo"]}
+    example: {"sql": "SELECT uri, title, state FROM v_task WHERE state = ?1 LIMIT 20", "params": ["todo"]}
   # streams.write
   - name: stream.rename
     summary: "Rename a stream (`str1`)."
@@ -1732,7 +1686,7 @@ commands:
     example: {"stream": "str1", "prompt": "Prefer small, reviewable commits."}
   # tabs.write — the window's; an agent's acts in its own thread's tabs.
   - name: tab.open
-    summary: "Open a tab (`uri`: a page's uri — `oxplow:oxplow/file?path=src/a.rs`, `oxplow:oxplow/work_item?id=tsk3&provider=oxplow`) in your thread's tabs, without bringing it to the front."
+    summary: "Open a tab (`uri`: a page's uri — `oxplow:oxplow/file?path=src/a.rs`, `oxplow:oxplow/task?id=tsk3&provider=oxtask`) in your thread's tabs, without bringing it to the front."
     scope: tabs.write
     op: open
     example: {"uri": "oxplow:oxplow/file?path=src/main.rs"}
@@ -1765,13 +1719,13 @@ commands:
     example: {"terminal": "trm3"}
   # test_runs.write
   - name: test.record_run
-    summary: "Record a test run with pass/fail counts oxplow couldn't read from its output, marked `asserted`. oxplow records runs it sees in shell commands itself; this is for runs it couldn't parse. The run is the thread's open effort's. Returns `{ recorded, observationId }`."
+    summary: "Record a test run with pass/fail counts oxplow couldn't read from its output, marked `asserted`. oxplow records runs it sees in shell commands itself; this is for runs it couldn't parse. The run belongs to the thread's current turn. Returns `{ recorded, observationId }`."
     scope: test_runs.write
     op: record_run
     example: {"command": "pytest tests/app", "passed": 120, "failed": 0, "total": 120, "duration_ms": 41200}
   # threads.write
   - name: thread.close
-    summary: "Close a thread (`thr12`) — history, reopenable. Its open effort and its agent sessions close, and their processes stop. An agent closes only its own thread."
+    summary: "Close a thread (`thr12`) — history, reopenable. Its agent sessions close, and their processes stop. An agent closes only its own thread."
     scope: threads.write
     op: close
     example: {"thread": "thr12"}
@@ -1950,64 +1904,62 @@ commands:
     ui: { label: "Quick Open…", group: File, shortcut: "Ctrl/Cmd+P", while_typing: true, menu: { bar: file, group: 3_go, order: 10 }, when: "streamShown" }
     example: {}
   - name: window.navigate
-    summary: "Take the person to a uri: opens and focuses its page (a file's editor, a work item, effort, wiki page, directory or `oxplow:oxplow/page?page=<route>`), or selects a `stream:` / `thread:`. `stream` switches to that stream first. Changes what the person sees. Returns `{ opened, stream }`."
+    summary: "Take the person to a uri: opens and focuses its page (a file's editor, a task, request, knowledge page, directory or `oxplow:oxplow/page?page=<route>`), or selects a `stream:` / `thread:`. `stream` switches to that stream first. Changes what the person sees. Returns `{ opened, stream }`."
     scope: window.show
     op: navigate
     example: {"uri": "oxplow:oxplow/file?path=src/auth.rs"}
     tool: navigate
-  # work_items.write
-  - name: work_item.comment
-    summary: "Comment on a work item (oxplow: a note shown with the task)."
-    scope: work_items.write
+  # task_tracker.write
+  - name: task.assign
+    summary: "Say who is going to work on a task: a thread (`oxplow:oxplow/thread?id=thr3`, or `thr3`), the person (`oxplow:oxplow/person`), or nobody (`to` null: the pool any thread may pull from, or the backlog for a backlog item). At the end of that assignee's queue, or before/after an item there. Core's record, for every task tracker: a controller agent routes work to threads with it. A done or canceled item is nobody's (closing one releases it), and a closed thread takes none. Undone by assigning it back."
+    scope: task_tracker.write
+    op: assign
+    example: {"uri": "oxplow:oxplow/task?id=tsk12&provider=oxtask", "to": "oxplow:oxplow/thread?id=thr3"}
+  - name: task.comment
+    summary: "Comment on a task (oxplow: a note shown with the task)."
+    scope: task_tracker.write
     op: comment
-    needs: [work_items.comments]
-    example: {"uri": "oxplow:oxplow/work_item?id=tsk12&provider=oxplow", "body": "Found the cause: the redirect keeps the stale `next` param."}
-  - name: work_item.create
-    summary: "File a work item on the active tracker (the one the person chose), optionally straight into a state. `thread` is the thread it's filed on: absent, an agent's own (a person's lands on the backlog). `native` is the tracker's own fields as its create declares them (oxplow: { priority }). On oxplow the result carries `link_warnings`: the `[[…]]` links in the body that don't resolve."
-    scope: work_items.write
+    needs: [task_tracker.comments]
+    example: {"uri": "oxplow:oxplow/task?id=tsk12&provider=oxtask", "body": "Found the cause: the redirect keeps the stale `next` param."}
+  - name: task.create
+    summary: "File a task on the active tracker (the one the person chose), optionally straight into a state (`backlog`: not ready yet; `todo`, the default: ready to work on). It's assigned to nobody unless `assignee` names a thread or the person (see oxplow.task.assign). `native` is the tracker's own fields as its create declares them (oxplow: { priority }). On oxplow the result carries `link_warnings`: the `[[…]]` links in the body that don't resolve."
+    scope: task_tracker.write
     op: create
-    example: {"title": "Fix the login redirect loop", "body": "Signing in from /settings bounces back to /login.", "state": "todo"}
-  - name: work_item.delete
-    summary: "Delete a work item."
-    scope: work_items.write
+    example: {"title": "Fix the login redirect loop", "body": "Signing in from /settings bounces back to /login.", "stage": "todo"}
+  - name: task.delete
+    summary: "Delete a task."
+    scope: task_tracker.write
     op: delete
     confirm: destructive
-    needs: [work_items.delete]
-    example: {"uri": "oxplow:oxplow/work_item?id=tsk12&provider=oxplow"}
-  - name: work_item.link
-    summary: "Link a work item to another of the same provider, or to any uri it is about. The uri: (`oxplow:oxplow/collector?collector=triage/hot`, `oxplow:oxplow/effort?id=eff12`, `oxplow:oxplow/file?path=src/a.rs`), by a link type the provider names (oxplow: blocks, relates_to, discovered_from, duplicates, supersedes, replies_to, about). Only an item target must exist; a uri may name something since gone. Undone by work_item.unlink."
-    scope: work_items.write
+    needs: [task_tracker.delete]
+    example: {"uri": "oxplow:oxplow/task?id=tsk12&provider=oxtask"}
+  - name: task.link
+    summary: "Link a task to another of the same provider, or to any uri it is about. The uri: (`oxplow:oxplow/collector?collector=triage/hot`, `oxplow:oxplow/request?id=req12`, `oxplow:oxplow/file?path=src/a.rs`), by a link type the provider names (oxplow: blocks, relates_to, discovered_from, duplicates, supersedes, replies_to, about). Only an item target must exist; a uri may name something since gone. Undone by task.unlink."
+    scope: task_tracker.write
     op: link
-    needs: [work_items.links]
-    example: {"uri": "oxplow:oxplow/work_item?id=tsk12&provider=oxplow", "target": "oxplow:oxplow/work_item?id=tsk9&provider=oxplow", "link_type": "blocks"}
-  - name: work_item.unlink
-    summary: "Remove a work item's link (`uri`, `target`, `link_type`, as it was linked). Undone by work_item.link."
-    scope: work_items.write
+    needs: [task_tracker.links]
+    example: {"uri": "oxplow:oxplow/task?id=tsk12&provider=oxtask", "target": "oxplow:oxplow/task?id=tsk9&provider=oxtask", "link_type": "blocks"}
+  - name: task.unlink
+    summary: "Remove a task's link (`uri`, `target`, `link_type`, as it was linked). Undone by task.link."
+    scope: task_tracker.write
     op: unlink
-    needs: [work_items.links]
-    example: {"uri": "oxplow:oxplow/work_item?id=tsk12&provider=oxplow", "target": "oxplow:oxplow/work_item?id=tsk9&provider=oxplow", "link_type": "blocks"}
-  - name: work_item.move
-    summary: "Move a work item to a thread's list or the backlog (at the end, or before/after an item there)."
-    scope: work_items.write
-    op: move
-    needs: [work_items.lists]
-    example: {"uri": "oxplow:oxplow/work_item?id=tsk12&provider=oxplow", "to": {"thread": "thr3"}}
-  - name: work_item.reorder
-    summary: "Put a work item before or after another on its list (neither: at its end)."
-    scope: work_items.write
+    needs: [task_tracker.links]
+    example: {"uri": "oxplow:oxplow/task?id=tsk12&provider=oxtask", "target": "oxplow:oxplow/task?id=tsk9&provider=oxtask", "link_type": "blocks"}
+  - name: task.reorder
+    summary: "Put a task before or after another in its assignee's queue, or among the unassigned (neither: at its end). Core's, for every task tracker."
+    scope: task_tracker.write
     op: reorder
-    needs: [work_items.ordering]
-    example: {"uri": "oxplow:oxplow/work_item?id=tsk12&provider=oxplow", "before": "oxplow:oxplow/work_item?id=tsk9&provider=oxplow"}
-  - name: work_item.transition
-    summary: "Move a work item to a canonical state (todo, in_progress, blocked, done, canceled), optionally naming the provider's own state."
-    scope: work_items.write
+    example: {"uri": "oxplow:oxplow/task?id=tsk12&provider=oxtask", "before": "oxplow:oxplow/task?id=tsk9&provider=oxtask"}
+  - name: task.transition
+    summary: "Move a task to a canonical state (backlog, todo, in_progress, blocked, done, canceled), optionally naming the provider's own state. Done or canceled releases its assignee."
+    scope: task_tracker.write
     op: transition
-    example: {"uri": "oxplow:oxplow/work_item?id=tsk12&provider=oxplow", "to": "in_progress"}
-  - name: work_item.update
-    summary: "Edit a work item's title, body, parent or native fields and, optionally, move it to a state — all in one run (see oxplow.work_item.transition for the state's effects). On oxplow the result carries `link_warnings` for the body's `[[…]]` links."
-    scope: work_items.write
+    example: {"uri": "oxplow:oxplow/task?id=tsk12&provider=oxtask", "to": "in_progress"}
+  - name: task.update
+    summary: "Edit a task's title, body, parent or native fields and, optionally, move it to a state — all in one run (see oxplow.task.transition for the state's effects). On oxplow the result carries `link_warnings` for the body's `[[…]]` links."
+    scope: task_tracker.write
     op: update
-    example: {"uri": "oxplow:oxplow/work_item?id=tsk12&provider=oxplow", "title": "Fix the login redirect loop", "body": "Reproduces only with a stale session cookie."}
+    example: {"uri": "oxplow:oxplow/task?id=tsk12&provider=oxtask", "title": "Fix the login redirect loop", "body": "Reproduces only with a stale session cookie."}
   # worktrees.write
   - name: stream.archive
     summary: "Archive a stream and its threads (`delete_worktree` also removes its working copy from disk). Refused while an agent is running in it. A person is asked first."
@@ -2023,7 +1975,7 @@ commands:
     example: {"title": "Login fix", "source": "new", "new_branch": "login-fix", "start_point": "main"}
 
 # What oxplow records itself. The measures and dimensions its producers
-# (tokens, efforts, tests, coverage, analysis) and the code collectors write
+# (tokens, requests, tests, coverage, analysis) and the code collectors write
 # facts on, and the metrics over them; the producers' Rust only records the facts.
 measures:
   - {"key": "oxplow.complexity", "title": "Cyclomatic complexity", "unit": "count", "subjectKind": "symbol", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-path", "description": "Cyclomatic complexity of a function."}
@@ -2033,18 +1985,18 @@ measures:
   - {"key": "oxplow.test_case", "title": "Test case", "unit": "count", "subjectKind": "test", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-subject", "description": "A test case and how its last run went."}
   - {"key": "oxplow.lint_hit", "title": "Static-analysis hit", "unit": "count", "subjectKind": "file", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "complete", "description": "One finding of a static-analysis rule."}
   - {"key": "oxplow.tokens", "title": "Agent tokens", "unit": "count", "subjectKind": "model", "temporalSemantics": "additive", "fold": "sum", "captureScope": "complete", "description": "Tokens an agent used, by model."}
-  - {"key": "oxplow.cycle_time", "title": "Effort cycle time", "unit": "ms", "subjectKind": "effort", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "Time from an effort's start to its finish."}
   - {"key": "oxplow.turn", "title": "Agent turns", "unit": "count", "subjectKind": "model", "temporalSemantics": "additive", "fold": "sum", "captureScope": "complete", "description": "Turns an agent took in a conversation."}
-  - {"key": "oxplow.work_item_effort", "title": "Efforts per work item", "unit": "count", "subjectKind": "work_item", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "Efforts spent on a work item."}
   - {"key": "oxplow.nudge", "title": "Nudges fired", "unit": "count", "temporalSemantics": "additive", "fold": "sum", "captureScope": "complete", "description": "Nudges that oxplow sent to an agent."}
-  - {"key": "oxplow.effort_test_outcome", "title": "Effort test outcome", "unit": "count", "subjectKind": "effort", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "A figure of how an effort's tests went, such as runs or failures."}
   - {"key": "oxplow.test_duration", "title": "Test duration", "unit": "ms", "subjectKind": "test", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-subject", "description": "Time a test run took."}
   - {"key": "oxplow.cache_tokens", "title": "Prompt-cache tokens", "unit": "count", "subjectKind": "model", "temporalSemantics": "additive", "fold": "sum", "captureScope": "complete", "description": "Tokens an agent read from or wrote to the model's prompt cache."}
   - {"key": "oxplow.cache_usage", "title": "Prompt-cache hit ratio", "unit": "%", "subjectKind": "model", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "Share of an agent's prompt tokens that the cache served."}
-  - {"key": "oxplow.effort_tokens", "title": "Effort token spend", "unit": "count", "subjectKind": "effort", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "Tokens an agent spent during an effort."}
-  - {"key": "oxplow.effort_steering", "title": "Effort steering events", "unit": "count", "subjectKind": "effort", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "Times a person steered an agent during an effort."}
-  - {"key": "oxplow.effort_time_to_green", "title": "Effort time to green", "unit": "ms", "subjectKind": "effort", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "Time from an effort's first red test run to its first green one."}
-  - {"key": "oxplow.token_waste", "title": "Reverted-effort token waste", "unit": "count", "subjectKind": "effort", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "Tokens spent on an effort that was later reverted."}
+  # A request's figures: one capture per request at its start, replaced
+  # when the request is recorded again, so each is one observation and a
+  # period's mean is Σ/count over the requests that started in it.
+  - {"key": "oxplow.request_tokens", "title": "Request token spend", "unit": "count", "subjectKind": "request", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "Tokens (input + output) a request spent over all its turns, as of its latest turn."}
+  - {"key": "oxplow.request_cycle_time", "title": "Request cycle time", "unit": "ms", "subjectKind": "request", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "Time from a request's first prompt to its last activity, as of its latest turn."}
+  - {"key": "oxplow.request_test_outcome", "title": "Request test outcome", "unit": "count", "subjectKind": "request", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "A figure of how a request's tests went, such as runs or failures, as of its latest turn."}
+  - {"key": "oxplow.request_time_to_green", "title": "Request time to green", "unit": "ms", "subjectKind": "request", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "Time from a request's first red test run to its first green one."}
   - {"key": "oxplow.coverage.branch", "title": "Branch coverage", "unit": "%", "subjectKind": "file", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "complete", "description": "Share of a file's branches that tests ran."}
   - {"key": "oxplow.coverage.function", "title": "Function coverage", "unit": "%", "subjectKind": "file", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "complete", "description": "Share of a file's functions that tests ran."}
 dimensions:
@@ -2058,5 +2010,5 @@ dimensions:
   - {"key": "oxplow.test_suite", "label": "Test suite", "valueType": "categorical", "description": "The test suite a test belongs to."}
   - {"key": "oxplow.rule", "label": "Rule", "valueType": "categorical", "promote": true, "description": "The rule that raised a finding."}
   - {"key": "oxplow.token_kind", "label": "Token kind", "valueType": "categorical", "promote": true, "description": "The kind of token in source code, such as an identifier or a keyword."}
-  - {"key": "oxplow.tests_stat", "label": "Test outcome stat", "valueType": "categorical", "subjectKind": "effort", "promote": true, "description": "Which test figure of an effort a fact holds, such as passed or failed."}
-  - {"key": "work.priority", "label": "Priority", "entity": "v_work_item", "expr": "json_extract(e.native, '$.priority')", "description": "The priority of a work item."}
+  - {"key": "oxplow.tests_stat", "label": "Test outcome stat", "valueType": "categorical", "subjectKind": "request", "promote": true, "description": "Which test figure of a request a fact holds, such as passed or failed."}
+  - {"key": "work.priority", "label": "Priority", "entity": "v_task", "expr": "json_extract(e.native, '$.priority')", "description": "The priority of a task."}

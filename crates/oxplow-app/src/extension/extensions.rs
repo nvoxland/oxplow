@@ -16,6 +16,7 @@ use oxplow_db::SqlCell;
 use oxplow_domain::DomainError;
 use serde::{Deserialize, Serialize};
 
+pub mod agent_contexts;
 pub mod ai_profiles;
 pub(crate) mod candidates;
 pub mod config;
@@ -105,10 +106,12 @@ pub enum AdvisoryOn {
 )]
 #[serde(rename_all = "kebab-case")]
 pub enum AdvisoryOncePer {
-    /// Once per effort, the first time the query returns rows.
-    Effort,
+    /// Once per request on the thread, the first time the query returns
+    /// rows (the request of the turn the trigger belongs to): the next
+    /// request is fresh. The default.
+    Request,
     /// Once per thread per `key` value: each row's `key` column fires
-    /// once (put `:effort_id` in the key for once per effort per row).
+    /// once (put `:request_id` in the key for once per request per row).
     Row,
     /// Every time, whenever the query returns rows.
     Turn,
@@ -143,14 +146,13 @@ pub enum AdvisoryAudience {
 }
 
 fn default_once_per() -> AdvisoryOncePer {
-    AdvisoryOncePer::Effort
+    AdvisoryOncePer::Request
 }
 
 /// Guidance an extension gives the coding agent: a query over the semantic
-/// layer, run by core at `on`, with `:thread_id`, `:stream_id`, `:turn_id`
-/// and `:effort_id` bound (`:effort_id` NULL when the thread has no
-/// effort, `:turn_id` NULL at a prompt). Each result row's `message`
-/// column is a line of guidance.
+/// layer, run by core at `on`, with `:thread_id`, `:stream_id`, `:turn_id`,
+/// and `:request_id` (the request of the turn the trigger belongs to)
+/// bound. Each result row's `message` column is a line of guidance.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Advisory {
@@ -158,7 +160,7 @@ pub struct Advisory {
     pub on: AdvisoryOn,
     pub query: String,
     pub once_per: AdvisoryOncePer,
-    /// Line put above the messages (e.g. `# Metric deltas (this effort)`).
+    /// Line put above the messages (e.g. `# Metric deltas (this request)`).
     pub heading: Option<String>,
     pub audience: AdvisoryAudience,
     /// The capabilities (or features) it needs; without them it doesn't
@@ -393,6 +395,9 @@ pub struct Extension {
     /// Skills and slash commands it gives the coding agent (`skills:`;
     /// valid ones — invalid ones are in `errors`).
     pub skills: Vec<skills::SkillDecl>,
+    /// What it puts in the coding agent's context (`context:`; valid
+    /// ones — invalid ones are in `errors`).
+    pub contexts: Vec<agent_contexts::AgentContextDecl>,
     /// Another extension's event types its effects and collectors react
     /// to (P9.D1): each resolves when an enabled extension registers the
     /// type (`vocabulary_reactor`).
@@ -715,14 +720,17 @@ pub fn source_declaring_page(project: &Path, checkout: &Path, id: &str) -> Optio
     })
 }
 
-/// Settings are the namespace's: the enabled extensions sharing one that
-/// declare `configuration:` each get the one declaration of them all
-/// (`config_schema::merge`). One at another version, or declaring a key an
-/// earlier one does, is a load error and has none.
+/// Settings are the namespace's: the extensions sharing one that declare
+/// `configuration:` each get the one declaration of them all
+/// (`config_schema::merge`). A disabled one's keys are in it too: the
+/// stored settings outlive its being off (bundled's task workflow with
+/// bundled off), and a layer holding them must still read, or every setting
+/// of the namespace would fail closed. One at another version, or declaring
+/// a key an earlier one does, is a load error and has none.
 fn share_configuration(extensions: &mut [Extension]) {
     let mut namespaces: Vec<String> = extensions
         .iter()
-        .filter(|e| e.enabled && e.configuration.is_some())
+        .filter(|e| e.configuration.is_some())
         .map(|e| e.namespace.clone())
         .collect();
     namespaces.sort();
@@ -731,7 +739,7 @@ fn share_configuration(extensions: &mut [Extension]) {
         let at: Vec<usize> = (0..extensions.len())
             .filter(|&i| {
                 let e = &extensions[i];
-                e.enabled && e.namespace == namespace && e.configuration.is_some()
+                e.namespace == namespace && e.configuration.is_some()
             })
             .collect();
         if at.len() < 2 {
@@ -1482,7 +1490,7 @@ pub async fn extension_tree_at(
 }
 
 /// One extension that changed between two revisions of a workspace:
-/// what an effort's review shows for it.
+/// what a review of the change shows for it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtensionChange {
@@ -1711,6 +1719,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         effects: Vec::new(),
         implementations: Vec::new(),
         skills: Vec::new(),
+        contexts: Vec::new(),
         subscriptions: Vec::new(),
         origin: origin.to_string(),
         ui: ExtensionUi::default(),
@@ -1899,13 +1908,25 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             ext.errors.extend(errors);
         }
         if let Some(v) = m.skills.as_ref() {
-            let (declared, errors) = skills::parse_skills(v, man, &manifest, files);
+            let (declared, errors) =
+                skills::parse_skills(v, man, &manifest, files, ext.configuration.as_ref());
             ext.skills = declared;
             ext.errors.extend(errors);
         }
-        if let Some(v) = m.implementations.as_ref() {
+        if let Some(v) = m.context.as_ref() {
             let (declared, errors) =
-                implementations::parse_implementations(v, man, &manifest, &|rel| files.read(rel));
+                agent_contexts::parse_contexts(v, man, &manifest, ext.configuration.as_ref());
+            ext.contexts = declared;
+            ext.errors.extend(errors);
+        }
+        if let Some(v) = m.implementations.as_ref() {
+            let (declared, errors) = implementations::parse_implementations(
+                v,
+                man,
+                &manifest,
+                &|rel| files.read(rel),
+                ext.configuration.as_ref(),
+            );
             // An implementation owns the skills it lists: they must be its
             // extension's.
             for d in &declared {
@@ -2370,8 +2391,8 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         }
     }
     let pages = ext.page_files.clone();
-    ext.page_files.retain(|page| {
-        let problem = page_icon_problem(page)
+    ext.page_files.retain_mut(|page| {
+        let problem = page_icon_problem(page, files)
             .map(|e| ("page.invalid_icon", e))
             .or_else(|| page_ref_problem(page, &pages).map(|e| ("page.invalid_ref", e)));
         match problem {
@@ -2633,6 +2654,13 @@ fn needed_permissions(
         };
         out.push((line("skills", i), format!("skill `{}`", skill.name), needed));
     }
+    for (i, c) in ext.contexts.iter().enumerate() {
+        let needed = Permissions {
+            agent: true,
+            ..needs_permissions(&c.needs)
+        };
+        out.push((line("context", i), format!("context `{}`", c.id), needed));
+    }
     for (i, c) in ext.custom_components.iter().enumerate() {
         let needed = Permissions {
             commands: c
@@ -2697,7 +2725,18 @@ fn config_sql(ext: &Extension) -> Vec<(String, Option<String>, &str)> {
             a.query.as_str(),
         )
     });
-    datasets.chain(pages).chain(advisories).collect()
+    let contexts = ext.contexts.iter().map(|c| {
+        (
+            "extension.yaml".to_string(),
+            Some(format!("context `{}`", c.id)),
+            c.query.as_str(),
+        )
+    });
+    datasets
+        .chain(pages)
+        .chain(advisories)
+        .chain(contexts)
+        .collect()
 }
 
 /// A `config('/pointer')` read names a scalar key the extension's own
@@ -2763,12 +2802,9 @@ fn check_config_reads(ext: &mut Extension) {
 /// The `type` of the schema property at JSON pointer `pointer`, following
 /// `properties`; `None` when the schema declares no such property or type.
 fn config_key_type<'a>(schema: &'a serde_json::Value, pointer: &str) -> Option<&'a str> {
-    let mut node = schema;
-    for token in pointer.split('/').skip(1) {
-        let token = token.replace("~1", "/").replace("~0", "~");
-        node = node.get("properties")?.get(&token)?;
-    }
-    node.get("type")?.as_str()
+    config_schema::schema_key(schema, pointer)?
+        .get("type")?
+        .as_str()
 }
 
 /// Name each page file `page` refers to — a param's `options_from`, a
@@ -2788,11 +2824,25 @@ pub(crate) fn qualify_page_refs(page: &mut crate::pages::schema::Page) {
     });
 }
 
-/// A page `icon` oxplow doesn't draw.
-fn page_icon_problem(page: &crate::pages::schema::Page) -> Option<String> {
-    let icon = page.icon.as_deref()?;
-    (!crate::extension::extension_resources::ICONS.contains(&icon))
-        .then(|| format!("`icon: {icon}` isn't one oxplow draws"))
+/// Resolve every icon `page` names (`pages::refs::for_each_icon`): an
+/// `assets/<name>.svg` becomes the extension's svg as a data URI. The first
+/// that can't be drawn (a name oxplow doesn't draw, a missing svg) is why
+/// the page doesn't load.
+fn page_icon_problem(
+    page: &mut crate::pages::schema::Page,
+    files: &dyn ExtensionFiles,
+) -> Option<String> {
+    let mut problem = None;
+    crate::pages::refs::for_each_icon(page, |place, icon| {
+        if problem.is_some() {
+            return;
+        }
+        match crate::extension::extension_resources::resolve_icon(icon, files) {
+            Ok(resolved) => *icon = resolved,
+            Err(why) => problem = Some(format!("{place}: {why}")),
+        }
+    });
+    problem
 }
 
 /// What `page` names that it can't: a page file of its own extension
@@ -3242,11 +3292,18 @@ pub(crate) fn shape_problem(cfg: &VizConfig, components: &[String]) -> Option<St
         Viz::Treemap => need("chart", &[("label", &chart.label), ("size", &chart.size)]),
         Viz::Tree => {
             let t = cfg.tree.clone().unwrap_or_default();
-            need(
-                "tree",
-                &[("id", &t.id), ("parent", &t.parent), ("label", &t.label)],
-            )
-            .or_else(|| lazy_tree_problem(cfg, &t))
+            // Over paths, the path is the id, the parent and the label.
+            let shape = if t.path.is_some() {
+                [&t.id, &t.parent, &t.label].iter().any(|k| k.is_some()).then(|| {
+                    "`tree.path` names the id, the parent and the label: give it, or `id`/`parent`/`label`, not both".to_string()
+                })
+            } else {
+                need(
+                    "tree",
+                    &[("id", &t.id), ("parent", &t.parent), ("label", &t.label)],
+                )
+            };
+            shape.or_else(|| lazy_tree_problem(cfg, &t))
         }
         Viz::Timeline => {
             let t = cfg.timeline.clone().unwrap_or_default();
@@ -3326,8 +3383,20 @@ pub(crate) fn shape_problem(cfg: &VizConfig, components: &[String]) -> Option<St
         Viz::Board if cfg.group.is_none() => {
             Some("`board` needs `group: { by: <column> }` (its columns)".to_string())
         }
+        Viz::Icons
+            if cfg
+                .columns
+                .first()
+                .is_none_or(|c| c.icon.is_none()) =>
+        {
+            Some(
+                "`icons` draws each row as its first column's `icon`: give `columns: [{ key, icon, link? }]`"
+                    .to_string(),
+            )
+        }
         Viz::Table
         | Viz::List
+        | Viz::Icons
         | Viz::Number
         | Viz::Markdown
         | Viz::Detail
@@ -3383,7 +3452,7 @@ fn highlight_problem(cfg: &VizConfig) -> Option<String> {
 }
 
 /// Row styling on a viz that doesn't draw rows that way: `group` and
-/// `depth` are for `list` / `table`, `emphasis` also for `tree`.
+/// `depth` and `edge` are for `list` / `table`, `emphasis` also for `tree`.
 fn row_style_problem(cfg: &VizConfig) -> Option<String> {
     let rows = matches!(cfg.viz, Viz::List | Viz::Table);
     let viz = format!("{:?}", cfg.viz).to_lowercase();
@@ -3392,9 +3461,24 @@ fn row_style_problem(cfg: &VizConfig) -> Option<String> {
             "`group` is only for `list`, `table` and `board`, not `{viz}`"
         ));
     }
+    if cfg
+        .group
+        .as_ref()
+        .is_some_and(|g| !g.compact.is_empty() || !g.grown.is_empty())
+        && cfg.viz != Viz::List
+    {
+        return Some(format!(
+            "`group.compact` and `group.grown` are only for `list`, not `{viz}`"
+        ));
+    }
     if cfg.depth.is_some() && !rows {
         return Some(format!(
             "`depth` is only for `list` and `table`, not `{viz}`"
+        ));
+    }
+    if cfg.edge.is_some() && !rows {
+        return Some(format!(
+            "`edge` is only for `list` and `table`, not `{viz}`"
         ));
     }
     if cfg.emphasis.is_some() && !rows && cfg.viz != Viz::Tree {
@@ -3427,6 +3511,7 @@ pub(crate) fn clear_contributions(ext: &mut Extension) {
     ext.effects.clear();
     ext.implementations.clear();
     ext.skills.clear();
+    ext.contexts.clear();
     ext.subscriptions.clear();
     ext.advisories.clear();
     ext.measures.clear();
@@ -4118,6 +4203,7 @@ async fn prepare(
             }
         }
     }
+    check_contexts(layer, ext).await;
     check_collector_inputs(layer, ext, read).await;
     let pages = crate::pages::checks::dry_run_all(layer, ext).await;
     // Another extension's page files a reference reads, dry-run once each.
@@ -4254,6 +4340,61 @@ async fn prepare(
     Prepared { pages, overlay }
 }
 
+/// Dry-run each agent context's query with its params NULL and the
+/// declared configuration defaults: it must run and return a `text`
+/// column.
+async fn check_contexts(layer: &crate::sql_gateway::SqlGateway, ext: &mut Extension) {
+    for c in ext.contexts.clone() {
+        let problem = |code: &str, message: String| {
+            Diagnostic::error(code, format!("context `{}`: {message}", c.id))
+                .at("extension.yaml", None)
+                .contribution(format!("{}/{}", ext.namespace, c.id))
+        };
+        let shown = |e: &dyn std::fmt::Display| e.to_string().replacen("invalid value: ", "", 1);
+        let query = match oxplow_db::datasets::substitute_config(
+            &c.query,
+            ext.default_configuration().as_ref(),
+        ) {
+            Ok(query) => query,
+            Err(e) => {
+                ext.errors.push(problem("context.invalid_query", shown(&e)));
+                continue;
+            }
+        };
+        let run = layer
+            .run(
+                oxplow_db::SqlQuery::new(&query)
+                    .named(
+                        agent_contexts::PARAMS
+                            .iter()
+                            .map(|p| (p.to_string(), SqlCell::Null(())))
+                            .collect(),
+                    )
+                    .limit(Some(1)),
+            )
+            .await;
+        match run {
+            Err(e) => ext.errors.push(problem("context.invalid_query", shown(&e))),
+            Ok(r)
+                if !r
+                    .columns
+                    .iter()
+                    .any(|col| col == agent_contexts::TEXT_COLUMN) =>
+            {
+                ext.errors.push(problem(
+                    "context.missing_column",
+                    format!(
+                        "the query must return a `{}` column (columns: {})",
+                        agent_contexts::TEXT_COLUMN,
+                        r.columns.join(", ")
+                    ),
+                ))
+            }
+            Ok(_) => {}
+        }
+    }
+}
+
 /// A collector's `input` query reads published views only: a physical table
 /// is no part of the contract an extension reads through, and the read refuses
 /// it. Named at its collector's line in `extension.yaml`.
@@ -4310,6 +4451,14 @@ fn action_column_problems(
 ) -> Vec<String> {
     let mut problems: Vec<String> = Vec::new();
     for a in actions {
+        if let Some(current) = a.current.as_ref().filter(|c| !cols.contains(c)) {
+            problems.push(format!(
+                "action `{}` reads its row's option from `current: {current}`, which isn't in \
+                     the query result (columns: {})",
+                a.id,
+                cols.join(", ")
+            ));
+        }
         if let Some(when) = a.when.as_ref().filter(|w| !cols.contains(w)) {
             problems.push(format!(
                 "action `{}` is offered `when: {when}`, which isn't in the \
@@ -4447,7 +4596,7 @@ pub struct ManifestScaffold<'a> {
     pub name: &'a str,
     pub description: &'a str,
     pub purpose: &'a str,
-    /// The thread/effort ref that asked for it, when known.
+    /// The thread or request ref that asked for it, when known.
     pub origin: Option<&'a str>,
     pub example_name: &'a str,
     /// YAML flow text for the example's input (`{ page: demo }`).
@@ -4488,13 +4637,10 @@ mod tests {
         assert_eq!(subscribes("acme", &[], "acme.closed"), Subscribes::Unknown);
         assert_eq!(subscribes("acme", &[], "other.closed"), Subscribes::Foreign);
         assert_eq!(
-            subscribes("oxplow", &[], "oxplow.review.accepted"),
+            subscribes("oxplow", &[], "oxplow.tasks.finished_cleared"),
             Subscribes::Foreign
         );
-        assert_eq!(
-            subscribes("oxplow", &[], "work_item.nope"),
-            Subscribes::Unknown
-        );
+        assert_eq!(subscribes("oxplow", &[], "task.nope"), Subscribes::Unknown);
     }
 
     /// An extension's errors as the lines a person reads, one per line.
@@ -4524,10 +4670,10 @@ mod tests {
     fn a_broken_list_entry_is_an_error_at_its_own_line() {
         for (block, says) in [
             ("commands:\n  - name: a.b\n    summary: S.\n    entry: h.star\n  - name: c.d\n    bogus: 1\n", "command"),
-            ("effects:\n  - id: a\n    summary: S.\n    on: [work_item.state_changed]\n    entry: e.star\n  - id: b\n    bogus: 1\n", "effect"),
+            ("effects:\n  - id: a\n    summary: S.\n    on: [task.state_changed]\n    entry: e.star\n  - id: b\n    bogus: 1\n", "effect"),
             ("collectors:\n  - id: a\n    runtime: starlark\n    entry: c.star\n  - id: b\n    bogus: 1\n", "collector"),
             ("skills:\n  - name: a\n    file: a.md\n  - name: b\n    bogus: 1\n", "skill"),
-            ("implementations:\n  - id: a\n    capability: work_items\n  - id: b\n    bogus: 1\n", "implementation"),
+            ("implementations:\n  - id: a\n    capability: task_tracker\n  - id: b\n    bogus: 1\n", "implementation"),
         ] {
             let d = tempfile::tempdir().unwrap();
             let manifest = format!("manifest: 2\nname: x\nintent:\n  purpose: p\n{block}");
@@ -4727,6 +4873,39 @@ mod tests {
                 err.contains("`all` is for a whole-viz action"),
                 "{action}: {err}"
             );
+        }
+    }
+
+    /// `options_from` makes a row action one entry per option: it binds
+    /// `{{option.value}}` or `{{option.label}}`, and nothing else names
+    /// `option`; `current` needs options.
+    #[test]
+    fn an_action_with_options_is_a_row_action_that_binds_the_option() {
+        let parse = |action: &str| {
+            parse_actions(
+                vec![serde_yaml::from_str(action).unwrap()],
+                &[],
+                false,
+                false,
+            )
+        };
+        let ok = parse(
+            "{ id: m, label: Mark, command: x.y.z, row: true, options_from: stages, current: stage, input: { to: '{{option.value}}', why: '{{option.label}}' } }",
+        )
+        .unwrap();
+        assert_eq!(ok[0].options_from.as_deref(), Some("stages"));
+        assert_eq!(ok[0].current.as_deref(), Some("stage"));
+        for (action, says) in [
+            ("{ id: m, label: M, command: x.y.z, options_from: s, input: { to: '{{option.value}}' } }", "`options_from` is for a row action"),
+            ("{ id: m, label: M, command: x.y.z, row: true, drag: true, options_from: s, input: { to: '{{option.value}}' } }", "`options_from` is for a row action"),
+            ("{ id: m, label: M, command: x.y.z, row: true, options_from: s, input: { to: done } }", "use `{{option.value}}`"),
+            ("{ id: m, label: M, command: x.y.z, row: true, options_from: s, input: { to: '{{option.id}}' } }", "isn't `{{option.value}}`"),
+            ("{ id: m, label: M, command: x.y.z, row: true, input: { to: '{{option.value}}' } }", "needs `options_from`"),
+            ("{ id: m, label: M, command: x.y.z, row: true, current: stage, input: { to: x } }", "needs `options_from`"),
+            ("{ id: m, label: M, command: x.y.z, row: true, key: m, options_from: s, input: { to: '{{option.value}}' } }", "a `key` can't run it"),
+        ] {
+            let err = parse(action).unwrap_err();
+            assert!(err.contains(says), "{action}: {err}");
         }
     }
 
@@ -5167,6 +5346,44 @@ mod tests {
         );
     }
 
+    /// An `icons` viz draws each row as its icon alone, so its first column
+    /// must name the icon column; a toggle's option may name an icon.
+    #[test]
+    fn an_icons_viz_needs_its_first_columns_icon() {
+        let (_d, ext) = load_x(
+            &[
+                (
+                    "strip",
+                    &viz_page(
+                        "",
+                        "SELECT 'Git' AS title, 'git-branch' AS kind, 'oxplow:x' AS uri",
+                        "viz: icons
+columns: [{ key: title, icon: kind, link: { kind: page, from: uri } }]
+",
+                    ),
+                ),
+                (
+                    "bare",
+                    &viz_page(
+                        "",
+                        "SELECT 'Git' AS title",
+                        "viz: icons
+columns: [{ key: title }]
+",
+                    ),
+                ),
+            ],
+            "",
+        );
+        assert!(node(&ext, "strip").is_some());
+        assert!(node(&ext, "bare").is_none());
+        let errs = shown_errors(&ext);
+        assert!(
+            errs.contains("`icons` draws each row as its first column's `icon`"),
+            "{errs}"
+        );
+    }
+
     /// `acme` at `dir` with `manifest` (and the files it names): loaded as
     /// a deployment is, its permission errors alone.
     fn permission_errors(dir: &Path, manifest: &str) -> Vec<String> {
@@ -5317,7 +5534,7 @@ mod tests {
             "provider.json",
             &serde_json::to_string(&oxplow_provider_fake::declarations()).unwrap(),
         );
-        let body = "providers:\n  - id: tracker\n    capability: work_items\n    entry: bin/provider\n    declarations: provider.json\n    network: [api.example.com]\n";
+        let body = "providers:\n  - id: tracker\n    capability: task_tracker\n    entry: bin/provider\n    declarations: provider.json\n    stages: [{ id: icebox, title: Icebox, bucket: backlog }, { id: ready, title: Ready, bucket: todo }, { id: doing, title: Doing, bucket: in_progress }, { id: stuck, title: Stuck, bucket: blocked }, { id: shipped, title: Shipped, bucket: done }, { id: dropped, title: Dropped, bucket: canceled }]\n    network: [api.example.com]\n";
         let errors = permission_errors(
             dir.path(),
             &format!("manifest: 2\nname: acme\nintent:\n  purpose: x\n{body}"),
@@ -5343,20 +5560,20 @@ mod tests {
     fn a_component_may_invoke_only_its_own_or_a_declared_command() {
         let dir = tempfile::tempdir().unwrap();
         write(dir.path(), "components/board/index.html", "<!doctype html>");
-        let body = "custom_components:\n  - { id: board, commands: [oxplow.work_item.transition, acme.item.tidy] }\n";
+        let body = "custom_components:\n  - { id: board, commands: [oxplow.task.transition, acme.item.tidy] }\n";
         let errors = permission_errors(
             dir.path(),
             &format!("manifest: 2\nname: acme\nintent:\n  purpose: x\n{body}"),
         );
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(
-            errors[0].contains("`commands:oxplow.work_item.transition`")
+            errors[0].contains("`commands:oxplow.task.transition`")
                 && errors[0].contains("component `board`"),
             "{errors:?}"
         );
         let errors = permission_errors(
             dir.path(),
-            &format!("manifest: 2\nname: acme\npermissions: [commands:oxplow.work_item.*]\nintent:\n  purpose: x\n{body}"),
+            &format!("manifest: 2\nname: acme\npermissions: [commands:oxplow.task.*]\nintent:\n  purpose: x\n{body}"),
         );
         assert!(errors.is_empty(), "{errors:?}");
     }
@@ -5438,13 +5655,13 @@ mod tests {
         "manifest: 2\nname: review\nintent:\n  purpose: test\ndescription: Review helpers\n";
     const PAGE: &str = r#"
 title: Items by state
-description: Every work item in a given state.
+description: Every task in a given state.
 params:
   - { name: state, label: State, default: in_progress }
 loaders:
   items:
     sql: |
-      SELECT uri, title FROM v_work_item WHERE state = :state ORDER BY title
+      SELECT uri, title FROM v_task WHERE state = :state ORDER BY title
 view:
   viz: table
   from: items
@@ -5762,7 +5979,7 @@ view:
     /// given thread (else the stream's selected one).
     #[tokio::test]
     async fn view_context_defaults_to_the_primary_stream_and_its_thread() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         use oxplow_domain::stores::ThreadStore as _;
         let thread = f.svc.thread_store.get(&f.thread).await.unwrap().unwrap();
         let expect = ViewContext {
@@ -6117,7 +6334,7 @@ collectors:
   - id: things
     runtime: starlark
     entry: collectors/things.star
-    input: \"SELECT uri FROM v_work_item\"
+    input: \"SELECT uri FROM v_task\"
     entities:
       - { name: thing, key: id, columns: { id: int, label: text } }
 datasets:
@@ -6224,7 +6441,7 @@ commands:
         std::fs::create_dir_all(dir.join("commands")).unwrap();
         std::fs::write(
             dir.join("extension.yaml"),
-            "manifest: 2\nname: x\nintent:\n  purpose: p\npermissions: [ai.compute]\neffects:\n  - { id: e, summary: s, on: [effort.finished], entry: effects/e.star, needs: [ai.discover] }\ncommands:\n  - { name: c.go, summary: s, entry: commands/c.star, needs: [ai.discover], input_schema: { type: object, additionalProperties: false } }\n",
+            "manifest: 2\nname: x\nintent:\n  purpose: p\npermissions: [ai.compute]\neffects:\n  - { id: e, summary: s, on: [task.state_changed], entry: effects/e.star, needs: [ai.discover] }\ncommands:\n  - { name: c.go, summary: s, entry: commands/c.star, needs: [ai.discover], input_schema: { type: object, additionalProperties: false } }\n",
         )
         .unwrap();
         let script = "def transform(x):\n    r = scope(\"ai.discover\", {\"role\": \"summarize\"})\n    if not r[\"dataset\"]:\n        return {\"skip\": r[\"problem\"]}\n    return {\"commands\": []}\n";
@@ -6331,10 +6548,20 @@ commands:
         assert!(foundation.errors.is_empty(), "{:?}", foundation.errors);
         assert!(foundation.warnings.is_empty(), "{:?}", foundation.warnings);
         assert_eq!(foundation.namespace, "oxplow");
-        assert!(foundation.commands.iter().all(|c| matches!(
-            c.handler,
-            crate::extension::extension_commands::CommandHandler::Scope { .. }
-        )));
+        // Foundation's commands are core's ops, but for the one script that
+        // composes a settings write (oxwiki on or off).
+        let scripts: Vec<&str> = foundation
+            .commands
+            .iter()
+            .filter(|c| {
+                !matches!(
+                    c.handler,
+                    crate::extension::extension_commands::CommandHandler::Scope { .. }
+                )
+            })
+            .map(|c| c.name.as_str())
+            .collect();
+        assert_eq!(scripts, ["oxplow.knowledge.set_oxwiki"]);
         // The agent harnesses and AI providers core runs are
         // foundation's declarations — many of each, all active.
         let declared = |capability: &str| {
@@ -6370,11 +6597,10 @@ commands:
         assert_eq!(
             commands,
             [
-                "oxplow.review_policy.read",
-                "oxplow.review_policy.write",
-                "oxplow.review.accept",
-                "oxplow.review.request_changes",
-                "oxplow.work.clear_finished"
+                "oxplow.tasks.set_workflow",
+                "oxplow.tasks.clear_finished",
+                "oxplow.task.new",
+                "oxplow.knowledge.new_page"
             ]
         );
         let mut datasets: Vec<&str> = b.datasets.iter().map(|m| m.decl.name.as_str()).collect();
@@ -6384,14 +6610,13 @@ commands:
             [
                 "change_co_change",
                 "change_interest",
-                "claim_status",
                 "co_change_pair",
                 "deviation",
                 "finished_cleared",
+                "ready_queue",
                 "struggle",
-                "thread_work",
-                "verdict",
-                "verdicts"
+                "task_workflow",
+                "thread_tasks"
             ]
         );
         // Every shipped page's SQL and advisory runs against a real schema
@@ -6407,16 +6632,16 @@ commands:
         }
     }
 
-    /// The work list and the wiki are foundation's data and the agent's
-    /// tools, with no screens of its own: a work item or wiki link opens the
+    /// The task tracker and knowledge are foundation's data and the agent's
+    /// tools, with no screens of its own: a task or knowledge link opens the
     /// generic resource page, and no menu offers a form that isn't there.
     #[test]
-    fn foundation_has_no_task_or_wiki_ui() {
+    fn foundation_has_no_task_or_knowledge_ui() {
         let dir = tempfile::tempdir().unwrap();
         let exts = load_extensions(dir.path());
         let ext = |name: &str| exts.iter().find(|e| e.name == name).unwrap();
         let foundation = ext("oxplow-foundation");
-        for resource in ["oxplow/work_item", "oxplow/wiki"] {
+        for resource in ["oxplow/task", "oxplow/knowledge"] {
             let renders = |e: &Extension| {
                 e.page_files
                     .iter()
@@ -6439,10 +6664,9 @@ commands:
                 .filter(|c| c.ui.is_some())
                 .filter(|c| {
                     let scope = scope_of(c);
-                    ["work_items.", "knowledge.", "handoffs."]
+                    ["tasks.", "knowledge.", "handoffs."]
                         .iter()
                         .any(|s| scope.starts_with(s))
-                        || c.name == "effort.link"
                 })
                 .map(|c| c.name.clone())
                 .collect::<Vec<_>>()
@@ -6452,7 +6676,7 @@ commands:
             "tasks",
             "board",
             "backlog",
-            "wiki-index",
+            "knowledge-index",
             "hand-off",
             "new-task",
         ] {
@@ -6852,7 +7076,7 @@ commands:
             ),
             (
                 "pages/c.yaml",
-                "title: C\nparams: [{ name: s, type: choice, options_from: opts }]\nloaders:\n  q: { page: c2, loader: q }\nview:\n  stack:\n    - { id: t, title: T, viz: table, from: q }\n    - { id: e, title: E, embed: { page: c2 } }\n    - { id: f, title: F, viz: form, form: { command: oxplow.work_item.create, choices: { state: opts } } }\n",
+                "title: C\nparams: [{ name: s, type: choice, options_from: opts }]\nloaders:\n  q: { page: c2, loader: q }\nview:\n  stack:\n    - { id: t, title: T, viz: table, from: q }\n    - { id: e, title: E, embed: { page: c2 } }\n    - { id: f, title: F, viz: form, form: { command: oxplow.task.create, choices: { state: opts } } }\n",
             ),
             ("pages/c2.yaml", &viz_page("", "SELECT 1 AS a", "")),
             ("queries/opts.yaml", "title: O\nloaders:\n  rows: { sql: \"SELECT 1 AS value, 'a' AS label\" }\n"),
@@ -7023,7 +7247,7 @@ commands:
         write(
             root,
             ".oxplow/extensions/x/pages/p.yaml",
-            "title: T\nparams:\n  - { name: ok, type: choice, options_from: good }\n  - { name: bad, type: choice, options_from: plain }\n  - { name: own, type: choice, options_from: '#own' }\nloaders:\n  own: { sql: 'SELECT 1 AS nope' }\n  shown: { sql: 'SELECT :ok AS ok, :bad AS bad, :own AS own' }\nview:\n  stack:\n    - { id: t, title: T, viz: table, from: shown }\n    - { id: f, title: F, viz: form, form: { command: oxplow.work_item.create, fields: [{ name: native, from: fields }] } }\n",
+            "title: T\nparams:\n  - { name: ok, type: choice, options_from: good }\n  - { name: bad, type: choice, options_from: plain }\n  - { name: own, type: choice, options_from: '#own' }\nloaders:\n  own: { sql: 'SELECT 1 AS nope' }\n  shown: { sql: 'SELECT :ok AS ok, :bad AS bad, :own AS own' }\nview:\n  stack:\n    - { id: t, title: T, viz: table, from: shown }\n    - { id: f, title: F, viz: form, form: { command: oxplow.task.create, fields: [{ name: native, from: fields }] } }\n",
         );
         let v = validate_extension(&layer().await, &cat(), root, "x", None)
             .await
@@ -7056,6 +7280,10 @@ commands:
                 ),
                 ("bare", "title: B\nview: { viz: table }\n"),
                 ("stray", "title: S\nview: { viz: table, from: nope }\n"),
+                (
+                    "options",
+                    "title: O\nloaders: { items: { sql: SELECT 1 AS id } }\nview: { viz: table, from: items, actions: [{ id: m, label: M, command: a.b.c, row: true, options_from: nope, input: { to: '{{option.value}}' } }] }\n",
+                ),
             ],
             "",
         );
@@ -7066,6 +7294,10 @@ commands:
             (
                 "stray",
                 "shows `nope`, but there is no loader `nope` in `loaders:`",
+            ),
+            (
+                "options",
+                "action `m` takes its options from `nope`, but there is no loader `nope`",
             ),
         ] {
             assert!(page_of(&ext, slug).is_none(), "{slug} loaded");
@@ -7294,6 +7526,54 @@ commands:
                 "{slug}: {errs}"
             );
         }
+    }
+
+    /// A tree over paths names its `path` (and maybe its `status`) in place
+    /// of `id`/`parent`/`label`, never beside them. (Both are role columns,
+    /// checked against the result as every tree column is.)
+    #[test]
+    fn a_path_tree_names_its_path_not_its_ids() {
+        let tree = |sql: &str, node: &str| viz_page("", sql, &format!("viz: tree\n{node}"));
+        let (_d, ext) = load_x(
+            &[
+                (
+                    "paths",
+                    &tree(
+                        "SELECT 'a/b.rs' AS path, 'added' AS status",
+                        "tree: { path: path, status: status }\n",
+                    ),
+                ),
+                (
+                    "both",
+                    &tree(
+                        "SELECT 'a' AS path, 'a' AS id",
+                        "tree: { path: path, id: id }\n",
+                    ),
+                ),
+                (
+                    "nostatus",
+                    &tree(
+                        "SELECT 'a' AS path",
+                        "tree: { path: path, status: status }\n",
+                    ),
+                ),
+            ],
+            "",
+        );
+        let viz = |slug: &str| node(&ext, slug);
+        let paths = viz("paths").unwrap_or_else(|| panic!("{:?}", ext.errors));
+        let t = paths.tree.as_ref().unwrap();
+        assert_eq!(
+            (t.path.as_deref(), t.status.as_deref()),
+            (Some("path"), Some("status"))
+        );
+        let errs = shown_errors(&ext);
+        assert!(
+            errs.lines().any(|l| l.contains("both")
+                && l.contains("`tree.path` names the id, the parent and the label")),
+            "{errs}"
+        );
+        assert!(viz("both").is_none(), "both loaded");
     }
 
     /// `code` shows each row's file at a revision, `diff` the first row's
@@ -8163,13 +8443,13 @@ commands:
                     &viz_page(
                         "params: [{ name: k }]\n",
                         "SELECT 1 AS a",
-                        "actions:\n  - { id: go, label: Go, command: oxplow.work_item.transition, input: { uri: '{{param.k}}' } }\n",
+                        "actions:\n  - { id: go, label: Go, command: oxplow.task.transition, input: { uri: '{{param.k}}' } }\n",
                     ),
                 ),
                 (
                     "page",
                     &viz_page(
-                        "params: [{ name: k }]\nactions:\n  - { id: go, label: Go, command: oxplow.work_item.transition, input: { uri: '{{param.k}}' } }\n",
+                        "params: [{ name: k }]\nactions:\n  - { id: go, label: Go, command: oxplow.task.transition, input: { uri: '{{param.k}}' } }\n",
                         "SELECT 1 AS a",
                         "",
                     ),
@@ -8251,11 +8531,11 @@ commands:
         let page = |head: &str, params: &str| {
             viz_page(
                 &format!("category: Work\nparams:\n{params}{head}"),
-                "SELECT :effort_id || :state || :q || :thread_id AS a",
+                "SELECT :request_id || :state || :q || :thread_id AS a",
                 "",
             )
         };
-        let params = "  - { name: effort_id, label: Effort }\n  - { name: state, default: open }\n  - { name: q, role: filter }\n  - { name: thread_id }\n";
+        let params = "  - { name: request_id, label: Request }\n  - { name: state, default: open }\n  - { name: q, role: filter }\n  - { name: thread_id }\n";
         let (_d, ext) = load_x(&[("p", &page("", params))], "");
         let warned: Vec<&Diagnostic> = ext
             .warnings
@@ -8265,7 +8545,7 @@ commands:
         assert_eq!(warned.len(), 1, "{:?}", ext.warnings);
         assert!(
             ext.shown(warned[0])
-                .contains("/pages/p.yaml:4: param `effort_id` opens empty from the launcher"),
+                .contains("/pages/p.yaml:4: param `request_id` opens empty from the launcher"),
             "{:?}",
             warned[0]
         );
@@ -8273,7 +8553,7 @@ commands:
         // In no category, it isn't opened from the launcher.
         let uncategorized = viz_page(
             &format!("params:\n{params}"),
-            "SELECT :effort_id || :state || :q || :thread_id AS a",
+            "SELECT :request_id || :state || :q || :thread_id AS a",
             "",
         );
         let (_d, ext) = load_x(&[("p", &uncategorized)], "");
@@ -8301,7 +8581,7 @@ commands:
         write(
             dir.path(),
             ".oxplow/extensions/tbl/extension.yaml",
-            "manifest: 2\nname: tbl\nintent:\n  purpose: test\nadvisories:\n  - id: peek\n    on: turn-end\n    query: SELECT title AS message FROM work_item\ncollectors:\n  - id: sum\n    runtime: starlark\n    entry: sum.star\n    input: SELECT title FROM work_item\n    entities:\n      - { name: notes, key: n, columns: { n: int } }\n",
+            "manifest: 2\nname: tbl\nintent:\n  purpose: test\nadvisories:\n  - id: peek\n    on: turn-end\n    query: SELECT title AS message FROM task\ncollectors:\n  - id: sum\n    runtime: starlark\n    entry: sum.star\n    input: SELECT title FROM task\n    entities:\n      - { name: notes, key: n, columns: { n: int } }\n",
         );
         write(
             dir.path(),
@@ -8311,7 +8591,7 @@ commands:
         write(
             dir.path(),
             ".oxplow/extensions/tbl/pages/all.yaml",
-            &viz_page("title: All\n", "SELECT title FROM work_item", ""),
+            &viz_page("title: All\n", "SELECT title FROM task", ""),
         );
         let e = validate_extension(&layer().await, &cat(), dir.path(), "tbl", None)
             .await
@@ -8320,9 +8600,9 @@ commands:
             let found = e
                 .errors
                 .iter()
-                .find(|m| m.contains(what) && m.contains("`work_item` is a physical table"));
+                .find(|m| m.contains(what) && m.contains("`task` is a physical table"));
             let found = found.unwrap_or_else(|| panic!("{what}: {:?}", e.errors));
-            assert!(found.contains("read v_work_item"), "{found:?}");
+            assert!(found.contains("read v_task"), "{found:?}");
         }
     }
 
@@ -8582,9 +8862,9 @@ commands:
             "datasets:",
             "  - name: late",
             "    version: 1",
-            "    description: Blocked work items.",
+            "    description: Blocked tasks.",
             "    fields:",
-            "      - { name: uri, type: TEXT, doc: Work item ref. }",
+            "      - { name: uri, type: TEXT, doc: Task ref. }",
             "  - { name: gone, version: 1, description: No file., fields: [] }",
             "",
         ]
@@ -8593,7 +8873,7 @@ commands:
         write(
             dir.path(),
             ".oxplow/extensions/x/datasets/late.sql",
-            "SELECT uri FROM ref('work_item') WHERE state = 'blocked'",
+            "SELECT uri FROM ref('task') WHERE state = 'blocked'",
         );
         write(
             dir.path(),
@@ -8631,7 +8911,7 @@ commands:
             ext.datasets[0].file,
             ".oxplow/extensions/x/datasets/late.sql"
         );
-        assert!(ext.datasets[0].sql.contains("ref('work_item')"));
+        assert!(ext.datasets[0].sql.contains("ref('task')"));
 
         write(
             dir.path(),
@@ -8660,7 +8940,7 @@ commands:
         let manifest = [
             "dimensions:",
             "  - { key: acme.team, label: Team }",
-            "  - { key: acme.prio, entity: v_work_item, expr: \"json_extract(e.native, '$.priority')\" }",
+            "  - { key: acme.prio, entity: v_task, expr: \"json_extract(e.native, '$.priority')\" }",
             "  - { key: acme.hot, promote: true }",
             "",
         ]
@@ -9029,7 +9309,7 @@ commands:
                     &viz_page(
                         "params: [{ name: stream_id, default: '' }]\n",
                         "SELECT 1 AS id, 'Ready' AS bucket, 'oxplow:oxplow/page?page=tasks' AS bucket_ref, 1 AS current, 0 AS indent, 'done' AS glyph, 'success' AS hue",
-                        "viz: list\ngroup: { by: bucket, link: { kind: page, from: bucket_ref } }\nemphasis: current\ndepth: indent\ncolumns:\n  - { key: id, icon: glyph, tone: hue }\nactions:\n  - { id: add, label: '+', command: oxplow.work_item.create, group: Ready, input: { stream: '{{param.stream_id}}' } }\n",
+                        "viz: list\ngroup: { by: bucket, link: { kind: page, from: bucket_ref } }\nemphasis: current\ndepth: indent\nedge: hue\ncolumns:\n  - { key: id, icon: glyph, tone: hue }\nactions:\n  - { id: add, label: '+', command: oxplow.task.create, group: Ready, input: { stream: '{{param.stream_id}}' } }\n",
                     ),
                 ),
                 ("t", &viz_page("", "SELECT 1 AS id, NULL AS p, 'x' AS l, 1 AS on_", "viz: tree\ntree: { id: id, parent: p, label: l }\nemphasis: on_\n")),
@@ -9039,6 +9319,10 @@ commands:
                 ("e", &viz_page("", "SELECT 1", "viz: list\nactions: [{ id: x, label: X, command: a.b.c, group: Ready }]\n")),
                 ("f", &viz_page("", "SELECT 1", "viz: list\ngroup: { by: g }\nactions: [{ id: x, label: X, command: a.b.c, group: Ready, row: true }]\n")),
                 ("g", &viz_page("", "SELECT 1 AS x, 2 AS y", "viz: bar\nchart: { x: x, y: y }\nemphasis: x\n")),
+                // A group's row caps draw a "+N more" only a list has.
+                ("h", &viz_page("", "SELECT 1 AS g", "viz: table\ngroup: { by: g, compact: { Ready: 2 } }\n")),
+                // A coloured edge is a list's or a table's row.
+                ("i", &viz_page("", "SELECT 1 AS id, NULL AS p, 'x' AS l", "viz: tree\ntree: { id: id, parent: p, label: l }\nedge: l\n")),
             ],
             "",
         );
@@ -9056,10 +9340,13 @@ commands:
                 }),
                 values: Vec::new(),
                 labels: Default::default(),
+                compact: Default::default(),
+                grown: Default::default(),
             })
         );
         assert_eq!(a.emphasis.as_deref(), Some("current"));
         assert_eq!(a.depth.as_deref(), Some("indent"));
+        assert_eq!(a.edge.as_deref(), Some("hue"));
         assert_eq!(a.columns[0].icon.as_deref(), Some("glyph"));
         assert_eq!(a.columns[0].tone.as_deref(), Some("hue"));
         assert_eq!(a.actions[0].group.as_deref(), Some("Ready"));
@@ -9071,6 +9358,8 @@ commands:
             ("e", "`group: Ready` needs the viz to have a `group`"),
             ("f", "a group action isn't a row action"),
             ("g", "`emphasis` is only for `list`, `table` and `tree`"),
+            ("h", "`group.compact` and `group.grown` are only for `list`"),
+            ("i", "`edge` is only for `list` and `table`"),
         ] {
             assert!(page_of(&ext, slug).is_none(), "{slug} should fail");
             assert!(
@@ -9093,7 +9382,7 @@ commands:
                 &viz_page(
                     "",
                     "SELECT 1 AS id",
-                    "viz: table\ngroup: { by: g1, link: { kind: page, from: g2 } }\nemphasis: e1\ndepth: d1\ncolumns:\n  - { key: id, icon: i1, tone: t1 }\n",
+                    "viz: table\ngroup: { by: g1, link: { kind: page, from: g2 } }\nemphasis: e1\ndepth: d1\nedge: x1\ncolumns:\n  - { key: id, icon: i1, tone: t1 }\n",
                 ),
             )],
             "",
@@ -9102,7 +9391,7 @@ commands:
             .await
             .unwrap();
         let errs = shown_errors(&v);
-        for k in ["g1", "g2", "e1", "d1", "i1", "t1"] {
+        for k in ["g1", "g2", "e1", "d1", "x1", "i1", "t1"] {
             assert!(errs.contains(&format!("`{k}`")), "{k}: {errs}");
         }
     }
@@ -9155,13 +9444,13 @@ commands:
                     &viz_page(
                         "params: [{ name: item, default: '' }]\n",
                         "SELECT 1 AS id",
-                        "actions:\n  - { id: finish, label: Finish, command: oxplow.work_item.transition, input: { uri: '{{param.item}}', to: done } }\n  - { id: row, label: Row, command: oxplow.work_item.transition, row: true, input: { uri: 'work_item:oxplow:tsk{{row.id}}', to: done } }\n",
+                        "actions:\n  - { id: finish, label: Finish, command: oxplow.task.transition, input: { uri: '{{param.item}}', to: done } }\n  - { id: row, label: Row, command: oxplow.task.transition, row: true, input: { uri: 'task:oxplow:tsk{{row.id}}', to: done } }\n",
                     ),
                 ),
                 ("b", &viz_page("", "SELECT 1", "actions: [copy]\n")),
                 ("c", &viz_page("", "SELECT 1", "actions: [{ action: run-source, source: a/b }]\n")),
-                ("d", &viz_page("", "SELECT 1", "actions: [{ id: x, label: X, command: oxplow.work_item.create, input: { title: '{{param.nope}}' } }]\n")),
-                ("e", &viz_page("", "SELECT 1", "actions: [{ id: x, label: X, command: oxplow.work_item.create, input: { title: '{{row.id}}' } }]\n")),
+                ("d", &viz_page("", "SELECT 1", "actions: [{ id: x, label: X, command: oxplow.task.create, input: { title: '{{param.nope}}' } }]\n")),
+                ("e", &viz_page("", "SELECT 1", "actions: [{ id: x, label: X, command: oxplow.task.create, input: { title: '{{row.id}}' } }]\n")),
                 ("f", &viz_page("", "SELECT 1", "actions: [{ id: x, label: X, command: Not-A-Name }]\n")),
                 ("g", &viz_page("", "SELECT 1", "actions: [{ id: x, label: X, command: a.b.c }, { id: x, label: Y, command: a.b.d }]\n")),
                 // A whole-page action is never a row's: the row is a node's.
@@ -9176,8 +9465,8 @@ commands:
                 .map(|x| (x.id.as_str(), x.command.as_deref().unwrap(), x.row))
                 .collect::<Vec<_>>(),
             vec![
-                ("finish", "oxplow.work_item.transition", false),
-                ("row", "oxplow.work_item.transition", true)
+                ("finish", "oxplow.task.transition", false),
+                ("row", "oxplow.task.transition", true)
             ]
         );
         for (slug, needle) in [
@@ -9504,6 +9793,62 @@ commands:
         );
     }
 
+    /// A page's icons (its own, its choices' options', its actions') may be
+    /// an svg the extension brings (`assets/<name>.svg`), published as a
+    /// data URI like a resource's; a missing svg or a name oxplow doesn't
+    /// draw is an error at the page.
+    #[test]
+    fn a_pages_icons_may_be_svgs_the_extension_brings() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M0 0h1v1z"/></svg>"#;
+        let choice = |icon: &str| {
+            format!(
+                "params:\n  - name: show\n    role: filter\n    default: a\n    options:\n      - {{ value: a, label: A, icon: {icon} }}\n      - {{ value: b, label: B, icon: star }}\n"
+            )
+        };
+        let (_d, ext) = load_tree(&[
+            ("assets/own.svg", svg),
+            (
+                "pages/a.yaml",
+                &viz_page(
+                    &format!("icon: assets/own.svg\n{}", choice("assets/own.svg")),
+                    "SELECT 1",
+                    "actions:\n  - { id: go, label: Go, command: x.y.z, icon: assets/own.svg }",
+                ),
+            ),
+            (
+                "pages/b.yaml",
+                &viz_page(&choice("unicorn"), "SELECT 1", ""),
+            ),
+            (
+                "pages/c.yaml",
+                &viz_page("icon: assets/gone.svg\n", "SELECT 1", ""),
+            ),
+        ]);
+        let uri = format!(
+            "data:image/svg+xml;base64,{}",
+            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, svg)
+        );
+        let a = page_of(&ext, "a").unwrap_or_else(|| panic!("{:?}", ext.errors));
+        assert_eq!(a.icon.as_deref(), Some(uri.as_str()));
+        let options = &a.params[0].options;
+        assert_eq!(options[0].icon.as_deref(), Some(uri.as_str()));
+        assert_eq!(options[1].icon.as_deref(), Some("star"));
+        assert_eq!(
+            node(&ext, "a").unwrap().actions[0].icon.as_deref(),
+            Some(uri.as_str())
+        );
+        assert!(page_of(&ext, "b").is_none() && page_of(&ext, "c").is_none());
+        let errs = shown_errors(&ext);
+        assert!(
+            errs.contains("b.yaml") && errs.contains("`icon: unicorn` isn't one oxplow draws"),
+            "{errs}"
+        );
+        assert!(
+            errs.contains("c.yaml") && errs.contains("no file `assets/gone.svg`"),
+            "{errs}"
+        );
+    }
+
     /// A page's id is its file's name: one that isn't kebab-case is an
     /// error.
     #[test]
@@ -9558,7 +9903,7 @@ commands:
     async fn advisories_parse_and_validate_their_columns() {
         let (d, ext) = load_x(
             &[],
-            "permissions: [agent.write]\nadvisories:\n  - id: low-coverage\n    on: post-tool-use\n    once_per: effort\n    query: SELECT 'add tests' AS message WHERE :effort_id IS NOT NULL\n  - id: crossings\n    on: prompt\n    once_per: row\n    heading: '# Metric thresholds'\n    query: SELECT 'x' AS message, 'k' AS key\n  - id: nokey\n    on: prompt\n    once_per: row\n    query: SELECT 'x' AS message\n  - id: Bad Id\n    on: prompt\n    query: SELECT 1\n",
+            "permissions: [agent.write]\nadvisories:\n  - id: low-coverage\n    on: post-tool-use\n    once_per: request\n    query: SELECT 'add tests' AS message WHERE :request_id IS NOT NULL\n  - id: crossings\n    on: prompt\n    once_per: row\n    heading: '# Metric thresholds'\n    query: SELECT 'x' AS message, 'k' AS key\n  - id: nokey\n    on: prompt\n    once_per: row\n    query: SELECT 'x' AS message\n  - id: Bad Id\n    on: prompt\n    query: SELECT 1\n",
         );
         let ids: Vec<&str> = ext.advisories.iter().map(|a| a.id.as_str()).collect();
         assert_eq!(ids, vec!["low-coverage", "crossings", "nokey"]);
@@ -9579,6 +9924,38 @@ commands:
             !errs.contains("low-coverage") && !errs.contains("crossings"),
             "{errs}"
         );
+    }
+
+    /// A check dry-runs each agent context with its params NULL: a query
+    /// that fails, or returns no `text` column, is an error; one that
+    /// returns no row is fine. Each is a contribution in the catalog.
+    #[tokio::test]
+    async fn agent_contexts_are_dry_run_by_the_check() {
+        let (d, ext) = load_x(
+            &[],
+            "permissions: [agent.write]\ncontext:\n  - id: fine\n    doc: Fine.\n    query: SELECT 'x' AS text WHERE :thread_id IS NOT NULL AND :stream_id IS NULL AND :request_id IS NULL\n  - id: notext\n    doc: No text.\n    query: SELECT 'x' AS message\n  - id: broken\n    doc: Broken.\n    query: SELECT nope FROM nowhere\n",
+        );
+        assert_eq!(
+            ext.contexts
+                .iter()
+                .map(|c| c.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["fine", "notext", "broken"]
+        );
+        assert!(ext.contributions.iter().any(|c| c.id.kind
+            == oxplow_domain::contribution::ContributionKind::AgentContext
+            && c.id.local == "fine"
+            && c.description.as_deref() == Some("Fine.")));
+        let v = validate_extension(&layer().await, &cat(), d.path(), "x", None)
+            .await
+            .unwrap();
+        let errs = shown_errors(&v);
+        assert!(
+            errs.contains("context `notext`: the query must return a `text` column"),
+            "{errs}"
+        );
+        assert!(errs.contains("context `broken`"), "{errs}");
+        assert!(!errs.contains("context `fine`"), "{errs}");
     }
 
     #[test]
@@ -9605,6 +9982,29 @@ commands:
             (link.base.as_deref(), link.head.as_deref()),
             (Some("b"), Some("h"))
         );
+    }
+
+    /// A column can link to a request's Changes page by the request's id
+    /// (`request`), as `commit` links a sha.
+    #[test]
+    fn a_request_link_names_the_column_holding_its_id() {
+        let (_d, ext) = load_x(
+            &[(
+                "requests",
+                &viz_page(
+                    "",
+                    "SELECT 3 AS id, 'Fix it' AS prompt",
+                    "columns:\n  - { key: prompt, link: { kind: request, from: id } }\n",
+                ),
+            )],
+            "",
+        );
+        let link = node(&ext, "requests").unwrap().columns[0]
+            .link
+            .clone()
+            .unwrap();
+        assert_eq!(link.kind, LinkKind::Request);
+        assert_eq!(link.from.as_deref(), Some("id"));
     }
 
     /// A page's `label` is what its tab says, `{{param.<name>}}` filled
@@ -9825,7 +10225,7 @@ commands:
     async fn an_extension_loads_at_any_revision() {
         use oxplow_domain::stores::StreamStore as _;
         use oxplow_domain::vcs::Revision;
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let ws = f.svc.layout.project_dir.clone();
         // Git sees an extension's source once it is shared.
         crate::extension::extension_deploy::share(&f.svc, "acme").unwrap();
@@ -9886,14 +10286,14 @@ commands:
         assert_eq!(at_snapshot.description, "Edited.");
     }
 
-    /// An effort's review names the extensions that changed between
-    /// its two revisions, each with what the change does; files outside
+    /// A review names the extensions that changed between its two
+    /// revisions, each with what the change does; files outside
     /// `.oxplow/extensions/` change nothing here.
     #[tokio::test]
-    async fn an_effort_review_names_the_extensions_that_changed() {
+    async fn a_review_names_the_extensions_that_changed() {
         use oxplow_domain::stores::StreamStore as _;
         use oxplow_domain::vcs::Revision;
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let ws = f.svc.layout.project_dir.clone();
         // Git sees an extension's source once it is shared.
         crate::extension::extension_deploy::share(&f.svc, "acme").unwrap();
@@ -9971,7 +10371,7 @@ commands:
     async fn the_earlier_side_of_a_review_is_not_checked() {
         use oxplow_domain::stores::StreamStore as _;
         use oxplow_domain::vcs::Revision;
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let ws = f.svc.layout.project_dir.clone();
         // Git sees an extension's source once it is shared.
         crate::extension::extension_deploy::share(&f.svc, "acme").unwrap();

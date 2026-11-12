@@ -205,56 +205,55 @@ async fn the_mapping_turns_verbs_into_tool_calls_and_output_into_outcomes() {
         .unwrap();
     assert_eq!(
         created.result,
-        json!({ "uri": "oxplow:oxplow/work_item?id=N-1&provider=notes" })
+        json!({ "uri": "oxplow:oxplow/task?id=N-1&provider=notes" })
     );
     let row = &created.events[0].payload["item"];
-    assert_eq!(
-        (row["state"].clone(), row["native_state"].clone()),
-        (json!("todo"), json!("open"))
-    );
+    assert_eq!(row["stage"], json!("open"));
     assert_eq!(
         created.events[0].subject,
-        ["oxplow:oxplow/work_item?id=N-1&provider=notes"]
+        ["oxplow:oxplow/task?id=N-1&provider=notes"]
     );
 
     let child = invoke(
         &peer,
         &handle,
         "create",
-        json!({ "title": "Child", "parent_uri": "oxplow:oxplow/work_item?id=N-1&provider=notes" }),
+        json!({ "title": "Child", "parent_uri": "oxplow:oxplow/task?id=N-1&provider=notes" }),
     )
     .await
     .unwrap();
     assert_eq!(
         child.events[0].payload["item"]["parent_uri"],
-        "oxplow:oxplow/work_item?id=N-1&provider=notes"
+        "oxplow:oxplow/task?id=N-1&provider=notes"
     );
 
     let moved = invoke(
         &peer,
         &handle,
         "transition",
-        json!({ "uri": "oxplow:oxplow/work_item?id=N-1&provider=notes", "to": "blocked" }),
+        json!({ "uri": "oxplow:oxplow/task?id=N-1&provider=notes", "to": "stuck" }),
     )
     .await
     .unwrap();
-    assert_eq!(moved.events[0].payload["item"]["native_state"], "stuck");
+    assert_eq!(moved.events[0].payload["item"]["stage"], "stuck");
+    // A stage the server doesn't have is its tool's error, refused at the
+    // field it names.
     let wrong = invoke(
         &peer,
         &handle,
         "transition",
-        json!({ "uri": "oxplow:oxplow/work_item?id=N-1&provider=notes", "to": "done", "native_state": "dropped" }),
+        json!({ "uri": "oxplow:oxplow/task?id=N-1&provider=notes", "to": "nowhere" }),
     )
     .await;
     assert!(
-        matches!(&wrong, Err(ProtocolError::InvalidInput { field, .. }) if field == "/native_state"),
+        matches!(&wrong, Err(ProtocolError::InvalidInput { field, .. }) if field == "/stage"),
         "{wrong:?}"
     );
     let missing = invoke(
         &peer,
         &handle,
         "update",
-        json!({ "uri": "oxplow:oxplow/work_item?id=N-9&provider=notes", "title": "x" }),
+        json!({ "uri": "oxplow:oxplow/task?id=N-9&provider=notes", "title": "x" }),
     )
     .await;
     assert!(
@@ -272,8 +271,8 @@ async fn the_mapping_turns_verbs_into_tool_calls_and_output_into_outcomes() {
     assert_eq!(
         refs,
         [
-            "oxplow:oxplow/work_item?id=N-2&provider=notes",
-            "oxplow:oxplow/work_item?id=N-1&provider=notes"
+            "oxplow:oxplow/task?id=N-2&provider=notes",
+            "oxplow:oxplow/task?id=N-1&provider=notes"
         ]
     );
     let (method, last) = streamed.last().unwrap();
@@ -301,14 +300,11 @@ async fn with_mapping(from: &str, to: &str) -> (tempfile::TempDir, Child, Peer, 
 #[cfg(unix)]
 #[tokio::test]
 async fn a_mapping_may_not_return_an_undeclared_event_or_a_foreign_ref() {
-    let (_ext, _child, peer, handle) = with_mapping(
-        "\"type\": \"work_item.recorded\"",
-        "\"type\": \"work_item.created\"",
-    )
-    .await;
+    let (_ext, _child, peer, handle) =
+        with_mapping("\"type\": \"task.recorded\"", "\"type\": \"task.created\"").await;
     let undeclared = invoke(&peer, &handle, "create", json!({ "title": "x" })).await;
     assert!(
-        matches!(&undeclared, Err(ProtocolError::Internal(m)) if m.contains("`work_item.created@3`")),
+        matches!(&undeclared, Err(ProtocolError::Internal(m)) if m.contains("`task.created@3`")),
         "{undeclared:?}"
     );
 
@@ -352,7 +348,7 @@ async fn a_tool_error_the_mapping_passes_over_is_an_invalid_input() {
         &peer,
         &handle,
         "update",
-        json!({ "uri": "oxplow:oxplow/work_item?id=N-9&provider=notes", "title": "x" }),
+        json!({ "uri": "oxplow:oxplow/task?id=N-9&provider=notes", "title": "x" }),
     )
     .await;
     assert!(
@@ -608,22 +604,22 @@ async fn a_server_by_url_is_pinned_and_called() {
         .unwrap();
     assert_eq!(
         created.result,
-        json!({ "uri": "oxplow:oxplow/work_item?id=N-1&provider=notes" })
+        json!({ "uri": "oxplow:oxplow/task?id=N-1&provider=notes" })
     );
     let moved = invoke(
         &peer,
         &handle,
         "transition",
-        json!({ "uri": "oxplow:oxplow/work_item?id=N-1&provider=notes", "to": "blocked" }),
+        json!({ "uri": "oxplow:oxplow/task?id=N-1&provider=notes", "to": "stuck" }),
     )
     .await
     .unwrap();
-    assert_eq!(moved.events[0].payload["item"]["native_state"], "stuck");
+    assert_eq!(moved.events[0].payload["item"]["stage"], "stuck");
     let (streamed, result) = read(&peer, &handle, None).await;
     assert_eq!(result["records"], 1);
     assert_eq!(
         streamed[0].1["row"]["uri"],
-        "oxplow:oxplow/work_item?id=N-1&provider=notes"
+        "oxplow:oxplow/task?id=N-1&provider=notes"
     );
 
     // Its service stops taking the token mid-session (the server comes

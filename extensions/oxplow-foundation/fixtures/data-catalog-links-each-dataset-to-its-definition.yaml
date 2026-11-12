@@ -1,5 +1,5 @@
 # The catalog's Dataset column opens the dataset's definition, not its rows.
-when: { page: data-catalog, params: { dataset: work_item } }
+when: { page: data-catalog, params: { dataset: task } }
 expect:
   loaders:
-    catalog: { rows: [{ view: v_work_item, definition: "oxplow:oxplow/dataset?dataset=work_item#oxplow.renderer=oxplow/dataset-definition" }] }
+    catalog: { rows: [{ view: v_task, definition: "oxplow:oxplow/dataset?dataset=task#oxplow.renderer=oxplow/dataset-definition" }] }

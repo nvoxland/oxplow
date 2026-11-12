@@ -1,5 +1,5 @@
-//! The change-analysis producer: for one change (a commit, an effort, or
-//! the working tree) it diffs the two endpoints, analyzes the changed files
+//! The change-analysis producer: for one change (a commit, a turn, a request,
+//! a range or the working tree) it diffs the two endpoints, analyzes the changed files
 //! (function metrics, churn, imports, zones, co-change) and stores the rows
 //! behind `v_change*`, which the analytics pages read. See
 //! `.context/semantic-layer.md` → "Change analysis".
@@ -326,17 +326,23 @@ pub enum ChangeTarget {
         #[serde(rename = "streamId", default)]
         stream_id: Option<String>,
     },
-    /// An effort: its start snapshot → its end snapshot (or the working
-    /// tree while it's open).
-    Effort {
-        #[serde(rename = "effortId")]
-        effort_id: String,
-    },
     /// An agent turn: its start snapshot → its end snapshot, "what changed
     /// this turn" (P2.10). A turn still running has no end: `NotFound`.
     Turn {
         #[serde(rename = "turnId")]
         turn_id: String,
+    },
+    /// A request on one stream: from the last take at or before its first
+    /// turn there started to where its last one ended ([`end_take`]; the
+    /// working tree while one runs), limited to the files its
+    /// turns changed (`v_turn_file`, claimed or sole). `stream_id`
+    /// defaults to the stream of the request's first turn; a request can
+    /// span streams, so it's keyed by both.
+    Request {
+        #[serde(rename = "requestId")]
+        request_id: String,
+        #[serde(rename = "streamId", default)]
+        stream_id: Option<String>,
     },
     /// Any two revisions, each spelled as a `rev` is (`working`,
     /// `snap:<id>`, `git:<rev>`); no base is the whole tree at `head`.
@@ -386,7 +392,7 @@ pub(crate) struct DupJob {
 
 /// Coalesces duplicate scans: each parses the whole tree, so one runs at
 /// a time across every change (a HEAD move or a turn's end analyzes the
-/// working tree and each open effort together), and the newest request for
+/// working tree and each running request together), and the newest request for
 /// a change replaces its queued one.
 #[derive(Default)]
 pub(crate) struct DupQueue {
@@ -446,9 +452,9 @@ pub(crate) fn hold_running_for_tests(svc: &crate::Services, id: i64) {
     svc.change_analyzer.state.lock().unwrap().running.insert(id);
 }
 
-/// Analyze `target` if it hasn't been (or its head moved — an effort
-/// closed), store the results, and return the change. A working tree's
-/// and an open effort's analysis is kept current by the `change.analyze`
+/// Analyze `target` if it hasn't been (or its head moved — a request
+/// finished), store the results, and return the change. A working tree's
+/// and a running request's analysis is kept current by the `change.analyze`
 /// consumer ([`refresh_change`]); this reads it, computing it the first
 /// time. While another call is computing the same change this returns it
 /// with status `running`; its rows' commit announces the results
@@ -520,7 +526,7 @@ pub async fn refresh_files(
         .await
         .into_local_path();
     let events_to = events_to(svc).await?;
-    let only = own_files(svc, kind, &key).await?;
+    let only = own_files(svc, kind, &key, stream).await?;
     // A working tree is also asked what git says of it: which of its files
     // are staged or untracked, how many conflict, what is in progress. That
     // also says which files to look at.
@@ -720,7 +726,6 @@ async fn resolve(
     ),
     oxplow_domain::DomainError,
 > {
-    use oxplow_db::EffortStore as _;
     use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
     use oxplow_domain::DomainError;
 
@@ -820,17 +825,43 @@ async fn resolve(
                 .get(&tid)
                 .await?
                 .ok_or(DomainError::NotFound)?;
-            let end = turn.snapshot_id.ok_or(DomainError::NotFound)?;
-            let start = turn.start_snapshot_id.ok_or_else(|| {
-                invalid(format!(
-                    "turn {turn_id} began before the stream had a snapshot, so there's nothing to diff from"
-                ))
-            })?;
+            let ended = turn.ended_at.ok_or(DomainError::NotFound)?;
             let thread = svc
                 .thread_store
                 .get(&turn.thread_id)
                 .await?
                 .ok_or(DomainError::NotFound)?;
+            // The turn's two points on its stream's snapshot line: the last
+            // take at or before it began, and where it ended ([`end_take`]).
+            let stream = thread.stream_id.value();
+            let turn_id_value = tid.value();
+            let (began, ended) = (
+                oxplow_db::ts_to_string(turn.started_at),
+                oxplow_db::ts_to_string(ended),
+            );
+            let (start, end) = svc
+                .db
+                .read(move |c| {
+                    use rusqlite::OptionalExtension as _;
+                    let start: Option<i64> = c
+                        .query_row(
+                            "SELECT id FROM snapshot WHERE stream_id = ?1 AND created_at <= ?2
+                              ORDER BY created_at DESC, id DESC LIMIT 1",
+                            rusqlite::params![stream, began],
+                            |r| r.get(0),
+                        )
+                        .optional()
+                        .map_err(oxplow_db::map_sql_err)?;
+                    let end = end_take(c, stream, &ended, &[turn_id_value])?;
+                    Ok((start, end))
+                })
+                .await?;
+            let end = end.ok_or(DomainError::NotFound)?;
+            let start = start.ok_or_else(|| {
+                invalid(format!(
+                    "turn {turn_id} began before the stream had a snapshot, so there's nothing to diff from"
+                ))
+            })?;
             (
                 thread.stream_id,
                 "turn",
@@ -839,32 +870,39 @@ async fn resolve(
                 Revision::Snapshot(end),
             )
         }
-        ChangeTarget::Effort { effort_id } => {
-            let eid = oxplow_domain::EffortId::try_from_str(&effort_id)
-                .ok_or_else(|| invalid(format!("not an effort id: {effort_id}")))?;
-            let effort = svc
-                .effort_store
-                .get_effort(&eid)
+        ChangeTarget::Request {
+            request_id,
+            stream_id,
+        } => {
+            let rid = oxplow_domain::RequestId::try_from_str(&request_id)
+                .ok_or_else(|| invalid(format!("not a request id: {request_id}")))?;
+            let stream = match stream_id.as_deref() {
+                Some(s) => Some(
+                    oxplow_domain::StreamId::try_from_str(s)
+                        .ok_or_else(|| invalid(format!("not a stream id: {s}")))?
+                        .value(),
+                ),
+                None => None,
+            };
+            let req = rid.value();
+            let span = svc
+                .db
+                .read(move |c| request_span(c, req, stream))
                 .await?
                 .ok_or(DomainError::NotFound)?;
-            let start = effort.start_snapshot_id.ok_or_else(|| {
+            let start = span.start.ok_or_else(|| {
                 invalid(format!(
-                    "effort {effort_id} has no start snapshot, so there's nothing to diff"
+                    "request {request_id} began before the stream had a snapshot, so there's nothing to diff from"
                 ))
             })?;
-            let thread = svc
-                .thread_store
-                .get(&effort.thread_id)
-                .await?
-                .ok_or(DomainError::NotFound)?;
-            let head = match effort.end_snapshot_id {
-                Some(end) if effort.ended_at.is_some() => Revision::Snapshot(end),
+            let head = match span.end {
+                Some(end) if !span.running => Revision::Snapshot(end),
                 _ => Revision::Working,
             };
             (
-                thread.stream_id,
-                "effort",
-                eid.value().to_string(),
+                oxplow_domain::StreamId::new(span.stream),
+                "request",
+                req.to_string(),
                 Some(Revision::Snapshot(start)),
                 head,
             )
@@ -920,7 +958,7 @@ async fn analyze(
             return Ok(row);
         }
     }
-    let only = own_files(svc, kind, &key).await?;
+    let only = own_files(svc, kind, &key, stream).await?;
     let from = analyzed_from(svc, stream, base.as_ref(), &head, only.as_ref()).await?;
     {
         let mut st = svc
@@ -939,9 +977,9 @@ async fn analyze(
             };
         }
         // Computed from these very inputs: current, however it was asked
-        // for (a forced rerun, an effort's head now its end snapshot of the
-        // same tree). Otherwise results of another head (an effort analyzed
-        // while open, now closed) are stale however they were computed.
+        // for (a forced rerun, a request's head now its end snapshot of the
+        // same tree). Otherwise results of another head (a request analyzed
+        // while running, now finished) are stale however they were computed.
         let same_inputs = from.is_some() && row.analyzed_from == from;
         if row.status == "done" && (same_inputs || (!head_moved && !force)) {
             return Ok(row);
@@ -1144,26 +1182,158 @@ fn spawn_duplicates(
     });
 }
 
-/// An effort's own files (`v_effort_file`: claimed or observed): what its
-/// change is limited to, since its bracket also holds what other threads
-/// and the person changed. `None` for any other kind of change.
+/// Where `turns` ended on `stream`'s snapshot line: the latest of their
+/// own end takes (`snapshot_op`, trigger `turn_end`, which can land just
+/// after the turn closed) and the last take at or before `ended`. A take
+/// after the end that isn't theirs is another writer's; an unchanged tree
+/// records no take, so the end is the take the tree was already at.
+fn end_take(
+    c: &rusqlite::Connection,
+    stream: i64,
+    ended: &str,
+    turns: &[i64],
+) -> Result<Option<i64>, oxplow_domain::DomainError> {
+    use rusqlite::OptionalExtension as _;
+    let turns = serde_json::to_string(turns).unwrap_or_else(|_| "[]".into());
+    c.query_row(
+        "SELECT id FROM snapshot
+          WHERE stream_id = ?1
+            AND (created_at <= ?2
+                 OR id IN (SELECT snapshot_id FROM snapshot_op
+                            WHERE trigger = 'turn_end'
+                              AND turn_id IN (SELECT value FROM json_each(?3))))
+          ORDER BY created_at DESC, id DESC LIMIT 1",
+        rusqlite::params![stream, ended, turns],
+        |r| r.get(0),
+    )
+    .optional()
+    .map_err(oxplow_db::map_sql_err)
+}
+
+/// A request's span on one stream's snapshot line.
+pub(crate) struct RequestSpan {
+    pub stream: i64,
+    /// When its first turn there started (RFC 3339).
+    pub began: String,
+    /// When its last turn there ended; `None` while one runs.
+    pub ended: Option<String>,
+    /// Its turns there.
+    pub turns: Vec<i64>,
+    /// The last take at or before its first turn there started.
+    pub start: Option<i64>,
+    /// Where its turns there ended ([`end_take`]).
+    pub end: Option<i64>,
+    /// One of its turns there is still running.
+    pub running: bool,
+}
+
+/// Where request `request` sits on `stream`'s snapshot line (the stream of
+/// its first turn when none is given); `None` when it has no turn there.
+pub(crate) fn request_span(
+    c: &rusqlite::Connection,
+    request: i64,
+    stream: Option<i64>,
+) -> Result<Option<RequestSpan>, oxplow_domain::DomainError> {
+    use rusqlite::OptionalExtension as _;
+    let map = oxplow_db::map_sql_err;
+    let turns: Option<(i64, String, Option<String>, bool)> = c
+        .query_row(
+            "SELECT th.stream_id, min(t.started_at), max(t.ended_at),
+                    max(t.ended_at IS NULL)
+               FROM agent_turn t JOIN threads th ON th.id = t.thread_id
+              WHERE t.request_id = ?1
+                AND th.stream_id = coalesce(?2,
+                      (SELECT th2.stream_id FROM agent_turn t2
+                         JOIN threads th2 ON th2.id = t2.thread_id
+                        WHERE t2.request_id = ?1 ORDER BY t2.id LIMIT 1))
+              GROUP BY th.stream_id",
+            rusqlite::params![request, stream],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .optional()
+        .map_err(map)?;
+    let Some((stream, began, ended, running)) = turns else {
+        return Ok(None);
+    };
+    let start: Option<i64> = c
+        .query_row(
+            "SELECT id FROM snapshot WHERE stream_id = ?1 AND created_at <= ?2
+              ORDER BY created_at DESC, id DESC LIMIT 1",
+            rusqlite::params![stream, began],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(map)?;
+    let turn_ids: Vec<i64> = {
+        let mut stmt = c
+            .prepare(
+                "SELECT t.id FROM agent_turn t JOIN threads th ON th.id = t.thread_id
+                  WHERE t.request_id = ?1 AND th.stream_id = ?2",
+            )
+            .map_err(map)?;
+        let ids = stmt
+            .query_map(rusqlite::params![request, stream], |r| r.get(0))
+            .map_err(map)?
+            .collect::<Result<_, _>>()
+            .map_err(map)?;
+        ids
+    };
+    let end = end_take(c, stream, ended.as_deref().unwrap_or_default(), &turn_ids)?;
+    Ok(Some(RequestSpan {
+        stream,
+        start,
+        end,
+        ended: ended.filter(|_| !running),
+        began,
+        turns: turn_ids,
+        running,
+    }))
+}
+
+/// A request's own files (its turns', `v_turn_file`): what its change is
+/// limited to, since its span also holds what other threads and the person
+/// changed. `None` for any other kind of change.
 async fn own_files(
     svc: &crate::Services,
     kind: &str,
     key: &str,
+    stream: oxplow_domain::StreamId,
 ) -> Result<Option<std::collections::HashSet<String>>, oxplow_domain::DomainError> {
-    use oxplow_db::EffortStore as _;
-    if kind != "effort" {
-        return Ok(None);
+    if kind == "request" {
+        return Ok(Some(request_files(svc, key, stream).await?));
     }
-    let Ok(id) = key.parse::<i64>() else {
-        return Ok(None);
-    };
-    let files = svc
-        .effort_store
-        .list_files(&oxplow_domain::EffortId::new(id))
-        .await?;
-    Ok(Some(files.into_iter().map(|f| f.path).collect()))
+    Ok(None)
+}
+
+/// The files request `key`'s turns on `stream` changed, as `v_turn_file`
+/// joins them: the ones a call of the turn claimed, or that only its turn
+/// was running to change. A file another turn could as well have changed
+/// is not the request's.
+pub(crate) async fn request_files(
+    svc: &crate::Services,
+    key: &str,
+    stream: oxplow_domain::StreamId,
+) -> Result<std::collections::HashSet<String>, oxplow_domain::DomainError> {
+    let (request, stream) = (key.parse::<i64>().unwrap_or_default(), stream.value());
+    svc.db
+        .read(move |c| {
+            let mut stmt = c
+                .prepare(
+                    "SELECT DISTINCT f.path FROM v_turn_file f
+                      WHERE f.turn_id IN (SELECT id FROM agent_turn WHERE request_id = ?1)
+                        -- `+`: by the turns' key, not a scan of the stream's.
+                        AND +f.stream_id = ?2
+                        AND f.confidence IN ('claimed', 'sole')",
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+            let paths = stmt
+                .query_map(rusqlite::params![request, stream], |r| r.get(0))
+                .map_err(oxplow_db::map_sql_err)?
+                .collect::<Result<_, _>>()
+                .map_err(oxplow_db::map_sql_err)?;
+            Ok(paths)
+        })
+        .await
 }
 
 /// Diff `base` → `head` in `root` (limited to `only` when given), read the
@@ -1311,7 +1481,7 @@ mod tests {
     /// files: its list is restated against the new HEAD, not kept.
     #[tokio::test]
     async fn after_a_commit_that_cleans_the_tree_the_working_change_lists_nothing() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         crate::test_fixtures::commit_all(&root, "base");
@@ -1347,7 +1517,7 @@ mod tests {
     /// row is there when the query reads it, and its analysis lands after.
     #[tokio::test]
     async fn a_query_that_names_a_change_makes_it() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         std::fs::write(root.join("a.rs"), "fn a() {}\n").unwrap();
@@ -1419,7 +1589,7 @@ mod tests {
     /// tree at its head. A side that isn't a revision is refused, saying so.
     #[tokio::test]
     async fn a_range_between_any_two_revisions_is_analyzed() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(root.join("src/lib.rs"), BEFORE).unwrap();
@@ -1889,7 +2059,7 @@ mod tests {
 
     #[tokio::test]
     async fn weakened_tests_are_counted_on_both_sides() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
         std::fs::create_dir_all(root.join("tests")).unwrap();
         std::fs::write(
@@ -1930,7 +2100,7 @@ mod tests {
     /// not failed) rather than analyzed from nothing.
     #[tokio::test]
     async fn a_snapshot_change_is_not_analyzed_without_contents() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         f.svc
             .snapshot_captures
             .set_content_policy(crate::snapshot_capture::ContentPolicy::HashesOnly);
@@ -1950,9 +2120,12 @@ mod tests {
             .svc
             .db
             .transaction(move |c| {
+                // A turn that began at the first take and ended at the last:
+                // its points on the line are found by time.
                 c.execute(
-                    "INSERT INTO agent_turn (thread_id, prompt, started_at, start_snapshot_id, snapshot_id)
-                     VALUES (1, 'p', '2026-01-01T00:00:00.000000Z', ?1, ?2)",
+                    "INSERT INTO agent_turn (thread_id, prompt, started_at, ended_at)
+                     VALUES (1, 'p', (SELECT created_at FROM snapshot WHERE id = ?1),
+                                     (SELECT created_at FROM snapshot WHERE id = ?2))",
                     rusqlite::params![start, end],
                 )
                 .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))?;
@@ -1974,10 +2147,10 @@ mod tests {
 
     /// P2.10 (tsk434): a turn diffs its start snapshot → its end snapshot
     /// — everything the turn changed, even across a snapshot taken in the
-    /// middle (an effort closing mid-turn).
+    /// middle (a run's measured take mid-turn).
     #[tokio::test]
     async fn a_turn_diffs_from_where_it_started_to_where_it_ended() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
         let capture = crate::snapshot_capture::SnapshotCaptureService::new(
             f.svc.snapshot_store.clone(),
@@ -1999,7 +2172,6 @@ mod tests {
                 trigger: oxplow_domain::snapshot::SnapshotTrigger::Manual,
                 thread_id: None,
                 turn_id: None,
-                effort_id: None,
                 budget: None,
                 provider: None,
             })
@@ -2011,10 +2183,13 @@ mod tests {
             .svc
             .db
             .transaction(move |c| {
+                // A turn that began at the first take and ended at the last
+                // (or is still running): its points are found by time.
                 let ins = |snap: Option<i64>| {
                     c.execute(
-                        "INSERT INTO agent_turn (thread_id, prompt, started_at, start_snapshot_id, snapshot_id)
-                         VALUES (1, 'p', '2026-01-01T00:00:00.000000Z', ?1, ?2)",
+                        "INSERT INTO agent_turn (thread_id, prompt, started_at, ended_at)
+                         VALUES (1, 'p', (SELECT created_at FROM snapshot WHERE id = ?1),
+                                         (SELECT created_at FROM snapshot WHERE id = ?2))",
                         rusqlite::params![start, snap],
                     )
                     .map(|_| c.last_insert_rowid())
@@ -2063,9 +2238,179 @@ mod tests {
         );
     }
 
+    /// A turn ends at the take it left the tree at, not at the next take
+    /// after it: one another writer made after the turn closed is not the
+    /// turn's.
+    #[tokio::test]
+    async fn a_turn_ends_at_its_last_take_not_the_next_writers() {
+        let f = crate::test_fixtures::services_with_thread().await;
+        let root = f.svc.layout.project_dir.clone();
+        let capture = crate::snapshot_capture::SnapshotCaptureService::new(
+            f.svc.snapshot_store.clone(),
+            f.svc.blobs.clone(),
+            root.clone(),
+            std::sync::Arc::new(crate::vcs::GitProvider),
+            oxplow_domain::StreamId::new(1),
+            1_000_000,
+            oxplow_fs_watch::WorkspaceFilter::default(),
+        )
+        .with_settle_duration(std::time::Duration::ZERO)
+        .with_predrain_delay(std::time::Duration::ZERO);
+        let take = |path: &str, body: &str| {
+            let full = root.join(path);
+            std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+            std::fs::write(&full, body).unwrap();
+            capture.mark_dirty(full, oxplow_fs_watch::WatchEventKind::Other);
+            capture.request_snapshot(crate::snapshot_capture::TakeRequest {
+                trigger: oxplow_domain::snapshot::SnapshotTrigger::Manual,
+                thread_id: None,
+                turn_id: None,
+                budget: None,
+                provider: None,
+            })
+        };
+        let s0 = take("src/a.rs", BEFORE).await.unwrap().unwrap();
+        let s1 = take("src/a.rs", AFTER).await.unwrap().unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        // The turn closed after its last take.
+        let turn: i64 = f
+            .svc
+            .db
+            .transaction(move |c| {
+                c.execute(
+                    "INSERT INTO agent_turn (thread_id, prompt, started_at, ended_at)
+                     VALUES (1, 'p', (SELECT created_at FROM snapshot WHERE id = ?1),
+                             strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+                    rusqlite::params![s0],
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+                Ok(c.last_insert_rowid())
+            })
+            .await
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        let _other = take("src/c.rs", "pub fn c() {}\n").await.unwrap().unwrap();
+        let c = ensure_change(
+            &f.svc,
+            ChangeTarget::Turn {
+                turn_id: oxplow_domain::AgentTurnId::new(turn).to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(c.head_revision, Some(Revision::Snapshot(s1)));
+    }
+
+    /// A request diffs from where its first turn on the stream started to
+    /// where its last one ended, limited to the files its turns changed: a
+    /// file the person changed between its turns is not the request's.
+    /// While one of its turns runs, its head is the working tree.
+    #[tokio::test]
+    async fn a_request_diffs_its_turns_span_limited_to_its_files() {
+        let f = crate::test_fixtures::services_with_thread().await;
+        let root = f.svc.layout.project_dir.clone();
+        let capture = crate::snapshot_capture::SnapshotCaptureService::new(
+            f.svc.snapshot_store.clone(),
+            f.svc.blobs.clone(),
+            root.clone(),
+            std::sync::Arc::new(crate::vcs::GitProvider),
+            oxplow_domain::StreamId::new(1),
+            1_000_000,
+            oxplow_fs_watch::WorkspaceFilter::default(),
+        )
+        .with_settle_duration(std::time::Duration::ZERO)
+        .with_predrain_delay(std::time::Duration::ZERO);
+        let take = |path: &str, body: &str| {
+            let full = root.join(path);
+            std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+            std::fs::write(&full, body).unwrap();
+            capture.mark_dirty(full, oxplow_fs_watch::WatchEventKind::Other);
+            capture.request_snapshot(crate::snapshot_capture::TakeRequest {
+                trigger: oxplow_domain::snapshot::SnapshotTrigger::Manual,
+                thread_id: None,
+                turn_id: None,
+                budget: None,
+                provider: None,
+            })
+        };
+        // The turns are recorded as they happen: each opens, the take
+        // captures its file, it closes. The person's c.rs lands between
+        // the request's two turns.
+        let exec = |sql: &'static str, args: Vec<i64>| {
+            let db = f.svc.db.clone();
+            async move {
+                db.transaction(move |c| {
+                    c.execute(sql, rusqlite::params_from_iter(args.iter()))
+                        .map_err(oxplow_db::map_sql_err)?;
+                    Ok(c.last_insert_rowid())
+                })
+                .await
+                .unwrap()
+            }
+        };
+        let open = "INSERT INTO agent_turn (thread_id, prompt, request_id, started_at)
+                    VALUES (1, 'p', ?1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))";
+        let close =
+            "UPDATE agent_turn SET ended_at = (SELECT created_at FROM snapshot WHERE id = ?2)
+                      WHERE id = ?1";
+        let pause = || tokio::time::sleep(std::time::Duration::from_millis(5));
+        let request = exec("INSERT INTO request (thread_id) VALUES (1)", vec![]).await;
+        let _s0 = take("src/a.rs", BEFORE).await.unwrap().unwrap();
+        pause().await;
+        let first = exec(open, vec![request]).await;
+        pause().await;
+        let s1 = take("src/a.rs", AFTER).await.unwrap().unwrap();
+        exec(close, vec![first, s1]).await;
+        pause().await;
+        let _s2 = take("src/c.rs", "pub fn c() {}\n").await.unwrap().unwrap();
+        pause().await;
+        let second = exec(open, vec![request]).await;
+        pause().await;
+        let s3 = take("src/b.rs", "pub fn b() {}\n").await.unwrap().unwrap();
+        exec(close, vec![second, s3]).await;
+        let running = exec("INSERT INTO request (thread_id) VALUES (1)", vec![]).await;
+        pause().await;
+        exec(open, vec![running]).await;
+
+        let c = ensure_change(
+            &f.svc,
+            ChangeTarget::Request {
+                request_id: oxplow_domain::RequestId::new(request).to_string(),
+                stream_id: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            (c.kind.as_str(), c.target.as_str(), c.status.as_str()),
+            ("request", request.to_string().as_str(), "done")
+        );
+        assert_eq!(c.head_revision, Some(Revision::Snapshot(s3)));
+        assert_eq!(
+            rows(
+                &f.svc,
+                "SELECT path, status FROM v_change_file WHERE change_id = ?1 ORDER BY path",
+                c.id
+            )
+            .await,
+            serde_json::json!([["src/a.rs", "modified"], ["src/b.rs", "added"]])
+        );
+
+        let live = ensure_change(
+            &f.svc,
+            ChangeTarget::Request {
+                request_id: oxplow_domain::RequestId::new(running).to_string(),
+                stream_id: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(live.head_revision, Some(Revision::Working));
+    }
+
     #[tokio::test]
     async fn a_commit_is_analyzed_once_and_stored() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(root.join("src/lib.rs"), BEFORE).unwrap();
@@ -2138,7 +2483,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_working_tree_is_recomputed_when_refreshed() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(root.join("src/lib.rs"), BEFORE).unwrap();
@@ -2190,7 +2535,7 @@ mod tests {
     /// leaves the deep analysis alone.
     #[tokio::test]
     async fn refreshing_files_stores_the_file_list_alone() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(root.join("src/lib.rs"), BEFORE).unwrap();
@@ -2254,87 +2599,9 @@ mod tests {
         );
     }
 
-    /// An effort's change is its own files: another file that changed in
-    /// its bracket (someone else's, or between its turns) isn't on it.
-    #[tokio::test]
-    async fn an_efforts_change_is_limited_to_its_files() {
-        use oxplow_db::EffortStore as _;
-        let f = crate::thread_checkpoint::tests::with_baseline().await;
-        let stream = f.svc.streams.list_streams().await.unwrap()[0].id;
-        let start = f
-            .svc
-            .snapshot_store
-            .latest_snapshot_id_for_stream(stream)
-            .await
-            .unwrap();
-        f.svc
-            .effort_store
-            .finish(&f.effort, None, None)
-            .await
-            .unwrap();
-        let effort = f
-            .svc
-            .effort_store
-            .start(
-                "oxplow:oxplow/work_item?id=A-1&provider=issues",
-                &f.thread,
-                start,
-            )
-            .await
-            .unwrap();
-        let root = f.svc.layout.project_dir.clone();
-        std::fs::write(root.join("mine.txt"), "mine").unwrap();
-        std::fs::write(root.join("theirs.txt"), "theirs").unwrap();
-        f.svc
-            .effort_store
-            .record_file(
-                &effort.id,
-                "mine.txt",
-                oxplow_db::EffortFileChange::Created,
-                oxplow_db::effort_store::FileRefVersion {
-                    local_snapshot_id: 0,
-                    closest_vcs_rev: None,
-                    vcs_rev_exact: false,
-                },
-            )
-            .await
-            .unwrap();
-        let c = refresh_files(
-            &f.svc,
-            ChangeTarget::Effort {
-                effort_id: effort.id.to_string(),
-            },
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            rows(
-                &f.svc,
-                "SELECT path FROM v_change_file WHERE change_id = ?1",
-                c.id
-            )
-            .await,
-            serde_json::json!([["mine.txt"]])
-        );
-    }
-
-    #[tokio::test]
-    async fn an_effort_without_a_start_snapshot_is_explained() {
-        let f = crate::test_fixtures::services_with_effort().await;
-        let err = ensure_change(
-            &f.svc,
-            ChangeTarget::Effort {
-                effort_id: f.effort.to_string(),
-            },
-        )
-        .await
-        .unwrap_err();
-        assert!(err.to_string().contains("start snapshot"), "{err}");
-    }
-
     #[tokio::test]
     async fn duplicates_of_changed_files_arrive_after_the_main_analysis() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
         let body = "pub fn tally(items: &[u32]) -> u32 {\n    let mut total = 0;\n    for item in items {\n        if *item > 10 {\n            total += item * 2;\n        } else {\n            total += item + 1;\n        }\n    }\n    total\n}\n";
         std::fs::create_dir_all(root.join("src")).unwrap();

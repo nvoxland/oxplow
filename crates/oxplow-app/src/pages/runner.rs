@@ -96,7 +96,7 @@ pub struct SeeAlso {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PageInactive {
-    /// The needs that aren't met (`work_items`, `knowledge`).
+    /// The needs that aren't met (`task_tracker`, `knowledge`).
     pub needs: Vec<String>,
     /// What a person reads.
     pub message: String,
@@ -602,7 +602,11 @@ impl<'a> PageRunner<'a> {
                                 .get(loader)
                                 .map(|r| match &r.error {
                                     Some(e) => Err(e.clone()),
-                                    None => Ok(r.result.clone()),
+                                    None => {
+                                        let mut result = r.result.clone();
+                                        result.reads = chain_reads(&run, loader);
+                                        Ok(result)
+                                    }
                                 })
                                 .unwrap_or_else(|| {
                                     Err(format!("page `{target}`'s loader `{loader}` didn't run"))
@@ -1151,6 +1155,27 @@ pub(super) enum Unreadable {
     Failed(String),
     /// One has no columns (it yielded nothing, with no shape).
     NoColumns,
+}
+
+/// What a page loader borrowing `run`'s `loader` read: everything its
+/// chain on that page read (the loaders it reads as temp tables, theirs,
+/// and their declared `reads`). Its own result read only the temp tables,
+/// so without the chain a change to the dataset behind them wouldn't reach
+/// the borrower, and an open run would keep its old rows.
+fn chain_reads(run: &PageRun, loader: &str) -> oxplow_db::Reads {
+    let page = &run.page;
+    let chain = page.loader_chain(loader);
+    let mut all: Vec<oxplow_db::Reads> = Vec::new();
+    for decl in page.loaders.iter().filter(|d| chain.contains(&d.name)) {
+        if let Some(r) = run.loaders.get(&decl.name) {
+            all.push(r.result.reads.clone());
+        }
+        all.push(oxplow_db::Reads {
+            datasets: decl.reads.clone(),
+            ..Default::default()
+        });
+    }
+    oxplow_db::Reads::union(&all)
 }
 
 /// The loaders `names` as the temp tables a query reads them from.

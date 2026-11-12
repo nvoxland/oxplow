@@ -1,0 +1,12 @@
+enable: [shelf, shelf-db]
+given:
+  - { command: shelf-db.book.add, input: { title: Dune, rating: 4 } }
+when: { collector: shelf-db.books, trigger: sqlite }
+expect: { ok: true }
+steps:
+  - when: { command: shelf-db.book.remove, input: { id: dune } }
+    expect: { ok: true }
+  - when: { collector: shelf-db.books, trigger: sqlite }
+    expect: { ok: true }
+  - when: { sql: "SELECT count(*) AS n FROM v_shelf_book" }
+    expect: { rows: [{ n: 0 }] }

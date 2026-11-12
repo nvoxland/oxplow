@@ -107,7 +107,7 @@ test("a value that is not a list of items shows as it is; an empty list shows no
 // A `format: source` column says who caused a row: a chip with its kind's
 // icon and its label, a link where it has a `uri`; an agent reads it as text.
 test("a source column is a chip that says who, opening its thread", () => {
-  const agent = JSON.stringify({ kind: "agent", label: "Main Controller", uri: "oxplow:oxplow/page?page=thread-work&thread=thr1" });
+  const agent = JSON.stringify({ kind: "agent", label: "Main Controller", uri: "oxplow:oxplow/page?page=thread-tasks&thread=thr1" });
   const view = render(
     runOf("table", { columns: [{ ...column, key: "perms", format: "source" }] }, [
       ["a", "Alpha", agent],
@@ -121,8 +121,29 @@ test("a source column is a chip that says who, opening its thread", () => {
   ]);
   opened.length = 0;
   fireEvent.click(chips[0]!.querySelector("button")!);
-  expect(opened).toEqual(["oxplow:oxplow/page?page=thread-work&thread=thr1"]);
+  expect(opened).toEqual(["oxplow:oxplow/page?page=thread-tasks&thread=thr1"]);
   expect(chips[1]!.querySelector("button")).toBeNull();
+});
+
+// `viz: icons` draws each row as its icon alone: the first column's value is
+// the hover and the button's name, its link what a click opens.
+test("an icons viz draws each row as its icon, named by its first column", () => {
+  const cols = [{ key: "name", label: "Page", link: { kind: "page", from: "id", line: null, base: null, head: null }, unit: null, icon: "perms", tone: null, format: null }];
+  const view = render(
+    runOf("icons", { columns: cols }, [
+      ["oxplow:oxplow/page?page=git-dashboard", "Git Status", "git-branch"],
+      ["oxplow:oxplow/page?page=alerts", "Alerts", "bell"],
+    ]),
+  );
+  const icons = view.getAllByTestId("viz-icon-item");
+  expect(icons.map((i) => [i.getAttribute("title"), i.getAttribute("aria-label"), i.textContent])).toEqual([
+    ["Git Status", "Git Status", ""],
+    ["Alerts", "Alerts", ""],
+  ]);
+  expect(icons[0]!.querySelector("svg")).not.toBeNull();
+  opened.length = 0;
+  fireEvent.click(icons[1]!);
+  expect(opened).toEqual(["oxplow:oxplow/page?page=alerts"]);
 });
 
 // `mock.module` outlives this file: put the real modules back for the files that run after it.

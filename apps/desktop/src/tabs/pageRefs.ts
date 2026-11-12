@@ -4,7 +4,8 @@
  * hand-format an id.
  *
  * - An **entity** page's id is the entity's own ref: `file:<path>[@rev]`,
- *   `dir:<path>`, `wiki:<slug>`, `work_item:oxplow:tsk42`, `commit:<sha>`,
+ *   `dir:<path>`, `oxplow:oxplow/knowledge?id=…&store=…`,
+ *   `task:oxplow:tsk42`, `commit:<sha>`,
  *   `metric:<key>`, `page:<ext>/<slug>[?params]`.
  * - A **declared page** (a manifest's `pages:` entry, not a thing in the
  *   graph) is `page:<id>[?params]` for oxplow's own extension (core-named,
@@ -36,7 +37,6 @@ import {
   agentSessionUri,
   commitUri,
   dirUri,
-  effortUri,
   extPageUri,
   fileUri,
   formatUri,
@@ -50,7 +50,8 @@ import {
   snapshotUri,
   turnUri,
   typeOf,
-  wikiUri,
+  knowledgeOf,
+  knowledgeUri,
   type ParamValue,
 } from "../uri/uri.js";
 
@@ -181,13 +182,13 @@ export function directoryRef(path: string): TabRef {
   return { id: dirUri(bare) };
 }
 
-export function wikiPageRef(slug: string): TabRef {
-  return { id: wikiUri(slug) };
+export function knowledgePageRef(store: string, id: string): TabRef {
+  return { id: knowledgeUri(store, id) };
 }
 
-/** A work item's page, whichever list it's on: the tab id is its ref
- *  (`work_item:<provider>:<id>`). */
-export function workItemTabRef(ref: string): TabRef {
+/** A task's page, whichever list it's on: the tab id is its ref
+ *  (`task:<provider>:<id>`). */
+export function taskTabRef(ref: string): TabRef {
   return { id: ref };
 }
 
@@ -203,8 +204,8 @@ export function gitCommitRef(sha: string): TabRef {
   return { id: commitUri(sha) };
 }
 
-/** Open one metric's detail page, optionally scoped to an effort's window —
- *  the task-page metrics-panel drill-in ("In this effort" before→after +
+/** Open one metric's detail page, optionally scoped to a window —
+ *  the task-page metrics-panel drill-in (before→after +
  *  further exploration). Its own page kind (`metric`); Metrics and the
  *  dashboard tiles both navigate into it. */
 export function metricRef(metricKey: string, view?: Record<string, SqlCell>): TabRef {
@@ -397,8 +398,11 @@ export function symbolRef(ref: string): TabRef {
   return { id: ref };
 }
 
-export function wikiFreshnessRef(slug: string): TabRef {
-  return pageTabRef("wiki-freshness", { slug });
+/** A knowledge page's freshness report, by the page's URI. */
+export function knowledgeFreshnessRef(uri: string): TabRef {
+  const page = knowledgeOf(uri);
+  if (!page) throw new Error(`not a knowledge page: ${uri}`);
+  return pageTabRef("knowledge-freshness", { store: page.store, id: page.id });
 }
 
 /** The Dashboards index — the list of the user's custom dashboards: the
@@ -431,22 +435,6 @@ export function hookEventsRef(): TabRef {
   return pageTabRef("hook-events");
 }
 
-/**
- * Named ref helpers for the work pages. Mirrors the GitDashboard
- * pattern (`gitDashboardRef`, `uncommittedChangesRef`) so call sites
- * read as intent rather than as stringly-typed `pageTabRef("…")`.
- */
-export function tasksRef(): TabRef {
-  return pageTabRef("tasks");
-}
-/** The Done Work page: the foundation's `done-work` page. */
-export function doneWorkRef(): TabRef {
-  return pageTabRef("done-work");
-}
-export function backlogRef(): TabRef {
-  return pageTabRef("backlog");
-}
-
 /** Git Dashboard — committed-history rollup page. */
 export function gitDashboardRef(): TabRef {
   return pageTabRef("git-dashboard");
@@ -460,8 +448,6 @@ export function gitDashboardRef(): TabRef {
  *
  * - **snapshot** (`snapshot:<N>`) — a single capture, framed as
  *   `[parent → N]` (its recorded parent).
- * - **effort** (`effort:<effN>`) — the effort's start/end snapshot
- *   bracket, carrying the task title + "in progress" state.
  * - **turn** (`turn:<trnN>`) — an agent turn's start/end snapshots:
  *   what the turn changed.
  * - **endpoints** (`page:diff-view#start=<rev>&end=<rev>`) — an explicit
@@ -472,12 +458,6 @@ export function gitDashboardRef(): TabRef {
  *  dashboard, file version history, and snapshot backlinks. */
 export function snapshotRef(snapshotId: number): TabRef {
   return { id: snapshotUri(snapshotId) };
-}
-
-/** An effort's page — its start/end snapshot bracket as a diff. The
- *  'View diff' button on a completed effort points here. */
-export function effortDiffRef(effortId: string): TabRef {
-  return { id: effortUri(effortId) };
 }
 
 /** An agent turn's page (`trn<N>`) — what the turn changed. */

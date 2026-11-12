@@ -1,0 +1,106 @@
+title: Work
+description: "The tasks assigned to a thread, its stream, you, nobody or anyone, as a kanban board: a column per stage of the list, drag a card to move it. The backlog is the Task List's."
+icon: columns-3
+category: Work
+keywords: work board kanban tasks columns state
+needs:
+- task_tracker
+# The board's filters are its view (the tab's `#`): the board draws them
+# in its own toolbar, so the page has no rail.
+params:
+- name: show
+  type: choice
+  role: view
+  default: thread
+  options:
+  - { value: thread, label: This thread }
+  - { value: stream, label: This stream }
+  - { value: me, label: Assigned to me }
+  - { value: pool, label: Unassigned }
+  - { value: all, label: Everyone's }
+- name: priority
+  type: choice
+  role: view
+  default: any
+  options:
+  - { value: any, label: Any }
+  - { value: urgent, label: Urgent }
+  - { value: high, label: High }
+  - { value: medium, label: Medium }
+  - { value: low, label: Low }
+- name: q
+  type: search
+  role: view
+  label: Search
+- name: thread_id
+- name: stream_id
+loaders:
+  # The scope (with no thread, "this thread" is everything) and the form a
+  # new item is filed with.
+  row:
+    sql: |
+      SELECT CASE WHEN :show = 'thread' AND :thread_id IS NULL THEN 'all' ELSE :show END AS scope,
+             uri('oxplow/page', 'page', 'new-task') AS new_task
+  items:
+    page: oxplow/task-rows
+    loader: items
+    params:
+      show: { from: row.scope }
+      state: all
+      priority: { param: priority }
+      q: { param: q }
+      thread_id: { param: thread_id }
+      stream_id: { param: stream_id }
+  # The cards: every ready, started or blocked item, and what was done in
+  # the last three days, twenty at most; the backlog, the rest of Done and
+  # the canceled ones are the Task List's. Wider than one assignee, a card
+  # names who it's for.
+  board:
+    sql: |
+      SELECT i.*, CASE WHEN :scope NOT IN ('thread', 'me') THEN i.assignee_title END AS assignee_shown
+      FROM items i
+      WHERE i.state NOT IN ('backlog', 'canceled')
+        AND (i.state <> 'done' OR (i.done_rank <= 20 AND julianday(i.closed_at) >= julianday('now', '-3 days')))
+      ORDER BY i.ord
+    params:
+      scope:
+        from: row.scope
+  # The list's stages: the board's columns (but its backlog and canceled
+  # ones, the Task List's) and a card's Mark entries.
+  stages:
+    page: oxplow/task-stages
+    loader: task_stages
+  # How many items each stage has, shown or not.
+  counts:
+    sql: |
+      SELECT stage, count(*) AS n FROM items GROUP BY stage
+  # A turn the agent has open on the thread: a live card at the top of the
+  # first started stage.
+  live:
+    sql: |
+      SELECT 'Agent is working: ' || CASE WHEN instr(trim(t.prompt), char(10)) > 0
+                                          THEN substr(trim(t.prompt), 1, instr(trim(t.prompt), char(10)) - 1)
+                                          ELSE trim(t.prompt) END AS title
+      FROM v_agent_turn t
+      WHERE :scope = 'thread' AND t.thread_id = :thread_id AND t.ended_at IS NULL
+    params:
+      scope:
+        from: row.scope
+  # Who a card can be assigned to: the stream's open threads, then you.
+  assignees:
+    sql: |
+      SELECT t.uri, t.title FROM v_thread t
+      WHERE t.stream_id = :stream_id AND t.closed_at IS NULL AND t.archived_at IS NULL
+      UNION ALL
+      SELECT uri('oxplow/person'), 'You'
+  # The list's own choice fields, for a card's menu.
+  fields:
+    page: oxplow/task-fields
+    loader: task_fields
+# Another extension may stand in for the board (`task.board`: `scope`
+# from the row, `thread_id`, `stream_id`).
+view:
+  id: board
+  replaceable: task.board
+  component:
+    id: board

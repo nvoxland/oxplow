@@ -37,15 +37,24 @@ use crate::extension::extensions::Extension;
 use oxplow_domain::uri::resources::{ResourceDecl, ResourceRegistry};
 
 /// What the generation needs of the host to build a vocabulary: the
-/// active work list's id recognizer, asked at each build.
+/// active task tracker's id recognizer, asked at each build.
 pub struct VocabularyService {
-    /// The active work list's id recognizer (its id and `id_pattern`), if
-    /// it declares one: the vocabulary's way of reading `tsk42` in text.
-    work_item_ids: WorkItemIds,
+    /// What the vocabulary recognizes in text from the capabilities in use.
+    recognizers: Recognize,
 }
 
-/// The active work list's id recognizer, asked at each build.
-pub type WorkItemIds = Arc<dyn Fn() -> Option<(String, String)> + Send + Sync>;
+/// What text names through the capabilities in use: the active task
+/// tracker's ids (its id and `id_pattern`, when it declares one — how
+/// `tsk42` is read) and the enabled knowledge stores (how
+/// `[[<store>:<id>]]` is read).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Recognizers {
+    pub task_ids: Option<(String, String)>,
+    pub knowledge_stores: Vec<String>,
+}
+
+/// The recognizers, asked at each build.
+pub type Recognize = Arc<dyn Fn() -> Recognizers + Send + Sync>;
 
 /// What one enabled extension brings to the vocabulary.
 #[derive(serde::Serialize)]
@@ -73,16 +82,16 @@ pub type VocabularyErrors = BTreeMap<String, Vec<crate::extension::extensions::D
 pub struct PreparedVocabulary {
     generation: String,
     declared: Declared,
-    work_item_ids: Option<(String, String)>,
+    recognizers: Recognizers,
 }
 
 impl PreparedVocabulary {
-    /// Freeze one candidate's enabled declarations with a host-selected work
-    /// item recognizer. This permits capability and vocabulary candidates to
+    /// Freeze one candidate's enabled declarations with a host-selected
+    /// task recognizer. This permits capability and vocabulary candidates to
     /// use the same planned selection without changing either live registry.
     pub fn prepare(
         snapshot: &CatalogSnapshot,
-        work_item_ids: Option<(String, String)>,
+        recognizers: Recognizers,
     ) -> Result<Self, VocabularyErrors> {
         let errors: VocabularyErrors = snapshot
             .extensions()
@@ -96,7 +105,7 @@ impl PreparedVocabulary {
         Ok(Self {
             generation: snapshot.generation().to_string(),
             declared: declarations(snapshot.extensions()),
-            work_item_ids,
+            recognizers,
         })
     }
 
@@ -121,23 +130,27 @@ impl PreparedVocabulary {
             Ok((mut vocabulary, mut errors)) => {
                 // A bad recognizer rejects the candidate instead of
                 // silently dropping recognition.
-                match self.work_item_ids.as_ref() {
+                vocabulary.resources = vocabulary
+                    .resources
+                    .clone()
+                    .with_knowledge_stores(self.recognizers.knowledge_stores.iter().cloned());
+                match self.recognizers.task_ids.as_ref() {
                     Some((provider, pattern)) => {
                         match vocabulary
                             .resources
                             .clone()
-                            .with_work_item_ids(provider, pattern)
+                            .with_task_ids(provider, pattern)
                         {
                             Ok(resources) => vocabulary.resources = resources,
                             Err(error) => errors.entry("<host>".to_string()).or_default().push(
                                 Diagnostic::error(
-                                    "activation.work_item_id_recognizer",
-                                    format!("work item id recognizer: {error}"),
+                                    "activation.task_id_recognizer",
+                                    format!("task id recognizer: {error}"),
                                 ),
                             ),
                         }
                     }
-                    None => vocabulary.resources = vocabulary.resources.without_work_item_ids(),
+                    None => vocabulary.resources = vocabulary.resources.without_task_ids(),
                 }
                 errors.retain(|_, messages| !messages.is_empty());
                 if errors.is_empty() {
@@ -179,8 +192,8 @@ fn declarations(extensions: &[Extension]) -> Declared {
 }
 
 impl VocabularyService {
-    pub fn new(work_item_ids: WorkItemIds) -> Self {
-        Self { work_item_ids }
+    pub fn new(recognizers: Recognize) -> Self {
+        Self { recognizers }
     }
 
     /// Capture declarations and the current host recognizer from one catalog
@@ -190,24 +203,23 @@ impl VocabularyService {
         &self,
         snapshot: &CatalogSnapshot,
     ) -> Result<PreparedVocabulary, VocabularyErrors> {
-        PreparedVocabulary::prepare(snapshot, (self.work_item_ids)())
+        PreparedVocabulary::prepare(snapshot, (self.recognizers)())
     }
 }
 
-/// `resources` recognizing the active work list's ids (`ids`), or none.
-pub fn with_work_item_ids(
-    resources: ResourceRegistry,
-    ids: Option<&(String, String)>,
-) -> ResourceRegistry {
-    match ids {
+/// `resources` recognizing what `recognizers` say: the active task
+/// tracker's ids (or none) and the enabled knowledge stores.
+pub fn recognizing(resources: ResourceRegistry, recognizers: &Recognizers) -> ResourceRegistry {
+    let resources = resources.with_knowledge_stores(recognizers.knowledge_stores.iter().cloned());
+    match recognizers.task_ids.as_ref() {
         Some((provider, pattern)) => resources
             .clone()
-            .with_work_item_ids(provider, pattern)
+            .with_task_ids(provider, pattern)
             .unwrap_or_else(|e| {
-                tracing::warn!(provider, error = %e, "the work list's id pattern doesn't compile");
-                resources.without_work_item_ids()
+                tracing::warn!(provider, error = %e, "the task tracker's id pattern doesn't compile");
+                resources.without_task_ids()
             }),
-        None => resources.without_work_item_ids(),
+        None => resources.without_task_ids(),
     }
 }
 
@@ -403,7 +415,7 @@ mod tests {
     /// while the rows already logged still read.
     #[tokio::test]
     async fn a_declared_type_registers_keeps_its_contract_and_outlives_its_extension() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         let log = SqliteEventLogStore::new(svc.db.clone(), svc.vocabulary.clone());
@@ -491,7 +503,7 @@ mod tests {
     /// and stays after the extension is removed.
     #[tokio::test]
     async fn a_declared_retention_window_outlives_its_extension() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         write(
@@ -538,14 +550,14 @@ mod tests {
     /// it from; a kind no dataset holds has none.
     #[tokio::test]
     async fn core_kinds_are_listed_with_their_dataset_and_search_feed() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         crate::test_fixtures::activate_with_problems(&f.svc).await;
         let rows = f
             .svc
             .sql
             .query_sql(
                 "SELECT resource, resolve, searchable FROM v_resource \
-                 WHERE resource IN ('oxplow/work_item', 'oxplow/decision', 'oxplow/comment', 'oxplow/file', 'oxplow/event') \
+                 WHERE resource IN ('oxplow/task', 'oxplow/decision', 'oxplow/comment', 'oxplow/file', 'oxplow/event') \
                  ORDER BY resource",
                 vec![],
                 None,
@@ -562,18 +574,9 @@ mod tests {
                     text("v_comment"),
                     text("v_search_comment")
                 ],
-                vec![
-                    text("oxplow/decision"),
-                    text("v_decision"),
-                    text("v_search_decision")
-                ],
                 vec![text("oxplow/event"), text("v_event"), SqlCell::Null(())],
                 vec![text("oxplow/file"), SqlCell::Null(()), SqlCell::Null(())],
-                vec![
-                    text("oxplow/work_item"),
-                    text("v_work_item"),
-                    text("v_search_work_item")
-                ],
+                vec![text("oxplow/task"), text("v_task"), text("v_search_task")],
             ]
         );
     }
@@ -583,14 +586,14 @@ mod tests {
     // `v_resource`.
     #[tokio::test]
     async fn every_resource_is_an_extensions_and_is_listed() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         crate::test_fixtures::activate_with_problems(&f.svc).await;
         let rows = f
             .svc
             .sql
             .query_sql(
                 "SELECT resource, extension, resolve, title, searchable, json_extract(params, '$.id.required') \
-                 FROM v_resource WHERE resource IN ('oxplow/effort', 'oxplow/turn', 'oxplow/file') \
+                 FROM v_resource WHERE resource IN ('oxplow/request', 'oxplow/turn', 'oxplow/file') \
                  ORDER BY resource",
                 vec![],
                 None,
@@ -604,20 +607,20 @@ mod tests {
             rows,
             vec![
                 vec![
-                    text("oxplow/effort"),
-                    text("oxplow-foundation"),
-                    text("v_effort"),
-                    null.clone(),
-                    text("v_search_effort"),
-                    SqlCell::Int(1)
-                ],
-                vec![
                     text("oxplow/file"),
                     text("oxplow-foundation"),
                     null.clone(),
                     null.clone(),
                     null.clone(),
                     null.clone()
+                ],
+                vec![
+                    text("oxplow/request"),
+                    text("oxplow-foundation"),
+                    text("v_request"),
+                    text("prompt"),
+                    null.clone(),
+                    SqlCell::Int(1)
                 ],
                 vec![
                     text("oxplow/turn"),
@@ -630,10 +633,10 @@ mod tests {
             ]
         );
         let vocabulary = f.svc.vocabulary.current();
-        let effort =
-            oxplow_domain::uri::oxplow_uri::OxplowUri::parse("oxplow:oxplow/effort?id=eff1")
+        let request =
+            oxplow_domain::uri::oxplow_uri::OxplowUri::parse("oxplow:oxplow/request?id=req1")
                 .unwrap();
-        assert_eq!(vocabulary.resources.validate(&effort), Ok(()));
+        assert_eq!(vocabulary.resources.validate(&request), Ok(()));
     }
 
     const ACME: &str = "manifest: 2
@@ -669,7 +672,7 @@ resources:
 
     #[tokio::test]
     async fn a_declared_resource_links_while_its_extension_is_installed() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         let link = || {
@@ -694,7 +697,7 @@ resources:
     /// the second, and the refused extension reports it.
     #[tokio::test]
     async fn a_shared_wikilink_prefix_is_refused_to_the_second() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         write_ext(&root, "acme", ACME);
@@ -722,7 +725,7 @@ resources:
     /// `acme-pr`) doesn't take the declaring one's retention window away.
     #[tokio::test]
     async fn a_namesake_that_declares_nothing_keeps_the_others_window() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         write(
@@ -828,7 +831,7 @@ resources:
     /// at its name, so one namespace never has two owners.
     #[tokio::test]
     async fn a_name_that_would_share_a_namespace_is_refused_at_the_name() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         write(&root, ".oxplow/extensions/acme-pr/extension.yaml", MANIFEST);
@@ -891,7 +894,7 @@ resources:
     /// installed, back if the owner's declaration is refused.
     #[tokio::test]
     async fn a_subscription_to_another_extensions_type_resolves_when_its_owner_registers_it() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         write(&root, ".oxplow/extensions/beta/extension.yaml", SUBSCRIBER);
@@ -978,7 +981,7 @@ resources:
     #[tokio::test]
     async fn a_subscription_to_no_type_at_all_is_refused_at_load() {
         let d = tempfile::tempdir().unwrap();
-        for bad in ["work_item.nope", "beta.nope", "nope"] {
+        for bad in ["task.nope", "beta.nope", "nope"] {
             write(
                 d.path(),
                 ".oxplow/extensions/beta/extension.yaml",

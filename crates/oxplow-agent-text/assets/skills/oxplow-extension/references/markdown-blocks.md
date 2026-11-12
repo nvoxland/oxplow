@@ -1,11 +1,11 @@
 # Inline pages: `oxplow-page` blocks and `oxplow_show_page`
 
 An **inline page** is a page you write whole, as one-off YAML, to answer a
-question or to live in a wiki page. It has no file and no extension.
+question or to live in a knowledge page. It has no file and no extension.
 
 ## The block
 
-In markdown (a wiki page) write a fenced block:
+In markdown (a knowledge page) write a fenced block:
 
 ````markdown
 ```oxplow-page
@@ -16,7 +16,7 @@ view: { viz: table, from: t }
 ```
 ````
 
-The wiki renders the block as the page, live (a wiki page opened in the app,
+A knowledge page renders the block as the page, live (a knowledge page opened in the app,
 or `oxplow_run_page`'s text). In any other store it reads as the YAML. The
 same YAML works as the `spec` of `oxplow_show_page`.
 
@@ -38,7 +38,7 @@ person.
   page `temp/<id>` (`oxplow:oxplow/page?page=temp/<id>`). The same YAML is
   the same page. It survives a restart and is removed after seven days
   without being opened (then the tab says "This view is gone"). Its About this page
-  has a Definition, as any page's. The person can **save it to the wiki** (as an
+  has a Definition, as any page's. The person can **save it as a knowledge page** (as an
   `oxplow-page` block) or **as a page** in their extension (default
   `my-pages`), where it becomes a file.
 - To save it yourself as a page, write the YAML with

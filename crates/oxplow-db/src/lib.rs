@@ -4,6 +4,8 @@
 //! `rusqlite` connection pool. Migrations live in `migrations/` as
 //! plain SQL and are applied at startup via `refinery`.
 
+pub mod agent_job_store;
+pub mod agent_message_store;
 pub mod agent_nudge_store;
 pub mod agent_session_store;
 pub mod agent_stores;
@@ -18,6 +20,7 @@ pub mod changes;
 pub mod collector_store;
 pub mod command_audit_store;
 pub mod comment_store;
+pub mod commit_request_store;
 pub mod contribution_health_store;
 pub mod contribution_store;
 mod database;
@@ -25,8 +28,6 @@ pub mod datasets;
 pub mod diagnostic_store;
 pub mod effect_run_store;
 pub mod effect_state_store;
-pub mod effort_evidence_store;
-pub mod effort_store;
 pub mod event_content_store;
 pub mod event_log_store;
 pub mod event_retention;
@@ -41,14 +42,18 @@ mod fact_chain;
 pub mod fact_store;
 pub mod git_store;
 pub mod handoff_store;
+pub mod knowledge_page_store;
+pub mod knowledge_record;
+pub mod model_store;
 pub mod op_error_store;
 pub mod page_ref_projections;
 pub mod page_ref_store;
 pub mod panel_layout_store;
 pub mod proposal_store;
 pub mod provider_collector_store;
-pub mod reasoning_store;
 pub mod replaceable_store;
+pub mod request_analysis_store;
+pub mod request_links;
 pub mod resource_store;
 pub mod search_store;
 pub mod semantic_layer;
@@ -58,17 +63,13 @@ pub mod sql_tokens;
 pub mod stream_store;
 pub mod symbol_store;
 pub mod table_generations;
+pub mod task_refs;
 pub mod terminal_store;
-#[cfg(test)]
-pub(crate) mod test_tasks;
 pub mod thread_context_store;
 pub mod thread_store;
 pub mod token_usage_store;
 pub mod tool_call_store;
 pub mod ui_preference_store;
-pub mod wiki_page_store;
-pub mod wiki_page_thread_updates;
-pub mod work_item_refs;
 
 pub use agent_nudge_store::{
     AgentNudge, Audience, NewAgentNudge, OnceScope, SqliteAgentNudgeStore,
@@ -102,28 +103,21 @@ pub use database::{
     PublicationTransaction, TxError,
 };
 pub use diagnostic_store::{DiagnosticRow, SqliteDiagnosticStore};
-pub use effort_evidence_store::EffortObservation;
-pub use effort_evidence_store::SqliteEffortEvidenceStore;
-pub use effort_store::{
-    Effort, EffortAtSnapshot, EffortFile, EffortFileChange, EffortStore, FileRefVersion,
-    FileSource, OwnedFileRefVersion, SqliteEffortStore,
-};
 pub use event_log_store::{anchors_for_thread_tx, DeadLetter, EventCtx, SqliteEventLogStore};
 pub use fact_store::{
-    BatchApply, BatchRows, CubeReadRow, Dimension, EffortCaptureGroup, EffortMetricDelta, FactRow,
-    FactSliceKey, Measure, MetricCapture, MetricSpec, NewCubeRow, NewDimension, NewFact,
-    NewMeasure, NewMetricCapture, NewMetricSpec, SqliteFactStore, TestCaseResult, TestCaseStat,
+    BatchApply, BatchRows, CaptureGroup, CubeReadRow, Dimension, FactRow, FactSliceKey, Measure,
+    Members, MetricCapture, MetricDelta, MetricSpec, NewCubeRow, NewDimension, NewFact, NewMeasure,
+    NewMetricCapture, NewMetricSpec, SqliteFactStore, TestCaseResult, TestCaseStat,
 };
 pub use git_store::{GitBranchRow, GitCommitFileRow, GitCommitRow, GitTagRow, SqliteGitStore};
 pub use handoff_store::SqliteHandoffStore;
+pub use knowledge_page_store::{KnowledgePage, SqliteKnowledgePageStore};
+pub use page_ref_projections::{FileRefVersion, OwnedFileRefVersion};
 pub use page_ref_store::{PageRefEdge, PageRefStore, SourceSlice, SqlitePageRefStore};
 pub use panel_layout_store::{PanelPlacement, SqlitePanelLayoutStore};
 pub use proposal_store::{NewProposal, Proposal, ProposalDecision, SqliteProposalStore};
 pub use provider_collector_store::{CollectorState, SqliteProviderCollectorStore};
-pub use reasoning_store::{
-    insert_claim_tx, record_decision_tx, replace_claims_tx, replace_inferred_tx, ClaimProvenance,
-    NewClaim, NewDecision, SqliteReasoningStore,
-};
+pub use request_analysis_store::{AnalysisSpan, Observation, SqliteRequestAnalysisStore};
 pub use search_store::{sanitize_query, SearchHit, SqliteSearchStore};
 pub use semantic_layer::{
     DatasetFreshness, Reads, SemanticLayer, SqlCell, SqlParams, SqlQuery, SqlQueryResult,
@@ -139,5 +133,3 @@ pub use token_usage_store::{
 };
 pub use tool_call_store::{NewToolCall, SqliteToolCallStore};
 pub use ui_preference_store::{SqliteUiPreferenceStore, UiPreference};
-pub use wiki_page_store::{SqliteWikiPageStore, WikiPage};
-pub use wiki_page_thread_updates::{SqliteWikiPageThreadUpdateStore, WikiPageThreadUpdate};

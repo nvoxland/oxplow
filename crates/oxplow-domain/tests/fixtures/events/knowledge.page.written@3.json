@@ -1,0 +1,6 @@
+{
+  "page": "oxplow:oxplow/knowledge?id=architecture&store=oxwiki",
+  "store": "oxwiki",
+  "outbound": ["oxplow:oxplow/file?path=src/lib.rs"],
+  "snapshot": 4
+}

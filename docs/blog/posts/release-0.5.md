@@ -10,6 +10,8 @@ categories:
 
 <!-- more -->
 
+> Efforts were removed on 2026-11-10. This post is kept as written; where it says "effort", read the requests and turns that replaced them.
+
 ## Pick your agent: Claude, Codex, or OpenCode
 
 Time to move beyond just Claude. Agents are configurable now, and you choose which one drives a thread:

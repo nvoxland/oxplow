@@ -10,6 +10,8 @@ categories:
 
 <!-- more -->
 
+> Efforts were removed on 2026-11-10. This post is kept as written; where it says "effort", read the requests and turns that replaced them.
+
 ## Local History is a page now
 
 The old SnapshotsPanel was a bottom-rail tool window with a flat list. It's gone, replaced by a Local History page that treats snapshots as first-class content:

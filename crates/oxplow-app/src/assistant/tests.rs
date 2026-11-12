@@ -83,7 +83,7 @@ impl Fx {
                 self.stream,
                 Some(self.thread),
                 Some(AssistantContext::Page {
-                    uri: "oxplow:oxplow/wiki?slug=home".into(),
+                    uri: "oxplow:oxplow/knowledge?id=home&store=oxwiki".into(),
                     label: Some("Home".into()),
                 }),
             )
@@ -514,7 +514,10 @@ async fn a_second_prompt_carries_the_first_exchange() {
     assert!(second.contains("My name is Nathan."), "{second}");
     assert!(second.contains("Hi Nathan."), "{second}");
     // The system prompt names the page it was opened on.
-    assert!(second.contains("oxplow:oxplow/wiki?slug=home"), "{second}");
+    assert!(
+        second.contains("oxplow:oxplow/knowledge?id=home&store=oxwiki"),
+        "{second}"
+    );
     // Each model call is recorded, as the Assistant's.
     let calls = fx
         .svc
@@ -626,7 +629,7 @@ async fn the_handoff_body_condenses_the_transcript() {
         other => panic!("{other:?}"),
     };
     for want in [
-        "oxplow:oxplow/wiki?slug=home",
+        "oxplow:oxplow/knowledge?id=home&store=oxwiki",
         "**Person:** What is the answer?",
         "**Assistant:** It is 42.",
         "`oxplow.probe.read`: done",

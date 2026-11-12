@@ -34,21 +34,21 @@ test("lineage splits what a dataset reads from what reads it", () => {
   const rows = result(
     ["view", "input", "kind"],
     [
-      ["v_claim", "v_test_run", "ref"],
-      ["v_claim", "claim", "source"],
-      ["v_effort_claim", "v_claim", "ref"],
-      ["v_claim_digest", "v_claim", "ref"],
+      ["v_turn_file", "v_test_run", "ref"],
+      ["v_turn_file", "turn_file", "source"],
+      ["v_turn_file_a", "v_turn_file", "ref"],
+      ["v_turn_file_summary", "v_turn_file", "ref"],
     ],
   );
   expect(LINEAGE_SQL).toContain("FROM v_dataset_lineage WHERE view = ?1 OR input = ?1");
-  expect(lineage("v_claim", rows)).toEqual({
+  expect(lineage("v_turn_file", rows)).toEqual({
     reads: [
-      { name: "claim", kind: "source" },
+      { name: "turn_file", kind: "source" },
       { name: "v_test_run", kind: "ref" },
     ],
-    readBy: ["v_claim_digest", "v_effort_claim"],
+    readBy: ["v_turn_file_a", "v_turn_file_summary"],
   });
-  expect(lineage("v_work_item", result(["view", "input", "kind"], []))).toEqual({ reads: [], readBy: [] });
+  expect(lineage("v_task", result(["view", "input", "kind"], []))).toEqual({ reads: [], readBy: [] });
 });
 
 
@@ -88,10 +88,10 @@ test("a metric template and a chart ride in the address as text and read back", 
 
 test("the view reads back from the tab's address, a chart viz only by name", () => {
   expect(readView({})).toEqual({ dataset: "", sql: "", viz: "table", chart: null, template: null });
-  const v = readView({ dataset: "v_effort", sql: "SELECT 1", viz: "bar", chart: JSON.stringify({ x: "a", y: "b" }) });
-  expect(v).toMatchObject({ dataset: "v_effort", sql: "SELECT 1", viz: "bar", chart: { x: "a", y: "b" } });
+  const v = readView({ dataset: "v_request", sql: "SELECT 1", viz: "bar", chart: JSON.stringify({ x: "a", y: "b" }) });
+  expect(v).toMatchObject({ dataset: "v_request", sql: "SELECT 1", viz: "bar", chart: { x: "a", y: "b" } });
   expect(readView({ viz: "pie" }).viz).toBe("table");
-  expect(sampleSql("v_work_item")).toBe("SELECT * FROM v_work_item LIMIT 50");
+  expect(sampleSql("v_task")).toBe("SELECT * FROM v_task LIMIT 50");
 });
 
 // What the host draws under the explorer (`showView`) is an inline page:

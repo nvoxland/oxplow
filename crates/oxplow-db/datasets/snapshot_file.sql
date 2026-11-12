@@ -1,4 +1,5 @@
 SELECT f.id, f.snapshot_id, f.stream_id, f.path, f.storage, f.size_bytes, f.content_hash, f.captured_at,
+       f.first_changed_at, f.last_changed_at,
        CAST(CASE
          WHEN f.storage = 'deleted' THEN
            CASE WHEN p.storage IS NULL OR p.storage = 'deleted' THEN NULL ELSE 'deleted' END

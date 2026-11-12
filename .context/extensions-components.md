@@ -4,6 +4,26 @@ Custom components (the sandboxed frame, protocol, testing a component) and the E
 
 ## What works today: Explore Data
 
+- **The Work board: oxplow-bundled's built component** (`pages/work.yaml`,
+  `custom_components: board`, source `extensions/oxplow-bundled/src/board/`,
+  built by bundled's `package.json` with `bun build`, no dependencies). The
+  worked example of a custom page that **reuses core where it fits and draws
+  the rest itself**. Core's: the nav bar (`setTitle`, `setActions`: New
+  Task…), the confirmation a delete asks for, the record and line of an
+  `invoke` that fails, the tab's `#` with Back and Forward, the page's
+  loaders as its data (the shared `task-rows` query), the kit's sheet
+  (`.ox-toolbar`, `.ox-select`, `.ox-input`, `.ox-board`, `.ox-card`, the
+  drag classes and `.ox-menu`) and the theme's tokens. Its own: the
+  toolbar, the columns, drag and drop, and a card's menu. **A custom page
+  owns its controls through `role: view` params** (`show`, `priority`,
+  `q`): they ride the tab's `#` like filters, the rail never draws them,
+  and the component sets them with `setViewParams` and hears Back through
+  `onViewParams`. With no `filter` param, `rail:`, sections or see-also, the
+  page draws no rail and the frame has the whole width. Its pure half
+  (`model.ts`) is tested from the desktop suite (`viz/boardModel.test.ts`),
+  the frame by a `ui:` fixture. What the library doesn't give it: icons (a
+  card has no state glyph; its column says the state) and the host's own
+  context menu (it draws `.ox-menu`).
 - **Timeline: oxplow-bundled's other built component** (`pages/timeline.yaml`,
   source `src/timeline/`, built with `vis-timeline` by bundled's
   `package.json`). The page is the worked example of a component that owns
@@ -60,7 +80,7 @@ Custom components (the sandboxed frame, protocol, testing a component) and the E
     `oxplow.page.show`. A `spec` is an inline page of the agent's own
     (read-only, no actions or forms). It opens beside the conversation
     as a page file on `oxplow:temp` (`oxplow:oxplow/page?page=temp/<id>`) and the call returns the page's
-    text. The person saves it with **Save to wiki** or **Save as Page**
+    text. The person saves it with **Save as knowledge page** or **Save as Page**
     (`oxplow.extension.write_page`). Nothing else is stored: there are no
     thread answers and no Keep This. See pages-and-tabs.md "Showing a
     page".
@@ -150,9 +170,9 @@ a project one's.
 custom_components:
   - id: burndown                       # [a-z0-9-]+
     title: Burndown
-    description: Open work items against the days left in a sprint.   # optional: one sentence (v_custom_component.description; none is made up)
+    description: Open tasks against the days left in a sprint.   # optional: one sentence (v_custom_component.description; none is made up)
     bundle: components/burndown        # default components/<id>; holds index.html
-    commands: [oxplow.work_item.transition]
+    commands: [oxplow.task.transition]
     sql: read                          # optional: its own read-only SQL (querySql); needs sql.read in permissions
 ```
 ```yaml
@@ -358,7 +378,9 @@ around it** (`component_harness.rs`, `PageAt::ui`):
 writes the page's view by the rail's rule (`pageViewChange`: a selection
 pushes a history step, a filter replaces), which a whole-page component
 hears through `onViewParams`. A page's rail stacked above its body (a
-narrow window) is capped and scrolls, so the body keeps the height.
+narrow window) is capped and scrolls, so the body keeps the height. A
+custom page whose controls are its own declares them `role: view`
+(the Work board): no rail is drawn, and the frame takes the width.
 
 **Whose view a component has** (protocol 9, `viz/hostedView.ts`
 `useHostedView`): its host's, where the host shares one, and only what
@@ -427,7 +449,8 @@ classic. `oxplow.connect()` waits for `init`, answers `ready`, and
 resolves with `{ data, params, run (the latest of each), page, props,
 tokens, protocol, onUpdate(fn({ run, data, params, changed })) →
 unsubscribe, invoke(command, input), navigate(uri, { newTab, replace }),
-querySql, openForm (a command's, or `{ title, schema, values }`),
+querySql, renderMarkdown(element, text, { inline? }), openForm (a
+command's, or `{ title, schema, values }`),
 signIn, cancelSignIn, setTitle, setActions, showView, onAction,
 viewParams, setViewParams, onViewParams, historyState, setHistoryState,
 onHistoryState, pageMemory, applyTheme(doc?) }` (the `.d.ts` beside it
@@ -435,11 +458,32 @@ is the reference; `viewParams` / `historyState` are null where the host
 gives no view). A failed request rejects with the host's `{ code,
 message }`. `init` carries `protocol` (`BRIDGE_PROTOCOL` in
 `componentBridge.ts`, `PROTOCOL` in the library — one number, bumped when
-a message's shape changes; now 12), and `connect` rejects a host that
+a message's shape changes; now 13), and `connect` rejects a host that
 speaks another. One app is one library version. `componentClient.test.ts`
 drives the served file against the real `createBridgeHost` and the real
 `init` (`initMessage`, which `CustomComponentViz` posts), so the two
-cannot drift. `oxplow extension new component <name>` scaffolds an
+cannot drift.
+
+**Markdown in a frame** (`renderMarkdown`, protocol 13). A component
+sends the text (`markdown { text, inline }`); the host answers the tree
+to draw (`markdownTree`, `components/Markdown/markdownTree.ts`): the
+viewer's parse (remark + GFM), its wikilinks and link rules
+(`markdownLinks.ts`, shared with `MarkdownView`) and a link's title by the
+viewer's rule (`refLinkTitle`), reduced to the elements a frame may draw
+— `INLINE_ELEMENTS` for a line, plus the blocks for a body. A link is a
+`ref` (the library draws a link that `navigate`s, Cmd/Ctrl-click a new
+tab, its click stopped there), a web page's `href` (drawn as its text with
+the URL on hover: a frame opens nothing off oxplow, which would be a way
+out for its data) or `broken` (why, on hover); raw HTML, images, tables
+and a `javascript:` URL never cross (`urlTransform`). No HTML crosses at
+all: the library builds each node with `createElement`, and any tag
+outside its own list leaves its text. The element gets the kit's `ox-md`
+(and `ox-md-inline`, whose children flow in the element whatever its own
+display). The app's host looks titles up in its caches (`liveTreeDeps`);
+the test harness's host runs the same tree with none (`NO_LOOKUPS`) —
+`markdownTree`, `markdownLinks` and `resourceStore` import no React, so
+the harness stays React-free (`harnessBuild.test.ts`). The Work board's
+cards draw their description this way. `oxplow extension new component <name>` scaffolds an
 extension — the component, a page that shows it and a bundle that uses
 the library — that checks and tests clean (`just_works.rs`). The
 reference is in `docs/guide/pages.md` "Custom components".
@@ -469,7 +513,9 @@ ends the component and its table shows.
 named in every bundle's CSP `style-src`) is a few `ox-` classes in
 oxplow's look — text, card, badge, buttons, forms (`ox-form`, `ox-field`,
 `ox-label`, `ox-input`/`ox-select`/`ox-textarea` with the accent focus
-ring, `ox-error`), drag and drop (`ox-drag`, `ox-dragging`,
+ring, `ox-error`), a nesting panel (`ox-nest`: a parent and its children,
+as a `depth` list draws them), a menu (`ox-menu`, `ox-menu-item`, `ox-menu-separator`,
+`ox-menu-heading`, `ox-danger`), drag and drop (`ox-drag`, `ox-dragging`,
 `ox-drop-target`, the Work board's dashed accent drop look), table,
 states, chart series. They read only the theme's tokens (`kitSheet.test.ts`:
 every `var(--x)` is one the app's root defines, and no literal color). A

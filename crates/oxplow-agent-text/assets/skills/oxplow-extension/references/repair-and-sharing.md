@@ -11,11 +11,11 @@ in `v_contribution_health` (`extension`, `contribution`, `kind`, `state` = `ok` 
 - **Three failures in a row disable it.** A disabled collector doesn't
   run, `oxplow.collector.sync` refuses naming the reason, and a page over its
   view carries the reason as a warning.
-- **A disable files a repair work item** (`repair_item`). Its body is the
+- **A disable files a repair task** (`repair_item`). Its body is the
   whole repair brief: what the extension is for, the declaration, the
   last errors, the failing fixture and the `check` report. A repeat
   failure comments on the open item. The item is linked `about` the
-  contribution's ref (`v_work_item_link`), which is how the open one is
+  contribution's ref (`v_task_link`), which is how the open one is
   found; its title is only for people. When the user asks you to repair an
   extension, read that item first.
 - **Fix it, then prove it.** Change the script or declaration, run

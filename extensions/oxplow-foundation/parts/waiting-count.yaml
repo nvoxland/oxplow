@@ -1,0 +1,10 @@
+title: Waiting on you (count)
+description: How many things wait on the person.
+loaders:
+  open_count:
+    page: oxplow/waiting-on-you
+    loader: open_count
+view:
+  from: open_count
+  viz: number
+badge: { loader: open_count, column: waiting }

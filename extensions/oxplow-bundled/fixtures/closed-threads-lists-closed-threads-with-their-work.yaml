@@ -1,0 +1,23 @@
+# Closed Threads lists only the stream's closed threads, each with a
+# Reopen action and the work it did, counted by stage as the list names
+# them, open stages first: the agent's thread worked two and closed.
+given:
+  - { command: oxplow.thread.create, input: { stream: str1, title: Old }, bind: old }
+  - { command: oxplow.thread.create, input: { stream: str1, title: Live } }
+  - { command: oxplow.task.create, input: { title: Finished, assignee: thr1 }, bind: finished }
+  - { command: oxplow.task.create, input: { title: Left, assignee: thr1 }, bind: left }
+  - observe:
+      turn:
+        prompt: Work both
+        during:
+          - { command: oxplow.task.transition, input: { uri: $finished.uri, to: in_progress }, as: agent }
+          - { command: oxplow.task.transition, input: { uri: $finished.uri, to: done }, as: agent }
+          - { command: oxplow.task.transition, input: { uri: $left.uri, to: in_progress }, as: agent }
+          - { command: oxplow.task.transition, input: { uri: $left.uri, to: todo }, as: agent }
+  - { command: oxplow.thread.close, input: { thread: $old.id } }
+  - { command: oxplow.thread.close, input: { thread: thr1 } }
+when: { page: closed-threads, params: { stream_id: 1 } }
+expect:
+  loaders:
+    closed_threads: { rows: [{ work: "1 Ready · 1 Done" }, { title: Old, work: "" }] }
+  nodes: [{ id: closed_threads, kind: viz, actions: [reopen] }]

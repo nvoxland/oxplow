@@ -21,11 +21,11 @@ pub struct SiteSearchInput {
     /// Free text. Tokens are matched as prefixes (stemmed); ranking is BM25.
     pub query: String,
     /// Scope file/stream-bound hits to one worktree (project-global hits like
-    /// wiki are always included). Omit to search every stream.
+    /// knowledge are always included). Omit to search every stream.
     #[serde(default)]
     pub stream_id: Option<String>,
     /// Restrict to these resources: any `v_resource` lists as `searchable`
-    /// (`oxplow/work_item`, `oxplow/wiki`, `oxplow/thread_note`, an
+    /// (`oxplow/task`, `oxplow/knowledge`, `oxplow/thread_note`, an
     /// extension's), or `oxplow/file`.
     #[serde(default)]
     pub resources: Option<Vec<String>>,
@@ -70,7 +70,7 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_fixtures::services_with_effort;
+    use crate::test_fixtures::services_with_thread;
     use oxplow_domain::{Actor, CommandError};
     use serde_json::json;
 
@@ -79,7 +79,7 @@ mod tests {
     /// its field.
     #[tokio::test]
     async fn search_finds_a_task_through_the_bus() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         fx.svc
             .search_store
             .upsert("task", "tsk1", None, "Reconcile quokka ledger", "")

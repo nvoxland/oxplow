@@ -47,8 +47,7 @@ sinks.
 
 **Panel headers.** `--panel-header-bg` (`rgba(108,156,246,0.12)`, a muted
 accent wash — *not* grey) tints the header band of every panel so titles
-read as intentional headers in dark mode: rail section headers
-(`RailSection`), Navigator stream-header rows, the page tab bar
+read as intentional headers in dark mode: Navigator stream-header rows, the page tab bar
 (`CenterTabs`), and the common page chrome (`PageNavBar`). It's
 translucent, so when a surface needs the same look over a non-card base
 (tab bar, page nav) layer it over `--surface-card`:
@@ -56,7 +55,13 @@ translucent, so when a surface needs the same look over a non-card base
 That layered value is `--surface-chrome`, and it is what everything that
 comes out of the chrome wears: a tab's dialog (`TabModal`) and every menu
 (`MenuList`: the ☰, right-click menus, the menubar), with a
-`--border-strong` edge.
+`--border-strong` edge. A rail panel (`RailSection`) sits *on* that
+chrome, so its header can't wear the same wash (it would be the rail's own
+color): it wears `--rail-panel-header-bg` (the same blue at 22%) over the
+card, bluer than the rail and lighter than the card body below. The whole
+panel is a `--surface-card` card with a `--border-strong` edge and a
+`--text-primary` title. A header toggle's picked option is boxed in
+`--accent` over `--rail-panel-choice-bg` (the blue at 18%), not filled solid.
 
 ### Borders
 
@@ -116,9 +121,7 @@ hardcoded **coverage 50/80 ramp is retired** (tsk220): the thresholds now live o
 the `oxplow.coverage.diff_pct` definition (`target: 80`, `fail_at: 50`, set in
 `collection.rs::record_coverage_metric`). To re-tune a metric's coloring, change
 its `target`/`warn_at`/`fail_at` (config or producer) — never a UI constant. (The
-legacy `EffortObservations` coverage bar still restates `80`/`50` as named
-constants documented to mirror the def; it's removed with `effort_observation` in
-tsk215.)
+coverage bar must read the def, not restate `80`/`50` as constants.)
 
 ### Comments
 
@@ -200,7 +203,7 @@ the tokens, never inline a font stack.
 | Variable        | Used for                                                          |
 |-----------------|-------------------------------------------------------------------|
 | `--font-ui`     | UI chrome — buttons, menus, labels, tabs, panel headers, sidebars |
-| `--font-prose`  | Long-form body content — `.oxplow-md` (wiki bodies, task descriptions, effort summaries, anywhere `MarkdownView` renders) |
+| `--font-prose`  | Long-form body content — `.oxplow-md` (knowledge page bodies, task descriptions, anywhere `MarkdownView` renders) |
 | `--font-mono`   | Code-shaped surfaces — Monaco, xterm, code blocks, blame columns, file-path chips, tabular IDs, stacktraces |
 
 The prose-vs-UI-vs-mono split mirrors Wikipedia / Metabase: sans for

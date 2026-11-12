@@ -87,6 +87,9 @@ impl ConfigWatcher {
                             Err(e) => warn!(error = %e, "failed to reload project.yaml"),
                         }
                     }
+                    if says.global_metrics {
+                        services.global_metrics_changed();
+                    }
                 }
             });
         };
@@ -103,15 +106,25 @@ impl ConfigWatcher {
 struct Says {
     /// Restate the listing rows that follow an extension source.
     sources: bool,
-    /// Read the config again.
+    /// Read the config again (it announces only what changed).
     config: bool,
+    /// A global metric changed: announce it, as the metrics runner reads
+    /// the global scope again on `ConfigChanged`.
+    global_metrics: bool,
 }
 
-/// Changes it lost could be any of them, so a rescan asks for both.
+/// Changes it lost could be any of them, so a rescan asks for all of them
+/// (the global metrics only when it covers their folder).
 fn what_changed(batch: &Batch, sources_dir: &Path, global_metrics: Option<&Path>) -> Says {
     let mut says = Says {
         sources: !batch.rescans.is_empty(),
         config: !batch.rescans.is_empty(),
+        global_metrics: global_metrics.is_some_and(|dir| {
+            batch
+                .rescans
+                .iter()
+                .any(|r| r.starts_with(dir) || dir.starts_with(r))
+        }),
     };
     for (path, _) in &batch.paths {
         if path.starts_with(sources_dir) {
@@ -121,9 +134,8 @@ fn what_changed(batch: &Batch, sources_dir: &Path, global_metrics: Option<&Path>
         let is_config = path
             .file_name()
             .is_some_and(|n| n == OXPLOW_CONFIG_FILE || n == PERSONAL_CONFIG_FILE);
-        // A `.yaml`/`.yml` change under the global metrics dir also triggers a
-        // reload — the runner re-reads the global scope on the resulting
-        // `ConfigChanged`.
+        // A `.yaml`/`.yml` change under the global metrics dir is announced:
+        // the runner re-reads the global scope on `ConfigChanged`.
         let is_global_metric = global_metrics.is_some_and(|dir| {
             path.starts_with(dir)
                 && matches!(
@@ -131,7 +143,8 @@ fn what_changed(batch: &Batch, sources_dir: &Path, global_metrics: Option<&Path>
                     Some("yaml") | Some("yml")
                 )
         });
-        says.config |= is_config || is_global_metric;
+        says.config |= is_config;
+        says.global_metrics |= is_global_metric;
     }
     says
 }
@@ -161,8 +174,11 @@ mod tests {
     fn a_batch_asks_for_what_its_paths_touch() {
         assert_eq!(says(&["/p/.oxplow/local.sqlite"], &[]), Says::default());
         assert!(says(&["/p/.oxplow/project.yaml"], &[]).config);
-        assert!(says(&["/g/metrics/a.yaml"], &[]).config);
-        assert!(!says(&["/g/metrics/a.txt"], &[]).config);
+        // A global metric isn't project.yaml: reloading it would read the
+        // same config and announce nothing, so it is its own ask.
+        let metric = says(&["/g/metrics/a.yaml"], &[]);
+        assert!(metric.global_metrics && !metric.config);
+        assert!(!says(&["/g/metrics/a.txt"], &[]).global_metrics);
         let sources = says(&["/p/.oxplow/extensions/x/page.yaml"], &[]);
         assert!(sources.sources && !sources.config);
     }
@@ -171,6 +187,8 @@ mod tests {
     #[test]
     fn lost_changes_ask_for_everything() {
         let lost = says(&[], &["/p/.oxplow"]);
-        assert!(lost.sources && lost.config);
+        assert!(lost.sources && lost.config && !lost.global_metrics);
+        assert!(says(&[], &["/g/metrics"]).global_metrics);
+        assert!(says(&[], &["/g"]).global_metrics);
     }
 }

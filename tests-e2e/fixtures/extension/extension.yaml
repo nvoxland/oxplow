@@ -2,21 +2,29 @@ manifest: 2
 name: e2e
 intent:
   purpose: >-
-    The browser suite's extension: a fake work-item tracker, an effect, its
+    The browser suite's extension: a fake task tracker, an effect, its
     pages, and a resource, so specs drive each through the UI.
   origin: null
   examples: []
 # Its providers run programs, its effect reads with its own SQL and
-# comments on (or deletes) work items.
-permissions: [process.run, sql.read, commands:oxplow.work_item.comment, commands:oxplow.work_item.delete]
+# comments on (or deletes) tasks.
+permissions: [process.run, sql.read, commands:oxplow.task.comment, commands:oxplow.task.delete]
 # `bin/provider` and `bin/scripted` are written when a suite daemon starts:
 # they run the oxplow-provider-fake binary this checkout built, the second in
 # harness mode.
 providers:
   - id: fake
-    capability: work_items
+    capability: task_tracker
     entry: bin/provider
     declarations: provider.json
+    # Its own workflow, one stage in each of core's buckets.
+    stages:
+      - { id: icebox, title: Icebox, bucket: backlog }
+      - { id: ready, title: Ready, bucket: todo }
+      - { id: doing, title: Doing, bucket: in_progress }
+      - { id: stuck, title: Stuck, bucket: blocked }
+      - { id: shipped, title: Shipped, bucket: done }
+      - { id: dropped, title: Dropped, bucket: canceled }
   # The agent every session runs: the fake harness (a scripted terminal
   # agent) behind the provider protocol, so no spec starts a real agent CLI.
   - id: scripted
@@ -28,7 +36,7 @@ effects:
     summary: >-
       Comments on each created oxplow task; one titled "[fail]" fails, one
       titled "[delete]" asks to delete it.
-    on: [work_item.created]
+    on: [task.created]
     entry: effects/note.star
     needs: [sql.read]
 # A command that always refuses, a page that runs it and a component that

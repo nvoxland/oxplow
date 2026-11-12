@@ -2,8 +2,8 @@
 when:
   form: edit-item
   node: edit_item
-  params: { uri: "oxplow:oxplow/work_item?id=1&provider=oxplow" }
+  params: { uri: "oxplow:oxplow/task?id=1&provider=oxtask" }
 expect:
-  values: { uri: "oxplow:oxplow/work_item?id=1&provider=oxplow" }
+  values: { uri: "oxplow:oxplow/task?id=1&provider=oxtask" }
   fixed: [uri]
   fields: [title, body]

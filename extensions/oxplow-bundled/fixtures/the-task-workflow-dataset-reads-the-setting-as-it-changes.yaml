@@ -1,0 +1,10 @@
+# v_oxplow_task_workflow is the project's task workflow and definition of
+# done: the defaults until a project sets them, then what it set (a
+# settings write republishes the dataset).
+when: { sql: "SELECT workflow, definition_of_done FROM v_oxplow_task_workflow" }
+expect: { rows: [{ workflow: agent_tracks, definition_of_done: "" }] }
+steps:
+  - given:
+      - { command: oxplow.tasks.set_workflow, input: { workflow: person_files, definition_of_done: Tests pass. } }
+  - when: { sql: "SELECT workflow, definition_of_done FROM v_oxplow_task_workflow" }
+    expect: { rows: [{ workflow: person_files, definition_of_done: Tests pass. }] }

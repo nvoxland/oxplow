@@ -104,7 +104,7 @@ pub struct ProviderKindInfo {
 #[derive(Debug, Clone, Copy)]
 pub struct CallSite<'a> {
     /// What asked (`oxplow:oxplow/thread?id=<id>` for an agent's MCP call,
-    /// `oxplow:oxplow/collector?collector=<owner>/<id>`, `inferred-decisions`, …).
+    /// `oxplow:oxplow/collector?collector=<owner>/<id>`, …).
     pub caller: &'a str,
     /// For a recorded computation (`ai_compute`), the hash of its input.
     pub input_hash: Option<&'a str>,
@@ -1572,7 +1572,7 @@ pub(crate) fn test_providers() -> ModelProviders {
     // The shipped providers, each a kind oxplow-foundation declares.
     let providers = ModelProviders::default();
     let bundled = crate::test_fixtures::shipped_extensions();
-    let built = crate::capabilities::declared_by(&bundled)
+    let built = crate::capabilities::declared_by(&bundled, &Default::default())
         .iter()
         .filter(|i| i.capability == "ai_provider")
         .filter_map(built_in)
@@ -2104,7 +2104,7 @@ mod tests {
     #[test]
     fn every_shipped_ai_provider_is_a_rust_kind() {
         let bundled = crate::test_fixtures::shipped_extensions();
-        let providers: Vec<_> = crate::capabilities::declared_by(&bundled)
+        let providers: Vec<_> = crate::capabilities::declared_by(&bundled, &Default::default())
             .into_iter()
             .filter(|i| i.capability == "ai_provider")
             .collect();

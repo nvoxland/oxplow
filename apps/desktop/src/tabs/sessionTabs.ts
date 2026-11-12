@@ -7,6 +7,7 @@ import { typeOf } from "../uri/uri.js";
  */
 import type { HarnessListing } from "../tauri-bridge/generated/bindings.js";
 import { agentSessionRef, newSessionRef } from "./pageRefs.js";
+import { refsOf, type Session } from "./session.js";
 import type { TabRef } from "./tabState.js";
 
 /** `tabs` with `openSessions`' tabs leading (and only theirs). The session
@@ -34,4 +35,17 @@ export function newThreadTabs(
   if (setting === "ask") return ask;
   const harness = harnesses.find((h) => h.id === setting && h.enabled);
   return harness ? { tabs: [], start: { harness: harness.id } } : ask;
+}
+
+/** Whether a thread's stored tabs (`tabs/useTabSessions.ts`) are left from a
+ *  thread that is gone. The browser keeps them across a reset of the project,
+ *  and a new thread can get an old one's id; tabs of agent sessions, none of
+ *  which the thread has open now, then name sessions that can't load. An entry
+ *  with no agent-session tab is not judged (a thread whose sessions were all
+ *  closed keeps its page tabs). Asked once, when the window first sees the
+ *  thread's open sessions: later, a closed session's tab is `reconcileSessionTabs`'s. */
+export function storedSessionIsStale(stored: Session, openSessions: ReadonlyArray<{ id: string }>): boolean {
+  const named = refsOf(stored).filter((t) => typeOf(t.id) === "oxplow/agent_session");
+  if (named.length === 0) return false;
+  return !named.some((t) => openSessions.some((s) => agentSessionRef(s.id).id === t.id));
 }

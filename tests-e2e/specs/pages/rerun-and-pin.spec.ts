@@ -13,7 +13,7 @@ test("a page re-runs when its dataset changes, and pins to a new dashboard", asy
       "category: Data",
       "loaders:",
       "  numbats:",
-      "    sql: SELECT title FROM v_work_item WHERE title LIKE 'Numbat%' ORDER BY created_at",
+      "    sql: SELECT title FROM v_task WHERE title LIKE 'Numbat%' ORDER BY created_at",
       "view: { from: numbats, viz: table, empty: No numbats yet. }",
       "",
     ].join("\n"),
@@ -22,8 +22,8 @@ test("a page re-runs when its dataset changes, and pins to a new dashboard", asy
   await open(page, daemon, "oxplow:oxplow/page?page=mine/numbat-tasks");
   const body = shown(page).getByTestId("page-file");
   await expect(body).toContainText("No numbats yet.");
-  // A write elsewhere changes `v_work_item`: the open page runs again by itself.
-  await run(daemon, "oxplow.work_item.create", { title: "Numbat one", thread: daemon.thread });
+  // A write elsewhere changes `v_task`: the open page runs again by itself.
+  await run(daemon, "oxplow.task.create", { title: "Numbat one", assignee: daemon.thread });
   await expect(body).toContainText("Numbat one");
   await page.getByTestId("page-nav-menu").filter({ visible: true }).click();
   await page.getByTestId("menu-item-page-pin").click();

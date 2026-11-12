@@ -17,4 +17,4 @@ steps:
         tree:
           rows:
             contains:
-              - { name: directory.yaml, parent: "oxplow-foundation/pages", target: "oxplow:oxplow/file?filesystem=oxplow:extensions&path=oxplow-foundation/pages/directory.yaml" }
+              - { name: directory.yaml, path: "oxplow-foundation/pages/directory.yaml", target: "oxplow:oxplow/file?filesystem=oxplow:extensions&path=oxplow-foundation/pages/directory.yaml" }

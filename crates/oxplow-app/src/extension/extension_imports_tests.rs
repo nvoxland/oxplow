@@ -124,7 +124,7 @@ impl<'a> Ext<'a> {
     }
 }
 
-/// Every extension has `items` (`v_<name>_items`: over the work items, or
+/// Every extension has `items` (`v_<name>_items`: over the tasks, or
 /// over its import), an always-available `plain` dataset and, when it imports,
 /// a `seen` page reading the import.
 fn put(root: &Path, e: &Ext) {
@@ -136,7 +136,7 @@ fn put_in(dir: &Path, e: &Ext) {
     let version = e.dataset_version;
     let mut manifest = format!("manifest: 2\nname: {name}\n");
     manifest += &format!(
-        "intent:\n  purpose: p\ndatasets:\n  - name: items\n    version: {version}\n    description: Items.\n    fields:\n      - {{ name: uri, type: TEXT, doc: Work item ref. }}\n  - name: plain\n    version: 1\n    description: Plain.\n    fields:\n      - {{ name: uri, type: TEXT, doc: Work item ref. }}\n"
+        "intent:\n  purpose: p\ndatasets:\n  - name: items\n    version: {version}\n    description: Items.\n    fields:\n      - {{ name: uri, type: TEXT, doc: Task ref. }}\n  - name: plain\n    version: 1\n    description: Plain.\n    fields:\n      - {{ name: uri, type: TEXT, doc: Task ref. }}\n"
     );
     let mut exports = String::new();
     if let Some((visibility, version)) = e.export {
@@ -174,7 +174,7 @@ fn put_in(dir: &Path, e: &Ext) {
         }
     }
     let mut imports = String::new();
-    let mut sql = "SELECT uri FROM ref('work_item')";
+    let mut sql = "SELECT uri FROM ref('task')";
     if let Some((target, version, optional)) = e.import {
         let version = version
             .map(|v| format!(", version: {v}"))
@@ -226,11 +226,7 @@ fn put_in(dir: &Path, e: &Ext) {
     write(dir, "extension.yaml", &manifest);
     write(dir, "handlers/get.star", HANDLER);
     write(dir, "datasets/items.sql", sql);
-    write(
-        dir,
-        "datasets/plain.sql",
-        "SELECT uri FROM ref('work_item')",
-    );
+    write(dir, "datasets/plain.sql", "SELECT uri FROM ref('task')");
 }
 
 const HANDLER: &str = "def transform(x):\n    return {\"commands\": [], \"result\": {}}\n";

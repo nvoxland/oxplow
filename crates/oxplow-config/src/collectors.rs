@@ -69,7 +69,7 @@ pub struct EntityColumn {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EntityRelation {
-    /// The view it joins to, e.g. `v_work_item` or `v_github_review`.
+    /// The view it joins to, e.g. `v_task` or `v_github_review`.
     pub to: String,
     /// The SQL join condition, e.g. `v_github_pr.head_branch = v_stream.branch`.
     pub on: String,
@@ -125,7 +125,7 @@ pub enum Trigger {
 ///   agent event) for that long.
 ///
 /// An event type in `force` runs at once, past them all: a moment that
-/// needs the result fresh (an effort finishing, a commit).
+/// needs the result fresh (a commit).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Pacing {
@@ -288,7 +288,7 @@ pub enum CollectorRuntime {
     /// A sandboxed jq program: no I/O, so no approval.
     Jaq,
     /// A provider instance's collector (`oxplow.provider.sync`): its records
-    /// land in the capability's dataset (`v_work_item`).
+    /// land in the capability's dataset (`v_task`).
     Read,
 }
 
@@ -412,7 +412,7 @@ pub struct CollectorSpec {
     pub after: Vec<String>,
     /// A script's input query: read-only SQL over the semantic layer,
     /// handed over as `input.rows`. `:stream_id`, `:snapshot_id`,
-    /// `:effort_id`, `:thread_id` and `:turn_id` bind the triggering
+    /// `:thread_id` and `:turn_id` bind the triggering
     /// event's anchors, `:event_id` its id and `:event_seq` its seq (NULL
     /// otherwise).
     pub input: Option<CollectorInput>,
@@ -1167,7 +1167,7 @@ fn validate(
             {
                 return Err(ctx(
                     "a `read` collector takes only `provider` and `on`: its records land in \
-                     the provider's capability (`v_work_item`)"
+                     the provider's capability (`v_task`)"
                         .into(),
                 ));
             }
@@ -1563,7 +1563,7 @@ mod tests {
     use super::*;
 
     fn knows(t: &str) -> bool {
-        matches!(t, "snapshot.taken" | "effort.finished" | "vcs.head.moved")
+        matches!(t, "snapshot.taken" | "vcs.head.moved")
     }
 
     fn parse(yaml: &str) -> (Vec<CollectorSpec>, Vec<String>) {
@@ -1590,7 +1590,7 @@ mod tests {
         merged_at: time
         draft: bool
       relations:
-        - { to: v_work_item, on: "v_my_gh_pr.title LIKE '%' || substr(v_work_item.ref, 18) || '%'" }
+        - { to: v_task, on: "v_my_gh_pr.title LIKE '%' || substr(v_task.ref, 18) || '%'" }
 "#;
 
     #[test]
@@ -1628,7 +1628,7 @@ mod tests {
             ]
         );
         assert_eq!(e.columns[1].doc, "PR title");
-        assert_eq!(e.relations[0].to, "v_work_item");
+        assert_eq!(e.relations[0].to, "v_task");
     }
 
     /// Every shape of `on` parses, with `where` and the pacing keys beside
@@ -1654,22 +1654,22 @@ mod tests {
         // Pacing — settle, at most, idle, and the events that run
         // at once past them.
         assert_eq!(
-            with("on: [snapshot.taken, effort.finished]\n  settle: 30s\n  at_most: 5m\n  idle: 2m\n  force: [effort.finished]")
+            with("on: [snapshot.taken, vcs.head.moved]\n  settle: 30s\n  at_most: 5m\n  idle: 2m\n  force: [vcs.head.moved]")
                 .0[0]
                 .trigger,
             Trigger::On {
-                events: vec!["snapshot.taken".into(), "effort.finished".into()],
+                events: vec!["snapshot.taken".into(), "vcs.head.moved".into()],
                 filter: Default::default(),
                 pacing: Pacing {
                     settle_secs: Some(30),
                     at_most_secs: Some(300),
                     idle_secs: Some(120),
-                    force: vec!["effort.finished".into()],
+                    force: vec!["vcs.head.moved".into()],
                 },
             }
         );
         assert_eq!(
-            with("on: effort.finished\n  after: [change.analyze]").0[0].after,
+            with("on: vcs.head.moved\n  after: [change.analyze]").0[0].after,
             vec!["change.analyze"]
         );
         for (t, needle) in [
@@ -1688,8 +1688,8 @@ mod tests {
                 "`force` needs",
             ),
             (
-                "on: [snapshot.taken]\n  settle: 30s\n  force: [effort.finished]",
-                "`force` names `effort.finished`, which isn't in `on`",
+                "on: [snapshot.taken]\n  settle: 30s\n  force: [vcs.head.moved]",
+                "`force` names `vcs.head.moved`, which isn't in `on`",
             ),
             ("on: [nope.happened]", "isn't a registered event type"),
             (
@@ -1754,7 +1754,7 @@ mod tests {
 - id: hot
   runtime: starlark
   entry: collectors/hot.star
-  input: "SELECT uri, title FROM v_work_item WHERE json_extract(native, '$.priority') = 'high'"
+  input: "SELECT uri, title FROM v_task WHERE json_extract(native, '$.priority') = 'high'"
   sync: upsert
   entities:
     - name: hot_task
@@ -1805,15 +1805,15 @@ mod tests {
         assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(out[0].input.as_ref().and_then(|i| i.limit), None);
         let bounded = DERIVED.replace(
-            r#"input: "SELECT uri, title FROM v_work_item WHERE json_extract(native, '$.priority') = 'high'""#,
-            "input: { sql: \"SELECT uri, title FROM v_work_item\", limit: 50 }",
+            r#"input: "SELECT uri, title FROM v_task WHERE json_extract(native, '$.priority') = 'high'""#,
+            "input: { sql: \"SELECT uri, title FROM v_task\", limit: 50 }",
         );
         let (out, errors) = parse(&bounded);
         assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(
             out[0].input,
             Some(CollectorInput {
-                sql: "SELECT uri, title FROM v_work_item".into(),
+                sql: "SELECT uri, title FROM v_task".into(),
                 limit: Some(50),
             })
         );
@@ -1838,7 +1838,7 @@ mod tests {
         assert!(s.runtime.is_derived());
         assert_eq!(
             s.input.as_ref().map(|i| i.sql.as_str()),
-            Some("SELECT uri, title FROM v_work_item WHERE json_extract(native, '$.priority') = 'high'")
+            Some("SELECT uri, title FROM v_task WHERE json_extract(native, '$.priority') = 'high'")
         );
         assert_eq!(parse(GOOD).0[0].sync, CollectorSync::Replace);
         for (from, to, needle) in [
@@ -1849,11 +1849,7 @@ mod tests {
                 "sync: upsert\n  credentials: [TOKEN]",
                 "can't take",
             ),
-            (
-                "FROM v_work_item",
-                "FROM v_my_gh_hot_task",
-                "feed on itself",
-            ),
+            ("FROM v_task", "FROM v_my_gh_hot_task", "feed on itself"),
         ] {
             let (s, e) = parse(&DERIVED.replace(from, to));
             assert!(s.is_empty(), "{to}: should be rejected");

@@ -169,7 +169,7 @@ pub(super) async fn start_effects(host: &Host, ext: &Extension) -> Result<(), St
 /// `commands` or `pages` delivers the `contribution.job.completed` the job
 /// logs to the extension's effects, running there too: the
 /// effects that reacted (`[{ id, state? }]`), the commands they ran
-/// (`[names]`) and which of the named wiki pages (`[uri]`) now exist.
+/// (`[names]`) and which of the named knowledge pages (`[uri]`) now exist.
 pub(super) async fn job_example(
     host: &Host,
     ext: &Extension,
@@ -521,7 +521,7 @@ pub(super) async fn command_run(
 
 /// Run advisory `id` for a thread (`when: { advisory, thread? }`, the
 /// primary thread when none) as the app does on its `on:` — over that
-/// thread's open effort — and check what the agent is told, line by line:
+/// thread — and check what the agent is told, line by line:
 /// `expect: { lines: [..] }` (none: `[]`).
 pub(super) async fn advisory_example(
     host: &Host,
@@ -586,6 +586,110 @@ pub(super) async fn advisory_example(
                 format!("advisory `{id}` said {at} at `{path}`, the example expects {want}"),
             )
             .fix("its query, or the example's `given` and `expect` (`{ lines: [..] }`)")
+            .mismatch(path, want, at),
+        );
+    }
+}
+
+/// Run agent context `id` for a thread (`when: { context, thread? }`, the
+/// primary thread when none) as the app does on a prompt, and check what
+/// the agent would be told, uncut: `expect: { text: <string> | null }`
+/// (`null`: nothing to say). A text over the per-context budget is a
+/// warning: the agent gets it cut.
+pub(super) async fn context_example(
+    host: &Host,
+    ext: &Extension,
+    ex: &Example<'_>,
+    id: &str,
+    report: &mut TestReport,
+) {
+    let shown = ex.shown;
+    if !ext.contexts.iter().any(|c| c.id == id) {
+        return report.errors.push(
+            error(
+                shown,
+                None,
+                "fixture.unknown",
+                format!("`{id}` isn't one of the extension's agent contexts"),
+            )
+            .fix("the example's `when.context`"),
+        );
+    }
+    let thread = match ex.when.get("thread").and_then(Value::as_str) {
+        None => oxplow_domain::ThreadId::new(1),
+        Some(t) => match oxplow_domain::ThreadId::try_from_str(t) {
+            Some(thread) => thread,
+            None => {
+                return report.errors.push(
+                    error(
+                        shown,
+                        None,
+                        "fixture.unknown",
+                        format!("`when.thread: {t}` isn't a thread"),
+                    )
+                    .fix("`thr1`"),
+                )
+            }
+        },
+    };
+    if let Err(e) = host.svc.streams.ensure_primary().await {
+        return report.errors.push(error(
+            shown,
+            None,
+            "example.thread_failed",
+            format!("its thread: {e}"),
+        ));
+    }
+    host.current().await;
+    let from = format!("{}/{id}", ext.namespace);
+    use oxplow_app::agent_context::Reading;
+    let reading = match oxplow_app::agent_context::extension_contexts(&host.svc, &thread).await {
+        Ok(contexts) => contexts
+            .into_iter()
+            .find(|c| c.from == from)
+            .map_or(Reading::Silent, |c| c.reading),
+        Err(why) => Reading::Failed(why),
+    };
+    let text = match reading {
+        Reading::Says(text) => Some(text),
+        Reading::Silent => None,
+        // A failure is the fixture's error, never "nothing to say".
+        Reading::Failed(why) => {
+            return report.errors.push(error(
+                shown,
+                None,
+                "context.failed",
+                format!("context `{id}` couldn't be read: {why}"),
+            ));
+        }
+    };
+    if let Some(t) = &text {
+        let over = t.chars().count();
+        if over > oxplow_app::agent_context::CONTEXT_BUDGET {
+            report.warnings.push(
+                warning(
+                    shown,
+                    None,
+                    "context.over_budget",
+                    format!(
+                        "context `{id}` says {over} characters: the agent gets the first {}",
+                        oxplow_app::agent_context::CONTEXT_BUDGET
+                    ),
+                )
+                .fix("say less: the facts the agent needs now"),
+            );
+        }
+    }
+    let got = json!({ "text": text });
+    if let Some((path, want, at)) = compare(&ex.expect, &got) {
+        report.errors.push(
+            error(
+                shown,
+                None,
+                "fixture.compare",
+                format!("context `{id}` said {at} at `{path}`, the example expects {want}"),
+            )
+            .fix("its query, or the example's `given` and `expect` (`{ text: <string> | null }`)")
             .mismatch(path, want, at),
         );
     }
@@ -806,63 +910,6 @@ pub(super) fn example_event(
             );
             None
         }
-    }
-}
-
-/// Dry-run the extension's effort policy script `id` on the fixture's
-/// event (`when: { implementation, event: { type, payload, subject?,
-/// anchors? }, answers? }`, the answers standing in for its scope calls'):
-/// what it composes, checked against the throwaway's registry, against
-/// `expect` as an effect's is. A policy emits nothing. Nothing runs.
-pub(super) async fn policy_example(
-    host: &Host,
-    ext: &Extension,
-    ex: &Example<'_>,
-    id: &str,
-    report: &mut TestReport,
-) {
-    use oxplow_app::effects::{run_over, Reaction};
-    let (shown, example) = (ex.shown, ex.name);
-    let Some((decl, script)) = ext
-        .implementations
-        .iter()
-        .filter(|d| d.id == id && d.capability == EFFORT_POLICY)
-        .find_map(|d| d.script.as_deref().map(|s| (d, s)))
-    else {
-        report.errors.push(error(shown, None, "fixture.unknown", format!("example `{example}` names effort policy `{id}`, which `{}` doesn't declare as a script", ext.name)).fix(format!("an `implementations:` entry with `capability: effort_policy`, `id: {id}` and a `.star` entry")));
-        return;
-    };
-    let Some(event) = example_event(host, ex, report) else {
-        return;
-    };
-    let event = event.to_json();
-    let Some(answers) = answers(ex, &format!("effort policy `{id}`"), report) else {
-        return;
-    };
-    let run = oxplow_app::run_context::for_dry_run();
-    let decided = run_over(
-        &host.svc.sql,
-        &run,
-        &decl.needs,
-        script,
-        event,
-        Some(&answers),
-        &oxplow_app::services::Sources::default(),
-    )
-    .await
-    .and_then(|reaction| match &reaction {
-        Reaction::Run { events, .. } if !events.is_empty() => {
-            Err("it appends events, and a policy emits nothing".to_string())
-        }
-        Reaction::Run { calls, .. } => oxplow_app::extension::extension_commands::check_calls(
-            host.svc.commands.as_ref(),
-            calls,
-        )
-        .map(|()| reaction),
-        Reaction::Skip(_) => Ok(reaction),
-    });
-    if let Some(p) = reaction_problem(&ex.expect, decided) {
-        report.errors.push(error(shown, ex.line("expect"), "example.effort_policy", format!("effort policy `{id}` {p}")).fix("its script, or the example's `expect` (`{ commands: [names] }` or `{ skip: <part of the reason> | $any }`)"));
     }
 }
 

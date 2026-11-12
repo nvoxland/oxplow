@@ -5,7 +5,6 @@
 SELECT e.id AS event_id,
        e.seq,
        e.thread_id,
-       e.effort_id,
        e.turn_id,
        e.agent_session_id,
        e.at AS proposed_at,

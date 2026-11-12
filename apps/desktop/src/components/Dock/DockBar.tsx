@@ -1,7 +1,7 @@
 /// The dock's icon row, at the right of the bottom bar: one button per
 /// panel, the open one highlighted, a count pill when the panel has a badge.
 
-import { ICONS } from "../../icons.js";
+import { ICONS, iconFor } from "../../icons.js";
 import { dockStore, useDockState } from "./dockStore.js";
 import { useDockPanels, type DockPanelDef } from "./dockPanels.js";
 
@@ -19,7 +19,7 @@ export function DockBar() {
 
 function DockButton({ panel, active }: { panel: DockPanelDef; active: boolean }) {
   const badge = panel.useBadge();
-  const Icon = ICONS[panel.icon] ?? ICONS["box"]!;
+  const Icon = iconFor(panel.icon) ?? ICONS.box;
   const title = badge ? `${panel.title} (${badge.count})` : panel.title;
   return (
     <button

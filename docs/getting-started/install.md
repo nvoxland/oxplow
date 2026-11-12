@@ -89,8 +89,8 @@ See [Agents](../guide/agents.md) to enable Claude Code, Codex, and OpenCode,
 choose the default, and run different agents in separate threads.
 
 Oxplow stores everything project-local under `.oxplow/` inside
-the project root: the SQLite database, the wiki pages folder,
-per-effort snapshots, the agent runtime files oxplow installs, and
+the project root: the SQLite database, the knowledge pages folder,
+snapshots, the agent runtime files oxplow installs, and
 the LSP server cache. Worktrees for non-primary streams live as
 siblings of the project root. There is no global state to
 configure.

@@ -91,7 +91,7 @@ winners AS (
 SELECT f.id, c.id AS capture_id, m.key AS measure_key, f.value, f.numerator,
        f.denominator, subj.kind AS subject_kind, subj.uri AS subject, w.path, f.line,
        f.severity, f.rule, f.detail, d.json AS dims_json,
-       c.stream_id, c.thread_id, c.effort_id, c.captured_at, c.branch
+       c.stream_id, c.thread_id, c.turn_id, c.captured_at, c.branch
   FROM winners w
   CROSS JOIN source('fact') f ON f.capture_id = w.capture_id AND f.path_id = w.path_id
   CROSS JOIN source('metric_capture') c ON c.id = f.capture_id
@@ -110,7 +110,7 @@ SELECT f.id, c.id AS capture_id, m.key AS measure_key, f.value, f.numerator,
                        WHERE fl.fact_id = f.id AND fl.capture_id <= ph.capture_id
                        ORDER BY fl.capture_id DESC LIMIT 1), f.line) AS INTEGER) AS line,
        f.severity, f.rule, f.detail, d.json AS dims_json,
-       c.stream_id, c.thread_id, c.effort_id, c.captured_at, c.branch
+       c.stream_id, c.thread_id, c.turn_id, c.captured_at, c.branch
   FROM winners w
   CROSS JOIN source('fact_path_hold') ph ON ph.capture_id = w.capture_id AND ph.path_id = w.path_id
   CROSS JOIN source('metric_capture') c ON c.id = ph.capture_id

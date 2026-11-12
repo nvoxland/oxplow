@@ -1,0 +1,150 @@
+title: Knowledge Page
+description: One knowledge page, edited where it is read when its store lets oxplow write it, with its store, kind, author, when it was last edited, how many reads it has, whether the files it cites have changed, and those files. The renderer of oxplow's `knowledge` resource.
+# The page's title names its tab: the first loader's first row.
+label: '{{row.title}}'
+for: oxplow/knowledge
+default: true
+comments: true
+needs:
+- knowledge
+params:
+- name: uri
+- name: store
+- name: id
+loaders:
+  row:
+    sql: |
+      SELECT coalesce(p.title, :id) AS title
+      FROM (SELECT 1) LEFT JOIN v_knowledge_page p ON p.uri = :uri
+    columns:
+    - key: title
+  body:
+    sql: |
+      SELECT p.uri, p.store, p.id, coalesce(b.body, '') AS body,
+             coalesce((SELECT json_extract(s.features, '$.edit') FROM v_capability_provider s
+                       WHERE s.capability = 'knowledge' AND s.provider = p.store), 0) AS can_edit
+      FROM v_knowledge_page p LEFT JOIN v_knowledge_body b ON b.uri = p.uri
+      WHERE p.uri = :uri
+  about:
+    sql: |
+      SELECT p.store, p.kind, p.author, p.updated_at, p.read_count, p.last_read_at,
+             CASE WHEN p.stale_ref_count = 0 THEN 'fresh'
+                  WHEN p.stale_ref_count = (SELECT count(*) FROM v_knowledge_ref r WHERE r.page = p.uri) THEN 'very stale'
+                  ELSE 'stale' END AS freshness,
+             (SELECT count(*) FROM v_knowledge_ref r WHERE r.page = p.uri) AS cited_files,
+             p.stale_ref_count AS stale_files,
+             p.url AS store_url
+      FROM v_knowledge_page p WHERE p.uri = :uri
+  refs:
+    sql: |
+      SELECT r.path, CASE WHEN r.stale THEN 'changed since this page was written' ELSE 'current' END AS status,
+             CASE WHEN r.stale THEN 'warning' ELSE 'success' END AS tone, r.stale
+      FROM v_knowledge_ref r WHERE r.page = :uri
+      ORDER BY r.stale DESC, r.path
+  # What links here: the tasks, commits and knowledge pages that name it.
+  backlinks:
+    sql: |
+      -- Each title from its own view, pinned in a subquery's WHERE (a join
+      -- on a view's uri column scans the whole view).
+      SELECT coalesce(
+               CASE r.source_resource
+                 WHEN 'oxplow/task' THEN (SELECT w.title FROM v_task w WHERE w.uri = r.source_uri)
+                 WHEN 'oxplow/commit' THEN (SELECT c.subject FROM v_commit c WHERE c.sha = uri_param(r.source_uri, 'sha'))
+                 WHEN 'oxplow/knowledge' THEN (SELECT k.title FROM v_knowledge_page k WHERE k.uri = r.source_uri)
+               END, r.source_uri) AS title,
+             r.source_uri AS uri,
+             'Links to this page' AS description
+      FROM v_page_ref r
+      WHERE r.target_uri = :uri
+        AND r.ref_type IN ('wikilink', 'summary_wikilink')
+      GROUP BY r.source_uri
+      ORDER BY title LIMIT 10
+rail:
+  stack:
+  - id: about
+    title: About
+    from: about
+    viz: detail
+    columns:
+    - key: store
+      label: Store
+    - key: kind
+      label: Kind
+    - key: author
+      label: Author
+      when: author
+    - key: updated_at
+      label: Last edited
+      format: datetime
+    - key: freshness
+      label: Freshness
+    - key: stale_files
+      label: Files changed since
+    - key: read_count
+      label: Reads
+      format: integer
+    empty: This page is not recorded. Its store may be off.
+    actions:
+    - id: open-in-store
+      label: Open in its store
+      open: store_url
+      when: store_url
+view:
+  stack:
+  - id: body
+    title: Page
+    hide_title: true
+    from: body
+    viz: markdown
+    markdown:
+      text: body
+    empty: This page is not recorded. Its store may be off.
+    actions:
+    # Only a store that oxplow writes can be edited.
+    - id: save
+      label: Save
+      command: oxplow.knowledge.write_page
+      edit: true
+      when: can_edit
+      fixed:
+      - store
+      - id
+      input:
+        store: '{{row.store}}'
+        id: '{{row.id}}'
+        body: '{{row.body}}'
+  - id: refs
+    title: Referenced files
+    from: refs
+    viz: table
+    columns:
+    - key: path
+      label: File
+      link:
+        kind: file
+    - key: status
+      label: Status
+      tone: tone
+      width: 230
+    empty: This page cites no files.
+    actions:
+    - id: verify-all
+      label: Mark all verified
+      command: oxplow.knowledge.verify_files
+      input:
+        store: '{{param.store}}'
+        id: '{{param.id}}'
+    - id: verify
+      label: Mark verified
+      command: oxplow.knowledge.verify_files
+      when: stale
+      input:
+        store: '{{param.store}}'
+        id: '{{param.id}}'
+        files:
+        - '{{row.path}}'
+      row: true
+see_also:
+  - { page: knowledge }
+  - { page: knowledge-freshness, params: { store: { param: store }, id: { param: id } } }
+  - { from: backlinks }

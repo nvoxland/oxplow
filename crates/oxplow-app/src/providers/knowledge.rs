@@ -4,15 +4,16 @@
 //! a provider may implement"). The page commands check a write against
 //! core's record, then call it; each verb is one invoke:
 //!
-//! - `write_page { slug, title?, body, verified_files, removed_files }`,
-//! - `delete_page { slug }`,
-//! - `link { page, target }` (`target` a wikilink's inside),
+//! - `write_page { id?, title?, body, verified_files, removed_files }` (no
+//!   `id`: the store derives one from the title),
+//! - `delete_page { id }`,
 //!
-//! each answering the page's `knowledge.page.recorded@2` — the body it
-//! keeps and the refs it states, in oxplow's grammar — which core records
-//! (row, links, pins) the same way it records the wiki's. Its collector
-//! streams its pages as the same records, for pages edited outside oxplow;
-//! [`KnowledgeRecords`] records those while it is the active store.
+//! `write_page` answering the page's `knowledge.page.recorded@3` — its id,
+//! the body it keeps and the refs it states, in oxplow's grammar — which
+//! core records (row, links, pins) the same way it records oxwiki's. Adding
+//! a link is core's: a `write_page` of the body with the link added. Its
+//! collector streams its pages as the same records, for pages edited
+//! outside oxplow; [`KnowledgeRecords`] records those while it is enabled.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -20,18 +21,25 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use oxplow_domain::capability::KNOWLEDGE;
 use oxplow_domain::events::schema::{
-    EventType as _, KnowledgePageRecorded, KnowledgePageRecordedV2,
+    EventType as _, KnowledgePageRecorded, KnowledgePageRecordedV3,
 };
 use oxplow_domain::events::Envelope;
-use oxplow_domain::knowledge::{Kept, KnowledgeProvider, KnowledgeRegistry, PageCall, PageDraft};
+use oxplow_domain::knowledge::{
+    Kept, KindDecl, KnowledgeFeatures, KnowledgeProvider, KnowledgeStores, PageCall, PageDraft,
+};
 use oxplow_domain::{CommandError, DomainError, InputValidator};
 use serde_json::{json, Value};
 
-use super::registry::{CapabilityHost, Instance, PreparedProviderCapability};
+use super::endpoint::Endpoint;
+use super::registry::{CapabilityHost, PreparedProviderCapability};
 
 /// The knowledge side of the host: a started instance is a store in
-/// `Services.knowledge`, under its id.
-pub struct KnowledgeHost(pub Arc<KnowledgeRegistry>);
+/// `Services.knowledge`, under its id. Retired (stopped, or withdrawn
+/// across a generation), its pages stay recorded and hidden
+/// (`v_knowledge_page` lists the enabled stores' only).
+pub struct KnowledgeHost {
+    pub stores: Arc<KnowledgeStores>,
+}
 
 impl KnowledgeHost {
     pub const CAPABILITY: &'static str = "knowledge";
@@ -43,21 +51,32 @@ impl CapabilityHost for KnowledgeHost {
     }
 
     fn has(&self, id: &str) -> bool {
-        self.0.has(id)
+        self.stores.get(id).is_some()
     }
 
-    fn prepare(&self, instance: &Arc<Instance>) -> Result<PreparedProviderCapability, String> {
-        let declared = &instance.declared;
-        let features = declared
+    fn prepare(&self, instance: &Arc<dyn Endpoint>) -> Result<PreparedProviderCapability, String> {
+        let declared = instance.declared();
+        let decl = declared
             .capabilities
             .iter()
             .find(|c| c.capability == Self::CAPABILITY)
-            .ok_or("it declares no `knowledge` capability")?
-            .features
-            .clone();
-        let features = Some(features)
+            .ok_or("it declares no `knowledge` capability")?;
+        let features = Some(decl.features.clone())
             .filter(|f| !f.is_null())
             .unwrap_or_else(|| json!({}));
+        let kinds: Vec<KindDecl> = match decl.data.get("kinds") {
+            None => vec![KindDecl::note()],
+            Some(kinds) => serde_json::from_value(kinds.clone())
+                .map_err(|e| format!("its `data.kinds` aren't `[{{ id, title, bucket }}]`: {e}"))?,
+        };
+        if kinds.is_empty() {
+            return Err("it declares no `data.kinds`".into());
+        }
+        let edit = features
+            .get("edit")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let published_kinds = serde_json::to_value(&kinds).expect("kinds serialize");
         let mut verbs = BTreeMap::new();
         for verb in KNOWLEDGE.verbs {
             let c = declared
@@ -72,28 +91,33 @@ impl CapabilityHost for KnowledgeHost {
         let adapter = Arc::new(ExternalKnowledge {
             instance: instance.clone(),
             verbs,
+            kinds,
+            features: KnowledgeFeatures { edit },
         });
-        let registry = self.0.clone();
+        let stores = self.stores.clone();
         Ok(PreparedProviderCapability::new(features, move || {
-            registry.register(adapter);
-        }))
+            stores.register(adapter);
+        })
+        .with_kinds(published_kinds))
     }
 
     fn retire(&self, id: &str) {
-        self.0.unregister(id);
+        self.stores.unregister(id);
     }
 }
 
 pub struct ExternalKnowledge {
-    instance: Arc<Instance>,
+    instance: Arc<dyn Endpoint>,
     /// Each contract verb's compiled input schema.
     verbs: BTreeMap<&'static str, InputValidator>,
+    kinds: Vec<KindDecl>,
+    features: KnowledgeFeatures,
 }
 
 impl ExternalKnowledge {
     fn failed(&self, message: impl std::fmt::Display) -> CommandError {
         CommandError::Failed {
-            message: format!("knowledge store `{}`: {message}", self.instance.name),
+            message: format!("knowledge store `{}`: {message}", self.instance.name()),
         }
     }
 
@@ -112,7 +136,7 @@ impl ExternalKnowledge {
         schema.check(&input).map_err(|e| match e {
             CommandError::Invalid { field, message } => CommandError::Invalid {
                 field,
-                message: format!("{} `{verb}`: {message}", self.instance.id),
+                message: format!("{} `{verb}`: {message}", self.instance.id()),
             },
             other => other,
         })?;
@@ -127,26 +151,51 @@ impl ExternalKnowledge {
         let events = out
             .events
             .into_iter()
-            .map(|d| self.instance.envelope(call.actor(), None, d))
+            .map(|d| self.instance.envelope(call.actor(), d))
             .collect::<Result<Vec<_>, _>>()?;
         Ok((out.result, events))
     }
 
-    /// What it kept of `slug`: the body and refs its record of the page
-    /// says, and every event it recorded.
-    fn kept(&self, slug: &str, events: Vec<Envelope>) -> Result<Kept, CommandError> {
-        let page = crate::knowledge::page_ref(slug);
-        let record = events
+    /// What it kept of the page `id` (the one it derived when `None`): its
+    /// record of the page — one of its own, the only one it answered when
+    /// it derived the id — and every event it recorded.
+    fn kept(&self, id: Option<&str>, events: Vec<Envelope>) -> Result<Kept, CommandError> {
+        let mine: Vec<(String, oxplow_domain::events::schema::KnowledgePageRecord)> = events
             .iter()
             .filter(|e| e.event_type == KnowledgePageRecorded::TYPE)
             .filter_map(|e| {
-                serde_json::from_value::<KnowledgePageRecordedV2>(e.payload.clone()).ok()
+                let record =
+                    serde_json::from_value::<KnowledgePageRecordedV3>(e.payload.clone()).ok()?;
+                let (store, page) = oxplow_domain::uri::build::knowledge_of_uri(&record.page.uri)?;
+                (store == self.id()).then_some((page, record.page))
             })
-            .find(|r| r.page.uri == page)
-            .ok_or_else(|| self.failed(format!("it answered no record of `{page}`")))?;
+            .collect();
+        let found = match id {
+            Some(id) => mine.into_iter().find(|(page, _)| page == id),
+            None if mine.len() == 1 => mine.into_iter().next(),
+            None => None,
+        };
+        let (id, record) = found.ok_or_else(|| {
+            self.failed(match id {
+                Some(id) => format!("it answered no record of its page `{id}`"),
+                None => "it answered no one record of the page it named".to_string(),
+            })
+        })?;
+        if let Some(kind) = &record.kind {
+            if !self.kinds.iter().any(|k| &k.id == kind) {
+                return Err(
+                    self.failed(format!("its page `{id}` is of an undeclared kind `{kind}`"))
+                );
+            }
+        }
         Ok(Kept {
-            body: record.page.body,
-            refs: Some(record.page.uris),
+            id,
+            body: record.body,
+            title: Some(record.title),
+            kind: record.kind,
+            url: record.url,
+            author: record.author,
+            refs: Some(record.uris),
             events,
         })
     }
@@ -155,62 +204,57 @@ impl ExternalKnowledge {
 #[async_trait]
 impl KnowledgeProvider for ExternalKnowledge {
     fn id(&self) -> &str {
-        &self.instance.id
+        self.instance.id()
+    }
+
+    fn kinds(&self) -> Vec<KindDecl> {
+        self.kinds.clone()
+    }
+
+    fn features(&self) -> KnowledgeFeatures {
+        self.features
     }
 
     async fn write_page(
         &self,
         call: &PageCall<'_>,
         draft: &PageDraft,
-    ) -> Result<Option<Kept>, CommandError> {
+    ) -> Result<Kept, CommandError> {
         let mut input = json!({
-            "slug": draft.slug,
             "body": draft.body,
             "verified_files": draft.verified_files,
             "removed_files": draft.removed_files,
         });
+        if let Some(id) = &draft.id {
+            input["id"] = json!(id);
+        }
         if let Some(title) = &draft.title {
             input["title"] = json!(title);
         }
         let (_, events) = self.call(call, "write_page", input).await?;
-        self.kept(&draft.slug, events).map(Some)
+        self.kept(draft.id.as_deref(), events)
     }
 
     async fn delete_page(
         &self,
         call: &PageCall<'_>,
-        slug: &str,
-    ) -> Result<Option<Vec<Envelope>>, CommandError> {
-        let (_, events) = self
-            .call(call, "delete_page", json!({ "slug": slug }))
-            .await?;
-        Ok(Some(events))
-    }
-
-    async fn link(
-        &self,
-        call: &PageCall<'_>,
-        slug: &str,
-        target: &str,
-    ) -> Result<Option<Kept>, CommandError> {
-        let (_, events) = self
-            .call(call, "link", json!({ "page": slug, "target": target }))
-            .await?;
-        self.kept(slug, events).map(Some)
+        id: &str,
+    ) -> Result<Vec<Envelope>, CommandError> {
+        let (_, events) = self.call(call, "delete_page", json!({ "id": id })).await?;
+        Ok(events)
     }
 }
 
-/// Records the active store's pages its collector streamed (edited
+/// Records the pages an enabled store's collector streamed (edited
 /// outside oxplow): each `knowledge.page.recorded` a provider's read logged
-/// (source `provider:<id>`) while that provider is the active store is
-/// restated into core's record — or, `deleted`, taken out of it. A
-/// record whose body the record already holds restates nothing; one a
-/// page command answered was recorded by the command.
+/// (source `provider:<id>`) of its own pages is restated into core's record
+/// — or, `deleted`, taken out of it. A record whose body the record already
+/// holds restates nothing; one a page command answered was recorded by the
+/// command.
 pub struct KnowledgeRecords {
-    pub stores: Arc<KnowledgeRegistry>,
+    pub stores: Arc<KnowledgeStores>,
     pub db: oxplow_db::Database,
     pub vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
-    pub project_dir: std::path::PathBuf,
 }
 
 impl KnowledgeRecords {
@@ -228,54 +272,62 @@ impl crate::event_pump::AsyncEventConsumer for KnowledgeRecords {
     }
 
     async fn handle(&self, event: &oxplow_domain::StoredEvent) -> Result<(), DomainError> {
+        use oxplow_db::knowledge_record::{body_hash, delete_page_tx, write_page_tx, PageWrite};
         let env = &event.envelope;
-        if env.source != oxplow_domain::uri::build::provider_source(&self.stores.active_id()) {
-            return Ok(());
-        }
-        let KnowledgePageRecordedV2 { page } = serde_json::from_value(env.payload.clone())
+        let KnowledgePageRecordedV3 { page } = serde_json::from_value(env.payload.clone())
             .map_err(|e| DomainError::Invalid(format!("knowledge.page.recorded payload: {e}")))?;
-        let Some(slug) =
-            oxplow_domain::uri::build::id_of(&page.uri, oxplow_domain::uri::resources::WIKI)
-                .ok()
-                .filter(|s| crate::knowledge::valid_slug(s))
-        else {
+        // Its own pages, while it's enabled.
+        let Some((store, id)) = oxplow_domain::uri::build::knowledge_of_uri(&page.uri) else {
             return Ok(());
         };
-        let (vocabulary, project_dir, cause) = (
-            self.vocabulary.clone(),
-            self.project_dir.clone(),
-            env.id.clone(),
-        );
+        if env.source != oxplow_domain::uri::build::provider_source(&store) {
+            return Ok(());
+        }
+        let Some(provider) = self.stores.get(&store) else {
+            return Ok(());
+        };
+        // Its URI's one spelling, whatever order the provider wrote.
+        let uri = oxplow_domain::uri::build::knowledge_uri(&store, &id);
+        // A kind it doesn't declare is no kind: the store's first.
+        let kind = page
+            .kind
+            .clone()
+            .filter(|k| provider.kinds().iter().any(|d| &d.id == k));
+        let updated_at = oxplow_db::string_to_ts(&page.updated_at)
+            .unwrap_or_else(|_| oxplow_domain::Timestamp::now());
+        let (vocabulary, cause) = (self.vocabulary.clone(), env.id.clone());
         self.db
             .transaction(move |tx| {
                 let vocabulary = vocabulary.current();
                 let mut ev = oxplow_db::EventCtx::system(&vocabulary, "knowledge_records");
                 ev.cause = Some(cause.clone());
                 let logged = if page.deleted {
-                    crate::knowledge::delete_page_tx(
-                        tx,
-                        &ev,
-                        oxplow_domain::Anchors::default(),
-                        &slug,
-                    )?
+                    delete_page_tx(tx, &ev, oxplow_domain::Anchors::default(), &uri)?
                 } else {
-                    let stored = oxplow_db::wiki_page_store::get_tx(tx, &slug)?;
-                    let body = crate::wiki_pages::strip_body_version_literals(&page.body);
-                    if stored.is_some_and(|(_, hash)| hash == crate::knowledge::body_hash(&body)) {
+                    // What the record already holds restates nothing.
+                    let same = oxplow_db::knowledge_page_store::get_tx(tx, &uri)?.is_some_and(
+                        |(row, hash)| {
+                            hash == body_hash(&page.body)
+                                && row.title == page.title
+                                && row.kind == kind
+                                && row.url == page.url
+                                && row.author == page.author
+                        },
+                    );
+                    if same {
                         return Ok(());
                     }
-                    let (_, env) = crate::knowledge::write_page_tx(
+                    let (_, env) = write_page_tx(
                         tx,
                         &ev,
-                        &project_dir,
-                        &crate::knowledge::PageWrite {
-                            slug: &slug,
-                            body: &body,
-                            verified: &[],
-                            removed: &[],
-                            updated_at: oxplow_domain::Timestamp::now(),
+                        &PageWrite {
+                            title: Some(&page.title),
+                            kind: kind.as_deref(),
+                            url: page.url.as_deref(),
+                            author: page.author.as_deref(),
                             stated: Some(&page.uris),
-                            anchors: oxplow_domain::Anchors::default(),
+                            updated_at,
+                            ..PageWrite::new(&store, &id, &page.body)
                         },
                     )?;
                     Some(env)

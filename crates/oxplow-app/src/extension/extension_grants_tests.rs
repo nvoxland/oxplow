@@ -8,7 +8,7 @@ use std::path::Path;
 use oxplow_domain::{Actor, CommandError};
 use serde_json::{json, Value};
 
-use crate::test_fixtures::{services_with_task_effort, TaskEffortFixture};
+use crate::test_fixtures::{services_with_task, TaskFixture};
 
 fn write(root: &Path, rel: &str, body: &str) {
     let path = root.join(rel);
@@ -29,7 +29,7 @@ fn script(sql: &str) -> String {
     )
 }
 
-async fn run(fx: &TaskEffortFixture, name: &str) -> Result<Value, CommandError> {
+async fn run(fx: &TaskFixture, name: &str) -> Result<Value, CommandError> {
     fx.svc
         .commands
         .run(&Actor::Human, name, json!({}), false)
@@ -39,25 +39,21 @@ async fn run(fx: &TaskEffortFixture, name: &str) -> Result<Value, CommandError> 
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_qualified_read_reaches_only_its_dataset_and_what_derives_from_it() {
-    let fx = services_with_task_effort().await;
+    let fx = services_with_task().await;
     let root = fx.svc.layout.project_dir.clone();
     let commands = [
-        (
-            "items",
-            "sql.read:v_work_item",
-            "SELECT uri FROM v_work_item",
-        ),
-        ("efforts", "sql.read:v_work_item", "SELECT id FROM v_effort"),
-        ("any", "sql.read", "SELECT id FROM v_effort"),
+        ("items", "sql.read:v_task", "SELECT uri FROM v_task"),
+        ("requests", "sql.read:v_task", "SELECT id FROM v_request"),
+        ("any", "sql.read", "SELECT id FROM v_request"),
         (
             "derived",
-            "sql.read:v_work_item",
-            "SELECT id FROM v_acme_efforts",
+            "sql.read:v_task",
+            "SELECT id FROM v_acme_requests",
         ),
         (
             "joined",
-            "sql.read:v_work_item",
-            "SELECT w.uri FROM v_work_item w, v_effort e",
+            "sql.read:v_task",
+            "SELECT w.uri FROM v_task w, v_request e",
         ),
         (
             "ownlineage",
@@ -66,10 +62,10 @@ async fn a_qualified_read_reaches_only_its_dataset_and_what_derives_from_it() {
         ),
         (
             "both",
-            "sql.read:v_acme_mine, sql.read:v_work_item",
+            "sql.read:v_acme_mine, sql.read:v_task",
             "SELECT uri FROM v_acme_mine",
         ),
-        ("anyderived", "sql.read", "SELECT id FROM v_acme_efforts"),
+        ("anyderived", "sql.read", "SELECT id FROM v_acme_requests"),
     ];
     let block: String = commands
         .iter()
@@ -79,18 +75,18 @@ async fn a_qualified_read_reaches_only_its_dataset_and_what_derives_from_it() {
         &root,
         ".oxplow/extensions/acme/extension.yaml",
         &format!(
-            "manifest: 2\nname: acme\nintent:\n  purpose: p\npermissions: [sql.read]\ndatasets:\n  - name: efforts\n    version: 1\n    description: Efforts.\n    fields:\n      - {{ name: id, type: INTEGER, doc: Id. }}\n  - name: mine\n    version: 1\n    description: Items.\n    fields:\n      - {{ name: uri, type: TEXT, doc: Ref. }}\ncommands:\n{block}"
+            "manifest: 2\nname: acme\nintent:\n  purpose: p\npermissions: [sql.read]\ndatasets:\n  - name: requests\n    version: 1\n    description: Requests.\n    fields:\n      - {{ name: id, type: INTEGER, doc: Id. }}\n  - name: mine\n    version: 1\n    description: Items.\n    fields:\n      - {{ name: uri, type: TEXT, doc: Ref. }}\ncommands:\n{block}"
         ),
     );
     write(
         &root,
-        ".oxplow/extensions/acme/datasets/efforts.sql",
-        "SELECT id FROM ref('effort')",
+        ".oxplow/extensions/acme/datasets/requests.sql",
+        "SELECT id FROM ref('request')",
     );
     write(
         &root,
         ".oxplow/extensions/acme/datasets/mine.sql",
-        "SELECT uri FROM ref('work_item')",
+        "SELECT uri FROM ref('task')",
     );
     for (name, _, sql) in commands {
         write(
@@ -125,10 +121,10 @@ async fn a_qualified_read_reaches_only_its_dataset_and_what_derives_from_it() {
     // a join with one, an extension dataset derived from one, and an extension
     // dataset it holds a grant for whose own inputs it does not.
     for (name, dataset) in [
-        ("efforts", "v_effort"),
-        ("joined", "v_effort"),
-        ("derived", "v_effort"),
-        ("ownlineage", "v_work_item"),
+        ("requests", "v_request"),
+        ("joined", "v_request"),
+        ("derived", "v_request"),
+        ("ownlineage", "v_task"),
     ] {
         let error = run(&fx, &format!("acme.read.{name}"))
             .await
@@ -153,7 +149,7 @@ async fn a_qualified_read_reaches_only_its_dataset_and_what_derives_from_it() {
         .svc
         .sql
         .query_sql(
-            "SELECT decisions FROM v_extension_run WHERE contribution = 'oxplow:oxplow/command?command=acme.read.efforts'",
+            "SELECT decisions FROM v_extension_run WHERE contribution = 'oxplow:oxplow/command?command=acme.read.requests'",
             vec![],
             None,
         )
@@ -169,20 +165,20 @@ async fn a_qualified_read_reaches_only_its_dataset_and_what_derives_from_it() {
             .unwrap()
             .iter()
             .any(|d| d["need"] == "dataset"
-                && d["name"] == "v_effort"
+                && d["name"] == "v_request"
                 && d["decision"] == "denied"),
         "{denied}"
     );
 }
 
-async fn errors_of(fx: &TaskEffortFixture, extension: &str) -> String {
+async fn errors_of(fx: &TaskFixture, extension: &str) -> String {
     crate::test_fixtures::load_errors(&fx.svc, extension).await
 }
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_service_the_script_did_not_declare_is_refused() {
-    let fx = services_with_task_effort().await;
+    let fx = services_with_task().await;
     let root = fx.svc.layout.project_dir.clone();
     write(
         &root,
@@ -272,7 +268,7 @@ mod program_collectors {
     }
 
     async fn go(
-        fx: &TaskEffortFixture,
+        fx: &TaskFixture,
     ) -> Result<crate::collector_runner::CollectorRunReport, RunCollectorError> {
         let root = fx.svc.layout.project_dir.clone();
         // What was written (or edited) since is published first.
@@ -293,7 +289,7 @@ mod program_collectors {
     #[cfg(unix)]
     #[tokio::test(flavor = "multi_thread")]
     async fn disabling_the_extension_stops_its_next_command_and_collector_run() {
-        let fx = services_with_task_effort().await;
+        let fx = services_with_task().await;
         let root = fx.svc.layout.project_dir.clone();
         write(
             &root,
@@ -345,7 +341,7 @@ mod program_collectors {
     }
 
     async fn spec_of(
-        fx: &TaskEffortFixture,
+        fx: &TaskFixture,
     ) -> (std::path::PathBuf, oxplow_config::collectors::CollectorSpec) {
         crate::test_fixtures::activate_with_problems(&fx.svc).await;
         let root = fx.svc.layout.project_dir.clone();
@@ -385,7 +381,7 @@ mod program_collectors {
     #[cfg(unix)]
     #[tokio::test(flavor = "multi_thread")]
     async fn a_program_gets_a_scrubbed_environment() {
-        let fx = services_with_task_effort().await;
+        let fx = services_with_task().await;
         let root = fx.svc.layout.project_dir.clone();
         write(
             &root,
@@ -450,7 +446,7 @@ mod program_collectors {
     #[cfg(unix)]
     #[tokio::test(flavor = "multi_thread")]
     async fn a_timeout_reaps_the_program_and_what_it_started() {
-        let fx = services_with_task_effort().await;
+        let fx = services_with_task().await;
         let root = fx.svc.layout.project_dir.clone();
         write(&root, ".oxplow/extensions/acme/extension.yaml", MANIFEST);
         let pidfile = root.join("child.pid");
@@ -490,9 +486,9 @@ mod program_collectors {
 /// may do with the person's rights is what was approved at deploy.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_script_composing_a_command_outside_its_namespace_needs_the_commands_permission() {
-    let fx = services_with_task_effort().await;
+    let fx = services_with_task().await;
     let root = fx.svc.layout.project_dir.clone();
-    let item = oxplow_tasks::work_item_ref(fx.task);
+    let item = oxplow_oxtask::task_ref(fx.task);
     let manifest = |permissions: &str| {
         format!(
             "manifest: 2\nname: acme\nintent:\n  purpose: p\n{permissions}commands:\n  - name: notes.add\n    summary: Comments.\n    input_schema: {{ type: object }}\n    entry: note.star\n"
@@ -502,7 +498,7 @@ async fn a_script_composing_a_command_outside_its_namespace_needs_the_commands_p
         &root,
         ".oxplow/extensions/acme/note.star",
         &format!(
-            "def transform(x):\n    return {{\"commands\": [{{\"name\": \"oxplow.work_item.comment\", \"input\": {{\"uri\": \"{item}\", \"body\": \"noted\"}}}}]}}\n"
+            "def transform(x):\n    return {{\"commands\": [{{\"name\": \"oxplow.task.comment\", \"input\": {{\"uri\": \"{item}\", \"body\": \"noted\"}}}}]}}\n"
         ),
     );
     write(
@@ -516,14 +512,14 @@ async fn a_script_composing_a_command_outside_its_namespace_needs_the_commands_p
         .expect_err("outside its namespace");
     let message = format!("{refused:?}");
     assert!(
-        message.contains("commands:oxplow.work_item.comment"),
+        message.contains("commands:oxplow.task.comment"),
         "{message}"
     );
 
     write(
         &root,
         ".oxplow/extensions/acme/extension.yaml",
-        &manifest("permissions: [commands:oxplow.work_item.*]\n"),
+        &manifest("permissions: [commands:oxplow.task.*]\n"),
     );
     crate::test_fixtures::activate(&fx.svc).await;
     run(&fx, "acme.notes.add")

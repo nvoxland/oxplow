@@ -10,6 +10,6 @@ expect:
   loaders:
     tree:
       rows:
-        - { name: sub, icon: folder, folder_uri: "oxplow:oxplow/dir?path=src/sub" }
+        - { name: sub, is_dir: 1, folder_uri: "oxplow:oxplow/dir?path=src/sub" }
         - { name: a.rs, status: untracked, target: "oxplow:oxplow/file?path=src/a.rs" }
         - { name: b.rs, status: untracked, target: "oxplow:oxplow/file?path=src/b.rs" }

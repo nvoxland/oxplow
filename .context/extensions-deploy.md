@@ -84,7 +84,7 @@ source directly: an edit changes nothing until it is deployed.
   from that folder. Its `Extension.path` is the folder's absolute path, so
   every `root.join(ext.path)` reader finds it. The file watcher never looks
   under `.oxplow/runtime/`; it does watch `.oxplow/extensions/` (an agent's
-  edits to a source are its work, snapshotted and given to its effort), and
+  edits to a source are its work, snapshotted like any edit), and
   watching never activates anything. A tree (the Uncommitted page, a diff)
   is git's view: a personal source, which `.oxplow/.gitignore` ignores, is
   no one's uncommitted work there (`WorkspaceFilter::ignore_in_trees`), a
@@ -149,8 +149,11 @@ source directly: an edit changes nothing until it is deployed.
   activate against, need `cargo run -q -p oxplow-dev -- extension deploy`
   with oxplow quit (`extension_deploy::DEPLOY_FROM_OUTSIDE`; it deploys
   every extension that is on whose source isn't what runs, foundation
-  first). Nothing ships to roll back to, and a non-required one can be
-  removed.
+  first, as one change to what runs: `extension_deploy::deploy_together`
+  stages each, then activates them all at once, so oxplow's own two moving
+  their shared `configuration` version together are checked against each
+  other, never against the copy of the other that runs). Nothing ships
+  to roll back to, and a non-required one can be removed.
 - **The live set:** each extension's active deployment, in the
   `extension_deployment` table (`v_extension_deployment`: name, hash,
   deployed_at, commit, dirty, source, active). `commit` is the primary
@@ -359,7 +362,7 @@ version keeps working and the error says why); private state read by the
 next version; a producer's export changing under two consumers (the
 unversioned one keeps working; the one pinned to the old contract is held
 with a problem naming the import, and keeps serving its last working
-version); switching the work list between oxplow's and a provider's; and a
+version); switching the task tracker between oxplow's and a provider's; and a
 queued job across disable then enable (it waits, then runs). The shared
 setup is `test_fixtures::lifecycle` (`booted()` registers the pump
 reactors a running oxplow has but in-memory services lack).
@@ -423,7 +426,7 @@ is `unchanged`. A dataset's `downstream` is its direct readers from
 `v_dataset_lineage` (`downstream_of`) other than this extension's own
 views, by exact name. A provider's declarations are read from each
 version's files. `extension_impact::summary` is the one wording that
-`extension check --impact` and an effort's review share: collectors'
+`extension check --impact` and a request's review share: collectors'
 and providers' grants first ("now reaches x (was y)", a provider command
 added (destructive)), then what the collectors make of their inputs,
 then datasets with their readers and rows, then pages ("Page x: changed",
@@ -520,7 +523,7 @@ byte-identical after. Text output adds `impact against <rev>:` and the
 report's lines; `--json` adds `impact` (the `ImpactReport`) and
 `against` to the check's JSON.
 
-**On an effort's review.** The diff page (`oxplow/diff-view`)
+**On a request's review.** The diff page (`oxplow/diff-view`)
 has an "Extension Changes" table, empty unless the range touched
 `.oxplow/extensions/**`. Its `extensions` loader reads the live dataset
 `v_extension_change` (pinned to `base` and `head`, each a `v_change`

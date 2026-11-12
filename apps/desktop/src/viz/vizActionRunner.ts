@@ -8,7 +8,8 @@ import type { CommandOutcome, Drop, SqlCell } from "../tauri-bridge/generated/bi
 
 /** What a viz component presses with: the viz (only its id, which the run
  *  holds) and its params, the action, the row it is on, and for a form
- *  action its input, for a drag action where the row landed. */
+ *  action its input, for a drag action where the row landed, for an action
+ *  with options the `value` of the one pressed. */
 export type VizActionRunner = (
   id: string,
   action: string,
@@ -18,6 +19,7 @@ export type VizActionRunner = (
   confirmed: boolean,
   input?: unknown,
   drop?: Drop | null,
+  option?: string | null,
 ) => Promise<CommandOutcome>;
 
 const outsidePage: VizActionRunner = () => Promise.reject(new Error("This isn't on a page, so its actions can't run."));

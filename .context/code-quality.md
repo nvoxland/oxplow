@@ -176,7 +176,7 @@ in the background. `DuplicationRecorder::record`
   the findings, their `finding → file` page refs and the scan's `done`
   status commit together, so a scan announces one `DatasetsChanged`, not
   two per finding. That burst (`page_ref` feeds `v_knowledge_page` and
-  `v_thread_work`) used to keep the webview re-reading the wiki and Work
+  `v_thread_work`) used to keep the webview re-reading knowledge pages and Work
   models for the whole store and made typing lag;
 - **only the latest scan per scope is kept**: the same write deletes the
   older finished scans of its tool and scope (findings cascade; their page
@@ -189,7 +189,7 @@ in the background. `DuplicationRecorder::record`
   untouched file's duplicates (tsk365). `oxplow.duplicate_lines` is
   oxplow-bundled's whole-tree collector's: the
   `duplicate_blocks(min_lines)` Starlark builtin over the whole tree after
-  ref moves (`snapshot.taken`, `trigger: git_refs`) — paced, so a burst
+  moves of the stream's HEAD (`vcs.head.moved`) — paced, so a burst
   of them (a commit, a rebase, a restart's catch-up) is one scan of the
   latest tree once they settle for 60 s, at most every 15 min — an empty capture
   clearing the metric after a refactor (tsk44); those restates are history,
@@ -205,13 +205,13 @@ its changed files. There is no manual "Scan now" any more.
 **Scans are coalesced.**
 - `change_analysis::DupQueue` runs one scan at a time across every
   change (a HEAD move or a turn's end take that recorded files analyzes
-  the working tree and each open effort together); a newer request for a
+  the working tree and each live request together); a newer request for a
   change replaces its queued one, so rapid agent edits don't pile up
   whole-tree parses.
 - **An analysis whose inputs haven't moved isn't redone**, forced or
   not. `change.analyzed_from` (V12) records the build, each side's tree
-  (a snapshot's `tree_hash`; a working tree's latest snapshot's) and an
-  effort's own files; a rerun from the same keeps what's stored, and no
+  (a snapshot's `tree_hash`; a working tree's latest snapshot's) and a
+  request's own files; a rerun from the same keeps what's stored, and no
   duplicate scan is queued. A turn's end no longer forces a rerun: its
   take does, and only when it recorded files.
 - **One detection at a time per process, whoever asks.** The detector
@@ -227,7 +227,7 @@ its changed files. There is no manual "Scan now" any more.
   haven't moved isn't redone.
 - A failure while storing marks the scan and its task failed rather than
   leaving them "running".
-- An effort analyzed while open is recomputed once it closes: the change
+- A request analyzed while live is recomputed once it finishes: the change
   store reports a moved head (working tree → end snapshot) — unless the
   end snapshot holds the tree it was analyzed against.
 

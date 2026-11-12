@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import { listBacklinks, listPageOutbound, type BacklinkEdge } from "../api.js";
 import { refTargetNow } from "./refOpener.js";
-import { contributionOf, fileUri, idOf, identityOf, keyOf, pageUri, paramOf, typeOf, wikiUri } from "../uri/uri.js";
+import { contributionOf, fileUri, idOf, identityOf, keyOf, pageUri, paramOf, typeOf, knowledgeUri } from "../uri/uri.js";
 import type { TabRef } from "./tabState.js";
 import type { BacklinkEntry } from "./backlinkTypes.js";
 
 /**
  * Backlinks for a page. One IPC call to the unified `page_ref`
- * graph; the SQLite reader joins source labels (wiki title, work-
+ * graph; the SQLite reader joins source labels (page title, work-
  * item title, commit subject) at read time so the renderer doesn't
  * need a second round-trip per row.
  *
@@ -100,8 +100,8 @@ export function humanRefTypeForTest(refType: string, sourceExtra: string | null)
   return humanRefType(refType, sourceExtra);
 }
 
-/** The work-item link type an edge's `ref_type` names (`work_item_link:about`). */
-const LINK_TYPE_PREFIX = "work_item_link:";
+/** The task link type an edge's `ref_type` names (`task_link:about`). */
+const LINK_TYPE_PREFIX = "task_link:";
 
 function linkTypeOf(refType: string): string | undefined {
   return refType.startsWith(LINK_TYPE_PREFIX) ? refType.slice(LINK_TYPE_PREFIX.length) : undefined;
@@ -140,13 +140,13 @@ function entryFor(edge: BacklinkEdge, uri: string): BacklinkEntry {
  * Collapse rows whose `ref` resolves to the same logical page.
  * Two cases that need this today:
  *
- *  1. A wiki page is referenced both as `wiki:<slug>` (via
- *     `summary_wikilink` / `impact`) and as `file:.oxplow/wiki/<slug>.md`
- *     (via `touched_file`). Same underlying entity, three rows.
- *  2. Multiple ref_types pointing at the same target (e.g. an
- *     impact edge AND a summary_wikilink edge to the same slug).
+ *  1. An oxwiki page is referenced both as its knowledge URI (via
+ *     `wikilink`) and as `file:.oxplow/oxwiki/<slug>.md` (via
+ *     `touched_file`). Same underlying entity, two rows.
+ *  2. Multiple ref_types pointing at the same target (e.g. a
+ *     wikilink edge AND a touched_file edge to the same slug).
  *
- * Strategy: bucket by canonical key, prefer the wiki ref over the
+ * Strategy: bucket by canonical key, prefer the knowledge ref over the
  * file ref when both exist, prefer a non-fallback label, and merge
  * each contributor's subtitle into a `·`-separated chip line. Order
  * within the input is preserved across the first appearance of each
@@ -166,10 +166,10 @@ export function dedupeEntriesByTarget(entries: BacklinkEntry[]): BacklinkEntry[]
   return order.map((key) => {
     const group = buckets.get(key)!;
     if (group.length === 1) return group[0];
-    // Pick the "best" base entry: wiki kind wins over file when the
-    // file is the on-disk shadow of the same wiki page.
-    const wikiMember = group.find((g) => typeOf(g.target) === "oxplow/wiki");
-    const base = wikiMember ?? group[0];
+    // Pick the "best" base entry: knowledge kind wins over file when the
+    // file is the on-disk shadow of the same oxwiki page.
+    const knowledgeMember = group.find((g) => typeOf(g.target) === "oxplow/knowledge");
+    const base = knowledgeMember ?? group[0];
     // Combine subtitles, dropping empties and duplicates while
     // preserving first-seen order.
     const seen = new Set<string>();
@@ -190,15 +190,15 @@ export function dedupeEntriesByTarget(entries: BacklinkEntry[]): BacklinkEntry[]
 /**
  * Identity key for dedup. Same key ⇒ same logical page.
  *
- * `file:.oxplow/wiki/<slug>.md` is treated as `wiki:<slug>` so the
- * on-disk shadow of a wiki page doesn't render as a sibling row to
- * the wiki tab itself.
+ * `file:.oxplow/oxwiki/<slug>.md` is treated as the oxwiki page `<slug>` so the
+ * on-disk shadow of a page doesn't render as a sibling row to
+ * the page's tab itself.
  */
 function canonicalEntryKey(entry: BacklinkEntry): string {
   const path = idOf(entry.target, "oxplow/file");
   if (path !== null) {
-    const m = /^\.oxplow\/wiki\/(.+)\.md$/.exec(path);
-    if (m) return wikiUri(m[1]!);
+    const m = /^\.oxplow\/oxwiki\/(.+)\.md$/.exec(path);
+    if (m) return knowledgeUri("oxwiki", m[1]!);
   }
   return entry.target;
 }
@@ -226,21 +226,19 @@ function openFor(uri: string, resolved: boolean): string | null {
  *
  *  - **mention** — every body-mention ref_type collapses to this
  *    single label. They all mean "the target was named in some
- *    body text" (description / AC / summary / wiki page), and the
+ *    body text" (description / AC / summary / knowledge page), and the
  *    user doesn't care which body parser found it.
  *
  *  - **action verb** (`created` / `modified` / `deleted` /
  *    `referenced` / `resolved` / `completed` / `reopened`, …) —
  *    rendered for any edge that represents a change. `touched_file`
- *    edges carry the `effort_file.change_kind` through
- *    `source_extra.change_kind`; `impact` edges carry the declared
- *    action through `source_extra.action`. Both paths normalize
- *    `updated` to `modified` for display.
+ *    edges carry their change kind through
+ *    `source_extra.change_kind`; `updated` is shown as `modified`.
  *
- *  - **typed link** — `work_item_link:<sub>` becomes the sub-type with
+ *  - **typed link** — `task_link:<sub>` becomes the sub-type with
  *    underscores swapped for spaces (e.g. `blocks`, `relates to`).
  *
- *  - **comment** — `comment_*`: a work item's comment mentions it (the
+ *  - **comment** — `comment_*`: a task's comment mentions it (the
  *    item is the source; its comments live on its page).
  *
  *  Plus a `found in` fallback for `finding_path`, and the raw
@@ -248,28 +246,24 @@ function openFor(uri: string, resolved: boolean): string | null {
  *  crashes the renderer.
  */
 function humanRefType(refType: string, sourceExtra: string | null): string {
-  if (refType.startsWith("work_item_link:")) {
-    const sub = refType.slice("work_item_link:".length);
+  if (refType.startsWith("task_link:")) {
+    const sub = refType.slice("task_link:".length);
     return sub.replace(/_/g, " ");
   }
   switch (refType) {
-    case "wiki_file_ref":
-    case "wiki_dir_ref":
+    case "knowledge_file_ref":
+    case "knowledge_dir_ref":
+    case "file_mention":
+    case "dir_mention":
     case "wikilink":
-    case "summary_wikilink":
-    case "summary_file_ref":
-    case "summary_dir_ref":
-    case "work_item_mention":
-    case "summary_work_item_mention":
+    case "task_mention":
     case "finding_mention":
-    case "summary_finding_mention":
     case "commit_mention":
-    case "summary_commit_mention":
       return "mention";
     case "comment_file_ref":
     case "comment_dir_ref":
     case "comment_wikilink":
-    case "comment_work_item_mention":
+    case "comment_task_mention":
     case "comment_finding_mention":
     case "comment_commit_mention":
       return "comment";
@@ -277,8 +271,6 @@ function humanRefType(refType: string, sourceExtra: string | null): string {
       return normalizeAction(parseExtraField(sourceExtra, "change_kind")) ?? "modified";
     case "finding_path":
       return "found in";
-    case "impact":
-      return normalizeAction(parseExtraField(sourceExtra, "action")) ?? "impact";
     default:
       return refType;
   }
@@ -298,10 +290,9 @@ function parseExtraField(sourceExtra: string | null, field: string): string | nu
 
 /**
  * Normalize the action vocabulary the backend stores
- * (`created`/`updated`/`deleted` from `effort_file`, plus the
- * looser impact verbs the agent declares) into the labels the
+ * (`created`/`updated`/`deleted`) into the labels the
  * renderer surfaces. Notably: `updated` → "modified" everywhere so
- * a file-change row and a wiki-page-change row read the same way.
+ * a file-change row and a knowledge-page-change row read the same way.
  */
 function normalizeAction(action: string | null): string | null {
   if (!action) return null;

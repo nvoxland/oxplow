@@ -12,7 +12,6 @@ test("a user interrupt names its agent session", () => {
     agent_session_id: "ses3",
     session_id: null,
     payload_json: JSON.stringify({ source: "user-escape" }),
-    prompt: null,
     decision: null,
   });
 });

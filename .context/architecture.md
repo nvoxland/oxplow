@@ -70,7 +70,7 @@ which is that oxplow steers and never drives a doing-agent.
 - **Chat agents** (built): an agent spoken to over the Agent Client
   Protocol, or a Codex thread, receives a prompt **only** when a human presses Enter in the
   thread's prompt box. oxplow's context (session context, advisories,
-  decisions, post-tool nudges) rides **only** on that human prompt, as a
+  post-tool nudges) rides **only** on that human prompt, as a
   visible block. Two source-scan tests pin this: the
   Rust `chat/guard_tests.rs` (the prompt type is built only on the human
   submit path) and the TS `no-agent-input-automation.test.ts` (only the
@@ -124,7 +124,7 @@ machine until that person deploys it there.
 - **Not gated:** pure in-process Starlark/jq transforms without privileged
   host access, and the user's own global-scope config. Everything else
   runs under its extension's permissions: model-calling collectors,
-  scripted effort policies, effects, declared AI providers and components
+  effects, declared AI providers and components
   that invoke commands. Every script runs in its own worker process,
   killed and reaped past its time budget or memory cap, or when its run
   is cancelled ([collection.md](./collection.md) "Containing scripts").
@@ -155,13 +155,13 @@ The core app is a **skeleton**: the controls you steer with, plus a data
 layer everything else builds on.
 
 - **Controls in core, instruments in extensions.** Core keeps streams,
-  threads, tasks and efforts, agent surfaces (terminal harnesses), comments, wiki, diff and file drill-down, and the
+  threads, tasks and requests, agent surfaces (terminal harnesses), comments, knowledge, diff and file drill-down, and the
   page graph (rail, launcher, tabs). Anything that **measures or
   visualizes** is an extension ([extensions.md](./extensions.md)).
 - **All data goes through the [semantic layer](./semantic-layer.md).**
   Sources produce entities and facts, dimensions slice them, metrics
   aggregate them, and read-only `v_*` SQL views are the contract. Core
-  ships common sources (work, wiki, git, LSP, tests, agent sessions…);
+  ships common sources (work, knowledge, git, LSP, tests, agent sessions…);
   users and their agents add more (GitHub, CI…) and build **pages** on
   top.
 - **One extension format for first- and third-party.** Oxplow's own
@@ -171,10 +171,10 @@ layer everything else builds on.
   [extensions.md](./extensions.md) for why.
 - **Exceptions over trends.** Humans reviewing agent work act on
   decisions and deviations, not on totals. Shipped pages are live
-  exception lists at the effort boundary, not dashboards.
+  exception lists at the request boundary, not dashboards.
 - **Stop investing in commodity surfaces.** Session lists, worktree per
   session and diff review now ship free with every major agent vendor's
-  app. Maintain them; put new effort into the semantic layer and
+  app. Maintain them; put new work into the semantic layer and
   verification.
 
 ## Current app shape

@@ -53,7 +53,9 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import type { IconName } from "./iconNames.js";
+import { createElement, type CSSProperties } from "react";
+
+import { isIconName, type IconName } from "./iconNames.js";
 
 /**
  * What draws each icon a resource, a page or an action may name
@@ -113,3 +115,53 @@ export const ICONS: Readonly<Record<IconName, LucideIcon>> = {
   "user": User,
   "zap": Zap,
 };
+
+/** What an extension's svg icon looks like on the wire (`assets/<name>.svg`,
+ *  published as a data URI): base64 only, so it holds no quote or
+ *  parenthesis and can't leave the CSS `url()`. */
+const SVG_DATA_URI = /^data:image\/svg\+xml;base64,[A-Za-z0-9+/=]+$/;
+
+const svgIcons = new Map<string, LucideIcon>();
+
+/** An extension's svg as an icon that sizes like the built-in ones: the
+ *  mask of an empty element (an image load, where no script in it runs),
+ *  colored by the text around it, so it follows the theme. */
+function svgIcon(src: string): LucideIcon {
+  let icon = svgIcons.get(src);
+  if (!icon) {
+    const image = `url("${src}")`;
+    icon = (({ size = 16, className, style }: { size?: number | string; className?: string; style?: CSSProperties }) =>
+      createElement("span", {
+        "aria-hidden": true,
+        "data-testid": "svg-icon",
+        className,
+        style: {
+          display: "inline-block",
+          flex: "none",
+          width: size,
+          height: size,
+          backgroundColor: "currentColor",
+          WebkitMaskImage: image,
+          maskImage: image,
+          WebkitMaskSize: "contain",
+          maskSize: "contain",
+          WebkitMaskRepeat: "no-repeat",
+          maskRepeat: "no-repeat",
+          WebkitMaskPosition: "center",
+          maskPosition: "center",
+          ...style,
+        },
+      })) as unknown as LucideIcon;
+    svgIcons.set(src, icon);
+  }
+  return icon;
+}
+
+/** What draws an icon a resource, a page, an action or a choice names: one
+ *  oxplow draws (`ICONS`), or the svg its extension brought (a data URI);
+ *  anything else, nothing. */
+export function iconFor(icon: string | null | undefined): LucideIcon | null {
+  if (!icon) return null;
+  if (isIconName(icon)) return ICONS[icon];
+  return SVG_DATA_URI.test(icon) ? svgIcon(icon) : null;
+}

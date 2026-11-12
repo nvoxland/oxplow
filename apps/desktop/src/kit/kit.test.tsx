@@ -14,7 +14,7 @@ import { useListNav } from "./useListNav.js";
 
 afterEach(cleanup);
 
-// A section is a heading and a rule, wiki style: no box around it.
+// A section is a heading and a rule, document style: no box around it.
 test("a Section is an h2 with its description, actions and body, and carries its id", () => {
   const { container, getByRole, getByText } = render(
     <Section id="earlier" title="Earlier sessions" description="What you had before." actions={[{ id: "r", label: "Refresh", run: () => {} }]}>

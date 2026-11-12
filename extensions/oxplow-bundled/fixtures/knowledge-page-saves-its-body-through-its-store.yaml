@@ -1,0 +1,15 @@
+# Editing the body and saving writes the page back through its store, under
+# the same id; the page is not renamed or duplicated.
+given:
+  - { command: oxplow.knowledge.write_page, input: { store: oxwiki, title: Ferrets, body: "# Ferrets\n\nThey steal socks.\n" } }
+when: { page: knowledge-page, params: { uri: "oxplow:oxplow/knowledge?id=ferrets&store=oxwiki", store: oxwiki, id: ferrets } }
+expect:
+  nodes: [{ id: body, actions: [save] }]
+steps:
+  - press: { action: save, node: body, row: { id: ferrets }, input: { body: "# Ferrets\n\nThey steal socks and keys.\n" } }
+    expect: { ok: true }
+  - expect:
+      loaders:
+        body: { rows: [{ id: ferrets, body: "# Ferrets\n\nThey steal socks and keys.\n" }] }
+  - when: { page: knowledge }
+    expect: { loaders: { pages: { rows: [{ id: ferrets }] } } }

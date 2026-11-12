@@ -15,17 +15,17 @@ const recorder = () => {
   return { calls, press };
 };
 
-test("a viz's press runs the node's action on the open run, with the row, input and drop", async () => {
+test("a viz's press runs the node's action on the open run, with the row, input, drop and option", async () => {
   const { calls, press } = recorder();
   const run = nodeActionRunner(press, "run-1", "notes/items");
-  await run("ignored/page", "finish", { p: 1 }, { id: "a" }, "stream", true, { note: "x" }, { onto: { id: "b" } });
-  expect(calls).toEqual([["run-1", "notes/items", "finish", { id: "a" }, { note: "x" }, { onto: { id: "b" } }, true]]);
+  await run("ignored/page", "finish", { p: 1 }, { id: "a" }, "stream", true, { note: "x" }, { onto: { id: "b" } }, "done");
+  expect(calls).toEqual([["run-1", "notes/items", "finish", { id: "a" }, { note: "x" }, { onto: { id: "b" } }, "done", true]]);
 });
 
-test("input and drop default to none; a whole-page action names no node", async () => {
+test("input, drop and option default to none; a whole-page action names no node", async () => {
   const { calls, press } = recorder();
   await nodeActionRunner(press, "run-1", null)("x", "add", {}, null, null, false);
-  expect(calls).toEqual([["run-1", null, "add", null, null, null, false]]);
+  expect(calls).toEqual([["run-1", null, "add", null, null, null, null, false]]);
 });
 
 test("before the run opens a press fails, saying so", async () => {
@@ -47,7 +47,7 @@ test("useNodeActions presses through the page's action context", async () => {
     </PageActionContext.Provider>,
   );
   await runner!("x", "go", {}, { id: "a" }, null, false);
-  expect(calls).toEqual([["run-9", "items", "go", { id: "a" }, null, null, false]]);
+  expect(calls).toEqual([["run-9", "items", "go", { id: "a" }, null, null, null, false]]);
 });
 
 // What a command changed shows even when no dataset change announces it

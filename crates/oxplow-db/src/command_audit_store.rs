@@ -276,7 +276,7 @@ mod tests {
                     let id = insert_tx(
                         tx,
                         &NewCommandAudit {
-                            command: "oxplow.work_item.transition".into(),
+                            command: "oxplow.task.transition".into(),
                             actor_kind: ActorKind::Agent,
                             actor_id: Some("thr3".into()),
                             thread_id: Some(ThreadId::new(3)),
@@ -286,7 +286,7 @@ mod tests {
                             error: None,
                             result: Some(json!({"id": "tsk1"})),
                             inverse: Some(CommandCall {
-                                name: "oxplow.work_item.transition".into(),
+                                name: "oxplow.task.transition".into(),
                                 input: json!({"id": "tsk1", "to": "ready"}),
                             }),
                             scopes: [("sql.read".to_string(), 2)].into(),
@@ -298,7 +298,7 @@ mod tests {
                     let undo_id = insert_tx(
                         tx,
                         &NewCommandAudit {
-                            command: "oxplow.work_item.transition".into(),
+                            command: "oxplow.task.transition".into(),
                             actor_kind: ActorKind::Human,
                             actor_id: None,
                             thread_id: None,
@@ -324,7 +324,7 @@ mod tests {
         assert_eq!(row.via.as_deref(), Some("assistant:ast1"));
         assert_eq!(store.get(undo_id).await.unwrap().unwrap().via, None);
         assert_eq!(store.get(undo_id).await.unwrap().unwrap().session_id, None);
-        assert_eq!(row.command, "oxplow.work_item.transition");
+        assert_eq!(row.command, "oxplow.task.transition");
         assert_eq!(row.actor_kind, ActorKind::Agent);
         assert_eq!(row.thread_id, Some(ThreadId::new(3)));
         assert_eq!(row.outcome, Outcome::Ok);

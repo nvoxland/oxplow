@@ -14,16 +14,6 @@
           "type": "string"
         },
         {
-          "const": "effort_start",
-          "description": "An effort opened (its start bracket).",
-          "type": "string"
-        },
-        {
-          "const": "effort_end",
-          "description": "An effort closed (its end bracket), including a restart closing\nan orphaned effort.",
-          "type": "string"
-        },
-        {
           "const": "startup",
           "description": "The boot sweep.",
           "type": "string"

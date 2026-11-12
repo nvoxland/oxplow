@@ -45,6 +45,7 @@
 /// the frame. The daemon serves a client library wrapping this
 /// (`/component-lib/oxplow-component.js`, `oxplow.connect()`); it checks
 /// `protocol` against the one it speaks.
+import type { MarkdownNode } from "../components/Markdown/markdownTree.js";
 import { isIconName } from "../iconNames.js";
 import { ipcErrorDetails, needsConfirmation } from "../ipc-error.js";
 import { parseUri } from "../uri/uri.js";
@@ -78,7 +79,7 @@ import type { CommandOutcome, VizRun, PageRun, SqlCell, SqlQueryResult } from ".
 /// and `update` carry `data` (each loader's rows), `params` and `props`,
 /// `update` the loaders that `changed` — and a page shows an inline page
 /// under it (`showView`, its YAML) where it showed a viz spec.
-export const BRIDGE_PROTOCOL = 12;
+export const BRIDGE_PROTOCOL = 13;
 
 /** One loader's rows as a component reads them (and what `showView`
  *  answers: the inline page's first loader's). */
@@ -175,7 +176,8 @@ export type BridgeRequest =
   | { id: string; method: "setHistoryState"; patch: Record<string, unknown> }
   | { id: string; method: "pageMemoryGet"; key: string }
   | { id: string; method: "pageMemorySet"; key: string; value: unknown }
-  | { id: string; method: "showView"; spec: string | null };
+  | { id: string; method: "showView"; spec: string | null }
+  | { id: string; method: "markdown"; text: string; inline: boolean };
 
 export type FrameMessage = { type: "ready" } | { type: "size"; height: number } | { type: "request"; request: BridgeRequest };
 
@@ -203,6 +205,9 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
         type: "request",
         request: { id: m.id, method: "navigate", uri: m.uri, newTab: m.newTab === true, replace: m.replace === true },
       };
+    case "markdown":
+      if (typeof m.text !== "string" || (m.inline !== undefined && typeof m.inline !== "boolean")) return null;
+      return { type: "request", request: { id: m.id, method: "markdown", text: m.text, inline: m.inline === true } };
     case "querySql": {
       const params = m.params ?? [];
       if (typeof m.sql !== "string" || !Array.isArray(params) || !params.every(isCell)) return null;
@@ -334,6 +339,9 @@ export interface BridgeDeps {
    *  it asks about beyond itself, one line each. */
   confirm(command: string, details: string[]): Promise<boolean>;
   onReady(): void;
+  /** Markdown as the tree the library draws (`markdownTree`): the viewer's
+   *  parse, links and titles, as data — no HTML crosses. */
+  markdown(text: string, inline: boolean): Promise<MarkdownNode[]>;
   /** Run its own read-only SQL (`run_component_sql`). */
   querySql?(sql: string, params: SqlCell[]): Promise<SqlQueryResult>;
   /** Show a declared command's form in the host and run it as submitted:
@@ -443,6 +451,13 @@ export function createBridgeHost(
       case "navigate":
         if (deps.navigate(r.uri, { newTab: r.newTab, replace: r.replace })) reply(r.id, null);
         else fail(r.id, "INVALID", "A component may open oxplow's pages only.");
+        return;
+      case "markdown":
+        try {
+          reply(r.id, await deps.markdown(r.text, r.inline));
+        } catch (e) {
+          failWith(r.id, e);
+        }
         return;
       case "querySql":
         if (!deps.querySql) return fail(r.id, "INVALID", "This host runs no SQL for a component.");

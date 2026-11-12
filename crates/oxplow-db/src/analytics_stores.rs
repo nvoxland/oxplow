@@ -19,11 +19,10 @@ use crate::database::{string_to_ts, ts_to_string};
 use crate::event_log_store::append_tx;
 use crate::page_ref_projections::finding_edges;
 use crate::snapshot_tree::{identities, manifest_hash, ContentHasher, SnapshotTree, TreeEntry};
-use oxplow_domain::events::schema::{SnapshotTaken, SnapshotTakenV3, VcsHeadMoved, VcsHeadMovedV2};
+use oxplow_domain::events::schema::{SnapshotTaken, SnapshotTakenV3, VcsHeadMoved, VcsHeadMovedV3};
 use oxplow_domain::events::{Anchors, Envelope};
 use oxplow_domain::snapshot::SnapshotTrigger;
 use oxplow_domain::uri::build::{commit_uri, snapshot_uri, stream_uri};
-use oxplow_domain::EffortId;
 
 // ---------------- Page visits ----------------
 
@@ -1116,15 +1115,11 @@ fn stamp_revision_tx(
         params![revision.to_string(), snapshot_id],
     )?;
     if let Revision::Vcs { rev, .. } = revision {
-        for table in ["effort_file", "page_ref"] {
-            conn.execute(
-                &format!(
-                    "UPDATE {table} SET closest_vcs_rev = ?1, vcs_rev_exact = 1
-                      WHERE local_snapshot_id = ?2"
-                ),
-                params![rev, snapshot_id],
-            )?;
-        }
+        conn.execute(
+            "UPDATE page_ref SET closest_vcs_rev = ?1, vcs_rev_exact = 1
+              WHERE local_snapshot_id = ?2",
+            params![rev, snapshot_id],
+        )?;
     }
     Ok(())
 }
@@ -1136,7 +1131,7 @@ fn insert_op_tx(
     snapshot_id: i64,
     parent: Option<i64>,
     trigger: SnapshotTrigger,
-    anchors: (Option<ThreadId>, Option<i64>, Option<EffortId>),
+    anchors: (Option<ThreadId>, Option<i64>),
     elapsed_ms: u64,
     budget_ms: Option<u64>,
     file_count: u32,
@@ -1145,9 +1140,9 @@ fn insert_op_tx(
     let over = budget_ms.is_some_and(|b| elapsed_ms > b);
     conn.execute(
         "INSERT INTO snapshot_op
-           (stream_id, snapshot_id, parent_snapshot_id, trigger, thread_id, turn_id, effort_id,
+           (stream_id, snapshot_id, parent_snapshot_id, trigger, thread_id, turn_id,
             at, elapsed_ms, budget_ms, over_budget, file_count, provider, contents, handle)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         params![
             stream_id.value(),
             snapshot_id,
@@ -1155,7 +1150,6 @@ fn insert_op_tx(
             trigger.as_db_str(),
             anchors.0.map(|t| t.value()),
             anchors.1,
-            anchors.2.map(|e| e.value()),
             ts_to_string(Timestamp::now()),
             elapsed_ms as i64,
             budget_ms.map(|b| b as i64),
@@ -1239,6 +1233,29 @@ fn record_take_tx(
             })
             .collect();
         insert_rows_tx(tx, &rows).map_err(map_sql_err)?;
+        for row in &rows {
+            if let Some((first, last)) = take.changed_at.get(&row.path) {
+                tx.execute(
+                    "UPDATE file_snapshot SET first_changed_at = ?3, last_changed_at = ?4
+                      WHERE snapshot_id = ?1 AND path = ?2",
+                    params![sid, row.path, ts_to_string(*first), ts_to_string(*last)],
+                )
+                .map_err(map_sql_err)?;
+            }
+        }
+        for row in &rows {
+            let oid = match row.storage {
+                SnapshotStorage::Git => row.blob_hash.as_ref(),
+                _ => take.git_oids.get(&row.path),
+            };
+            if let Some(oid) = oid {
+                tx.execute(
+                    "UPDATE file_snapshot SET git_oid = ?3 WHERE snapshot_id = ?1 AND path = ?2",
+                    params![sid, row.path, oid],
+                )
+                .map_err(map_sql_err)?;
+            }
+        }
         // The tree read before the lock holds when no take landed since;
         // otherwise it is read here.
         let tree = match read_before {
@@ -1276,32 +1293,47 @@ fn record_take_tx(
             }
         }
     };
-    let op_seq = insert_op_tx(
-        tx,
-        take.stream_id,
-        snapshot_id,
-        parent,
-        take.trigger,
-        (take.thread_id, take.turn_id, take.effort_id),
-        take.elapsed_ms,
-        take.budget_ms,
-        file_count,
-        (
-            take.provider.as_deref(),
-            take.contents,
-            take.handle.as_deref(),
-        ),
-    )
-    .map_err(map_sql_err)?;
-    if let Some(turn) = take.turn_id {
-        // The turn ended at this snapshot (P2.3).
-        tx.execute(
-            "UPDATE agent_turn SET snapshot_id = ?2 WHERE id = ?1",
-            params![turn, snapshot_id],
+    // An operation is a take that captured files. A request that found
+    // nothing answers the current snapshot and logs none; a provider's mark
+    // is the exception, since its handle names the state it marked.
+    let op_seq = if unchanged && take.handle.is_none() {
+        None
+    } else {
+        Some(
+            insert_op_tx(
+                tx,
+                take.stream_id,
+                snapshot_id,
+                parent,
+                take.trigger,
+                (take.thread_id, take.turn_id),
+                take.elapsed_ms,
+                take.budget_ms,
+                file_count,
+                (
+                    take.provider.as_deref(),
+                    take.contents,
+                    take.handle.as_deref(),
+                ),
+            )
+            .map_err(map_sql_err)?,
         )
-        .map_err(map_sql_err)?;
-    }
+    };
     let over_budget = take.budget_ms.is_some_and(|b| take.elapsed_ms > b);
+    // Whoever asked for a take waits on its event (a turn's checkpoint).
+    // A request nobody is anchored to that found nothing is not a fact
+    // about the worktree.
+    let waited_on = take.thread_id.is_some() || take.turn_id.is_some();
+    if unchanged && op_seq.is_none() && !waited_on {
+        return Ok(Some(TakeOutcome {
+            op_seq,
+            snapshot_id,
+            parent_snapshot_id: parent,
+            unchanged,
+            file_count,
+            over_budget,
+        }));
+    }
     let stream = stream_uri(take.stream_id);
     let env = Envelope::typed::<SnapshotTaken>(
         take.source.clone(),
@@ -1320,7 +1352,6 @@ fn record_take_tx(
     .with_anchors(Anchors {
         stream_id: Some(take.stream_id),
         thread_id: take.thread_id,
-        effort_id: take.effort_id,
         turn_id: take.turn_id,
         snapshot_id: Some(snapshot_id),
         ..Anchors::default()
@@ -1339,11 +1370,9 @@ fn record_take_tx(
 
 fn record_head_moved_tx(
     tx: &rusqlite::Connection,
-    vocabulary: &Vocabulary,
     stream_id: StreamId,
     expected: i64,
     revision: &Revision,
-    source: &str,
 ) -> Result<Option<TakeOutcome>, DomainError> {
     use crate::database::map_sql_err;
     let sid = expected;
@@ -1367,38 +1396,15 @@ fn record_head_moved_tx(
         sid,
         Some(sid),
         SnapshotTrigger::HeadMoved,
-        (None, None, None),
+        (None, None),
         0,
         None,
         0,
         (None, true, None),
     )
     .map_err(map_sql_err)?;
-    let stream = stream_uri(stream_id);
-    let env = Envelope::typed::<VcsHeadMoved>(
-        source.to_string(),
-        &VcsHeadMovedV2 {
-            stream: stream_id.to_string(),
-            snapshot: sid,
-            from: from
-                .and_then(|f| f.parse::<Revision>().ok())
-                .and_then(|f| f.vcs_rev().map(str::to_string)),
-            to: revision.vcs_rev().unwrap_or_default().to_string(),
-        },
-    )
-    .with_anchors(Anchors {
-        stream_id: Some(stream_id),
-        snapshot_id: Some(sid),
-        ..Anchors::default()
-    })
-    .with_subject([
-        stream,
-        snapshot_uri(sid),
-        commit_uri(revision.vcs_rev().unwrap_or_default()),
-    ]);
-    append_tx(tx, vocabulary, &env)?;
     Ok(Some(TakeOutcome {
-        op_seq,
+        op_seq: Some(op_seq),
         snapshot_id: sid,
         parent_snapshot_id: Some(sid),
         unchanged: true,
@@ -1412,7 +1418,7 @@ fn row_to_op(row: &rusqlite::Row<'_>) -> rusqlite::Result<SnapshotOp> {
         rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
     };
     let trigger: String = row.get(4)?;
-    let at: String = row.get(8)?;
+    let at: String = row.get(7)?;
     Ok(SnapshotOp {
         seq: row.get(0)?,
         stream_id: StreamId::new(row.get(1)?),
@@ -1425,15 +1431,14 @@ fn row_to_op(row: &rusqlite::Row<'_>) -> rusqlite::Result<SnapshotOp> {
         })?,
         thread_id: row.get::<_, Option<i64>>(5)?.map(ThreadId::new),
         turn_id: row.get(6)?,
-        effort_id: row.get::<_, Option<i64>>(7)?.map(EffortId::new),
         at: string_to_ts(&at).map_err(conv)?,
-        elapsed_ms: row.get(9)?,
-        budget_ms: row.get(10)?,
-        over_budget: row.get::<_, i64>(11)? != 0,
-        file_count: row.get(12)?,
-        provider: row.get(13)?,
-        contents: row.get::<_, i64>(14)? != 0,
-        handle: row.get(15)?,
+        elapsed_ms: row.get(8)?,
+        budget_ms: row.get(9)?,
+        over_budget: row.get::<_, i64>(10)? != 0,
+        file_count: row.get(11)?,
+        provider: row.get(12)?,
+        contents: row.get::<_, i64>(13)? != 0,
+        handle: row.get(14)?,
     })
 }
 
@@ -1448,7 +1453,6 @@ pub struct TakeRecord {
     pub thread_id: Option<ThreadId>,
     /// `agent_turn.id`, when the take belongs to a turn.
     pub turn_id: Option<i64>,
-    pub effort_id: Option<EffortId>,
     /// The branch the workspace was on (recorded clean or dirty).
     pub branch: Option<String>,
     /// The head revision when the workspace was clean at the take.
@@ -1466,13 +1470,23 @@ pub struct TakeRecord {
     /// A snapshot provider's own name for the state it marked ;
     /// `None` for core's capture pipeline.
     pub handle: Option<String>,
+    /// When the watcher first and last heard each row's path change since
+    /// the previous take, by path. A row absent from it (the startup sweep,
+    /// a file with no watcher event) has no change time.
+    pub changed_at: std::collections::HashMap<String, (Timestamp, Timestamp)>,
+    /// The git blob id of the bytes each oxplow-stored row captured, by
+    /// path, so a row is comparable with a commit's blob without reading
+    /// bytes. A git-backed row's address is its own; a row absent from the
+    /// map (hashes-only, deleted, oversize) has none.
+    pub git_oids: std::collections::HashMap<String, String>,
 }
 
 /// What a take recorded.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TakeOutcome {
-    /// The `snapshot_op.seq` of this take.
-    pub op_seq: i64,
+    /// The `snapshot_op.seq` of this take; `None` for a request that found
+    /// nothing, which logs no operation.
+    pub op_seq: Option<i64>,
     /// The snapshot the worktree is at after the take.
     pub snapshot_id: i64,
     pub parent_snapshot_id: Option<i64>,
@@ -1496,7 +1510,6 @@ pub struct SnapshotOp {
     pub thread_id: Option<ThreadId>,
     #[specta(type = Option<oxplow_domain::JsNumber>)]
     pub turn_id: Option<i64>,
-    pub effort_id: Option<EffortId>,
     pub at: Timestamp,
     #[specta(type = oxplow_domain::JsNumber)]
     pub elapsed_ms: i64,
@@ -1570,29 +1583,61 @@ impl SqliteSnapshotStore {
 
     /// HEAD moved while the worktree was clean: re-stamp `snapshot_id` —
     /// the snapshot the caller saw the clean tree at — with `sha` (and
-    /// every exact-pin file ref on it), record a `head_moved` op and
-    /// `vcs.head.moved`, in one transaction. `Ok(None)` when the stream's
-    /// current snapshot is no longer `snapshot_id` (a take landed since:
-    /// stamping it would claim a dirty tree is the commit), or it already
-    /// points at `sha`.
+    /// every exact-pin file ref on it) and record a `head_moved` op, in one
+    /// transaction. `Ok(None)` when the stream's current snapshot is no
+    /// longer `snapshot_id` (a take landed since: stamping it would claim a
+    /// dirty tree is the commit), or it already points at `sha`. The move
+    /// itself is [`Self::log_head_moved`]'s.
     pub async fn record_head_moved(
         &self,
         stream_id: StreamId,
         snapshot_id: i64,
         revision: Revision,
-        source: String,
     ) -> Result<Option<TakeOutcome>, DomainError> {
+        self.db
+            .transaction(move |tx| record_head_moved_tx(tx, stream_id, snapshot_id, &revision))
+            .await
+    }
+
+    /// Log `vcs.head.moved`: `stream_id`'s HEAD moved from `from` to `to`
+    /// (commit shas), whether or not the tree was clean. `snapshot` is the
+    /// snapshot [`Self::record_head_moved`] re-stamped with it, when it did.
+    pub async fn log_head_moved(
+        &self,
+        stream_id: StreamId,
+        from: Option<String>,
+        to: Option<String>,
+        snapshot: Option<i64>,
+        source: String,
+    ) -> Result<(), DomainError> {
         let vocabulary = self.vocabulary.clone();
         self.db
             .transaction(move |tx| {
-                record_head_moved_tx(
-                    tx,
-                    &vocabulary.current(),
-                    stream_id,
-                    snapshot_id,
-                    &revision,
-                    &source,
+                let stream = stream_uri(stream_id);
+                let mut subject = vec![stream];
+                if let Some(snapshot) = snapshot {
+                    subject.push(snapshot_uri(snapshot));
+                }
+                if let Some(to) = &to {
+                    subject.push(commit_uri(to));
+                }
+                let env = Envelope::typed::<VcsHeadMoved>(
+                    source.clone(),
+                    &VcsHeadMovedV3 {
+                        stream: stream_id.to_string(),
+                        snapshot,
+                        from: from.clone(),
+                        to: to.clone(),
+                    },
                 )
+                .with_anchors(Anchors {
+                    stream_id: Some(stream_id),
+                    snapshot_id: snapshot,
+                    ..Anchors::default()
+                })
+                .with_subject(subject);
+                append_tx(tx, &vocabulary.current(), &env)?;
+                Ok(())
             })
             .await
     }
@@ -1607,7 +1652,7 @@ impl SqliteSnapshotStore {
             .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT seq, stream_id, snapshot_id, parent_snapshot_id, trigger, thread_id,
-                            turn_id, effort_id, at, elapsed_ms, budget_ms, over_budget, file_count,
+                            turn_id, at, elapsed_ms, budget_ms, over_budget, file_count,
                             provider, contents, handle
                        FROM snapshot_op WHERE stream_id = ?1
                       ORDER BY seq DESC LIMIT ?2",
@@ -1628,7 +1673,7 @@ impl SqliteSnapshotStore {
             .call(move |conn| {
                 conn.query_row(
                     "SELECT seq, stream_id, snapshot_id, parent_snapshot_id, trigger, thread_id,
-                            turn_id, effort_id, at, elapsed_ms, budget_ms, over_budget, file_count,
+                            turn_id, at, elapsed_ms, budget_ms, over_budget, file_count,
                             provider, contents, handle
                        FROM snapshot_op WHERE snapshot_id = ?1 ORDER BY seq ASC LIMIT 1",
                     params![snapshot_id],
@@ -1773,26 +1818,6 @@ impl SqliteSnapshotStore {
     ) -> Result<Option<i64>, DomainError> {
         self.db
             .call(move |conn| latest_snapshot_id_for_stream_tx(conn, stream_id))
-            .await
-    }
-
-    /// The stream's newest snapshot taken at or before `at` — the tree as
-    /// it stood then, as far as oxplow saw it. `None` when there's none.
-    pub async fn latest_snapshot_at_or_before(
-        &self,
-        stream_id: StreamId,
-        at: Timestamp,
-    ) -> Result<Option<i64>, DomainError> {
-        self.db
-            .call(move |conn| {
-                conn.query_row(
-                    "SELECT id FROM snapshot WHERE stream_id = ?1 AND created_at <= ?2
-                     ORDER BY created_at DESC, id DESC LIMIT 1",
-                    params![stream_id.value(), ts_to_string(at)],
-                    |row| row.get(0),
-                )
-                .optional()
-            })
             .await
     }
 
@@ -2106,11 +2131,11 @@ impl SqliteSnapshotStore {
             .await
     }
 
-    /// For each input snapshot id, return the set of wiki slugs whose
-    /// `.md` body changed in that snapshot's file_snapshot rows.
-    /// Cheap targeted query for the Local History dashboard's wiki
-    /// badges — avoids fetching the full file list per snapshot.
-    pub async fn list_wiki_slugs_for_snapshots(
+    /// For each input snapshot id, the oxwiki pages (their URIs) whose
+    /// `.md` file changed in that snapshot's file_snapshot rows. Cheap
+    /// targeted query for the Local History dashboard's knowledge badges —
+    /// avoids fetching the full file list per snapshot.
+    pub async fn list_knowledge_pages_for_snapshots(
         &self,
         snapshot_ids: Vec<i64>,
     ) -> Result<Vec<(i64, String)>, DomainError> {
@@ -2121,10 +2146,11 @@ impl SqliteSnapshotStore {
             .call(move |conn| {
                 let placeholders: Vec<String> =
                     (1..=snapshot_ids.len()).map(|i| format!("?{i}")).collect();
+                let dir = oxplow_domain::knowledge::OXWIKI_DIR;
                 let sql = format!(
                     "SELECT snapshot_id, path FROM file_snapshot \
                      WHERE snapshot_id IN ({}) \
-                       AND path LIKE '.oxplow/wiki/%.md'",
+                       AND path LIKE '{dir}/%.md'",
                     placeholders.join(",")
                 );
                 let mut stmt = conn.prepare(&sql)?;
@@ -2136,11 +2162,17 @@ impl SqliteSnapshotStore {
                     let sid: i64 = row.get("snapshot_id")?;
                     let path: String = row.get("path")?;
                     let slug = path
-                        .strip_prefix(".oxplow/wiki/")
+                        .strip_prefix(oxplow_domain::knowledge::OXWIKI_DIR)
+                        .and_then(|s| s.strip_prefix('/'))
                         .and_then(|s| s.strip_suffix(".md"))
-                        .map(|s| s.to_string())
-                        .unwrap_or(path);
-                    Ok((sid, slug))
+                        .unwrap_or(&path);
+                    Ok((
+                        sid,
+                        oxplow_domain::uri::build::knowledge_uri(
+                            oxplow_domain::knowledge::OXWIKI,
+                            slug,
+                        ),
+                    ))
                 })?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
@@ -3256,7 +3288,6 @@ mod tests {
             trigger,
             thread_id: None,
             turn_id: None,
-            effort_id: None,
             branch: Some("main".into()),
             revision: None,
             elapsed_ms: 5,
@@ -3265,6 +3296,8 @@ mod tests {
             provider: None,
             contents: true,
             handle: None,
+            changed_at: Default::default(),
+            git_oids: Default::default(),
         }
     }
 
@@ -3481,8 +3514,8 @@ mod tests {
         slow.budget_ms = Some(1);
         slow.elapsed_ms = 50;
         let second = store.record_take(slow).await.unwrap().unwrap();
-        // A later empty take lands on the second snapshot; its creating op
-        // is still the turn-end one.
+        // A later empty take lands on the second snapshot and logs no op;
+        // the snapshot's creating op is still the turn-end one.
         store
             .record_take(take(1, vec![], SnapshotTrigger::Quiet))
             .await
@@ -3504,16 +3537,18 @@ mod tests {
             (Some(first.snapshot_id), SnapshotTrigger::TurnEnd, true)
         );
 
-        let ops = store.list_ops(StreamId::new(1), 2).await.unwrap();
+        let ops = store.list_ops(StreamId::new(1), 3).await.unwrap();
         let triggers: Vec<SnapshotTrigger> = ops.iter().map(|o| o.trigger).collect();
         assert_eq!(
             triggers,
-            vec![SnapshotTrigger::Quiet, SnapshotTrigger::TurnEnd]
+            vec![SnapshotTrigger::TurnEnd, SnapshotTrigger::Startup]
         );
     }
 
+    /// A request that finds nothing answers the stream's current snapshot and
+    /// logs no operation: an operation is a take that captured files.
     #[tokio::test]
-    async fn an_empty_or_identical_take_records_an_op_on_the_parent() {
+    async fn an_empty_or_identical_take_answers_the_current_snapshot_and_logs_no_op() {
         let db = Database::in_memory();
         seed_stream(&db, 1);
         let store = SqliteSnapshotStore::new(db.clone());
@@ -3531,6 +3566,7 @@ mod tests {
         assert!(empty.unchanged);
         assert_eq!(empty.snapshot_id, base.snapshot_id);
         assert_eq!(empty.parent_snapshot_id, Some(base.snapshot_id));
+        assert_eq!(empty.op_seq, None);
         // Rows that net out to the same tree (a change and its revert).
         let same = store
             .record_take(take(1, vec![("a.txt", "a1")], SnapshotTrigger::Quiet))
@@ -3541,9 +3577,41 @@ mod tests {
         assert_eq!(same.snapshot_id, base.snapshot_id);
         assert_eq!(count(&db, "SELECT count(*) FROM snapshot"), 1);
         assert_eq!(count(&db, "SELECT count(*) FROM file_snapshot"), 1);
-        assert_eq!(count(&db, "SELECT count(*) FROM snapshot_op"), 3);
+        assert_eq!(count(&db, "SELECT count(*) FROM snapshot_op"), 1);
+        // Nobody waits on these requests: no event either.
+        assert_eq!(events(&db, "snapshot.taken").len(), 1);
+        // Nor does a `git_refs` take that found nothing: a move of HEAD is
+        // `vcs.head.moved`'s.
+        let moved = store
+            .record_take(take(1, vec![], SnapshotTrigger::GitRefs))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(moved.unchanged);
+        assert_eq!(count(&db, "SELECT count(*) FROM snapshot_op"), 1);
+        assert_eq!(events(&db, "snapshot.taken").len(), 1);
+    }
+
+    /// A request that names a turn or a thread is waited on (the
+    /// checkpoint): it logs `snapshot.taken` as
+    /// unchanged, though no operation.
+    #[tokio::test]
+    async fn an_unchanged_request_that_someone_waits_on_still_logs_its_event() {
+        let db = Database::in_memory();
+        seed_stream(&db, 1);
+        let store = SqliteSnapshotStore::new(db.clone());
+        let base = store
+            .record_take(take(1, vec![("a.txt", "a1")], SnapshotTrigger::Startup))
+            .await
+            .unwrap()
+            .unwrap();
+        let mut end = take(1, vec![], SnapshotTrigger::TurnEnd);
+        end.turn_id = Some(7);
+        let out = store.record_take(end).await.unwrap().unwrap();
+        assert_eq!((out.unchanged, out.snapshot_id), (true, base.snapshot_id));
+        assert_eq!(count(&db, "SELECT count(*) FROM snapshot_op"), 1);
         let taken = events(&db, "snapshot.taken");
-        assert_eq!(taken.len(), 3);
+        assert_eq!(taken.len(), 2);
         assert_eq!(taken[1]["unchanged"], true);
         assert_eq!(taken[1]["file_count"], 0);
     }
@@ -3578,7 +3646,7 @@ mod tests {
         let store = SqliteSnapshotStore::new(db.clone());
         assert_eq!(
             store
-                .record_head_moved(StreamId::new(1), 1, Revision::git("aaaaaaa"), "test".into())
+                .record_head_moved(StreamId::new(1), 1, Revision::git("aaaaaaa"))
                 .await
                 .unwrap(),
             None,
@@ -3592,31 +3660,21 @@ mod tests {
             .execute(
                 "INSERT INTO page_ref (source_uri, target_uri, source_resource, target_resource,
                    ref_type, local_snapshot_id, vcs_rev_exact)
-                 VALUES (uri('oxplow/wiki', 'slug', 'w'), uri('oxplow/file', 'path', 'a.txt'),
-                         'oxplow/wiki', 'oxplow/file', 'mention', ?1, 0)",
+                 VALUES ('oxplow:oxplow/knowledge?id=w&store=oxwiki', uri('oxplow/file', 'path', 'a.txt'),
+                         'oxplow/knowledge', 'oxplow/file', 'mention', ?1, 0)",
                 params![base.snapshot_id],
             )
             .unwrap();
         // Same commit: nothing to record.
         assert_eq!(
             store
-                .record_head_moved(
-                    StreamId::new(1),
-                    base.snapshot_id,
-                    Revision::git("aaaaaaa"),
-                    "test".into()
-                )
+                .record_head_moved(StreamId::new(1), base.snapshot_id, Revision::git("aaaaaaa"))
                 .await
                 .unwrap(),
             None
         );
         let moved = store
-            .record_head_moved(
-                StreamId::new(1),
-                base.snapshot_id,
-                Revision::git("bbbbbbb"),
-                "test".into(),
-            )
+            .record_head_moved(StreamId::new(1), base.snapshot_id, Revision::git("bbbbbbb"))
             .await
             .unwrap()
             .unwrap();
@@ -3646,12 +3704,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             store
-                .record_head_moved(
-                    StreamId::new(1),
-                    base.snapshot_id,
-                    Revision::git("ccccccc"),
-                    "test".into()
-                )
+                .record_head_moved(StreamId::new(1), base.snapshot_id, Revision::git("ccccccc"),)
                 .await
                 .unwrap(),
             None
@@ -3663,16 +3716,44 @@ mod tests {
                 .unwrap(),
             None
         );
+        // The re-stamp logs an op; the move is the listener's event.
+        assert_eq!(events(&db, "vcs.head.moved").len(), 0);
+        store
+            .log_head_moved(
+                StreamId::new(1),
+                Some("aaaaaaa".into()),
+                Some("bbbbbbb".into()),
+                Some(base.snapshot_id),
+                "test".into(),
+            )
+            .await
+            .unwrap();
+        store
+            .log_head_moved(
+                StreamId::new(1),
+                Some("bbbbbbb".into()),
+                Some("ccccccc".into()),
+                None,
+                "test".into(),
+            )
+            .await
+            .unwrap();
         let moved_events = events(&db, "vcs.head.moved");
-        assert_eq!(moved_events.len(), 1);
+        assert_eq!(moved_events.len(), 2);
         assert_eq!(moved_events[0]["from"], "aaaaaaa");
         assert_eq!(moved_events[0]["to"], "bbbbbbb");
+        assert_eq!(moved_events[0]["snapshot"], base.snapshot_id);
+        assert_eq!(moved_events[1]["to"], "ccccccc");
+        assert!(
+            moved_events[1].get("snapshot").is_none(),
+            "a dirty tree re-stamps none"
+        );
     }
 
     #[tokio::test]
     async fn a_revision_stamp_cascades_to_file_refs() {
         // When a revision is stamped on a snapshot, every
-        // `effort_file` and `page_ref` row pointing at that
+        // `page_ref` row pointing at that
         // snapshot must pick up the sha and flip
         // `vcs_rev_exact` to 1. We bypass the domain stores
         // (FK setup noise) and seed the rows directly.
@@ -3700,33 +3781,17 @@ mod tests {
         .await
         .unwrap()
         .unwrap();
-        // Seed one effort_file row pointing at this snapshot
-        // (skip the FK chain — fk on `effort` is enforced but
-        // we can disable it for the test by NOT joining via the
-        // store and writing through the raw connection.)
+        // Seed one page_ref row pointing at this snapshot.
         let db_for_seed = db.clone();
         tokio::task::spawn_blocking(move || {
             db_for_seed.with_conn(|conn| {
-                conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
-                conn.execute(
-                    "INSERT INTO effort (work_item, thread_id, started_at)
-                     VALUES ('oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 1, '2026-01-01T00:00:00Z')",
-                    [],
-                )?;
-                conn.execute(
-                    "INSERT INTO effort_file
-                       (effort_id, path, change_kind,
-                        local_snapshot_id, closest_vcs_rev, vcs_rev_exact)
-                     VALUES (?1, ?2, 'updated', ?3, ?4, 0)",
-                    params![1, "src/a.rs", snap_id, "aaaa"],
-                )?;
                 conn.execute(
                     "INSERT INTO page_ref
                        (source_uri, target_uri, source_resource, target_resource, ref_type,
                         source_extra, local_snapshot_id, closest_vcs_rev, vcs_rev_exact)
-                     VALUES (uri('oxplow/wiki', 'slug', 'intro'),
-                             uri('oxplow/file', 'path', 'src/a.rs'), 'oxplow/wiki', 'oxplow/file',
-                             'wiki_file_ref', NULL, ?1, 'aaaa', 0)",
+                     VALUES ('oxplow:oxplow/knowledge?id=intro&store=oxwiki',
+                             uri('oxplow/file', 'path', 'src/a.rs'), 'oxplow/knowledge', 'oxplow/file',
+                             'knowledge_file_ref', NULL, ?1, 'aaaa', 0)",
                     params![snap_id],
                 )?;
                 Ok(())
@@ -3742,35 +3807,22 @@ mod tests {
             .unwrap();
 
         let db_for_check = db.clone();
-        let (file_sha, file_exact, edge_sha, edge_exact): (
-            Option<String>,
-            i64,
-            Option<String>,
-            i64,
-        ) = tokio::task::spawn_blocking(move || {
-            db_for_check.with_conn(|conn| {
-                let mut row = conn.query_row(
-                    "SELECT closest_vcs_rev, vcs_rev_exact FROM effort_file
-                         WHERE effort_id = 1 AND path = 'src/a.rs'",
-                    [],
-                    |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, i64>(1)?)),
-                )?;
-                let er = conn.query_row(
-                    "SELECT closest_vcs_rev, vcs_rev_exact FROM page_ref
-                         WHERE source_uri = uri('oxplow/wiki', 'slug', 'intro')
+        let (edge_sha, edge_exact): (Option<String>, i64) =
+            tokio::task::spawn_blocking(move || {
+                db_for_check.with_conn(|conn| {
+                    let er = conn.query_row(
+                        "SELECT closest_vcs_rev, vcs_rev_exact FROM page_ref
+                         WHERE source_uri = 'oxplow:oxplow/knowledge?id=intro&store=oxwiki'
                            AND target_uri = uri('oxplow/file', 'path', 'src/a.rs')",
-                    [],
-                    |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, i64>(1)?)),
-                )?;
-                row = (row.0, row.1);
-                Ok((row.0, row.1, er.0, er.1))
+                        [],
+                        |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, i64>(1)?)),
+                    )?;
+                    Ok((er.0, er.1))
+                })
             })
-        })
-        .await
-        .unwrap()
-        .unwrap();
-        assert_eq!(file_sha.as_deref(), Some("bbbb"));
-        assert_eq!(file_exact, 1);
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(edge_sha.as_deref(), Some("bbbb"));
         assert_eq!(edge_exact, 1);
     }
@@ -3818,7 +3870,7 @@ mod tests {
     async fn page_visit_record_then_recent() {
         let store = SqlitePageVisitStore::new(Database::in_memory());
         store
-            .record("wiki", "abc", None, Some(1234), None)
+            .record("oxplow/knowledge", "abc", None, Some(1234), None)
             .await
             .unwrap();
         store
@@ -3834,9 +3886,18 @@ mod tests {
     #[tokio::test]
     async fn page_visit_top_groups_correctly() {
         let store = SqlitePageVisitStore::new(Database::in_memory());
-        store.record("wiki", "a", None, None, None).await.unwrap();
-        store.record("wiki", "a", None, None, None).await.unwrap();
-        store.record("wiki", "b", None, None, None).await.unwrap();
+        store
+            .record("oxplow/knowledge", "a", None, None, None)
+            .await
+            .unwrap();
+        store
+            .record("oxplow/knowledge", "a", None, None, None)
+            .await
+            .unwrap();
+        store
+            .record("oxplow/knowledge", "b", None, None, None)
+            .await
+            .unwrap();
         let top = store.list_top(10, None).await.unwrap();
         assert_eq!(top[0].1, "a");
         assert_eq!(top[0].2, 2);
@@ -3845,9 +3906,15 @@ mod tests {
     #[tokio::test]
     async fn page_visit_forget_clears_only_target() {
         let store = SqlitePageVisitStore::new(Database::in_memory());
-        store.record("wiki", "a", None, None, None).await.unwrap();
-        store.record("wiki", "b", None, None, None).await.unwrap();
-        store.forget_page("wiki", "a").await.unwrap();
+        store
+            .record("oxplow/knowledge", "a", None, None, None)
+            .await
+            .unwrap();
+        store
+            .record("oxplow/knowledge", "b", None, None, None)
+            .await
+            .unwrap();
+        store.forget_page("oxplow/knowledge", "a").await.unwrap();
         let recent = store.list_recent(10, None).await.unwrap();
         assert_eq!(recent.len(), 1);
         assert_eq!(recent[0].page_id, "b");
@@ -3857,14 +3924,17 @@ mod tests {
     async fn page_visit_recent_filters_by_thread() {
         let store = SqlitePageVisitStore::new(Database::in_memory());
         store
-            .record("wiki", "a", None, None, Some("thr1"))
+            .record("oxplow/knowledge", "a", None, None, Some("thr1"))
             .await
             .unwrap();
         store
-            .record("wiki", "b", None, None, Some("thr2"))
+            .record("oxplow/knowledge", "b", None, None, Some("thr2"))
             .await
             .unwrap();
-        store.record("wiki", "c", None, None, None).await.unwrap();
+        store
+            .record("oxplow/knowledge", "c", None, None, None)
+            .await
+            .unwrap();
         let in_thread = store.list_recent(10, Some("thr1")).await.unwrap();
         assert_eq!(in_thread.len(), 1);
         assert_eq!(in_thread[0].page_id, "a");
@@ -3876,19 +3946,19 @@ mod tests {
     async fn page_visit_top_filters_by_thread() {
         let store = SqlitePageVisitStore::new(Database::in_memory());
         store
-            .record("wiki", "a", None, None, Some("thr1"))
+            .record("oxplow/knowledge", "a", None, None, Some("thr1"))
             .await
             .unwrap();
         store
-            .record("wiki", "a", None, None, Some("thr1"))
+            .record("oxplow/knowledge", "a", None, None, Some("thr1"))
             .await
             .unwrap();
         store
-            .record("wiki", "a", None, None, Some("thr2"))
+            .record("oxplow/knowledge", "a", None, None, Some("thr2"))
             .await
             .unwrap();
         store
-            .record("wiki", "b", None, None, Some("thr1"))
+            .record("oxplow/knowledge", "b", None, None, Some("thr1"))
             .await
             .unwrap();
         let in_thread = store.list_top(10, Some("thr1")).await.unwrap();

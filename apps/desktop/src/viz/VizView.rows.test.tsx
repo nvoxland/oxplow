@@ -52,6 +52,7 @@ const base: VizConfig = {
   group: null,
   emphasis: null,
   depth: null,
+  edge: null,
   parts: [],
   launcherCategory: null,
   hidden: false,
@@ -62,9 +63,9 @@ const base: VizConfig = {
 };
 const columns = ["bucket", "bucket_ref", "id", "title", "status", "hue", "on", "d", "uri"];
 const rows: SqlCell[][] = [
-  ["In progress", "oxplow:oxplow/page?page=tasks", 1, "Epic", "in_progress", null, 0, 0, "oxplow:oxplow/work_item?id=tsk1&provider=oxplow"],
-  ["In progress", "oxplow:oxplow/page?page=tasks", 2, "Child", "done", "warning", 1, 1, "oxplow:oxplow/work_item?id=tsk2&provider=oxplow"],
-  ["Ready", null, 3, "Next", "todo", null, 0, 0, "oxplow:oxplow/work_item?id=tsk3&provider=oxplow"],
+  ["In progress", "oxplow:oxplow/page?page=tasks", 1, "Epic", "in_progress", null, 0, 0, "oxplow:oxplow/task?id=tsk1&provider=oxtask"],
+  ["In progress", "oxplow:oxplow/page?page=tasks", 2, "Child", "done", "warning", 1, 1, "oxplow:oxplow/task?id=tsk2&provider=oxtask"],
+  ["Ready", null, 3, "Next", "todo", null, 0, 0, "oxplow:oxplow/task?id=tsk3&provider=oxtask"],
 ];
 const runOf = (viz: Partial<VizConfig>): VizRun =>
   ({ config: { ...base, ...viz }, params: {}, result: { columns, rows, truncated: false } }) as unknown as VizRun;
@@ -73,7 +74,7 @@ const grouped: Partial<VizConfig> = {
   emphasis: "on",
   depth: "d",
   columns: [{ key: "title", label: null, link: link("page", "uri"), unit: null, icon: "status", tone: "hue" }],
-  actions: [{ id: "add", label: "+", command: "oxplow.work_item.create", input: {}, row: false, group: "Ready" }],
+  actions: [{ id: "add", label: "+", command: "oxplow.task.create", input: {}, row: false, group: "Ready" }],
 };
 
 test("a grouped list puts its rows under a heading per value, in order, and the heading has an arrow to its page", () => {
@@ -103,7 +104,7 @@ test("a group's action is a button in its heading, even compact, and runs withou
 
 // A group's heading says how many rows it holds and folds them away.
 test("a group's heading shows its count and folds its rows", () => {
-  const view = render(<VizView run={runOf(grouped)} compact onOpenPage={() => {}} />);
+  const view = render(<VizView run={runOf(grouped)} onOpenPage={() => {}} />);
   const headings = view.getAllByTestId("viz-group-heading");
   expect(headings.map((h) => h.querySelector("[data-testid=viz-group-count]")?.textContent)).toEqual(["2", "1"]);
   const toggle = headings[0]!.querySelector("[aria-expanded]") as HTMLElement;
@@ -116,6 +117,26 @@ test("a group's heading shows its count and folds its rows", () => {
   expect((view.getAllByTestId("viz-group-heading")[0]!.querySelector("[aria-expanded]") as HTMLElement).getAttribute("aria-expanded")).toBe("false");
   fireEvent.click(view.getAllByTestId("viz-group-heading")[0]!.querySelector("[aria-expanded]") as HTMLElement);
   expect(view.getByTestId("viz-row-0")).toBeTruthy();
+});
+
+// A compact view (a rail panel, a strip, a tile) is folded as a whole by
+// what holds it: its group headings say the group and count, and fold nothing.
+test("a compact view's group headings fold nothing", () => {
+  const view = render(<VizView run={runOf(grouped)} compact onOpenPage={() => {}} />);
+  const headings = view.getAllByTestId("viz-group-heading");
+  expect(headings.map((h) => h.querySelector("[data-testid=viz-group-count]")?.textContent)).toEqual(["2", "1"]);
+  expect(headings.every((h) => h.querySelector("[aria-expanded]") === null)).toBe(true);
+  expect(view.getByTestId("viz-row-0")).toBeTruthy();
+});
+
+// A compact list (a rail panel) is dense: each row one line, its other
+// columns beside its headline, not under it.
+test("a compact list draws each row as one dense line", () => {
+  const view = render(<VizView run={runOf(grouped)} compact onOpenPage={() => {}} />);
+  const row = view.getByTestId("viz-row-0");
+  expect(row.getAttribute("data-dense")).toBe("true");
+  const full = render(<VizView run={runOf(grouped)} onOpenPage={() => {}} />);
+  expect(full.getAllByTestId("viz-row-0").at(-1)!.getAttribute("data-dense")).toBeNull();
 });
 
 // A cell's format can draw a mark: a series as a small line with its
@@ -147,6 +168,30 @@ test("sparkline and badge formats draw a line and a pill", () => {
   expect(second.querySelector("[data-testid=viz-badge]")!.textContent).toBe("low");
 });
 
+// A markdown cell draws its inline marks on one line: blocks unwrap, a
+// link is a link; the agent still reads the text as written.
+test("a markdown format draws its inline markdown on one line", () => {
+  const run = {
+    config: {
+      ...base,
+      viz: "table",
+      columns: [{ key: "summary", label: null, link: null, unit: null, icon: null, tone: null, format: "markdown" }],
+    },
+    params: {},
+    result: { columns: ["summary"], rows: [["- Fix **it** in `a.ts`, see [the spec](https://example.com/spec)."], [null]], truncated: false },
+  } as unknown as VizRun;
+  const view = render(<VizView run={run} onOpenPage={() => {}} />);
+  const first = view.getByTestId("viz-row-0");
+  const md = first.querySelector("[data-testid=viz-markdown]")!;
+  expect(md.tagName).toBe("SPAN");
+  expect(md.querySelector("strong")!.textContent).toBe("it");
+  expect(md.querySelector("code")!.textContent).toBe("a.ts");
+  expect(md.querySelector("a")!.textContent).toContain("the spec");
+  // No block survives: no list, no paragraph.
+  expect(md.querySelector("ul, li, p, div")).toBeNull();
+  expect(view.getByTestId("viz-row-1").querySelector("[data-testid=viz-markdown]")).toBeNull();
+});
+
 // A line chart's targets column draws a target line on its series.
 test("a line's targets column draws each series' target line", () => {
   const run = {
@@ -175,6 +220,50 @@ test("cells draw their icon and tone; rows their emphasis and depth", () => {
   expect(child.getAttribute("data-emphasis")).toBe("true");
   expect(view.getByTestId("viz-row-0").getAttribute("data-emphasis")).toBeNull();
   expect(child.style.paddingLeft).not.toBe(view.getByTestId("viz-row-0").style.paddingLeft);
+});
+
+// `edge` names a column of tones: a row's coloured bar down its left side
+// (Task List's urgent and high items), an invisible one where it has none,
+// so every row lines up; no `edge`, no bar.
+test("a list's or a table's `edge` draws each row's tone as a bar down its left side", () => {
+  for (const viz of ["list", "table"] as const) {
+    const view = render(<VizView run={runOf({ ...grouped, viz, group: null, edge: "hue" })} onOpenPage={() => {}} />);
+    const edgeOf = (i: number) => {
+      const row = view.getByTestId(`viz-row-${i}`);
+      return (viz === "list" ? row : (row.querySelector("td") as HTMLElement)).style.borderLeft;
+    };
+    expect(edgeOf(1)).toContain("var(--status-waiting)");
+    // No tone: an edge as wide, drawn in nothing, so rows line up unboxed.
+    expect(edgeOf(0)).toContain("transparent");
+    view.unmount();
+  }
+  const plain = render(<VizView run={runOf({ ...grouped, group: null })} onOpenPage={() => {}} />);
+  expect(plain.getByTestId("viz-row-1").style.borderLeft).toBe("");
+});
+
+// A `depth` list draws a parent and its children as one panel (the kit's
+// `ox-nest`, as the board's epics): the parent row its top line, its
+// children inside, the panel's edge where they end. A compact list (a rail
+// panel) and a table keep the indent.
+test("a list nests a parent's children in its panel; compact and table rows only indent", () => {
+  const view = render(<VizView run={runOf({ ...grouped, group: null })} onOpenPage={() => {}} />);
+  const nest = view.getByTestId("viz-nest-0");
+  expect(nest.className).toContain("ox-nest");
+  expect(nest.contains(view.getByTestId("viz-row-0"))).toBe(true);
+  expect(nest.contains(view.getByTestId("viz-row-1"))).toBe(true);
+  expect(nest.contains(view.getByTestId("viz-row-2"))).toBe(false);
+  // Its fold is a bare arrow, not a filled button.
+  const fold = view.getByTestId("viz-row-fold-0");
+  expect(fold.style.background).toBe("transparent");
+  expect(fold.style.border).toContain("none");
+  // In its panel, a child isn't indented as well.
+  expect(view.getByTestId("viz-row-1").style.paddingLeft).toBe(view.getByTestId("viz-row-0").style.paddingLeft);
+  view.unmount();
+  for (const props of [{ compact: true }, {}] as const) {
+    const other = render(<VizView run={runOf({ ...grouped, group: null, ...(Object.keys(props).length ? {} : { viz: "table" }) })} {...props} onOpenPage={() => {}} />);
+    expect(other.queryByTestId("viz-nest-0")).toBeNull();
+    other.unmount();
+  }
 });
 
 test("a grouped table puts heading rows between its rows", () => {
@@ -260,7 +349,7 @@ test("a link to a ref of any kind opens through the page's openRef", () => {
   fireEvent.click(view.getByTestId("viz-row-2").querySelector("button")!);
   fireEvent.click(view.getAllByTestId("open-page-link")[0]!, { metaKey: true });
   expect(opened).toEqual([
-    ["oxplow:oxplow/work_item?id=tsk3&provider=oxplow", false],
+    ["oxplow:oxplow/task?id=tsk3&provider=oxtask", false],
     ["oxplow:oxplow/page?page=tasks", true],
   ]);
 });
@@ -362,7 +451,7 @@ test("a link opens with its column's pages as the origin", () => {
   );
   fireEvent.click(view.getByText("Child"));
   const [ref, origin] = opened[0]!;
-  expect(ref).toBe("oxplow:oxplow/work_item?id=tsk2&provider=oxplow");
+  expect(ref).toBe("oxplow:oxplow/task?id=tsk2&provider=oxtask");
   // The collection is the viz's link column, run again for its list.
   expect(origin).toMatchObject({ items: [], live: { node: "x/work", column: "title" } });
 });
@@ -388,7 +477,7 @@ test("↑/↓ and Enter open the row under the cursor", () => {
   fireEvent.keyDown(table, { key: "ArrowDown" });
   fireEvent.keyDown(table, { key: "ArrowUp" });
   fireEvent.keyDown(table, { key: "Enter" });
-  expect(opened).toEqual([["oxplow:oxplow/work_item?id=tsk2&provider=oxplow", "origin"]]);
+  expect(opened).toEqual([["oxplow:oxplow/task?id=tsk2&provider=oxtask", "origin"]]);
   expect(view.getByTestId("viz-row-1").getAttribute("data-cursor")).toBe("true");
 });
 
@@ -399,7 +488,7 @@ test("Enter runs the first row action of a row with no link", async () => {
       run={runOf({
         viz: "table",
         columns: [{ key: "title", label: null, link: null, unit: null }],
-        actions: [{ id: "open", label: "Open", command: "oxplow.work_item.update", input: {}, row: true }],
+        actions: [{ id: "open", label: "Open", command: "oxplow.task.update", input: {}, row: true }],
       })}
       onOpenPage={() => {}}
     />,
@@ -420,8 +509,8 @@ test("a click on a row runs the primary action, but not from a link in it", asyn
         viz: "table",
         columns: [{ key: "title", label: null, link: null, unit: null }],
         actions: [
-          { id: "other", label: "Other", command: "oxplow.work_item.update", input: {}, row: true },
-          { id: "take", label: "Take", command: "oxplow.work_item.update", input: {}, row: true, primary: true },
+          { id: "other", label: "Other", command: "oxplow.task.update", input: {}, row: true },
+          { id: "take", label: "Take", command: "oxplow.task.update", input: {}, row: true, primary: true },
         ],
       })}
       onOpenPage={() => {}}
@@ -454,6 +543,60 @@ test("a list row leaves out its empty cells", () => {
   expect(view.getByTestId("viz-row-0").textContent).not.toContain("—");
   expect(view.getByTestId("viz-row-1").textContent).toContain("x");
   expect(view.getByTestId("viz-row-1").textContent).not.toContain("—");
+});
+
+// A list can cap its groups: `group.compact` in a rail panel,
+// `group.grown` in a panel grown to the whole rail, by group value. A
+// capped group ends in "+N more", which asks for the next size up (the
+// view's `onMore`: the panel grows, a grown one opens its page). A group
+// not named shows every row, and the panel's own row cap doesn't cut the
+// list, so no group is cut off whole. A page shows every row.
+const many: SqlCell[][] = [
+  ["In progress", null, 1, "Active", "in_progress", null, 1, 0, "u1"],
+  ["In progress", null, 2, "Also active", "in_progress", null, 0, 0, "u2"],
+  ["In progress", null, 3, "And this", "in_progress", null, 0, 0, "u3"],
+  ...[4, 5, 6, 7, 8, 9].map((n): SqlCell[] => ["Ready", null, n, `Next ${n}`, "todo", null, 0, 0, `u${n}`]),
+  ...[10, 11, 12, 13].map((n): SqlCell[] => ["Finished", null, n, `Done ${n}`, "done", null, 0, 0, `u${n}`]),
+];
+const runOfMany = (viz: Partial<VizConfig>): VizRun =>
+  ({ config: { ...base, ...viz }, params: {}, result: { columns, rows: many, truncated: false } }) as unknown as VizRun;
+const capped: Partial<VizConfig> = {
+  group: { by: "bucket", link: null, values: [], labels: {}, compact: { Ready: 2, Finished: 2 }, grown: { Ready: 3, Finished: 3 } },
+  columns: [{ key: "title", label: null, link: null, unit: null, icon: null, tone: null }],
+};
+const shownOf = (view: ReturnType<typeof render>) => view.getAllByTestId(/^viz-row-\d+$/).map((r) => r.textContent ?? "");
+const groupMore = (view: ReturnType<typeof render>, group: string) => view.queryByTestId(`viz-group-more-${group}`);
+
+test("in a panel, a list caps each group `group.compact` names, and a group's +N more grows the panel", () => {
+  let more = 0;
+  const view = render(<VizView run={runOfMany(capped)} compact maxRows={8} onMore={() => more++} onOpenPage={() => {}} />);
+  // In progress isn't named: all three. Ready and Finished: two each.
+  expect(shownOf(view)).toEqual(["Active", "Also active", "And this", "Next 4", "Next 5", "Done 10", "Done 11"]);
+  // The heading counts the group, not what shows.
+  expect(view.getAllByTestId("viz-group-count").map((c) => c.textContent)).toEqual(["3", "6", "4"]);
+  // No cut of the whole list.
+  expect(view.queryByTestId("viz-more")).toBeNull();
+  expect(groupMore(view, "In progress")).toBeNull();
+  expect(groupMore(view, "Ready")!.textContent).toBe("+4 more");
+  expect(groupMore(view, "Finished")!.textContent).toBe("+2 more");
+  fireEvent.click(groupMore(view, "Finished")!.querySelector("button")!);
+  expect(more).toBe(1);
+});
+
+test("grown, a list caps each group `group.grown` names, and +N more asks for the page", () => {
+  let more = 0;
+  const view = render(<VizView run={runOfMany(capped)} compact onMore={() => more++} onOpenPage={() => {}} />);
+  expect(shownOf(view)).toEqual(["Active", "Also active", "And this", "Next 4", "Next 5", "Next 6", "Done 10", "Done 11", "Done 12"]);
+  expect(groupMore(view, "Ready")!.textContent).toBe("+3 more");
+  expect(groupMore(view, "Finished")!.textContent).toBe("+1 more");
+  fireEvent.click(groupMore(view, "Ready")!.querySelector("button")!);
+  expect(more).toBe(1);
+});
+
+test("a page shows every row of every group", () => {
+  const view = render(<VizView run={runOfMany(capped)} onOpenPage={() => {}} />);
+  expect(view.getAllByTestId(/^viz-row-\d+$/)).toHaveLength(13);
+  expect(groupMore(view, "Ready")).toBeNull();
 });
 
 // `mock.module` outlives this file: put the real modules back for the files that run after it.

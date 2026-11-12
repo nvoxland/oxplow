@@ -1,5 +1,5 @@
 //! Helpers that scenario tests of an extension's life (deploy, disable,
-//! rollback, the work list switching) share with the tests of one
+//! rollback, the task tracker switching) share with the tests of one
 //! transition: what once sat private in those files.
 
 #![cfg(test)]
@@ -26,7 +26,7 @@ pub(crate) fn fake_bin() -> PathBuf {
     bin
 }
 
-/// A private extension declaring the fake as its work-items provider,
+/// A private extension declaring the fake as its task tracker provider,
 /// its entry a script running the fake with `hooks`.
 #[cfg(unix)]
 pub(crate) fn write_extension(project: &Path, hooks: &str) {
@@ -34,7 +34,7 @@ pub(crate) fn write_extension(project: &Path, hooks: &str) {
     std::fs::create_dir_all(dir.join("bin")).unwrap();
     std::fs::write(
         dir.join("extension.yaml"),
-        "manifest: 2\nname: tracker\nintent:\n  purpose: the fake tracker\n  examples: [{ name: a }]\ncommands:\n  - name: item.estimate\n    summary: Set a work item's points.\n    provider: fake\n    op: estimate\n    ui: { label: \"Estimate in Fake…\", group: Tracker, about: oxplow/work_item, input: { uri: \"{{uri}}\", points: 3 } }\npermissions: [process.run]\nproviders:\n  - id: fake\n    capability: work_items\n    entry: bin/provider\n    declarations: provider.json\n",
+        "manifest: 2\nname: tracker\nintent:\n  purpose: the fake tracker\n  examples: [{ name: a }]\ncommands:\n  - name: item.estimate\n    summary: Set a task's points.\n    provider: fake\n    op: estimate\n    ui: { label: \"Estimate in Fake…\", group: Tracker, about: oxplow/task, input: { uri: \"{{uri}}\", points: 3 } }\npermissions: [process.run]\nproviders:\n  - id: fake\n    capability: task_tracker\n    entry: bin/provider\n    declarations: provider.json\n    stages: [{ id: icebox, title: Icebox, bucket: backlog }, { id: ready, title: Ready, bucket: todo }, { id: doing, title: Doing, bucket: in_progress }, { id: stuck, title: Stuck, bucket: blocked }, { id: shipped, title: Shipped, bucket: done }, { id: dropped, title: Dropped, bucket: canceled }]\n",
     )
     .unwrap();
     let script = dir.join("bin/provider");
@@ -101,25 +101,25 @@ pub(crate) async fn page(
     }
 }
 
-/// Log an `effort.claim_verified` for `effort` with `evidence` and return
-/// it as stored: an event an `on:` collector or effect can react to.
-pub(crate) async fn log_claim(
+/// Log a `task.state_changed` moving `task` (an item's id on `issues`) to
+/// done on `thread` and return it as stored: an event an `on:` collector or
+/// effect can react to.
+pub(crate) async fn log_task_done(
     svc: &crate::Services,
-    effort: oxplow_domain::EffortId,
-    evidence: &str,
+    thread: oxplow_domain::ThreadId,
+    task: &str,
 ) -> oxplow_domain::StoredEvent {
     use oxplow_domain::events::Anchors;
     use oxplow_domain::Envelope;
-    let env = Envelope::typed::<oxplow_domain::events::schema::EffortClaimVerified>(
+    let env = Envelope::typed::<oxplow_domain::events::schema::TaskStateChanged>(
         "human",
-        &oxplow_domain::events::schema::EffortClaimVerifiedV2 {
-            claim: 1,
-            effort: None,
-            evidence: Some(evidence.into()),
+        &oxplow_domain::events::schema::TaskStateChangedV1 {
+            task: oxplow_domain::uri::build::task_uri("issues", task),
+            to: oxplow_domain::tasks::Bucket::Done,
         },
     )
     .with_anchors(Anchors {
-        effort_id: Some(effort),
+        thread_id: Some(thread),
         ..Anchors::default()
     });
     let id = env.id.clone();
@@ -140,12 +140,12 @@ pub(crate) const CONFIGURATION_V2: &str = "configuration:
   defaults: { limit: 10 }
 ";
 
-/// `services_with_effort` with the pump's reactors a running oxplow has for
+/// `services_with_thread` with the pump's reactors a running oxplow has for
 /// the life of an extension: its `on:` collectors, its effects and what
 /// follows a changed setting. Boot registers them; in-memory services have
 /// none, so a scenario that logs an event or sets a config key asks for them.
-pub(crate) async fn booted() -> crate::test_fixtures::EffortFixture {
-    let fx = crate::test_fixtures::services_with_effort().await;
+pub(crate) async fn booted() -> crate::test_fixtures::ThreadFixture {
+    let fx = crate::test_fixtures::services_with_thread().await;
     crate::capabilities::register(&fx.svc);
     crate::collector_triggers::register(&fx.svc);
     crate::effect_triggers::register(&fx.svc);

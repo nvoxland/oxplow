@@ -94,7 +94,7 @@ pub struct ScaffoldInput {
     /// language's files).
     #[serde(default)]
     pub glob: Option<String>,
-    /// The thread or effort ref that asked for it, recorded as the
+    /// The thread or request ref that asked for it, recorded as the
     /// extension's `intent.origin`.
     #[serde(default)]
     pub origin: Option<String>,
@@ -460,7 +460,7 @@ mod tests {
     /// turn — the capture carries both; a person's carries neither.
     #[tokio::test]
     async fn an_agents_assertion_carries_its_thread_and_turn() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         fx.svc
             .fact_store
             .upsert_spec(oxplow_db::NewMetricSpec::base(
@@ -476,6 +476,7 @@ mod tests {
             .ingest(crate::hook_ingest::HookEnvelope {
                 session_title: None,
                 turn_run: None,
+                reading: Default::default(),
                 kind: oxplow_domain::HookKind::UserPromptSubmit,
                 thread_id: Some(fx.thread),
                 stream_id: None,
@@ -486,7 +487,7 @@ mod tests {
                 decision: None,
                 tool: None,
                 subagent: None,
-                peer: None,
+                harness_turn: None,
             })
             .await
             .unwrap();

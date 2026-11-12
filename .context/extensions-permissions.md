@@ -18,7 +18,7 @@ don't ask a model; `state.read`, `extension_config.read`, `jobs.read`.
 # absent or [] = baseline only. `oxplow_domain::permissions::PERMISSION_IDS`.
 permissions:
   - sql.read                     # ad-hoc read-only SQL (a script's `needs: [sql.read]`)
-  - commands:oxplow.work_item.*  # commands outside its own namespace (`*` one segment, `**` the rest)
+  - commands:oxplow.task.*  # commands outside its own namespace (`*` one segment, `**` the rest)
   - files.read                   # or files.write (includes read): `needs: [tree.read]`
   - ai.compute                   # models, with the person's key
   - network:api.github.com       # hosts its programs reach (`network:*.example.com` covers the names under it)
@@ -176,9 +176,7 @@ its scope trace.
   diverge; the host's own `read` keeps its transaction choice),
   a composer (`Composer` gets a pure child; what it calls becomes the
   run's scopes), effects (`for_effect`: the effect actor on the event's
-  thread and stream, caused by the event), the effort policy
-  (`for_policy`, its composed calls `run_in` it so `command.executed`
-  is caused by the event), entity and fact collectors (a child of the
+  thread and stream, caused by the event), entity and fact collectors (a child of the
   run that ran them, named for the collector), provider invokes (on the
   wire as `InvokeParams.context`; `host/call`s are answered only inside
   a registered run) and knowledge, snapshot and harness verbs. A page
@@ -266,12 +264,27 @@ uses):
 - **Who may declare what** (checked at load): a Starlark collector's
   `needs:` any service (`check_declared`; another runtime has no
   builtins, so `needs` there is an error); a composing script — a
-  command's `entry:`, an effect, an effort policy script — reads only
+  command's `entry:`, or an effect — reads only
   (`scope_calls::check_script_need`: it runs pure, so `ai.compute` is
   refused, naming why). A **command's** script reads the semantic layer
   (metric functions included) and not the tree: it decides what runs,
   and reading a whole tree belongs to an effect or a collector (refused
-  at load, naming them). A provider's
+  at load, naming them). **A capability implementation's** script
+  (`implementations:` with a script `entry`,
+  `scope_calls::check_implementation_need`) reads what a composing script
+  does, and also the **stream's worktree** (`tree.read`, bare or
+  `tree.read:<path>`, giving it `files()` and the other tree builtins: the
+  tree as it is on disk at the call, `providers::worktree_tree`, not a
+  snapshot) and writes **its own extension's private state**
+  (`scope("state.write", { scope, area, expected, schema_version, values })`,
+  see [extensions-manifest.md](./extensions-manifest.md) "Private state host
+  boundary"). Each is decided as any other need is: declared in the
+  implementation's `needs`, within the extension's permissions
+  (`tree.read` needs `files.read` in `permissions:`, checked at load as
+  every `needs` is; `state.write` is baseline, as `state.read` is: the
+  namespace is the extension's own), and by the run's live authority at
+  each call. A command's or an effect's script is refused `state.write`;
+  a command's script is still refused `tree.read`. A provider's
   `needs` stay `scope()` calls (`check_callable`: `host/call` answers
   `sql.read`).
 - **`scope("ai.discover", { role })`** (callable from an effect, a command
@@ -321,7 +334,7 @@ uses):
   every host that runs a Starlark script — entity collectors
   (`collector_runner::given`), fact collectors (`MetricsService::given`),
   commands (`compose_calls`), effects (`effect_triggers::run_script`,
-  `effects::run_over`) and effort policy scripts — calls
+  `effects::run_over`) — calls
   `services::decide` / `prepare` with the run, the script and its needs.
   For each service the script uses it refuses what the run's mode
   excludes (`RunContext::decide_service`: "a pure run can't use
@@ -359,8 +372,8 @@ extension may reach (its `permissions:`, approved when it was deployed —
   env, commands }`, derived from the declaration: an exec collector's
   entry, `network`, `credentials` and `env`; a collector's services
   (`services::collector_needs`: declared ∪ implied, `ai.compute` among
-  them for a model-calling script); a script's (effect, command, effort
-  policy, job, provider `host/call`) scopes from its `needs`.
+  them for a model-calling script); a script's (effect, command,
+  job, provider `host/call`) scopes from its `needs`.
 - **The grant.** `Grant { namespace, permissions }` (`grants::grant_of`):
   the extension's command namespace and its declared permissions. There is
   no approvals store and nothing hashed per program: the deployment is
@@ -369,9 +382,9 @@ extension may reach (its `permissions:`, approved when it was deployed —
 - **The authority** a run carries (`RunContext::authorized`,
   `run::Authority { declared, grant, enforcement }`,
   `grants::authority(ext, declared)`). Every extension run has one: a
-  collector, an effect, a job, a script command, a scripted effort policy,
+  collector, an effect, a job, a script command,
   a provider's `host/call`s. Core's own work has none and is allowed what
-  it does (core's built-in effort policy, core commands).
+  it does (core commands).
 - **Decisions.** `run.decide(Need)` → `Allowed`, `Denied(why)` or
   `Unenforced(why)`, recorded on the run (`v_extension_run.decisions`).
   `grant::decide` refuses what the contribution didn't declare ("not
@@ -396,7 +409,7 @@ extension may reach (its `permissions:`, approved when it was deployed —
   declare doesn't load ("Permissions"). The runtime decisions are for what
   only a run reveals — a script's composed commands, a path or dataset it
   reads.
-- **Bounded reads.** `sql.read:v_work_item` names an exact published
+- **Bounded reads.** `sql.read:v_task` names an exact published
   dataset; use multiple needs for multiple datasets. SQLite preparation checks
   the query's datasets and transitive registered `ref` inputs, including
   materialized datasets, before evaluating rows. Bare `sql.read` preserves
@@ -566,3 +579,10 @@ files:
 oxplow's write guard does not apply to these writes (it goes with the oxwiki
 carve-out). A script's `store.sql` and `files.*` reads need the service in
 its `needs`; the router checks it like `state.read`.
+
+**Not built here** (kept from the design): a tool's own SQLite file (beads'
+`.beads/beads.db`) read with `files.sqlite { path, sql, params }`, read
+only, when `path` is inside a `files:` folder the extension may read; and a
+folder outside the project (a vault): a `files:` entry that is an absolute
+or `~/` path, which the person approves by name at install, like any
+grant. Today an absolute path in `files:` is a load error.

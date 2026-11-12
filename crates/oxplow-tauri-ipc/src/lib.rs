@@ -90,8 +90,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
         .typ::<OxplowEvent>()
         .typ::<oxplow_domain::vcs::OpOutcome>()
-        // A provider's work-item flags (`v_capability_provider.features`).
-        .typ::<oxplow_domain::work_items::WorkItemsFeatures>()
+        // A provider's task flags (`v_capability_provider.features`).
+        .typ::<oxplow_domain::tasks::TaskTrackerFeatures>()
         // `oxplow.collector.sync`'s result, read through `run_command`.
         .typ::<oxplow_app::collector_runner::CollectorRunReport>()
         // One viz node's config with its loader's rows: what the desktop's
@@ -165,12 +165,10 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             // comments
             commands::generated::list_comments_for_target,
             commands::generated::list_comments_for_stream,
-            // wiki
             // events (dead-letter queue)
             // page refs (unified backlinks/outbound)
             commands::generated::list_backlinks,
             commands::generated::list_outbound,
-            // wiki freshness (V20 file-ref version tracking)
             // page visit
             commands::generated::record_page_visit,
             commands::generated::list_recent_page_visits,
@@ -182,7 +180,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             // snapshots
             commands::generated::list_snapshot_ops,
             commands::generated::list_files_for_snapshot,
-            commands::generated::list_wiki_slugs_for_snapshots,
+            commands::generated::list_knowledge_pages_for_snapshots,
             commands::generated::get_file_snapshot,
             commands::generated::get_snapshot_stats,
             commands::generated::get_blob_storage_bytes,
@@ -200,9 +198,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             // config
             commands::generated::get_config,
             commands::generated::get_workspace_context,
-            // efforts
-            commands::generated::list_efforts_at_snapshots,
-            commands::generated::list_efforts_in_window,
             commands::generated::run_command,
             commands::generated::command_open_after,
             commands::generated::get_command,

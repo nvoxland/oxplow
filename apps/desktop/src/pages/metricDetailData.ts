@@ -106,7 +106,7 @@ export function filterByBranch(samples: SeriesPoint[], branch: string | null): S
   return samples.filter((s) => s.branch === branch);
 }
 
-/** Latest value minus the earliest (the effort/window delta). `null` when there
+/** Latest value minus the earliest (the window delta). `null` when there
  *  are fewer than two points. */
 export function deltaVsFirst(samples: SeriesPoint[]): number | null {
   const pts = seriesPoints(samples);

@@ -1,0 +1,58 @@
+title: Task workflow
+description: "How this project's agents use tasks, and what done means here. For the project; applies to agent sessions started after a change."
+needs:
+- task_tracker
+loaders:
+  # The four workflows while oxtask is the active tracker (the setting is
+  # oxtask's), the current one marked.
+  workflows:
+    sql: |
+      WITH cur(choice) AS (SELECT workflow FROM v_oxplow_task_workflow)
+      SELECT w.value, w.label, w.says,
+             (w.value = cur.choice) AS current,
+             (w.value <> cur.choice) AS can_use
+      FROM cur, (
+        SELECT 'agent_tracks' AS value, 'The agent tracks everything' AS label,
+               'The agent takes or files a task for new work, moves it to in progress before it edits and to done when it is fully done; it is reminded when it edits with no task.' AS says, 0 AS ord
+        UNION ALL SELECT 'person_files', 'You file, the agent works them',
+               'The agent works the tasks assigned or queued to its thread and files only follow-ups; what you ask it directly needs no task.', 1
+        UNION ALL SELECT 'custom', 'The project''s own way',
+               'oxtask offers only the next-task command; the project''s own extension tells the agent the rest.', 2
+        UNION ALL SELECT 'off', 'Off',
+               'oxtask tells the agent nothing about tasks.', 3
+      ) w
+      WHERE EXISTS (SELECT 1 FROM v_capability_provider p
+                     WHERE p.capability = 'task_tracker' AND p.provider = 'oxtask' AND p.active = 1)
+      ORDER BY w.ord
+  done_means:
+    sql: SELECT definition_of_done FROM v_oxplow_task_workflow
+view:
+  stack:
+  - id: workflows
+    title: How agents use tasks
+    from: workflows
+    viz: table
+    emphasis: current
+    columns:
+    - key: label
+      label: Workflow
+    - key: says
+      label: What the agent does
+    empty: The task workflow is oxtask's; another task tracker is in use.
+    actions:
+    - id: use
+      label: Use This
+      command: oxplow.tasks.set_workflow
+      row: true
+      when: can_use
+      input:
+        workflow: '{{row.value}}'
+  - id: done_means
+    title: What done means
+    from: done_means
+    viz: form
+    form:
+      command: oxplow.tasks.set_workflow
+      mode: edit
+      fields:
+      - definition_of_done

@@ -262,7 +262,7 @@ mod tests {
     #[test]
     fn a_need_is_decided_against_the_extensions_permissions() {
         let g = granted(
-            "[process.run, \"network:*.githubusercontent.com\", network:api.github.com, secrets:GH_TOKEN, commands:oxplow.work_item.*]",
+            "[process.run, \"network:*.githubusercontent.com\", network:api.github.com, secrets:GH_TOKEN, commands:oxplow.task.*]",
         );
         let declared = GrantRequest {
             scopes: ["ai.compute".to_string(), "sql.read".to_string()].into(),
@@ -289,7 +289,7 @@ mod tests {
             Decision::Denied("not declared".into())
         );
         assert_eq!(
-            d(Need::Command("oxplow.work_item.transition".into())),
+            d(Need::Command("oxplow.task.transition".into())),
             Decision::Allowed
         );
         assert_eq!(

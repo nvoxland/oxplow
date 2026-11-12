@@ -1,18 +1,19 @@
 //! The fake as a **knowledge provider** (`OXPLOW_FAKE_CAPABILITY=knowledge`):
 //! pages in memory (kept in `OXPLOW_FAKE_STATE` as items are), each write
-//! answering the page's `knowledge.page.recorded@1` event:
+//! answering the page's `knowledge.page.recorded@3` event, the store in its
+//! URI the instance's id:
 //!
-//! - `write_page { slug, title?, body, verified_files, removed_files }` →
-//!   `{ page: "oxplow:oxplow/wiki?slug=%3Cslug%3E" }`; the title defaults to the slug, and it
-//!   keeps no pins, so the two ref lists are accepted and ignored;
-//! - `delete_page { slug }` → `{}`, the page marked `deleted`;
-//! - `link { page, target }` → `{}`: `[[target]]` appended under a
-//!   `## Related` heading.
+//! - `write_page { id?, title?, body, verified_files, removed_files }` →
+//!   `{ id }`; with no `id` it takes one from the title (lowercased, its
+//!   other characters `-`); the title defaults to the id, and it keeps no
+//!   pins, so the two ref lists are accepted and ignored;
+//! - `delete_page { id }` → `{}`, the page marked `deleted`.
 //!
-//! A page's `uris` are its body's `[[…]]` interiors in oxplow's ref
-//! grammar: one with a `/` or a `.` is a file (`oxplow:oxplow/file?path=<path>`), a bare one
-//! a page (`oxplow:oxplow/wiki?slug=<slug>`). The collector `knowledge_pages` streams the
-//! pages changed after its cursor.
+//! It declares `features { edit: true }` and `data { kinds: [note] }`. A page's `uris`
+//! are its body's `[[…]]` interiors in oxplow's ref grammar: one with a `/`
+//! or a `.` is a file (`oxplow:oxplow/file?path=<path>`), `<store>:<id>` that
+//! store's page, a bare one oxwiki's. The collector `knowledge_pages`
+//! streams the pages changed after its cursor.
 
 use std::collections::BTreeMap;
 
@@ -40,9 +41,9 @@ impl Page {
 
 pub(crate) type Pages = BTreeMap<String, Page>;
 
-/// What it declares in knowledge mode: the `knowledge` capability, its
-/// three verbs, the recorded event and a collector of the pages; the same
-/// config as its work list.
+/// What it declares in knowledge mode: the `knowledge` capability with its
+/// kinds, its two verbs, the recorded event and a collector of the pages;
+/// the same config as its task tracker.
 pub fn declarations() -> InitializeResult {
     let string = json!({ "type": "string" });
     let refs = json!({ "type": "array", "items": string });
@@ -54,40 +55,33 @@ pub fn declarations() -> InitializeResult {
         },
         capabilities: vec![CapabilityDecl {
             capability: "knowledge".into(),
-            features: json!({}),
-            data: Value::Null,
+            features: json!({ "edit": true }),
+            data: json!({ "kinds": [{ "id": "note", "title": "Note", "bucket": "note" }] }),
         }],
         commands: vec![
             crate::command(
                 "write_page",
                 "Write a page: create it, or replace its body.",
-                json!({ "type": "object", "required": ["slug", "body", "verified_files", "removed_files"],
+                json!({ "type": "object", "required": ["body", "verified_files", "removed_files"],
                         "additionalProperties": false,
-                        "properties": { "slug": string, "title": string, "body": string,
+                        "properties": { "id": string, "title": string, "body": string,
                                         "verified_files": refs, "removed_files": refs } }),
             ),
             crate::command(
                 "delete_page",
                 "Delete a page.",
-                json!({ "type": "object", "required": ["slug"], "additionalProperties": false,
-                        "properties": { "slug": string } }),
-            ),
-            crate::command(
-                "link",
-                "Link a page to a target, under its Related heading.",
-                json!({ "type": "object", "required": ["page", "target"],
-                        "additionalProperties": false,
-                        "properties": { "page": string, "target": string } }),
+                json!({ "type": "object", "required": ["id"], "additionalProperties": false,
+                        "properties": { "id": string } }),
             ),
         ],
         event_types: vec![EventTypeDecl {
             event_type: RECORDED.into(),
-            v: 2,
+            v: 3,
             // Core's schema, as a provider must declare it.
             schema: oxplow_domain::vocabulary::Vocabulary::core()
                 .schema(
                     <oxplow_domain::events::schema::KnowledgePageRecorded as oxplow_domain::events::schema::EventType>::TYPE,
-                    2,
+                    3,
                 )
                 .cloned()
                 .unwrap_or(Value::Null),
@@ -126,10 +120,15 @@ pub(crate) fn refs_of(body: &str) -> Vec<String> {
         let Some(close) = after.find("]]") else { break };
         let inner = after[..close].trim();
         if !inner.is_empty() {
-            let r = if inner.contains('/') || inner.contains('.') {
-                oxplow_domain::uri::build::file_uri(inner)
-            } else {
-                oxplow_domain::uri::build::wiki_uri(inner)
+            let r = match inner.split_once(':') {
+                Some((store, id)) => oxplow_domain::uri::build::knowledge_uri(store, id),
+                None if inner.contains('/') || inner.contains('.') => {
+                    oxplow_domain::uri::build::file_uri(inner)
+                }
+                None => oxplow_domain::uri::build::knowledge_uri(
+                    oxplow_domain::knowledge::OXWIKI,
+                    inner,
+                ),
             };
             if !refs.contains(&r) {
                 refs.push(r);
@@ -153,7 +152,7 @@ fn updated_at(rev: u64) -> String {
 fn event(record: &Value) -> Value {
     serde_json::to_value(EventDraft {
         event_type: RECORDED.into(),
-        v: 2,
+        v: 3,
         payload: json!({ "page": record }),
         subject: vec![record["uri"].as_str().unwrap_or_default().to_string()],
     })
@@ -161,16 +160,17 @@ fn event(record: &Value) -> Value {
 }
 
 /// Put `record` in `pages` at a new revision; the event it answers.
-fn keep(pages: &mut Pages, rev: &mut u64, slug: &str, mut record: Value) -> Value {
+fn keep(pages: &mut Pages, rev: &mut u64, id: &str, mut record: Value) -> Value {
     *rev += 1;
     record["updated_at"] = json!(updated_at(*rev));
     let answer = event(&record);
-    pages.insert(slug.to_string(), Page { record, rev: *rev });
+    pages.insert(id.to_string(), Page { record, rev: *rev });
     answer
 }
 
-fn record_of(slug: &str, title: &str, body: &str, deleted: bool) -> Value {
-    let mut record = json!({ "uri": oxplow_domain::uri::build::wiki_uri(slug), "title": title, "body": body,
+fn record_of(store: &str, id: &str, title: &str, body: &str, deleted: bool) -> Value {
+    let mut record = json!({ "uri": oxplow_domain::uri::build::knowledge_uri(store, id),
+                             "kind": "note", "title": title, "body": body,
                              "uris": refs_of(body), "updated_at": "" });
     if deleted {
         record["deleted"] = json!(true);
@@ -178,9 +178,24 @@ fn record_of(slug: &str, title: &str, body: &str, deleted: bool) -> Value {
     record
 }
 
-/// `verb`'s answer to `input`: `(result, events)`. `rev` is the world's
-/// revision, bumped by a write.
+/// The id a title makes: its letters and digits lowercased, every other run
+/// of characters one `-`.
+fn id_from(title: &str) -> String {
+    let mut id = String::new();
+    for c in title.chars() {
+        if c.is_ascii_alphanumeric() {
+            id.push(c.to_ascii_lowercase());
+        } else if !id.is_empty() && !id.ends_with('-') {
+            id.push('-');
+        }
+    }
+    id.trim_end_matches('-').to_string()
+}
+
+/// `verb`'s answer to `input`, as the store `store` (the instance):
+/// `(result, events)`. `rev` is the world's revision, bumped by a write.
 pub(crate) fn answer(
+    store: &str,
     pages: &mut Pages,
     rev: &mut u64,
     verb: &str,
@@ -188,66 +203,38 @@ pub(crate) fn answer(
 ) -> Result<(Value, Vec<Value>), ProtocolError> {
     match verb {
         "write_page" => {
-            let slug = str_field(input, "slug")?;
             let body = str_field(input, "body")?;
-            let title = input
-                .get("title")
-                .and_then(Value::as_str)
-                .unwrap_or(&slug)
-                .to_string();
-            let recorded = keep(pages, rev, &slug, record_of(&slug, &title, &body, false));
-            Ok((json!({ "page": slug }), vec![recorded]))
+            let title = input.get("title").and_then(Value::as_str);
+            let id = match input.get("id").and_then(Value::as_str) {
+                Some(id) => id.to_string(),
+                None => id_from(title.ok_or_else(|| invalid("/id", "an id or a title"))?),
+            };
+            if id.is_empty() {
+                return Err(invalid("/title", "it makes no id"));
+            }
+            let title = title.unwrap_or(&id).to_string();
+            let recorded = keep(pages, rev, &id, record_of(store, &id, &title, &body, false));
+            Ok((json!({ "id": id }), vec![recorded]))
         }
         "delete_page" => {
-            let slug = str_field(input, "slug")?;
+            let id = str_field(input, "id")?;
             let page = pages
-                .get(&slug)
+                .get(&id)
                 .filter(|p| p.record["deleted"] != json!(true))
-                .ok_or_else(|| invalid("/slug", format!("no page `{slug}`")))?;
+                .ok_or_else(|| invalid("/id", format!("no page `{id}`")))?;
             let record = record_of(
-                &slug,
-                page.record["title"].as_str().unwrap_or(&slug),
+                store,
+                &id,
+                page.record["title"].as_str().unwrap_or(&id),
                 page.record["body"].as_str().unwrap_or_default(),
                 true,
             );
-            let recorded = keep(pages, rev, &slug, record);
-            Ok((json!({}), vec![recorded]))
-        }
-        "link" => {
-            let page = str_field(input, "page")?;
-            let slug = oxplow_domain::uri::build::id_of(&page, oxplow_domain::uri::resources::WIKI)
-                .unwrap_or_else(|_| page.clone());
-            let target = str_field(input, "target")?;
-            let target = [
-                oxplow_domain::uri::resources::WIKI,
-                oxplow_domain::uri::resources::FILE,
-            ]
-            .iter()
-            .find_map(|kind| oxplow_domain::uri::build::id_of(&target, kind).ok())
-            .unwrap_or(target);
-            let existing = pages
-                .get(&slug)
-                .filter(|p| p.record["deleted"] != json!(true))
-                .ok_or_else(|| invalid("/page", format!("no page `{slug}`")))?;
-            let title = existing.record["title"]
-                .as_str()
-                .unwrap_or(&slug)
-                .to_string();
-            let mut body = existing.record["body"]
-                .as_str()
-                .unwrap_or_default()
-                .trim_end()
-                .to_string();
-            if !body.lines().any(|l| l.trim() == "## Related") {
-                body.push_str("\n\n## Related");
-            }
-            body.push_str(&format!("\n\n[[{target}]]\n"));
-            let recorded = keep(pages, rev, &slug, record_of(&slug, &title, &body, false));
+            let recorded = keep(pages, rev, &id, record);
             Ok((json!({}), vec![recorded]))
         }
         other => Err(invalid(
             "/command",
-            format!("a knowledge provider answers write_page, delete_page or link, not `{other}`"),
+            format!("a knowledge provider answers write_page or delete_page, not `{other}`"),
         )),
     }
 }

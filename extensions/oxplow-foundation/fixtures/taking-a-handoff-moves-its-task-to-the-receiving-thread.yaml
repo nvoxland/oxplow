@@ -1,0 +1,19 @@
+# Work handed from one thread to another is an open handoff until its
+# recipient takes it; taking it settles it and moves its task onto the
+# taking thread (here thr1, the thread an `as: agent` step acts for).
+requires: [oxplow-bundled]
+given:
+  - { command: oxplow.thread.create, input: { stream: str1, title: Docs }, bind: docs }
+  - { command: oxplow.task.create, input: { title: Write the guide, assignee: thr2 }, bind: item }
+  - { command: oxplow.handoff.send, input: { from_thread: $docs.id, to_thread: thr1, task: $item.uri, body: The outline is done; write the rest. } }
+when: { sql: "SELECT state, body FROM v_handoff" }
+expect: { rows: [{ state: open, body: The outline is done; write the rest. }] }
+steps:
+  - when: { sql: "SELECT t.title AS thread FROM v_task w JOIN v_thread t ON t.uri = w.assignee WHERE w.title = 'Write the guide'" }
+    expect: { rows: [{ thread: Docs }] }
+  - given:
+      - { command: oxplow.handoff.resolve, input: { handoff: hnd1, outcome: taken }, as: agent }
+  - when: { sql: "SELECT state FROM v_handoff" }
+    expect: { rows: [{ state: taken }] }
+  - when: { sql: "SELECT t.id AS thread_id FROM v_task w JOIN v_thread t ON t.uri = w.assignee WHERE w.title = 'Write the guide'" }
+    expect: { rows: [{ thread_id: 1 }] }

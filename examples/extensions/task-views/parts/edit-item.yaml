@@ -1,17 +1,17 @@
 title: Edit item
-description: A work item's title and body in a plain form. It stands in for oxplow's editor; the rail beside it stays oxplow's.
+description: A task's title and body in a plain form. It stands in for oxplow's editor; the rail beside it stays oxplow's.
 params:
 - name: uri
-  label: Work item
+  label: Task
 loaders:
   edit_item:
     sql: |
-      SELECT title, body FROM v_work_item WHERE uri = :uri
+      SELECT title, body FROM v_task WHERE uri = :uri
 view:
   from: edit_item
   viz: form
   form:
-    command: oxplow.work_item.update
+    command: oxplow.task.update
     mode: edit
     defaults:
       uri: '{{param.uri}}'

@@ -8,16 +8,37 @@ use std::time::Duration;
 use oxplow_domain::Actor;
 use serde_json::{json, Value};
 
-use crate::test_fixtures::{services_with_effort, EffortFixture};
+use crate::test_fixtures::{services_with_thread, ThreadFixture};
 
-/// Three edits of a file, nothing else.
-async fn three_edits(fx: &EffortFixture) {
+/// Three edits of a file in one turn of a request, nothing else.
+async fn three_edits(fx: &ThreadFixture) {
+    let thread = fx.thread.value();
+    let turn: i64 = fx
+        .svc
+        .db
+        .transaction(move |c| {
+            c.execute(
+                "INSERT INTO request (thread_id) VALUES (?1)",
+                rusqlite::params![thread],
+            )
+            .map_err(oxplow_db::map_sql_err)?;
+            let request = c.last_insert_rowid();
+            c.execute(
+                "INSERT INTO agent_turn (thread_id, prompt, request_id, started_at)
+                 VALUES (?1, 'p', ?2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+                rusqlite::params![thread, request],
+            )
+            .map_err(oxplow_db::map_sql_err)?;
+            Ok(c.last_insert_rowid())
+        })
+        .await
+        .unwrap();
     for _ in 0..3 {
         fx.svc
             .tool_call_store
             .record(oxplow_db::NewToolCall {
-                thread_id: fx.thread.value(),
-                effort_id: Some(fx.effort.value()),
+                thread_id: thread,
+                turn_id: Some(turn),
                 tool: "edit".into(),
                 kind: "edit".into(),
                 path: Some("src/warm.rs".into()),
@@ -29,7 +50,7 @@ async fn three_edits(fx: &EffortFixture) {
     }
 }
 
-async fn struggles(fx: &EffortFixture) -> Value {
+async fn struggles(fx: &ThreadFixture) -> Value {
     serde_json::to_value(
         fx.svc
             .sql
@@ -43,11 +64,11 @@ async fn struggles(fx: &EffortFixture) -> Value {
 
 /// A person sets the struggle threshold: the project layer, through the
 /// extension's own command.
-async fn set_threshold(fx: &EffortFixture, edits: i64) {
+async fn set_threshold(fx: &ThreadFixture, edits: i64) {
     let read = fx
         .svc
         .commands
-        .run(&Actor::Human, "oxplow.review_policy.read", json!({}), false)
+        .run(&Actor::Human, "oxplow.settings.read", json!({}), false)
         .await
         .unwrap();
     let expected = read.result["result"]["stamps"]["project"].clone();
@@ -55,9 +76,9 @@ async fn set_threshold(fx: &EffortFixture, edits: i64) {
         .commands
         .run(
             &Actor::Human,
-            "oxplow.review_policy.write",
+            "oxplow.settings.write",
             json!({
-                "schema_version": 1,
+                "schema_version": 2,
                 "project": {
                     "expected": expected,
                     "values": { "struggle": { "repeatedEdits": edits } }
@@ -73,7 +94,7 @@ async fn set_threshold(fx: &EffortFixture, edits: i64) {
 /// struggle at the default of five, and are once the project sets three.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_project_setting_changes_a_bundled_datasets_result() {
-    let fx = services_with_effort().await;
+    let fx = crate::test_fixtures::services_with_thread().await;
     three_edits(&fx).await;
     assert_eq!(struggles(&fx).await, json!([]), "the default is five");
 
@@ -86,7 +107,7 @@ async fn a_project_setting_changes_a_bundled_datasets_result() {
 /// read it by itself: no restart and no explicit activation.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_settings_change_republishes_the_datasets_that_read_it() {
-    let fx = services_with_effort().await;
+    let fx = crate::test_fixtures::services_with_thread().await;
     three_edits(&fx).await;
     fx.svc.extension_activation.spawn(&fx.svc);
     set_threshold(&fx, 3).await;
@@ -113,7 +134,7 @@ async fn a_settings_change_republishes_the_datasets_that_read_it() {
 /// time: lowering the threshold changes the query it gets.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_query_reads_the_current_setting() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let bundled = fx
         .svc
         .extension_catalog
@@ -154,7 +175,7 @@ const CONFIGURED: &str = "manifest: 2\nname: mine\nintent:\n  purpose: p\n  exam
 /// key — and the other extension's value never appears.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_extension_reads_only_its_own_settings() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let root = fx.svc.layout.project_dir.clone();
     write(&root, ".oxplow/extensions/mine/extension.yaml", CONFIGURED);
     // `struggle` is oxplow-bundled's key, not `mine`'s.
@@ -191,7 +212,7 @@ async fn an_extension_reads_only_its_own_settings() {
     );
 }
 
-async fn held_errors(fx: &EffortFixture, name: &str) -> String {
+async fn held_errors(fx: &ThreadFixture, name: &str) -> String {
     crate::test_fixtures::load_errors(&fx.svc, name).await
 }
 
@@ -199,7 +220,7 @@ async fn held_errors(fx: &EffortFixture, name: &str) -> String {
 /// at load: an object value has no SQL literal.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_own_key_reads_and_a_key_that_is_not_a_scalar_fails_the_load() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let root = fx.svc.layout.project_dir.clone();
     write(&root, ".oxplow/extensions/mine/extension.yaml", CONFIGURED);
     write(
@@ -237,7 +258,7 @@ async fn an_own_key_reads_and_a_key_that_is_not_a_scalar_fails_the_load() {
 async fn a_materialized_dataset_is_refilled_when_its_setting_changes() {
     use oxplow_db::extension_config_store::{self, ConfigNamespace};
     use oxplow_domain::extension_state::Scope;
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let root = fx.svc.layout.project_dir.clone();
     write(
         &root,
@@ -267,7 +288,14 @@ async fn a_materialized_dataset_is_refilled_when_its_setting_changes() {
     let assets = crate::assets::Assets::new(fx.svc.db.clone(), Duration::from_millis(50));
     assets.sync_datasets().await.unwrap();
     assets.quiesce().await;
-    assert_eq!(limit().await, json!([[7]]));
+    // The refill is the asset's own: wait until the dataset reads the value,
+    // not for the assets to look idle.
+    let want = json!([[7]]);
+    assert!(
+        crate::test_fixtures::until(Duration::from_secs(20), || async { limit().await == want })
+            .await,
+        "the dataset was not refilled with {want}"
+    );
 
     fx.svc
         .db
@@ -287,5 +315,12 @@ async fn a_materialized_dataset_is_refilled_when_its_setting_changes() {
     crate::test_fixtures::activate_with_problems(&fx.svc).await;
     assets.sync_datasets().await.unwrap();
     assets.quiesce().await;
-    assert_eq!(limit().await, json!([[9]]));
+    // The refill is the asset's own: wait until the dataset reads the value,
+    // not for the assets to look idle.
+    let want = json!([[9]]);
+    assert!(
+        crate::test_fixtures::until(Duration::from_secs(20), || async { limit().await == want })
+            .await,
+        "the dataset was not refilled with {want}"
+    );
 }

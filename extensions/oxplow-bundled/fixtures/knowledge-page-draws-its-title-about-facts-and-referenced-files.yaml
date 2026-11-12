@@ -1,0 +1,23 @@
+# A knowledge page: the tab is named by the page's title, the body is the
+# markdown (editable, as its store lets oxplow write it), About gives the
+# store, kind and freshness, and Referenced files lists the files it cites
+# with whether each changed since the page was pinned.
+given:
+  - observe: { turn: { prompt: Build the holt, write: { path: src/holt.rs, body: "fn holt() {}\n" } } }
+  - observe: { snapshot: { files: [{ path: src/holt.rs, hash: h1 }] } }
+  - { command: oxplow.knowledge.write_page, input: { store: oxwiki, title: Otters, body: "# Otters\n\nThey hold hands. See [[file:src/holt.rs]].\n" } }
+when: { page: knowledge-page, params: { uri: "oxplow:oxplow/knowledge?id=otters&store=oxwiki", store: oxwiki, id: otters } }
+expect:
+  label: Otters
+  loaders:
+    row: { rows: [{ title: Otters }] }
+    body: { rows: [{ id: otters, store: oxwiki, can_edit: 1 }] }
+    about: { rows: [{ store: oxwiki, kind: note, freshness: fresh, cited_files: 1, stale_files: 0, read_count: 0 }] }
+    refs: { rows: [{ path: src/holt.rs, status: current }] }
+steps:
+  - given:
+      - observe: { snapshot: { files: [{ path: src/holt.rs, hash: h2 }] } }
+  - expect:
+      loaders:
+        about: { rows: [{ freshness: "very stale", stale_files: 1 }] }
+        refs: { rows: [{ path: src/holt.rs, status: changed since this page was written }] }

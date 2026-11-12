@@ -107,7 +107,7 @@ fn mark() -> bool {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ChooseProviderInput {
-    /// The capability (`work_items`, `effort_policy`, `snapshots`, …).
+    /// The capability (`task_tracker`, `snapshots`, `knowledge`, …).
     pub capability: String,
     /// The implementation to use; absent or blank: the default (the
     /// project's, for a personal choice).
@@ -122,7 +122,7 @@ pub struct ChooseProviderInput {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ChooseReplacementInput {
-    /// The core sub-component an extension replaces (`work_item.board`).
+    /// The core sub-component an extension replaces (`task.board`).
     pub target: String,
     /// Whose shows: an extension's name, or `oxplow` for oxplow's own.
     /// Leave it out for the default.
@@ -657,21 +657,21 @@ mod tests {
         bus.run(
             &human,
             SET,
-            json!({ "key": "activeProviders", "value": { "effort_policy": "none" }, "layer": "personal" }),
+            json!({ "key": "activeProviders", "value": { "task_tracker": "none" }, "layer": "personal" }),
             true,
         )
         .await
         .unwrap();
         assert_eq!(file(&dir), "", "project.yaml untouched");
         let personal = std::fs::read_to_string(dir.path().join(".oxplow/personal.yaml")).unwrap();
-        assert!(personal.contains("effort_policy: none"), "{personal}");
+        assert!(personal.contains("task_tracker: none"), "{personal}");
         assert_eq!(
             target
                 .config
                 .read()
                 .unwrap()
                 .personal_active_providers
-                .get("effort_policy")
+                .get("task_tracker")
                 .map(String::as_str),
             Some("none")
         );
@@ -1021,7 +1021,7 @@ mod tests {
     /// nothing marked removes the key.
     #[tokio::test(flavor = "multi_thread")]
     async fn marking_a_path_generated_edits_the_exclude_list() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let run = |input: Value| {
             let svc = svc.clone();
@@ -1052,7 +1052,7 @@ mod tests {
     /// goes back to the default, and the last one removes the key.
     #[tokio::test(flavor = "multi_thread")]
     async fn choosing_a_provider_edits_that_capabilitys_entry_in_its_layer() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let run = |input: Value| {
             let svc = svc.clone();
@@ -1066,7 +1066,7 @@ mod tests {
         let project = || crate::config_service::read_config(&svc.config).active_providers;
         let personal = || crate::config_service::read_config(&svc.config).personal_active_providers;
         run(json!({ "capability": "snapshots", "provider": "contents_store" })).await;
-        run(json!({ "capability": "effort_policy", "provider": "none" })).await;
+        run(json!({ "capability": "task_tracker", "provider": "none" })).await;
         assert_eq!(project().len(), 2);
         run(json!({ "capability": "snapshots", "provider": "other", "layer": "personal" })).await;
         assert_eq!(
@@ -1080,7 +1080,7 @@ mod tests {
         );
         run(json!({ "capability": "snapshots" })).await;
         assert!(!project().contains_key("snapshots"));
-        run(json!({ "capability": "effort_policy" })).await;
+        run(json!({ "capability": "task_tracker" })).await;
         assert!(project().is_empty());
         run(json!({ "capability": "snapshots", "layer": "personal" })).await;
         assert!(personal().is_empty());

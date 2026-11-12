@@ -1,7 +1,7 @@
 # oxplow.rust.unsafe_blocks — count `unsafe { … }` blocks across the Rust tree.
 # A tree-derived collector: reads the snapshot via files() and the AST via
 # ast_query(). Deterministic (no I/O) → observed. Its facts are per-file
-# (subject "file:<path>", nonzero only), so an effort's change attributes
+# (subject "file:<path>", nonzero only), so a request's change attributes
 # through its files.
 #
 # Inverted substrate (epic tsk12): a per-file `oxplow.ast_hit` FACT

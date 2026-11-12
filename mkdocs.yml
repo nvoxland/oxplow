@@ -55,7 +55,7 @@ nav:
       - Your first stream: getting-started/first-stream.md
       - Concepts: getting-started/concepts.md
   - Guide:
-      - Work queue: guide/work-queue.md
+      - Tasks: guide/tasks.md
       - Wiki pages: guide/wiki.md
       - Comments: guide/comments.md
       - Search: guide/search.md

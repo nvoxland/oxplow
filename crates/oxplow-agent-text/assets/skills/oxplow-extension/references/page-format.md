@@ -37,14 +37,14 @@ name: review            # must equal the folder name
 description: Pages for reviewing agent work
 intent:                 # required: what it is for, and how to know it works
   purpose: Show what is waiting on the reviewer in this stream
-  origin: oxplow:oxplow/effort?id=eff42  # the effort you are working under, or null
+  origin: oxplow:oxplow/request?id=req42  # the request you are working under, or null
   examples:
     - name: one blocked task
       input: { page: waiting-on-me, params: { stream_id: 1 } }
       expect: one row for the blocked task
 ui:                     # optional: what it adds to other pages
   mounts:
-    - { page: task-history, at: oxplow/work-item.sections }   # also add requires: [oxplow-bundled]
+    - { page: task-history, at: oxplow/task-detail.sections }   # also add requires: [oxplow-bundled]
 panels:                 # optional: a left-nav panel
   - { id: waiting, title: Waiting on Me, icon: bell, scope: stream, body: waiting-on-me, badge: waiting-on-me }
 ```
@@ -85,7 +85,7 @@ examples.
   `keywords` or `badge`: see "Renderers".)
 - `description` says what the page is: what it shows, for what, over which
   scope, in which order. A page whose purpose is an action (a form that
-  files an item, hands off work or verifies a claim) may name it. Never
+  files an item or hands off work) may name it. Never
   list UI mechanics or the actions on offer: the page shows its own
   controls, and Definition in About this page lists them. Good: "The stream's closed
   threads, newest first, with the work each finished." Bad: "...
@@ -116,10 +116,10 @@ examples.
 presets? }]`. A param binds by name into SQL (`:name`), command args
 (`{ param: name }`) and `{{param.name}}` templates. Its value is the
 caller's, else the viewer's context, else `default`. **`stream_id`,
-`thread_id`, `effort_id` and `uri` are filled in from what the person is
+`thread_id`, `request_id` and `uri` are filled in from what the person is
 looking at.** Don't hardcode ids.
 
-- `type`: `text` (default), `choice` (`options: [{ value, label }]` with a
+- `type`: `text` (default), `choice` (`options: [{ value, label, icon? }]`, an `icon` one oxplow draws or `assets/<name>.svg` in the extension, with a
   `default` that is one of them, or `options_from`: a query of `queries/`
   (`<query>`, its last loader, or `<query>#<loader>`) whose rows are
   `value`, `label`, optional `group` — or `'#<loader>'`, a loader of this
@@ -154,7 +154,7 @@ called `content` that you never declare. Read it as `FROM content` or `{
 from: content.<col> }`; do not query for what the page renders. For a file
 (`oxplow/file`) it is one row, `uri, path, filesystem, rev, kind, size,
 modified_at, is_text, language`; for a resource a dataset resolves (a
-commit, a work item) it is that dataset's row; for any other it is `{ uri }`.
+commit, a task) it is that dataset's row; for any other it is `{ uri }`.
 `content: { text: true, max_bytes: 262144 }` in the page also reads a file's
 text (`text`, `truncated`; `text` is NULL for a binary file; `max_bytes` at
 most 4 MiB, default 64 KiB). No such file or row: `content` has no rows.

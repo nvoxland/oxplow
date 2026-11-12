@@ -76,9 +76,9 @@ export function panelAlerts(
 type Part = "body" | "collapsed" | "badge" | "count";
 
 /** Every panel's runs, by panel id, for the stream and thread shown: one
- *  open run per part, which the daemon binds (`open_panel_part`), the body
- *  with the viewer's picks. The daemon re-runs them when what they read
- *  changes. */
+ *  open run per part, which the daemon binds (`open_panel_part`), each
+ *  with the viewer's picks. The daemon re-runs them
+ *  when what they read changes. */
 export function useExtensionPanelRuns(
   panels: readonly ExtensionPanel[],
   streamId: string | null,
@@ -103,7 +103,9 @@ export function useExtensionPanelRuns(
         if (!page) continue;
         const handle = runs.open({
           page,
-          panel: { panel: p.id, part, choices: part === "body" ? (choices[p.id] ?? {}) : {} },
+          // The header's picks go to every part (the daemon keeps the ones
+          // its page declares).
+          panel: { panel: p.id, part, choices: choices[p.id] ?? {} },
           params: {},
           streamId,
           threadId,

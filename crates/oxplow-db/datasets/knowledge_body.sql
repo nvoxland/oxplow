@@ -1,3 +1,3 @@
-SELECT p.uri, w.body
-FROM source('wiki_page') w
-JOIN ref('knowledge_page') p ON p.slug = w.slug
+SELECT p.uri, k.body
+FROM source('knowledge_page') k
+JOIN ref('knowledge_page') p ON p.uri = k.uri

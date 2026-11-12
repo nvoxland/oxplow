@@ -27,7 +27,7 @@
 //! turn the tool's output into the answer (`invoked` / `records`). Tool
 //! output is data — the mapping reads it, nothing runs it — and what the
 //! mapping returns is checked: only declared event types, only this
-//! provider's refs (`oxplow:oxplow/work_item?id=…&provider=<id>`, the id from
+//! provider's refs (`oxplow:oxplow/task?id=…&provider=<id>`, the id from
 //! `OXPLOW_PROVIDER_ID`).
 
 use std::collections::HashMap;
@@ -68,7 +68,7 @@ pub struct Adapter {
     pub tools: Vec<Value>,
     /// The MCP server: a program it runs, or one it reaches.
     pub server: Server,
-    /// Its provider id: its refs are `oxplow:oxplow/work_item?id=…&provider=<id>`.
+    /// Its provider id: its refs are `oxplow:oxplow/task?id=…&provider=<id>`.
     pub provider_id: String,
 }
 
@@ -677,13 +677,13 @@ async fn call(
     Ok((tool, output, result.is_error == Some(true)))
 }
 
-/// Refuse what isn't this provider's: a work item URI with another
+/// Refuse what isn't this provider's: a task URI with another
 /// `provider`, or none.
 fn own_ref(provider: &str, r: &Value, what: &str) -> Result<(), ProtocolError> {
-    match r.as_str().and_then(oxplow_domain::uri::build::work_item_of_uri) {
+    match r.as_str().and_then(oxplow_domain::uri::build::task_of_uri) {
         Some((p, _)) if p == provider => Ok(()),
         _ => Err(internal(format!(
-            "the mapping returned {what} `{r}`, which isn't one of this provider's work items (`provider={provider}`)"
+            "the mapping returned {what} `{r}`, which isn't one of this provider's tasks (`provider={provider}`)"
         ))),
     }
 }

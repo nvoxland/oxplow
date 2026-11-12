@@ -3,6 +3,8 @@
 /// (`pages/CustomPageView`). The frame is sandboxed (`allow-scripts
 /// allow-forms`) and reaches the app only over the bridge
 /// (`componentBridge.ts`).
+import { markdownTree } from "../components/Markdown/markdownTree.js";
+import { liveTreeDeps } from "../components/Markdown/liveTreeDeps.js";
 import type { CSSProperties, MutableRefObject } from "react";
 import { useEffect, useRef, useState } from "react";
 
@@ -292,6 +294,7 @@ export function ComponentFrame({
           return true;
         },
         querySql: (sql, params) => runComponentSql(component, sql, params, streamId, version),
+        markdown: async (text, inline) => markdownTree(text, inline, await liveTreeDeps()),
         pageMemoryGet: async (key) => {
           await memoryRef.current.ready;
           return memoryRef.current.get(memoryScope, key) ?? null;

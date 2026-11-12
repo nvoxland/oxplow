@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`snapshot.ref_drifted@1`: a snapshot of the primary stream changed files a\nsource's pinned refs cite (`file_pin` / `dir_pin` edges, a shared\nmodel's pinned markdown column), so what it says of them may no longer\nhold (`v_ref_pin.stale`), whether or not it was stale already. Caused by\nthe `snapshot.taken`.",
+  "properties": {
+    "paths": {
+      "description": "The changed files it cites, or that are under a directory it cites\n(repo-relative).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "snapshot": {
+      "description": "The snapshot that changed them.",
+      "format": "int64",
+      "type": "integer"
+    },
+    "source": {
+      "description": "The source that pins them (a model row's URI).",
+      "type": "string"
+    }
+  },
+  "required": [
+    "source",
+    "snapshot",
+    "paths"
+  ],
+  "title": "RefDriftedV1",
+  "type": "object"
+}

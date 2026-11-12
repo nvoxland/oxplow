@@ -8,11 +8,11 @@ const result = (rows: (string | null)[][]): SqlQueryResult =>
 describe("bookmarks", () => {
   test("rows become refs; an unparseable ref is skipped", () => {
     const out = bookmarksFromResult(result([
-      ["oxplow:oxplow/work_item?id=tsk7&provider=oxplow", "Fix it", "thread"],
+      ["oxplow:oxplow/task?id=tsk7&provider=oxtask", "Fix it", "thread"],
       ["", null, "project"],
     ]));
     expect(out).toHaveLength(1);
-    expect(out[0]!.ref.id).toBe("oxplow:oxplow/work_item?id=tsk7&provider=oxplow");
+    expect(out[0]!.ref.id).toBe("oxplow:oxplow/task?id=tsk7&provider=oxtask");
     expect(out[0]!.label).toBe("Fix it");
     expect(out[0]!.scope).toBe("thread");
   });

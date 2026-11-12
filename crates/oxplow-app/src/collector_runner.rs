@@ -847,13 +847,13 @@ impl RunTrigger {
 pub struct Anchored {
     pub stream_id: Option<i64>,
     pub snapshot_id: Option<i64>,
-    pub effort_id: Option<i64>,
     pub thread_id: Option<i64>,
+    pub turn_id: Option<i64>,
 }
 
 /// The named parameters a collector's `input` may use: the trigger
-/// event's anchors (`:stream_id`, `:snapshot_id`, `:effort_id`,
-/// `:thread_id`, `:turn_id`), else what the run `known`, and the event
+/// event's anchors (`:stream_id`, `:snapshot_id`, `:thread_id`,
+/// `:turn_id`), else what the run `known`, and the event
 /// itself — `:event_id` its id, `:event_seq` its seq; NULL when neither
 /// has one. Ids bind as integers: they're join keys.
 pub fn anchor_params(event: Option<&EventView>, known: Anchored) -> Vec<(String, SqlCell)> {
@@ -872,20 +872,16 @@ pub fn anchor_params(event: Option<&EventView>, known: Anchored) -> Vec<(String,
             int(a.and_then(|a| a.snapshot_id).or(known.snapshot_id)),
         ),
         (
-            "effort_id".into(),
-            int(a
-                .and_then(|a| a.effort_id)
-                .map(|v| v.value())
-                .or(known.effort_id)),
-        ),
-        (
             "thread_id".into(),
             int(a
                 .and_then(|a| a.thread_id)
                 .map(|v| v.value())
                 .or(known.thread_id)),
         ),
-        ("turn_id".into(), int(a.and_then(|a| a.turn_id))),
+        (
+            "turn_id".into(),
+            int(a.and_then(|a| a.turn_id).or(known.turn_id)),
+        ),
         (
             "event_id".into(),
             event
@@ -2693,11 +2689,11 @@ pub(crate) mod tests {
                    VALUES (1, 'primary', 'p', 'main', 'refs/heads/main', 'local', '/r', '2026-01-01', '2026-01-01');
                  INSERT INTO threads (id, stream_id, title, created_at, updated_at)
                    VALUES (1, 1, 'T', '2026-01-01', '2026-01-01');
-                 INSERT INTO capability_provider (capability, provider, active) VALUES ('work_items', 'oxplow', 1);
-                 INSERT INTO work_item (uri, provider, title, state, native_state, native, thread_id, created_at, updated_at) VALUES
-                   ('oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 'oxplow', 'Fix login', 'todo', 'ready', '{\"priority\":\"high\"}', 1, '2026-01-01', '2026-01-01'),
-                   ('oxplow:oxplow/work_item?id=tsk2&provider=oxplow', 'oxplow', 'Tidy docs', 'todo', 'ready', '{\"priority\":\"low\"}', 1, '2026-01-01', '2026-01-01'),
-                   ('oxplow:oxplow/work_item?id=tsk3&provider=oxplow', 'oxplow', 'Ship it', 'done', 'done', '{\"priority\":\"high\"}', 1, '2026-01-01', '2026-01-01');",
+                 INSERT INTO capability_provider (capability, provider, active) VALUES ('task_tracker', 'oxtask', 1);
+                 INSERT INTO task (uri, provider, title, state, stage, native, created_at, updated_at) VALUES
+                   ('oxplow:oxplow/task?id=tsk1&provider=oxtask', 'oxtask', 'Fix login', 'todo', 'ready', '{\"priority\":\"high\"}', '2026-01-01', '2026-01-01'),
+                   ('oxplow:oxplow/task?id=tsk2&provider=oxtask', 'oxtask', 'Tidy docs', 'todo', 'ready', '{\"priority\":\"low\"}', '2026-01-01', '2026-01-01'),
+                   ('oxplow:oxplow/task?id=tsk3&provider=oxtask', 'oxtask', 'Ship it', 'done', 'done', '{\"priority\":\"high\"}', '2026-01-01', '2026-01-01');",
             )
             .map_err(|e| DomainError::Invalid(e.to_string()))
         })
@@ -2732,7 +2728,7 @@ pub(crate) mod tests {
                     .build()
                     .unwrap()
                     .block_on(async {
-                        let fx = crate::test_fixtures::services_with_effort().await;
+                        let fx = crate::test_fixtures::services_with_thread().await;
                         let svc = &fx.svc;
                         let reply = json!({ "answers": { "label": { "type": "choice", "choice": "bug", "probabilities": { "bug": 0.9, "feature": 0.1 } } } });
                         let (base, _) = oxplow_ai_fake::mock(
@@ -2790,10 +2786,10 @@ pub(crate) mod tests {
     /// `/collector`, and an unknown collector is not found.
     #[tokio::test]
     async fn sync_takes_a_collector_ref() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         for bad in [
             "work/bad",
-            "oxplow:oxplow/effort?id=eff1",
+            "oxplow:oxplow/request?id=req1",
             "oxplow:oxplow/collector?collector=nowhere",
         ] {
             let err = fx
@@ -2834,7 +2830,7 @@ pub(crate) mod tests {
     /// `oxplow.contribution.enable` lets it run again. An agent may enable it.
     #[tokio::test]
     async fn a_collector_failing_three_runs_is_disabled_until_enabled() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let root = fx.svc.layout.project_dir.clone();
         extension(
             &root,
@@ -2891,12 +2887,12 @@ pub(crate) mod tests {
     /// around the bus.
     #[tokio::test]
     async fn the_scheduler_runs_collector_sync_through_the_bus() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let root = fx.svc.layout.project_dir.clone();
         extension(
             &root,
             "work",
-            "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    on: { every: 10m }\n    input: \"SELECT uri, title FROM v_work_item\"\n    entities:\n      - { name: hot, key: uri, columns: { uri: text, title: text } }\n",
+            "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    on: { every: 10m }\n    input: \"SELECT uri, title FROM v_task\"\n    entities:\n      - { name: hot, key: uri, columns: { uri: text, title: text } }\n",
             &[(
                 "hot.star",
                 "def transform(input):\n    return {\"entities\": {\"hot\": [{\"uri\": r[\"uri\"], \"title\": r[\"title\"]} for r in input[\"rows\"]]}}\n",
@@ -2979,7 +2975,7 @@ pub(crate) mod tests {
     /// all of them.
     #[tokio::test]
     async fn a_bounded_input_says_whether_it_is_complete() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let count = |limit: Option<usize>| {
             let limit = limit.map(|l| format!(", limit: {l}")).unwrap_or_default();
             format!(
@@ -3025,7 +3021,7 @@ pub(crate) mod tests {
     /// that couldn't happen fails the preview, saying why.
     #[tokio::test]
     async fn a_preview_takes_the_event_it_reacts_to() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let root = fx.svc.layout.project_dir.clone();
         extension(
             &root,
@@ -3074,7 +3070,7 @@ pub(crate) mod tests {
             root.path(),
             "work",
             &format!(
-                "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT uri, title, json_extract(native, '$.priority') AS priority FROM v_work_item WHERE state = 'todo'\"\n{entity}  - id: jq\n    runtime: jaq\n    entry: hot.jq\n    input: \"SELECT uri, title FROM v_work_item\"\n    entities:\n      - {{ name: upper, key: uri, columns: {{ uri: text, title: text }} }}\n"
+                "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT uri, title, json_extract(native, '$.priority') AS priority FROM v_task WHERE state = 'todo'\"\n{entity}  - id: jq\n    runtime: jaq\n    entry: hot.jq\n    input: \"SELECT uri, title FROM v_task\"\n    entities:\n      - {{ name: upper, key: uri, columns: {{ uri: text, title: text }} }}\n"
             ),
             &[
                 (
@@ -3148,7 +3144,7 @@ pub(crate) mod tests {
         extension(
             root.path(),
             "work",
-            "manifest: 2\nname: work\nintent:\n  purpose: test\npermissions: [ai.compute]\nai_profiles:\n  - { id: sort, description: Sorts., fallback: decide }\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: kind.star\n    input: \"SELECT uri, title FROM v_work_item\"\n    entities:\n      - { name: kind, key: uri, columns: { uri: text, kind: text } }\n",
+            "manifest: 2\nname: work\nintent:\n  purpose: test\npermissions: [ai.compute]\nai_profiles:\n  - { id: sort, description: Sorts., fallback: decide }\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: kind.star\n    input: \"SELECT uri, title FROM v_task\"\n    entities:\n      - { name: kind, key: uri, columns: { uri: text, kind: text } }\n",
             &[(
                 "kind.star",
                 "def transform(input):\n    rows = []\n    for r in input[\"rows\"]:\n        a = ai_classify(\"is this a bug?\", [\"bug\", \"feature\"], role = \"sort\")\n        b = ai_classify(\"is this a bug?\", [\"bug\", \"feature\"], role = \"sort\")\n        rows.append({\"uri\": r[\"uri\"], \"kind\": a[\"label\"] if a == b else \"differs\"})\n    return {\"entities\": {\"kind\": rows}}\n",
@@ -3249,7 +3245,7 @@ pub(crate) mod tests {
         extension(
             root.path(),
             "work",
-            "manifest: 2\nname: work\nintent:\n  purpose: test\npermissions: [process.run]\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT uri, title, json_extract(native, '$.priority') AS priority FROM v_work_item WHERE state = 'todo'\"\n    entities:\n      - { name: hot, key: uri, columns: { uri: text, title: text } }\n  - id: sh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: raw, key: id, columns: { id: int } }\n",
+            "manifest: 2\nname: work\nintent:\n  purpose: test\npermissions: [process.run]\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT uri, title, json_extract(native, '$.priority') AS priority FROM v_task WHERE state = 'todo'\"\n    entities:\n      - { name: hot, key: uri, columns: { uri: text, title: text } }\n  - id: sh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: raw, key: id, columns: { id: int } }\n",
             &[(
                 "hot.star",
                 "def transform(input):\n    return {\"entities\": {\"hot\": [{\"uri\": r[\"uri\"], \"title\": r[\"title\"]} for r in input[\"rows\"] if r[\"priority\"] == \"high\"]}}\n",
@@ -3287,10 +3283,7 @@ pub(crate) mod tests {
         assert_eq!(hot.columns, vec!["uri", "title"]);
         assert_eq!(
             serde_json::to_value(&hot.rows).unwrap(),
-            json!([[
-                "oxplow:oxplow/work_item?id=tsk1&provider=oxplow",
-                "Fix login"
-            ]])
+            json!([["oxplow:oxplow/task?id=tsk1&provider=oxtask", "Fix login"]])
         );
         assert_eq!(hot.total, 1);
         assert!(

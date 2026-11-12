@@ -28,7 +28,7 @@ effects:
 - `review.ask` takes `{ job, intentKey, request: { schemaVersion: 1,
   role, messages } }` — no model: the role's is used. The `intentKey` is
   the job's **subject**, one job per key: put what it's about in it
-  (`review:eff12`), and read it back as the snapshot's `intentKey`
+  (`review:req12`), and read it back as the snapshot's `intentKey`
   (or `v_job_run.intent_key`) in the effect that publishes the answer.
 - To start one on an event, an effect composes your own `ask` command. Keep the
   prompt in one script command that composes `ask`, so the effect and a
@@ -45,13 +45,11 @@ effects:
   it updates as the model writes. oxplow's own Job Runs page lists every run
   with Cancel.
 - `$OXPLOW_BIN extension new --from triage` copies an example with one, with
-  its fixtures (a tool round, a cancel); `--from effort-review`
-  starts one per finished effort, its tool reading the effort's evidence,
-  and comments the answer on the work item.
+  its fixtures (a tool round, a cancel).
 - Your namespace is your name with `-` as `_`, and it names everything
-  you contribute: extension `effort-review` has commands
-  `effort_review.review.ask` and its job is
-  `oxplow:oxplow/job?job=effort_review/review`.
+  you contribute: extension `my-review` has commands
+  `my_review.review.ask` and its job is
+  `oxplow:oxplow/job?job=my_review/review`.
 
 ## AI profiles
 

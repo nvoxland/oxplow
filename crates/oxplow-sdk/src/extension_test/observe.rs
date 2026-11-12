@@ -5,16 +5,13 @@ use super::*;
 ///
 /// - `event: { type, v?, payload, subject?, anchors? }`: an event logged
 ///   and delivered, the extension's effects reacting.
-/// - `evidence: { effort, observations?: [..], metric_deltas?: [..] }`: an
-///   effort's evidence (a metric delta is `{ key, current, baseline?, warn_at?,
-///   fail_at?, crossing?, kind?, direction?, .. }`).
-/// - `commit: { sha, at, subject, files?, .. }`: a commit the indexer read.
+/// - `commit: { sha, at?, subject, files?, .. }`: a commit the indexer read
+///   (a file's `blob` links it to the requests that left the file so).
 /// - `change: { kind?, target, files?, functions? }`: a change's analysis,
-///   as the change analysis stores it (`kind` is `commit` by default; an
-///   effort's `target` is its id, like `eff1`).
-/// - `test_run: { effort, at?, cases?: [{ name, status }], asserted_failed? }`:
-///   a test run an effort recorded, as a run recorder writes it.
-/// - `snapshot: { trigger?, elapsed_ms?, budget_ms?, revision?, branch?, files?: [{ path, hash }] }`:
+///   as the change analysis stores it (`kind` is `commit` by default).
+/// - `test_run: { turn, at?, cases?: [{ name, status }], asserted_failed? }`:
+///   a test run a turn made, as a run recorder writes it.
+/// - `snapshot: { trigger?, elapsed_ms?, budget_ms?, revision?, branch?, files?: [{ path, hash, blob? }] }` (a `turn_end` take is the latest turn's):
 ///   one take in the stream's snapshot log.
 /// - `diagnostics: { path, language?, items?: [{ severity, message, line?, col?, source?, code? }] }`:
 ///   what a language server reported for a file.
@@ -24,11 +21,11 @@ use super::*;
 ///   a finished run of an extension's code, as the host records it.
 /// - `health: { namespace, contribution, kind?, disable }`: a contribution
 ///   disabled after failures, with the reason.
-/// - `token_usage: { thread?, effort?, session?, model?, prompt?, input_tokens?,
+/// - `token_usage: { thread?, session?, model?, prompt?, input_tokens?,
 ///   output_tokens?, cache_creation_input_tokens?, cache_read_input_tokens?, turn? }`:
 ///   the tokens a turn spent.
 /// - `hint: { hint, evaluated?, thread? }`: a hint's query ran that many times.
-/// - `nudge: { kind, message, thread?, effort?, audience?, delivered? }`: a
+/// - `nudge: { kind, message, thread?, audience?, delivered? }`: a
 ///   nudge a hint raised.
 /// - `analyze: { kind: working | commit | …, sha?, streamId? }`: a change
 ///   analyzed now (`change_analysis::ensure_change`), so its files and
@@ -41,16 +38,17 @@ use super::*;
 ///   what a collector found, recorded as one capture of the measure.
 /// - `retention: { days }`: the log's retention sweep, run as it is `days`
 ///   from now: payloads past their keep are expired, envelopes stay.
-/// - `collect: { effort, collectors?: [key] }`: the fact collectors an
-///   effort's end triggers, run over what the effort recorded.
+/// - `detail_compaction: { keep }`: old run detail compacted, as the daily
+///   pass does, keeping each producer's newest `keep` captures' whole.
 /// - `turn: { prompt?, during?: [{ command, input?, as? }], tools?: [{ name, kind, paths?, command?, detail?,
 ///   ok?, exit_code? }], write?: { path, body }, answer?, compactions?: n,
-///   context?: { tokens, window? }, thread?, session?, subagent?, peer? }`:
+///   context?: { tokens, window? }, thread?, session?, subagent?, peer?, open? }`:
 ///   one turn on `thread` (thr1), in `session`, as
 ///   its harness's hooks report it — the prompt, each tool call, the file
 ///   the turn wrote (a snapshot of the worktree is taken after it), the
 ///   context compactions, and the turn's end with the agent's last message
-///   and how full its context was.
+///   and how full its context was (none with `open: true`: it is still
+///   running).
 pub(super) async fn observe(host: &Host, ext: &Extension, observed: &Value) -> Result<(), String> {
     let Some(map) = observed.as_object().filter(|m| m.len() == 1) else {
         return Err("name one kind — fix: `observe: { turn: { .. } }`".into());
@@ -58,16 +56,15 @@ pub(super) async fn observe(host: &Host, ext: &Extension, observed: &Value) -> R
     let (kind, body) = map.iter().next().expect("one key");
     match kind.as_str() {
         "turn" => observe_turn(host, body).await,
-        "evidence" => observe_evidence(host, body).await,
         "event" => observe_event(host, ext, body).await,
         "commit" => observe_commit(host, body).await,
         "change" => observe_change(host, body).await,
         "test_run" => observe_test_run(host, body).await,
         "snapshot" => observe_snapshot(host, body).await,
-        "collect" => observe_collect(host, body).await,
         "diagnostics" => observe_diagnostics(host, body).await,
         "symbols" => observe_symbols(host, body).await,
         "retention" => observe_retention(host, body).await,
+        "detail_compaction" => observe_detail_compaction(host, body).await,
         "facts" => observe_facts(host, body).await,
         "visit" => observe_visit(host, body).await,
         "refs" => observe_refs(host, body).await,
@@ -80,7 +77,7 @@ pub(super) async fn observe(host: &Host, ext: &Extension, observed: &Value) -> R
         "conversation" => observe_conversation(host, body).await,
         other => {
             return Err(format!(
-                "`{other}` isn't a kind — fix: `turn`, `evidence`, `event`, `commit`, `change`, `test_run`, `snapshot`, `collect`, `diagnostics`, `symbols`, `retention`, `facts`, `visit`, `refs`, `analyze`, `run`, `health`, `token_usage`, `hint`, `nudge` or `conversation`"
+                "`{other}` isn't a kind — fix: `turn`, `event`, `commit`, `change`, `test_run`, `snapshot`, `diagnostics`, `symbols`, `retention`, `detail_compaction`, `facts`, `visit`, `refs`, `analyze`, `run`, `health`, `token_usage`, `hint`, `nudge` or `conversation`"
             ))
         }
     }?;
@@ -137,11 +134,11 @@ pub(super) async fn first_stream(host: &Host) -> Result<oxplow_domain::StreamId,
 }
 
 /// `change: { kind?, target, files?: [{ path, status?, additions?,
-/// deletions?, zone?, is_test? }], functions?: [{ path, symbol, name?, status?,
+/// deletions?, zone?, is_test?, staged?, untracked? }], functions?: [{ path, symbol, name?, status?,
 /// container?, signature_changed?, body_changed?, start_line?, visibility?,
 /// is_test?, length?, params_before?, params_after?, complexity?, complexity_delta? }] }`:
 /// what the change analysis stored for a change (`SqliteChangeStore::
-/// store_results`). A `working` or `effort` change's head is the working
+/// store_results`). A `working` change's head is the working
 /// tree; a `commit`'s is the commit `target`.
 pub(super) async fn observe_change(host: &Host, body: &Value) -> Result<(), String> {
     use oxplow_db::{ChangeFileRow, ChangeFunctionRow, ChangeResults};
@@ -149,12 +146,8 @@ pub(super) async fn observe_change(host: &Host, body: &Value) -> Result<(), Stri
     let text = |v: &Value, key: &str| v.get(key).and_then(Value::as_str).map(str::to_string);
     let kind = text(body, "kind").unwrap_or_else(|| "commit".into());
     let target = text(body, "target").ok_or("`change.target` names what the change is of")?;
-    let target = match (kind.as_str(), target.strip_prefix("eff")) {
-        ("effort", Some(n)) if n.parse::<i64>().is_ok() => n.to_string(),
-        _ => target,
-    };
     let head = match kind.as_str() {
-        "working" | "effort" => Revision::Working,
+        "working" => Revision::Working,
         _ => Revision::git(target.clone()),
     };
     let int = |v: &Value, key: &str| v.get(key).and_then(Value::as_i64);
@@ -174,7 +167,9 @@ pub(super) async fn observe_change(host: &Host, body: &Value) -> Result<(), Stri
             deletions: int(&f, "deletions").unwrap_or(0),
             zone: Some(text(&f, "zone").unwrap_or_else(|| "other".into())),
             is_test: flag(&f, "is_test"),
-            ..Default::default()
+            // A working tree's file: in the index, or not tracked yet.
+            staged: f.get("staged").and_then(Value::as_bool),
+            untracked: f.get("untracked").and_then(Value::as_bool),
         });
     }
     for f in list("functions") {
@@ -213,28 +208,43 @@ pub(super) async fn observe_change(host: &Host, body: &Value) -> Result<(), Stri
         .map_err(|e| e.to_string())
 }
 
-/// `test_run: { effort, at?, producer?, branch?, cases?: [{ name, status }],
-/// asserted_failed? }`: a run an effort recorded, as a run recorder writes
-/// it: a `tests` capture with its detail and an `oxplow.test_case` fact
-/// per case (or per failure asserted as a count with no report), through
-/// the fact store. A `producer` other than `tests` is a record without
+/// `test_run: { turn, at?, producer?, branch?, cases?: [{ name, status }],
+/// asserted_failed? }`: a run a turn made, as a run recorder writes it:
+/// a `tests` capture with its detail and an `oxplow.test_case` fact per
+/// case (or per failure asserted as a count with no report), through the
+/// fact store. A `producer` other than `tests` is a record without
 /// measurements.
 pub(super) async fn observe_test_run(host: &Host, body: &Value) -> Result<(), String> {
-    use oxplow_db::effort_store::EffortStore as _;
-    use oxplow_domain::{EffortId, Timestamp};
-    let effort = body
-        .get("effort")
-        .and_then(Value::as_str)
-        .and_then(|e| e.strip_prefix("eff"))
-        .and_then(|n| n.parse::<i64>().ok())
-        .ok_or("`test_run.effort` is an effort's id, like `eff1`")?;
-    let found = host
+    let turn = body
+        .get("turn")
+        .and_then(Value::as_i64)
+        .ok_or("`test_run.turn` is a turn's id, like `1`")?;
+    let rows = host
         .svc
-        .effort_store
-        .get_effort(&EffortId::new(effort))
+        .sql
+        .query_sql(
+            &format!("SELECT thread_id FROM v_agent_turn WHERE id = {turn}"),
+            vec![],
+            None,
+        )
         .await
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("no effort eff{effort}"))?;
+        .rows;
+    let Some([oxplow_db::SqlCell::Int(thread)]) = rows.first().map(Vec::as_slice) else {
+        return Err(format!("no turn {turn}"));
+    };
+    record_test_run(host, body, *thread, Some(turn)).await
+}
+
+/// One test run, as a run recorder writes it, owned by `thread` and the
+/// turn it ran in.
+async fn record_test_run(
+    host: &Host,
+    body: &Value,
+    thread: i64,
+    turn: Option<i64>,
+) -> Result<(), String> {
+    use oxplow_domain::Timestamp;
     let at = match body.get("at").and_then(Value::as_str) {
         Some(at) => Timestamp::parse(at).map_err(|e| format!("`test_run.at`: {e}"))?,
         None => Timestamp::now(),
@@ -276,6 +286,16 @@ pub(super) async fn observe_test_run(host: &Host, body: &Value) -> Result<(), St
             })).collect::<Vec<_>>()
         })]
     };
+    // The counts a run recorder writes beside a report's suites: a run
+    // with cases has its passed and total (a report-less one only what it
+    // asserted).
+    let mut payload = json!({ "command": "cargo test", "failed": failed, "suites": suites });
+    if !cases.is_empty() {
+        let count = |s: &str| cases.iter().filter(|(_, status)| status == s).count() as i64;
+        payload["passed"] = json!(count("passed"));
+        payload["skipped"] = json!(count("skipped"));
+        payload["total"] = json!(cases.len() as i64 + asserted_failed);
+    }
     let facts = &host.svc.fact_store;
     let case = facts
         .get_measure("oxplow.test_case")
@@ -284,14 +304,17 @@ pub(super) async fn observe_test_run(host: &Host, body: &Value) -> Result<(), St
         .ok_or("no `oxplow.test_case` measure")?;
     let stream = first_stream(host).await?;
     let mut capture = oxplow_db::NewMetricCapture::done(stream.value(), producer, "hook");
-    capture.thread_id = Some(found.thread_id.value());
-    capture.effort_id = Some(effort);
+    // A run's trigger, as the recorder stamps it: what a request's analysis
+    // reads its runs by.
+    capture.trigger = Some("on-report".into());
+    capture.thread_id = Some(thread);
+    capture.turn_id = turn;
     capture.branch = Some(branch.to_string());
     capture.captured_at = Some(at);
     capture.detail_json = Some(
         json!({
             "kind": "test-detail",
-            "payload": { "command": "cargo test", "failed": failed, "suites": suites }
+            "payload": payload
         })
         .to_string(),
     );
@@ -527,7 +550,7 @@ pub(super) fn thread_text(body: &Value) -> String {
         .to_string()
 }
 
-/// `token_usage: { thread?, effort?, session?, model?, prompt?, input_tokens?,
+/// `token_usage: { thread?, session?, model?, prompt?, input_tokens?,
 /// output_tokens?, cache_creation_input_tokens?, cache_read_input_tokens?,
 /// turn? }`: the tokens a turn spent (`SqliteTokenUsageStore::record`).
 pub(super) async fn observe_token_usage(host: &Host, body: &Value) -> Result<(), String> {
@@ -539,7 +562,6 @@ pub(super) async fn observe_token_usage(host: &Host, body: &Value) -> Result<(),
         .record(oxplow_db::NewAgentTokenUsage {
             stream_id: stream.to_string(),
             thread_id: thread_text(body),
-            effort_id: text("effort"),
             session_id: text("session").unwrap_or_else(|| "s".into()),
             agent_kind: text("agent").unwrap_or_else(|| "claude".into()),
             model: text("model").or_else(|| Some("m".into())),
@@ -579,7 +601,7 @@ pub(super) async fn observe_hint(host: &Host, body: &Value) -> Result<(), String
     Ok(())
 }
 
-/// `nudge: { kind, message, thread?, effort?, audience?, delivered? }`: a
+/// `nudge: { kind, message, thread?, audience?, delivered? }`: a
 /// nudge a hint raised (`SqliteAgentNudgeStore::record`), delivered or not.
 pub(super) async fn observe_nudge(host: &Host, body: &Value) -> Result<(), String> {
     use oxplow_db::agent_nudge_store::{Audience, NewAgentNudge};
@@ -589,7 +611,6 @@ pub(super) async fn observe_nudge(host: &Host, body: &Value) -> Result<(), Strin
         .nudge_store
         .record(NewAgentNudge {
             thread_id: thread_text(body),
-            effort_id: text("effort"),
             kind: text("kind").ok_or("`nudge.kind`")?,
             message: text("message").unwrap_or_default(),
             trigger: None,
@@ -621,7 +642,10 @@ pub(super) async fn observe_nudge(host: &Host, body: &Value) -> Result<(), Strin
 /// …`: the change is made and analyzed to the end
 /// (`change_analysis::ensure_change`, what `oxplow_ensure_change` calls), so a
 /// page reads its files and functions without waiting for the background
-/// analysis. `streamId` of `working` defaults to the primary stream's.
+/// analysis. `streamId` of `working` defaults to the primary stream's. A
+/// working change's file list is refreshed first (`refresh_files`), as the
+/// change reactor does on every move in the app: that is what says which
+/// files are staged or untracked.
 pub(super) async fn observe_analyze(host: &Host, body: &Value) -> Result<(), String> {
     let mut target = body.clone();
     if target.get("kind").and_then(Value::as_str) == Some("working")
@@ -630,8 +654,14 @@ pub(super) async fn observe_analyze(host: &Host, body: &Value) -> Result<(), Str
         let stream = first_stream(host).await?;
         target["streamId"] = json!(stream.to_string());
     }
+    let working = target.get("kind").and_then(Value::as_str) == Some("working");
     let target: oxplow_app::change_analysis::ChangeTarget =
         serde_json::from_value(target).map_err(|e| format!("`analyze`: {e}"))?;
+    if working {
+        oxplow_app::change_analysis::refresh_files(&host.svc, target.clone())
+            .await
+            .map_err(|e| e.to_string())?;
+    }
     oxplow_app::change_analysis::ensure_change(&host.svc, target)
         .await
         .map(|_| ())
@@ -838,45 +868,29 @@ pub(super) async fn observe_retention(host: &Host, body: &Value) -> Result<(), S
         .map_err(|e| e.to_string())
 }
 
-/// `collect: { effort, collectors?: [key] }`: the fact collectors an
-/// `effort.finished` triggers (`MetricsService::run_effort_collectors`),
-/// run for the effort now; `collectors` names the ones to run (by key),
-/// else every one runs.
-pub(super) async fn observe_collect(host: &Host, body: &Value) -> Result<(), String> {
-    use oxplow_db::effort_store::EffortStore as _;
-    use oxplow_domain::EffortId;
-    let effort = body
-        .get("effort")
-        .and_then(Value::as_str)
-        .and_then(|e| e.strip_prefix("eff"))
-        .and_then(|n| n.parse::<i64>().ok())
-        .ok_or("`collect.effort` is an effort's id, like `eff1`")?;
-    let found = host
-        .svc
-        .effort_store
-        .get_effort(&EffortId::new(effort))
-        .await
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("no effort eff{effort}"))?;
-    let wanted: Option<Vec<String>> = body.get("collectors").and_then(Value::as_array).map(|l| {
-        l.iter()
-            .filter_map(|k| k.as_str().map(str::to_string))
-            .collect()
-    });
+/// `detail_compaction: { keep }`: the daily compaction of old run detail
+/// (`compact_capture_details`), keeping each producer's newest `keep`
+/// captures' detail whole.
+pub(super) async fn observe_detail_compaction(host: &Host, body: &Value) -> Result<(), String> {
+    let keep = body
+        .get("keep")
+        .and_then(Value::as_u64)
+        .and_then(|n| u32::try_from(n).ok())
+        .ok_or("`detail_compaction.keep` is how many of each producer's newest captures keep their detail")?;
     host.svc
-        .metrics
-        .run_effort_collectors(&found.thread_id, &found.id, None, &|c| {
-            wanted.as_ref().is_none_or(|w| w.contains(&c.key))
-        })
-        .await;
-    Ok(())
+        .fact_store
+        .compact_capture_details(None, Some(keep))
+        .await
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
-/// `snapshot: { trigger?, elapsed_ms?, budget_ms?, revision?, branch?, files?: [{ path, hash }] }`:
+/// `snapshot: { trigger?, elapsed_ms?, budget_ms?, revision?, branch?, files?: [{ path, hash, blob? }] }`:
 /// one take in the stream's snapshot log (`SqliteSnapshotStore::
 /// record_take`): its parent is the take before it, and it is over budget
 /// when `elapsed_ms` is more than `budget_ms`. A take whose files hash as
-/// its parent's makes no new snapshot.
+/// its parent's makes no new snapshot. A `turn_end` take is the latest
+/// turn's end take (its thread and turn), as a turn's own end take is.
 pub(super) async fn observe_snapshot(host: &Host, body: &Value) -> Result<(), String> {
     take_snapshot(host, body).await.map(|_| ())
 }
@@ -894,6 +908,9 @@ pub(super) async fn take_snapshot(
         None => SnapshotTrigger::Manual,
     };
     let mut rows = Vec::new();
+    // A file's `blob` is the git blob id of its bytes, as a take records
+    // it: what a commit's file is matched with.
+    let mut git_oids = std::collections::HashMap::new();
     for f in body
         .get("files")
         .and_then(Value::as_array)
@@ -901,6 +918,9 @@ pub(super) async fn take_snapshot(
         .flatten()
     {
         let text = |key: &str| f.get(key).and_then(Value::as_str);
+        if let (Some(path), Some(blob)) = (text("path"), text("blob")) {
+            git_oids.insert(path.to_string(), blob.to_string());
+        }
         rows.push(FileSnapshot {
             id: 0,
             stream_id: stream,
@@ -916,15 +936,36 @@ pub(super) async fn take_snapshot(
             content_hash: None,
         });
     }
+    // A turn's end take is the latest turn's: what it left the tree at.
+    let (thread_id, turn_id) = if trigger == SnapshotTrigger::TurnEnd {
+        let rows = host
+            .svc
+            .sql
+            .query_sql(
+                "SELECT thread_id, id FROM v_agent_turn ORDER BY id DESC LIMIT 1",
+                vec![],
+                None,
+            )
+            .await
+            .map_err(|e| e.to_string())?
+            .rows;
+        match rows.first().map(Vec::as_slice) {
+            Some([oxplow_db::SqlCell::Int(thread), oxplow_db::SqlCell::Int(turn)]) => {
+                (Some(oxplow_domain::ThreadId::new(*thread)), Some(*turn))
+            }
+            _ => (None, None),
+        }
+    } else {
+        (None, None)
+    };
     host.svc
         .snapshot_store
         .record_take(TakeRecord {
             stream_id: stream,
             rows,
             trigger,
-            thread_id: None,
-            turn_id: None,
-            effort_id: None,
+            thread_id,
+            turn_id,
             branch: body
                 .get("branch")
                 .and_then(Value::as_str)
@@ -939,18 +980,27 @@ pub(super) async fn take_snapshot(
             provider: None,
             contents: false,
             handle: None,
+            changed_at: Default::default(),
+            git_oids,
         })
         .await
         .map_err(|e| e.to_string())
 }
 
-/// `commit: { sha, at, subject, author?, email?, body?, parents?, files?:
-/// [{ path, status?, additions?, deletions? }] }`: a commit the git indexer
-/// read, stored as it stores one (`SqliteGitStore::upsert_commit`).
+/// `commit: { sha, at?, subject, author?, email?, body?, parents?, files?:
+/// [{ path, status?, additions?, deletions?, blob? }] }`: a commit the git
+/// indexer read, stored as it stores one (`SqliteGitStore::upsert_commit`);
+/// `at` is now when absent. The files that name a `blob` (the git blob id
+/// the commit holds) are linked to the requests whose work left the file so
+/// on the first stream, as the indexer links a commit it indexed
+/// (`commit_request_store::link_commit_tx`).
 pub(super) async fn observe_commit(host: &Host, body: &Value) -> Result<(), String> {
     let text = |key: &str| body.get(key).and_then(Value::as_str);
-    let at = text("at").ok_or("`commit.at` is when it was committed (RFC 3339)")?;
-    let committed = oxplow_domain::Timestamp::parse(at).map_err(|e| format!("`commit.at`: {e}"))?;
+    let committed = match text("at") {
+        Some(at) => oxplow_domain::Timestamp::parse(at).map_err(|e| format!("`commit.at`: {e}"))?,
+        None => oxplow_domain::Timestamp::now(),
+    };
+    let mut blobs: Vec<(String, String)> = Vec::new();
     let mut files = Vec::new();
     for f in body
         .get("files")
@@ -958,6 +1008,12 @@ pub(super) async fn observe_commit(host: &Host, body: &Value) -> Result<(), Stri
         .into_iter()
         .flatten()
     {
+        if let (Some(path), Some(blob)) = (
+            f.get("path").and_then(Value::as_str),
+            f.get("blob").and_then(Value::as_str),
+        ) {
+            blobs.push((path.to_string(), blob.to_string()));
+        }
         files.push(oxplow_db::git_store::GitCommitFileRow {
             path: f
                 .get("path")
@@ -992,95 +1048,44 @@ pub(super) async fn observe_commit(host: &Host, body: &Value) -> Result<(), Stri
             files,
         })
         .await
-        .map_err(|e| e.to_string())
-}
-
-/// `evidence: { effort, observations: [{ kind, metric_value?, payload?,
-/// provenance?, source? }] }`: what an effort's evidence holds — its
-/// `test-run`s and `diff-coverage` — as the evidence store keeps it
-/// (`EffortEvidenceStore::replace`, what an effort's refresh calls); the
-/// observations are the effort's whole set.
-pub(super) async fn observe_evidence(host: &Host, body: &Value) -> Result<(), String> {
-    let effort = body
-        .get("effort")
-        .and_then(Value::as_str)
-        .and_then(|e| e.strip_prefix("eff"))
-        .and_then(|n| n.parse::<i64>().ok())
-        .ok_or("`evidence.effort` is an effort's id, like `eff1`")?;
-    let mut observations = Vec::new();
-    for o in body
-        .get("observations")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        let text = |key: &str, default: &str| {
-            o.get(key)
-                .and_then(Value::as_str)
-                .unwrap_or(default)
-                .to_string()
-        };
-        observations.push(oxplow_db::EffortObservation {
-            kind: o
-                .get("kind")
-                .and_then(Value::as_str)
-                .ok_or("an observation names its `kind`")?
-                .to_string(),
-            provenance: text("provenance", "observed"),
-            source: text("source", "fixture"),
-            metric_value: o.get("metric_value").and_then(Value::as_f64),
-            payload_json: o.get("payload").map(Value::to_string),
-            local_snapshot_id: None,
-            created_at: oxplow_domain::Timestamp::now(),
-        });
+        .map_err(|e| e.to_string())?;
+    if blobs.is_empty() {
+        return Ok(());
     }
-    let mut deltas = Vec::new();
-    for d in body
-        .get("metric_deltas")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        let text = |key: &str| d.get(key).and_then(Value::as_str).map(str::to_string);
-        let num = |key: &str| d.get(key).and_then(Value::as_f64);
-        let key = text("key").ok_or("a metric delta names its `key`")?;
-        let current = num("current").ok_or("a metric delta names its `current`")?;
-        deltas.push(oxplow_db::EffortMetricDelta {
-            title: text("title").unwrap_or_else(|| key.clone()),
-            key,
-            unit: text("unit"),
-            direction: text("direction").unwrap_or_else(|| "lower-better".into()),
-            kind: text("kind").unwrap_or_else(|| "gauge".into()),
-            category: text("category"),
-            language: text("language"),
-            agg: text("agg").unwrap_or_else(|| "files".into()),
-            baseline: num("baseline"),
-            current,
-            delta: num("delta").or_else(|| num("baseline").map(|b| current - b)),
-            changed: d.get("changed").and_then(Value::as_bool).unwrap_or(true),
-            attributed_files: d.get("attributed_files").and_then(Value::as_i64),
-            sample_count: d.get("sample_count").and_then(Value::as_i64).unwrap_or(1),
-            target: num("target"),
-            warn_at: num("warn_at"),
-            fail_at: num("fail_at"),
-            crossing: text("crossing"),
-            latest_capture_id: None,
-        });
-    }
+    let stream = first_stream(host).await?;
+    let sha = text("sha").unwrap_or_default().to_string();
     host.svc
-        .effort_evidence_store
-        .replace(effort, deltas, observations, String::new())
+        .db
+        .transaction(move |tx| {
+            let paths: Vec<oxplow_db::commit_request_store::CommitPath<'_>> = blobs
+                .iter()
+                .map(|(path, blob)| oxplow_db::commit_request_store::CommitPath {
+                    path,
+                    blob: Some(blob),
+                })
+                .collect();
+            oxplow_db::commit_request_store::link_commit_tx(
+                tx,
+                stream,
+                &sha,
+                committed,
+                &paths,
+                oxplow_domain::Timestamp::now(),
+            )
+            .map(|_| ())
+        })
         .await
         .map_err(|e| e.to_string())
 }
 
 pub(super) async fn observe_turn(host: &Host, body: &Value) -> Result<(), String> {
-    use oxplow_app::hook_ingest::{HookEnvelope, LAST_ASSISTANT_MESSAGE};
+    use oxplow_app::hook_ingest::HookEnvelope;
     use oxplow_domain::hook::HookKind;
     for key in body.as_object().into_iter().flat_map(|m| m.keys()) {
         if ![
             "prompt",
             "during",
+            "runs",
             "tools",
             "write",
             "answer",
@@ -1091,11 +1096,13 @@ pub(super) async fn observe_turn(host: &Host, body: &Value) -> Result<(), String
             "subagent",
             "peer",
             "conversation",
+            "job",
+            "open",
         ]
         .contains(&key.as_str())
         {
             return Err(format!(
-                "`turn.{key}` — fix: `prompt`, `during`, `tools`, `write`, `answer`, `compactions`, `context`, `thread`, `session`, `subagent`, `peer` or `conversation`"
+                "`turn.{key}` — fix: `prompt`, `during`, `runs`, `tools`, `write`, `answer`, `compactions`, `context`, `thread`, `session`, `subagent`, `peer`, `conversation`, `job` or `open`"
             ));
         }
     }
@@ -1123,6 +1130,7 @@ pub(super) async fn observe_turn(host: &Host, body: &Value) -> Result<(), String
     let envelope = |kind: HookKind, payload: Value| HookEnvelope {
         session_title: None,
         turn_run: None,
+        reading: Default::default(),
         kind,
         thread_id: Some(thread),
         stream_id: None,
@@ -1133,7 +1141,7 @@ pub(super) async fn observe_turn(host: &Host, body: &Value) -> Result<(), String
         decision: None,
         tool: None,
         subagent: None,
-        peer: None,
+        harness_turn: None,
     };
     let ingest = |env: HookEnvelope| async move {
         svc.hook_ingest
@@ -1166,17 +1174,45 @@ pub(super) async fn observe_turn(host: &Host, body: &Value) -> Result<(), String
         None => None,
     };
     let mut prompt = envelope(HookKind::UserPromptSubmit, json!({}));
-    // No prompt (`prompt: null`) is a subagent's or a peer's hand-back.
-    prompt.prompt = match body.get("prompt") {
+    // A `peer` is another session's message, a `job` a background job's
+    // report (the id of the call that started it), and a `subagent` with
+    // no prompt (`prompt: null`) a subagent's hand-back; else a person's
+    // words.
+    let text = match body.get("prompt") {
         Some(Value::Null) => None,
         Some(p) => Some(p.as_str().unwrap_or_default().to_string()),
         None => Some("Work on it".to_string()),
     };
-    if let Some(sub) = body.get("subagent") {
-        prompt.subagent =
-            Some(serde_json::from_value(sub.clone()).map_err(|e| format!("`turn.subagent`: {e}"))?);
-    }
-    prompt.peer = body.get("peer").and_then(Value::as_str).map(str::to_string);
+    let subagent: Option<oxplow_domain::agent::tool::Subagent> = match body.get("subagent") {
+        Some(sub) => {
+            Some(serde_json::from_value(sub.clone()).map_err(|e| format!("`turn.subagent`: {e}"))?)
+        }
+        None => None,
+    };
+    let job = body.get("job").and_then(Value::as_str);
+    prompt.prompt = match (body.get("peer").and_then(Value::as_str), subagent, text) {
+        (None, _, text) if job.is_some() => {
+            Some(oxplow_domain::agent::observe::Prompt::BackgroundJob {
+                call: job.map(str::to_string),
+                job: None,
+                status: None,
+                summary: None,
+                text: text.unwrap_or_default(),
+            })
+        }
+        (Some(from), _, text) => Some(oxplow_domain::agent::observe::Prompt::PeerMessage {
+            from: from.to_string(),
+            socket: None,
+            message: text.clone(),
+            text: text.unwrap_or_default(),
+            idle_notice: false,
+        }),
+        (None, Some(subagent), None) => Some(oxplow_domain::agent::observe::Prompt::Handback {
+            subagent,
+            text: String::new(),
+        }),
+        (None, _, text) => text.map(oxplow_domain::agent::observe::Prompt::person),
+    };
     ingest(prompt).await?;
     for step in body
         .get("during")
@@ -1188,9 +1224,21 @@ pub(super) async fn observe_turn(host: &Host, body: &Value) -> Result<(), String
             .get("command")
             .and_then(Value::as_str)
             .ok_or("`turn.during` steps are `{ command, input?, as? }`")?;
+        // An agent's command in the turn is that turn's agent's: its thread
+        // and session, not the fixture's first.
+        let actor = match step_actor(step)? {
+            oxplow_domain::commands::Actor::Agent { stream_id, .. } => {
+                oxplow_domain::commands::Actor::Agent {
+                    session_id: session,
+                    thread_id: Some(thread),
+                    stream_id,
+                }
+            }
+            other => other,
+        };
         svc.commands
             .run(
-                &step_actor(step)?,
+                &actor,
                 command,
                 step.get("input").cloned().unwrap_or_else(|| json!({})),
                 step.get("confirmed")
@@ -1199,6 +1247,33 @@ pub(super) async fn observe_turn(host: &Host, body: &Value) -> Result<(), String
             )
             .await
             .map_err(|e| format!("`turn.during` `{command}` failed: {e}"))?;
+    }
+    // The test runs the turn made, recorded while it's open: each is the
+    // turn's (its capture names the turn), as a run a tool call caused is.
+    let runs: Vec<Value> = body
+        .get("runs")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if !runs.is_empty() {
+        let open = svc
+            .sql
+            .query_sql(
+                "SELECT id FROM v_agent_turn WHERE thread_id = ?1 AND ended_at IS NULL
+                  ORDER BY id DESC LIMIT 1",
+                vec![oxplow_db::SqlCell::Int(thread.value())],
+                None,
+            )
+            .await
+            .map_err(|e| e.to_string())?
+            .rows;
+        let turn = match open.first().map(Vec::as_slice) {
+            Some([oxplow_db::SqlCell::Int(t)]) => *t,
+            _ => return Err("`turn.runs`: the turn isn't open".into()),
+        };
+        for run in &runs {
+            record_test_run(host, run, thread.value(), Some(turn)).await?;
+        }
     }
     for tool in body
         .get("tools")
@@ -1253,11 +1328,15 @@ pub(super) async fn observe_turn(host: &Host, body: &Value) -> Result<(), String
     for _ in 0..body.get("compactions").and_then(Value::as_u64).unwrap_or(0) {
         ingest(envelope(HookKind::PostCompact, json!({}))).await?;
     }
-    let mut payload = json!({});
-    if let Some(answer) = body.get("answer") {
-        payload[LAST_ASSISTANT_MESSAGE] = answer.clone();
+    // `open: true` leaves the turn running: no end.
+    if body.get("open").and_then(Value::as_bool).unwrap_or(false) {
+        return Ok(());
     }
-    let mut stop = envelope(HookKind::Stop, payload);
+    let mut stop = envelope(HookKind::Stop, json!({}));
+    stop.reading.final_message = body
+        .get("answer")
+        .and_then(Value::as_str)
+        .map(str::to_string);
     if let Some(context) = body.get("context") {
         stop.turn_run = Some(oxplow_domain::hook::TurnRun {
             context_tokens: context.get("tokens").and_then(Value::as_i64),

@@ -3,8 +3,8 @@
 when:
   page: oxplow/implementation
   params:
-    uri: "oxplow:oxplow/implementation?implementation=oxplow/work_items.oxplow"
+    uri: "oxplow:oxplow/implementation?implementation=oxplow/knowledge.oxwiki"
 expect:
   nodes:
     - { id: about, kind: viz, viz: detail }
-  text: { contains: ["## About [node about]\n\nThe work list that oxplow keeps itself."] }
+  text: { contains: ["## About [node about]\n\noxplow's own knowledge store: a wiki of markdown pages kept in the project's .oxplow/oxwiki folder."] }

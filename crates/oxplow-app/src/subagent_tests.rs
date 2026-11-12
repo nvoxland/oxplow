@@ -5,11 +5,11 @@ use oxplow_domain::agent::tool::Subagent;
 use oxplow_domain::HookKind;
 use serde_json::json;
 
-use crate::test_fixtures::{services_with_effort, EffortFixture};
+use crate::test_fixtures::{services_with_thread, ThreadFixture};
 use crate::{HookEnvelope, ToolDecision};
 
 fn envelope(
-    fx: &EffortFixture,
+    fx: &ThreadFixture,
     kind: HookKind,
     body: serde_json::Value,
     subagent: Option<&str>,
@@ -17,6 +17,7 @@ fn envelope(
     HookEnvelope {
         session_title: None,
         turn_run: None,
+        reading: crate::test_fixtures::claude_reading(&body),
         kind,
         thread_id: Some(fx.thread),
         stream_id: None,
@@ -30,11 +31,11 @@ fn envelope(
             id: id.into(),
             kind: Some("Explore".into()),
         }),
-        peer: None,
+        harness_turn: None,
     }
 }
 
-async fn subagents(fx: &EffortFixture) -> Vec<Vec<oxplow_db::SqlCell>> {
+async fn subagents(fx: &ThreadFixture) -> Vec<Vec<oxplow_db::SqlCell>> {
     fx.svc
         .sql
         .query_sql(
@@ -59,7 +60,7 @@ fn text(c: &oxplow_db::SqlCell) -> String {
 /// calls made as it; one only a tool call names is `unknown`.
 #[tokio::test]
 async fn a_subagent_is_running_finished_or_only_named_by_its_calls() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let ingest = |e: HookEnvelope| {
         let svc = fx.svc.clone();
         async move { svc.hook_ingest.ingest(e).await.unwrap() }
@@ -153,4 +154,28 @@ async fn a_subagent_is_running_finished_or_only_named_by_its_calls() {
     // As an event's body reads: the text with its size.
     let body: serde_json::Value = serde_json::from_str(read.content.as_deref().unwrap()).unwrap();
     assert_eq!(body["text"], "the leak is in the gasket");
+}
+
+/// A request has an address: its URI is built and parsed by the one
+/// builder, and reading it answers its row (who started it, with what).
+#[tokio::test]
+async fn a_requests_uri_reads_its_row() {
+    let fx = services_with_thread().await;
+    fx.svc
+        .hook_ingest
+        .ingest(HookEnvelope {
+            prompt: Some("fix the login page".into()),
+            ..envelope(&fx, HookKind::UserPromptSubmit, json!({}), None)
+        })
+        .await
+        .unwrap();
+    let uri = oxplow_domain::uri::build::request_uri(oxplow_domain::RequestId::new(1));
+    assert_eq!(uri, "oxplow:oxplow/request?id=req1");
+    let read = crate::ref_read::read(&fx.svc, &uri, &Default::default(), None)
+        .await
+        .unwrap();
+    let row = read.row.expect("v_request holds it");
+    assert_eq!(row["prompt"], "fix the login page");
+    assert_eq!(row["source"], "person");
+    assert_eq!(row["first_turn"], "oxplow:oxplow/turn?id=trn1");
 }

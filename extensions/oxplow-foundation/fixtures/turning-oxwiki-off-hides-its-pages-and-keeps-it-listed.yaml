@@ -1,0 +1,13 @@
+# Turning oxwiki off (oxplow.knowledge.set_oxwiki) keeps it declared and
+# listed, off because of the setting, and hides its pages: they stay
+# recorded, and its files are left alone.
+given:
+  - { command: oxplow.knowledge.write_page, input: { id: arch, body: "# Arch\n" } }
+  - { command: oxplow.knowledge.set_oxwiki, input: { on: false } }
+when:
+  sql: |
+    SELECT p.provider, p.active, p.chosen_by,
+           (SELECT count(*) FROM v_knowledge_page) AS pages
+      FROM v_capability_provider p WHERE p.capability = 'knowledge'
+expect:
+  rows: [{ provider: oxwiki, active: 0, chosen_by: setting, pages: 0 }]

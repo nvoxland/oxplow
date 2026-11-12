@@ -1,0 +1,168 @@
+{
+  "$defs": {
+    "RunningWork": {
+      "description": "A job or subagent a turn left running, as its harness reported it.",
+      "properties": {
+        "description": {
+          "description": "What it is doing, as the harness described it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "The harness's id for it: the one its report back names (Claude's\ntask id, a subagent's id).",
+          "type": "string"
+        },
+        "kind": {
+          "description": "What it is, in the harness's word (`subagent`, `shell`, …).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "TurnOutcome": {
+      "description": "How a turn ended (`agent.turn.ended`).",
+      "oneOf": [
+        {
+          "const": "completed",
+          "description": "The agent finished (Stop).",
+          "type": "string"
+        },
+        {
+          "const": "interrupted",
+          "description": "The person interrupted it (an abort in the harness).",
+          "type": "string"
+        },
+        {
+          "const": "errored",
+          "description": "The harness ended it with an error (an API failure, a refused\nrequest): `agent_turn.error` holds the harness's own words.",
+          "type": "string"
+        },
+        {
+          "const": "session_ended",
+          "description": "Its harness session ended with the turn still open (an exit sends\nno Stop).",
+          "type": "string"
+        },
+        {
+          "const": "session_restarted",
+          "description": "A new harness process started with the turn still open: the one\nthat ran it is gone.",
+          "type": "string"
+        },
+        {
+          "const": "session_closed",
+          "description": "oxplow closed the agent session with the turn still open.",
+          "type": "string"
+        },
+        {
+          "const": "restart",
+          "description": "oxplow restarted with the turn still open; recovery closed it.",
+          "type": "string"
+        }
+      ]
+    },
+    "TurnUsage": {
+      "additionalProperties": false,
+      "description": "A turn's token counts, when the harness reported them with the turn\n(ACP's prompt response). Claude's come from the transcript instead.",
+      "properties": {
+        "cache_read": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cache_write": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "input": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "output": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "input",
+        "output",
+        "cache_write",
+        "cache_read"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`agent.turn.ended@5`: a turn closed — how (`outcome`), what it left\nrunning, and what the token-usage reactor needs to count it (the\ntranscript to read, or the counts themselves).",
+  "properties": {
+    "error": {
+      "description": "The harness's own words for the error that ended it (`outcome:\nerrored`): `name: message`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "left_running": {
+      "description": "The jobs and subagents still running when it ended, when the\nharness said.",
+      "items": {
+        "$ref": "#/$defs/RunningWork"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "outcome": {
+      "$ref": "#/$defs/TurnOutcome"
+    },
+    "thread": {
+      "description": "The thread (`thr3`).",
+      "type": "string"
+    },
+    "transcript_path": {
+      "description": "The harness's session transcript (Claude's `transcript_path`).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "turn": {
+      "description": "The turn (`trn12`).",
+      "type": "string"
+    },
+    "usage": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TurnUsage"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Counts reported with the turn (ACP)."
+    }
+  },
+  "required": [
+    "turn",
+    "thread",
+    "outcome"
+  ],
+  "title": "AgentTurnEndedV5",
+  "type": "object"
+}

@@ -1,0 +1,39 @@
+title: Thread work
+description: The thread's tasks — the ones assigned to it, in progress first, then to do, blocked and backlog in its queue's order, then the ones it finished, newest first — with the requests that worked on each.
+tool: thread_tasks
+params:
+- name: thread
+  label: Thread (`thr3`)
+answers:
+- {"question":"What is assigned to this thread, and what has it finished?","params":{"thread":"thr1"},"skill":"tasks"}
+loaders:
+  thread_tasks:
+    sql: |
+      -- `state` is the bucket; `stage` is how the list names it.
+      SELECT w.uri, w.title, w.state, coalesce(w.stage_title, w.stage) AS stage,
+             coalesce((SELECT group_concat(DISTINCT rt.request) FROM v_request_task rt
+                        WHERE rt.task = w.uri), '') AS requests
+      FROM v_task w
+      WHERE w.assignee = uri('oxplow/thread', 'id', :thread)
+         OR (w.state IN ('done', 'canceled')
+             AND EXISTS (SELECT 1 FROM v_request_task rt JOIN v_thread th ON th.id = rt.thread_id
+                          WHERE rt.task = w.uri AND th.uri = uri('oxplow/thread', 'id', :thread)))
+      ORDER BY CASE w.state WHEN 'in_progress' THEN 0 WHEN 'todo' THEN 1 WHEN 'blocked' THEN 2
+                            WHEN 'backlog' THEN 3 WHEN 'done' THEN 4 ELSE 5 END,
+               CASE WHEN w.state IN ('done', 'canceled') THEN w.closed_at END DESC,
+               coalesce(w.rank, 1e18),
+               w.created_at
+view:
+  from: thread_tasks
+  viz: table
+  columns:
+  - key: title
+    label: Task
+    link:
+      kind: page
+      from: uri
+  - key: stage
+    label: Stage
+  - key: requests
+    label: Requests
+  empty: The thread has no tasks.

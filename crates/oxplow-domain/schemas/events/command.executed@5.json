@@ -63,7 +63,7 @@
       "type": "integer"
     },
     "command": {
-      "description": "The command's name (`oxplow.work_item.transition`, `oxplow.config.set`).",
+      "description": "The command's name (`oxplow.task.transition`, `oxplow.config.set`).",
       "type": "string"
     },
     "outcome": {

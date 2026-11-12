@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { cleanup, render } from "@testing-library/react";
 
-import { setResources, type Resource } from "../resources.js";
+import { setResources, type Resource } from "../resourceStore.js";
 import { Page } from "./Page.js";
 import { PageNavigationContext, type PageNavigation } from "./PageNavigationContext.js";
 

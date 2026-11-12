@@ -1,0 +1,17 @@
+# oxtask's opinion: an agent tracks what it works on as tasks. A request
+# that changed files while its thread had no task in progress, and none
+# linked to it, is reminded once, right after the tool call that changed the
+# file (the hint runs after every tool call, in the same turn); a second edit
+# in the same request is not reminded again.
+given:
+  - observe: { turn: { prompt: Fix the greeting, tools: [{ name: Edit, kind: edit, paths: [greeting.txt], ok: true }] } }
+when: { sql: "SELECT kind, message FROM v_agent_nudge" }
+expect:
+  rows:
+    - kind: oxplow/untracked-work
+      message: "This request changed files, and no task is in progress on this thread. If it is work the person will want to see on the Work panel, take or file its task and move it to in progress (the `track-work` skill); a small fix needs none."
+steps:
+  - given:
+      - observe: { turn: { prompt: Fix the farewell, tools: [{ name: Edit, kind: edit, paths: [farewell.txt], ok: true }, { name: Edit, kind: edit, paths: [farewell2.txt], ok: true }] } }
+  - when: { sql: "SELECT count(*) AS n FROM v_agent_nudge" }
+    expect: { rows: [{ n: 2 }] }

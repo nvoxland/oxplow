@@ -35,8 +35,8 @@ loaders:
       SELECT 'cmt' || c.id AS cid, c.uri, c.target,
              CASE c.target_resource
                WHEN 'oxplow/file' THEN uri_param(c.target, 'path')
-               WHEN 'oxplow/wiki' THEN 'wiki/' || uri_param(c.target, 'slug')
-               WHEN 'oxplow/work_item' THEN uri_param(c.target, 'id')
+               WHEN 'oxplow/knowledge' THEN uri_param(c.target, 'store') || '/' || uri_param(c.target, 'id')
+               WHEN 'oxplow/task' THEN uri_param(c.target, 'id')
                WHEN 'oxplow/agent_session' THEN 'an agent session''s terminal'
                ELSE c.target END AS target_label,
              CASE c.intent WHEN 'followup' THEN 'follow-up' ELSE 'note' END AS kind,
@@ -96,7 +96,7 @@ view:
       link:
         kind: page
         from: go_ref
-    empty: No unresolved comments. Select text in a wiki page, file, work item or the agent's output to add one; the agent can answer them.
+    empty: No unresolved comments. Select text in a knowledge page, file, task or the agent's output to add one; the agent can answer them.
     actions:
     - id: reply
       label: Reply…

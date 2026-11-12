@@ -1,0 +1,69 @@
+title: New Task
+description: "The form for a new item on the active task tracker - its title, description, starting stage, who it's for (nobody unless picked) and the list's own fields."
+icon: plus
+needs:
+- task_tracker
+params:
+- name: thread_id
+- name: parent
+loaders:
+  new_task:
+    sql: |
+      SELECT 'todo' AS stage, :parent AS parent_uri
+  new_task_parents:
+    sql: |
+      SELECT w.uri AS value, w.title AS label
+      FROM v_task w
+      WHERE w.state NOT IN ('done', 'canceled')
+        AND EXISTS (SELECT 1 FROM v_capability_provider p
+                    WHERE p.capability = 'task_tracker' AND p.active = 1
+                      AND json_extract(p.features, '$.hierarchy') = 1)
+        AND EXISTS (SELECT 1 FROM v_task c WHERE c.parent_uri = w.uri)
+      ORDER BY w.assignee IS NOT (SELECT uri FROM v_thread WHERE id = :thread_id), w.title
+  # Where it may start: the list's backlog, to-do and blocked stages, a
+  # bucket's first named by its bucket (`todo`, the default).
+  stages:
+    page: oxplow/task-stages
+    loader: task_stages
+  new_task_stages:
+    sql: |
+      SELECT filter AS value, label FROM stages
+      WHERE bucket IN ('backlog', 'todo', 'blocked')
+      ORDER BY ord
+  # Who it's for: nobody (the default: any thread may take it), you, or an
+  # open thread.
+  new_task_assignees:
+    sql: |
+      SELECT uri('oxplow/person') AS value, 'Me' AS label, NULL AS "group"
+      UNION ALL
+      SELECT * FROM (
+        SELECT t.uri, t.title, s.title
+        FROM v_thread t
+        JOIN v_stream s ON s.id = t.stream_id
+        WHERE t.closed_at IS NULL AND t.archived_at IS NULL AND s.archived_at IS NULL
+        ORDER BY s.kind <> 'primary', s.title, t.sort_index, t.id)
+view:
+  from: new_task
+  viz: form
+  form:
+    command: oxplow.task.new
+    then: replace
+    fields:
+    - title
+    - body
+    - stage
+    - assignee
+    - parent_uri
+    - name: native
+      from: oxplow/task-fields
+    choices:
+      stage: oxplow/new-task#new_task_stages
+      assignee: oxplow/new-task#new_task_assignees
+      parent_uri: oxplow/new-task#new_task_parents
+    again:
+      label: Save and Another
+      keep:
+      - stage
+      - assignee
+      - parent_uri
+      - native

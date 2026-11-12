@@ -1,5 +1,5 @@
 //! The notes MCP server (the `oxplow-provider-mcp-notes` binary): notes
-//! with a title, body, state (`open`, `doing`, `stuck`, `closed`,
+//! with a title, body, state (`someday`, `open`, `doing`, `stuck`, `closed`,
 //! `dropped`) and parent, in memory — what the MCP adapter's tests and
 //! its `notes` fixture extension drive. Each write bumps a revision;
 //! `list_items` returns the notes changed after one.
@@ -18,7 +18,7 @@ use rmcp::{tool, tool_handler, tool_router, ErrorData, ServerHandler, ServiceExt
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-const STATES: &[&str] = &["open", "doing", "stuck", "closed", "dropped"];
+const STATES: &[&str] = &["someday", "open", "doing", "stuck", "closed", "dropped"];
 
 #[derive(Clone)]
 struct Note {
@@ -60,7 +60,7 @@ struct ListParams {
 struct CreateParams {
     title: String,
     body: Option<String>,
-    /// One of open, doing, stuck, closed, dropped (default open).
+    /// One of someday, open, doing, stuck, closed, dropped (default open).
     state: Option<String>,
     /// The parent note's id.
     parent: Option<String>,

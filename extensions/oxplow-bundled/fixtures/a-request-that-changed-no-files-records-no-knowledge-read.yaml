@@ -1,0 +1,10 @@
+# The share is about the requests that changed files: a request that only
+# read a page records nothing.
+given:
+  - { command: oxplow.knowledge.write_page, input: { store: oxwiki, title: Greeting notes, body: "# Greeting notes\n\nThe greeting says hello." } }
+  - observe:
+      turn:
+        prompt: What does the greeting say?
+        tools: [{ name: Read, kind: read, paths: [".oxplow/oxwiki/greeting-notes.md"], ok: true }]
+when: { sql: "SELECT count(*) AS n FROM v_fact WHERE measure_key = 'knowledge.read_requests'" }
+expect: { rows: [{ n: 0 }] }

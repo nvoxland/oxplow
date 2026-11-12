@@ -240,8 +240,9 @@ impl ExtensionActivation {
         Ok(())
     }
 
-    /// An extension's stored configuration only changes what its datasets were
-    /// compiled against when one of them reads it: republish when it has.
+    /// An extension's stored configuration only changes what was published
+    /// when something of it reads it (`configuration_readers`: a dataset's
+    /// `config()`, a skill's `when:`): republish when it has.
     pub(crate) async fn request_config_refresh(
         &self,
         db: &oxplow_db::Database,
@@ -609,6 +610,11 @@ impl ExtensionActivation {
         let mut failed = crate::extension::extension_catalog::Failed::new();
         let mut gave_way = VocabularyErrors::new();
         let mut restaged = false;
+        // Whether the settings that offer implementations changed after
+        // `prepare` read them (a write since, a carried-forward layer): then
+        // the generation's offered set is stale, and another one follows
+        // its commit.
+        let offer_stale = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let (published, retired, mut held) = loop {
             let (snapshot, mut held) =
                 raw.admitted(svc.extension_catalog.active().as_deref(), &failed);
@@ -657,6 +663,7 @@ impl ExtensionActivation {
                 Err(error) => return Err(error),
             };
             let Prepared {
+                offered,
                 commands,
                 adapters,
                 bundles,
@@ -692,6 +699,7 @@ impl ExtensionActivation {
             let adapters = Mutex::new(Some(adapters));
             let bundles = Mutex::new(Some(bundles));
             let svc = svc.clone();
+            let stale = offer_stale.clone();
             let outcome = db
                 .transaction_with_publication(move |publication| {
                     let mut boundary = boundary.lock().unwrap_or_else(|error| error.into_inner());
@@ -709,10 +717,6 @@ impl ExtensionActivation {
                         .providers
                         .reserve_generation(&mut providers, &mut running, &config)
                         .map_err(TxError::Aborted)?;
-                    let knowledge = capabilities
-                        .selected("knowledge")
-                        .unwrap_or(oxplow_domain::capability::NONE)
-                        .to_string();
                     let snapshots = capabilities
                         .selected("snapshots")
                         .unwrap_or(oxplow_domain::capability::NONE)
@@ -753,6 +757,14 @@ impl ExtensionActivation {
                             .map_err(TxError::Storage)?;
                         }
                     }
+                    // A raised configuration version keeps the stored
+                    // layers its schema still takes, before datasets
+                    // compile against them.
+                    crate::extension::extension_configuration::carry_forward_tx(
+                        publication.transaction()?,
+                        published.extensions(),
+                    )
+                    .map_err(TxError::Storage)?;
                     let vocabulary =
                         database.replace_tx(publication.transaction()?, Timestamp::now())?;
                     metrics.replace_tx(publication.transaction()?)?;
@@ -765,6 +777,13 @@ impl ExtensionActivation {
                     let configs = crate::extension::extension_generation::config_signature_tx(
                         publication.transaction()?,
                         published.extensions(),
+                    );
+                    stale.store(
+                        crate::capabilities::offering_implementations_tx(
+                            publication.transaction()?,
+                            published.extensions(),
+                        ) != offered,
+                        std::sync::atomic::Ordering::SeqCst,
                     );
                     // Set this before the commit attempt so an unwind in either commit
                     // or publication cannot expose mismatched database/memory state.
@@ -801,7 +820,7 @@ impl ExtensionActivation {
                     // readers remain excluded by the owned generation writer.
                     let retired = providers.apply();
                     crate::extension::extension_runtime_adapters::PreparedRuntimeAdapters::follow_selected(
-                        &svc, &knowledge, &snapshots,
+                        &svc, &snapshots,
                     );
                     #[cfg(test)]
                     svc.extension_activation
@@ -839,6 +858,9 @@ impl ExtensionActivation {
             }
         };
         retired.finish().await;
+        if offer_stale.load(std::sync::atomic::Ordering::SeqCst) {
+            self.request();
+        }
         for (name, why) in gave_way {
             held.entry(name).or_default().extend(why);
         }
@@ -943,6 +965,9 @@ struct Prepared {
     metrics: crate::metrics_service::PreparedMetricCatalog,
     capabilities: crate::capabilities::PreparedCapabilities,
     database: crate::extension::extension_generation::PreparedExtensionDatabase,
+    /// The settings that offered implementations (`when:`) as `prepare`
+    /// read them, outside the transaction.
+    offered: crate::capabilities::Settings,
 }
 
 impl ExtensionActivation {
@@ -969,9 +994,13 @@ impl ExtensionActivation {
             .stage(snapshot)
             .await
             .map_err(TxError::Aborted)?;
+        // What a setting offers (`when:` on an implementation), read once
+        // for this publication: the adapters and the capability rows agree.
+        let offered =
+            crate::capabilities::offering_implementations(svc, snapshot.extensions()).await;
         let adapters =
             crate::extension::extension_runtime_adapters::PreparedRuntimeAdapters::prepare(
-                svc, snapshot,
+                svc, snapshot, &offered,
             )
             .map_err(TxError::Aborted)?;
         let bundle_root = svc.layout.project_dir.clone();
@@ -997,7 +1026,7 @@ impl ExtensionActivation {
             .map_err(TxError::Aborted)?;
         let capabilities = svc
             .capabilities
-            .prepare_with_external(snapshot, &config, providers.implementations())
+            .prepare_with_external(snapshot, &config, providers.implementations(), &offered)
             .map_err(TxError::Aborted)?;
         let database =
             crate::extension::extension_generation::PreparedExtensionDatabase::prepare_with_capabilities(
@@ -1006,6 +1035,7 @@ impl ExtensionActivation {
             )
             .map_err(TxError::Aborted)?;
         Ok(Prepared {
+            offered,
             commands,
             adapters,
             bundles,

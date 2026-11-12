@@ -1,0 +1,14 @@
+# An agent that did everything right — took a task (moved it to in progress),
+# edited, moved it to done before stopping — has no thread task in progress at
+# the end but its request has a task linked: nothing to remind it of.
+given:
+  - { command: oxplow.task.create, input: { title: The fix, stage: todo, assignee: thr1 }, bind: fix }
+  - observe:
+      turn:
+        prompt: Fix the greeting
+        during:
+          - { command: oxplow.task.transition, input: { uri: $fix.uri, to: in_progress }, as: agent }
+        tools: [{ name: Edit, kind: edit, paths: [greeting.txt], ok: true }]
+  - { command: oxplow.task.transition, input: { uri: $fix.uri, to: done } }
+when: { sql: "SELECT count(*) AS n FROM v_agent_nudge" }
+expect: { rows: [{ n: 0 }] }

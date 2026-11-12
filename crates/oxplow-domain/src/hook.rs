@@ -96,15 +96,37 @@ pub struct AgentTurn {
     pub session_id: Option<String>,
     pub started_at: Timestamp,
     pub ended_at: Option<Timestamp>,
-    /// The snapshot the stream's worktree was at when the turn opened;
-    /// `start_snapshot_id → snapshot_id` is what the turn changed.
-    /// `None` when the stream had no snapshot yet.
-    #[specta(type = Option<crate::JsNumber>)]
-    pub start_snapshot_id: Option<i64>,
-    /// The snapshot the worktree was at when the turn ended (its
-    /// `turn_end` take); `None` while running.
-    #[specta(type = Option<crate::JsNumber>)]
-    pub snapshot_id: Option<i64>,
+    /// What opened it; `None` for a turn recorded before sources were.
+    pub source: Option<TurnSource>,
+}
+
+/// What a hook's body means, as its harness read it: the harness adapter
+/// says (core reads no harness's body keys). Each part is empty when the
+/// harness said nothing.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HookReading {
+    /// Where the harness keeps the session's transcript.
+    pub transcript: Option<String>,
+    /// A `Stop` / `SubagentStop`'s final message: the agent's own last words.
+    pub final_message: Option<String>,
+    /// A `Notification`: the agent waits on the person (a permission, a
+    /// form, input).
+    pub waits_on_person: bool,
+    /// A `Notification`'s text.
+    pub notice: Option<String>,
+    /// A `SessionStart` that is a context compaction posted mid-turn: the
+    /// same process and turn go on.
+    pub compaction: bool,
+    /// A `PostCompact`'s summary of the context, when the harness gives one.
+    pub compact_summary: Option<String>,
+    /// What triggered a `PostCompact` (`auto`, `manual`), as the harness
+    /// names it.
+    pub compact_trigger: Option<String>,
+    /// A `SessionEnd`'s reason, as the harness names it.
+    pub end_reason: Option<String>,
+    /// A `SessionEnd` that clears the conversation: the next session starts
+    /// a new one.
+    pub clears_conversation: bool,
 }
 
 /// What a turn ran on and how full its context was, as its harness
@@ -121,6 +143,95 @@ pub struct TurnRun {
     pub context_tokens: Option<i64>,
     /// The model's context window, in tokens.
     pub context_window: Option<i64>,
+    /// The work the agent had started that was still running when the
+    /// turn ended (Claude Code's Stop `background_tasks`); `None` when the
+    /// harness says nothing, empty when it says none.
+    pub left_running: Option<Vec<RunningWork>>,
+    /// How the harness says the turn ended, when it is not simply finished
+    /// (an abort is `Interrupted`, a failure `Errored`); `None` reads as
+    /// `Completed`.
+    pub outcome: Option<TurnOutcome>,
+    /// The harness's own words for an error that ended it (`name: message`).
+    pub error: Option<String>,
+}
+
+/// A job or subagent a turn left running, as its harness reported it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, schemars::JsonSchema)]
+pub struct RunningWork {
+    /// The harness's id for it: the one its report back names (Claude's
+    /// task id, a subagent's id).
+    pub id: String,
+    /// What it is, in the harness's word (`subagent`, `shell`, …).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// What it is doing, as the harness described it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+/// What opened a turn (`agent_turn.source`), as its harness read the
+/// prompt hook. Only `person` is a person's words; the others are what the
+/// harness delivered to the agent on its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnSource {
+    /// A person's prompt.
+    Person,
+    /// A job the agent started in the background reported back (Claude
+    /// Code's task notification: a background shell or subagent finished).
+    BackgroundJob,
+    /// A subagent handed its report back to its session.
+    Subagent,
+    /// Another agent session's message.
+    Peer,
+    /// The harness opened a turn and said nothing of why.
+    Unknown,
+}
+
+impl TurnSource {
+    /// Its stored spelling (`agent_turn.source`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TurnSource::Person => "person",
+            TurnSource::BackgroundJob => "background_job",
+            TurnSource::Subagent => "subagent",
+            TurnSource::Peer => "peer",
+            TurnSource::Unknown => "unknown",
+        }
+    }
+
+    /// The source a stored spelling names; `None` for a turn recorded
+    /// before sources were (NULL) or an unknown spelling.
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "person" => TurnSource::Person,
+            "background_job" => TurnSource::BackgroundJob,
+            "subagent" => TurnSource::Subagent,
+            "peer" => TurnSource::Peer,
+            "unknown" => TurnSource::Unknown,
+            _ => return None,
+        })
+    }
+}
+
+/// How a turn's cause is known (`agent_turn.cause_basis`): the harness
+/// named it (`reported`), or oxplow matched it from what it saw
+/// (`matched`). Best effort either way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum CauseBasis {
+    Reported,
+    Matched,
+}
+
+impl CauseBasis {
+    /// Its stored spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CauseBasis::Reported => "reported",
+            CauseBasis::Matched => "matched",
+        }
+    }
 }
 
 /// How a turn ended (`agent.turn.ended`).
@@ -129,10 +240,36 @@ pub struct TurnRun {
 pub enum TurnOutcome {
     /// The agent finished (Stop).
     Completed,
-    /// The person interrupted it.
+    /// The person interrupted it (an abort in the harness).
     Interrupted,
+    /// The harness ended it with an error (an API failure, a refused
+    /// request): `agent_turn.error` holds the harness's own words.
+    Errored,
+    /// Its harness session ended with the turn still open (an exit sends
+    /// no Stop).
+    SessionEnded,
+    /// A new harness process started with the turn still open: the one
+    /// that ran it is gone.
+    SessionRestarted,
+    /// oxplow closed the agent session with the turn still open.
+    SessionClosed,
     /// oxplow restarted with the turn still open; recovery closed it.
     Restart,
+}
+
+impl TurnOutcome {
+    /// Its stored spelling (`agent_turn.outcome`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TurnOutcome::Completed => "completed",
+            TurnOutcome::Interrupted => "interrupted",
+            TurnOutcome::Errored => "errored",
+            TurnOutcome::SessionEnded => "session_ended",
+            TurnOutcome::SessionRestarted => "session_restarted",
+            TurnOutcome::SessionClosed => "session_closed",
+            TurnOutcome::Restart => "restart",
+        }
+    }
 }
 
 #[cfg(test)]

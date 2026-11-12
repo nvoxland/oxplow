@@ -7,7 +7,7 @@ params:
 - name: uri
   label: Collector
 answers:
-- {"question":"When did this collector last run, and did it fail?","about":"oxplow/collector","params":{"uri":"oxplow:oxplow/collector?collector=oxplow/oxplow.effort_test_outcome"},"skill":"oxplow-extension"}
+- {"question":"When did this collector last run, and did it fail?","about":"oxplow/collector","params":{"uri":"oxplow:oxplow/collector?collector=oxplow/oxplow.request_outcome"},"skill":"oxplow-extension"}
 loaders:
   about:
     sql: |

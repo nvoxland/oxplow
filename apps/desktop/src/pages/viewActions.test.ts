@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { definitionUri, pageSlug, titledPage, viewWikiBody } from "./viewActions.js";
+import { definitionUri, pageSlug, titledPage, viewKnowledgeBody } from "./viewActions.js";
 import { identityOf, viewOf } from "../uri/uri.js";
 
 test("a saved page keeps comments and ordered loaders when its title changes", () => {
@@ -9,9 +9,9 @@ test("a saved page keeps comments and ordered loaders when its title changes", (
   expect(yaml.indexOf("source:")).toBeLessThan(yaml.indexOf("dependent:"));
 });
 
-test("a wiki view's enclosing fence cannot be closed by markdown inside its YAML", () => {
+test("a knowledge view's enclosing fence cannot be closed by markdown inside its YAML", () => {
   const source = "title: Example\nview: { markdown: '```example```' }\n";
-  expect(viewWikiBody("Example", source)).toBe(`# Example\n\n\`\`\`\`oxplow-page\n${source}\`\`\`\`\n`);
+  expect(viewKnowledgeBody("Example", source)).toBe(`# Example\n\n\`\`\`\`oxplow-page\n${source}\`\`\`\`\n`);
   expect(pageSlug("Busy Tasks!")).toBe("busy-tasks");
   expect(pageSlug("2026 release")).toBe("page-2026-release");
 });

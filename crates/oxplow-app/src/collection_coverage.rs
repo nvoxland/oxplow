@@ -143,8 +143,8 @@ fn status_of(
 mod tests {
     use oxplow_db::CollectorRun;
 
-    async fn fixture() -> crate::test_fixtures::EffortFixture {
-        let fx = crate::test_fixtures::services_with_effort().await;
+    async fn fixture() -> crate::test_fixtures::ThreadFixture {
+        let fx = crate::test_fixtures::services_with_thread().await;
         let dir = fx.svc.layout.project_dir.join(".oxplow/extensions/my-gh");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
@@ -177,7 +177,7 @@ mod tests {
     #[tokio::test]
     async fn a_fed_dataset_says_how_its_collection_stands() {
         let fx = fixture().await;
-        let datasets = vec!["v_my_gh_pr".to_string(), "v_effort".to_string()];
+        let datasets = vec!["v_my_gh_pr".to_string(), "v_request".to_string()];
         let coverage = fx.svc.feeds.coverage(&fx.svc.db, &datasets).await.unwrap();
         assert_eq!(
             coverage.len(),
@@ -207,7 +207,7 @@ mod tests {
     #[tokio::test]
     async fn a_result_names_the_catalog_generation() {
         let fx = fixture().await;
-        let query = || oxplow_db::SqlQuery::new("SELECT count(*) FROM v_effort");
+        let query = || oxplow_db::SqlQuery::new("SELECT count(*) FROM v_request");
         let first = fx.svc.sql.run(query()).await.unwrap();
         assert!(first.coverage.is_empty());
         let generation = first.generation.clone().expect("a generation");

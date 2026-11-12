@@ -2,8 +2,8 @@
 # resolved one only when the filter reaches back to it; a picked thread reads
 # as its messages in order, and none picked shows nothing.
 given:
-  - { command: oxplow.knowledge.add_comment, input: { stream: str1, target: "oxplow:oxplow/wiki?slug=a-page", quote: one, intent: note, body: first }, bind: first }
-  - { command: oxplow.knowledge.add_comment, input: { stream: str1, target: "oxplow:oxplow/wiki?slug=a-page", quote: two, intent: followup, body: first }, bind: second }
+  - { command: oxplow.knowledge.add_comment, input: { stream: str1, target: "oxplow:oxplow/knowledge?id=a-page&store=oxwiki", quote: one, intent: note, body: first }, bind: first }
+  - { command: oxplow.knowledge.add_comment, input: { stream: str1, target: "oxplow:oxplow/knowledge?id=a-page&store=oxwiki", quote: two, intent: followup, body: first }, bind: second }
 when: { page: comments, params: { stream_id: 1, days: "0" } }
 expect:
   loaders:
@@ -12,10 +12,10 @@ expect:
         - { quote: one }
         - quote: two
           kind: follow-up
-          target_label: wiki/a-page
+          target_label: oxwiki/a-page
           go: Go to location
           # Go to location opens the page at the comment.
-          go_ref: "oxplow:oxplow/wiki?slug=a-page#comment=cmt2"
+          go_ref: "oxplow:oxplow/knowledge?id=a-page&store=oxwiki#comment=cmt2"
           latest: "user: first"
           is_open: 1
           is_followup: 1

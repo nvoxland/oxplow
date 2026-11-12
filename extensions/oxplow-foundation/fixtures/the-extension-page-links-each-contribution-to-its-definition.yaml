@@ -10,7 +10,7 @@ expect:
     collectors:
       rows:
         contains:
-          - { link: "oxplow:oxplow/collector?collector=oxplow/oxplow.effort_test_outcome#oxplow.renderer=oxplow/collector" }
+          - { link: "oxplow:oxplow/collector?collector=oxplow/oxplow.request_outcome#oxplow.renderer=oxplow/collector" }
     metrics:
       rows:
         contains:

@@ -1,0 +1,27 @@
+# Struggled here, a section of a request's Changes page: the files its
+# turns edited over and over and the shell commands that kept failing, most
+# first.
+given:
+  - observe:
+      turn:
+        prompt: Fiddle
+        tools:
+          - { name: Edit, kind: edit, paths: [a.rs], ok: true }
+          - { name: Edit, kind: edit, paths: [a.rs], ok: true }
+          - { name: Edit, kind: edit, paths: [a.rs], ok: true }
+          - { name: Edit, kind: edit, paths: [a.rs], ok: true }
+          - { name: Edit, kind: edit, paths: [a.rs], ok: true }
+          - { name: Edit, kind: edit, paths: [a.rs], ok: true }
+          - { name: Bash, kind: shell, ok: false }
+          - { name: Bash, kind: shell, ok: false }
+          - { name: Bash, kind: shell, ok: false }
+when: { part: oxplow/struggled, params: { uri: "oxplow:oxplow/request?id=req1" } }
+expect:
+  loaders:
+    struggled:
+      rows:
+        - { subject: a.rs, kind: repeated_edits, count: 6 }
+        - { subject: shell, kind: failed_commands, count: 3 }
+steps:
+  - when: { part: oxplow/struggled, params: { uri: "oxplow:oxplow/request?id=req9" } }
+    expect: { loaders: { struggled: { rows: 0 } } }

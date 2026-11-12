@@ -63,15 +63,6 @@ pub mod duplication_scan;
 pub mod effect_triggers;
 pub mod effective_config;
 pub mod effects;
-pub mod effort_evidence;
-pub mod effort_landing;
-pub mod effort_lifecycle;
-pub mod effort_observation;
-pub mod effort_policy;
-pub mod effort_policy_conformance;
-pub mod effort_policy_script;
-pub mod effort_reactors;
-pub mod effort_service;
 pub mod entity_metrics;
 pub mod event_bodies;
 pub mod event_lineage;
@@ -93,6 +84,7 @@ pub mod indexer;
 pub mod kind_search;
 pub mod knowledge;
 pub mod knowledge_conformance;
+pub mod knowledge_drift;
 pub mod link_check;
 pub mod live_datasets;
 #[cfg(test)]
@@ -112,6 +104,7 @@ pub mod metric_visibility;
 #[cfg(test)]
 mod metrics_authoring_tests;
 pub mod metrics_service;
+pub mod models;
 pub mod net_sandbox;
 pub mod observe_conformance;
 pub mod on_demand;
@@ -131,11 +124,12 @@ pub mod providers;
 mod reading_data_tests;
 #[cfg(test)]
 mod real_watch_tests;
-pub mod reasoning;
 pub mod recovery;
+pub mod ref_drift;
 pub mod ref_moves;
 pub mod ref_read;
 pub mod ref_resolver;
+pub(crate) mod request_analysis;
 pub mod run_context;
 #[cfg(test)]
 mod run_context_tests;
@@ -165,6 +159,8 @@ pub mod stream_watch;
 mod subagent_tests;
 pub mod symbol_collector;
 pub mod symbol_resolve;
+pub mod task_tracker_conformance;
+pub mod tasks;
 pub mod terminal_sessions;
 #[cfg(test)]
 pub(crate) mod test_fixtures;
@@ -182,11 +178,6 @@ pub mod vcs_conformance;
 pub mod viz_actions;
 pub mod viz_text;
 pub mod vocabulary_reactor;
-pub mod wiki_drift;
-pub mod wiki_pages;
-pub mod wiki_pages_watch;
-pub mod work_items;
-pub mod work_items_conformance;
 pub mod workspace_files;
 pub mod worktrees;
 
@@ -196,7 +187,7 @@ pub use hook_ingest::{
     HookEnvelope, HookIngestError, HookIngestService, IngestOutcome, ToolDecision,
 };
 pub use oxplow_lsp::{LspError, LspProxy};
-use oxplow_tasks::SqliteTaskStore;
+use oxplow_oxtask::SqliteOxtaskStore;
 
 use oxplow_domain::vocabulary::VocabularyHandle;
 use std::path::PathBuf;
@@ -206,11 +197,6 @@ pub use background_task::{
     BackgroundTask, BackgroundTaskChange, BackgroundTaskChangeKind, BackgroundTaskKind,
     BackgroundTaskStatus, BackgroundTaskStore, StartInput, UpdateInput,
 };
-// Re-export the effort store trait + row type so downstream crates that
-// hold a `Services` (e.g. oxplow-control-plane, which doesn't depend on
-// oxplow-db directly) can call the trait methods its public
-// `effort_store` field exposes.
-pub use oxplow_db::{EffortFile, EffortStore};
 
 use thiserror::Error;
 use tracing::info;
@@ -220,10 +206,9 @@ use std::sync::RwLock;
 use oxplow_config::OxplowConfig;
 use oxplow_db::{
     Database, SqliteAgentNudgeStore, SqliteAgentSessionStore, SqliteAgentTurnStore,
-    SqliteCodeQualityStore, SqliteCommentStore, SqliteEffortStore, SqliteEventLogStore,
-    SqliteFactStore, SqlitePageRefStore, SqlitePageVisitStore, SqliteSearchStore,
-    SqliteSnapshotStore, SqliteStreamStore, SqliteThreadStore, SqliteTokenUsageStore,
-    SqliteUsageStore, SqliteWikiPageStore, SqliteWikiPageThreadUpdateStore,
+    SqliteCodeQualityStore, SqliteCommentStore, SqliteEventLogStore, SqliteFactStore,
+    SqlitePageRefStore, SqlitePageVisitStore, SqliteSearchStore, SqliteSnapshotStore,
+    SqliteStreamStore, SqliteThreadStore, SqliteTokenUsageStore, SqliteUsageStore,
 };
 use oxplow_domain::stores::AgentStatusStore;
 use oxplow_session::{StreamService, ThreadService, WorkspaceLayout};
@@ -276,7 +261,7 @@ impl AppLayout {
 /// Creates `state_dir` (recursively) and drops a `.gitignore` that ignores
 /// everything in the directory except `project.yaml` (the shareable config)
 /// and the `.gitignore` itself — so a project can commit its oxplow config
-/// while the DB / snapshots / wiki / runtime files stay local. Idempotent:
+/// while the DB / snapshots / oxwiki / runtime files stay local. Idempotent:
 /// an existing `.gitignore` is left untouched. Whether the directory as a
 /// whole is tracked is the host repo's call (its root `.gitignore`); oxplow
 /// doesn't manage that.
@@ -500,14 +485,11 @@ pub struct Services {
     pub layout: AppLayout,
     pub streams: StreamService,
     pub threads: ThreadService,
-    /// What an effort's lifecycle does around its store (snapshot pins,
-    /// lifecycle metrics, file claims).
-    pub efforts: effort_service::EffortService,
     pub stream_store: Arc<SqliteStreamStore>,
     pub thread_store: Arc<SqliteThreadStore>,
     /// A thread's agent sessions (`agent_session`).
     pub agent_session_store: Arc<SqliteAgentSessionStore>,
-    pub task_store: Arc<SqliteTaskStore>,
+    pub task_store: Arc<SqliteOxtaskStore>,
     /// Work handed between threads (`.context/agent-model.md` "Handoffs").
     pub handoff_store: Arc<oxplow_db::SqliteHandoffStore>,
     /// The event log (`.context/data-model.md` "event_log"). Producers
@@ -549,8 +531,8 @@ pub struct Services {
     pub vocabulary_service: Arc<vocabulary_reactor::VocabularyService>,
     /// The command bus: the one write path (`.context/commands.md`).
     pub commands: Arc<commands::CommandBus>,
-    /// The work-items providers, by name (`.context/work-items.md`).
-    pub work_items: oxplow_domain::work_items::WorkItemsRegistry,
+    /// The task trackers, by name (`.context/tasks.md`).
+    pub tasks: oxplow_domain::tasks::TaskTrackers,
     /// The agent harnesses the project's extensions declare, by key.
     pub harnesses: oxplow_domain::agent::registry::HarnessRegistry,
     /// Where the harnesses' saved conversations are read: the machine's,
@@ -561,9 +543,6 @@ pub struct Services {
     pub session_auth: Arc<session_auth::SessionAuth>,
     /// Every capability's implementations and which is active.
     pub capabilities: Arc<capabilities::CapabilityRegistry>,
-    /// The effort policies, by id: the declared built-ins and the running
-    /// provider instances (`.context/work-tracking.md`).
-    pub effort_policies: Arc<oxplow_domain::effort_policy::EffortPolicyRegistry>,
     /// The snapshot implementations, and the one the project uses
     /// (`snapshots::CoreSnapshots` for both built-ins).
     pub snapshots: Arc<oxplow_domain::snapshot::SnapshotRegistry>,
@@ -579,15 +558,16 @@ pub struct Services {
     pub extension_checks: commands::agent_reads::extensions::ExtensionChecksSlot,
     /// The daemon's line to its window: the window's capabilities' calls.
     pub client_host: Arc<client_host::ClientHost>,
-    /// The knowledge implementations and the active one: oxplow's wiki
-    /// (bundled), a provider's, or none (`.context/knowledge.md`).
-    pub knowledge: Arc<oxplow_domain::knowledge::KnowledgeRegistry>,
+    /// The enabled knowledge stores, every one in use at once: oxwiki, an
+    /// extension's (`.context/knowledge.md`).
+    pub knowledge: Arc<oxplow_domain::knowledge::KnowledgeStores>,
     /// Which collectors feed which datasets (`collection_coverage`).
     pub feeds: Arc<collection_coverage::Feeds>,
-    /// Whether oxplow's wiki is the active store (its watch and repair
-    /// run only then).
-    pub wiki: Arc<knowledge::WikiFollow>,
-    pub wiki_page_store: Arc<SqliteWikiPageStore>,
+    /// Whether oxwiki is an enabled store (its watch and repair run only
+    /// then).
+    pub oxwiki: Arc<oxplow_oxwiki::OxwikiPresence>,
+    /// Core's record of every store's pages.
+    pub knowledge_pages: Arc<oxplow_db::SqliteKnowledgePageStore>,
     pub page_visit_store: Arc<SqlitePageVisitStore>,
     pub usage_store: Arc<SqliteUsageStore>,
     pub code_quality_store: Arc<SqliteCodeQualityStore>,
@@ -598,7 +578,7 @@ pub struct Services {
     pub search_store: Arc<SqliteSearchStore>,
     /// Per-stream snapshot capture registry. Holds one service per
     /// active stream (each watching its own worktree). Callers that know which stream they're acting on `get(&stream_id)`
-    /// here; those about the primary stream's worktree (the wiki watcher)
+    /// here; those about the primary stream's worktree (the oxwiki watcher)
     /// use `snapshot_captures.primary()`.
     pub snapshot_captures: snapshot_capture_registry::SnapshotCaptureRegistry,
     /// Each stream's one file watch.
@@ -607,7 +587,6 @@ pub struct Services {
     pub agent_turn_store: Arc<SqliteAgentTurnStore>,
     /// What the person's windows show: their tabs per thread (`client_reports`).
     pub client_reports: Arc<client_reports::ClientReports>,
-    pub effort_store: Arc<SqliteEffortStore>,
     /// Durable atomic fact layer (epic tsk12) — the unified metric substrate
     /// (the V38 `metric_*` cluster is retired, T-E3). Producers write facts
     /// here; the read surface aggregates them through `metric_engine`.
@@ -619,7 +598,7 @@ pub struct Services {
     /// disagree on what a branch sees.
     pub metric_visibility: Arc<metric_visibility::VisibilityResolver>,
     /// Runs config-declared `metrics:` gauges into the substrate (tsk213, P3):
-    /// seeds definitions, runs on-snapshot/on-effort-complete/manual triggers.
+    /// seeds definitions, runs on-snapshot/manual triggers.
     pub metrics: metrics_service::MetricsService,
     /// Persisted agent nudges (report-less-run / coverage-target) — the
     /// human-facing record of what oxplow steered the agent to do.
@@ -634,8 +613,6 @@ pub struct Services {
     pub panel_layout_store: oxplow_db::SqlitePanelLayoutStore,
     /// The person's page memory and app preferences (`ui_preference`).
     pub ui_preference_store: oxplow_db::SqliteUiPreferenceStore,
-    /// Agent decisions and claims (`v_decision`, `v_claim`).
-    pub reasoning_store: Arc<oxplow_db::SqliteReasoningStore>,
     /// Persisted agent tool calls (`v_tool_call` and derived views).
     pub tool_call_store: Arc<oxplow_db::SqliteToolCallStore>,
     /// Git history and branches (`v_commit`, `v_branch`, …).
@@ -652,8 +629,7 @@ pub struct Services {
     pub change_analyzer: Arc<change_analysis::ChangeAnalyzer>,
     /// Runs extension advisories for the hooks (see `advisories`).
     pub advisories: Arc<advisories::AdvisoryRunner>,
-    /// Per-effort metric deltas / observations for pages (see `effort_evidence`).
-    pub effort_evidence_store: Arc<oxplow_db::SqliteEffortEvidenceStore>,
+    pub request_analysis_store: Arc<oxplow_db::SqliteRequestAnalysisStore>,
     /// Secrets store (the OS keychain in the app): AI provider keys and
     /// extension-source credentials. Values never go to the UI or agents.
     pub secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
@@ -665,7 +641,6 @@ pub struct Services {
     pub token_usage: token_usage::TokenUsageService,
     /// Logs an agent's OTLP token exports as `agent.tokens.reported`.
     pub otlp_ingest: otlp_ingest::OtlpIngestService,
-    pub wiki_page_thread_updates: Arc<SqliteWikiPageThreadUpdateStore>,
     /// Unified cross-page reference graph. Every writer that owns a
     /// source's slice mirrors its outbound URIs into this store
     /// at write time; the reader IPC (`list_backlinks` /
@@ -890,10 +865,10 @@ impl Services {
         }
     }
 
-    /// The `work_item.*` commands, typed (`work_items::WorkItems`): the
+    /// The `task.*` commands, typed (`tasks::Tasks`): the
     /// one write surface for every provider's items.
-    pub fn work_items_client(&self) -> work_items::WorkItems {
-        work_items::WorkItems::new(self.commands.clone())
+    pub fn tasks_client(&self) -> tasks::Tasks {
+        tasks::Tasks::new(self.commands.clone())
     }
 
     /// The tree a thread works in: its stream's worktree (a sibling
@@ -903,7 +878,6 @@ impl Services {
     pub fn advisory_deps(&self) -> advisories::AdvisoryDeps {
         advisories::AdvisoryDeps {
             advisories: self.advisories.clone(),
-            effort_store: self.effort_store.clone(),
             thread_store: self.thread_store.clone(),
             worktrees: self.worktrees.clone(),
             extension_catalog: self.extension_catalog.clone(),
@@ -978,7 +952,7 @@ impl Services {
             vocabulary.clone(),
         ));
         let comment_store = Arc::new(SqliteCommentStore::new(db.clone(), vocabulary.clone()));
-        let task_store = Arc::new(SqliteTaskStore::new(db.clone()));
+        let task_store = Arc::new(SqliteOxtaskStore::new(db.clone()));
         let handoff_store = Arc::new(oxplow_db::SqliteHandoffStore::new(db.clone()));
         let event_log_store = Arc::new(SqliteEventLogStore::new(db.clone(), vocabulary.clone()));
         let extension_activation =
@@ -991,25 +965,40 @@ impl Services {
         let page_runs = pages::open_runs::PageRuns::default();
         event_bus.reach_open_runs(page_runs.clone());
         let ref_moves = ref_moves::RefMoves::new(event_bus.clone());
+        // Where pages are kept: oxwiki when foundation declares it, a
+        // provider's instance once it runs — every one in use at once.
+        let knowledge = Arc::new(oxplow_domain::knowledge::KnowledgeStores::new());
         let event_pump = Arc::new(event_pump::EventPump::new(
             db.clone(),
             (*event_log_store).clone(),
             vec![
                 // A list's records reach the interface before an item's
                 // page refs are restated from it.
-                Arc::new(work_items::WorkItemsProjection),
-                Arc::new(page_ref_consumers::PageRefWorkItemConsumer {
+                Arc::new(tasks::TasksProjection),
+                Arc::new(page_ref_consumers::PageRefTaskConsumer {
                     vocabulary: vocabulary.clone(),
                 }),
                 Arc::new(tool_call_reactors::ToolCallProjection),
-                Arc::new(knowledge::WikiAttribution),
+                Arc::new(knowledge::KnowledgeAttribution),
+                Arc::new(knowledge::KnowledgeFileReads {
+                    stores: knowledge.clone(),
+                    project_dir: layout.project_dir.clone(),
+                    vocabulary: vocabulary.clone(),
+                }),
+                Arc::new(knowledge::KnowledgeReads),
+                Arc::new(knowledge::KnowledgeDrift {
+                    vocabulary: vocabulary.clone(),
+                }),
+                Arc::new(ref_drift::RefDrift {
+                    vocabulary: vocabulary.clone(),
+                }),
                 // The log's facts the renderer hears (P7.B6).
                 Arc::new(ui_push::UiPush {
                     events: event_bus.clone(),
                 }),
             ],
         ));
-        let wiki_page_store = Arc::new(SqliteWikiPageStore::new(db.clone()));
+        let knowledge_pages = Arc::new(oxplow_db::SqliteKnowledgePageStore::new(db.clone()));
         let page_visit_store = Arc::new(SqlitePageVisitStore::new(db.clone()));
         let usage_store = Arc::new(SqliteUsageStore::new(db.clone()));
         let code_quality_store = Arc::new(SqliteCodeQualityStore::new(db.clone()));
@@ -1038,10 +1027,6 @@ impl Services {
             db.clone(),
             vocabulary.clone(),
         ));
-        let effort_store = Arc::new(SqliteEffortStore::with_vocabulary(
-            db.clone(),
-            vocabulary.clone(),
-        ));
         let fact_store = Arc::new(SqliteFactStore::new(db.clone()));
         let metric_visibility = Arc::new(metric_visibility::VisibilityResolver::new(
             SqliteSnapshotStore::new(db.clone()),
@@ -1057,14 +1042,13 @@ impl Services {
         let nudge_store = Arc::new(SqliteAgentNudgeStore::new(db.clone()));
         let terminal_store = Arc::new(oxplow_db::SqliteTerminalStore::new(db.clone()));
         let collector_store = Arc::new(oxplow_db::SqliteCollectorStore::new(db.clone()));
-        let reasoning_store = Arc::new(oxplow_db::SqliteReasoningStore::new(db.clone()));
         let tool_call_store = Arc::new(oxplow_db::SqliteToolCallStore::new(db.clone()));
         let git_store = Arc::new(oxplow_db::SqliteGitStore::new(db.clone()));
         let diagnostic_store = Arc::new(oxplow_db::SqliteDiagnosticStore::new(db.clone()));
         let symbol_store = oxplow_db::SqliteSymbolStore::new(db.clone());
-        let effort_evidence_store = Arc::new(oxplow_db::SqliteEffortEvidenceStore::new(db.clone()));
+        let request_analysis_store =
+            Arc::new(oxplow_db::SqliteRequestAnalysisStore::new(db.clone()));
         let change_store = Arc::new(oxplow_db::SqliteChangeStore::new(db.clone()));
-        let wiki_page_thread_updates = Arc::new(SqliteWikiPageThreadUpdateStore::new(db.clone()));
 
         let workspace_layout = WorkspaceLayout::for_project(&layout.project_dir);
         let config_arc = Arc::new(RwLock::new(config));
@@ -1096,7 +1080,7 @@ impl Services {
             event_bus.clone(),
         )
         .with_event_pump(event_pump.clone());
-        let recovery_svc = recovery::RecoveryService::new(agent_turn_store.clone());
+        let recovery_svc = recovery::RecoveryService::new(agent_turn_store.clone(), db.clone());
 
         let pty = oxplow_pty::PtyManager::spawn();
         // Lazily-built per-(stream, language) LSP proxies. Spawn cost
@@ -1199,17 +1183,6 @@ impl Services {
                 blobs: blobs.clone(),
                 max_file_bytes: max_bytes,
                 generated,
-                open_turn_probe: Some({
-                    let turns = agent_turn_store.clone();
-                    Arc::new(move |stream| {
-                        let turns = turns.clone();
-                        Box::pin(async move {
-                            // On a lookup error, assume a turn is open: the
-                            // turn's own end take is the safe default.
-                            turns.stream_has_open_turn(stream).await.unwrap_or(true)
-                        })
-                    })
-                }),
             },
         );
         let stream_watches = stream_watch::StreamWatchRegistry::new(
@@ -1323,6 +1296,9 @@ impl Services {
                     features: serde_json::to_value(vcs.features())
                         .unwrap_or(serde_json::Value::Null),
                     fields: serde_json::Value::Array(Vec::new()),
+                    stages: serde_json::Value::Array(Vec::new()),
+                    kinds: serde_json::Value::Array(Vec::new()),
+                    offered: true,
                     id_pattern: None,
                     icon: None,
                     config: serde_json::json!({}),
@@ -1362,15 +1338,12 @@ impl Services {
             hook_ingest.with_turn_snapshots(Arc::new(turn_snapshots::CaptureTurnSnapshots {
                 snapshots: snapshots.clone(),
                 threads: thread_store.clone(),
-                efforts: effort_store.clone(),
                 config: config_arc.clone(),
             }));
         // An agent's PTY exiting ends its session (Codex posts no SessionEnd).
         terminal_sessions.ingest_exits_into(hook_ingest.clone());
         let metrics = metrics_service::MetricsService::new(
             snapshot_store.clone(),
-            thread_store.clone(),
-            effort_store.clone(),
             snapshot_content.clone(),
             vcs.clone(),
             config_arc.clone(),
@@ -1386,47 +1359,38 @@ impl Services {
             layer: sql.clone(),
         })
         .with_ai(ai_compute.clone());
-        let efforts =
-            effort_service::EffortService::new(effort_store.clone(), thread_store.clone())
-                .with_event_pump(event_pump.clone())
-                .with_snapshot_captures(snapshot_captures.clone())
-                .with_snapshots(snapshots.clone())
-                .with_metrics(fact_store.clone(), event_bus.clone())
-                .with_steering_sources(agent_turn_store.clone(), comment_store.clone());
         // What an agent's context reads changing: sessions without a
         // prompt hook inject it between turns.
         let (context_changes, _) = tokio::sync::watch::channel(0u64);
         event_pump.register_async(Arc::new(context_watch::ContextChanges {
             changed: context_changes.clone(),
+            contexts_declared: {
+                let (catalog, root) = (extension_catalog.clone(), layout.project_dir.clone());
+                Arc::new(move || {
+                    catalog
+                        .live_snapshot(&root)
+                        .extensions()
+                        .iter()
+                        .any(|e| e.enabled && !e.contexts.is_empty())
+                })
+            },
         }));
-        // The post-commit half of effort open/close runs on the pump.
-        event_pump.register_async(Arc::new(effort_lifecycle::EffortLifecycleConsumer::new(
-            efforts.without_event_pump(),
-            (*event_log_store).clone(),
-        )));
-        // A structured edit claims its file for the effort it happened in.
-        event_pump.register_async(Arc::new(tool_call_reactors::EffortClaimConsumer::new(
-            efforts.without_event_pump(),
-            db.clone(),
-            layout.project_dir.clone(),
-        )));
-        // The vocabulary reads the active work list's own ids in text
-        // (`tsk42`), as that list declares them; from the first read, and
-        // at every rebuild (a switch rebuilds it).
-        let work_item_ids: vocabulary_reactor::WorkItemIds = {
+        // The vocabulary reads the active task tracker's own ids in text
+        // (`tsk42`), as that list declares them, and `[[<store>:<id>]]` for
+        // the enabled knowledge stores; from the first read, and at every
+        // rebuild (a switch rebuilds it).
+        let recognizers: vocabulary_reactor::Recognize = {
             let (capabilities, config) = (capabilities.clone(), config_arc.clone());
-            Arc::new(move || capabilities.work_item_ids(&config_service::read_config(&config)))
+            Arc::new(move || capabilities.recognizers(&config_service::read_config(&config)))
         };
         {
             // oxplow-foundation's resources, built in, until the service's
             // first pass adds every enabled extension's.
             let mut boot = oxplow_domain::vocabulary::Vocabulary::core();
-            boot.resources =
-                vocabulary_reactor::with_work_item_ids(boot.resources, work_item_ids().as_ref());
+            boot.resources = vocabulary_reactor::recognizing(boot.resources, &recognizers());
             vocabulary.swap(boot);
         }
-        let vocabulary_service =
-            Arc::new(vocabulary_reactor::VocabularyService::new(work_item_ids));
+        let vocabulary_service = Arc::new(vocabulary_reactor::VocabularyService::new(recognizers));
         let agent_policy = Arc::new(agent_policy::AgentPolicy);
         let commands = Arc::new(
             commands::CommandBus::new(
@@ -1456,50 +1420,26 @@ impl Services {
         commands
             .register(commands::compose::sequence_command())
             .expect("command.sequence registers");
-        // The work-items providers (`.context/work-items.md`); oxplow's
+        // The task trackers (`.context/tasks.md`); oxplow's
         // own, over this bus. Its active one is resolved from the config as
         // it is now.
-        let work_items = {
+        let tasks = {
             let (config, capabilities) = (config_arc.clone(), capabilities.clone());
-            oxplow_domain::work_items::WorkItemsRegistry::new(Arc::new(move || {
-                capabilities.active(&config_service::read_config(&config), "work_items")
+            oxplow_domain::tasks::TaskTrackers::new(Arc::new(move || {
+                capabilities.active(&config_service::read_config(&config), "task_tracker")
             }))
         };
-        // None as a work list: the sink every verb reaches while no list is
-        // active (`work_items::none_provider`).
-        work_items.register(work_items::none_provider());
+        // None as a task tracker: the sink every verb reaches while no list is
+        // active (`tasks::none_provider`).
+        tasks.register(tasks::none_provider());
         // A turn's end take becomes a `thread.checkpoint` a policy reads.
         event_pump.register_async(Arc::new(thread_checkpoint::ThreadCheckpointConsumer {
             log: (*event_log_store).clone(),
             sql: sql.clone(),
         }));
-        // Its turn's changed files become the effort's observed ones.
-        event_pump.register_async(Arc::new(effort_observation::EffortObservationConsumer {
-            efforts: effort_store.clone(),
-            snapshots: snapshot_store.clone(),
-            sql: sql.clone(),
-            lifecycle: efforts.without_event_pump(),
-        }));
-        // The effort policies: the built-ins and scripts the extensions
-        // declare, and the provider instances that register themselves.
-        let effort_policies =
-            Arc::new(oxplow_domain::effort_policy::EffortPolicyRegistry::default());
         event_pump.register_async(Arc::new(snapshots::SnapshotSwitch {
             registry: snapshots.clone(),
             captures: snapshot_captures.clone(),
-        }));
-        // The project's effort policy reacts to items starting and
-        // finishing, through this bus (`.context/work-tracking.md`).
-        event_pump.register_async(Arc::new(effort_policy::EffortPolicyConsumer {
-            bus: Arc::downgrade(&commands),
-            sql: sql.clone(),
-            config: config_arc.clone(),
-            capabilities: capabilities.clone(),
-            policies: effort_policies.clone(),
-            vocabulary: vocabulary.clone(),
-            db: db.clone(),
-            catalog: extension_catalog.clone(),
-            root: layout.project_dir.clone(),
         }));
         let config_applied = Arc::new(tokio::sync::Notify::new());
         let config_target = commands::config_commands::ConfigTarget {
@@ -1531,18 +1471,17 @@ impl Services {
             vocabulary: vocabulary.clone(),
         };
         for command in [
-            commands::work_item::transition_op(work_items.clone(), db.clone()),
-            commands::work_item::update_op(work_items.clone(), link_deps.clone()),
-            commands::work_item::create_op(work_items.clone(), link_deps.clone()),
-            commands::work_item::link_op(work_items.clone(), link_deps.clone()),
-            commands::work_item::unlink_op(work_items.clone(), link_deps.clone()),
-            commands::work_item::comment_op(work_items.clone()),
-            commands::work_item::reorder_op(work_items.clone()),
-            commands::work_item::move_op(work_items.clone()),
-            commands::work_item::delete_op(work_items.clone()),
+            commands::task::transition_op(tasks.clone(), db.clone()),
+            commands::task::update_op(tasks.clone(), link_deps.clone()),
+            commands::task::create_op(tasks.clone(), link_deps.clone()),
+            commands::task::link_op(tasks.clone(), link_deps.clone()),
+            commands::task::unlink_op(tasks.clone(), link_deps.clone()),
+            commands::task::comment_op(tasks.clone()),
+            commands::task::reorder_op(tasks.clone()),
+            commands::task::assign_op(tasks.clone()),
+            commands::task::delete_op(tasks.clone()),
         ]
         .into_iter()
-        .chain(commands::review::ops())
         .chain(commands::thread::ops(session_processes.clone()))
         .chain(commands::agent_session::ops(
             config_target.clone(),
@@ -1551,7 +1490,6 @@ impl Services {
             chat.clone(),
             capabilities.clone(),
         ))
-        .chain(commands::effort::ops(work_items.clone()))
         .chain(commands::hint::ops())
         .chain(commands::terminal::ops(
             db.clone(),
@@ -1559,29 +1497,13 @@ impl Services {
             terminal_sessions.clone(),
         ))
         .chain(commands::comment::ops())
-        .chain(commands::reasoning::ops())
         .chain(commands::ui::ops())
         .chain(commands::op_error::ops())
-        .chain(commands::effort_report::ops(
-            commands::effort_report::EffortDeps {
-                lifecycle: efforts.clone(),
-                efforts: effort_store.clone(),
-                sql: sql.clone(),
-                db: db.clone(),
-                vocabulary: vocabulary.clone(),
-                project_dir: layout.project_dir.clone(),
-                vcs: vcs.clone(),
-            },
-        ))
-        .chain(commands::handoff::ops(
-            link_deps.clone(),
-            work_items.clone(),
-        ))
+        .chain(commands::handoff::ops(link_deps.clone(), tasks.clone()))
         .chain(commands::stream::ops(commands::stream::StreamDeps {
             streams: streams.clone(),
             snapshot_captures: snapshot_captures.clone(),
             stream_watches: stream_watches.clone(),
-            snapshots: snapshots.clone(),
             ref_moves: ref_moves.clone(),
             threads: thread_store.clone(),
             sessions: agent_session_store.clone(),
@@ -1589,39 +1511,17 @@ impl Services {
             log: event_log_store.clone(),
             search: search_store.clone(),
             worktrees: worktrees.clone(),
-            efforts: effort_store.clone(),
             db: db.clone(),
             terminals: terminal_store.clone(),
             terminal_sessions: terminal_sessions.clone(),
         })) {
             commands.add_op(command).expect("core ops register");
         }
-        // Where pages are kept: the wiki under each id an extension
-        // declares it, none (a sink) always, a provider's instance once it
-        // runs; the active one is the project's choice.
-        let knowledge = {
-            let (config, capabilities) = (config_arc.clone(), capabilities.clone());
-            Arc::new(oxplow_domain::knowledge::KnowledgeRegistry::new(Arc::new(
-                move || {
-                    capabilities
-                        .active(&config_service::read_config(&config), knowledge::CAPABILITY)
-                },
-            )))
-        };
-        let wiki = Arc::new(knowledge::WikiFollow::default());
-        event_pump.register_async(Arc::new(knowledge::KnowledgeSwitch {
-            stores: knowledge.clone(),
-            wiki: wiki.clone(),
-            db: db.clone(),
-            vocabulary: event_log_store.vocabulary().clone(),
-            project_dir: layout.project_dir.clone(),
-            pages: wiki_page_store.clone(),
-        }));
+        let oxwiki = Arc::new(oxplow_oxwiki::OxwikiPresence::default());
         event_pump.register_async(Arc::new(providers::knowledge::KnowledgeRecords {
             stores: knowledge.clone(),
             db: db.clone(),
             vocabulary: event_log_store.vocabulary().clone(),
-            project_dir: layout.project_dir.clone(),
         }));
         let providers = providers::ProviderRegistry::new(
             providers::HostDeps {
@@ -1642,15 +1542,15 @@ impl Services {
                 global_dir: machine.config_dir.clone(),
                 events: event_bus.clone(),
                 capabilities: capabilities.clone(),
+                captures: snapshot_captures.clone(),
             },
             &commands,
             vec![
-                Arc::new(providers::work_items::WorkItemsHost(work_items.clone())),
-                Arc::new(providers::effort_policy::EffortPolicyHost(
-                    effort_policies.clone(),
-                )),
+                Arc::new(providers::tasks::TaskTrackerHost(tasks.clone())),
                 Arc::new(providers::agent_harness::HarnessHost(harnesses.clone())),
-                Arc::new(providers::knowledge::KnowledgeHost(knowledge.clone())),
+                Arc::new(providers::knowledge::KnowledgeHost {
+                    stores: knowledge.clone(),
+                }),
                 Arc::new(providers::filesystems::FileSystemsHost::new(
                     filesystems.clone(),
                 )),
@@ -1697,7 +1597,6 @@ impl Services {
         let collection = collection::CollectionService::new(
             fact_store.clone(),
             nudge_store.clone(),
-            effort_store.clone(),
             thread_store.clone(),
             snapshot_store.clone(),
             snapshot_captures.clone(),
@@ -1742,7 +1641,7 @@ impl Services {
             db: db.clone(),
             vocabulary: event_log_store.vocabulary().clone(),
             stores: knowledge.clone(),
-            wiki: wiki.clone(),
+            oxwiki: oxwiki.clone(),
         }) {
             commands.add_op(command).expect("knowledge ops register");
         }
@@ -1825,7 +1724,6 @@ impl Services {
         let token_usage_store = Arc::new(SqliteTokenUsageStore::new(db.clone()));
         let token_usage = token_usage::TokenUsageService::new(
             token_usage_store.clone(),
-            effort_store.clone(),
             thread_store.clone(),
             agent_session_store.clone(),
             fact_store.clone(),
@@ -1868,7 +1766,6 @@ impl Services {
         }));
         let advisory_deps = advisories::AdvisoryDeps {
             advisories: advisories.clone(),
-            effort_store: effort_store.clone(),
             thread_store: thread_store.clone(),
             worktrees: worktrees.clone(),
             extension_catalog: extension_catalog.clone(),
@@ -1894,7 +1791,6 @@ impl Services {
             layout,
             streams,
             threads,
-            efforts,
             snapshot_captures,
             stream_watches,
             stream_store,
@@ -1918,18 +1814,17 @@ impl Services {
             extension_checks: Default::default(),
             client_host,
             commands,
-            work_items,
+            tasks,
             harnesses,
             saved_conversations,
             session_auth,
             capabilities,
-            effort_policies,
             snapshots,
             providers,
             knowledge,
             feeds,
-            wiki,
-            wiki_page_store,
+            oxwiki,
+            knowledge_pages,
             page_visit_store,
             usage_store,
             code_quality_store,
@@ -1938,7 +1833,6 @@ impl Services {
             agent_status_store,
             agent_turn_store,
             client_reports,
-            effort_store,
             fact_store,
             metric_engine,
             metric_visibility,
@@ -1949,7 +1843,6 @@ impl Services {
             collector_runner,
             panel_layout_store,
             ui_preference_store,
-            reasoning_store,
             tool_call_store,
             git_store,
             diagnostic_store,
@@ -1957,7 +1850,7 @@ impl Services {
             ai,
             ai_compute,
             secrets: machine.secrets,
-            effort_evidence_store,
+            request_analysis_store,
             advisories,
             change_store,
             change_analyzer: Arc::new(change_analysis::ChangeAnalyzer::default()),
@@ -1965,7 +1858,6 @@ impl Services {
             token_usage_store,
             token_usage,
             otlp_ingest,
-            wiki_page_thread_updates,
             page_ref_store,
             comment_store,
             hook_ingest,
@@ -2118,9 +2010,16 @@ impl Services {
     /// running `/oxplow:configure` writes a `testing:` block — so the
     /// edit goes live without a process restart. A full reload from disk
     /// is safe: the in-memory config is always exactly the file's content
-    /// plus defaults (the same thing boot computes).
+    /// plus defaults (the same thing boot computes). A file that reads as
+    /// what is applied changes nothing and announces nothing: the watcher
+    /// reloads on every rescan (macOS drops events whenever a build writes
+    /// thousands of files), and each `ConfigChanged` re-runs every open page
+    /// that follows config.
     pub fn reload_config_from_disk(&self) -> Result<(), AppInitError> {
         let fresh = oxplow_config::load_project_config(&self.layout.project_dir)?;
+        if *self.config.read().unwrap_or_else(|e| e.into_inner()) == fresh {
+            return Ok(());
+        }
         self.snapshot_captures.set_generated(&fresh.generated);
         {
             let mut guard = self.config.write().unwrap_or_else(|e| e.into_inner());
@@ -2129,6 +2028,13 @@ impl Services {
         self.config_applied.notify_waiters();
         self.events.emit(OxplowEvent::ConfigChanged);
         Ok(())
+    }
+
+    /// A metric file in the global metrics folder changed: it isn't
+    /// project.yaml, so a reload would read the same config, but the metrics
+    /// runner reads the global scope again on `ConfigChanged`.
+    pub fn global_metrics_changed(&self) {
+        self.events.emit(OxplowEvent::ConfigChanged);
     }
 }
 
@@ -2228,6 +2134,31 @@ mod tests {
             .unwrap();
     }
 
+    /// A reload that reads what is already applied changes nothing and says
+    /// nothing: the watcher reloads on every rescan (macOS drops events
+    /// whenever a build writes thousands of files, even under an ignored
+    /// folder), and each `ConfigChanged` re-runs every open page that
+    /// follows config.
+    #[tokio::test]
+    async fn reloading_an_unchanged_config_announces_nothing() {
+        let project = tempdir().unwrap();
+        init_git(project.path());
+        let services = Services::in_memory(project.path()).await.unwrap();
+        let path = oxplow_config::config_path(project.path());
+        std::fs::write(&path, "snapshotRetentionDays: 3\n").unwrap();
+        services.reload_config_from_disk().unwrap();
+        let mut rx = services.events.subscribe_ui();
+        services.reload_config_from_disk().unwrap();
+        let heard = std::iter::from_fn(|| rx.try_recv().ok())
+            .any(|e| matches!(e, OxplowEvent::ConfigChanged));
+        assert!(!heard, "an unchanged reload announced ConfigChanged");
+        std::fs::write(&path, "snapshotRetentionDays: 4\n").unwrap();
+        services.reload_config_from_disk().unwrap();
+        let heard = std::iter::from_fn(|| rx.try_recv().ok())
+            .any(|e| matches!(e, OxplowEvent::ConfigChanged));
+        assert!(heard, "a changed reload announced nothing");
+    }
+
     #[tokio::test]
     async fn reload_config_from_disk_picks_up_external_edits() {
         let project = tempdir().unwrap();
@@ -2306,7 +2237,6 @@ mod tests {
                 "oxplow.effect.backfill",
                 "oxplow.effect.retry",
                 "oxplow.effect.retry_all",
-                "oxplow.effort.report",
                 // Writes the store, the settings and `.oxplow/.gitignore`.
                 "oxplow.extension.deploy",
                 "oxplow.extension.disable",
@@ -2335,13 +2265,14 @@ mod tests {
                 "oxplow.git.publish",
                 "oxplow.git.rebase",
                 "oxplow.git.revert",
-                // The active knowledge store keeps the page (the wiki's file,
-                // a provider's service); core records what it kept.
+                // The page's store keeps it (oxwiki's file, a provider's
+                // service); core records what it kept.
                 "oxplow.knowledge.comments",
                 "oxplow.knowledge.delete_page",
                 "oxplow.knowledge.drift",
                 "oxplow.knowledge.link",
-                "oxplow.knowledge.verify_files",
+                // Bundled's menu entry for write_page, over its form.
+                "oxplow.knowledge.new_page",
                 "oxplow.knowledge.write_page",
                 // A download into .oxplow/lsp/, a person's call (P8.A9).
                 "oxplow.lsp.install_server",
@@ -2384,6 +2315,18 @@ mod tests {
                 // A stream's worktree and its capture service (P8.A4).
                 "oxplow.stream.archive",
                 "oxplow.stream.create",
+                // Every task tracker's verbs, oxplow's own included. Who works
+                // on an item and its place in their queue are core's
+                // (`assign`, `reorder`), in the bus's transaction.
+                "oxplow.task.comment",
+                "oxplow.task.create",
+                "oxplow.task.delete",
+                "oxplow.task.link",
+                // bundled's menu entry for create.
+                "oxplow.task.new",
+                "oxplow.task.transition",
+                "oxplow.task.unlink",
+                "oxplow.task.update",
                 // A run's capture, through the collection service (P8.A8).
                 "oxplow.terminal.close",
                 "oxplow.test.record_run",
@@ -2405,16 +2348,6 @@ mod tests {
                 "oxplow.vcs.stage",
                 "oxplow.vcs.status",
                 "oxplow.vcs.uncommit",
-                // Every work list's verbs, oxplow's own included.
-                "oxplow.work_item.comment",
-                "oxplow.work_item.create",
-                "oxplow.work_item.delete",
-                "oxplow.work_item.link",
-                "oxplow.work_item.move",
-                "oxplow.work_item.reorder",
-                "oxplow.work_item.transition",
-                "oxplow.work_item.unlink",
-                "oxplow.work_item.update",
             ]
         );
     }
@@ -2433,11 +2366,12 @@ mod tests {
                 "oxplow.command.sequence",
                 // The bundled extension's script commands compose their
                 // calls per input.
-                // Taking a handoff moves its work item, then settles it.
+                // Taking a handoff moves its task, then settles it.
                 "oxplow.handoff.resolve",
-                "oxplow.review.accept",
-                "oxplow.review.request_changes",
-                "oxplow.work.clear_finished",
+                // A settings write for the project, its stamps read first.
+                "oxplow.knowledge.set_oxwiki",
+                "oxplow.tasks.clear_finished",
+                "oxplow.tasks.set_workflow",
             ]
         );
     }

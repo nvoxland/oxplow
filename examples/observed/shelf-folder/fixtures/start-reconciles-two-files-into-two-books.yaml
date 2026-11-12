@@ -1,0 +1,13 @@
+enable: [shelf, shelf-folder]
+given:
+  - files:
+      "shelf/dune.md": "# Dune\n\nA desert planet."
+      "shelf/emma.md": "# Emma\n\nA matchmaker."
+when: { collector: shelf-folder.books, trigger: start }
+expect: { ok: true }
+steps:
+  - when: { sql: "SELECT id, title, store FROM v_shelf_book ORDER BY id" }
+    expect:
+      rows:
+        - { id: dune, title: Dune, store: shelf-folder }
+        - { id: emma, title: Emma, store: shelf-folder }

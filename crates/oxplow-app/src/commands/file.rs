@@ -352,7 +352,7 @@ mod tests {
     /// record, its size kept — and logs `file.saved` caused by the run.
     #[tokio::test(flavor = "multi_thread")]
     async fn save_writes_is_audited_without_its_content_and_logs_file_saved() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let stream = fx.svc.streams.list_streams().await.unwrap()[0]
             .id
             .to_string();
@@ -403,7 +403,7 @@ mod tests {
     /// not) writes.
     #[tokio::test(flavor = "multi_thread")]
     async fn save_refuses_a_filesystem_that_is_not_writable() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let stream = fx.svc.streams.list_streams().await.unwrap()[0]
             .id
             .to_string();
@@ -454,7 +454,7 @@ mod tests {
     }
 
     async fn run(
-        fx: &crate::test_fixtures::EffortFixture,
+        fx: &crate::test_fixtures::ThreadFixture,
         name: &str,
         input: serde_json::Value,
         confirmed: bool,
@@ -465,14 +465,14 @@ mod tests {
             .await
     }
 
-    async fn stream_ref_of(fx: &crate::test_fixtures::EffortFixture) -> String {
+    async fn stream_ref_of(fx: &crate::test_fixtures::ThreadFixture) -> String {
         fx.svc.streams.list_streams().await.unwrap()[0]
             .id
             .to_string()
     }
 
     async fn logged(
-        fx: &crate::test_fixtures::EffortFixture,
+        fx: &crate::test_fixtures::ThreadFixture,
         event_type: &str,
     ) -> Vec<serde_json::Value> {
         fx.svc
@@ -492,7 +492,7 @@ mod tests {
     /// `file.deleted`) — what the window reacts to to fix its open buffers.
     #[tokio::test(flavor = "multi_thread")]
     async fn the_file_commands_change_the_worktree_and_log_what_they_did() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let root = fx._dir.path().to_path_buf();
         let stream = stream_ref_of(&fx).await;
 
@@ -598,7 +598,7 @@ mod tests {
     /// of Save.
     #[tokio::test(flavor = "multi_thread")]
     async fn an_agent_changes_files_only_in_its_own_stream() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let stream = stream_ref_of(&fx).await;
         let elsewhere = Actor::Agent {
             session_id: None,
@@ -638,7 +638,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_save_the_window_does_for_an_agent_runs_as_the_agent() {
         use crate::events::OxplowEvent;
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let stream = fx.svc.streams.list_streams().await.unwrap()[0].id;
         let agent = Actor::Agent {
             session_id: None,
@@ -701,7 +701,7 @@ mod tests {
     /// rule), an effect — with no stream — in none.
     #[tokio::test(flavor = "multi_thread")]
     async fn an_agent_saves_only_in_its_own_stream() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let stream = fx.svc.streams.list_streams().await.unwrap()[0].id;
         let input = json!({ "stream": stream.to_string(), "path": "n.txt", "content": "x" });
         let elsewhere = Actor::Agent {

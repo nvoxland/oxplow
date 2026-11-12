@@ -1,7 +1,7 @@
 //! Unified site-wide search index (FTS5 / BM25).
 //!
 //! One standalone FTS5 table (`search_fts`) holds the searchable text for
-//! every kind of entity — tasks, comments, notes, wiki pages, file contents
+//! every kind of entity — tasks, comments, knowledge pages, file contents
 //! — paired with a `search_entry` identity table that maps
 //! `(kind, ref_id, stream_id)` — the entity's resource (`oxplow/file`), its
 //! URI and stream — to the FTS rowid so an entity can be updated or
@@ -9,7 +9,7 @@
 //! above body); snippets via `snippet()`.
 //!
 //! Two writers drive it from `oxplow-app`: a kind indexed from a dataset
-//! (tasks, comments, notes, wiki pages, an extension's searchable kind) is
+//! (tasks, comments, knowledge pages, an extension's searchable kind) is
 //! restated by its asset (`kind_search`, [`restate_kind_tx`]: only the
 //! entries that changed are written); file
 //! contents are upserted by the `search.index` consumer (`indexer`). See
@@ -25,9 +25,9 @@ use oxplow_domain::DomainError;
 use crate::database::Database;
 
 /// One ranked search result: the URI it found
-/// (`oxplow:oxplow/work_item?id=tsk7&provider=oxplow`), which the caller
+/// (`oxplow:oxplow/task?id=tsk7&provider=oxtask`), which the caller
 /// opens the way it opens any URI, and its resource. `stream_id` is `None`
-/// for project-global entities (wiki pages); `score` is the BM25 score
+/// for project-global entities (knowledge pages); `score` is the BM25 score
 /// (lower = better match).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct SearchHit {
@@ -427,7 +427,7 @@ mod tests {
         .await
         .unwrap();
         s.upsert(
-            "wiki",
+            "oxplow/knowledge",
             "auth",
             None,
             "Authentication",
@@ -436,7 +436,7 @@ mod tests {
         .await
         .unwrap();
         let hits = s.search("login", Some("s-a"), &[], 10).await.unwrap();
-        assert_eq!(hits.len(), 2, "both task and global wiki match");
+        assert_eq!(hits.len(), 2, "both task and global knowledge page match");
         assert!(hits.iter().any(|h| h.uri == "1"));
         assert!(hits.iter().any(|h| h.uri == "auth"));
     }
@@ -445,7 +445,7 @@ mod tests {
     async fn prefix_matches_partial_token() {
         let s = store().await;
         s.upsert(
-            "wiki",
+            "oxplow/knowledge",
             "auth",
             None,
             "Authentication",
@@ -478,9 +478,15 @@ mod tests {
         )
         .await
         .unwrap();
-        s.upsert("wiki", "w", None, "Widgets", "all about the widget")
-            .await
-            .unwrap();
+        s.upsert(
+            "oxplow/knowledge",
+            "w",
+            None,
+            "Widgets",
+            "all about the widget",
+        )
+        .await
+        .unwrap();
         let hits = s.search("widget", Some("s-a"), &[], 10).await.unwrap();
         let ids: Vec<&str> = hits.iter().map(|h| h.uri.as_str()).collect();
         assert!(ids.contains(&"src/a.rs"), "stream a's file is in scope");
@@ -488,7 +494,10 @@ mod tests {
             !ids.contains(&"src/b.rs"),
             "stream b's file is filtered out"
         );
-        assert!(ids.contains(&"w"), "global wiki is always in scope");
+        assert!(
+            ids.contains(&"w"),
+            "a global knowledge page is always in scope"
+        );
     }
 
     #[tokio::test]
@@ -693,7 +702,7 @@ mod tests {
     async fn multi_word_query_ands_terms_across_a_body() {
         let s = store().await;
         s.upsert(
-            "wiki",
+            "oxplow/knowledge",
             "architecture-overview",
             None,
             "Architecture Overview",
@@ -727,7 +736,9 @@ mod tests {
     #[tokio::test]
     async fn junk_query_does_not_error() {
         let s = store().await;
-        s.upsert("wiki", "w", None, "T", "body").await.unwrap();
+        s.upsert("oxplow/knowledge", "w", None, "T", "body")
+            .await
+            .unwrap();
         // Punctuation-only / FTS5-operator input must not throw.
         for q in ["", "   ", ":::", "\"", "AND OR NOT", "a-b (c)"] {
             assert!(

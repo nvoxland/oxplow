@@ -1,0 +1,3 @@
+enable: [shelf, shelf-db]
+when: { command: shelf-db.book.add, input: { title: Dune, rating: "five" } }
+expect: { ok: false, refused: rating }

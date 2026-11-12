@@ -10,7 +10,7 @@ const source = (title: string, prefix: string) => `# Keep the source comment
 title: ${title}
 loaders:
   count:
-    sql: SELECT count(*) AS n FROM v_work_item WHERE title LIKE '${prefix}%'
+    sql: SELECT count(*) AS n FROM v_task WHERE title LIKE '${prefix}%'
 view: { id: count, viz: number, from: count }
 `;
 
@@ -32,9 +32,9 @@ async function action(page: Page, id: string) {
   await page.getByTestId(`menu-item-action-${id}`).click();
 }
 
-test("Save to wiki keeps a live oxplow-page block that renders again after reload", async ({ page, daemon }) => {
+test("Save as knowledge page keeps a live oxplow-page block that renders again after reload", async ({ page, daemon }) => {
   await show(page, daemon, source("Saved Bilby Count", "Saved Bilby "));
-  await action(page, "view-save-wiki");
+  await action(page, "view-save-knowledge");
   const form = page.getByTestId("save-view-form").filter({ visible: true });
   await form.getByTestId("save-view-title").fill("Saved Bilby View");
   await form.getByTestId("save-view-title").press("Enter");
@@ -42,6 +42,6 @@ test("Save to wiki keeps a live oxplow-page block that renders again after reloa
   await expect(inline.locator('[data-node="count"]')).toContainText("0");
   await page.reload();
   await expect(inline.locator('[data-node="count"]')).toContainText("0");
-  await run(daemon, "oxplow.work_item.create", { title: "Saved Bilby evidence", thread: daemon.thread });
+  await run(daemon, "oxplow.task.create", { title: "Saved Bilby evidence", thread: daemon.thread });
   await expect(inline.locator('[data-node="count"]')).toContainText("1");
 });

@@ -38,6 +38,27 @@ export function switchSections(run: PageRun): { param: string; sections: { id: s
   };
 }
 
+/** Whether the page's `rail:` tree draws at the rail's bottom: a form (a
+ *  quick add) is something to do, not what the page is about, so it comes
+ *  after the filters and the links; any other tree leads the rail. */
+export function railTreeLast(run: PageRun): boolean {
+  const rail = run.page.rail;
+  return rail?.kind === "viz" && rail.config.viz === "form";
+}
+
+/** The page's `rail:` tree, under its root's title as a group. */
+export function PageRailTree({ run, runId, onApply, streamId = null, onOpenPage }: Pick<PageRailProps, "run" | "runId" | "onApply" | "streamId" | "onOpenPage">) {
+  if (!run.rail) return null;
+  const tree = <PageTree run={run} runId={runId} root={run.rail} streamId={streamId} onOpenPage={onOpenPage} onSetParam={onApply} />;
+  return run.page.rail?.title ? (
+    <RailGroup title={run.page.rail.title} testId="page-rail-tree">
+      {tree}
+    </RailGroup>
+  ) : (
+    <div data-testid="page-rail-tree">{tree}</div>
+  );
+}
+
 export function PageRail({ run, runId, onApply, picked = NO_PICKED, streamId = null, onOpenPage }: PageRailProps) {
   // A resource param is what the page is, a selection what a row picked:
   // neither is an input. A switch's param is its sections, drawn as links.
@@ -53,18 +74,9 @@ export function PageRail({ run, runId, onApply, picked = NO_PICKED, streamId = n
     changed.length > 0
       ? { id: "page-rail-reset", label: "Reset", title: "Put every filter back to its default", run: () => changed.forEach((p) => onApply(p.name, p.default ?? null)) }
       : undefined;
-  const tree = run.rail ? <PageTree run={run} runId={runId} root={run.rail} streamId={streamId} onOpenPage={onOpenPage} onSetParam={onApply} /> : null;
   return (
     <>
-      {tree ? (
-        run.page.rail?.title ? (
-          <RailGroup title={run.page.rail.title} testId="page-rail-tree">
-            {tree}
-          </RailGroup>
-        ) : (
-          <div data-testid="page-rail-tree">{tree}</div>
-        )
-      ) : null}
+      {railTreeLast(run) ? null : <PageRailTree run={run} runId={runId} onApply={onApply} streamId={streamId} onOpenPage={onOpenPage} />}
       {sw ? (
         // The page's sections, each a link to it; the one in view marked.
         <RailGroup title={run.page.title} testId="page-sections">

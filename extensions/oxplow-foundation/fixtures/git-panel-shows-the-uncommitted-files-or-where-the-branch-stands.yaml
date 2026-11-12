@@ -1,0 +1,76 @@
+# The rail's Git panel: the stream's changed files as paths with their
+# status (the tree makes the folders and draws the marks), collapsed to one
+# line of coloured counts, counted by files. Its header toggle shows the
+# files git doesn't track yet, or leaves them out, in every part; or shows
+# an overview: the changes, then where the branch stands with its buttons;
+# collapsed, the stats only.
+given:
+  - observe: { commit: { sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", at: "2023-11-14T22:13:20Z", author: Ada, email: ada@example.com, subject: first } }
+  - observe:
+      refs:
+        branches: [{ name: main, head: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", stream: 1, default: true }]
+        heads: [{ stream: 1, sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }]
+  - observe:
+      change:
+        kind: working
+        target: ""
+        files:
+          - { path: src/ui/a.rs, status: modified, additions: 1 }
+          - { path: src/new.rs, status: added, additions: 1, untracked: true }
+          - { path: old.rs, status: deleted, deletions: 3 }
+when: { panel: git }
+expect:
+  choices: [{ name: show, value: changed_untracked }]
+  body:
+    loaders:
+      uncommitted:
+        rows:
+          # A deleted file has nothing to open, so no `file_path`.
+          - { path: old.rs, status: deleted, file_path: null }
+          - { path: src/new.rs, status: untracked, file_path: src/new.rs }
+          - { path: src/ui/a.rs, status: modified, file_path: src/ui/a.rs }
+  collapsed:
+    loaders:
+      uncommitted_line:
+        rows:
+          - changes: '[{"text":"1M","tone":"warning","hint":"modified"},{"text":"1D","tone":"danger","hint":"deleted"},{"text":"+2","tone":"success","hint":"lines added","gap":true},{"text":"−3","tone":"danger","hint":"lines removed"},{"text":"1U","tone":"success","hint":"untracked","gap":true}]'
+            page: "oxplow:oxplow/page?page=uncommitted-changes"
+  count: 3
+steps:
+  # Tracked files only: the untracked one leaves the tree, the line and the count.
+  - when: { choices: { show: changed } }
+    expect:
+      choices: [{ name: show, value: changed }]
+      body:
+        loaders:
+          uncommitted:
+            rows:
+              - { path: old.rs, status: deleted }
+              - { path: src/ui/a.rs, status: modified }
+      collapsed:
+        loaders:
+          uncommitted_line:
+            rows:
+              - changes: '[{"text":"1M","tone":"warning","hint":"modified"},{"text":"1D","tone":"danger","hint":"deleted"},{"text":"+1","tone":"success","hint":"lines added","gap":true},{"text":"−3","tone":"danger","hint":"lines removed"}]'
+      count: 2
+  # The Overview: the changes in one line, then where the branch stands,
+  # with its buttons and without its name (the header says the stream);
+  # collapsed, only the branch's ↑/↓, with no buttons. The count stays the
+  # uncommitted files, untracked ones too.
+  - when: { choices: { show: overview } }
+    expect:
+      choices: [{ name: show, value: overview }]
+      body:
+        loaders:
+          uncommitted_line:
+            rows:
+              - changes: '[{"text":"1M","tone":"warning","hint":"modified"},{"text":"1D","tone":"danger","hint":"deleted"},{"text":"+2","tone":"success","hint":"lines added","gap":true},{"text":"−3","tone":"danger","hint":"lines removed"},{"text":"1U","tone":"success","hint":"untracked","gap":true}]'
+          branch/branch:
+            rows:
+              - { branch: main, show_branch: 0, remote: No remote, heading: Repository }
+      collapsed:
+        loaders:
+          sync_line:
+            rows:
+              - sync: '[{"text":"No remote","tone":null,"hint":"the repository has no remote"}]'
+      count: 3

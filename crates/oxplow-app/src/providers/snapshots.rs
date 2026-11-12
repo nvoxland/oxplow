@@ -3,7 +3,7 @@
 //! (`.context/providers.md` "A snapshots provider"). The process marks the
 //! worktree; core keeps the record. Each mark is:
 //!
-//! - `mark { stream, worktree, trigger, thread?, turn?, effort?,
+//! - `mark { stream, worktree, trigger, thread?, turn?,
 //!   budget_ms?, parent }` → `{ handle, unchanged, file_count, branch?,
 //!   revision? }`, `parent` the handle on the stream's newest op (`null`
 //!   when core's capture took it, or nothing has);
@@ -31,13 +31,14 @@ use oxplow_domain::snapshot::{
     MarkRequest, Marked, SnapshotError, SnapshotProvider, SnapshotRegistry,
 };
 use oxplow_domain::tree_diff::FileChange;
-use oxplow_domain::uri::build::{effort_uri, thread_uri};
+use oxplow_domain::uri::build::thread_uri;
 use oxplow_domain::vcs::Revision;
 use oxplow_domain::{InputValidator, StreamId, Timestamp};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::registry::{CapabilityHost, Instance, PreparedProviderCapability};
+use super::endpoint::Endpoint;
+use super::registry::{CapabilityHost, PreparedProviderCapability};
 use crate::blob_store::BlobStore;
 use crate::snapshot_capture_registry::SnapshotCaptureRegistry;
 use crate::snapshot_files::SnapshotFiles;
@@ -72,8 +73,8 @@ impl CapabilityHost for SnapshotsHost {
         self.registry.has(id)
     }
 
-    fn prepare(&self, instance: &Arc<Instance>) -> Result<PreparedProviderCapability, String> {
-        let declared = &instance.declared;
+    fn prepare(&self, instance: &Arc<dyn Endpoint>) -> Result<PreparedProviderCapability, String> {
+        let declared = instance.declared();
         let capability = declared
             .capabilities
             .iter()
@@ -115,7 +116,7 @@ impl CapabilityHost for SnapshotsHost {
 }
 
 pub struct ExternalSnapshots {
-    instance: Arc<Instance>,
+    instance: Arc<dyn Endpoint>,
     contents: bool,
     /// Each declared contract verb's compiled input schema.
     verbs: BTreeMap<&'static str, InputValidator>,
@@ -280,7 +281,7 @@ impl ExternalSnapshots {
     fn failed(&self, message: impl std::fmt::Display) -> SnapshotError {
         SnapshotError::Storage(format!(
             "snapshot provider `{}`: {message}",
-            self.instance.name
+            self.instance.name()
         ))
     }
 
@@ -288,6 +289,7 @@ impl ExternalSnapshots {
     /// read its answer as `T`.
     async fn call<T: serde::de::DeserializeOwned>(
         &self,
+        stream: StreamId,
         verb: &'static str,
         input: Value,
     ) -> Result<T, SnapshotError> {
@@ -299,10 +301,16 @@ impl ExternalSnapshots {
             .check(&input)
             .map_err(|e| self.failed(format!("its `{verb}` schema refuses the call: {e}")))?;
         let key = format!("{verb}:{}", uuid::Uuid::new_v4().simple());
+        // Anchored to the stream being marked: a script implementation's
+        // `tree.read` is that stream's worktree.
         let run = oxplow_domain::run::RunContext::core(
             oxplow_domain::Actor::System,
             oxplow_domain::run::Mode::External,
-        );
+        )
+        .anchored(oxplow_domain::events::Anchors {
+            stream_id: Some(stream),
+            ..Default::default()
+        });
         let out = self
             .instance
             .invoke(&run, verb, input, Some(key))
@@ -318,13 +326,18 @@ impl ExternalSnapshots {
     }
 
     /// Keep the bytes of each `(path, identity)` the blob store lacks.
-    async fn pull(&self, handle: &str, pull: Vec<(String, String)>) -> Result<(), SnapshotError> {
+    async fn pull(
+        &self,
+        stream: StreamId,
+        handle: &str,
+        pull: Vec<(String, String)>,
+    ) -> Result<(), SnapshotError> {
         for (path, identity) in pull {
             if self.ledger.blobs.has(&identity) {
                 continue;
             }
             let answer: BytesAnswer = self
-                .call("read_at", json!({ "handle": handle, "path": path }))
+                .call(stream, "read_at", json!({ "handle": handle, "path": path }))
                 .await?;
             let bytes = base64::engine::general_purpose::STANDARD
                 .decode(answer.bytes)
@@ -347,7 +360,7 @@ impl ExternalSnapshots {
 #[async_trait]
 impl SnapshotProvider for ExternalSnapshots {
     fn id(&self) -> &str {
-        &self.instance.id
+        self.instance.id()
     }
 
     fn contents(&self) -> bool {
@@ -382,15 +395,12 @@ impl SnapshotProvider for ExternalSnapshots {
         if let Some(t) = request.turn {
             input["turn"] = json!(t);
         }
-        if let Some(e) = request.effort {
-            input["effort"] = json!(effort_uri(e));
-        }
         if let Some(b) = request.budget {
             input["budget_ms"] = json!(b.as_millis() as u64);
         }
-        let marked: MarkAnswer = self.call("mark", input).await?;
+        let marked: MarkAnswer = self.call(request.stream, "mark", input).await?;
         tracing::debug!(
-            provider = %self.instance.name,
+            provider = %self.instance.name(),
             handle = %marked.handle,
             files = marked.file_count,
             unchanged = marked.unchanged,
@@ -408,6 +418,7 @@ impl SnapshotProvider for ExternalSnapshots {
         } else {
             let changed: ChangedAnswer = self
                 .call(
+                    request.stream,
                     "changed",
                     json!({
                         "stream": request.stream.to_string(),
@@ -432,7 +443,8 @@ impl SnapshotProvider for ExternalSnapshots {
             )
             .map_err(|e| self.failed(e))?
         };
-        self.pull(&marked.handle, planned.pull).await?;
+        self.pull(request.stream, &marked.handle, planned.pull)
+            .await?;
         let outcome = store
             .record_take(TakeRecord {
                 stream_id: request.stream,
@@ -440,15 +452,16 @@ impl SnapshotProvider for ExternalSnapshots {
                 trigger: request.trigger,
                 thread_id: request.thread,
                 turn_id: request.turn,
-                effort_id: request.effort,
                 branch: marked.branch,
                 revision,
                 elapsed_ms: started.elapsed().as_millis() as u64,
                 budget_ms: request.budget.map(|b| b.as_millis() as u64),
-                source: oxplow_domain::uri::build::provider_source(&self.instance.name),
-                provider: Some(self.instance.id.clone()),
+                source: oxplow_domain::uri::build::provider_source(self.instance.name()),
+                provider: Some(self.instance.id().to_string()),
                 contents: self.contents,
                 handle: Some(marked.handle),
+                changed_at: Default::default(),
+                git_oids: Default::default(),
             })
             .await
             .map_err(storage)?;

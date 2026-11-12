@@ -2,8 +2,8 @@ use super::*;
 
 /// Load component `id` as its frame would, then ask what the fixture asks
 /// (`when: { component, items?: [title], invokes?: [{ command, input? }]
-/// }`): `items` are work items filed first
-/// (`oxplow:oxplow/work_item?id=tsk1&provider=oxplow`, …); each invoke's
+/// }`): `items` are tasks filed first
+/// (`oxplow:oxplow/task?id=tsk1&provider=oxtask`, …); each invoke's
 /// outcome — what the command answers when the component calls it —
 /// against `expect: { invokes?: [{ ok?, refused? }] }`. The data a
 /// component draws is its page's loaders: a page example tests those. The
@@ -40,10 +40,10 @@ pub(super) async fn component_example(
     {
         let made = host
             .svc
-            .work_items_client()
+            .tasks_client()
             .create(
                 &Actor::Human,
-                oxplow_app::work_items::NewItem {
+                oxplow_app::tasks::NewItem {
                     title: title.as_str().unwrap_or_default().into(),
                     ..Default::default()
                 },
@@ -261,6 +261,73 @@ pub(super) async fn query_example(
     let got = result_got(&result, &want);
     if let Some((path, want, got)) = compare(&want, &got) {
         report.errors.push(error(shown, ex.line("expect"), "fixture.compare", format!("`{query}` returned {got} at `{path}`, the example expects {want}")).fix("the query, or the example's `expect` (`{ rows: n | $any | [..] | { contains: [..] }, columns? }`)").mismatch(path, want, got));
+        return;
+    }
+    query_steps(host, ext, ex, &mut binds, report).await;
+}
+
+/// A query example's `steps:`, in order: a `given` changes the state, a
+/// `when` runs what it names (the query again with other params, or any
+/// page, part or panel) and checks its `expect`. A query has no actions, so
+/// a step is one of those two.
+async fn query_steps(
+    host: &Host,
+    ext: &Extension,
+    ex: &Example<'_>,
+    binds: &mut Binds,
+    report: &mut TestReport,
+) {
+    let shown = ex.shown;
+    let steps = match &ex.steps {
+        None => return,
+        Some(Value::Array(steps)) => steps,
+        Some(_) => {
+            report.errors.push(
+                error(
+                    shown,
+                    ex.line("steps"),
+                    "fixture.step",
+                    "`steps` isn't a list",
+                )
+                .fix("`steps: [{ given: [..] } | { when, expect }]`"),
+            );
+            return;
+        }
+    };
+    for (index, step) in steps.iter().enumerate() {
+        let label = format!("steps[{index}]");
+        if let Some(given) = step.get("given") {
+            if !run_steps(
+                host,
+                ext,
+                shown,
+                &format!("{label}.given"),
+                given,
+                binds,
+                report,
+            )
+            .await
+            {
+                return;
+            }
+        }
+        if let Some(when) = step.get("when") {
+            let expect = step.get("expect").cloned().unwrap_or(Value::Null);
+            if !step_run(host, ext, ex, (when, &expect), binds, &label, report).await {
+                return;
+            }
+        } else if step.get("given").is_none() {
+            report.errors.push(
+                error(
+                    shown,
+                    ex.line("steps"),
+                    "fixture.step",
+                    format!("{label}: a query example's step is `{{ given }}` or `{{ when, expect }}`"),
+                )
+                .fix("`{ given: [..] }`, or `{ when: { query | page | part | panel, params? }, expect }`"),
+            );
+            return;
+        }
     }
 }
 
@@ -868,6 +935,10 @@ impl PageAt<'_> {
                     row: what.get("row").map(cells),
                     input,
                     drop: None,
+                    option: what
+                        .get("option")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
                     on_behalf_of: Actor::Human,
                     confirmed,
                 },

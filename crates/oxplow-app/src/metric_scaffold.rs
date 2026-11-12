@@ -145,7 +145,7 @@ pub struct ScaffoldFile {
 
 /// Every file of the extension `name`, relative to the project root:
 /// `extension.yaml`, the collector script, the page and the fixture.
-/// `origin` is the thread or effort ref that asked for it.
+/// `origin` is the thread or request ref that asked for it.
 pub fn extension_files(
     name: &str,
     origin: Option<&str>,

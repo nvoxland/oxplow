@@ -302,7 +302,7 @@ fn files(project: &Path, folders: &[Folder], call: &str, args: Value) -> Result<
         }
         "files.list" => list(project, &rel, args.glob.as_deref()),
         "files.write" => {
-            let body = args.body.ok_or_else(|| format!("{takes}"))?;
+            let body = args.body.ok_or_else(|| takes.to_string())?;
             if let Some(parent) = full.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| format!("`{rel}`: {e}"))?;
             }

@@ -226,7 +226,7 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
         std::fs::write(
             dir.path().join(".oxplow/personal.yaml"),
-            "activeProviders: { effort_policy: none }\n",
+            "activeProviders: { task_tracker: none }\n",
         )
         .unwrap();
         let config = oxplow_config::load_project_config(dir.path()).unwrap();
@@ -235,7 +235,7 @@ mod tests {
         assert_eq!(personal.origin, ConfigOrigin::Personal);
         assert_eq!(
             personal.value,
-            serde_json::json!({ "effort_policy": "none" })
+            serde_json::json!({ "task_tracker": "none" })
         );
         assert_eq!(find(&all, "activeProviders").origin, ConfigOrigin::Default);
     }

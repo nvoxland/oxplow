@@ -9,12 +9,12 @@ loaders:
     sql: |
       SELECT t.uri, t.title, t.closed_at,
              coalesce((SELECT group_concat(n || ' ' || label, ' · ')
-                       FROM (SELECT count(*) AS n,
-                                    CASE w.state WHEN 'todo' THEN 'To Do' WHEN 'in_progress' THEN 'In Progress'
-                                                 WHEN 'blocked' THEN 'Blocked' WHEN 'done' THEN 'Done' ELSE 'Canceled' END AS label,
+                       -- By stage, as the list names it; open buckets first.
+                       FROM (SELECT count(*) AS n, coalesce(w.stage_title, w.stage) AS label,
                                     CASE w.state WHEN 'todo' THEN 0 WHEN 'in_progress' THEN 1 WHEN 'blocked' THEN 2
-                                                 WHEN 'done' THEN 3 ELSE 4 END AS rank
-                             FROM v_work_item w WHERE w.thread_id = t.id GROUP BY w.state ORDER BY rank)), '') AS work,
+                                                 WHEN 'backlog' THEN 3 WHEN 'done' THEN 4 ELSE 5 END AS rank
+                             FROM v_task w WHERE w.uri IN (SELECT rt.task FROM v_request_task rt WHERE rt.thread_id = t.id)
+                             GROUP BY w.stage ORDER BY rank, label)), '') AS work,
              uri_param(t.uri, 'id') AS thread
       FROM v_thread t
       WHERE t.stream_id = :stream_id AND t.closed_at IS NOT NULL AND t.archived_at IS NULL
@@ -30,7 +30,7 @@ view:
     format: relative
     width: 120
   - key: work
-    label: Work
+    label: Tasks
   empty: No closed threads. Threads you close from the rail's menu show up here, with the work they finished.
   actions:
   - id: reopen

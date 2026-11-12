@@ -70,15 +70,14 @@ where
     .is_some()
 }
 
-use oxplow_tasks::work_item_ref;
+use oxplow_oxtask::task_ref;
 use std::path::Path;
 use std::sync::Arc;
 
-use oxplow_db::EffortStore as _;
-use oxplow_domain::{EffortId, ThreadId};
-use oxplow_tasks::TaskId;
-use oxplow_tasks::TaskStore as _;
-use oxplow_tasks::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
+use oxplow_domain::ThreadId;
+use oxplow_oxtask::OxtaskId;
+use oxplow_oxtask::OxtaskStore as _;
+use oxplow_oxtask::{Oxtask, OxtaskActorKind, OxtaskAuthor, OxtaskPriority, OxtaskStatus};
 
 /// A git repo with one empty commit on `main`, whatever the machine's
 /// `init.defaultBranch` (stream setup refuses non-git dirs).
@@ -210,14 +209,15 @@ pub async fn load_errors(svc: &Arc<crate::Services>, name: &str) -> String {
     format!("{live}\n{held}")
 }
 
-pub struct EffortFixture {
+/// Services over a fresh repo with a primary stream, its first thread and
+/// that thread's agent session: what most tests want.
+pub struct ThreadFixture {
     pub svc: Arc<crate::Services>,
     /// Keep alive: the project directory.
     pub _dir: tempfile::TempDir,
     pub thread: ThreadId,
     /// The thread's agent session (the project's default agent).
     pub session: oxplow_domain::AgentSessionId,
-    pub effort: EffortId,
 }
 
 /// An agent session (a Claude terminal) on `thread`, as setup — written to
@@ -237,21 +237,32 @@ pub async fn open_session(
 }
 
 /// In-memory services over a fresh repo with a primary stream, its first
-/// thread and an open effort linked to nothing — an effort needs no work
-/// item (`.context/work-tracking.md`), so a test that isn't about one
-/// doesn't make one.
-pub async fn services_with_effort() -> EffortFixture {
+/// thread and its session.
+pub async fn services_with_thread() -> ThreadFixture {
     let dir = tempfile::tempdir().unwrap();
     init_git_repo(dir.path());
-    services_with_effort_in(dir).await
+    services_with_thread_in(dir).await
 }
 
-/// [`services_with_effort`] while developing oxplow: oxplow's own
+/// [`services_with_thread`] over the project `dir`, already set up.
+pub async fn services_with_thread_in(dir: tempfile::TempDir) -> ThreadFixture {
+    let svc = crate::Services::in_memory(dir.path()).await.unwrap();
+    with_thread(dir, svc).await
+}
+
+/// [`services_with_thread`] while developing oxplow: oxplow's own
 /// extensions run from their sources (`enableBundledExtensions: false`),
 /// each a copy of the repo's folder in the project's
 /// `.oxplow/extensions/`. Boot deploys nothing, so foundation is deployed
 /// once booted, as `oxplow-dev extension deploy` does for a checkout.
-pub async fn services_developing_oxplow() -> EffortFixture {
+pub async fn services_developing_oxplow() -> ThreadFixture {
+    let (dir, svc) = developing_oxplow().await;
+    with_thread(dir, svc).await
+}
+
+/// A project dir and booted services with oxplow's own extensions running
+/// from their sources.
+async fn developing_oxplow() -> (tempfile::TempDir, Arc<crate::Services>) {
     let dir = tempfile::tempdir().unwrap();
     init_git_repo(dir.path());
     for b in crate::bundled_extensions::BUNDLED {
@@ -271,158 +282,128 @@ pub async fn services_developing_oxplow() -> EffortFixture {
     crate::extension::extension_deploy::deploy(&svc, "oxplow-foundation", true)
         .await
         .expect("foundation deploys from its source");
-    with_effort(dir, svc).await
+    (dir, svc)
 }
 
-/// [`services_with_effort`] over the project `dir`, already set up.
-pub async fn services_with_effort_in(dir: tempfile::TempDir) -> EffortFixture {
-    let svc = crate::Services::in_memory(dir.path()).await.unwrap();
-    with_effort(dir, svc).await
-}
-
-/// A stream, a thread's session and an open effort over booted `svc`.
-async fn with_effort(dir: tempfile::TempDir, svc: Arc<crate::Services>) -> EffortFixture {
+/// A stream and a thread's session over booted `svc`.
+async fn with_thread(dir: tempfile::TempDir, svc: Arc<crate::Services>) -> ThreadFixture {
     svc.streams.ensure_primary().await.unwrap();
-    // Activation logged the capability choices; the policy has heard them
-    // (they close open efforts) before the fixture opens one.
-    svc.event_pump
-        .settle(
-            &[
-                crate::effort_policy::NAME,
-                crate::knowledge::KnowledgeSwitch::NAME,
-            ],
-            std::time::Duration::from_secs(5),
-        )
-        .await;
     let thread = ThreadId::new(1);
     let session = open_session(&svc, thread).await;
-    let opened = svc
-        .commands
-        .run(
-            &oxplow_domain::Actor::Human,
-            crate::commands::effort::OPEN,
-            serde_json::json!({ "thread": thread.to_string() }),
-            false,
-        )
-        .await
-        .unwrap();
-    let effort = opened.result["effort"]
-        .as_str()
-        .and_then(|e| e.parse::<oxplow_domain::EffortId>().ok())
-        .expect("effort.open names the effort");
-    EffortFixture {
+    ThreadFixture {
         svc,
         _dir: dir,
         thread,
         session,
-        effort,
     }
 }
 
-/// [`EffortFixture`] whose effort is linked to an in-progress oxplow task
-/// on the thread: for a test about tasks.
-pub struct TaskEffortFixture {
-    pub fx: EffortFixture,
-    pub task: TaskId,
+/// [`ThreadFixture`] with an in-progress oxplow task on the thread: for a
+/// test about tasks.
+pub struct TaskFixture {
+    pub fx: ThreadFixture,
+    pub task: OxtaskId,
 }
 
-impl std::ops::Deref for TaskEffortFixture {
-    type Target = EffortFixture;
+impl std::ops::Deref for TaskFixture {
+    type Target = ThreadFixture;
 
-    fn deref(&self) -> &EffortFixture {
+    fn deref(&self) -> &ThreadFixture {
         &self.fx
     }
 }
 
 /// In-memory services over a fresh repo with a primary stream, its first
-/// thread, an in-progress task on it and an open effort linked to it.
-pub async fn services_with_task_effort() -> TaskEffortFixture {
+/// thread and an in-progress task assigned to it.
+pub async fn services_with_task() -> TaskFixture {
     let dir = tempfile::tempdir().unwrap();
     init_git_repo(dir.path());
     let svc = crate::Services::in_memory(dir.path()).await.unwrap();
-    svc.streams.ensure_primary().await.unwrap();
-    // Activation logged the capability choices; the policy has heard them
-    // (they close open efforts) before the fixture opens one.
-    svc.event_pump
-        .settle(
-            &[
-                crate::effort_policy::NAME,
-                crate::knowledge::KnowledgeSwitch::NAME,
-            ],
-            std::time::Duration::from_secs(5),
-        )
-        .await;
-    let thread = ThreadId::new(1);
-    let session = open_session(&svc, thread).await;
+    let fx = with_thread(dir, svc).await;
+    let task = in_progress_task(&fx.svc, fx.thread).await;
+    TaskFixture { fx, task }
+}
+
+/// An in-progress oxplow task assigned to `thread`.
+async fn in_progress_task(svc: &crate::Services, thread: ThreadId) -> OxtaskId {
     let now = oxplow_domain::Timestamp::now();
     let task = svc
         .task_store
-        .insert(&Task {
-            id: TaskId::placeholder(),
-            thread_id: Some(thread),
+        .insert(&Oxtask {
+            id: OxtaskId::placeholder(),
             parent_id: None,
             title: "t".into(),
             description: String::new(),
-            status: TaskStatus::InProgress,
-            priority: TaskPriority::Medium,
-            sort_index: 0,
-            created_by: TaskActorKind::User,
+            status: OxtaskStatus::InProgress,
+            priority: OxtaskPriority::Medium,
+            created_by: OxtaskActorKind::User,
             created_at: now,
             updated_at: now,
             completed_at: None,
             deleted_at: None,
             note_count: 0,
-            author: Some(TaskAuthor::User),
+            author: Some(OxtaskAuthor::User),
         })
         .await
         .unwrap();
-    restate_task(&svc, task).await;
-    let effort = svc
-        .effort_store
-        .start(&work_item_ref(task), &thread, None)
-        .await
-        .unwrap()
-        .id;
-    TaskEffortFixture {
-        fx: EffortFixture {
-            svc,
-            _dir: dir,
-            thread,
-            session,
-            effort,
-        },
-        task,
-    }
+    restate_task(svc, task).await;
+    assign_to(svc, &task_ref(task), Some(thread)).await;
+    task
 }
 
-/// A task filed as a person through `oxplow.work_item.create` with
-/// `input` (on the backlog unless it names a `thread`): its id.
-pub async fn file_item(svc: &crate::Services, input: serde_json::Value) -> TaskId {
+/// A task filed as a person through `oxplow.task.create` with
+/// `input` (assigned to nobody unless it names an `assignee`): its id.
+pub async fn file_item(svc: &crate::Services, input: serde_json::Value) -> OxtaskId {
     let out = svc
         .commands
         .run(
             &oxplow_domain::Actor::Human,
-            crate::commands::work_item::CREATE,
+            crate::commands::task::CREATE,
             input,
             false,
         )
         .await
         .unwrap();
-    oxplow_tasks::task_of_work_item_ref(out.result["uri"].as_str().unwrap()).unwrap()
+    oxplow_oxtask::oxtask_of_task_ref(out.result["uri"].as_str().unwrap()).unwrap()
 }
 
-/// Restate task `task` in the work-item interface, as its list does after
-/// a write: its `work_item.recorded`, logged and projected. For a test
+/// Restate task `task` in the task interface, as its list does after
+/// a write: its `task.recorded`, logged and projected. For a test
 /// that writes the task store directly rather than through the
-/// `oxplow.work_item.*` commands.
-pub async fn restate_task(svc: &crate::Services, task: TaskId) {
+/// `oxplow.task.*` commands.
+pub async fn restate_task(svc: &crate::Services, task: OxtaskId) {
     let record = svc
         .db
-        .read(move |tx| oxplow_tasks::record::record_tx(tx, task))
+        .read(move |tx| oxplow_oxtask::record::record_tx(tx, task))
         .await
         .unwrap();
     svc.event_log_store
-        .append(oxplow_tasks::provider::recorded(record))
+        .append(oxplow_oxtask::provider::recorded(record))
+        .await
+        .unwrap();
+    svc.event_pump.deliver_projections().await.unwrap();
+}
+
+/// Assign `item` to `thread` (`None`: nobody) in the task interface,
+/// as `oxplow.task.assign` does: its `task.assigned`, logged and
+/// projected. For a fixture that sets up who works on what without a
+/// run to count.
+pub async fn assign_to(svc: &crate::Services, item: &str, thread: Option<ThreadId>) {
+    use oxplow_domain::events::schema::{TaskAssigned, TaskAssignedV1};
+    svc.event_log_store
+        .append(
+            oxplow_domain::Envelope::typed::<TaskAssigned>(
+                "human",
+                &TaskAssignedV1 {
+                    task: item.to_string(),
+                    from: None,
+                    to: thread.map(oxplow_domain::uri::build::thread_uri),
+                    before: None,
+                    after: None,
+                },
+            )
+            .with_subject([item]),
+        )
         .await
         .unwrap();
     svc.event_pump.deliver_projections().await.unwrap();
@@ -467,6 +448,15 @@ pub fn claude_tool(
     let claude =
         oxplow_harnesses::built_in("oxplow:claude-code", "claude", "Claude").expect("the built-in");
     futures::executor::block_on(claude.tool_use(body))
+}
+
+/// A hook body's meaning as the hook route reads it
+/// (`AgentHarness::reading` of the bearer's harness), for a test posting
+/// Claude Code's bodies.
+pub fn claude_reading(body: &serde_json::Value) -> oxplow_domain::hook::HookReading {
+    let claude =
+        oxplow_harnesses::built_in("oxplow:claude-code", "claude", "Claude").expect("the built-in");
+    claude.reading(body)
 }
 
 /// Keep the section of reference doc `doc` (repo-relative) between
@@ -784,7 +774,6 @@ pub async fn run_as_page_in(
         ("oxplow/thread-settings-prompt", "thread-settings", "prompt"),
         ("oxplow/changes-header", "diff-view", "header"),
         ("oxplow/changes-description", "diff-view", "description"),
-        ("oxplow/changes-verdict", "diff-view", "verdict"),
         ("oxplow/changes-concurrent", "diff-view", "concurrent"),
         ("oxplow/changes-files", "diff-view", "files"),
         ("oxplow/changes-extensions", "diff-view", "extensions"),

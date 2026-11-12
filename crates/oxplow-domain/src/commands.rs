@@ -56,7 +56,7 @@ pub enum Lifecycle {
 /// row and `command.executed`), or outside it, against a system the bus
 /// doesn't own — a VCS, a provider process, a collector's script — and is
 /// audited after it returns (`External`). A `Dispatch` command decides
-/// per input (the `work_item.*` verbs: oxplow's own items in the
+/// per input (the `task.*` verbs: oxplow's own items in the
 /// transaction, another provider's through its process) and then runs
 /// exactly as one or the other. A test lists the `External` and the
 /// `Dispatch` commands, so each one is a reviewed choice.
@@ -129,7 +129,7 @@ impl Access {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, JsonSchema)]
 pub struct CommandSpec {
     /// The command id: `<namespace>.<area>.<verb>`, snake_case —
-    /// `oxplow.work_item.transition`, `acme_pr.issue.close`. The namespace
+    /// `oxplow.task.transition`, `acme_pr.issue.close`. The namespace
     /// is its owner's (`oxplow` for core and oxplow's own extensions, an
     /// extension's declared `namespace:` otherwise), so two extensions'
     /// areas never collide. (A person reads the command's label, not its
@@ -164,7 +164,7 @@ pub struct CommandSpec {
     pub atomicity: Atomicity,
     pub access: Access,
     /// The scopes its handler calls (`sql.read`) and the capabilities, or
-    /// their features (`work_items.comments`), it needs active; unmet, it
+    /// their features (`task_tracker.comments`), it needs active; unmet, it
     /// isn't offered and doesn't run (`.context/commands.md`).
     pub needs: Vec<String>,
     /// How a person meets it — label, group, where it's offered and how
@@ -243,7 +243,7 @@ pub struct CommandUi {
     /// More words search matches it by.
     #[serde(default)]
     pub keywords: Vec<String>,
-    /// The ref kind it acts on (`work_item`, `effort`): offered on that
+    /// The ref kind it acts on (`task`, `request`): offered on that
     /// ref's page and rows. `None`: it needs no ref, and search offers it.
     #[serde(default)]
     pub about: Option<String>,
@@ -485,7 +485,7 @@ impl CommandSpec {
         }
         Err(DomainError::Invalid(format!(
             "command id `{id}` must be `<namespace>.<area>.<verb>` in snake_case \
-             (e.g. `oxplow.work_item.transition`)"
+             (e.g. `oxplow.task.transition`)"
         )))
     }
 }
@@ -1194,7 +1194,7 @@ mod tests {
     fn a_command_ui_is_checked_where_it_is_declared() {
         for good in [
             json!({ "label": "New", "input": { "thread": "{{thread}}", "n": 1 } }),
-            json!({ "label": "Finish", "about": "oxplow/work_item", "input": { "uri": "{{uri}}", "id": "{{uri.id}}" } }),
+            json!({ "label": "Finish", "about": "oxplow/task", "input": { "uri": "{{uri}}", "id": "{{uri.id}}" } }),
             json!({ "label": "New Task…", "form": "oxplow:oxplow/page?page=new-task" }),
             json!({ "label": "New Thread…", "form": "new-thread" }),
             json!({ "label": "New", "open_after": "oxplow:oxplow/dashboard?id={{result.id}}" }),
@@ -1234,7 +1234,7 @@ mod tests {
                 "(new-thread)",
             ),
             (
-                json!({ "label": "X", "about": "Work Item" }),
+                json!({ "label": "X", "about": "Task" }),
                 "/ui/about",
                 "isn't a resource",
             ),
@@ -1289,8 +1289,10 @@ mod tests {
         );
         let whole = ui(json!({ "label": "New", "open_after": "{{result.page}}" }));
         assert_eq!(
-            whole.open_after_for(&json!({ "page": "oxplow:oxplow/wiki?slug=lib" })),
-            Ok(Some("oxplow:oxplow/wiki?slug=lib".to_string()))
+            whole.open_after_for(&json!({ "page": "oxplow:oxplow/knowledge?id=lib&store=oxwiki" })),
+            Ok(Some(
+                "oxplow:oxplow/knowledge?id=lib&store=oxwiki".to_string()
+            ))
         );
     }
 
@@ -1327,7 +1329,7 @@ mod tests {
             #[serde(default)]
             body: Option<String>,
             #[serde(default)]
-            state: Option<crate::work_items::CanonicalState>,
+            state: Option<crate::tasks::Bucket>,
         }
         let schema = serde_json::to_value(schemars::schema_for!(Create)).unwrap();
         let v = InputValidator::compile(&schema).unwrap();
@@ -1355,7 +1357,7 @@ mod tests {
         let state = message(json!({ "title": "t", "state": "ready" }));
         assert!(
             state.contains(
-                r#"Expected one of: "todo", "in_progress", "blocked", "done", "canceled""#
+                r#"Expected one of: "backlog", "todo", "in_progress", "blocked", "done", "canceled""#
             ),
             "{state}"
         );
@@ -1553,18 +1555,18 @@ mod tests {
 
     #[test]
     fn a_command_id_is_namespace_area_verb() {
-        assert!(CommandSpec::validate_id("oxplow.work_item.transition").is_ok());
+        assert!(CommandSpec::validate_id("oxplow.task.transition").is_ok());
         assert!(CommandSpec::validate_id("acme_pr.issue.close").is_ok());
         for bad in [
-            "work_item.transition",
+            "task.transition",
             "transition",
-            "oxplow.work_item.transition.now",
-            "Oxplow.work_item.transition",
+            "oxplow.task.transition.now",
+            "Oxplow.task.transition",
             "oxplow..transition",
         ] {
             assert!(CommandSpec::validate_id(bad).is_err(), "{bad}");
         }
-        assert_eq!(namespace_of("oxplow.work_item.create"), "oxplow");
+        assert_eq!(namespace_of("oxplow.task.create"), "oxplow");
     }
 
     #[test]

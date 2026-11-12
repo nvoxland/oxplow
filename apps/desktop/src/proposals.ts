@@ -166,7 +166,7 @@ export function sourceOf(p: Proposal): Source {
   return {
     kind: "agent",
     label: p.threadTitle ?? p.actorId ?? "An agent",
-    ...(thread ? { uri: pageTabRef("thread-work", { thread }).id } : {}),
+    ...(thread ? { uri: pageTabRef("thread-tasks", { thread }).id } : {}),
   };
 }
 

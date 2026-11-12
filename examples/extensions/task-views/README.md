@@ -1,33 +1,34 @@
 # Task views: your own Board, list and editor
 
-Three views, each a part (`parts/`), that stand in for oxplow's own, with no work-items provider of
-their own. They read `v_work_item` and change items only through the
-work-item commands, so they work with whichever list is active.
+Three views, each a part (`parts/`), that stand in for oxplow's own, with no task tracker provider of
+their own. They read `v_task` and change items only through the
+task commands, so they work with whichever list is active.
 
 | Replaces | Part | What it is |
 |---|---|---|
-| `work_item.board` | `swimlanes` | A `viz: custom` component: a column per state, cards you drag |
-| `work_item.list` | `compact-list` | A table with title (a page link), state and updated; row actions **Done** and **Edit…** |
-| `work_item.detail` | `edit-item` | A `viz: form` over `oxplow.work_item.update`: title and body, `uri` fixed |
+| `task.board` | `swimlanes` | A `viz: custom` component: a column per stage of the active list, cards you drag |
+| `task.list` | `compact-list` | A table with title (a page link), state and updated; row actions **Done** and **Edit…** |
+| `task.detail` | `edit-item` | A `viz: form` over `oxplow.task.update`: title and body, `uri` fixed |
 
 ```yaml
 ui:
   mounts:
-    - { page: swimlanes, at: work_item.board, version: 1 }
-    - { page: compact-list, at: work_item.list, version: 1 }
-    - { page: edit-item, at: work_item.detail, version: 1 }
+    - { page: swimlanes, at: task.board, version: 2 }
+    - { page: compact-list, at: task.list, version: 2 }
+    - { page: edit-item, at: task.detail, version: 1 }
 ```
 
 ## What the swimlanes do
 
-- One column per canonical state: todo, in progress, blocked, done,
-  canceled. Drag a card to another column and it runs
-  `oxplow.work_item.transition`.
-- Drag a card within its column and it runs `oxplow.work_item.reorder`,
-  but only when the active provider's `features` include `ordering`
-  (the page's `features` loader). Without it the drop does nothing.
+- One column per stage of the active task tracker, in the list's order and
+  titled as the list names it (the `stages` loader reads them from
+  `v_capability_provider.stages`). A card sits in the column of its
+  `stage`. Drag a card to another column and it runs
+  `oxplow.task.transition` with that column's stage id.
+- Drag a card within its column and it runs `oxplow.task.reorder`:
+  its place in its assignee's queue, core's for every task tracker.
 - Click a title to rename the item: an inline form (Enter saves, Escape
-  puts it back) that runs `oxplow.work_item.update`. A refusal naming a
+  puts it back) that runs `oxplow.task.update`. A refusal naming a
   field shows under the input.
 - Click a card to open the item; Cmd/Ctrl-click opens it in a new tab.
 - If the board's commands are refused (the extension isn't deployed or is
@@ -37,9 +38,9 @@ ui:
 ## What a view may and may not do
 
 May:
-- read any published dataset (`v_work_item`, `v_thread`, …) through its
+- read any published dataset (`v_task`, `v_thread`, …) through its
   parts' loaders;
-- change work items through the commands it declares in
+- change tasks through the commands it declares in
   `custom_components[].commands` (a table or form on a page uses `actions` /
   `form`, which run as you);
 - hold forms, drag and drop and its own filters, styled with the kit
@@ -52,7 +53,7 @@ May not:
 - run a command it didn't declare (`custom_components[].commands`) or one
   outside the extension's `permissions.commands`;
 - replace the page chrome around it (the scope picker, the rail, the
-  backlog drawer stay oxplow's), or the work list itself.
+  filters stay oxplow's), or the task tracker itself.
 
 ## Try it
 
@@ -60,7 +61,7 @@ May not:
 2. Settings → Integrations: choose **task-views** for the board, list and
    editor (it's the only candidate, so it is the default).
 3. Deploy it (`oxplow.extension.deploy { name: "task-views" }`, or Deploy on
-   Settings → Extensions) and approve the work-item commands it asks for,
+   Settings → Extensions) and approve the task commands it asks for,
    so cards can change items.
 
 `oxplow extension check task-views` lints it and `oxplow extension test

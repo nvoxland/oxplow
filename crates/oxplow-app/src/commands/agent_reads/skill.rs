@@ -38,7 +38,7 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                 let SkillInput { name, reference } = parse(input)?;
                 let svc = services.get()?;
                 // What's offered now: core's and the active implementations'.
-                let text = crate::capabilities::agent_text(&svc);
+                let text = crate::capabilities::agent_text(&svc).await;
                 let found = match &reference {
                     None => text.skill_body(&name),
                     Some(reference) => text.skill_reference(&name, reference),
