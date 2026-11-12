@@ -547,6 +547,21 @@ migrations without `storage:`, is a load error.
   script needs `commands:oxplow.extension_store.write` in `permissions:`. A
   collector cannot write: it only reads.
 
+**The boundary holds in SQLite itself.** Every connection of the store's pool
+sets `SQLITE_LIMIT_ATTACHED` to 0, so nothing can attach another file (the
+main database included) to a pooled connection. The extension's own SQL (a
+migration, a write batch) also runs under an authorizer that refuses `ATTACH`,
+`DETACH` and transaction control (`BEGIN`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`,
+`RELEASE`): the host owns the transaction, so "one transaction" holds. The
+host's own statements (the migration record, the commit) run without it.
+
+**Declared folders (`files:`).** A folder is refused at load, and every path
+is refused at run time (`check_path`), when any part is `.git` (compared
+without case, at any depth), or when it is in `.oxplow` (also without case)
+except under `.oxplow/oxwiki`. `.oxplow` holds oxplow's own data (other
+extensions' store files in `extensions-data`, the extensions' sources); oxwiki's
+markdown files are its store, so exactly `.oxplow/oxwiki` stays open.
+
 The file is removed with the extension's data (`extension_deploy::remove`),
 never on a disable.
 

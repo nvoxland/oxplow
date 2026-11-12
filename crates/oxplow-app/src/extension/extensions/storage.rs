@@ -61,6 +61,26 @@ pub struct ExtensionStorage {
     pub folders: Vec<Folder>,
 }
 
+/// Why no extension may declare (or reach) `path`: `.git` at any depth, in
+/// any case (macOS is case-insensitive), is git's; `.oxplow` is oxplow's own
+/// data (other extensions' store files in `extensions-data`, the extensions'
+/// sources in `extensions`, the database ...). The one exception is
+/// `.oxplow/oxwiki`: oxwiki's markdown files are its store, so the extension
+/// that holds them needs write access there. `path` is already a valid path.
+pub(crate) fn reserved(path: &str) -> Option<&'static str> {
+    let parts: Vec<&str> = path.trim_end_matches('/').split('/').collect();
+    if parts.iter().any(|p| p.eq_ignore_ascii_case(".git")) {
+        return Some("`.git` is git's");
+    }
+    if parts[0].eq_ignore_ascii_case(".oxplow") {
+        let oxwiki = parts.len() >= 2 && parts[1] == "oxwiki";
+        if !oxwiki {
+            return Some("`.oxplow` is oxplow's own data (only `.oxplow/oxwiki` is open)");
+        }
+    }
+    None
+}
+
 /// Read and check the two keys. `files` is the extension's own folder, for
 /// its migrations.
 pub(crate) fn load(
@@ -78,11 +98,10 @@ pub(crate) fn load(
     let line = key_line(manifest, "files");
     for folder in folders {
         let path = folder.path.trim_end_matches('/');
-        let first = path.split('/').next().unwrap_or_default();
         let problem = if !oxplow_domain::service::valid_path(path) {
             Some("a folder is relative to the project root, with no `..`, `.` or empty parts")
-        } else if first == ".git" {
-            Some("`.git` is git's")
+        } else if let Some(why) = reserved(path) {
+            Some(why)
         } else if out.folders.iter().any(|f| f.path == path) {
             Some("it is declared twice")
         } else {
@@ -143,6 +162,81 @@ mod tests {
         )];
         files.extend(extra.iter().map(|(p, t)| (p.to_string(), t.to_string())));
         Tree::new(files).load("acme", ".oxplow/extensions/acme")
+    }
+
+    #[test]
+    fn a_folder_in_git_or_oxplows_own_data_is_refused() {
+        for path in [
+            ".git",
+            ".GIT",
+            ".Git/hooks",
+            "sub/.git",
+            "a/.GiT/b",
+            ".oxplow",
+            ".oxplow/extensions-data",
+            ".oxplow/extensions",
+            ".oxplow/extensions/x",
+            ".OXPLOW/extensions-data",
+            ".oxplow/oxwiki/../extensions",
+            ".oxplow/oxwikix",
+            ".oxplow/oxwiki2/a",
+        ] {
+            let ext = load_tree(
+                &format!("files:\n  - {{ path: '{path}', access: write }}\n"),
+                &[],
+            );
+            assert!(ext.storage.folders.is_empty(), "{path} was kept");
+        }
+        for path in [
+            ".oxplow/oxwiki",
+            ".oxplow/oxwiki/pages",
+            "gitless",
+            "a/.github",
+        ] {
+            let ext = load_tree(
+                &format!("files:\n  - {{ path: '{path}', access: write }}\n"),
+                &[],
+            );
+            assert_eq!(ext.storage.folders.len(), 1, "{path} was refused");
+        }
+    }
+
+    #[test]
+    fn the_run_time_path_check_refuses_the_same_places() {
+        let f = [Folder {
+            path: ".oxplow/oxwiki".into(),
+            access: FolderAccess::Write,
+        }];
+        // Even a folder that slipped through never opens these.
+        let all = [
+            Folder {
+                path: ".GIT".into(),
+                access: FolderAccess::Write,
+            },
+            Folder {
+                path: "sub".into(),
+                access: FolderAccess::Write,
+            },
+            Folder {
+                path: ".oxplow".into(),
+                access: FolderAccess::Write,
+            },
+        ];
+        for path in [
+            ".GIT/config",
+            "sub/.git/config",
+            "sub/.Git",
+            ".oxplow/extensions-data/x.sqlite",
+        ] {
+            assert!(
+                crate::extension::extension_services::check_path(&all, path, true).is_err(),
+                "{path}"
+            );
+        }
+        assert!(
+            crate::extension::extension_services::check_path(&f, ".oxplow/oxwiki/a.md", true)
+                .is_ok()
+        );
     }
 
     #[test]

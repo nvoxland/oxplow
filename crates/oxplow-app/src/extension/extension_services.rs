@@ -250,6 +250,9 @@ pub fn check_path(folders: &[Folder], path: &str, write: bool) -> Result<String,
     if !oxplow_domain::service::valid_path(trimmed) {
         return refuse("has `..`, `.` or an empty part, or is empty");
     }
+    if let Some(why) = crate::extension::extensions::storage::reserved(trimmed) {
+        return refuse(why);
+    }
     let Some(folder) = folders
         .iter()
         .find(|f| trimmed == f.path || trimmed.starts_with(&format!("{}/", f.path)))
