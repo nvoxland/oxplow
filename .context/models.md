@@ -30,9 +30,14 @@ the later one; a run names the rows it quarantined.
 
 Also built: children ("Children" below).
 
+Also built: the edge repair over models (`model_store::repair_edges_tx`,
+run in the publication when a model's edge code, declaration or the
+vocabulary changed: `models::repair_edges_if_needed_tx`, recorded as
+`model_repair:<model>`); a stated row keeps its refs (`refs` column) so
+the repair restates them as written.
+
 Not yet: the provider `read` adapter, the owner's
-`oxplow.model.write`, bare-link patterns, the boot repair over models, the
-tombstone sweep's schedule, and the shipped-extension plumbing (F7).
+`oxplow.model.write`, bare-link patterns, the tombstone sweep's schedule, and the shipped-extension plumbing (F7).
 This doc is the contract for the rest. The other pieces
 have their contracts in their own docs:
 

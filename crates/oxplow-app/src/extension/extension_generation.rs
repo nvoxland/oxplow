@@ -318,6 +318,9 @@ impl PreparedExtensionDatabase {
                 TxError::Storage(error) => TxError::Storage(error),
             })?;
             let vocabulary = self.vocabulary.replace_tx(tx, now)?;
+            // The models' edges, repaired when how they're projected (or
+            // which ids resolve) changed since their last repair.
+            crate::models::repair_edges_if_needed_tx(tx, &self.models, &vocabulary.resources)?;
             oxplow_db::contribution_store::reset_tx(tx, &self.contributions)?;
             oxplow_db::catalog_listing_store::reset_tx(tx, &self.listing)?;
             if let Some(capabilities) = &self.capabilities {

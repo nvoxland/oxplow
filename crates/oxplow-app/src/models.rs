@@ -205,6 +205,68 @@ impl ModelRegistry {
     }
 }
 
+/// The code that decides a model row's edges: the store and the shared
+/// projections. A model's edges are repaired when it changes.
+const EDGE_CODE: &[&str] = &[
+    include_str!("../../oxplow-db/src/model_store.rs"),
+    include_str!("../../oxplow-db/src/page_ref_projections.rs"),
+];
+
+/// Repair each model's edges (`model_store::repair_edges_tx`) whose last
+/// repair was made by other edge code, another declaration of it or
+/// another vocabulary (which ids resolve), recorded in `asset_state` as
+/// `model_repair:<model>`; a repair rewrites only what drifted.
+pub fn repair_edges_if_needed_tx(
+    conn: &rusqlite::Connection,
+    registry: &ModelRegistry,
+    kinds: &oxplow_domain::uri::resources::ResourceRegistry,
+) -> Result<(), oxplow_domain::DomainError> {
+    use rusqlite::OptionalExtension;
+    for (id, spec) in &registry.models {
+        let mut hasher = xxhash_rust::xxh3::Xxh3::new();
+        for source in EDGE_CODE {
+            hasher.update(source.as_bytes());
+        }
+        hasher.update(
+            serde_json::to_string(&spec.decl)
+                .unwrap_or_default()
+                .as_bytes(),
+        );
+        hasher.update(format!("{kinds:?}").as_bytes());
+        let key = format!("{:016x}", hasher.digest());
+        let asset = format!("model_repair:{id}");
+        let stored: Option<String> = conn
+            .query_row(
+                "SELECT built_from FROM asset_state WHERE asset = ?1",
+                [&asset],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map_err(oxplow_db::map_sql_err)?
+            .flatten();
+        if stored.as_deref() == Some(key.as_str()) {
+            continue;
+        }
+        let started = std::time::Instant::now();
+        oxplow_db::model_store::repair_edges_tx(conn, &spec.decl, kinds)?;
+        conn.execute(
+            "INSERT INTO asset_state (asset, computed_at, events_to, elapsed_ms, built_from)
+             VALUES (?1, ?2, (SELECT coalesce(max(seq), 0) FROM event_log), ?3, ?4)
+             ON CONFLICT (asset) DO UPDATE SET
+                computed_at = excluded.computed_at, events_to = excluded.events_to,
+                elapsed_ms = excluded.elapsed_ms, built_from = excluded.built_from",
+            rusqlite::params![
+                asset,
+                oxplow_domain::Timestamp::now().to_string(),
+                started.elapsed().as_millis() as i64,
+                key
+            ],
+        )
+        .map_err(oxplow_db::map_sql_err)?;
+    }
+    Ok(())
+}
+
 /// The JSON Schema of every model's change event.
 pub fn change_event_schema() -> Value {
     json!({
@@ -734,6 +796,73 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<Value>(&fields).unwrap(),
             json!({"shelf-score": {"score": 9}})
+        );
+    }
+
+    /// The edge repair runs for a model once per edge code, declaration and
+    /// vocabulary: recorded, it doesn't run again until one of them changes.
+    #[tokio::test]
+    async fn the_edge_repair_runs_once_per_key() {
+        let db = oxplow_db::Database::in_memory();
+        let count = |db: oxplow_db::Database| async move {
+            db.read(|tx| {
+                tx.query_row(
+                    "SELECT count(*) FROM asset_state WHERE asset = 'model_repair:shelf/book'",
+                    [],
+                    |r| r.get::<_, i64>(0),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap()
+        };
+        let computed = |db: oxplow_db::Database| async move {
+            db.read(|tx| {
+                tx.query_row(
+                    "SELECT built_from FROM asset_state WHERE asset = 'model_repair:shelf/book'",
+                    [],
+                    |r| r.get::<_, String>(0),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap()
+        };
+        let repair = |db: oxplow_db::Database, registry: ModelRegistry| async move {
+            db.transaction(move |tx| {
+                for spec in registry.models.values() {
+                    ensure_model_tx(tx, &spec.decl)?;
+                }
+                repair_edges_if_needed_tx(tx, &registry, &vocabulary().resources)
+            })
+            .await
+            .unwrap()
+        };
+        repair(db.clone(), registry()).await;
+        assert_eq!(count(db.clone()).await, 1);
+        let first = computed(db.clone()).await;
+        repair(db.clone(), registry()).await;
+        assert_eq!(
+            computed(db.clone()).await,
+            first,
+            "the same key repairs nothing"
+        );
+        let mut changed = registry();
+        changed
+            .models
+            .get_mut("shelf/book")
+            .unwrap()
+            .decl
+            .columns
+            .push(oxplow_db::model_store::ModelColumn::new(
+                "note",
+                oxplow_db::model_store::ModelType::Text,
+            ));
+        repair(db.clone(), changed).await;
+        assert_ne!(
+            computed(db.clone()).await,
+            first,
+            "another declaration repairs again"
         );
     }
 }
