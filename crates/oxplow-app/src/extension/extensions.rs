@@ -6729,7 +6729,6 @@ commands:
                 "oxplow.tasks.clear_finished",
                 "oxplow.tasks.assign",
                 "oxplow.tasks.reorder",
-                "oxplow.task.new",
                 "oxplow.knowledge.new_page"
             ]
         );
@@ -6744,14 +6743,14 @@ commands:
                 "deviation",
                 "finished_cleared",
                 "ready_queue",
-                "request_task_view_next",
-                "search_task_next",
+                "request_link",
+                "search_task",
                 "session_task_badge",
                 "snapshot_work_badge",
                 "struggle",
-                "task_comment_next",
-                "task_link_next",
-                "task_next",
+                "task",
+                "task_comment",
+                "task_link",
                 "task_workflow",
                 "thread_tasks",
                 "thread_work_badge"
