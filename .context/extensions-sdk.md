@@ -637,3 +637,23 @@ dataset's line in `extension.yaml` ("misses n row(s) a full refill holds"
 — a watermark that doesn't grow as rows arrive drops a row below it
 unseen, which nothing at run time can tell); an append that hits the key
 passes (the runtime refills then); no fixture is a warning.
+
+## Fixtures for observers (contract, being built)
+
+New fixture forms for the shared-models work ([models.md](./models.md)):
+
+- `requires: [shelf, shelf-folder]` at a fixture's top: the examples
+  that run together (the existing key).
+- `given: - { files: { "<path>": "<body>" } }` writes project files;
+  `given: - { remove_files: ["<path>"] }` removes them; `given: - {
+  rename_files: [{ from, to }] }` renames.
+- `when: { collector: <id>, trigger: start | sqlite | { files: [{ path,
+  op }] } }` runs a collector for real as that trigger fires, and applies
+  its output; `expect: { ok, result?, problems? }`. Live triggers are
+  off in a fixture: a collector runs only when a step says so.
+- `when: { action_point: <id>, context: {...} }` → `expect: { draws:
+  none | button | menu, commands: [ids] }`.
+- `when: { item_commands: "<item uri>" }` → `expect: { commands: [ids]
+  }`.
+- `when: { search: "<text>", resource?: <id> }` → `expect: { uris: [...]
+  }`, through the search index (not a `LIKE`).

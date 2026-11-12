@@ -340,10 +340,18 @@ collectors:
   over the asset window. Input: `x["trigger"] = "files"`, `x["changed"]
   = [{ path, op: created | modified | removed }]`.
 - **`{ sqlite: own }`** or **`{ sqlite: <path> }`**: a SQLite file's
-  `PRAGMA data_version` moved (polled, every 2 s while the extension is
-  on; `own` is the extension's own file, [extensions-permissions.md](./extensions-permissions.md)
-  "Store services"). Input: `x["trigger"] = "sqlite"`.
+  `PRAGMA data_version` moved, polled every 2 s while the extension is
+  on, on one dedicated read connection per file (`data_version` is only
+  comparable on the same connection). `own` is the extension's own file;
+  a `<path>` (a tool's database, `.beads/beads.db`) must be inside a
+  `files:` folder it may read, and is read with `files.sqlite`
+  ([extensions-permissions.md](./extensions-permissions.md) "Store
+  services"). Input: `x["trigger"] = "sqlite"`.
 - Every run may return `"cursor"`; the next run gets it as `x["cursor"]`
-  ([models.md](./models.md) "Cursor").
+  ([models.md](./models.md) "Cursor"), and `"models"` / `"fields"`, the
+  declarative writes of [models.md](./models.md) "The output". Both work
+  for `exec` collectors (printed on stdout) as for Starlark.
+- A collector only reads while it runs (`store.sql`, `files.read`,
+  `files.list`, `files.sqlite`); the host applies its output after.
 - A trigger fires only while the extension is on. A run that fails keeps
   the cursor and is retried on the next trigger.

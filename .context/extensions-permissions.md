@@ -518,6 +518,16 @@ manifest makes the host open `.oxplow/extensions-data/<name>.sqlite`
 (created when missing; its own pool, like `Database::attach`; never
 attached to the main connection) and run the extension's migration files
 (`storage/migrations/V<n>__<name>.sql`, in order, recorded in the file).
+**Scripts read; the host writes.** A command script runs before policy
+and confirm and only composes (`.context/commands.md`), and `check` dry
+runs its examples, so every service below that a script calls reads
+only. Writes are core commands the script composes, run by the host
+after confirm: `oxplow.extension_store.write { batch }` and
+`oxplow.extension_files.write { path, body }` / `delete { path }`, each
+allowed only for the composing extension's own file or declared folders.
+(The text below predates this rule where it shows a write through
+`scope()`; the subagent building it updates it.)
+
 The service `store.sql` (`needs: [store.sql]`) runs SQL on that file
 only:
 
@@ -548,3 +558,9 @@ files:
 usual grant). A path outside a declared folder, or with `..`, is refused.
 oxplow's write guard does not apply to these writes (it goes with the
 oxwiki carve-out).
+
+**A tool's own SQLite file** (beads' `.beads/beads.db`): `files.sqlite {
+path, sql, params }` reads it, read only, when `path` is inside a `files:`
+folder the extension may read. **A folder outside the project** (a
+vault): a `files:` entry may be an absolute or `~/` path; the person
+approves it by name at install, like any grant.
