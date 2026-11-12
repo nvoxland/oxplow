@@ -168,7 +168,10 @@ models:
   `PreparedVocabulary::prepare`), in load order; the first match wins an
   id two would match (whether two regexes overlap can't be checked in
   general, so the order is the rule). A provider fill carries its
-  instance's `id_pattern`. `[[slug]]` resolves to the store the model's
+  instance's `id_pattern`; the host's recognizers list every running
+  provider instance's pattern after the active tracker's
+  (`CapabilityRegistry::task_ids_from`), so an external store's loose ids
+  are links whether it is active or not. `[[slug]]` resolves to the store the model's
   owner names as `default_store` (bundled: `oxwiki`), else is left as
   text.
 - **Search.** The resource's `searchable: <dataset>` stays the mechanism
@@ -656,7 +659,10 @@ Every open model keeps per-item values beyond its columns.
     replaced (null where none) as its inverse, `set_fields` again with
     `extension` naming the composer. Only an undo's replay may run it that
     way (`RunContext::is_replaying_inverse`, set by `CommandBus::undo`), so
-    a command composing only `set_fields` calls undoes with its run.
+    a command composing only `set_fields` calls undoes with its run. A
+    script's own `inverse` may not name `set_fields` (`route_inverse`
+    refuses it): its recorded undo is the only one, so no script can write
+    another extension's fields through an undo.
   - A store's `snapshot` restates its own fields only. It never removes
     another namespace's values on an item that is still there. Values go
     with the item (as a tombstone, "Removal").

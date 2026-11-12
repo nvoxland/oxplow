@@ -1041,13 +1041,20 @@ impl CapabilityRegistry {
             .unwrap_or_else(|| Arc::new(fallback.clone()))
     }
 
+    /// What loose task ids text names: the active tracker's pattern first,
+    /// then each running provider instance's (its store fills the task
+    /// model whether it is active or not; `ModelRegistry::with_provider_fills`).
     fn task_ids_from(all: &[Implementation], config: &OxplowConfig) -> Vec<(String, String)> {
         let id = Self::resolve_from(all, config, "task_tracker").id;
-        all.iter()
-            .find(|i| i.capability == "task_tracker" && i.id == id)
-            .and_then(|i| i.id_pattern.clone())
-            .map(|pattern| (id, pattern))
-            .into_iter()
+        let tracker = |i: &&Implementation| i.capability == "task_tracker" && i.offered;
+        let active = all.iter().filter(tracker).filter(|i| i.id == id);
+        let running = all
+            .iter()
+            .filter(tracker)
+            .filter(|i| i.id != id && matches!(i.source, Source::External));
+        active
+            .chain(running)
+            .filter_map(|i| Some((i.id.clone(), i.id_pattern.clone()?)))
             .collect()
     }
 
@@ -1605,6 +1612,29 @@ mod tests {
             config: Value::Object(Default::default()),
             description: None,
         }
+    }
+
+    /// Text names the active tracker's ids first, then each running
+    /// provider instance's that declares a pattern (its store fills the
+    /// task model whether it is active or not); a script or built-in that
+    /// isn't active names none.
+    #[test]
+    fn every_running_task_providers_ids_are_recognized_the_active_first() {
+        let mut core = builtin("task_tracker", "oxtask", "oxplow:oxtask");
+        core.id_pattern = Some(r"tsk\d+".into());
+        let mut linear = builtin("task_tracker", "linear", "x");
+        linear.source = Source::External;
+        linear.id_pattern = Some(r"ENG-\d+".into());
+        let mut quiet = builtin("task_tracker", "quiet", "y");
+        quiet.id_pattern = Some(r"Q\d+".into());
+        let ids = CapabilityRegistry::task_ids_from(&[core, linear, quiet], &config(&[], &[]));
+        assert_eq!(
+            ids,
+            vec![
+                ("oxtask".to_string(), r"tsk\d+".to_string()),
+                ("linear".to_string(), r"ENG-\d+".to_string()),
+            ]
+        );
     }
 
     fn registry(declared: bool) -> CapabilityRegistry {

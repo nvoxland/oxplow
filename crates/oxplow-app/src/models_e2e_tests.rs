@@ -408,3 +408,47 @@ async fn an_id_pattern_on_a_fill_recognizes_its_loose_task_ids() {
     );
     assert_eq!(resources.task_uri_of("zzz"), None);
 }
+
+/// A script's inverse can't name `oxplow.model.set_fields`: that command
+/// records its own undo, and naming it with `extension` would write another
+/// extension's fields when the person undoes.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_scripts_inverse_cant_write_fields_as_another_extension() {
+    let fx = services_with_thread().await;
+    let root = fx._dir.path();
+    write(root, ".oxplow/extensions/shelf/extension.yaml", OWNER);
+    write(
+        root,
+        ".oxplow/extensions/shelfdb/extension.yaml",
+        &DB_STORE.replace(
+            "permissions: ['commands:oxplow.extension_store.write']",
+            "permissions: ['commands:oxplow.extension_store.write', 'commands:oxplow.model.set_fields']",
+        ),
+    );
+    write(
+        root,
+        ".oxplow/extensions/shelfdb/storage/migrations/V1__book.sql",
+        "CREATE TABLE book (id TEXT PRIMARY KEY, title TEXT NOT NULL);",
+    );
+    write(
+        root,
+        ".oxplow/extensions/shelfdb/books.star",
+        "def transform(x):\n    return {\"models\": []}\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/shelfdb/handlers/add.star",
+        "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.extension_store.write\", \"input\": {\"batch\": [{\"sql\": \"INSERT INTO book (id, title) VALUES ('a', 'A')\", \"params\": []}]}}], \"result\": {}, \"inverse\": {\"commands\": [{\"name\": \"oxplow.model.set_fields\", \"input\": {\"model\": \"shelf/book\", \"uri\": \"oxplow:shelf/book?id=a&store=shelfdb\", \"values\": {\"score\": None}, \"extension\": \"shelf\"}}]}}\n",
+    );
+    let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
+    assert!(problems.is_empty(), "{problems:?}");
+    let err = fx
+        .svc
+        .commands
+        .run(&Actor::Human, "shelfdb.book.add", json!({}), true)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("oxplow.model.set_fields"), "{err}");
+    assert!(err.contains("records its own undo"), "{err}");
+}

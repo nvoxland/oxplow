@@ -35,7 +35,7 @@ struct SetFields {
     extension: Option<String>,
 }
 
-const SET_FIELDS: &str = "oxplow.model.set_fields";
+pub(crate) const SET_FIELDS: &str = "oxplow.model.set_fields";
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

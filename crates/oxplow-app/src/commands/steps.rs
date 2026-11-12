@@ -420,6 +420,15 @@ pub(super) fn route_inverse(
                 call.name
             )));
         }
+        // It records its own undo when a script composes it; named in a
+        // script's inverse it would write as whatever `extension` says.
+        if call.name == super::model_commands::SET_FIELDS {
+            return Err(invalid(format!(
+                "`{}` records its own undo when the script composes it; leave it out of \
+                 the inverse",
+                call.name
+            )));
+        }
         if several && matches!(command.handler, Handler::Compose(_)) {
             return Err(invalid(format!(
                 "`{}` composes other commands, and an inverse of several calls runs as a \
