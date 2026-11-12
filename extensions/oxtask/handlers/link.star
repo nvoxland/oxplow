@@ -10,6 +10,9 @@ def uri(to):
 def transform(x):
     i = x["input"]
     to = uri(i["to"])
+    there = scope("store.sql", {"sql": "SELECT 1 AS there FROM task WHERE id = ?1 AND deleted = 0", "params": [i["id"]]})["rows"]
+    if len(there) == 0:
+        return {"refuse": "no such task " + i["id"]}
     write = {
         "sql": "INSERT INTO task_link (task_id, to_uri, type) VALUES (?1, ?2, ?3) " +
                "ON CONFLICT(task_id, to_uri, type) DO UPDATE SET deleted = 0",

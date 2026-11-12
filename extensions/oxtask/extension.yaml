@@ -70,6 +70,7 @@ commands:
         author: { type: string }
       additionalProperties: false
     entry: handlers/create.star
+    needs: [store.sql]
     access: write
     example: { title: Fix the greeting, stage: ready, priority: high }
   - name: task.update
@@ -82,7 +83,7 @@ commands:
         title: { type: string, minLength: 1 }
         body: { type: [string, "null"] }
         priority: { type: [string, "null"], enum: [urgent, high, medium, low, null] }
-        parent: { type: [string, "null"] }
+        parent: { type: [string, "null"], pattern: "^tsk[0-9]+$" }
       additionalProperties: false
     entry: handlers/update.star
     needs: [store.sql]
@@ -140,6 +141,7 @@ commands:
         author: { type: string }
       additionalProperties: false
     entry: handlers/comment.star
+    needs: [store.sql]
     access: write
     example: { id: tsk1, body: Reproduced on main. }
   - name: task.delete

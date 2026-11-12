@@ -25,6 +25,11 @@ struct StatementInput {
     sql: String,
     #[serde(default)]
     params: Vec<Value>,
+    /// The rows this statement must change (its own, not a trigger's). Fewer
+    /// or more fails the command and rolls the batch back, naming the
+    /// statement: how a command says "no such row".
+    #[serde(default)]
+    expect_changes: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -82,6 +87,7 @@ pub fn ops(
                         .map(|s| Statement {
                             sql: s.sql,
                             params: s.params,
+                            expect_changes: s.expect_changes,
                         })
                         .collect();
                     let composer = services

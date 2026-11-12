@@ -6,6 +6,11 @@
 
 def transform(x):
     i = x["input"]
+    parent = i.get("parent")
+    if parent != None:
+        there = scope("store.sql", {"sql": "SELECT 1 AS there FROM task WHERE id = ?1 AND deleted = 0", "params": [parent]})["rows"]
+        if len(there) == 0:
+            return {"refuse": "no such task " + parent}
     stage = i.get("stage", "backlog")
     write = {
         "sql": "INSERT INTO task (title, body, stage, parent, priority, author, closed_at) " +

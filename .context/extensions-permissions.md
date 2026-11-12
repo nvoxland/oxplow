@@ -538,7 +538,7 @@ migrations without `storage:`, is a load error.
   allows only `SELECT`, reads and read-form `PRAGMA`s, so any write, `ATTACH`,
   `DETACH` or `VACUUM` is refused. It reaches only that extension's file
   (the owner comes from the run, never from the request).
-- **Write: `oxplow.extension_store.write { batch: [{sql, params}] }`**, a
+- **Write: `oxplow.extension_store.write { batch: [{sql, params, expect_changes?}] }`**, a
   core command (scope `store.write`, an External handler: it runs outside the
   database transaction, is not undoable, and its `batch` is left out of the
   audit). The statements are one transaction on the file. It answers
@@ -546,7 +546,11 @@ migrations without `storage:`, is a load error.
   counts none), `rows` one list per statement, in order, of that statement's
   rows as objects (column to value) — what a `RETURNING` clause gives, `[]`
   for a statement without one — so a store can mint an id inside its write
-  (`INSERT … RETURNING id`). **A script's own `result` cannot see them**: the
+  (`INSERT … RETURNING id`). **`expect_changes: n`** on a statement says it
+  must change exactly `n` rows of its own (a trigger's changes don't count):
+  any other count fails the command, rolls the whole batch back and names the
+  statement. A command uses it to say "no such row" (`UPDATE … WHERE id = ?`
+  with `expect_changes: 1`). **A script's own `result` cannot see them**: the
   script runs once, when the bus routes the run, before any step has run, and
   nothing binds an earlier step's answer into a later step's input or into the
   script's `result` (the calls and the `inverse` are fixed at compose time). The
