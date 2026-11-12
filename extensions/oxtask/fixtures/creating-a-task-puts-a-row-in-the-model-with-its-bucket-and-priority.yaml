@@ -2,7 +2,7 @@
 # when the command returns, with the stage, its title, the bucket as `state`
 # and the priority as a field. The id was minted by the insert; the command
 # answers it and returns the inverse that deletes the task. The author is who
-# ran the command (a person here).
+# ran the command (a person here), with its kind.
 requires: [oxplow-bundled, oxtask]
 when:
   command: oxtask.task.create
@@ -18,7 +18,8 @@ steps:
       sql: |
         SELECT id, title, body, state, stage, stage_title, store,
                json_extract(fields, '$.oxtask.priority') AS priority,
-               json_extract(fields, '$.oxtask.author') AS author
+               json_extract(fields, '$.oxtask.author') AS author,
+               json_extract(fields, '$.oxtask.author_kind') AS author_kind
         FROM v_oxplow_task_record
     expect:
       rows:
@@ -31,3 +32,4 @@ steps:
           store: oxtask
           priority: high
           author: "oxplow:oxplow/person"
+          author_kind: person
