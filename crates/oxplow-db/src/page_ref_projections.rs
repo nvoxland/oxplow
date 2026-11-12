@@ -92,10 +92,6 @@ pub fn task_comment_ref_types() -> Vec<String> {
     COMMENT_MENTIONS.all()
 }
 
-/// A task's link slice is every ref type with this prefix — one per
-/// link type, the list's own (`task_link:blocks`).
-pub const RT_LINK_PREFIX: &str = "task_link:";
-
 pub const RT_COMMENT_FILE: &str = "comment_file_ref";
 pub const RT_COMMENT_DIR: &str = "comment_dir_ref";
 pub const RT_COMMENT_WIKILINK: &str = "comment_wikilink";
@@ -329,19 +325,6 @@ pub fn task_comment_edges<'a>(
     out
 }
 
-/// A task's link edges: one per `(target URI, link type)`, its ref
-/// type `task_link:<type>`. Any URI: another item, or what the item
-/// is about.
-pub fn task_link_edges(item: &str, links: &[(String, String)]) -> Vec<PageRefEdge> {
-    links
-        .iter()
-        .filter(|(target, _)| oxplow_domain::uri::OxplowUri::parse(target).is_ok())
-        .map(|(target, link_type)| {
-            PageRefEdge::new(item, target, format!("{RT_LINK_PREFIX}{link_type}"))
-        })
-        .collect()
-}
-
 /// What `text` mentions, as edges from `source` under `types`; the source
 /// naming itself isn't one.
 fn mention_edges(
@@ -447,17 +430,6 @@ mod tests {
         // self-mention filtered out
         assert!(!targets.contains(&task("tsk1").as_str()));
         assert!(edges.iter().all(|e| e.source == task("tsk1")));
-    }
-
-    #[test]
-    fn link_edges_carry_the_lists_own_link_type() {
-        let item = build::task_uri("issues", "ENG-10");
-        let other = build::task_uri("issues", "ENG-20");
-        let edges = task_link_edges(&item, &[(other.clone(), "parent_of".into())]);
-        assert_eq!(edges.len(), 1);
-        assert_eq!(edges[0].source, item);
-        assert_eq!(edges[0].target, other);
-        assert_eq!(edges[0].ref_type, "task_link:parent_of");
     }
 
     /// Comments' mentions are the item's own edges, under the comment

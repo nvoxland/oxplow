@@ -4,8 +4,12 @@
 //! Run with oxplow quit, after the new binary has booted once (so the
 //! migrations ran and bundled's `task_record` and `request_task` model
 //! tables exist). Core's rows (`oxtask`, `oxtask_link`,
-//! `oxtask_note`, `task_assignment`, `request_task`) are only read; nothing
-//! of core's is deleted.
+//! `oxtask_note`, `task_assignment`, `request_task`) are only read. From the
+//! main database the move deletes the command log's `oxplow.task.*` rows
+//! (audit rows, those whose inverse names one, proposals), the references
+//! to them in `effect_run`, and the old `task_link:*` edges of `page_ref`
+//! (the shared model writes them again as oxtask fills it). A copy of the
+//! database is made first.
 //!
 //! - Each task becomes a row of the store's `task` with `n` equal to its old
 //!   id, so `tsk<N>` keeps its id and its URI (the model's `store_param` is
@@ -56,6 +60,8 @@ const LINK_MODEL_TABLE: &str = "model__oxplow__request_task";
 /// was in progress; the move drops it.
 const LEGACY_LINK_MODEL_TABLE: &str = "model__oxplow__request_task_next";
 const LINK_RESOURCE: &str = "oxplow/request_task";
+/// The ref type prefix of a task's link edges.
+const LINK_EDGE_PREFIX: &str = "task_link:";
 const PERSON: &str = "oxplow:oxplow/person";
 
 struct Task {
@@ -99,6 +105,14 @@ struct Moved {
     assignments: usize,
     assigned: usize,
     requests: BTreeMap<String, usize>,
+    log: LogCleanup,
+}
+
+/// What the move deletes from the main database's log and edges.
+struct LogCleanup {
+    audit_rows: usize,
+    proposals: usize,
+    link_edges: usize,
 }
 
 /// A timestamp to the second (its first 19 characters).
@@ -382,7 +396,7 @@ async fn run(
         .collect();
     Ok(format!(
         "{}{} tasks ({} soft-deleted), {} links, {} notes, {} assignments ({} with an assignee), \
-         {} request links ({})",
+         {} request links ({}); deleting {} audit rows, {} proposals and {} task_link edges",
         if dry_run {
             "dry run, nothing kept: "
         } else {
@@ -395,7 +409,10 @@ async fn run(
         moved.assignments,
         moved.assigned,
         moved.requests.values().sum::<usize>(),
-        requests.join(", ")
+        requests.join(", "),
+        moved.log.audit_rows,
+        moved.log.proposals,
+        moved.log.link_edges
     ))
 }
 
@@ -426,22 +443,55 @@ fn main_half(tx: &Transaction<'_>, replace: bool) -> Result<Moved, DomainError> 
         )
         .map_err(sql)?;
     }
-    // The old task commands leave the command log: their audit rows (with the
-    // inverses an undo would run), and the proposals waiting on them. Core has
-    // no `oxplow.task.*` any more; no history of them is kept.
+    // The old task commands leave the command log: their audit rows (and any
+    // row whose inverse would run one), the proposals waiting on them, and
+    // the references to either. Core has no `oxplow.task.*` any more; no
+    // history of them is kept. The old link edges go too: the shared model
+    // writes them again as oxtask fills it.
+    let named = "command LIKE 'oxplow.task.%' OR inverse_json LIKE '%oxplow.task.%'";
+    let count = |sql_text: &str| -> Result<usize, DomainError> {
+        tx.query_row(sql_text, [], |r| r.get::<_, i64>(0))
+            .map(|n| n as usize)
+            .map_err(sql)
+    };
+    let log = LogCleanup {
+        audit_rows: count(&format!("SELECT count(*) FROM command_audit WHERE {named}"))?,
+        proposals: count(
+            "SELECT count(*) FROM command_proposal WHERE command LIKE 'oxplow.task.%'",
+        )?,
+        link_edges: count(&format!(
+            "SELECT count(*) FROM page_ref WHERE ref_type LIKE '{LINK_EDGE_PREFIX}%'"
+        ))?,
+    };
     tx.execute(
         "DELETE FROM command_proposal WHERE command LIKE 'oxplow.task.%'",
         [],
     )
     .map_err(sql)?;
     tx.execute(
-        "UPDATE command_audit SET undone_by = NULL WHERE undone_by IN
-           (SELECT id FROM command_audit WHERE command LIKE 'oxplow.task.%')",
+        &format!(
+            "UPDATE command_audit SET undone_by = NULL WHERE undone_by IN
+               (SELECT id FROM command_audit WHERE {named})"
+        ),
+        [],
+    )
+    .map_err(sql)?;
+    tx.execute(&format!("DELETE FROM command_audit WHERE {named}"), [])
+        .map_err(sql)?;
+    tx.execute(
+        "UPDATE effect_run SET audit_id = NULL
+          WHERE audit_id IS NOT NULL AND audit_id NOT IN (SELECT id FROM command_audit)",
         [],
     )
     .map_err(sql)?;
     tx.execute(
-        "DELETE FROM command_audit WHERE command LIKE 'oxplow.task.%'",
+        "UPDATE effect_run SET proposal_id = NULL
+          WHERE proposal_id IS NOT NULL AND proposal_id NOT IN (SELECT id FROM command_proposal)",
+        [],
+    )
+    .map_err(sql)?;
+    tx.execute(
+        &format!("DELETE FROM page_ref WHERE ref_type LIKE '{LINK_EDGE_PREFIX}%'"),
         [],
     )
     .map_err(sql)?;
@@ -772,6 +822,7 @@ fn main_half(tx: &Transaction<'_>, replace: bool) -> Result<Moved, DomainError> 
         assignments,
         assigned,
         requests,
+        log,
     })
 }
 
@@ -1245,7 +1296,14 @@ mod tests {
             "INSERT INTO command_audit (id, at, command, actor_kind, input_json, outcome, inverse_json)
                VALUES (901, 't', 'oxplow.task.create', 'human', '{}', 'ok', '{}'),
                       (902, 't', 'oxplow.task.transition', 'human', '{}', 'ok', NULL),
-                      (903, 't', 'oxplow.thread.rename', 'human', '{}', 'ok', NULL);
+                      (903, 't', 'oxplow.thread.rename', 'human', '{}', 'ok', NULL),
+                      (904, 't', 'oxplow.thread.close', 'human', '{}', 'ok', '{\"command\":\"oxplow.task.transition\"}'),
+                      (905, 't', 'oxplow.thread.mark', 'human', '{}', 'ok', '{\"command\":\"oxplow.thread.mark\"}');
+             INSERT INTO effect_run (id, effect, event_id, event_seq, state, audit_id, proposal_id, started_at)
+               VALUES (1, 'e', 'ev1', 1, 'ok', 901, 1, 't'), (2, 'e', 'ev2', 2, 'ok', 903, 2, 't');
+             INSERT INTO page_ref (source_uri, target_uri, source_resource, target_resource, ref_type)
+               VALUES ('oxplow:oxplow/task?id=tsk1&provider=oxtask', 'oxplow:oxplow/task?id=tsk2&provider=oxtask', 'oxplow/task', 'oxplow/task', 'task_link:blocks'),
+                      ('oxplow:oxplow/task?id=tsk1&provider=oxtask', 'oxplow:oxplow/task?id=tsk2&provider=oxtask', 'oxplow/task', 'oxplow/task', 'mention');
              UPDATE command_audit SET undone_by = 902 WHERE id = 901;
              INSERT INTO command_proposal (created_at, command, input_json, actor_kind, key, preview_json, decision)
                VALUES ('t', 'oxplow.task.delete', '{}', 'agent', 'k1', '{}', 'pending'),
@@ -1253,10 +1311,34 @@ mod tests {
         )
         .unwrap();
         drop(m);
+        let dry = move_to_oxtask(dir.path(), true, false, false)
+            .await
+            .unwrap();
+        assert!(
+            dry.contains("deleting 3 audit rows, 1 proposals and 1 task_link edges"),
+            "{dry}"
+        );
         move_to_oxtask(dir.path(), false, false, false)
             .await
             .unwrap();
         let m = main_db(dir.path());
+        let dangling: i64 = m
+            .query_row(
+                "SELECT count(*) FROM effect_run WHERE audit_id IS NOT NULL AND audit_id NOT IN (SELECT id FROM command_audit)
+                   OR proposal_id IS NOT NULL AND proposal_id NOT IN (SELECT id FROM command_proposal)",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(dangling, 0);
+        let edges: Vec<String> = m
+            .prepare("SELECT ref_type FROM page_ref")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(edges, vec!["mention"]);
         let commands = |table: &str| -> Vec<String> {
             let mut st = m
                 .prepare(&format!(
@@ -1268,7 +1350,10 @@ mod tests {
                 .collect::<Result<_, _>>()
                 .unwrap()
         };
-        assert_eq!(commands("command_audit"), vec!["oxplow.thread.rename"]);
+        assert_eq!(
+            commands("command_audit"),
+            vec!["oxplow.thread.mark", "oxplow.thread.rename"]
+        );
         assert_eq!(commands("command_proposal"), vec!["oxplow.thread.close"]);
     }
 
