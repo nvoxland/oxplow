@@ -1,7 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { run } from "../../support/daemon.js";
+import { fileTask, run } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { navigate, taskIdOf, shown } from "../../support/ui.js";
 
@@ -17,10 +17,7 @@ test("an extension's ref renders as a link and opens its page", async ({ page, d
 
 
 async function createItem(daemon: Parameters<typeof run>[0] & { thread: string }, title: string) {
-  const created = await run<{ result: { uri: string } }>(daemon, "oxplow.task.create", {
-    title,
-    assignee: daemon.thread,
-  });
+  const created = await fileTask(daemon, title);
   return taskIdOf(created.result.uri).replace(/^tsk/, "");
 }
 

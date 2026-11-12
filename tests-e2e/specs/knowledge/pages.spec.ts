@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { run, searchable } from "../../support/daemon.js";
+import { fileTask, run, searchable } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { open, reload, shown, taskIdOf } from "../../support/ui.js";
 
@@ -13,10 +13,7 @@ const uriOf = (id: string) => `oxplow:oxplow/knowledge?id=${id}&store=oxwiki`;
 const fileOf = (daemon: { project: string }, id: string) => join(daemon.project, ".oxplow", "oxwiki", `${id}.md`);
 
 test("a written page renders, and a task link in it opens the task", async ({ page, daemon }) => {
-  const created = await run<{ result: { uri: string } }>(daemon, "oxplow.task.create", {
-    title: "Wombat follow-up",
-    assignee: daemon.thread,
-  });
+  const created = await fileTask(daemon, "Wombat follow-up");
   await run(daemon, "oxplow.knowledge.write_page", {
     store: "oxwiki",
     title: "Wombat plan",

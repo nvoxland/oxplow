@@ -8,7 +8,8 @@ intent:
   examples: []
 # Its providers run programs, its effect reads with its own SQL and
 # comments on (or deletes) tasks.
-permissions: [process.run, sql.read, commands:oxplow.task.comment, commands:oxplow.task.delete]
+requires: [oxplow-bundled, oxtask]
+permissions: [process.run, sql.read, commands:oxtask.task.comment, commands:oxtask.task.delete]
 # `bin/provider` and `bin/scripted` are written when a suite daemon starts:
 # they run the oxplow-provider-fake binary this checkout built, the second in
 # harness mode.
@@ -34,9 +35,10 @@ providers:
 effects:
   - id: note-created
     summary: >-
-      Comments on each created oxplow task; one titled "[fail]" fails, one
+      Comments on each created oxtask task; one titled "[fail]" fails, one
       titled "[delete]" asks to delete it.
-    on: [task.created]
+    on: [oxplow.task_record.changed]
+    where: { cause: trigger }
     entry: effects/note.star
     needs: [sql.read]
 # A command that always refuses, a page that runs it and a component that

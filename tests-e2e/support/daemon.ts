@@ -32,7 +32,7 @@ export const LOG_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", ".out
  *  spec ever starts a real agent CLI. The suite's extensions are on; the
  *  fixtures deploy them once the daemon has started (boot deploys nothing). */
 function projectYaml(): string {
-  return `agents: [scripted]\nextensions: [oxplow-bundled, e2e, github]\nextensionInstances:\n  e2e/scripted: { enabled: true, config: { team: core } }\n`;
+  return `agents: [scripted]\nextensions: [oxplow-bundled, oxtask, e2e, github]\nextensionInstances:\n  e2e/scripted: { enabled: true, config: { team: core } }\n`;
 }
 
 /** Put the suite's test extension's source (`tests-e2e/fixtures/extension`)
@@ -342,4 +342,28 @@ export async function searchable(daemon: Daemon, query: string, resource: string
     const hits = await ipc<SearchHit[]>(daemon, "search", { query, streamId: null, resources: [name], limit: 10 });
     return hits.length > 0;
   });
+}
+
+/** File a task in oxtask, the project's task store, and give it to the
+ *  thread the pages open on (`assign: false` leaves it for nobody). The answer
+ *  is shaped like a command's run, `{ result: { uri, id } }`, so a spec reads
+ *  `.result.uri` as it did. */
+export async function fileTask(
+  daemon: Daemon & { thread: string },
+  title: string,
+  opts: { stage?: string; body?: string; parent?: string; priority?: string; assign?: boolean } = {},
+): Promise<{ result: { uri: string; id: string } }> {
+  const made = await run<{ result: { id: string } }>(daemon, "oxtask.task.create", {
+    title,
+    stage: opts.stage ?? "ready",
+    ...(opts.body === undefined ? {} : { body: opts.body }),
+    ...(opts.parent === undefined ? {} : { parent: opts.parent }),
+    ...(opts.priority === undefined ? {} : { priority: opts.priority }),
+  });
+  const id = made.result.id;
+  const uri = `oxplow:oxplow/task?id=${id}&provider=oxtask`;
+  if (opts.assign !== false) {
+    await run(daemon, "oxplow.tasks.assign", { uri, to: `oxplow:oxplow/thread?id=${daemon.thread}` });
+  }
+  return { result: { uri, id } };
 }

@@ -4,7 +4,7 @@ requires: [oxplow-bundled, oxtask]
 given:
   - { command: oxtask.task.create, input: { title: A } }
   - { command: oxtask.task.create, input: { title: B } }
-  - { command: oxtask.task.delete, input: { id: tsk1 } }
+  - { command: oxtask.task.delete, input: { id: tsk1 }, confirmed: true }
 when: { collector: oxtask/tasks, trigger: start }
 expect: { ok: true }
 steps:

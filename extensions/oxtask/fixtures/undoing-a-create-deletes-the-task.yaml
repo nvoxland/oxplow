@@ -5,7 +5,7 @@ given:
 when: { sql: "SELECT id FROM v_oxplow_task_record" }
 expect: { rows: [{ id: tsk1 }] }
 steps:
-  - when: { undo: oxtask.task.create }
+  - when: { undo: oxtask.task.create, confirmed: true }
     expect: { ok: true }
   - when: { sql: "SELECT id FROM v_oxplow_task_record" }
     expect: { rows: [] }

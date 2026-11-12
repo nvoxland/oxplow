@@ -169,6 +169,7 @@ commands:
     entry: handlers/delete.star
     needs: [store.sql]
     access: write
+    confirm: destructive
     ui: { label: Delete Task, group: Tasks, about: { resource: oxplow/task, accepts: { store: oxtask } }, input: { id: "{{uri.id}}" } }
     example: { id: tsk1 }
   - name: task.restore

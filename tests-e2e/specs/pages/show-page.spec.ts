@@ -2,7 +2,7 @@ import { rmSync } from "node:fs";
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
 import { expect, test } from "../../support/fixtures.js";
-import { run } from "../../support/daemon.js";
+import { fileTask, run } from "../../support/daemon.js";
 import { open, shown, load, reload } from "../../support/ui.js";
 
 type Daemon = Parameters<typeof run>[0];
@@ -10,7 +10,7 @@ const source = (title: string, prefix: string) => `# Keep the source comment
 title: ${title}
 loaders:
   count:
-    sql: SELECT count(*) AS n FROM v_task WHERE title LIKE '${prefix}%'
+    sql: SELECT count(*) AS n FROM v_oxplow_task WHERE title LIKE '${prefix}%'
 view: { id: count, viz: number, from: count }
 `;
 
@@ -40,7 +40,7 @@ test("show_page opens a temp page (a file on oxplow:temp) whose live run survive
   await expect(body.locator('[data-node="count"]')).toContainText("0");
   await reload(page);
   await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toHaveText("Shown Quoll Count");
-  await run(daemon, "oxplow.task.create", { title: "Shown Quoll evidence", assignee: daemon.thread });
+  await fileTask(daemon, "Shown Quoll evidence");
   await expect(body.locator('[data-node="count"]')).toContainText("1");
   await expect(page.getByTestId(`center-tab-${uri}`)).toBeVisible();
 });

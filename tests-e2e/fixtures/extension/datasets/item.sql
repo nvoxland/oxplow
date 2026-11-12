@@ -2,5 +2,5 @@
 -- task's own number).
 SELECT CAST(uri('e2e/item', 'id', substr(w.native_id, 4)) AS TEXT) AS uri,
        CAST(w.title AS TEXT) AS title
-FROM ref('task') w
+FROM ref('oxplow/task') w
 WHERE w.provider = 'oxtask'

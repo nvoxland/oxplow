@@ -1,4 +1,4 @@
-import { ipc, run } from "../../support/daemon.js";
+import { fileTask, ipc, run } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { shown, load } from "../../support/ui.js";
 
@@ -8,7 +8,7 @@ import { shown, load } from "../../support/ui.js";
 
 test("an effect's destructive step waits in Alerts until a person approves it", async ({ page, daemon }) => {
   await load(page);
-  await run(daemon, "oxplow.task.create", { title: "Pear [delete]", assignee: daemon.thread });
+  await fileTask(daemon, "Pear [delete]");
   // The dock's Alerts icon counts it once the effect has run (it runs in the
   // background, so wait for that). It opens the Alerts panel, which links
   // to the Alerts page, where the proposal waits.
@@ -22,7 +22,7 @@ test("an effect's destructive step waits in Alerts until a person approves it", 
   const live = async () =>
     (
       await ipc<{ rows: unknown[][] }>(daemon, "query_sql", {
-        sql: "SELECT count(*) FROM v_task WHERE title = 'Pear [delete]'",
+        sql: "SELECT count(*) FROM v_oxplow_task WHERE title = 'Pear [delete]'",
       })
     ).rows[0]?.[0];
   expect(await live()).toBe(1);
@@ -34,10 +34,10 @@ test("an effect's destructive step waits in Alerts until a person approves it", 
 
 test("approving a proposal whose run fails keeps the failure on its card, recorded once", async ({ page, daemon }) => {
   await load(page);
-  const made = await run<{ result: { uri: string } }>(daemon, "oxplow.task.create", { title: "Quince [delete]", assignee: daemon.thread });
+  const made = await fileTask(daemon, "Quince [delete]");
   await expect(page.getByTestId("dock-alerts-badge")).toHaveText("1");
   // The task goes another way first, so the delete the effect asked for fails.
-  await run(daemon, "oxplow.task.delete", { uri: made.result.uri });
+  await run(daemon, "oxtask.task.delete", { id: made.result.id });
   await page.getByTestId("dock-alerts").click();
   await page.getByTestId("dock-panel-open-page").getByTestId("open-page-link").click();
   const card = shown(page).locator('[data-testid^="proposal-"]').filter({ hasText: "destructive" }).first();

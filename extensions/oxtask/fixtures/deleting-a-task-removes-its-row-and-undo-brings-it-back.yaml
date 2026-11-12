@@ -2,7 +2,7 @@ requires: [oxplow-bundled, oxtask]
 given:
   - { command: oxtask.task.create, input: { title: A } }
   - { command: oxtask.task.comment, input: { id: tsk1, body: Kept } }
-when: { command: oxtask.task.delete, input: { id: tsk1 } }
+when: { command: oxtask.task.delete, input: { id: tsk1 }, confirmed: true }
 expect: { ok: true }
 steps:
   - when: { sql: "SELECT count(*) AS n FROM v_oxplow_task_record" }

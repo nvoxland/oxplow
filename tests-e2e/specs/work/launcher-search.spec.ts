@@ -1,15 +1,12 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { deploy, extensionSource, run, searchable } from "../../support/daemon.js";
+import { deploy, extensionSource, fileTask, run, searchable } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { searchLauncher, load } from "../../support/ui.js";
 
 test("search finds a task and a knowledge page, and opens them", async ({ page, daemon }) => {
-  const created = await run<{ result: { uri: string } }>(daemon, "oxplow.task.create", {
-    title: "Quokka migration",
-    assignee: daemon.thread,
-  });
+  const created = await fileTask(daemon, "Quokka migration");
   await run(daemon, "oxplow.knowledge.write_page", { id: "quokka-notes", title: "Quokka notes", body: "# Quokka notes\n\nWhat we know.\n" });
   await searchable(daemon, "quokka", "task");
   await searchable(daemon, "quokka", "knowledge");
@@ -40,7 +37,7 @@ test("a page added while the window is open is in the launcher", async ({ page, 
   );
   writeFileSync(
     join(dir, "pages", "wombats.yaml"),
-    "title: Wombat Tasks\ncategory: Work\nloaders:\n  items: { sql: SELECT uri FROM v_task }\nview: { from: items, viz: table }\n",
+    "title: Wombat Tasks\ncategory: Work\nloaders:\n  items: { sql: SELECT uri FROM v_oxplow_task }\nview: { from: items, viz: table }\n",
   );
   await deploy(daemon, "wombat");
   await expect(async () => {

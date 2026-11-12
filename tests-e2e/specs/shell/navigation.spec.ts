@@ -1,16 +1,16 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { run } from "../../support/daemon.js";
+import { fileTask, run } from "../../support/daemon.js";
 import { installExtension } from "../../support/pages.js";
 import { expect, test } from "../../support/fixtures.js";
-import { navigate, open, shown, load, reload } from "../../support/ui.js";
+import { navigate, open, shown, load, reload, taskIdOf } from "../../support/ui.js";
 
 const overviewTitle = (page: import("@playwright/test").Page) => page.getByTestId("page-nav-title").filter({ visible: true });
 
 /// An item the test extension's overview lists, each title a link to its page.
 async function item(daemon: Parameters<typeof run>[0] & { thread: string }, title: string) {
-  const created = await run<{ result: { uri: string } }>(daemon, "oxplow.task.create", { title, assignee: daemon.thread });
+  const created = await fileTask(daemon, title);
   return created.result.uri;
 }
 
@@ -104,7 +104,7 @@ test("Up and Down from a page opened from a page follow the page's rows as they 
   await expect(body).toContainText("Origin delta");
 
   // A page the page no longer lists has no Up or Down.
-  await run(daemon, "oxplow.task.update", { uri: delta, title: "[archived] Origin delta" });
+  await run(daemon, "oxtask.task.update", { id: taskIdOf(delta), title: "[archived] Origin delta" });
   await expect(page.getByTestId("page-nav-siblings").filter({ visible: true })).not.toBeVisible();
   await page.keyboard.press("Alt+ArrowDown");
   await expect(body).toContainText("Origin delta");
