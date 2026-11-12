@@ -78,6 +78,15 @@ pub(crate) enum Prepared {
         input: Value,
         confirmed: bool,
     },
+    /// An action point: the command that answers it for `context` runs,
+    /// when one does ([`run_point`]).
+    Point {
+        actor: Actor,
+        point: String,
+        context: Value,
+        command: Option<String>,
+        confirmed: bool,
+    },
     /// An `open` action: the URI it opens. Nothing runs (no bus run, no
     /// audit); the outcome says what to open (`{ "opened": <uri> }`) and the
     /// presser navigates.
@@ -93,6 +102,13 @@ impl Prepared {
                 input,
                 confirmed,
             } => svc.commands.run(&actor, &command, input, confirmed).await,
+            Prepared::Point {
+                actor,
+                point,
+                context,
+                command,
+                confirmed,
+            } => run_page_point(svc, actor, &point, &context, command.as_deref(), confirmed).await,
             Prepared::Open(uri) => Ok(CommandOutcome {
                 result: serde_json::json!({ "opened": uri }),
                 audit_id: None,
@@ -227,11 +243,21 @@ pub(crate) fn prepare_resolved(
         }
         Some(given) => filled(bound, given, &action.fixed)?,
     };
+    let actor = Actor::Page {
+        page_id: actor_id.to_string(),
+        on_behalf_of: Box::new(on_behalf_of),
+    };
+    if let Some(point) = action.point {
+        return Ok(Prepared::Point {
+            actor,
+            point,
+            context: input,
+            command: action.command,
+            confirmed,
+        });
+    }
     Ok(Prepared::Command {
-        actor: Actor::Page {
-            page_id: actor_id.to_string(),
-            on_behalf_of: Box::new(on_behalf_of),
-        },
+        actor,
         command: action
             .command
             .ok_or_else(|| invalid("/action", format!("`{action_id}` has no command to run")))?,
@@ -695,57 +721,109 @@ pub async fn invoke_component_point(
         .read_generation(async { check_component_point(svc, project_root, &call) })
         .await
         .map_err(CommandError::from)??;
-    let offer =
-        crate::commands::action_point_offers::action_point_offer(svc, &call.point, &call.context)
-            .await
-            .map_err(|message| CommandError::Invalid {
-                field: Some("/point".into()),
-                message,
-            })?;
-    let chosen = match &call.command {
-        Some(name) => offer
-            .commands
-            .iter()
-            .find(|c| &c.id == name)
-            .ok_or_else(|| CommandError::Invalid {
-                field: Some("/command".into()),
-                message: format!(
-                    "`{name}` isn't offered at `{}` for this context ({})",
-                    call.point,
-                    offered_ids(&offer)
-                ),
-            })?,
-        None => match offer.commands.as_slice() {
-            [] => {
-                return Err(CommandError::Invalid {
-                    field: Some("/point".into()),
-                    message: format!("nothing answers `{}` for this context", call.point),
-                })
-            }
-            [only] => only,
-            _ => {
-                return Err(CommandError::Invalid {
-                    field: Some("/command".into()),
-                    message: format!(
-                        "several answer `{}` for this context; name one: {}",
-                        call.point,
-                        offered_ids(&offer)
-                    ),
-                })
-            }
-        },
-    };
-    Prepared::Command {
-        actor: Actor::Component {
+    run_point(
+        svc,
+        Actor::Component {
             component: call.component,
             on_behalf_of: Box::new(call.on_behalf_of),
         },
-        command: chosen.id.clone(),
-        input: chosen.input.clone(),
-        confirmed: call.confirmed,
-    }
-    .run(svc)
+        &call.point,
+        &call.context,
+        call.command.as_deref(),
+        call.confirmed,
+    )
     .await
+}
+
+/// The command that answers `point` for `context`, as the viewer's offer
+/// says: `command` when named and offered, else the only one; `None` when
+/// nothing answers. A named command that isn't offered, or several with
+/// none named, is `Invalid`.
+async fn answer_of(
+    svc: &crate::Services,
+    point: &str,
+    context: &Value,
+    command: Option<&str>,
+) -> Result<Option<crate::commands::action_point_offers::PointCommand>, CommandError> {
+    let offer = crate::commands::action_point_offers::action_point_offer(svc, point, context)
+        .await
+        .map_err(|message| CommandError::Invalid {
+            field: Some("/point".into()),
+            message,
+        })?;
+    match command {
+        Some(name) => offer
+            .commands
+            .iter()
+            .find(|c| c.id == name)
+            .cloned()
+            .map(Some)
+            .ok_or_else(|| CommandError::Invalid {
+                field: Some("/command".into()),
+                message: format!(
+                    "`{name}` isn't offered at `{point}` for this context ({})",
+                    offered_ids(&offer)
+                ),
+            }),
+        None => match offer.commands.as_slice() {
+            [] => Ok(None),
+            [only] => Ok(Some(only.clone())),
+            _ => Err(CommandError::Invalid {
+                field: Some("/command".into()),
+                message: format!(
+                    "several answer `{point}` for this context; name one: {}",
+                    offered_ids(&offer)
+                ),
+            }),
+        },
+    }
+}
+
+/// Run the command that answers `point` for `context`, as `actor`
+/// (`Invalid` when nothing does).
+async fn run_point(
+    svc: &crate::Services,
+    actor: Actor,
+    point: &str,
+    context: &Value,
+    command: Option<&str>,
+    confirmed: bool,
+) -> Result<CommandOutcome, CommandError> {
+    let chosen = answer_of(svc, point, context, command)
+        .await?
+        .ok_or_else(|| CommandError::Invalid {
+            field: Some("/point".into()),
+            message: format!("nothing answers `{point}` for this context"),
+        })?;
+    svc.commands
+        .run(&actor, &chosen.id, chosen.input, confirmed)
+        .await
+}
+
+/// A page action's point: as [`run_point`], but a row nothing answers is
+/// skipped — the outcome says `{ "skipped": <why> }` and nothing ran — so
+/// one row of a bulk run doesn't fail the rest.
+async fn run_page_point(
+    svc: &crate::Services,
+    actor: Actor,
+    point: &str,
+    context: &Value,
+    command: Option<&str>,
+    confirmed: bool,
+) -> Result<CommandOutcome, CommandError> {
+    match answer_of(svc, point, context, command).await? {
+        Some(chosen) => {
+            svc.commands
+                .run(&actor, &chosen.id, chosen.input, confirmed)
+                .await
+        }
+        None => Ok(CommandOutcome {
+            result: serde_json::json!({ "skipped": format!("nothing answers `{point}` for this item") }),
+            audit_id: None,
+            event_id: None,
+            inverse: None,
+        }),
+    }
 }
 
 fn offered_ids(offer: &crate::commands::action_point_offers::PointOffer) -> String {
@@ -1243,6 +1321,113 @@ view:
         let (kind, id) = audit_actor(&fx.svc).await;
         assert_eq!(kind, "page");
         assert_eq!(id.as_deref(), Some("acme/tasks"));
+    }
+
+    /// A page whose row action names an action point, not a command: the
+    /// command that joined it answers, for the context the row binds.
+    async fn point_page_fixture(
+        joined: &[&str],
+    ) -> (crate::test_fixtures::TaskFixture, std::path::PathBuf) {
+        let (fx, root) = fixture().await;
+        let ext = root.join(".oxplow/extensions/acme");
+        let commands: String = joined
+            .iter()
+            .map(|name| {
+                format!(
+                    "  - name: {name}\n    summary: Finish it.\n    input_schema: {{ type: object, \
+                     required: [uri, to], properties: {{ uri: {{ type: string }}, to: {{ type: string }} }} }}\n    \
+                     entry: handlers/finish.star\n    \
+                     examples:\n      - {{ name: happy, input: {{ uri: \"oxplow:oxplow/task?id=tsk1\", to: done }}, \
+                     expect_commands: [oxplow.task.transition] }}\n    \
+                     ui: {{ label: {name}, at: acme/item.finish, \
+                     input: {{ uri: \"{{{{context.uri}}}}\", to: \"{{{{context.stage}}}}\" }} }}\n"
+                )
+            })
+            .collect();
+        std::fs::write(
+            ext.join("extension.yaml"),
+            format!(
+                "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [commands:oxplow.task.transition]\n\
+                 action_points:\n  - {{ name: item.finish, label: Finish, context: {{ uri: uri, stage: string }} }}\n\
+                 commands:\n{commands}"
+            ),
+        )
+        .unwrap();
+        std::fs::create_dir_all(ext.join("handlers")).unwrap();
+        std::fs::write(
+            ext.join("handlers/finish.star"),
+            "def transform(x):\n    i = x[\"input\"]\n    return {\"commands\": [{\"name\": \"oxplow.task.transition\", \
+             \"input\": {\"uri\": i[\"uri\"], \"to\": i[\"to\"]}}]}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            ext.join("pages/pointed.yaml"),
+            r#"title: Pointed
+loaders:
+  items:
+    sql: SELECT uri, title FROM v_task
+view:
+  viz: table
+  from: items
+  actions:
+    - { id: finish-point, label: Finish, point: acme/item.finish, row: true, bulk: true, context: { uri: "{{row.uri}}", stage: done } }
+    - { id: finish-named, label: Finish, point: acme/item.finish, command: acme.item.also, row: true, context: { uri: "{{row.uri}}", stage: done } }
+"#,
+        )
+        .unwrap();
+        crate::test_fixtures::activate(&fx.svc).await;
+        (fx, root)
+    }
+
+    /// A row action with a `point` runs the command that answers it, as the
+    /// page acting for the person, with the context the row binds.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_point_action_runs_the_command_that_answers_it() {
+        let (fx, _root) = point_page_fixture(&["item.finish"]).await;
+        Press::on("acme/pointed", Some("items"), "finish-point")
+            .row(task_row(&fx))
+            .run(&fx.svc)
+            .await
+            .unwrap();
+        assert_eq!(state(&fx.svc, fx.task).await, "done");
+        let (kind, id) = audit_actor(&fx.svc).await;
+        assert_eq!(
+            (kind.as_str(), id.as_deref()),
+            ("page", Some("acme/pointed#items"))
+        );
+    }
+
+    /// Nothing answering skips the row, with a reason and no failure;
+    /// several answering without a named command is `Invalid`; the action's
+    /// `command` names one.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_point_action_skips_a_row_nothing_answers_and_needs_a_name_when_several_do() {
+        let (fx, _root) = point_page_fixture(&[]).await;
+        let skipped = Press::on("acme/pointed", Some("items"), "finish-point")
+            .row(task_row(&fx))
+            .run(&fx.svc)
+            .await
+            .unwrap();
+        assert!(skipped.result["skipped"]
+            .as_str()
+            .unwrap()
+            .contains("nothing answers `acme/item.finish`"));
+        assert_eq!(skipped.audit_id, None);
+        assert_ne!(state(&fx.svc, fx.task).await, "done");
+
+        let (fx, _root) = point_page_fixture(&["item.finish", "item.also"]).await;
+        let err = Press::on("acme/pointed", Some("items"), "finish-point")
+            .row(task_row(&fx))
+            .run(&fx.svc)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("several answer"), "{err}");
+        Press::on("acme/pointed", Some("items"), "finish-named")
+            .row(task_row(&fx))
+            .run(&fx.svc)
+            .await
+            .unwrap();
+        assert_eq!(state(&fx.svc, fx.task).await, "done");
     }
 
     /// A row action binds the row it was invoked on; a whole-page action

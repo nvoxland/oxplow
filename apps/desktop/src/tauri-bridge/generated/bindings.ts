@@ -4654,6 +4654,12 @@ export type PageAction_Deserialize = {
 	 */
 	command?: string | null,
 	/**
+	 *  Instead of a command: an action point (`oxplow/task.move`) whose
+	 *  answering command runs, for the context `input` binds. The store
+	 *  that joined the point answers, so the page names no store's command.
+	 */
+	point?: string | null,
+	/**
 	 *  An `open` action: the column of the row it is offered on that holds
 	 *  the URI it opens. It runs no command (no bus run, no audit): the
 	 *  app navigates, and an agent pressing it is told the URI.
@@ -4830,6 +4836,12 @@ export type PageAction_Serialize = {
 	 *  `open` action, which runs none.
 	 */
 	command: string | null,
+	/**
+	 *  Instead of a command: an action point (`oxplow/task.move`) whose
+	 *  answering command runs, for the context `input` binds. The store
+	 *  that joined the point answers, so the page names no store's command.
+	 */
+	point?: string | null,
 	/**
 	 *  An `open` action: the column of the row it is offered on that holds
 	 *  the URI it opens. It runs no command (no bus run, no audit): the

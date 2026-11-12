@@ -669,6 +669,22 @@ is gone, is the toast's (usability.md "A person's command that fails").
   bindings; `actionDoes` (vizActions.ts) is what an action's title says
   (`opens <column>`). The Text view's "Open current version" is one:
   `open: current_uri` over its loader's column.
+- A **`point:`** action (instead of `command:`) runs whichever command
+  answers an action point, for the context `context:` binds (bound as
+  `input:` is: `{{row.x}}`, `{{param.x}}`, `{{order.x}}`, the drop's
+  places). `PageAction.point` / `context` (stored in `input`);
+  `prepare_resolved` → `Prepared::Point` → `run_page_point`
+  (`viz_actions.rs`): the offer is asked as the viewer
+  (`action_point_offer`, so `ui.accepts` / `about.accepts` apply), then the
+  single command runs as `Actor::Page` with the offer's bound input. A
+  `command:` beside `point:` names which, when several answer; several
+  with none named is `Invalid`. A row nothing answers is **skipped**, not
+  failed: no run, the outcome is `{ "skipped": <why> }` (the desktop toasts
+  "<label>: skipped — <why>"), so `bulk` over rows of several stores works
+  for the ones that have an answer. A `point` action takes no `form`,
+  `edit`, `open`, `fixed`, `fields`, `choices` or `input`; `drag`, `bulk`,
+  `row`, `options_from`, `when` work as for a command. A fixture presses it
+  like any action (`press: { action, node, row }`, `expect: { ok, result }`).
 - An action runs as the page for whoever pressed it
   (`Actor::Page { page_id, on_behalf_of }`; `pages/actions.rs`,
   `viz_actions::prepare_resolved`), so it grants no power. A press names

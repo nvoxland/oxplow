@@ -385,6 +385,19 @@ shared page (bundled's task pages, the Work board) offers "move this
 task" without naming any store: each store joins the point for its own
 items.
 
+A command at an item point binds the item in its input: `{{uri}}` is the
+item's URI and `{{uri.<param>}}` one of its params (`{{uri.id}}`), as an item
+command's do (`CommandUi::point_input`); a key the item lacks leaves the
+entry out.
+
+**One command, one action: `about` and `at` together.** A command may have
+both — it is offered on its item (`about`) and at a point (`at`), the same
+action. The store filter is then `about.accepts`, which serves the point
+too; `ui.accepts` is only for a point command with no `about` filter, and
+declaring both is refused ("one store filter"). A `form` command at a point
+opens its form with the context's keys (and the `{{uri}}` bindings) as
+params; the form's submit is the input.
+
 **The store filter.** `ui.about` is either the resource kind (a string) or
 `{ resource, accepts?: { store: <id> | [ids] } }`. An item URI's `store`
 param is matched like a renderer's `accepts` rule: an id equal to the

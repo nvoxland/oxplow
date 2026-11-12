@@ -138,6 +138,12 @@ export async function performVizAction(
     deps.openPage((outcome.result as { opened: string }).opened, false);
     return "done";
   }
+  // A point action whose row nothing answers ran nothing: it says why.
+  const skipped = (outcome.result as { skipped?: unknown } | null)?.skipped;
+  if (action.point && typeof skipped === "string") {
+    deps.toast(`${action.label}: skipped — ${skipped}`);
+    return "done";
+  }
   // A run that came back undoable offers its Undo.
   const auditId = outcome.inverse && outcome.audit_id != null ? outcome.audit_id : null;
   const uri = resultUri(outcome.result);
