@@ -560,7 +560,7 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   is an icon drawn before the cell from a fixed vocabulary
   (`viz/vizIcons.tsx`): the work glyphs, one per bucket (`backlog`,
   `todo`, `in_progress`, `blocked`, `done`, `canceled`: pass
-  `v_task.state`, never a list's own stage), a file's
+  `v_oxplow_task.state`, never a list's own stage), a file's
   status (`added`, `modified`, `deleted`, `renamed`, `untracked`,
   `conflicted`), the kinds (`epic`, `task`, `knowledge`, `file`, `folder`,
   `commit`, `diff`, `metric`, `dashboard`, `comment`), the resource icon

@@ -120,7 +120,7 @@ and vocabulary replacement and contribution restatement inside a surrounding
 savepoint: any diagnostic or storage failure restores the whole candidate.
 `prepare_with_capabilities` also includes prepared capability rows and switch
 events, rejecting mismatched catalog identities. Vocabulary then uses the
-candidate's planned task tracker recognizer rather than the old live selection.
+candidate's planned recognizers rather than the old live selection.
 It returns a vocabulary for publication only after the outer transaction commits.
 Storage or rollback errors require the caller to abort; logical diagnostics stay
 separate from retryable contention. This helper executes no external work.

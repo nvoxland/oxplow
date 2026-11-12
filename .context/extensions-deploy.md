@@ -362,7 +362,7 @@ version keeps working and the error says why); private state read by the
 next version; a producer's export changing under two consumers (the
 unversioned one keeps working; the one pinned to the old contract is held
 with a problem naming the import, and keeps serving its last working
-version); switching the task tracker between oxplow's and a provider's; and a
+version); switching a capability's choice; and a
 queued job across disable then enable (it waits, then runs). The shared
 setup is `test_fixtures::lifecycle` (`booted()` registers the pump
 reactors a running oxplow has but in-memory services lack).

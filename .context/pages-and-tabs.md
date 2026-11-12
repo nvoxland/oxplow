@@ -452,7 +452,7 @@ including inline rows and multiple loaders.
 this order (supplied, else the viewer's context, else the default;
 `head_sha` the viewed stream's HEAD; a stream change re-runs a page
 that declares it). A page whose `needs` (a capability such as
-`task_tracker` or `knowledge`) are unmet runs no loader: its run has
+`knowledge`, or a shared model such as `model:oxplow/task_record`) are unmet runs no loader: its run has
 `inactive` with the unmet needs and a message, and the page says so.
 A `sql` loader reads the extension's settings through `config()`.
 Loaders run in order: a `sql`
@@ -847,7 +847,7 @@ margin; an embed or a slot takes its title from the page it shows):
   then the `sections` slot. `request-summary` (no `for:`; param
   `request`, `req3`; the agent's `oxplow_request_summary`) is a request at
   a glance: a `detail` over `v_request` (its Changes row a `request`
-  link), then tables of its tasks (`v_request_task`, the strongest basis
+  link), then tables of its tasks (`v_oxplow_request_link`, the strongest basis
   per task), its files (`v_turn_file` claimed or sole, through
   `v_agent_turn.request_id`), its runs (`v_request_observation`), its
   metric changes (`v_request_metric_delta`, `changed = 1`) and its commits
@@ -874,8 +874,7 @@ margin; an embed or a slot takes its title from the page it shows):
   toolbar, a column per stage of the list (but backlog and canceled) and each
   card's menu; no rail. `task-list` (every item, whoever it's assigned to,
   each row naming its assignee; filters `state`, one of the list's stages,
-  `todo` (its first to-do stage) by default, `priority`, `q`): its `rail:` a quick-add `form` (drawn at the rail's bottom) over
-  `oxplow.task.create` (a title, in the stage the list shows, for nobody), its view a
+  `todo` (its first to-do stage) by default, `priority`, `q`): its `rail:` a quick add (the `oxplow/task.new` point's node, drawn at the rail's bottom: the store's own form), its view a
   `list` (the `task.list` replaceable; drag to reorder or nest; marked rows
   get bulk Mark (a select of the stages), priority, Assign to (the threads
   and You), Unassign and Delete) and New Task… in the nav bar. Both read
@@ -1179,7 +1178,7 @@ zone grouping); each appears only when it has content:
    single discovery surface. Always visible.
 2. **Work** — an `oxplow-bundled` panel, thread-scoped, over
    its dataset `thread_tasks` (one row per line, per thread), which reads the
-   task interface (`v_task`): whichever list is active, nothing
+   task model (`v_oxplow_task`): whichever store holds the tasks, nothing
    with none. Its header opens the `work` page, the same list in a tab,
    every row. The body part `work-panel` groups the lines (`group`): "In
    progress" (the thread's in-progress tasks: each epic's header followed
@@ -1187,7 +1186,7 @@ zone grouping); each appears only when it has content:
    active), then the stand-alone tasks; each task says what the thread's
    latest request is doing now), "Up next" (the ready and blocked tasks
    assigned to the thread, in its queue's order) and "Finished" (the last
-   20 done tasks the thread worked, `v_request_task` basis assigned or
+   20 done tasks the thread worked, `v_oxplow_request_link` basis assigned or
    transition, and knowledge pages it touched, newest first; `oxplow.tasks.clear_finished` records an
    event and the `finished_cleared` dataset hides what finished before
    it, though the panel has no button for it). The headings have no
@@ -1429,10 +1428,11 @@ screens"). **Work** is the board, a custom page whose component draws
 its filters, so it takes the whole width with no rail; the Work panel's
 header opens it. **Task List** is one state's items at a time, the
 backlog's too, with a quick add in its rail, for triage, finding and what was
-finished. Both read `v_task` and offer
-only what the active list can do (`v_capability_provider`): epics with
-`hierarchy`, Delete with `delete`; reordering and assignment are core's,
-for every list. There's no Archived page:
+finished. Both read `v_oxplow_task` and offer
+only what the item's store answers (its commands joined to the task
+points): Delete when a store answers `oxplow/task.delete`, epics when one
+answers `oxplow/task.unparent`; reordering and assignment are bundled's,
+for every store. There's no Archived page:
 oxplow's archived tasks are done or canceled, as the interface states
 them.
 

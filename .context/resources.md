@@ -26,8 +26,8 @@ fields that hold a URI are named `uri` (V101); prose says URI.
 2. **Links are URIs, and may dangle.** Store the URI. Extensions come and
    go and records get deleted; a URI nothing resolves is a dead link,
    shown as its raw text, never an error. Reads never fail on one. A task says what it is about with a link `about` any URI
-   (`oxplow.task.link { uri, target, link_type: about }`); find the
-   items about a thing by that link (`v_task_link.to_uri`).
+   (`oxtask.task.link { uri, target, link_type: about }`); find the
+   items about a thing by that link (`v_oxplow_task_link.to_uri`).
 3. **Two things stay strict:** the grammar (a malformed URI is refused at
    every write) and the event log (a subject must be a URI of a declared
    resource whose params hold).
@@ -210,11 +210,11 @@ resources:
   read from its manifest (`resources::foundation()`); manifest checks that
   run before any vocabulary (a decorator's `resource:`, a prompt's
   `about:`) read the same list (`extension_resources::resource_problem`).
-- **A task tracker's own ids.** The registry carries the active task tracker's
-  id recognizer (`with_task_ids(provider, id_pattern)`, set from the
-  capability registry at every rebuild): `tsk42` in text, `[[…]]` or loose,
-  is `oxplow:oxplow/task?id=tsk42&provider=oxtask` while oxtask
-  are the list (`task_uri_of`, `find_task_uris`).
+- **A task store's own ids.** The registry carries each store's id
+  recognizer (`with_task_ids(provider, id_pattern)`, from the models'
+  `fills.id_pattern`): `tsk42` in text, `[[…]]` or loose,
+  is `oxplow:oxplow/task?id=tsk42&provider=oxtask` while oxtask fills the
+  task model (`task_uri_of`, `find_task_uris`).
 - **What names a resource elsewhere** is its name: `ui.about` on a command
   (`about: oxplow/task`), an intent prompt's `about:`, a decorator's
   `resource:`, a fact subject's `subject_kind` (`oxplow/file`), a search
@@ -255,7 +255,7 @@ dataset; `symbol_resolve` finds a symbol now (`v_symbol`) or at its `rev`.
 
 `uri::canonical_wikilink(resources, interior)` turns a wikilink interior
 into a URI: a URI passes through when its resource is declared; one of
-the active list's ids → its task; `git:abc1234` and a bare sha → a
+a store's ids → its task; `git:abc1234` and a bare sha → a
 commit; `dir:src/` → `dir?path=src`; `finding:fnd-1`; a declared
 `wikilink.prefix` (`pr:12` → `oxplow:github/pr?id=12`); `src/a.rs@HEAD:42`
 → `file?path=src/a.rs&rev=git:HEAD#lines=42`; a kebab slug → an oxwiki page; `<store>:<id>` with an enabled store's id → that store's page.
@@ -308,9 +308,8 @@ they were.
 `wiki_page.file_refs_json` / `dir_refs_json` (the table is `knowledge_page` now) became `files_json` /
 `dirs_json`: a knowledge page's citation is a file path, so its names say `files`
 (`verify_refs` is now `oxplow.knowledge.verify_files`, with `files`,
-`verified_files`, `removed_files`). Events: stored `task.recorded`
-rows moved to v3 (`item.uri`, `item.parent_uri`) and
-`knowledge.page.recorded` rows to v2 (`page.uri`, `page.uris`). Undo
+`verified_files`, `removed_files`). Events: stored
+`knowledge.page.recorded` rows are v2 (`page.uri`, `page.uris`). Undo
 inverses and pending proposals had their input keys renamed (`ref` to
 `uri`, `parent_ref`, `evidence_ref`, `refs` and the rest likewise). The
 core datasets, command inputs and results, templates (`{{uri}}`,

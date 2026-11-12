@@ -300,7 +300,7 @@ collectors:
   - id: prs
     runtime: starlark        # starlark | jaq | exec
     entry: collectors/prs.star
-    input: "SELECT uri, title FROM v_task"
+    input: "SELECT uri, title FROM v_oxplow_task"
     on: { every: 15m }  # or manual (the default), or { on: [event types] }
     entities:
       - { name: pr, key: number, columns: { number: int, title: text } }
@@ -603,11 +603,10 @@ The same table is the `v_replaceable` dataset.
 | `vcs.history.graph` | history graph | no | 2 | `head_sha`, `reveal_sha`, `limit` | `q`, `author`, `branch` |
 <!-- replaceables:end -->
 
-A view of tasks reads `v_task` and changes items only through
-the interface commands (`oxplow.task.update`, `transition`,
-`reorder`, `move`, …), so it works with whichever list is active; the
-active list's `features` (`v_capability_provider`) say which of them it
-takes.
+A view of tasks reads `v_oxplow_task` and changes items only through
+the task action points (`oxplow/task.move`, `task.edit`, … and
+`oxplow.tasks.assign`, `reorder`), so it works with whichever store holds
+the task; a point nothing answers for an item is skipped.
 
 ### Effects
 

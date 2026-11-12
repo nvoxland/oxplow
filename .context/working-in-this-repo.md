@@ -140,7 +140,7 @@ is the one in `extensions/oxtask/handlers/*.star`.
 
 `task move-to-oxtask` is the one-off move of core's tasks into the oxtask
 extension's own file (`.oxplow/extensions-data/oxtask.sqlite`) and bundled's
-fields (`.context/models.md` "The switch"). Run it with oxplow quit, after
+fields (`.context/tasks.md`). Run it with oxplow quit, after
 the new binary booted once on the project (so bundled's `task_record` model
 and `request_task_next` model tables exist). Each task keeps its
 number (so `tsk<N>` and its URI), links and notes go to the store, an
@@ -222,18 +222,13 @@ the site search index). `knowledge delete` is confirmed by being named.
 is opened; an option a command doesn't take is refused (both used to
 become a task's title — tasks named `--help`).
 
-It runs the task system's own `task.*` commands on a command bus
-over the project's database (validation, audit and events as the app
-writes them; the acting thread is `$OXPLOW_THREAD_ID` or `--thread`), on
-a bus that checks nothing active. So it's the same tasks, and
-re-enabling the extension shows everything done meanwhile. The database
-is opened as it is (`Database::open_existing`: no migrating, no dataset
-recompile under the running app; refused at another schema version).
-The running app picks up the new events with its next pump pass; with
-the task tracker none, nothing reacts to them. Its reads (`list`,
-`show`) are oxplow's `task` table itself, not the task interface
-(which shows only the active list's items) — the one reader of oxplow's
-tables outside its implementation, on purpose.
+The `knowledge` commands run on a command bus over the project's
+database (validation, audit and events as the app writes them; the acting
+thread is `$OXPLOW_THREAD_ID` or `--thread`), on a bus that checks nothing
+active. The database is opened as it is (`Database::open_existing`: no
+migrating, no dataset recompile under the running app; refused at another
+schema version). The running app picks up the new events with its next
+pump pass.
 
 ## Repo layout (post-Tauri rewrite)
 
@@ -252,9 +247,6 @@ The backend is Rust; the desktop frontend is React/Monaco/xterm.
   Building oxplow needs bun, as its extension builds use it.
 - `crates/` — reusable Rust libraries. `oxplow-domain` (pure types +
   store traits), `oxplow-db` (rusqlite stores + migrations),
-  `oxplow-oxtask` (oxtask, one implementation of the
-  task interface: its store, service and status mapping; nothing
-  outside it names them — `.context/tasks.md`),
   `oxplow-config`, `oxplow-fs-watch`, `oxplow-git`, `oxplow-session`,
   `oxplow-runtime` (the write guard),
   `oxplow-pty`, `oxplow-lsp`, `oxplow-mcp`,
@@ -407,8 +399,7 @@ test reads or relies on the task.
 
 `tests-e2e/` drives the built frontend in Chromium (and, for custom
 components, WebKit) against `oxplow-daemon-sim` over a throwaway git
-project — the real app, a real daemon, the fake terminal harness and the fake
-task tracker; `tests-e2e/README.md` has the harness. It isn't part
+project — the real app, a real daemon and the fake terminal harness; `tests-e2e/README.md` has the harness. It isn't part
 of `test:collect` (it builds the frontend and boots a daemon per test,
 ~70 s); CI runs it as its own `e2e` job, where a spec that passes only on
 its retry fails the run. Each checkout serves on a port of its

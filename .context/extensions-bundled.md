@@ -5,7 +5,7 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
 ## What works today: Bundled extensions and the review packet
 
 - **Bundled extensions.** There are two (see "The `oxplow-bundled` extension" for the split). `oxplow-foundation` is required: oxplow's own
-  commands, AI providers and harness implementations, the default task tracker,
+  commands, AI providers and harness implementations, the default
   snapshots and knowledge, and the
   measures, dimensions and metrics oxplow records itself (tokens, requests, tests,
   coverage, analysis, tasks: its `measures:` / `dimensions:` / `metrics:`,
@@ -45,7 +45,49 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
   failure. Their sources are in this repo's `extensionSources`.
   - `oxplow-foundation` (`oxplow`, required): oxplow's own commands, providers and harnesses.
   - `oxplow-bundled` (`oxplow`): the review packet, analytics pages and advisories.
-  - `oxtask` (`oxtask`): will hold the tasks store and its commands. Empty now.
+  - `oxtask` (`oxtask`): the tasks store, oxplow's own task tracker: it fills `oxplow/task_record` (store `oxtask`) from its own SQLite file and holds the commands `oxtask.task.*`.
+    It holds the opinion about how its tasks are worked, so bundled names none
+    of its commands:
+    - **The task workflow**: the setting `tasks.workflow` (`off`,
+      `person_files`, `agent_tracks` the default, `custom`) with
+      `tasks.definitionOfDone` (free text), in oxtask's own `configuration:`
+      (namespace `oxtask`, not `oxplow`'s). `oxtask.tasks.set_workflow
+      { workflow?, definition_of_done? }` (a script: it merges into the
+      project layer) writes it through oxtask's `oxtask.settings.write`
+      (`oxtask.settings.read` reads it with the stamps). Dataset
+      `v_oxtask_task_workflow` (one row: `workflow`, `definition_of_done`);
+      Settings → Integrations shows it as **Task workflow** (the part
+      `task-workflow-settings`, mounted at `oxplow/settings.integrations`):
+      the four workflows, the current one marked, Use This to choose one, and
+      a form for what done means.
+    - **Skills, offered by the workflow** (`when:` on each, and only while the
+      task model has a live store): `oxtask` (the commands; always offered
+      then), `track-work` (`agent_tracks`: take or file a task for new work,
+      in progress before editing, done when fully done), `work-tasks`
+      (`person_files`: work what is assigned or queued; file only follow-ups)
+      and the slash command `/next-task` (every preset but `off`). Both
+      working skills say: the harness's own plan list is for steps inside a
+      task, discovered work is a backlog task linked `discovered_from`, and
+      done includes the definition of done. The Rust test
+      `the_task_skills_follow_the_task_workflow` checks the offer per preset.
+    - **The ready queue**: dataset `v_oxtask_ready_queue` (`todo` with no open
+      blocker; per thread, its assigned ready items in queue order, an epic
+      with its ready children as one unit; `thread_id` NULL is the pool),
+      read by the page `next-task` (the agent tool `oxtask_next_task`, with
+      `thread: "thr3"`) and by the context below.
+    - **The agent context `task-state`**: the thread's task in progress, the
+      next three in its ready queue and the definition of done (nothing when
+      there is none of them; core's `CONTEXT_CLEARED` tells an agent told
+      before): once, then on change, and again after a compaction
+      (extensions-commands.md "agent contexts"). Offered in every preset but
+      `off`.
+    - **The advisory `untracked-work`** (`agent_tracks` only): a request that
+      changed files (a claimed or sole `v_turn_file`) while the thread had no
+      task in progress and no task linked is reminded once per request.
+    Fixtures are oxtask's: `task-state-*`, `task-workflow-settings-*`,
+    `the-task-workflow-dataset-reads-the-setting-as-it-changes`,
+    `setting-the-task-workflow-keeps-the-definition-of-done`,
+    `the-reminder-is-only-for-the-agent-tracks-workflow`, `next-task-*`.
   - `oxwiki` (`oxwiki`): will hold the knowledge store and its commands. Empty now.
 
 - **The knowledge metrics** (in `oxplow-bundled`). The `oxplow.knowledge_pages` collector restates the page counts (`knowledge.pages`, `knowledge.stale_pages`, sliced by `oxplow.knowledge_store` and `oxplow.knowledge_bucket`) when a page is written, recorded or deleted and when a snapshot changes a file a page cites (`knowledge.page.drifted`); the `oxplow.request_read_knowledge` collector records, per stopped request that changed files, whether an agent read a page (`knowledge.read_requests`). Metrics: `knowledge.pages`, `knowledge.stale_pct`, `knowledge.read_requests_pct`. See `metrics.md` (knowledge pages, request read knowledge).
@@ -80,21 +122,23 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
 
 ## The rule: data in foundation, person-facing screens here
 
-oxplow-foundation holds the data of the task tracker and knowledge: their
-datasets, the `task` and `knowledge` resources, the `oxplow:oxwiki`
+oxplow-foundation holds the data of knowledge: its
+datasets, the `knowledge` resource, the `oxplow:oxwiki`
 implementation and its setting (`configuration: oxwiki`, default on; turned
 off by `oxplow.knowledge.set_oxwiki`, a script composing a settings write),
 the bus commands (with no `ui:`), skills and metrics. oxplow's own
 extensions share the namespace `oxplow`, so they share one configuration
 (at one `version`) and one pair of commands over it, foundation's
-`oxplow.settings.read` / `.write`; bundled's task workflow writes through
-them too. It has
-no page that a person uses to read or edit them. The task tracker's
-commands (`oxplow.task.*`) and the generic `tasks` skill (`needs:
-[task_tracker]`) are foundation's, serving any tracker; **oxtask itself is
-oxplow-bundled's**: the `oxplow:oxtask` implementation, its `/next-task`
-skill and the agent's tool pages `next-task` and `thread-tasks`. With only
-foundation running there is no task tracker.
+`oxplow.settings.read` / `.write`. It has
+no page that a person uses to read or edit them. Core and foundation have
+no tasks: the task model `oxplow/task_record`, its datasets (`v_oxplow_task`
+…), the `task` resource, the store-agnostic `tasks` skill (`needs:
+['model:oxplow/task_record']`: how to read the model, buckets, link types,
+assigning; it names no store's command) and the agent's tool page
+`thread-tasks` are **oxplow-bundled's**, and the shipped store is the
+`oxtask` extension, which holds the opinion about how its tasks are worked
+(the next-task queue, the workflow setting and its skills; below). With only foundation running there is no
+task tracker ([tasks.md](./tasks.md)).
 
 oxplow-bundled holds that UI: the pages above and the menu commands.
 With oxplow-bundled off, a task or knowledge page link opens core's generic
@@ -145,7 +189,7 @@ Each loads clean (`documented_examples_load_without_errors`):
 `oxplow-foundation` (required) and `oxplow-bundled` (optional, on by default), both
 in the `oxplow` namespace so a contribution can move between them without a rename.
 Foundation is kept as small as it can be while still useful: the host's pages, the
-default capability implementations (tasks, snapshots, knowledge)
+default capability implementations (snapshots, knowledge)
 and the measures core's change analysis records. `oxplow-bundled` is what has been
 reviewed and kept.
 
@@ -300,7 +344,7 @@ screens and the holder's add the review and analysis:
   **Assigned to you** (`assigned`; parts `assigned-panel`, `assigned-line`,
   `assigned-count`; page `assigned-to-you`, whose loaders `lines`, `line`
   and `open_count` the parts read) is the same view for the person: the
-  open tasks with `assignee = oxplow:oxplow/person` (`v_task`) - In
+  open tasks with `assignee = oxplow:oxplow/person` (`v_oxplow_task`) - In
   progress, then Up next (todo and blocked) in the person's queue order
   (`rank IS NULL, rank, created_at`) - each with its stage, under its
   epic. A project-scoped panel (`scope: project`): the same in every
@@ -309,53 +353,14 @@ screens and the holder's add the review and analysis:
   (`request_task` links threads' requests, a person's command is in no
   turn), so showing one would be a guess. Fixtures:
   `assigned-to-you-*`.
-  How an agent uses tasks is the project's **task workflow**, the
-  setting `tasks.workflow` of bundled's `configuration:` (version 2),
-  with `tasks.definitionOfDone` (free text; empty is none). Set both with
-  `oxplow.tasks.set_workflow { workflow?, definition_of_done? }` (a
-  script: it merges into the project layer, keeping the other settings).
-  Bundled also holds `oxplow.tasks.assign { uri, to? }` and
+  Bundled holds `oxplow.tasks.assign { uri, to? }` and
   `oxplow.tasks.reorder { uri, before?|after? }` (scripts over the shared
-  task model's `assignee` and `rank` fields, undone with their run):
-  TEMPORARY names beside core's `oxplow.task.assign` / `.reorder`, which
-  the switch renames them to. `assign` puts the task last in the new
+  task model's `assignee` and `rank` fields, undone with their run).
+  `assign` puts the task last in the new
   assignee's queue; `reorder` ranks it between its neighbours, numbering
-  the whole queue first when a neighbour has no rank.
-  The presets, by what oxtask offers (`when:` on each skill, offered only
-  while oxtask is the active tracker):
-  - `agent_tracks` (default): the `track-work` skill (take or file a task
-    for new work, in progress before editing, done when fully done) and
-    the `untracked-work` advisory: a request that changed files (a
-    claimed or sole `v_turn_file`) while the thread had no task in
-    progress is reminded once per request.
-  - `person_files`: the `work-tasks` skill (work what is assigned or
-    queued; file only follow-ups or when asked); no reminder.
-  - `custom`: only `/next-task`; the project's own extension supplies its
-    skill.
-  - `off`: none of them.
-  Both working skills say: the harness's own plan list is for steps inside
-  a task, discovered work is a backlog task linked `discovered_from`, and
-  done includes the definition of done. In every preset but `off`, while oxtask is
-  the active tracker, its agent context `task-state` tells the agent the
-  thread's task in progress, the next three in its ready queue (bundled's
-  `v_oxplow_ready_queue`, the one definition `next-task` reads too: `todo`
-  with no open blocker, an epic with its children as one unit, the pool
-  with `thread_id` NULL) and the
-  definition of done (nothing when there is none of them; core's
-  `CONTEXT_CLEARED` tells an agent told before): once, then on change, and again after
-  a compaction (extensions-commands.md "agent contexts"). Fixtures:
-  `task-state-*`. Settings → Integrations shows it as **Task workflow**
-  (`task-workflow-settings`, mounted at `oxplow/settings.integrations`):
-  the four workflows with what the agent does in each, the current one
-  marked, Use This to choose one for the project, and a form for what
-  done means. Both it and `task-state` read the dataset
-  `v_oxplow_task_workflow` (one row: `workflow`, `definition_of_done`).
-  Fixtures: `task-workflow-settings-*`,
-  `the-task-workflow-dataset-reads-the-setting-as-it-changes`. Fixtures:
-  `the-reminder-is-only-for-the-agent-tracks-workflow`,
-  `setting-the-task-workflow-keeps-the-definition-of-done`; the skills per
-  preset are the Rust test
-  `oxtask_offers_the_skills_of_the_projects_task_workflow`. It is `oxplow-bundled`'s, beside its
+  the whole queue first when a neighbour has no rank. Bundled names no
+  store's command: how an agent uses tasks is oxtask's opinion (below).
+  The Work panel is `oxplow-bundled`'s, beside its
   `thread_tasks` dataset and `tasks.clear_finished` command, with a `panel:`
   fixture. Still in the holder: Comments (`comments-panel`). Each moves the same way: its parts, a
   `panel:` fixture, and any rule it repeats with a foundation page made one
@@ -491,20 +496,20 @@ and enabling it restores the review and analysis pages.
 
 ## Task readers moved out of foundation (flip-order step 6, in part)
 
-Foundation must load and work with bundled off, and after the flip only
+Foundation must load and work with bundled off, and only
 bundled reads tasks. Both extensions have the namespace `oxplow`, so a
 moved page, metric or dimension keeps its id.
 
 - **Moved to bundled:** the metrics `task.open` and `task.completed` and the
-  dimension `work.priority` (all read `v_task`). A metric's key and its
+  dimension `work.priority` (all read `v_oxplow_task`). A metric's key and its
   facts' measure keys carry no extension (`metric_spec.key` is unique and
   `extension` only records the owner), so history keeps its keys. The
   metric page's "See also" now links them to `oxplow-bundled`; the fixture
   moved with them.
-- **Stays in foundation:** the `tasks` skill (it documents the
-  `oxplow.task.*` commands, which stay in foundation until the flip, and is
-  gated on `task_tracker`; it moves with them), the `task` resource and the
-  `oxplow.task.*` descriptors.
+- **Nothing task-shaped stays in foundation:** the `tasks` skill, the
+  `task` resource and its descriptors moved to bundled, and core's
+  `oxplow.task.*` commands are gone (the shipped store's are oxtask's
+  `oxtask.task.*`).
 - **Pages:** none of `closed-threads`, `diff-view`, `local-history`,
   `request-summary` and `thread-sessions` is a task page; each showed tasks
   in part. Foundation's versions now read no task, and bundled adds the
@@ -534,10 +539,8 @@ moved page, metric or dimension keeps its id.
 
 Three bundled effects keep the task model right when a thread closes, a
 stream archives or a handoff is taken (`effects/release_on_close.star`,
-`effects/take_handoff_task.star`; `.context/models.md` "The switch" step
-7a). They read `task_next` and `v_handoff` through `sql.read` and write
-oxplow's two fields; before the flip the model holds no live task, so they
-do nothing on a live project.
+`effects/take_handoff_task.star`). They read `v_oxplow_task` and `v_handoff` through `sql.read` and write
+oxplow's two fields.
 
 ## Added for extraction
 

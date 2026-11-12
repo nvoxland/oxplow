@@ -301,14 +301,14 @@ markdown links (`[label](oxplow:oxplow/file?path=…)`) for read-rendering; the
 markdown links to oxplow URIs back into `[[ ]]` form on save.
 
 **Task wikilinks** — a full URI (`[[oxplow:oxplow/task?id=ENG-1&provider=issues]]`) or a
-bare id of the active list's (`[[tsk42]]` with oxtask), matched
-by the id pattern the list declares (`v_capability_provider.id_pattern`,
+bare id of a store's (`[[tsk42]]` with oxtask), matched
+by the id pattern the store declares (`fills.id_pattern`,
 `taskRefOfMention`), as the backend ref extractor does — route to the
 item's `oxplow/task` URI link and **resolve to its title** at
 render time via `useTaskTitle` (`apps/desktop/src/taskTitleCache.ts`,
 a lazy per-ref sibling of `knowledgeTitleCache`, keyed by a page's URI) — same display-swap rule knowledge
 page links use (bare `[[tsk42]]` shows the title; `[[tsk42|label]]` keeps the
-label). An item that isn't on the active list renders broken. Click
+label). An item no store holds renders broken. Click
 routes through `taskTabRef` via the page-nav chokepoint.
 
 The `Markdown` component applies `preprocessWikilinks` to the value it

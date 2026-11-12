@@ -101,7 +101,7 @@ entity that has the columns.
 A **metric** is an aggregation over an entity **or** a fact set, sliced by
 dimensions:
 
-- `count(v_task) where state = 'done'`
+- `count(v_oxplow_task) where state = 'done'`
 - `median(v_github_pr.merged_at - opened_at)`
 - `avg(fact oxplow.coverage)`
 
@@ -813,7 +813,7 @@ and `v_dataset_test` are the catalog of all of them:
 | `v_thread` | threads within a stream |
 | `v_knowledge_touch` | which threads wrote which knowledge pages, and when each last did (`page`, `thread_id`, `last_seen_at`; the rail's Finished section, v4) |
 | `v_knowledge_page` / `v_knowledge_ref` | knowledge pages of the enabled stores (v5: `uri, store, id, kind, bucket, title, url, author, excerpt, body_size, outbound_uris, stale_ref_count, updated_at`; a disabled store's pages stay recorded but hidden; the body is `v_knowledge_body`, pins are `v_knowledge_pin` keyed by `page`, search is `v_search_knowledge`) with their outbound refs and `stale_ref_count`, and each page's file refs with their pin and `stale` (P5.C4; knowledge.md) |
-| `v_task` | the active task tracker's items (`uri`, `provider`, `native_id`, `state` (the bucket), `stage` and `stage_title` (the list's own stage, as it declares it), `native` JSON, `parent_uri`), excluding deleted; everything reads it — oxtask has no dataset of its own (`v_task` was removed) and keeps its own fields in `stage` / `native`; oxtask tasks are `task:oxplow:tsk<n>` (V115, P5.C1; data-model.md) |
+| `v_oxplow_task` | every store's tasks, bundled's dataset over the model `oxplow/task_record` (`uri`, `native_id`, `provider`, `title`, `body`, `state` (the bucket), `stage` and `stage_title` (the store's own stage, as it declares it), `parent_uri`, `assignee`, `rank`, `native` JSON, `created_at`, `updated_at`, `closed_at`), excluding deleted; oxtask tasks are `oxplow:oxplow/task?id=tsk<n>&provider=oxtask` |
 | `v_comment` | comment threads, with first-message `body` and `message_count` |
 | `v_comment_message` | each message of a thread, by `comment` (the thread's URI) and `position` from 1, with `author` and `body` |
 | `v_snapshot` | worktree snapshots, with `tree_hash` (whole-tree identity, V96) |
@@ -822,9 +822,9 @@ and `v_dataset_test` are the catalog of all of them:
 | `v_measure` | fact-type catalog |
 | `v_capture` | the scan/run that produced facts |
 | `v_fact` | atomic measurements, joined to `measure_key` and capture context |
-| `v_task_comment` | comments on the active list's items (`v_task_note` was removed) |
+| `v_oxplow_task_comment` | comments on tasks (bundled's dataset over the model's `comments` child) |
 | `v_handoff` | work handed from one thread to another (`oxplow.handoff.*`; V84): sender thread and session, recipient thread, task, body, `delivered_at` (stamped at the recipient's next prompt), `state` `open` / `taken` / `declined` / `withdrawn`; `v_search_handoff` is its search feed |
-| `v_task_link` | typed links between the active list's items (`v_task_link` was removed) |
+| `v_oxplow_task_link` | typed links between tasks (bundled's dataset over the model's `links` child) |
 | `v_agent_turn` | human prompt → agent answer, per thread (V74); what a turn changed is `v_turn_file` |
 | `v_token_usage` | model tokens per thread / request / model, with each turn's prompt (V74, `prompt` V82) |
 | `v_page_visit` | pages the human opened, and for how long (V74) |
@@ -853,7 +853,7 @@ and `v_dataset_test` are the catalog of all of them:
 | `v_terminal` | a stream's terminals: shells in its worktree, with the `uri` their PTY is keyed by (V106) |
 | `v_request_metric_delta`, `v_request_observation` | per request and stream, how each metric moved over the request's window (`crossing`) and the test runs, diff coverage and analysis its turns made, stored by the `request_analysis` asset (collection.md "A request's analysis"); `seq` runs oldest first, so the highest is the latest: every reader takes `ORDER BY seq DESC` as newest. Diff coverage is the request's start snapshot against the snapshot of the run's capture (collection.md) |
 | `v_change`, `v_change_file` (a `working` change's files say `staged` and `untracked`, restated by `change_reactor::watch_working_files` at boot and whenever the stream's refs or index move), `v_change_function`, `v_change_import`, `v_change_duplicate` | stored change analysis (see "Change analysis" below) (V81) |
-| `v_commit`, `v_commit_file`, `v_commit_task`, `v_branch`, `v_tag` | history, branches and tags (V85, V113). The commit indexer (`commit_indexer.rs`, run at boot and on each ref move, `RefMoves`) stores the commits reachable from **every stream's** head — new history whole, up to a 5000-commit horizon (`IndexDepth`), and any older commit a query names by `sha` ("Made on demand") — through the VCS capability (`Vcs::log`/`revision`, `.context/vcs.md`) — with their files (first-parent diff) as it projects them into `page_ref`; `v_commit.parents` (JSON, v2) lets a stream's history be a recursive read from its branch's head. `v_commit_task` reads the indexer's task mention edges and the task → commit links (declared impacts, the requests that worked on the task and made the commit), for the active task tracker's items. `refresh_refs` restates `v_branch` (`is_default`, v2) and `v_tag` from `Vcs::branches`/`tags` and maps each local branch to the stream checked out on it. The desktop's history panel, dashboard lists, branch picker and new-stream form read these datasets (`apps/desktop/src/vcsHistory.ts`) |
+| `v_commit`, `v_commit_file`, `v_commit_task`, `v_branch`, `v_tag` | history, branches and tags (V85, V113). The commit indexer (`commit_indexer.rs`, run at boot and on each ref move, `RefMoves`) stores the commits reachable from **every stream's** head — new history whole, up to a 5000-commit horizon (`IndexDepth`), and any older commit a query names by `sha` ("Made on demand") — through the VCS capability (`Vcs::log`/`revision`, `.context/vcs.md`) — with their files (first-parent diff) as it projects them into `page_ref`; `v_commit.parents` (JSON, v2) lets a stream's history be a recursive read from its branch's head. `v_commit_task` reads the indexer's task mention edges and the task → commit links (declared impacts, the requests that worked on the task and made the commit), for every store's tasks. `refresh_refs` restates `v_branch` (`is_default`, v2) and `v_tag` from `Vcs::branches`/`tags` and maps each local branch to the stream checked out on it. The desktop's history panel, dashboard lists, branch picker and new-stream form read these datasets (`apps/desktop/src/vcsHistory.ts`) |
 | `v_test_case_stat` | each test's summary per stream, branch and producer (V139, tsk733): last status and duration, runs, failures, flips, last failed / passed, max and mean duration — updated with every run, the home of per-test history since a run writes change-only per-case facts |
 | `v_test_run`, `v_test_case` | test runs (V87), views only. A run IS its `metric_capture` (producer `tests`, or `test-run` for a run that measured nothing), and both views read its verbatim `test-detail` payload in `detail_json`: counts from the payload, cases by `json_each` over `suites[].cases[]`. Cases come from the payload, not the `oxplow.test_case` facts, because those are skipped while every tests metric is disabled. `turn_id` is the capture's own: the turn of the tool call that ran it, which puts the run in that turn's request. A run that only reported counts (`oxplow.test.record_run`) has no cases |
 | `v_diagnostic` | what the language servers have published, right now (V86). `lsp_diagnostics.rs` subscribes to the LSP session broadcast and replaces a file's rows per `(stream, language, path)` on each `textDocument/publishDiagnostics` (paths repo-relative, positions 1-based, a URI outside the worktree dropped). Live state: the table is cleared at boot and a server's rows when it restarts, crashes or stops. Only files a server has published appear (usually the open ones, not the whole repo). A view re-runs on `DatasetsChanged` when rows commit; at most every 500 ms per stream, from the first change (so a server that publishes continuously can't starve it), `code.diagnostics.changed@2` is logged per changed file (P5.C5) |
@@ -893,16 +893,16 @@ An extension entity `<entity>` owned by extension `<ext>` is exposed as
   - **The authorizer enforces the read contract** (P4.3, tsk488; it only
     recorded in P4.1). The query's own SQL — a CTE body included — may
     read datasets (views) and `temp.*` tables; a stored table is refused as
-    "`task` is a physical table, not a published dataset; read
-    v_task",
+    "`thread` is a physical table, not a published dataset; read
+    v_thread",
     naming the datasets whose `source()` it is (from `dataset_input`), and
     never with SQLite's "no such table" (which `explain_unsynced` reads as
     an unsynced source). A table that doesn't exist at all names the
-    published dataset it most likely meant ("no such table: v_tasks; did
-    you mean `v_task`?", edit distance, read once the session's authorizer is
+    published dataset it most likely meant ("no such table: v_threads; did
+    you mean `v_thread`?", edit distance, read once the session's authorizer is
     off — tsk1039). An unknown column names the columns of each published
     dataset the query names, and the nearest one ("no such column: titel …;
-    did you mean `title`? v_task has: …"), so an agent's next query is
+    did you mean `title`? v_thread has: …"), so an agent's next query is
     right without a discovery query (agents spent about one call in six
     guessing columns). `count(*)` over a view is allowed (SQLite reports
     its base table at top level after the view's own reads). **A read's
@@ -1034,7 +1034,7 @@ collectors:
           number: int          # text | int | real | bool | time
           title: { type: text, doc: PR title }
         relations:             # documented joins (not executed)
-          - { to: v_task, on: "v_github_pr.title LIKE '%' || v_task.native_id || '%'" }
+          - { to: v_oxplow_task, on: "v_github_pr.title LIKE '%' || v_oxplow_task.native_id || '%'" }
 ```
 
 The entry prints `{"entities": {"<name>": [ {col: value, …}, … ]}}`,
@@ -1177,7 +1177,7 @@ entities from data already in the semantic layer:
   - id: hot
     runtime: starlark          # def transform(input): return {"entities": {...}}
     entry: sources/hot.star
-    input: "SELECT uri, title FROM v_task WHERE json_extract(native, '$.priority') = 'high'"
+    input: "SELECT uri, title FROM v_oxplow_task WHERE json_extract(native, '$.priority') = 'high'"
     entities: [...]
 ```
 
@@ -1264,7 +1264,7 @@ component (their `description:`, NULL when absent: none is made up), the same te
   - A changed column set rebuilds the table.
   - The store refuses to replace a view it doesn't own: a core view, or
     one from another extension. Extension `work` plus entity `item` can't
-    shadow `v_task`.
+    shadow `v_oxplow_task`.
   - `drop_extension` removes an extension's tables, views and state.
 - **Permission.** An exec collector runs code, so its extension must
   declare `process.run` (and the `network` hosts and `secrets` it

@@ -68,18 +68,18 @@ check already reported is not repeated.
   writes `.oxplow/extensions/<name>/extension.yaml` (v2, an `intent` whose `origin` is the URI passed with `--origin`,
   one example) and, but for a bare extension, that example's fixture
   `fixtures/basic.yaml` — then the kind's starter (P7.C6):
-  - `page` — `pages/<name>.yaml`, open tasks in the viewer's stream, with
-    a Start row action (`oxplow.task.transition`, a `uri` column it
+  - `page` — `pages/<name>.yaml`, the viewer's open threads, with
+    a Mark row action (`oxplow.thread.mark`, a `uri` column it
     binds but doesn't show) and an `answers:` entry; its example is
     `{ page: <name>, params: { stream_id: 1 } }`;
-  - `query` — `queries/<name>.yaml`, a rows loader of task states as
+  - `query` — `queries/<name>.yaml`, a rows loader of marks as
     `value` / `label`, for a choice's `options_from`; its example is
     `{ query: <name> }` expecting a row;
   - `component` — a `custom_components:` entry (a bundle under
     `components/<name>/`) and a page whose `component` node it feeds;
     `panel` — a `panels:` entry whose `body` is a part (`parts/<name>.yaml`),
     its example `{ panel: <name> }` checking the body's rows;
-  - `collector` — a Starlark collector `items` over `v_task` declaring
+  - `collector` — a Starlark collector `items` over `v_thread` declaring
     entity `item`, a dataset `open_items` over `ref('item')` and a page over
     the dataset; its example runs the collector over fixture rows;
   - `metric` — a code metric, built by `oxplow_app::metric_scaffold::
@@ -97,11 +97,10 @@ check already reported is not repeated.
     `path` column links `file` at the `line` column. Its example runs the
     collector over a two-folder fixture corpus and expects the facts;
   - `command` — `commands: [note]` whose `handlers/note.star` composes
-    `oxplow.task.comment`, with an example and a `ui` about
-    `task`; its intent example dry-runs it;
-  - `effect` (P8.D12) — `effects: [on-done]` on `task.state_changed`
-    `where: { to: done }`, whose `effects/on-done.star` composes
-    `oxplow.task.comment`; its intent example dry-runs it on a fixture
+    `oxplow.thread.rename`, with an example and a `ui` about
+    `thread`; its intent example dry-runs it;
+  - `effect` (P8.D12) — `effects: [on-done]` on `thread.closed`, whose
+    `effects/on-done.star` composes `oxplow.thread.rename`; its intent example dry-runs it on a fixture
     event;
   - `provider` — below; `extension` — the manifest only.
   It refuses an existing folder, a bad name and an origin that isn't a URI. **What
@@ -110,7 +109,7 @@ check already reported is not repeated.
   `crates/oxplow-sdk/tests/just_works.rs` holds each kind to it, through
   to loading in a real oxplow: the page's row action names a registered
   command, the collector syncs and its dataset publishes, the command runs
-  through the bus; a task tracker passes the kit
+  through the bus; a provider passes the kit
   with the fake behind its stub.
 - **Recorded fresh-agent runs** (`crates/oxplow-sdk/fixtures/just-works/
   <kind>/`): `scripts/record-just-works.sh <kind>` gives `prompt.md` to
@@ -186,7 +185,7 @@ check already reported is not repeated.
 - **`scaffold(…, Kind::Provider { capability }, …)`** (`extension new
   provider <name> [--capability <cap>]`, P5.D5) adds a `providers:` entry
   (id = the name with `_` for `-`, the capability). `Kind::parse("provider")`
-  is `task_tracker`; `Kind::provider(cap)` refuses a capability without a
+  is `snapshots`; `Kind::provider(cap)` refuses a capability without a
   provider contract (the CLI exits 2), and `--capability` on another kind
   is a usage error. `provider.json` comes from the capability's
   `ProviderContract`: the verbs it always needs (`confirm: never`,
@@ -195,8 +194,8 @@ check already reported is not repeated.
   its records' entity when it streams records, and an object config
   schema. What the contract doesn't say is the SDK's starter per
   capability (`provider_starter`, `verb_input`): each verb's summary and
-  input schema, the intent example and its fixture — `create` expecting
-  `{ uri: $any }` for a task tracker; `render` of `{ kind: ack }` expecting `{ body: $any }` for an agent
+  input schema, the intent example and its fixture — `mark` expecting
+  `{ handle: $any, … }` for a snapshots provider; `render` of `{ kind: ack }` expecting `{ body: $any }` for an agent
   harness, whose `launch` / `tool_use` / `render` inputs are the wire's
   (`{ session, endpoints, … }`, `{ body }`, `{ answer }`) and whose
   capability `data` starts as `{ env_markers: [], settings: [] }` (`ProviderStarter.data`; null for a
@@ -208,13 +207,7 @@ check already reported is not repeated.
   `implementations:` entry whose `entry` is a script,
   `implementations/<id>.star` (extensions-commands.md "Implementations").
   `Kind::implementation(cap)` takes the capabilities a provider may
-  implement (a provider contract) and refuses the rest. A task tracker's
-  works as written (`implementation_script`: its items kept in oxplow's
-  own record, read back from `v_task` with `sql.read`; the provider
-  scaffold's six stages) and its `basic` fixture chooses it and files a
-  task (`given: [oxplow.capability.choose, oxplow.task.create]`, then a
-  `sql` read of `v_task`); another capability's verbs (each its contract
-  always needs) are stubs that `fail`, so its conformance suite is red
+  implement (a provider contract) and refuses the rest. The verbs it always needs (each its contract's) are stubs that `fail`, so its conformance suite is red
   until they're written (`just_works.rs`
   `a_scaffolded_script_implementation_is_red_until_its_verbs_are_written`).
   `extension test` runs each script implementation's capability suite

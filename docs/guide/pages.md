@@ -13,8 +13,8 @@ can **Save as knowledge page** or **Save as Page** to keep it.
 
 ## The data
 
-Everything oxplow tracks is exposed as read-only SQL views: `v_task`
-(the active task tracker's items, whichever tracker holds them), `v_request`,
+Everything oxplow tracks is exposed as read-only SQL views: `v_oxplow_task`
+(the tasks of every store that fills the task model), `v_request`,
 `v_thread`, `v_comment`, `v_knowledge_page`, `v_turn_file`, `v_agent_turn`,
 `v_token_usage`, `v_fact`, and more.
 
@@ -57,8 +57,8 @@ answers:
 loaders:
   blocked:
     sql: |
-      SELECT uri, title, updated_at FROM v_task
-      WHERE state = 'blocked' AND thread_id = :thread_id
+      SELECT uri, title, updated_at FROM v_oxplow_task
+      WHERE state = 'blocked'
 view:
   viz: table            # table | list | sections | tree | number | markdown | bar | line | treemap | board | custom | ...
   from: blocked
@@ -262,7 +262,7 @@ the commands it declares, and it is fed its page's data.
 # extension.yaml
 custom_components:
   - id: burndown
-    commands: [oxplow.task.transition]    # commands it may run
+    commands: [oxtask.task.move]    # commands it may run
 ```
 
 ```yaml
@@ -297,7 +297,7 @@ oxplow.connect().then((component) => {
   component.onUpdate(({ data }) => render(data)); // a loader changed
 });
 // Elsewhere, with `component` in hand:
-//   await component.invoke("oxplow.task.transition", { uri, to: "done" })
+//   await component.invoke("oxtask.task.move", { id: "tsk42", stage: "done" })
 //   await component.navigate("oxplow:oxplow/task?id=tsk42&provider=oxtask")   // oxplow pages only
 //   await component.navigate(uri, { newTab: true })    // open it in a new tab
 //   await component.navigate(uri, { replace: true })   // take the place of this step in Back
@@ -389,7 +389,7 @@ oxplow.connect().then(async (component) => {
   // Its own memory for you, in every tab:
   //   await component.pageMemory.set("columns", ["title", "state"]);
   // A form oxplow shows; resolves with the result, or rejects CANCELLED:
-  //   await component.openForm("oxplow.task.create", { title: "" })
+  //   await component.openForm("oxtask.task.create", { title: "" })
 });
 ```
 
@@ -432,10 +432,10 @@ a bookmark doesn't freeze it to one date.
 
 An extension can put its own page where one of oxplow's views is: the
 Work board (`task.board`), the Task List's list (`task.list`) or a
-task's description editor (`task.detail`). It needs no task tracker of its
-own: a view reads `v_task` and changes items through the task
-commands (`oxplow.task.update`, `transition`, `reorder`, `move`), so it
-works with whichever list is active.
+task's description editor (`task.detail`). It needs no task store of its
+own: a view reads `v_oxplow_task` and changes items through the task
+action points (`oxplow/task.move`, `task.edit`, … and `oxplow.tasks.assign`,
+`reorder`), so it works with whichever store holds the task.
 
 ```yaml
 # extension.yaml
@@ -540,7 +540,7 @@ collectors:
   - id: hot
     runtime: starlark            # or: jaq
     entry: collectors/hot.star
-    input: "SELECT uri, title FROM v_task WHERE json_extract(native, '$.priority') = 'high'"
+    input: "SELECT uri, title FROM v_oxplow_task WHERE json_extract(native, '$.priority') = 'high'"
     entities:
       - { name: hot_item, key: uri, columns: { uri: text, title: text } }
 ```

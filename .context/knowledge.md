@@ -39,7 +39,7 @@ metrics and tracking are common to all of them.
 - **Wikilinks.** A bare `[[slug]]` is an oxwiki page. `[[<store>:<id>]]`
   names another enabled store's page (`canonical_wikilink`; the vocabulary
   knows the enabled stores through `ResourceRegistry::with_knowledge_stores`,
-  set from `CapabilityRegistry::recognizers` with the task tracker's ids).
+  set from `CapabilityRegistry::recognizers`).
 - **Kinds and buckets.** A store declares the kinds of page it keeps
   (`KindDecl { id, title, bucket }`), each in one of three core
   **buckets**: `note` (understanding to read later), `memory` (what an

@@ -28,7 +28,7 @@ or exact mechanics.
 - **`.context/usability.md`** — UI rules (Enter submits, Escape cancels,
   drop-target highlighting, right-click for destructive actions, etc.).
   Read before adding *any* UI.
-- **Tasks from the command line.** oxtask, oxplow's own task tracker,
+- **Tasks from the command line.** oxtask, oxplow's own task store,
   ships in `oxplow-bundled` and is a store of the shared task model. With
   oxtask enabled in the project, or oxplow not running, file and update
   tasks with `cargo run -q -p oxplow-dev -- task …`
@@ -115,7 +115,7 @@ or exact mechanics.
 | Language support — the `Language` enum, `LanguageSupport` registry, per-language specs (analysis/merge/LSP/metrics) | `.context/language-support.md` |
 | Tables, stores, tasks, sort_index, migrations | `.context/data-model.md` |
 | The agent process, Stop hook, MCP tools, write guard, agent prompt config | `.context/agent-model.md` |
-| How oxplow infers the agent's work (turns and requests, no gates, hints) and the capabilities direction (swappable task tracker, snapshots) | `.context/work-tracking.md` |
+| How oxplow infers the agent's work (turns and requests, no gates, hints) and the capabilities direction (swappable snapshots) | `.context/work-tracking.md` |
 | Adding a new persisted operation (store + IPC + UI), event bus, cross-store updates | `.context/ipc-and-stores.md` |
 | Background colors, tier hierarchy, adding a new color variable | `.context/theming.md` |
 | `.git` watching, blame, branch changes, commit execution | `.context/git-integration.md` |
@@ -131,8 +131,8 @@ or exact mechanics.
 | Resources and their URIs — building, reading, storing or linking any `<kind>:<id>` string in Rust, SQL, Starlark or TS (builders, readers, `uri` columns, dead links); the grammar and type registry; resource / renderer / view | `.context/resources.md` "Using refs" |
 | Commands — the command bus (spec, actors, validate → policy → confirm → run + audit + `command.executed` in one transaction, undo), adding a command | `.context/commands.md` |
 | Knowledge — the knowledge capability (several stores at once; oxwiki is oxplow's own), `knowledge.write_page` and its sibling commands, pins, hand-edit convergence, the oxwiki write guard | `.context/knowledge.md` |
-| External providers — the JSON-RPC/NDJSON protocol crate and meta-model, the fake provider, the host (consent, spawn, handshake, `ExternalTaskTracker`), instances and health, Settings → Integrations, the conformance kit and `oxplow extension test` | `.context/providers.md` |
-| Tasks — `v_task`, the `TaskTracker` capability and registry, oxtask, the conformance suite | `.context/tasks.md` |
+| External providers — the JSON-RPC/NDJSON protocol crate and meta-model, the fake provider, the host (consent, spawn, handshake), instances and health, Settings → Integrations, the conformance kit and `oxplow extension test` | `.context/providers.md` |
+| Tasks — the `oxplow/task_record` model, bundled's `v_oxplow_task` datasets and task points, oxtask | `.context/tasks.md` |
 | Shared models (contract, being built) — `models:` / `fills:`, `model.write`, fields, markdown bodies, how tasks and knowledge become observed systems | `.context/models.md` |
 | The semantic layer — sources (entities + facts), dimensions, metrics, the `v_*` read contract, `query_sql`, user/extension sources (target design, epic tsk275) | `.context/semantic-layer.md` |
 | Extensions — the terms (extension, contribution, capability, provider, scope, access, effect) and the index of the extensions docs | `.context/extensions.md` |

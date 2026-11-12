@@ -600,11 +600,7 @@ instead of running the script again: composing afresh could read
 changed rows, change a step's input and so its key, and make a write that
 landed again. It is sent only while every step still goes to a provider
 keeping the promise; otherwise it isn't sent (`Reacted::NotResent`) and the
-failure counts, a person's. A composed `oxplow.task.create` files on the
-tracker active when it's **sent**, like every create: pointed
-elsewhere meanwhile, the retry goes there — or, when that tracker keeps
-no idempotent writes (oxplow's own), isn't sent by itself and waits for a
-person. Each step carries its idempotency key, the
+failure counts, a person's. Each step carries its idempotency key, the
 same on every attempt ([commands.md](./commands.md) `effect_step_key`), so
 a write that landed lands once. A person's **Retry** composes afresh from
 what the effect reads now — the person decides it should. A loop every 5 s (`spawn_auto_retry`, at boot — its first tick only

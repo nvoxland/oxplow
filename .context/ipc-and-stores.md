@@ -744,7 +744,7 @@ cross-page-reference graph (`page_ref` table; see
 [data-model.md](./data-model.md)) is the exception: a single
 one `source_uri` like a task's accumulates
 rows from different owners (the item's body, link and comment slices,
-restated from the task interface),
+restated from the task model),
 each owning a slice keyed by `ref_type`.
 
 The pattern that lets writers co-own a source without trampling
@@ -773,13 +773,10 @@ each other:
    or a writer's drift is undone at the next start after a migration or
    under a new build (it doesn't rerun when neither changed).
 4. **Event-driven projection** where the write logs an event. A
-   task command logs core's `task.*` events in its
-   transaction (`.context/tasks.md`), and
-   `PageRefTaskConsumer` (`oxplow-app/src/page_ref_consumers.rs`)
-   restates the item's body, link and comment slices from the
-   task interface (`task_refs::restate_tx`) when the pump
-   delivers it, for every list — after `tasks.project` has put a
-   list's record there —
+   write of a shared-model row (a task, a knowledge page) logs the
+   model's change event, and the model's edge projection restates the
+   row's body, link and comment slices (`.context/models.md`) when the pump
+   delivers it,
    checkpointed and dead-lettered, so a crash between commit and
    projection can't leave the graph stale. As writes gain events this
    replaces (3) for them; see [data-model.md](./data-model.md)

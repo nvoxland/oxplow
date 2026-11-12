@@ -15,7 +15,7 @@ rename. Each piece looks reasonable. The combined diff is
 unreviewable.
 
 **Oxplow primitive: tasks.** A task is a row, not a vibe.
-When a task tracker is active, tasks make scope and follow-ups durable.
+When a task store is enabled, tasks make scope and follow-ups durable.
 New scope can get its own row rather than disappearing into a diff.
 Filing is optional; observed turns, changes and evidence are recorded
 without requiring a task before an edit.

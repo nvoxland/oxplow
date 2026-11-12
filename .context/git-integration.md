@@ -632,7 +632,7 @@ commit into the unified `page_ref` graph (see
   commit made outside oxplow, or of a file edited again since, has no rows,
   and a commit with no task still links to its requests. Nothing is closed
   by a commit. The `task → commit` edge is **derived**
-  (`v_commit_task`): through the task's requests (`v_request_task`), from
+  (`v_commit_task`): through the task's requests (`v_oxplow_request_link`), from
   the commit's message, and from a declared impact; it is not stored.
 - **Logged as `vcs.commit.indexed`** `{ commit, stream, committed_at }`,
   once per commit (dedupe key), anchored to the stream whose workspace

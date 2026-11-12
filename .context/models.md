@@ -162,16 +162,12 @@ models:
 - **Bare links.** A loose id in text (`tsk12`, `[[slug]]`) resolves by
   the stores' declared patterns: each `fills:` entry of a task model (one
   whose resource is `oxplow/task`) may declare `id_pattern:` (a regex,
-  matched whole, checked at load). Built: the vocabulary recognizes the
-  active task tracker's pattern first (until the flip removes core's
-  tracker), then each live fill's (`ModelRegistry::task_ids`, added in
+  matched whole, checked at load). The vocabulary recognizes each live
+  fill's pattern (`ModelRegistry::task_ids`, in
   `PreparedVocabulary::prepare`), in load order; the first match wins an
   id two would match (whether two regexes overlap can't be checked in
-  general, so the order is the rule). A provider fill carries its
-  instance's `id_pattern`; the host's recognizers list every running
-  provider instance's pattern after the active tracker's
-  (`CapabilityRegistry::task_ids_from`), so an external store's loose ids
-  are links whether it is active or not. `[[slug]]` resolves to the store the model's
+  general, so the order is the rule). A store's loose ids are links whether it is the only one or not.
+  `[[slug]]` resolves to the store the model's
   owner names as `default_store` (bundled: `oxwiki`), else is left as
   text.
 - **Search.** The resource's `searchable: <dataset>` stays the mechanism
@@ -279,53 +275,37 @@ fills:
 - **Cursor.** A collector may return `"cursor": {...}`; it is kept in
   `collector_run.cursor_json` and given back as `x["cursor"]` on the next
   run. A failed run keeps the old cursor.
-- **Providers (decided 2026-11-12: build the adapter).** A provider
-  process's `read` stream is turned into the same `models` output for its
-  instance's store (its instance id), applied with `models::apply_tx`, so
-  an existing provider tracker (Linear) keeps showing its items with no
-  change to the provider program; its writes become its own commands (one
-  per provider operation, as today). `TasksProjection` and
-  `KnowledgeRecords` go once the adapter stands in for them.
-  **Built (adapter, beside the projections).** `providers/model_records.rs`
-  (`records.models`, an async pump consumer) turns each `task.recorded` /
+- **Providers (knowledge only).** A provider process's `read` stream is
+  turned into the same `models` output for its instance's store (its
+  instance id), applied with `models::apply_tx`. `providers/model_records.rs`
+  (`records.models`, an async pump consumer) turns each
   `knowledge.page.recorded` of a running provider instance into a
-  `ModelOutput` for `oxplow/task_record` / `oxplow/knowledge_record`
-  (store = the instance id, `upsert` of one row or `delete`), applied with
-  `apply_tx`: cause `trigger`, the record's anchors, source
-  `provider:<instance>`. A task row has its stage's title and bucket (as the
-  instance declares its stages), the first-seen `closed_at` / `created_at`,
-  the instance's declared `native` fields as `fields`, and `links` /
-  `comments` when the record states them (a link whose type the model's
-  enum lacks, or whose target is no ref, is dropped with a warning); a page
-  row's stated `uris` are its `refs`. The fills come from the registry:
+  `ModelOutput` for `oxplow/knowledge_record` (store = the instance id,
+  `upsert` of one row or `delete`), applied with `apply_tx`: cause
+  `trigger`, the record's anchors, source `provider:<instance>`. A page
+  row's stated `uris` are its `refs`. The fill comes from the registry:
   `ModelRegistry::with_provider_fills` adds, from the generation's
-  capability rows (`PreparedCapabilities::rows`, called in
-  `PreparedExtensionDatabase::with_vocabulary`), one fill per available
-  external instance (task_tracker -> task_record, knowledge ->
-  knowledge_record), written as the provider's extension; the views list
-  its store because the fill is in the swapped registry. Bundled off (the
-  models undeclared) -> no fill, the consumer returns without error.
-  **One writer per store.** A provider fill carries `provider: true`
-  (set only by `with_provider_fills`, never by a manifest), and the
-  consumer writes only through such a fill. A store an extension fills has
-  its own writer: core's own tracker emits `task.recorded` with
-  `provider=oxtask` too, and the oxtask extension fills `oxplow/task_record`
-  with `stores: [oxtask]`, so without the flag the adapter would write a
-  second copy of those rows.
-  **Reconcile.** A record that arrives with no provider fill is dropped by
-  the consumer, and the provider sync never resends it (it equals the item's
-  last `task.recorded`). So a publication states a store when its provider
-  fill appears: `model_records::reconcile_if_needed_tx`, run in
-  `PreparedExtensionDatabase::with_vocabulary` after the capability rows are
-  restated (a task's stage is read from them). It writes the latest
-  `task.recorded` / `knowledge.page.recorded` of each item of the store
-  from the event log with cause `reconcile` (a deleted item stays out; a
-  record that won't write is warned about, not fatal). An `asset_state`
-  marker `model_reconcile:<model>:<store>` makes it run once per fill; a
-  publication without the fill drops the marker, so a fill that goes away
-  and comes back is stated again. An instance becoming available changes
-  the capability rows, which is a publication (the fill is built from those
-  rows), so no separate trigger is needed.
+  capability rows, one fill per available external knowledge instance,
+  written as the provider's extension; the views list its store because
+  the fill is in the swapped registry. Bundled off (the model undeclared)
+  -> no fill, the consumer returns without error. **One writer per
+  store.** A provider fill carries `provider: true` (set only by
+  `with_provider_fills`, never by a manifest), and the consumer writes
+  only through such a fill. **Reconcile.** A record that arrives with no
+  provider fill is dropped by the consumer, and the provider sync never
+  resends it, so a publication states a store when its provider fill
+  appears: `model_records::reconcile_if_needed_tx`, run in
+  `PreparedExtensionDatabase::with_vocabulary` after the capability rows
+  are restated. It writes the latest `knowledge.page.recorded` of each
+  page of the store from the event log with cause `reconcile` (a deleted
+  page stays out; a record that won't write is warned about, not fatal).
+  An `asset_state` marker `model_reconcile:<model>:<store>` makes it run
+  once per fill; a publication without the fill drops the marker, so a
+  fill that goes away and comes back is stated again.
+  **There is no task provider.** A tracker
+  outside oxplow (a Linear-like service) is an ordinary extension: a
+  collector that pulls its data fills `oxplow/task_record` through
+  `fills:`, like oxtask. The adapter goes with the `knowledge` capability.
 
 ## A script that composes a store's write (decided 2026-11-12, built)
 
@@ -407,7 +387,7 @@ models:
     open: true
     key: id
     store_param: provider      # today's URIs: oxplow:oxplow/task?id=<id>&provider=<store>
-    change_event: oxplow.task.changed
+    change_event: oxplow.task_record.changed
     search: { title: title, body: body }
     columns:
       id: text
@@ -444,105 +424,55 @@ fields:                        # oxplow's own annotations on every store's tasks
       - { name: rank, title: Rank, kind: number }         # sparse: an assign writes one value
 ```
 
-- **Declared now** (2026-11-12) as `task_record` and `knowledge_record`
-  (`v_oxplow_task_record`, `v_oxplow_knowledge_record`): in the `oxplow`
-  namespace a model named `task` would be `ref('task')` and shadow core's
-  `v_task` for bundled's own datasets. Two Phase 3 decisions follow: a
-  bundled dataset is `v_oxplow_<name>`, so `v_task` as the read contract
-  needs core to point the name at bundled's dataset (or its readers move);
-  and a child edge's prefix must start with its model's name, so task
-  links become `task_record_link:<type>` edges (today `task_link:`), and
-  `v_task_link` moves with them.
+- **Declared** (2026-11-12) as `task_record` and `knowledge_record`
+  (`v_oxplow_task_record`, `v_oxplow_knowledge_record`): a bundled dataset
+  is `v_oxplow_<name>`, and a child edge's prefix must start with its
+  model's name, so task links are `task_record_link:<type>` edges.
 - **Assignment and rank are bundled's fields** (namespace `oxplow`), written
-  by its commands (`oxplow.task.assign` / `reorder` become bundled's, over
+  by its commands (`oxplow.tasks.assign` / `reorder`, over
   `oxplow.model.set_fields`): a store's reconcile never touches them, a
   rename and a tombstone keep them.
-- **`v_task` stays, as bundled's dataset** joining `v_oxplow_task` with its
-  fields and the store's stages, with today's columns (`provider` = store,
-  `native_id` = id, `native` = the store's own fields, `assignee`, `rank`,
-  `stage_title`…), so its readers move with no change. Core's `v_task`
-  goes in the same publication (two can't both exist).
-- **Request links** are bundled's own model, `oxplow/request_task_next`
-  (TEMPORARY, the flip renames it `request_task`; view
-  `v_oxplow_request_task_next`, table `model__oxplow__request_task_next`,
-  as `task_next` is the temporary `task`), written
-  by its collector `oxplow.request_task` as a reaction to
-  `oxplow.task_record.changed` events with `cause: trigger` or `fields`.
-  It is owner-only (not `open`), with one store, `oxplow`, named in
-  bundled's own `fills:`. A row is named by its `key`
-  (`<request uri>|<task uri>|<basis>`) and has `request` (uri), `task`
-  (uri), `basis` (`filed`, `transition`, `assigned`, `edited`, and
-  `prompt` for a link moved from core), `thread` (uri), `turn_id` (int,
-  from the event's anchors) and `at` (the event's time). It is a model,
-  not an entity, because a model's table keeps its rows across a shape
-  change, where an entity table is dropped and rebuilt empty, and links
-  moved from core can't be rebuilt from anything. No edge is stated: a
-  column's edge projects from the row's own URI, not from the request to
-  the task, so none fits. Until the flip it has the `_next` name so that,
-  inside bundled, `ref('request_task')` is still core's dataset (a
-  bundled dataset of the same name would shadow it): `thread_tasks` and
-  `deviation` keep reading core's `request_task` and `task`, which is
-  what the live app (core's tracker, oxtask off) fills. The flip's
-  `move --replace` rewrites every link from core's table, so the rename
-  costs nothing.
+- **Request links** are bundled's own model, `oxplow/request_task` (view
+  `v_oxplow_request_task`; the dataset `request_link`,
+  `v_oxplow_request_link`, is its read shape), written by its collector
+  `oxplow.request_task` as a reaction to `oxplow.task_record.changed` events
+  with `cause: trigger` or `fields`. It is owner-only (not `open`), with
+  one store, `oxplow`, named in bundled's own `fills:`. A row is named by
+  its `key` (`<request uri>|<task uri>|<basis>`) and has `request` (uri),
+  `task` (uri), `basis` (`filed`, `transition`, `assigned`, `edited`,
+  `prompt`), `thread` (uri), `turn_id` (int, from the event's anchors) and
+  `at` (the event's time). It is a model, not an entity, because a model's
+  table keeps its rows across a shape change, where an entity table is
+  dropped and rebuilt empty. No edge is stated: a column's edge projects
+  from the row's own URI, not from the request to the task, so none fits.
 
-## The switch, as decided after the 2026-11-12 review
+## Tasks on the model
 
-- **Thread and stream ends are events** (built): closing a thread logs
+The shape of the task side; `.context/tasks.md` is the map.
+
+- **Thread and stream ends are events:** closing a thread logs
   `thread.closed@1 { thread }`, archiving a stream logs `stream.archived@1
-  { stream, threads }` (core namespace `stream`, kept without expiry), so
-  bundled releases what they were working on by reacting to them, and
-  core's commands stop naming tasks at the flip. A taken handoff's task is
-  read from `v_handoff` by the `handoff.settled` event's `handoff`.
-
-- **The read contract is bundled's dataset `task` (`v_oxplow_task`)**, over
-  `task_record` joined with oxplow's fields and the store's stages, with
-  today's `v_task` columns. No core alias for `v_task`: an alias would be a
-  core special case. Its readers (pages, datasets, core Rust readers) move
-  to the new name. The same holds for `v_task_link` (its edges become
-  `task_record_link:<type>`) and the knowledge read contract.
+  { stream, threads }` (core namespace `stream`, kept without expiry).
+  Bundled releases what they were working on by reacting to them; core's
+  commands name no task. A taken handoff's task is read from `v_handoff`
+  by the `handoff.settled` event's `handoff`.
+- **The read contract is bundled's dataset `task` (`v_oxplow_task`)**,
+  over `task_record` joined with oxplow's fields and the store's stages.
+  Its links are `v_oxplow_task_link` (the edges `task_record_link:<type>`),
+  its comments `v_oxplow_task_comment`, its search rows
+  `v_oxplow_search_task`.
 - **Reactions:**
-  - request links: a bundled collector `on: [oxplow.task_record.changed]`
-    (with the cause filter below) that writes them, declarative and
+  - request links: bundled collectors `on: [oxplow.task_record.changed]`
+    (with the cause filter below), `agent.prompt.submitted` and
+    `agent.turn.ended` write the model `request_task`, declarative and
     replayable, from the event's anchors (a command-started run carries the
     command's turn);
   - assign on start, close the assignment on done: a bundled effect that
     composes `oxplow.model.set_fields`.
 - **A cause filter on `on:`** (`where: { cause: [trigger, fields] }`), so a
   thousand-row reconcile doesn't start a thousand script runs that only
-  skip. Built: a `where:` value is one scalar or a non-empty list (equals
-  any of them), applied before a run is queued or spawned.
-- **Order:** the vertical slice runs only on a throwaway oxplow (fixtures,
-  an e2e) — a new store `oxtask` on a database whose core tasks share its
-  ids would give two items one URI. The switch moves the data first
-  (core's rows into `oxtask.sqlite`, rehearsed on a copy of the live home
-  with a before/after comparison), then flips the reads (bundled's `task`
-  dataset, the resources' `resolve` / `searchable`), and only then deletes
-  core's task verbs, tables and projection.
-- **At the flip, `thread_tasks` and `deviation` move to the models.** They
-  read `ref('request_task')` and `ref('task')` of core; at the flip they
-  read the renamed model `request_task` (`thread` is a thread URI where
-  core had `thread_id`; `request` a URI where core had `request_id`, so
-  they join `ref('thread')` / `ref('request')` on `uri`) and `task`
-  (the model-based dataset). Their fixtures move from core's
-  `oxplow.task.*` commands to oxtask's (`requires: [oxtask]`,
-  `oxtask.task.create` / `move` / `update` / `comment`, assignees through
-  `oxplow.tasks.assign`, stage `todo` is `ready`). These fixtures: the
-  Work panel and line ones (`work-panel-collapses-to-the-active-task`,
-  `work-panel-finished-needs-a-transition-by-the-thread`,
-  `work-panel-groups-a-threads-work`,
-  `work-panel-lists-every-ready-task-and-the-last-20-finished`,
-  `work-panel-now-is-the-threads-latest-request`,
-  `work-panel-orders-an-epic-with-its-children-before-stand-alone-tasks`,
-  `work-panel-shows-the-active-item-under-its-epic`,
-  `work-line-shows-the-last-finished-when-nothing-is-in-progress`,
-  `work-shows-only-the-active-task-tracker`) and the deviation ones
-  (`deviation-lists-files-a-request-changed-outside-its-tasks-area`,
-  `what-deviated-lists-files-outside-the-tasks-stated-area`). The
-  converted text is in git history: commit `b790396f4` (the datasets'
-  `ref('task_next')` lines and these fixtures' oxtask versions), the
-  dropped tracker-none step of `work-shows-only-the-active-task-tracker`
-  returns with them, since `task` follows the active tracker.
+  skip. A `where:` value is one scalar or a non-empty list (equals any of
+  them), applied before a run is queued or spawned.
 - **Bundled names no store's command: task points.** The shared pages, the
   parts and the Work board act on a task through bundled's item points,
   `oxplow/task.move { uri, stage }`, `task.edit { uri, title?, body?,
@@ -550,129 +480,53 @@ fields:                        # oxplow's own annotations on every store's tasks
   `task.unparent`, `task.delete`, `task.unlink { uri, to, type }` — run by a
   page or viz action with `point:` / `context:`, or by the board with
   `invokePoint` (`custom_components[].action_points`) — and `task.comment`,
-  `task.link` (form points, drawn as an `action_point` node: the store's own
-  form). A store's command joins with `ui: { at: <point>, accepts: { store },
-  input: { id: "{{uri.id}}", … } }` (`about` + `at` for the ones that are also
-  item commands). oxtask owns what is oxtask's: the `oxtask/new-task` form
-  (the `task.new` point; bundled's `new-task` page is the point's node), and
-  an `edit-task` part mounted into the task page's `sections` slot (Move to,
-  Details, the description editor; empty on another store's task). Dropped
-  with it: oxtask's "Move To…" form (Mark ▸ is the page's), the Task List's
-  rail quick add (the `task.new` point node), the task page's inline
-  forms (now the mounted part), and the board's menu sets only a task's
-  `priority` (what `task.edit` carries). `task.detail.state` stays a
-  replaceable node (a read-only Stage line).
-- **The `_next` datasets, in final shape, beside core's (flip prep).**
-  Nothing live reads them. Each has fixtures (`requires: [oxtask]`) that
-  make the same tasks through core's tracker and through oxtask and compare
-  the rows:
-  - `task_next` is `v_task`'s columns, names and meanings. Closed for the
-    match: `body` is `''` for a task with none (core's default; the model
-    stores no body), `stage_title` is core's ("In Progress": oxtask's title
-    for the stage follows it), and `rank` counts from 0 in a queue (core's;
-    `oxplow.tasks.assign` and `reorder` number that way). What still
-    differs, by design: `native` holds the store's own fields (oxtask:
-    `author` as a URI, `author_kind`, `priority` when set; core's was
-    `priority` and `author: user`), a comment's id (below), timestamps'
-    precision, and the rows listed: `v_task` is the active tracker's items
-    only, `task_next` every store's. A task closed on a done stage has the
-    time it first closed in both.
-  - `task_link_next` is `v_task_link`'s columns including `created_at`: the
-    links child has an `at` column (oxtask's `task_link.created_at`, stated
-    by its collector; the move carries core's).
-  - `task_comment_next` (new) is `v_task_comment`'s columns over the
-    comments child; `id` is the store's (`cmt3`, core's `oxtask_note:3`) and
-    `author` a URI.
-  - `search_task_next` (new) is `v_search_task`'s rows: the task's id, its
-    body, then its comments in the body; `stream_id` from the assigned
-    thread; tasks assigned to an archived thread or stream left out.
-    (Archiving a stream also releases its threads' assignments, in core and
-    in bundled's effect, so the task returns project-wide; the filter
-    covers a task still assigned to an archived thread.)
-  - Request links: besides the collector on `oxplow.task_record.changed`,
-    `oxplow.request_task_prompt` (on `agent.prompt.submitted`, from the
-    `prompt_mention` edges of a person's turn to tasks) writes basis
-    `prompt`, and `oxplow.request_task_assigned` (on `agent.turn.ended`,
-    from the tasks in progress and assigned to the thread in
-    `task_next`) writes basis `assigned`, both into `request_task_next`
-    with the event's time and turn: the links core's `hook_ingest` and
-    `request_links::link_assigned_tx` write. The `assigned` read is of the
-    task state when the collector runs, just after the turn's end. The
-    older change-event collector also writes `assigned` when an assignment
-    to the thread is made in a turn, a superset of core's; the flip may
-    drop it. After the flip review: **a link keeps its first evidence**
-    (core inserts or ignores): each collector leaves out a key already in
-    `request_task_next`, so a request's later turns don't move its `turn_id`
-    and `at`; **a fields-only change links nothing** (a reorder, the close's
-    clear of the assignee) unless the assignee became the turn's thread;
-    the **prompt link** goes by the prompt's own source (`person`), not the
-    turn's, so a person's prompt landing in a turn a report started links.
-  - The assign-on-start effect does what core's did: only an agent's start
-    (the change's source is `agent:<thread>`) assigns, through
-    `oxplow.tasks.assign`, so the task goes to the end of the thread's
-    queue; a close clears the assignee and the rank.
-  - The `task_record` model's `title` is markdown like `body`, so a title
-    naming a file or a task keeps its edge (core parsed both).
-- **Done before the flip (steps 6 and 4 of the flip order, in part).** The
-  task metrics and the `work.priority` dimension are bundled's; the
-  request summary's Tasks section is a bundled part in a foundation slot
-  (`.context/extensions-bundled.md`). Bundled declares the action point
-  `oxplow/task.new` (context `parent?`, `thread_id?`); oxtask's `task.create`
-  joins it (a button with one store, a menu with several) and its `move`,
-  `link`, `comment` and `delete` are item commands (`ui.about: { resource:
-  oxplow/task, accepts: { store: oxtask } }`), so they show only on oxtask
-  tasks. Create, move, link and comment open small forms (oxtask's pages
-  `new-task`, `move-task`, `link-task`, `comment-on-task`); delete runs from
-  the task's id.
-- **Request links in core's read shape (step 5).** Bundled's
-  `request_task_view_next` is `v_request_task`'s columns (`request`, `task`,
-  `basis`, `turn`, `thread_id`, `at`, `turns`, `started_at`, `last_ended_at`,
-  `request_id`) over the `request_task_next` model, joined to `request` and
-  `agent_turn`; `basis` keeps the model's names (`filed` and `edited` are
-  core's `command`). Core's fact store reads a fact's task through
-  `v_request_task`, ranking `command`, `edited` and `filed` alike (a test pins
-  it), so the flip changes the view and not the reader.
-- **Bundled reacts to thread close, stream archive and a taken handoff
-  (step 7a, done).** Three effects, on the events core logs for them
-  (`thread.closed`, `stream.archived`, `handoff.settled` with `state:
-  taken`), do on the model what core did on its tables: a closed thread's, or
-  each archived thread's, open tasks (not done or canceled) go to the end of
-  nobody's queue in the order the thread held them, assignee cleared and a
-  place set (`oxplow.model.set_fields` once per task, because
-  `oxplow.tasks.assign`'s script runs once for all the steps and would give
-  every release the same place); a taken handoff's open task that isn't
-  already the recipient's goes to the end of the recipient's queue
-  (`oxplow.tasks.assign`). Before the flip the model holds no live task, so
-  they find nothing and need no switch. Fixtures prove each, and compare
-  assignee and rank with `v_task` for the same setup through core. One
-  difference stays until the flip: `oxplow.handoff.send` checks its task
-  against core's active tracker, so a handoff of a model-only task is refused
-  there (the fixtures send core's task of the same URI).
-- **The conversion branch (`flip-ext`), what the extensions and the desktop
-  look like after the flip.** Bundled's datasets have their final names:
-  `task` (`v_oxplow_task`), `task_link`, `task_comment`, `search_task`, and
-  for request links the model `request_task` (`v_oxplow_request_task`, the
-  rows) beside the dataset `request_link` (`v_oxplow_request_link`, in
-  `v_request_task`'s shape: request_id, thread_id, turn, turns, started_at,
-  last_ended_at; a dataset cannot take the model's view name). The `task`
-  resource (`resolve: task`, `searchable: search_task`) is bundled's; foundation
-  keeps no task reader, no `oxplow.task.*` descriptor and no `tasks` skill
-  (bundled's `tasks` skill documents oxtask's commands and
-  `oxplow.tasks.assign` / `reorder`). Every task page, part, query, context,
-  advisory and skill needs `model:oxplow/task_record` (no `task_tracker`
-  needs, no `implementations:` entry); stages and fields come from
-  `v_model_stage` and `v_model_field_decl`; actions are oxtask's commands
-  (`id`, not a URI) and bundled's assign and reorder. The desktop reads the
-  same datasets and the backlink prefix is `task_record_link:`. The `_next`
-  parity fixtures are gone. Parity was proved before the flip: `task_next`
-  matched `v_task` for the same tasks except `native` (the store's own fields:
-  `author` a URI with `author_kind`, no default `priority`) and timestamp
-  precision; `task_link_next`, `task_comment_next` (`id` the store's `cmt3`),
-  `search_task_next` and `request_task_view_next` matched their core
-  datasets' columns (request-link `basis` keeps the model's names).
-- **Before the deletes:** the provider `read` adapter, and the boot repair
-  over models and their children (core's repair goes with the task
-  projection).
+  `task.link`, `task.new` (form points, drawn as an `action_point` node: the
+  store's own form). A store's command joins with `ui: { at: <point>,
+  accepts: { store }, input: { id: "{{uri.id}}", … } }` (`about` + `at` for
+  the ones that are also item commands). oxtask owns what is oxtask's: the
+  `oxtask/new-task` form (the `task.new` point; bundled's `new-task` page is
+  the point's node) and an `edit-task` part mounted into the task page's
+  `sections` slot (Move to, Details, the description editor; empty on
+  another store's task). `task.detail.state` is a replaceable node (a
+  read-only Stage line).
+- **Request links.** The model `request_task` holds the rows
+  (`v_oxplow_request_task`); the dataset `request_link`
+  (`v_oxplow_request_link`: request_id, thread_id, turn, turns, started_at,
+  last_ended_at, basis) joins them to `request` and `agent_turn` (a dataset
+  cannot take the model's view name). `basis` is `filed`, `edited`,
+  `transition`, `assigned` or `prompt`. A link keeps its first evidence: a
+  collector leaves out a key already in the model, so a request's later
+  turns don't move its `turn_id` and `at`. A fields-only change links
+  nothing (a reorder, the close's clear of the assignee) unless the
+  assignee became the turn's thread. The prompt link goes by the prompt's
+  own source (`person`), not the turn's. The `assigned` link reads the
+  tasks in progress and assigned to the thread when the collector runs,
+  just after the turn's end.
+- **Assignment.** Only an agent's start (the change's source is
+  `agent:<thread>`) assigns, through `oxplow.tasks.assign`, so the task
+  goes to the end of the thread's queue; a close clears the assignee and
+  the rank. The `task_record` model's `title` is markdown like `body`, so
+  a title naming a file or a task keeps its edge.
+- **Release.** Three bundled effects, on `thread.closed`,
+  `stream.archived` and `handoff.settled` (`state: taken`): a closed
+  thread's, or each archived thread's, open tasks (not done or canceled)
+  go to the end of nobody's queue in the order the thread held them,
+  assignee cleared and a place set (`oxplow.model.set_fields` once per
+  task, because `oxplow.tasks.assign`'s script runs once for all the steps
+  and would give every release the same place); a taken handoff's open task
+  that isn't already the recipient's goes to the end of the recipient's
+  queue (`oxplow.tasks.assign`).
+- **Datasets that read both.** `thread_tasks` and `deviation` read the
+  model `request_task` (`thread` and `request` are URIs, so they join
+  `ref('thread')` / `ref('request')` on `uri`) and `task`.
+- **Foundation keeps no task reader and no `tasks` skill.** Bundled's
+  `tasks` skill documents the store-agnostic reads and
+  `oxplow.tasks.assign` / `reorder`; oxtask's skills document its commands.
+  Every task page, part, query, context, advisory and skill needs
+  `model:oxplow/task_record`; stages and fields come from `v_model_stage`
+  and `v_model_field_decl`; actions are a store's commands (`id`, not a
+  URI) and bundled's assign and reorder. The desktop reads the same
+  datasets and the backlink prefix is `task_record_link:`.
 
 ## Children
 
@@ -801,12 +655,10 @@ Every open model keeps per-item values beyond its columns.
   its implicit columns, its declared columns. A disabled store's rows are
   hidden (kept until it is removed). There is no "active store".
 - The owner publishes **one read contract** joining its model with its
-  annotations: bundled's `v_task` (the model, stages, assignment, rank)
-  and `v_knowledge_page` (the model, pins, reads) keep their names and
-  the columns their readers use today, so the move is the owner's
-  dataset, not every reader. With bundled off they do not exist, and
-  core readers of them (`v_request_task`, `v_commit_task`, the ref
-  resolver) say so (empty, never an error).
+  annotations: bundled's `v_oxplow_task` (the model, stages, assignment,
+  rank) and `v_knowledge_page` (the model, pins, reads). Core has no alias
+  for them. With bundled off they do not exist, and core readers of the
+  models (the ref resolver) say so (empty, never an error).
 - Any extension may `ref()` an open model, and add dimensions and
   metrics over it, as over any entity.
 
@@ -867,19 +719,11 @@ search through the index, the SQLite file, the file service, fields kept
 apart by namespace through a reconcile, an action point with zero, one
 and two contributors, and the store filter.
 
-## The flip, done in core (branch `flip-core`)
+## What core keeps for tasks
 
-Core's task verbs (`oxplow.task.*`), the tracker registry, the active
-choice for `task_tracker`, `Tasks`/`TasksProjection`, the task page_ref
-projection, `request_links` and its writers in `record.rs`/`hook_ingest`,
-the datasets `task`, `task_link`, `task_comment`, `request_task`,
-`search_task` and `commit_task`, the task conformance suite and the
-`oxplow-oxtask` crate are gone. What is left of the kind: the
-`task_tracker` capability as the contract an external provider declares
-(`many`, not choosable, no verbs, no dispatch; `providers/tasks.rs` only
-tracks running instances), the read adapter, and the recognizers from
-fills and running instances. `repair_item` (`contribution_repair`) and
-`commit_task` are bundled's datasets. Release of a closed thread's or
-archived stream's work and the move of a taken handoff's task are bundled's
-reactions to `thread.closed` / `stream.archived` / `handoff.settled`. See
-`.context/tasks.md`.
+Core holds no task table, command or reader. The read adapter
+(`providers/model_records.rs`) is knowledge-only, and the loose-id
+recognizers come from the models' `fills.id_pattern` alone.
+`v_oxplow_contribution_repair` and `v_oxplow_commit_task` are bundled's
+datasets. The `oxplow.task` fact dimension is declared by bundled over its
+request-link dataset. See `.context/tasks.md`.

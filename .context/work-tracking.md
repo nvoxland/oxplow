@@ -189,7 +189,7 @@ datasets, a trigger, pacing, and an audience.
   ("fewer tasks filed"), which invites filing to satisfy a number. What a
   task tracker wants of its agent (oxtask's `untracked-work` reminder to
   take a task before editing) is that tracker's opinion and lives in the
-  tracker's extension (`oxplow-bundled`), not in core's hints; it fires
+  tracker's extension (`oxtask`), not in core's hints; it fires
   once per request, after the first edit, only while no task is in
   progress on the thread and none is linked to the request.
 
@@ -371,7 +371,7 @@ The three in progress:
   offer, an instance owns its namespace, and the bus and MCP offer and run
   only what's active. Skills and slash commands come from extensions
   too (`skills:`), offered the same way; the task guidance and
-  `/next-task` moved from core into `oxplow-bundled`. A task tracker
+  `/next-task` moved from core into the task store's extension (`oxtask`). A task tracker
   declares its id pattern, and a loose id in a command (`tsk12`) is the
   active list's item.
   The app's test fixtures (`services_with_thread`, `services_with_task`)

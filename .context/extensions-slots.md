@@ -102,7 +102,7 @@ ui:
 The targets are one table of data, `crates/oxplow-domain/data/replaceable.json`
 (read by `oxplow_domain::replaceable::all()`; `fixtures/replaceable.json` pins
 its targets so it only shrinks):
-each a `target`, the `capability` it belongs to, whether it is **bound to
+each a `target`, the `capability` (or shared `model`) it belongs to, whether it is **bound to
 a provider**, its contract's **version**, its **props contract** — the
 params the replacement page is given instead of any host state — and its
 **view**: the host page's view params the replacement shares, read
@@ -114,12 +114,12 @@ is published as `v_replaceable` and generated into the reference
 `version:` must be the contract's: a changed contract refuses it rather
 than handing it props it does not know.
 
-| Target | Core component | Capability | Bound | Props | View |
+| Target | Core component | Belongs to | Bound | Props | View |
 |---|---|---|---|---|---|
-| `task.board` | the Work board (the `board` component node of bundled's `work` page; v2) | `task_tracker` | no | `scope` (`thread` / `stream` / `me` / `pool` / `all`: whom the items are assigned to), `thread_id` (applies when `scope` is `thread`); a page's implicit `stream_id` applies when `scope` is `stream` | — |
-| `task.list` | the Task List's list (the `list` node of bundled's `task-list` page; v2): its filters and New Task… stay oxplow's | `task_tracker` | no | `scope` (`thread` / `stream` / `me` / `pool` / `all`: whom the items are assigned to), `thread_id` (applies when `scope` is `thread`) | — |
-| `task.detail` | a task's description editor (the `body` node of the `task` page): the state, fields, About, links, comments, activity and the mounts stay oxplow's | `task_tracker` | no | `uri` (the item) | — |
-| `task.detail.state` | a task's State (the `state` node) — never its Move To (the About node's menu), so a replacement cannot strand an item | `task_tracker` | yes | `uri` (the item) | — |
+| `task.board` | the Work board (the `board` component node of bundled's `work` page; v2) | model `oxplow/task_record` | no | `scope` (`thread` / `stream` / `me` / `pool` / `all`: whom the items are assigned to), `thread_id` (applies when `scope` is `thread`); a page's implicit `stream_id` applies when `scope` is `stream` | — |
+| `task.list` | the Task List's list (the `list` node of bundled's `task-list` page; v2): its filters and New Task… stay oxplow's | model `oxplow/task_record` | no | `scope` (`thread` / `stream` / `me` / `pool` / `all`: whom the items are assigned to), `thread_id` (applies when `scope` is `thread`) | — |
+| `task.detail` | a task's description editor (the `body` node of the `task` page): the state, fields, About, links, comments, activity and the mounts stay oxplow's | model `oxplow/task_record` | no | `uri` (the item) | — |
+| `task.detail.state` | a task's State (the `state` node) — never its Move To (the About node's menu), so a replacement cannot strand an item | model `oxplow/task_record` | yes | `uri` (the item) | — |
 | `vcs.history.graph` | Git History's commits (a node of the `git-history` page): oxplow's own is a plain list | `vcs` | no | `head_sha` (the stream's head), `reveal_sha` (a commit to scroll to and mark, or null), `limit` | `q`, `author`, `branch` (Git History's filters; v2) |
 
 **Who places a target.** A page node marked `replaceable: <target>`
@@ -140,15 +140,15 @@ own and why). The page's params must cover the contract so
 the props exist; a page with a `replaceable` node is not warned about
 params it passes on.
 
-**Bound or not.** A bound target shows one provider's own thing — the
-state control lists that tracker's states — so only the extension of the
-provider whose item it shows replaces it. Every other target is a **view**:
-the Board, the list and the editor show the capability as a whole, reading
-`v_task` and changing items through the interface commands
-(`oxplow.task.update`, `transition`, `reorder`, `move`), so they work
-with whichever list is active and any extension may bring one — a view
-needs no provider. Choosing a presentation is separate from installing a
-task tracker.
+**Bound or not.** A bound target shows one store's own thing — the
+state control lists that store's stages — so only the extension that fills
+the model as the item's own store replaces it. Every other target is a
+**view**: the Board, the list and the editor show the model as a whole,
+reading `v_oxplow_task` and changing items through the task action points
+(`oxplow/task.move`, `task.edit`, … and bundled's `oxplow.tasks.assign`
+and `reorder`), so they work with whichever store holds the task and any
+extension may bring one — a view needs no store. Choosing a presentation
+is separate from installing a store.
 
 **Whose shows** is the person's: `replacements: { <target>: <extension> |
 oxplow }`, one project key validated against the table. An extension
@@ -159,16 +159,16 @@ provider's extension's. Settings → Integrations lists each replaced
 target with that choice (a `<select>`: Default, oxplow's own, each
 extension). Every target has a `label` a person reads, in the same table
 ("board", "state control", "history graph"), carried on each
-`UiReplacement`. A state control replacement lists the tracker's own
-stages, each with **Move Here** (`oxplow.task.transition` with the
+`UiReplacement`. A state control replacement lists the store's own
+stages, each with **Move Here** (the `oxplow/task.move` point with the
 stage id); oxplow's Move To stays beside it.
 
 **At load** (`replacements::parse_replacements`, errors at the entry's
 line): the target is in the table; the page is one of the extension's and
 declares **every** prop (a replacement takes the whole contract — a Board
 that ignores `scope` is not the Board); a pinned `version` is the
-contract's; for a bound target, the extension brings a provider of the
-target's capability (`providers:`); a target is replaced once per
+contract's; for a bound target, the extension fills the target's model
+(`fills:`) or brings a provider of its capability (`providers:`); a target is replaced once per
 extension. The viewer's stream is not a prop: a page that declares
 `stream_id` gets it, as everywhere. Valid ones are
 `ExtensionUi.replacements` (`UiReplacement { id: <namespace>/<target>,
@@ -177,14 +177,14 @@ label }`).
 
 **In the run** (`PageRunner::replacement` → `replacements::chosen`), from
 the enabled extensions' replacements of the target, only when one exists:
-- **bound**: the **item's own provider** decides, whichever is active, so
-  another provider's item never gets a page that sends this one's states.
-  The provider is the `provider` param of the node's `uri` param (a task's URI carries it); which extension brings it is the capability
-  registry's answer at run time, not at load, so installing or switching
-  one needs no reload;
+- **bound**: the **item's own store** decides, so another store's item
+  never gets a page that sends this one's states. The store is the
+  `provider` param of the node's `uri` param (a task's URI carries it);
+  which extension fills it is the model registry's answer at run time, not
+  at load, so installing or switching one needs no reload;
 - **unbound**: the person's choice (`replacements`), or the only
   candidate; no provider is read;
-- no candidate, a provider no extension brings (oxplow's own), several
+- no candidate, a store no extension fills, several
   unbound candidates and no choice, or `oxplow` chosen → the node's own
   content, `replaced_by` unset;
 - chosen → its page runs as the node's embed with the props it declares;
@@ -204,7 +204,7 @@ desktop, so the wrong component never flashes.
 
 Showing one records `usage { kind: "replacement", key: <namespace>/<target> }`
 (the evidence a kind needs to be promoted), once per replacement drawn
-without an error. Agents read tasks from `v_task` either way.
+without an error. Agents read tasks from `v_oxplow_task` either way.
 The rules are tested in Rust (`replacements::chosen`'s tests, the runner's
 `a_replaceable_node_runs_the_replacement_that_stands_in_for_it`); which
 replacement a page shows is a fixture's (`loaders: { <node>/<loader> }`,
@@ -237,16 +237,16 @@ filters, reveal, Cmd-click.
 **The example that proves views and forms: `examples/extensions/task-views`.**
 An extension with no provider of its own, replacing `task.board`
 (the `swimlanes` component: a column per canonical state, drag a card to
-another column to `oxplow.task.transition` it, drag within a column to
+another column to move it (`oxplow/task.move`), drag within a column to
 `reorder` it in its assignee's queue,
 click a title to rename it through an inline `<form>` with `ox-input` and a
 field refusal shown in `ox-error`, a click on a card `navigate`s, a
 Cmd/Ctrl-click opens a new tab, and a `DENIED` refusal is one line above the
 board), `task.list` (`compact-list`, a `viz: table` with Done and an
 `Edit…` form action) and `task.detail` (`edit-item`, a `viz: form` over
-`oxplow.task.update` with `uri` fixed). It reads `v_task` and
-changes items only through the interface commands, so it works with any
-list. `viz/swimlanes.test.ts` runs the bundle's script against its page;
+the `oxplow/task.edit` point with `uri` fixed). It reads `v_oxplow_task`
+and changes items only through the task action points, so it works with any
+store. `viz/swimlanes.test.ts` runs the bundle's script against its page;
 `every_example_scaffolds_checks_and_tests_clean` checks it clean and runs its fixtures.
 
 A form (`FormViz`) re-reads its start values when it resets, so after a
@@ -254,7 +254,7 @@ successful Save it shows what was saved, not the title it first opened
 with. Activation takes a cloned snapshot of the config (`read_config`)
 rather than holding its read guard across the transaction: a nested read
 behind a waiting config reload would otherwise deadlock the daemon when
-the active task tracker switched
+a capability's choice switched
 (`tests-e2e/specs/components/task-views.spec.ts` is its regression test).
 
 ## Commands in core menus (a command's `ui.about`)

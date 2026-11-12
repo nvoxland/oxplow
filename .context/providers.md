@@ -2,27 +2,23 @@
 
 An external provider is a program oxplow talks to — an issue tracker's bridge, a
 docs system's — that implements one of oxplow's capabilities outside the
-app (P5.D): one core gives a provider contract (the task tracker, the agent harness,
+app (P5.D): one core gives a provider contract (the agent harness,
 snapshots, knowledge, a filesystem; "What a provider may implement"). This doc
 covers the protocol (D1), the fake provider (D2), what a provider may
 implement, the host with its permission and spawn rules (D3), instances with health (D4), the
-conformance kit with `oxplow extension test` (D5), which trackers are
-backends, and the MCP adapter (P7.A6).
+conformance kit with `oxplow extension test` (D5). There is no task
+tracker contract: tasks are a shared model that stores fill
+([tasks.md](./tasks.md)).
 
 ## The protocol (`crates/oxplow-provider-protocol`)
 
-**Host secret references.** A remote MCP provider may declare its fixed
-`OXPLOW_MCP_BEARER` credential as `{name, secretRef:{schemaVersion:1,id}}`.
-The reference is scoped to the primary project and owning extension, including
-for global instances; it is inert unless the extension declares `secrets` and
-the deployment is live.
-Only the shipped HTTP transport receives the resolved bearer. Package programs,
-stdio servers, OAuth declarations and arbitrary environment variable names
-cannot consume a reference. The host brackets resolution with live owner and
-deployment checks. Save/revoke invalidates a synchronous admission revision, stops
-old consumers and requests coherent reconciliation even if the RPC is cancelled.
-Normal instance credential setters refuse these declarations; human host-secret
-ingress returns only reference/presence. See [extensions-permissions.md](./extensions-permissions.md)
+**Host secret references.** A provider credential may be declared as
+`{name, secretRef:{schemaVersion:1,id}}`, a reference into the host's secret
+store. The reference is scoped to the primary project and owning extension,
+including for global instances; it is inert unless the extension declares
+`secrets` and the deployment is live. No provider receives a resolved secret today; package programs, OAuth
+declarations and arbitrary environment variable names cannot consume a
+reference. See [extensions-permissions.md](./extensions-permissions.md)
 "Host-owned secret references" for persistence and lifecycle details. Runtime
 validation and the human settings form remain unfinished.
 
@@ -68,7 +64,7 @@ manifest `needs` (`sql.read`: `args` `{ sql, params? }` →
 rows), `key` naming the idempotency key of the `invoke` it serves so the
 call is recorded with that run. `Instance::invoke(run, …)` registers the
 run under the key for the call's length (`HostCalls::begin`), whichever
-verb it is — a command, a task, knowledge, snapshot or harness
+verb it is — a command, knowledge, snapshot or harness
 verb. Refused (`InvalidInput` at `/scope`)
 for one it doesn't need or that isn't there, and for one naming no
 `invoke` under way: nothing a provider does of oxplow is outside a run.
@@ -85,7 +81,7 @@ a provider is deployed again to speak it.
 
 **Errors** (`errors.rs`): JSON-RPC's standard codes plus
 `NotConfigured` (-32001), `Auth` (-32002, `data.credential` — the
-credential the service refused, when the provider knows it; tsk821),
+credential the service refused, when the provider knows it),
 `RateLimited` (-32003, `data.retry_after_ms`), `InvalidInput` (-32004, `data.field`) and
 `Cancelled` (-32800). `ProtocolError` is the typed form; the conversion
 keeps the data both ways.
@@ -103,71 +99,63 @@ stub generation for provider authors.
 
 ## The fake provider (`crates/oxplow-provider-fake`)
 
-A scripted **task tracker** provider, lib + bin, that the host's tests and the conformance kit drive over real
-stdio. `declarations()` is its `InitializeResult`: the `task_tracker`
-capability (hierarchy, comments, links, delete and `idempotent_writes`),
-the task tracker verbs `create` / `update` / `transition` (undoable: its
-inverse moves the item back) / `link` / `comment` / `delete` over the contract's inputs (`stage`,
-one of its own; its `native.points`; `additionalProperties: false`), one
-command of its own, `estimate { uri, points }`, the
-`task.recorded@3` event type with the core schema (its records
-state its links and comments), a
-`task_tracker`
-collector over the `task` entity, and a config schema requiring
-`team`. `check` returns handle `fake:<team>` or a `/team` problem. Items
-live in memory as `oxplow:oxplow/task?id=W-<n>&provider=fake` in its stages `icebox`,
-`ready`, `doing`, `stuck`, `shipped`, `dropped` (one per bucket, declared
-in its manifest's `stages:`; `STAGES`, and `with_its_stages` for a test
-that turns a scaffold into the fake); every
-`invoke` returns the `task.recorded` events the host logs. Each
-write bumps the item's revision (a deleted item stays, marked
-`deleted`); `read` streams each item changed after the cursor, in
-revision order, as `$/record` followed by a `$/state { cursor, seen }`
-checkpoint (opaque to the host), then `{ records }`.
+A scripted provider, lib + bin, that the host's tests and the conformance
+kit drive over real stdio. `OXPLOW_FAKE_CAPABILITY` picks the capability it
+implements; unset, it is a **snapshots** provider. The modes: `snapshots`
+(the default), `filesystem`, `agent_harness` (`harness_declarations`) and
+`knowledge` (going away with that capability: add no new uses). Every mode
+has the same config, requiring `team`: `check` returns handle `fake:<team>`
+or a `/team` problem. It takes its instance id from `OXPLOW_PROVIDER_ID`
+(`fake` by default). The doc comment at the top of
+`crates/oxplow-provider-fake/src/lib.rs` is the full list of modes and
+hooks.
 
 **Script hooks** — `OXPLOW_FAKE_HOOKS` at spawn, or a `fake/hooks
 { hooks }` notification mid-session, which **replaces** them (`""`
-clears), keeping only what was declared at `initialize` — `plain-writes`,
-`bad-declarations` (tsk1001) (comma-separated):
-`fail-next:<n>` (the next n check/invoke/read fail `Internal`),
+clears), keeping only what was declared at `initialize`
+(`bad-declarations`) (comma-separated). They act in every mode:
+`fail-next[:<n>]` (the next n check/invoke/read fail `Internal`),
 `started-file:<path>` (each invoke writes `<path>` as it begins, before
 `slow` — so a test knows a call is under way without timing it),
 `slow:<ms>` (invoke and read wait first; `$/cancel` interrupts them with
 `Cancelled`), `slow-check:<ms>` (check waits first), `crash` (the next request drops the connection; the binary
 exits 3), `shutdown-file:<path>` (a `shutdown` writes `<path>` first —
 proof of an orderly stop), `ignore-shutdown` (it answers `shutdown` and
-keeps running), `checkpoint-at-end` (a read sends one `$/state`, after
-its last record) and `bad-declarations` (`initialize` answers something other
-than `declarations()`, for the host's handshake check), `progress` (a
-read sends `$/progress` before each record, then takes 100 ms over it), `read-fail-after:<n>` (a
-read fails after `n` checkpointed records) and `bad-record` (a read
-streams another provider's item), `rate-limit:<ms>` (its next invoke or
-read is refused `RateLimited`), `needs:<NAME>` (`check` reports
-`/credentials/<NAME>` unless that credential reached the process) and
+keeps running), `bad-declarations` (`initialize` declares an extra command
+named `undeclared`, for the host's handshake check), `rate-limit:<ms>` (its
+next invoke or read is refused `RateLimited`), `needs:<NAME>` (`check` reports
+`/credentials/<NAME>` unless that credential reached the process),
 `accepts:<NAME>=<value>` (check, invoke and read answer `Auth` naming
 `<NAME>` unless the credential the process holds is `<value>` — a
-service that takes one token and no other, for the sign-in tests) and
+service that takes one token and no other, for the sign-in tests),
 `refuse-auth` (invoke and read answer an `Auth` that names no
 credential), `lax-check` (check doesn't look at credentials, so `accepts`
 shows only on invoke and read — a service whose check doesn't validate the
 token), `lose-reply` (the next invoke lands and is never answered),
-`forget-keys` (it declares `idempotent_writes` and does a re-sent write
-again — what the kit must catch) and, at start, `plain-writes` (it
-declares no `idempotent_writes` — `plain_declarations()` — and ignores
-keys). **It keeps `idempotent_writes`:** an `invoke` sent again with its
-`idempotency_key` is done once and answered as the first was; the key
-sent with another write is `InvalidInput` at `/idempotency_key`.
+`host-read` (an invoke first reads the host, `host/call` `sql.read`, and
+answers what it read beside its result) and `config-read` (the same for the
+extension's own configuration, `extension_config.read`). The hooks that act on a `read` need a
+collector, which only the knowledge mode has: `progress` (a read sends
+`$/progress` before each record, then takes 100 ms over it),
+`read-fail-after:<n>` (a read fails after `n` checkpointed records),
+`stuck-cursor` (every `$/state` is `{ cursor: 0 }`), `checkpoint-at-end`
+(a read sends one `$/state`, after its last record) and
+`hold-read-file:<path>` (a read waits until `<path>` exists, sending
+`$/progress` meanwhile).
+
+**Idempotency keys:** an `invoke` sent again with its `idempotency_key`
+is done once and answered as the first was; the key sent with another
+write is `InvalidInput` at `/idempotency_key`. It declares no
+`idempotent_writes`.
 **Its service outlives its process** when `OXPLOW_FAKE_STATE` names a
-file: items, revisions and answered keys are restored at start and kept
-after every invoke, as a real service's are — what the kit's restart
-re-sends against (tsk916). Fixtures that launch it through an
+file: its state and answered keys are restored at start and kept
+after every invoke, as a real service's are. Fixtures that launch it through an
 extension (`providers/tests.rs` `write_extension`, the SDK's
 `just_works.rs`, the desktop `extension_cli.rs`) set it to
 `<project>/.oxplow/fake-state-$OXPLOW_PROVIDER_ID.json` — outside the
 extension folder, whose contents are the deployment — and the kit tests
-clear it before each run, since the golden transcript records the URIs
-handed out. Without it the fake forgets on exit, and a declared
-`idempotent_writes` fails the kit's restart check.
+clear it before each run, since the golden transcript records what it
+handed out. Without it the fake forgets on exit.
 Two notifications drive it from a test: `fake/changed { collectors? }`
 (it sends `host/changed` back, as a webhook would make it) and
 `fake/exit` (it exits 3 on its own).
@@ -224,199 +212,33 @@ keeps no pins). There is no `link` verb: core adds the link and writes
 the page through `write_page`. `delete_page` answers the record with `deleted: true`, and a page that is
 absent or already deleted is `InvalidInput`. `read` of `knowledge_pages`
 streams the pages changed after the cursor in revision order, each
-followed by a `$/state` checkpoint, as the task tracker's does.
-
-## Which trackers are backends (decided 2026-10-05)
-
-A task tracker is a **backend for the project's own work**: when
-it's the active tracker, every new item goes to it ([tasks.md](./tasks.md)
-"One write surface"). So it should have the visibility the person wants
-for that work — usually still just theirs, like oxtask or a
-local tracker such as beads (filed as the example to build). A team's
-tracker (Linear, GitHub Issues) isn't one: an agent's every small task
-would land in the team's tracker. At most it would be a separate view of
-work, read in through a collector. The reference Linear provider (P7.A5)
-was an experiment to prove the protocol and was removed; the fake
-provider and `tests-e2e/fixtures/extension` are the complete example.
-
-## The MCP adapter (`crates/oxplow-provider-mcp`)
-
-A provider can be an **MCP server** instead of a program speaking the
-protocol (P7.A6). Its manifest entry names the server, a mapping and the
-pinned tools instead of an `entry` (exactly one of the two):
-
-```yaml
-providers:
-  - id: notes
-    capability: task_tracker
-    adapter:
-      mcp: { command: [bin/notes-server, --stdio] }  # a program in the folder
-      mapping: mcp/notes.star                        # Starlark transform(x)
-      tools: mcp/tools.json                          # the server's tools/list, pinned
-    declarations: provider.json
-```
-
-**What runs** is oxplow's own adapter, `oxplow-provider-mcp`, shipped
-beside oxplow (a Tauri sidecar staged by `stage-sidecars.sh`; dev and
-test builds find it in `target/<profile>`: `host::adapter_bin`), started
-like any provider — the scrubbed env, the sandbox and egress proxy, the
-verified copy as its cwd — with `--declarations … --mapping … --tools …
--- <command>` (`ProviderSpec::launch`). It runs the server's command as
-the folder's file (never a name looked up on `PATH`), as an MCP client
-over the server's stdio; the server inherits the sandbox and the
-credentials. The loader refuses an adapter whose server, mapping or tools
-isn't inside the folder (a path check: a server that doesn't exist fails
-when the adapter spawns it, at `check`), an `args:` beside it, and tools
-that aren't a JSON list of named tools. **The deployment holds it all**: the server's file, the mapping and the
-tools are in the deployment folder, so changing the mapping, a pin or the
-server needs a new deploy; `declaration_impact` lists the server and each
-pinned tool added, removed or changed (`ProviderImpact.tools`).
-
-**A server by `url`** (P9.B4): `mcp` names exactly one of `command` and
-`url` (`spec::McpServer`, an enum — the rule is the type):
-
-```yaml
-    adapter:
-      mcp: { url: https://mcp.example.com/mcp, auth: NOTES_TOKEN }
-      mapping: mcp/notes.star
-      tools: mcp/tools.json
-    credentials: [NOTES_TOKEN]       # or `{ name, oauth }`: signed in for
-    network: [mcp.example.com]
-```
-
-- The adapter is started with `--url <url> [--auth-env <NAME>]` instead of
-  `-- <command>` and speaks **streamable HTTP** to the server (rmcp's
-  reqwest client; no redirects followed), through the egress proxy where
-  the OS enforces `network`. `auth` names the credential whose value is
-  sent as the bearer token; a credential that didn't reach the adapter is
-  a `check` problem at `/credentials/<NAME>`.
-- The loader refuses a `url` that isn't https (plain http only on
-  loopback — the bearer never crosses the network in the clear), a host
-  the provider's `network` doesn't list, an `auth` that isn't one of its
-  `credentials` or is one of them named as a `client_secret` (the host's
-  alone, never in the process's environment, so it could never reach the
-  server — tsk835), and `auth` beside a `command`.
-- **A `401` is `Auth`** naming the bearer's credential (at the server's
-  initialize, `tools/list` or a tool call), so a signed-in bearer is renewed and the call tried once
-  more ("Credentials and sign-in"); a pasted one is a failure that says
-  the bearer was refused. That holds with or without a
-  `WWW-Authenticate` challenge (tsk831): rmcp types only a challenged
-  `401`, so the adapter reaches the server through its own client
-  (`Http`, rmcp's reqwest client delegated to) that reads a bare one —
-  rmcp's `HTTP 401 …` response error or reqwest's status error — as
-  the same. The one shape it can't see is a `401` whose body is a
-  JSON-RPC error: rmcp hands that to the session as the server's error,
-  without its status. **A `403` isn't `Auth`**: the server takes the
-  token but refuses what it may do, and a renewed token carries the same
-  grant — it is an ordinary failure naming the scope the server wants
-  (from its `insufficient_scope` challenge). The notes server's
-  `Refusal` (`Challenge | Bare | Forbidden`) serves each.
-- **What the deployment holds** is the url, the mapping, the pins, the
-  declarations and the permissions — **not the server's code**, which runs
-  elsewhere (`args` carry the mapping, the tools file and
-  `--auth-env <NAME>`). What stands between a changed server and the
-  project is the pin: `check` refuses a server whose tools aren't exactly
-  `tools.json`. The permissions a deploy asks about (`network` for the
-  url's host, `secrets` for the bearer) say what the adapter reaches; the
-  server's own code is not covered.
-- Everything after the transport is the same: the pin, the mapping, the
-  checks on what the mapping returns.
-
-- **`initialize`** answers the checked-in declarations (the handshake
-  checks them like any provider's).
-- **`check`** starts the server and runs `tools/list`: a server whose
-  tools differ from `tools.json` in anything — each tool is pinned whole
-  as the server lists it: name, title, description, input and output
-  schemas, annotations (`destructiveHint`), so no hint changes under the
-  pin (§6.8; tsk719) — or that lists a tool twice, is a problem at `""`
-  naming the first difference,
-  and no handle (a changed server needs its pins updated and a new deploy). A clean check keeps the config under a handle. Starting the
-  server holds nothing else, so a server that hangs starting never stops
-  the adapter answering `$/cancel` or `shutdown`; `shutdown` stops the
-  calls in flight first, then the server (tsk720).
-- **`invoke` and `read`** run the mapping's `transform(x)` twice, each
-  under the sandbox with a 5 s budget: `x = { phase, command, input,
-  config, provider }` with `phase: invoke` → `{ tool, arguments }` (or
-  `{ refuse: { field, message } }`, an `InvalidInput`); the tool's output
-  (its structured content, else its text, as JSON when it parses) comes
-  back as `x.output` with `phase: invoked` → `{ result, events, inverse? }`.
-  A read: `phase: read` (`x.state` the checkpoint) → a tool call; `phase:
-  records` → `{ records, state }`, streamed as `$/record`s then one
-  `$/state`. **Tool output is data**: the mapping reads it and nothing
-  runs it. **What the mapping returns is checked**: an event type the
-  declarations don't list, or a subject, item or record that isn't this
-  provider's (`oxplow:oxplow/task?…&provider=<id>`, the id from `OXPLOW_PROVIDER_ID`) fails
-  the call; so does a `records` answer without a `state` (a missing
-  checkpoint would restart every read from nothing). **A tool error**
-  (`isError`) is the server refusing the request, not a failure: the
-  mapping runs with `x.error = true` and the error's output and may
-  answer `{ refuse: { field, message } }`; an error it passes over (or
-  trips on) is an `InvalidInput` naming the tool. Either way it never
-  counts toward disabling the provider (tsk719). The notes server reports
-  a missing note, parent or bad state as a tool error naming its
-  argument.
-
-**Tests**: `tests/adapter.rs` drives the adapter over stdio in a copy of
-the fixture extension `tests/fixtures/notes/` in front of the test server
-`oxplow-provider-mcp-notes` (`src/notes.rs`, an rmcp server: `list_items`,
-`create_item`, `update_item` over notes `open | doing | stuck | closed |
-dropped`; over stdio, or with `--http <addr>` over streamable HTTP at
-`/mcp`, behind the bearer in `$NOTES_BEARER` when set — the library's
-`notes::serve_http` / `notes::http_router` is what the tests run
-in-process, behind a token check (`notes::Tokens`; `notes::only(t)`
-takes one token, the OAuth stand-in its live access tokens);
-`a_server_by_url_is_pinned_and_called` covers the pin, the calls, a
-bearer refused at check and mid-session, and a missing one, and
-`tests/kit.rs` runs `extension test` on the fixture with its server by url) — the pin (an edited `tools.json` is refused), the mapping's
-calls and outcomes, the read and its cursor, an undeclared event and a
-foreign ref refused; `the_pinned_tools_are_the_servers` checks the pin
-(`OXPLOW_BLESS=1` re-pins). `tests/kit.rs` runs the fixture through
-`oxplow extension test`, the task tracker suite through a throwaway host over
-the adapter included.
+followed by a `$/state` checkpoint `{ cursor, seen }`.
 
 ## The host (`crates/oxplow-app/src/providers/`)
 
-**The manifest kind** (`spec.rs`; an MCP server's form is in "The MCP
-adapter" above): `providers:` is a stable kind (since the command model's
+**The manifest kind** (`spec.rs`): `providers:` is a stable kind (since the command model's
 providers phase), loaded onto `Extension.providers` (a disabled extension
 has none):
 
 ```yaml
 providers:
   - id: fake                     # the URI segment and command namespace
-    capability: task_tracker       # one with a provider contract (below)
+    capability: snapshots        # one with a provider contract (below)
     entry: bin/provider          # a program in the extension folder
     args: [--stdio]
-    env: [TRACKER_URL]           # host variables passed through by name
+    env: [SERVICE_URL]           # host variables passed through by name
     credentials: [token]         # keychain values, as env; or
                                  # `{ name, oauth }` — "Credentials and sign-in"
     network: [api.example.com]   # hosts it may reach
     declarations: provider.json  # its InitializeResult, checked in
-    id_pattern: "[A-Z]+-\\d+"     # a task tracker's own ids (optional)
-    stages:                      # a task tracker's workflow (required for one)
-      - { id: ready, title: Ready, bucket: todo }
-      - { id: doing, title: Doing, bucket: in_progress }
-      - { id: shipped, title: Shipped, bucket: done }
     needs: [sql.read]            # scopes it calls (`host/call`); read ones only
 ```
-
-`fields` (a task tracker's own, kept in `native`: `[{ name, title, kind:
-enum|text|number, values? }]`, tasks.md "Declared fields") and
-`stages` (its workflow, each in one of core's buckets, tasks.md
-"Buckets and stages") are published with the instance's capability row.
-A task tracker must declare `stages:` (one in each of todo, in_progress and
-done; `stages_problem`), and nothing else may. `id_pattern` (a regex
-matched whole) is what a task tracker's ids look
-like: while it's the active one, a loose id (`ENG-12`) in a task
-command resolves to its item (`task::with_loose_refs`,
-tasks.md).
 
 The loader refuses (into `errors`) an id that isn't lowercase
 snake_case, is `oxplow` or a core namespace, or repeats
 (`capability::instance_id_problem`); a capability with no provider
-contract; a task tracker without `stages:`, or stages `stages_problem`
-refuses, or `stages:` on anything else; an `id_pattern` that isn't a regex, or `fields` / `idPattern`
-on a capability that keeps no items; an entry or declarations path
+contract; `stages:`, `fields` or `id_pattern` on a capability that keeps
+no items (none does today); an entry or declarations path
 outside the folder (or the manifest, or under a retired UI folder); a bad host
 pattern; and declarations that don't parse, speak another protocol
 version, lack the named capability, declare a feature that isn't the
@@ -425,7 +247,7 @@ isn't its contract's shape (`ProviderContract::data`, a JSON Schema: an
 agent harness's environment markers and settings) or
 any `data` when the contract asks for none, lack a verb its contract requires
 for the features it declares, declare a verb that isn't `confirm: never`
-and `access: record` (core's call of it — `task.<verb>` —
+and `access: record` (core's call of the verb
 is what a person confirms and what is gated), or
 declare an event type its contract doesn't let it emit.
 
@@ -439,21 +261,26 @@ a verb runs as (so an inverse naming a verb undoes through it), the event
 types it may emit, what its collectors stream, the URIs an instance owns,
 and whether it keeps items.
 
-| | `task_tracker` | `agent_harness` | `snapshots` | `knowledge` | `filesystem` |
-|---|---|---|---|---|---|
-| verbs | none | `launch`, `tool_use`, `render`; `turns` ← transcript, `token_readings` ← telemetry, `refresh_text` ← runtime_text, `prompt` and `subagent` ← subagents | `mark`, `changed`; `read_at` ← contents | `write_page`, `delete_page` | `stat`, `read`, `list`; `write` ← writable |
-| verbs run as | none (a task tracker provider only fills the task model) | core's call: a session's launch, the hook route, the OTLP route, a transcript read, a text refresh | core's call: every take core makes (a turn's end, a measured run, an archive) | `oxplow.knowledge.<verb>`, after core checks the page against its record | core's call: a reader's `stat`, `read` and `list` for a file URI naming the filesystem |
-| declares as `data` | nothing | `env_markers`, `settings` | nothing | `kinds` (`{ id, title, bucket }`; none means `note`); feature `edit` | nothing |
-| may emit | `task.recorded@3` | nothing | nothing | `knowledge.page.recorded@3` | nothing |
-| collectors stream | `task` rows, logged as `task.recorded@3` `{ item: row }` | nothing | nothing | `knowledge_page` rows, logged as `knowledge.page.recorded@3` `{ page: row }` | nothing |
-| owns URIs | `oxplow/task` with `provider=<instance>` | none | none | `oxplow/knowledge` (its `store` param names the store) | none (its id is the `filesystem` param of the file URIs it serves) |
-| keeps items (`fields`, `idPattern`) | yes | no | no | no | no |
+| | `agent_harness` | `snapshots` | `knowledge` | `filesystem` |
+|---|---|---|---|---|
+| verbs | `launch`, `tool_use`, `render`; `turns` ← transcript, `token_readings` ← telemetry, `refresh_text` ← runtime_text, `prompt` and `subagent` ← subagents | `mark`, `changed`; `read_at` ← contents | `write_page`, `delete_page` | `stat`, `read`, `list`; `write` ← writable |
+| verbs run as | core's call: a session's launch, the hook route, the OTLP route, a transcript read, a text refresh | core's call: every take core makes (a turn's end, a measured run, an archive) | `oxplow.knowledge.<verb>`, after core checks the page against its record | core's call: a reader's `stat`, `read` and `list` for a file URI naming the filesystem |
+| declares as `data` | `env_markers`, `settings` | nothing | `kinds` (`{ id, title, bucket }`; none means `note`); feature `edit` | nothing |
+| may emit | nothing | nothing | `knowledge.page.recorded@3` | nothing |
+| collectors stream | nothing | nothing | `knowledge_page` rows, logged as `knowledge.page.recorded@3` `{ page: row }` | nothing |
+| owns URIs | none | none | `oxplow/knowledge` (its `store` param names the store) | none (its id is the `filesystem` param of the file URIs it serves) |
+
+There is no task tracker capability: a task is a row of the shared model
+`oxplow/task_record`, filled by a store ([tasks.md](./tasks.md)). A
+program that brings an outside tracker's data in is an ordinary extension
+whose collector fills the model through `fills:`, not a provider with a
+contract. No capability keeps items now, so a provider's `fields`,
+`id_pattern` and `stages` are refused.
 
 Each such capability has a **host** (`registry::CapabilityHost`): what
 turns a started instance into the capability's implementation and takes
 it out again. `Services` builds one per capability and hands them to the
-`ProviderRegistry`: `tasks::TaskTrackerHost` registers an
-`ExternalTaskTracker` in `Services.tasks`; the agent
+`ProviderRegistry`: the agent
 harness's (`agent_harness::HarnessHost`) registers an `ExternalHarness` in
 `Services.harnesses` under the instance id, beside the built-ins (a
 catalog reload keeps it); the snapshots' (`snapshots::SnapshotsHost`)
@@ -472,12 +299,12 @@ Each host's `prepare` validates declarations and constructs its adapter
 without changing a live registry or starting a process. It returns a
 `PreparedProviderCapability` with fixed features and an infallible,
 synchronous registry action that the generation applies at publication. All
-six capability hosts use this split; nothing publishes an adapter outside a
+the capability hosts use this split; nothing publishes an adapter outside a
 generation.
 
 **A host adapts an endpoint, not a process** (`endpoint::Endpoint`):
 what its adapter calls — the id and name, the declarations
-(`InitializeResult`), a task tracker's stages and id pattern, `invoke`,
+(`InitializeResult`), `invoke`,
 `envelope` (`endpoint::envelope_of`, one rule: a declared type within
 the contract, its own records and subjects) and `restart`. An `Instance`
 is one (its process); a **script implementation** an extension declares
@@ -507,7 +334,7 @@ through `write_page`). The store declares its kinds as `data: { kinds }`.
 Each answers the page's `knowledge.page.recorded@3 { page: { uri, kind?,
 url?, author?, title, body, uris, updated_at, deleted } }`: `body` what it keeps (in its own
 grammar if it likes), `uris` what the page links **in oxplow's grammar**
-(`oxplow:oxplow/file?path=src/lib.rs`, `oxplow:oxplow/knowledge?id=other&store=oxwiki`, a task's URI) — core links and pins
+(`oxplow:oxplow/file?path=src/lib.rs`, `oxplow:oxplow/knowledge?id=other&store=oxwiki`) — core links and pins
 from those, never parsing a foreign body. A write answering no record of
 the page fails. Core records the row, the edges and the pins from it and
 logs `knowledge.page.written` after the store's own record. Its collector
@@ -629,12 +456,10 @@ it found Codex passing its telemetry bearer in `--config`. The kit's arm
 runs it with config `{}` and the kit environment's search path (its PATH,
 then the install dirs under its HOME — `kit_search_path`), so a harness
 provider's program must be findable where a person's would be; `ran`
-shows `agent_harness suite`. The MCP adapter
-(`oxplow-provider-mcp`) still maps task URIs only.
+shows `agent_harness suite`.
 
 **A provider runs under its extension's permissions** (`.context/extensions-permissions.md`
-"Permissions"): its manifest declares `process` (an `entry` or an MCP
-`command`), the `network` hosts it reaches and the `secrets` its credentials
+"Permissions"): its manifest declares `process` (an `entry`), the `network` hosts it reaches and the `secrets` its credentials
 name — the loader refuses it otherwise, naming what to declare — and a person
 approved them when they deployed the extension (a deploy that adds one asks
 first; the deploy's consent check is a person's to approve). There is no per-program approval.
@@ -677,8 +502,7 @@ gateway — `HostDeps::sql`, metric functions included — or `state.read`
 over its own private namespace), each call counted
 into the trace of the run whose key it
 names (`ProviderRegistry::run_op` registers the run's
-`Invocation::trace` under its key, and `ExternalTaskTracker` the
-`task.<verb>` run's, from `VerbCall::trace`) — so the run's audit
+`Invocation::trace` under its key) — so the run's audit
 row records it.The conformance kit has no project: it answers `host/call` like any
 other request.
 
@@ -693,7 +517,7 @@ extensionInstances:
 ```
 
 **An instance id** follows the provider id's rule — one rule,
-`oxplow_domain::tasks::provider_id_problem` (tsk840): lowercase
+`oxplow_domain::tasks::provider_id_problem`: lowercase
 letters, digits and underscores, starting with a letter, and none of
 oxplow's own (`oxplow`, a core namespace such as `code` or `config`),
 checked wherever an id is written (`extensionInstances`, `instances.yaml`,
@@ -708,9 +532,9 @@ One spelling everywhere, because the id is used as it stands:
 
 | Keyed on the **instance id** | Keyed on the **provider (program)** |
 |---|---|
-| the URI's `provider` param (`oxplow:oxplow/task?id=ENG-1&provider=issues_acme`) and `check_subject` | the extension's deployment (`.oxplow/runtime/extensions/<ext>/<hash>/`) |
-| an extension command's `instance` (`tracker.item.estimate { instance: issues_acme }`) | the extension's permissions (`process.run`, `network`, `secrets`) |
-| the task tracker registry id, `v_capability_provider.provider`, the `activeProviders` value | the Extensions page's provider row, `declaration_impact` |
+| the URI's `provider` param (`oxplow:oxplow/knowledge?id=a&provider=wiki_acme`) and `check_subject` | the extension's deployment (`.oxplow/runtime/extensions/<ext>/<hash>/`) |
+| an extension command's `instance` (`tracker.snapshot.mark { instance: issues_acme }`) | the extension's permissions (`process.run`, `network`, `secrets`) |
+| the capability registry id, `v_capability_provider.provider`, the `activeProviders` value | the Extensions page's provider row, `declaration_impact` |
 | `OXPLOW_PROVIDER_ID` (the provider is told which instance it is) | the kit's fixtures and transcripts (it tests the program, as its default instance) |
 | `contribution_health.contribution`, `provider_collector_state.instance` (the name) | |
 | the credential accounts (`instance:<project>:<namespace>/<id>:<name>`) | |
@@ -726,7 +550,7 @@ of it, in the same activation.
 `enable_instance` any). A person adds another with `add_instance`
 (refused when the extension doesn't declare the provider, the id is
 taken, or the id is another provider's own), removes one with
-`remove_instance` (it stops, and everything of it goes — tsk841: its
+`remove_instance` (it stops, and everything of it goes: its
 config entry; its credentials, named by the extension or, when the
 extension no longer declares its provider, by the copy it last ran
 (`host::last_ran_credentials`); its read checkpoints
@@ -766,14 +590,14 @@ config, provider? } }`, the same entries and the same validation):
   moment the person added a global instance of the same name in another
   project — it moved onto the global credentials (unconfigured, or the
   other project's token against this one's config), and back when the
-  global one went (tsk838). Now a global one appearing or going never
+  global one went. Now a global one appearing or going never
   moves a project entry onto other credentials, and removing a project's
   replacement removes its own credentials, never the global one's;
 - its credentials are the person's, set once:
   `instance:global:<namespace>/<id>:<name>` (a project instance's are
   `instance:<project>:…`). Changing one — a pasted value, a sign-in, a
   sign-out — restarts it in **every** project, not only where it was
-  changed (tsk842): the keychain can't be watched, so
+  changed: the keychain can't be watched, so
   `credential_changed` bumps the instance's count in
   `instance-credentials.yaml` beside `instances.yaml`
   (`oxplow_config::CredentialGenerations`: counts only, never a value,
@@ -791,7 +615,7 @@ config, provider? } }`, the same entries and the same validation):
   person (`Actor::Human`; anyone else is `Denied`) — no command reaches
   it, so no agent or page can;
 - **every change is one read-modify-write of the instances as they are
-  then** (tsk837): `write_instances` takes an `edit` of them, under the
+  then**: `write_instances` takes an `edit` of them, under the
   registry's `instances_gate` (one change at a time in a process, never
   held across a check or a reconcile — `set_instance` checks first, then
   takes the gate, re-resolves and edits) and, for the file,
@@ -844,11 +668,11 @@ form; sign-in is a provider's.
   `PendingSignIn::exchange` trades the code. It is hand-rolled (two form
   POSTs over reqwest), one mechanism for every provider. The listener is
   its own crate, `oxplow-oauth-redirect` (the shell's; no core crate uses
-  it — tsk904), and answers anything but `GET /callback` itself — with a
+  it), and answers anything but `GET /callback` itself — with a
   plain-text page marked `nosniff` and `no-store` — reads each connection on its own
   task with a deadline (10 s) and a 16 KiB head cap, and never reads a
   body, so an idle or oversized connection never holds up the real
-  redirect (tsk825).
+  redirect.
 - **Token requests** (`token_request`): the client secret goes in an
   HTTP Basic header (`client_secret_basic`, each half form-encoded — RFC
   6749 §2.3.1; the default every server must accept) or, with
@@ -857,7 +681,7 @@ form; sign-in is a provider's.
   — reqwest follows none, so the secret and the code go to the declared
   endpoint only. An answer whose `token_type` isn't `Bearer` is refused
   (a missing one reads as bearer), and `expires_in` is read as a number
-  or a numeric string (tsk829).
+  or a numeric string.
 - **The token is one keychain secret** — JSON `{ access_token,
   refresh_token?, expires_at?, scope? }` under the credential's instance
   account. The provider's process is handed **the access token alone**,
@@ -871,11 +695,10 @@ form; sign-in is a provider's.
   tries the call once more on a fresh one (`Instance::reauthorize` — a
   process started since the refused call is left alone, so two callers
   renew once; "since the call" counts from when the call had its process,
-  so a read that started the process itself still renews — tsk907). **Only the refused credential is renewed** (tsk821,
-  `Instance::renewable`): the one the `Auth` names, when the instance
+  so a read that started the process itself still renews). **Only the refused credential is renewed** (`Instance::renewable`): the one the `Auth` names, when the instance
   signs in for it; with none named, its credential only when the process
   is handed exactly one and it is signed in — with two or more (a pasted
-  key beside a sign-in counts, tsk908) it can't know which and renews
+  key beside a sign-in counts) it can't know which and renews
   none, so a good sign-in is never lapsed for another's refusal and the
   refusal is the
   call's failure. A named credential that is pasted, not signed in for,
@@ -883,19 +706,18 @@ form; sign-in is a provider's.
   renewal its service refuses for good never lapses one it didn't name.
   None of that counts as a failure; an `Auth` after the renewal does,
   like any other. Renewals of one account are **serialized** in-process
-  (`renewal_lock`), and **a refusal renews only the token it refused**
-  (tsk928): `oauth::access_token` takes the refused access token, and
+  (`renewal_lock`), and **a refusal renews only the token it refused**: `oauth::access_token` takes the refused access token, and
   forces a renewal only while that token is still the one stored — a
   caller that waited, another project's instance on the same global
   account, or a Settings Check refused for a token already replaced gets
   the stored one (renewed only if it is lapsing), so a rotating refresh
-  token is spent once (tsk827). Each instance keeps the credentials it
+  token is spent once. Each instance keeps the credentials it
   gave its process (`Live.given`), which is how it names the refused
   token. The write compares first: a sign-out during the renewal
   stays signed out, a token replaced meanwhile (a new sign-in, another
   process) is used rather than overwritten, and a refused renewal marks
   the token lapsed only if it is still the one that was refused. Calls
-  refused together renew once (tsk828): `Instance.renewed_at` records
+  refused together renew once: `Instance.renewed_at` records
   each credential's last renewal, `reauthorize` returns early when that
   credential was renewed since the refused call, and a call cut off because a renewal ended its
   process (peer closed) is retried like an `Auth` — in `invoke` and in
@@ -927,7 +749,7 @@ form; sign-in is a provider's.
   `oxplow.provider.complete_sign_in { instance, name, redirect }`, the
   shell answering the browser with the core's verdict
   (`answer_oauth_redirect { listener, outcome }`). A listener is known by
-  its **id**, never its port (tsk905): a newer sign-in may listen on the
+  its **id**, never its port: a newer sign-in may listen on the
   same port, and a late answer or stop for an old one must not touch it. A
   replaced or left sign-in is stopped with `stop_oauth_redirect
   { listener }`, which tells a browser still waiting and resolves once the
@@ -937,12 +759,12 @@ form; sign-in is a provider's.
   provider is re-checked against the declaration it began with
   (an endpoint edited meanwhile gets nothing) and with its credentials
   where they were (a global instance turned off here, or a project entry of
-  its name arriving, moves them: `failed`, sign in again — tsk909), the
+  its name arriving, moves them: `failed`, sign in again), the
   code is exchanged and the token stored — and then it answers, so the
   browser hears at once; `credential_changed` restarts the instance on it
   afterwards and the renderer hears `CredentialChanged { instance, name,
   error }` when it has — the keychain is no model, so this is one of the
-  bus's UI-only signals (tsk906). The finish runs on a task of its own: a
+  bus's UI-only signals. The finish runs on a task of its own: a
   caller that goes away mid-exchange (a dropped connection to a remote
   daemon) never leaves it half done. The row acts on the outcome it holds
   too — it stops waiting, and shows a failure the core didn't announce.
@@ -953,13 +775,13 @@ form; sign-in is a provider's.
   listener stops by then too, by itself (`RedirectListeners`, a deadline
   task per listener — whether or not anyone still waits on it: a redirect
   it holds is answered and the socket closed, so a declared port is free
-  again; tsk904). A stop returns once the socket is closed. A second sign-in for the same credential
+  again). A stop returns once the socket is closed. A second sign-in for the same credential
   abandons the first (its redirect is no longer the sign-in's; the row
   stops its listener), and the first's news says it was replaced. Every
   sign-in has a **number** (`oxplow.provider.begin_sign_in` → `{ url, signIn }`,
   `SignInId`); `CredentialChanged { …, signIn }` names the sign-in it is
   about, so a row ignores news of another sign-in of the credential — its
-  own replaced one, another window's (tsk929). A row that is left, or
+  own replaced one, another window's. A row that is left, or
   whose browser never opened, cancels its sign-in (`oxplow.provider.cancel_sign_in
   { instance, name, sign_in }`): nothing of it — verifier, client
   secret — is kept the five minutes, and its news says it was cancelled. Each `(instance, credential)` has its own gate
@@ -968,8 +790,7 @@ form; sign-in is a provider's.
   under way, and removing an instance — a project entry that uncovers a
   global one too — takes its credentials' gates, waits for a finish in
   flight and abandons its sign-ins first, so nothing is kept for what's
-  gone (tsk826). A slow token endpoint holds up only its own sign-in
-  (tsk910). The row's Sign in is off while one starts, and off
+  gone. A slow token endpoint holds up only its own sign-in. The row's Sign in is off while one starts, and off
   without the desktop app (a plain browser can't catch the redirect),
   with the reason shown.
   `oxplow.provider.set_credential` refuses a value for a signed-in credential;
@@ -991,19 +812,16 @@ form; sign-in is a provider's.
   issued for (RFC 6749 §4.1.3), reads the client from a Basic header or
   the form, issues refresh tokens, and can expire, rotate, revoke, delay,
   redirect token requests and answer with another `token_type` or a
-  string `expires_in` (tsk830). At `/mcp` it serves the notes MCP server
-  behind exactly the access tokens it issued and still holds live, so a
-  signed-in bearer runs end to end (oxplow-provider-mcp's
-  `tests/signed_in.rs`: sign in, a by-url instance on the token, the
-  server expires it, the next create renews once and lands, still
-  Ready); `POST /sim/expire` lapses every
+  string `expires_in`. It serves OAuth only (no `/mcp`); a stand-in service
+  asks it which access tokens it issued and still holds live, so a
+  signed-in bearer runs end to end (`OAuthSim::accepts(token)` is the check
+  a stand-in service makes); `POST /sim/expire` lapses every
   access token and `POST /sim/revoke` revokes the grant (its access
   tokens stop working, its refresh is `invalid_grant`). Run it by hand
   with `cargo run -p oxplow-oauth-sim -- --http 127.0.0.1:8124` (it
   prints its urls). **Development only:** it is a dev-dependency of the
   crates that test sign-in and a binary, never a dependency of anything
-  that ships. Guard `no_test_double_is_a_production_dependency`
-  (tsk930) holds that for every test double — a workspace crate named
+  that ships. Guard `no_test_double_is_a_production_dependency` holds that for every test double — a workspace crate named
   `*-fake` or `*-sim` (`oxplow-oauth-sim`, `oxplow-ai-fake`,
   `oxplow-provider-fake`): no workspace crate reaches
   one through a normal or build edge of the resolved graph (`cargo
@@ -1033,15 +851,11 @@ owner's), missing, or disabled is left out with that state on its row, and one
 whose start failed or hung is published failing, restarting with backoff and
 counted by `contribution_health` — every other extension and instance
 activates. A started instance is handed to its capability's host at
-publication — for a task tracker,
-`ExternalTaskTracker::provider` (id, declared features, and the
-`TaskVerbs` the `task.*` commands call — the trait every tracker
-implements, oxtask included (`oxplow_oxtask::OxtaskTracker`) — each verb's
-input checked against its declared schema first) in
-`Services.tasks` — and its **other** declared commands on the bus as
+publication — for a knowledge store, `ExternalKnowledge` in
+`Services.knowledge` (each host's adapter, "What a provider may
+implement") — and its **other** declared commands on the bus as
 `<id>.<name>` (`External`, `Experimental`; confirm / access / undoable as declared). Its capability's verbs are never
-commands of their own: `task.<verb>` is the one write surface
-(P7.A1). A refusal —
+commands of their own: core's call of the verb is the one write surface. A refusal —
 unconfigured, a handshake that doesn't match — registers
 nothing; a start that merely failed (it may come up) registers and
 counts as a failure, and its next call restarts it after a backoff that
@@ -1049,9 +863,9 @@ doubles from `MachineEnv.provider_backoff` (1 s in the app, 0 in
 `Services::in_memory`) up to 60 s. `stop(instance)` removes both and
 kills the process. **Its commands are its extension's**: the manifest
 declares each once over an operation its declarations list
-(`commands:` → `{ name: item.estimate, provider: fake, op: estimate,
+(`commands:` → `{ name: snapshot.mark, provider: fake, op: mark,
 ui, … }`, [extensions-commands.md](./extensions-commands.md) "Commands"), so it has one id
-for every instance (`tracker.item.estimate`), registered by the
+for every instance (`tracker.snapshot.mark`), registered by the
 extension's generation whether or not an instance runs. Its spec takes the
 operation's input schema (plus an optional `instance`), effect and
 undo; its `confirm` is the manifest's when that asks more, else the
@@ -1060,28 +874,27 @@ A run goes through the bus's **provider router**
 (`CommandBus::set_provider_router`, `ProviderRouter for
 ProviderRegistry::run_op`) to the instance its input names — an
 `instance` field, else the instance its `uri` is of
-(a task URI's `provider` param), else the provider's default instance —
+(a URI's `provider` param), else the provider's default instance —
 `Unavailable` when that one isn't running; its inverse names an
 operation, made a call of the command declared over it (with the
 instance), or `<family>.<verb>` for a capability verb (its contract's
 `dispatch`, when it has one). A capability verb can't be
 declared this way: core calls it. An instance registers only its
 capability's implementation (no bus namespace). **A provider emits only
-its capability's event types** (its contract's `events`: `task_tracker` →
-`task.recorded@3` — a published version's schema never changes,
-since declarations are compared to it exactly;
-tsk548): declaring any other type — another core one such as
+its capability's event types** (its contract's `events`: `knowledge` →
+`knowledge.page.recorded@3` — a published version's schema never changes,
+since declarations are compared to it exactly): declaring any other type — another core one such as
 `contribution.enabled`, which would clear another contribution's disable — is
 refused when the manifest loads, and the declared schema must equal
 core's (checked at enable). Its own types are P7. A command's run
 invokes the process and hands the bus its result, its inverse (as
-`<id>.<command>`, or for a verb `task.<verb>`) and its events —
-refused if a type isn't declared, a record names another provider's row
-(a `task.recorded` another's item), or a subject isn't one of its
+`<id>.<command>`) and its events —
+refused if a type isn't declared, a record names another provider's row,
+or a subject isn't one of its
 own URIs (`check_subject`: its contract's resource with `provider=<id>`, or
 the extension's URI `oxplow:oxplow/extension?name=<ext>`).
 
-**Calls are bounded** (tsk549): `check` and `invoke` time out after
+**Calls are bounded**: `check` and `invoke` time out after
 `HostDeps.call_timeout` (`MachineEnv.provider_call_timeout`: 60 s in the
 app, 2 s in `Services::in_memory`); a timeout sends `$/cancel` and
 counts as a failure. A restart runs under its own `starting` lock,
@@ -1118,8 +931,7 @@ it runs, cleared when it ends. Settings → Integrations appends both to
 the instance's status (neither is a problem colour). The fake's
 `rate-limit:<ms>` hook refuses its next `invoke` or `read` that way.
 
-**A call's outcome is its instance's while that instance runs**
-(tsk820, tsk836). Every health write a running instance causes takes the
+**A call's outcome is its instance's while that instance runs**. Every health write a running instance causes takes the
 `Instance` that caused it and does nothing unless it is still the one
 running under its name (`is_running`, by identity) — checked and written
 under the `running` lock a stop takes: `call_succeeded`, `call_failed`
@@ -1152,7 +964,7 @@ the `contribution_health` row keyed `<extension>` / `<instance id>`, kind
 `provider` (`v_contribution_health`). **Three failures in a row disable the
 instance** — a write counts once however often it is sent again under
 its idempotency key (an effect's automatic retries, a person's retry of
-the same composition: `Instance::failed_keys`, tsk913), so one outage
+the same composition: `Instance::failed_keys`), so one outage
 that a reaction retries through doesn't halt it: it stops, and the row (`disabled`, its reason) and
 `contribution.disabled@1 { contribution, reason }` (`contribution` the provider's URI) commit
 together (source `system:extensions`, subject `extension:<extension>`). So is
@@ -1161,7 +973,7 @@ what keeps it off, across generations and restarts, and one whose row
 can't be read stays off too (`failing`, naming the error — not knowing
 isn't a yes). `InstanceHealth` is the process's state, showing the
 row's count. **A disable wins over a start in
-flight** (tsk569): each disable bumps the instance's epoch under the
+flight**: each disable bumps the instance's epoch under the
 `running` lock, and a generation publishes a started instance only if the
 epoch it began with still holds, so a concurrent generation can't bring back
 what was just disabled.
@@ -1173,25 +985,22 @@ it before writing `extensionInstances`.
 
 **Reading: collectors and sync** (`sync.rs`, P7.A3). `Instance::read`
 runs one declared collector's `read` — **one at a time per collector**
-(a second sync waits, then resumes after the first; tsk715) — from the
+(a second sync waits, then resumes after the first) — from the
 checkpoint it last stored
 (`provider_collector_state`, [data-model.md](./data-model.md)), through
 `start_streaming`. Each `$/record` must be the collector's entity — the
 one its contract streams — and a row of its own (its `uri`), valid as
-the contract's event; it is kept as that envelope (`task.recorded@3`
-`{ item }`, the actor's source) until the
+the contract's event; it is kept as that envelope (`knowledge.page.recorded@3`
+`{ page }`, the actor's source) until the
 next `$/state`, which commits the batch **and** the checkpoint in one
 transaction, so a read that fails midway keeps exactly what its last
 checkpoint covered and the next read resumes there. A record equal to its
-item's last `task.recorded` (a write's or an earlier read's —
-looked up by the contract key's literal path, `json_extract(payload,
-'$.item.uri')`, the expression index `event_log_task_uri`) is
-**not logged**: it restates nothing, and logging it would echo a write
-back to whatever reacted to it — an effect that writes another
-provider's item would hear its own write again on every sync (tsk799).
-The checkpoint's `records` still counts what was read. This leans on a
-read restating a write exactly, which the task tracker conformance suite
-checks. The result's
+row's last recorded event (a write's or an earlier read's, looked up by
+the contract key's literal path) is **not logged**: it restates nothing,
+and logging it would echo a write back to whatever reacted to it — an
+effect that writes another provider's row would hear its own write again
+on every sync. The checkpoint's `records` still counts what was read. The
+result's
 `records` must equal what was streamed; records after the last
 checkpoint of a read that succeeded land too. A read holds at most
 `HostDeps.max_uncheckpointed` records between checkpoints
@@ -1200,8 +1009,7 @@ streams more without a `$/state` fails. A record that breaks a
 rule, a count that doesn't match, or a read that sends nothing for
 `call_timeout` (`$/cancel` follows) fails the read and counts toward the
 instance's health like a failed call (a refused input or a cancel
-doesn't). The projection (`tasks.project`) then restates
-`v_task`.
+doesn't).
 
 **`oxplow.provider.sync { instance, collector? }`** is the one way to read
 ([commands.md](./commands.md)): Settings → Integrations' **Sync Now**, an
@@ -1213,7 +1021,7 @@ on request), as `Actor::System` through the bus, so each read is
 audited. **A start** reads every collector once (`sync_started`) so the
 items are there before the first scheduled read — spawned, not awaited:
 a large first read must not hold up Settings' Enable or every other
-reconcile (tsk716). An external write whose
+reconcile. An external write whose
 reply was lost (it landed at the tracker but the call timed out) is
 restated by the next read.
 
@@ -1266,8 +1074,7 @@ removed. The core is covered by `providers/tests.rs`
 (`provider_instances_are_managed_by_commands_and_read_as_a_model`), and the
 whole in a browser by the suite's `integrations/fake-provider` spec
 (`tests-e2e/`, P11): a person configures the fake's Team in the form, presses Check and
-Enable, makes it the project's task tracker in Settings → Capabilities; an item created on it reaches the
-fake's service, and after Sync Now it is on the Board. Admitting the
+Enable, and presses Sync Now. Admitting the
 program is the extension's deploy (the Extensions page); a deploy restarts
 its running instances on the new declarations in the same activation, so
 updated declarations take effect instead of disabling an instance at its
@@ -1282,21 +1089,18 @@ the instance; an unconfigured instance can't be enabled (nothing
 written) and a configured one enables, writes `extensionInstances` and
 disables again; `fail-next:3` disables it after three failures with the
 reason logged, keeps it off across a reconcile, refuses an agent's
-`oxplow.contribution.enable` and comes back on a person's; and the task tracker
-conformance suite passes through the dispatching `task.*` over the
-fake; `task.*` writes the fake's items through its process with one
-audit row (and undo dispatches again), its verbs aren't on the bus but
-its extension's `tracker.item.estimate` is, run on the instance its `uri`
-names; a verb's input is checked against its declared schema
-and a parent or link target of another provider is refused.
+`oxplow.contribution.enable` and comes back on a person's; and a command
+an extension declares over the fake's operation (`tracker.snapshot.mark`) is
+on the bus, run on the instance its `uri` or `instance` names, with one
+audit row, and its input is checked against its declared schema.
 **Its commands appear in core menus** by their own `ui`: one about a
-URI's kind (`ui.about: task`) is on that URI's page menu and its
+URI's kind (`ui.about: <kind>`) is on that URI's page menu and its
 rows' right-click menus (`refOffers`).
 
 **Its features are published** while it runs: publication writes the
 instance in the capability registry and the generation's withdrawal takes it
 out, each restating `v_capability_provider`, so the UI offers only what the
-provider declares ([tasks.md](./tasks.md)). Each generation restates
+provider declares. Each generation restates
 the rows, so a choice takes effect with the config change.
 
 ## Idempotency
@@ -1305,10 +1109,12 @@ A write to a provider may land without oxplow learning it did (a crash, a
 timeout, a lost reply). Sending it again is safe only if the provider can
 tell it is the same write. The contract (P10, built):
 
-- **`features.idempotent_writes: true`** in a provider's task tracker
-  declaration promises that two `invoke`s carrying the same key perform
-  the write once and answer alike (a key sent with another write is
-  `InvalidInput` at `/idempotency_key`; protocol 2).
+- **`features.idempotent_writes: true`** in a provider's declaration
+  promises that two `invoke`s carrying the same key perform the write once
+  and answer alike (a key sent with another write is `InvalidInput` at
+  `/idempotency_key`; protocol 2). No capability's provider contract
+  offers the feature today (the task tracker's did, and is gone), so no
+  provider can declare it.
 - **`InvokeParams.idempotency_key`** goes with every write: the caller's
   (a step of an effect's reaction: `effect_step_key`,
   `effect:<effect>:<event id>:<index>:<hash of the call>`, the same on
@@ -1325,13 +1131,10 @@ tell it is the same write. The contract (P10, built):
   same ([extensions-events.md](./extensions-events.md) "Attempts"); anything else waits for
   a person's `oxplow.effect.retry`, asked first. A failed command a person ran
   is reported, not retried.
-- **The kit checks the promise** (the task tracker suite,
-  [tasks.md](./tasks.md) "Conformance"): a provider that
-  declares it and doesn't keep it fails.
 
-The fake declares and keeps it, which proves the host and nothing about a
-service: a real provider declares it only once its service is known to do
-a keyed write once.
+The fake answers a re-sent key as it answered the first (its
+`lose-reply` hook makes the case); a real provider would declare the
+feature only once its service is known to do a keyed write once.
 
 ## The conformance kit (`crates/oxplow-sdk/src/conformance.rs`, `extension_test/`)
 
@@ -1345,10 +1148,9 @@ approval is asked; credentials come from the environment (the declared
 names — for a signed-in credential, an access token the author got
 themselves: the kit never signs in — and never a client secret).
 The report's **`left`** lists what the run made in a provider's own
-system and didn't remove — the URI a task tracker `create` example returned,
-and the items the conformance suite filed and couldn't delete
-(`task_tracker_conformance::SuiteRun.left`: everything, for a provider
-without `delete`); the text form prints each as `left in the provider:`.
+system and didn't remove (`conformance::SuiteRun.left`: everything, for a
+provider without a delete); the text form prints each as `left in the
+provider:`.
 Against a real service that is what to clean up.
 `test_extension` reads this process's; `test_extension_in` takes a
 `HostEnv` instead — for the provider's credentials, its declared `env`
@@ -1365,7 +1167,7 @@ and the throwaway host the conformance suite runs in
   A provider-sent notification or request outside the protocol, a
   host-only notification (`$/cancel`) from the provider, a reply to an
   id the other side isn't waiting on, or a line that isn't JSON-RPC, is
-  a violation (tsk570).
+  a violation.
   `finish()` sends `shutdown`, waits for the process and returns the
   session.
 - **The session**: `initialize` (must equal the declarations file,
@@ -1395,8 +1197,7 @@ and the throwaway host the conformance suite runs in
   project (`GitProvider::init_repository`: an empty root commit) with a
   copy of the extension, `Services::in_memory` over it, the provider
   enabled there with the fixture config, then its
-  capability's suite: `task_tracker_conformance::suite` against its
-  `ExternalTaskTracker`, or — the instance made the project's snapshots, the captures following it —
+  capability's suite: when the instance made the project's snapshots, the captures following it,
   `snapshot_conformance::suite` on the primary stream (round-trip, an
   unchanged mark keeps its snapshot, diffs with deletions, turn-end
   anchoring, the budget recorded), which both built-ins pass too; or —
@@ -1409,8 +1210,7 @@ and the throwaway host the conformance suite runs in
   `implementations:` entry whose entry is a script, the same capability
   suite (`capability_suite`, shared with the providers') on a fork of the
   throwaway with the implementation chosen (a choosable capability's
-  `activeProviders`); its case is `implementation <id>`. The example
-  `examples/extensions/note-tracker` passes the task tracker's.
+  `activeProviders`); its case is `implementation <id>`.
 
 The red test (`extension_cli.rs`,
 `extension_test_blesses_a_provider_then_a_changed_transcript_fails`)
@@ -1423,7 +1223,7 @@ blocked stdin reader).
 
 ## External execution authority
 
-Providers, including MCP adapters, run with the person's file, network
+Providers run with the person's file, network
 and process authority; the deploy's `process` line says so and oxplow doesn't confine them
 (there is no execution tier, and confinement is shelved until real OS
 confinement exists). Network declarations plus the macOS egress proxy limit
@@ -1516,10 +1316,10 @@ review, and metric catalog reseeding remains separate.
 
 ## The read adapter into the record models
 
-A provider instance's `task.recorded` and `knowledge.page.recorded`
-records are also written into bundled's `oxplow/task_record` and
-`oxplow/knowledge_record` models under the instance's id
-(`providers/model_records.rs`, consumer `records.models`), beside the
-`tasks.project` and `knowledge.records` projections, which go in a later
-phase. See `.context/models.md` "Providers". A provider program changes
-nothing.
+A provider instance's `knowledge.page.recorded` records are also written
+into bundled's `oxplow/knowledge_record` model under the instance's id
+(`providers/model_records.rs`, consumer `records.models`; it is
+knowledge-only), beside the `knowledge.records` projection, which goes in a
+later phase. A task is not read this way: a task store fills
+`oxplow/task_record` through `fills:` ([tasks.md](./tasks.md)). See
+`.context/models.md` "Providers". A provider program changes nothing.

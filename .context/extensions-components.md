@@ -173,7 +173,7 @@ custom_components:
     title: Burndown
     description: Open tasks against the days left in a sprint.   # optional: one sentence (v_custom_component.description; none is made up)
     bundle: components/burndown        # default components/<id>; holds index.html
-    commands: [oxplow.task.transition]
+    commands: [oxtask.task.move]
     sql: read                          # optional: its own read-only SQL (querySql); needs sql.read in permissions
 ```
 ```yaml

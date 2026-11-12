@@ -625,7 +625,7 @@ Move optional opinions out of core while retaining common evidence, analysis mec
 
 Status: done. Core keeps detection and the health report; the bundled
 effect `oxplow/repair-disabled` files (or comments on) the repair
-item through `oxplow.task.create` / `comment` on the active task tracker,
+item through `oxtask.task.create` / `comment`,
 deduplicating by the open item's `Repair <extension> <contribution>:` title
 prefix (no stable task key exists yet). An
 effect whose event carries no thread is an anchorless effect (no thread

@@ -19,7 +19,7 @@ it declares in `needs` ([commands.md](./commands.md) "Scopes") — `scope("sql.r
 A script's scope needs are the scopes a script can call
 (`scope_calls::CALLABLE`, `check_callable`): one it can't is refused at
 load, the one rule a command's `entry:`, an effect and a provider's
-`host/call` meet. A capability need (`task_tracker.comments`) gates the
+`host/call` meet. A capability need (`snapshots.contents`) gates the
 command instead.
 
 `sql.read` returns complete row lists only: more than 1000 result rows
@@ -41,7 +41,7 @@ commands:
     confirm: never                     # never (default) | always | destructive; children only add
     access: write                      # write (default) | record | read (composes nothing, returns a result)
     job: false                         # true: a durable job's model may call it (needs entry:, never over a scope's operation)
-    needs: [sql.read, task_tracker.comments]   # scopes it calls; capabilities / features it needs active
+    needs: [sql.read, model:oxplow/task_record]   # scopes it calls; capabilities / features it needs active
     ui:                                # how a person meets it (`.context/commands.md` "Offering a command")
       label: Finish Review
       group: Review
@@ -49,14 +49,14 @@ commands:
       # about_when: closed             # only where this column of the resource's dataset row is truthy
       input: { uri: "{{uri}}" }
     examples:
-      - { name: happy, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" }, expect_commands: [oxplow.task.transition] }
+      - { name: happy, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" }, expect_commands: [oxtask.task.move] }
       - { name: gone, input: { uri: "oxplow:oxplow/task?id=tsk9&provider=oxtask" }, answers: { sql.read: [[]] }, refused: no such }
     example: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" }   # the input an agent is shown; a script's defaults to its first example that runs
 ```
 
 **A need** (`needs:` on a command, skill, agent context, page or job;
 `capability::check_need`) is a scope it calls (`sql.read`), a capability
-(`task_tracker`) or one of its features (`task_tracker.comments`) that
+(`snapshots`) or one of its features (`snapshots.contents`) that
 must be active, or a shared model with a live store
 (`model:oxplow/task_record`): met while some enabled extension or running
 provider instance fills it (`CapabilityRegistry` keeps each publication's
@@ -73,9 +73,8 @@ expecting a refusal). Every command an agent is offered has one that
 fits (`every_command_an_agent_is_offered_has_an_example_that_fits`).
 
 A command may be **backed by an operation of one of the extension's
-providers**: `provider: fake` + `op: estimate`, the operation one its
-checked-in declarations list (not a capability verb — those run as
-`oxplow.task.<verb>`). Its input schema (plus an optional
+providers**: `provider: fake` + `op: mark`, the operation one its
+checked-in declarations list (not a capability verb — core calls those). Its input schema (plus an optional
 `instance`), access and undo are the declaration's, its `confirm` the
 stronger of the manifest's and the declaration's; it runs on the
 instance its input names ([providers.md](./providers.md) "The host").
@@ -253,7 +252,7 @@ An extension declares capability implementations (stable,
 
 ```yaml
 implementations:
-  - { capability: task_tracker, id: oxtask, entry: "oxplow:oxtask" }
+  - { capability: snapshots, id: hashes, entry: "oxplow:snapshot-hashes" }
 ```
 
 - `capability` is a choosable one, or one many implementations serve
@@ -285,8 +284,8 @@ implementations:
   (`BuiltIn.provider`: `oxplow:oxtask` is `oxplow`) is declared under that
   id and no other.
 - **A process implements a capability through `providers:`**, not
-  here: a capability whose spec carries a provider contract (the task tracker, an agent harness) may be an external
-  provider's instance — the task tracker chosen by
+  here: a capability whose spec carries a provider contract (snapshots, an agent harness, knowledge, a filesystem) may be an external
+  provider's instance — snapshots chosen by
   `activeProviders` like a built-in, a harness registered beside the
   built-ins under its instance id, as many as run
   ([providers.md](./providers.md) "What a provider may implement").
@@ -297,24 +296,21 @@ implementations:
   contract — the same verb tables a provider implements
   (`oxplow_domain::capability::ProviderContract`), so a capability added
   that way takes a script with no change here. Example:
-  `examples/extensions/note-tracker` (a task tracker); `oxplow extension
-  new implementation <name> [--capability <cap>]` scaffolds one.
+  `oxplow extension new implementation <name> [--capability <cap>]`
+  scaffolds one.
 
   ```yaml
   implementations:
-    - capability: task_tracker
-      id: notes
-      entry: trackers/notes.star
-      needs: [sql.read]           # the scopes it calls
+    - capability: snapshots
+      id: treehash
+      entry: snapshots/treehash.star
+      needs: [state.write, tree.read]   # the scopes it calls
       config: { prefix: n }       # any map: every verb gets it
-      features: { links: false }  # the capability's; one left out is off
-      id_pattern: "n\\d+"         # a task tracker's, as a provider's
-      stages: [{ id: jotted, title: Jotted, bucket: todo }, …]
+      features: { contents: false }     # the capability's; one left out is off
   ```
 
   It declares what a provider declares of itself — `features:`,
-  `data:` (an agent harness's), a task tracker's `stages:`, `fields:`
-  and `id_pattern:` — and the load checks it with the provider rules
+  `data:` (an agent harness's) — and the load checks it with the provider rules
   (`spec::items_problem`, `spec::check_declarations` over the
   declarations the script stands for). **The ABI**: the script defines one
   function per verb (`def create(x):`; other functions are helpers),
@@ -326,8 +322,8 @@ implementations:
   command: <verb>, input }`). **How it runs** (`providers::script`): its
   capability's host adapts it as it adapts an instance — both are a
   `providers::endpoint::Endpoint` (`CapabilityHost::prepare`), so the
-  task tracker's is an `ExternalTaskTracker` and `task.<verb>` reaches it
-  through `TaskVerbs::invoke` like any list — and each call runs the verb
+  snapshots' is an `ExternalSnapshots` that core's takes call like any
+  provider's — and each call runs the verb
   in the command scripts' sandbox (no I/O of its own; its host calls are
   its scopes), as the implementation's own
   contribution (kind `implementation`, `<capability>.<id>`), on a child of
@@ -337,9 +333,7 @@ implementations:
   contract's event types, only its own items' records and subjects
   (`endpoint::envelope_of`), an inverse naming one of the capability's
   verbs; a shape that isn't `InvokeResult` fails the call. What it keeps
-  between calls it reads back through its scopes — a task tracker's own
-  items from `v_task` (`sql.read`), recorded by the `task.recorded@3`
-  its verbs answered — or in its **extension's private state**: it may
+  between calls it reads back through its scopes (`sql.read`) or in its **extension's private state**: it may
   declare `state.write` (and `state.read`) and keep what it needs there
   ([extensions-manifest.md](./extensions-manifest.md) "Private state host
   boundary": whole-namespace compare-exchange, 1 MiB and 256 keys, `project`
@@ -372,8 +366,7 @@ implementations:
   it on a throwaway oxplow, chosen there, as it does a provider's program
   ([extensions-sdk.md](./extensions-sdk.md)).
 
-  **Which capabilities a script can implement** (each but the task
-  tracker is held by a test in `providers/script_capabilities.rs`, a small
+  **Which capabilities a script can implement** (each is held by a test in `providers/script_capabilities.rs`, a small
   extension against the capability's conformance suite):
   - `knowledge` works: `write_page` and `delete_page` answer the
     page's `knowledge.page.recorded@3`; `delete_page` reads the
@@ -433,8 +426,8 @@ implementations:
 - A required capability's default is core's own: `CapabilityRegistry::new`
   registers it (snapshots' `oxplow`, `oxplow:snapshots`), so it's there
   whatever is disabled, and a manifest declaring that id is an error.
-- `oxplow-foundation` declares the default implementations (the task tracker
-  and knowledge's oxwiki, `oxplow:oxwiki`), so they run with
+- `oxplow-foundation` declares the default implementation (knowledge's
+  oxwiki, `oxplow:oxwiki`), so they run with
   `oxplow-bundled` off; turning the list off is choosing another provider
   (or none) in Settings → Capabilities, not disabling an extension
   (`capabilities::CapabilityRegistry::resolve`, `.context/work-tracking.md`).
@@ -443,26 +436,26 @@ implementations:
   chosen `hashes` with bundled disabled falls back to core's `oxplow`.
 
 **Declared needs.** A page or an advisory may declare `needs:
-[tasks, snapshots.contents]` — capabilities, or one of a
+[knowledge, snapshots.contents]` — capabilities, or one of a
 capability's features (`oxplow_domain::capability::check_need`; an
 unknown one is a load error). A page run checks them against what's
 active (`ViewContext.active`, a `capabilities::Active` snapshot that
 `view_context` fills): unmet, it runs no loader and `PageRun.inactive`
-is set (`PageInactive { needs, message }`: "Needs: Task tracker (choose one
+is set (`PageInactive { needs, message }`: "Needs: <capability title> (choose one
 in Settings → Capabilities)."). The page view shows that instead of its
 empty state. An advisory whose
 needs aren't met doesn't run. A context built without `Services` (param
 checks) checks nothing. A capability's none declares every feature (it
 takes everything, keeping nothing), so a feature need is met by none and
-only a need of the capability itself (`task_tracker`) isn't. `oxplow-foundation`
-declares no `task_tracker` need: with no list chosen its task pages, hint and
-skill just find nothing.
+only a need of the capability itself (`knowledge`) isn't. Task guidance
+needs the task model instead (`model:oxplow/task_record`): its pages, hint
+and skill are hidden while no store fills it.
 
 **What an implementation owns.** A provider instance owns its command
 namespace (`<id>.*`), offered and run only while it's active
 (`capabilities::Active::refusal`, `.context/commands.md` step 0). The
-built-ins own nothing of the agent's surface: the task tools read
-whichever list is active.
+built-ins own nothing of the agent's surface: the task tools read the
+task model.
 
 ## Skills
 
@@ -471,10 +464,8 @@ An extension gives the coding agent skills and slash commands (stable,
 
 ```yaml
 skills:
-  - { name: tasks, file: skills/tasks/SKILL.md, needs: [task_tracker] }
+  - { name: tasks, file: skills/tasks/SKILL.md, needs: ['model:oxplow/task_record'] }
   - { name: next-task, kind: command, file: commands/next-task.md }
-implementations:
-  - { capability: task_tracker, id: oxtask, entry: "oxplow:oxtask", skills: [next-task] }
 ```
 
 - `name` is lowercase letters, digits and `-`, not one of core's own
@@ -512,8 +503,9 @@ implementations:
   already on disk (`refresh_agent_text` → each harness's `refresh_text`). A skill folder oxplow wrote
   carries a `.oxplow` marker, so one no longer offered is removed and a
   person's own stay; the Claude `commands/` folder is oxplow's whole.
-- `oxplow-foundation` gives the `tasks` skill (any task tracker) and the
-  `next-task` command (oxtask's ready queue).
+- `oxplow-bundled` gives the store-agnostic `tasks` skill; `oxtask` gives
+  its own `oxtask` skill, `track-work`, `work-tasks` and the `next-task`
+  command (the ready queue), each gated on the task model and the workflow.
 
 ## Advisories
 
@@ -585,8 +577,8 @@ advisories:
   binding the thread's stream into the scope.
 - `oxplow_validate_extension` dry-runs each advisory with every param NULL and
   checks it returns `message` (and `key` for `once_per: row`).
-- oxplow-bundled ships one hint, oxtask's: `untracked-work` (post-tool-use,
-  `once_per: request`, while oxtask is the active tracker: the request has
+- oxtask ships one hint: `untracked-work` (post-tool-use,
+  `once_per: request`, while the task model has a live store: the request has
   a recorded edit and no linked task, and the thread has no task in
   progress; the `track-work` skill says what to do). The earlier
   outcome hints (`large-uncommitted`, `landed-in-progress`, the two
@@ -624,9 +616,9 @@ permissions: [agent.write]
 context:
   - id: task-state
     doc: What the thread works on now.     # for people: the catalog, the manifest
-    needs: [task_tracker]                  # optional; without it, it doesn't run
+    needs: ['model:oxplow/task_record']    # optional; without it, it doesn't run
     query: |                               # :thread_id, :stream_id, :request_id (each may be NULL)
-      SELECT 'In progress: ' || title AS text FROM v_task WHERE thread_id = :thread_id ...
+      SELECT 'In progress: ' || title AS text FROM v_oxplow_task WHERE state = 'in_progress' ...
 ```
 
 - **`when: { config: <pointer>, in: [..] }`** sends it only while a
@@ -737,7 +729,7 @@ tool: open_work              # offered as <namespace>_open_work
   agent asks for most, each with no `category` and a `tool:`: `catalog
   { dataset? }` (every dataset with its columns), `thread_tasks { thread }` (the
   thread's items by state, with their requests), `next_task { thread }` (what
-  to pick up next; the bundled `/next-task` command calls it). Params take
+  to pick up next; oxtask's `/next-task` command calls it). Params take
   bare ids (`thr3`).
   Each reads published `v_*` datasets only, so it works with the bundled
   extension off. For history, `oxplow_vcs_log` and `oxplow_diff` are

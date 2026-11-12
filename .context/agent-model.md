@@ -256,7 +256,7 @@ Every tool foundation declares is named below
 | Ask a model | `oxplow_ai_decide` (typed questions about some text, on the `decide` role), `oxplow_ai_summarize` (on `summarize`): recorded computations paid with the person's key, as the asking thread ([ai-providers.md](./ai-providers.md)) |
 | Pages | `oxplow_show_page` (shows the person a page beside the conversation — a page with params, or a `spec` of your own, written as a page file on `oxplow:temp` and shown as `oxplow:oxplow/page?page=temp/<id>`; returns its text and whether a window opened it), `oxplow_find_page` (the pages that answer a question, best first, each with its params; `about` a uri keeps the pages that show that kind of thing and binds its uri), `oxplow_run_page` (a page's text, each node under `[node <id>]`, or its loaders' rows; `page` or an inline `spec`), `oxplow_run_page_action` (a page's action as the page acting for you; a row action on one of the node's rows); `oxplow.page.describe { uri, text?, params? }` through `run_command` (what a page file is made of and where each node comes from; `uri` is the page's file on `oxplow:extensions`, `oxplow:temp` or the worktree; a file that is no page gives no rows) — [pages-and-tabs.md](./pages-and-tabs.md) "Page files" |
 | Show the person | `oxplow_navigate` (takes them to any URI's page, switching stream when needed; by default the shown tab goes there, pushed; `replace` rewrites its entry, `new_tab` opens another) |
-| Common questions, typed | foundation pages with `tool:`: `oxplow_thread_tasks`, `oxplow_next_task`, `oxplow_catalog`, `oxplow_request_summary { request }` (a request at a glance: its facts, tasks, files, tests and coverage, metric changes and commits; foundation's `request-summary`) (each runs `oxplow.page.run` on its page, its params the tool's input: `agent_tools::ToolTarget::Page`). Every other page is `oxplow_find_page` → `oxplow_run_page` (`file-history`, `recent-commits`, `snapshots`, `thread-sessions`, `session-transcript`) |
+| Common questions, typed | foundation pages with `tool:`: `oxplow_thread_tasks`, `oxtask_next_task` (oxtask's page), `oxplow_catalog`, `oxplow_request_summary { request }` (a request at a glance: its facts, tasks, files, tests and coverage, metric changes and commits; foundation's `request-summary`) (each runs `oxplow.page.run` on its page, its params the tool's input: `agent_tools::ToolTarget::Page`). Every other page is `oxplow_find_page` → `oxplow_run_page` (`file-history`, `recent-commits`, `snapshots`, `thread-sessions`, `session-transcript`) |
 | What the person has | `oxplow_list_tabs` (the tabs each of their windows shows, per thread, stream or project: selected, on screen, stale), `oxplow_get_open_page` (the page open in a thread in the window they were in last, the others' beside it, or one listed tab: `page` is its identity, `view` its `#`; the page's run as a tree with their params, and the focused node), `oxplow_list_comments` (their anchored comments, hydrated) |
 | Knowledge | `oxplow_knowledge_drift` (one stale ref of a knowledge page: its diff against its pin) |
 | Extension authoring | `oxplow_validate_extension`, `oxplow_preview_collector`; its tests run in a process of their own, `$OXPLOW_BIN extension test <name>` (`OXPLOW_BIN`: the daemon's binary, set for every agent session) |
@@ -1690,11 +1690,11 @@ Subagent tool calls reach the hooks like any other, so their edits and
 test runs land in the subagent's starting turn, and so its request, with nothing from them: there is
 no dispatch protocol or subagent skill.
 
-**What to pick up next** is the foundation page `oxplow/next-task`
-(the tool `oxplow_next_task` with `thread: "thr3"`) over `v_task`, whichever
-list is active: an epic with its ready descendants, or every ready
+**What to pick up next** is the page `oxtask/next-task`
+(the tool `oxtask_next_task` with `thread: "thr3"`) over
+`v_oxtask_ready_queue`, oxtask's dataset: an epic with its ready descendants, or every ready
 non-epic item, open `blocks` links holding an item back; empty with
-nothing ready or no list. The bundled `next-task` command calls that tool and
+nothing ready or no list. oxtask's `next-task` command calls that tool and
 moves the item it picks to `in_progress`, which assigns it to the thread.
 Claude Code's `TaskCreate` is a within-turn planner and never mirrors
 oxplow's items.

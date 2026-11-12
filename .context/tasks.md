@@ -2,25 +2,26 @@
 
 Core has no tasks. A task is a row of the shared model `oxplow/task_record`
 (declared by `oxplow-bundled`), filled by a **store**: an extension
-(oxtask, the shipped one; any other that `fills:` the model) or an external
-provider instance (the read adapter). Everything that reads or acts on a
+(oxtask, the shipped one; any other that `fills:` the model, a collector
+pulling an outside tracker's data included). Everything that reads or acts on a
 task goes through the model, the datasets bundled builds over it, or the
 action points bundled declares — never through a core table, a core verb or
 a core tracker. This doc is the map; `.context/models.md` holds the model
-mechanics, `.context/providers.md` the provider protocol and
-`.context/extensions-slots.md` the points.
+mechanics and `.context/extensions-slots.md` the points.
 
 ## Who owns what
 
 | Piece | Owner |
 |---|---|
-| The model `oxplow/task_record` (stage, title, body, parent, children `links` and `comments`), the `task` resource (`oxplow/task`), the read datasets (`task` → `v_oxplow_task`, `task_link`, `task_comment`, `search_task`, `request_link`, `commit_task`, `thread_tasks`, `deviation`, …), the pages, the Work board, assignment (`assignee`) and queue order (`rank`) fields, request links, the task points | `oxplow-bundled` |
+| The model `oxplow/task_record` (stage, title, body, parent, children `links` and `comments`), the `task` resource (`oxplow/task`), the read datasets (`task` → `v_oxplow_task`, `task_link`, `task_comment`, `search_task`, `request_link`, `commit_task`, `thread_tasks`, `deviation`, …), the pages, the Work board, assignment (`assignee`) and queue order (`rank`) fields, request links, the task points, the store-agnostic `tasks` skill | `oxplow-bundled` (it names no store's command) |
 | A store's own data, commands and forms | The store: oxtask keeps its own SQLite file (`.oxplow/extensions-data/oxtask.sqlite`), its commands `oxtask.task.*`, its `oxtask/new-task` form and an `edit-task` part |
-| The `task_tracker` capability *kind* | Core, only as the contract an external provider program declares (`capability.rs`: `many`, not choosable, no verbs, no dispatch); the provider host (`providers/tasks.rs`) only tracks running instances |
-| The read adapter, and the recognizers | Core (`providers/model_records.rs`, `ModelRegistry::with_provider_fills`, `task_ids_from`) |
+| How a store's tasks are worked: the task workflow setting (`tasks.workflow`, `tasks.definitionOfDone`, `oxtask.tasks.set_workflow`, `v_oxtask_task_workflow`, Settings → Integrations), the ready queue (`v_oxtask_ready_queue`, the `next-task` page and `/next-task`), the skills `oxtask`, `track-work`, `work-tasks`, the agent context `task-state`, the `untracked-work` advisory | The store (oxtask); another store brings its own. See extensions-bundled.md |
+| The recognizers (loose ids) | Core (`ModelRegistry`, from each store's `fills.id_pattern`) |
 
-Core's `task` datasets, `oxplow.task.*` verbs, the task conformance suite,
-the tracker registry and the `oxplow-oxtask` crate are gone. Bundled off
+Core's `task` datasets, `oxplow.task.*` commands, the `Tasks` client and
+`TasksProjection`, the task conformance suite, the tracker registry, the
+`task_tracker` capability kind (and with it the external task provider and
+the `oxplow-oxtask` crate) are gone. Bundled off
 means no task model: pages, tools and skills that `need` the model
 (`needs: [model:oxplow/task_record]`, met while the model has a live store)
 are hidden.
@@ -57,9 +58,10 @@ item command):
   `action_point` node: the store's own form;
 - a point command binds its item's id with `{{uri.id}}`.
 
-Assignment (`oxplow.tasks.assign`), queue order (`oxplow.tasks.reorder`),
-the workflow setting and clearing Finished are bundled's own commands over
-the model's `assignee` / `rank` fields (`oxplow.model.set_fields`).
+Assignment (`oxplow.tasks.assign`), queue order (`oxplow.tasks.reorder`)
+and clearing Finished are bundled's own commands over the model's
+`assignee` / `rank` fields (`oxplow.model.set_fields`). The workflow setting
+is the store's (oxtask's `oxtask.tasks.set_workflow`), not bundled's.
 
 ## Reactions (events, not core code)
 
@@ -81,19 +83,17 @@ the model's `assignee` / `rank` fields (`oxplow.model.set_fields`).
 ## Recognizers (loose ids)
 
 Text and commands name a task by a bare id (`tsk12`) when a live store
-declared the id pattern: `ModelRegistry` (`fills.id_pattern`) and the
-running provider instances' patterns (`CapabilityRegistry::task_ids_from`).
-There is no active tracker; every live store's pattern applies.
+declared the id pattern: `ModelRegistry` (`fills.id_pattern`) is the only
+source. There is no active tracker; every live store's pattern applies.
 
 ## External providers
 
-A provider program that implements `task_tracker` only fills the model: its
-collector streams `task.recorded@3` records; `providers/model_records.rs`
-turns them into rows of `oxplow/task_record` (store = the instance id), and
-a fill appearing later is backfilled from the latest recorded events. Core
-calls none of its verbs: its own system takes the writes (a provider that
-wants commands declares them like any extension). See
-`.context/providers.md`.
+There is no task provider contract: a JSON-RPC provider cannot implement
+tasks, and the read adapter (`providers/model_records.rs`) is
+knowledge-only. A tracker outside oxplow (a Linear-like service) comes in
+as an ordinary extension whose collector pulls its data into
+`oxplow/task_record` through `fills:`; the extension declares whatever
+commands it wants like any other.
 
 ## Reading tasks
 
@@ -104,8 +104,9 @@ store's own fields as JSON), `created_at`, `updated_at`, `closed_at`.
 `v_oxplow_task_link`, `v_oxplow_task_comment`, `v_oxplow_request_link`
 (`request`, `task`, `basis`, `turn`, `thread_id`, `at`, `turns`,
 `started_at`, `last_ended_at`) and `v_oxplow_commit_task` complete it. An
-agent reads them with `oxplow_query_sql`, or through the tools bundled
-declares (`oxplow_next_task`, `oxplow_thread_tasks`).
+agent reads them with `oxplow_query_sql`, or through the tools the
+extensions declare (bundled's `oxplow_thread_tasks`, oxtask's
+`oxtask_next_task`).
 
 ## From the command line
 

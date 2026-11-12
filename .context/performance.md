@@ -1377,7 +1377,7 @@ on the same data. A query plan test holds it (`agent_stores`). The
 The task page's Shared work section (`oxplow-bundled`'s
 `shared-work-rows`) timed out (`query_sql: timed out after 5s`) on this
 repo's database: 52 live requests, 130 live turns, joined to
-`v_turn_file` and `v_request_task` on their `uri` columns. Each section
+`v_turn_file` and `v_oxplow_request_link` on their `uri` columns. Each section
 alone timed out. The same query joined on `turn_id` / `request_id`
 answers at once (735 shared files, 35 shared items). The rule is in
 `resources.md` "Join two views by their ids".
@@ -1404,7 +1404,7 @@ what changed:
 | Loader | Before | After | Why |
 |---|---|---|---|
 | `v_subagent` (thread-sessions) | 3.5–4 s, past 5 s for a whole column | one pass | a subquery per subagent re-read the subagent events (id inside the payload) and scanned every tool call (no index by subagent); now grouped once each (`the_subagent_model_reads_events_and_calls_once`) |
-| shared-work-rows, a thread | 2.0 s | 35 ms | items joined `v_task` by uri before grouping; group first, title after |
+| shared-work-rows, a thread | 2.0 s | 35 ms | items joined `v_oxplow_task` by uri before grouping; group first, title after |
 | shared-work-rows, a 225-request task | 2–4 s | 135 ms | the task's files read from the files in; `CROSS JOIN` from its requests out |
 | diff-view `row`, a turn / no subject | 1.1–1.6 s | 6–25 ms | next to the turn arm, `rq` walked every turn, each scanning every turn for its request's first; driven from the request id now |
 | diff-view `row`, a 24-turn request | 2.1 s | ~0.5 s | the same, and its `turn_end` takes found from its turns |

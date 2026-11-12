@@ -18,7 +18,7 @@ don't ask a model; `state.read`, `extension_config.read`, `jobs.read`.
 # absent or [] = baseline only. `oxplow_domain::permissions::PERMISSION_IDS`.
 permissions:
   - sql.read                     # ad-hoc read-only SQL (a script's `needs: [sql.read]`)
-  - commands:oxplow.task.*  # commands outside its own namespace (`*` one segment, `**` the rest)
+  - commands:oxtask.task.*  # commands outside its own namespace (`*` one segment, `**` the rest)
   - files.read                   # or files.write (includes read): `needs: [tree.read]`
   - ai.compute                   # models, with the person's key
   - network:api.github.com       # hosts its programs reach (`network:*.example.com` covers the names under it)
@@ -244,8 +244,8 @@ its scope trace.
   and `event_retention::tests::extension_runs_past_their_window_are_swept`.
 - **Cancel reaches the worker.** Every script a collector, command,
   effect, policy or fact collector runs is passed its run's cancel flag;
-  an exec collector's program is killed when it's set. Upcasts, report
-  parsers and the MCP adapter's mappings still run
+  an exec collector's program is killed when it's set. Upcasts and report
+  parsers still run
   under their own fixed budgets without one.
 
 ## Services
@@ -409,7 +409,7 @@ extension may reach (its `permissions:`, approved when it was deployed —
   declare doesn't load ("Permissions"). The runtime decisions are for what
   only a run reveals — a script's composed commands, a path or dataset it
   reads.
-- **Bounded reads.** `sql.read:v_task` names an exact published
+- **Bounded reads.** `sql.read:v_oxplow_task` names an exact published
   dataset; use multiple needs for multiple datasets. SQLite preparation checks
   the query's datasets and transitive registered `ref` inputs, including
   materialized datasets, before evaluating rows. Bare `sql.read` preserves
