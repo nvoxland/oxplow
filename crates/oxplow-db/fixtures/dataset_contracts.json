@@ -32960,5 +32960,47 @@
       ],
       "key": []
     }
+  },
+  "model_stage": {
+    "1": {
+      "columns": [
+        {
+          "name": "model",
+          "type": "TEXT",
+          "doc": "The model (`<owner namespace>/<model>`)."
+        },
+        {
+          "name": "store",
+          "type": "TEXT",
+          "doc": "The store whose workflow it is."
+        },
+        {
+          "name": "position",
+          "type": "INT",
+          "doc": "Its place in the workflow, from 0."
+        },
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "The stage's id (`in_progress`)."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "What a screen calls it (`In Progress`)."
+        },
+        {
+          "name": "bucket",
+          "type": "TEXT",
+          "doc": "The bucket it is in: `backlog`, `todo`, `in_progress`, `blocked`, `done` or `canceled`."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension that declares it (a provider instance's extension for its stages)."
+        }
+      ],
+      "key": []
+    }
   }
 }
