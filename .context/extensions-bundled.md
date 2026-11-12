@@ -262,8 +262,11 @@ screens and the holder's add the review and analysis:
   `work-line`, no count; its header opens the Work board) is the
   thread's tasks, a project-manager view (never turns or requests): In
   progress is the tasks in progress assigned to it (under their epic),
-  each with what its latest request is doing now (`v_request_task`,
-  `v_request.state`: the Now column); Up next the ready and blocked tasks
+  each with what the thread's latest request is doing now (the Now
+  column: the panel's loader reads `v_request.state` for its own thread;
+  `v_oxplow_thread_tasks` reads no request, because a request changes on
+  every tool call and the list, rebuilt for every thread, would re-run
+  with it, and the collapsed line shows no Now); Up next the ready and blocked tasks
   assigned to the thread in its queue's order; Finished the done tasks a
   request on the thread worked on (each once) and knowledge pages touched.
   **Assigned to you** (`assigned`; parts `assigned-panel`, `assigned-line`,

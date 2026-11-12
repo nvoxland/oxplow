@@ -6,14 +6,25 @@ params:
 loaders:
   work:
     sql: |
-      SELECT grp, title, icon, uri, depth, active,
-             CASE activity WHEN 'running' THEN 'working'
-                           WHEN 'waiting_on_person' THEN 'waiting on you'
-                           WHEN 'waiting_on_work' THEN 'waiting on its jobs'
-                           ELSE '' END AS now
-      FROM v_oxplow_thread_tasks
-      WHERE thread_id = :thread_id
-      ORDER BY g, ord
+      -- What a task in progress on this thread is doing now is the state of
+      -- the thread's latest request (a follow-up is linked to a task only
+      -- at its turn's end; the thread's request is live), read once, for
+      -- this thread alone.
+      WITH latest AS (
+        SELECT r.state FROM v_request r
+        WHERE r.thread_id = :thread_id
+        ORDER BY r.last_activity_at DESC, r.id DESC LIMIT 1
+      )
+      SELECT w.grp, w.title, w.icon, w.uri, w.depth, w.active,
+             CASE WHEN NOT w.active THEN ''
+                  ELSE CASE (SELECT state FROM latest)
+                         WHEN 'running' THEN 'working'
+                         WHEN 'waiting_on_person' THEN 'waiting on you'
+                         WHEN 'waiting_on_work' THEN 'waiting on its jobs'
+                         ELSE '' END END AS now
+      FROM v_oxplow_thread_tasks w
+      WHERE w.thread_id = :thread_id
+      ORDER BY w.g, w.ord
 view:
   from: work
   viz: list
