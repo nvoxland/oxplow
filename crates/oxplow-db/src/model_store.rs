@@ -289,6 +289,37 @@ fn validate(decl: &ModelDecl) -> Result<(), DomainError> {
     }
 }
 
+/// Replace every published field declaration with `decls`: `(model,
+/// namespace, extension, field)` (`v_model_field_decl`).
+pub fn replace_field_decls_tx(
+    conn: &rusqlite::Connection,
+    decls: &[(String, String, String, FieldDecl)],
+) -> Result<(), DomainError> {
+    conn.execute("DELETE FROM model_field_decl", [])
+        .map_err(map_sql_err)?;
+    for (model, namespace, extension, f) in decls {
+        conn.execute(
+            "INSERT OR IGNORE INTO model_field_decl
+               (model, namespace, name, extension, title, kind, values_json, read_only)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                model,
+                namespace,
+                f.name,
+                extension,
+                f.title,
+                f.kind,
+                f.values
+                    .as_ref()
+                    .map(|v| serde_json::to_string(v).unwrap_or_default()),
+                f.read_only,
+            ],
+        )
+        .map_err(map_sql_err)?;
+    }
+    Ok(())
+}
+
 /// Whether `decl` is a model the store can keep: its names, key and
 /// columns (what a manifest's `models:` is checked against).
 pub fn check_decl(decl: &ModelDecl) -> Result<(), DomainError> {
@@ -390,6 +421,97 @@ pub fn ensure_model_tx(conn: &rusqlite::Connection, decl: &ModelDecl) -> Result<
             .map_err(map_sql_err)?;
         }
         register_tx(conn, decl, &view, &select, all)?;
+    }
+    // Its fields in long form, each with its declared kind.
+    let field_view = format!("{}_field", decl.view());
+    let select = format!(
+        "SELECT f.uri, f.namespace, f.name, f.value, d.kind FROM model_field_value f \
+         JOIN {} t ON t.uri = f.uri AND t.removed_at IS NULL \
+         LEFT JOIN model_field_decl d ON d.model = f.model AND d.namespace = f.namespace AND d.name = f.name \
+         WHERE f.model = {}",
+        quote(&decl.table()),
+        sql_text(&decl.id())
+    );
+    let create_view = format!("CREATE VIEW {} AS {select}", quote(&field_view));
+    let current: Option<String> = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'view' AND name = ?1",
+            [&field_view],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(map_sql_err)?;
+    if current.as_deref() != Some(create_view.as_str()) {
+        conn.execute_batch(&format!(
+            "DROP VIEW IF EXISTS {}; {create_view};",
+            quote(&field_view)
+        ))
+        .map_err(map_sql_err)?;
+    }
+    register_field_view_tx(conn, decl, &field_view, &select)
+}
+
+/// Record the long field view as its owner's dataset.
+fn register_field_view_tx(
+    conn: &rusqlite::Connection,
+    decl: &ModelDecl,
+    view: &str,
+    select: &str,
+) -> Result<(), DomainError> {
+    let contract = serde_json::json!([
+        {"name": "uri", "type": "TEXT", "doc": "The item."},
+        {"name": "namespace", "type": "TEXT", "doc": "Who wrote the value (a store id, or an extension's namespace)."},
+        {"name": "name", "type": "TEXT", "doc": "The field."},
+        {"name": "value", "type": "TEXT", "doc": "Its value, as JSON."},
+        {"name": "kind", "type": "TEXT", "doc": "Its declared kind: enum, text or number."}
+    ])
+    .to_string();
+    let now = ts_to_string(oxplow_domain::Timestamp::now());
+    let current: Option<String> = conn
+        .query_row("SELECT sql FROM dataset WHERE view = ?1", [view], |r| {
+            r.get(0)
+        })
+        .optional()
+        .map_err(map_sql_err)?;
+    if current.as_deref() == Some(select) {
+        return Ok(());
+    }
+    conn.execute(
+        "INSERT INTO dataset (view, name, owner, version, description, sql, compiled_at, kind)
+         VALUES (?1, ?2, ?3, 1, ?4, ?5, ?6, 'entity')
+         ON CONFLICT (view) DO UPDATE SET description = excluded.description,
+             sql = excluded.sql, compiled_at = excluded.compiled_at",
+        params![
+            view,
+            format!("{}_field", decl.name),
+            decl.extension,
+            format!(
+                "The fields of the shared model `{}`'s items, one value per row.",
+                decl.id()
+            ),
+            select,
+            now
+        ],
+    )
+    .map_err(map_sql_err)?;
+    conn.execute(
+        "INSERT INTO dataset_contract (view, version, columns_json, recorded_at)
+         VALUES (?1, 1, ?2, ?3)
+         ON CONFLICT (view, version) DO UPDATE SET columns_json = excluded.columns_json,
+             recorded_at = excluded.recorded_at",
+        params![view, contract, now],
+    )
+    .map_err(map_sql_err)?;
+    for input in [
+        decl.table(),
+        "model_field_value".to_string(),
+        "model_field_decl".to_string(),
+    ] {
+        conn.execute(
+            "INSERT OR IGNORE INTO dataset_input (view, input, kind) VALUES (?1, ?2, 'source')",
+            params![view, input],
+        )
+        .map_err(map_sql_err)?;
     }
     Ok(())
 }
@@ -1905,5 +2027,59 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(stale(db.clone()).await, 1);
+    }
+
+    /// The declared fields are published (a store's under its store id,
+    /// another extension's under its namespace), and each model's long
+    /// field view joins a value with its declared kind.
+    #[tokio::test]
+    async fn field_declarations_and_the_long_field_view() {
+        let db = Database::in_memory();
+        write(
+            &db,
+            "shelf-db",
+            rating(),
+            ModelWrite::Snapshot {
+                rows: vec![row(
+                    json!({"id": "b1", "title": "Dune", "fields": {"rating": 4}}),
+                )],
+                confirm_removals: false,
+            },
+        )
+        .await
+        .unwrap();
+        db.transaction(|tx| {
+            replace_field_decls_tx(
+                tx,
+                &[(
+                    "shelf/book".into(),
+                    "shelf-db".into(),
+                    "shelf-db".into(),
+                    rating()[0].clone(),
+                )],
+            )
+        })
+        .await
+        .unwrap();
+        let (kind, value): (String, String) = db
+            .read(|tx| {
+                tx.query_row(
+                    "SELECT kind, value FROM v_shelf_book_field WHERE name = 'rating'",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .map_err(map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!((kind.as_str(), value.as_str()), ("number", "4"));
+        let decls: i64 = db
+            .read(|tx| {
+                tx.query_row("SELECT count(*) FROM model_field_decl", [], |r| r.get(0))
+                    .map_err(map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(decls, 1);
     }
 }

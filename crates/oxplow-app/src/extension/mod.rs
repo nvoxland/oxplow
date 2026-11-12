@@ -38,7 +38,7 @@ mod extension_jobs_tests;
 #[cfg(test)]
 mod extension_lifecycle_tests;
 #[cfg(test)]
-mod extension_private_state_tests;
+pub(crate) mod extension_private_state_tests;
 pub mod extension_resources;
 #[cfg(test)]
 mod extension_run_health_tests;

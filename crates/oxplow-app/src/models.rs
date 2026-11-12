@@ -113,6 +113,38 @@ impl ModelRegistry {
     }
 }
 
+impl ModelRegistry {
+    /// Every declared field as `(model, namespace, extension, field)`: a
+    /// store's under each of its store ids, another extension's under its
+    /// namespace (`v_model_field_decl`).
+    pub fn field_decls(&self) -> Vec<(String, String, String, FieldDecl)> {
+        let mut out = Vec::new();
+        for fill in &self.fills {
+            for store in &fill.stores {
+                for f in &fill.fields {
+                    out.push((
+                        fill.model.clone(),
+                        store.clone(),
+                        fill.extension.clone(),
+                        f.clone(),
+                    ));
+                }
+            }
+        }
+        for decl in &self.fields {
+            for f in &decl.fields {
+                out.push((
+                    decl.model.clone(),
+                    decl.namespace.clone(),
+                    decl.extension.clone(),
+                    f.clone(),
+                ));
+            }
+        }
+        out
+    }
+}
+
 /// The JSON Schema of every model's change event.
 pub fn change_event_schema() -> Value {
     json!({
@@ -355,6 +387,10 @@ pub fn apply_tx(
     }
     Ok(out)
 }
+
+#[cfg(test)]
+#[path = "models_e2e_tests.rs"]
+mod e2e_tests;
 
 #[cfg(test)]
 mod tests {

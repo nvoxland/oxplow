@@ -3017,7 +3017,7 @@ pub(crate) mod tests {
         extension(
             &root,
             "shelves",
-            "manifest: 2\nname: shelves\nintent:\n  purpose: test\nrequires: [shelf]\nfills:\n  - model: shelf/book\n    stores: [shelves]\ncollectors:\n  - id: books\n    runtime: starlark\n    entry: books.star\n    entities:\n      - { name: seen, key: id, columns: { id: text } }\n",
+            "manifest: 2\nname: shelves\nintent:\n  purpose: test\nrequires: [shelf]\nfills:\n  - model: shelf/book\n    stores: [shelves]\n    fields: [{ name: rating, title: Rating, kind: number }]\ncollectors:\n  - id: books\n    runtime: starlark\n    entry: books.star\n    entities:\n      - { name: seen, key: id, columns: { id: text } }\n",
             &[(
                 "books.star",
                 "def transform(x):\n    return {\"models\": [{\"model\": \"shelf/book\", \"store\": \"shelves\", \"snapshot\": [{\"id\": \"dune\", \"title\": \"Dune\"}]}], \"cursor\": {\"n\": 1}}\n",
@@ -3025,6 +3025,23 @@ pub(crate) mod tests {
         );
         let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
         assert!(problems.is_empty(), "{problems:?}");
+        let declared: String = fx
+            .svc
+            .db
+            .read(|tx| {
+                tx.query_row(
+                    "SELECT namespace || ':' || name || ':' || kind FROM v_model_field_decl",
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            declared, "shelves:rating:number",
+            "the store's field is published"
+        );
         let out = fx
             .svc
             .commands

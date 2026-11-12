@@ -370,6 +370,13 @@ pub const SCOPES: &[Scope] = &[
         summary: "Enable, record and rebuild metrics (changes the configuration and the facts).",
     },
     Scope {
+        id: "model.write",
+        access: Access::Record,
+        host: Host::Daemon,
+        spends: false,
+        summary: "Write the composing extension's own fields on a shared model's items (`fields:`).",
+    },
+    Scope {
         id: "pages.author",
         access: Access::Write,
         host: Host::Daemon,

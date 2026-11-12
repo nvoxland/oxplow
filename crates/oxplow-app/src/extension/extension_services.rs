@@ -142,6 +142,13 @@ impl ExtensionServices {
 
     /// The extension a write command is composed by: a person or an agent
     /// running it directly has none, and is refused.
+    /// The name of the extension whose script composed `run`'s command.
+    pub fn composer_name(&self, run: &RunContext, command: &str) -> Result<String, String> {
+        self.owner
+            .with_composer(run, |ext| ext.name.clone())
+            .map_err(|_| format!("`{command}` can only be composed by an extension's own script"))
+    }
+
     fn composer(
         &self,
         run: &RunContext,
