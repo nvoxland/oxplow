@@ -561,9 +561,9 @@ fields:                        # oxplow's own annotations on every store's tasks
   - `search_task_next` (new) is `v_search_task`'s rows: the task's id, its
     body, then its comments in the body; `stream_id` from the assigned
     thread; tasks assigned to an archived thread or stream left out.
-    (Core's stream archive also releases the stream's assignments, so there
-    the task returns project-wide; bundled does that at the flip when it
-    reacts to the archive.)
+    (Archiving a stream also releases its threads' assignments, in core and
+    in bundled's effect, so the task returns project-wide; the filter
+    covers a task still assigned to an archived thread.)
   - Request links: besides the collector on `oxplow.task_record.changed`,
     `oxplow.request_task_prompt` (on `agent.prompt.submitted`, from the
     `prompt_mention` edges of a person's turn to tasks) writes basis
@@ -607,6 +607,22 @@ fields:                        # oxplow's own annotations on every store's tasks
   core's `command`). Core's fact store reads a fact's task through
   `v_request_task`, ranking `command`, `edited` and `filed` alike (a test pins
   it), so the flip changes the view and not the reader.
+- **Bundled reacts to thread close, stream archive and a taken handoff
+  (step 7a, done).** Three effects, on the events core logs for them
+  (`thread.closed`, `stream.archived`, `handoff.settled` with `state:
+  taken`), do on the model what core did on its tables: a closed thread's, or
+  each archived thread's, open tasks (not done or canceled) go to the end of
+  nobody's queue in the order the thread held them, assignee cleared and a
+  place set (`oxplow.model.set_fields` once per task, because
+  `oxplow.tasks.assign`'s script runs once for all the steps and would give
+  every release the same place); a taken handoff's open task that isn't
+  already the recipient's goes to the end of the recipient's queue
+  (`oxplow.tasks.assign`). Before the flip the model holds no live task, so
+  they find nothing and need no switch. Fixtures prove each, and compare
+  assignee and rank with `v_task` for the same setup through core. One
+  difference stays until the flip: `oxplow.handoff.send` checks its task
+  against core's active tracker, so a handoff of a model-only task is refused
+  there (the fixtures send core's task of the same URI).
 - **Before the deletes:** the provider `read` adapter, and the boot repair
   over models and their children (core's repair goes with the task
   projection).

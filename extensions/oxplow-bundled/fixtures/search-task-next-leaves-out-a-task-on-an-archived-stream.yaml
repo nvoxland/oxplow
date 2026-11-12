@@ -1,5 +1,5 @@
-# A task assigned to a thread of an archived stream leaves search; the same
-# task on a live stream stays.
+# A task assigned to a thread of an archived stream is not indexed under it:
+# archiving releases it to nobody, and it stays in search project-wide.
 requires: [oxtask]
 given:
   - observe: { turn: { prompt: base, write: { path: base.txt, body: "x\n" } } }
@@ -17,11 +17,10 @@ when: { sql: "SELECT title, stream_id FROM v_oxplow_search_task_next ORDER BY ti
 expect: { rows: [{ title: Archived work, stream_id: str2 }, { title: Live work, stream_id: str1 }] }
 steps:
   - given: [{ command: oxplow.stream.archive, input: { stream: str2 }, confirmed: true }]
-  - when: { sql: "SELECT title FROM v_oxplow_search_task_next ORDER BY title" }
-    expect: { rows: [{ title: Live work }] }
-  # Core's archive also releases the stream's assignments (the task goes
-  # project-wide and stays in search); bundled does that at the flip, when it
-  # reacts to the archive. Until then the assignment stays and the filter
-  # leaves the task out.
+  # Archiving also releases the stream's assignments (bundled's effect, as
+  # core's did): the task goes project-wide and stays in search, the same rows
+  # as core's.
+  - when: { sql: "SELECT title, stream_id FROM v_oxplow_search_task_next ORDER BY title" }
+    expect: { rows: [{ title: Archived work, stream_id: null }, { title: Live work, stream_id: str1 }] }
   - when: { sql: "SELECT title, stream_id FROM v_search_task ORDER BY title" }
     expect: { rows: [{ title: Archived work, stream_id: null }, { title: Live work, stream_id: str1 }] }

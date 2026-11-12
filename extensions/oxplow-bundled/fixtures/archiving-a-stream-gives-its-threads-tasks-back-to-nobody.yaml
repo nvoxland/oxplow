@@ -1,0 +1,24 @@
+# Archiving a stream releases the open tasks of every one of its threads, as
+# core did: both threads' tasks go to nobody, in thread order; another
+# stream's thread keeps its own.
+requires: [oxtask]
+given:
+  - observe: { turn: { prompt: base, write: { path: base.txt, body: "x\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [base.txt] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: base } }
+  - { command: oxplow.stream.create, input: { title: Side, source: new, new_branch: side, start_point: main } }
+  - { command: oxplow.thread.create, input: { stream: str2, title: One } }
+  - { command: oxplow.thread.create, input: { stream: str2, title: Two } }
+  - { command: oxtask.task.create, input: { title: On one, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr2" } }
+  - { command: oxtask.task.create, input: { title: On two, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", to: "oxplow:oxplow/thread?id=thr3" } }
+  - { command: oxtask.task.create, input: { title: On the main thread, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk3&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxplow.stream.archive, input: { stream: str2 }, confirmed: true }
+when: { sql: "SELECT title, assignee, rank FROM v_oxplow_task_next ORDER BY title" }
+expect:
+  rows:
+    - { title: On one, assignee: null, rank: 0 }
+    - { title: On the main thread, assignee: "oxplow:oxplow/thread?id=thr1", rank: 0 }
+    - { title: On two, assignee: null, rank: 1 }
