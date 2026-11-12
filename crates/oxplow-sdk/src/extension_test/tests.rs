@@ -2032,6 +2032,74 @@ when: { page: items }
     );
 }
 
+/// A page's row action may name an action point instead of a command: a
+/// fixture's `press` runs the command that answers it, and `expect` sees
+/// what it answered; a row nothing answers is skipped, not refused.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_page_fixture_presses_a_point_action() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        ".oxplow/extensions/pointed/extension.yaml",
+        "manifest: 2
+name: pointed
+intent:
+  purpose: Presses a point.
+  examples:
+    - { name: pressed, input: { page: items }, expect: items }
+permissions: [commands:oxplow.task.transition]
+action_points:
+  - { name: item.start, label: Start, context: { uri: uri } }
+commands:
+  - name: item.start
+    summary: Start it.
+    input_schema: { type: object, required: [uri], properties: { uri: { type: string } } }
+    entry: handlers/start.star
+    examples:
+      - { name: happy, input: { uri: \"oxplow:oxplow/task?id=tsk1\" }, expect_commands: [oxplow.task.transition] }
+    ui: { label: Start, at: pointed/item.start, input: { uri: \"{{context.uri}}\" } }
+",
+    );
+    write(
+        root,
+        ".oxplow/extensions/pointed/handlers/start.star",
+        "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.task.transition\", \"input\": {\"uri\": x[\"input\"][\"uri\"], \"to\": \"in_progress\"}}]}\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/pointed/pages/items.yaml",
+        "title: Items
+params: [{ name: uri }]
+loaders:
+  items: { sql: \"SELECT title, uri, state FROM v_task WHERE uri = :uri\" }
+view:
+  from: items
+  viz: table
+  actions:
+    - { id: start, label: Start, point: pointed/item.start, context: { uri: '{{row.uri}}' }, row: true }
+    - { id: nobody, label: Nobody, point: pointed/item.start, command: pointed.item.other, context: { uri: '{{row.uri}}' }, row: true }
+",
+    );
+    write(
+        root,
+        ".oxplow/extensions/pointed/fixtures/pressed.yaml",
+        "requires: [oxplow-bundled]
+given: [{ command: oxplow.task.create, input: { title: First }, bind: first }]
+when: { page: items, params: { uri: $first.uri } }
+expect: { loaders: { items: { rows: [{ state: todo }] } } }
+steps:
+  - press: { action: start, node: items, row: { uri: $first.uri } }
+    expect: { ok: true }
+  - expect: { loaders: { items: { rows: [{ state: in_progress }] } } }
+  - press: { action: nobody, node: items, row: { uri: $first.uri } }
+    expect: { ok: false, refused: $any }
+",
+    );
+    let report = test_extension(root, "pointed", false).await.unwrap();
+    assert_eq!(report.error_lines(), Vec::<String>::new());
+}
+
 /// A page step presses one of its actions for real, as a person would:
 /// on a row (`row:` its columns), with what it answered or why it said
 /// no checked by `expect`, and the page run again shows what it did.

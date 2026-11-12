@@ -820,6 +820,7 @@ fn definition_parts(run: &PageRun) -> (Vec<Value>, Vec<Value>, Vec<Value>) {
                     "id": a.id,
                     "label": a.label,
                     "command": a.command,
+                    "point": a.point,
                     "open": a.open,
                     "on": on,
                     "row": a.row,
