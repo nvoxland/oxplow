@@ -347,8 +347,12 @@ Every open model keeps per-item values beyond its columns.
   that reverse what it did, and the bus keeps that as the run's undo — the
   same place, the same Undo, the same policy, confirm and audit as a
   built-in one. A run whose script returns no inverse has none. oxtask
-  offers one for each of its writes. (To build: the `inverse` key on a
-  script command's output and the bus keeping it for a steps run.)
+  offers one for each of its writes. (Built: the `inverse` key on a
+  script command's output, kept by the bus for a steps run — see
+  [extensions-commands.md](./extensions-commands.md) "Running" and
+  [commands.md](./commands.md) "As steps". The inverse names commands, for
+  a store write the extension's own command that makes it: the host's
+  `oxplow.extension_store.write` runs only for the composing script.)
 - With the owner extension off, its models do not exist; a store that
   requires it is held. The shell still starts.
 - A model's contract (columns, key, types, its change event) is

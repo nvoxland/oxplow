@@ -425,6 +425,66 @@ pub(super) async fn job_example(
     }
 }
 
+/// Run `when: { undo: <command>, as?, confirmed? }` for real: the undo of
+/// that command's newest run that was not undone yet (the inverse its
+/// audit row kept, run through the bus as a run of its own), checked
+/// against `expect`: `{ ok: true }` or `{ ok: false, refused }`.
+pub(super) async fn undo_run(
+    host: &Host,
+    ex: &Example<'_>,
+    command: &str,
+    report: &mut TestReport,
+) {
+    use oxplow_domain::events::schema::CommandOutcome;
+    let shown = ex.shown;
+    host.current().await;
+    let actor = match step_actor(&ex.when) {
+        Ok(actor) => actor,
+        Err(e) => {
+            return report
+                .errors
+                .push(error(shown, None, "example.failed", e.to_string()))
+        }
+    };
+    let rows = host
+        .svc
+        .commands
+        .audit_store()
+        .list_recent(1000)
+        .await
+        .unwrap_or_default();
+    let Some(row) = rows.iter().find(|r| {
+        r.command == command
+            && r.outcome == CommandOutcome::Ok
+            && r.undone_by.is_none()
+            && r.inverse.is_some()
+    }) else {
+        return report.errors.push(
+            error(
+                shown,
+                ex.line("when"),
+                "example.failed",
+                format!("`{command}` has no run to undo: none ran, all were undone, or its runs keep no inverse"),
+            )
+            .fix("run the command first (`given:` or an earlier step), and have its script return an `inverse`"),
+        );
+    };
+    let confirmed = ex
+        .when
+        .get("confirmed")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let outcome = host.svc.commands.undo(&actor, row.id, confirmed).await;
+    host.settle().await;
+    let got = match outcome {
+        Ok(_) => json!({ "ok": true }),
+        Err(e) => json!({ "ok": false, "refused": e.to_string() }),
+    };
+    if let Some((path, want, at)) = compare(&ex.expect, &got) {
+        report.errors.push(error(shown, ex.line("expect"), "fixture.compare", format!("the undo of `{command}` gave {at} at `{path}`, the example expects {want}")).fix("the steps before it, or the example's `expect` (`{ ok: true }` or `{ ok: false, refused }`)").mismatch(path, want, at));
+    }
+}
+
 /// Run `when: { command, input?, as?, confirmed? }` for real, through the
 /// bus, and let what it set off settle: `{ ok: true, result }` or `{ ok:
 /// false, refused }`, and `commands`, the ones that ran because of it (its
@@ -831,8 +891,9 @@ pub(super) async fn sql_example(host: &Host, ex: &Example<'_>, sql: &str, report
 /// `input` (and `answers`, standing in for its scope calls' — per
 /// scope, in call order): what it composes, checked against the
 /// throwaway's registry, and what it answers, against `expect` — `{
-/// commands: [names] }` and/or `{ result }` (only the keys it names), or
-/// `{ refused: <part of the reason> }`. Nothing runs.
+/// commands: [names] }`, `{ result }` and/or `{ inverse: { commands: [{
+/// name, input }] } }` (what its script returns to undo the run; only the
+/// keys it names), or `{ refused: <part of the reason> }`. Nothing runs.
 pub(super) async fn command_example(
     host: &Host,
     ex: &Example<'_>,
@@ -861,8 +922,21 @@ pub(super) async fn command_example(
             "composed [{}] but the example expects it to refuse ({want})",
             call_names(&calls).join(", ")
         )),
-        (Ok(Composed::Run { calls, result, .. }), None) => {
-            let got = json!({ "commands": call_names(&calls), "result": result });
+        (
+            Ok(Composed::Run {
+                calls,
+                result,
+                inverse,
+                ..
+            }),
+            None,
+        ) => {
+            let inverse = inverse.map(|calls| json!({ "commands": calls }));
+            let got = json!({
+                "commands": call_names(&calls),
+                "result": result,
+                "inverse": inverse,
+            });
             compare(&ex.expect, &got).map(|(path, want, got)| {
                 let did = if path.starts_with("/result") {
                     "answered"

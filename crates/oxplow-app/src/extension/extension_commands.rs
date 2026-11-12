@@ -787,9 +787,10 @@ pub fn refuse_shared_namespaces(extensions: &mut [Extension]) {
     }
 }
 
-/// The commands a script composed, its optional `result`, and the events
-/// it emits: `{ commands: [{ name, input }], result?, events?: [{ type,
-/// payload, subject? }] }`.
+/// The commands a script composed, its optional `result`, the events it
+/// emits and the `inverse` that undoes a run whose calls leave oxplow's
+/// records: `{ commands: [{ name, input }], result?, events?: [{ type,
+/// payload, subject? }], inverse?: { commands: [{ name, input }] } }`.
 pub fn composed(value: Value) -> Result<Composed, String> {
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
@@ -802,6 +803,13 @@ pub fn composed(value: Value) -> Result<Composed, String> {
         refuse: Option<String>,
         #[serde(default)]
         events: Vec<ComposedEvent>,
+        #[serde(default)]
+        inverse: Option<Inverse>,
+    }
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Inverse {
+        commands: Vec<Call>,
     }
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
@@ -810,30 +818,53 @@ pub fn composed(value: Value) -> Result<Composed, String> {
         #[serde(default = "empty_object")]
         input: Value,
     }
+    impl Call {
+        fn into_call(self) -> CommandCall {
+            CommandCall {
+                name: self.name,
+                input: self.input,
+            }
+        }
+    }
     fn empty_object() -> Value {
         json!({})
     }
-    const SHAPE: &str =
-        "the script must return `{ commands: [{ name, input }], result?, events? }` \
-                         or `{ refuse: \"why\" }`";
+    const SHAPE: &str = "the script must return `{ commands: [{ name, input }], result?, events?, \
+                         inverse?: { commands: [{ name, input }] } }` or `{ refuse: \"why\" }`";
     let out: Out = serde_json::from_value(value).map_err(|e| format!("{SHAPE}: {e}"))?;
     match (out.refuse, out.commands) {
-        (Some(why), None) if out.result.is_none() && out.events.is_empty() => {
+        (Some(why), None)
+            if out.result.is_none() && out.events.is_empty() && out.inverse.is_none() =>
+        {
             Ok(Composed::Refused(why))
         }
         (Some(_), _) => Err(format!("{SHAPE}: a refusal composes nothing")),
         (None, None) => Err(format!("{SHAPE}: it returned neither")),
-        (None, Some(commands)) => Ok(Composed::Run {
-            calls: commands
-                .into_iter()
-                .map(|c| CommandCall {
-                    name: c.name,
-                    input: c.input,
-                })
-                .collect(),
-            result: out.result,
-            events: out.events,
-        }),
+        (None, Some(commands)) => {
+            let inverse = match out.inverse {
+                None => None,
+                Some(Inverse { commands }) if commands.is_empty() => {
+                    return Err(format!(
+                        "{SHAPE}: `inverse.commands` needs at least one call (leave `inverse` \
+                         out when there is nothing to undo)"
+                    ))
+                }
+                Some(Inverse { commands }) => {
+                    if let Some(bad) = commands.iter().position(|c| !c.input.is_object()) {
+                        return Err(format!(
+                            "{SHAPE}: `inverse.commands[{bad}].input` must be an object"
+                        ));
+                    }
+                    Some(commands.into_iter().map(Call::into_call).collect())
+                }
+            };
+            Ok(Composed::Run {
+                calls: commands.into_iter().map(Call::into_call).collect(),
+                result: out.result,
+                events: out.events,
+                inverse,
+            })
+        }
     }
 }
 
@@ -894,6 +925,10 @@ pub enum Composed {
         calls: Vec<CommandCall>,
         result: Option<Value>,
         events: Vec<ComposedEvent>,
+        /// The calls that reverse `calls`, when the script said
+        /// (`"inverse": { "commands": [...] }`): the run's undo when its
+        /// calls leave oxplow's records.
+        inverse: Option<Vec<CommandCall>>,
     },
     /// Decline, for this reason.
     Refused(String),
@@ -1061,12 +1096,14 @@ pub fn extension_command(
                     calls,
                     result,
                     events,
+                    inverse,
                 } => {
                     let events = own_events(&vocabulary.current(), &extension, &source, events)?;
                     Ok(Composition {
                         calls,
                         result,
                         events,
+                        inverse,
                     })
                 }
                 Composed::Refused(message) => Err(CommandError::Invalid {
@@ -2440,6 +2477,238 @@ mod tests {
         crate::test_fixtures::activate_with_problems(&fx.svc).await;
     }
 
+    /// `my-review` with a `review.finish` command over `script`, whose
+    /// permissions are `permissions`.
+    async fn with_script(
+        fx: &crate::test_fixtures::ThreadFixture,
+        permissions: &str,
+        script: &str,
+    ) {
+        let root = fx._dir.path();
+        write(
+            root,
+            ".oxplow/extensions/my-review/extension.yaml",
+            &format!("manifest: 2\nname: my-review\nintent:\n  purpose: p\npermissions: [{permissions}]\ncommands:\n  - name: review.finish\n    summary: Finish the task.\n    input_schema: {{ type: object, required: [uri], properties: {{ uri: {{ type: string }} }}, additionalProperties: false }}\n    entry: finish.star\n"),
+        );
+        write(root, ".oxplow/extensions/my-review/finish.star", script);
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
+    }
+
+    /// Moves the task to done; its `inverse` moves it back to todo.
+    const FINISH_WITH_INVERSE: &str = "def transform(x):
+    uri = x[\"input\"][\"uri\"]
+    return {
+        \"commands\": [{\"name\": \"oxplow.task.transition\", \"input\": {\"uri\": uri, \"to\": \"done\"}}],
+        \"inverse\": {\"commands\": [{\"name\": \"oxplow.task.transition\", \"input\": {\"uri\": uri, \"to\": \"todo\"}}]},
+    }
+";
+
+    /// A steps run (its call leaves oxplow's records) whose script
+    /// returns an `inverse` keeps it as the run's undo: the same place a
+    /// built-in command's inverse is kept, and the same Undo runs it, as
+    /// a run of its own.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_steps_run_keeps_its_scripts_inverse_as_its_undo() {
+        let fx = crate::test_fixtures::services_with_task().await;
+        with_script(&fx, "commands:oxplow.task.*", FINISH_WITH_INVERSE).await;
+        let r = oxplow_oxtask::task_ref(fx.task);
+        let out = fx
+            .svc
+            .commands
+            .run(
+                &agent(&fx),
+                "my_review.review.finish",
+                json!({ "uri": r }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(task(&fx).await.status, oxplow_oxtask::OxtaskStatus::Done);
+        let kept = out.inverse.clone().expect("the run is undoable");
+        assert_eq!(kept.name, "oxplow.task.transition");
+        assert_eq!(kept.input, json!({ "uri": r, "to": "todo" }));
+        let audit = out.audit_id.unwrap();
+        let row = fx
+            .svc
+            .commands
+            .audit_store()
+            .get(audit)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.inverse, Some(kept));
+
+        let undo = fx
+            .svc
+            .commands
+            .undo(&agent(&fx), audit, false)
+            .await
+            .unwrap();
+        assert_eq!(task(&fx).await.status, oxplow_oxtask::OxtaskStatus::Ready);
+        let row = fx
+            .svc
+            .commands
+            .audit_store()
+            .get(audit)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            row.undone_by, undo.audit_id,
+            "the undo is its own audited run"
+        );
+    }
+
+    /// A steps run whose script returns no `inverse` has no undo.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_steps_run_without_an_inverse_has_no_undo() {
+        let fx = crate::test_fixtures::services_with_task().await;
+        with_finish(&fx, FINISH).await;
+        let r = oxplow_oxtask::task_ref(fx.task);
+        let out = fx
+            .svc
+            .commands
+            .run(
+                &agent(&fx),
+                "my_review.review.finish",
+                json!({ "uri": r }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert!(out.inverse.is_none());
+        let row = fx
+            .svc
+            .commands
+            .audit_store()
+            .get(out.audit_id.unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(row.inverse.is_none());
+        let err = fx
+            .svc
+            .commands
+            .undo(&agent(&fx), out.audit_id.unwrap(), false)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("not undoable"), "{err}");
+    }
+
+    /// A composition that stays in oxplow's records undoes itself (the
+    /// reversed children), so an `inverse` beside it is a contradiction:
+    /// the run is refused before anything runs, and the error names the
+    /// command.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_inverse_on_an_in_transaction_composition_is_refused_before_it_runs() {
+        let fx = crate::test_fixtures::services_with_task().await;
+        let script = format!(
+            "def transform(x):
+    return {{
+        \"commands\": [{{\"name\": \"oxplow.thread.mark\", \"input\": {{\"thread\": \"{}\", \"mark\": \"red\"}}}}],
+        \"inverse\": {{\"commands\": [{{\"name\": \"oxplow.thread.mark\", \"input\": {{\"thread\": \"{}\"}}}}]}},
+    }}
+",
+            fx.thread, fx.thread
+        );
+        with_script(&fx, "commands:oxplow.thread.*", &script).await;
+        let r = oxplow_oxtask::task_ref(fx.task);
+        let before = fx
+            .svc
+            .commands
+            .audit_store()
+            .list_recent(50)
+            .await
+            .unwrap()
+            .len();
+        let err = fx
+            .svc
+            .commands
+            .run(
+                &agent(&fx),
+                "my_review.review.finish",
+                json!({ "uri": r }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        let said = err.to_string();
+        assert!(
+            said.contains("my_review.review.finish")
+                && said.contains("stay in oxplow's records")
+                && said.contains("drop `inverse`"),
+            "{said}"
+        );
+        let after = fx.svc.commands.audit_store().list_recent(50).await.unwrap();
+        assert!(
+            after
+                .iter()
+                .all(|a| a.outcome != oxplow_domain::events::schema::CommandOutcome::Ok),
+            "nothing ran: {after:?} (had {before})"
+        );
+    }
+
+    /// An `inverse` is checked when the run is routed: a command that
+    /// doesn't exist, an input that isn't an object or doesn't fit, and a
+    /// raw store write (it can only be composed by the extension's own
+    /// script, so an undo could never run it) each fail the run clearly,
+    /// with the task untouched.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_bad_inverse_fails_the_run_before_it_runs() {
+        let fx = crate::test_fixtures::services_with_task().await;
+        let r = oxplow_oxtask::task_ref(fx.task);
+        let cases = [
+            (
+                r#"{"commands": [{"name": "oxplow.nope", "input": {}}]}"#,
+                "oxplow.nope",
+            ),
+            (
+                r#"{"commands": [{"name": "oxplow.task.transition", "input": "x"}]}"#,
+                "object",
+            ),
+            (
+                r#"{"commands": [{"name": "oxplow.task.transition", "input": {"to": 3}}]}"#,
+                "oxplow.task.transition",
+            ),
+            (
+                r#"{"commands": [{"name": "oxplow.extension_store.write", "input": {"batch": []}}]}"#,
+                "own command",
+            ),
+            (r#"{"commands": []}"#, "at least one"),
+        ];
+        for (inverse, says) in cases {
+            let script = format!(
+                "def transform(x):
+    return {{
+        \"commands\": [{{\"name\": \"oxplow.task.transition\", \"input\": {{\"uri\": x[\"input\"][\"uri\"], \"to\": \"done\"}}}}],
+        \"inverse\": {},
+    }}
+",
+                inverse.replace("true", "True")
+            );
+            with_script(
+                &fx,
+                "commands:oxplow.task.*, commands:oxplow.extension_store.write",
+                &script,
+            )
+            .await;
+            let before = task(&fx).await.status;
+            let err = fx
+                .svc
+                .commands
+                .run(
+                    &agent(&fx),
+                    "my_review.review.finish",
+                    json!({ "uri": r }),
+                    false,
+                )
+                .await
+                .unwrap_err();
+            assert!(err.to_string().contains(says), "{inverse}: {err}");
+            assert_eq!(task(&fx).await.status, before, "{inverse}: nothing ran");
+        }
+    }
+
     /// P8.D4: a script's `events` append its extension's own types,
     /// caused by the run's `command.executed`.
     #[tokio::test(flavor = "multi_thread")]
@@ -2999,6 +3268,48 @@ mod tests {
         assert!(composed(json!({ "refuse": "no", "commands": [] }))
             .unwrap_err()
             .contains("a refusal composes nothing"),);
+    }
+
+    /// The shape of `inverse`: `{ commands: [{ name, input }] }` beside
+    /// `commands`, at least one call, each input an object; a refusal
+    /// carries none.
+    #[test]
+    fn the_inverse_of_a_script_has_a_shape() {
+        let run = |v: serde_json::Value| composed(v);
+        let Ok(Composed::Run { inverse, .. }) = run(json!({
+            "commands": [],
+            "inverse": { "commands": [{ "name": "a.b", "input": { "k": 1 } }] },
+        })) else {
+            panic!("an inverse of one call parses");
+        };
+        assert_eq!(
+            inverse,
+            Some(vec![CommandCall {
+                name: "a.b".into(),
+                input: json!({ "k": 1 })
+            }])
+        );
+        for (bad, says) in [
+            (
+                json!({ "commands": [], "inverse": { "commands": [] } }),
+                "at least one",
+            ),
+            (
+                json!({ "commands": [], "inverse": { "commands": [{ "name": "a.b", "input": [] }] } }),
+                "must be an object",
+            ),
+            (
+                json!({ "commands": [], "inverse": { "calls": [] } }),
+                "unknown field",
+            ),
+            (
+                json!({ "refuse": "no", "inverse": { "commands": [] } }),
+                "a refusal composes nothing",
+            ),
+        ] {
+            let err = run(bad.clone()).unwrap_err();
+            assert!(err.contains(says), "{bad}: {err}");
+        }
     }
 
     /// An example may stand in answers for its scope calls

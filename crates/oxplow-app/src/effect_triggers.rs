@@ -929,6 +929,7 @@ fn effect_command(
                     ..e.clone()
                 })
                 .collect(),
+            inverse: None,
         })
     });
     sequence.with_handler(Compose::handler(composer))

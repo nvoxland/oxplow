@@ -272,7 +272,13 @@ check already reported is not repeated.
   values?, fixed?, fields? }`, the values the fields start from, the
   read-only ones and the shown ones, `null` for all), and the dry runs that
   stay dry (`{ effect, event }`, `{ implementation, event }`, `{ command,
-  input }`, a derived or fact collector, an event type, a wikilink).
+  input, answers }` — its `expect` may name `commands`, `result` and
+  `inverse: { commands: [{ name, input }] }`, the undo its script returns —
+  a derived or fact collector, an event type, a wikilink), and an undo
+  (`{ undo: <command> }`, run for real: the undo of that command's newest
+  run not yet undone, through the bus, `expect: { ok: true }` or
+  `{ ok: false, refused }`; `examples/extensions/shelf-db` removes a book,
+  undoes it and finds the book again).
   **One rule compares every `expect`** (`compare`): an object only on the
   keys it names (a key the result lacks matches only `null`, not even
   `$any`); a list every item, in order; `{ contains: [..] }` the items a

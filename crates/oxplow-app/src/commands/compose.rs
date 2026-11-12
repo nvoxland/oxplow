@@ -37,6 +37,11 @@ pub struct Composition {
     pub calls: Vec<CommandCall>,
     pub result: Option<Value>,
     pub events: Vec<oxplow_domain::Envelope>,
+    /// The calls that reverse `calls`, when the composer says so (an
+    /// extension script's `inverse`): the run's undo when its calls leave
+    /// oxplow's records (steps, which have none of their own). Refused
+    /// beside calls that all stay inside, which undo themselves.
+    pub inverse: Option<Vec<CommandCall>>,
 }
 
 /// What a composer reads through: the SQL gateway (the published datasets,
@@ -161,6 +166,7 @@ pub fn sequence_command() -> Command {
                 .collect(),
             result: None,
             events: Vec::new(),
+            inverse: None,
         })
     });
     Command::new(spec, Compose::handler(compose)).expect("command.sequence registers")

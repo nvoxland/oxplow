@@ -383,6 +383,7 @@ pub fn resolve_op() -> Op {
                     "task": handoff.task,
                 })),
                 events: Vec::new(),
+                inverse: None,
             })
         },
     );

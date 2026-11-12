@@ -751,10 +751,29 @@ children: [the landed steps], failed?: { name, input, error } }` and the
 landed steps' events, caused by it. A run that stopped partway is
 recorded as an `error` with what landed, and returns `Failed` naming the
 failed step and the ones that stand; a run that failed at its first
-step is audited like any failure. **Not undoable** (no inverse): a
-system outside the bus can't be rolled back with it, so a person
-reverses a landed step by hand (each child keeps its own `inverse` in
-the result).
+step is audited like any failure. **Not undoable by itself** (no
+inverse of its own): a system outside the bus can't be rolled back with
+it, so a person reverses a landed step by hand (each child keeps its own
+`inverse` in the result) — unless the composer **said** how:
+`Composition.inverse` (an extension script's `"inverse": { "commands":
+[{ name, input }] }`) is checked while routing and, when every step
+landed, is the run's inverse — recorded in the audit row and returned
+beside the result, the same place and the same `undo` as any other. An
+undo runs it through the bus as a run of its own (its policy, confirmation
+and audit; as the person or agent who undoes, not the extension). **Checked
+at routing, before anything runs** (`Router::route_inverse`): each call
+names a registered command that writes, the composing contribution may
+compose it (`commands:` permission), its needs are met and its input fits;
+the host's own-script-only writes (`oxplow.extension_store.write`,
+`oxplow.extension_files.write` / `delete`) are refused (an undo is not the
+extension's script — name the extension's own command that makes the write);
+several calls become an `oxplow.command.sequence`, so none may itself compose
+(a composite whose steps leave the transaction can't be a step of one),
+and a single call stays as it is. **A composition that stays in the
+transaction takes no `inverse`**: it undoes itself (the reversed children),
+so a script that returns both is refused at routing, naming the command —
+silently preferring one would hide the other. A run that stops partway
+keeps no inverse.
 
 ## Proposals: a run that needs a person who isn't there (P6b.A3)
 
