@@ -1,17 +1,7 @@
 import { expect, test } from "bun:test";
 
 import type { SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
-import {
-  activeProviderOf,
-  capabilityProvidersFromResult,
-  featuresFor,
-  itemsFromResult,
-  taskRefOfMention,
-  taskTrackerProfileOf,
-  NO_FEATURES,
-  type CapabilityProvider,
-  type Task,
-} from "./tasks.js";
+import { itemsFromResult, taskRefOfMention, taskTrackerProfileOf, NO_FEATURES, type Task } from "./tasks.js";
 
 const result = (rows: SqlQueryResult["rows"]): SqlQueryResult =>
   ({
@@ -21,7 +11,7 @@ const result = (rows: SqlQueryResult["rows"]): SqlQueryResult =>
     ],
     rows,
     truncated: false,
-    reads: { datasets: ["v_task", "v_task_comment"], tables: [], measures: [] },
+    reads: { datasets: ["v_oxplow_task", "v_oxplow_task_comment"], tables: [], measures: [] },
     freshness: {},
   }) as unknown as SqlQueryResult;
 
@@ -55,32 +45,28 @@ test("rows read as tasks: the interface's columns and the list's own fields", ()
   expect(items[1]).toMatchObject({ state: "done", stage: "shipped", stageTitle: "shipped", assignee: null, rank: null, closedAt: "t2", native: {}, parentUri: "oxplow:oxplow/task?id=ENG-0&provider=issues" });
 });
 
-// A provider's flags and fields come from v_capability_provider; a
-// provider the model doesn't list (or a flag it doesn't declare) is off.
-test("capability providers read with their features and fields; an unknown provider has none", () => {
-  const providers = capabilityProvidersFromResult({
-    columns: ["capability", "provider", "extension", "features", "fields", "stages", "active"],
+// The profile reads the task model's declarations: the first store's
+// stages in order, the stores' own fields (not oxplow's assignee and rank),
+// and what an item can do; no store, nothing.
+test("the profile reads the stores' stages and fields; no store has none", () => {
+  const stages = {
+    columns: ["store", "id", "title", "bucket"],
     rows: [
-      [
-        "task_tracker",
-        "oxtask",
-        null,
-        '{"hierarchy":true,"comments":true,"links":true,"delete":true}',
-        '[{"name":"priority","title":"Priority","kind":"enum","values":["high","low"],"read_only":false}]',
-        '[{"id":"ready","title":"Ready","bucket":"todo"},{"id":"done","title":"Done","bucket":"done"}]',
-        1,
-      ],
-      ["task_tracker", "fake", "tracker", '{"comments":true}', "[]", null, 0],
+      ["oxtask", "ready", "Ready", "todo"],
+      ["oxtask", "done", "Done", "done"],
     ],
     truncated: false,
-    reads: { datasets: ["v_capability_provider"], tables: [], measures: [] },
+    reads: { datasets: ["v_model_stage"], tables: [], measures: [] },
     freshness: {},
-  } as unknown as SqlQueryResult);
-  expect(featuresFor(providers, "oxtask")).toEqual({ hierarchy: true, comments: true, links: true, delete: true, idempotent_writes: false });
-  expect(featuresFor(providers, "fake")).toEqual({ hierarchy: false, comments: true, links: false, delete: false, idempotent_writes: false });
-  expect(featuresFor(providers, "issues")).toEqual({ hierarchy: false, comments: false, links: false, delete: false, idempotent_writes: false });
-  expect(providers.find((p) => p.provider === "fake")?.extension).toBe("tracker");
-  expect(taskTrackerProfileOf(providers)).toEqual({
+  } as unknown as SqlQueryResult;
+  const fields = {
+    columns: ["name", "title", "kind", "values", "read_only"],
+    rows: [["priority", "Priority", "enum", '["high","low"]', 0]],
+    truncated: false,
+    reads: { datasets: ["v_model_field_decl"], tables: [], measures: [] },
+    freshness: {},
+  } as unknown as SqlQueryResult;
+  expect(taskTrackerProfileOf(stages, fields)).toEqual({
     provider: "oxtask",
     features: { hierarchy: true, comments: true, links: true, delete: true, idempotent_writes: false },
     fields: [{ name: "priority", title: "Priority", kind: "enum", values: ["high", "low"], read_only: false }],
@@ -90,24 +76,8 @@ test("capability providers read with their features and fields; an unknown provi
     ],
     idPattern: null,
   });
-  expect(providers.find((p) => p.provider === "fake")?.stages).toEqual([]);
-});
-
-test("the active task tracker provider is the row marked active", () => {
-  const row = (provider: string, active: boolean): CapabilityProvider => ({
-    capability: "task_tracker",
-    provider,
-    extension: provider === "oxtask" ? null : "tracker",
-    features: {},
-    fields: [],
-    stages: [],
-    idPattern: null,
-    active,
-  });
-  expect(activeProviderOf([row("oxtask", false), row("fake", true)])).toBe("fake");
-  expect(activeProviderOf([row("oxtask", true), row("fake", false)])).toBe("oxtask");
-  expect(activeProviderOf([])).toBeNull();
-  expect(taskTrackerProfileOf([])).toEqual({ provider: null, features: NO_FEATURES, fields: [], stages: [], idPattern: null });
+  const none = { ...stages, rows: [] } as unknown as SqlQueryResult;
+  expect(taskTrackerProfileOf(none, fields)).toEqual({ provider: null, features: NO_FEATURES, fields: [], stages: [], idPattern: null });
 });
 
 // A loose id in text names an item of the active list only when the list

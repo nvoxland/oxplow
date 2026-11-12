@@ -13,7 +13,7 @@ const viz = (over: Partial<VizConfig> = {}): VizConfig => ({
   slug: "waiting",
   title: "Waiting on me",
   description: "Blocked tasks",
-  query: "SELECT ref, title FROM v_task",
+  query: "SELECT ref, title FROM v_oxplow_task",
   viz: "table",
   params: [],
   columns: [],

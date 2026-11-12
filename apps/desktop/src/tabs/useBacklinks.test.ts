@@ -80,9 +80,9 @@ describe("humanRefType", () => {
   });
 
   test("typed task links humanize the sub-type", () => {
-    expect(humanRefTypeForTest("task_link:blocks", null)).toBe("blocks");
-    expect(humanRefTypeForTest("task_link:relates_to", null)).toBe("relates to");
-    expect(humanRefTypeForTest("task_link:discovered_from", null)).toBe("discovered from");
+    expect(humanRefTypeForTest("task_record_link:blocks", null)).toBe("blocks");
+    expect(humanRefTypeForTest("task_record_link:relates_to", null)).toBe("relates to");
+    expect(humanRefTypeForTest("task_record_link:discovered_from", null)).toBe("discovered from");
   });
 
   test("finding_path stays as 'found in'", () => {
@@ -171,7 +171,7 @@ describe("edges to any ref", () => {
   const edge = (over: Partial<BacklinkEdge>): BacklinkEdge => ({
     source: taskUri("oxtask", "tsk1"),
     target: knowledgeUri("oxwiki", "x"),
-    ref_type: "task_link:about",
+    ref_type: "task_record_link:about",
     source_extra: null,
     source_label: null,
     resolved: true,

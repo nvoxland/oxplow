@@ -100,8 +100,8 @@ export function humanRefTypeForTest(refType: string, sourceExtra: string | null)
   return humanRefType(refType, sourceExtra);
 }
 
-/** The task link type an edge's `ref_type` names (`task_link:about`). */
-const LINK_TYPE_PREFIX = "task_link:";
+/** The task link type an edge's `ref_type` names (`task_record_link:about`). */
+const LINK_TYPE_PREFIX = "task_record_link:";
 
 function linkTypeOf(refType: string): string | undefined {
   return refType.startsWith(LINK_TYPE_PREFIX) ? refType.slice(LINK_TYPE_PREFIX.length) : undefined;
@@ -235,7 +235,7 @@ function openFor(uri: string, resolved: boolean): string | null {
  *    edges carry their change kind through
  *    `source_extra.change_kind`; `updated` is shown as `modified`.
  *
- *  - **typed link** — `task_link:<sub>` becomes the sub-type with
+ *  - **typed link** — `task_record_link:<sub>` becomes the sub-type with
  *    underscores swapped for spaces (e.g. `blocks`, `relates to`).
  *
  *  - **comment** — `comment_*`: a task's comment mentions it (the
@@ -246,8 +246,8 @@ function openFor(uri: string, resolved: boolean): string | null {
  *  crashes the renderer.
  */
 function humanRefType(refType: string, sourceExtra: string | null): string {
-  if (refType.startsWith("task_link:")) {
-    const sub = refType.slice("task_link:".length);
+  if (refType.startsWith("task_record_link:")) {
+    const sub = refType.slice("task_record_link:".length);
     return sub.replace(/_/g, " ");
   }
   switch (refType) {

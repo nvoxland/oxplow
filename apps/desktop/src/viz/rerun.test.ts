@@ -8,12 +8,12 @@ import {
   NO_READS,
 } from "./rerun.js";
 
-const task = { ...NO_READS, datasets: ["v_task", "v_thread"] };
+const task = { ...NO_READS, datasets: ["v_oxplow_task", "v_thread"] };
 const grid = { ...NO_READS, datasets: [], measures: ["oxplow.coverage"] };
 
 describe("a viz re-runs on what it read", () => {
   test("a dataset it read changed; another didn't", () => {
-    expect(readsChanged({ kind: "datasetsChanged", datasets: ["v_task"] }, task)).toBe(true);
+    expect(readsChanged({ kind: "datasetsChanged", datasets: ["v_oxplow_task"] }, task)).toBe(true);
     expect(readsChanged({ kind: "datasetsChanged", datasets: ["v_snapshot"] }, task)).toBe(false);
   });
   test("a metric grid re-runs on its own measures only", () => {
@@ -37,11 +37,11 @@ describe("a viz re-runs on what it read", () => {
     expect(extensionsChanged({ kind: "extensionsChanged" })).toBe(true);
     expect(extensionsChanged({ kind: "configChanged" })).toBe(true);
     expect(extensionsChanged({ kind: "workspaceChanged", path: "src/a.ts" })).toBe(false);
-    expect(extensionsChanged({ kind: "datasetsChanged", datasets: ["v_task"] })).toBe(false);
+    expect(extensionsChanged({ kind: "datasetsChanged", datasets: ["v_oxplow_task"] })).toBe(false);
   });
   test("several runs read the union", () => {
     const u = unionReads([task, grid, null]);
-    expect(u.datasets.sort()).toEqual(["v_task", "v_thread"]);
+    expect(u.datasets.sort()).toEqual(["v_oxplow_task", "v_thread"]);
     expect(u.measures).toEqual(["oxplow.coverage"]);
   });
 });
@@ -61,7 +61,7 @@ describe("the changes a host missed", () => {
   });
   test("match a run's reads as readsChanged does, within the window", () => {
     const missed = new MissedChanges();
-    missed.note({ kind: "datasetsChanged", datasets: ["v_task"] }, 1_000);
+    missed.note({ kind: "datasetsChanged", datasets: ["v_oxplow_task"] }, 1_000);
     expect(missed.matches(task, 2_000)).toBe(true);
     expect(missed.matches({ ...NO_READS, datasets: ["v_snapshot"] }, 2_000)).toBe(false);
     expect(missed.matches(task, 1_000 + 30_000)).toBe(false);
@@ -71,7 +71,7 @@ describe("the changes a host missed", () => {
   });
   test("a re-run forgets what changed before it started", () => {
     const missed = new MissedChanges();
-    missed.note({ kind: "datasetsChanged", datasets: ["v_task"] }, 1_000);
+    missed.note({ kind: "datasetsChanged", datasets: ["v_oxplow_task"] }, 1_000);
     missed.note({ kind: "metricSamplesChanged", measures: ["oxplow.coverage"] }, 3_000);
     missed.forgetBefore(2_000);
     expect(missed.matches(task, 3_000)).toBe(false);

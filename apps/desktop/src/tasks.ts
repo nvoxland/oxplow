@@ -1,9 +1,9 @@
 /**
  * Tasks read through the task interface (`.context/tasks.md`):
- * `v_task` and its views, whichever list is active — oxtask,
- * an extension's tracker, or none (nothing). The active list's own fields
- * are in `native`, described by the fields it declares
- * (`v_capability_provider.fields`); what it can do, by its features. Each
+ * `v_oxplow_task` and its views, over the task model: oxtask and any other
+ * store's items, or none (nothing). A store's own fields are in `native`,
+ * described by the fields it declares (`v_model_field_decl`), its stages by
+ * `v_model_stage`. Each
  * read returns what it read (`reads`) so a page re-runs with
  * `useRerunOnChange`.
  */
@@ -16,7 +16,7 @@ import type { Bucket, FieldDecl, Reads, SqlQueryResult, StageDecl, TaskTrackerFe
  *  acts on. The UI draws the list's stages. */
 export type { Bucket, StageDecl };
 
-/** One item on the active task tracker, as `v_task` holds it. */
+/** One item of the task model, as `v_oxplow_task` holds it. */
 export interface Task {
   /** `task:<provider>:<id>`: its identity everywhere. */
   uri: string;
@@ -48,7 +48,7 @@ export interface Task {
 
 const COLUMNS = `w.uri, w.provider, w.title, w.body, w.state, w.stage, w.stage_title, w.parent_uri, w.assignee, w.rank, w.closed_at,
   w.created_at, w.updated_at, w.native,
-  (SELECT count(*) FROM v_task_comment c WHERE c.uri = w.uri) AS comment_count`;
+  (SELECT count(*) FROM v_oxplow_task_comment c WHERE c.uri = w.uri) AS comment_count`;
 
 const text = (c: SqlCell | undefined): string | null => (c === null || c === undefined ? null : String(c));
 
@@ -89,7 +89,7 @@ export function itemsFromResult(result: SqlQueryResult): Task[] {
 
 /** One task by ref, with what it read. */
 export async function readTask(ref: string): Promise<{ item: Task | null; reads: Reads }> {
-  const res = await querySql(`SELECT ${COLUMNS} FROM v_task w WHERE w.uri = ?1`, [ref], 1);
+  const res = await querySql(`SELECT ${COLUMNS} FROM v_oxplow_task w WHERE w.uri = ?1`, [ref], 1);
   return { item: itemsFromResult(res)[0] ?? null, reads: res.reads };
 }
 
@@ -97,17 +97,16 @@ export async function readTask(ref: string): Promise<{ item: Task | null; reads:
 export async function readTasksByRef(refs: string[]): Promise<{ items: Task[]; reads: Reads }> {
   if (refs.length === 0) return { items: [], reads: NO_READS };
   const res = await querySql(
-    `SELECT ${COLUMNS} FROM v_task w WHERE w.uri IN (${refs.map((_, i) => `?${i + 1}`).join(", ")})`,
+    `SELECT ${COLUMNS} FROM v_oxplow_task w WHERE w.uri IN (${refs.map((_, i) => `?${i + 1}`).join(", ")})`,
     refs,
     refs.length,
   );
   return { items: itemsFromResult(res), reads: res.reads };
 }
 
-// ---- the active list: what it can do and its own fields (v_capability_provider) ----
+// ---- the task model's stores: what they can do and their own fields ----
 
-/** A task tracker provider's feature flags, as the provider declares them
- *  (the Rust `TaskTrackerFeatures`). */
+/** A task store's feature flags (the Rust `TaskTrackerFeatures`). */
 export type { FieldDecl, TaskTrackerFeatures };
 
 /** No feature declared. */
@@ -119,83 +118,15 @@ export const NO_FEATURES: Required<TaskTrackerFeatures> = {
   idempotent_writes: false,
 };
 
-/** One capability's provider, with its flags and fields as declared. */
-export interface CapabilityProvider {
-  capability: string;
-  provider: string;
-  /** The extension it comes from; null for oxplow's own. */
-  extension: string | null;
-  features: Record<string, unknown>;
-  /** A task tracker's own fields. */
-  fields: FieldDecl[];
-  /** A task tracker's stages, in its order. */
-  stages: StageDecl[];
-  /** What a task tracker's own ids look like (a regex matched whole). */
-  idPattern: string | null;
-  /** The capability's active provider. */
-  active: boolean;
-}
-
-function jsonOf<T>(raw: SqlCell | null, fallback: T): T {
-  try {
-    const parsed: unknown = JSON.parse(String(raw ?? ""));
-    return parsed && typeof parsed === "object" ? (parsed as T) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-export function capabilityProvidersFromResult(result: SqlQueryResult): CapabilityProvider[] {
-  const at = (row: SqlCell[], name: string) => {
-    const i = result.columns.indexOf(name);
-    return i < 0 ? null : (row[i] ?? null);
-  };
-  return result.rows.map((row) => {
-    const fields = jsonOf<FieldDecl[]>(at(row, "fields"), []);
-    const stages = jsonOf<StageDecl[]>(at(row, "stages"), []);
-    return {
-      capability: String(at(row, "capability")),
-      provider: String(at(row, "provider")),
-      extension: at(row, "extension") == null ? null : String(at(row, "extension")),
-      features: jsonOf<Record<string, unknown>>(at(row, "features"), {}),
-      fields: Array.isArray(fields) ? fields : [],
-      stages: Array.isArray(stages) ? stages : [],
-      idPattern: at(row, "id_pattern") == null ? null : String(at(row, "id_pattern")),
-      active: Number(at(row, "active") ?? 0) === 1,
-    };
-  });
-}
-
-/** `capability`'s providers, and what was read. */
-export async function readCapabilityProviders(
-  capability: string,
-): Promise<{ providers: CapabilityProvider[]; reads: Reads }> {
-  const res = await querySql(
-    "SELECT capability, provider, extension, features, fields, stages, id_pattern, active FROM v_capability_provider WHERE capability = ?1",
-    [capability],
-    100,
-  );
-  return { providers: capabilityProvidersFromResult(res), reads: res.reads };
-}
-
-/** The capability's active task tracker provider — where every create files
- *  — or null while none is listed. */
-export function activeProviderOf(providers: CapabilityProvider[]): string | null {
-  return providers.find((p) => p.capability === "task_tracker" && p.active)?.provider ?? null;
-}
-
-/** A task tracker provider's flags; every flag off for one that isn't
- *  listed or doesn't declare it, so the UI only offers what it can do. */
-export function featuresFor(providers: CapabilityProvider[], provider: string): Required<TaskTrackerFeatures> {
-  const f = providers.find((p) => p.capability === "task_tracker" && p.provider === provider)?.features ?? {};
-  return {
-    hierarchy: f.hierarchy === true,
-    comments: f.comments === true,
-    links: f.links === true,
-    delete: f.delete === true,
-    idempotent_writes: f.idempotent_writes === true,
-  };
-}
+/** What oxtask (the task model's store) does: items nest, take comments and
+ *  links, and are deleted. A project with no live task store does none. */
+const STORE_FEATURES: Required<TaskTrackerFeatures> = {
+  hierarchy: true,
+  comments: true,
+  links: true,
+  delete: true,
+  idempotent_writes: false,
+};
 
 /** What the screens offer: the active list, what it can do and its own
  *  fields. */
@@ -209,17 +140,48 @@ export interface TaskTrackerProfile {
   idPattern: string | null;
 }
 
-export function taskTrackerProfileOf(providers: CapabilityProvider[]): TaskTrackerProfile {
-  const provider = activeProviderOf(providers);
-  if (provider === null) return { provider: null, features: NO_FEATURES, fields: [], stages: [], idPattern: null };
-  const row = providers.find((p) => p.capability === "task_tracker" && p.provider === provider);
+/** The profile `v_model_stage` and `v_model_field_decl` say: the first
+ *  store's stages, in its order, and the stores' own fields (oxplow's
+ *  `assignee` and `rank` are not a store's). No store: nothing. */
+export function taskTrackerProfileOf(stages: SqlQueryResult, fields: SqlQueryResult): TaskTrackerProfile {
+  const at = (r: SqlQueryResult, row: SqlCell[], name: string) => {
+    const i = r.columns.indexOf(name);
+    return i < 0 ? null : (row[i] ?? null);
+  };
+  if (stages.rows.length === 0) return { provider: null, features: NO_FEATURES, fields: [], stages: [], idPattern: null };
+  const provider = String(at(stages, stages.rows[0], "store"));
   return {
     provider,
-    features: featuresFor(providers, provider),
-    fields: row?.fields ?? [],
-    stages: row?.stages ?? [],
-    idPattern: row?.idPattern ?? null,
+    features: STORE_FEATURES,
+    fields: fields.rows.map((row) => {
+      const values = jsonOf<unknown>(at(fields, row, "values"), null);
+      return {
+        name: String(at(fields, row, "name")),
+        title: String(at(fields, row, "title")),
+        kind: String(at(fields, row, "kind")),
+        values: Array.isArray(values) ? values.map(String) : [],
+        read_only: Number(at(fields, row, "read_only") ?? 0) === 1,
+      } as FieldDecl;
+    }),
+    stages: stages.rows
+      .filter((row) => String(at(stages, row, "store")) === provider)
+      .map((row) => ({
+        id: String(at(stages, row, "id")),
+        title: String(at(stages, row, "title")),
+        bucket: String(at(stages, row, "bucket")) as Bucket,
+      })),
+    // The model does not say how a store's ids look (yet).
+    idPattern: null,
   };
+}
+
+function jsonOf<T>(raw: SqlCell | null, fallback: T): T {
+  try {
+    const parsed: unknown = JSON.parse(String(raw ?? ""));
+    return parsed && typeof parsed === "object" ? (parsed as T) : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 /** The task ref a loose id in text names on the active list (`tsk42`
@@ -236,8 +198,24 @@ export function taskRefOfMention(profile: TaskTrackerProfile, id: string): strin
   return re.test(id) ? taskUri(profile.provider, id) : null;
 }
 
-/** The active list's profile, and what was read. */
+/** The task model's profile, and what was read. */
 export async function readTaskTrackerProfile(): Promise<{ profile: TaskTrackerProfile; reads: Reads }> {
-  const { providers, reads } = await readCapabilityProviders("task_tracker");
-  return { profile: taskTrackerProfileOf(providers), reads };
+  const stages = await querySql(
+    "SELECT store, id, title, bucket FROM v_model_stage WHERE model = 'oxplow/task_record' ORDER BY store, position",
+    [],
+    200,
+  );
+  const fields = await querySql(
+    "SELECT name, title, kind, \"values\", read_only FROM v_model_field_decl WHERE model = 'oxplow/task_record' AND namespace <> 'oxplow' ORDER BY name",
+    [],
+    200,
+  );
+  return {
+    profile: taskTrackerProfileOf(stages, fields),
+    reads: {
+      datasets: [...new Set([...stages.reads.datasets, ...fields.reads.datasets])],
+      tables: [...new Set([...stages.reads.tables, ...fields.reads.tables])],
+      measures: [...new Set([...stages.reads.measures, ...fields.reads.measures])],
+    },
+  };
 }

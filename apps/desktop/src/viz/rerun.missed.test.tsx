@@ -35,15 +35,15 @@ test("a change announced before the run reported its reads re-runs the host once
   }
   render(<Host />);
   // The first run is in flight (its reads unknown): the write lands.
-  emit({ kind: "datasetsChanged", datasets: ["v_task"] });
+  emit({ kind: "datasetsChanged", datasets: ["v_oxplow_task"] });
   await pause(200);
   expect(runs).toBe(0);
   // It reports what it read, and that includes the dataset that changed.
-  await act(async () => report(["v_task"]));
+  await act(async () => report(["v_oxplow_task"]));
   await pause(200);
   expect(runs).toBe(1);
   // The re-run is the answer to that change: reporting again asks for no more.
-  await act(async () => report(["v_task"]));
+  await act(async () => report(["v_oxplow_task"]));
   await pause(200);
   expect(runs).toBe(1);
 });
@@ -61,7 +61,7 @@ test("a change to a dataset the run didn't read asks for nothing", async () => {
   }
   render(<Host />);
   emit({ kind: "datasetsChanged", datasets: ["v_snapshot"] });
-  await act(async () => report(["v_task"]));
+  await act(async () => report(["v_oxplow_task"]));
   await pause(200);
   expect(runs).toBe(0);
 });

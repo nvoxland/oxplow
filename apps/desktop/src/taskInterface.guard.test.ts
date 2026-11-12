@@ -2,10 +2,10 @@ import { expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
-// The desktop reads the task interface — `v_task` and its views,
+// The desktop reads the task interface — `v_oxplow_task` and its views,
 // whichever list is active — and never oxplow's own task tables, ids or
 // refs (`.context/tasks.md`). oxtask is one implementation of the
-// interface; nothing here may know which is active. (`v_task` is the
+// interface; nothing here may know which is active. (`v_oxplow_task` is the
 // interface itself, so reading it is fine.)
 
 const ROOT = import.meta.dir;

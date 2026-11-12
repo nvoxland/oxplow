@@ -22,7 +22,7 @@ export function paramKind(name: string): ParamKind | null {
 export function paramOptionsSql(kind: ParamKind): string {
   switch (kind) {
     case "task":
-      return "SELECT uri AS value, title AS label FROM v_task ORDER BY updated_at DESC LIMIT 200";
+      return "SELECT uri AS value, title AS label FROM v_oxplow_task ORDER BY updated_at DESC LIMIT 200";
     case "thread":
       return "SELECT id AS value, title AS label FROM v_thread WHERE closed_at IS NULL ORDER BY sort_index";
     case "stream":

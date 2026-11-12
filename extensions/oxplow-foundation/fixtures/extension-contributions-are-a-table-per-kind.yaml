@@ -32,7 +32,7 @@ expect:
       rows:
         contains:
           - { title: oxplow.agent.draft, description: "Put text in the shown thread's agent input, unsent." }
-    skills: { rows: { contains: [{ description: $any }] } }
+    skills: { rows: 0 }
     components: { rows: { contains: [{ title: Integrations }] } }
     metrics:
       rows:

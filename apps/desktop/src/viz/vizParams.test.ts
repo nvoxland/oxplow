@@ -14,7 +14,7 @@ test("oxplow's id params are pickers; anything else is typed", () => {
 });
 
 test("each picker reads its dataset, newest first", () => {
-  expect(paramOptionsSql("task")).toContain("FROM v_task");
+  expect(paramOptionsSql("task")).toContain("FROM v_oxplow_task");
   expect(paramOptionsSql("thread")).toContain("FROM v_thread");
   expect(paramOptionsSql("stream")).toContain("FROM v_stream");
 });
