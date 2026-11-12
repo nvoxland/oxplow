@@ -298,14 +298,12 @@ Runs Vite + cargo to produce platform installers in
 
 **The bundle carries three binaries.** Every project window is backed by
 an `oxplow-daemon` child, so the daemon ships beside the shell as a
-Tauri **sidecar** (`bundle.externalBin`), and so does oxplow's MCP
-adapter, `oxplow-provider-mcp`, which the daemon runs for a provider
-declared with `adapter:` (P7.A6). `beforeBuildCommand` runs
-`src-tauri/scripts/stage-sidecars.sh`, which builds both and copies them
-to `src-tauri/binaries/<name>-<target-triple>` (gitignored). Tauri then
-places them next to the shell — `Oxplow.app/Contents/MacOS/` on macOS —
-which is exactly where `BundledDaemon::binary_path()` and
-`providers::host::adapter_bin()` look.
+Tauri **sidecar** (`bundle.externalBin`), and so does the script worker.
+`beforeBuildCommand` runs `src-tauri/scripts/stage-sidecars.sh`, which
+builds them and copies them to `src-tauri/binaries/<name>-<target-triple>`
+(gitignored). Tauri then places them next to the shell —
+`Oxplow.app/Contents/MacOS/` on macOS — which is exactly where
+`BundledDaemon::binary_path()` looks.
 
 A bundle without it can't open any project, and the shell says so
 ("no oxplow-daemon next to the app"). Note the script path is relative

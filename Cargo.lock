@@ -5020,7 +5020,6 @@ version = "0.8.0"
 dependencies = [
  "axum",
  "base64 0.23.1",
- "oxplow-provider-mcp",
  "oxplow-workspace-hack",
  "parking_lot",
  "reqwest",
@@ -5058,32 +5057,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "xxhash-rust",
-]
-
-[[package]]
-name = "oxplow-provider-mcp"
-version = "0.8.0"
-dependencies = [
- "axum",
- "futures",
- "oxplow-ai",
- "oxplow-app",
- "oxplow-config",
- "oxplow-domain",
- "oxplow-oauth-redirect",
- "oxplow-oauth-sim",
- "oxplow-provider-protocol",
- "oxplow-script",
- "oxplow-sdk",
- "reqwest",
- "rmcp",
- "schemars 1.2.2",
- "serde",
- "serde_json",
- "sse-stream",
- "tempfile",
- "tokio",
- "url",
 ]
 
 [[package]]

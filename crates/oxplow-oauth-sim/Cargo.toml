@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "A stand-in OAuth authorization server, with the notes MCP server behind the tokens it issues, for oxplow's sign-in tests and the in-app walk"
+description = "A stand-in OAuth authorization server for oxplow's sign-in tests and the in-app walk"
 publish = false
 
 # Development only: a dev-dependency of the crates that test sign-in, and a
@@ -16,7 +16,6 @@ name = "oxplow-oauth-sim"
 path = "src/main.rs"
 
 [dependencies]
-oxplow-provider-mcp = { workspace = true }
 axum = { version = "0.8" }
 base64 = "0.23"
 parking_lot = "0.12"

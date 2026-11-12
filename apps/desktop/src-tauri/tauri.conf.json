@@ -16,7 +16,7 @@
   },
   "bundle": {
     "active": true,
-    "externalBin": ["binaries/oxplow-daemon", "binaries/oxplow-provider-mcp", "binaries/oxplow-script-worker"],
+    "externalBin": ["binaries/oxplow-daemon", "binaries/oxplow-script-worker"],
     "targets": "all",
     "icon": [
       "icons/32x32.png",

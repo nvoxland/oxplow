@@ -22,7 +22,6 @@ async fn main() {
     };
     println!("authorize_url: {}", sim.authorize_url);
     println!("token_url:     {}", sim.token_url);
-    println!("mcp url:       {}", sim.mcp_url);
     println!("expire tokens: POST {}", sim.expire_url);
     println!("revoke grant:  POST {}", sim.revoke_url);
     sim.served().await;

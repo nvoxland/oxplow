@@ -1,2 +1,0 @@
-when: { command: create, input: { title: First note } }
-expect: { uri: $any }
