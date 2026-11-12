@@ -18,11 +18,16 @@ V29; `crates/oxplow-app/src/models.rs`; manifest parsing in
   transaction, one change event per changed row.
 - `v_ref_pin` and `snapshot.ref_drifted@1`.
 
-Not yet: child models, generated search, `v_model_field_decl` and the long
-field view, `oxplow.refs.verify` / `oxplow.model.set_fields` /
+Also built: `search:` (a generated `v_<ns>_search_<model>`, the resource
+searched through it unless it names its own `searchable:`),
+`v_model_field_decl` and the long field view `v_<ns>_<model>_field`,
+`oxplow.model.set_fields`, and the observer triggers (F2,
+[extensions-jobs.md](./extensions-jobs.md) "Triggers for observers").
+
+Not yet: child models, `oxplow.refs.verify` and the owner's
 `oxplow.model.write`, bare-link patterns, the boot repair over models, the
-tombstone sweep's schedule, the triggers (F2) and the shipped-extension
-plumbing (F7). This doc is the contract for the rest. The other pieces
+tombstone sweep's schedule, and the shipped-extension plumbing (F7).
+This doc is the contract for the rest. The other pieces
 have their contracts in their own docs:
 
 - triggers (`files`, `sqlite`, `start`): [extensions-jobs.md](./extensions-jobs.md) "Triggers for observers";
