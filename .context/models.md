@@ -623,6 +623,28 @@ fields:                        # oxplow's own annotations on every store's tasks
   difference stays until the flip: `oxplow.handoff.send` checks its task
   against core's active tracker, so a handoff of a model-only task is refused
   there (the fixtures send core's task of the same URI).
+- **The conversion branch (`flip-ext`), what the extensions and the desktop
+  look like after the flip.** Bundled's datasets have their final names:
+  `task` (`v_oxplow_task`), `task_link`, `task_comment`, `search_task`, and
+  for request links the model `request_task` (`v_oxplow_request_task`, the
+  rows) beside the dataset `request_link` (`v_oxplow_request_link`, in
+  `v_request_task`'s shape: request_id, thread_id, turn, turns, started_at,
+  last_ended_at; a dataset cannot take the model's view name). The `task`
+  resource (`resolve: task`, `searchable: search_task`) is bundled's; foundation
+  keeps no task reader, no `oxplow.task.*` descriptor and no `tasks` skill
+  (bundled's `tasks` skill documents oxtask's commands and
+  `oxplow.tasks.assign` / `reorder`). Every task page, part, query, context,
+  advisory and skill needs `model:oxplow/task_record` (no `task_tracker`
+  needs, no `implementations:` entry); stages and fields come from
+  `v_model_stage` and `v_model_field_decl`; actions are oxtask's commands
+  (`id`, not a URI) and bundled's assign and reorder. The desktop reads the
+  same datasets and the backlink prefix is `task_record_link:`. The `_next`
+  parity fixtures are gone. Parity was proved before the flip: `task_next`
+  matched `v_task` for the same tasks except `native` (the store's own fields:
+  `author` a URI with `author_kind`, no default `priority`) and timestamp
+  precision; `task_link_next`, `task_comment_next` (`id` the store's `cmt3`),
+  `search_task_next` and `request_task_view_next` matched their core
+  datasets' columns (request-link `basis` keeps the model's names).
 - **Before the deletes:** the provider `read` adapter, and the boot repair
   over models and their children (core's repair goes with the task
   projection).
