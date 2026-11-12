@@ -225,6 +225,9 @@ pub struct RunContext {
     run: RunId,
     parent: Option<RunId>,
     contribution: Option<ContributionRef>,
+    /// The contribution whose script composed this run, when another
+    /// contribution's command (a core command it composes) runs under it.
+    composed_by: Option<ContributionRef>,
     actor: Actor,
     anchors: Anchors,
     subject: Vec<String>,
@@ -253,6 +256,7 @@ impl RunContext {
             run: RunId::generate(),
             parent: None,
             contribution,
+            composed_by: None,
             anchors: actor.anchors(),
             actor,
             subject: Vec::new(),
@@ -479,6 +483,10 @@ impl RunContext {
         RunContext {
             run: RunId::generate(),
             parent: Some(self.run.clone()),
+            composed_by: match &contribution {
+                Some(_) => self.contribution.clone(),
+                None => self.composed_by.clone(),
+            },
             contribution: contribution.or_else(|| self.contribution.clone()),
             actor: self.actor.clone(),
             anchors: self.anchors.clone(),
@@ -512,6 +520,13 @@ impl RunContext {
 
     pub fn contribution_ref(&self) -> Option<&ContributionRef> {
         self.contribution.as_ref()
+    }
+
+    /// The contribution whose script composed this run's command, for a
+    /// command that acts for its composer (an extension writing its own file).
+    /// `None` for a command run directly.
+    pub fn composed_by(&self) -> Option<&ContributionRef> {
+        self.composed_by.as_ref()
     }
 
     /// The extension it belongs to.

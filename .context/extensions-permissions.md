@@ -509,58 +509,80 @@ reconciliation. Keychain mutation failure also invalidates old consumers; it
 does not claim deletion succeeded. Runtime isolation/revocation checks remain
 pending.
 
-## Store services (contract, being built)
+## Store services
 
-Part of the shared-models work ([models.md](./models.md)).
+Part of the shared-models work ([models.md](./models.md)). Built:
+`crates/oxplow-db/src/extension_store.rs` (the file),
+`extension/extension_services.rs` (the services),
+`commands/extension_services.rs` (the write commands),
+`extensions/storage.rs` (the manifest keys).
+
+A script is a pure composer (it runs before policy and confirmation, and
+`check` dry-runs its examples), so a **service only reads**; a **write is a
+command** the script composes, which the host runs after policy and
+confirmation.
 
 **An extension's own SQLite file.** `storage: { sqlite: true }` in the
-manifest makes the host open `.oxplow/extensions-data/<name>.sqlite`
-(created when missing; its own pool, like `Database::attach`; never
-attached to the main connection) and run the extension's migration files
-(`storage/migrations/V<n>__<name>.sql`, in order, recorded in the file).
-**Scripts read; the host writes.** A command script runs before policy
-and confirm and only composes (`.context/commands.md`), and `check` dry
-runs its examples, so every service below that a script calls reads
-only. Writes are core commands the script composes, run by the host
-after confirm: `oxplow.extension_store.write { batch }` and
-`oxplow.extension_files.write { path, body }` / `delete { path }`, each
-allowed only for the composing extension's own file or declared folders.
-(The text below predates this rule where it shows a write through
-`scope()`; the subagent building it updates it.)
+manifest makes the host open `.oxplow/extensions-data/<extension name>.sqlite`
+(created when missing; its own pool of two connections, like
+`Database::attach`; never attached to the main connection) and run the
+extension's migration files (`storage/migrations/V<n>__<name>.sql`, in order
+of `n`, each in a transaction with its record in the file's
+`_oxplow_migration` table, so each runs once; a redeploy with changed
+migrations runs the new ones). A file that doesn't match the name, or
+migrations without `storage:`, is a load error.
 
-The service `store.sql` (`needs: [store.sql]`) runs SQL on that file
-only:
+- **Read: `store.sql`** (`needs: [store.sql]`; commands, effects, collectors):
+  `scope("store.sql", {"sql": "SELECT …", "params": [...]})` answers
+  `{rows}`. One statement; it is prepared under an SQLite authorizer that
+  allows only `SELECT`, reads and read-form `PRAGMA`s, so any write, `ATTACH`,
+  `DETACH` or `VACUUM` is refused. It reaches only that extension's file
+  (the owner comes from the run, never from the request).
+- **Write: `oxplow.extension_store.write { batch: [{sql, params}] }`**, a
+  core command (scope `store.write`, an External handler: it runs outside the
+  database transaction, is not undoable, and its `batch` is left out of the
+  audit). The statements are one transaction on the file. It answers
+  `{changes}`. It runs as the composing extension and refuses any other
+  caller (a person, an agent, a run with no extension contribution); the
+  script needs `commands:oxplow.extension_store.write` in `permissions:`. A
+  collector cannot write: it only reads.
 
-```python
-scope("store.sql", {"sql": "INSERT INTO book (id, title) VALUES (?1, ?2)", "params": ["b1", "Dune"]})
-scope("store.sql", {"batch": [{"sql": "...", "params": [...]}, ...]})   # one transaction
-# -> {"rows": [...], "changes": n}
-```
-
-It is usable from commands, effects and collectors. A command's call
-commits with the command's own write (the store file first, then the
-main database; a failure in the second leaves the store written, and the
-next reconcile repairs the model). The file is removed with the
-extension's data (uninstall), never on disable.
+The file is removed with the extension's data (`extension_deploy::remove`),
+never on a disable.
 
 **The scoped file service.** `files:` in the manifest names folders the
-extension may use, relative to the project root, each with `access: read
-| write`:
+extension may use, relative to the project root, each `access: read | write`:
 
 ```yaml
 files:
   - { path: shelf, access: write }
 ```
 
-`files.read { path }` → `{ body }`, `files.list { path, glob? }` →
-`{ files: [{ path, size, modified_at }] }`, `files.write { path, body }`,
-`files.delete { path }` (`needs: [files.read]` / `[files.write]`, the
-usual grant). A path outside a declared folder, or with `..`, is refused.
-oxplow's write guard does not apply to these writes (it goes with the
-oxwiki carve-out).
+- **Read: `files.read`** (`needs: [files.read]`; needs `permissions:
+  [files.read]` or `[files.write]`): `scope("files.read", {path})` answers
+  `{body}` (at most 16 MiB), `scope("files.list", {path, glob?})` answers
+  `{files: [{path, size, modified_at}]}`, paths relative to the project
+  root, sorted.
+- **Write: `oxplow.extension_files.write { path, body }` and
+  `oxplow.extension_files.delete { path }`**, core commands (scope
+  `files.write`, External handlers; `body` is left out of the audit). They
+  run as the composing extension, only in a declared folder with `access:
+  write`, and need `permissions: [files.write]` and
+  `commands:oxplow.extension_files.*`. A write is whole or not at all (a
+  temporary file is renamed into place).
+- **Path checks** (`extension_services::check_path`): an absolute path, a
+  `..`, `.` or empty part, a path outside every declared folder, or a write
+  to a read-only folder is refused with the path and the declared folders
+  named; a symbolic link on the way is refused. `files:` entries that are
+  absolute, contain `..` or name `.git` are load errors.
 
-**A tool's own SQLite file** (beads' `.beads/beads.db`): `files.sqlite {
-path, sql, params }` reads it, read only, when `path` is inside a `files:`
-folder the extension may read. **A folder outside the project** (a
-vault): a `files:` entry may be an absolute or `~/` path; the person
-approves it by name at install, like any grant.
+oxplow's write guard does not apply to these writes (it goes with the oxwiki
+carve-out). A script's `store.sql` and `files.*` reads need the service in
+its `needs`; the router checks it like `state.read`.
+
+**Not built here** (kept from the design): a tool's own SQLite file (beads'
+`.beads/beads.db`) read with `files.sqlite { path, sql, params }`, read
+only, when `path` is inside a `files:` folder the extension may read; and a
+folder outside the project (a vault): a `files:` entry that is an absolute
+or `~/` path, which the person approves by name at install, like any
+grant. Today an absolute path in `files:` is a load error.

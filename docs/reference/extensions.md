@@ -262,6 +262,8 @@ collectors:
 | `jobs.read` | Read this extension's durable job status and result: scope("jobs.read", {id}). |  | yes |
 | `extension_config.read` | Read the resolved defaults, project and personal settings with their provenance: `scope("extension_config.read", {})`. |  | yes |
 | `state.read` | Read this extension's workflow state or cache: `scope("state.read", {scope, area})` returns a snapshot or null. |  | yes |
+| `store.sql` | Read SQL on this extension's own file (`storage: { sqlite: true }`): `scope("store.sql", {sql, params?})` runs one statement that changes nothing and returns `{rows}`. Writes are the command `oxplow.extension_store.write`. |  | yes |
+| `files.read` | Read files in the folders `files:` declares: `scope("files.read", {path})` returns `{body}`, `scope("files.list", {path, glob?})` returns `{files: [{path, size, modified_at}]}`. Writes are the commands `oxplow.extension_files.write` and `.delete`. |  | yes |
 | `sql.read` | Read-only SQL over the published datasets (`v_*`): `scope("sql.read", {sql, params?, page?})` returns every row, or one page. | `scope` | yes |
 | `tree.read` | The files of the snapshot the run is anchored to, with their syntax, metrics and duplicate blocks. | `files`, `source_files`, `duplicate_blocks` | yes |
 | `ai.compute` | Model calls on your AI provider: classify, score, summarize, extract, typed completion. Each answer is recorded, so the same question on the same text costs one call. | `ai_classify`, `ai_score`, `ai_summarize`, `ai_extract`, `ai_complete` | no |
@@ -754,6 +756,16 @@ transcript.
 
 A page's fixture is `input: { page: <slug>, params? }`, with `given:` beside
 `input` (steps run first, in order: `{ command, input?, as? }` or `{ rows: {
+<entity>: [...] } }`) and `expect: { loaders: { <name>: { rows: n | $any |
+[ { col: val } ], columns? } }, nodes: [{ id, kind? }], text: { contains: [...]
+} }`. A form node's fixture is `input: { form: <page>, node? }`. Every page's
+`answers:` entry also runs: the page must open with its params and no loader
+may fail.
+
+Your coding agent has the same checks as MCP tools
+(`oxplow_validate_extension`, `oxplow_preview_collector`), and the
+`oxplow-extension` skill walks it through building one.
+, input?, as? }` or `{ rows: {
 <entity>: [...] } }`) and `expect: { loaders: { <name>: { rows: n | $any |
 [ { col: val } ], columns? } }, nodes: [{ id, kind? }], text: { contains: [...]
 } }`. A form node's fixture is `input: { form: <page>, node? }`. Every page's

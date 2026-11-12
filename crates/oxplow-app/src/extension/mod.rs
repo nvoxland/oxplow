@@ -46,9 +46,12 @@ mod extension_run_health_tests;
 mod extension_run_pin_tests;
 pub(crate) mod extension_runtime_adapters;
 pub(crate) mod extension_secrets;
+pub(crate) mod extension_services;
 #[cfg(test)]
 mod extension_sql_config_tests;
 pub(crate) mod extension_state;
 pub mod extension_store;
+#[cfg(test)]
+mod extension_store_services_tests;
 pub mod extensions;
 mod stray_folder;

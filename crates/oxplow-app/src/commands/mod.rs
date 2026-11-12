@@ -30,6 +30,7 @@ pub mod effect;
 pub mod extension_configuration;
 pub mod extension_deploy;
 pub mod extension_jobs;
+pub mod extension_services;
 pub mod extension_state;
 pub mod file;
 pub mod handoff;

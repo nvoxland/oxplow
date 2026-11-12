@@ -1272,11 +1272,16 @@ impl Services {
         // A query's result says which collectors feed what it read and how
         // they stand, and the catalog generation it ran against.
         let feeds = Arc::new(collection_coverage::Feeds::default());
+        let extension_services = Arc::new(extension::extension_services::ExtensionServices::new(
+            extension_catalog.clone(),
+            layout.project_dir.clone(),
+        ));
         let sql = sql.with_collection(sql_gateway::Collection {
             ai: ai.clone(),
             jobs: jobs.clone(),
             feeds: feeds.clone(),
             db: db.clone(),
+            services: extension_services.clone(),
             catalog: extension_catalog.clone(),
             root: layout.project_dir.clone(),
         });
@@ -1686,6 +1691,9 @@ impl Services {
             .into_iter()
             .chain(commands::context_basket::ops())
             .chain(commands::extension_jobs::ops(jobs.clone()))
+            .chain(commands::extension_services::ops(
+                extension_services.clone(),
+            ))
             .chain(commands::extension_state::ops(
                 extension::extension_state::StateHost::new(
                     extension_catalog.clone(),
@@ -2250,6 +2258,9 @@ mod tests {
                 "oxplow.extension.unshare",
                 "oxplow.extension.validate",
                 "oxplow.extension.write_page",
+                "oxplow.extension_files.delete",
+                "oxplow.extension_files.write",
+                "oxplow.extension_store.write",
                 "oxplow.file.create",
                 "oxplow.file.create_directory",
                 "oxplow.file.delete",

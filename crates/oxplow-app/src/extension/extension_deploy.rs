@@ -1363,6 +1363,7 @@ pub async fn remove(svc: &Arc<Services>, name: &str) -> Result<(), DomainError> 
     }
     activate(svc, &LiveChanges::from([(name.to_string(), None)])).await?;
     extension_store::remove_all(&project, name);
+    crate::extension::extension_services::remove_store_file(&project, name);
     let name = name.to_string();
     svc.db
         .transaction(move |tx| {

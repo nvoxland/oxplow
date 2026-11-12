@@ -120,6 +120,10 @@ pub type JobReader<'a> = dyn FnMut(crate::extension::extension_jobs::JobInput) -
 /// its answer (`{ role, model, problem }`).
 pub type AiReader<'a> = dyn FnMut(String) -> Result<Value, String> + 'a;
 
+/// The store and file services: given the call (`store.sql`, `files.list`, …)
+/// and its arguments, its answer.
+pub type ServiceCaller<'a> = dyn FnMut(&str, Value) -> Result<Value, String> + 'a;
+
 /// `ai.discover`'s answer for `name` as `extension` means it: the role
 /// qualified, and the model it is bound to now or why none is.
 fn discover(
@@ -163,6 +167,7 @@ pub struct Calls<'a> {
     configuration: Option<Box<ConfigurationReader<'a>>>,
     jobs: Option<Box<JobReader<'a>>>,
     ai: Option<Box<AiReader<'a>>>,
+    services: Option<Box<ServiceCaller<'a>>>,
     /// Answers standing in for a scope's own, in call order (an
     /// example's); a scope without any is served for real.
     answers: BTreeMap<String, VecDeque<Value>>,
@@ -181,6 +186,7 @@ impl<'a> Calls<'a> {
             configuration: None,
             jobs: None,
             ai: None,
+            services: None,
             answers: BTreeMap::new(),
             busy: None,
         }
@@ -282,6 +288,19 @@ impl<'a> Calls<'a> {
         }
     }
 
+    /// The store and file services over the app's `services`, as the run's
+    /// extension (`ExtensionServices::call`).
+    fn with_extension_services(
+        mut self,
+        services: Option<std::sync::Arc<crate::extension::extension_services::ExtensionServices>>,
+    ) -> Self {
+        if let Some(services) = services {
+            let run = self.run.clone();
+            self.services = Some(Box::new(move |call, args| services.call(&run, call, args)));
+        }
+        self
+    }
+
     /// Answer `ai.discover` with `ai`.
     pub fn with_ai_reader(mut self, ai: Box<AiReader<'a>>) -> Self {
         self.ai = Some(ai);
@@ -315,7 +334,8 @@ impl<'a> Calls<'a> {
         let Some(layer) = layer else {
             return self;
         };
-        self.with_state_source(layer.state_source(), runtime)
+        self.with_extension_services(layer.extension_services())
+            .with_state_source(layer.state_source(), runtime)
             .with_configuration_source(layer.configuration_source(), runtime)
             .with_jobs_source(layer.jobs_source(), runtime)
             .with_ai_source(layer.ai_source())
@@ -331,17 +351,19 @@ impl<'a> Calls<'a> {
 
     /// The handler's call of `id` with `args`: its answer, or why not.
     pub fn serve(&mut self, id: &str, args: Value) -> Result<Value, String> {
-        if oxplow_domain::scope::scope(id).is_none() {
+        // `files.list` is a call of the service `files.read` declares.
+        let need = oxplow_domain::service::need_of_call(id);
+        if oxplow_domain::scope::scope(need).is_none() {
             return Err(format!("no scope `{id}`"));
         }
-        check_callable(id)?;
+        check_callable(need)?;
         // Decided and recorded on the run either way.
         let decision = self
             .run
-            .decide(oxplow_domain::grant::Need::Scope(id.to_string()));
-        if !oxplow_domain::service::declares(self.needs, id) {
+            .decide(oxplow_domain::grant::Need::Scope(need.to_string()));
+        if !oxplow_domain::service::declares(self.needs, need) {
             return Err(format!(
-                "`{id}` isn't in the command's `needs` — declare it to call it"
+                "`{id}` isn't in the command's `needs` — declare `{need}` to call it"
             ));
         }
         if let oxplow_domain::grant::Decision::Denied(why) = decision {
@@ -409,6 +431,12 @@ impl<'a> Calls<'a> {
             "sql.read" => self.sql_read(args),
             "extension_config.read" => self.configuration_read(),
             "state.read" => self.state_read(state_input.expect("parsed state request")),
+            "store.sql" | "files.read" | "files.list" => self
+                .services
+                .as_mut()
+                .ok_or_else(|| format!("`{id}` isn't available where this script runs"))?(
+                id, args
+            ),
             "state.write" => self.state_write(write_input.expect("parsed state write")),
             "jobs.read" => self
                 .jobs

@@ -32,6 +32,7 @@ pub mod public_contracts;
 pub mod replacements;
 pub mod schema;
 pub mod skills;
+pub mod storage;
 use crate::pages::schema::PageKind;
 use crate::pages::spec::{
     action_templates, edit_column, label_refs, param_problem, FormMode, FormSpec, LabelFrom,
@@ -434,6 +435,11 @@ pub struct Extension {
     pub jobs: Vec<jobs::JobDecl>,
     /// Named dataset needs this extension declares.
     pub ai_profiles: Vec<ai_profiles::AiProfileDecl>,
+    /// Its own SQLite file and the folders it may use (`storage:`, `files:`).
+    /// Host-side only.
+    #[serde(default)]
+    #[specta(skip)]
+    pub storage: storage::ExtensionStorage,
     /// Its `version:` (semver), when it declares one; required to share.
     pub version: Option<String>,
     /// Its contributions as descriptors (`extensions::descriptors`): the
@@ -1727,6 +1733,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         commands: Vec::new(),
         jobs: Vec::new(),
         ai_profiles: Vec::new(),
+        storage: Default::default(),
         version: None,
         contributions: Vec::new(),
         configuration: None,
@@ -2090,6 +2097,9 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             ext.ai_profiles = profiles;
             ext.errors.extend(errors);
         }
+        let (kept, errors) = storage::load(m.storage.as_ref(), &m.files, files, man, &manifest);
+        ext.storage = kept;
+        ext.errors.extend(errors);
         if let Some(v) = &m.custom_components {
             let (components, errors) =
                 custom_components::parse_custom_components(name, v, man, &manifest, &|rel| {
@@ -2535,7 +2545,11 @@ fn needs_permissions(needs: &[String]) -> Permissions {
         match oxplow_domain::service::need_scope(need) {
             "ai.compute" | "ai.discover" => p.ai = true,
             "sql.read" => p.sql = Some(oxplow_domain::permissions::SqlAccess::Read),
-            "tree.read" => p.files = Some(oxplow_domain::permissions::FilesAccess::Read),
+            "tree.read" | "files.read" => {
+                p.files = p
+                    .files
+                    .max(Some(oxplow_domain::permissions::FilesAccess::Read))
+            }
             _ => {}
         }
     }
@@ -3508,6 +3522,7 @@ pub(crate) fn clear_contributions(ext: &mut Extension) {
     ext.commands.clear();
     ext.jobs.clear();
     ext.ai_profiles.clear();
+    ext.storage = Default::default();
     ext.contributions.clear();
 }
 
