@@ -107,11 +107,40 @@ pub enum Trigger {
         /// once by default.
         #[serde(default)]
         pacing: Pacing,
+        /// What else in the same `on:` list sets it off: `start`, a file
+        /// glob, a SQLite file (an observer's triggers).
+        #[serde(default)]
+        sources: Vec<ObserverSource>,
     },
     /// A report collector's: when the agent runs the project's tests or an
     /// analyzer (the `collection` reactor detects the run), if its report
     /// was written by that run.
     OnRun { run: RunKind },
+}
+
+/// An observer's trigger in an `on:` list, beside event types
+/// (`.context/extensions-jobs.md` "Triggers for observers").
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum ObserverSource {
+    /// Once when the extension starts (boot, enable, a deploy that changes it).
+    Start,
+    /// Files of the primary worktree matching `glob` (relative to the
+    /// project root) were created, changed or removed.
+    Files { glob: String },
+    /// A SQLite file's `PRAGMA data_version` moved: the extension's own file
+    /// (`path` absent) or a tool's database in a `files:` folder it may read.
+    Sqlite { path: Option<String> },
+}
+
+impl Trigger {
+    /// The observer sources it lists (none for any other trigger).
+    pub fn sources(&self) -> &[ObserverSource] {
+        match self {
+            Trigger::On { sources, .. } => sources,
+            _ => &[],
+        }
+    }
 }
 
 /// When an `on:` collector runs after a triggering event. Empty,
@@ -728,8 +757,45 @@ pub enum ColumnShape {
 pub enum OnFile {
     Manual(Manual),
     Events(EventTypeList),
+    /// Event types mixed with `start`, `{ files: <glob> }` and
+    /// `{ sqlite: own | <path> }`.
+    Observers(Vec<OnItem>),
+    Observer(ObserverFile),
     Every(EveryFile),
     Run(RunFile),
+}
+
+/// An item of an `on:` list: an event type, or an observer's trigger.
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum OnItem {
+    /// An event type, or `start`.
+    Event(String),
+    Observer(ObserverFile),
+}
+
+/// `{ files: <glob> }` or `{ sqlite: own | <path> }`.
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum ObserverFile {
+    Files(FilesFile),
+    Sqlite(SqliteFile),
+}
+
+/// `{ files: shelf/*.md }`: files of the project matching the glob (from
+/// the project root) were created, changed or removed.
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FilesFile {
+    pub files: String,
+}
+
+/// `{ sqlite: own }` or `{ sqlite: .beads/beads.db }`: a SQLite file
+/// changed (the extension's own, or one in a `files:` folder it may read).
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SqliteFile {
+    pub sqlite: String,
 }
 
 /// `manual`: only when someone runs it.
@@ -864,6 +930,16 @@ pub fn parse_trigger(
         }
         Some(Value::Mapping(map)) => {
             let get = |k: &str| map.get(Value::String(k.into())).cloned();
+            if get("files").is_some() || get("sqlite").is_some() {
+                // `on: { files: … }` alone is a list of one.
+                return parse_trigger(
+                    TriggerKeys {
+                        on: Some(&Value::Sequence(vec![Value::Mapping(map.clone())])),
+                        ..keys
+                    },
+                    knows_event,
+                );
+            }
             if map.len() != 1 || (get("every").is_none() && get("run").is_none()) {
                 return Err(shapes.to_string());
             }
@@ -927,17 +1003,20 @@ pub fn parse_trigger(
             Ok(Trigger::Every { minutes })
         }
         (None, Some(on)) => {
-            let events: Vec<String> = match on {
-                Value::String(s) => vec![s.clone()],
-                Value::Sequence(items) => items
-                    .iter()
-                    .map(|i| i.as_str().map(str::to_string))
-                    .collect::<Option<_>>()
-                    .ok_or_else(|| "`on` lists event types".to_string())?,
-                _ => return Err("`on` lists event types".into()),
-            };
-            if events.is_empty() {
+            let (events, sources) = split_on(on)?;
+            if events.is_empty() && sources.is_empty() {
                 return Err("`on` names no event type".into());
+            }
+            if events.is_empty()
+                && [&t.filter, &t.settle, &t.at_most, &t.idle, &t.force]
+                    .iter()
+                    .any(|v| v.is_some())
+            {
+                return Err(
+                    "`where`, `settle`, `at_most`, `idle` and `force` go with event types in \
+                     `on`, not with `start`, `files` or `sqlite`"
+                        .into(),
+                );
             }
             if events.iter().any(|t| t == "collector.synced") {
                 return Err(
@@ -1007,10 +1086,96 @@ pub fn parse_trigger(
                 events,
                 filter,
                 pacing,
+                sources,
             })
         }
         _ => Err(shapes.to_string()),
     }
+}
+
+/// An `on:` value split into its event types and its observer sources
+/// (`start`, `{ files: <glob> }`, `{ sqlite: own | <path> }`).
+fn split_on(on: &serde_yaml::Value) -> Result<(Vec<String>, Vec<ObserverSource>), String> {
+    use serde_yaml::Value;
+    let one = std::slice::from_ref(on);
+    let items: &[Value] = match on {
+        Value::Sequence(items) => items,
+        Value::String(_) => one,
+        _ => return Err("`on` lists event types".into()),
+    };
+    let mut events = Vec::new();
+    let mut sources = Vec::new();
+    for item in items {
+        match item {
+            Value::String(s) if s == "start" => sources.push(ObserverSource::Start),
+            Value::String(s) => events.push(s.clone()),
+            Value::Mapping(map) => sources.push(observer_source(map)?),
+            _ => return Err("`on` lists event types".into()),
+        }
+    }
+    Ok((events, sources))
+}
+
+/// A `{ files: <glob> }` or `{ sqlite: own | <path> }` item of `on:`.
+fn observer_source(map: &serde_yaml::Mapping) -> Result<ObserverSource, String> {
+    use serde_yaml::Value;
+    let shapes = "an `on` item is an event type, `start`, `{ files: <glob> }` or \
+                  `{ sqlite: own | <path> }`";
+    if map.len() != 1 {
+        return Err(format!("an `on` item takes one key; {shapes}"));
+    }
+    let (key, value) = map.iter().next().expect("one key");
+    match (key.as_str(), value) {
+        (Some("files"), Value::String(glob)) => {
+            if !is_inside_glob(glob) {
+                return Err(format!(
+                    "`files: {glob}` must be a glob relative to the project root (no leading \
+                     `/`, no `..`)"
+                ));
+            }
+            globset::Glob::new(glob).map_err(|e| format!("`files: {glob}` isn't a glob: {e}"))?;
+            Ok(ObserverSource::Files { glob: glob.clone() })
+        }
+        (Some("files"), _) => Err("`files` takes a glob, like `shelf/*.md`".into()),
+        (Some("sqlite"), Value::String(s)) if s == "own" => {
+            Ok(ObserverSource::Sqlite { path: None })
+        }
+        (Some("sqlite"), Value::String(path)) => {
+            if !is_inside(path) {
+                return Err(format!(
+                    "`sqlite: {path}` must be a path relative to the project root (no leading \
+                     `/`, no `..`)"
+                ));
+            }
+            Ok(ObserverSource::Sqlite {
+                path: Some(path.clone()),
+            })
+        }
+        (Some("sqlite"), _) => Err("`sqlite` takes `own` or a path".into()),
+        _ => Err(shapes.to_string()),
+    }
+}
+
+/// The globs of an observer's `files` triggers as one matcher over
+/// project-relative paths; `*` stays inside a folder, `**` crosses them.
+pub fn files_matcher(globs: &[String]) -> Result<globset::GlobSet, globset::Error> {
+    let mut set = globset::GlobSetBuilder::new();
+    for glob in globs {
+        set.add(
+            globset::GlobBuilder::new(glob)
+                .literal_separator(true)
+                .build()?,
+        );
+    }
+    set.build()
+}
+
+/// A glob that stays inside the project: not absolute, no `..` part.
+fn is_inside_glob(glob: &str) -> bool {
+    !glob.is_empty()
+        && !glob.starts_with('/')
+        && !glob.contains('\\')
+        && glob.split('/').all(|part| part != "..")
 }
 
 fn yaml_scalar(v: &serde_yaml::Value) -> Option<String> {
@@ -1649,6 +1814,7 @@ mod tests {
                 events: vec!["snapshot.taken".into()],
                 filter: [("trigger".to_string(), "git_refs".to_string())].into(),
                 pacing: Pacing::default(),
+                sources: Vec::new(),
             }
         );
         // Pacing — settle, at most, idle, and the events that run
@@ -1666,6 +1832,7 @@ mod tests {
                     idle_secs: Some(120),
                     force: vec!["vcs.head.moved".into()],
                 },
+                sources: Vec::new(),
             }
         );
         assert_eq!(
@@ -1709,6 +1876,86 @@ mod tests {
         // No `on`: manual.
         let (s, _) = parse(&GOOD.replace("  on: { every: 10m }\n", ""));
         assert_eq!(s[0].trigger, Trigger::Manual);
+    }
+
+    /// An observer's `on:` mixes event types with `start`, `{ files: <glob> }`
+    /// and `{ sqlite: own | <path> }` in one list.
+    #[test]
+    fn observer_triggers_mix_with_event_types() {
+        let with = |t: &str| parse(&GOOD.replace("on: { every: 10m }", t));
+        let (s, e) = with(
+            "on: [start, { files: \"shelf/*.md\" }, { sqlite: own }, { sqlite: .beads/beads.db }, snapshot.taken]",
+        );
+        assert!(e.is_empty(), "{e:?}");
+        let Trigger::On {
+            events, sources, ..
+        } = &s[0].trigger
+        else {
+            panic!("an `on` trigger");
+        };
+        assert_eq!(events, &["snapshot.taken"]);
+        assert_eq!(
+            sources,
+            &[
+                ObserverSource::Start,
+                ObserverSource::Files {
+                    glob: "shelf/*.md".into()
+                },
+                ObserverSource::Sqlite { path: None },
+                ObserverSource::Sqlite {
+                    path: Some(".beads/beads.db".into())
+                },
+            ]
+        );
+        // `start` alone, as a bare word.
+        let (s, e) = with("on: start");
+        assert!(e.is_empty(), "{e:?}");
+        assert!(matches!(&s[0].trigger, Trigger::On { events, sources, .. }
+            if events.is_empty() && sources == &[ObserverSource::Start]));
+        // `where` and pacing go with event types only.
+        for t in [
+            "on: [start]\n  where: { a: b }",
+            "on: [start]\n  settle: 30s",
+        ] {
+            let (s, e) = with(t);
+            assert!(s.is_empty(), "{t}");
+            assert!(
+                e.iter().any(|m| m.contains("go with event types")),
+                "{t}: {e:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_bad_observer_triggers() {
+        let with = |t: &str| parse(&GOOD.replace("on: { every: 10m }", t));
+        for (t, needle) in [
+            ("on: [{ files: \"a[\" }]", "isn't a glob"),
+            (
+                "on: [{ files: \"/etc/*\" }]",
+                "relative to the project root",
+            ),
+            (
+                "on: [{ files: \"../x/*\" }]",
+                "relative to the project root",
+            ),
+            ("on: [{ files: 3 }]", "takes a glob"),
+            (
+                "on: [{ sqlite: /var/db.sqlite }]",
+                "relative to the project root",
+            ),
+            (
+                "on: [{ sqlite: ../db.sqlite }]",
+                "relative to the project root",
+            ),
+            ("on: [{ sqlite: 3 }]", "`own` or a path"),
+            ("on: [{ files: \"a\", sqlite: own }]", "one key"),
+            ("on: [{ nope: x }]", "`start`, `{ files"),
+        ] {
+            let (s, e) = with(t);
+            assert!(s.is_empty(), "{t}");
+            assert!(e.iter().any(|m| m.contains(needle)), "{t}: {e:?}");
+        }
     }
 
     #[test]

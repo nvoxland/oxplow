@@ -3606,3 +3606,187 @@ async fn a_panel_fixture_names_its_scope_not_params_and_checks_the_count() {
         "{errors}"
     );
 }
+
+/// The shelf extension: a collector that follows a folder of notes and its
+/// own SQLite file, and the fixtures that run it as each trigger.
+fn shelf(root: &Path, fixtures: &[(&str, &str)]) {
+    write(
+        root,
+        ".oxplow/extensions/shelf/extension.yaml",
+        "manifest: 2
+name: shelf
+intent:
+  purpose: Follow a folder of notes.
+  examples:
+    - { name: start, input: { collector: books }, expect: every note on start }
+    - { name: changed, input: { collector: books }, expect: the changed notes }
+    - { name: moved, input: { collector: books }, expect: the notes that are left }
+    - { name: failing, input: { collector: books }, expect: a failure said }
+permissions: [files.read]
+storage: { sqlite: true }
+files:
+  - { path: shelf, access: read }
+collectors:
+  - id: books
+    runtime: starlark
+    entry: collectors/books.star
+    needs: [files.read]
+    on: [start, { files: \"shelf/*.md\" }, { sqlite: own }]
+    sync: upsert
+    entities:
+      - { name: book, key: path, columns: { path: text, title: text } }
+",
+    );
+    write(
+        root,
+        ".oxplow/extensions/shelf/storage/migrations/V1__t.sql",
+        "CREATE TABLE t (x);",
+    );
+    write(
+        root,
+        ".oxplow/extensions/shelf/collectors/books.star",
+        "def transform(x):
+    paths = []
+    if x[\"trigger\"] == \"start\":
+        paths = [f[\"path\"] for f in scope(\"files.list\", {\"path\": \"shelf\"})[\"files\"]]
+    elif x[\"trigger\"] == \"files\":
+        paths = [c[\"path\"] for c in x[\"changed\"] if c[\"op\"] != \"removed\"]
+    rows = []
+    for p in paths:
+        body = scope(\"files.read\", {\"path\": p})[\"body\"]
+        if body.startswith(\"!\"):
+            fail(\"cannot read \" + p)
+        rows.append({\"path\": p, \"title\": body.strip()})
+    return {\"entities\": {\"book\": rows}}
+",
+    );
+    for (name, body) in fixtures {
+        write(
+            root,
+            &format!(".oxplow/extensions/shelf/fixtures/{name}.yaml"),
+            body,
+        );
+    }
+}
+
+/// `given` makes, removes and moves project files, and a collector's
+/// `when: { collector, trigger }` runs it for real as `start` or as a files
+/// change, storing what it brings.
+#[tokio::test(flavor = "multi_thread")]
+async fn extension_test_runs_a_collector_as_the_trigger_that_fires_it() {
+    let dir = tempfile::tempdir().unwrap();
+    shelf(
+        dir.path(),
+        &[
+            (
+                "start",
+                "given:
+  - { files: { \"shelf/a.md\": \"Dune\", \"shelf/b.md\": \"Emma\" } }
+when: { collector: books, trigger: start }
+expect: { ok: true, result: { book: 2 } }
+",
+            ),
+            (
+                "changed",
+                "given:
+  - { files: { \"shelf/a.md\": \"Dune\", \"shelf/b.md\": \"Emma\" } }
+when: { collector: books, trigger: { files: [{ path: shelf/b.md, op: created }] } }
+expect: { ok: true, result: { book: 1 } }
+",
+            ),
+            (
+                "moved",
+                "given:
+  - { files: { \"shelf/a.md\": \"Dune\", \"shelf/b.md\": \"Emma\", \"shelf/c.md\": \"Ulysses\" } }
+  - { remove_files: [shelf/b.md] }
+  - { rename_files: [{ from: shelf/c.md, to: shelf/d.md }] }
+when: { collector: books, trigger: start }
+expect: { ok: true, result: { book: 2 } }
+steps:
+  - given: [{ remove_files: [shelf/a.md] }]
+    expect: { ok: true, result: { book: 1 } }
+",
+            ),
+            (
+                "failing",
+                "given:
+  - { files: { \"shelf/a.md\": \"!\" } }
+when: { collector: books, trigger: { files: [{ path: shelf/a.md, op: modified }] } }
+expect: { ok: false, problems: [\"cannot read shelf/a.md\"] }
+",
+            ),
+        ],
+    );
+    let report = test_extension(dir.path(), "shelf", false).await.unwrap();
+    assert_eq!(report.error_lines(), Vec::<String>::new());
+    for ran in [
+        "example start",
+        "example changed",
+        "example moved",
+        "example failing",
+    ] {
+        assert!(
+            report.ran.iter().any(|r| r == ran),
+            "{ran}: {:?}",
+            report.ran
+        );
+    }
+}
+
+/// A wrong expectation, a trigger the collector's `on:` doesn't list, and a
+/// path outside the project are findings at the fixture.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_trigger_fixture_that_cannot_happen_is_a_finding() {
+    let dir = tempfile::tempdir().unwrap();
+    shelf(
+        dir.path(),
+        &[
+            (
+                "start",
+                "given:
+  - { files: { \"shelf/a.md\": \"Dune\" } }
+when: { collector: books, trigger: start }
+expect: { ok: true, result: { book: 5 } }
+",
+            ),
+            (
+                "changed",
+                "when: { collector: books, trigger: { files: [{ path: other/x.md, op: created }] } }
+expect: { ok: true }
+",
+            ),
+            (
+                "moved",
+                "given:
+  - { files: { \"../escape.md\": \"x\" } }
+when: { collector: books, trigger: start }
+expect: { ok: true }
+",
+            ),
+            (
+                "failing",
+                "when: { collector: books, trigger: sometimes }
+expect: { ok: true }
+",
+            ),
+        ],
+    );
+    let report = test_extension(dir.path(), "shelf", false).await.unwrap();
+    let errors = report.error_lines().join("\n");
+    assert!(
+        errors.contains("collector `books` returned 1 at `/result/book`"),
+        "{errors}"
+    );
+    assert!(
+        errors.contains("`other/x.md` isn't matched by its `files:` globs"),
+        "{errors}"
+    );
+    assert!(
+        errors.contains("`../escape.md` isn't a path inside the project"),
+        "{errors}"
+    );
+    assert!(
+        errors.contains("trigger \"sometimes\" isn't one of"),
+        "{errors}"
+    );
+}

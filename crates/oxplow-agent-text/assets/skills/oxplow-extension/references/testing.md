@@ -105,7 +105,7 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
 | context | `{ context: <id>, thread? }` | `{ text: <string> \| null }` |
 | sql | `{ sql, params? }` | `{ rows, columns? }` |
 | wikilink | `{ wikilink }` | `{ uri }` |
-| collector | `{ collector: <id>, rows?, event? } \| { collector: <id>, files }` | `{ entities?, events? } \| { facts }` |
+| collector | `{ collector: <id>, rows?, event? } \| { collector: <id>, files } \| { collector: <id>, trigger: start \| sqlite \| { files: [{ path, op }] } } (run for real, as that trigger fires)` | `{ entities?, events? } \| { facts } \| { ok?, result?, problems? }` |
 | command | `{ command, input?, as?, confirmed? } (with answers: the extension's own, a dry run)` | `{ ok, result?, commands? } \| { ok: false, refused }` |
 <!-- /fixture-kinds -->
 
@@ -297,6 +297,22 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      `on:` collector reacts to), `expect: { entities: { <name>: n } }` —
      it runs your script and types its rows; an exec collector's example
      isn't run (it is a program under `process.run`);
+   - an observer's collector (`on:` lists `start`, `{ files: <glob> }` or
+     `{ sqlite: … }`), run as the trigger that fires it: `when: { collector:
+     <id>, trigger: start | sqlite | { files: [{ path, op: created | modified |
+     removed }] } }`. The collector runs for real as that trigger (its input
+     has `x["trigger"]`, a files trigger's `x["changed"]`, and `x["cursor"]`)
+     and its output is applied (rows, models, cursor), so a later step sees it.
+     `expect: { ok?, result?, problems? }`: `ok` (default `true`) that it ran
+     well, `result` the counts it stored (`{ book: 2 }`, an entity's rows, or
+     `<model>.<op>` for shared models; only the keys you name), `problems`
+     text its failure holds when `ok: false`. The trigger must be one its
+     `on:` lists, and a changed path must match its glob. Live triggers are
+     off in a fixture: the collector runs only when a step says so. Make the
+     project files it follows in `given:` first — `- { files: { "<path>":
+     "<body>" } }` writes them, `- { remove_files: ["<path>"] }` removes
+     them, `- { rename_files: [{ from, to }] }` moves them (paths from the
+     project root);
    - a fact collector (one with `facts:`): `when: { collector: <id>,
      files: { "src/a.ts": "…" } }` (the tree its `files()` sees),
      `expect: { facts: [{ measure, value, path? }] }` — each fact is

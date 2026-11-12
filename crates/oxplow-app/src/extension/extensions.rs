@@ -2127,6 +2127,44 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         let (kept, errors) = storage::load(m.storage.as_ref(), &m.files, files, man, &manifest);
         ext.storage = kept;
         ext.errors.extend(errors);
+        // A collector's SQLite trigger reads a file: its own (declared with
+        // `storage:`) or one in a `files:` folder the extension may read.
+        {
+            let (own, folders) = (ext.storage.sqlite, ext.storage.folders.clone());
+            let collectors_line = key_line(&manifest, "collectors");
+            let mut problems = Vec::new();
+            ext.collectors.retain(|c| {
+                let bad = c.trigger.sources().iter().find_map(|source| match source {
+                    oxplow_config::collectors::ObserverSource::Sqlite { path: None } if !own => {
+                        Some("`sqlite: own` needs `storage: { sqlite: true }`".to_string())
+                    }
+                    oxplow_config::collectors::ObserverSource::Sqlite { path: Some(path) } => {
+                        crate::extension::extension_services::check_path(&folders, path, false)
+                            .err()
+                            .map(|why| format!("`sqlite: {path}`: {why}"))
+                    }
+                    _ => None,
+                });
+                match bad {
+                    None => true,
+                    Some(why) => {
+                        let c_line =
+                            entry_line(&manifest, "collectors", "id", &c.id).or(collectors_line);
+                        problems.push(
+                            at(
+                                "collector.trigger_invalid",
+                                man,
+                                c_line,
+                                format!("collector `{}`: {why}", c.id),
+                            )
+                            .contribution(format!("{}/{}", ext.namespace, c.id)),
+                        );
+                        false
+                    }
+                }
+            });
+            ext.errors.extend(problems);
+        }
         if let Some(v) = &m.action_points {
             let (points, errors) =
                 action_points::parse_action_points(v, man, &manifest, &ext.namespace);

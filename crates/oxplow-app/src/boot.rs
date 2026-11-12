@@ -354,6 +354,17 @@ pub async fn run_boot_orchestration(
         });
     }
 
+    // Observers' triggers (`start`, `files`, `sqlite` in a collector's
+    // `on:`), once the watches they hear are up.
+    {
+        let services = state.clone();
+        let mut watching = watching.clone();
+        tokio::spawn(async move {
+            let _ = watching.wait_for(|up| *up).await;
+            crate::observer_triggers::supervise(&services);
+        });
+    }
+
     // Config watcher: hot-reload `.oxplow/project.yaml` on out-of-band edits so
     // config changes go live without a restart.
     {

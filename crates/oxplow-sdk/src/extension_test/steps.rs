@@ -119,6 +119,30 @@ pub(super) async fn run_steps(
             host.settle().await;
             continue;
         }
+        // Project files a tool would have written, removed or moved.
+        let on_files = [
+            (
+                "files",
+                given_files as fn(&Host, &Value) -> Result<(), String>,
+            ),
+            ("remove_files", given_remove_files),
+            ("rename_files", given_rename_files),
+        ]
+        .into_iter()
+        .find_map(|(kind, make)| step.get(kind).map(|value| (kind, make, value)));
+        if let Some((kind, make, value)) = on_files {
+            if let Err(e) = make(host, value) {
+                report.errors.push(error(
+                    shown,
+                    None,
+                    "fixture.step",
+                    format!("`{key}[{index}]` `{kind}`: {e}"),
+                ));
+                return false;
+            }
+            host.settle().await;
+            continue;
+        }
         if let Some(observed) = step.get("observe") {
             let observed = match binds.substitute(observed) {
                 Ok(observed) => observed,

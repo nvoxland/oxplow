@@ -172,6 +172,51 @@ mod tests {
         );
     }
 
+    /// A SQLite trigger names the extension's own file (needs `storage:`)
+    /// or a file in a `files:` folder it may read; any other is an error
+    /// at the collector's line.
+    #[test]
+    fn a_sqlite_trigger_stays_in_what_the_extension_may_read() {
+        let collector = |on: &str| {
+            format!(
+                "permissions: [files.read]\ncollectors:\n  - id: tracker\n    runtime: starlark\n    entry: t.star\n    on: [{on}]\n    entities:\n      - {{ name: x, key: id, columns: {{ id: int }} }}\n"
+            )
+        };
+        let script = ("t.star", "def transform(x):\n    return {}\n");
+        let good = load_tree(
+            &format!(
+                "storage: {{ sqlite: true }}\nfiles:\n  - {{ path: .beads, access: read }}\n{}",
+                collector("{ sqlite: own }, { sqlite: .beads/beads.db }")
+            ),
+            &[script],
+        );
+        assert!(good.errors.is_empty(), "{:?}", good.errors);
+        assert_eq!(good.collectors.len(), 1);
+        for (manifest, needle) in [
+            (
+                collector("{ sqlite: own }"),
+                "needs `storage: { sqlite: true }`",
+            ),
+            (
+                format!(
+                    "files:\n  - {{ path: docs, access: read }}\n{}",
+                    collector("{ sqlite: .beads/beads.db }")
+                ),
+                "outside every declared folder",
+            ),
+        ] {
+            let ext = load_tree(&manifest, &[script]);
+            let found = ext
+                .errors
+                .iter()
+                .find(|e| e.code == "collector.trigger_invalid")
+                .unwrap_or_else(|| panic!("{manifest}: {:?}", ext.errors));
+            assert!(found.message.contains(needle), "{}", found.message);
+            assert!(found.line.is_some(), "an error at file:line");
+            assert!(ext.collectors.is_empty());
+        }
+    }
+
     #[test]
     fn a_bad_folder_or_migration_is_an_error() {
         for (manifest, extra, needle) in [

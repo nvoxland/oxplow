@@ -227,6 +227,13 @@ pub(super) async fn dispatch(
         sql_example(host, ex, sql, report).await;
     } else if let Some(link) = ex.when.get("wikilink").and_then(Value::as_str) {
         wikilink_example(ext, ex, link, report);
+    } else if let Some(id) = ex
+        .when
+        .get("collector")
+        .and_then(Value::as_str)
+        .filter(|_| ex.when.get("trigger").is_some())
+    {
+        observer_example(host, ext, ex, id, report).await;
     } else if let Some(id) = ex.when.get("collector").and_then(Value::as_str) {
         collector_example(host, ext, ex, id, report).await;
     } else if let Some(cmd) = ex
@@ -348,8 +355,8 @@ pub(super) const KINDS: &[Kind] = &[
     },
     Kind {
         key: "collector",
-        when: "{ collector: <id>, rows?, event? } | { collector: <id>, files }",
-        expect: "{ entities?, events? } | { facts }",
+        when: "{ collector: <id>, rows?, event? } | { collector: <id>, files } | { collector: <id>, trigger: start | sqlite | { files: [{ path, op }] } } (run for real, as that trigger fires)",
+        expect: "{ entities?, events? } | { facts } | { ok?, result?, problems? }",
     },
     Kind {
         key: "command",
@@ -395,6 +402,7 @@ pub(super) fn makes_data(ex: &Example<'_>) -> bool {
         || ex.steps.is_some()
         || has("rows")
         || has("setup")
+        || has("trigger")
         || has("job")
         || has("component")
         || has("advisory")

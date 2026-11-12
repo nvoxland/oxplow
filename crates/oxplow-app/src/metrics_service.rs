@@ -3806,6 +3806,7 @@ mod tests {
                 events: vec![SNAPSHOT_TAKEN.into()],
                 filter: Default::default(),
                 pacing: Default::default(),
+                sources: Vec::new(),
             },
             facts,
             runtime: CollectorRuntime::Starlark,
