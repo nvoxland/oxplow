@@ -2173,7 +2173,14 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             let collectors_line = key_line(&manifest, "collectors");
             let mut problems = Vec::new();
             ext.collectors.retain(|c| {
-                if !c.entities.is_empty() || !c.facts.is_empty() || observes {
+                // A report collector's output is its records; a `read`
+                // collector's lands in its provider's capability.
+                if !c.entities.is_empty()
+                    || !c.facts.is_empty()
+                    || c.records.is_some()
+                    || c.runtime == oxplow_config::collectors::CollectorRuntime::Read
+                    || observes
+                {
                     return true;
                 }
                 let c_line = entry_line(&manifest, "collectors", "id", &c.id).or(collectors_line);
