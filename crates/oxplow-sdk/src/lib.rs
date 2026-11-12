@@ -317,7 +317,7 @@ pub fn scaffold_with(
     // The intent example, and its fixture (what `extension test` runs).
     // The URIs the examples name, built like every other.
     use oxplow_domain::uri::build::thread_uri;
-    let thread = thread_uri(oxplow_domain::ThreadId::new(1));
+    let thread = "thr1";
     let (example_input, example_expect, fixture_expect) = match kind {
         Kind::Component | Kind::Page => (
             format!("{{ page: {name}, params: {{ stream_id: 1 }} }}"),
@@ -860,6 +860,16 @@ struct ProviderStarter {
 
 fn provider_starter(capability: &str) -> ProviderStarter {
     match capability {
+        // The program declares its own commands (core calls none of a
+        // tracker's), so the example names one to replace.
+        "task_tracker" => ProviderStarter {
+            input: "{ command: create, input: { title: First } }".to_string(),
+            expect: "the new item's URI",
+            fixture: "{ uri: $any }".to_string(),
+            needs: None,
+            data: serde_json::Value::Null,
+            on: &[],
+        },
         "agent_harness" => ProviderStarter {
             input: "{ command: render, input: { answer: { kind: ack } } }".to_string(),
             expect: "its hooks' acknowledgement",

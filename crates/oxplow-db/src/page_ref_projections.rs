@@ -419,8 +419,9 @@ mod tests {
         for k in ["file", "dir", "knowledge", "task", "finding", "commit"] {
             assert!(kinds.contains(&format!("oxplow/{k}")), "{k}: {kinds:?}");
         }
-        // Every stored target is a URI foundation declares.
-        for e in &edges {
+        // Every stored target is a URI foundation declares, but a task's:
+        // oxplow-bundled declares that resource.
+        for e in edges.iter().filter(|e| resource(e) != "oxplow/task") {
             let r = oxplow_domain::uri::OxplowUri::parse(&e.target)
                 .unwrap_or_else(|err| panic!("{}: {err}", e.target));
             tasks_kinds()

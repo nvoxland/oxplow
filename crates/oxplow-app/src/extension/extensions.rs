@@ -6793,6 +6793,8 @@ commands:
                 "change_co_change",
                 "change_interest",
                 "co_change_pair",
+                "commit_task",
+                "contribution_repair",
                 "deviation",
                 "finished_cleared",
                 "ready_queue",
@@ -8771,7 +8773,7 @@ commands:
         write(
             dir.path(),
             ".oxplow/extensions/tbl/extension.yaml",
-            "manifest: 2\nname: tbl\nintent:\n  purpose: test\nadvisories:\n  - id: peek\n    on: turn-end\n    query: SELECT title AS message FROM task\ncollectors:\n  - id: sum\n    runtime: starlark\n    entry: sum.star\n    input: SELECT title FROM task\n    entities:\n      - { name: notes, key: n, columns: { n: int } }\n",
+            "manifest: 2\nname: tbl\nintent:\n  purpose: test\nadvisories:\n  - id: peek\n    on: turn-end\n    query: SELECT title AS message FROM threads\ncollectors:\n  - id: sum\n    runtime: starlark\n    entry: sum.star\n    input: SELECT title FROM threads\n    entities:\n      - { name: notes, key: n, columns: { n: int } }\n",
         );
         write(
             dir.path(),
@@ -8781,7 +8783,7 @@ commands:
         write(
             dir.path(),
             ".oxplow/extensions/tbl/pages/all.yaml",
-            &viz_page("title: All\n", "SELECT title FROM task", ""),
+            &viz_page("title: All\n", "SELECT title FROM threads", ""),
         );
         let e = validate_extension(&layer().await, &cat(), dir.path(), "tbl", None)
             .await
@@ -8790,9 +8792,9 @@ commands:
             let found = e
                 .errors
                 .iter()
-                .find(|m| m.contains(what) && m.contains("`task` is a physical table"));
+                .find(|m| m.contains(what) && m.contains("`threads` is a physical table"));
             let found = found.unwrap_or_else(|| panic!("{what}: {:?}", e.errors));
-            assert!(found.contains("read v_thread"), "{found:?}");
+            assert!(found.contains("v_thread"), "{found:?}");
         }
     }
 

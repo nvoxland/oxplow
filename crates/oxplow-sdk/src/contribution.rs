@@ -6,7 +6,6 @@ use std::path::Path;
 
 use oxplow_app::extension::extensions::EXTENSIONS_DIR;
 use oxplow_domain::contribution::{extension_namespace, ContributionKind};
-use oxplow_domain::uri::build::thread_uri;
 
 use crate::{title_case, Kind, SdkError};
 
@@ -60,7 +59,7 @@ pub(crate) fn build(
     command: Option<(&str, &str)>,
 ) -> Result<Contribution, SdkError> {
     let ns = extension_namespace(namespace);
-    let thread = thread_uri(oxplow_domain::ThreadId::new(1));
+    let thread = "thr1";
     let mut files: Vec<(String, String)> = Vec::new();
     let mut write = |rel: &str, body: String| -> Result<(), SdkError> {
         files.push((rel.to_string(), body));
@@ -195,13 +194,13 @@ pub(crate) fn build(
              \x20     type: object\n\
              \x20     required: [thread]\n\
              \x20     properties:\n\
-             \x20       thread: {{ type: string, description: \"The thread (oxplow:oxplow/thread?id=<id>).\" }}\n\
+             \x20       thread: {{ type: string, description: \"The thread id (thr1).\" }}\n\
              \x20     additionalProperties: false\n\
              \x20   entry: {file}\n\
              \x20   # Who may run it: a person, an agent, a page (each child command checks its own too).\n\
              \x20   \
              \x20   # On a thread's page (Commands) and a row's right-click.\n\
-             \x20   ui: {{ label: {label}, about: oxplow/thread, input: {{ thread: \"{{{{uri}}}}\" }} }}\n\
+             \x20   ui: {{ label: {label}, about: oxplow/thread, input: {{ thread: \"{{{{uri.id}}}}\" }} }}\n\
              \x20   examples:\n\
              \x20     - {{ name: happy, input: {{ thread: \"{thread}\" }}, expect_commands: [oxplow.thread.rename] }}\n"
                     ),

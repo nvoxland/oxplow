@@ -1141,7 +1141,7 @@ mod tests {
         assert_eq!(
             rows(
                 svc,
-                "SELECT json_extract(payload, '$.outcome'), json_extract(payload, '$.event'), cause FROM v_event WHERE type = 'effect.result'",
+                "SELECT json_extract(payload, '$.outcome'), json_extract(payload, '$.event'), cause FROM v_event WHERE type = 'effect.result' AND json_extract(payload, '$.effect') LIKE 'acme/%'",
             )
             .await,
             json!([["ok", ev.envelope.id.to_string(), executed[0][0]]])
@@ -1272,7 +1272,11 @@ mod tests {
         let ev = log(svc, settled(&fx, "taken")).await;
         interrupt(svc, &ev).await;
         assert_eq!(title(&fx).await, before, "not sent again");
-        let run = rows(svc, "SELECT state, reason FROM v_effect_run").await;
+        let run = rows(
+            svc,
+            "SELECT state, reason FROM v_effect_run WHERE effect LIKE 'acme/%'",
+        )
+        .await;
         assert_eq!(run[0][0], json!("failed"));
         assert!(run[0][1].as_str().unwrap().contains("interrupted"), "{run}");
     }
@@ -1313,7 +1317,7 @@ mod tests {
         assert_eq!(
             rows(
                 svc,
-                "SELECT origin, state, reason LIKE 'interrupted%' FROM v_effect_run ORDER BY event_seq"
+                "SELECT origin, state, reason LIKE 'interrupted%' FROM v_effect_run WHERE effect LIKE 'acme/%' ORDER BY event_seq"
             )
             .await,
             json!([["backfill", "failed", 1], ["live", "started", null], ["auto", "failed", 1]])
@@ -1321,7 +1325,7 @@ mod tests {
         assert_eq!(
             rows(
                 svc,
-                "SELECT json_extract(payload, '$.origin'), json_extract(payload, '$.outcome') FROM v_event WHERE type = 'effect.result' ORDER BY seq"
+                "SELECT json_extract(payload, '$.origin'), json_extract(payload, '$.outcome') FROM v_event WHERE type = 'effect.result' AND json_extract(payload, '$.effect') LIKE 'acme/%' ORDER BY seq"
             )
             .await,
             json!([["backfill", "failed"], ["auto", "failed"]])
@@ -1589,7 +1593,7 @@ mod tests {
         assert_eq!(
             rows(
                 svc,
-                "SELECT v, json_extract(payload, '$.attempt'), json_extract(payload, '$.origin'), json_extract(payload, '$.outcome') FROM v_event WHERE type = 'effect.result' ORDER BY seq"
+                "SELECT v, json_extract(payload, '$.attempt'), json_extract(payload, '$.origin'), json_extract(payload, '$.outcome') FROM v_event WHERE type = 'effect.result' AND json_extract(payload, '$.effect') LIKE 'acme/%' ORDER BY seq"
             )
             .await,
             json!([[5, 1, "live", "failed"], [5, 2, "retry", "ok"]])
@@ -1782,7 +1786,7 @@ mod tests {
         let guarded = rows(
             svc,
             &format!(
-                "SELECT state, reason FROM v_effect_run WHERE event_id = '{}'",
+                "SELECT state, reason FROM v_effect_run WHERE effect LIKE 'acme/%' AND event_id = '{}'",
                 chained.envelope.id
             ),
         )
@@ -1821,7 +1825,7 @@ mod tests {
         assert_eq!(run[0][0], json!("proposed"));
         assert!(run[0][1].is_number(), "{run}");
         assert_eq!(
-            rows(svc, "SELECT json_extract(payload, '$.outcome') FROM v_event WHERE type = 'effect.result'").await,
+            rows(svc, "SELECT json_extract(payload, '$.outcome') FROM v_event WHERE type = 'effect.result' AND json_extract(payload, '$.effect') LIKE 'acme/%'").await,
             json!([["proposed"]])
         );
     }
@@ -2130,7 +2134,7 @@ mod tests {
         let guarded = rows(
             svc,
             &format!(
-                "SELECT state FROM v_effect_run WHERE event_id = '{}'",
+                "SELECT state FROM v_effect_run WHERE effect LIKE 'acme/%' AND event_id = '{}'",
                 chained.envelope.id
             ),
         )
@@ -2248,7 +2252,7 @@ mod tests {
         assert_eq!(
             rows(
                 svc,
-                "SELECT count(*) FROM v_event WHERE type = 'effect.result'"
+                "SELECT count(*) FROM v_event WHERE type = 'effect.result' AND json_extract(payload, '$.effect') LIKE 'acme/%'"
             )
             .await,
             json!([[0]])
@@ -2404,7 +2408,7 @@ mod tests {
         assert_eq!(
             rows(
                 svc,
-                "SELECT event_seq, attempt, origin, state FROM v_effect_run ORDER BY event_seq"
+                "SELECT event_seq, attempt, origin, state FROM v_effect_run WHERE effect LIKE 'acme/%' ORDER BY event_seq"
             )
             .await,
             json!(past
@@ -2413,7 +2417,7 @@ mod tests {
                 .collect::<Vec<_>>())
         );
         assert_eq!(
-            rows(svc, "SELECT DISTINCT json_extract(payload, '$.origin') FROM v_event WHERE type = 'effect.result'").await,
+            rows(svc, "SELECT DISTINCT json_extract(payload, '$.origin') FROM v_event WHERE type = 'effect.result' AND json_extract(payload, '$.effect') LIKE 'acme/%'").await,
             json!([["backfill"]])
         );
         // Nothing left, and the live consumer doesn't react to them again.

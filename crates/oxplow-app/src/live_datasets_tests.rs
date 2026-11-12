@@ -290,7 +290,7 @@ async fn scopes_list_what_a_command_may_need() {
     let fx = services_with_thread().await;
     let got = rows(
         &fx,
-        "SELECT id, access, host FROM v_scope WHERE id IN ('records.read', 'task_tracker.write', 'tabs.write') ORDER BY id",
+        "SELECT id, access, host FROM v_scope WHERE id IN ('records.read', 'tabs.write') ORDER BY id",
     )
     .await;
     assert_eq!(
@@ -298,11 +298,6 @@ async fn scopes_list_what_a_command_may_need() {
         [
             vec![json!("records.read"), json!("read"), json!("daemon")],
             vec![json!("tabs.write"), json!("view"), json!("window")],
-            vec![
-                json!("task_tracker.write"),
-                json!("record"),
-                json!("daemon")
-            ],
         ]
     );
 }

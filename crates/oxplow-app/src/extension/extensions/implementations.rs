@@ -4,9 +4,9 @@
 //!
 //! ```yaml
 //! implementations:
-//!   - capability: task_tracker
-//!     id: oxplow
-//!     entry: oxplow:oxtask
+//!   - capability: knowledge
+//!     id: oxwiki
+//!     entry: oxplow:oxwiki
 //! ```
 //!
 //! An entry names a built-in in core's standard library
@@ -40,7 +40,7 @@ pub struct ImplementationDecl {
     pub id: String,
     /// How a person names it; the built-in's own title when absent.
     pub title: Option<String>,
-    /// The built-in it is (`oxplow:oxtask`); its features are core's to
+    /// The built-in it is (`oxplow:oxwiki`); its features are core's to
     /// say. `None` for an AI provider, which names its kind instead.
     pub entry: Option<String>,
     /// An AI provider's Rust kind (`anthropic`, `openai_compatible`,
@@ -100,7 +100,7 @@ pub(crate) struct ImplementationFile {
     id: String,
     #[serde(default)]
     title: Option<String>,
-    /// The built-in it is (`oxplow:oxtask`), or a script in the extension
+    /// The built-in it is (`oxplow:oxwiki`), or a script in the extension
     /// that implements the capability's verbs.
     #[serde(default)]
     entry: Option<String>,
@@ -858,7 +858,7 @@ mod tests {
                 "unknown key `ops`",
             ),
             (
-                "  - { capability: task_tracker, id: acme, provider: anthropic, entry: oxplow:oxtask }\n",
+                "  - { capability: snapshots, id: acme, provider: anthropic, entry: oxplow:snapshots }\n",
                 "`provider:` names an AI provider's kind",
             ),
         ] {
@@ -867,19 +867,17 @@ mod tests {
         }
     }
 
-    const TRACKER: &str = "def create(x):\n    return {\"result\": {}}\n\
-        def update(x):\n    return {\"result\": {}}\n\
-        def transition(x):\n    return {\"result\": scope(\"sql.read\", {\"sql\": \"SELECT 1\"})}\n\
+    const SNAP: &str = "def mark(x):\n    return {}\n\
+        def changed(x):\n    return {\"result\": scope(\"sql.read\", {\"sql\": \"SELECT 1\"})}\n\
         def _helper(x):\n    return x\n";
     const STAGES: &str = "stages: [{ id: open, title: Open, bucket: todo }, { id: doing, title: Doing, bucket: in_progress }, { id: closed, title: Closed, bucket: done }]";
 
     fn scripts(rel: &str) -> Option<String> {
         match rel {
-            "trackers/t.star" => Some(TRACKER.to_string()),
-            "trackers/two.star" => {
-                Some("def create(x):\n    return {}\ndef update(x):\n    return {}\n".to_string())
-            }
-            "trackers/broken.star" => Some("def create(x)\n".to_string()),
+            "snaps/s.star" => Some(SNAP.to_string()),
+            "snaps/full.star" => Some(format!("{SNAP}def read_at(x):\n    return {{}}\n")),
+            "snaps/one.star" => Some("def mark(x):\n    return {}\n".to_string()),
+            "snaps/broken.star" => Some("def mark(x)\n".to_string()),
             _ => None,
         }
     }
@@ -887,52 +885,50 @@ mod tests {
     /// An entry that is a file of the extension is a script implementing
     /// the capability's verbs: it keeps its `needs`, and what it declares
     /// of itself as an external provider's declarations would say it —
-    /// the verbs it defines (helpers aside), its features, its stages.
+    /// the verbs it defines (helpers aside) and its features.
     #[test]
     fn an_entry_may_be_a_script_implementing_the_verbs() {
         let (decls, errors) = parse_with(
-            &format!(
-                "  - {{ capability: task_tracker, id: notes, title: Notes, entry: trackers/t.star, needs: [sql.read], id_pattern: \"n\\\\d+\", features: {{ hierarchy: false }}, config: {{ prefix: n }}, {STAGES} }}\n"
-            ),
+            "  - { capability: snapshots, id: marks, title: Marks, entry: snaps/full.star, needs: [sql.read], features: { contents: true }, config: { prefix: n } }\n",
             &scripts,
         );
         assert!(errors.is_empty(), "{errors:?}");
         let d = &decls[0];
-        assert_eq!(d.entry.as_deref(), Some("trackers/t.star"));
+        assert_eq!(d.entry.as_deref(), Some("snaps/full.star"));
         assert_eq!(d.needs, vec!["sql.read".to_string()]);
         assert_eq!(d.config["prefix"], "n");
         let script = d.script.as_ref().unwrap();
-        assert_eq!(script.text, TRACKER);
+        assert_eq!(script.text, scripts("snaps/full.star").unwrap());
         let verbs: Vec<&str> = script
             .declared
             .commands
             .iter()
             .map(|c| c.name.as_str())
             .collect();
-        assert_eq!(verbs, ["create", "update", "transition"]);
-        // Every feature said, one it leaves out off.
+        assert_eq!(verbs, ["mark", "changed", "read_at"]);
         assert_eq!(
             script.declared.capabilities[0].features,
-            serde_json::json!({
-                "hierarchy": false,
-                "comments": false,
-                "links": false,
-                "delete": false,
-                "idempotent_writes": false,
-            })
+            serde_json::json!({ "contents": true })
         );
-        assert_eq!(script.spec.stages.len(), 3);
-        assert_eq!(script.spec.id_pattern.as_deref(), Some("n\\d+"));
+        // A feature it leaves out is said, off.
+        let (decls, errors) = parse_with(
+            "  - { capability: snapshots, id: marks, entry: snaps/s.star, needs: [sql.read] }\n",
+            &scripts,
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(
+            decls[0].script.as_ref().unwrap().declared.capabilities[0].features,
+            serde_json::json!({ "contents": false })
+        );
     }
 
     /// What a script implementation can't be is refused at load, each with
-    /// its own code: a capability with no verbs, a script that isn't there
-    /// or doesn't parse, a verb the contract requires (for the features it
-    /// declares) left undefined, a feature or need that isn't one, a scope
-    /// it calls without needing, a task tracker without stages and stages on
-    /// anything else, a config that isn't a map, an id its refs can't carry;
-    /// and a built-in or an AI provider is refused the keys only a script
-    /// takes.
+    /// its own code: a script that isn't there or doesn't parse, a verb the
+    /// contract requires (for the features it declares) left undefined, a
+    /// feature or need that isn't one, a scope it calls without needing,
+    /// stages on a capability with no items, a config that isn't a map, an
+    /// id its refs can't carry; and a built-in or an AI provider is refused
+    /// the keys only a script takes.
     #[test]
     fn a_bad_script_implementation_is_refused() {
         let errors = |yaml: &str| {
@@ -943,82 +939,87 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join("\n")
         };
-        let tracker = |extra: &str| {
-            format!("  - {{ capability: task_tracker, id: notes, entry: trackers/t.star, needs: [sql.read], {STAGES}{extra} }}\n")
+        let snap = |extra: &str| {
+            format!("  - {{ capability: snapshots, id: marks, entry: snaps/s.star, needs: [sql.read]{extra} }}\n")
         };
         for (yaml, code, want) in [
             (
-                "  - { capability: task_tracker, id: notes, entry: trackers/gone.star }\n".to_string(),
+                "  - { capability: snapshots, id: marks, entry: snaps/gone.star }\n".to_string(),
                 "implementation.script_missing",
                 "isn't in the extension".to_string(),
             ),
             (
-                format!("  - {{ capability: task_tracker, id: notes, entry: trackers/broken.star, {STAGES} }}\n"),
+                "  - { capability: snapshots, id: marks, entry: snaps/broken.star }\n".to_string(),
                 "implementation.script_invalid",
                 "doesn't parse".into(),
             ),
             (
-                format!("  - {{ capability: task_tracker, id: notes, entry: trackers/two.star, {STAGES} }}\n"),
+                "  - { capability: snapshots, id: marks, entry: snaps/one.star }\n".to_string(),
                 "implementation.script_missing_verb",
-                "defines no `transition`".into(),
+                "defines no `changed`".into(),
             ),
             (
-                tracker(", features: { links: true }"),
+                snap(", features: { contents: true }"),
                 "implementation.script_missing_verb",
-                "defines no `link` (`def link(x):`), a verb a `task_tracker` implementation answers when it declares `links`".into(),
+                "defines no `read_at` (`def read_at(x):`), a verb a `snapshots` implementation answers when it declares `contents`".into(),
             ),
             (
-                tracker(", features: { wings: true }"),
+                snap(", features: { wings: true }"),
                 "implementation.script_declares",
                 "`wings` isn't one of its features".into(),
             ),
             (
-                format!("  - {{ capability: task_tracker, id: notes, entry: trackers/t.star, needs: [threads.write], {STAGES} }}\n"),
+                "  - { capability: snapshots, id: marks, entry: snaps/s.star, needs: [threads.write] }\n".to_string(),
                 "implementation.script_need",
                 "threads.write".into(),
             ),
             (
-                format!("  - {{ capability: task_tracker, id: notes, entry: trackers/t.star, needs: [state.write:x], {STAGES} }}\n"),
+                "  - { capability: snapshots, id: marks, entry: snaps/s.star, needs: [state.write:x] }\n".to_string(),
                 "implementation.script_need",
                 "state.write:x".into(),
             ),
             (
-                format!("  - {{ capability: task_tracker, id: notes, entry: trackers/t.star, {STAGES} }}\n"),
+                "  - { capability: snapshots, id: marks, entry: snaps/s.star }\n".to_string(),
                 "implementation.script_invalid",
                 "without".into(),
             ),
             (
-                "  - { capability: task_tracker, id: notes, entry: trackers/t.star, needs: [sql.read] }\n".into(),
-                "implementation.script_items",
-                "declares its `stages:`".into(),
-            ),
-            (
-                "  - { capability: knowledge, id: notes, entry: trackers/t.star, needs: [sql.read], stages: [{ id: open, title: Open, bucket: todo }] }\n".into(),
+                format!("  - {{ capability: snapshots, id: marks, entry: snaps/s.star, needs: [sql.read], {STAGES} }}\n"),
                 "implementation.script_items",
                 "stages are a task tracker's".into(),
             ),
             (
-                tracker(", config: [a]"),
+                "  - { capability: knowledge, id: notes, entry: snaps/s.star, needs: [sql.read], stages: [{ id: open, title: Open, bucket: todo }] }\n".into(),
+                "implementation.script_items",
+                "stages are a task tracker's".into(),
+            ),
+            (
+                snap(", id_pattern: \"n\\\\d+\""),
+                "implementation.script_items",
+                "id_pattern is a task tracker's".into(),
+            ),
+            (
+                snap(", config: [a]"),
                 "implementation.script_config",
                 "must be a map".into(),
             ),
             (
-                tracker("").replace("id: notes", "id: oxtask"),
+                snap("").replace("id: marks", "id: oxtask"),
                 "implementation.script_id",
                 "reserved".into(),
             ),
             (
-                tracker("").replace("trackers/t.star", "../t.star"),
+                snap("").replace("snaps/s.star", "../s.star"),
                 "implementation.script_outside",
                 "inside the extension".into(),
             ),
             (
-                "  - { capability: task_tracker, id: oxtask, entry: \"oxplow:oxtask\", needs: [sql.read] }\n".into(),
+                "  - { capability: snapshots, id: keep, entry: \"oxplow:snapshots\", needs: [sql.read] }\n".into(),
                 "implementation.built_in_needs",
                 "takes no `needs`".into(),
             ),
             (
-                format!("  - {{ capability: task_tracker, id: oxtask, entry: \"oxplow:oxtask\", {STAGES} }}\n"),
+                format!("  - {{ capability: snapshots, id: keep, entry: \"oxplow:snapshots\", {STAGES} }}\n"),
                 "implementation.built_in_declares",
                 "takes no `stages`".into(),
             ),
@@ -1166,15 +1167,15 @@ mod tests {
     #[test]
     fn a_built_in_is_declared_for_its_capability() {
         let (decls, errors) =
-            parse("  - { capability: task_tracker, id: oxtask, entry: oxplow:oxtask }\n");
+            parse("  - { capability: snapshots, id: keep, entry: oxplow:snapshots }\n");
         assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(
             decls,
             vec![ImplementationDecl {
-                capability: "task_tracker".into(),
-                id: "oxtask".into(),
+                capability: "snapshots".into(),
+                id: "keep".into(),
                 title: None,
-                entry: Some("oxplow:oxtask".into()),
+                entry: Some("oxplow:snapshots".into()),
                 provider: None,
                 skills: vec![],
                 config: serde_json::json!({}),
@@ -1191,26 +1192,27 @@ mod tests {
     #[test]
     fn an_implementation_keeps_its_description() {
         let (decls, errors) = parse(
-            "  - { capability: task_tracker, id: oxtask, entry: oxplow:oxtask, description: \"The task tracker oxplow keeps.\" }\n",
+            "  - { capability: snapshots, id: keep, entry: oxplow:snapshots, description: \"Keeps every version.\" }\n",
         );
         assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(
             decls[0].description.as_deref(),
-            Some("The task tracker oxplow keeps.")
+            Some("Keeps every version.")
         );
     }
 
-    /// A built-in whose items' refs carry a provider (`oxplow:oxplow/task?id=…&provider=oxtask`)
-    /// is declared under that id and no other: its refs would otherwise
-    /// name a list that refuses them.
+    /// A built-in whose items' refs carry a provider
+    /// (`oxplow:oxplow/knowledge?id=…&store=oxwiki`) is declared under that
+    /// id and no other: its refs would otherwise name a list that refuses
+    /// them.
     #[test]
     fn a_built_in_is_declared_under_the_provider_its_refs_carry() {
         let (decls, errors) =
-            parse("  - { capability: task_tracker, id: tasks, entry: oxplow:oxtask }\n");
+            parse("  - { capability: knowledge, id: pages, entry: oxplow:oxwiki }\n");
         assert!(decls.is_empty());
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(
-            errors[0].message.contains("`oxplow:oxtask`") && errors[0].message.contains("`oxtask`"),
+            errors[0].message.contains("`oxplow:oxwiki`") && errors[0].message.contains("`oxwiki`"),
             "{}",
             errors[0].message
         );
@@ -1251,19 +1253,19 @@ mod tests {
                 .join("\n")
         };
         assert!(
-            errors("  - { capability: vcs, id: jj, entry: oxplow:oxtask }\n")
+            errors("  - { capability: vcs, id: jj, entry: oxplow:snapshots }\n")
                 .contains("an extension implements")
         );
         assert!(
-            errors("  - { capability: task_tracker, id: beads, entry: oxplow:beads }\n")
+            errors("  - { capability: snapshots, id: beads, entry: oxplow:beads }\n")
                 .contains("built-ins")
         );
         assert!(
-            errors("  - { capability: snapshots, id: x, entry: oxplow:oxtask }\n")
-                .contains("implements `task_tracker`")
+            errors("  - { capability: snapshots, id: x, entry: oxplow:oxwiki }\n")
+                .contains("implements `knowledge`")
         );
         assert!(
-            errors("  - { capability: task_tracker, id: none, entry: oxplow:oxtask }\n")
+            errors("  - { capability: snapshots, id: none, entry: oxplow:snapshots }\n")
                 .contains("not `none`")
         );
         assert!(
@@ -1271,11 +1273,11 @@ mod tests {
                 .contains("core's own")
         );
         assert!(errors(
-            "  - { capability: task_tracker, id: oxtask, entry: oxplow:oxtask, features: [a] }\n"
+            "  - { capability: snapshots, id: keep, entry: oxplow:snapshots, features: [a] }\n"
         )
         .contains("features"));
         assert!(errors(
-            "  - { capability: task_tracker, id: oxtask, entry: oxplow:oxtask }\n  - { capability: task_tracker, id: oxtask, entry: oxplow:oxtask }\n"
+            "  - { capability: snapshots, id: keep, entry: oxplow:snapshots }\n  - { capability: snapshots, id: keep, entry: oxplow:snapshots }\n"
         )
         .contains("twice"));
     }

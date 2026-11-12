@@ -351,8 +351,7 @@ async fn a_provider_command_runs_on_the_instance_its_ref_is_of() {
 }
 
 /// P6b.C2: a running instance's capability and features are a model row
-/// (as the host reads them); stopped, it's no longer available — still
-/// listed, as the project's choice, with `available = 0`.
+/// (as the host reads them); stopped, it's no longer published.
 #[cfg(unix)]
 #[tokio::test]
 async fn a_running_instance_publishes_its_features() {
@@ -371,14 +370,14 @@ async fn a_running_instance_publishes_its_features() {
     assert_eq!(fake.capability, "task_tracker");
     assert_eq!(fake.extension.as_deref(), Some("tracker"));
     turn_off(&fx.svc, INSTANCE).await;
-    let stopped = store
+    // `task_tracker` has no choice to keep it listed: a stopped instance is
+    // no longer published.
+    assert!(store
         .list()
         .await
         .unwrap()
         .into_iter()
-        .find(|r| r.provider == "fake")
-        .expect("the project's choice stays listed");
-    assert!(!stopped.available && !stopped.active);
+        .all(|r| r.provider != "fake"));
 }
 
 /// Protocol 3's `host/call`: a provider whose manifest `needs` `sql.read`
@@ -523,10 +522,6 @@ async fn a_provider_command_is_declared_over_an_operation_it_lists() {
     let manifest = root.join(".oxplow/extensions/tracker/extension.yaml");
     let base = std::fs::read_to_string(&manifest).unwrap();
     for (entry, says) in [
-        (
-            "  - { name: item.comment, summary: S., provider: fake, op: comment }\n",
-            "`comment` is a task_tracker verb",
-        ),
         (
             "  - { name: item.nope, summary: S., provider: fake, op: nope }\n",
             "its declarations have no command `nope`",
@@ -999,49 +994,6 @@ async fn a_failed_enable_writes_no_config() {
     assert!(err.is_err(), "{err:?}");
     assert!(fx.svc.config.read().unwrap().extension_instances.is_empty());
     assert!(!running(&fx.svc, "fake"));
-}
-
-/// P7.A1: a capability verb is run by `task.<verb>` (whose
-/// spec is what a person confirms), never on its own: it is
-/// `confirm: never` and `access: record`; a provider declaring `delete`
-/// must declare the verb.
-#[cfg(unix)]
-#[test]
-fn a_capability_verb_is_record_and_never_confirms() {
-    let (spec, declared) = {
-        let dir = tempfile::tempdir().unwrap();
-        write_extension(dir.path(), "");
-        (
-            extension(dir.path()).providers[0].clone(),
-            oxplow_provider_fake::declarations(),
-        )
-    };
-    spec::check_declarations(&spec, &declared).unwrap();
-    for (field, value) in [("confirm", "always"), ("access", "write")] {
-        let mut changed = declared.clone();
-        for c in changed
-            .commands
-            .iter_mut()
-            .filter(|c| c.name == "transition")
-        {
-            match field {
-                "confirm" => c.confirm = value.into(),
-                _ => c.access = value.into(),
-            }
-        }
-        let err = spec::check_declarations(&spec, &changed).unwrap_err();
-        assert!(err.contains("transition") && err.contains(field), "{err}");
-    }
-    // The extra command isn't a verb: it may ask.
-    let mut asking = declared.clone();
-    for c in asking.commands.iter_mut().filter(|c| c.name == "estimate") {
-        c.confirm = "always".into();
-    }
-    spec::check_declarations(&spec, &asking).unwrap();
-    let mut no_delete = declared;
-    no_delete.commands.retain(|c| c.name != "delete");
-    let err = spec::check_declarations(&spec, &no_delete).unwrap_err();
-    assert!(err.contains("`delete`"), "{err}");
 }
 
 /// The fake's spec, as an implementation of `capability`.
@@ -1917,144 +1869,6 @@ async fn provider_instances_are_managed_by_commands_and_read_as_a_model() {
     assert_eq!(instance_rows(&fx).await.len(), 1);
 }
 
-/// removing an instance — here one whose provider is gone, which
-/// is when the row offers Remove — takes everything of it: its config,
-/// the active-provider choice naming it, its read checkpoints (an
-/// instance added again under the id starts fresh) and its health row. An
-/// extension that no longer declares the provider has no credentials left
-/// to name.
-#[cfg(unix)]
-#[tokio::test]
-async fn removing_an_instance_leaves_nothing_behind() {
-    let fx = services_with_thread().await;
-    let project = fx.svc.layout.project_dir.clone();
-    write_extension(&project, "needs:FAKE_TOKEN");
-    let manifest = project
-        .join(".oxplow/extensions")
-        .join(EXT)
-        .join("extension.yaml");
-    let text = std::fs::read_to_string(&manifest).unwrap();
-    std::fs::write(
-        &manifest,
-        format!(
-            "{}    credentials: [FAKE_TOKEN]\n",
-            permit_secrets(&text, &["FAKE_TOKEN"])
-        ),
-    )
-    .unwrap();
-    deploy(&fx, &extension(&project)).await;
-    let providers = &fx.svc.providers;
-    providers
-        .add_instance(&Actor::Human, SECOND, "fake", Scope::Project)
-        .await
-        .unwrap();
-    crate::test_fixtures::activate_with_problems(&fx.svc).await;
-    providers
-        .set_credential(SECOND, "FAKE_TOKEN", Some("t0ken"))
-        .unwrap();
-    providers
-        .set_instance(&Actor::Human, SECOND, true, json!({ "team": "second" }))
-        .await
-        .unwrap();
-    crate::test_fixtures::activate_with_problems(&fx.svc).await;
-    let states = oxplow_db::SqliteProviderCollectorStore::new(fx.svc.db.clone());
-    for _ in 0..200 {
-        if states
-            .get(SECOND, "task_tracker")
-            .await
-            .unwrap()
-            .is_some_and(|s| s.status != "reading")
-        {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    }
-    fx.svc
-        .commands
-        .run(
-            &Actor::Human,
-            crate::commands::config_commands::SET,
-            json!({ "key": "activeProviders", "value": { "task_tracker": "fake_second" } }),
-            true,
-        )
-        .await
-        .unwrap();
-    let account = crate::collector_runner::instance_credential_account(
-        &fx.svc.providers.deps.project,
-        EXT,
-        "fake_second",
-        "FAKE_TOKEN",
-    );
-    assert!(fx.svc.secrets.get(&account).unwrap().is_some());
-
-    // Its provider goes from the extension.
-    let text = std::fs::read_to_string(&manifest).unwrap();
-    // (Its command goes with it: an edit that leaves a command naming a
-    // provider that isn't there is held back, not applied.)
-    std::fs::write(
-        &manifest,
-        text.replace("- id: fake", "- id: fake_renamed")
-            .replace("provider: fake\n", "provider: fake_renamed\n"),
-    )
-    .unwrap();
-    crate::test_fixtures::activate(&fx.svc).await;
-    providers
-        .remove_instance(&Actor::Human, SECOND)
-        .await
-        .unwrap();
-    crate::test_fixtures::activate_with_problems(&fx.svc).await;
-
-    let config = fx.svc.config.read().unwrap().clone();
-    assert!(!config.extension_instances.contains_key(SECOND));
-    assert_eq!(config.active_providers.get("task_tracker"), None);
-    assert_eq!(states.for_instance(SECOND).await.unwrap(), vec![]);
-    assert_eq!(
-        oxplow_db::contribution_health_store::SqliteContributionHealthStore::new(fx.svc.db.clone())
-            .get(&registry::contribution_key(SECOND))
-            .await
-            .unwrap(),
-        None
-    );
-
-    // A global instance of an extension this project has, that doesn't
-    // resolve, is listed — so it can be removed here.
-    let global = fx.svc.layout.state_dir.join("global-config");
-    oxplow_config::GlobalInstances::update(&global, |all| {
-        all.insert(
-            "tracker/fake_lost".into(),
-            oxplow_config::ExtensionInstanceConfig {
-                enabled: true,
-                provider: Some("fake".into()),
-                ..Default::default()
-            },
-        );
-        Ok::<_, ()>(())
-    })
-    .unwrap()
-    .unwrap();
-    crate::test_fixtures::activate(&fx.svc).await;
-    let lost = providers
-        .list()
-        .await
-        .into_iter()
-        .find(|v| v.instance == "tracker/fake_lost")
-        .expect("listed");
-    assert!(
-        matches!(lost.health.state, InstanceState::Missing { .. }),
-        "{:?}",
-        lost.health.state
-    );
-    providers
-        .remove_instance(&Actor::Human, "tracker/fake_lost")
-        .await
-        .unwrap();
-    crate::test_fixtures::activate_with_problems(&fx.svc).await;
-    assert!(oxplow_config::GlobalInstances::load(&global)
-        .unwrap()
-        .instances
-        .is_empty());
-}
-
 /// an instance oxplow can't run as configured — its id is a
 /// command namespace something else already owns — says so on its row,
 /// rather than showing enabled and "Off" with no reason.
@@ -2442,81 +2256,6 @@ async fn state_of(svc: &crate::Services, instance: &str) -> Option<InstanceState
         .into_iter()
         .find(|v| v.instance == instance)
         .map(|v| v.health.state)
-}
-
-/// P9.B2: a global instance belongs to the person, not a project: it runs
-/// in every project of this machine that has its extension, and isn't
-/// listed where the extension isn't.
-#[cfg(unix)]
-#[tokio::test]
-async fn a_global_instance_runs_in_every_project_with_the_extension() {
-    let (fx, _ext) = deployed("").await;
-    let providers = &fx.svc.providers;
-    let added = providers
-        .add_instance(&Actor::Human, SHARED, "fake", Scope::Global)
-        .await
-        .unwrap();
-    assert_eq!((added.scope, added.overridden), (Scope::Global, false));
-    providers
-        .set_instance(&Actor::Human, SHARED, true, json!({ "team": "shared" }))
-        .await
-        .unwrap();
-    crate::test_fixtures::activate_with_problems(&fx.svc).await;
-    // It is in the machine's file, not the project's.
-    assert!(fx.svc.config.read().unwrap().extension_instances.is_empty());
-    let global = fx.svc.layout.state_dir.join("global-config");
-    let file = oxplow_config::GlobalInstances::load(&global).unwrap();
-    assert!(file.instances[SHARED].enabled);
-    assert_eq!(state_of(&fx.svc, SHARED).await, Some(InstanceState::Ready));
-
-    let (other, _other_dir) = sibling_project(&fx, "", true).await;
-    crate::test_fixtures::activate(&other).await;
-    let there = other
-        .providers
-        .list()
-        .await
-        .into_iter()
-        .find(|v| v.instance == SHARED)
-        .expect("listed where its extension is");
-    assert_eq!(
-        (there.scope, there.health.state),
-        (Scope::Global, InstanceState::Ready)
-    );
-    assert!(running(&other, "fake_shared"));
-
-    let (bare, _bare_dir) = sibling_project(&fx, "", false).await;
-    crate::test_fixtures::activate(&bare).await;
-    assert_eq!(
-        state_of(&bare, SHARED).await,
-        None,
-        "no such extension there"
-    );
-
-    // An agent may write the machine's file too.
-    let agent = Actor::Agent {
-        session_id: None,
-        thread_id: Some(fx.thread),
-        stream_id: None,
-    };
-    providers
-        .add_instance(&agent, "tracker/fake_other", "fake", Scope::Global)
-        .await
-        .unwrap();
-    providers
-        .remove_instance(&Actor::Human, "tracker/fake_other")
-        .await
-        .unwrap();
-    // Removing it stops it everywhere it is read.
-    providers
-        .remove_instance(&Actor::Human, SHARED)
-        .await
-        .unwrap();
-    crate::test_fixtures::activate_with_problems(&fx.svc).await;
-    assert_eq!(state_of(&fx.svc, SHARED).await, None);
-    assert!(other.providers.reconcile_if_global_changed().await);
-    crate::test_fixtures::activate_with_problems(&other).await;
-    assert_eq!(state_of(&other, SHARED).await, None);
-    assert!(!running(&other, "fake_shared"));
 }
 
 /// a person turns a global instance off in one project from its

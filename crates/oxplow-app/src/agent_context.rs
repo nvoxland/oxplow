@@ -1436,7 +1436,7 @@ mod tests {
     }
 
     /// A stored setting that turns a context off takes it back once, and
-    /// one whose `needs` stop being met (no task tracker) does too.
+    /// one whose `needs` stop being met (no snapshot contents) does too.
     #[tokio::test]
     async fn a_context_turned_off_by_its_setting_or_its_needs_is_taken_back() {
         use oxplow_db::extension_config_store::{ConfigNamespace, SqliteExtensionConfigStore};
@@ -1445,7 +1445,7 @@ mod tests {
             &fx.svc,
             "state",
             "permissions: [agent.write]\nconfiguration:\n  version: 1\n  schema: { type: object, additionalProperties: false, properties: { mode: { type: string, enum: [alpha, beta] } } }\n  defaults: { mode: alpha }\n",
-            "  - id: shown\n    doc: Said in alpha.\n    when: { config: /mode, in: [alpha] }\n    query: SELECT 'alpha says' AS text\n  - id: tasks\n    doc: Said with a tracker.\n    needs: [task_tracker]\n    query: SELECT 'tracked' AS text\n",
+            "  - id: shown\n    doc: Said in alpha.\n    when: { config: /mode, in: [alpha] }\n    query: SELECT 'alpha says' AS text\n  - id: snaps\n    doc: Said with snapshots.\n    needs: [snapshots.contents]\n    query: SELECT 'snapped' AS text\n",
         );
         crate::test_fixtures::activate(&fx.svc).await;
         let ctx = AgentContext::default();
@@ -1474,7 +1474,7 @@ mod tests {
             .run(
                 &oxplow_domain::Actor::Human,
                 "oxplow.capability.choose",
-                serde_json::json!({ "capability": "task_tracker", "provider": "none" }),
+                serde_json::json!({ "capability": "snapshots", "provider": "hashes" }),
                 true,
             )
             .await
@@ -1485,14 +1485,14 @@ mod tests {
             !fx.svc
                 .capabilities
                 .snapshot(&crate::config_service::read_config(&fx.svc.config))
-                .unmet(&["task_tracker".to_string()])
+                .unmet(&["snapshots.contents".to_string()])
                 .is_empty(),
-            "no task tracker now"
+            "no snapshot contents now"
         );
         assert_eq!(
             prompt(&ctx, &fx).await,
             vec![format!(
-                "<context from=\"state/tasks\">\n{CONTEXT_CLEARED}\n</context>"
+                "<context from=\"state/snaps\">\n{CONTEXT_CLEARED}\n</context>"
             )]
         );
     }

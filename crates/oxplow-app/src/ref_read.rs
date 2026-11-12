@@ -438,8 +438,6 @@ async fn ai_call_body(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_domain::Actor;
-    use serde_json::json;
 
     /// A project with `src/a.txt` committed as three lines, then edited in
     /// the working tree.
@@ -552,54 +550,6 @@ mod tests {
             .await,
             Err(ReadError::NotFound(_))
         ));
-    }
-
-    /// A task is its row with its links and comments beside it.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn a_task_is_its_row_links_and_comments() {
-        let (_dir, svc) = project().await;
-        let created = |title: &str| {
-            let svc = svc.clone();
-            let title = title.to_string();
-            async move {
-                svc.commands
-                    .run(
-                        &Actor::Human,
-                        "oxplow.task.create",
-                        json!({ "title": title }),
-                        false,
-                    )
-                    .await
-                    .unwrap()
-                    .result["uri"]
-                    .as_str()
-                    .unwrap()
-                    .to_string()
-            }
-        };
-        let item = created("Fix the login loop").await;
-        let other = created("Ship it").await;
-        for (id, input) in [
-            (
-                "oxplow.task.link",
-                json!({ "uri": item, "target": other, "link_type": "blocks" }),
-            ),
-            (
-                "oxplow.task.comment",
-                json!({ "uri": item, "body": "Seen on Safari only." }),
-            ),
-        ] {
-            svc.commands
-                .run(&Actor::Human, id, input, false)
-                .await
-                .unwrap();
-        }
-        let read = read(&svc, &item, &Reader::default(), None).await.unwrap();
-        let row = read.row.unwrap();
-        assert_eq!(row["title"], "Fix the login loop");
-        assert_eq!(read.related["links"][0]["to_uri"], json!(other));
-        assert_eq!(read.related["comments"][0]["body"], "Seen on Safari only.");
-        assert_eq!(read.content, None);
     }
 
     /// Any kind a dataset owns reads as that dataset's row; one no dataset owns,

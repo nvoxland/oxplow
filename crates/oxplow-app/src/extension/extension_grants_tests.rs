@@ -488,7 +488,7 @@ mod program_collectors {
 async fn a_script_composing_a_command_outside_its_namespace_needs_the_commands_permission() {
     let fx = services_with_thread().await;
     let root = fx.svc.layout.project_dir.clone();
-    let item = oxplow_domain::uri::build::thread_uri(fx.thread);
+    let item = fx.thread.to_string();
     let manifest = |permissions: &str| {
         format!(
             "manifest: 2\nname: acme\nintent:\n  purpose: p\n{permissions}commands:\n  - name: notes.add\n    summary: Comments.\n    input_schema: {{ type: object }}\n    entry: note.star\n"

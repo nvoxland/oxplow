@@ -1250,11 +1250,8 @@ mod tests {
                    VALUES (1, 'primary', 'oxplow', 'main', 'refs/heads/main', 'local', '/tmp/x', '2026-01-01', '2026-01-01');
                  INSERT INTO threads (id, stream_id, title, created_at, updated_at)
                    VALUES (1, 1, 'Thread', '2026-01-01', '2026-01-01');
-                 INSERT INTO capability_provider (capability, provider) VALUES ('task_tracker', 'oxtask');
-                 INSERT INTO task (uri, provider, title, body, state, stage, created_at, updated_at)
-                   VALUES ('oxplow:oxplow/task?id=a&provider=oxtask', 'oxtask', 'Live item', '', 'in_progress', 'in_progress', '2026-01-01', '2026-01-01');
-                 INSERT INTO task (uri, provider, title, body, state, stage, created_at, updated_at, deleted_at)
-                   VALUES ('oxplow:oxplow/task?id=b&provider=oxtask', 'oxtask', 'Deleted item', '', 'todo', 'ready', '2026-01-01', '2026-01-01', '2026-01-02');",
+                 INSERT INTO threads (id, stream_id, title, mark, created_at, updated_at)
+                   VALUES (2, 1, 'Live item', 'amber', '2026-01-01', '2026-01-01');",
             )
         })
         .await
@@ -1323,22 +1320,22 @@ mod tests {
     #[tokio::test]
     async fn check_sql_compiles_without_running_and_refuses_writes() {
         let (_db, sl) = seeded().await;
-        sl.check("SELECT count(*) FROM v_task e WHERE e.state = 'done'")
+        sl.check("SELECT count(*) FROM v_thread e WHERE e.mark = 'red'")
             .await
             .unwrap();
         let err = |sql: &'static str| {
             let sl = sl.clone();
             async move { sl.check(sql).await.unwrap_err().to_string() }
         };
-        let unknown = err("SELECT nope FROM v_task").await;
+        let unknown = err("SELECT nope FROM v_thread").await;
         assert!(unknown.contains("no such column"), "{unknown}");
         // It names the dataset's columns, so the next query can be right.
-        assert!(unknown.contains("v_task has: "), "{unknown}");
+        assert!(unknown.contains("v_thread has: "), "{unknown}");
         assert!(unknown.contains("title"), "{unknown}");
         // And the nearest one, when a column is close to one it has.
-        let close = err("SELECT e.titel FROM v_task e").await;
+        let close = err("SELECT e.titel FROM v_thread e").await;
         assert!(close.contains("did you mean `title`?"), "{close}");
-        assert!(err("DELETE FROM task").await.contains("SELECT"));
+        assert!(err("DELETE FROM threads").await.contains("SELECT"));
     }
 
     #[test]
@@ -1370,10 +1367,10 @@ mod tests {
         let out = sl
             .run(
                 SqlQuery::new(
-                    "SELECT title FROM v_task WHERE state = :state AND created_at >= :since",
+                    "SELECT title FROM v_thread WHERE mark = :mark AND created_at >= :since",
                 )
                 .named(vec![
-                    ("state".into(), SqlCell::Text("in_progress".into())),
+                    ("mark".into(), SqlCell::Text("amber".into())),
                     ("since".into(), SqlCell::Text("2026-01-01".into())),
                     ("unused".into(), SqlCell::Int(9)),
                 ]),
@@ -1386,7 +1383,7 @@ mod tests {
         );
         // A name the query uses must be given; a positional count must match.
         let err = sl
-            .run(SqlQuery::new("SELECT title FROM v_task WHERE uri = :uri").named(vec![]))
+            .run(SqlQuery::new("SELECT title FROM v_thread WHERE uri = :uri").named(vec![]))
             .await
             .unwrap_err();
         assert!(err.to_string().contains("no value for :uri"), "{err}");
@@ -1410,24 +1407,27 @@ mod tests {
             let sl = sl.clone();
             async move { sl.run(SqlQuery::new(sql).raw(true)).await.unwrap().reads }
         };
-        let r = reads("SELECT count(*) FROM v_task").await;
-        assert_eq!((r.datasets, r.tables), (vec!["v_task".to_string()], vec![]));
-        let r =
-            reads("WITH t AS (SELECT uri FROM v_task) SELECT * FROM t JOIN v_thread th ON 1").await;
+        let r = reads("SELECT count(*) FROM v_thread").await;
+        assert_eq!(
+            (r.datasets, r.tables),
+            (vec!["v_thread".to_string()], vec![])
+        );
+        let r = reads("WITH t AS (SELECT uri FROM v_stream) SELECT * FROM t JOIN v_thread th ON 1")
+            .await;
         assert_eq!(
             r.datasets,
-            vec!["v_task".to_string(), "v_thread".to_string()]
+            vec!["v_stream".to_string(), "v_thread".to_string()]
         );
         assert!(r.tables.is_empty(), "{:?}", r.tables);
-        let r = reads("SELECT t.title FROM task t JOIN v_thread th ON th.uri = t.uri").await;
-        assert_eq!(r.tables, vec!["task".to_string()]);
-        let r = reads("WITH c AS (SELECT title FROM task) SELECT * FROM c").await;
+        let r = reads("SELECT t.title FROM threads t JOIN v_thread th ON th.id = t.id").await;
+        assert_eq!(r.tables, vec!["threads".to_string()]);
+        let r = reads("WITH c AS (SELECT title FROM threads) SELECT * FROM c").await;
         assert_eq!(
             r.tables,
-            vec!["task".to_string()],
+            vec!["threads".to_string()],
             "a CTE body is the query's own SQL"
         );
-        let r = reads("SELECT j.value FROM v_task t, json_each('[1,2]') j").await;
+        let r = reads("SELECT j.value FROM v_thread t, json_each('[1,2]') j").await;
         assert!(
             r.tables.is_empty(),
             "a table-valued function isn't a table: {:?}",
@@ -1436,10 +1436,10 @@ mod tests {
         let r = reads("SELECT name FROM sqlite_master").await;
         assert_eq!(r.tables, vec!["sqlite_master".to_string()]);
         let checked = sl
-            .check("SELECT uri FROM v_task WHERE uri = :uri")
+            .check("SELECT uri FROM v_thread WHERE uri = :uri")
             .await
             .unwrap();
-        assert_eq!(checked.datasets, vec!["v_task".to_string()]);
+        assert_eq!(checked.datasets, vec!["v_thread".to_string()]);
     }
 
     /// tsk1039: a misspelled dataset names the one it most likely meant —
@@ -1448,12 +1448,12 @@ mod tests {
     async fn an_unknown_dataset_suggests_the_nearest_one() {
         let (_db, sl) = seeded().await;
         let err = sl
-            .query_sql("SELECT * FROM v_tasks", vec![], None)
+            .query_sql("SELECT * FROM v_threads", vec![], None)
             .await
             .unwrap_err()
             .to_string();
-        assert!(err.contains("no such table: v_tasks"), "{err}");
-        assert!(err.contains("did you mean `v_task`?"), "{err}");
+        assert!(err.contains("no such table: v_threads"), "{err}");
+        assert!(err.contains("did you mean `v_thread`?"), "{err}");
         let err = sl
             .query_sql("SELECT * FROM v_zzzzzzzzz", vec![], None)
             .await
@@ -1477,29 +1477,29 @@ mod tests {
                     .to_string()
             }
         };
-        let msg = refused("SELECT * FROM task").await;
-        // The table's own dataset comes first, before the others that read
-        // it (an index feed, v_search_task).
+        let msg = refused("SELECT * FROM threads").await;
+        // It names the datasets over the table.
         assert!(
-            msg.contains("`task` is a physical table, not a published dataset; read v_task"),
+            msg.contains("`threads` is a physical table, not a published dataset; read ")
+                && msg.contains("v_thread"),
             "{msg}"
         );
         assert!(!msg.contains("no such table"), "{msg}");
         assert!(
-            refused("WITH c AS (SELECT title FROM task) SELECT * FROM c")
+            refused("WITH c AS (SELECT title FROM threads) SELECT * FROM c")
                 .await
-                .contains("`task` is a physical table")
+                .contains("`threads` is a physical table")
         );
         assert!(refused("SELECT name FROM sqlite_master")
             .await
             .contains("`sqlite_master` is a physical table"));
-        assert!(sl.check("SELECT uri FROM task").await.is_err());
+        assert!(sl.check("SELECT uri FROM threads").await.is_err());
         // Datasets, counts over them, table-valued functions and temp tables
         // are all fine.
         for ok in [
-            "SELECT count(*) FROM v_task",
-            "SELECT t.uri FROM v_task t JOIN v_thread th ON th.uri = t.assignee",
-            "SELECT j.value FROM v_task t, json_each('[1]') j",
+            "SELECT count(*) FROM v_thread",
+            "SELECT t.uri FROM v_thread t JOIN v_stream s ON s.id = t.stream_id",
+            "SELECT j.value FROM v_thread t, json_each('[1]') j",
         ] {
             sl.query_sql(ok, vec![], None)
                 .await
@@ -1517,7 +1517,7 @@ mod tests {
         // view, as the accessor of the reads inside it (P4.11).
         db.call(|c| {
             c.execute_batch(
-                "CREATE VIEW v_cte_probe AS WITH live AS (SELECT title FROM task) SELECT title FROM live",
+                "CREATE VIEW v_cte_probe AS WITH live AS (SELECT title FROM threads) SELECT title FROM live",
             )
         })
         .await
@@ -1531,19 +1531,14 @@ mod tests {
         assert!(out.reads.tables.is_empty(), "{:?}", out.reads.tables);
         // Raw reads the table, and says so.
         let out = sl
-            .run(SqlQuery::new("SELECT count(*) FROM task").raw(true))
+            .run(SqlQuery::new("SELECT count(*) FROM threads").raw(true))
             .await
             .unwrap();
-        assert_eq!(out.reads.tables, vec!["task".to_string()]);
+        assert_eq!(out.reads.tables, vec!["threads".to_string()]);
         // A refusal leaves the connection writable.
-        db.call(|c| {
-            c.execute(
-                "UPDATE task SET title = 'x' WHERE uri = 'oxplow:oxplow/task?id=a&provider=oxtask'",
-                [],
-            )
-        })
-        .await
-        .unwrap();
+        db.call(|c| c.execute("UPDATE threads SET title = 'x' WHERE id = 2", []))
+            .await
+            .unwrap();
     }
 
     /// P4.5a (tsk490): a query's temp tables exist for it alone — created
@@ -1582,14 +1577,9 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(left, 0);
-        db.call(|c| {
-            c.execute(
-                "UPDATE task SET title = 'w' WHERE uri = 'oxplow:oxplow/task?id=a&provider=oxtask'",
-                [],
-            )
-        })
-        .await
-        .unwrap();
+        db.call(|c| c.execute("UPDATE threads SET title = 'w' WHERE id = 2", []))
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -1597,21 +1587,16 @@ mod tests {
         let (_db, sl) = seeded().await;
         let out = sl
             .query_sql(
-                "SELECT uri, title, state, assignee FROM v_task ORDER BY uri",
+                "SELECT id, title, mark FROM v_thread WHERE mark IS NOT NULL ORDER BY id",
                 vec![],
                 None,
             )
             .await
             .unwrap();
-        assert_eq!(out.columns, vec!["uri", "title", "state", "assignee"]);
+        assert_eq!(out.columns, vec!["id", "title", "mark"]);
         assert_eq!(
             serde_json::to_value(&out.rows).unwrap(),
-            json!([[
-                "oxplow:oxplow/task?id=a&provider=oxtask",
-                "Live item",
-                "in_progress",
-                null
-            ]])
+            json!([[2, "Live item", "amber"]])
         );
         assert!(!out.truncated);
     }
@@ -1621,8 +1606,8 @@ mod tests {
         let (_db, sl) = seeded().await;
         let out = sl
             .query_sql(
-                "SELECT title FROM v_task WHERE state = ?1",
-                vec![json!("in_progress").into()],
+                "SELECT title FROM v_thread WHERE mark = ?1",
+                vec![json!("amber").into()],
                 None,
             )
             .await
@@ -1637,14 +1622,14 @@ mod tests {
     async fn rejects_anything_but_a_single_read() {
         let (_db, sl) = seeded().await;
         for sql in [
-            "DELETE FROM task",
-            "INSERT INTO task (title) VALUES ('x')",
-            "UPDATE task SET title = 'x'",
-            "DROP VIEW v_task",
+            "DELETE FROM threads",
+            "INSERT INTO threads (title) VALUES ('x')",
+            "UPDATE threads SET title = 'x'",
+            "DROP VIEW v_thread",
             "PRAGMA query_only = 0",
             "ATTACH DATABASE '/tmp/evil.sqlite' AS evil",
-            "SELECT 1; DELETE FROM task",
-            "WITH x AS (SELECT 1) DELETE FROM task",
+            "SELECT 1; DELETE FROM threads",
+            "WITH x AS (SELECT 1) DELETE FROM threads",
             "",
         ] {
             let err = sl.query_sql(sql, vec![], None).await.unwrap_err();
@@ -1655,7 +1640,7 @@ mod tests {
         }
         // Nothing was deleted.
         let out = sl
-            .run(SqlQuery::new("SELECT count(*) FROM task").raw(true))
+            .run(SqlQuery::new("SELECT count(*) FROM threads").raw(true))
             .await
             .unwrap();
         assert_eq!(serde_json::to_value(&out.rows).unwrap(), json!([[2]]));
@@ -1688,10 +1673,12 @@ mod tests {
     async fn leaves_the_pooled_connection_writable() {
         let (db, sl) = seeded().await;
         sl.query_sql("SELECT 1", vec![], None).await.unwrap();
-        let _ = sl.query_sql("DELETE FROM task", vec![], None).await;
+        let _ = sl.query_sql("DELETE FROM threads", vec![], None).await;
         // A failure after the authorizer is installed, and one after
         // `query_only` is on, leave nothing behind either.
-        let _ = sl.query_sql("SELECT nope FROM v_task", vec![], None).await;
+        let _ = sl
+            .query_sql("SELECT nope FROM v_thread", vec![], None)
+            .await;
         let _ = sl.query_sql("SELECT ?1", vec![], None).await;
         let _ = sl
             .run(
@@ -1701,13 +1688,8 @@ mod tests {
             .await;
         // in_memory() has a single pooled connection, so this proves
         // query_only was reset.
-        db.call(|c| {
-            c.execute(
-                "UPDATE task SET title = 'renamed' WHERE uri = 'oxplow:oxplow/task?id=a&provider=oxtask'",
-                [],
-            )
-        })
-        .await
-        .unwrap();
+        db.call(|c| c.execute("UPDATE threads SET title = 'renamed' WHERE id = 2", []))
+            .await
+            .unwrap();
     }
 }

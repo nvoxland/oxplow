@@ -122,28 +122,15 @@ mod tests {
     #[tokio::test]
     async fn an_outbound_edge_says_whether_its_target_resolves() {
         let (svc, _dir) = crate::test_support::services().await;
-        let stream = svc.streams.ensure_primary().await.unwrap();
-        let thread = svc
-            .threads
-            .selected_or_first(&stream.id)
-            .await
-            .unwrap()
-            .expect("the primary stream has a thread");
-        let made = svc
-            .commands
-            .run(
-                &oxplow_domain::Actor::Human,
-                "oxplow.task.create",
-                serde_json::json!({
-                    "title": "Fix it",
-                    "assignee": thread.to_string(),
-                    "links": [{ "target": "oxplow:oxplow/collector?collector=ghost/none", "link_type": "about" }],
-                }),
-                false,
-            )
+        let item = "oxplow:oxplow/knowledge?id=fix-it&store=oxwiki".to_string();
+        svc.page_ref_store
+            .upsert_edge(oxplow_db::PageRefEdge::new(
+                item.clone(),
+                "oxplow:oxplow/collector?collector=ghost/none",
+                "mention",
+            ))
             .await
             .unwrap();
-        let item = made.result["uri"].as_str().unwrap().to_string();
         let out = crate::dispatch("list_outbound", serde_json::json!({ "source": item }), &svc)
             .await
             .unwrap();

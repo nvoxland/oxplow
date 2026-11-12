@@ -634,11 +634,11 @@ mod tests {
             thread_id: Some(ThreadId::new(4)),
             ..Anchors::default()
         })
-        .with_subject(["oxplow:oxplow/task?id=tsk4&provider=oxtask"]);
+        .with_subject(["oxplow:oxplow/thread?id=thr4"]);
         let e2 = Envelope::typed::<CommandExecuted>(
             "agent:thr4",
             &CommandExecutedV5 {
-                command: "oxplow.task.transition".into(),
+                command: "oxplow.thread.mark".into(),
                 actor_kind: ActorKind::Agent,
                 actor_id: Some("thr4".into()),
                 outcome: CommandOutcome::Ok,
@@ -775,7 +775,7 @@ mod tests {
             .append(env(None).with_subject([
                 "oxplow:oxplow/config?key=zones",
                 "oxplow:oxplow/stream?id=str1",
-                "oxplow:oxplow/task?id=tsk4&provider=oxtask",
+                "oxplow:oxplow/thread?id=thr4",
             ]))
             .await
             .unwrap();

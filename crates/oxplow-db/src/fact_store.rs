@@ -7939,9 +7939,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_fact_reads_its_captures_turn_request_and_task_and_outlives_the_turn() {
-        // A capture made in a turn: its facts read the turn, the turn's
-        // request and that request's task. Deleting the turn SET-NULLs the
+    async fn a_fact_reads_its_captures_turn_and_request_and_outlives_the_turn() {
+        // A capture made in a turn: its facts read the turn and the turn's
+        // request. Deleting the turn SET-NULLs the
         // capture's turn, never deletes a fact.
         let store = fixture().await;
         let m = measure(&store, "oxplow.complexity").await;
@@ -7958,10 +7958,7 @@ mod tests {
             .unwrap();
         let rows = store.facts_for_measure(m).await.unwrap();
         assert_eq!((rows[0].turn_id, rows[0].request_id), (Some(1), Some(1)));
-        assert!(rows[0]
-            .task
-            .as_deref()
-            .is_some_and(|t| t.starts_with("oxplow:oxplow/task?id=tsk")));
+        assert_eq!(rows[0].task, None, "core links no task to a request");
 
         store
             .db
@@ -7974,59 +7971,6 @@ mod tests {
         assert_eq!(rows.len(), 1, "the fact survives its turn");
         assert_eq!(rows[0].value, 7.0);
         assert_eq!((rows[0].turn_id, rows[0].task.as_deref()), (None, None));
-    }
-
-    /// A fact's task is its request's strongest link, whichever name the
-    /// basis has: core's `command` is bundled's `edited` (and a filing `filed`),
-    /// all of them below a prompt and above a move, above the weakest.
-    #[tokio::test]
-    async fn a_facts_task_is_the_strongest_link_by_either_name_of_a_basis() {
-        let store = fixture().await;
-        let m = measure(&store, "oxplow.complexity").await;
-        store
-            .record_facts(
-                NewMetricCapture {
-                    turn_id: Some(1),
-                    captured_at: Some(at("2026-06-30T10:30:00Z")),
-                    ..NewMetricCapture::done(1, "metrics", "builtin")
-                },
-                vec![NewFact::new(m, 7.0)],
-            )
-            .await
-            .unwrap();
-        store
-            .db
-            .call(|conn| {
-                conn.execute(
-                    "INSERT INTO request_task (request_id, task_uri, basis, turn_id, at)
-                     VALUES (1, 'oxplow:oxplow/task?id=other&provider=oxtask', 'transition', 1,
-                             '2026-06-30T10:00:00.000000Z')",
-                    [],
-                )
-            })
-            .await
-            .unwrap();
-        let first = "oxplow:oxplow/task?id=tsk1&provider=oxtask";
-        for (basis, winner) in [
-            ("command", first),
-            ("edited", first),
-            ("filed", first),
-            ("prompt", first),
-            ("assigned", "oxplow:oxplow/task?id=other&provider=oxtask"),
-        ] {
-            store
-                .db
-                .call(move |conn| {
-                    conn.execute(
-                        "UPDATE request_task SET basis = ?1 WHERE task_uri LIKE '%tsk1%'",
-                        [basis],
-                    )
-                })
-                .await
-                .unwrap();
-            let rows = store.facts_for_measure(m).await.unwrap();
-            assert_eq!(rows[0].task.as_deref(), Some(winner), "{basis}");
-        }
     }
 
     #[tokio::test]

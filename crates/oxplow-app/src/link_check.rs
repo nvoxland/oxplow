@@ -327,22 +327,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn flags_nonexistent_task() {
-        let dir = git_repo();
-        let services = Services::in_memory(dir.path()).await.unwrap();
-        let warnings = check_links(&services, "Blocked by [[tsk999]].").await;
-        assert_eq!(warnings.len(), 1);
-        assert_eq!(warnings[0].target, "tsk999");
-        assert!(
-            warnings[0]
-                .reason
-                .contains("`oxplow:oxplow/task?id=tsk999&provider=oxtask` does not exist"),
-            "{}",
-            warnings[0].reason
-        );
-    }
-
-    #[tokio::test]
     async fn flags_missing_knowledge_page_but_not_code_fenced() {
         let dir = git_repo();
         let services = Services::in_memory(dir.path()).await.unwrap();

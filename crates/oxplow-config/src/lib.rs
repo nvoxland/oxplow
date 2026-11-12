@@ -3863,17 +3863,17 @@ mod tests {
     #[test]
     fn active_providers_name_one_provider_per_capability() {
         let parse = |yaml: &str| parse_project_config(serde_yaml::from_str(yaml).unwrap(), "demo");
-        let config = parse("activeProviders: { task_tracker: issues }\n").unwrap();
-        assert_eq!(config.active_providers["task_tracker"], "issues");
+        let config = parse("activeProviders: { snapshots: issues }\n").unwrap();
+        assert_eq!(config.active_providers["snapshots"], "issues");
         let doc = render_project_config(&config, "demo");
         let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(doc)).unwrap();
         assert!(
-            yaml.contains("activeProviders:\n  task_tracker: issues"),
+            yaml.contains("activeProviders:\n  snapshots: issues"),
             "{yaml}"
         );
         let err = parse("activeProviders: { vcs: jj }\n").unwrap_err();
-        assert!(err.to_string().contains("task_tracker"), "{err}");
-        let err = parse("activeProviders: { task_tracker: Issues-App }\n").unwrap_err();
+        assert!(err.to_string().contains("snapshots"), "{err}");
+        let err = parse("activeProviders: { snapshots: Issues-App }\n").unwrap_err();
         assert!(err.to_string().contains("instance id"), "{err}");
         assert!(parse("agents: [claude]\n")
             .unwrap()
@@ -3892,7 +3892,7 @@ mod tests {
         std::fs::create_dir_all(&oxplow).unwrap();
         std::fs::write(
             oxplow.join("project.yaml"),
-            "activeProviders: { task_tracker: issues }\n",
+            "activeProviders: { snapshots: issues }\n",
         )
         .unwrap();
         std::fs::write(
@@ -3902,13 +3902,9 @@ mod tests {
         .unwrap();
         let config = load_project_config(dir.path()).unwrap();
         assert_eq!(
-            config
-                .active_providers
-                .get("task_tracker")
-                .map(String::as_str),
+            config.active_providers.get("snapshots").map(String::as_str),
             Some("issues")
         );
-        assert_eq!(config.active_providers.get("snapshots"), None);
         assert_eq!(
             config
                 .personal_active_providers

@@ -208,8 +208,9 @@ mod tests {
         }
     }
 
-    /// oxplow's own tools are foundation's declarations, each named under
-    /// `oxplow_`, its hint its command's access.
+    /// oxplow's own tools are foundation's declarations (and, as the test
+    /// services ship it, oxplow-bundled's `next_task` and `thread_tasks`),
+    /// each named under `oxplow_`, its hint its command's access.
     #[tokio::test]
     async fn oxplows_tools_are_foundations_declarations() {
         let fx = services_with_thread().await;
@@ -236,6 +237,7 @@ mod tests {
                 "oxplow_list_comments",
                 "oxplow_list_tabs",
                 "oxplow_navigate",
+                "oxplow_next_task",
                 "oxplow_preview_collector",
                 "oxplow_query_sql",
                 "oxplow_read",
@@ -244,6 +246,7 @@ mod tests {
                 "oxplow_run_page_action",
                 "oxplow_search",
                 "oxplow_show_page",
+                "oxplow_thread_tasks",
                 "oxplow_validate_extension",
                 "oxplow_vcs_blame",
                 "oxplow_vcs_branches",

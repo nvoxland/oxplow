@@ -655,7 +655,7 @@ mod tests {
              panels:\n  - {{ id: inbox, title: Inbox, scope: project, body: open }}\n\
              resources:\n  - {{ name: pr, label: Pull request, params: {{ id: {{ required: true, pattern: '^[0-9]+$' }} }}, resolve: prs, icon: git-pull-request }}\n\
              custom_components:\n  - {{ id: chart }}\n\
-             ui:\n  mounts:\n    - {{ page: open, at: oxplow/diff.file-header }}\n    - {{ page: open, at: oxplow/diff.file-header }}\n  decorators:\n    - {{ dataset: prs, resource: oxplow/task, placement: ref-chip, label: title }}\n"
+             ui:\n  mounts:\n    - {{ page: open, at: oxplow/diff.file-header }}\n    - {{ page: open, at: oxplow/diff.file-header }}\n  decorators:\n    - {{ dataset: prs, resource: oxplow/thread, placement: ref-chip, label: title }}\n"
         )
     }
 
@@ -665,7 +665,7 @@ mod tests {
         write(
             root,
             &format!("{dir}/datasets/prs.sql"),
-            "SELECT 'oxplow:oxplow/task?id=tsk1&provider=oxtask' AS uri, 'One' AS title",
+            "SELECT 'oxplow:oxplow/thread?id=thr1' AS uri, 'One' AS title",
         );
         write(
             root,
@@ -749,7 +749,7 @@ mod tests {
             "manifest: 2\nname: acme\nintent: { purpose: p, origin: null, examples: [] }\n\
              permissions: [ai.compute]\n\
              implementations:\n\
-             \x20 - { capability: task_tracker, id: oxtask, entry: \"oxplow:oxtask\" }\n\
+             \x20 - { capability: knowledge, id: oxwiki, entry: \"oxplow:oxwiki\" }\n\
              \x20 - { capability: ai_provider, id: tidy, provider: openai_compatible }\n",
         );
         let ext = load_extensions(dir.path())
@@ -764,7 +764,7 @@ mod tests {
         assert_eq!(
             ids,
             [
-                "oxplow:oxplow/implementation?implementation=acme/task_tracker.oxtask",
+                "oxplow:oxplow/implementation?implementation=acme/knowledge.oxwiki",
                 "oxplow:oxplow/implementation?implementation=acme/ai_provider.tidy"
             ]
         );
@@ -874,7 +874,7 @@ mod tests {
                 id: "tracker/task.board".into(),
                 extension: "tracker".into(),
                 target: "task.board".into(),
-                capability: "task_tracker".into(),
+                capability: "vcs".into(),
                 bound_to_provider: false,
                 page: "tracker/board".into(),
                 version: 1,

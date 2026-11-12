@@ -220,8 +220,8 @@ mod tests {
         let err = crate::dispatch(
             "run_command",
             json!({
-                "id": "oxplow.task.transition",
-                "input": { "uri": "oxplow:oxplow/task?id=tsk999&provider=oxtask", "to": "done" },
+                "id": "oxplow.thread.mark",
+                "input": { "thread": "thr999", "mark": "amber" },
                 "confirmed": true,
             }),
             &svc,
@@ -241,7 +241,7 @@ mod tests {
             })
             .await
             .unwrap();
-        assert_eq!(row.0, "oxplow.task.transition");
+        assert_eq!(row.0, "oxplow.thread.mark");
         assert_ne!(row.1, "ok");
         // A run that succeeds, or fails before any run, names none.
         let unknown = crate::dispatch(
@@ -405,20 +405,28 @@ mod tests {
                 .await
             }
         };
-        // A command that asks asks the person over IPC: a task's delete.
+        // A command that asks asks the person over IPC: a comment's delete.
         let made = crate::dispatch(
             "run_command",
-            json!({ "id": "oxplow.task.create", "input": { "title": "T" }, "confirmed": false }),
+            json!({
+                "id": "oxplow.knowledge.add_comment",
+                "input": {
+                    "stream": "str1",
+                    "target": "oxplow:oxplow/knowledge?id=a-page&store=oxwiki",
+                    "body": "T",
+                },
+                "confirmed": false,
+            }),
             &svc,
         )
         .await
         .unwrap();
         let delete = |confirmed: bool| {
-            let (svc, uri) = (svc.clone(), made["result"]["uri"].clone());
+            let (svc, comment) = (svc.clone(), made["result"]["comment"]["id"].clone());
             async move {
                 crate::dispatch(
                     "run_command",
-                    json!({ "id": "oxplow.task.delete", "input": { "uri": uri }, "confirmed": confirmed }),
+                    json!({ "id": "oxplow.knowledge.delete_comment", "input": { "comment": comment }, "confirmed": confirmed }),
                     &svc,
                 )
                 .await
@@ -479,19 +487,28 @@ mod tests {
             .commands
             .run(
                 &oxplow_domain::Actor::Human,
-                "oxplow.task.create",
-                json!({ "title": "Proposed away" }),
+                "oxplow.knowledge.add_comment",
+                json!({
+                    "stream": "str1",
+                    "target": "oxplow:oxplow/knowledge?id=a-page&store=oxwiki",
+                    "body": "Proposed away",
+                }),
                 false,
             )
             .await
             .unwrap();
         let propose = || {
             let (svc, effect) = (svc.clone(), effect.clone());
-            let uri = made.result["uri"].clone();
+            let comment = made.result["comment"]["id"].clone();
             async move {
                 let err = svc
                     .commands
-                    .run(&effect, "oxplow.task.delete", json!({ "uri": uri }), false)
+                    .run(
+                        &effect,
+                        "oxplow.knowledge.delete_comment",
+                        json!({ "comment": comment }),
+                        false,
+                    )
                     .await
                     .unwrap_err();
                 let oxplow_domain::CommandError::Proposed { proposal, .. } = err else {
@@ -518,7 +535,7 @@ mod tests {
                     .run(
                         &oxplow_domain::Actor::Human,
                         "oxplow.sql.query",
-                        json!({ "sql": "SELECT count(*) FROM v_task WHERE title = 'Proposed away'" }),
+                        json!({ "sql": "SELECT count(*) FROM v_comment WHERE body = 'Proposed away'" }),
                         false,
                     )
                     .await

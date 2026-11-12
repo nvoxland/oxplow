@@ -279,7 +279,7 @@ async fn a_dataset_that_does_not_compile_holds_back_only_its_extension() {
     std::fs::write(
         dir.path()
             .join(".oxplow/extensions/late/datasets/blocked.sql"),
-        "SELECT no_such_column AS uri FROM ref('task')",
+        "SELECT no_such_column AS uri FROM ref('thread')",
     )
     .unwrap();
     write_ext(dir.path(), "alpha", 2, "");
@@ -295,6 +295,14 @@ async fn a_dataset_that_does_not_compile_holds_back_only_its_extension() {
 async fn the_documented_examples_activate() {
     let dir = tempfile::tempdir().unwrap();
     crate::test_fixtures::init_git_repo(dir.path());
+    // Some examples build on oxplow-bundled's models and oxtask, which are
+    // off until a project turns them on.
+    std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
+    std::fs::write(
+        dir.path().join(".oxplow/project.yaml"),
+        "extensions: [oxplow-bundled, oxtask]\n",
+    )
+    .unwrap();
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions");
     // Each example is a folder; the folder's README isn't one.
     for entry in std::fs::read_dir(&examples).unwrap() {

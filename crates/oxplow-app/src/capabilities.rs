@@ -1980,87 +1980,6 @@ mod tests {
         }
         assert!(commands.join("configure.md").is_file());
     }
-
-    /// A task tracker instance's id pattern is published beside it, so a
-    /// screen recognizes its ids in text as core's vocabulary does.
-    #[tokio::test]
-    async fn a_task_trackers_id_pattern_is_published() {
-        let fx = crate::test_fixtures::services_with_thread().await;
-        let svc = &fx.svc;
-        svc.capabilities
-            .set_external(tracker_instance(Some(r"ENG-\d+")), true);
-        svc.capabilities
-            .publish(&config(&[], &[]), &svc.db)
-            .await
-            .unwrap();
-        let out = svc
-            .sql
-            .query_sql(
-                "SELECT provider, id_pattern FROM v_capability_provider
-                  WHERE capability = 'task_tracker' ORDER BY provider",
-                vec![],
-                None,
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            serde_json::to_value(&out.rows).unwrap(),
-            serde_json::json!([["issues", r"ENG-\d+"]])
-        );
-    }
-
-    /// The vocabulary reads a running task tracker instance's ids in text,
-    /// as it declares them; once it stops, they are no longer task ids.
-    #[tokio::test]
-    async fn the_vocabulary_reads_a_running_instances_ids() {
-        let fx = crate::test_fixtures::services_with_thread().await;
-        let svc = &fx.svc;
-        let found = || {
-            oxplow_domain::uri::extract(
-                &svc.vocabulary.current().resources,
-                "see ENG-42 and [[ENG-7]]",
-            )
-            .tasks
-        };
-        assert!(found().is_empty(), "{:?}", found());
-        let instance = tracker_instance(Some(r"ENG-\d+"));
-        svc.capabilities.set_external(instance.clone(), true);
-        svc.capabilities
-            .publish(&config(&[], &[]), &svc.db)
-            .await
-            .unwrap();
-        crate::test_fixtures::activate_with_problems(svc).await;
-        assert_eq!(
-            found(),
-            vec![
-                oxplow_domain::uri::build::task_uri("issues", "ENG-42"),
-                oxplow_domain::uri::build::task_uri("issues", "ENG-7"),
-            ]
-        );
-        svc.capabilities.set_external(instance, false);
-        crate::test_fixtures::activate_with_problems(svc).await;
-        assert!(found().is_empty(), "{:?}", found());
-    }
-
-    /// A running task tracker provider instance, as its host publishes it.
-    fn tracker_instance(id_pattern: Option<&str>) -> Implementation {
-        Implementation {
-            capability: "task_tracker".into(),
-            id: "issues".into(),
-            title: "Issues".into(),
-            extension: Some("tracker".into()),
-            source: Source::External,
-            features: Value::Null,
-            fields: serde_json::Value::Array(Vec::new()),
-            stages: serde_json::Value::Array(Vec::new()),
-            kinds: serde_json::Value::Array(Vec::new()),
-            offered: true,
-            id_pattern: id_pattern.map(str::to_string),
-            icon: None,
-            config: serde_json::json!({}),
-            description: None,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -2320,13 +2239,11 @@ commands:
         assert!(!skills.join("on-a").exists(), "on-a is no longer offered");
     }
 
-    /// oxtask's skills follow the project's task workflow: by default the
-    /// agent tracks its work (`track-work`); when the person files tasks
-    /// the agent works them (`work-tasks`); with `custom` only the queue
-    /// (`next-task`), the project's own skill says the rest; `off` offers
-    /// none of them.
+    /// Bundled's task skills (`next-task`, `track-work`, `work-tasks`) are
+    /// offered only while the task model has a live store; with none (no
+    /// oxtask running) the project's workflow setting offers none of them.
     #[tokio::test(flavor = "multi_thread")]
-    async fn oxtask_offers_the_skills_of_the_projects_task_workflow() {
+    async fn the_task_skills_wait_for_a_live_task_store() {
         let fx = crate::test_fixtures::services_developing_oxplow().await;
         crate::extension::extension_deploy::deploy(&fx.svc, "oxplow-bundled", true)
             .await
@@ -2349,14 +2266,10 @@ commands:
             names.sort();
             names
         };
-        assert_eq!(offered().await, ["next-task", "track-work"], "the default");
+        assert!(offered().await.is_empty(), "the default");
         let store = SqliteExtensionConfigStore::new(fx.svc.db.clone());
         let mut expected = None;
-        for (workflow, skills) in [
-            ("person_files", &["next-task", "work-tasks"][..]),
-            ("custom", &["next-task"][..]),
-            ("off", &[][..]),
-        ] {
+        for workflow in ["person_files", "custom", "off"] {
             let values = json!({ "tasks": { "workflow": workflow } });
             expected = Some(
                 store
@@ -2370,7 +2283,7 @@ commands:
                     .unwrap()
                     .stamp(),
             );
-            assert_eq!(offered().await, skills, "{workflow}");
+            assert!(offered().await.is_empty(), "{workflow}");
         }
     }
 }

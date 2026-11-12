@@ -3344,7 +3344,7 @@
           "default": null
         },
         "entry": {
-          "description": "The built-in it is (`oxplow:oxtask`), or a script in the extension\nthat implements the capability's verbs.",
+          "description": "The built-in it is (`oxplow:oxwiki`), or a script in the extension\nthat implements the capability's verbs.",
           "type": [
             "string",
             "null"

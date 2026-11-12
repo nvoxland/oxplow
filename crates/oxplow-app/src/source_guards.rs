@@ -733,9 +733,6 @@ fn no_tmux_in_the_app() {
 /// it. Each `(file, pattern)` still here says why.
 #[rustfmt::skip]
 const SPECIAL_CASES: &[(&str, &str, &str)] = &[
-    // Reserving the name, so no provider takes oxplow's refs: no decision
-    // about how to call one.
-    ("crates/oxplow-domain/src/capability.rs", "== OXTASK", "the reserved provider id"),
     ("crates/oxplow-domain/src/capability.rs", "== \"oxplow\"", "the reserved provider id"),
     // The same reservation for filesystems: no extension's filesystem id
     // falls in `oxplow:`, the namespace of oxplow's own.
@@ -1430,7 +1427,7 @@ fn pages_take_spec_types_from_the_spec_module() {
 /// and re-export nothing, or put it under a facade such as `extension/`.
 #[test]
 fn the_crate_root_exposes_no_more_modules() {
-    const PUB_MODS: usize = 135;
+    const PUB_MODS: usize = 133;
     let lib = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"))
         .expect("lib.rs");
     let count = lib.lines().filter(|l| l.starts_with("pub mod ")).count();

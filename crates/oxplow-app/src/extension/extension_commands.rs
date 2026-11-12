@@ -12,8 +12,8 @@
 //!     confirm: never                     # never | always | destructive
 //!     access: write                      # write | record | read
 //!     examples:
-//!       - { name: happy, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" }, expect_commands: [oxplow.task.transition] }
-//!       - { name: gone, input: { uri: "oxplow:oxplow/task?id=tsk9&provider=oxtask" }, answers: { sql.read: [[]] }, refused: no such task }
+//!       - { name: happy, input: { uri: "oxplow:oxplow/thread?id=thr1" }, expect_commands: [oxplow.thread.rename] }
+//!       - { name: gone, input: { uri: "oxplow:oxplow/thread?id=thr9" }, answers: { sql.read: [[]] }, refused: no such thread }
 //! ```
 //!
 //! The script reads with `scope("sql.read", { sql, params })` (one
@@ -2557,7 +2557,7 @@ mod tests {
             .unwrap();
         assert!(v.errors.is_empty(), "{:?}", v.errors);
         // A read of a table, not a published dataset, is refused.
-        let d = reads("SELECT title AS r FROM thread");
+        let d = reads("SELECT title AS r FROM threads");
         let v = validate_extension(&layer, &cat, d.path(), "x", Some(&schema))
             .await
             .unwrap();
@@ -2642,7 +2642,7 @@ mod tests {
     return {
         \"commands\": [
             {\"name\": \"oxplow.probe.rename\", \"input\": {\"thread\": row[\"uri\"], \"title\": \"done\"}},
-            {\"name\": \"oxplow.thread.rename\", \"input\": {\"thread\": row[\"uri\"], \"title\": row[\"title\"] + \" (reviewed)\"}},
+            {\"name\": \"oxplow.thread.rename\", \"input\": {\"thread\": row[\"uri\"].split(\"id=\")[1], \"title\": row[\"title\"] + \" (reviewed)\"}},
         ],
         \"result\": {\"finished\": row[\"uri\"]},
     }
@@ -3115,7 +3115,7 @@ def finish(x):
             .await
             .unwrap();
         assert_eq!(out.result["result"], json!({ "from": "transform" }));
-        assert_eq!(out.inverse.unwrap().input["to"], "todo");
+        assert_eq!(out.inverse.unwrap().input["title"], "todo");
     }
 
     /// A step that fails stops the run: `finish` is not called, and the
@@ -4191,7 +4191,7 @@ def finish(x):
         for (example, says) in [
             (
                 "      - { name: happy, input: { uri: \"oxplow:oxplow/thread?id=thr1\" }, expect_commands: [oxplow.thread.rename] }\n",
-                "example `happy`: refused (no such item) but `expect_commands` is [oxplow.probe.rename]",
+                "example `happy`: refused (no such item) but `expect_commands` is [oxplow.thread.rename]",
             ),
             (
                 "      - { name: missing, input: { uri: \"oxplow:oxplow/thread?id=thr1\" }, answers: { sql.read: [[{ uri: \"oxplow:oxplow/thread?id=thr1\" }]] }, refused: no such item }\n",

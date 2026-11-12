@@ -2892,10 +2892,10 @@ mod tests {
         let db = Database::open_read_only(&path).unwrap();
         let conn = db.conn().unwrap();
         let n: i64 = conn
-            .query_row("SELECT count(*) FROM v_task", [], |r| r.get(0))
+            .query_row("SELECT count(*) FROM v_thread", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 0);
-        assert!(conn.execute("DELETE FROM task", []).is_err());
+        assert!(conn.execute("DELETE FROM threads", []).is_err());
     }
 
     /// Migrating refuses to open a database whose migrations left a row

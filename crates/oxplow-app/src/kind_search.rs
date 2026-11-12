@@ -1572,7 +1572,7 @@ mod core_tests {
     }
 
     /// A core dataset is named by its bare name in its URI
-    /// (`oxplow:oxplow/dataset?dataset=task`), an extension's by
+    /// (`oxplow:oxplow/dataset?dataset=thread`), an extension's by
     /// `owner/name`: both are indexed, none skipped.
     #[tokio::test]
     async fn a_core_dataset_is_found_by_its_bare_name() {
@@ -1583,7 +1583,7 @@ mod core_tests {
             entries(&svc, "oxplow/dataset")
                 .await
                 .iter()
-                .any(|(uri, _)| uri == "oxplow:oxplow/dataset?dataset=task")
+                .any(|(uri, _)| uri == "oxplow:oxplow/dataset?dataset=thread")
         })
         .await;
     }

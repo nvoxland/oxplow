@@ -1006,7 +1006,7 @@ mod tests {
             &server,
             &rmcp::model::Extensions::default(),
             "oxplow_query_sql",
-            serde_json::json!({ "sql": "DELETE FROM oxtask" }),
+            serde_json::json!({ "sql": "DELETE FROM threads" }),
         )
         .await
         .unwrap_err();
@@ -1022,7 +1022,7 @@ mod tests {
                 &rmcp::model::Extensions::default(),
                 "oxplow_query_sql",
                 serde_json::json!({
-                    "sql": "SELECT name FROM v_field WHERE view = 'v_task'",
+                    "sql": "SELECT name FROM v_field WHERE view = 'v_thread'",
                 }),
             )
             .await
@@ -1033,7 +1033,7 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .any(|r| r[0] == "state"));
+            .any(|r| r[0] == "mark"));
     }
 
     #[tokio::test]
@@ -1403,7 +1403,7 @@ mod tests {
         for expected in [
             "oxplow.config.set",
             "oxplow.config.list_keys",
-            "oxplow.task.transition",
+            "oxplow.thread.rename",
             "oxplow.metric.record",
             "oxplow.collector.sync",
             "oxplow.metric.rebuild",

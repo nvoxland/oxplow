@@ -68,7 +68,6 @@ pub const CORE_CONSUMERS: &[&str] = &[
     "knowledge.reads",
     "knowledge.records",
     "metrics.entity_states",
-    "page_ref.task",
     "records.models",
     "refs.drift",
     "search.index",
@@ -79,7 +78,6 @@ pub const CORE_CONSUMERS: &[&str] = &[
     "token_usage.turns",
     "tool_call.project",
     "ui.push",
-    "tasks.project",
 ];
 
 /// A consumer whose work runs outside the pump's transaction (see the

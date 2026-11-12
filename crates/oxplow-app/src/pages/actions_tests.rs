@@ -15,11 +15,13 @@ use super::runner::{RunRequest, RunTarget};
 use super::test_support::fixture;
 use crate::pages::spec::ViewContext;
 
+/// The titles of the threads the actions made (the fixture's own thread is
+/// titled "Thread" and left out).
 async fn titles(svc: &crate::Services) -> Vec<String> {
     let r = svc
         .sql
         .run(oxplow_db::SqlQuery::new(
-            "SELECT title FROM v_thread ORDER BY title",
+            "SELECT title FROM v_thread WHERE title != 'Thread' ORDER BY title",
         ))
         .await
         .unwrap();
