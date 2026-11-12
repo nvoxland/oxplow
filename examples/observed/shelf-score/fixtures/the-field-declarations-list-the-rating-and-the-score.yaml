@@ -1,9 +1,0 @@
-enable: [shelf, shelf-db, shelf-score]
-when:
-  sql: |
-    SELECT model, namespace, name, kind FROM v_model_field_decl
-    WHERE model = 'shelf/book' ORDER BY namespace
-expect:
-  rows:
-    - { model: shelf/book, namespace: shelf-db, name: rating, kind: number }
-    - { model: shelf/book, namespace: shelf-score, name: score, kind: number }

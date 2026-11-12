@@ -1,0 +1,14 @@
+requires: [shelf, shelf-folder]
+given:
+  - files:
+      "shelf/dune.md": "# Dune"
+      "shelf/emma.md": "# Emma"
+when: { collector: shelf_folder/books, trigger: start }
+expect: { ok: true }
+steps:
+  - given:
+      - { remove_files: ["shelf/emma.md"] }
+  - when: { collector: shelf_folder/books, trigger: start }
+    expect: { ok: true }
+  - when: { sql: "SELECT id FROM v_shelf_book" }
+    expect: { rows: [{ id: dune }] }

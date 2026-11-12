@@ -111,6 +111,20 @@ Each loads clean (`documented_examples_load_without_errors`):
   `the_schema_review_example_joins_its_facts_with_core_evidence` runs it
   over a real request.
 
+- **`shelf`, `shelf-folder`, `shelf-db`, `shelf-score`** — the shared-models
+  example set ([models.md](./models.md)). `shelf` owns the open model `book`
+  (change event, search, a pinned markdown body), the action point
+  `shelf/book.new` and a read-only page. `shelf-folder` fills it from
+  `shelf/*.md` (a `start` snapshot, `files` upserts and deletes);
+  `shelf-db` fills it from its own SQLite file (a `sqlite` trigger, a
+  cursor, a `rating` field); both write their tool by composing
+  `oxplow.extension_files.write` / `oxplow.extension_store.write`.
+  `shelf-score` adds a `score` field to any store's book through
+  `oxplow.model.set_fields`. The test
+  `the_shelf_examples_pass_their_own_fixtures` copies the four into one
+  project and runs every fixture. A fixture names a collector as
+  `<namespace>/<id>` and may name a required extension's collector.
+
 ## The `oxplow-bundled` extension
 
 **Two shipped extensions, and a holder that doesn't ship.** oxplow ships

@@ -1,4 +1,0 @@
-# Only shelf is on. No command joins shelf/book.new, so nothing is drawn.
-enable: [shelf]
-when: { action_point: shelf/book.new, context: {} }
-expect: { draws: none, commands: [] }

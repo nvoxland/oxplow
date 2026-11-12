@@ -1,0 +1,6 @@
+# Two stores on: two commands join shelf/book.new, so a menu.
+requires: [shelf, shelf-folder, shelf-db]
+when: { action_point: shelf/book.new, context: {} }
+expect:
+  draws: menu
+  commands: [shelf_db.book.add, shelf_folder.book.new]

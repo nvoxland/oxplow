@@ -1,0 +1,41 @@
+manifest: 2
+name: shelf
+description: A shared model of books. Other extensions fill it from their own tools.
+engine: ">=0.7"
+version: 0.1.0
+intent:
+  purpose: >-
+    Show the owner side of a shared model. Shelf declares the open model
+    `book` (its change event is declared on the model), an action point and a read-only page. It
+    keeps no books itself. Stores such as shelf-folder and shelf-db fill it.
+  origin: null
+  examples:
+    - name: the-books-page-lists-books-from-two-stores
+      input: { page: books }
+      expect: rows of every enabled store show
+resources:
+  - name: book
+    label: Book
+    description: A book of the shared shelf.
+    params:
+      store: { required: true }
+      id: { required: true }
+models:
+  - name: book
+    resource: book
+    open: true
+    key: id
+    change_event: shelf.book.changed
+    columns:
+      id: text
+      title: text
+      author: text
+      about: uri
+      body: { type: text, markdown: { pins: true } }
+    search: { title: title, body: body }
+action_points:
+  - name: book.new
+    label: New Book
+    doc: Add a book to a store. Each store offers its own way.
+    context:
+      about?: uri

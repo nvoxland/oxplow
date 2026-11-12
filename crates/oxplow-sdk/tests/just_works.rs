@@ -1078,6 +1078,28 @@ async fn a_scaffolded_panel_checks_tests_and_shows_its_page() {
     assert_eq!(ext.page_files.len(), 1);
 }
 
+/// The four shelf examples (a shared model, its folder and database
+/// stores, and a field from a non-store) pass their own fixtures when they
+/// are in one project together.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_shelf_examples_pass_their_own_fixtures() {
+    let dir = project().await;
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions");
+    let names = ["shelf", "shelf-folder", "shelf-db", "shelf-score"];
+    for name in names {
+        copy(
+            &examples.join(name),
+            &dir.path().join(".oxplow/extensions").join(name),
+        );
+    }
+    let mut failures = Vec::new();
+    for name in names {
+        let report = test_extension(dir.path(), name, false).await.unwrap();
+        failures.extend(report.error_lines());
+    }
+    assert_eq!(failures, Vec::<String>::new());
+}
+
 /// The shipped extensions pass `extension test`, their pages' answers run.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_shipped_extensions_pass_their_own_test() {

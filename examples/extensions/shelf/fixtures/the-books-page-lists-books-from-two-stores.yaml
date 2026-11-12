@@ -1,0 +1,18 @@
+# A folder file and a database row both show on the one page.
+requires: [shelf, shelf-folder, shelf-db]
+given:
+  - { files: { "shelf/dune.md": "# Dune\n\nA desert planet." } }
+when: { collector: shelf_folder/books, trigger: start }
+expect: { ok: true }
+steps:
+  - given:
+      - { command: shelf_db.book.add, input: { title: Emma, author: Austen } }
+  - when: { collector: shelf_db/books, trigger: sqlite }
+    expect: { ok: true }
+  - when: { page: books }
+    expect:
+      loaders:
+        books:
+          rows:
+            - { title: Dune, store: shelf-folder }
+            - { title: Emma, author: Austen, store: shelf-db }

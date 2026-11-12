@@ -1,0 +1,46 @@
+manifest: 2
+name: shelf-folder
+description: Books kept as markdown files in the shelf/ folder of the project.
+engine: ">=0.7"
+version: 0.1.0
+requires: [shelf]
+intent:
+  purpose: >-
+    Show a store over files. A collector reconciles the folder at start
+    and follows changes with a files trigger. The collector only reads the
+    folder and returns the model rows; the host applies them. A command
+    writes a new file by composing oxplow.extension_files.write.
+  origin: null
+  examples:
+    - name: start-reconciles-the-folder-into-books
+      input: { collector: shelf_folder/books, trigger: start }
+      expect: one row per file
+permissions: [files.read, files.write, 'commands:oxplow.extension_files.write']
+files:
+  - { path: shelf, access: write }
+fills:
+  - model: shelf/book
+    stores: [shelf-folder]
+collectors:
+  - id: books
+    doc: Reads shelf/*.md and states the books of this store.
+    runtime: starlark
+    entities:
+      - { name: seen, key: id, columns: { id: text } }
+    entry: collectors/books.star
+    needs: [files.read]
+    on: [start, { files: "shelf/*.md" }]
+commands:
+  - name: book.new
+    summary: Write a new book file in shelf/. The collector then adds the row.
+    input_schema:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string, minLength: 1 }
+        body: { type: string }
+      additionalProperties: false
+    entry: handlers/new_book.star
+    access: write
+    ui: { label: "New Book (file)", at: shelf/book.new }
+    example: { title: Dune, body: A desert planet. }

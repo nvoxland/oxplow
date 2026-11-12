@@ -1,0 +1,4 @@
+# Only shelf is on. No command joins shelf/book.new, so nothing is drawn.
+requires: [shelf]
+when: { action_point: shelf/book.new, context: {} }
+expect: { draws: none, commands: [] }
