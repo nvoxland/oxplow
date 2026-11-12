@@ -36,9 +36,10 @@ item is about (`oxplow:oxplow/collector?collector=triage/hot`, `oxplow:oxplow/re
 needn't resolve; it may name something deleted or an extension's resource
 since uninstalled (resources.md "Using URIs"),
 `v_task_comment` its comments. Core reads tasks only through
-these: a thread's assigned items (`v_task`), a task's URI summary
-(`ref_resolver`), a `[[…]]` link's check (`link_check`) and search
-(`v_search_task`).
+these: a thread's assigned items (`v_task`), and, through the task
+resource's `resolve:` dataset (`ref_resolver::resolve_view`, not `v_task`
+by name), a task's URI summary (`ref_resolver`), a `[[…]]` link's check
+(`link_check`) and a taken handoff's label; and search (`v_search_task`).
 
 **Buckets and stages.** A task tracker declares its own **stages**, its
 workflow in order — `[{ id, title, bucket }]`

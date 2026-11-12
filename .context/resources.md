@@ -225,9 +225,13 @@ resources:
 ## Resolving and reading
 
 `ref_resolver::resolve_ref(svc, uri)` → `RefSummary { uri, resource,
-title, detail, body_excerpt, resolved }`: richer resolvers for tasks,
-commits, files, directories, knowledge pages and findings; any other resource
-through its declaration's `resolve` view and `title` column, by `uri`.
+title, detail, body_excerpt, resolved }`: richer resolvers for commits,
+files, directories, knowledge pages and findings; any other resource (a
+task too) through its declaration's `resolve` view, by `uri`: its `title`
+column, and the view's `state` and `body` columns, when it has them, as
+the detail and the excerpt. Core code that needs a resource's rows reads
+them through `ref_resolver::resolve_view(svc, resource)` (the view and its
+title column), never a dataset by name.
 Nothing resolves it → `resolved: false`.
 
 `ref_read::read` (`oxplow_read`, `records.read`) returns `{ uri, resource,
