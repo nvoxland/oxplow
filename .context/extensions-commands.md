@@ -54,6 +54,15 @@ commands:
     example: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" }   # the input an agent is shown; a script's defaults to its first example that runs
 ```
 
+**A need** (`needs:` on a command, skill, agent context, page or job;
+`capability::check_need`) is a scope it calls (`sql.read`), a capability
+(`task_tracker`) or one of its features (`task_tracker.comments`) that
+must be active, or a shared model with a live store
+(`model:oxplow/task_record`): met while some enabled extension or running
+provider instance fills it (`CapabilityRegistry` keeps each publication's
+live models; `Active::unmet`). Task guidance gates on the task model this
+way once tasks are a model's.
+
 `example:` is the command's example input, for any handler (script,
 scope operation, provider op): it registers as JSON Schema's `examples`
 on the input schema the command ends up with, an operation's schema

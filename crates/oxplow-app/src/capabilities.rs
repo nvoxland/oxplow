@@ -414,6 +414,8 @@ pub struct Active {
     /// What implementations that aren't active own, kept from offering:
     /// a provider instance's command namespace (`<namespace>.*`).
     hidden_commands: Vec<Hidden>,
+    /// The shared models with a live store (`model:<ns>/<model>` needs).
+    live_models: Arc<std::collections::BTreeSet<String>>,
 }
 
 /// A command its owner, not being active, keeps from offering.
@@ -470,7 +472,14 @@ impl Active {
             .filter(|need| {
                 oxplow_domain::scope::scope(oxplow_domain::service::need_scope(need)).is_none()
             })
+            .filter(|need| match oxplow_domain::capability::model_need(need) {
+                Some(model) => !self.live_models.contains(model),
+                None => true,
+            })
             .filter(|need| {
+                if oxplow_domain::capability::model_need(need).is_some() {
+                    return true;
+                }
                 let (id, feature) = match need.split_once('.') {
                     Some((id, f)) => (id, Some(f)),
                     None => (need.as_str(), None),
@@ -491,6 +500,9 @@ pub fn needs_message(unmet: &[String]) -> String {
     let named: Vec<String> = unmet
         .iter()
         .map(|need| {
+            if let Some(model) = oxplow_domain::capability::model_need(need) {
+                return format!("a store of `{model}` (an extension that keeps them)");
+            }
             let (id, feature) = match need.split_once('.') {
                 Some((id, f)) => (id, Some(f)),
                 None => (need.as_str(), None),
@@ -515,6 +527,9 @@ struct RegistryState {
     external: Vec<Implementation>,
     /// Config choices committed with this published registry generation.
     published_config: Option<Arc<OxplowConfig>>,
+    /// The shared models with a live store in this generation: what a
+    /// `model:<ns>/<model>` need asks for.
+    live_models: Arc<std::collections::BTreeSet<String>>,
     revision: Arc<()>,
 }
 
@@ -676,6 +691,7 @@ impl CapabilityRegistry {
                 declared: Vec::new(),
                 external: Vec::new(),
                 published_config: None,
+                live_models: Arc::default(),
                 revision: Arc::new(()),
             }),
             vocabulary,
@@ -800,11 +816,22 @@ impl CapabilityRegistry {
         candidate.revision = Arc::new(());
         let all = candidate.implementations();
         let (rows, resolved) = Self::rows_from(&all, config);
+        let models =
+            crate::models::ModelRegistry::of(snapshot.extensions()).with_provider_fills(&rows);
+        candidate.live_models = Arc::new(
+            models
+                .models
+                .keys()
+                .filter(|m| !models.live_stores(m).is_empty())
+                .cloned()
+                .collect(),
+        );
+        let active = Self::snapshot_from(&all, config, candidate.live_models.clone());
         Ok(PreparedCapabilities {
             generation: snapshot.generation().to_string(),
             base,
             candidate,
-            active: Self::snapshot_from(&all, config),
+            active,
             recognizers: Self::recognizers_from(&all, config),
             rows,
             resolved,
@@ -936,10 +963,20 @@ impl CapabilityRegistry {
     /// What's active under `config`, for checking needs.
     pub fn snapshot(&self, config: &OxplowConfig) -> Active {
         let config = self.read_effective_config(config);
-        Self::snapshot_from(&self.implementations(), &config)
+        let live_models = self
+            .state
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .live_models
+            .clone();
+        Self::snapshot_from(&self.implementations(), &config, live_models)
     }
 
-    fn snapshot_from(all: &[Implementation], config: &OxplowConfig) -> Active {
+    fn snapshot_from(
+        all: &[Implementation],
+        config: &OxplowConfig,
+        live_models: Arc<std::collections::BTreeSet<String>>,
+    ) -> Active {
         let mut by_capability = std::collections::BTreeMap::new();
         for spec in capability::CAPABILITIES {
             if spec.many {
@@ -1002,6 +1039,7 @@ impl CapabilityRegistry {
         Active {
             by_capability,
             hidden_commands,
+            live_models,
         }
     }
 

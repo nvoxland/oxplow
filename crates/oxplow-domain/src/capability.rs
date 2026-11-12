@@ -537,12 +537,31 @@ pub fn check_against(schema: &str, value: &serde_json::Value, what: &str) -> Res
     }
 }
 
+/// The shared model a `model:<namespace>/<model>` need names, if it is one.
+pub fn model_need(need: &str) -> Option<&str> {
+    need.strip_prefix("model:")
+}
+
 /// Check one declared need: a scope (`sql.read`,
-/// [`crate::scope`]), a capability (`task_tracker`), or one of its
-/// features (`snapshots.contents`), as core declares them.
+/// [`crate::scope`]), a capability (`task_tracker`), one of its
+/// features (`snapshots.contents`), as core declares them, or a shared
+/// model with a live store (`model:oxplow/task_record`).
 pub fn check_need(need: &str) -> Result<(), String> {
     if crate::scope::scope(crate::service::need_scope(need)).is_some() {
         return Ok(());
+    }
+    if let Some(model) = model_need(need) {
+        let word = |w: &str| {
+            !w.is_empty()
+                && w.chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+        };
+        return match model.split('/').collect::<Vec<_>>()[..] {
+            [ns, name] if word(ns) && word(name) => Ok(()),
+            _ => Err(format!(
+                "needs `{need}`: a model need is `model:<namespace>/<model>`"
+            )),
+        };
     }
     let (id, feature) = match need.split_once('.') {
         Some((id, feature)) => (id, Some(feature)),
@@ -760,6 +779,26 @@ mod tests {
         assert!(check_need("task_tracker.flying")
             .unwrap_err()
             .contains("isn't a feature"));
+    }
+
+    /// `model:<owner namespace>/<model>` needs a shared model with a live
+    /// store; its shape is checked, whether the model exists is the app's.
+    #[test]
+    fn a_need_may_name_a_shared_model() {
+        assert!(check_need("model:oxplow/task_record").is_ok());
+        for bad in [
+            "model:",
+            "model:task_record",
+            "model:oxplow/",
+            "model:a/b/c",
+        ] {
+            assert!(
+                check_need(bad)
+                    .unwrap_err()
+                    .contains("model:<namespace>/<model>"),
+                "{bad}"
+            );
+        }
     }
 }
 

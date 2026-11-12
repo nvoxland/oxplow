@@ -538,3 +538,26 @@ async fn a_models_children_are_read_beside_its_item() {
     assert_eq!(notes.len(), 1, "{notes:?}");
     assert_eq!(notes[0]["text"], "Spice");
 }
+
+/// `needs: [model:<ns>/<model>]` is met while the model has a live store:
+/// what turns task guidance on and off once tasks are a model's.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_model_need_is_met_while_the_model_has_a_live_store() {
+    let fx = services_with_thread().await;
+    let need = vec!["model:oxplow/task_record".to_string()];
+    let active = || {
+        fx.svc
+            .capabilities
+            .snapshot(&crate::config_service::read_config(&fx.svc.config))
+    };
+    crate::test_fixtures::activate(&fx.svc).await;
+    assert_eq!(active().unmet(&need), need, "no store fills it yet");
+    write(
+        fx._dir.path(),
+        ".oxplow/extensions/zz/extension.yaml",
+        "manifest: 2\nname: zz\nintent:\n  purpose: p\nfills:\n  - model: oxplow/task_record\n    stores: [zz]\n",
+    );
+    let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
+    assert!(problems.is_empty(), "{problems:?}");
+    assert!(active().unmet(&need).is_empty(), "zz fills it");
+}
