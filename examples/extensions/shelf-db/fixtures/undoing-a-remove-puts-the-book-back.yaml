@@ -1,0 +1,25 @@
+# Remove keeps a tombstone; the undo runs the inverse the remove returned,
+# `shelf_db.book.add`, which revives the tombstone with the next change
+# number. The collector then sees the book again.
+requires: [shelf, shelf-db]
+given:
+  - { command: shelf_db.book.add, input: { title: Dune, author: Herbert, rating: 4 } }
+when: { command: shelf_db.book.remove, input: { id: dune } }
+expect: { ok: true }
+steps:
+  - when: { collector: shelf_db/books, trigger: sqlite }
+    expect: { ok: true }
+  - when: { sql: "SELECT count(*) AS n FROM v_shelf_book" }
+    expect: { rows: [{ n: 0 }] }
+  - when: { undo: shelf_db.book.remove }
+    expect: { ok: true }
+  - when: { collector: shelf_db/books, trigger: sqlite }
+    expect: { ok: true }
+  - when:
+      sql: |
+        SELECT id, title, author, store,
+               json_extract(fields, '$."shelf-db".rating') AS rating
+        FROM v_shelf_book
+    expect:
+      rows:
+        - { id: dune, title: Dune, author: Herbert, store: shelf-db, rating: 4 }

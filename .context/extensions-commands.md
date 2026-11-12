@@ -148,9 +148,26 @@ in one transaction (`steps::run_composed`; the script runs once, when the bus ro
 confirmation apply (a person's run whose child asks is asked first; an agent's run asks nothing), one audit row with `{ result,
 children }`, the children's events caused by the run, the reversed
 children as its undo; when one leaves it (`task.*` on another
-provider's item), as **steps** — all checked first, then run in
+provider's item, `oxplow.extension_store.write`, `oxplow.extension_files.write`,
+a provider call), as **steps** — all checked first, then run in
 order, each landing as it runs, stopping at the first failure, one audit
-row, no undo. A script can't do I/O of its own: `files()` sees
+row, no undo of their own. **`inverse`:** a script may return `"inverse":
+{ "commands": [{ name, input }, …] }` beside `commands`; for a steps run
+the bus keeps it as the run's undo (the audit row's inverse, the same Undo
+as a built-in command's), and the undo runs it through the bus with its own
+policy, confirmation and audit. It names *commands*: to take back a store
+write, name the extension's own command that makes the opposite write
+(`shelf_db.book.add` for `shelf_db.book.remove`), not
+`oxplow.extension_store.write`, which runs only for the composing script. A
+steps run whose script returns none has no undo. A composition that stays in
+oxplow's records undoes itself, so `inverse` beside it is **refused when the
+run is routed** (before anything runs), naming the command; `composed`
+checks the shape (`inverse` is `{ commands: [{ name, input }] }`, at least
+one call, each input an object), routing checks the rest (known command,
+permission, input fits, writes, not an own-script-only write); the `check`
+dry run shows `inverse` to an example's `expect` (`expect: { inverse: {
+commands: [...] } }`) but cannot know the routing, so a contradiction is
+found when the command runs. A script can't do I/O of its own: `files()` sees
 nothing, `ai_*` is refused without a host, and `scope` reaches only
 what it `needs`. **Registration**
 (`ExtensionCommands`, `Services.extension_commands`): the enabled

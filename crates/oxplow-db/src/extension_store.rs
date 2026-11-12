@@ -20,11 +20,13 @@ pub struct Statement {
     pub params: Vec<Value>,
 }
 
-/// What a call answers: the rows of the last statement that returns any,
-/// and the rows changed by all of them.
+/// What a call answers: for each statement, in order, the rows it returns
+/// (objects, column to value; a `SELECT`'s, or an `INSERT`/`UPDATE`/`DELETE`
+/// with `RETURNING`'s; empty for a statement that returns none), and the
+/// rows changed by all of them.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Answer {
-    pub rows: Vec<Value>,
+    pub rows: Vec<Vec<Value>>,
     pub changes: usize,
 }
 
@@ -164,6 +166,7 @@ fn execute(tx: &Connection, batch: &[Statement]) -> Result<Answer, StoreError> {
                 answer.changes += prepared
                     .execute(rusqlite::params_from_iter(params))
                     .map_err(fail)?;
+                answer.rows.push(Vec::new());
                 continue;
             }
             let names: Vec<String> = prepared
@@ -183,9 +186,14 @@ fn execute(tx: &Connection, batch: &[Statement]) -> Result<Answer, StoreError> {
                 rows.push(Value::Object(object));
             }
             drop(cursor);
+            // A `SELECT` changes nothing (`changes()` would still hold the
+            // statement before it); `RETURNING` of a write does.
+            let wrote = !prepared.readonly();
             drop(prepared);
-            answer.changes += tx.changes() as usize;
-            answer.rows = rows;
+            if wrote {
+                answer.changes += tx.changes() as usize;
+            }
+            answer.rows.push(rows);
         }
         Ok(answer)
     }
@@ -287,6 +295,41 @@ mod tests {
         ]
     }
 
+    /// The rows of an answer to one statement.
+    fn only(answer: Answer) -> Vec<Value> {
+        assert_eq!(answer.rows.len(), 1, "one statement: {answer:?}");
+        answer.rows.into_iter().next().unwrap()
+    }
+
+    /// A write answers each statement's own `RETURNING` rows (a list per
+    /// statement, empty for one without), so the store can mint an id in its
+    /// write; `changes` counts only the statements that changed rows.
+    #[test]
+    fn a_write_answers_each_statements_returning_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ExtensionStore::open(&dir.path().join("a.sqlite")).unwrap();
+        store.migrate(&migrations()).unwrap();
+        let answer = store
+            .write(&[
+                stmt(
+                    "INSERT INTO book (id, title) VALUES ('m-' || (SELECT count(*) FROM book), ?1) RETURNING id, title",
+                    vec![json!("Dune")],
+                ),
+                stmt("UPDATE book SET title = title WHERE id = 'b0'", vec![]),
+                stmt("SELECT count(*) AS n FROM book", vec![]),
+            ])
+            .unwrap();
+        assert_eq!(
+            answer.rows,
+            vec![
+                vec![json!({ "id": "m-1", "title": "Dune" })],
+                vec![],
+                vec![json!({ "n": 2 })],
+            ]
+        );
+        assert_eq!(answer.changes, 2, "a SELECT changes nothing");
+    }
+
     #[test]
     fn migrations_run_in_order_and_only_once() {
         let dir = tempfile::tempdir().unwrap();
@@ -300,7 +343,7 @@ mod tests {
         let answer = store
             .write(&[stmt("SELECT count(*) AS n FROM book", vec![])])
             .unwrap();
-        assert_eq!(answer.rows, vec![json!({ "n": 1 })]);
+        assert_eq!(only(answer), vec![json!({ "n": 1 })]);
     }
 
     #[test]
@@ -332,7 +375,7 @@ mod tests {
         let count = store
             .write(&[stmt("SELECT id FROM book ORDER BY id", vec![])])
             .unwrap();
-        assert_eq!(count.rows, vec![json!({ "id": "b0" })]);
+        assert_eq!(only(count), vec![json!({ "id": "b0" })]);
         let ok = store
             .write(&[
                 stmt(
@@ -351,7 +394,7 @@ mod tests {
         let n = store
             .write(&[stmt("SELECT count(*) AS n FROM book", vec![])])
             .unwrap();
-        assert_eq!(n.rows, vec![json!({ "n": 1 })]);
+        assert_eq!(only(n), vec![json!({ "n": 1 })]);
     }
 
     #[test]
@@ -365,7 +408,7 @@ mod tests {
                 vec![json!("New"), json!("b0")],
             )])
             .unwrap();
-        assert_eq!((answer.rows.len(), answer.changes), (0, 1));
+        assert_eq!((answer.rows, answer.changes), (vec![vec![]], 1));
     }
 
     #[test]
@@ -375,7 +418,7 @@ mod tests {
         store.migrate(&migrations()).unwrap();
         let read = |sql: &str| store.read(&stmt(sql, vec![]));
         assert_eq!(
-            read("SELECT title FROM book").unwrap().rows,
+            only(read("SELECT title FROM book").unwrap()),
             vec![json!({ "title": "Seed" })]
         );
         for sql in [
@@ -392,7 +435,7 @@ mod tests {
         }
         // The refused statements changed nothing, and a read still works.
         assert_eq!(
-            read("SELECT count(*) AS n FROM book").unwrap().rows,
+            only(read("SELECT count(*) AS n FROM book").unwrap()),
             vec![json!({ "n": 1 })]
         );
     }
@@ -477,7 +520,7 @@ mod tests {
             let n = store
                 .read(&stmt("SELECT count(*) AS n FROM book", vec![]))
                 .unwrap();
-            assert_eq!(n.rows, vec![json!({ "n": 1 })], "{sql}");
+            assert_eq!(only(n), vec![json!({ "n": 1 })], "{sql}");
         }
         // A plain write still works afterwards.
         store

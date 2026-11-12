@@ -1223,7 +1223,7 @@ commands:
   # store.write, files.write — an extension's own SQLite file and folders. A script composes
   # these; they run as that extension and refuse any other caller.
   - name: extension_store.write
-    summary: "Run SQL statements, in one transaction, on the composing extension's own SQLite file (`storage: { sqlite: true }`). Only an extension's own script can compose it, and only for its own file. Returns `{ changes }`. Its statements are not recorded."
+    summary: "Run SQL statements, in one transaction, on the composing extension's own SQLite file (`storage: { sqlite: true }`). Only an extension's own script can compose it, and only for its own file. Returns `{ changes, rows }` (`rows`: one list per statement of its RETURNING rows). Its statements are not recorded."
     scope: store.write
     op: write
     example: {"batch": [{"sql": "INSERT INTO book (id, title) VALUES (?1, ?2)", "params": ["b1", "Dune"]}]}

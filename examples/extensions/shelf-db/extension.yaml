@@ -40,13 +40,14 @@ commands:
         title: { type: string, minLength: 1 }
         author: { type: string }
         rating: { type: integer, minimum: 0, maximum: 5 }
+        id: { type: string, minLength: 1 }
       additionalProperties: false
     entry: handlers/add.star
     access: write
     ui: { label: "New Book (database)", at: shelf/book.new }
     example: { title: Dune, author: Herbert, rating: 4 }
   - name: book.remove
-    summary: Remove a book of this store.
+    summary: Remove a book of this store. Undo adds the book again.
     input_schema:
       type: object
       required: [id]
@@ -54,6 +55,7 @@ commands:
         id: { type: string }
       additionalProperties: false
     entry: handlers/remove.star
+    needs: [store.sql]
     access: write
     ui:
       label: Remove

@@ -244,6 +244,8 @@ pub(super) async fn dispatch(
         .filter(|_| ex.when.get("answers").is_some())
     {
         command_example(host, ex, cmd, report).await;
+    } else if let Some(command) = ex.when.get("undo").and_then(Value::as_str) {
+        undo_run(host, ex, command, report).await;
     } else if let Some(command) = ex.when.get("command").and_then(Value::as_str) {
         command_run(host, ex, command, report).await;
     } else if ex.when.get("command").is_none() || ext.providers.is_empty() {
@@ -363,6 +365,11 @@ pub(super) const KINDS: &[Kind] = &[
         when: "{ command, input?, as?, confirmed? } (with answers: the extension's own, a dry run)",
         expect: "{ ok, result?, commands? } | { ok: false, refused }",
     },
+    Kind {
+        key: "undo",
+        when: "{ undo: <command>, as?, confirmed? } (runs the undo of that command's newest run not yet undone)",
+        expect: "{ ok: true } | { ok: false, refused }",
+    },
 ];
 
 /// The kinds, for a finding's fix: each `when` and its `expect`.
@@ -403,6 +410,7 @@ pub(super) fn makes_data(ex: &Example<'_>) -> bool {
         || has("rows")
         || has("setup")
         || has("trigger")
+        || has("undo")
         || has("job")
         || has("component")
         || has("advisory")

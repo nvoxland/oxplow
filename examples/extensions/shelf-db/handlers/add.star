@@ -1,4 +1,5 @@
-# shelf_db.book.add { title, author?, rating? }: insert a row.
+# shelf_db.book.add { title, author?, rating?, id? }: insert a row.
+# The id is the title as a slug unless given (the undo of a remove gives it).
 # The row gets the next change number; a removed book of the same id
 # comes back. The sqlite trigger of the collector adds the model row.
 
@@ -16,7 +17,7 @@ def slug(text):
 
 def transform(x):
     i = x["input"]
-    id = slug(i["title"])
+    id = i.get("id") or slug(i["title"])
     write = {
         "sql": "INSERT INTO book (id, title, author, rating, seq) " +
                "VALUES (?1, ?2, ?3, ?4, (SELECT COALESCE(MAX(seq), 0) + 1 FROM book)) " +

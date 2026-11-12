@@ -10,7 +10,7 @@ use oxplow_db::extension_store::Statement;
 use oxplow_domain::CommandError;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use crate::extension::extension_services::ExtensionServices;
 
@@ -87,7 +87,7 @@ pub fn ops(
                     let composer = services
                         .composer_name(&invocation.run, "oxplow.extension_store.write")
                         .ok();
-                    let changes = runner
+                    let result = runner
                         .observe_write(
                             &invocation.run,
                             composer.as_deref(),
@@ -103,7 +103,7 @@ pub fn ops(
                             }
                         })?;
                     Ok(HandlerOutput {
-                        result: json!({ "changes": changes }),
+                        result,
                         ..HandlerOutput::default()
                     })
                 })

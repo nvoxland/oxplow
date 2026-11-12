@@ -107,6 +107,7 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
 | wikilink | `{ wikilink }` | `{ uri }` |
 | collector | `{ collector: <id>, rows?, event? } \| { collector: <id>, files } \| { collector: <id>, trigger: start \| sqlite \| { files: [{ path, op }] } } (run for real, as that trigger fires)` | `{ entities?, events? } \| { facts } \| { ok?, result?, problems? }` |
 | command | `{ command, input?, as?, confirmed? } (with answers: the extension's own, a dry run)` | `{ ok, result?, commands? } \| { ok: false, refused }` |
+| undo | `{ undo: <command>, as?, confirmed? } (runs the undo of that command's newest run not yet undone)` | `{ ok: true } \| { ok: false, refused }` |
 <!-- /fixture-kinds -->
 
    - a page: `when: { page: <slug | ext/slug>, params? }`, with `given:` —
@@ -288,6 +289,10 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      `expect: { ok: true, result?, commands?: [names] }` or `{ ok: false,
      refused: <part of the reason> }` — `commands` are the ones it ran (a
      script's) and what reacted. Make what it needs with `given:` first.
+   - an undo, run for real: `when: { undo: <command> }`, `expect: { ok:
+     true }` or `{ ok: false, refused }` — takes back that command's newest
+     run not yet undone (the inverse its script returned), as a run of its
+     own; check what it did with a `sql`/`page` step after it.
    - a query: `when: { sql: "SELECT … FROM v_<namespace>_<dataset>", params? }`,
      `expect: { rows: [ { col: val } ] }` — reads the published datasets as a
      page loader would, for a dataset, a decorator's labels or a metric
@@ -320,9 +325,11 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      `expect: { facts: [{ measure, value, path? }] }` — each fact is
      compared on the keys you name, in order;
    - a command: `when: { command: <id>, input: {...}, answers? }`,
-     `expect: { commands: [names], result: {...} }` (either or both;
-     `result` is compared on the keys you name, so a read command's
-     example checks its answer) or `{ refused: <part of the reason> }` —
+     `expect: { commands: [names], result: {...}, inverse: { commands:
+     [{ name, input }] } }` (any of them; `result` is compared on the keys
+     you name, so a read command's example checks its answer; `inverse`
+     is what the script returns to undo a run that leaves oxplow's records,
+     such as a store write) or `{ refused: <part of the reason> }` —
      a dry run; nothing changes;
    - a provider: `when: { command, input }` (`references/providers.md`).
 

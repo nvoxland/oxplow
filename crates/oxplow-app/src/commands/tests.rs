@@ -1654,6 +1654,7 @@ async fn a_composites_own_events_land_with_its_steps_only_when_all_landed() {
                     layer: oxplow_domain::events::schema::ConfigLayer::Project,
                 },
             )],
+            inverse: None,
         })
     });
     bus.register(Command::new(spec.clone(), Compose::handler(compose)).unwrap())

@@ -1,0 +1,18 @@
+# The remove command's script reads the book and returns, beside its write,
+# the `inverse` that undoes it: the extension's own add command with the
+# book's fields. The host keeps it as the run's undo (a store write leaves
+# oxplow's records, so the run has none of its own). A dry run: the store
+# is answered from the example.
+requires: [shelf, shelf-db]
+when:
+  command: shelf_db.book.remove
+  input: { id: dune }
+  answers:
+    store.sql:
+      - rows: [{ title: Dune, author: Herbert, rating: 4 }]
+expect:
+  commands: [oxplow.extension_store.write]
+  inverse:
+    commands:
+      - name: shelf_db.book.add
+        input: { id: dune, title: Dune, author: Herbert, rating: 4 }
