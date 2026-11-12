@@ -15,7 +15,7 @@ given:
 when:
   sql: |
     SELECT c.basis, c.request = n.request AS request, c.task = n.task AS task,
-           n.thread = (SELECT uri FROM v_thread LIMIT 1) AS thread, n.turn_id IS NOT NULL AS turn, n.at IS NOT NULL AS timed
+           n.thread = (SELECT uri FROM v_thread LIMIT 1) AS thread, c.turn = 'oxplow:oxplow/turn?id=trn' || n.turn_id AS turn, n.at IS NOT NULL AS timed
       FROM v_request_task c
       JOIN v_oxplow_request_task_next n ON n.task = c.task AND n.basis = c.basis AND n.request = c.request
      WHERE c.basis IN ('prompt', 'assigned') ORDER BY c.basis
