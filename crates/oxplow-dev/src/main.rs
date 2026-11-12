@@ -19,6 +19,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+mod move_tasks;
+
 use oxplow_app::commands::CommandBus;
 use oxplow_db::{Database, SqliteEventLogStore};
 use oxplow_domain::tasks::TaskTrackers;
@@ -34,6 +36,10 @@ oxplow-dev task update <id> [--title T] [--body B] [--parent ID]
 oxplow-dev task comment <id> <body>
 oxplow-dev task link <id> <target> <blocks|discovered_from|relates_to|duplicates|supersedes|replies_to|about>
 oxplow-dev task unlink <id> <target> <link type>
+
+oxplow-dev task move-to-oxtask [--dry-run]   one-off: move core's tasks into oxtask's own file
+                                             and bundled's fields (oxplow quit, the new
+                                             binary booted once; --dry-run keeps nothing)
 
 oxplow-dev knowledge list [--store oxwiki]   the pages (id, title)
 oxplow-dev knowledge show <id> [--store S]
@@ -92,6 +98,15 @@ async fn run(mut args: Vec<String>, env_thread: Option<String>) -> Result<String
     if args.first().is_some_and(|a| a == "help") || args.iter().any(|a| a == "--help" || a == "-h")
     {
         return Ok(USAGE.to_string());
+    }
+    if args.first().is_some_and(|a| a == "task")
+        && args.get(1).is_some_and(|a| a == "move-to-oxtask")
+    {
+        let dry_run = take_switch(&mut args, "--dry-run");
+        if args.len() != 2 {
+            return Err(format!("usage:\n{USAGE}"));
+        }
+        return move_tasks::move_to_oxtask(&project, dry_run).await;
     }
     match args.first().map(String::as_str) {
         Some("task") => {

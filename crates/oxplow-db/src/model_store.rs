@@ -1564,11 +1564,10 @@ fn stored_fields_tx(
     .map_err(map_sql_err)
 }
 
-/// Restate `namespace`'s fields on `uri` to `fields`; whether they moved.
 /// Restate `namespace`'s fields on `uri` to `fields`, and say what moved:
 /// each changed field as `fields.<namespace>.<name>`, with its value
 /// before and after (JSON; null when absent). Empty when nothing moved.
-fn put_fields_tx(
+pub fn put_fields_tx(
     conn: &rusqlite::Connection,
     model: &str,
     uri: &str,

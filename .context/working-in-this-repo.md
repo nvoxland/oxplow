@@ -114,6 +114,7 @@ cargo run -q -p oxplow-dev -- task transition tsk12 done
 cargo run -q -p oxplow-dev -- task update tsk12 [--title …] [--body …] [--parent …]
 cargo run -q -p oxplow-dev -- task comment tsk12 "…"
 cargo run -q -p oxplow-dev -- task link tsk12 tsk13 blocks
+cargo run -q -p oxplow-dev -- task move-to-oxtask [--dry-run]   # one-off, see below
 cargo run -q -p oxplow-dev -- knowledge list [--store oxwiki]
 cargo run -q -p oxplow-dev -- knowledge show some-page [--store S]
 cargo run -q -p oxplow-dev -- knowledge write some-page [--title …] [--file body.md] [--store S]   # body from stdin without --file
@@ -124,6 +125,17 @@ cargo run -q -p oxplow-dev -- extension deploy                     # everything 
 cargo run -q -p oxplow-dev -- extension deploy oxplow-foundation   # one extension
 cargo run -q -p oxplow-dev -- --help
 ```
+
+`task move-to-oxtask` is the one-off move of core's tasks into the oxtask
+extension's own file (`.oxplow/extensions-data/oxtask.sqlite`) and bundled's
+fields (`.context/models.md` "The switch"). Run it with oxplow quit, after
+the new binary booted once on the project (so bundled's `task_record` model
+table and `request_task_next` entity table exist). Each task keeps its
+number (so `tsk<N>` and its URI), links and notes go to the store, an
+assignment becomes the `oxplow` fields `assignee` and `rank`, and request
+links go to the entity (basis `command` becomes `edited`). It reads core's
+tables and deletes nothing there; it refuses when the store already has
+tasks; `--dry-run` does it all and keeps nothing.
 
 `extension status` and `extension deploy` change what oxplow runs from
 outside it. Boot deploys nothing, so they are how a checkout gets its
