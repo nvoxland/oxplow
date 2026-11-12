@@ -214,6 +214,13 @@ action_points:
       thread_id?: int
 # What a request's work touched: one row per request, task and basis.
 resources:
+  - name: task
+    description: "A task, epic or other item of the project's task model."
+    label: Task
+    params: { provider: { required: true, pattern: '^[a-z][a-z0-9_-]*$' }, id: { required: true } }
+    resolve: task
+    searchable: search_task
+    icon: check-square
   - name: request_task
     label: Request link
     description: "A link from a request to a task its turns changed, and how (filed, transition, assigned, edited; prompt for a link moved from core, where a person's prompt named the task)."

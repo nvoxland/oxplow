@@ -14,19 +14,13 @@ steps:
     expect:
       rows: [{ n: 1 }]
   - when:
-      sql: "SELECT uri, title FROM v_search_skill WHERE title = 'tasks'"
-    expect:
-      rows:
-        - uri: "oxplow:oxplow/skill?skill=oxplow/tasks"
-          title: tasks
-  - when:
       sql: "SELECT uri, title FROM v_search_collector WHERE uri LIKE '%oxplow.request_outcome'"
     expect:
       rows:
         - uri: "oxplow:oxplow/collector?collector=oxplow/oxplow.request_outcome"
           title: oxplow.request_outcome
   - when:
-      sql: "SELECT count(*) AS n FROM v_search_dataset WHERE uri = 'oxplow:oxplow/dataset?dataset=task' AND title = 'v_task' AND body NOT LIKE '%SELECT%'"
+      sql: "SELECT count(*) AS n FROM v_search_dataset WHERE uri = 'oxplow:oxplow/dataset?dataset=thread' AND title = 'v_thread' AND body NOT LIKE '%SELECT%'"
     expect:
       rows: [{ n: 1 }]
   - when:

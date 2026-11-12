@@ -1,10 +1,11 @@
 # What a thing is, is a paragraph under the About heading, above its facts
 # (the node's `lead:`), not a "What it is" row and not a section of its own.
+requires: [oxplow-bundled]
 when:
   page: oxplow/skill
   params:
-    uri: "oxplow:oxplow/skill?skill=oxplow/tasks"
+    uri: "oxplow:oxplow/skill?skill=oxplow/track-work"
 expect:
   nodes:
     - { id: about, kind: viz, viz: detail }
-  text: { contains: ["## About [node about]\n\nThe project's task tracker \u2014 when filing a "] }
+  text: { contains: ["## About [node about]\n\nHow to keep oxtask, the project's task tracker"] }

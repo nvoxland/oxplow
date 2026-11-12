@@ -1,9 +1,10 @@
 # A skill page names the skill, what it teaches and whether it is a skill or a slash command.
-when: { page: oxplow/skill, params: { uri: "oxplow:oxplow/skill?skill=oxplow/tasks" } }
+requires: [oxplow-bundled]
+when: { page: oxplow/skill, params: { uri: "oxplow:oxplow/skill?skill=oxplow/track-work" } }
 expect:
-  label: tasks
+  label: track-work
   loaders:
     about:
-      rows: [{ name: tasks, extension: oxplow-foundation }]
+      rows: [{ name: track-work, extension: oxplow-bundled }]
     facts:
       rows: [{ is_a: A skill an agent loads when it applies }]

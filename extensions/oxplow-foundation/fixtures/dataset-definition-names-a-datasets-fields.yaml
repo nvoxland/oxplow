@@ -1,9 +1,9 @@
 # The definition mode of a dataset: what it holds, its owner and kind, and each field with its type and doc.
 when:
   page: oxplow/dataset-definition
-  params: { uri: "oxplow:oxplow/dataset?dataset=task" }
+  params: { uri: "oxplow:oxplow/dataset?dataset=thread" }
 expect:
-  label: v_task
+  label: v_thread
   loaders:
-    about: { rows: [{ view: v_task, owner: core, kind: sql }] }
+    about: { rows: [{ view: v_thread, owner: core, kind: sql }] }
     fields: { rows: { contains: [{ name: uri, sql_type: TEXT }, { name: title }] } }

@@ -96,7 +96,7 @@ intent:
       input: { page: command, params: { uri: "oxplow:oxplow/command?command=oxplow.agent.draft" } }
       expect: a command's permission, whether it asks first and can be undone, and where it is declared
     - name: the-skill-page-says-what-a-skill-is
-      input: { page: skill, params: { uri: "oxplow:oxplow/skill?skill=oxplow/tasks" } }
+      input: { page: skill, params: { uri: "oxplow:oxplow/skill?skill=oxplow/track-work" } }
       expect: a skill's description and whether it is a skill or a slash command
     - name: the-component-page-links-the-commands-it-may-run
       input: { page: custom-component, params: { uri: "oxplow:oxplow/custom_component?custom_component=oxplow/integrations" } }
@@ -219,7 +219,7 @@ intent:
       input: { page: command, params: { uri: 'oxplow:oxplow/command?command=oxplow.agent.draft' } }
       expect: its see-also links name the extension that declares it
     - name: the-skill-page-links-to-its-extension
-      input: { page: skill, params: { uri: 'oxplow:oxplow/skill?skill=oxplow/tasks' } }
+      input: { page: skill, params: { uri: 'oxplow:oxplow/skill?skill=oxplow/track-work' } }
       expect: its see-also links name the extension that declares it
     - name: the-custom-component-page-links-to-its-extension
       input: { page: custom-component, params: { uri: 'oxplow:oxplow/custom_component?custom_component=oxplow/integrations' } }
@@ -294,7 +294,7 @@ intent:
       input: { page: measure-data, params: {uri:"oxplow:oxplow/measure?measure=oxplow.tokens"} }
       expect: its description is a paragraph above the facts
     - name: the-dataset-data-page-says-what-it-is-in-a-paragraph-above-its-facts
-      input: { page: dataset-data, params: {uri:"oxplow:oxplow/dataset?dataset=task"} }
+      input: { page: dataset-data, params: {uri:"oxplow:oxplow/dataset?dataset=thread"} }
       expect: its description is a paragraph above the facts
     - name: the-metric-page-says-what-it-is-in-a-paragraph-above-its-facts
       input: { page: metric, params: {uri:"oxplow:oxplow/metric?metric=agent.tokens.total",metric:"agent.tokens.total"} }
@@ -312,10 +312,10 @@ intent:
       input: { page: resource-data, params: {uri:"oxplow:oxplow/resource?resource=oxplow/stream"} }
       expect: its description is a paragraph above the facts
     - name: the-skill-page-says-what-it-is-in-a-paragraph-above-its-facts
-      input: { page: skill, params: {uri:"oxplow:oxplow/skill?skill=oxplow/tasks"} }
+      input: { page: skill, params: {uri:"oxplow:oxplow/skill?skill=oxplow/track-work"} }
       expect: its description is a paragraph above the facts
     - name: the-dataset-definition-page-says-what-it-is-in-a-paragraph-above-its-facts
-      input: { page: dataset-definition, params: {uri:"oxplow:oxplow/dataset?dataset=task"} }
+      input: { page: dataset-definition, params: {uri:"oxplow:oxplow/dataset?dataset=thread"} }
       expect: its description is a paragraph above the facts
     - name: the-extension-page-reads-a-shipped-extension
       input: { page: extension, params: { uri: 'oxplow:oxplow/extension?name=oxplow-foundation', name: oxplow-foundation } }
@@ -369,13 +369,13 @@ intent:
       input: { query: 'diff-view#changes_ends', params: { stream_id: 1 } }
       expect: the To choice offers the working tree
     - name: dataset-definition-names-a-datasets-fields
-      input: { page: dataset-definition, params: { uri: "oxplow:oxplow/dataset?dataset=task" } }
+      input: { page: dataset-definition, params: { uri: "oxplow:oxplow/dataset?dataset=thread" } }
       expect: a dataset's description, owner, kind and each field with its type and doc
     - name: dataset-fields-lists-a-datasets-fields-as-choices
-      input: { query: 'dataset-data#dataset_fields', params: { uri: "oxplow:oxplow/dataset?dataset=task" } }
+      input: { query: 'dataset-data#dataset_fields', params: { uri: "oxplow:oxplow/dataset?dataset=thread" } }
       expect: none, then each field of the dataset, as choices
     - name: data-catalog-links-each-dataset-to-its-definition
-      input: { page: data-catalog, params: { dataset: task } }
+      input: { page: data-catalog, params: { dataset: thread } }
       expect: each dataset links to its definition page
     - name: measure-data-lists-its-facts-newest-first-and-folds-them-by-group
       input: { page: measure-data, params: { uri: "oxplow:oxplow/measure?measure=oxplow.tokens" } }
@@ -390,7 +390,7 @@ intent:
       input: { page: dimension-data, params: { uri: "oxplow:oxplow/dimension?dimension=oxplow.language" } }
       expect: all measures, then each whose facts carry the dimension
     - name: command-data-lists-its-runs-newest-first
-      input: { page: command-data, params: { uri: "oxplow:oxplow/command?command=oxplow.task.create" } }
+      input: { page: command-data, params: { uri: "oxplow:oxplow/command?command=oxplow.thread.create" } }
       expect: a command's audited runs, newest first, narrowed by outcome, who and date
     - name: collector-data-lists-its-last-run-counts-and-the-facts-it-recorded
       input: { page: collector-data, params: { uri: "oxplow:oxplow/collector?collector=oxplow/oxplow.request_outcome", range: all } }
@@ -422,10 +422,6 @@ panels:
   # What only the person can move: a question an agent waits on, a handoff
   # no agent is there to take, an open note; counted in its header.
   - { id: waiting, title: Waiting on you, icon: bell, scope: project, body: waiting-on-you, count: waiting-count, open: 'oxplow:oxplow/page?page=waiting-on-you' }
-# What the coding agent reads about the task tracker: its commands, while
-# there is one (oxtask's ready-queue skill is oxplow-bundled's).
-skills:
-  - { name: tasks, file: skills/tasks/SKILL.md, needs: [task_tracker] }
 # What oxplow runs by default: snapshots, oxwiki (a knowledge store beside
 # any an extension adds), and the agent harnesses and AI providers — core's
 # built-ins, many of each at once (every one of those declared here is
@@ -630,13 +626,6 @@ resources:
     resolve: symbol
     title: name
     icon: list-tree
-  - name: task
-    description: "A task, epic or other item on the project's task tracker."
-    label: Task
-    params: { provider: { required: true, pattern: '^[a-z][a-z0-9_-]*$' }, id: { required: true } }
-    resolve: task
-    searchable: search_task
-    icon: check-square
   - name: knowledge
     description: "A page of one of the project's knowledge stores (oxwiki, an extension's)."
     label: Knowledge page
@@ -1682,7 +1671,7 @@ commands:
     scope: sql.read
     op: query
     tool: query_sql
-    example: {"sql": "SELECT uri, title, state FROM v_task WHERE state = ?1 LIMIT 20", "params": ["todo"]}
+    example: {"sql": "SELECT uri, title, state FROM v_oxplow_task WHERE state = ?1 LIMIT 20", "params": ["todo"]}
   # streams.write
   - name: stream.rename
     summary: "Rename a stream (`str1`)."
@@ -1919,57 +1908,6 @@ commands:
     op: navigate
     example: {"uri": "oxplow:oxplow/file?path=src/auth.rs"}
     tool: navigate
-  # task_tracker.write
-  - name: task.assign
-    summary: "Say who is going to work on a task: a thread (`oxplow:oxplow/thread?id=thr3`, or `thr3`), the person (`oxplow:oxplow/person`), or nobody (`to` null: the pool any thread may pull from, or the backlog for a backlog item). At the end of that assignee's queue, or before/after an item there. Core's record, for every task tracker: a controller agent routes work to threads with it. A done or canceled item is nobody's (closing one releases it), and a closed thread takes none. Undone by assigning it back."
-    scope: task_tracker.write
-    op: assign
-    example: {"uri": "oxplow:oxplow/task?id=tsk12&provider=oxtask", "to": "oxplow:oxplow/thread?id=thr3"}
-  - name: task.comment
-    summary: "Comment on a task (oxplow: a note shown with the task)."
-    scope: task_tracker.write
-    op: comment
-    needs: [task_tracker.comments]
-    example: {"uri": "oxplow:oxplow/task?id=tsk12&provider=oxtask", "body": "Found the cause: the redirect keeps the stale `next` param."}
-  - name: task.create
-    summary: "File a task on the active tracker (the one the person chose), optionally straight into a state (`backlog`: not ready yet; `todo`, the default: ready to work on). It's assigned to nobody unless `assignee` names a thread or the person (see oxplow.task.assign). `native` is the tracker's own fields as its create declares them (oxplow: { priority }). On oxplow the result carries `link_warnings`: the `[[…]]` links in the body that don't resolve."
-    scope: task_tracker.write
-    op: create
-    example: {"title": "Fix the login redirect loop", "body": "Signing in from /settings bounces back to /login.", "stage": "todo"}
-  - name: task.delete
-    summary: "Delete a task."
-    scope: task_tracker.write
-    op: delete
-    confirm: destructive
-    needs: [task_tracker.delete]
-    example: {"uri": "oxplow:oxplow/task?id=tsk12&provider=oxtask"}
-  - name: task.link
-    summary: "Link a task to another of the same provider, or to any uri it is about. The uri: (`oxplow:oxplow/collector?collector=triage/hot`, `oxplow:oxplow/request?id=req12`, `oxplow:oxplow/file?path=src/a.rs`), by a link type the provider names (oxplow: blocks, relates_to, discovered_from, duplicates, supersedes, replies_to, about). Only an item target must exist; a uri may name something since gone. Undone by task.unlink."
-    scope: task_tracker.write
-    op: link
-    needs: [task_tracker.links]
-    example: {"uri": "oxplow:oxplow/task?id=tsk12&provider=oxtask", "target": "oxplow:oxplow/task?id=tsk9&provider=oxtask", "link_type": "blocks"}
-  - name: task.unlink
-    summary: "Remove a task's link (`uri`, `target`, `link_type`, as it was linked). Undone by task.link."
-    scope: task_tracker.write
-    op: unlink
-    needs: [task_tracker.links]
-    example: {"uri": "oxplow:oxplow/task?id=tsk12&provider=oxtask", "target": "oxplow:oxplow/task?id=tsk9&provider=oxtask", "link_type": "blocks"}
-  - name: task.reorder
-    summary: "Put a task before or after another in its assignee's queue, or among the unassigned (neither: at its end). Core's, for every task tracker."
-    scope: task_tracker.write
-    op: reorder
-    example: {"uri": "oxplow:oxplow/task?id=tsk12&provider=oxtask", "before": "oxplow:oxplow/task?id=tsk9&provider=oxtask"}
-  - name: task.transition
-    summary: "Move a task to a canonical state (backlog, todo, in_progress, blocked, done, canceled), optionally naming the provider's own state. Done or canceled releases its assignee."
-    scope: task_tracker.write
-    op: transition
-    example: {"uri": "oxplow:oxplow/task?id=tsk12&provider=oxtask", "to": "in_progress"}
-  - name: task.update
-    summary: "Edit a task's title, body, parent or native fields and, optionally, move it to a state — all in one run (see oxplow.task.transition for the state's effects). On oxplow the result carries `link_warnings` for the body's `[[…]]` links."
-    scope: task_tracker.write
-    op: update
-    example: {"uri": "oxplow:oxplow/task?id=tsk12&provider=oxtask", "title": "Fix the login redirect loop", "body": "Reproduces only with a stale session cookie."}
   # worktrees.write
   - name: stream.archive
     summary: "Archive a stream and its threads (`delete_worktree` also removes its working copy from disk). Refused while an agent is running in it. A person is asked first."

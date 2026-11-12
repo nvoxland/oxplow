@@ -26,7 +26,7 @@ params:
   default: 30d
   presets: [1d, 7d, 30d, 90d, all]
 answers:
-- {"question":"When did this command run, who ran it and did it fail?","about":"oxplow/command","params":{"uri":"oxplow:oxplow/command?command=oxplow.task.create"},"skill":"oxplow-extension"}
+- {"question":"When did this command run, who ran it and did it fail?","about":"oxplow/command","params":{"uri":"oxplow:oxplow/command?command=oxplow.thread.create"},"skill":"oxplow-extension"}
 loaders:
   about:
     sql: |

@@ -1,8 +1,6 @@
 # Waiting on you raises its alert and counts in its panel's header while
-# anything waits on the person: here an open note-to-self. Tasks assigned
-# to the person are the Assigned to you panel's, not counted here.
-given:
-  - { command: oxplow.task.create, input: { title: Mine, assignee: "oxplow:oxplow/person" } }
+# anything waits on the person: here an open note-to-self. (Tasks assigned
+# to the person are the Assigned to you panel's, not counted here.)
 when: { page: oxplow/waiting-on-you }
 expect:
   loaders: { waiting_on_me: { rows: 0 } }

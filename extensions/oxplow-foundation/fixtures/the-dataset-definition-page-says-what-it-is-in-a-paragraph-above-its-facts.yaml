@@ -3,8 +3,8 @@
 when:
   page: oxplow/dataset-definition
   params:
-    uri: "oxplow:oxplow/dataset?dataset=task"
+    uri: "oxplow:oxplow/dataset?dataset=thread"
 expect:
   nodes:
     - { id: about, kind: viz, viz: detail }
-  text: { contains: ["## About [node about]\n\nThe active task tracker's items \u2014 the task interface"] }
+  text: { contains: ["## About [node about]\n\nThreads: independent lines of the person's work"] }

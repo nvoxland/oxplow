@@ -1,9 +1,10 @@
 # "See also": the page links to the extension that declares it.
+requires: [oxplow-bundled]
 when:
   page: oxplow/skill
   params:
-    uri: "oxplow:oxplow/skill?skill=oxplow/tasks"
+    uri: "oxplow:oxplow/skill?skill=oxplow/track-work"
 expect:
   see_also:
     contains:
-      - { title: oxplow-foundation, uri: "oxplow:oxplow/extension?name=oxplow-foundation" }
+      - { title: oxplow-bundled, uri: "oxplow:oxplow/extension?name=oxplow-bundled" }
