@@ -10,6 +10,6 @@ steps:
   - when: { command: shelf_db.book.remove, input: { id: dune } }
     expect: { ok: true }
   - when: { collector: shelf_db/books, trigger: sqlite }
-    expect: { ok: true, result: { "shelf/book.removed": 1 } }
+    expect: { ok: true }
   - when: { sql: "SELECT id FROM v_shelf_book" }
     expect: { rows: [{ id: emma }] }

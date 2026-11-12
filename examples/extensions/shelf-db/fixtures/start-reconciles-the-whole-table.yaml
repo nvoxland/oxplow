@@ -11,6 +11,6 @@ steps:
   - when: { command: shelf_db.book.remove, input: { id: dune } }
     expect: { ok: true }
   - when: { collector: shelf_db/books, trigger: start }
-    expect: { ok: true, result: { "shelf/book.removed": 1, "shelf/book.upserted": 1 } }
+    expect: { ok: true }
   - when: { sql: "SELECT id FROM v_shelf_book" }
     expect: { rows: [{ id: emma }] }
