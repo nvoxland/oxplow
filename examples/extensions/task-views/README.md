@@ -1,21 +1,19 @@
-# Task views: your own Board, list and editor
+# Task views: your own Board and list
 
-Three views, each a part (`parts/`), that stand in for oxplow's own, with no task tracker provider of
+Two views, each a part (`parts/`), that stand in for oxplow's own, with no task tracker provider of
 their own. They read `v_oxplow_task` and change items only through the
-task commands, so they work with whichever list is active.
+task action points, so they work with whichever store holds the task.
 
 | Replaces | Part | What it is |
 |---|---|---|
 | `task.board` | `swimlanes` | A `viz: custom` component: a column per stage of the active list, cards you drag |
-| `task.list` | `compact-list` | A table with title (a page link), state and updated; row actions **Done** and **Edit…** |
-| `task.detail` | `edit-item` | A `viz: form` over `oxtask.task.update`: title and body, `id` fixed |
+| `task.list` | `compact-list` | A table with title (a page link), state and updated; row action **Done** (the `oxplow/task.move` point) |
 
 ```yaml
 ui:
   mounts:
     - { page: swimlanes, at: task.board, version: 2 }
     - { page: compact-list, at: task.list, version: 2 }
-    - { page: edit-item, at: task.detail, version: 1 }
 ```
 
 ## What the swimlanes do
@@ -24,11 +22,12 @@ ui:
   titled as the list names it (the `stages` loader reads them from
   `v_capability_provider.stages`). A card sits in the column of its
   `stage`. Drag a card to another column and it runs
-  `oxtask.task.move` with that column's stage id.
+  the `oxplow/task.move` point with that column's stage id: the store that
+  holds the card answers it, so the board names no store's command.
 - Drag a card within its column and it runs `oxplow.tasks.reorder`:
   its place in its assignee's queue, core's for every task tracker.
 - Click a title to rename the item: an inline form (Enter saves, Escape
-  puts it back) that runs `oxtask.task.update`. A refusal naming a
+  puts it back) that runs the `oxplow/task.edit` point. A refusal naming a
   field shows under the input.
 - Click a card to open the item; Cmd/Ctrl-click opens it in a new tab.
 - If the board's commands are refused (the extension isn't deployed or is
@@ -40,9 +39,9 @@ ui:
 May:
 - read any published dataset (`v_oxplow_task`, `v_thread`, …) through its
   parts' loaders;
-- change tasks through the commands it declares in
-  `custom_components[].commands` (a table or form on a page uses `actions` /
-  `form`, which run as you);
+- change tasks through the commands and action points it declares in
+  `custom_components[].commands` / `action_points` (a table or form on a page
+  uses `actions` / `form`, which run as you; an action may name a `point:`);
 - hold forms, drag and drop and its own filters, styled with the kit
   (`ox-form`, `ox-input`, `ox-error`, `ox-drag`, `ox-drop-target`, …).
 
@@ -50,8 +49,8 @@ May not:
 - reach the network, the files or another page's state: a component runs
   in a sandboxed frame and talks to oxplow only through the client
   library;
-- run a command it didn't declare (`custom_components[].commands`) or one
-  outside the extension's `permissions.commands`;
+- run a command or point it didn't declare (`custom_components[].commands`,
+  `action_points`) or a command outside the extension's `permissions.commands`;
 - replace the page chrome around it (the scope picker, the rail, the
   filters stay oxplow's), or the task tracker itself.
 
@@ -59,11 +58,11 @@ May not:
 
 1. Copy this folder to `.oxplow/extensions/task-views/`.
 2. Settings → Integrations: choose **task-views** for the board, list and
-   editor (it's the only candidate, so it is the default).
+   (it's the only candidate, so it is the default).
 3. Deploy it (`oxplow.extension.deploy { name: "task-views" }`, or Deploy on
    Settings → Extensions) and approve the task commands it asks for,
    so cards can change items.
 
 `oxplow extension check task-views` lints it and `oxplow extension test
 task-views` runs `fixtures/`: the list over some rows, the board's loaders
-and a refused update, and the editor's loader.
+and a refused update.

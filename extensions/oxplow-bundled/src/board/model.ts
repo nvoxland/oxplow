@@ -165,11 +165,11 @@ export interface MenuContext {
   stages: Stage[];
 }
 
-/** A command a card runs, as the component's `invoke` takes it. */
-export interface Act {
-  command: string;
-  input: Record<string, unknown>;
-}
+/** What a card runs: a command (as the component's `invoke` takes it) or an
+ *  action point (`invokePoint`), whichever store holds the task answering. */
+export type Act =
+  | { command: string; input: Record<string, unknown> }
+  | { point: string; context: Record<string, unknown> };
 
 export type MenuEntry =
   | { kind: "item"; id: string; label: string; act?: Act; open?: string; checked?: boolean; danger?: boolean }
@@ -183,22 +183,23 @@ export type MenuEntry =
 export function cardMenu(card: Rec, { fields, assignees, stages }: MenuContext): MenuEntry[] {
   if (card.uri == null) return [];
   const uri = String(card.uri);
-  const id = String(card.id);
   const out: MenuEntry[] = [{ kind: "item", id: "open", label: "Open", open: uri }];
   const group = (entries: MenuEntry[]) => {
     if (entries.length > 0) out.push({ kind: "separator" }, ...entries);
   };
   group(stages.filter((s) => s.value !== card.stage).map((s) => ({
     kind: "item" as const, id: `to-${s.value}`, label: `Mark ${s.label}`,
-    act: { command: "oxtask.task.move", input: { id, stage: s.value } },
+    act: { point: "oxplow/task.move", context: { uri, stage: s.value } },
   })));
   const native = parseObject(card.native);
-  for (const f of fields) {
+  // `oxplow/task.edit` carries a title, description, priority and epic: the
+  // board sets a task's priority from its menu, whichever store holds it.
+  for (const f of fields.filter((f) => f.name === "priority")) {
     group([
       { kind: "heading", label: f.title },
       ...f.values.map((v) => ({
         kind: "item" as const, id: `${f.name}-${v}`, label: humanize(v), checked: native[f.name] === v,
-        act: { command: "oxtask.task.update", input: { id, [f.name]: v } },
+        act: { point: "oxplow/task.edit", context: { uri, [f.name]: v } },
       })),
     ]);
   }
@@ -215,8 +216,8 @@ export function cardMenu(card: Rec, { fields, assignees, stages }: MenuContext):
     ]);
   }
   const moves: MenuEntry[] = [];
-  if (truthy(card.has_parent)) moves.push({ kind: "item", id: "unparent", label: "Make top-level", act: { command: "oxtask.task.update", input: { id, parent: null } } });
-  if (truthy(card.can_delete)) moves.push({ kind: "item", id: "delete", label: "Delete", danger: true, act: { command: "oxtask.task.delete", input: { id } } });
+  if (truthy(card.has_parent)) moves.push({ kind: "item", id: "unparent", label: "Make top-level", act: { point: "oxplow/task.unparent", context: { uri } } });
+  if (truthy(card.can_delete)) moves.push({ kind: "item", id: "delete", label: "Delete", danger: true, act: { point: "oxplow/task.delete", context: { uri } } });
   group(moves);
   return out;
 }
@@ -227,7 +228,7 @@ export function cardMenu(card: Rec, { fields, assignees, stages }: MenuContext):
 export function dropAct(card: Rec, to: string, before: Rec | null): Act | null {
   if (card.uri == null) return null;
   const uri = String(card.uri);
-  if (to !== card.stage) return { command: "oxtask.task.move", input: { id: String(card.id), stage: to } };
+  if (to !== card.stage) return { point: "oxplow/task.move", context: { uri, stage: to } };
   if (before && before.uri === card.uri) return null;
   return { command: "oxplow.tasks.reorder", input: before?.uri ? { uri, before: String(before.uri) } : { uri } };
 }

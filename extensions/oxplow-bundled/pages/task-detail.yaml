@@ -38,13 +38,11 @@ loaders:
              (w.state NOT IN ('done', 'canceled') AND w.assignee IS NOT NULL) AS assigned,
              coalesce((SELECT json_extract(f, '$.delete') FROM feat), 0) AS can_delete
       FROM v_oxplow_task w WHERE w.uri = :uri
-  # The list's stages: Mark's options and the Stage form's choices.
+  # The list's stages: Mark's options.
   stages:
     page: oxplow/task-stages
     loader: task_stages
   marks:
-    sql: SELECT value, label FROM stages ORDER BY ord
-  task_states:
     sql: SELECT value, label FROM stages ORDER BY ord
   # Who Assign to offers: the stream's open threads, then you.
   assignees:
@@ -56,10 +54,7 @@ loaders:
       SELECT uri('oxplow/person'), 'You'
   state:
     sql: |
-      SELECT w.uri, w.native_id AS id, w.stage FROM v_oxplow_task w WHERE w.uri = :uri
-  fields:
-    sql: |
-      SELECT w.uri, w.native_id AS id, w.title, json_extract(w.native, '$.priority') AS priority
+      SELECT w.uri, w.native_id AS id, w.stage, coalesce(w.stage_title, w.stage) AS stage_title, w.state AS icon
       FROM v_oxplow_task w WHERE w.uri = :uri
   body:
     sql: |
@@ -143,12 +138,12 @@ rail:
     # Mark ▸ the list's stages, its own checked.
     - id: mark
       label: Mark
-      command: oxtask.task.move
+      point: oxplow/task.move
       row: true
       options_from: marks
       current: stage
-      input:
-        id: '{{row.id}}'
+      context:
+        uri: '{{row.uri}}'
         stage: '{{option.value}}'
     # Assign to ▸ the stream's threads and you; a closed item is nobody's.
     - id: assign
@@ -171,34 +166,22 @@ rail:
         to: null
     - id: delete
       label: Delete
-      command: oxtask.task.delete
+      point: oxplow/task.delete
       row: true
       then: close
       when: can_delete
-      input:
-        id: '{{row.id}}'
+      context:
+        uri: '{{row.uri}}'
+  # Its stage, as its store's own page may draw it instead (`task.detail.state`).
   - id: state
     replaceable: task.detail.state
     title: Stage
     from: state
-    viz: form
-    form:
-      command: oxtask.task.move
-      mode: edit
-      fields:
-      - { name: stage, label: Move to }
-      choices:
-        stage: oxplow/task-detail#task_states
-  - id: fields
-    title: Details
-    from: fields
-    viz: form
-    form:
-      command: oxtask.task.update
-      mode: edit
-      fields:
-      - title
-      - priority
+    viz: detail
+    columns:
+    - key: stage_title
+      label: Stage
+      icon: icon
 view:
   stack:
   - id: body
@@ -208,16 +191,6 @@ view:
     viz: markdown
     markdown:
       text: body
-    actions:
-    - id: save
-      label: Save
-      command: oxtask.task.update
-      edit: true
-      fixed:
-      - id
-      input:
-        id: '{{row.id}}'
-        body: '{{row.body}}'
   - id: children
     title: Tasks under it
     from: children

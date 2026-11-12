@@ -6,7 +6,7 @@ given:
 when:
   component: swimlanes
   invokes:
-    - { command: oxtask.task.update, input: { id: tsk1, title: Fix the lexer } }
+    - { point: oxplow/task.edit, context: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", title: Fix the lexer } }
 expect:
   invokes:
     - { ok: true, result: $any }

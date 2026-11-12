@@ -12,6 +12,6 @@ steps:
       - drag: { from: ".card", to: '.lane[data-stage="done"]' }
       - expect:
           count: { '.lane[data-stage="done"] .card': 1 }
-          invoked: [{ command: oxtask.task.move, ok: true }]
+          invoked: [{ point: oxplow/task.move, ok: true }]
   - when: { sql: "SELECT stage FROM v_oxplow_task WHERE title = 'Card one'" }
     expect: { rows: [{ stage: done }] }

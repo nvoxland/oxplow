@@ -317,7 +317,7 @@ pub(super) const KINDS: &[Kind] = &[
     },
     Kind {
         key: "component",
-        when: "{ component: <id>, items?, invokes?: [{ command, input? }] }",
+        when: "{ component: <id>, items?, invokes?: [{ command, input? } | { point, context?, command? }] }",
         expect: "{ invokes: [{ ok, result? } | { ok: false, refused }] }",
     },
     Kind {

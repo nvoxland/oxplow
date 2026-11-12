@@ -72,7 +72,7 @@ commands:
     entry: handlers/create.star
     needs: [store.sql]
     access: write
-    ui: { label: New Task, group: Tasks, at: oxplow/task.new, form: "oxplow:oxplow/page?page=new-task", open_after: "oxplow:oxplow/task?id={{result.id}}&provider=oxtask" }
+    ui: { label: New Task, group: Tasks, at: oxplow/task.new, form: "oxplow:oxplow/page?page=oxtask/new-task", open_after: "oxplow:oxplow/task?id={{result.id}}&provider=oxtask" }
     example: { title: Fix the greeting, stage: ready, priority: high }
   - name: task.update
     summary: Change a task's title, body, priority or parent (null clears the last three). Undo puts the old values back.
@@ -89,7 +89,31 @@ commands:
     entry: handlers/update.star
     needs: [store.sql]
     access: write
+    ui:
+      label: Edit Task
+      group: Tasks
+      at: oxplow/task.edit
+      accepts: { store: oxtask }
+      input:
+        id: "{{uri.id}}"
+        title: "{{context.title}}"
+        body: "{{context.body}}"
+        priority: "{{context.priority}}"
+        parent: "{{context.parent}}"
     example: { id: tsk1, title: A clearer title }
+  - name: task.unparent
+    summary: Make a task top-level (it leaves its epic). Undo puts it back under it.
+    input_schema:
+      type: object
+      required: [id]
+      properties:
+        id: { type: string, pattern: "^tsk[0-9]+$" }
+      additionalProperties: false
+    entry: handlers/unparent.star
+    needs: [store.sql]
+    access: write
+    ui: { label: Make Top-level, group: Tasks, at: oxplow/task.unparent, accepts: { store: oxtask }, input: { id: "{{uri.id}}" } }
+    example: { id: tsk2 }
   - name: task.move
     summary: Put a task in a stage. done and canceled close it. Undo moves it back.
     input_schema:
@@ -102,7 +126,7 @@ commands:
     entry: handlers/move.star
     needs: [store.sql]
     access: write
-    ui: { label: Move To…, group: Tasks, about: { resource: oxplow/task, accepts: { store: oxtask } }, form: "oxplow:oxplow/page?page=oxtask/move-task" }
+    ui: { label: Move, group: Tasks, at: oxplow/task.move, accepts: { store: oxtask }, input: { id: "{{uri.id}}", stage: "{{context.stage}}" } }
     example: { id: tsk1, stage: in_progress }
   - name: task.link
     summary: Link a task to another task (its id) or any URI, with a type. Undo removes the link.
@@ -117,7 +141,7 @@ commands:
     entry: handlers/link.star
     needs: [store.sql]
     access: write
-    ui: { label: Link…, group: Tasks, about: { resource: oxplow/task, accepts: { store: oxtask } }, form: "oxplow:oxplow/page?page=oxtask/link-task" }
+    ui: { label: Link…, group: Tasks, at: oxplow/task.link, about: { resource: oxplow/task, accepts: { store: oxtask } }, form: "oxplow:oxplow/page?page=oxtask/link-task" }
     example: { id: tsk1, to: tsk2, type: blocks }
   - name: task.unlink
     summary: Remove a link from a task. Undo links it again.
@@ -132,6 +156,7 @@ commands:
     entry: handlers/unlink.star
     needs: [store.sql]
     access: write
+    ui: { label: Unlink, group: Tasks, at: oxplow/task.unlink, accepts: { store: oxtask }, input: { id: "{{uri.id}}", to: "{{context.to}}", type: "{{context.type}}" } }
     example: { id: tsk1, to: tsk2, type: blocks }
   - name: task.comment
     summary: Add a comment to a task. The result names the comment's id (cmt and a number); undo removes it. Its author is who runs the command.
@@ -145,7 +170,7 @@ commands:
     entry: handlers/comment.star
     needs: [store.sql]
     access: write
-    ui: { label: Comment…, group: Tasks, about: { resource: oxplow/task, accepts: { store: oxtask } }, form: "oxplow:oxplow/page?page=oxtask/comment-on-task" }
+    ui: { label: Comment…, group: Tasks, at: oxplow/task.comment, about: { resource: oxplow/task, accepts: { store: oxtask } }, form: "oxplow:oxplow/page?page=oxtask/comment-on-task" }
     example: { id: tsk1, body: Reproduced on main. }
   - name: task.uncomment
     summary: Remove a comment from its task. It is the undo of task.comment.
@@ -170,7 +195,7 @@ commands:
     needs: [store.sql]
     access: write
     confirm: destructive
-    ui: { label: Delete Task, group: Tasks, about: { resource: oxplow/task, accepts: { store: oxtask } }, input: { id: "{{uri.id}}" } }
+    ui: { label: Delete Task, group: Tasks, at: oxplow/task.delete, about: { resource: oxplow/task, accepts: { store: oxtask } }, input: { id: "{{uri.id}}" } }
     example: { id: tsk1 }
   - name: task.restore
     summary: Bring a deleted task back. It is the undo of task.delete.
@@ -184,3 +209,8 @@ commands:
     needs: [store.sql]
     access: write
     example: { id: tsk1 }
+ui:
+  mounts:
+    # Edit an oxtask task in place on the shared task page (empty on another
+    # store's task).
+    - { page: edit-task, at: oxplow/task-detail.sections, position: { before: links }, title: Edit }

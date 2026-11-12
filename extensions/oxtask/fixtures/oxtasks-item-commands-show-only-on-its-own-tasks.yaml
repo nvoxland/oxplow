@@ -1,11 +1,11 @@
-# Move, link, comment and delete are offered on an oxtask task, and not on a
+# Link, comment and delete are offered on an oxtask task, and not on a
 # task of any other store.
 requires: [oxplow-bundled, oxtask]
 given:
   - { command: oxtask.task.create, input: { title: A } }
 when: { item_commands: "oxplow:oxplow/task?id=tsk1&provider=oxtask" }
 expect:
-  commands: { contains: [oxtask.task.move, oxtask.task.link, oxtask.task.comment, oxtask.task.delete] }
+  commands: { contains: [oxtask.task.link, oxtask.task.comment, oxtask.task.delete] }
 steps:
   - when: { item_commands: "oxplow:oxplow/task?id=ENG-1&provider=elsewhere" }
     expect: { commands: [] }

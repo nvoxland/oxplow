@@ -37,18 +37,8 @@ view:
   actions:
   - id: done
     label: Done
-    command: oxtask.task.move
-    input:
-      id: '{{row.id}}'
+    point: oxplow/task.move
+    context:
+      uri: '{{row.uri}}'
       stage: done
     row: true
-  - id: edit
-    label: Edit…
-    command: oxtask.task.update
-    input:
-      id: '{{row.id}}'
-      title: '{{row.title}}'
-    row: true
-    form: true
-    fixed:
-    - id

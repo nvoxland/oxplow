@@ -14,7 +14,6 @@ expect:
     # The page's row names its tab: the item's title.
     row: { rows: [{ title: The item }] }
     about: { rows: [{ stage: ready, stage_title: Ready, icon: todo, assigned_to: Thread, parent: An epic, id: tsk2, list: oxtask, is_open: 1, assigned: 1, can_delete: 1 }] }
-    state: { rows: [{ stage: ready }] }
     body: { rows: [{ body: "Fix **it**." }] }
     children: { rows: 0 }
     marks: { rows: [{ value: backlog }, { value: ready, label: Ready }, { value: in_progress }, { value: blocked }, { value: done }, { value: canceled }] }
@@ -34,4 +33,4 @@ steps:
   - expect: { loaders: { about: { rows: [{ assigned_to: You }] } } }
   # An item the active list doesn't hold: nothing to read.
   - params: { uri: "oxplow:oxplow/task?id=nope&provider=oxtask" }
-    expect: { loaders: { about: { rows: 0 }, state: { rows: 0 } } }
+    expect: { loaders: { about: { rows: 0 } } }

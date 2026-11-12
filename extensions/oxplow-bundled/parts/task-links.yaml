@@ -18,35 +18,33 @@ loaders:
              replace(l.link_type, '_', ' ') || ' (from it)', l.link_type, 'from', 0
       FROM v_oxplow_task_link l WHERE l.to_uri = :uri
 view:
-  id: links
-  from: links
-  viz: list
-  group:
-    by: kind
-  columns:
-  - key: item
-    label: Item
-    icon: icon
-    link:
-      kind: page
-      from: other
-  empty: No links.
-  actions:
-  - id: link
-    label: Link…
-    command: oxtask.task.link
-    form: true
-    fixed:
-    - id
-    input:
-      id: '{{param.id}}'
-      type: relates_to
-  - id: unlink
-    label: Unlink
-    command: oxtask.task.unlink
-    row: true
-    when: outbound
-    input:
-      id: '{{param.id}}'
-      to: '{{row.other}}'
-      type: '{{row.link_type}}'
+  stack:
+  - id: links
+    title: Links
+    hide_title: true
+    from: links
+    viz: list
+    group:
+      by: kind
+    columns:
+    - key: item
+      label: Item
+      icon: icon
+      link:
+        kind: page
+        from: other
+    empty: No links.
+    actions:
+    - id: unlink
+      label: Unlink
+      point: oxplow/task.unlink
+      row: true
+      when: outbound
+      context:
+        uri: '{{param.uri}}'
+        to: '{{row.other}}'
+        type: '{{row.link_type}}'
+  # Link… is the store's own form.
+  - action_point: oxplow/task.link
+    context:
+      uri: { param: uri }

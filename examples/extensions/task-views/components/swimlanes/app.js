@@ -45,6 +45,16 @@
         },
       );
 
+    /** Run an action point: whichever task tracker holds the item answers. */
+    const changePoint = (point, context) =>
+      component.invokePoint(point, context).then(
+        () => clearNote(),
+        (e) => {
+          say(e);
+          throw e;
+        },
+      );
+
     component.onUpdate(({ data }) => {
       current = data.swimlanes;
       stageRows = data.stages;
@@ -88,7 +98,7 @@
           const from = items.find((i) => i.uri === ref);
           if (!from) return;
           if (from.stage !== stage) {
-            change("oxtask.task.move", { id: from.id, stage }).catch(() => {});
+            changePoint("oxplow/task.move", { uri: from.uri, stage }).catch(() => {});
             return;
           }
           // Within its column: its place in its assignee's queue.
@@ -161,7 +171,7 @@
       };
       form.addEventListener("submit", (e) => {
         e.preventDefault();
-        change("oxtask.task.update", { id: item.id, title: input.value }).then(
+        changePoint("oxplow/task.edit", { uri: item.uri, title: input.value }).then(
           () => leave(),
           (err) => {
             if (err && err.field) {

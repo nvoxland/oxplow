@@ -1,8 +1,7 @@
 # Submitting the New Task form files an item with the title, description
 # and starting stage it was given, assigned to nobody; Save and Another
-# keeps the list's own fields (a priority) for the next one. The Task List
-# at the stage then lists both.
-requires: [oxtask]
+# keeps the list's own fields (a priority) for the next one.
+requires: [oxplow-bundled]
 when: { page: new-task, params: { thread_id: 1 } }
 expect:
   loaders: { new_task: { rows: [{ stage: ready }] } }
@@ -16,5 +15,3 @@ steps:
       rows:
         - { title: Made in the form, body: Why it matters., stage: ready, assignee: null, priority: high }
         - { title: Second of two, stage: ready, assignee: null, priority: high }
-  - when: { page: task-list, params: { state: todo, priority: high, stream_id: 1 } }
-    expect: { loaders: { list: { rows: [{ title: Made in the form }, { title: Second of two }] } } }

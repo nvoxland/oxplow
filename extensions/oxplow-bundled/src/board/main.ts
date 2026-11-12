@@ -13,6 +13,7 @@ interface Component {
   viewParams: Record<string, string> | null;
   onUpdate(fn: (u: { data: Record<string, Rows>; params: Record<string, unknown> }) => void): () => void;
   invoke(command: string, input?: unknown): Promise<unknown>;
+  invokePoint(point: string, context?: unknown, command?: string): Promise<unknown>;
   navigate(ref: string, options?: { newTab?: boolean }): Promise<null>;
   setTitle(title: string): Promise<null>;
   setActions(actions: { id: string; label: string; primary?: boolean; prominent?: boolean; icon?: string }[]): Promise<null>;
@@ -100,7 +101,7 @@ function start(c: Component) {
     render();
   });
 
-  const run = (act: Act) => c.invoke(act.command, act.input).catch(() => render());
+  const run = (act: Act) => ("point" in act ? c.invokePoint(act.point, act.context) : c.invoke(act.command, act.input)).catch(() => render());
 
   function render() {
     closeMenu();

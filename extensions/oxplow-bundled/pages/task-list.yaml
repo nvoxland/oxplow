@@ -84,12 +84,7 @@ actions:
 rail:
   id: add
   title: New task
-  from: new_item
-  viz: form
-  form:
-    command: oxtask.task.create
-    then: stay
-    fields: [title]
+  action_point: oxplow/task.new
 view:
   id: list
   replaceable: task.list
@@ -125,69 +120,68 @@ view:
       before: '{{before.uri}}'
   - id: nest
     label: Nest under
-    command: oxtask.task.update
+    point: oxplow/task.edit
     row: true
     drag: true
     when: can_nest
-    input:
-      id: '{{row.id}}'
+    context:
+      uri: '{{row.uri}}'
       parent: '{{onto.id}}'
   # Mark ▸ the list's stages, the row's own checked.
   - id: mark
     label: Mark
-    command: oxtask.task.move
+    point: oxplow/task.move
     row: true
     bulk: true
     options_from: marks
     current: stage
-    input:
-      id: '{{row.id}}'
+    context:
+      uri: '{{row.uri}}'
       stage: '{{option.value}}'
   - id: priority-urgent
     label: Priority Urgent
-    command: oxtask.task.update
+    point: oxplow/task.edit
     row: true
     bulk: true
     when: can_prioritize
-    input:
-      id: '{{row.id}}'
+    context:
+      uri: '{{row.uri}}'
       priority: urgent
   - id: priority-high
     label: Priority High
-    command: oxtask.task.update
+    point: oxplow/task.edit
     row: true
     bulk: true
     when: can_prioritize
-    input:
-      id: '{{row.id}}'
+    context:
+      uri: '{{row.uri}}'
       priority: high
   - id: priority-medium
     label: Priority Medium
-    command: oxtask.task.update
+    point: oxplow/task.edit
     row: true
     bulk: true
     when: can_prioritize
-    input:
-      id: '{{row.id}}'
+    context:
+      uri: '{{row.uri}}'
       priority: medium
   - id: priority-low
     label: Priority Low
-    command: oxtask.task.update
+    point: oxplow/task.edit
     row: true
     bulk: true
     when: can_prioritize
-    input:
-      id: '{{row.id}}'
+    context:
+      uri: '{{row.uri}}'
       priority: low
   - id: unparent
     label: Make top-level
-    command: oxtask.task.update
+    point: oxplow/task.unparent
     row: true
     bulk: true
     when: has_parent
-    input:
-      id: '{{row.id}}'
-      parent: null
+    context:
+      uri: '{{row.uri}}'
   # Assign to ▸ the stream's threads and you; a closed item is nobody's.
   - id: assign
     label: Assign to
@@ -211,9 +205,9 @@ view:
       to: null
   - id: delete
     label: Delete
-    command: oxtask.task.delete
+    point: oxplow/task.delete
     row: true
     bulk: true
     when: can_delete
-    input:
-      id: '{{row.id}}'
+    context:
+      uri: '{{row.uri}}'

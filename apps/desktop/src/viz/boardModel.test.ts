@@ -62,17 +62,17 @@ test("a card's menu offers what its gates allow, each as the command it runs", (
   // The list's other stages, each a move there.
   expect(labels).toEqual(["Open", "---", "Mark Backlog", "Mark In Progress", "Mark Blocked", "Mark Done", "Mark Canceled", "---", "# Priority", "High", "Low", "---", "# Assign to", "Main", "You", "Nobody", "---", "Delete"]);
   // Who it's for: its assignee checked, each choice an assign.
-  expect(menu.find((m) => m.kind === "item" && m.label === "Mark Blocked")).toMatchObject({ id: "to-blocked", act: { command: "oxtask.task.move", input: { id: item({}).id, stage: "blocked" } } });
+  expect(menu.find((m) => m.kind === "item" && m.label === "Mark Blocked")).toMatchObject({ id: "to-blocked", act: { point: "oxplow/task.move", context: { uri: item({}).uri, stage: "blocked" } } });
   expect(menu.find((m) => m.kind === "item" && m.label === "Main")).toMatchObject({ checked: true });
   expect(menu.find((m) => m.kind === "item" && m.label === "You")).toMatchObject({ checked: false, act: { command: "oxplow.tasks.assign", input: { uri: item({}).uri, to: "oxplow:oxplow/person" } } });
   expect(menu.find((m) => m.kind === "item" && m.label === "Nobody")).toMatchObject({ act: { command: "oxplow.tasks.assign", input: { to: null } } });
   const low = menu.find((m) => m.kind === "item" && m.label === "Low");
-  expect(low).toMatchObject({ checked: true, act: { command: "oxtask.task.update", input: { id: item({}).id, priority: "low" } } });
-  expect(menu.find((m) => m.kind === "item" && m.label === "Delete")).toMatchObject({ danger: true, act: { command: "oxtask.task.delete", input: { id: item({}).id } } });
+  expect(low).toMatchObject({ checked: true, act: { point: "oxplow/task.edit", context: { uri: item({}).uri, priority: "low" } } });
+  expect(menu.find((m) => m.kind === "item" && m.label === "Delete")).toMatchObject({ danger: true, act: { point: "oxplow/task.delete", context: { uri: item({}).uri } } });
   expect(menu[0]).toMatchObject({ kind: "item", label: "Open", open: item({}).uri });
   // An epic's child can leave it; a closed card is nobody's to assign.
   const child = cardMenu(item({ has_parent: 1, can_delete: 0 }), { fields: [], assignees, stages });
-  expect(child.find((m) => m.kind === "item" && m.label === "Make top-level")).toMatchObject({ act: { command: "oxtask.task.update", input: { id: "tsk1", parent: null } } });
+  expect(child.find((m) => m.kind === "item" && m.label === "Make top-level")).toMatchObject({ act: { point: "oxplow/task.unparent", context: { uri: item({}).uri } } });
   const done = cardMenu(item({ state: "done", stage: "done", is_open: 0, assignee: null }), { fields: [], assignees, stages });
   expect(done.some((m) => m.kind === "heading" && m.label === "Assign to")).toBe(false);
 });
@@ -85,7 +85,7 @@ test("the agent's live card has no menu and doesn't move", () => {
 
 test("a drop on another column moves the item to its stage; within its column it reorders in its queue", () => {
   const card = item({});
-  expect(dropAct(card, "in_progress", null)).toEqual({ command: "oxtask.task.move", input: { id: card.id, stage: "in_progress" } });
+  expect(dropAct(card, "in_progress", null)).toEqual({ point: "oxplow/task.move", context: { uri: card.uri, stage: "in_progress" } });
   const other = item({ uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask" });
   expect(dropAct(card, "ready", other)).toEqual({ command: "oxplow.tasks.reorder", input: { uri: card.uri, before: other.uri } });
   expect(dropAct(card, "ready", null)).toEqual({ command: "oxplow.tasks.reorder", input: { uri: card.uri } });

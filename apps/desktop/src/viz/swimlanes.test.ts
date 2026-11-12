@@ -59,6 +59,11 @@ async function start(items = ITEMS) {
         if (rejection) throw rejection;
         return null;
       },
+      invokePoint: async (point: string, context: unknown) => {
+        invokes.push([point, context]);
+        if (rejection) throw rejection;
+        return null;
+      },
       navigate: async (ref: string, opts: unknown) => {
         opened.push([ref, opts]);
         return null;
@@ -121,7 +126,7 @@ test("a card dropped on another column is transitioned; the dragged-over column 
   fire(lane("blocked"), "drop");
   await settle();
   expect(lane("blocked").classList.contains("ox-drop-target")).toBe(false);
-  expect(invokes).toEqual([["oxplow.task.transition", { uri: "oxplow:oxplow/task?id=1&provider=a", to: "blocked" }]]);
+  expect(invokes).toEqual([["oxplow/task.move", { uri: "oxplow:oxplow/task?id=1&provider=a", stage: "blocked" }]]);
 });
 
 test("a drop within a column reorders it in its assignee's queue", async () => {
@@ -129,8 +134,8 @@ test("a drop within a column reorders it in its assignee's queue", async () => {
   await drag("oxplow:oxplow/task?id=3&provider=a", card("oxplow:oxplow/task?id=1&provider=a"));
   await drag("oxplow:oxplow/task?id=1&provider=a", card("oxplow:oxplow/task?id=2&provider=a"));
   expect(invokes).toEqual([
-    ["oxplow.task.reorder", { uri: "oxplow:oxplow/task?id=3&provider=a", before: "oxplow:oxplow/task?id=1&provider=a" }],
-    ["oxplow.task.reorder", { uri: "oxplow:oxplow/task?id=1&provider=a", after: "oxplow:oxplow/task?id=2&provider=a" }],
+    ["oxplow.tasks.reorder", { uri: "oxplow:oxplow/task?id=3&provider=a", before: "oxplow:oxplow/task?id=1&provider=a" }],
+    ["oxplow.tasks.reorder", { uri: "oxplow:oxplow/task?id=1&provider=a", after: "oxplow:oxplow/task?id=2&provider=a" }],
   ]);
 
 });
@@ -152,7 +157,7 @@ test("a title is edited in place: Enter submits it, Escape leaves it as it was",
   again.closest("form")!.dispatchEvent(submit);
   await settle();
   expect(submit.defaultPrevented).toBe(true);
-  expect(invokes).toEqual([["oxplow.task.update", { uri: "oxplow:oxplow/task?id=1&provider=a", title: "Renamed" }]]);
+  expect(invokes).toEqual([["oxplow/task.edit", { uri: "oxplow:oxplow/task?id=1&provider=a", title: "Renamed" }]]);
   expect(opened).toEqual([]);
 });
 

@@ -1,5 +1,6 @@
 # Task actions, the agents' page for one item: Mark done moves the
-# item it names, and Record a block asks which item it blocks.
+# item it names (Record a block is the store's own link form, placed by the
+# task.link point).
 requires: [oxtask]
 given:
   - { command: oxtask.task.create, input: { title: Fix it, stage: ready } }
@@ -7,7 +8,7 @@ given:
 when: { page: task-actions, params: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" } }
 expect:
   loaders: { item: { rows: [{ title: Fix it, stage_title: Ready }] } }
-  actions: [done, blocks]
+  actions: [done]
 steps:
   - press: { action: done }
     expect: { ok: true }

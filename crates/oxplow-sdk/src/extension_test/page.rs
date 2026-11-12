@@ -1,7 +1,7 @@
 use super::*;
 
 /// Load component `id` as its frame would, then ask what the fixture asks
-/// (`when: { component, items?: [title], invokes?: [{ command, input? }]
+/// (`when: { component, items?: [title], invokes?: [{ command, input? } | { point, context?, command? }]
 /// }`): `items` are tasks filed first
 /// (`oxplow:oxplow/task?id=tsk1&provider=oxtask`, …); each invoke's
 /// outcome — what the command answers when the component calls it —
@@ -67,23 +67,42 @@ pub(super) async fn component_example(
         .cloned()
         .unwrap_or_default()
     {
-        let out = invoke_component_command(
-            &host.svc,
-            &host.root,
-            ComponentInvoke {
-                component: key.clone(),
-                command: i
-                    .get("command")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .into(),
-                input: i.get("input").cloned().unwrap_or_else(|| json!({})),
-                on_behalf_of: Actor::Human,
-                confirmed: true,
-                version: version.clone(),
-            },
-        )
-        .await;
+        // `{ point, context?, command? }` runs an action point the component
+        // declares; `{ command, input? }` a command it declares.
+        let out = if let Some(point) = i.get("point").and_then(Value::as_str) {
+            oxplow_app::viz_actions::invoke_component_point(
+                &host.svc,
+                &host.root,
+                oxplow_app::viz_actions::ComponentPointInvoke {
+                    component: key.clone(),
+                    point: point.into(),
+                    context: i.get("context").cloned().unwrap_or_else(|| json!({})),
+                    command: i.get("command").and_then(Value::as_str).map(String::from),
+                    on_behalf_of: Actor::Human,
+                    confirmed: true,
+                    version: version.clone(),
+                },
+            )
+            .await
+        } else {
+            invoke_component_command(
+                &host.svc,
+                &host.root,
+                ComponentInvoke {
+                    component: key.clone(),
+                    command: i
+                        .get("command")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .into(),
+                    input: i.get("input").cloned().unwrap_or_else(|| json!({})),
+                    on_behalf_of: Actor::Human,
+                    confirmed: true,
+                    version: version.clone(),
+                },
+            )
+            .await
+        };
         invokes.push(match out {
             Ok(out) => json!({ "ok": true, "result": out.result }),
             // Denied or failed alike: it said no, and why.

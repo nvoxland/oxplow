@@ -1,11 +1,11 @@
-# A task's page: its Move to form transitions the item and its Details
-# form renames it; the board then shows it in its new stage under the new
-# title.
-requires: [oxtask]
+# An oxtask task's page offers Edit (mounted into the shared task page): its
+# Move to form transitions the task and its Details form renames it; the
+# board then shows it in its new stage under the new title.
+requires: [oxplow-bundled]
 given:
   - { command: oxtask.task.create, input: { title: Item to move, stage: ready } }
   - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
-when: { page: task-detail, params: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", thread_id: 1, stream_id: 1 } }
+when: { part: edit-task, params: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" } }
 expect:
   loaders: { state: { rows: [{ stage: ready }] }, fields: { rows: [{ title: Item to move }] } }
 steps:
@@ -15,7 +15,8 @@ steps:
     expect: { ok: true }
   - expect:
       loaders:
-        row: { rows: [{ title: Item moved and renamed }] }
         state: { rows: [{ stage: in_progress }] }
-  - when: { page: work, params: { show: thread, priority: any, thread_id: 1, stream_id: 1 } }
-    expect: { loaders: { board: { rows: [{ title: Item moved and renamed, state: in_progress }] } } }
+        fields: { rows: [{ title: Item moved and renamed }] }
+  # Another store's task: nothing to edit.
+  - params: { uri: "oxplow:oxplow/task?id=ENG-1&provider=elsewhere" }
+    expect: { loaders: { state: { rows: 0 }, fields: { rows: 0 }, body: { rows: 0 } } }

@@ -1,15 +1,14 @@
-# A task's Link… adds a link to another item and Unlink, on its own end,
-# removes it; the Links part reads each change.
+# A task's Links part lists a link from both ends and Unlink, on its own
+# end, removes it: the task.unlink point, answered by the store that holds
+# the task.
 requires: [oxtask]
 given:
   - { command: oxtask.task.create, input: { title: Item with notes, stage: ready } }
   - { command: oxtask.task.create, input: { title: Third item, stage: ready } }
+  - { command: oxtask.task.link, input: { id: tsk1, to: tsk2, type: relates_to } }
 when: { part: task-links, params: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", id: tsk1 } }
-expect: { loaders: { links: { rows: 0 } } }
+expect: { loaders: { links: { rows: [{ item: Third item, link_type: relates_to, outbound: 1 }] } } }
 steps:
-  - press: { action: link, node: links, input: { to: tsk2 } }
-    expect: { ok: true }
-  - expect: { loaders: { links: { rows: [{ item: Third item, link_type: relates_to, outbound: 1 }] } } }
   - press: { action: unlink, node: links, row: { other: "oxplow:oxplow/task?id=tsk2&provider=oxtask", link_type: relates_to } }
     expect: { ok: true }
   - expect: { loaders: { links: { rows: 0 } } }

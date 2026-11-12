@@ -3,10 +3,12 @@ description: "The form to link an oxtask task to another task (its id) or any UR
 icon: link
 params:
 - name: uri
+- name: to
+- name: type
 loaders:
   item:
     sql: |
-      SELECT uri_param(:uri, 'id') AS id, '' AS "to", 'relates_to' AS type
+      SELECT uri_param(:uri, 'id') AS id, coalesce(:to, '') AS "to", coalesce(nullif(:type, ''), 'relates_to') AS type
 view:
   from: item
   viz: form

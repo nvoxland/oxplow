@@ -11,25 +11,23 @@ loaders:
       SELECT c.id, c.author, c.body, c.created_at
       FROM v_oxplow_task_comment c WHERE c.uri = :uri ORDER BY c.created_at, c.id
 view:
-  id: comments
-  from: comments
-  viz: list
-  columns:
-  - key: body
-    label: Says
-    format: markdown
-  - key: author
-    label: Who
-  - key: created_at
-    label: When
-    format: relative
-  empty: No comments.
-  actions:
-  - id: comment
-    label: Comment…
-    command: oxtask.task.comment
-    form: true
-    fixed:
-    - id
-    input:
-      id: '{{param.id}}'
+  stack:
+  - id: comments
+    title: Comments
+    hide_title: true
+    from: comments
+    viz: list
+    columns:
+    - key: body
+      label: Says
+      format: markdown
+    - key: author
+      label: Who
+    - key: created_at
+      label: When
+      format: relative
+    empty: No comments.
+  # Comment… is the store's own form.
+  - action_point: oxplow/task.comment
+    context:
+      uri: { param: uri }

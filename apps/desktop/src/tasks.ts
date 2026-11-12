@@ -143,7 +143,7 @@ export interface TaskTrackerProfile {
 /** The profile `v_model_stage` and `v_model_field_decl` say: the first
  *  store's stages, in its order, and the stores' own fields (oxplow's
  *  `assignee` and `rank` are not a store's). No store: nothing. */
-export function taskTrackerProfileOf(stages: SqlQueryResult, fields: SqlQueryResult): TaskTrackerProfile {
+export function taskTrackerProfileOf(stages: SqlQueryResult, fields: SqlQueryResult, stores?: SqlQueryResult): TaskTrackerProfile {
   const at = (r: SqlQueryResult, row: SqlCell[], name: string) => {
     const i = r.columns.indexOf(name);
     return i < 0 ? null : (row[i] ?? null);
@@ -170,8 +170,14 @@ export function taskTrackerProfileOf(stages: SqlQueryResult, fields: SqlQueryRes
         title: String(at(stages, row, "title")),
         bucket: String(at(stages, row, "bucket")) as Bucket,
       })),
-    // The model does not say how a store's ids look (yet).
-    idPattern: null,
+    // How the store's ids look, as `v_model_store` says.
+    idPattern: stores
+      ? (() => {
+          const row = stores.rows.find((r) => String(at(stores, r, "store")) === provider);
+          const pattern = row ? at(stores, row, "id_pattern") : null;
+          return pattern ? String(pattern) : null;
+        })()
+      : null,
   };
 }
 
@@ -210,12 +216,13 @@ export async function readTaskTrackerProfile(): Promise<{ profile: TaskTrackerPr
     [],
     200,
   );
+  const stores = await querySql("SELECT store, id_pattern FROM v_model_store WHERE model = 'oxplow/task_record'", [], 50);
   return {
-    profile: taskTrackerProfileOf(stages, fields),
+    profile: taskTrackerProfileOf(stages, fields, stores),
     reads: {
-      datasets: [...new Set([...stages.reads.datasets, ...fields.reads.datasets])],
-      tables: [...new Set([...stages.reads.tables, ...fields.reads.tables])],
-      measures: [...new Set([...stages.reads.measures, ...fields.reads.measures])],
+      datasets: [...new Set([...stages.reads.datasets, ...fields.reads.datasets, ...stores.reads.datasets])],
+      tables: [...new Set([...stages.reads.tables, ...fields.reads.tables, ...stores.reads.tables])],
+      measures: [...new Set([...stages.reads.measures, ...fields.reads.measures, ...stores.reads.measures])],
     },
   };
 }

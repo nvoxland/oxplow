@@ -543,6 +543,25 @@ fields:                        # oxplow's own annotations on every store's tasks
   `ref('task_next')` lines and these fixtures' oxtask versions), the
   dropped tracker-none step of `work-shows-only-the-active-task-tracker`
   returns with them, since `task` follows the active tracker.
+- **Bundled names no store's command: task points.** The shared pages, the
+  parts and the Work board act on a task through bundled's item points,
+  `oxplow/task.move { uri, stage }`, `task.edit { uri, title?, body?,
+  priority?, parent? }` (parent is the epic's id in its store),
+  `task.unparent`, `task.delete`, `task.unlink { uri, to, type }` — run by a
+  page or viz action with `point:` / `context:`, or by the board with
+  `invokePoint` (`custom_components[].action_points`) — and `task.comment`,
+  `task.link` (form points, drawn as an `action_point` node: the store's own
+  form). A store's command joins with `ui: { at: <point>, accepts: { store },
+  input: { id: "{{uri.id}}", … } }` (`about` + `at` for the ones that are also
+  item commands). oxtask owns what is oxtask's: the `oxtask/new-task` form
+  (the `task.new` point; bundled's `new-task` page is the point's node), and
+  an `edit-task` part mounted into the task page's `sections` slot (Move to,
+  Details, the description editor; empty on another store's task). Dropped
+  with it: oxtask's "Move To…" form (Mark ▸ is the page's), the Task List's
+  rail quick add (the `task.new` point node), the task page's inline
+  forms (now the mounted part), and the board's menu sets only a task's
+  `priority` (what `task.edit` carries). `task.detail.state` stays a
+  replaceable node (a read-only Stage line).
 - **The `_next` datasets, in final shape, beside core's (flip prep).**
   Nothing live reads them. Each has fixtures (`requires: [oxtask]`) that
   make the same tasks through core's tracker and through oxtask and compare

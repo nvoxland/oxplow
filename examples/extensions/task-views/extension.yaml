@@ -1,15 +1,15 @@
 manifest: 2
 name: task-views
-description: Another way to see the task tracker — swimlanes for the Board, a compact list and a plain editor — over whichever task tracker provider is active.
+description: Another way to see the task tracker — swimlanes for the Board and a compact list — over whichever task tracker provider is active.
 engine: ">=0.7"
 # Its fixtures file tasks, and oxtask is oxplow-bundled's.
 requires: [oxplow-bundled, oxtask]
 version: 0.1.0
 intent:
   purpose: >-
-    Replace oxplow's Board, Tasks list and task editor with views of my own.
-    They read v_oxplow_task and change items only through the task
-    interface commands, so they work with any task tracker.
+    Replace oxplow's Board and Tasks list with views of my own. They read
+    v_oxplow_task and change items only through the task action points
+    (oxplow/task.move, oxplow/task.edit), so they work with any task store.
   origin: null
   examples:
     - name: compact-list
@@ -24,22 +24,19 @@ intent:
     - name: swimlanes-renames
       input: { component: swimlanes }
       expect: renaming an item through the board goes through
-    - name: edit-item
-      input: { part: edit-item, params: { uri: "oxplow:oxplow/task?id=1&provider=oxtask" } }
-      expect: a form for the item's title and body, its uri fixed
     - name: swimlanes-drags-a-card-to-a-lane
       input: { part: swimlanes, params: { scope: all } }
       expect: one lane per stage of the active list; a drag moves the card's item to the lane's stage
     - name: swimlanes-renames-a-card-through-its-title
       input: { part: swimlanes, params: { scope: all } }
       expect: an empty title is refused under the input, Escape puts it back and Enter saves a new one
-permissions: [commands:oxtask.task.move, commands:oxplow.tasks.reorder, commands:oxtask.task.update]
+permissions: [commands:oxplow.tasks.reorder]
 custom_components:
   - id: swimlanes
     title: Swimlanes
-    commands: [oxtask.task.move, oxplow.tasks.reorder, oxtask.task.update]
+    commands: [oxplow.tasks.reorder]
+    action_points: [oxplow/task.move, oxplow/task.edit]
 ui:
   mounts:
     - { page: swimlanes, at: task.board, version: 2 }
     - { page: compact-list, at: task.list, version: 2 }
-    - { page: edit-item, at: task.detail, version: 1 }

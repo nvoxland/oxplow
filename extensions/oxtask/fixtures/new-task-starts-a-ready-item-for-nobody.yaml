@@ -1,7 +1,7 @@
 # New Task… opens this form: a new item starts in the list's first to-do
 # stage (`todo`, its bucket), assigned to nobody
 # (any thread may take it) and under no epic unless one is given.
-requires: [oxtask]
+requires: [oxplow-bundled]
 when: { form: new-task, params: { thread_id: 1 } }
 expect:
   values: { stage: ready, parent: null }

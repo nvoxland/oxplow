@@ -212,6 +212,60 @@ action_points:
     context:
       parent?: uri
       thread_id?: int
+  # What can be done to a task, for whichever store holds it: the store's
+  # command joins the point for its own items. Shared pages and the Work
+  # board run these and name no store's command.
+  - name: task.move
+    label: Move Task
+    doc: Put a task in one of its list's stages.
+    item: uri
+    context:
+      uri: uri
+      stage: string
+  - name: task.edit
+    label: Edit Task
+    doc: Change a task's title, description, priority or parent epic (the epic's id in its store).
+    item: uri
+    context:
+      uri: uri
+      title?: string
+      body?: string
+      priority?: string
+      parent?: string
+  - name: task.unparent
+    label: Make Top-level
+    doc: Take a task out of its epic.
+    item: uri
+    context:
+      uri: uri
+  - name: task.delete
+    label: Delete Task
+    doc: Delete a task.
+    item: uri
+    context:
+      uri: uri
+  - name: task.comment
+    label: Comment
+    doc: Add a comment to a task.
+    item: uri
+    context:
+      uri: uri
+  - name: task.link
+    label: Link
+    doc: Link a task to another item.
+    item: uri
+    context:
+      uri: uri
+      to?: string
+      type?: string
+  - name: task.unlink
+    label: Unlink
+    doc: Remove a link from a task.
+    item: uri
+    context:
+      uri: uri
+      to: string
+      type: string
 # What a request's work touched: one row per request, task and basis.
 resources:
   - name: task
@@ -446,6 +500,8 @@ custom_components:
     description: "The tasks as a kanban board: a column per stage of the list, drag a card to move it, a card's menu to set its stage, fields and assignee."
     bundle: dist/board
     commands: [oxplow.tasks.assign, oxplow.tasks.reorder]
+    # Whichever store holds a card answers these: the board names no store's command.
+    action_points: [oxplow/task.move, oxplow/task.edit, oxplow/task.unparent, oxplow/task.delete]
 panels:
   # What the thread is working on: its open task (with its epic), the
   # items assigned to it next, and what it finished; collapsed, the task.

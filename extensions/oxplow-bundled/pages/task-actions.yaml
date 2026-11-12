@@ -16,31 +16,29 @@ loaders:
 actions:
 - id: done
   label: Mark done
-  command: oxtask.task.move
-  input:
-    id: '{{row.id}}'
+  point: oxplow/task.move
+  context:
+    uri: '{{row.uri}}'
     stage: done
-- id: blocks
-  label: Record a block…
-  command: oxtask.task.link
-  form: true
-  fixed:
-  - id
-  - type
-  input:
-    id: '{{row.id}}'
-    type: blocks
 view:
-  id: item
-  from: item
-  viz: detail
-  columns:
-  - key: title
-    label: Task
-    link:
-      kind: page
-      from: uri
-  - key: stage_title
-    label: Stage
-    icon: icon
-  empty: This task isn't on the active task tracker.
+  stack:
+  - id: item
+    title: Task
+    hide_title: true
+    from: item
+    viz: detail
+    columns:
+    - key: title
+      label: Task
+      link:
+        kind: page
+        from: uri
+    - key: stage_title
+      label: Stage
+      icon: icon
+    empty: This task isn't on the active task tracker.
+  # Record a block… is the store's own link form, starting as a block.
+  - action_point: oxplow/task.link
+    context:
+      uri: { param: uri }
+      type: blocks

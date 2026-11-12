@@ -1,49 +1,13 @@
 title: New Task
-description: "The form for a new task - its title, description, starting stage, priority and parent."
+description: "File a task: each task store offers its own form, here as one button (several stores, a menu)."
 icon: plus
 needs:
 - model:oxplow/task_record
 params:
 - name: thread_id
 - name: parent
-loaders:
-  new_task:
-    sql: |
-      SELECT 'ready' AS stage, CASE WHEN :parent <> '' THEN uri_param(:parent, 'id') END AS parent
-  new_task_parents:
-    sql: |
-      SELECT w.native_id AS value, w.title AS label
-      FROM v_oxplow_task w
-      WHERE w.state NOT IN ('done', 'canceled')
-        AND EXISTS (SELECT 1 FROM v_oxplow_task c WHERE c.parent_uri = w.uri)
-      ORDER BY w.assignee IS NOT (SELECT uri FROM v_thread WHERE id = :thread_id), w.title
-  # Where it may start: the stores' backlog, to-do and blocked stages.
-  stages:
-    page: oxplow/task-stages
-    loader: task_stages
-  new_task_stages:
-    sql: |
-      SELECT value, label FROM stages
-      WHERE bucket IN ('backlog', 'todo', 'blocked')
-      ORDER BY ord
 view:
-  from: new_task
-  viz: form
-  form:
-    command: oxtask.task.create
-    then: replace
-    fields:
-    - title
-    - body
-    - stage
-    - priority
-    - parent
-    choices:
-      stage: oxplow/new-task#new_task_stages
-      parent: oxplow/new-task#new_task_parents
-    again:
-      label: Save and Another
-      keep:
-      - stage
-      - priority
-      - parent
+  action_point: oxplow/task.new
+  context:
+    parent: { param: parent }
+    thread_id: { param: thread_id }

@@ -76,6 +76,15 @@ test("the profile reads the stores' stages and fields; no store has none", () =>
     ],
     idPattern: null,
   });
+  // The store's id pattern is the model's (`v_model_store`).
+  const stores = {
+    columns: ["store", "id_pattern"],
+    rows: [["oxtask", "tsk[0-9]+"]],
+    truncated: false,
+    reads: { datasets: ["v_model_store"], tables: [], measures: [] },
+    freshness: {},
+  } as unknown as SqlQueryResult;
+  expect(taskTrackerProfileOf(stages, fields, stores).idPattern).toBe("tsk[0-9]+");
   const none = { ...stages, rows: [] } as unknown as SqlQueryResult;
   expect(taskTrackerProfileOf(none, fields)).toEqual({ provider: null, features: NO_FEATURES, fields: [], stages: [], idPattern: null });
 });

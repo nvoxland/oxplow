@@ -1,0 +1,15 @@
+# A dry run: the store is answered from the example.
+requires: [oxplow-bundled, oxtask]
+when:
+  command: oxtask.task.unparent
+  input: { id: tsk2 }
+  answers:
+    store.sql:
+      - rows: [{ parent: tsk1 }]
+expect:
+  commands: [oxplow.extension_store.write]
+  result: { id: tsk2 }
+  inverse:
+    commands:
+      - name: oxtask.task.update
+        input: { id: tsk2, parent: tsk1 }

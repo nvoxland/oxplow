@@ -1,0 +1,13 @@
+# Link… (the store's own form, placed by the task.link point) links a task to
+# another and can start as a block.
+requires: [oxplow-bundled]
+given:
+  - { command: oxtask.task.create, input: { title: Item with notes, stage: ready } }
+  - { command: oxtask.task.create, input: { title: Third item, stage: ready } }
+when: { page: link-task, params: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", type: blocks } }
+expect: { loaders: { item: { rows: [{ id: tsk1, type: blocks }] } } }
+steps:
+  - submit: { node: item, input: { id: tsk1, to: tsk2, type: blocks } }
+    expect: { ok: true }
+  - when: { sql: "SELECT parent, \"to\", type FROM v_oxplow_task_record_links" }
+    expect: { rows: [{ parent: "oxplow:oxplow/task?id=tsk1&provider=oxtask", "to": "oxplow:oxplow/task?id=tsk2&provider=oxtask", type: blocks }] }

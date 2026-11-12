@@ -19,16 +19,16 @@ steps:
           text: { '[data-testid="column-ready"] h2': Ready, '[data-testid="column-in_progress"] h2': In Progress, '[data-testid="column-ready"] .card-title': Next up }
       - drag: { from: '[data-testid="column-ready"] .ox-card', to: '[data-testid="column-in_progress"]' }
       - expect:
-          invoked: [{ command: oxtask.task.move, input: { id: tsk1, stage: in_progress }, ok: true }]
+          invoked: [{ point: oxplow/task.move, context: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", stage: in_progress }, ok: true }]
           count: { '[data-testid="column-in_progress"] .ox-card': 1, '[data-testid="column-ready"] .ox-card': 0 }
-      # The card's menu: its field's values, each an update.
+      # The card's menu: its field's values, each an edit of the task, through the task.edit point.
       - click: '[data-testid="column-in_progress"] .card-menu'
       - expect: { visible: '[data-testid="card-menu"]', text: { '[data-id="priority-low"]': "✓ Low" } }
       - click: '[data-id="priority-high"]'
       - expect:
           invoked:
-            - { command: oxtask.task.move, input: { id: tsk1, stage: in_progress }, ok: true }
-            - { command: oxtask.task.update, input: { id: tsk1, priority: high }, ok: true }
+            - { point: oxplow/task.move, context: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", stage: in_progress }, ok: true }
+            - { point: oxplow/task.edit, context: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", priority: high }, ok: true }
       # Show is the tab's view: everyone's cards (the unassigned too); a
       # card's menu assigns one to this thread, and Back to the thread's
       # shows it there.
@@ -40,8 +40,8 @@ steps:
       - click: '[data-id="assign-oxplow:oxplow/thread?id=thr1"]'
       - expect:
           invoked:
-            - { command: oxtask.task.move, input: { id: tsk1, stage: in_progress }, ok: true }
-            - { command: oxtask.task.update, input: { id: tsk1, priority: high }, ok: true }
+            - { point: oxplow/task.move, context: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", stage: in_progress }, ok: true }
+            - { point: oxplow/task.edit, context: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", priority: high }, ok: true }
             - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" }, ok: true }
       - view_params: { show: null }
       - expect: { count: { '[data-testid="column-ready"] .ox-card': 1, '[data-testid="column-in_progress"] .ox-card': 1 } }
