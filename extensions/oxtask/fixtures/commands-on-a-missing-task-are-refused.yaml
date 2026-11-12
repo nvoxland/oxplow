@@ -1,0 +1,26 @@
+# A command that names a task that isn't there fails with "no such task"
+# instead of succeeding and changing nothing.
+requires: [oxplow-bundled, oxtask]
+given:
+  - { command: oxtask.task.create, input: { title: A } }
+when: { command: oxtask.task.move, input: { id: tsk99, stage: done } }
+expect: { ok: false, refused: "no such task tsk99" }
+steps:
+  - when: { command: oxtask.task.update, input: { id: tsk99, title: X } }
+    expect: { ok: false, refused: "no such task tsk99" }
+  - when: { command: oxtask.task.delete, input: { id: tsk99 } }
+    expect: { ok: false, refused: "no such task tsk99" }
+  - when: { command: oxtask.task.restore, input: { id: tsk1 } }
+    expect: { ok: false, refused: "no deleted task tsk1" }
+  - when: { command: oxtask.task.link, input: { id: tsk99, to: tsk1, type: blocks } }
+    expect: { ok: false, refused: "no such task tsk99" }
+  - when: { command: oxtask.task.comment, input: { id: tsk99, body: Hi } }
+    expect: { ok: false, refused: "no such task tsk99" }
+  - when: { command: oxtask.task.update, input: { id: tsk1, parent: tsk99 } }
+    expect: { ok: false, refused: "no such task tsk99" }
+  - when: { command: oxtask.task.update, input: { id: tsk1, parent: "not an id" } }
+    expect: { ok: false }
+  - when: { command: oxtask.task.create, input: { title: B, parent: tsk99 } }
+    expect: { ok: false, refused: "no such task tsk99" }
+  - when: { sql: "SELECT count(*) AS n FROM v_oxplow_task_record" }
+    expect: { rows: [{ n: 1 }] }

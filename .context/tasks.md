@@ -646,6 +646,21 @@ bundled's `task_record` model. It uses only what any extension can use.
   trigger; two agents filing at once can't collide. The new id is in the
   write's `rows` (the run's children); the command's own `result` can't
   name it (the script runs before the write).
+- **An id is never reused.** `n` is `INTEGER PRIMARY KEY AUTOINCREMENT`
+  (tasks and comments), so a number that was used never comes back, even
+  after a manual delete of the highest row. **The later data move must seed
+  `sqlite_sequence` with the highest imported number** (`task` and
+  `task_comment`), or new ids can collide with the old ones.
+- **Rows are never hard deleted.** A hard `DELETE` bumps no `seq`, so the
+  incremental collector would never see it. `BEFORE DELETE` triggers on
+  `task`, `task_link` and `task_comment` abort with a message that says to
+  use `oxtask.task.delete` (a soft delete).
+- **A command on a task that isn't there fails.** `task_link` and
+  `task_comment` reference `task(id)` (the store turns `foreign_keys` on),
+  `parent` references it too, and each command checks the task first
+  ("no such task tsk99") and writes with `expect_changes`
+  (`.context/extensions-permissions.md` "Store services"), so a race rolls
+  back instead of changing nothing.
 - **Stages**: oxtask's own — `backlog`, `ready` "Ready", `in_progress`,
   `blocked`, `done`, `canceled` — each with its bucket; every row the
   collector states carries `stage`, `stage_title` and the bucket as
