@@ -516,6 +516,45 @@ fields:                        # oxplow's own annotations on every store's tasks
   `ref('task_next')` lines and these fixtures' oxtask versions), the
   dropped tracker-none step of `work-shows-only-the-active-task-tracker`
   returns with them, since `task` follows the active tracker.
+- **The `_next` datasets, in final shape, beside core's (flip prep).**
+  Nothing live reads them. Each has fixtures (`requires: [oxtask]`) that
+  make the same tasks through core's tracker and through oxtask and compare
+  the rows:
+  - `task_next` is `v_task`'s columns, names and meanings. Closed for the
+    match: `body` is `''` for a task with none (core's default; the model
+    stores no body), `stage_title` is core's ("In Progress": oxtask's title
+    for the stage follows it), and `rank` counts from 0 in a queue (core's;
+    `oxplow.tasks.assign` and `reorder` number that way). What still
+    differs, by design: `native` holds the store's own fields (oxtask:
+    `author` as a URI, `author_kind`, `priority` when set; core's was
+    `priority` and `author: user`), a comment's id (below), timestamps'
+    precision, and the rows listed: `v_task` is the active tracker's items
+    only, `task_next` every store's. A task closed on a done stage has the
+    time it first closed in both.
+  - `task_link_next` is `v_task_link`'s columns including `created_at`: the
+    links child has an `at` column (oxtask's `task_link.created_at`, stated
+    by its collector; the move carries core's).
+  - `task_comment_next` (new) is `v_task_comment`'s columns over the
+    comments child; `id` is the store's (`cmt3`, core's `oxtask_note:3`) and
+    `author` a URI.
+  - `search_task_next` (new) is `v_search_task`'s rows: the task's id, its
+    body, then its comments in the body; `stream_id` from the assigned
+    thread; tasks assigned to an archived thread or stream left out.
+    (Core's stream archive also releases the stream's assignments, so there
+    the task returns project-wide; bundled does that at the flip when it
+    reacts to the archive.)
+  - Request links: besides the collector on `oxplow.task_record.changed`,
+    `oxplow.request_task_prompt` (on `agent.prompt.submitted`, from the
+    `prompt_mention` edges of a person's turn to tasks) writes basis
+    `prompt`, and `oxplow.request_task_assigned` (on `agent.turn.ended`,
+    from the tasks in progress and assigned to the thread in
+    `task_next`) writes basis `assigned`, both into `request_task_next`
+    with the event's time and turn: the links core's `hook_ingest` and
+    `request_links::link_assigned_tx` write. The `assigned` read is of the
+    task state when the collector runs, just after the turn's end. The
+    older change-event collector also writes `assigned` when an assignment
+    to the thread is made in a turn, a superset of core's; the flip may
+    drop it.
 - **Before the deletes:** the provider `read` adapter, and the boot repair
   over models and their children (core's repair goes with the task
   projection).
