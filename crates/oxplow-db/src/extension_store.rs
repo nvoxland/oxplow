@@ -163,6 +163,7 @@ fn execute(tx: &Connection, batch: &[Statement]) -> Result<Answer, StoreError> {
         };
         for statement in batch {
             refuse_escape(&statement.sql)?;
+            check_expectation(statement)?;
             let mut prepared = tx.prepare(&statement.sql).map_err(fail)?;
             let params: Vec<rusqlite::types::Value> = statement.params.iter().map(cell).collect();
             if prepared.column_count() == 0 {
@@ -204,6 +205,31 @@ fn execute(tx: &Connection, batch: &[Statement]) -> Result<Answer, StoreError> {
         }
         Ok(answer)
     }
+}
+
+/// `expect_changes` counts the rows a write changed: a statement that isn't
+/// an INSERT, UPDATE or DELETE (a SELECT, DDL, a PRAGMA) has no such count,
+/// so naming one is a mistake, not a check that passes.
+fn check_expectation(statement: &Statement) -> Result<(), StoreError> {
+    if statement.expect_changes.is_none() {
+        return Ok(());
+    }
+    let first = statement
+        .sql
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .to_ascii_uppercase();
+    if matches!(
+        first.as_str(),
+        "INSERT" | "UPDATE" | "DELETE" | "REPLACE" | "WITH"
+    ) {
+        return Ok(());
+    }
+    Err(StoreError(format!(
+        "`expect_changes` counts the rows an INSERT, UPDATE or DELETE changed; `{}` is none of them",
+        statement.sql
+    )))
 }
 
 /// Check a statement's `expect_changes` against the rows it changed.
@@ -322,6 +348,35 @@ mod tests {
         let mut hit = stmt("UPDATE book SET title = 'x' WHERE id = 'b0'", vec![]);
         hit.expect_changes = Some(1);
         store.write(&[hit]).unwrap();
+    }
+
+    #[test]
+    fn expect_changes_on_a_statement_that_is_no_write_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ExtensionStore::open(&dir.path().join("s.sqlite")).unwrap();
+        store.migrate(&migrations()).unwrap();
+        for sql in [
+            "SELECT id FROM book",
+            "CREATE TABLE t (x)",
+            "PRAGMA user_version",
+        ] {
+            let mut bad = stmt(sql, vec![]);
+            bad.expect_changes = Some(0);
+            let err = store.write(&[bad]).unwrap_err();
+            assert!(
+                err.0.contains("`expect_changes` counts the rows an INSERT"),
+                "{sql}: {err}"
+            );
+        }
+        // A write, with or without RETURNING, and a CTE write still count.
+        for sql in [
+            "INSERT INTO book (id, title) VALUES ('b8', 'T') RETURNING id",
+            "WITH x AS (SELECT 'b7' AS i) INSERT INTO book (id, title) SELECT i, 'T' FROM x",
+        ] {
+            let mut ok = stmt(sql, vec![]);
+            ok.expect_changes = Some(1);
+            store.write(&[ok]).unwrap();
+        }
     }
 
     /// oxtask's schema: a command can't make a raw `DELETE` (only an

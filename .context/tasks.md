@@ -634,23 +634,24 @@ bundled's `task_record` model. It uses only what any extension can use.
 
 - **Its file** (`storage: { sqlite: true }`, migrations under
   `storage/migrations/`): `task (n INTEGER PRIMARY KEY, id TEXT UNIQUE —
-  'tsk' || n, title, body, stage, parent, priority, author, created_at,
+  'tsk' || n, title, body, stage, parent, priority, author, author_kind,
+  created_at,
   updated_at, closed_at, seq INTEGER, deleted INTEGER DEFAULT 0)`,
   `task_link (task_id, to_uri, type, seq, deleted)`, `task_comment (id,
-  task_id, author, at, body, seq, deleted)`, and a `change_seq` counter.
+  task_id, author, author_kind, at, body, seq, deleted)`, and a `change_seq` counter.
   **SQLite triggers** bump `seq` on every insert, update and soft delete,
   so a write from anywhere (its commands, `oxplow-dev task`, a person's
   sqlite3) is seen by the collector.
 - **Ids are minted in the write**: `INSERT INTO task (title, …) VALUES
   (…) RETURNING id`, the id derived from `n` in the same statement or a
   trigger; two agents filing at once can't collide. The new id is in the
-  write's `rows` (the run's children); the command's own `result` can't
-  name it (the script runs before the write).
+  write's `rows` (the run's children); the script's `finish` reads it
+  there, so the command's `result` and `inverse` name it.
 - **An id is never reused.** `n` is `INTEGER PRIMARY KEY AUTOINCREMENT`
   (tasks and comments), so a number that was used never comes back, even
-  after a manual delete of the highest row. **The later data move must seed
-  `sqlite_sequence` with the highest imported number** (`task` and
-  `task_comment`), or new ids can collide with the old ones.
+  after a manual delete of the highest row. The data move
+  (`oxplow-dev task move-to-oxtask`) seeds `sqlite_sequence` with the
+  highest number the old tables ever gave (`task` and `task_comment`).
 - **Rows are never hard deleted.** A hard `DELETE` bumps no `seq`, so the
   incremental collector would never see it. `BEFORE DELETE` triggers on
   `task`, `task_link` and `task_comment` abort with a message that says to
@@ -672,12 +673,15 @@ bundled's `task_record` model. It uses only what any extension can use.
   returns `cursor: { seq }`. A store write is observed at once, as its
   command.
 - **Its fields**: `priority` (enum urgent, high, medium, low) and a
-  read-only `author`, in its `fills:` entry; `id_pattern: "tsk[0-9]+"`.
+  read-only `author` (the actor's URI) and `author_kind` (`person`, `agent`
+  or `system`, from `x["actor"]["kind"]`), in its `fills:` entry; a
+  comment carries both too (the `author_kind` column of bundled's
+  `task_record` comments child); `id_pattern: "tsk[0-9]+"`.
 - **Its commands** (its own shape, not the old generic verbs):
   `oxtask.task.create { title, body?, stage?, parent?, priority? }`,
   `oxtask.task.update { id, title?, body?, priority?, parent? }`,
   `oxtask.task.move { id, stage }`, `oxtask.task.link { id, to, type }` /
-  `unlink`, `oxtask.task.comment { id, body }` (and `uncomment { comment }`, its undo), `oxtask.task.delete { id }`. `create` and `comment` answer the id they minted (their script's `finish` reads the insert's `RETURNING` row) and return the inverse that deletes the task / removes the comment; the author of either is who ran the command (`x["actor"]["uri"]`).
+  `unlink`, `oxtask.task.comment { id, body }` (and `uncomment { comment }`, its undo), `oxtask.task.delete { id }`. `create` and `comment` answer the id they minted (their script's `finish` reads the insert's `RETURNING` row) and return the inverse that deletes the task / removes the comment; the author of either is who ran the command (`x["actor"]["uri"]`, its kind in `author_kind`). `uncomment`, `link` and `unlink` write with `expect_changes`, so a missing comment or link is refused.
   Each composes `oxplow.extension_store.write`, and returns an `inverse`
   (its own command that makes the opposite write) where one exists, so
   each is undoable. Assignment and rank are not oxtask's: they are

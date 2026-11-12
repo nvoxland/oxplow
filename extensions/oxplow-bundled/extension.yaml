@@ -164,7 +164,7 @@ models:
         edge: { to: to, type_from: type, prefix: "task_record_link:" }
       comments:
         key: [id]
-        columns: { id: text, author: text, at: time, body: { type: text, markdown: {} } }
+        columns: { id: text, author: text, author_kind: { type: text, values: [person, agent, system] }, at: time, body: { type: text, markdown: {} } }
   - name: knowledge_record
     resource: knowledge
     open: true

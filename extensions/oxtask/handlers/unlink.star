@@ -12,6 +12,7 @@ def transform(x):
     write = {
         "sql": "UPDATE task_link SET deleted = 1 WHERE task_id = ?1 AND to_uri = ?2 AND type = ?3 AND deleted = 0",
         "params": [i["id"], to, i["type"]],
+        "expect_changes": 1,
     }
     out = {
         "commands": [{"name": "oxplow.extension_store.write", "input": {"batch": [write]}}],

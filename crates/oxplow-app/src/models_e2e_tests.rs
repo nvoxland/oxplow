@@ -228,11 +228,9 @@ async fn a_store_id_two_extensions_claim_is_refused() {
 
 const DB_STORE: &str = "manifest: 2\nname: shelfdb\nintent:\n  purpose: p\nrequires: [shelf]\npermissions: ['commands:oxplow.extension_store.write']\nstorage: { sqlite: true }\nfills:\n  - model: shelf/book\n    stores: [shelfdb]\ncollectors:\n  - id: books\n    runtime: starlark\n    entry: books.star\n    needs: [store.sql]\n    on: [{ sqlite: own }]\ncommands:\n  - name: book.add\n    summary: Add a book.\n    input_schema: { type: object }\n    entry: handlers/add.star\n";
 
-/// A store's command that writes its own file is observed at once, as
-/// that command: the model shows the row when the command returns, and its
-/// change event carries the command's anchors (the agent's thread).
-#[tokio::test(flavor = "multi_thread")]
-async fn a_stores_write_shows_in_the_model_when_its_command_returns() {
+/// `shelf` and its sqlite store `shelfdb` (a snapshot collector, and a
+/// command `book.add` that inserts a row) on, and an agent mid-turn.
+async fn shelfdb_with_an_agent_mid_turn() -> (crate::test_fixtures::ThreadFixture, Actor) {
     let fx = services_with_thread().await;
     let root = fx._dir.path();
     write(root, ".oxplow/extensions/shelf/extension.yaml", OWNER);
@@ -283,6 +281,15 @@ async fn a_stores_write_shows_in_the_model_when_its_command_returns() {
         thread_id: Some(fx.thread),
         stream_id: None,
     };
+    (fx, agent)
+}
+
+/// A store's command that writes its own file is observed at once, as
+/// that command: the model shows the row when the command returns, and its
+/// change event carries the command's anchors (the agent's thread).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stores_write_shows_in_the_model_when_its_command_returns() {
+    let (fx, agent) = shelfdb_with_an_agent_mid_turn().await;
     fx.svc
         .commands
         .run(
@@ -327,4 +334,56 @@ async fn a_stores_write_shows_in_the_model_when_its_command_returns() {
         "and its open turn's: {:?}",
         changed[0].envelope.anchors
     );
+}
+
+/// A write to the store's file from outside (a person's sqlite3) that no
+/// trigger has observed yet is nobody's, even when a command's write is
+/// observed next: the command's turn takes only its own change.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_outside_write_pending_when_a_command_writes_is_nobodys() {
+    let (fx, agent) = shelfdb_with_an_agent_mid_turn().await;
+    let add = |id: &'static str| {
+        let (svc, agent) = (fx.svc.clone(), agent.clone());
+        async move {
+            svc.commands
+                .run(
+                    &agent,
+                    "shelfdb.book.add",
+                    json!({ "id": id, "title": id }),
+                    true,
+                )
+                .await
+                .unwrap();
+        }
+    };
+    add("dune").await;
+    let file = crate::extension::store_path(fx._dir.path(), "shelfdb");
+    rusqlite::Connection::open(&file)
+        .unwrap()
+        .execute("INSERT INTO book (id, title) VALUES ('emma', 'Emma')", [])
+        .unwrap();
+    add("carrie").await;
+    let threads: Vec<(String, Option<oxplow_domain::ThreadId>)> = fx
+        .svc
+        .event_log_store
+        .read_after(0, 1000)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.envelope.event_type == "shelf.book.changed")
+        .map(|e| {
+            (
+                e.envelope.payload["uri"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+                e.envelope.anchors.thread_id,
+            )
+        })
+        .collect();
+    assert_eq!(threads.len(), 3, "{threads:?}");
+    for (uri, thread) in &threads {
+        let want = (!uri.contains("id=emma")).then_some(fx.thread);
+        assert_eq!(*thread, want, "{uri}");
+    }
 }

@@ -1,5 +1,5 @@
 # A comment mints its id in the insert; the command answers it and returns the
-# inverse that removes it. The author is who ran the command.
+# inverse that removes it. The author is who ran the command, with its kind.
 requires: [oxplow-bundled, oxtask]
 given:
   - { command: oxtask.task.create, input: { title: A } }
@@ -13,8 +13,8 @@ expect:
 steps:
   - when: { command: oxtask.task.comment, input: { id: tsk1, body: Second note }, as: agent }
     expect: { ok: true, result: { comment: cmt2 } }
-  - when: { sql: "SELECT id, author, body, at IS NOT NULL AS timed FROM v_oxplow_task_record_comments ORDER BY id" }
+  - when: { sql: "SELECT id, author, author_kind, body, at IS NOT NULL AS timed FROM v_oxplow_task_record_comments ORDER BY id" }
     expect:
       rows:
-        - { id: cmt1, author: "oxplow:oxplow/person", body: First note, timed: 1 }
-        - { id: cmt2, author: "oxplow:oxplow/thread?id=thr1", body: Second note, timed: 1 }
+        - { id: cmt1, author: "oxplow:oxplow/person", author_kind: person, body: First note, timed: 1 }
+        - { id: cmt2, author: "oxplow:oxplow/thread?id=thr1", author_kind: agent, body: Second note, timed: 1 }

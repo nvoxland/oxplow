@@ -48,6 +48,7 @@ fills:
     fields:
       - { name: priority, title: Priority, kind: enum, values: [urgent, high, medium, low] }
       - { name: author, title: Author, kind: text, read_only: true }
+      - { name: author_kind, title: Author kind, kind: enum, values: [person, agent, system], read_only: true }
 collectors:
   - id: tasks
     doc: Reads the task tables of this extension's file and states the tasks of the oxtask store, each with its links and comments.

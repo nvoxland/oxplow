@@ -2107,6 +2107,29 @@ impl CollectorRunner {
         for (owner, id, _) in &observers {
             held.push(run_lock(&root, owner, id).lock_owned().await);
         }
+        // An outside write to the file (a person's sqlite3) that no trigger
+        // has observed yet is nobody's: observed first, with no anchors, so
+        // the command's run below takes only the command's change. A files
+        // trigger names only the command's paths, so it needs no such run.
+        let nobody = RunContext::core(
+            oxplow_domain::Actor::System,
+            oxplow_domain::run::Mode::External,
+        );
+        for (owner, id, trigger) in &observers {
+            if matches!(trigger, RunTrigger::Sqlite) {
+                if let Err(e) = Box::pin(run_collector_held(
+                    &ctx,
+                    &nobody,
+                    owner,
+                    id,
+                    RunTrigger::Sqlite,
+                ))
+                .await
+                {
+                    tracing::warn!(collector = %format!("{owner}/{id}"), error = ?e, "an outside write before a store's write wasn't observed; its next trigger will");
+                }
+            }
+        }
         let written = write.await?;
         for (owner, id, trigger) in observers {
             if let Err(e) = run_collector_held(&ctx, run, &owner, &id, trigger).await {

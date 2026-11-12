@@ -37,9 +37,11 @@ oxplow-dev task comment <id> <body>
 oxplow-dev task link <id> <target> <blocks|discovered_from|relates_to|duplicates|supersedes|replies_to|about>
 oxplow-dev task unlink <id> <target> <link type>
 
-oxplow-dev task move-to-oxtask [--dry-run]   one-off: move core's tasks into oxtask's own file
+oxplow-dev task move-to-oxtask [--dry-run] [--replace]
+                                             one-off: move core's tasks into oxtask's own file
                                              and bundled's fields (oxplow quit, the new
-                                             binary booted once; --dry-run keeps nothing)
+                                             binary booted once; --dry-run keeps nothing;
+                                             --replace redoes a move already made)
 
 oxplow-dev knowledge list [--store oxwiki]   the pages (id, title)
 oxplow-dev knowledge show <id> [--store S]
@@ -103,10 +105,11 @@ async fn run(mut args: Vec<String>, env_thread: Option<String>) -> Result<String
         && args.get(1).is_some_and(|a| a == "move-to-oxtask")
     {
         let dry_run = take_switch(&mut args, "--dry-run");
+        let replace = take_switch(&mut args, "--replace");
         if args.len() != 2 {
             return Err(format!("usage:\n{USAGE}"));
         }
-        return move_tasks::move_to_oxtask(&project, dry_run).await;
+        return move_tasks::move_to_oxtask(&project, dry_run, replace).await;
     }
     match args.first().map(String::as_str) {
         Some("task") => {
