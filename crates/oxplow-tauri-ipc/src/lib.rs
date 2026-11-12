@@ -95,6 +95,12 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         // One viz node's config with its loader's rows: what the desktop's
         // viz components draw (`viz/nodeRun.ts` builds it from a page run).
         .typ::<oxplow_app::pages::spec::VizRun>()
+        // A task store's stages, their buckets and its own fields: the
+        // desktop reads them from `v_model_stage` / `v_model_field_decl`
+        // (`tasks.ts`), which no command returns.
+        .typ::<oxplow_domain::tasks::Bucket>()
+        .typ::<oxplow_domain::tasks::StageDecl>()
+        .typ::<oxplow_domain::tasks::FieldDecl>()
         .commands(collect_commands![
             // app
             commands::generated::app_version,

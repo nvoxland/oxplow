@@ -1258,6 +1258,15 @@ export type BlameLine = {
 };
 
 /**
+ *  What a task tracker's stage means to core: the bucket each of its declared
+ *  stages ([`StageDecl`]) is in. Core acts on buckets only — `backlog` is
+ *  filed but not ready, `todo` is ready (what an idle thread may pull),
+ *  `in_progress` is started, `blocked` waits on an answer, `done` and
+ *  `canceled` are closed — and the screens draw the list's own stages.
+ */
+export type Bucket = "backlog" | "todo" | "in_progress" | "blocked" | "done" | "canceled";
+
+/**
  *  What a deploy builds before it copies: `run` in the source folder, as
  *  the person, then `output` is copied into the deployment. The hash is of
  *  the inputs — every file but `output` and the `exclude` folders — and
@@ -2918,6 +2927,34 @@ export type Extension_Serialize = {
 	 */
 	shared: boolean,
 };
+
+/**
+ *  One of a task tracker's own fields: kept in an item's `native` under
+ *  `name`, declared so screens render and edit it without knowing which
+ *  list is active.
+ */
+export type FieldDecl = {
+	/**  Its key in `native` (snake_case). */
+	name: string,
+	/**  How a person names it. */
+	title: string,
+	kind: FieldKind,
+	/**
+	 *  An `enum`'s values, in the order they're offered (empty for any
+	 *  other kind).
+	 */
+	values?: string[],
+	/**
+	 *  Set by the list itself (who filed it, when it synced): shown, never
+	 *  edited — a `oxplow.task.update` that names it is refused.
+	 */
+	read_only?: boolean,
+};
+
+/**  What kind of value a declared field holds. */
+export type FieldKind =
+/**  One of `values`. */
+"enum" | "text" | "number";
 
 /**  A field's value a condition compares with. */
 export type FieldValue = boolean | number | null | string;
@@ -6310,6 +6347,20 @@ export type SqlQueryResult = {
 	 *  keeps current carry no entry.
 	 */
 	coverage?: SourceCoverage[],
+};
+
+/**
+ *  One of a task tracker's stages, as it declares them in order: its id (what
+ *  a record and an input name), how a person names it, and its bucket. The
+ *  first stage of a bucket is that bucket's default — where an input
+ *  naming the bucket (`to: done`) lands.
+ */
+export type StageDecl = {
+	/**  snake_case, unique in the list (`in_review`). */
+	id: string,
+	/**  How a person names it (`In Review`). */
+	title: string,
+	bucket: Bucket,
 };
 
 /**  One store id or a list of them. */
