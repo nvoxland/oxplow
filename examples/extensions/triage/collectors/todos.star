@@ -5,7 +5,7 @@ KINDS = ["bug", "cleanup", "feature"]
 
 def transform(input):
     rows = scope("sql.read", {
-        "sql": "SELECT count(*) AS n FROM v_task WHERE state NOT IN ('done', 'canceled')",
+        "sql": "SELECT count(*) AS n FROM v_oxplow_task WHERE state NOT IN ('done', 'canceled')",
     })
     facts = [{"measure": "triage.open_items", "value": rows[0]["n"]}]
     for f in source_files():

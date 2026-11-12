@@ -2,7 +2,7 @@
 when:
   component: swimlanes
   invokes:
-    - { command: oxplow.task.update, input: { uri: "oxplow:oxplow/task?id=1&provider=oxtask", title: x } }
+    - { command: oxtask.task.update, input: { id: tsk99, title: x } }
 expect:
   invokes:
     - { ok: false, refused: $any }

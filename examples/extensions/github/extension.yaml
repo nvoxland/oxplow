@@ -62,7 +62,7 @@ collectors:
           url: text
         relations:
           - { to: v_stream, on: "v_github_pr.head_branch = v_stream.branch" }
-          - { to: v_task, on: "v_github_pr.title LIKE '%' || v_task.native_id || '%'" }
+          - { to: v_oxplow_task, on: "v_github_pr.title LIKE '%' || v_oxplow_task.native_id || '%'" }
 datasets:
   - name: pull_request
     version: 2

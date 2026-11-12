@@ -6,17 +6,13 @@ params:
 loaders:
   edit_item:
     sql: |
-      SELECT title, body FROM v_task WHERE uri = :uri
+      SELECT native_id AS id, title, body FROM v_oxplow_task WHERE uri = :uri
 view:
   from: edit_item
   viz: form
   form:
-    command: oxplow.task.update
+    command: oxtask.task.update
     mode: edit
-    defaults:
-      uri: '{{param.uri}}'
-    fixed:
-    - uri
     fields:
     - title
     - body

@@ -12,8 +12,8 @@ params:
 loaders:
   compact_list:
     sql: |
-      SELECT w.uri, w.title, w.state, w.updated_at
-      FROM v_task w
+      SELECT w.uri, w.native_id AS id, w.title, w.state, w.updated_at
+      FROM v_oxplow_task w
       WHERE :scope = 'all'
          OR (:scope = 'thread' AND w.assignee = uri('oxplow/thread', 'id', 'thr' || :thread_id))
          OR (:scope = 'stream' AND w.assignee IN (SELECT t.uri FROM v_thread t WHERE t.stream_id = :stream_id))
@@ -37,18 +37,18 @@ view:
   actions:
   - id: done
     label: Done
-    command: oxplow.task.transition
+    command: oxtask.task.move
     input:
-      uri: '{{row.uri}}'
-      to: done
+      id: '{{row.id}}'
+      stage: done
     row: true
   - id: edit
     label: Edit…
-    command: oxplow.task.update
+    command: oxtask.task.update
     input:
-      uri: '{{row.uri}}'
+      id: '{{row.id}}'
       title: '{{row.title}}'
     row: true
     form: true
     fixed:
-    - uri
+    - id

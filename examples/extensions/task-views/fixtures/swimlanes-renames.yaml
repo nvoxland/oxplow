@@ -1,10 +1,11 @@
 # Renaming an item through the board goes through: the update answers
 # with the item.
+requires: [oxtask]
 when:
   component: swimlanes
   items: [Fix the parser]
   invokes:
-    - { command: oxplow.task.update, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", title: Fix the lexer } }
+    - { command: oxtask.task.update, input: { id: tsk1, title: Fix the lexer } }
 expect:
   invokes:
     - { ok: true, result: $any }

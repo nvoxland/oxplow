@@ -3,12 +3,12 @@ name: task-views
 description: Another way to see the task tracker — swimlanes for the Board, a compact list and a plain editor — over whichever task tracker provider is active.
 engine: ">=0.7"
 # Its fixtures file tasks, and oxtask is oxplow-bundled's.
-requires: [oxplow-bundled]
+requires: [oxplow-bundled, oxtask]
 version: 0.1.0
 intent:
   purpose: >-
     Replace oxplow's Board, Tasks list and task editor with views of my own.
-    They read v_task and change items only through the task
+    They read v_oxplow_task and change items only through the task
     interface commands, so they work with any task tracker.
   origin: null
   examples:
@@ -33,11 +33,11 @@ intent:
     - name: swimlanes-renames-a-card-through-its-title
       input: { part: swimlanes, params: { scope: all } }
       expect: an empty title is refused under the input, Escape puts it back and Enter saves a new one
-permissions: [commands:oxplow.task.transition, commands:oxplow.task.reorder, commands:oxplow.task.update]
+permissions: [commands:oxtask.task.move, commands:oxplow.tasks.reorder, commands:oxtask.task.update]
 custom_components:
   - id: swimlanes
     title: Swimlanes
-    commands: [oxplow.task.transition, oxplow.task.reorder, oxplow.task.update]
+    commands: [oxtask.task.move, oxplow.tasks.reorder, oxtask.task.update]
 ui:
   mounts:
     - { page: swimlanes, at: task.board, version: 2 }

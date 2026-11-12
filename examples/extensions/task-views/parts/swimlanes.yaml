@@ -1,5 +1,5 @@
 title: Swimlanes
-description: The tasks as a column per stage of the active list; drag a card to move it, click its title to rename it. It stands in for oxplow's Board.
+description: The tasks as a column per stage of the task stores; drag a card to move it, click its title to rename it. It stands in for oxplow's Board.
 params:
 - name: scope
   role: filter
@@ -12,8 +12,8 @@ params:
 loaders:
   swimlanes:
     sql: |
-      SELECT w.uri, w.title, w.stage, w.rank
-      FROM v_task w
+      SELECT w.uri, w.native_id AS id, w.title, w.stage, w.rank
+      FROM v_oxplow_task w
       WHERE :scope = 'all'
          OR (:scope = 'thread' AND w.assignee = uri('oxplow/thread', 'id', 'thr' || :thread_id))
          OR (:scope = 'stream' AND w.assignee IN (SELECT t.uri FROM v_thread t WHERE t.stream_id = :stream_id))
@@ -22,13 +22,10 @@ loaders:
       ORDER BY w.stage, w.rank
   stages:
     sql: |
-      SELECT CAST(json_extract(s.value, '$.id') AS TEXT) AS value,
-             CAST(json_extract(s.value, '$.title') AS TEXT) AS label,
-             CAST(json_extract(s.value, '$.bucket') AS TEXT) AS bucket,
-             CAST(s.key AS INTEGER) AS ord
-      FROM v_capability_provider p,
-           json_each(CASE WHEN json_valid(p.stages) THEN p.stages ELSE '[]' END) s
-      WHERE p.capability = 'task_tracker' AND p.active = 1
+      SELECT CAST(s.id AS TEXT) AS value, CAST(s.title AS TEXT) AS label,
+             CAST(s.bucket AS TEXT) AS bucket, CAST(s.position AS INTEGER) AS ord
+      FROM v_model_stage s
+      WHERE s.model = 'oxplow/task_record'
       ORDER BY ord
 view:
   from: swimlanes

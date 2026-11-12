@@ -1,14 +1,14 @@
 # Task views: your own Board, list and editor
 
 Three views, each a part (`parts/`), that stand in for oxplow's own, with no task tracker provider of
-their own. They read `v_task` and change items only through the
+their own. They read `v_oxplow_task` and change items only through the
 task commands, so they work with whichever list is active.
 
 | Replaces | Part | What it is |
 |---|---|---|
 | `task.board` | `swimlanes` | A `viz: custom` component: a column per stage of the active list, cards you drag |
 | `task.list` | `compact-list` | A table with title (a page link), state and updated; row actions **Done** and **Edit…** |
-| `task.detail` | `edit-item` | A `viz: form` over `oxplow.task.update`: title and body, `uri` fixed |
+| `task.detail` | `edit-item` | A `viz: form` over `oxtask.task.update`: title and body, `id` fixed |
 
 ```yaml
 ui:
@@ -24,11 +24,11 @@ ui:
   titled as the list names it (the `stages` loader reads them from
   `v_capability_provider.stages`). A card sits in the column of its
   `stage`. Drag a card to another column and it runs
-  `oxplow.task.transition` with that column's stage id.
-- Drag a card within its column and it runs `oxplow.task.reorder`:
+  `oxtask.task.move` with that column's stage id.
+- Drag a card within its column and it runs `oxplow.tasks.reorder`:
   its place in its assignee's queue, core's for every task tracker.
 - Click a title to rename the item: an inline form (Enter saves, Escape
-  puts it back) that runs `oxplow.task.update`. A refusal naming a
+  puts it back) that runs `oxtask.task.update`. A refusal naming a
   field shows under the input.
 - Click a card to open the item; Cmd/Ctrl-click opens it in a new tab.
 - If the board's commands are refused (the extension isn't deployed or is
@@ -38,7 +38,7 @@ ui:
 ## What a view may and may not do
 
 May:
-- read any published dataset (`v_task`, `v_thread`, …) through its
+- read any published dataset (`v_oxplow_task`, `v_thread`, …) through its
   parts' loaders;
 - change tasks through the commands it declares in
   `custom_components[].commands` (a table or form on a page uses `actions` /
