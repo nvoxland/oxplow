@@ -83,13 +83,15 @@ impl ExtensionServices {
 
     /// `oxplow.extension_store.write`: the statements in one transaction on
     /// the file of the extension the run is composed by; nobody else.
-    pub fn write_store(&self, run: &RunContext, batch: &[Statement]) -> Result<usize, String> {
+    /// Answers `{ changes, rows }`: `rows` one list per statement of the
+    /// rows it returned (`RETURNING`), `[]` for one that returns none.
+    pub fn write_store(&self, run: &RunContext, batch: &[Statement]) -> Result<Value, String> {
         let (name, storage) = self.composer(run, "oxplow.extension_store.write")?;
         let answer = self
             .store(&name, &storage)?
             .write(batch)
             .map_err(|e| e.to_string())?;
-        Ok(answer.changes)
+        Ok(json!({ "changes": answer.changes, "rows": answer.rows }))
     }
 
     /// `oxplow.extension_files.write`.
@@ -210,7 +212,9 @@ impl ExtensionServices {
                 params: args.params,
             })
             .map_err(|e| e.to_string())?;
-        Ok(json!({ "rows": answer.rows }))
+        // One statement: its rows.
+        let rows = answer.rows.into_iter().next().unwrap_or_default();
+        Ok(json!({ "rows": rows }))
     }
 }
 

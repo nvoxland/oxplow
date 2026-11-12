@@ -28,6 +28,11 @@ commands:
     input_schema: {{ type: object }}
     entry: handlers/put.star
     needs: [store.sql]
+  - name: book.mint
+    summary: Store a book under an id the store mints.
+    input_schema: {{ type: object }}
+    entry: handlers/mint.star
+    needs: [store.sql]
   - name: book.put_doc
     summary: Write into the read-only folder.
     input_schema: {{ type: object }}
@@ -74,6 +79,18 @@ commands:
     write(root, &format!("{base}/handlers/put.star"), &put);
     write(
         root,
+        &format!("{base}/handlers/mint.star"),
+        "def transform(x):
+    return {\"commands\": [
+        {\"name\": \"oxplow.extension_store.write\", \"input\": {\"batch\": [
+            {\"sql\": \"INSERT INTO book (id, title) VALUES ('m-' || (SELECT count(*) FROM book), ?1) RETURNING id, title\", \"params\": [x[\"input\"][\"title\"]]},
+            {\"sql\": \"UPDATE book SET title = title WHERE id = 's0'\"},
+        ]}},
+    ], \"result\": scope(\"store.sql\", {\"sql\": \"SELECT count(*) AS n FROM book\"})}
+",
+    );
+    write(
+        root,
         &format!("{base}/handlers/put_doc.star"),
         "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.extension_files.write\", \"input\": {\"path\": \"docs/a.md\", \"body\": \"x\"}}], \"result\": {}}\n",
     );
@@ -111,6 +128,30 @@ fn store_file(fx: &ThreadFixture, name: &str) -> std::path::PathBuf {
     fx._dir
         .path()
         .join(format!(".oxplow/extensions-data/{name}.sqlite"))
+}
+
+/// A store write answers each statement's `RETURNING` rows, so a store
+/// can mint an id in its write. They are in the run's result, on the
+/// write's child; the script's own `result` is composed before any step
+/// runs, so it can't see them (nothing binds an earlier step's answer into
+/// a later one).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_store_write_answers_its_returning_rows_in_the_runs_children() {
+    let fx = fixture().await;
+    let out = run(&fx, "alpha.book.mint", json!({"title": "Dune"}))
+        .await
+        .unwrap();
+    assert_eq!(out["children"][0]["name"], "oxplow.extension_store.write");
+    assert_eq!(
+        out["children"][0]["result"],
+        json!({ "changes": 2, "rows": [[{ "id": "m-1", "title": "Dune" }], []] }),
+        "{out}"
+    );
+    assert_eq!(
+        out["result"],
+        json!({ "rows": [{ "n": 1 }] }),
+        "the script's result was read before the write ran: {out}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
