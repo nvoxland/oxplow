@@ -91,14 +91,16 @@ models:
       state: { type: text, values: [backlog, todo, in_progress, blocked, done, canceled] }
       parent: { type: uri, edge: task.parent }
       closed_at: time
-  - name: task_link            # a child model: rows belong to a task
-    of: from                   # the parent URI column; removed with the parent
-    key: [from, to, type]      # a child's key may be several columns
-    columns:
-      from: uri
-      to: uri
-      type: { type: text, values: [blocks, discovered_from, relates_to, duplicates, supersedes] }
-    edge: { from: from, to: to, type_from: type, prefix: "task_link:" }
+    children:                  # rows that belong to one task (decided 2026-11-12)
+      links:
+        key: [to, type]        # unique within the parent
+        columns:
+          to: uri
+          type: { type: text, values: [blocks, discovered_from, relates_to, duplicates, supersedes] }
+        edge: { to: to, type_from: type, prefix: "task_link:" }
+      comments:
+        key: [id]
+        columns: { id: text, author: text, at: time, body: { type: text, markdown: {} } }
 ```
 
 - **Implicit columns** on every row: `store` (text), `uri` (text),
@@ -107,21 +109,23 @@ models:
   resource with params `<store_param>` and `id`: tasks keep today's
   `oxplow:oxplow/task?id=<id>&provider=<store>`, knowledge pages today's
   `oxplow:oxplow/knowledge?id=<id>&store=<store>`, so stored URIs do not
-  move. A child model's rows have no URI of their own (`uri` is NULL);
-  they are named by parent URI and key.
+  move. A child's rows have no URI of their own: they are named by their
+  parent's URI and their key (`parent`, then the key columns, in
+  `v_<ns>_<model>_<child>`).
 - **Column types:** `text`, `int`, `real`, `bool`, `time`, `uri` (one
   resource URI), `uris` (a JSON list of URIs). `values:` makes a text
   column an enum, checked on write.
 - **Edges from columns.** A `uri` / `uris` column with `edge: <type>`
   projects `page_ref` edges from the row's URI with that ref type. A
-  child model's `edge: { from, to, type_from, prefix }` projects one edge
-  per row, from its `from` column (the parent), typed `prefix + <value of
-  type_from>`, so a task link is the edge `task_link:blocks` it is today.
+  child's `edge: { to, type_from, prefix }` projects one edge per row, from
+  its parent's URI to its `to` column, typed `prefix + <value of
+  type_from>` (or a fixed `ref_type:`), so a task link is the edge
+  `task_link:blocks` it is today.
 - **Markdown bodies.** A column with `markdown:` is parsed as oxplow's
   markdown (`page_ref_projections::body_edges`: `file_mention`,
   `dir_mention`, `wikilink`, `task_mention`, `finding_mention`,
   `commit_mention`), restated in the same transaction as the row, by diff.
-  A child model's markdown column (a comment) projects onto the parent:
+  A child's markdown column (a comment) projects onto the parent:
   `comment_*` types from the parent's URI, as comment mentions are today.
   - `markdown: { pins: true }` makes its file and dir refs **pinned
     refs**, ref types `file_pin` / `dir_pin` (not `file_mention`, so a
@@ -170,8 +174,8 @@ models:
   changed; an unchanged row logs none. `cause: reconcile` (a `start`
   snapshot) is for catching up: the owner's reactions that mean "this
   happened now" (linking a request, assigning on start) act only on
-  `trigger` and `fields`. A child model logs its parent's event with
-  `changed: [<child model>]`.
+  `trigger` and `fields`. A change to a parent's children logs the
+  parent's event with `changed: [<child>]`.
 
 ## Filling a model (a store)
 
@@ -263,6 +267,25 @@ falling in a turn's window" needs better: the plan is that
 composing extension's observers directly with the command's anchors and
 cause, so the change event is the command's. `oxplow.model.set_fields`
 should carry the command's anchors too (it carries none today).
+
+## Children
+
+- **Declared in the parent** (`children: { <name>: { key, columns, edge? } }`),
+  stored in `model__<ns>__<model>__<name>`, read as
+  `v_<ns>_<model>_<name>` (`parent`, `store`, the key and columns): only
+  the children of a parent the parent's view shows.
+- **Written nested in the parent's row, as the whole set:** `"links": [{
+  "to": …, "type": "blocks" }]` on a task row is every link that task has
+  now (the rest go); a row that leaves the key out keeps its children. In
+  a `snapshot` too: a parent restated without `links` keeps them.
+- **Removed with the parent** only as far as the views go: a tombstoned
+  parent's children are hidden with it and come back with it; swept with
+  it.
+- A changed set is the parent's change (`changed: [<child>]`); its edges
+  (the child `edge`, its markdown's `comment_*` mentions) are restated from
+  the parent's URI, by diff.
+- A child table is a cache of its store like the parent's: a changed shape
+  rebuilds it, and the next write or `start` refills it.
 
 ## Removal
 
