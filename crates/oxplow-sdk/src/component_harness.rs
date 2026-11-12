@@ -336,6 +336,49 @@ async fn invoke(ctx: &Ctx, command: &str, input: Value, confirmed: bool) -> Valu
     answer
 }
 
+/// Run an action point the component declares, as the component for the
+/// person, and keep it for the test (the command that answered, or the
+/// refusal).
+async fn invoke_point(
+    ctx: &Ctx,
+    point: &str,
+    context: Value,
+    command: Option<String>,
+    confirmed: bool,
+) -> Value {
+    let out = oxplow_app::viz_actions::invoke_component_point(
+        &ctx.svc,
+        &ctx.root,
+        oxplow_app::viz_actions::ComponentPointInvoke {
+            component: ctx.component.clone(),
+            point: point.to_string(),
+            context: context.clone(),
+            command,
+            on_behalf_of: Actor::Human,
+            confirmed,
+            version: ctx.version.clone(),
+        },
+    )
+    .await;
+    let asked = matches!(out, Err(CommandError::NeedsConfirmation { .. }));
+    let (answer, kept) = match out {
+        Ok(out) => (
+            json!({ "ok": true, "result": out.result }),
+            json!({ "point": point, "context": context, "ok": true, "result": out.result }),
+        ),
+        Err(e) => (
+            refusal(&e),
+            json!({ "point": point, "context": context, "ok": false, "refused": e.to_string() }),
+        ),
+    };
+    if !asked {
+        let mut shared = ctx.shared.lock().unwrap_or_else(|e| e.into_inner());
+        shared.records.push(("invoked".into(), kept));
+        shared.acted = true;
+    }
+    answer
+}
+
 /// What the frame asks the core (or what the test answers for the person).
 async fn rpc(State(ctx): State<Arc<Ctx>>, Json(body): Json<Value>) -> Json<Value> {
     let ok = |result: Value| Json(json!({ "ok": true, "result": result }));
@@ -345,6 +388,16 @@ async fn rpc(State(ctx): State<Arc<Ctx>>, Json(body): Json<Value>) -> Json<Value
                 &ctx,
                 body["command"].as_str().unwrap_or_default(),
                 body["input"].clone(),
+                body["confirmed"].as_bool().unwrap_or(false),
+            )
+            .await,
+        ),
+        "invokePoint" => Json(
+            invoke_point(
+                &ctx,
+                body["point"].as_str().unwrap_or_default(),
+                body["context"].clone(),
+                body["command"].as_str().map(String::from),
                 body["confirmed"].as_bool().unwrap_or(false),
             )
             .await,

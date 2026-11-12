@@ -129,6 +129,34 @@ pub async fn invoke_component_command(
     .await?)
 }
 
+/// A custom component's frame runs an action point it declares, as the
+/// component acting for the person: whichever command answers the point for
+/// `context` (`command` names one when several do).
+pub async fn invoke_component_point(
+    svc: &Services,
+    id: String,
+    point: String,
+    context: oxplow_domain::Json,
+    command: Option<String>,
+    confirmed: bool,
+    version: String,
+) -> Result<oxplow_domain::CommandOutcome, IpcError> {
+    Ok(oxplow_app::viz_actions::invoke_component_point(
+        svc,
+        root(svc),
+        oxplow_app::viz_actions::ComponentPointInvoke {
+            component: id,
+            point,
+            context: context.0,
+            command,
+            on_behalf_of: oxplow_domain::Actor::Human,
+            confirmed,
+            version,
+        },
+    )
+    .await?)
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;

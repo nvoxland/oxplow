@@ -124,6 +124,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::list_extensions,
             commands::generated::load_component,
             commands::generated::invoke_component_command,
+            commands::generated::invoke_component_point,
             commands::generated::run_component_sql,
             commands::generated::component_form,
             commands::generated::list_services,

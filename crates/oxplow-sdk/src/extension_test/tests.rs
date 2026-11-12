@@ -2761,6 +2761,91 @@ steps:
     );
 }
 
+/// A component runs an action point it declares: `invokePoint` in a `ui`
+/// step reaches the command that joined the point, with the context bound
+/// into its input, and the harness records the call (`point`, `context`).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_ui_step_runs_an_action_point_the_component_declares() {
+    assert!(
+        crate::component_harness::shell().is_some(),
+        "no oxplow app to draw the harness: build it first (`bun run build:dev`)"
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        ".oxplow/extensions/pointer/extension.yaml",
+        "manifest: 2
+name: pointer
+intent:
+  purpose: Runs a point.
+  examples:
+    - { name: drawn, input: { page: board }, expect: board }
+permissions: [commands:oxplow.task.create]
+action_points:
+  - { name: card.add, label: Add, context: { title: string } }
+commands:
+  - name: card.add
+    summary: Add a card.
+    input_schema: { type: object, required: [title], properties: { title: { type: string } } }
+    entry: handlers/add.star
+    examples:
+      - { name: happy, input: { title: A }, expect_commands: [oxplow.task.create] }
+    ui: { label: Add, at: pointer/card.add, input: { title: \"{{context.title}}\" } }
+custom_components:
+  - { id: board, action_points: [pointer/card.add] }
+",
+    );
+    write(
+        root,
+        ".oxplow/extensions/pointer/handlers/add.star",
+        "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.task.create\", \"input\": {\"title\": x[\"input\"][\"title\"]}}]}\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/pointer/pages/board.yaml",
+        "title: Board\nloaders:\n  items: { sql: \"SELECT title FROM v_task ORDER BY title\" }\nview: { component: { id: board } }\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/pointer/components/board/index.html",
+        "<!doctype html><html><head><title>b</title></head><body><ul id=\"list\"></ul><button id=\"go\">Go</button><p id=\"err\"></p>\
+         <script src=\"/component-lib/oxplow-component.js\"></script><script src=\"app.js\"></script></body></html>",
+    );
+    write(
+        root,
+        ".oxplow/extensions/pointer/components/board/app.js",
+        "oxplow.connect().then(function (c) {
+  var draw = function (data) {
+    var list = document.getElementById('list');
+    list.innerHTML = '';
+    data.items.rows.forEach(function (r) { var li = document.createElement('li'); li.textContent = r[0]; list.appendChild(li); });
+  };
+  draw(c.data);
+  c.onUpdate(function (u) { draw(u.data); });
+  document.getElementById('go').addEventListener('click', function () {
+    c.invokePoint('pointer/card.add', { title: 'Dragged' });
+  });
+});
+",
+    );
+    write(
+        root,
+        ".oxplow/extensions/pointer/fixtures/drawn.yaml",
+        "requires: [oxplow-bundled]
+given: [{ command: oxplow.task.create, input: { title: First } }]
+when: { page: board }
+steps:
+  - ui:
+      - expect: { count: { li: 1 } }
+      - click: \"#go\"
+      - expect: { count: { li: 2 }, invoked: [{ point: pointer/card.add, ok: true }] }
+",
+    );
+    let report = test_extension(root, "pointer", false).await.unwrap();
+    assert_eq!(report.error_lines(), Vec::<String>::new());
+}
+
 /// A window that draws no frames (the display locked or asleep) leaves
 /// a fixture's `ui` steps, and the steps after them, not run, with why,
 /// never failed. The shell is

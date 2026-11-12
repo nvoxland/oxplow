@@ -175,6 +175,11 @@ function harness(deps: Partial<Parameters<typeof createBridgeHost>[1]> = {}) {
       if (!confirmed) throw new IpcCallError("needs confirmation", "NEEDS_CONFIRMATION", null, ["process — runs programs"]);
       return { result: null, audit_id: 1, event_id: null, inverse: null };
     },
+    invokePoint: async (point, context, command, confirmed) => {
+      calls.push(["invokePoint", point, context, command, confirmed]);
+      if (!confirmed) throw new IpcCallError("needs confirmation", "NEEDS_CONFIRMATION", null, []);
+      return { result: { moved: true }, audit_id: 1, event_id: null, inverse: null };
+    },
     navigate: (ref, opts) => {
       calls.push(["navigate", ref, opts]);
       return true;
@@ -207,6 +212,24 @@ test("an invoke that asks is confirmed in the host, with what it asks about, the
   await no.settle();
   expect(no.received).toEqual([{ id: "i2", ok: false, error: { code: "CANCELLED", message: "The person didn't confirm `oxplow.task.transition`." } }]);
   no.channel.port1.close();
+});
+
+test("invokePoint parses; it is confirmed in the host like an invoke, and carries the named command", async () => {
+  expect(parseFrameMessage({ id: "p0", method: "invokePoint", point: "oxplow/task.move", context: { uri: "u" } })).toEqual({
+    type: "request",
+    request: { id: "p0", method: "invokePoint", point: "oxplow/task.move", context: { uri: "u" }, command: null },
+  });
+  expect(parseFrameMessage({ id: "p0", method: "invokePoint", context: {} })).toBeNull();
+  expect(parseFrameMessage({ id: "p0", method: "invokePoint", point: "a/b", command: 3 })).toBeNull();
+  const h = harness();
+  h.send({ id: "p1", method: "invokePoint", point: "oxplow/task.move", context: { uri: "u", stage: "done" }, command: "oxtask.task.move" });
+  await h.settle();
+  expect(h.calls).toEqual([
+    ["invokePoint", "oxplow/task.move", { uri: "u", stage: "done" }, "oxtask.task.move", false],
+    ["invokePoint", "oxplow/task.move", { uri: "u", stage: "done" }, "oxtask.task.move", true],
+  ]);
+  expect(h.received).toEqual([{ id: "p1", ok: true, result: { moved: true } }]);
+  h.channel.port1.close();
 });
 
 test("navigate opens the ref; a malformed request is answered with an error when it has an id", async () => {

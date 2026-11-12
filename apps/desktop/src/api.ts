@@ -426,6 +426,20 @@ export async function invokeComponentCommand(
   return unwrap(await commands.invokeComponentCommand(id, command, input as never, confirmed, version));
 }
 
+/** A custom component runs an action point it declares: the command that
+ *  answers `point` for `context` (`command` names one when several do), as
+ *  the component acting for the person. */
+export async function invokeComponentPoint(
+  id: string,
+  point: string,
+  context: unknown,
+  command: string | null,
+  confirmed: boolean,
+  version: string,
+): Promise<CommandOutcome> {
+  return unwrap(await commands.invokeComponentPoint(id, point, context as never, command, confirmed, version));
+}
+
 /** A custom component that declares `sql: read` runs its own read-only SQL
  *  over the datasets (`querySql`), at the bundle version its frame loaded. */
 export async function runComponentSql(

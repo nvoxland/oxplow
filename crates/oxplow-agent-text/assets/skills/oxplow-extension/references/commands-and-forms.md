@@ -54,12 +54,18 @@
   invoke one of its `commands` (a
   component that declares any runs them under the extension's
   permissions, approved when it was deployed; a command that asks
-  still asks) or navigate. Its `index.html` loads
+  still asks), run an **action point** it lists in `action_points: [<id>]`
+  (`invokePoint(point, context, command?)` runs the one command that
+  answers the point for the context, as the person; a drag of a card to
+  another column is "move this item to stage X" — the store that joined
+  the point answers, so the component names no store's command and needs
+  no `commands:` for it; `command` picks one when several answer) or
+  navigate. Its `index.html` loads
   oxplow's client library with a plain `<script
   src="/component-lib/oxplow-component.js">` before its own plain script
   (no modules: a sandboxed frame can't load them), and the script calls
   `oxplow.connect().then((component) => …)` for `component.data` (each
-  loader's rows by name), `onUpdate(({ data, changed }) => …)`, `invoke` and `navigate`; it never
+  loader's rows by name), `onUpdate(({ data, changed }) => …)`, `invoke`, `invokePoint` and `navigate`; it never
   fetches (a page loader feeds it). `$OXPLOW_BIN extension new
   component <name>` scaffolds a working one; `docs/guide/pages.md` has
   the reference; `dashboards.md` has an example. A component written in TypeScript or with a library is

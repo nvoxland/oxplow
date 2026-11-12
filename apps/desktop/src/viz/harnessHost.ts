@@ -103,6 +103,8 @@ export async function runHarness(
           {
             invoke: async (command, input, confirmed) =>
               ({ result: await server.rpc("invoke", { command, input, confirmed }) }) as never,
+            invokePoint: async (point, context, command, confirmed) =>
+              ({ result: await server.rpc("invokePoint", { point, context, command, confirmed }) }) as never,
             navigate: (ref) => {
               server.record("navigate", ref);
               return true;
