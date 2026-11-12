@@ -1,0 +1,22 @@
+# The tasks a request worked on are bundled's section of the request
+# summary (a part mounted in its `sections` slot): one row per task, with its
+# strongest evidence. A request that worked on none says so.
+given:
+  - { command: oxplow.task.create, input: { title: Fix the parser }, bind: item }
+  - observe:
+      turn:
+        prompt: Fix the parser
+        during:
+          - { command: oxplow.task.transition, input: { uri: $item.uri, to: in_progress }, as: agent }
+  - observe: { turn: { prompt: Look around, answer: nothing } }
+when: { part: request-tasks, params: { request: req1 } }
+expect:
+  loaders:
+    tasks: { rows: [{ task: $item.uri, title: Fix the parser, basis: transition }] }
+steps:
+  # A later request on the thread, with the task still held: the weakest
+  # evidence. A request nobody made reads nothing.
+  - params: { request: req2 }
+    expect: { loaders: { tasks: { rows: [{ task: $item.uri, basis: assigned }] } } }
+  - params: { request: req9 }
+    expect: { loaders: { tasks: { rows: 0 } } }
