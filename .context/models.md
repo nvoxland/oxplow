@@ -1,19 +1,39 @@
 # Shared models (contract, being built)
 
-**Status: contract.** Only the first store-layer pieces are built
-(`crates/oxplow-db/src/model_store.rs`, V29). It is the contract for the
-"observed systems" work: tasks and knowledge stop being write-through
-capabilities, and a store's extension watches its own tool and fills a
-shared model. This doc is the contract for the framework piece F1. The
-other pieces have their contracts in their own docs:
+**Status: being built.** Built so far (`crates/oxplow-db/src/model_store.rs`,
+V29; `crates/oxplow-app/src/models.rs`; manifest parsing in
+`extension/extensions/shared_models.rs`):
+
+- `models:` / `fills:` / `fields:` in the manifest; the registry of the
+  enabled extensions' models (`ModelRegistry::of`), swapped in with the
+  vocabulary; each model's table and views made in the publication;
+  its change event registered as the owner's declared type with core's
+  schema (`models::change_event_schema`).
+- The store: the table and `v_<ns>_<model>` / `_all` views, diffing
+  upsert / delete / rename / snapshot, quarantine, tombstones (revival,
+  `sweep_tombstones_tx`), the removal guard, before/after values, fields
+  kept apart by namespace, edges from markdown / stated refs / uri
+  columns with `file_pin` / `dir_pin` pins.
+- A collector's `models` / `fields` / `cursor` output applied in its run's
+  transaction, one change event per changed row.
+- `v_ref_pin` and `snapshot.ref_drifted@1`.
+
+Not yet: child models, generated search, `v_model_field_decl` and the long
+field view, `oxplow.refs.verify` / `oxplow.model.set_fields` /
+`oxplow.model.write`, bare-link patterns, the boot repair over models, the
+tombstone sweep's schedule, the triggers (F2) and the shipped-extension
+plumbing (F7). This doc is the contract for the rest. The other pieces
+have their contracts in their own docs:
 
 - triggers (`files`, `sqlite`, `start`): [extensions-jobs.md](./extensions-jobs.md) "Triggers for observers";
-- an extension's own SQLite file and the scoped file service: [extensions-permissions.md](./extensions-permissions.md) "Store services";
-- named action points and the store filter: [extensions-slots.md](./extensions-slots.md) "Action points";
+- an extension's own SQLite file and the scoped file service: [extensions-permissions.md](./extensions-permissions.md) "Store services" (built);
+- named action points and the store filter: [extensions-slots.md](./extensions-slots.md) "Action points" (built);
 - the manifest keys: [extensions-manifest.md](./extensions-manifest.md) "`models:` and `fills:`";
 - the new fixture kinds: [extensions-sdk.md](./extensions-sdk.md) "Fixtures for observers".
 
-Update this doc as each part lands.
+Collectors are named by their extension's namespace (`<namespace>/<id>`),
+and a dashed name's default namespace uses underscores, so a fixture
+syncs `shelf_folder/books`, not `shelf-folder/books`.
 
 ## The idea
 
