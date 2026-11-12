@@ -2100,6 +2100,21 @@
     - { accepted_values: { column: actor, values: [agent, person] } }
     - { accepted_values: { column: via, values: [tool, file, open] } }
     - { relationships: { column: uri, to: knowledge_page, field: uri } }
+- name: ref_pin
+  version: 1
+  description: "Every pinned ref of any source (a shared model's pinned markdown column: `file_pin` / `dir_pin` edges) and how current it is: the generic definition of staleness. A reader filters on `source_resource`."
+  fields:
+    - { name: "source", type: "TEXT", doc: "What pins it (a model row's URI)." }
+    - { name: "source_resource", type: "TEXT", doc: "The source's resource (`oxplow/knowledge`, `shelf/book`)." }
+    - { name: "path", type: "TEXT", doc: "The file or directory (workspace-relative)." }
+    - { name: "kind", type: "TEXT", doc: "`file` or `dir`." }
+    - { name: "pinned_snapshot_id", type: "INTEGER", doc: "The snapshot it was pinned to; NULL if never pinned." }
+    - { name: "pinned_vcs_rev", type: "TEXT", doc: "The VCS revision nearest the pin; NULL without one." }
+    - { name: "pinned_vcs_rev_exact", type: "INT", doc: "1 when the pinned snapshot is exactly `pinned_vcs_rev`, else 0." }
+    - { name: "latest_snapshot_id", type: "INT", doc: "The latest primary-stream snapshot of the file (of any file under the directory); NULL if never captured there." }
+    - { name: "stale", type: "INT", doc: "1 when it changed after the pin (or was captured but never pinned)." }
+  tests:
+    - { not_null: source }
 - name: knowledge_pin
   version: 4
   description: "Each knowledge page's file refs and how current they are, every recorded page's (an enabled store's or not): the one definition of staleness `v_knowledge_ref` and `v_knowledge_page.stale_ref_count` both read."

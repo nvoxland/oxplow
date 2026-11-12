@@ -1858,4 +1858,45 @@ mod tests {
             vec![(B_RS.to_string(), "file_mention".to_string(), None)]
         );
     }
+
+    /// `v_ref_pin` says a pinned file is stale once the primary stream has a
+    /// snapshot of it newer than its pin.
+    #[tokio::test]
+    async fn a_pinned_file_goes_stale_when_it_changes_after_its_pin() {
+        let db = Database::in_memory();
+        snapshot(&db).await;
+        write_decl(
+            &db,
+            pinned_book(),
+            vec![row(
+                json!({"id": "b1", "title": "t", "body": "see [[file:src/a.rs]]"}),
+            )],
+        )
+        .await;
+        let stale = |db: Database| async move {
+            db.read(|tx| {
+                tx.query_row(
+                    "SELECT stale FROM v_ref_pin WHERE source = ?1 AND path = 'src/a.rs'",
+                    [B1],
+                    |r| r.get::<_, i64>(0),
+                )
+                .map_err(map_sql_err)
+            })
+            .await
+            .unwrap()
+        };
+        assert_eq!(stale(db.clone()).await, 0);
+        let later = snapshot(&db).await;
+        db.transaction(move |tx| {
+            tx.execute(
+                "INSERT INTO file_snapshot (stream_id, path, blob_hash, size_bytes, captured_at, storage, snapshot_id)
+                 VALUES (1, 'src/a.rs', 'h2', 1, '2026-01-02T00:00:00Z', 'oxplow', ?1)",
+                [later],
+            )
+            .map_err(map_sql_err)
+        })
+        .await
+        .unwrap();
+        assert_eq!(stale(db.clone()).await, 1);
+    }
 }

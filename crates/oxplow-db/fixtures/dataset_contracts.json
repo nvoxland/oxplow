@@ -32819,5 +32819,57 @@
       ],
       "key": []
     }
+  },
+  "ref_pin": {
+    "1": {
+      "columns": [
+        {
+          "name": "source",
+          "type": "TEXT",
+          "doc": "What pins it (a model row's URI)."
+        },
+        {
+          "name": "source_resource",
+          "type": "TEXT",
+          "doc": "The source's resource (`oxplow/knowledge`, `shelf/book`)."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "The file or directory (workspace-relative)."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`file` or `dir`."
+        },
+        {
+          "name": "pinned_snapshot_id",
+          "type": "INTEGER",
+          "doc": "The snapshot it was pinned to; NULL if never pinned."
+        },
+        {
+          "name": "pinned_vcs_rev",
+          "type": "TEXT",
+          "doc": "The VCS revision nearest the pin; NULL without one."
+        },
+        {
+          "name": "pinned_vcs_rev_exact",
+          "type": "INT",
+          "doc": "1 when the pinned snapshot is exactly `pinned_vcs_rev`, else 0."
+        },
+        {
+          "name": "latest_snapshot_id",
+          "type": "INT",
+          "doc": "The latest primary-stream snapshot of the file (of any file under the directory); NULL if never captured there."
+        },
+        {
+          "name": "stale",
+          "type": "INT",
+          "doc": "1 when it changed after the pin (or was captured but never pinned)."
+        }
+      ],
+      "key": []
+    }
   }
 }
