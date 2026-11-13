@@ -15,6 +15,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::database::{map_sql_err, ts_to_string};
+use crate::page_ref_store::PageRefEdge;
+use oxplow_domain::vcs::Revision;
 
 /// A declared column's type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -664,9 +666,7 @@ pub fn verify_pins_tx(
     let wanted: Vec<String> = files.map_or_else(|| pinned_files.clone(), <[String]>::to_vec);
     let outside: Vec<&str> = wanted
         .iter()
-        .filter(|p| {
-            !pinned_files.contains(p) && !crate::knowledge_record::path_under_any_dir(p, &dirs)
-        })
+        .filter(|p| !pinned_files.contains(p) && !path_under_any_dir(p, &dirs))
         .map(String::as_str)
         .collect();
     if !outside.is_empty() {
@@ -675,7 +675,7 @@ pub fn verify_pins_tx(
             outside.join(", ")
         )));
     }
-    let pin = crate::knowledge_record::pin_tx(conn)?;
+    let pin = pin_tx(conn)?;
     let Some(snapshot) = pin.snapshot_id else {
         return Err(invalid("there is no snapshot to pin to yet".into()));
     };
@@ -1261,6 +1261,56 @@ fn register_field_view_tx(
 }
 
 /// A SQL string literal.
+/// What new file refs are pinned to: the primary stream's latest snapshot,
+/// and the revision that snapshot is exactly, when it is one. Freshness
+/// compares the pinned snapshot to a file's latest (`oxplow_ref_drift`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Pin {
+    pub snapshot_id: Option<i64>,
+    pub revision: Option<String>,
+}
+
+impl Pin {
+    pub(crate) fn stamp(&self, edge: PageRefEdge) -> PageRefEdge {
+        match self.snapshot_id {
+            Some(id) => edge.with_version(id, self.revision.clone(), self.revision.is_some()),
+            None => edge,
+        }
+    }
+}
+
+pub fn pin_tx(conn: &rusqlite::Connection) -> Result<Pin, DomainError> {
+    let row: Option<(i64, Option<String>)> = conn
+        .query_row(
+            "SELECT s.id, s.revision FROM snapshot s
+             JOIN streams st ON st.id = s.stream_id AND st.kind = 'primary'
+             ORDER BY s.id DESC LIMIT 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()
+        .map_err(map_sql_err)?;
+    Ok(match row {
+        None => Pin::default(),
+        Some((id, revision)) => Pin {
+            snapshot_id: Some(id),
+            revision: revision
+                .and_then(|r| r.parse::<Revision>().ok())
+                .and_then(|r| r.vcs_rev().map(str::to_string)),
+        },
+    })
+}
+
+/// True if `path` is a file located under any of `dirs`. Workspace-relative,
+/// `/`-separated; an exact equality is not a match (a file path can't equal
+/// a directory).
+pub fn path_under_any_dir(path: &str, dirs: &[String]) -> bool {
+    dirs.iter().any(|d| {
+        let prefix = format!("{}/", d.trim_end_matches('/'));
+        path.starts_with(&prefix)
+    })
+}
+
 fn sql_text(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
 }
@@ -1863,7 +1913,7 @@ fn restate_edges_tx(
                 .collect::<rusqlite::Result<Vec<_>>>()
             })
             .map_err(map_sql_err)?;
-        let pin = crate::knowledge_record::pin_tx(conn)?;
+        let pin = pin_tx(conn)?;
         for e in edges.iter_mut() {
             if e.ref_type != RT_FILE_PIN && e.ref_type != RT_DIR_PIN {
                 continue;
@@ -1897,7 +1947,7 @@ fn restate_edges_tx(
                 .any(|e| e.target == kept.target && e.ref_type == kept.ref_type);
             let under = kept.ref_type == RT_FILE_PIN
                 && oxplow_domain::uri::build::file_of_uri(&kept.target)
-                    .is_ok_and(|f| crate::knowledge_record::path_under_any_dir(&f.path, &dirs));
+                    .is_ok_and(|f| path_under_any_dir(&f.path, &dirs));
             if !cited && under {
                 edges.push(kept);
             }
@@ -2478,6 +2528,34 @@ mod tests {
     use super::*;
     use crate::Database;
     use serde_json::json;
+
+    /// A file is under a directory when its path starts with it and a `/`;
+    /// the directory itself, or a sibling that shares its prefix, is not.
+    #[test]
+    fn a_path_is_under_a_directory_only_below_it() {
+        let dirs = vec!["src/ui".to_string(), "docs/".to_string()];
+        assert!(path_under_any_dir("src/ui/a.rs", &dirs));
+        assert!(path_under_any_dir("docs/x/y.md", &dirs));
+        assert!(!path_under_any_dir("src/ui", &dirs));
+        assert!(!path_under_any_dir("src/uikit/a.rs", &dirs));
+        assert!(!path_under_any_dir("a.rs", &[]));
+    }
+
+    /// New pins are the primary stream's latest snapshot, and the revision
+    /// that snapshot is exactly when it is one; with no snapshot, none.
+    #[test]
+    fn a_new_pin_is_the_primary_streams_latest_snapshot() {
+        let db = Database::in_memory();
+        let conn = db.conn().unwrap();
+        assert_eq!(pin_tx(&conn).unwrap(), Pin::default());
+        conn.execute_batch(
+            "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+               VALUES (1, 'primary', 'p', 'main', 'refs/heads/main', 'main', '/r', 'x', 'x');
+             INSERT INTO snapshot (id, stream_id, created_at) VALUES (7, 1, 'x');",
+        )
+        .unwrap();
+        assert_eq!(pin_tx(&conn).unwrap().snapshot_id, Some(7));
+    }
 
     fn book() -> ModelDecl {
         let mut body = ModelColumn::new("body", ModelType::Text);

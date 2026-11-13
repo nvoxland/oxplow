@@ -5,7 +5,7 @@
 //! The commands, oxwiki's file sync and a provider's streamed records all
 //! write through [`write_page_tx`] and [`delete_page_tx`].
 
-use rusqlite::{params, OptionalExtension};
+use rusqlite::params;
 use serde::Serialize;
 
 use oxplow_domain::events::schema::{
@@ -14,10 +14,10 @@ use oxplow_domain::events::schema::{
 use oxplow_domain::events::Envelope;
 use oxplow_domain::uri::build::{file_of_uri, file_uri, parse_resource};
 use oxplow_domain::uri::resources::{self as r, ResourceRegistry};
-use oxplow_domain::vcs::Revision;
 use oxplow_domain::{Anchors, DomainError, Timestamp};
 
 use crate::knowledge_page_store::{self, KnowledgePage};
+use crate::model_store::{path_under_any_dir, pin_tx};
 use crate::page_ref_projections::{
     knowledge_edges, stamp_file_versions, stated_edges, FileRefVersion, RT_KNOWLEDGE_FILE,
 };
@@ -26,46 +26,6 @@ use crate::EventCtx;
 
 fn sql(e: rusqlite::Error) -> DomainError {
     DomainError::Storage(e.to_string())
-}
-
-/// What new file refs are pinned to: the primary stream's latest snapshot,
-/// and the revision that snapshot is exactly, when it is one. Freshness
-/// compares the pinned snapshot to a file's latest (`oxplow_knowledge_drift`).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Pin {
-    pub snapshot_id: Option<i64>,
-    pub revision: Option<String>,
-}
-
-impl Pin {
-    fn stamp(&self, edge: PageRefEdge) -> PageRefEdge {
-        match self.snapshot_id {
-            Some(id) => edge.with_version(id, self.revision.clone(), self.revision.is_some()),
-            None => edge,
-        }
-    }
-}
-
-pub fn pin_tx(conn: &rusqlite::Connection) -> Result<Pin, DomainError> {
-    let row: Option<(i64, Option<String>)> = conn
-        .query_row(
-            "SELECT s.id, s.revision FROM snapshot s
-             JOIN streams st ON st.id = s.stream_id AND st.kind = 'primary'
-             ORDER BY s.id DESC LIMIT 1",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
-        .optional()
-        .map_err(sql)?;
-    Ok(match row {
-        None => Pin::default(),
-        Some((id, revision)) => Pin {
-            snapshot_id: Some(id),
-            revision: revision
-                .and_then(|r| r.parse::<Revision>().ok())
-                .and_then(|r| r.vcs_rev().map(str::to_string)),
-        },
-    })
 }
 
 /// The files and directories a page cites.
@@ -147,16 +107,6 @@ impl CitedRefs {
         }
         Ok(())
     }
-}
-
-/// True if `path` is a file located under any of `dirs`. Workspace-relative,
-/// `/`-separated; an exact equality is not a match (a file path can't equal
-/// a directory).
-pub fn path_under_any_dir(path: &str, dirs: &[String]) -> bool {
-    dirs.iter().any(|d| {
-        let prefix = format!("{}/", d.trim_end_matches('/'));
-        path.starts_with(&prefix)
-    })
 }
 
 /// A body's first `# ` heading, else `fallback`.
