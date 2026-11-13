@@ -3,7 +3,7 @@
 # tagged with its language) and asks the markers() capability — the per-language
 # knowledge lives in the language layer (oxplow-code-metrics), not here.
 #
-# Inverted substrate (epic tsk12): the durable grain is a per-marker
+# Inverted substrate: the durable grain is a per-marker
 # `oxplow.todo` FACT (value 1, subject = the file), and the marker total is the
 # metric SPEC `oxplow.todos` = count of those facts. Facts are the only output;
 # the reads aggregate them via the engine (the read flip, T-C3).

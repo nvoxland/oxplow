@@ -6,7 +6,7 @@
 # (subject "file:<path>", nonzero only), so a request's change attributes
 # through its files. and
 # a per-file `oxplow.ast_hit` FACT (rule="blocking_async") — the metric is the
-# SPEC Sum(oxplow.ast_hit) filtered by that rule (epic tsk12).
+# SPEC Sum(oxplow.ast_hit) filtered by that rule.
 def transform(input):
     q = "(member_access_expression name: (identifier) @result) " + \
         "(invocation_expression function: (member_access_expression name: (identifier) @wait))"

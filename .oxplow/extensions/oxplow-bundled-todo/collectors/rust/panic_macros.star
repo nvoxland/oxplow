@@ -5,7 +5,7 @@
 # (subject "file:<path>", nonzero only), so a request's change attributes
 # through its files. and a per-file
 # `oxplow.ast_hit` FACT (rule="panic_macro") — the metric is the SPEC
-# Sum(oxplow.ast_hit) filtered by that rule (epic tsk12).
+# Sum(oxplow.ast_hit) filtered by that rule.
 def transform(input):
     panicky = ["panic", "unimplemented", "todo", "unreachable"]
     facts = []

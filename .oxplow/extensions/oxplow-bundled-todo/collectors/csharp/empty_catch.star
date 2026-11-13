@@ -4,7 +4,7 @@
 # (subject "file:<path>", nonzero only), so a request's change attributes
 # through its files. and a per-file
 # `oxplow.ast_hit` FACT (rule="empty_catch") — the metric is the SPEC
-# Sum(oxplow.ast_hit) filtered by that rule (epic tsk12).
+# Sum(oxplow.ast_hit) filtered by that rule.
 def transform(input):
     facts = []
     for f in files("**/*.cs"):

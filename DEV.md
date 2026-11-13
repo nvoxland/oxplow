@@ -309,7 +309,7 @@ A bundle without it can't open any project, and the shell says so
 ("no oxplow-daemon next to the app"). Note the script path is relative
 to `apps/desktop`, not `src-tauri`: that is the cwd Tauri runs
 `beforeBuildCommand` in, and getting it wrong is silent until you look
-inside the bundle (tsk263).
+inside the bundle.
 
 **Staging is not only a packaging step.** `externalBin` makes
 tauri-build validate the sidecar from `oxplow-desktop`'s *build
@@ -320,7 +320,7 @@ script*, so `cargo test`, `cargo clippy --all-targets` and even a bare
 resource path `binaries/oxplow-daemon-<triple>` doesn't exist
 ```
 
-Run it once and everything compiles (tsk266):
+Run it once and everything compiles:
 
 ```
 bash apps/desktop/src-tauri/scripts/stage-sidecars.sh debug

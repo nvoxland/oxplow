@@ -3,7 +3,7 @@
 # uses the code_metrics() capability (per-function metrics from the language
 # layer).
 #
-# Inverted substrate (epic tsk12): the durable grain is a per-function
+# Inverted substrate: the durable grain is a per-function
 # `oxplow.complexity` FACT (emitted for EVERY function, not just offenders — so a
 # spec can re-threshold), and the "> 10" count is the metric SPEC
 # `oxplow.high_complexity_fns` computed over those facts. Facts are the only

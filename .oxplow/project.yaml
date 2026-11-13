@@ -13,7 +13,7 @@ generated:
   - apps/desktop/src/tauri-bridge/generated/bindings.ts
   # Another tool's scratch database.
   - .slopp
-# Architectural zones for the Change-analysis surfaces (tsk251). Ordered:
+# Architectural zones for the Change-analysis surfaces. Ordered:
 # the FIRST rule whose glob matches a path wins, so role-by-filename rules
 # (tests, docs) sit above the crate/app rules, and the `.toml` catch-all
 # sits last. Oxplow ships no built-in table — this IS the vocabulary.

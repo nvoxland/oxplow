@@ -1,6 +1,6 @@
 # repo.hardcoded_colors — hex/rgb color literals in TS/TSX (should be a
 # var(--…), see .context/theming.md). Re-added as a single-concern per-path
-# gauge (tsk61 — the original multi-concern version was dropped in the tsk42
+# gauge (the original multi-concern version was dropped in the tsk42
 # split and its catalog rows lingered as zombies). Scans string + template
 # nodes only, so the regex runs on tiny texts.
 def _ts_files():
