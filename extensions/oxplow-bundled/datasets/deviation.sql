@@ -4,16 +4,20 @@
 -- tasks name no area has no deviations. A request's files are its turns'
 -- files that a call of the turn claimed or that no other turn ran beside.
 WITH RECURSIVE
-files AS (
-  SELECT DISTINCT t.request_id, f.path
-  FROM ref('turn_file') f JOIN ref('agent_turn') t ON t.id = f.turn_id
-  WHERE t.request_id IS NOT NULL AND f.confidence IN ('claimed', 'sole')
-),
-area AS (
+-- The area comes first: only the requests whose tasks name one can have a
+-- deviation, so only their files are read. Each is built once per statement
+-- (`MATERIALIZED`) so the lookups below use an index, not a rescan.
+area AS MATERIALIZED (
   SELECT q.request_id, group_concat(w.title || ' ' || coalesce(w.body, ''), ' ') AS text
   FROM (SELECT DISTINCT request_id, task FROM ref('request_link')) q
   JOIN ref('task') w ON w.uri = q.task
   GROUP BY q.request_id
+),
+files AS MATERIALIZED (
+  SELECT DISTINCT t.request_id, f.path
+  FROM ref('turn_file') f JOIN ref('agent_turn') t ON t.id = f.turn_id
+  JOIN area a ON a.request_id = t.request_id
+  WHERE f.confidence IN ('claimed', 'sole')
 ),
 -- Every directory prefix of every file (`a/`, `a/b/`, …).
 dirs(request_id, path, prefix, rest) AS (
@@ -22,7 +26,7 @@ dirs(request_id, path, prefix, rest) AS (
   SELECT request_id, path, prefix || substr(rest, 1, instr(rest, '/')), substr(rest, instr(rest, '/') + 1)
   FROM dirs WHERE instr(rest, '/') > 0
 ),
-scored AS (
+scored AS MATERIALIZED (
   SELECT f.request_id, f.path,
          instr(a.text, f.path) > 0
          OR EXISTS (
