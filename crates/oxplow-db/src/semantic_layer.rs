@@ -690,6 +690,7 @@ impl<'c> ReadSession<'c> {
         let seen = std::sync::Arc::new(std::sync::Mutex::new(Seen::default()));
         let sink = seen.clone();
         let tables_c = tables.clone();
+        let views_c = views.clone();
         let own_c = own_ctes.clone();
         // Tables read inside a view so far (SQLite reports a view's own
         // reads before a `count(*)`'s empty-column read of its base table).
@@ -703,8 +704,13 @@ impl<'c> ReadSession<'c> {
                         table_name,
                         column_name,
                     } => {
+                        // A temp view (a check's overlay) is the view of its
+                        // name, as the accessors that name it say; only a
+                        // temp table keeps its `temp.` qualifier.
                         let table = match ctx.database_name {
-                            Some("temp") => format!("temp.{table_name}"),
+                            Some("temp") if !views_c.contains(table_name) => {
+                                format!("temp.{table_name}")
+                            }
                             _ => table_name.to_string(),
                         };
                         let in_view = ctx

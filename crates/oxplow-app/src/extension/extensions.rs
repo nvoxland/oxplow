@@ -4181,23 +4181,51 @@ fn check_components(
     }
 }
 
-/// The empty stand-ins a check gives `ext`'s declared entities (P7.C6).
+/// The empty stand-ins a check gives `ext`'s declared entities (P7.C6) and
+/// the views of the shared models it declares: a dataset reading one
+/// resolves before the first activation, and when a failed activation
+/// rolled the models back, so one dataset's failure doesn't show as a
+/// "names no dataset" on every dataset that reads a model.
 fn entity_stubs(ext: &Extension) -> Vec<oxplow_db::datasets::EntityStub> {
-    ext.collectors
+    use oxplow_db::collector_store::StoredType;
+    let entities =
+        ext.collectors
+            .iter()
+            .flat_map(|c| &c.entities)
+            .map(|e| oxplow_db::datasets::EntityStub {
+                owner: ext.name.clone(),
+                namespace: ext.namespace.clone(),
+                name: e.name.clone(),
+                view: e.view.clone(),
+                columns: e
+                    .columns
+                    .iter()
+                    .map(|c| (c.name.clone(), crate::collector_runner::stored(c.col_type)))
+                    .collect(),
+            });
+    let models = ext
+        .shared_models
+        .models
         .iter()
-        .flat_map(|c| &c.entities)
-        .map(|e| oxplow_db::datasets::EntityStub {
+        .flat_map(|m| oxplow_db::model_store::view_shapes(&m.decl))
+        .map(|(view, shape)| oxplow_db::datasets::EntityStub {
             owner: ext.name.clone(),
             namespace: ext.namespace.clone(),
-            name: e.name.clone(),
-            view: e.view.clone(),
-            columns: e
-                .columns
-                .iter()
-                .map(|c| (c.name.clone(), crate::collector_runner::stored(c.col_type)))
+            name: view.clone(),
+            view,
+            columns: shape
+                .into_iter()
+                .map(|(name, ty)| {
+                    let ty = match ty {
+                        "INTEGER" => StoredType::Integer,
+                        "REAL" => StoredType::Real,
+                        _ => StoredType::Text,
+                    };
+                    (name, ty)
+                })
                 .collect(),
-        })
-        .collect()
+        });
+    entities.chain(models).collect()
 }
 
 /// Dry-run a loaded extension's datasets, commands, advisories and viz nodes,

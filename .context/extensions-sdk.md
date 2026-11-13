@@ -157,8 +157,11 @@ check already reported is not repeated.
   the extension's datasets beside the other enabled extensions' (P4.9 —
   resolution, lineage, and the contract, so a changed contract at a
   published version fails here before it publishes) over **empty
-  stand-ins for every declared entity that hasn't synced**
-  (`datasets::EntityStub`: a typed temp table under the entity's view);
+  stand-ins for every declared entity that hasn't synced, and for the views
+  of every shared model it declares** (`datasets::EntityStub`: a typed temp
+  table under the view; a model's come from `model_store::view_shapes`, so
+  a failed activation that rolled the models back leaves the check's errors
+  the real ones, not a "names no dataset" on every reader of a model);
   `datasets::check_extensions` returns those views (`CheckedDatasets.views`).
   Every later query of the check — command examples' reads,
   advisories, agent contexts, pages — reads through them as an **overlay**

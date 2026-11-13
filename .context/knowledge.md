@@ -53,10 +53,6 @@ All through bundled's datasets (SQL, `oxplow_query_sql`) and `oxplow_read`:
 - `v_model_store` (`model = 'oxplow/knowledge_record'`) lists the stores;
   `v_page_ref` has the backlinks.
 
-A bundled dataset that reads a view that reads views, in a compound select,
-trips the lineage check (`reads … without ref()`): read a model view directly
-or use CTEs.
-
 Agents read through bundled's `knowledge` skill (find before you create; read
 with `oxplow_read`; the link rules). The metrics (`knowledge.pages`,
 `knowledge.stale_pages`, `knowledge.read_requests`) are bundled's collectors
