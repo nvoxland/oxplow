@@ -32,7 +32,7 @@ export const LOG_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", ".out
  *  spec ever starts a real agent CLI. The suite's extensions are on; the
  *  fixtures deploy them once the daemon has started (boot deploys nothing). */
 function projectYaml(): string {
-  return `agents: [scripted]\nextensions: [oxplow-bundled, oxtask, e2e, github]\nextensionInstances:\n  e2e/scripted: { enabled: true, config: { team: core } }\n`;
+  return `agents: [scripted]\nextensions: [oxplow-bundled, oxtask, oxwiki, e2e, github]\nextensionInstances:\n  e2e/scripted: { enabled: true, config: { team: core } }\n`;
 }
 
 /** Put the suite's test extension's source (`tests-e2e/fixtures/extension`)
@@ -353,14 +353,15 @@ export async function fileTask(
   title: string,
   opts: { stage?: string; body?: string; parent?: string; priority?: string; assign?: boolean } = {},
 ): Promise<{ result: { uri: string; id: string } }> {
-  const made = await run<{ result: { id: string } }>(daemon, "oxtask.task.create", {
+  // A script command's run answers `{ result: <its finish(...)>, children }`.
+  const made = await run<{ result: { result: { id: string } } }>(daemon, "oxtask.task.create", {
     title,
     stage: opts.stage ?? "ready",
     ...(opts.body === undefined ? {} : { body: opts.body }),
     ...(opts.parent === undefined ? {} : { parent: opts.parent }),
     ...(opts.priority === undefined ? {} : { priority: opts.priority }),
   });
-  const id = made.result.id;
+  const id = made.result.result.id;
   const uri = `oxplow:oxplow/task?id=${id}&provider=oxtask`;
   if (opts.assign !== false) {
     await run(daemon, "oxplow.tasks.assign", { uri, to: `oxplow:oxplow/thread?id=${daemon.thread}` });
