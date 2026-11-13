@@ -58,6 +58,34 @@ pub(crate) fn shell() -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
+/// How long a window gets to start and say whether it draws: a process
+/// start and a page load, which a machine under heavy load stretches to
+/// many seconds. A window that exits ends the wait early; this is only the
+/// bound for one that stays up and says nothing.
+pub(crate) const START_WAIT: Duration = Duration::from_secs(60);
+
+/// Poll `look` until it gives a value, or an error (which ends the wait at
+/// once), or `wait` passes: then the error names `what` never came.
+pub(crate) async fn first_signal<T>(
+    wait: Duration,
+    what: &str,
+    mut look: impl FnMut() -> Result<Option<T>, String>,
+) -> Result<T, String> {
+    let until = tokio::time::Instant::now() + wait;
+    loop {
+        if let Some(found) = look()? {
+            return Ok(found);
+        }
+        if tokio::time::Instant::now() >= until {
+            return Err(format!(
+                "no word from the oxplow app's window: waited {} s for {what}",
+                wait.as_secs()
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
 /// What the frame's host is answered from, and what it was asked.
 #[derive(Default)]
 struct Shared {
@@ -89,7 +117,7 @@ pub(crate) struct Harness {
     ctx: Arc<Ctx>,
     ops: mpsc::Sender<(Value, oneshot::Sender<Value>)>,
     server: tokio::task::JoinHandle<()>,
-    _window: tokio::process::Child,
+    window: Mutex<tokio::process::Child>,
 }
 
 impl Harness {
@@ -151,7 +179,7 @@ impl Harness {
             ctx,
             ops,
             server,
-            _window: window,
+            window: Mutex::new(window),
         })
     }
 
@@ -170,21 +198,30 @@ impl Harness {
     }
 
     /// Whether the window draws (its page asks first, before it mounts
-    /// anything): `None` when its page didn't say within `wait`.
-    pub(crate) async fn drawing(&self, wait: Duration) -> Option<bool> {
-        let until = tokio::time::Instant::now() + wait;
-        loop {
+    /// anything). Waits for that word for [`START_WAIT`]: opening the app's
+    /// window is a process start and a page load, which a busy machine
+    /// stretches far past a few seconds. It ends early when the window
+    /// exits, and says what never came when the bound passes.
+    pub(crate) async fn drawing(&self) -> Result<bool, String> {
+        first_signal(START_WAIT, "its page to say whether it draws", || {
             let said = self
                 .shared()
                 .records
                 .iter()
                 .find(|(kind, _)| kind == "drawing")
                 .and_then(|(_, value)| value.as_bool());
-            if said.is_some() || tokio::time::Instant::now() >= until {
-                return said;
+            if said.is_none() {
+                let mut window = self.window.lock().unwrap_or_else(|e| e.into_inner());
+                if let Ok(Some(status)) = window.try_wait() {
+                    return Err(format!(
+                        "the oxplow app's window exited ({status}) before its page said whether \
+                         it draws"
+                    ));
+                }
             }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
+            Ok(said)
+        })
+        .await
     }
 
     /// What only the shell answers, as asked so far.
@@ -569,6 +606,41 @@ async fn library(AxumPath(file): AxumPath<String>, headers: HeaderMap) -> Respon
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A slow start waits for the signal: it comes after 40 s of a busy
+    /// machine, well past the old fixed 10 s, and is still taken.
+    #[tokio::test(start_paused = true)]
+    async fn a_slow_signal_is_waited_for() {
+        let began = tokio::time::Instant::now();
+        let got = first_signal(START_WAIT, "the signal", || {
+            Ok((began.elapsed() >= Duration::from_secs(40)).then_some(true))
+        })
+        .await;
+        assert_eq!(got, Ok(true));
+    }
+
+    /// A signal that never comes ends the wait at its bound, and the error
+    /// names what never came and for how long.
+    #[tokio::test(start_paused = true)]
+    async fn a_signal_that_never_comes_names_itself() {
+        let got: Result<bool, String> =
+            first_signal(Duration::from_secs(90), "its page's word", || Ok(None)).await;
+        let why = got.unwrap_err();
+        assert!(
+            why.contains("its page's word") && why.contains("90 s"),
+            "{why}"
+        );
+    }
+
+    /// A window that is gone ends the wait at once, with its own error.
+    #[tokio::test(start_paused = true)]
+    async fn a_window_that_exits_ends_the_wait() {
+        let got: Result<bool, String> = first_signal(START_WAIT, "the signal", || {
+            Err("the window exited".to_string())
+        })
+        .await;
+        assert_eq!(got, Err("the window exited".to_string()));
+    }
 
     #[test]
     fn the_agent_goes_first_in_the_bundles_page() {
