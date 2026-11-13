@@ -2534,6 +2534,70 @@ mod tests {
         );
     }
 
+    /// A dataset over a dataset that itself reads datasets passes lineage:
+    /// the inner views' reads are theirs, not the dataset's.
+    #[test]
+    fn a_dataset_over_nested_views_passes_lineage() {
+        let mut conn = fresh();
+        let datasets = [
+            source("a", "SELECT id FROM source('streams')", &["id INTEGER"]),
+            source("b", "SELECT id FROM ref('a')", &["id INTEGER"]),
+            source("c", "SELECT id FROM ref('b') WHERE id > 0", &["id INTEGER"]),
+            source(
+                "d",
+                "SELECT x.id FROM ref('c') x JOIN ref('b') y ON y.id = x.id",
+                &["id INTEGER"],
+            ),
+            source("e", "SELECT count(*) AS n FROM ref('d')", &["n"]),
+        ];
+        compile(&mut conn, "t", &datasets, &view).unwrap();
+    }
+
+    /// A top-level UNION / UNION ALL over `ref()`s and `source()`s passes
+    /// lineage, and records every input.
+    #[test]
+    fn a_top_level_union_over_refs_passes_lineage() {
+        let mut conn = fresh();
+        let datasets = [
+            source("a", "SELECT id FROM source('streams')", &["id INTEGER"]),
+            source("b", "SELECT id FROM ref('a')", &["id INTEGER"]),
+            source(
+                "u",
+                "SELECT id FROM ref('a') UNION ALL SELECT id FROM ref('b') UNION SELECT id FROM source('streams')",
+                &["id INTEGER"],
+            ),
+            source(
+                "w",
+                "SELECT id FROM ref('u') UNION SELECT id FROM ref('b')",
+                &["id INTEGER"],
+            ),
+        ];
+        compile(&mut conn, "t", &datasets, &view).unwrap();
+    }
+
+    /// A raw table read stays refused beside nested views and in a UNION arm.
+    #[test]
+    fn a_raw_read_is_refused_beside_nested_views_and_unions() {
+        for sql in [
+            "SELECT id FROM ref('b') UNION ALL SELECT id FROM threads",
+            "SELECT id FROM threads UNION ALL SELECT id FROM ref('b')",
+            "SELECT b.id FROM ref('b') b JOIN threads t ON t.id = b.id",
+        ] {
+            let mut conn = fresh();
+            let datasets = [
+                source("a", "SELECT id FROM source('streams')", &["id INTEGER"]),
+                source("b", "SELECT id FROM ref('a')", &["id INTEGER"]),
+                source("c", sql, &["id INTEGER"]),
+            ];
+            let err = compile(&mut conn, "t", &datasets, &view).unwrap_err();
+            assert!(
+                err.to_string()
+                    .contains("datasets/c.sql: reads threads without ref()/source()"),
+                "{sql}: {err}"
+            );
+        }
+    }
+
     #[test]
     fn a_contract_changed_at_the_same_version_fails_naming_the_column() {
         let mut conn = fresh();
