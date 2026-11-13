@@ -260,7 +260,14 @@ one transaction:
   columns } }`, every version published): `every_core_dataset_contract_is_
   pinned_at_its_version` fails in CI on a change at a pinned version, and
   `OXPLOW_BLESS=1` pins a new one (earlier versions stay; it never
-  rewrites a pinned version, so a bless leaves such a change red). A sweeping
+  rewrites a pinned version, so a bless leaves such a change red). The
+  same test also compares the working golden with `HEAD`'s
+  (`rewritten_pins`): a pinned version that was edited or dropped in the
+  file, by hand or by a bless, is refused naming the dataset ("bump
+  `version` in datasets.yaml"), even when datasets.yaml was edited to
+  match. Only a new version may be added. Startup (`check_contract`),
+  `contract_drift` and `rewritten_pins` compare through one function,
+  `Contract::change_to`, so the test never accepts what startup refuses. A sweeping
   rename never edits the golden: a published version's docs stay as they
   were, and the datasets whose docs the rename rewords take a bump;
 - records `dataset` (view, name, owner, version, description, compiled

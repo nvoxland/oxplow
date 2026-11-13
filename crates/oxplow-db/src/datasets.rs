@@ -340,20 +340,22 @@ pub fn core_sources() -> Result<Vec<DatasetSource>, DomainError> {
 pub fn contract_drift(golden: &serde_json::Value, decls: &[DatasetDecl]) -> Vec<String> {
     let mut out = Vec::new();
     for d in decls {
-        let now = contract_json(d);
         match golden
             .get(&d.name)
             .and_then(|m| m.get(d.version.to_string()))
         {
-            Some(pinned) if *pinned == now => {}
             Some(pinned) => {
-                let was: Contract = serde_json::from_value(pinned.clone()).unwrap_or_default();
-                out.push(format!(
-                    "{} v{}'s contract changed ({}); bump its version",
-                    d.name,
-                    d.version,
-                    was.change_to(&d.fields, &d.key)
-                ));
+                let was: Result<Contract, _> = serde_json::from_value(pinned.clone());
+                let change = match was {
+                    Ok(was) => was.change_to(&d.fields, &d.key),
+                    Err(e) => Some(format!("the pin no longer reads ({e})")),
+                };
+                if let Some(change) = change {
+                    out.push(format!(
+                        "{} v{}'s contract changed ({change}); bump its `version` in datasets.yaml",
+                        d.name, d.version
+                    ));
+                }
             }
             None => out.push(format!(
                 "{} v{} isn't pinned yet; bless the golden with OXPLOW_BLESS=1",
@@ -394,14 +396,54 @@ pub struct Contract {
 
 impl Contract {
     /// The first difference from this contract to `columns` / `key`, in
-    /// words.
-    pub fn change_to(&self, columns: &[DatasetField], key: &[String]) -> String {
+    /// words; `None` when they are the same promise. The one comparison
+    /// of a published contract with a declared one: startup
+    /// (`check_contract`), the golden test (`contract_drift`) and the
+    /// published-pin guard (`rewritten_pins`) all use it, so none of them
+    /// can accept what another refuses.
+    pub fn change_to(&self, columns: &[DatasetField], key: &[String]) -> Option<String> {
         if self.columns != columns {
-            contract_change(&self.columns, columns)
+            Some(contract_change(&self.columns, columns))
+        } else if self.key != key {
+            Some(format!("its key became [{}]", key.join(", ")))
         } else {
-            format!("its key became [{}]", key.join(", "))
+            None
         }
     }
+}
+
+/// The pinned contracts of `published` (the golden as last committed) that
+/// `golden` rewrote or dropped. A pinned version is published: databases
+/// recorded it and refuse to open when it changes, so the only way to
+/// change a contract is a new `version`. One line per version.
+pub fn rewritten_pins(published: &serde_json::Value, golden: &serde_json::Value) -> Vec<String> {
+    let mut out = Vec::new();
+    let Some(names) = published.as_object() else {
+        return out;
+    };
+    for (name, versions) in names {
+        let Some(versions) = versions.as_object() else {
+            continue;
+        };
+        for (version, was) in versions {
+            let was: Contract = serde_json::from_value(was.clone()).unwrap_or_default();
+            let now = golden.get(name).and_then(|m| m.get(version));
+            let change = match now {
+                None => Some("it was removed".to_string()),
+                Some(now) => match serde_json::from_value::<Contract>(now.clone()) {
+                    Ok(now) => was.change_to(&now.columns, &now.key),
+                    Err(e) => Some(format!("it no longer reads ({e})")),
+                },
+            };
+            if let Some(change) = change {
+                out.push(format!(
+                    "{name} v{version} is already published and its pinned contract changed ({change}); \
+                     restore it and bump `version` in datasets.yaml instead"
+                ));
+            }
+        }
+    }
+    out
 }
 
 fn contract_json(d: &DatasetDecl) -> serde_json::Value {
@@ -1449,16 +1491,13 @@ fn check_contract(
             .map_err(map_sql_err)?;
             Ok(())
         }
-        Some(before) if before.columns != decl.fields || before.key != decl.key => {
-            Err(invalid(format!(
-                "{}: {} v{}'s contract changed ({}); bump its version",
-                m.source.file,
-                decl.name,
-                decl.version,
-                before.change_to(&decl.fields, &decl.key)
-            )))
-        }
-        Some(_) => Ok(()),
+        Some(before) => match before.change_to(&decl.fields, &decl.key) {
+            Some(change) => Err(invalid(format!(
+                "{}: {} v{}'s contract changed ({change}); bump its version",
+                m.source.file, decl.name, decl.version
+            ))),
+            None => Ok(()),
+        },
     }
 }
 
@@ -2597,7 +2636,8 @@ mod tests {
         assert_eq!(
             contract_drift(&golden, std::slice::from_ref(&reworded)),
             vec![
-                "a v1's contract changed (column `id`'s doc changed); bump its version".to_string()
+                "a v1's contract changed (column `id`'s doc changed); bump its `version` in datasets.yaml"
+                    .to_string()
             ]
         );
         let mut bumped = reworded;
@@ -2646,7 +2686,10 @@ mod tests {
         keyed.key = vec!["id".into()];
         assert_eq!(
             contract_drift(&golden, std::slice::from_ref(&keyed)),
-            vec!["a v1's contract changed (its key became [id]); bump its version".to_string()]
+            vec![
+                "a v1's contract changed (its key became [id]); bump its `version` in datasets.yaml"
+                    .to_string()
+            ]
         );
 
         let mut conn = fresh();
@@ -2933,6 +2976,47 @@ mod tests {
         assert_eq!(found, Vec::<String>::new());
     }
 
+    /// A pinned version is published. Rewriting it in the golden (by hand,
+    /// or by a bless) makes the golden agree with a changed datasets.yaml
+    /// and hides the change; only a comparison with the golden as it was
+    /// published refuses it.
+    #[test]
+    fn rewriting_a_published_pin_is_refused_and_a_new_version_is_not() {
+        let decl: DatasetDecl = serde_yaml::from_str(
+            "name: a\nversion: 1\ndescription: d\nfields:\n  - { name: id, type: INTEGER, doc: \"Row id.\" }\n",
+        )
+        .unwrap();
+        let published = pin_contracts(&serde_json::json!({}), std::slice::from_ref(&decl));
+        // The doc is edited in datasets.yaml and in the golden's v1.
+        let mut reworded = decl.clone();
+        reworded.fields[0].doc = "The row's id.".into();
+        let mut rewritten = published.clone();
+        rewritten["a"]["1"] = contract_json(&reworded);
+        assert_eq!(
+            contract_drift(&rewritten, std::slice::from_ref(&reworded)),
+            Vec::<String>::new(),
+            "the golden and datasets.yaml agree, so only the published copy can tell"
+        );
+        let refused = rewritten_pins(&published, &rewritten);
+        assert_eq!(refused.len(), 1, "{refused:?}");
+        assert!(refused[0].starts_with("a v1 "), "{refused:?}");
+        assert!(
+            refused[0].contains("column `id`'s doc changed"),
+            "{refused:?}"
+        );
+        assert!(
+            refused[0].contains("bump `version` in datasets.yaml"),
+            "{refused:?}"
+        );
+        // A dropped pin is refused too.
+        assert_eq!(rewritten_pins(&published, &serde_json::json!({})).len(), 1);
+        // A new version beside the published one is fine.
+        let mut bumped = reworded;
+        bumped.version = 2;
+        let added = pin_contracts(&published, std::slice::from_ref(&bumped));
+        assert_eq!(rewritten_pins(&published, &added), Vec::<String>::new());
+    }
+
     #[test]
     fn every_core_dataset_contract_is_pinned_at_its_version() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -2956,8 +3040,27 @@ mod tests {
         } else {
             golden
         };
-        let drift = contract_drift(&golden, &decls);
+        let mut drift = contract_drift(&golden, &decls);
+        // The golden as last committed holds what was published: the
+        // working file may add versions, never change one. (Without git
+        // there is nothing to compare with.)
+        if let Some(published) = committed_golden() {
+            drift.extend(rewritten_pins(&published, &golden));
+        }
         assert!(drift.is_empty(), "{}", drift.join("\n"));
+    }
+
+    /// `fixtures/dataset_contracts.json` as `HEAD` has it.
+    fn committed_golden() -> Option<serde_json::Value> {
+        let out = std::process::Command::new("git")
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .args(["show", "HEAD:./fixtures/dataset_contracts.json"])
+            .output()
+            .ok()?;
+        out.status
+            .success()
+            .then(|| serde_json::from_slice(&out.stdout).ok())
+            .flatten()
     }
 
     #[test]
