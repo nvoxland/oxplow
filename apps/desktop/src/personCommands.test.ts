@@ -61,7 +61,7 @@ test("a failure is recorded, not thrown", async () => {
   expect(store.pending()).toBeNull();
 });
 
-// tsk975: a command that came back undoable offers Undo on its toast;
+// a command that came back undoable offers Undo on its toast;
 // taking it undoes that run, as the person. One that isn't offers none.
 test("an undoable command's toast offers Undo, which undoes that run", async () => {
   const toasts: Array<[string, (() => void) | undefined]> = [];

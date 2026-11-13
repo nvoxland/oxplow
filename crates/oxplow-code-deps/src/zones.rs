@@ -4,7 +4,7 @@
 //! that every repo file belongs to, and the unit the Change-analysis
 //! surfaces summarize churn and cross-boundary imports by.
 //!
-//! **The rules are the project's, not oxplow's** (tsk251). Oxplow ships
+//! **The rules are the project's, not oxplow's**. Oxplow ships
 //! no built-in table: what makes a file "the store layer" follows from
 //! how a particular repo is laid out, and a general-purpose tool can't
 //! assume that. Rules come from the `zones:` block in
@@ -200,7 +200,7 @@ mod tests {
         ZoneRules::from_config(&cfg)
     }
 
-    /// tsk251: with no project config there is no rule table at all, so
+    /// with no project config there is no rule table at all, so
     /// every path is the `other` sentinel. Oxplow ships no assumptions
     /// about how a project lays out its files.
     #[test]

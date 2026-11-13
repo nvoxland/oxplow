@@ -311,7 +311,7 @@ export function TerminalSurface({
     };
     // xterm measures its cells when it opens, and again only after a
     // resize: opened in the fallback font, its rows overflow once the mono
-    // web font lands (tsk1042). So it opens once the font is in.
+    // web font lands. So it opens once the font is in.
     const fontLoaded: Promise<unknown> =
       typeof document !== "undefined" && document.fonts
         ? document.fonts.load(`${TERMINAL_FONT_SIZE}px ${resolvedMono}`).catch(() => undefined)

@@ -342,7 +342,7 @@ pub fn spawn(
             let changed = match rx.recv().await {
                 Ok(tables) => Changed::Tables(tables),
                 // Missed some: anything may have changed — the registry
-                // too, whose change re-registers assets (tsk854).
+                // too, whose change re-registers assets.
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => Changed::Everything,
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
             };
@@ -738,7 +738,7 @@ mod tests {
         );
     }
 
-    /// P7 review (tsk727): a contract change on an unchanged query (its
+    /// P7 review: a contract change on an unchanged query (its
     /// input's column changed type underneath it) recreates the dataset's
     /// table — empty — and the dataset is refilled, not left empty until an
     /// input moves.

@@ -146,7 +146,7 @@ fn sweep_thread_pool() -> Option<rayon::ThreadPool> {
 /// Whether `bytes` (whose xxh3 is `xxh3`) are the content `prior`'s row
 /// already records. By content hash when the prior has one; a VCS-backed
 /// prior not hashed yet is compared by object id — the same bytes hash
-/// to its address — so touching a clean file isn't a change (tsk439).
+/// to its address — so touching a clean file isn't a change.
 fn same_content(
     prior: Option<(&SnapshotStorage, Option<&str>, Option<&str>)>,
     xxh3: &str,
@@ -321,7 +321,7 @@ struct Inner {
     /// ahead of the watcher's first poll is not lost.
     shutdown: tokio::sync::Notify,
     /// Signalled by [`SnapshotCaptureService::set_generated`] so the
-    /// watch moves to match the filter (tsk206). Without this,
+    /// watch moves to match the filter. Without this,
     /// registration-time pruning would freeze the watch set at boot and a
     /// `generated.include` that un-ignores a directory would never be watched
     /// until restart — breaking `set_generated`'s "without a restart" contract.
@@ -464,7 +464,7 @@ impl SnapshotCaptureService {
         {
             return;
         }
-        // The watch SET is derived from the filter (tsk206), not just the
+        // The watch SET is derived from the filter, not just the
         // per-event check — so it has to move, or a newly-included
         // directory would stay unwatched until restart.
         self.inner.refilter.notify_one();
@@ -1035,7 +1035,7 @@ impl SnapshotCaptureService {
     }
 
     /// Expire snapshot CONTENT older than `retention_days` — the on-disk blob
-    /// copies — while keeping every `file_snapshot` ROW forever (tsk105).
+    /// copies — while keeping every `file_snapshot` ROW forever.
     ///
     /// Retention's job is bounding the blob directory; the rows are durable
     /// records other subsystems replay (the per-path metric fold's scanned
@@ -1052,7 +1052,7 @@ impl SnapshotCaptureService {
         // `0` is documented as "retention disabled" (`snapshotRetentionDays`
         // in oxplow-config) — and without this guard it silently meant the
         // OPPOSITE: a cutoff of `now`, i.e. expire everything but each path's
-        // newest content (tsk110).
+        // newest content.
         if retention_days == 0 {
             return Ok(0);
         }
@@ -1135,7 +1135,7 @@ impl SnapshotCaptureService {
             return Ok(0);
         }
         // The old `enqueue_full_tree` variant (enqueue EVERY path so the next
-        // snapshot lists the whole tree) is gone (tsk71): metric baselines now
+        // snapshot lists the whole tree) is gone: metric baselines now
         // run `scan_kind = 'full'` captures over the RECONSTRUCTED tree of an
         // ordinary snapshot, so nothing needs a fabricated full-tree snapshot
         // any more — and fabricating one polluted file attribution.
@@ -1374,8 +1374,8 @@ impl SnapshotCaptureService {
                                 return None;
                             }
                             // The prior row is in the other identity space
-                            // (an xxh3): compare content, not addresses
-                            // (tsk423). Clean means the disk bytes ARE the
+                            // (an xxh3): compare content, not addresses.
+                            // Clean means the disk bytes ARE the
                             // HEAD blob, so hash the file; equal bytes are
                             // not a change. A fresh path (no prior) is
                             // still recorded without a read.
@@ -1748,7 +1748,7 @@ impl SnapshotCaptureService {
                                 let size = metadata.len();
                                 let mtime_ms = mtime_to_unix_ms(&metadata);
                                 let oversize = size > max_bytes;
-                                // Touched but not changed (tsk423): same
+                                // Touched but not changed: same
                                 // bytes as the path's latest row → no row.
                                 // A too-big file compares by size + mtime.
                                 if oversize
@@ -2002,7 +2002,7 @@ fn clean_revision<'a>(
 #[cfg(test)]
 mod tests {
 
-    /// tsk554: a snapshot is stamped with the head only when the head
+    /// a snapshot is stamped with the head only when the head
     /// read before the status check and the one after it agree — a commit
     /// in between leaves it unstamped rather than stamped wrong.
     #[test]
@@ -2361,7 +2361,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_committed_file_already_captured_as_oxplow_is_not_recorded_again() {
-        // tsk423. The file was captured dirty (an oxplow row, xxh3), then
+        // . The file was captured dirty (an oxplow row, xxh3), then
         // committed and touched: its stat changed, it is clean vs HEAD, and
         // its HEAD OID differs from the prior row's address — but the bytes
         // are the same, so the sweep must record nothing.
@@ -2391,7 +2391,7 @@ mod tests {
 
     #[tokio::test]
     async fn rewriting_a_git_backed_file_with_the_same_bytes_writes_no_row() {
-        // tsk439: after the boot sweep most files are git-backed with no
+        // after the boot sweep most files are git-backed with no
         // content hash yet; a formatter or `touch` must not read as a change.
         let project = tempdir().unwrap();
         init_git_repo_with(project.path(), &[("lib.rs", "fn a() {}\n")]);
@@ -2575,7 +2575,7 @@ mod tests {
 
     #[tokio::test]
     async fn setting_the_filter_signals_the_watcher_to_re_register() {
-        // tsk206: pruning at registration freezes the watch set, so the
+        // pruning at registration freezes the watch set, so the
         // `set_generated` swap MUST wake the watcher — otherwise a newly
         // INCLUDED dir would never be watched until restart, silently breaking
         // that IPC's "without an app restart" contract.
@@ -2995,7 +2995,7 @@ mod tests {
         );
     }
 
-    /// P7 review (tsk724): a git-refs listener that fell behind the ref
+    /// P7 review: a git-refs listener that fell behind the ref
     /// moves (its own among the dropped) still takes: a missed move may
     /// have been its stream's.
     #[tokio::test]
@@ -3695,7 +3695,7 @@ mod tests {
 
     #[tokio::test]
     async fn cleanup_expires_old_content_but_keeps_every_record() {
-        // tsk105. Retention bounds the on-disk blob copies, NEVER the rows:
+        // . Retention bounds the on-disk blob copies, NEVER the rows:
         // the records are durable facts other subsystems replay (the per-path
         // metric fold derives each capture's restated set from them), and
         // deleting them rotted the fold's inputs out from under durable
@@ -3767,7 +3767,7 @@ mod tests {
 
     #[tokio::test]
     async fn zero_retention_days_disables_cleanup_entirely() {
-        // tsk110. `snapshotRetentionDays: 0` is documented as "disabled", and
+        // . `snapshotRetentionDays: 0` is documented as "disabled", and
         // without the guard it silently meant the OPPOSITE — a cutoff of now,
         // expiring everything but each path's newest content.
         let project = tempdir().unwrap();

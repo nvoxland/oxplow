@@ -3,8 +3,8 @@
 //! `v_field`, P4.2/P4.9) — read through SQL like everything else;
 //! this adds what SQL can't say: an entity an extension declares that
 //! hasn't synced yet. Row counts aren't here: one `count(*)` over a big
-//! dataset can outrun the query timeout, so the UI counts each row itself
-//! (tsk1065). See `.context/semantic-layer.md`.
+//! dataset can outrun the query timeout, so the UI counts each row itself.
+//! See `.context/semantic-layer.md`.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -90,7 +90,7 @@ mod tests {
     use super::*;
     use oxplow_db::{Database, EntityColumn, EntityTable, SqliteCollectorStore, StoredType};
 
-    /// tsk517: Settings → Data lists every published dataset
+    /// Settings → Data lists every published dataset
     /// — a synced entity once, from the registry, with its doc — and a
     /// declared entity that hasn't synced as `declared`.
     #[tokio::test]

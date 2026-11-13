@@ -125,7 +125,7 @@ fn target_of(uri: &str) -> Result<Target, IpcError> {
 
 /// Open a renderer-attached terminal session for `uri`: a terminal's shell
 /// or an agent session's agent CLI, run directly in a PTY. There is no
-/// terminal multiplexer (tsk1018): the process lives as long as the daemon,
+/// terminal multiplexer: the process lives as long as the daemon,
 /// and a re-attach replays its buffer. The URI is the key — opening it
 /// again, from another window or a browser client, resumes the one process.
 pub async fn open_terminal_session(

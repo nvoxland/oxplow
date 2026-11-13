@@ -11,7 +11,7 @@
 //! stalls the pump, and nothing is skipped silently — a person retries
 //! or discards the letter (`retry_dead_letter` / `discard_dead_letter`).
 //!
-//! **Async consumers** (P2.6.2, tsk454) do work that can't live in a
+//! **Async consumers** (P2.6.2) do work that can't live in a
 //! SQLite transaction — take a snapshot, call a service. The pump runs the
 //! handler outside any transaction and checkpoints only after it returns,
 //! so a crash mid-work re-delivers the event on the next run: an async
@@ -91,7 +91,7 @@ pub trait AsyncEventConsumer: Send + Sync {
     }
     /// The consumers an event of `event_type` waits on — a subset of
     /// [`Self::after`] for a consumer whose predecessors depend on what it
-    /// is handling (`collector.triggers`, tsk711). `after` alone orders the
+    /// is handling (`collector.triggers`). `after` alone orders the
     /// consumers when the pump settles.
     fn after_for(&self, event_type: &str) -> Vec<String> {
         let _ = event_type;
@@ -883,7 +883,7 @@ mod tests {
         .unwrap()
     }
 
-    /// An async consumer (P2.6.2, tsk454): work outside the pump's
+    /// An async consumer (P2.6.2): work outside the pump's
     /// transaction, checkpoint after it completes. Scripted outcomes per
     /// call; `Ok` once the script runs out.
     struct AsyncRecorder {
@@ -1192,7 +1192,7 @@ mod tests {
         }
     }
 
-    /// P3.6 (tsk476): the consumers a settle names catch up side by side —
+    /// P3.6: the consumers a settle names catch up side by side —
     /// the hook's wait is the slowest one's, not their sum.
     #[tokio::test]
     async fn settle_runs_the_named_consumers_concurrently() {

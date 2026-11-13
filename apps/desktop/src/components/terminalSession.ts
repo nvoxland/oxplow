@@ -1,5 +1,5 @@
 /// How a terminal pane reads its session's messages and decides when to open
-/// the session again (tsk1026): a session ends when its process exits, and is
+/// the session again: a session ends when its process exits, and is
 /// gone after the daemon restarts — the pane says so, or opens it again,
 /// instead of showing a dead screen that swallows keystrokes.
 

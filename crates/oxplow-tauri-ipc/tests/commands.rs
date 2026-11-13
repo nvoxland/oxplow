@@ -336,7 +336,7 @@ async fn workspace_reads_and_file_round_trip() {
         .await
         .unwrap();
     // Create → read → rename → delete a file inside the primary's
-    // worktree; a change names its stream (tsk551).
+    // worktree; a change names its stream.
     let primary = commands::generated::get_primary_stream(app.state())
         .await
         .unwrap()

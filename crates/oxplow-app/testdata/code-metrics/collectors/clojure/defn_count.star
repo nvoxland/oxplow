@@ -6,7 +6,7 @@
 # (subject "file:<path>", nonzero only), so a request's change attributes
 # through its files. and a per-file
 # `code_metrics.ast_hit` FACT (rule="defn") — the metric is the SPEC
-# Sum(code_metrics.ast_hit) filtered by that rule (epic tsk12).
+# Sum(code_metrics.ast_hit) filtered by that rule.
 def _clj_files():
     out = []
     for glob in ["**/*.clj", "**/*.cljs", "**/*.cljc"]:

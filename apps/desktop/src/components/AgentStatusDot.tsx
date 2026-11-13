@@ -11,7 +11,7 @@ export type AgentStatusDotState = "working" | "waiting" | "stalled" | "awaiting"
 const COLORS: Record<AgentStatusDotState, string> = {
   working: "#fcd34d",
   // Neutral: an idle agent is waiting for the next prompt, not wrong
-  // (tsk1045: pale red read as an error).
+  // (pale red read as an error).
   waiting: "#94a3b8",
   stalled: "#ef4444",
   // Sky blue: "you're on the clock" — distinct from working's yellow

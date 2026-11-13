@@ -8,7 +8,7 @@
 //! of its bytes, so the match reads no bytes and survives Local History
 //! expiry. Nothing is closed by a commit: the
 //! `task → commit` edge is derived through the requests' tasks
-//! (`v_request_task`, `v_commit_task`).
+//! (`v_oxplow_request_link`, `v_commit_task`).
 
 use std::path::Path;
 

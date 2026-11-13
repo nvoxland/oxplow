@@ -142,11 +142,11 @@ fn global_config_dir_from(home: Option<std::ffi::OsString>) -> Option<PathBuf> {
 }
 
 const DEFAULT_SNAPSHOT_RETENTION_DAYS: u32 = 7;
-/// Metric retention defaults to KEEP EVERYTHING (tsk93): per-test history is
+/// Metric retention defaults to KEEP EVERYTHING: per-test history is
 /// what makes the fact substrate worth having, and ~420k facts read fine. The
 /// knob exists so growth can be bounded later without a code change.
 const DEFAULT_METRIC_RETENTION_DAYS: u32 = 0;
-/// Detail COMPACTION, unlike capture pruning, is on by default (tsk211): it
+/// Detail COMPACTION, unlike capture pruning, is on by default: it
 /// drops only the per-run drill-in payload, never a fact, so no metric value or
 /// trend point changes. ~0.5 MB per coverage run made `detail_json` 200 MB of a
 /// 795 MB database in under three weeks of heavy use.
@@ -370,7 +370,7 @@ pub struct ResolvedSpec {
     /// can list it as an unchecked toggle), but `seed_catalog` prunes it from the
     /// `metric_spec` table so all spec-driven reads + producer collection stop.
     pub enabled: bool,
-    /// Set for an entity metric (tsk322); `aggregation` is then one of
+    /// Set for an entity metric; `aggregation` is then one of
     /// [`ENTITY_METRIC_AGGS`].
     pub entity: Option<EntitySpec>,
     /// Guidance for an agent reading the metric.
@@ -573,8 +573,8 @@ pub struct TestingConfig {
     /// The command that runs the project's tests and writes their reports
     /// (counts as a test run; named in the report-less nudge).
     pub command: Option<String>,
-    /// The coverage-free counterpart to `command`, for the red/green loop
-    /// (tsk171). It still writes a test report (JUnit), so the
+    /// The coverage-free counterpart to `command`, for the red/green loop.
+    /// It still writes a test report (JUnit), so the
     /// progression lands in the Tests panel, but skips coverage
     /// and should accept a filter.
     ///
@@ -656,7 +656,7 @@ pub struct GeneratedConfig {
 /// One row of the project's `zones:` table: the globs that select files
 /// and the zone label they belong to.
 ///
-/// Zones are entirely project-defined (tsk251) — oxplow ships no rule
+/// Zones are entirely project-defined — oxplow ships no rule
 /// table of its own, because a file's architectural role follows from
 /// how *this* project lays out its repo. Order in the table is
 /// load-bearing: [`ZoneRules`](../oxplow_code_deps/zones/struct.ZoneRules.html)
@@ -708,7 +708,7 @@ pub struct OxplowConfig {
     /// Metric-capture retention window in days: captures older than the
     /// cutoff are pruned (facts cascade) — EXCEPT each producer's newest capture, and any capture
     /// still contributing a current value to the fold. **0 (the default)
-    /// keeps everything** (tsk93); pruning trades away per-test drill-down /
+    /// keeps everything**; pruning trades away per-test drill-down /
     /// flakiness horizon for bounded growth, so it is strictly opt-in.
     #[serde(rename = "metricRetentionDays")]
     pub metric_retention_days: u32,
@@ -718,7 +718,7 @@ pub struct OxplowConfig {
     ///
     /// This is the knob that bounds a BUSY project: the payload is ~0.5 MB per
     /// coverage run, so age alone never catches up with a repo that runs tests
-    /// dozens of times a day (tsk211). Compaction never changes a metric value
+    /// dozens of times a day. Compaction never changes a metric value
     /// — only the Tests/Coverage panel's detail for old runs is lost.
     #[serde(rename = "metricDetailMaxPerProducer")]
     pub metric_detail_max_per_producer: u32,
@@ -1567,7 +1567,7 @@ pub fn parse_project_config(
 }
 
 /// Write `key` into `.oxplow/project.yaml` as `value`, or remove it when
-/// `None` — editing only that key's lines (tsk1028). Every other line of
+/// `None` — editing only that key's lines. Every other line of
 /// the file is kept byte for byte: the person's formatting, comments, flow
 /// style, and keys that happen to equal their default. A key's block is its
 /// line at column 0 through the line before the next one, with the comment
@@ -1927,7 +1927,7 @@ pub fn config_entries(config: &OxplowConfig, fallback_name: &str) -> Vec<ConfigE
 }
 
 /// Write a **global** metrics manifest (`global_config_dir()/metrics/<name>.yaml`)
-/// — a clean `metrics:` doc holding `entries` (tsk235). Creates parent dirs.
+/// — a clean `metrics:` doc holding `entries`. Creates parent dirs.
 /// Used by the Catalog "New metric" scaffold at global scope; the runner reads
 /// these via [`load_global_metric_entries`].
 pub fn write_global_metrics_file(path: &Path, entries: &[MetricEntry]) -> Result<(), ConfigError> {
@@ -1946,7 +1946,7 @@ pub fn write_global_metrics_file(path: &Path, entries: &[MetricEntry]) -> Result
 /// keys [`load_project_config`] reads) without unset values (null, empty
 /// lists and maps), so a hand-edited block stays minimal across UI-driven
 /// writes. Generic on purpose: the per-field writers it replaced forgot
-/// fields as the structs grew (tsk355 dropped entity metrics' `entity`,
+/// fields as the structs grew (dropped entity metrics' `entity`,
 /// `where`, … and broke loading).
 fn minimal_yaml<T: Serialize>(entry: &T) -> serde_yaml::Value {
     fn prune(v: serde_yaml::Value) -> Option<serde_yaml::Value> {
@@ -2047,7 +2047,7 @@ impl Default for ExtensionInstanceConfig {
 pub const INSTANCES_FILE: &str = "instances.yaml";
 
 /// Beside [`INSTANCES_FILE`]: how many times each global instance's
-/// credentials changed (tsk842). The values are in the keychain, which
+/// credentials changed. The values are in the keychain, which
 /// no oxplow can watch; each bumps the instance's count when it changes
 /// one, and every other restarts the instance when it sees the count
 /// move. Counts only — never a value.
@@ -2133,7 +2133,7 @@ impl GlobalInstances {
     /// every oxplow on the machine takes (`instances.yaml.lock`), `edit`
     /// the file as it is now, then validate and write it atomically — so
     /// two windows or two oxplows never drop each other's change, and a
-    /// reader never sees half a file (tsk837). The outer error is the
+    /// reader never sees half a file. The outer error is the
     /// file's (it couldn't be locked, read, validated or written); the
     /// inner is `edit`'s refusal, which writes nothing.
     pub fn update<E>(
@@ -2739,7 +2739,7 @@ const METRIC_CATEGORIES: &[&str] = &[
 const MEASURE_TEMPORAL_SEMANTICS: &[&str] = &["additive", "semi-additive", "non-additive"];
 /// How a measure's series folds over time (`Fold` in the metric engine).
 pub const MEASURE_FOLDS: &[&str] = &["sum", "last", "first", "avg", "none"];
-/// What ONE capture restates (tsk41). Deliberately NOT mirrored as a DB CHECK —
+/// What ONE capture restates. Deliberately NOT mirrored as a DB CHECK —
 /// `temporal_semantics`' CHECK is exactly why adding a value there needs a
 /// `measure` table rebuild (which would cascade-wipe every fact), so
 /// `capture_scope` is validated here and in `CaptureScope::parse` instead.
@@ -3056,7 +3056,7 @@ pub fn validate_metrics(
 }
 
 /// A dimension key a metric slices or filters by: its one, namespaced name
-/// (tsk945) — `subject`, the raw-subject pseudo-dimension, aside.
+///  — `subject`, the raw-subject pseudo-dimension, aside.
 fn dimension_key(at: &str, key: String) -> Result<String, ConfigError> {
     if key == "subject" || key.contains('.') {
         return Ok(key);
@@ -3161,7 +3161,7 @@ pub fn unknown_uses(
 /// enables a catalog metric, layering its threshold overrides on top (scope = the
 /// definition's scope). A `use:` referencing an unknown key is skipped
 /// silently: this runs on every event, so [`unknown_uses`] reports those
-/// once per load (tsk1076).
+/// once per load.
 pub fn resolve_metrics(
     builtin: &[MetricEntry],
     global: &[MetricEntry],
@@ -3390,7 +3390,7 @@ fn load_global_entries<E>(
 }
 
 // ---------------------------------------------------------------------------
-// Measures + dimensions (the fact-catalog authoring surface — epic tsk12, E)
+// Measures + dimensions (the fact-catalog authoring surface, E)
 // ---------------------------------------------------------------------------
 
 /// Shared key check for the `measures:` / `dimensions:` catalogs: the key must
@@ -4076,7 +4076,7 @@ mod tests {
         assert_eq!(config.personal_active_providers.len(), 1);
     }
 
-    /// tsk947: `eventRetention` sets a namespace's windows — a person's key.
+    /// `eventRetention` sets a namespace's windows — a person's key.
     /// Core state (kept whole) and a window under a day are refused.
     #[test]
     fn event_retention_sets_a_namespaces_windows() {
@@ -4104,7 +4104,7 @@ mod tests {
             err.contains("`snapshot`") && err.contains("kept whole"),
             "{err}"
         );
-        // tsk985: windows are bounded — at least a week for a core
+        // windows are bounded — at least a week for a core
         // namespace oxplow reads back, a day for an extension's; at most a
         // hundred years; and a body is never kept longer than its payload.
         for (yaml, says) in [
@@ -4308,7 +4308,7 @@ mod tests {
         );
     }
 
-    /// tsk840: an instance's id is a provider id's kind of name — its refs'
+    /// an instance's id is a provider id's kind of name — its refs'
     /// segment and its command namespace — so the same names are oxplow's
     /// own: `oxplow`, and a core namespace.
     #[test]
@@ -4330,7 +4330,7 @@ mod tests {
         }
     }
 
-    /// tsk837: each change to the machine's instances is one
+    /// each change to the machine's instances is one
     /// read-modify-write of the file as it is then, under a lock other
     /// processes take too — so writers at once never drop each other's
     /// entry.
@@ -4479,7 +4479,7 @@ dimensions:
     /// Resolve the project config path under `<dir>/.oxplow/`, creating the
     /// `.oxplow` parent so a subsequent write succeeds. Used by tests that
     /// author a config file directly (simulating a user-edited file).
-    /// tsk1028: a command's write changes only its key. The person's
+    /// a command's write changes only its key. The person's
     /// formatting, comments and default-valued keys (`agents: [claude]`)
     /// stay as written.
     #[test]
@@ -4762,7 +4762,7 @@ lsp:
         );
     }
 
-    /// tsk251: `zones:` is an ORDERED table — first match wins — so the
+    /// `zones:` is an ORDERED table — first match wins — so the
     /// parsed order must be the file's order, and `match` takes either a
     /// single glob or a list of them.
     #[test]
@@ -4857,7 +4857,7 @@ lsp:
 
     #[test]
     fn fast_test_command_round_trips() {
-        // tsk171: the coverage-free counterpart to `testCommand`, used for the
+        // the coverage-free counterpart to `testCommand`, used for the
         // red/green loop so those runs still emit a report instead of being
         // dropped because the full instrumented run is too slow to repeat.
         let dir = tempdir().unwrap();
@@ -4888,7 +4888,7 @@ lsp:
     #[test]
     fn managed_keys_covers_every_block_the_writer_emits() {
         // Every top-level key the renderer emits reads back the same: what
-        // `keys::with_key` validates a command's change through (tsk164).
+        // `keys::with_key` validates a command's change through.
         let dir = tempdir().unwrap();
         std::fs::write(
             cfg_path(dir.path()),
@@ -5348,7 +5348,7 @@ testing:
         assert!(!raw.contains("scripts"), "defaults are not written:\n{raw}");
     }
 
-    /// tsk863: reports are read by collectors (`records:`) now; the old
+    /// reports are read by collectors (`records:`) now; the old
     /// `collection:` block is a key the file doesn't have.
     #[test]
     fn a_collection_block_is_an_unknown_key() {
@@ -5484,7 +5484,7 @@ testing:
         }
     }
 
-    /// tsk945: a dimension key has one name — its namespaced one. A metric
+    /// a dimension key has one name — its namespaced one. A metric
     /// declaring a bare one to slice or filter by is refused, saying what
     /// the key is called.
     #[test]
@@ -5741,7 +5741,7 @@ metrics:
         assert!(resolve_metrics(&[], &[], &[], &project).is_empty());
     }
 
-    /// tsk1076: resolution runs on every event, so it reports nothing; the
+    /// resolution runs on every event, so it reports nothing; the
     /// config's unknown `use:` keys are named once per load by
     /// `unknown_uses`, a disable marker for an extension key aside.
     #[test]
@@ -5978,7 +5978,7 @@ metrics:
         load_project_config(&root).expect("the repo's project.yaml loads");
     }
 
-    /// tsk865: `gauges:` is a key the file doesn't have (they're
+    /// `gauges:` is a key the file doesn't have (they're
     /// `collectors:`); nothing special-cases it.
     #[test]
     fn a_gauges_block_is_an_unknown_key() {
@@ -6058,7 +6058,7 @@ metrics:
         assert!(check("[{title: nokey}]").is_err());
         // Bad temporalSemantics.
         assert!(check("[{key: acme.x, temporalSemantics: sideways}]").is_err());
-        // Bad captureScope (tsk41).
+        // Bad captureScope.
         assert!(check("[{key: acme.x, captureScope: sometimes}]").is_err());
         // `per-path` is the tree-gauge scope and must be accepted.
         let valid = check("[{key: acme.x, captureScope: per-path}]").unwrap();
@@ -6070,7 +6070,7 @@ metrics:
         assert_eq!(resolve_measures(&plain, &[])[0].capture_scope, "complete");
         // Duplicate key.
         assert!(check("[{key: acme.x}, {key: acme.x}]").is_err());
-        // componentRole is gone (tsk865): ratio components ride each fact.
+        // componentRole is gone: ratio components ride each fact.
         assert!(
             serde_yaml::from_str::<Vec<MeasureEntry>>("[{key: acme.x, componentRole: none}]")
                 .is_err()

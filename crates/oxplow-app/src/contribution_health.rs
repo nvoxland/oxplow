@@ -478,7 +478,7 @@ mod tests {
         );
     }
 
-    /// P7 review (tsk721): a provider and a collector with the same
+    /// P7 review: a provider and a collector with the same
     /// `<extension>/<id>` are two contributions with two health rows.
     #[tokio::test]
     async fn a_provider_and_a_collector_named_alike_have_their_own_health() {

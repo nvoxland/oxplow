@@ -56,7 +56,7 @@ manager owns:
   `apps/desktop/src/lspSuggestions.ts`; keep the two in sync) and both
   fix paths (the `oxplow.lsp.install_server` command / yaml entry).
 
-> **LSP id ↔ analysis `Language` bridge (tsk321).** The session `language`
+> **LSP id ↔ analysis `Language` bridge.** The session `language`
 > here is a free string (`languageId`), a separate namespace from the
 > static-analysis `oxplow_code_metrics::Language` enum. The one documented
 > bridge between them is `oxplow_code_metrics::language_from_lsp_id(id)` →
@@ -64,7 +64,7 @@ manager owns:
 > the rest to `language_from_name`; an LSP language with no analysis grammar
 > resolves to `None`). Use it whenever an LSP buffer needs tree-sitter
 > analysis — don't re-derive the mapping. Part of the unified language-support
-> epic (tsk320).
+> epic.
 
 ## Installer (`crates/oxplow-app/src/lsp_installer.rs`)
 
@@ -107,8 +107,7 @@ registrations). Install/remove emit `OxplowEvent::LspServersChanged`.
   restart/crash/stop; a view of `v_diagnostic` re-runs on
   `DatasetsChanged`. Debounced per stream, it logs **`code.diagnostics.changed@2 { stream, path, counts }`** once
   per changed file with its counts after the burst (a crash logs the
-  files it cleared, at zero, and so does the boot clear, `clear_at_boot`;
-  tsk571) — the durable record, on the event log.
+  files it cleared, at zero, and so does the boot clear, `clear_at_boot`;) — the durable record, on the event log.
 - **Code intelligence (P5.C5)**: `oxplow_domain::code_intel::CodeIntelligence`
   — `definition`, `references`, `hover`, `document_symbols`,
   `workspace_symbols`, `call_hierarchy`, `diagnostics`, `rename` — over
@@ -122,20 +121,20 @@ registrations). Install/remove emit `OxplowEvent::LspServersChanged`.
   `MarkedString`, 0-based positions, URIs) to them. A file's language is
   the configured server whose `extensions` cover it — an installed
   (Mason) server's come from the language registry
-  (`language::lsp_extensions`, set when it is registered; tsk556)
+  (`language::lsp_extensions`, set when it is registered)
   (`LspSessionManager::language_for_path`); an uncovered file's error
   names the server to install (by the extension's language). Diagnostics
   are what the servers published (`lsp_diagnostic`), not a pull — and
   only a running server's: with none running for the file's language the
   answer is `CodeIntelError::NotRunning`, never `[]`, so an empty list
-  always means clean (tsk558). Every
+  always means clean. Every
   request is bounded by `MachineEnv.lsp_request_timeout` (30 s in the
   app, 2 s in tests): a server that never answers is a
   `CodeIntelError::Failed` naming the language and method, not a hung
-  caller (tsk557). `rename`
+  caller. `rename`
   returns the edits — from `documentChanges` when the server sends it,
   with its file creates / renames / deletes as `WorkspaceEdit.operations`
-  in order, else from `changes` (tsk571) — and applies nothing itself.
+  in order, else from `changes` — and applies nothing itself.
   **`oxplow.code.rename { stream, uri, line, col, new_name }`**
   (`commands/code_rename.rs`, scope `files.write`, op `rename_symbol`)
   applies them: it asks the server, reads and edits every file first (an

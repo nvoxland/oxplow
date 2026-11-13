@@ -83,7 +83,7 @@ subscribing to *two* of them still gets two callbacks for one user action
 debounce says nothing about how long the resulting work takes — if it
 outruns the window, calls overlap.
 
-That bit the branch-changes summary in `App.tsx` (tsk238): it subscribes
+That bit the branch-changes summary in `App.tsx`: it subscribes
 to both `vcsRefsChanged` and `workspaceChanged`, and each refresh runs
 `listBranchChanges` → 4+ git subprocesses including a
 `status --untracked-files=all` worktree walk. Agent edit storms drove a
@@ -93,7 +93,7 @@ It was fixed with a trailing debounce **plus single-flight** (one queued
 follow-up, so the summary can't end stale); the helper (`coalesced-refresh.ts`)
 went with the last two views that used it, which are pages now (a page re-runs
 the loaders whose reads changed, once per change). Write it again for any new expensive refresh fed by more
-than one event stream. And each scan is cheaper (tsk241): `get_change_scopes`
+than one event stream. And each scan is cheaper: `get_change_scopes`
 (`oxplow-git/src/branch_changes.rs`) reads the branch, its base and its
 upstream in-process through `git2`, the repo opened once, so the one git
 process a scan spawns is the `status` — whose untracked walk uses git's
@@ -279,7 +279,7 @@ loading spinner) by:
   one seen) and logs `vcs.head.moved { from, to }` after the take, so every commit lands a snapshot row stamped with the new
   HEAD (`snapshot.revision`/`branch`) even when the worktree
   didn't change. Beyond Local History, those rows are the **anchor
-  points for metric ancestry** (tsk97/tsk102): a dirty test run's code
+  points for metric ancestry**: a dirty test run's code
   is placed by the *next* same-branch commit-stamped snapshot — the
   commit that absorbed it, not the fork point its `closest_vcs_rev`
   names. The metric fold partitions per `(stream, branch)` and its
@@ -573,7 +573,7 @@ the UI entry points for user-driven commits. oxplow never steers the agent to
 commit. The Directory page (the Files launcher entry) is only the tree: no commit, pull or push, and no
 branch status (the Git page has those).
 
-### Commits are not policed (tsk250)
+### Commits are not policed
 
 Neither hook comments on a commit. The Stop hook emits no commit
 directives, and the PostToolUse Bash hook doesn't look for `git commit` at
@@ -600,7 +600,7 @@ classified.
 from **every stream's** head as deep as `IndexDepth::DEFAULT` says — a
 window of 500, doubled while the oldest it read was new (a pull longer
 than the window is indexed whole, no gap), up to 5000, which is also the
-horizon: a first boot indexes the newest 5000 (tsk568) — through the VCS capability (`Vcs::log`, `Vcs::revision`;
+horizon: a first boot indexes the newest 5000 — through the VCS capability (`Vcs::log`, `Vcs::revision`;
 [vcs.md](./vcs.md)) — stores them (`v_commit`, `v_commit_file`),
 restates branches and tags (`v_branch`, `v_tag`), and projects each
 commit into the unified `page_ref` graph (see

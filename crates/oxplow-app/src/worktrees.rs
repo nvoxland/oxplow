@@ -156,7 +156,7 @@ impl WorktreeRouter {
 mod tests {
     use super::*;
 
-    /// P5.B1 (tsk520): a stream routes to its worktree; an unknown or
+    /// P5.B1: a stream routes to its worktree; an unknown or
     /// absent stream reads the primary checkout but a strict resolve
     /// refuses it.
     #[tokio::test]

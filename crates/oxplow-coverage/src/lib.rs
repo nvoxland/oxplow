@@ -89,7 +89,7 @@ impl CoverageReport {
     }
 
     /// Fold `other` in: line sets union and the branch/function counters
-    /// sum (tsk160) — two toolchains reporting the same file each
+    /// sum — two toolchains reporting the same file each
     /// contribute their own.
     pub fn merge(&mut self, other: CoverageReport) {
         for (path, fc) in other.files {

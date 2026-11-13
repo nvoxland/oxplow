@@ -104,7 +104,7 @@ impl BranchReconciler {
 mod tests {
     use super::*;
 
-    /// P5.B1 (tsk520): a checkout made outside oxplow lands on the
+    /// P5.B1: a checkout made outside oxplow lands on the
     /// stream's row.
     #[tokio::test]
     async fn a_checkout_outside_oxplow_updates_the_stream_branch() {

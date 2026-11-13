@@ -88,7 +88,7 @@ function useRailSections(available: string[]): {
   const [stored, setStored] = useState<PanelPlacement[]>([]);
   const [draggingId, setDraggingId] = useState<RailSectionId | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: RailSectionId; side: "before" | "after" } | null>(null);
-  // Kept in step with `panel_layout` by `layoutSync` (tsk972, tsk998): an
+  // Kept in step with `panel_layout` by `layoutSync`: an
   // edit before the load is replayed on it, a failed load saves nothing,
   // saves land in order.
   const [layoutLoaded, setLayoutLoaded] = useState(false);

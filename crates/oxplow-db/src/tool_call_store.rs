@@ -286,7 +286,7 @@ mod tests {
         }
     }
 
-    /// P3.2 (tsk472): the row is a projection of `agent.tool.finished`, so
+    /// P3.2: the row is a projection of `agent.tool.finished`, so
     /// a redelivered event writes nothing.
     /// The session and the subagent a call ran in are recorded and read
     /// back through `v_tool_call`.

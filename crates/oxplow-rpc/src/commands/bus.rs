@@ -203,7 +203,7 @@ mod tests {
 
     use crate::test_support::services;
 
-    /// P5.A1 (tsk519): the person runs a command over IPC. A human-only
+    /// P5.A1: the person runs a command over IPC. A human-only
     /// key needs their confirmation — refused without it, done with it —
     /// and the run is audited to a human.
     /// What a person can run now and is offered: every command with

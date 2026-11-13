@@ -18,7 +18,7 @@
 //! `after_for(event)` is the union of the `after:` lists of the
 //! collectors that event triggers (limited to consumers the pump has): an
 //! event reaches the collectors once each of those has handled it, so a
-//! collector's `after:` holds up only its own events (tsk711). `after()`, the
+//! collector's `after:` holds up only its own events. `after`, the
 //! union over every collector, orders the consumers when the pump settles.
 //!
 //! It holds `Services` weakly: the pump that runs it is part of it.
@@ -230,8 +230,8 @@ impl AsyncEventConsumer for CollectorTriggers {
         self.predecessors(None)
     }
 
-    /// Only the collectors `event_type` triggers wait on their `after:`
-    /// (tsk711): a `snapshot.taken` collector doesn't wait on the
+    /// Only the collectors `event_type` triggers wait on their `after:`:
+    /// a `snapshot.taken` collector doesn't wait on the
     /// `change.analyze` a `task.state_changed` collector names.
     fn after_for(&self, event_type: &str) -> Vec<String> {
         self.predecessors(Some(event_type))
@@ -440,7 +440,7 @@ mod tests {
         assert!(consumer.handles(&ev.envelope.event_type));
         consumer.handle(&ev).await.unwrap();
         consumer.handle(&ev).await.unwrap();
-        // tsk1002: `:event_id` is the event's id and `:event_seq` its seq,
+        // `:event_id` is the event's id and `:event_seq` its seq,
         // as an effect's `input` binds them.
         assert_eq!(
             rows(&fx.svc, "SELECT ev, id, thread, kind FROM v_work_seen").await,
@@ -670,7 +670,7 @@ mod tests {
             consumer.after_for("task.state_changed"),
             vec!["change.analyze".to_string()]
         );
-        // tsk711: predecessors follow the event's own collectors — an event
+        // predecessors follow the event's own collectors — an event
         // no collector waiting on `change.analyze` handles doesn't wait.
         assert_eq!(consumer.after_for("snapshot.taken"), Vec::<String>::new());
         assert_eq!(

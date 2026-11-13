@@ -712,7 +712,7 @@ mod tests {
         .unwrap()
     }
 
-    /// P4.9 (tsk494): an entity view is a dataset its extension owns — in the
+    /// P4.9: an entity view is a dataset its extension owns — in the
     /// registry with its table as input, so lineage and subscriptions see
     /// it; kept across the open that recompiles the SQL datasets; gone with
     /// its extension. Another extension, or a core view, can't take the name.
@@ -1069,7 +1069,7 @@ mod tests {
     }
 
     /// `_` is a LIKE wildcard: dropping `gh` must leave `gh-extra`'s view
-    /// (`ext__gh_extra__…`) alone (tsk368).
+    /// (`ext__gh_extra__…`) alone.
     #[tokio::test]
     async fn dropping_an_extension_leaves_similar_names_alone() {
         let db = Database::in_memory();

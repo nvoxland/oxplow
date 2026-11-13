@@ -7,7 +7,7 @@
 //! trailing fractional zeros — so `…20.5Z` sorted *after* `…20.51Z`, and a
 //! whole-second `…20Z` after everything in its second. That inverted
 //! `ORDER BY`s and window comparisons on every store that didn't remember to
-//! normalize (tsk243, tsk107, tsk387). Fixing the width **in the serializer**
+//! normalize. Fixing the width **in the serializer**
 //! makes the invariant hold by construction: there is no other way to turn a
 //! `Timestamp` into text. Parsing accepts any RFC 3339 string (old rows, other
 //! producers). Sub-microsecond precision is truncated, which preserves order.
@@ -44,8 +44,8 @@ impl Timestamp {
     }
 
     /// The instant `ms` milliseconds from the Unix epoch. The nanoseconds
-    /// are computed in `i128`, so a far instant is computed, never wrapped
-    /// (tsk985); one outside the calendar's ±9999 years is a bug.
+    /// are computed in `i128`, so a far instant is computed, never wrapped;
+    /// one outside the calendar's ±9999 years is a bug.
     pub fn from_unix_ms(ms: i64) -> Self {
         let nanos = i128::from(ms) * 1_000_000;
         Self(OffsetDateTime::from_unix_timestamp_nanos(nanos).expect("valid timestamp"))
@@ -140,7 +140,7 @@ mod tests {
 
     use super::*;
 
-    /// tsk935: a time from outside (an OTLP point) past what a timestamp
+    /// a time from outside (an OTLP point) past what a timestamp
     /// can hold is none, never a panic.
     #[test]
     fn unix_nanos_out_of_range_is_none() {
@@ -229,7 +229,7 @@ mod tests {
         assert!(serde_json::from_str::<Timestamp>("42").is_err());
     }
 
-    /// tsk985: a timestamp far from now is computed, never wrapped — the
+    /// a timestamp far from now is computed, never wrapped — the
     /// nanosecond product overflowed i64 past about 292 years, which turned
     /// a retention cutoff 300 years back into one in the future.
     #[test]

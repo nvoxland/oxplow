@@ -688,7 +688,7 @@ async fn ingest_failure_still_acks_200() {
     assert_eq!(body, serde_json::json!({}));
 }
 
-// ── OTLP metrics receiver (epic tsk22) ──────────────────────────────────────
+// ── OTLP metrics receiver ──────────────────────────────────────
 
 /// Build an encoded (protobuf) Claude-shaped OTLP metrics export body with one
 /// `input` + one `output` `claude_code.token.usage` data point.

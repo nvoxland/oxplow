@@ -157,7 +157,7 @@ models:
   - The page-ref boot repair covers every model's markdown and edge
     columns, keyed on the vocabulary too (edges depend on which ids
     resolve).
-- **Bare links.** A loose id in text (`tsk12`, `[[slug]]`) resolves by
+- **Bare links.** A loose id in text (`tsk42`, `[[slug]]`) resolves by
   the stores' declared patterns: each `fills:` entry of a task model (one
   whose resource is `oxplow/task`) may declare `id_pattern:` (a regex,
   matched whole, checked at load). The vocabulary recognizes each live

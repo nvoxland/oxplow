@@ -65,7 +65,7 @@ function renderNavigator(opts?: {
 
 /**
  * The overlay opens by CLICKING the strip's bottom-pinned chevron —
- * hover no longer opens it (tsk269).
+ * hover no longer opens it.
  */
 function openOverlay(getByTestId: (id: string) => HTMLElement) {
   fireEvent.click(getByTestId("navigator-expand"));
@@ -93,12 +93,12 @@ function stubPanelRect(panel: HTMLElement, right = 280, bottom = 800) {
   });
 }
 
-// --- Hover no longer expands (tsk269) ------------------------------------
+// --- Hover no longer expands ------------------------------------
 
 test("hovering the strip does not open the overlay", () => {
   const { getByTestId, queryByTestId } = renderNavigator();
 
-  // The whole point of tsk269: a pointer that merely drifts left while
+  // The whole point of a pointer that merely drifts left while
   // aiming at the rail HUD must not throw a 280px panel over the rail.
   fireEvent.mouseEnter(getByTestId("navigator-strip").parentElement as HTMLElement);
   fireEvent.mouseEnter(getByTestId("navigator-strip"));
@@ -201,7 +201,7 @@ test("a pointerdown outside the overlay collapses it so rail clicks aren't inter
   expect(queryByTestId("navigator-overlay") !== null).toBe(true);
 
   // A press anywhere outside the overlay (the rail / center / tab bar)
-  // must collapse it immediately (tsk131) — the very next click then
+  // must collapse it immediately — the very next click then
   // lands on the rail instead of being swallowed by the overlay.
   fireEvent.pointerDown(document.body);
   expect(queryByTestId("navigator-overlay") === null).toBe(true);

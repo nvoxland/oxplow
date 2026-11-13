@@ -27,7 +27,7 @@ describe("clampMenuPosition", () => {
   });
 
   test("a menu taller than the viewport pins to the top rather than hanging off it", () => {
-    // tsk146: the whole point. Before the max-height existed, a menu this tall
+    // the whole point. Before the max-height existed, a menu this tall
     // pinned here and everything past the fold was simply unreachable — there
     // was no scroll. Position alone can't fix that; it's why the fix is
     // max-height + overflowY, and this only asserts the position half.

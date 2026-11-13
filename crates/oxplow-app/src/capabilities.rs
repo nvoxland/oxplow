@@ -1295,7 +1295,7 @@ pub(crate) async fn offering_settings(
 /// Rewrite the skills and commands of the agent runtimes already on disk
 /// to what's offered now, each registered harness its own, in the project
 /// and in every stream's worktree on this machine: at boot (an agent that
-/// outlived an upgrade, tsk376), when the extensions change, and on a
+/// outlived an upgrade), when the extensions change, and on a
 /// switch.
 pub async fn refresh_agent_text(svc: &crate::Services) {
     // The offered capabilities and the extensions' files are read from one

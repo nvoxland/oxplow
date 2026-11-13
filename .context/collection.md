@@ -46,7 +46,7 @@ section for the column.
   observation wire type (`kind` ∈ `test-run`/`diff-coverage`/
   `static-analysis`, `metric_value`, `payload_json`, freshness pin) is the
   read/IPC shape only — see [metrics.md](./metrics.md) for the substrate.
-- **Report collectors** (tsk863) — reading a report is a **collector**:
+- **Report collectors** — reading a report is a **collector**:
   a `collectors:` entry in the project's own extension
   (`.oxplow/extensions/project/extension.yaml`; never `.oxplow/project.yaml`,
   which refuses `collectors:`) with `records: tests |
@@ -92,7 +92,7 @@ section for the column.
   typed shapes live in `oxplow-coverage`. `entry: "oxplow:<name>"` names a
   **bundled** parser: `junit`, `lcov`, `cobertura`, `jacoco`, `clippy`,
   `eslint`. **One table** holds them (`oxplow_config::collectors::
-  BUNDLED_PARSERS`, tsk935): each one's name, what it records, how its
+  BUNDLED_PARSERS`): each one's name, what it records, how its
   report is pre-parsed and its jq program (`oxplow-config/src/parsers/
   *.jq`). The config check and the runtime (`Collector::bundled`, which
   reads it) can't disagree. `lcov` is the exception in *how* it runs: its jq
@@ -124,7 +124,7 @@ section for the column.
   `collection:` block is gone: the file
   rejects it as an unknown key (`a_collection_block_is_an_unknown_key`).
 
-  **`fastCommand` (tsk171)** is the coverage-free counterpart to
+  **`fastCommand` ** is the coverage-free counterpart to
   `command`, for the red/green loop. It must still emit a test report, but
   skips instrumentation and should accept a filter. It exists because
   `command` in a coverage-instrumented repo is far too slow to run every
@@ -185,7 +185,7 @@ hook + MCP wiring):
   `metric_capture.turn_id`, so it is the turn's request's. A run outside
   any turn is still recorded, belonging to none. Nothing is declared or claimed
   ([work-tracking.md](./work-tracking.md)).
-  **Detection is run-aware (tsk347):** `detect_test_run`/`detect_analysis_run`
+  **Detection is run-aware:** `detect_test_run`/`detect_analysis_run`
   split the command on shell operators (`&&`/`||`/`;`/`|`) and ignore
   sub-commands whose leading executable only *reads* (grep/echo/cat/sed/…), so a
   command that merely MENTIONS a pattern (`grep test:collect .oxplow/project.yaml`) is no
@@ -244,7 +244,7 @@ hook + MCP wiring):
   **Freshness is the router:** a run only regenerates its own stack's/tool's
   report(s), so the mtime window (`FreshWindow::of_run`: written after the
   run's own start, less a second of mtime granularity, and by a minute
-  after it ended — tsk888) naturally excludes the other stacks' reports — a `bun test` run
+  after it ended) naturally excludes the other stacks' reports — a `bun test` run
   picks up the frontend reports, a `cargo cov` run the Rust ones, a
   `cargo clippy` run the clippy findings, and all accrue within one request.
   The UI builds a tech-natural tree by splitting each case's
@@ -279,8 +279,8 @@ hook + MCP wiring):
   falling back to HEAD with `exact = false` when the tree is dirty (the normal
   case). This is the fold's only ancestry material and is **not backfillable**;
   see the stamping note in [metrics.md](./metrics.md).
-  **A run reported any other way has its coverage read from its event**
-  (tsk1015): the `collection.run_reports` pump consumer reacts to
+  **A run reported any other way has its coverage read from its event**:
+  the `collection.run_reports` pump consumer reacts to
   `test.run.recorded` and runs `CollectionService::on_test_run_recorded`
   — the project's `on_run: test` **coverage** collectors whose report was
   written around the run's time (`FreshWindow::around`), recorded as a
@@ -401,7 +401,7 @@ scripts made that kilobytes).
 When a collector **should** have read a report but didn't count — its
 parse failed, or it is disabled — the nudge
 says that instead, collector by collector (`RunReports::unread`,
-`unread_reports_message`; tsk893): running the tests again wouldn't help,
+`unread_reports_message`): running the tests again wouldn't help,
 and the reasons name what a person must do. A coverage collector that
 didn't count also leaves the lost coverage's `failed` capture.
 
@@ -549,7 +549,7 @@ the built-in metrics' and report parsers' unit tests call them directly.
 (`CollectError::WorkerDied`), never an in-process fallback;
 `scripts/test-prereqs.sh` builds it before every test run.
 
-**`exec` is the one tier whose budget actually STOPS the work** (tsk161): a
+**`exec` is the one tier whose budget actually STOPS the work**: a
 child process can be killed, so `run_exec` enforces the deadline with
 `try_wait` + `kill` rather than detaching. It also drains stdout and stderr on
 their own threads while writing stdin from a third. Doing that in sequence —
@@ -558,7 +558,7 @@ filter the moment a pipe buffer (~64 KB) fills: the child blocks writing
 stdout, so it stops reading stdin, so the parent blocks writing. Reproduced
 with multiple MB through `cat`, and it had no budget to break out of it.
 
-> ### History: budgets that only bounded the caller's wait (tsk88)
+> ### History: budgets that only bounded the caller's wait
 >
 > Until the script worker, `run_sandboxed` ran a script on a thread and
 > `recv_timeout`'d; Rust can't kill a thread, so an overrun was **detached and
@@ -570,12 +570,12 @@ with multiple MB through `cat`, and it had no budget to break out of it.
 > **This same shape of bug has now bitten three times** — a fixed timeout sized
 > for a small input silently killing whole-workspace work, and reporting it as
 > nothing rather than as a failure:
-> 1. **tsk47** — tree scans (then "gauges") timed out at 5s on every full-tree scan and wrote nothing
+> 1. tree scans (then "gauges") timed out at 5s on every full-tree scan and wrote nothing
 >    (`oxplow.ts.console_calls` read 0 against 137 real calls).
-> 2. **tsk62** — the 5s *hook response* budget cancelled the coverage step after
+> 2. the 5s *hook response* budget cancelled the coverage step after
 >    the junit ingest on EVERY run, naming "a multi-MB lcov parse" as the cause.
 >    Fixed by detaching the recording from the hook response…
-> 3. **tsk88** — …at which point the same multi-MB lcov parse died at the 5s
+> 3. …at which point the same multi-MB lcov parse died at the 5s
 >    *sandbox* budget instead: one layer down, and **intermittent** rather than
 >    total. The real parse takes ~2.8s against a 5s budget, so it failed only
 >    under load — `metric_capture` showed **11 `done` (196 facts each) against 7
@@ -588,8 +588,8 @@ with multiple MB through `cat`, and it had no budget to break out of it.
 > DEBUG build** (the interpreter runs ~6x slower there, and that's what developers
 > actually run): an honest script that trips a budget now loses its run.
 >
-> **And a lesson about reading the evidence:** tsk88 was first written up as
-> "coverage never got a fact", borrowing tsk62's wording. One `GROUP BY status`
+> **And a lesson about reading the evidence:** was first written up as
+> "coverage never got a fact", borrowing the wording. One `GROUP BY status`
 > over `metric_capture` disproved it. *Intermittent* was the stronger clue anyway
 > — a marginal budget fails under load, which is exactly what a 60/40 split looks
 > like, whereas "never" would have pointed somewhere else entirely. When a
@@ -637,11 +637,11 @@ it):
   fact collector's `report:` is pre-parsed by `parse_report`.
 - `code_metrics(text, language, path)` → per-function `[{name, id, uri,
   container, kind, complexity, length, parameter_count, start_line, end_line, visibility, has_doc}]` via
-  `oxplow-code-metrics`. `has_doc` (tsk125) is per-language doc detection
+  `oxplow-code-metrics`. `has_doc` is per-language doc detection
   (`LanguageSpec::doc`): a doc comment immediately preceding the item —
   `///`/`/**`/… by prefix, NOT a plain `//` (except Go, where any preceding
   comment is the doc) — or a Python/Clojure docstring. Backs `oxplow.doc_coverage`.
-- **The language-agnostic layer** (tsk314) — for metrics that are the
+- **The language-agnostic layer** — for metrics that are the
   *same concept across languages* (TODOs, complexity, …), a metric shouldn't
   name a language. Two globals make that possible:
   - `source_files()` → `[{path, text, language}]` — every **recognized** source
@@ -655,10 +655,10 @@ it):
   `metrics/code/*.star` set in `oxplow-script`). Adding a language → no metric changes.
 
 **Output schemas** the transform must produce:
-- coverage: `{ "files": { "<path>": { "instrumented": [<line>…], "covered": [<line>…], "branchesFound"?: <n>, "branchesHit"?: <n>, "functionsFound"?: <n>, "functionsHit"?: <n> } } }` — branch/function are optional **counts** (a line holds several branches; functions are named), default 0 = "no such data for this file" (tsk123). lcov emits them from `BRF`/`BRH`/`FNF`/`FNH`; jacoco from the sourcefile `<counter type="BRANCH"/"METHOD">`; cobertura branch from per-line `condition-coverage="H% (a/b)"` (direct `<lines>` only, so method `<lines>` don't double-count) and function from `<method>` `line-rate`.
+- coverage: `{ "files": { "<path>": { "instrumented": [<line>…], "covered": [<line>…], "branchesFound"?: <n>, "branchesHit"?: <n>, "functionsFound"?: <n>, "functionsHit"?: <n> } } }` — branch/function are optional **counts** (a line holds several branches; functions are named), default 0 = "no such data for this file". lcov emits them from `BRF`/`BRH`/`FNF`/`FNH`; jacoco from the sourcefile `<counter type="BRANCH"/"METHOD">`; cobertura branch from per-line `condition-coverage="H% (a/b)"` (direct `<lines>` only, so method `<lines>` don't double-count) and function from `<method>` `line-rate`.
 - test: `{ "suites": [ { "name", "cases": [ { "classname", "name", "status": "passed|failed|skipped", "timeMs"?, "message"? } ] } ] }`. Once old enough for detail compaction (metrics.md, the compaction box) a run keeps its counts and only its **failed** cases, and its envelope says `"compacted": true`: an old run's passing cases are gone from `v_test_case`, its failures and `v_test_run` row stay (the request outcome reads them). `message` is a **failed** case's only: what its report said went wrong (junit: the `<failure>`/`<error>` `message` attribute, then its body, which is the assertion and where it happened), kept in the capture's `detail_json` and read as `v_test_case.message` so a flake can be diagnosed after the report file is overwritten. It is bounded: each message is cut at 4,096 bytes (`MAX_MESSAGE_BYTES`, on a character boundary, ending in `…`), and a run keeps 64 KB of them in all (`MAX_MESSAGE_BYTES_PER_RUN`): later failures keep their status and no message. The host applies the caps (`runtime::TestReport`'s conversion), so a project's own parser is bounded too
 - analysis: `{ "findings": [ { "path", "line"?, "column"?, "severity": "error|warning|info|note", "rule"?, "message" } ] }`
-- fact collector: `{ "facts": [ { "measure", "value", "subject"?, "path"?, "line"?, "rule"?, "num"?, "den"?, "dims"? } ] }` and nothing else — `facts_of` refuses any other output (the old `samples`/`findings` channels are gone, P7.B3). See [metrics.md](./metrics.md). Facts are the durable atomic grain of the inverted substrate (epic tsk12): each is bound to a defined `measure` (which must be in the collector's `facts:` allow-list) and re-aggregated by a metric *spec* at read time. `num`/`den` are optional ratio components (a `ratio` spec re-derives Σnum/Σden). `rule` populates the fact's `rule` column (the `oxplow.rule` dimension — the per-language idiom collectors tag each `oxplow.ast_hit` fact with the idiom slug there). A fact on an **undefined** measure — or one outside the collector's `facts:` — is a declare-to-collect violation: the run **fails**, naming the measure, and writes nothing (tsk1029; it used to drop the fact behind a run reported "ok"). A measure not yet in the catalog makes the run reseed it once first, so an extension added while oxplow runs is never failed by its collector winning the race with the catalog's reseed.
+- fact collector: `{ "facts": [ { "measure", "value", "subject"?, "path"?, "line"?, "rule"?, "num"?, "den"?, "dims"? } ] }` and nothing else — `facts_of` refuses any other output (the old `samples`/`findings` channels are gone, P7.B3). See [metrics.md](./metrics.md). Facts are the durable atomic grain of the inverted substrate: each is bound to a defined `measure` (which must be in the collector's `facts:` allow-list) and re-aggregated by a metric *spec* at read time. `num`/`den` are optional ratio components (a `ratio` spec re-derives Σnum/Σden). `rule` populates the fact's `rule` column (the `oxplow.rule` dimension — the per-language idiom collectors tag each `oxplow.ast_hit` fact with the idiom slug there). A fact on an **undefined** measure — or one outside the collector's `facts:` — is a declare-to-collect violation: the run **fails**, naming the measure, and writes nothing (it used to drop the fact behind a run reported "ok"). A measure not yet in the catalog makes the run reseed it once first, so an extension added while oxplow runs is never failed by its collector winning the race with the catalog's reseed.
 
 The two bundled analysis parsers are the canonical templates: `clippy.jq`
 (`input: lines`; `fromjson?` per line tolerates non-JSON lines, keeps
@@ -672,7 +672,7 @@ Declare a report collector with its own `entry` — no recompile. The
 **script lives in its own file** (relative to the extension folder, e.g.
 `collectors/clover.jq`; absolute paths and `..` are rejected), not inline in the yaml. The entry and the report `path` are
 also resolved through every symlink before anything is read, and one that
-lands outside the checkout is refused (`in_checkout`, tsk927): a repo can't
+lands outside the checkout is refused (`in_checkout`): a repo can't
 point a collector at a file of the person's. Example: a Clover (XML) coverage
 parser in jaq:
 
@@ -716,7 +716,7 @@ A tool that emits a whole-project **ratio** (not line-sets/findings) — e.g. TS
 (`records:` reads only the `tests`/`coverage`/`analysis` kinds).
 The fact engine reads the report, parses it per `format` (`parse_report`) and
 hands it to the jaq/starlark script as `input.report`; the script returns a
-`{facts:[{measure, value, num, den}]}` ratio fact. tsk126 dogfoods this as
+`{facts:[{measure, value, num, den}]}` ratio fact. dogfoods this as
 the `repo.scan_type_coverage` collector → `repo.type_coverage`
 (`.oxplow/extensions/project/collectors/type_coverage.jq`, `format: text` +
 `[… | try fromjson catch null][0]` so a missing report yields no facts rather

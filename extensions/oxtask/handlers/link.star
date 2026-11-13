@@ -1,5 +1,5 @@
 # oxtask.task.link { id, to, type }: link a task to a URI (or another
-# oxtask id, written as `tsk12`). A removed link of the same key comes back.
+# oxtask id, written as `tsk42`). A removed link of the same key comes back.
 # The inverse is unlink, unless the link was already there.
 
 def uri(to):

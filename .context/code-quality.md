@@ -5,13 +5,13 @@ function/zone/co-change tooling. Everything runs directly inside the Rust
 process via tree-sitter — no subprocess, no Python or Node dependency, nothing
 for the user to install.
 
-> **Retired (tsk229):** the persisted **per-function metrics scan** (tool name
+> **Retired:** the persisted **per-function metrics scan** (tool name
 > `"metrics"` → `complexity` / `function-length` / `parameter-count` findings),
 > the standalone **Code-quality page**, and the `run_code_quality_scan` /
 > `list_code_quality_scans` IPC+MCP commands are **gone**. Those signals now live
 > in the **metric substrate** as bundled, **language-agnostic** fact collectors
 > (`oxplow.high_complexity_fns`, `oxplow.long_functions`, `oxplow.fn_count` —
-> computed via the `code_metrics()` host builtin across all languages, tsk314 —
+> computed via the `code_metrics` host builtin across all languages —
 > see [metrics.md](./metrics.md)). What remains here: the **duplication** scan
 > (`"duplication"` tool — no script equivalent, so it stays inherent) and the
 > building blocks of the **change-analysis producer** (per-function metrics,
@@ -19,7 +19,7 @@ for the user to install.
 > The `code_quality_scan` / `code_quality_finding` tables persist — they hold
 > only `duplicate-block` findings, written by the change analyzer's scans.
 >
-> **Moved (tsk308):** the Change Analysis UI (the `components/ChangeAnalysis/`
+> **Moved:** the Change Analysis UI (the `components/ChangeAnalysis/`
 > cards, `useChangeAnalysis`, the scope drilldown) and its IPC
 > (`analyze_functions_at_refs`, `analyze_co_change_surprise`,
 > `run_duplication_scan_at`, `find_latest_code_quality_scan`,
@@ -186,14 +186,14 @@ in the background. `DuplicationRecorder::record`
   (`oxplow_code_metrics::is_supported_path`), not every file in the tree;
 - **no facts**: a change scan anchors only its changed files, so a capture
   from it would restate the whole tree from a slice and zero out every
-  untouched file's duplicates (tsk365). `oxplow.duplicate_lines` is
+  untouched file's duplicates. `oxplow.duplicate_lines` is
   oxplow-bundled's whole-tree collector's: the
   `duplicate_blocks(min_lines)` Starlark builtin over the whole tree after
   moves of the stream's HEAD (`vcs.head.moved`) — paced, so a burst
   of them (a commit, a rebase, a restart's catch-up) is one scan of the
   latest tree once they settle for 60 s, at most every 15 min — an empty capture
-  clearing the metric after a refactor (tsk44); those restates are history,
-  never baselines the dominated-capture prune acts on (tsk709) —
+  clearing the metric after a refactor; those restates are history,
+  never baselines the dominated-capture prune acts on —
   [metrics.md](./metrics.md) → "Three metric scopes";
 - a status-bar background task. Its rows' commits announce it
   (`DatasetsChanged` on `v_code_quality_scan`); the `CodeQualityScanned`
@@ -290,7 +290,7 @@ grammar table). Public API:
   different from the source. `ZONE_EXTERNAL` targets never trip
   cross-zone (importing serde isn't a layer violation).
 
-**Oxplow ships no rule table** (tsk251). What makes a file "the store
+**Oxplow ships no rule table**. What makes a file "the store
 layer" follows from how a particular repo is laid out, and oxplow runs
 on any repo — the old built-in table hardcoded ~25 `crates/oxplow-*` /
 `apps/desktop/*` / `.context/` prefixes, so every other project's files

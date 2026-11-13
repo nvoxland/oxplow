@@ -508,7 +508,7 @@ mod tests {
         );
     }
 
-    /// tsk861: a moved anchor is stored and recorded; one already where
+    /// a moved anchor is stored and recorded; one already where
     /// it was writes nothing — no audit row, no event — and an agent can't
     /// relocate (it is the renderer's).
     /// Re-attaching an orphaned comment anchors it again; undoing that

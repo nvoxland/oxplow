@@ -96,7 +96,7 @@ mod tests {
   </lines></class>
 </classes></package></packages></coverage>"#;
 
-    /// tsk863: `oxplow.collector.sync` runs a project report collector by hand —
+    /// `oxplow.collector.sync` runs a project report collector by hand —
     /// the agent's own thread records it, audited to the agent; a person
     /// names the thread, and `thread` is refused for any other collector.
     #[tokio::test]
@@ -186,7 +186,7 @@ mod tests {
         assert_eq!(run.envelope.anchors.thread_id, Some(fx.thread));
     }
 
-    /// tsk923: a run a person reports on a thread whose agent is mid-turn
+    /// a run a person reports on a thread whose agent is mid-turn
     /// isn't the agent's: no turn, on the capture or on its event.
     #[tokio::test]
     async fn a_persons_reported_run_carries_no_turn() {
@@ -258,7 +258,7 @@ mod tests {
             .unwrap()
     }
 
-    /// tsk483: a run an agent reports by command is in the turn open on
+    /// a run an agent reports by command is in the turn open on
     /// its thread — on the capture and on its event alike.
     #[tokio::test]
     async fn a_reported_run_carries_the_open_turn() {

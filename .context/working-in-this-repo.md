@@ -42,7 +42,7 @@ the matching `.context/` doc in the same commit**. Concrete triggers:
 Docs reference source by **path only** (no line numbers — they drift).
 
 **No task ids in the repo.** Don't cite oxplow task ids (`tsk42`,
-"epic tsk40") in docs, code or test comments, model descriptions,
+"") in docs, code or test comments, model descriptions,
 migrations or commit messages. They live only in one project's local
 database and mean nothing to anyone else. Say what the thing is or why
 it's that way instead. Older ids still in the tree predate this rule;
@@ -98,7 +98,7 @@ peer message UUIDs individually. A file does not wake an idle session.
 Snapshots and oxwiki are `oxplow-foundation`'s defaults; tasks are a shared
 model (`.context/tasks.md`) that oxtask, `oxplow-bundled`'s own store,
 fills. Core has no task verbs: `task.*` as commands is oxtask's
-(`oxtask.task.*`), and the task tools (`oxplow_next_task`,
+(`oxtask.task.*`), and the task tools (`oxtask_next_task`,
 `oxplow_thread_tasks`) and the `tasks` skill are offered only while the
 task model has a live store. The
 development helper `oxplow-dev` (`crates/oxplow-dev`, never shipped or
@@ -106,12 +106,12 @@ bundled) keeps oxtask usable from outside the app:
 
 ```
 cargo run -q -p oxplow-dev -- task list [--all]
-cargo run -q -p oxplow-dev -- task show tsk12
+cargo run -q -p oxplow-dev -- task show
 cargo run -q -p oxplow-dev -- task create "Title" [--body …] [--parent tsk1] [--state in_progress]
-cargo run -q -p oxplow-dev -- task transition tsk12 done
-cargo run -q -p oxplow-dev -- task update tsk12 [--title …] [--body …] [--parent …]
-cargo run -q -p oxplow-dev -- task comment tsk12 "…"
-cargo run -q -p oxplow-dev -- task link tsk12 tsk13 blocks
+cargo run -q -p oxplow-dev -- task transition done
+cargo run -q -p oxplow-dev -- task update [--title …] [--body …] [--parent …]
+cargo run -q -p oxplow-dev -- task comment "…"
+cargo run -q -p oxplow-dev -- task link blocks
 cargo run -q -p oxplow-dev -- knowledge list [--store oxwiki]
 cargo run -q -p oxplow-dev -- knowledge show some-page [--store S]
 cargo run -q -p oxplow-dev -- knowledge write some-page [--title …] [--file body.md] [--store S]   # body from stdin without --file
@@ -130,7 +130,7 @@ enabled (`extensions:` / `enableExtensions` in `.oxplow/project.yaml` and
 `.oxplow/personal.yaml`, less `disableExtensions`;
 `oxplow_config::extension_settings(..).is_enabled("oxtask")`); with it off
 the command says there is no task tracker to reach. It prints the shapes
-the pages use (`tsk12`, `state:`, the pretty JSON with `id` and `uri`);
+the pages use (`tsk42`, `state:`, the pretty JSON with `id` and `uri`);
 `--state todo` is oxtask's `ready`, and a run is `person`, or with
 `--thread` that thread's `agent` (the author columns). Each write is one
 statement through the file's own triggers (a change number, the delete
@@ -224,7 +224,7 @@ The backend is Rust; the desktop frontend is React/Monaco/xterm.
   SQLite has `log2`, `pow`, … (SQL datasets use them). A build that
   doesn't read that file (a packager outside the tree) must set it
   itself: every `Database` open probes `log2` and refuses to start
-  without it (`DbInitError::Build`, tsk726).
+  without it (`DbInitError::Build`).
 
 ## Tests
 
@@ -478,7 +478,7 @@ doesn't have this.
   (about 6%). Fat LTO is nearly all of a release's compile time, and it runs once
   for each of the four binaries.
 
-### Timing assertions flake under `cargo cov` (tsk175)
+### Timing assertions flake under `cargo cov`
 
 `cargo cov` runs every test as its **own process, all concurrently, on an
 instrumented binary** — so a test is 2-5x slower *and* competing with one
@@ -512,7 +512,7 @@ one run in five under load. Wait for the terminal state, then assert on it.
 first time instead of the run cancelling before it prints which test failed.
 Don't remove that flag.
 
-### Frontend timers: never sleep-then-assert (tsk342)
+### Frontend timers: never sleep-then-assert
 
 A React state change fired from a `setTimeout` (the slide-out strips'
 180 ms pointer-leave grace, say) lands **outside `act`**, so React only
@@ -619,7 +619,7 @@ commits. The durable fix is a PostToolUse hook on `Edit`/`Write` that
 runs `rustfmt` + `cargo clippy --fix` against the touched crate.
 Until that's installed, run both manually each turn.
 
-## Builds and `target/` (tsk881)
+## Builds and `target/`
 
 **One feature set per third-party crate, for every build.** Cargo's
 resolver picks a dependency's features from what the packages being
@@ -637,7 +637,7 @@ no-op. Build-script (host) dependencies keep their own features
 (`unify-target-host = "none"`), so the app never ships what only a build
 script asked for.
 
-What the hack leaves out, and why (tsk885):
+What the hack leaves out, and why:
 
 - **The providers stay out.** `oxplow-provider-{fake,mcp}`,
   `oxplow-provider-protocol` and the crates they're built from

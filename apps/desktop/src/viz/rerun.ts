@@ -18,7 +18,7 @@ export function readsOf(...datasets: string[]): Reads {
   return { datasets, tables: [], measures: [] };
 }
 
-/** The extension catalog changed — the daemon's own signal (tsk1030),
+/** The extension catalog changed — the daemon's own signal,
  *  sent when an extension was deployed, rolled back, turned on or off, or
  *  removed: a viz's definition may have. */
 export function pageDefinitionChanged(event: Readonly<Record<string, unknown>>): boolean {
@@ -140,7 +140,7 @@ export class MissedChanges {
 
 /** Re-run `refresh` when an event changes what the last run read, a viz
  *  definition changed, or the daemon is reached again — the events sent
- *  while it was unreachable never arrive (tsk1050). `reads` and `refresh`
+ *  while it was unreachable never arrive. `reads` and `refresh`
  *  may change every render.
  *
  *  A run in flight hasn't said what it read, and a change announced meanwhile

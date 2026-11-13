@@ -167,7 +167,7 @@ impl<'a> Collectors<'a> {
 
 /// A short stable key for a project (its canonical path, hashed): what
 /// credentials are scoped by, so a same-named extension in another repo
-/// can't read this one's (tsk348). Every worktree of the project shares it.
+/// can't read this one's. Every worktree of the project shares it.
 pub fn project_key(project_dir: &Path) -> String {
     use sha2::{Digest, Sha256};
     let canon = project_dir
@@ -1602,7 +1602,7 @@ impl RunLog {
     }
 
     /// [`Self::record`] with a fact collector's `capture` and its facts in
-    /// the same transaction (tsk712), so a run never lands without its
+    /// the same transaction, so a run never lands without its
     /// record or twice for one trigger event. `false` when the event's run
     /// was already recorded (nothing written).
     pub async fn record_with(
@@ -1763,7 +1763,7 @@ const PREVIEW_ROWS: usize = 50;
 /// What a collector would store, without storing it or recording a run:
 /// how an agent checks a collector it's writing in a worktree stream
 /// (collected data is project-wide, so a real run there would overwrite
-/// the project's rows, tsk377). The same consent applies: an exec
+/// the project's rows). The same consent applies: an exec
 /// collector runs only at a version a person approved.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -2034,7 +2034,7 @@ pub struct CollectorRunner {
     pub catalog: Arc<crate::extension::extension_catalog::ExtensionCatalog>,
     pub ai: Arc<crate::ai_compute::AiCompute>,
     pub worktrees: Arc<crate::worktrees::WorktreeRouter>,
-    /// Runs the project's report collectors (`records:`, tsk863).
+    /// Runs the project's report collectors (`records:`).
     pub collection: crate::collection::CollectionService,
     /// The fact engine, which runs the collectors that record facts.
     pub metrics: crate::metrics_service::MetricsService,
@@ -2223,7 +2223,7 @@ impl CollectorRunner {
 /// (External: it runs the collector's program or script). Any actor may
 /// run it; none approves through it — consent is a person's, in Settings
 /// → Data. Run by the system it's the `every:` schedule's run. A project
-/// report collector (`records:`, tsk863) records what it parses in a
+/// report collector (`records:`) records what it parses in a
 /// thread: an agent's own, or the one a person names.
 pub const SYNC: &str = "oxplow.collector.sync";
 
@@ -3383,7 +3383,7 @@ pub(crate) mod tests {
         assert_eq!(trigger, "every");
         assert!(run_due_collectors(&fx.svc).await.is_empty());
 
-        // P7 review (tsk722): the schedule says when it's next due — its
+        // P7 review: the schedule says when it's next due — its
         // run plus ten minutes plus the scheduler's tick — so a missed run
         // reads unfresh.
         let (due, fresh) = due_and_fresh(&fx.svc, "work", "star").await;
@@ -3685,7 +3685,7 @@ pub(crate) mod tests {
 
     /// A preview runs the source as its worktree has it and returns the
     /// rows, storing nothing: source data is project-wide, so an agent in
-    /// a worktree stream checks its source without overwriting it (tsk377).
+    /// a worktree stream checks its source without overwriting it.
     #[cfg(unix)]
     #[tokio::test]
     async fn a_preview_returns_rows_and_stores_nothing() {

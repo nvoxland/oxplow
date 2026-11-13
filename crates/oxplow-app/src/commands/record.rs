@@ -363,7 +363,7 @@ pub(super) fn record_tx(
         event.anchors.thread_id = event.anchors.thread_id.or(fallback.thread_id);
         event.anchors.stream_id = event.anchors.stream_id.or(fallback.stream_id);
         // One already logged under its dedupe key is that same fact (a
-        // re-sent step's answer, tsk912): logged once.
+        // re-sent step's answer): logged once.
         oxplow_db::event_log_store::append_unique_tx(tx, vocabulary, &event)?;
     }
     set_event_id_tx(tx, audit_id, &executed.id)?;

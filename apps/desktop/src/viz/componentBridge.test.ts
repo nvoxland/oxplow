@@ -39,7 +39,7 @@ test("frame messages parse into their requests and ready; anything else is refus
   }
 });
 
-// tsk984: a frame is served the bundle snapshot its host loaded, by its
+// a frame is served the bundle snapshot its host loaded, by its
 // version — a folder of its own, so the bundle's relative URLs stay in it.
 test("the bundle URL is the loaded version's folder", () => {
   expect(componentBundleUrl("http://127.0.0.1:7420", "ab12")).toBe("http://127.0.0.1:7420/components/v/ab12/");
@@ -297,7 +297,7 @@ test("a component navigates to app pages only", async () => {
   h.channel.port1.close();
 });
 
-// tsk960: a refused invoke — a component that is not allowed, or a policy saying
+// a refused invoke — a component that is not allowed, or a policy saying
 // no — is shown by the host, beside the frame, whatever the component's
 // own code does with the reply; any other failure is the frame's to show.
 test("a page's title and actions reach the host, and a press reaches the frame", async () => {

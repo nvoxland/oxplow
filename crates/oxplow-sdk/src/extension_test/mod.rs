@@ -8,7 +8,7 @@
 //! collector (`when: { collector, rows? }`, `expect: { entities: { <name>:
 //! n }, events?: [{ type, payload? }] }`; one that calls a model runs against the fixture model in the throwaway; an exec collector's isn't run — it is a program under the extension's `process.run` permission),
 //! a fact collector (`when: { collector, files: { <path>: <text> } }`,
-//! `expect: { facts: [{ measure, value?, path?, … }] }`, tsk1047),
+//! `expect: { facts: [{ measure, value?, path?, … }] }`),
 //! or one of its own commands (`when: { command, input, rows? }`,
 //! `expect: { commands: [names] }` and/or `{ result }` — only the keys it
 //! names — or `{ refused }`, dry-run),

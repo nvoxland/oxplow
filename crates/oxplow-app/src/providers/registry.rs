@@ -133,7 +133,7 @@ struct GlobalFile {
     reconciled_at: Option<std::time::SystemTime>,
     /// Each global instance's credential count
     /// ([`oxplow_config::CredentialGenerations`]) as this oxplow last
-    /// started it (tsk842).
+    /// started it.
     credentials_seen: BTreeMap<String, u64>,
 }
 
@@ -159,7 +159,7 @@ pub enum InstanceState {
     /// Enabled, but oxplow won't run it as configured: its id is a
     /// command namespace or provider something else already has, or it
     /// declares an event type oxplow doesn't know with that schema.
-    /// `reason` says which (tsk840).
+    /// `reason` says which.
     Refused {
         reason: String,
     },
@@ -233,7 +233,7 @@ pub struct InstanceCredential {
 type SignInGate = Arc<tokio::sync::Mutex<()>>;
 
 /// A sign-in's number, from its begin: the renderer tells its own
-/// sign-in's news from another's by it, and cancels it by it (tsk929).
+/// sign-in's news from another's by it, and cancels it by it.
 pub type SignInId = u32;
 
 /// A sign-in begun: the page the person signs in on, and its number.
@@ -278,7 +278,7 @@ pub struct ProviderInstanceView {
     pub instance: String,
     /// The project's, or the person's on this machine (every project).
     /// A project's entry is the project's, config and credentials, even
-    /// where it replaces a global one of the same name (tsk838).
+    /// where it replaces a global one of the same name.
     pub scope: Scope,
     /// This project's own entry replaces a global instance of the same
     /// name here.
@@ -342,7 +342,7 @@ struct Live {
     handle: Handle,
     /// When it started: a call older than it wasn't refused by it.
     since: Instant,
-    /// The credentials it was given: a refusal is of one of these (tsk928).
+    /// The credentials it was given: a refusal is of one of these.
     given: BTreeMap<String, String>,
 }
 
@@ -365,23 +365,23 @@ pub struct Instance {
     pub(super) registry: Weak<ProviderRegistry>,
     live: tokio::sync::Mutex<Option<Live>>,
     /// Stopped (torn down): it never starts again, so a late caller still
-    /// holding it can't bring back a process nobody runs (tsk836).
+    /// holding it can't bring back a process nobody runs.
     stopped: Arc<std::sync::atomic::AtomicBool>,
     /// Candidate/check processes cannot trigger incumbent reads by name.
     admitted: Arc<std::sync::atomic::AtomicBool>,
     /// One start at a time; held across a start, which `live` never is.
     starting: tokio::sync::Mutex<()>,
     /// When each signed-in credential was last renewed because its
-    /// service refused it (tsk828, per credential since tsk821).
+    /// service refused it (per credential since).
     renewed_at: parking_lot::Mutex<BTreeMap<String, Instant>>,
     /// The idempotency keys of writes whose failure its health has counted
     /// (newest last, at most [`FAILED_KEYS_KEPT`]): a write sent again
     /// under its key — an automatic retry, a person's — failing again is
-    /// the same failure, counted once (tsk913). A key that lands is
+    /// the same failure, counted once. A key that lands is
     /// forgotten.
     failed_keys: parking_lot::Mutex<std::collections::VecDeque<String>>,
     not_before: parking_lot::Mutex<Option<Instant>>,
-    /// One read per collector at a time (tsk715): a second waits, then
+    /// One read per collector at a time: a second waits, then
     /// resumes from the checkpoint the first left.
     pub(super) reading:
         parking_lot::Mutex<std::collections::HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
@@ -424,7 +424,7 @@ impl Instance {
     /// to give is a problem with the instance, at `/credentials/<NAME>`.
     /// Its credentials' values, for a start. `refused` names the signed-in
     /// credential an `Auth` refused and the token it refused: that one is
-    /// renewed first, unless it was replaced meanwhile (tsk928).
+    /// renewed first, unless it was replaced meanwhile.
     async fn credentials(
         &self,
         refused: Option<(&str, &str)>,
@@ -713,12 +713,12 @@ impl Instance {
         }
     }
 
-    /// The signed-in credential a refusal points at (tsk821): the one an
+    /// The signed-in credential a refusal points at: the one an
     /// `Auth` names, when it signs in for that one; with none named, its
     /// credential when it is handed exactly one and signs in for it — with
     /// two or more (signed in or pasted) it can't know which was refused,
     /// and renews none, so a good sign-in is never lapsed for a pasted
-    /// key's refusal (tsk908). A named credential that isn't signed in for
+    /// key's refusal. A named credential that isn't signed in for
     /// (a pasted key) has nothing to renew.
     pub(super) fn renewable(&self, named: Option<&str>) -> Option<String> {
         let credentials = &self.spec.credentials;
@@ -745,7 +745,7 @@ impl Instance {
     /// the call once more — false when there is nothing to renew. A
     /// credential renewed since `called` (another caller refused at the
     /// same time got here first), or a process started since on newer
-    /// tokens, needs nothing but the retry (tsk828).
+    /// tokens, needs nothing but the retry.
     pub(super) async fn reauthorize(&self, called: Instant, refusal: &Refusal) -> bool {
         let cred = match refusal {
             Refusal::RenewedUnder => return true,
@@ -1220,7 +1220,7 @@ impl Instance {
             Err(e) => {
                 // A refused input or a cancel is the caller's, not a
                 // failure; a write that already failed under its key is
-                // that same failure (tsk913).
+                // that same failure.
                 let counts = !matches!(
                     e,
                     ProtocolError::InvalidInput { .. } | ProtocolError::Cancelled
@@ -1238,7 +1238,7 @@ impl Instance {
     /// one its service may get past (it erred, the call timed out or its
     /// process died — `Internal`) is `Unavailable`, worth sending again;
     /// anything else — refused credentials renewal didn't fix, a method or
-    /// configuration it lacks, a cancel — is `Failed`, a person's (tsk914).
+    /// configuration it lacks, a cancel — is `Failed`, a person's.
     /// Whether this is the first counted failure of the write `key`;
     /// remembers it.
     fn first_failure_of(&self, key: &str) -> bool {
@@ -1436,7 +1436,7 @@ pub struct ProviderRegistry {
     extension_secrets:
         std::sync::OnceLock<Arc<crate::extension::extension_secrets::ExtensionSecrets>>,
     /// Set once its first reconcile has run: what waits for the
-    /// instances the config names to be up (tsk915).
+    /// instances the config names to be up.
     reconciled: tokio::sync::watch::Sender<bool>,
     /// How many times each instance has been disabled: a start that began
     /// before a disable doesn't register what the disable stopped.
@@ -1451,12 +1451,12 @@ pub struct ProviderRegistry {
     /// One gate per `(instance, credential)`, held while that sign-in is
     /// started, finished, expired or abandoned — across a finish's code
     /// exchange, so an abandon (a removed instance) waits for it and
-    /// nothing is kept for what's gone (tsk826) — and only for it: a slow
-    /// token endpoint holds up no other sign-in (tsk910).
+    /// nothing is kept for what's gone — and only for it: a slow
+    /// token endpoint holds up no other sign-in.
     sign_in_gates: parking_lot::Mutex<BTreeMap<(String, String), SignInGate>>,
     /// One change to a person's instances at a time in this process: each
-    /// reads them as they are and writes them back before another reads
-    /// (tsk837). Never held across a check or a reconcile.
+    /// reads them as they are and writes them back before another reads.
+    /// Never held across a check or a reconcile.
     instances_gate: tokio::sync::Mutex<()>,
     /// Numbers each sign-in, so a finished one untracks only itself.
     sign_in_seq: std::sync::atomic::AtomicU32,
@@ -1773,7 +1773,7 @@ impl ProviderRegistry {
     /// one here. A project's entry is the project's — its config and its
     /// credentials — whatever the person has globally, so a global one of
     /// the same name appearing or going never moves it onto other
-    /// credentials (tsk838). An instance configured nowhere is the
+    /// credentials. An instance configured nowhere is the
     /// project's too.
     fn scope_of(&self, instance: &str) -> (Scope, bool) {
         let global = self.global_instances().contains_key(instance);
@@ -1791,7 +1791,7 @@ impl ProviderRegistry {
     /// timer; `true` when it did.
     pub async fn reconcile_if_global_changed(&self) -> bool {
         // A global instance whose credentials another oxplow changed
-        // restarts on them (tsk842): their values are in the keychain,
+        // restarts on them: their values are in the keychain,
         // which nothing here can watch, so the other bumped a count.
         let changed: Vec<String> = match self.deps.global_dir.as_ref() {
             None => Vec::new(),
@@ -1934,7 +1934,7 @@ impl ProviderRegistry {
                     // doesn't have is the person's elsewhere: not this
                     // project's to list. One of an extension it has that
                     // doesn't resolve is listed, so it can be seen and
-                    // removed (tsk841).
+                    // removed.
                     let (scope, overridden) = self.scope_of(instance);
                     let here = self
                         .extensions()
@@ -2453,9 +2453,9 @@ impl ProviderRegistry {
     }
 
     /// A person turns the global instance `instance` off in this project
-    /// only (tsk843): the project gets its own entry of the same name —
+    /// only: the project gets its own entry of the same name —
     /// off, with the global one's config and provider — which replaces it
-    /// here (and is the project's, credentials included, tsk838); every
+    /// here (and is the project's, credentials included); every
     /// other project keeps running it, and removing the entry brings it
     /// back here. Written through `oxplow.config.set`, so an agent's is refused
     /// or proposed.
@@ -2503,7 +2503,7 @@ impl ProviderRegistry {
     pub async fn remove_instance(&self, actor: &Actor, instance: &str) -> Result<(), CommandError> {
         // A sign-in under way would store a token for what's gone — or,
         // for a project's replacement of a global one, under the removed
-        // entry's account (tsk826).
+        // entry's account.
         self.abandon_sign_ins(|(of, _)| of == instance).await;
         let missing = || CommandError::Invalid {
             field: Some("/instance".into()),
@@ -2528,7 +2528,7 @@ impl ProviderRegistry {
         };
         self.reconcile().await;
         // Its credentials go with it — a project's replacement's are its
-        // own, never the global one's that now shows through (tsk838) —
+        // own, never the global one's that now shows through —
         // named by the extension; one that no longer declares the
         // provider (when Remove is offered) has none left to name.
         let names = gone.credentials.clone().unwrap_or_default();
@@ -2698,7 +2698,7 @@ impl ProviderRegistry {
     /// running one), or starts if the credential was what it lacked. A
     /// global instance's runs in every project: the change is counted
     /// where every other oxplow on the machine looks, and each restarts
-    /// it on its next tick (tsk842).
+    /// it on its next tick.
     pub async fn credential_changed(&self, instance: &str) {
         if let (Scope::Global, Some(dir)) = (self.scope_of(instance).0, &self.deps.global_dir) {
             match oxplow_config::CredentialGenerations::bump(dir, instance) {
@@ -2765,7 +2765,7 @@ impl ProviderRegistry {
             )));
         };
         // Where it signs in, and where the code, the verifier and the
-        // client secret go, are its deployment's declaration (tsk824): the
+        // client secret go, are its deployment's declaration: the
         // declaration kept below is the one finishing checks again.
         let client_secret = match &oauth_decl.client_secret {
             None => None,
@@ -2799,7 +2799,7 @@ impl ProviderRegistry {
         let gate = self.sign_in_gate(&key);
         let _gate = gate.lock().await;
         // The one it replaces is told — another window's row may be
-        // waiting on it (tsk929).
+        // waiting on it.
         for replaced in self.abandon_sign_ins_locked(|k| *k == key) {
             self.sign_in_news(&key, replaced, Some("a newer sign-in replaced it".into()));
         }
@@ -2833,7 +2833,7 @@ impl ProviderRegistry {
     /// A person ends sign-in `sign_in` for `instance`'s `name` (the row was
     /// left, or its browser never opened): nothing of it is kept — its
     /// verifier and client secret go now, not in five minutes — and its
-    /// news says so (tsk929). One already over is nothing to cancel.
+    /// news says so. One already over is nothing to cancel.
     pub async fn cancel_sign_in(&self, instance: &str, name: &str, sign_in: SignInId) {
         let key = (instance.to_string(), name.to_string());
         let gate = self.sign_in_gate(&key);
@@ -2872,7 +2872,7 @@ impl ProviderRegistry {
     /// approved, with the declaration it began with) and the token kept —
     /// and answers then, so the browser hears at once; the instance
     /// restarts on it afterwards and the renderer is told
-    /// (`CredentialChanged`) when it has (tsk906). Once the sign-in is
+    /// (`CredentialChanged`) when it has. Once the sign-in is
     /// taken off the waiting list the finish runs to its end even if the
     /// caller goes away (a dropped connection to a remote daemon): it is
     /// never left half done. With no sign-in under way (never begun,
@@ -2957,7 +2957,7 @@ impl ProviderRegistry {
     /// with, and the
     /// instance still keeps its credentials where it did — a global one
     /// turned off here, or a project entry of its name arriving, moves
-    /// them, and the token mustn't go to the old place (tsk909).
+    /// them, and the token mustn't go to the old place.
     fn still_declared(
         &self,
         instance: &str,
@@ -3108,7 +3108,7 @@ impl ProviderRegistry {
     /// `made_by` is the running instance whose (re)start it was; a start
     /// of one no longer running is no one's, and changes nothing — never
     /// the state, health or enablement of the instance now running under
-    /// its name (tsk836). `None`: an enable's first start, before the
+    /// its name. `None`: an enable's first start, before the
     /// instance runs.
     pub(super) async fn start_failed(
         &self,
@@ -3299,7 +3299,7 @@ impl ProviderRegistry {
     }
 
     /// A call `instance` made failed: counted like any failure, while it
-    /// is the running instance (tsk820). A call cut short by its own stop
+    /// is the running instance. A call cut short by its own stop
     /// isn't one.
     pub(super) async fn call_failed(&self, instance: &Instance, error: String) {
         self.failed(&instance.name, Some(instance), error).await;
@@ -3382,7 +3382,7 @@ async fn deployment_of(
 
 /// Whether `instance` is the one running under its name: a stopped
 /// instance's late results — and those of the one a restart replaced —
-/// aren't the running one's (tsk820, tsk836).
+/// aren't the running one's.
 fn is_running(running: &BTreeMap<String, Arc<Instance>>, instance: &Instance) -> bool {
     running
         .get(&instance.name)

@@ -1,4 +1,4 @@
-// CPU-profile the renderer in headless Chromium (tsk219/tsk223).
+// CPU-profile the renderer in headless Chromium.
 //
 // Every performance measurement this project had taken was of the Rust backend;
 // the renderer had never been profiled at all. This drives the real React UI

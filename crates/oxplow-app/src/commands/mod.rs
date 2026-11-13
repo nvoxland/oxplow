@@ -113,8 +113,8 @@ pub struct HandlerOutput {
     /// already where it was). A `Tx` call that says so leaves no record —
     /// no audit row, no `command.executed` — like a read, and its
     /// transaction is rolled back, so nothing it wrote lands unaudited; one
-    /// that also returns events or an inverse (a change) is refused
-    /// (tsk901). An undo, an approval or an effect's reaction is recorded
+    /// that also returns events or an inverse (a change) is refused.
+    /// An undo, an approval or an effect's reaction is recorded
     /// anyway, since its row must be marked. Honoured for `Tx` handlers
     /// only: an `External` one's work is outside the database, so it is
     /// always recorded.
@@ -319,7 +319,7 @@ pub type ConfirmFor = dyn Fn(&Value) -> oxplow_domain::Confirm + Send + Sync;
 
 /// A command's own check of an input that needs what a transaction can't
 /// do — async work, such as resolving a metric query through the metric
-/// engine (tsk1010). Run once the actor is admitted, before the
+/// engine. Run once the actor is admitted, before the
 /// transaction opens: for a direct call, and for each call a composite
 /// composes (`steps.rs` collects them while routing). A refusal is the
 /// command's `Invalid`, at the input's field.
@@ -772,8 +772,7 @@ enum RunOrigin {
     /// An extension's effect reacting to an event (P8.D10): the run's
     /// `effect_run` row and `effect.result` land with it, and its
     /// `command.executed` is caused by the event. With what it composed
-    /// when every step is safe to send again, kept with its claim
-    /// (tsk954).
+    /// when every step is safe to send again, kept with its claim.
     Effect(
         Arc<oxplow_db::effect_run_store::EffectRunKey>,
         Option<Arc<str>>,
@@ -1188,7 +1187,7 @@ impl CommandBus {
     /// `started` claim when a step leaves it, or with its proposal when a
     /// command asks — and its `command.executed` caused by the event.
     /// `resend`: what it composed, when every step is safe to send again,
-    /// kept with its claim (tsk954).
+    /// kept with its claim.
     pub(crate) async fn run_effect(
         &self,
         run: &RunContext,
@@ -1410,8 +1409,8 @@ impl CommandBus {
             command
         };
         let spec = &command.spec;
-        // Each check that needs more than a transaction, before it opens
-        // (tsk1010): the command's own, or each composed call's.
+        // Each check that needs more than a transaction, before it opens:
+        // the command's own, or each composed call's.
         for pending in prechecks {
             if let Err(err) = pending.run().await {
                 self.audit_only(run, spec, &input, Outcome::Invalid, Some(err.to_string()))
@@ -1512,7 +1511,7 @@ impl CommandBus {
                         };
                         let out = match handler(&ctx, input_c.clone()) {
                             // A call that changed nothing: its answer, its
-                            // transaction rolled back (tsk901).
+                            // transaction rolled back.
                             Ok(out) if out.unchanged && matches!(origin_tx, RunOrigin::Call) => {
                                 if !out.events.is_empty() || out.inverse.is_some() {
                                     return Err(TxError::Aborted(Abort::Failed(

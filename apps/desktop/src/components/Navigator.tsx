@@ -62,7 +62,7 @@ type RenameTarget = { kind: "stream" | "thread"; id: string };
  * titles — y-positions are identical between the strip and the panel so
  * items don't move when switching modes.
  *
- * Hover used to expand it, and that was the problem (tsk269): the panel
+ * Hover used to expand it, and that was the problem: the panel
  * is ~280px wide over a rail HUD that starts at x=40, so it covers
  * essentially all of it, and a zero-dwell hover-open fired whenever the
  * pointer merely drifted left en route to that rail — burying the click
@@ -76,7 +76,7 @@ type RenameTarget = { kind: "stream" | "thread"; id: string };
  * covers the rail and lives in the same DOM subtree as the strip, so the
  * pointer never "leaves" the wrapper while parked over the covered
  * region — which is what used to strand it open on top of the rail and
- * swallow clicks meant for it (tsk131).
+ * swallow clicks meant for it.
  *
  * Visual hierarchy:
  *   - Stream rows: two-letter glyph, weight 700, with a subtle
@@ -619,7 +619,7 @@ export function Navigator({
 
 /** Single row inside the strip — letter + status, fixed height.
  *  Carries the full title as a native tooltip: since hover no longer
- *  expands the panel (tsk269), the tooltip is what answers "which stream
+ *  expands the panel, the tooltip is what answers "which stream
  *  / thread is this glyph?" without moving a single pixel of layout. The
  *  status dot keeps its own `awaiting` question tooltip via `question`. */
 function StripRow({

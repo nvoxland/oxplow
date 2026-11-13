@@ -146,8 +146,8 @@ mod tests {
         assert!(description.contains("v_op_error"), "{description}");
     }
 
-    /// Agents that can't discover skill files get an index instead
-    /// (tsk376): every skill, with its frontmatter description.
+    /// Agents that can't discover skill files get an index instead:
+    /// every skill, with its frontmatter description.
     #[test]
     fn the_skill_index_names_every_skill_with_its_description() {
         let text = core_text();

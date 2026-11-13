@@ -117,7 +117,7 @@ magic numbers in the renderer. the Metrics page's `tone` column reads
 `def.target` / `def.fail_at` / `def.direction` and returns three tiers — meets
 target → `--ok` (green), past the fail floor → `--err` (red), in-between →
 `--warn` (amber); `neutral` / threshold-less metrics are uncolored. The former
-hardcoded **coverage 50/80 ramp is retired** (tsk220): the thresholds now live on
+hardcoded **coverage 50/80 ramp is retired**: the thresholds now live on
 the `oxplow.coverage.diff_pct` definition (`target: 80`, `fail_at: 50`, set in
 `collection.rs::record_coverage_metric`). To re-tune a metric's coloring, change
 its `target`/`warn_at`/`fail_at` (config or producer) — never a UI constant. (The
@@ -296,8 +296,7 @@ value. Naming convention:
   semantic categories.
 - `--chart-<n>` (1–8) — categorical chart series, in order (Tableau 10;
   the treemap viz's groups), and `--chart-label` for text drawn on a
-  series fill. Charts cycle through them rather than inlining hex
-  (tsk371).
+  series fill. Charts cycle through them rather than inlining hex.
 
 ## Related
 

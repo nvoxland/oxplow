@@ -759,7 +759,7 @@ mod tests {
             .unwrap();
         assert!(thread(&fx, second).await.is_open());
 
-        // tsk788: and reopens only its own thread, as it closes only its own.
+        // and reopens only its own thread, as it closes only its own.
         run(
             &fx,
             &Actor::Human,

@@ -478,7 +478,7 @@ mod tests {
         }
     }
 
-    /// P3.2 (tsk472): a nudge reaches the agent exactly once, whichever hook
+    /// P3.2: a nudge reaches the agent exactly once, whichever hook
     /// response picks it up; a redelivered cause fires nothing new.
     #[tokio::test]
     async fn undelivered_nudges_are_taken_once_and_causes_dedupe() {
@@ -503,7 +503,7 @@ mod tests {
             .unwrap()
             .is_some());
         // The same event and kind outside a request (no turn) is its own
-        // nudge (tsk510).
+        // nudge.
         assert!(store
             .record(NewAgentNudge {
                 cause: Some("evt-1".into()),

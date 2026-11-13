@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-// tsk630: `window.confirm` / `alert` / `prompt` block the renderer (and
+// `window.confirm` / `alert` / `prompt` block the renderer (and
 // Tauri's webview answers `prompt` with null), so `.context/usability.md`
 // rules them out: a destructive button asks with `InlineConfirm`, a
 // command run from nowhere through `personCommands`' `CommandConfirm`, a
@@ -25,7 +25,7 @@ function code(text: string): string {
   return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/.*$/gm, "$1");
 }
 
-/** The blocking dialogs `src` calls (tsk899): through `window.` /
+/** The blocking dialogs `src` calls: through `window.` /
  *  `globalThis.` / `self.`, destructured off one of those, or bare — unless
  *  the file binds that name itself (a local `confirm()` isn't the
  *  browser's). */

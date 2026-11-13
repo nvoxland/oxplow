@@ -1,10 +1,10 @@
 import type { SeriesPoint } from "../api.js";
 import type { TimeRange } from "../kit/rangePresets.js";
 
-// Pure helpers behind the per-kind Metric detail view (tsk232). Kept out of the
+// Pure helpers behind the per-kind Metric detail view. Kept out of the
 // component so they're unit-testable without a DOM — same split as
 // the metric detail page's chart. Operates over the engine's
-// per-capture `SeriesPoint`s (epic tsk12); `ChartPoint` is the reduced `{t,v}`
+// per-capture `SeriesPoint`s; `ChartPoint` is the reduced `{t,v}`
 // shape the trend chart plots.
 
 export type ChartPoint = { t: number; v: number };

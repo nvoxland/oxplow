@@ -7,7 +7,7 @@
 //! writer's bug leaves drift. This restates every task (from the
 //! task interface, the same core its pump consumer runs),
 //! finding, thread-note and handoff slice from its row on boot, so the graph is its
-//! sources' again — which is why it stays (tsk920): it is the graph's
+//! sources' again — which is why it stays: it is the graph's
 //! one repair path.
 //!
 //! It runs only when the graph may have drifted from its sources: after a

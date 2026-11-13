@@ -1,5 +1,5 @@
 -- Every store's knowledge pages, over the shared knowledge model, in the
--- shape core's `v_knowledge_page` had, plus the page's `body`. A page's
+-- shape core's old knowledge page view had, plus the page's `body`. A page's
 -- reads are `v_oxplow_knowledge_read`'s, its stale refs the pins
 -- `v_oxplow_knowledge_ref` finds behind the primary stream's latest snapshot.
 WITH refs AS (

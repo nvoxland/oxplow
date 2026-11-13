@@ -1,4 +1,4 @@
-//! What a thin caller may not call (tsk903): every function in oxplow-db
+//! What a thin caller may not call: every function in oxplow-db
 //! that reaches a database write, and every consent or credential call.
 //! The list is clippy's `disallowed-methods` in each thin caller's
 //! `clippy.toml`, so the check is the compiler's own name resolution — an

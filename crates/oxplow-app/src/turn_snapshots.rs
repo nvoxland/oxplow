@@ -1,4 +1,4 @@
-//! The turn-end snapshot (P2.3, tsk425; `.context/agent-model.md`
+//! The turn-end snapshot (P2.3; `.context/agent-model.md`
 //! "Snapshot tracking").
 //!
 //! When a turn ends (Stop, or an interrupt — every harness reaches this
@@ -113,7 +113,7 @@ mod tests {
         }
     }
 
-    /// tsk935: a turn a session end closes (an exit mid-turn, tsk449) ends
+    /// a turn a session end closes (an exit mid-turn) ends
     /// at a snapshot too, as one a Stop closes does.
     #[tokio::test]
     async fn a_turn_a_session_end_closes_ends_at_a_snapshot() {

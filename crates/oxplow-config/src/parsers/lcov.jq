@@ -8,7 +8,7 @@
 # Malformed DA entries (non-numeric line) are skipped, not fatal — `tonumber?`
 # yields empty on failure, and `// null` keeps each step single-valued.
 #
-# PERFORMANCE (tsk88) — this must stay LINEAR. The original built each file's
+# PERFORMANCE — this must stay LINEAR. The original built each file's
 # line lists with `.instrumented += [$n]` inside a `reduce`, copying the whole
 # growing array once per entry: quadratic PER FILE. This repo's real report has
 # a 4783-line file, so that one record alone cost ~11M element copies and the

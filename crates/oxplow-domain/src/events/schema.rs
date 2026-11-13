@@ -901,7 +901,7 @@ impl EventType for EffectResult {
     type Payload = EffectResultV5;
 }
 
-/// `snapshot.taken@3` (tsk883): v1, its trigger able to say
+/// `snapshot.taken@3`: v1, its trigger able to say
 /// `run_measured` — the take that pins a run's reports to the code it
 /// measured.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

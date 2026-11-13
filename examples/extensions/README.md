@@ -10,11 +10,11 @@ and runs its fixtures; `tests/examples.rs` adds only what the SDK reports about 
 | Example | What it shows |
 |---|---|
 | [github](github/) | An outside data source: an exec collector syncing pull requests with a credential kept in the keychain, a resource kind (`[[pr:12]]`), a page and a custom component. |
-| [task-views](task_views/) | Replacing core views: the Board, the Tasks list and the task editor, for any task store. |
+| [task-views](task-views/) | Replacing core views: the Board, the Tasks list and the task editor, for any task store. |
 | [triage](triage/) | Data, AI and workflow state together: a collector that classifies TODO comments with a model, a durable per-TODO decision in private state, a custom board with forms, and a summary job. |
-| [schema-review](schema_review/) | A collector's facts about schema migrations (DDL per file, by its own dimension) and a page on a request's diff that lists the migration files it changed. |
-| [session-history](session_history/) | Adding a section to a core page: earlier prompts from the current thread, mounted on New Session after its start form. |
-| [commit-history](commit_history/) | A page with no code: typed params in the toolbar (a date range, a search, a switch) narrow the commits, and clicking one fills the next section with its files. |
+| [schema-review](schema-review/) | A collector's facts about schema migrations (DDL per file, by its own dimension) and a page on a request's diff that lists the migration files it changed. |
+| [session-history](session-history/) | Adding a section to a core page: earlier prompts from the current thread, mounted on New Session after its start form. |
+| [commit-history](commit-history/) | A page with no code: typed params in the toolbar (a date range, a search, a switch) narrow the commits, and clicking one fills the next section with its files. |
 
 ## What the trials prove
 

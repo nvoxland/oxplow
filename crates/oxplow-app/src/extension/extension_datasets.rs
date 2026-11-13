@@ -101,7 +101,7 @@ mod tests {
 
     const MANIFEST: &str = "manifest: 2\nname: late\nintent:\n  purpose: x\n  examples: [{ name: a }]\ndatasets:\n  - name: blocked\n    version: 1\n    description: Blocked tasks.\n    fields:\n      - { name: uri, type: TEXT, doc: Task ref. }\n  - name: broken\n    version: 1\n    description: Broken.\n    fields:\n      - { name: nope, doc: x }\n";
 
-    /// P4.9 (tsk494): an extension's dataset publishes its view; one that
+    /// P4.9: an extension's dataset publishes its view; one that
     /// doesn't compile is that extension's error in the list, not a boot
     /// failure; turning the extension off takes its views away.
     #[tokio::test]
@@ -214,7 +214,7 @@ mod tests {
         assert_eq!(n.result.rows.len(), 1);
     }
 
-    /// P4.9 (tsk494): `oxplow_validate_extension` (what `oxplow extension check`
+    /// P4.9: `oxplow_validate_extension` (what `oxplow extension check`
     /// runs) catches a breaking change at a published version before it
     /// is published, and an extension's `source()` of a core table.
     #[tokio::test]

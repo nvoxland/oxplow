@@ -756,7 +756,7 @@ const SCRUBBED: [&str; 5] = [
     "modelUsage",
 ];
 
-/// P7 review (tsk723): a recorded run carries nothing of the machine or
+/// P7 review: a recorded run carries nothing of the machine or
 /// session it was recorded on.
 #[test]
 fn recorded_runs_carry_no_local_paths_session_or_cost() {

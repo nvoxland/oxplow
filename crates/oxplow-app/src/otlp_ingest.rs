@@ -84,7 +84,7 @@ impl OtlpIngestService {
             .transaction(move |tx| {
                 use rusqlite::OptionalExtension as _;
                 // A thread that isn't there (deleted, or never) gets
-                // nothing logged, as a hook for one doesn't (tsk925).
+                // nothing logged, as a hook for one doesn't.
                 let known = tx
                     .query_row(
                         "SELECT 1 FROM threads WHERE id = ?1",
@@ -104,7 +104,7 @@ impl OtlpIngestService {
                 // The turn it measured, not the one open as it arrives: an
                 // export lands after its turn's Stop, and is stamped with
                 // when it was collected, so its window can reach into the
-                // next turn — it goes to the turn it overlaps most (tsk900).
+                // next turn — it goes to the turn it overlaps most.
                 // One that doesn't say when is the open turn's.
                 if let Some(end) = export.window_end {
                     let start = export.window_start.unwrap_or(end);
@@ -306,7 +306,7 @@ mod tests {
         assert_eq!(reported(svc).await.len(), 1);
     }
 
-    /// tsk925: an export naming a thread that isn't there (deleted, or
+    /// an export naming a thread that isn't there (deleted, or
     /// never) logs nothing, as a hook for one does.
     #[tokio::test]
     async fn an_export_for_an_unknown_thread_logs_nothing() {
@@ -321,7 +321,7 @@ mod tests {
         assert!(reported(svc).await.is_empty());
     }
 
-    /// tsk935: an export whose points say no time is the open turn's.
+    /// an export whose points say no time is the open turn's.
     #[tokio::test]
     async fn an_export_with_no_point_time_is_the_open_turns() {
         let fx = crate::test_fixtures::services_with_thread().await;
@@ -341,7 +341,7 @@ mod tests {
         assert_eq!(events[0].envelope.anchors.turn_id, Some(open));
     }
 
-    /// tsk935: an export measured before the thread's first turn is no
+    /// an export measured before the thread's first turn is no
     /// turn's.
     #[tokio::test]
     async fn an_export_before_the_first_turn_is_no_turns() {
@@ -393,7 +393,7 @@ mod tests {
         assert_eq!(events[0].envelope.anchors.turn_id, Some(measured_in));
     }
 
-    /// tsk900: a real Claude export is stamped with when it was collected,
+    /// a real Claude export is stamped with when it was collected,
     /// not when the response came back, so its window can span two turns.
     /// It goes to the turn its window overlaps most — not the one open when
     /// it arrives.

@@ -6,7 +6,7 @@ import { NO_READS, useRerunOnChange } from "./rerun.js";
 
 afterEach(cleanup);
 
-// tsk1050: an open viz kept what it showed before the daemon restarted,
+// an open viz kept what it showed before the daemon restarted,
 // though what it read changed meanwhile: events sent while the socket was
 // down never arrive. A reconnect re-runs it.
 test("a reconnect re-runs every open viz host", async () => {

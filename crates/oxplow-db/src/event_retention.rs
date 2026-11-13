@@ -14,7 +14,7 @@
 //! The windows are `oxplow_domain::events::retention`'s. A project may set
 //! its own per namespace (`eventRetention`, a person's key): it replaces
 //! core's default, and for an extension's namespace it is capped at the
-//! extension's window (tsk947).
+//! extension's window.
 //!
 //! An expired payload is replaced by `{}` and stamped `payload_expired_at`
 //! (the column is NOT NULL); an expired body's row is deleted, and a
@@ -188,7 +188,7 @@ pub struct SweepReport {
     pub refused_audit_deleted: usize,
     /// Extension runs past [`EXTENSION_RUN_DAYS`], deleted.
     pub extension_runs_deleted: usize,
-    /// A project's windows naming a namespace nothing logs (tsk985): kept
+    /// A project's windows naming a namespace nothing logs: kept
     /// for an extension not installed yet, and said, since a typo does nothing.
     pub unused: Vec<String>,
 }
@@ -652,7 +652,7 @@ mod tests {
         .unwrap()
     }
 
-    /// tsk947: a project's window for a core namespace replaces core's
+    /// a project's window for a core namespace replaces core's
     /// default — longer or shorter.
     #[tokio::test]
     async fn a_project_window_overrides_the_default() {
@@ -677,7 +677,7 @@ mod tests {
         assert_eq!(expired(&db).await, vec!["a70", "t20"]);
     }
 
-    /// tsk985: the longest window a project may set keeps what it says —
+    /// the longest window a project may set keeps what it says —
     /// the cutoff a hundred years back, never wrapped into the future — and
     /// a window naming a namespace nothing logs is reported, not silent.
     #[tokio::test]
@@ -694,7 +694,7 @@ mod tests {
         assert_eq!(report.unused, vec!["agnet".to_string()]);
     }
 
-    /// tsk947: a project can keep an extension's events for less, never for
+    /// a project can keep an extension's events for less, never for
     /// longer than its extension declared (or the extension default).
     #[tokio::test]
     async fn an_extension_namespace_cant_be_kept_longer_by_a_project() {
@@ -791,7 +791,7 @@ mod tests {
         );
     }
 
-    /// P3.11 (tsk481): an agent tool body older than 14 days is gone and its
+    /// P3.11: an agent tool body older than 14 days is gone and its
     /// event older than 30 days keeps its envelope with the payload
     /// replaced; state events are kept whole; a second sweep does nothing.
     #[tokio::test]

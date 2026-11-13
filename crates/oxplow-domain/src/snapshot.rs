@@ -1,4 +1,4 @@
-//! The snapshot capability's shared vocabulary (P2.2, tsk424;
+//! The snapshot capability's shared vocabulary (P2.2;
 //! `.context/data-model.md` "snapshot_op"), and its interface
 //! ([`SnapshotProvider`]): mark the worktree now, what changed between two
 //! points, read a path at a point — the last only an implementation
@@ -38,7 +38,7 @@ pub enum SnapshotTrigger {
     /// new commit (a re-stamp, no new snapshot).
     HeadMoved,
     /// A run's reports were recorded (coverage, analysis): the code it
-    /// measured, which their captures are pinned to (tsk883).
+    /// measured, which their captures are pinned to.
     RunMeasured,
 }
 

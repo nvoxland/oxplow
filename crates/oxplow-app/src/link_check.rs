@@ -3,7 +3,7 @@
 //! Given a body (knowledge page, task summary/description, handoff),
 //! flags every `[[…]]` wikilink whose target is invalid — either an
 //! **unrecognized ref shape** (e.g. `[[#13]]`, the GitHub form) or a
-//! **recognized ref whose object doesn't exist** (`[[tsk999]]`,
+//! **recognized ref whose object doesn't exist** (`[[]]`,
 //! `[[missing-slug]]`, `[[src/gone.rs]]`). MCP write tools surface the
 //! result so the authoring agent can self-correct in the same turn.
 //!
@@ -22,7 +22,7 @@ use oxplow_domain::vcs::RevisionGraph;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LinkWarning {
     /// The raw `[[…]]` interior as authored (the target, e.g. `#13`,
-    /// `tsk999`, `missing-slug`).
+    /// `tsk42`, `missing-slug`).
     pub target: String,
     /// Why it's invalid — human/LLM-readable, actionable.
     pub reason: String,
@@ -50,8 +50,7 @@ pub fn check_links_in(world: &LinkWorld<'_>, body: &str) -> Vec<LinkWarning> {
         match (&link.reference, &link.canonical) {
             // A resource the vocabulary knows with no typed probe here: one a
             // dataset holds (its `resolve:`)
-            // is checked against it, any other is a link as it stands
-            // (tsk894).
+            // is checked against it, any other is a link as it stands.
             (None, Some(canonical)) => {
                 if let Some(reason) = unresolved_ref(world, canonical) {
                     out.push(LinkWarning {
@@ -275,7 +274,7 @@ fn missing_reason(world: &LinkWorld<'_>, reference: &Reference) -> Option<String
             .resolve(sha)
             .is_none()
             .then(|| format!("commit `{sha}` was not found")),
-        // A file at a revision is looked for there (tsk895); one on disk in
+        // A file at a revision is looked for there; one on disk in
         // the worktree.
         Reference::File(detail) => match &detail.version {
             oxplow_domain::uri::RefVersion::Ref(rev) => {
@@ -370,7 +369,7 @@ mod tests {
         assert!(warnings[0].reason.contains("not a recognized reference"));
     }
 
-    /// tsk894: a ref of any kind the vocabulary knows is a link. One of a
+    /// a ref of any kind the vocabulary knows is a link. One of a
     /// kind no dataset holds (a shell page) is a link as it stands; one a
     /// dataset holds — a request, core's or an extension's — is checked
     /// against that dataset's rows.
@@ -411,7 +410,7 @@ mod tests {
         assert!(warnings[0].reason.contains("does not exist"));
     }
 
-    /// tsk895: a file pinned to a revision is looked for at that revision,
+    /// a file pinned to a revision is looked for at that revision,
     /// not on disk — one since deleted is still a good link.
     #[tokio::test]
     async fn a_pinned_file_is_checked_at_its_revision() {

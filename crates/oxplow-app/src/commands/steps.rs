@@ -1,4 +1,4 @@
-//! A composite's **steps** (P7 review, tsk713): when one of the calls a
+//! A composite's **steps** (P7 review): when one of the calls a
 //! composite makes leaves the bus's transaction — an `External` command,
 //! `task.*` on another provider's item — the calls can't be one
 //! all-or-nothing run. They run as steps instead:
@@ -180,7 +180,7 @@ struct Routed {
 
 /// Routes a composite's calls — composing it once, through `composing` — checking
 /// each call (step 0, its input, that it writes) and collecting its check
-/// before the transaction (tsk1010).
+/// before the transaction.
 pub(super) struct Router<'a> {
     pub registry: &'a BTreeMap<String, Arc<Command>>,
     pub composing: &'a super::compose::Composing<'a>,
@@ -493,7 +493,7 @@ fn check_tree(
 }
 
 /// A handler's answer, held to the contract: one that says it changed
-/// nothing returns no events and no inverse (tsk901).
+/// nothing returns no events and no inverse.
 fn honest(out: HandlerOutput, name: &str) -> Result<HandlerOutput, CommandError> {
     if out.unchanged && (!out.events.is_empty() || out.inverse.is_some()) {
         return Err(CommandError::Failed {
@@ -648,7 +648,7 @@ pub(super) fn composed_handler(
 /// attempt, and its system answers a re-send with the same answer, events
 /// included: each event without a dedupe key of its own takes one from
 /// the key, so a re-sent step that had landed logs its events once
-/// (tsk912; `record_tx` skips an event already logged under its key).
+/// (`record_tx` skips an event already logged under its key).
 fn same_events_once(mut out: HandlerOutput, key: Option<&str>) -> HandlerOutput {
     if let Some(key) = key {
         for (i, event) in out.events.iter_mut().enumerate() {
@@ -661,8 +661,8 @@ fn same_events_once(mut out: HandlerOutput, key: Option<&str>) -> HandlerOutput 
 }
 
 /// A step's failure as the run reports it: the step that failed and the
-/// ones that landed before it, which stand — of the failing step's kind
-/// (tsk914): `Unavailable` (worth sending again) stays so, with its wait,
+/// ones that landed before it, which stand — of the failing step's kind:
+/// `Unavailable` (worth sending again) stays so, with its wait,
 /// and anything else is `Failed`.
 fn stopped(failed: &str, landed: &[NestedChild], err: &CommandError) -> CommandError {
     let landed: Vec<String> = landed.iter().map(|c| format!("`{}`", c.name)).collect();
@@ -776,7 +776,7 @@ impl CommandBus {
     /// and routed. Every call inside the
     /// transaction → a `Tx` handler running exactly those calls; any
     /// outside → its steps. With it, every composed call's check before
-    /// the transaction (tsk1010).
+    /// the transaction.
     pub(super) async fn route_composite(
         &self,
         run: &RunContext,

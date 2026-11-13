@@ -89,7 +89,7 @@ test("treemap viz nodes draw a tile per positive item and link through the viz's
   );
   const tiles = container.querySelectorAll('[data-testid="viz-treemap-tile"]');
   expect(tiles.length).toBe(2);
-  // Theme tokens, never inline hex (tsk371).
+  // Theme tokens, never inline hex.
   for (const tile of tiles) {
     for (const el of tile.querySelectorAll("rect, text")) {
       for (const attr of ["fill", "stroke"]) {

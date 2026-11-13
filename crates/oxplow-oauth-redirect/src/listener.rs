@@ -146,7 +146,7 @@ async fn read_request(conn: &mut TcpStream) -> std::io::Result<HttpRequest> {
 }
 
 /// A plain-text page for the person's browser — never sniffed as
-/// anything else, never cached (tsk904).
+/// anything else, never cached.
 async fn respond(conn: &mut TcpStream, status: &str, text: &str) -> std::io::Result<()> {
     let head = format!(
         "HTTP/1.1 {status}\r\nContent-Type: text/plain; charset=utf-8\r\n\
@@ -189,7 +189,7 @@ mod tests {
         assert_eq!(callback, (200, "Signed in.".to_string()));
     }
 
-    /// tsk904: the page is plain text the browser neither sniffs nor
+    /// the page is plain text the browser neither sniffs nor
     /// keeps.
     #[tokio::test]
     async fn the_page_is_never_sniffed_or_cached() {
@@ -211,7 +211,7 @@ mod tests {
         assert_eq!(resp.headers()["cache-control"], "no-store");
     }
 
-    /// tsk825: a connection that sends nothing (another process, a
+    /// a connection that sends nothing (another process, a
     /// browser's idle socket) doesn't hold up the real redirect.
     #[tokio::test]
     async fn an_idle_connection_doesnt_hold_up_the_redirect() {
@@ -235,7 +235,7 @@ mod tests {
         assert_eq!(browser.await.unwrap().0, 400);
     }
 
-    /// tsk825: a request's head is bounded: a line with no end is refused
+    /// a request's head is bounded: a line with no end is refused
     /// rather than read.
     #[tokio::test]
     async fn a_request_is_read_within_its_bounds() {

@@ -1,4 +1,4 @@
-//! Reading and restoring captured files (P2.9, tsk433): one place for what
+//! Reading and restoring captured files (P2.9): one place for what
 //! the RPC and MCP snapshot tools do, with honest ids —
 //! a **`file_snapshot` id** names one captured file row, a **`snapshot`
 //! id** a whole capture (read a path *at* it).

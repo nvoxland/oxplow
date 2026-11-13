@@ -426,7 +426,7 @@ impl DupQueue {
 }
 
 /// Marks a change in flight; removed however the computation ends
-/// (an error return, a dropped future), so it can't stick (tsk364).
+/// (an error return, a dropped future), so it can't stick.
 struct RunningGuard<'a> {
     state: &'a std::sync::Mutex<AnalyzerState>,
     id: i64,
@@ -2145,7 +2145,7 @@ mod tests {
         assert_ne!(c.status, "failed");
     }
 
-    /// P2.10 (tsk434): a turn diffs its start snapshot → its end snapshot
+    /// P2.10: a turn diffs its start snapshot → its end snapshot
     /// — everything the turn changed, even across a snapshot taken in the
     /// middle (a run's measured take mid-turn).
     #[tokio::test]

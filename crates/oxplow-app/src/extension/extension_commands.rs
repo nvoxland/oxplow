@@ -1180,7 +1180,7 @@ fn run_script_fn(
 /// runs that in one transaction when every call can (each child's
 /// a job's tools, policy and confirmation; one audit row; the reversed children
 /// undo it), or as steps when one leaves it — a `task.*` call on
-/// another provider's item (P7 review, tsk713). Pure, so the bus may
+/// another provider's item (P7 review). Pure, so the bus may
 /// compose more than once.
 pub fn extension_command(
     bus: &std::sync::Arc<crate::commands::CommandBus>,

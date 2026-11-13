@@ -591,7 +591,7 @@ export function refLinkTitle(
  * The ref a parsed link names, or `null` when it isn't a page at all
  * (external URLs, anchors, empty and broken refs). A click opens it
  * through `PageNavigation.openRef`, where its kind's page says (the
- * registry), the same for every kind under "open in a new tab" (tsk265).
+ * registry), the same for every kind under "open in a new tab".
  */
 export function linkRef(parsed: ParsedLink): string | null {
   switch (parsed.kind) {

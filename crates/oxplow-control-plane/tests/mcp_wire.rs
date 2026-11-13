@@ -109,7 +109,7 @@ async fn mcp_session_initializes_lists_and_calls_tools_over_http() {
             .find(|t| t["name"] == name)
             .unwrap_or_else(|| panic!("{name} missing from tools/list"))
     };
-    // Our hand-rolled list_tools stamps read-only hints (tsk203) …
+    // Our hand-rolled list_tools stamps read-only hints …
     assert_eq!(
         tool("oxplow_get_skill")["annotations"]["readOnlyHint"],
         true

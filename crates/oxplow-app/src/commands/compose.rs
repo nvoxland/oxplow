@@ -10,7 +10,7 @@
 //!   children that changed something, reversed.
 //! - Any call leaves it (an `External` command, `task.*` on another
 //!   provider's item): its **steps** run in order (`steps.rs`), each
-//!   landing as it runs, with no undo (P7 review, tsk713).
+//!   landing as it runs, with no undo (P7 review).
 //!
 //! Either way it is composed once, before any transaction, its reads
 //! through the SQL gateway (as an effect's are), and each child's own

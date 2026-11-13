@@ -1,4 +1,4 @@
-//! Tier-2 AST-merge **spike** (tsk121) — NOT production code.
+//! Tier-2 AST-merge **spike** — NOT production code.
 //!
 //! Proves the risky core of a tree-sitter structural 3-way merge is
 //! tractable on oxplow's *existing* parser deps, and that the safety

@@ -3,7 +3,7 @@ use super::*;
 /// Run fact collector `spec` over the fixture's `files` (path → content;
 /// its other input keys — `report`, `rows`, `event` — are the collector's
 /// input), storing nothing; its facts against `expect: { facts: [...] }`,
-/// each compared on the keys its expected fact names (tsk1047).
+/// each compared on the keys its expected fact names.
 pub(super) async fn fact_collector_example(
     host: &Host,
     ext: &Extension,

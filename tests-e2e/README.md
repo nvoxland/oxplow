@@ -208,7 +208,7 @@ See `.context/performance.md`.
 
 ## What it found first time out
 
-The three idle-timer suspects in tsk219 were all wrong (details in
+The three idle-timer suspects in were all wrong (details in
 `.context/performance.md`). At idle the renderer executes **0.0%** JS across
 20-25s captures. Worth remembering before optimizing a timer because it *looks*
 expensive.

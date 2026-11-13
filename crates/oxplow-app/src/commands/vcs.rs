@@ -758,7 +758,7 @@ mod tests {
         );
     }
 
-    /// P5.B6 (tsk525): an agent runs VCS commands on its own stream only
+    /// P5.B6: an agent runs VCS commands on its own stream only
     /// (as its terminal's git reaches only its own worktree); a destructive
     /// one needs a person's confirmation; the audit row holds what the VCS
     /// reported.

@@ -122,7 +122,7 @@ pub async fn recent_activity(
 pub const AGENT_STALL_AFTER_MS: i64 = 15 * 60 * 1000;
 
 /// Shorter death threshold for the case where the agent is NOT inside
-/// an open tool call (tsk130). When a turn dies between steps — a
+/// an open tool call. When a turn dies between steps — a
 /// model-unavailable error ("Claude Fable 5 is currently unavailable")
 /// or a transient API death right after a prompt or between tool calls
 /// — Claude Code emits no hook and the log goes silent with no
@@ -145,7 +145,7 @@ pub const AGENT_DEAD_AFTER_MS: i64 = 5 * 60 * 1000;
 /// is still open: [`AGENT_STALL_AFTER_MS`] when one is (a long Bash can
 /// run silently up to its max), the shorter [`AGENT_DEAD_AFTER_MS`]
 /// when nothing is open (silence between steps means death, caught
-/// promptly — tsk130). `AwaitingUser` is exempt: waiting on the user
+/// promptly). `AwaitingUser` is exempt: waiting on the user
 /// indefinitely is legitimate.
 ///
 /// This is the hook-only entry point — it has no view of PTY output,
@@ -164,7 +164,7 @@ pub fn derive_session_status(events: &[Activity], now: Timestamp) -> AgentStatus
 /// Hooks are sparse *within* a turn: a single long turn streams tokens
 /// to the terminal for many minutes while emitting no Pre/PostToolUse
 /// between tool calls, so a frozen hook log alone reads as death even
-/// though the agent is plainly working (tsk141). Output bytes are the
+/// though the agent is plainly working. Output bytes are the
 /// missing cadence signal — an agent still writing to its PTY is alive
 /// regardless of how stale its last hook is.
 ///
@@ -173,7 +173,7 @@ pub fn derive_session_status(events: &[Activity], now: Timestamp) -> AgentStatus
 /// detected because a dead turn stops emitting output too: once both
 /// signals are quiet past the threshold (short or long per the
 /// open-tool rule), the turn degrades to `Stalled` exactly as before
-/// (tsk130 intact). `last_output_at = None` reproduces the old
+/// (intact). `last_output_at = None` reproduces the old
 /// hook-only behavior.
 pub fn derive_session_status_with_activity(
     events: &[Activity],
@@ -201,7 +201,7 @@ pub fn derive_session_status_with_activity(
     // state at the end and exempt it from the stall threshold. Two such
     // tools exist: ExitPlanMode (the built-in plan-approval prompt) and
     // AskUserQuestion (the built-in clarifying-question prompt). Before
-    // tsk128 only ExitPlanMode was tracked, so an agent blocked on
+    //  only ExitPlanMode was tracked, so an agent blocked on
     // AskUserQuestion stayed Running and degraded to Stalled — read as
     // a death and mis-triggering a re-dispatch.
     let mut pending_user_input: i32 = 0;
@@ -209,7 +209,7 @@ pub fn derive_session_status_with_activity(
     // matching PostToolUse). Distinguishes "the agent is inside a tool
     // that may legitimately run long (a 10-min Bash)" from "the agent
     // is between steps with nothing running" — the two get different
-    // silence thresholds below (tsk130).
+    // silence thresholds below.
     let mut open_tools: i32 = 0;
 
     // Parked on the person (a final question, a permission prompt), until a
@@ -293,7 +293,7 @@ pub fn derive_session_status_with_activity(
             // An open tool call (e.g. a long Bash) may legitimately run
             // silently up to its max; a turn with nothing open that goes
             // silent has almost certainly died between steps. Pick the
-            // threshold accordingly (tsk130).
+            // threshold accordingly.
             let threshold = if open_tools > 0 {
                 AGENT_STALL_AFTER_MS
             } else {
@@ -301,8 +301,8 @@ pub fn derive_session_status_with_activity(
             };
             // Silence is measured from the LATER of the last hook and
             // the last PTY output: a long turn streaming tokens with no
-            // intervening hook is alive (tsk141), while a genuinely-dead
-            // turn goes quiet on both signals and still degrades (tsk130).
+            // intervening hook is alive, while a genuinely-dead
+            // turn goes quiet on both signals and still degrades.
             let last_activity_ms = last
                 .at
                 .unix_ms()
@@ -494,7 +494,7 @@ mod tests {
 
     #[test]
     fn dead_with_no_open_tool_stalls_at_short_threshold() {
-        // tsk130: the genuinely-dead turn. A model-unavailable / API
+        // the genuinely-dead turn. A model-unavailable / API
         // death right after the prompt leaves the log silent with NO
         // open tool call (nothing to wait out). It must surface as
         // Stalled at the SHORT threshold, well before the 15-min stall
@@ -586,7 +586,7 @@ mod tests {
 
     #[test]
     fn ask_user_question_pending_shows_awaiting_user() {
-        // tsk128: the dogfooding bug. AskUserQuestion is a built-in
+        // the dogfooding bug. AskUserQuestion is a built-in
         // tool whose PreToolUse fires when the agent asks the user a
         // question; the matching PostToolUse only lands once the user
         // answers. Until then the agent is WAITING ON THE USER — it
@@ -634,7 +634,7 @@ mod tests {
 
     #[test]
     fn long_turn_with_ongoing_output_is_working_not_stalled() {
-        // tsk141: a single ~1h turn streams tokens to the terminal but
+        // a single ~1h turn streams tokens to the terminal but
         // emits NO hook between tool calls. The hook log is frozen at
         // turn start (well past the short death threshold with nothing
         // open), yet the PTY is still advancing — that's Working, not
@@ -691,7 +691,7 @@ mod tests {
 
     #[test]
     fn stale_output_does_not_revive_a_dead_turn() {
-        // Genuine-death guard (tsk130 intact): if the last output is
+        // Genuine-death guard (intact): if the last output is
         // ALSO older than the threshold, the activity signal can't mask
         // the death — it still degrades to Stalled.
         let events = [ev(HookKind::UserPromptSubmit, 1, "{}")];
@@ -705,7 +705,7 @@ mod tests {
 
     #[test]
     fn rejected_user_input_tool_clears_on_next_prompt() {
-        // tsk166: a rejected/cancelled AskUserQuestion fires PreToolUse
+        // a rejected/cancelled AskUserQuestion fires PreToolUse
         // with NO matching PostToolUse, stranding `pending_user_input`.
         // Without the reset it pins the thread to AwaitingUser (red
         // "waiting") forever. A fresh UserPromptSubmit must clear it so

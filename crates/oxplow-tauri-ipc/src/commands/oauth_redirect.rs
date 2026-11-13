@@ -25,7 +25,7 @@ impl Default for OAuthRedirects {
 }
 
 /// A redirect listener: its id — what waits on it, answers it and stops
-/// it (tsk905), never its port — and the port to sign in on.
+/// it, never its port — and the port to sign in on.
 #[derive(Debug, Clone, serde::Serialize, specta::Type)]
 pub struct OAuthListener {
     pub id: ListenerId,

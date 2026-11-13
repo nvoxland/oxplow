@@ -768,7 +768,7 @@
     - { unique: id }
 - name: search_comment
   version: 4
-  description: "What site search indexes for each comment (tsk864): the `comment` kind's index is restated from these rows when they change."
+  description: "What site search indexes for each comment: the `comment` kind's index is restated from these rows when they change."
   fields:
     - { name: "uri", type: "TEXT", doc: "The comment's canonical ref (`oxplow:oxplow/comment?id=cmt<n>`): what a hit opens." }
     - { name: "title", type: "TEXT", doc: "The quote it's anchored to." }
@@ -1482,7 +1482,7 @@
     - { unique: asset }
 - name: test_case_stat
   version: 2
-  description: "Each test's summary per stream, branch and producer (tsk733): what it is doing now and how it has behaved — flaky (flips), recently broken (last_failed_at), slow (max_ms, mean_ms). Updated with every test run; a run records per-case facts only where they change something, so this is where per-test history lives."
+  description: "Each test's summary per stream, branch and producer: what it is doing now and how it has behaved — flaky (flips), recently broken (last_failed_at), slow (max_ms, mean_ms). Updated with every test run; a run records per-case facts only where they change something, so this is where per-test history lives."
   fields:
     - { name: "stream_id", type: "INTEGER", doc: "Stream it ran in (v_stream.id)." }
     - { name: "branch", type: "TEXT", doc: "Branch checked out when it ran; empty when unknown." }

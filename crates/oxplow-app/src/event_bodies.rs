@@ -2,7 +2,7 @@
 //! prompt's text — for the
 //! activity panel (a person, any stream) and the MCP `read_event_content`
 //! tool (an agent, its own stream only). One routine for both, so the
-//! scope and the size cap can't differ between them (tsk509).
+//! scope and the size cap can't differ between them.
 
 use oxplow_domain::events::schema::ContentRef;
 use oxplow_domain::{DomainError, EventId, StreamId};

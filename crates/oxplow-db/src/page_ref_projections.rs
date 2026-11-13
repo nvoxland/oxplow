@@ -134,7 +134,7 @@ const BODY_MENTIONS: MentionTypes = MentionTypes {
 };
 
 /// A knowledge page's body: its files and directories are what freshness
-/// pins (`v_knowledge_pin`).
+/// pins (`v_oxplow_knowledge_ref`).
 const KNOWLEDGE_MENTIONS: MentionTypes = MentionTypes {
     file: RT_KNOWLEDGE_FILE,
     dir: RT_KNOWLEDGE_DIR,

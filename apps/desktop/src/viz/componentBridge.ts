@@ -54,7 +54,7 @@ import type { CommandOutcome, VizRun, PageRun, SqlCell, SqlQueryResult } from ".
 
 /// The protocol above, by number: bumped when a message's shape changes,
 /// with the served library (`crates/oxplow-app/assets/component/`). 2: `init`
-/// lost `kitCss` — the kit is a stylesheet the bundle links (tsk961).
+/// lost `kitCss` — the kit is a stylesheet the bundle links.
 /// 3: `navigate` carries `newTab` (a Cmd-click in a component). 4: a
 /// refused request's error carries the input `field` it names, when it
 /// names one (`INVALID`), so a component's form marks that field.
@@ -294,8 +294,8 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
   }
 }
 
-/** Where the daemon serves the bundle its host loaded at `version`
- *  (tsk984): a folder of its own, so the bundle's relative URLs stay in
+/** Where the daemon serves the bundle its host loaded at `version`:
+ * a folder of its own, so the bundle's relative URLs stay in
  *  it. */
 export function componentBundleUrl(base: string, version: string): string {
   return `${base}/components/v/${encodeURIComponent(version)}/`;

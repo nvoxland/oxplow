@@ -67,7 +67,7 @@ test("Escape in the form, or in a confirmation, stays inside it", async () => {
   expect(outer).toBe(0);
 });
 
-// tsk1054: a host re-reading its data passes a fresh copy of the same
+// a host re-reading its data passes a fresh copy of the same
 // schema and starting value; that's no reason to throw away an edit. A
 // different starting value is.
 test("an edit survives a fresh copy of the same starting value", () => {

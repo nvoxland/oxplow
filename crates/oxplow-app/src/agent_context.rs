@@ -1,4 +1,4 @@
-//! The context oxplow hands an agent, shared by every transport (tsk334,
+//! The context oxplow hands an agent, shared by every transport (
 //! P3.8): the `<session-context>` block (deduped per session — it names
 //! the other live agents in the worktree, so it changes as they come and
 //! go), the extensions' agent contexts (`context:`, each once, then on

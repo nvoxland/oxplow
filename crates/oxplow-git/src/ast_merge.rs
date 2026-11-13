@@ -1,11 +1,11 @@
 //! Tier-2 AST structural merge — parse + per-item 3-way merge
-//! (tsk134, tsk135; wired into auto-resolve in tsk136; second-slice
-//! languages added in tsk137).
+//! (wired into auto-resolve in; second-slice
+//! languages added in).
 //!
 //! The language-neutral core of the AST merge designed in
 //! `.context/smart-merge.md` (Tier 2), in two layers:
 //!
-//! 1. **Parse → items** ([`parse_top_level_items`], tsk134): parse a
+//! 1. **Parse → items** ([`parse_top_level_items`]): parse a
 //!    file's bytes with the right tree-sitter grammar and reduce it to
 //!    its ordered top-level items, each carrying
 //!    - a **stable identity key** for 3-way matching (an import is keyed
@@ -13,12 +13,12 @@
 //!      anything unnamed falls back to `kind + normalized-text`), and
 //!    - its **original byte span** (so reconstruction reuses exact
 //!      source, including a declaration's attached leading doc-comments).
-//! 2. **3-way merge** ([`merge_top_level`], tsk135): per-item classify
+//! 2. **3-way merge** ([`merge_top_level`]): per-item classify
 //!    (take-the-changed-side / take-agreement / refuse on overlap),
 //!    deterministic ordering + verbatim reconstruction, and a re-parse
 //!    guard that discards any reconstruction that doesn't parse cleanly.
 //!
-//! Wired into `auto_resolve_conflicts` as a Tier-1.5 fallback in tsk136
+//! Wired into `auto_resolve_conflicts` as a Tier-1.5 fallback in
 //! (see `smart_merge.rs`). The original feasibility spike lives at
 //! `crates/oxplow-git/tests/ast_merge_spike.rs`.
 //!
@@ -31,8 +31,8 @@
 //!
 //! ## Supported languages
 //!
-//! First slice (tsk134): rust, typescript, tsx, javascript, python, go.
-//! Second slice (tsk137): java, c, cpp, clojure. C/C++ and Clojure use
+//! First slice: rust, typescript, tsx, javascript, python, go.
+//! Second slice: java, c, cpp, clojure. C/C++ and Clojure use
 //! bespoke key resolvers (see [`KeyStrategy`]); the rest share the generic
 //! `name_fields` path.
 //!
@@ -60,7 +60,7 @@ use std::ops::Range;
 
 use tree_sitter::{Language as TsLanguage, Node, Parser};
 
-/// The canonical, workspace-wide language identity (tsk321). The AST merge
+/// The canonical, workspace-wide language identity. The AST merge
 /// front half no longer declares its own enum — it reuses
 /// `oxplow_code_metrics::Language` and keys its `MergeSpec` table off it via
 /// [`merge_spec`], which returns `None` for the canonical variants the merge
@@ -194,7 +194,7 @@ pub fn parse_top_level_items(src: &str, lang: Language) -> Option<Vec<Item>> {
         // A DETACHED run (blank line between) becomes its own item instead of
         // being dropped — a licence header or section divider is content, and
         // silently losing it while reporting a clean merge is the worst
-        // outcome available (tsk159).
+        // outcome available.
         let mut start = child.start_byte();
         if let Some((cstart, cend)) = comment_run {
             let gap = &src[cend..child.start_byte()];
@@ -244,7 +244,7 @@ fn push_comment_item(items: &mut Vec<Item>, src: &str, start: usize, end: usize)
     });
 }
 
-/// Key prefix marking a standalone comment block (tsk159). `reconstruct` reads
+/// Key prefix marking a standalone comment block. `reconstruct` reads
 /// it to restore the blank line that made the block detached in the first
 /// place.
 const COMMENT_KEY_PREFIX: &str = "#comment::";
@@ -502,7 +502,7 @@ static GO: MergeSpec = MergeSpec {
     grammar: || tree_sitter_go::LANGUAGE.into(),
 };
 
-// ---- Second-slice languages (tsk137) ----
+// ---- Second-slice languages ----
 
 // Java top-level items are imports + type declarations (methods/fields are
 // nested in a class body — intra-body merge is Tier-1's job, per the
@@ -554,7 +554,7 @@ static CLOJURE: MergeSpec = MergeSpec {
 // ===================================================================
 // Per-item 3-way merge: classify + ordering/reconstruction + re-parse
 // guard. Built on `parse_top_level_items`. Pure; no merge is wired into
-// `auto_resolve_conflicts` yet (that's tsk136).
+// `auto_resolve_conflicts` yet (that's).
 // ===================================================================
 
 /// Outcome of a top-level structural 3-way merge.
@@ -793,7 +793,7 @@ fn reconstruct(items: &[Item]) -> String {
         out.push('\n');
         // A standalone comment block was detached by a blank line — that blank
         // line is what made it standalone, so put it back rather than gluing a
-        // licence header onto the first declaration (tsk159).
+        // licence header onto the first declaration.
         if it.key.starts_with(COMMENT_KEY_PREFIX) {
             out.push('\n');
         }
@@ -822,7 +822,7 @@ mod tests {
         items.iter().map(|i| i.key.as_str()).collect()
     }
 
-    /// tsk159: a comment run separated from the next declaration by a blank
+    /// a comment run separated from the next declaration by a blank
     /// line — a licence header, a section divider, a trailing note — belongs to
     /// no item, so `reconstruct` (which emits only `Item.text`) dropped it.
     /// The re-parse guard cannot catch this: source with the header removed
@@ -928,7 +928,7 @@ mod tests {
         assert_eq!(language_for_path("x.jsx"), Some(Language::JavaScript));
         assert_eq!(language_for_path("x.py"), Some(Language::Python));
         assert_eq!(language_for_path("x.go"), Some(Language::Go));
-        // Second-slice languages (tsk137).
+        // Second-slice languages.
         assert_eq!(language_for_path("x.java"), Some(Language::Java));
         assert_eq!(language_for_path("x.c"), Some(Language::C));
         assert_eq!(language_for_path("x.h"), Some(Language::C));
@@ -943,7 +943,7 @@ mod tests {
 
     #[test]
     fn csharp_is_canonical_but_unsupported_for_merge() {
-        // C# lives in the unified `Language` enum (tsk321) — it's analysed
+        // C# lives in the unified `Language` enum — it's analysed
         // for metrics — but the AST merge front half doesn't support it, so
         // it has no `MergeSpec`, `parse_top_level_items` bails gracefully,
         // and a `.cs` path is never picked up by the merge resolver.

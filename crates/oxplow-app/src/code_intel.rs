@@ -632,7 +632,7 @@ mod tests {
         );
     }
 
-    /// tsk571: a rename answer's `documentChanges` wins over `changes`,
+    /// a rename answer's `documentChanges` wins over `changes`,
     /// and its file operations come through in order.
     #[test]
     fn a_rename_prefers_document_changes_and_keeps_file_operations() {
@@ -682,7 +682,7 @@ mod tests {
         assert!(plain.operations.is_empty());
     }
 
-    /// tsk571: a document symbol's location is its name; its extent is
+    /// a document symbol's location is its name; its extent is
     /// the whole symbol.
     #[test]
     fn a_symbol_has_its_name_and_its_extent() {

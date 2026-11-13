@@ -48,7 +48,7 @@ test("one query per decorator, over the refs of its kind", () => {
   expect(decorationQueries(decorator({}), ["oxplow:oxplow/commit?sha=abc1234"])).toEqual([]);
 });
 
-// tsk934: a large table's row badges aren't cut off by one row limit —
+// a large table's row badges aren't cut off by one row limit —
 // the refs go in chunks, each with room for every ref's decorations.
 test("many refs are asked in chunks, each with room for all its decorations", () => {
   const refs = Array.from({ length: 2 * REFS_PER_QUERY + 50 }, (_, i) => taskUri("oxtask", `tsk${i}`));
@@ -58,7 +58,7 @@ test("many refs are asked in chunks, each with room for all its decorations", ()
   expect(queries[0].limit).toBe(REFS_PER_QUERY * MAX_DECORATIONS_PER_REF);
 });
 
-// tsk934: one extension adds at most a few short labels to a ref.
+// one extension adds at most a few short labels to a ref.
 test("an extension's decorations on one ref are few and short", () => {
   const res = {
     columns: ["uri", "label"],

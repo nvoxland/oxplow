@@ -462,7 +462,7 @@ function RailBody({ children, width, fill, rightRail, rightRailTitle }: { childr
         style={{
           display: "flex",
           // The title keeps its line; the actions wrap below it when they
-          // don't fit beside it (tsk1043: they overlapped it).
+          // don't fit beside it (they overlapped it).
           flexWrap: "wrap",
           alignItems: "center",
           gap: 8,

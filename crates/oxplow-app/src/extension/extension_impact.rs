@@ -96,8 +96,7 @@ pub struct DatasetImpact {
 
 /// The most rows a side's diff reads; past it, counts only. It is the
 /// read gateway's own cap: a review reads through the same read-only path
-/// as everything else, and a larger number would be one it never returns
-/// (tsk779).
+/// as everything else, and a larger number would be one it never returns.
 pub const ROW_DIFF_LIMIT: usize = oxplow_db::semantic_layer::MAX_ROW_LIMIT;
 /// The most sample changes a keyed diff keeps.
 pub const ROW_DIFF_SAMPLES: usize = 20;
@@ -334,7 +333,7 @@ pub struct CollectorImpact {
     /// Why it wasn't run: it runs a program or reads a provider, which a
     /// review never does, approved or not.
     pub not_run: Option<String>,
-    /// Its entry's text changed though its declaration didn't (tsk783).
+    /// Its entry's text changed though its declaration didn't.
     pub script_changed: bool,
 }
 
@@ -2081,7 +2080,7 @@ mod tests {
         (d, ext)
     }
 
-    /// tsk795: a page that fails the same way in both versions didn't
+    /// a page that fails the same way in both versions didn't
     /// change; one whose failure changed did.
     #[tokio::test]
     async fn a_page_failing_the_same_way_on_both_sides_is_unchanged() {
@@ -2379,7 +2378,7 @@ mod tests {
         assert_eq!((added.before, added.after), (None, Some(2)));
     }
 
-    /// tsk792: samples come in key order — 2 before 10 — not text order.
+    /// samples come in key order — 2 before 10 — not text order.
     #[test]
     fn samples_are_in_key_order() {
         let key = vec!["id".to_string()];
@@ -2435,7 +2434,7 @@ mod tests {
         );
     }
 
-    /// tsk782: a collector's `input:` reads each side's own datasets — the
+    /// a collector's `input:` reads each side's own datasets — the
     /// before side sees its version of a view, the after side its own.
     #[tokio::test]
     async fn a_collectors_input_reads_each_sides_own_datasets() {
@@ -2507,7 +2506,7 @@ mod tests {
         assert_eq!(out[0].after.as_ref().unwrap().counts["thing"], 2, "{out:?}");
     }
 
-    /// tsk783: a collector whose script alone changed — no fixture, event or
+    /// a collector whose script alone changed — no fixture, event or
     /// `input:` to run it on — still says so.
     #[tokio::test]
     async fn a_collector_whose_script_alone_changed_says_so() {
@@ -2569,7 +2568,7 @@ mod tests {
         );
     }
 
-    /// tsk791: a review's dry run gets the command scripts' budget, not a
+    /// a review's dry run gets the command scripts' budget, not a
     /// collector's two minutes, and the review stops running scripts at
     /// its deadline — saying what it didn't run.
     #[tokio::test(flavor = "multi_thread")]
@@ -2630,7 +2629,7 @@ mod tests {
         );
     }
 
-    /// tsk779: a side past the limit reads `limit` rows, truncated, and the
+    /// a side past the limit reads `limit` rows, truncated, and the
     /// limit is what the gateway really returns — the note's number is the
     /// count it reports, not a larger one the gateway never reaches.
     #[tokio::test]

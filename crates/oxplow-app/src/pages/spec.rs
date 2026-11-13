@@ -2308,7 +2308,7 @@ impl VizConfig {
 /// Where a viz is being looked at from: the viewer's current stream and
 /// thread (numeric ids, as the `v_*` views use). A viz that declares a
 /// `stream_id` or `thread_id` param gets these unless it's given another
-/// value (tsk375).
+/// value.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ViewContext {
     pub stream_id: Option<i64>,

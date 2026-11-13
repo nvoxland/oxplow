@@ -836,7 +836,7 @@ impl Materializer for SqlDatasetMaterializer {
     /// Refill whole, or append past the watermark. An append that hits
     /// the key is a failure like any other: with the watermark the key, it
     /// means the SELECT emitted one key twice, which a refill would hit
-    /// too (tsk781).
+    /// too.
     async fn recompute(&self, full: bool) -> Result<Recomputed, DomainError> {
         match self.incremental.as_deref().filter(|_| !full) {
             Some(column) => self.append(column).await,
@@ -1331,7 +1331,7 @@ mod tests {
         assert_eq!(runs.load(Ordering::SeqCst), 1, "due, so recomputed");
     }
 
-    /// tsk794: what a recompute records is on the same clock it waits on,
+    /// what a recompute records is on the same clock it waits on,
     /// so a restart 50 minutes after a build waits the other 10, not an
     /// hour.
     #[tokio::test(start_paused = true)]
@@ -1357,7 +1357,7 @@ mod tests {
         );
     }
 
-    /// tsk780: a fresh record of a *different* definition (the dataset's
+    /// a fresh record of a *different* definition (the dataset's
     /// SELECT was edited) doesn't hold the clock: it rebuilds at once.
     #[tokio::test(start_paused = true)]
     async fn a_clocked_asset_whose_definition_changed_rebuilds_at_once() {
@@ -1402,7 +1402,7 @@ mod tests {
         }
     }
 
-    /// tsk794: the wiring end to end — a real write, the database's change
+    /// the wiring end to end — a real write, the database's change
     /// hook, `Assets::changed`: an insert appends, an update forces a
     /// whole recompute.
     #[tokio::test(start_paused = true)]
@@ -1661,11 +1661,11 @@ mod tests {
         }
     }
 
-    /// tsk781: an append that hits the key is a failure, not a silent
-    /// refill — with the watermark the key (tsk777), only SQL that emits a
+    /// an append that hits the key is a failure, not a silent
+    /// refill — with the watermark the key, only SQL that emits a
     /// key twice can hit it, and a refill of the same SQL fails the same
     /// way. (The shape below, the latest row per key, is one the compiler
-    /// refuses — tsk778; the materializer is driven directly.)
+    /// refuses; the materializer is driven directly.)
     #[tokio::test]
     async fn an_append_that_hits_its_key_fails() {
         let db = Database::in_memory();
@@ -1714,7 +1714,7 @@ mod tests {
         .unwrap()
     }
 
-    /// tsk781: a refill that fails — a keyed SELECT that emits one key
+    /// a refill that fails — a keyed SELECT that emits one key
     /// twice — is the asset's failure in `v_asset`, not only a log line;
     /// the next success clears it.
     #[tokio::test]

@@ -42,7 +42,7 @@ pub struct QueryMemo {
 struct MeasureMemo {
     generation: u64,
     epoch: u64,
-    /// The producers that have emitted facts for it (tsk130).
+    /// The producers that have emitted facts for it.
     producers: Option<Vec<String>>,
     /// Its distinct `(producer, rule, severity, dims_json)` slices, and the
     /// highest capture id they cover. A write can only add slices (facts are
@@ -209,7 +209,7 @@ pub struct Database {
     pool: Arc<Pool<SqliteConnectionManager>>,
     memo: Arc<QueryMemo>,
     /// Bounds how many DB tasks are dispatched to the blocking pool at once,
-    /// sized to the connection pool (tsk131).
+    /// sized to the connection pool.
     gate: Arc<Semaphore>,
     /// Background work (anything not run for a request a person waits on)
     /// takes one of these before the gate, so it can never hold every
@@ -416,14 +416,14 @@ fn busy_handler(count: i32) -> bool {
 /// Everything here is connection-local and lock-free. `journal_mode` is
 /// deliberately absent: it is a property of the *file*, set once in
 /// [`Database::open`], and doing it per connection means contending for
-/// an exclusive lock with whatever else is writing (tsk262).
+/// an exclusive lock with whatever else is writing.
 fn init_connection(c: &Connection) -> rusqlite::Result<()> {
     c.pragma_update(None, "foreign_keys", "ON")?;
     c.pragma_update(None, "synchronous", "NORMAL")?;
     // Waiting for the write lock is ours, not SQLite's fixed timeout
     // (`busy_handler`): a person's write goes ahead of the background's.
     c.busy_handler(Some(busy_handler))?;
-    // The hot metric store paths use `prepare_cached` (tsk112);
+    // The hot metric store paths use `prepare_cached`;
     // rusqlite's default LRU is 16 statements, small enough that the
     // build/read mix would thrash it and re-parse anyway.
     c.set_prepared_statement_cache_capacity(128);
@@ -437,7 +437,7 @@ fn init_connection(c: &Connection) -> rusqlite::Result<()> {
 /// only surfaces as an extension's compile error. The bundled SQLite gets
 /// them from `LIBSQLITE3_FLAGS = -DSQLITE_ENABLE_MATH_FUNCTIONS` in
 /// `.cargo/config.toml`, which a build from outside this tree doesn't
-/// read — so every open checks, and says how to build (tsk726).
+/// read — so every open checks, and says how to build.
 fn require_math_functions(c: &Connection) -> Result<(), DbInitError> {
     c.query_row("SELECT log2(8)", [], |r| r.get::<_, f64>(0))
         .map(|_| ())
@@ -535,7 +535,7 @@ impl Database {
         // exclusive lock and SQLite does NOT route it through
         // `busy_timeout`, so a connection coming up while migrations
         // hold a write transaction fails instantly — which is what made
-        // every fresh project log `ERROR database is locked` (tsk262).
+        // every fresh project log `ERROR database is locked`.
         let setup = Connection::open(path.as_ref()).map_err(DbInitError::Sqlite)?;
         setup
             .pragma_update(None, "journal_mode", "WAL")
@@ -648,7 +648,7 @@ impl Database {
     /// Sized to the connection pool: without it, `Database::call` spawns a
     /// blocking thread per caller, and the metric path fanned out to ~197 of
     /// them against 8 connections — ~189 OS threads (2 MB of stack each) whose
-    /// entire job was to block inside `pool.get()` (tsk131). Waiting here
+    /// entire job was to block inside `pool.get`. Waiting here
     /// instead makes the queue a cheap async wait. Throughput is unchanged:
     /// only `max_size` tasks could ever hold a connection anyway.
     ///
@@ -1162,8 +1162,7 @@ impl Database {
                 // `busy_timeout`). A deferred read-then-write transaction
                 // fails with SQLITE_BUSY_SNAPSHOT when another commits
                 // between its read and its first write, which no wait fixes.
-                // So Busy comes at BEGIN, and is retried like any other
-                // (tsk1005).
+                // So Busy comes at BEGIN, and is retried like any other.
                 let sql = |e| TxError::Storage(map_sql_err(e));
                 let outcome = conn
                     .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -1526,7 +1525,7 @@ mod tests {
     /// background's: with one writer holding the lock and a crowd of
     /// background writers behind it, an interactive one gets the lock as
     /// soon as the holder lets go, instead of whenever SQLite's busy wait
-    /// happens to favour it (tsk1422: a switch waited minutes behind a
+    /// happens to favour it (a switch waited minutes behind a
     /// startup's writes).
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn an_interactive_write_goes_ahead_of_queued_background_writes() {
@@ -2517,7 +2516,7 @@ mod tests {
         assert_eq!(n, 0, "rolled back");
     }
 
-    /// tsk978: `Database::transaction` is the one write path — it begins
+    /// `Database::transaction` is the one write path — it begins
     /// IMMEDIATE and retries Busy. No store opens a transaction of its own
     /// on a raw connection; an extension's own file (`extension_store.rs`, never the
     /// main database), the open-time dataset compile (`datasets.rs`, run
@@ -2558,7 +2557,7 @@ mod tests {
         assert_eq!(own, Vec::<String>::new());
     }
 
-    /// tsk1005: under IMMEDIATE, Busy comes at `BEGIN` — another writer
+    /// under IMMEDIATE, Busy comes at `BEGIN` — another writer
     /// holds the lock past `busy_timeout` — and that is retried like a
     /// Busy inside the transaction.
     #[tokio::test(flavor = "multi_thread")]
@@ -2698,7 +2697,7 @@ mod tests {
             "comment_message",
             // V43 — the durable atomic fact layer (the sole metric substrate
             // since T-E3 dropped the V38 cluster, V49). The `subject` hierarchy
-            // table was dropped in V52 (tsk15) — never read/written.
+            // table was dropped in V52 — never read/written.
             "measure",
             "dimension",
             "metric_capture",
@@ -2712,9 +2711,9 @@ mod tests {
             "fact_chain",
             // V44 — the metric SPEC layer.
             "metric_spec",
-            // V62 — the aggregate cube: the materialized fold (tsk96), its
+            // V62 — the aggregate cube: the materialized fold, its
             // durable live state, and the watermark — both keyed per
-            // (measure, stream, branch) since V63 (tsk97). V66 adds the
+            // (measure, stream, branch) since V63. V66 adds the
             // global invalidation epoch that fences in-flight builds.
             "metric_cube",
             "metric_live_fact",
@@ -2727,8 +2726,8 @@ mod tests {
             "event_dead_letter",
             "command_audit",
         ];
-        // `effort_observation` was dropped in V39 (tsk215); the V38
-        // `metric_*` cluster was dropped in V49 (T-E3, tsk50) — assert gone.
+        // `effort_observation` was dropped in V39; the V38
+        // `metric_*` cluster was dropped in V49 (T-E3) — assert gone.
         let expected_absent = [
             // The dead per-task audit table is gone.
             "task_event",

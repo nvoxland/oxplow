@@ -86,7 +86,7 @@ describe("invokeRoute", () => {
   });
 
   test("with no Tauri host, a shell command has nowhere to go", () => {
-    // A plain browser driving a daemon (tsk996): no daemon serves a shell
+    // A plain browser driving a daemon: no daemon serves a shell
     // command, so it's refused here, not sent to fail there.
     expect(invokeRoute(SHELL_COMMAND, DAEMON, false)).toBe("none");
     expect(invokeRoute(PROJECT_COMMAND, DAEMON, false)).toBe("http");

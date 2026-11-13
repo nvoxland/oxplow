@@ -9,7 +9,7 @@ oxplow's own task tracker, as an extension in its own namespace
   from any source is seen by the collector.
 - **Fills `oxplow/task_record`** as the store `oxtask`: the columns and the
   `links` / `comments` children of bundled's model, the field `priority`
-  (enum) and the read-only field `author`, ids like `tsk12`.
+  (enum) and the read-only field `author`, ids like `tsk42`.
 - **Stages** are oxtask's own: `backlog`, `ready` (bucket `todo`),
   `in_progress`, `blocked`, `done`, `canceled`. Each row carries `stage`,
   `stage_title` and the bucket as `state`.

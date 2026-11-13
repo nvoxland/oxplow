@@ -518,8 +518,8 @@ pub struct Services {
     /// generation holds it; boot activates the first one (a repairable
     /// baseline), and until then they serve the current load.
     pub extension_activation: Arc<extension::extension_activation::ExtensionActivation>,
-    /// Custom components' bundles as their frames loaded them, by version
-    /// (tsk984): what the daemon serves a frame, and what its invoke names.
+    /// Custom components' bundles as their frames loaded them, by version:
+    /// what the daemon serves a frame, and what its invoke names.
     pub component_bundles: Arc<component_bundles::ComponentBundles>,
     /// The primary worktree's extensions' SQL datasets, and their errors (P4.9).
     /// Rebuilds `vocabulary` from the primary worktree's extensions, and
@@ -576,17 +576,17 @@ pub struct Services {
     pub agent_turn_store: Arc<SqliteAgentTurnStore>,
     /// What the person's windows show: their tabs per thread (`client_reports`).
     pub client_reports: Arc<client_reports::ClientReports>,
-    /// Durable atomic fact layer (epic tsk12) — the unified metric substrate
+    /// Durable atomic fact layer — the unified metric substrate
     /// (the V38 `metric_*` cluster is retired, T-E3). Producers write facts
     /// here; the read surface aggregates them through `metric_engine`.
     pub fact_store: Arc<SqliteFactStore>,
-    /// Aggregation engine over `fact_store` (metrics-as-specs; epic tsk12).
+    /// Aggregation engine over `fact_store` (metrics-as-specs).
     pub metric_engine: metric_engine::MetricEngine,
-    /// The metric-ancestry resolver (tsk102) — ONE instance shared by the
+    /// The metric-ancestry resolver — ONE instance shared by the
     /// engine's fact fold and the cube builder's seed, so the two can never
     /// disagree on what a branch sees.
     pub metric_visibility: Arc<metric_visibility::VisibilityResolver>,
-    /// Runs config-declared `metrics:` gauges into the substrate (tsk213, P3):
+    /// Runs config-declared `metrics:` gauges into the substrate (P3):
     /// seeds definitions, runs on-snapshot/manual triggers.
     pub metrics: metrics_service::MetricsService,
     /// Persisted agent nudges (report-less-run / coverage-target) — the
@@ -624,7 +624,7 @@ pub struct Services {
     pub secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
     /// Collection engine (passive Bash-hook detection + coverage ingest).
     pub collection: collection::CollectionService,
-    /// Per-turn agent token usage parsed from the hook transcript (tsk104).
+    /// Per-turn agent token usage parsed from the hook transcript.
     pub token_usage_store: Arc<SqliteTokenUsageStore>,
     /// Captures token usage on Stop from the agent transcript.
     pub token_usage: token_usage::TokenUsageService,
@@ -654,7 +654,7 @@ pub struct Services {
     /// (`context_watch`): a session without a prompt hook rebuilds its
     /// context on it.
     pub context_changes: tokio::sync::watch::Sender<u64>,
-    /// Open ACP agent sessions (tsk281). Sessions get a
+    /// Open ACP agent sessions. Sessions get a
     /// `chat::host::ServicesChatHost` holding `Services` weakly.
     pub chat: Arc<chat::manager::ChatManager>,
     /// The Assistant's sessions, in memory (`assistant`).
@@ -662,7 +662,7 @@ pub struct Services {
     pub lsp_installer: lsp_installer::LspInstallerService,
     pub terminal_sessions: terminal_sessions::TerminalSessionRegistry,
     /// Shared per-thread PTY liveness, written by the terminal forwarder
-    /// and read by the agent stall watchdog (tsk141).
+    /// and read by the agent stall watchdog.
     pub output_activity: output_activity::OutputActivity,
     pub recovery: recovery::RecoveryService,
     pub events: EventBus,
@@ -856,7 +856,7 @@ impl Services {
 
     /// The tree a thread works in: its stream's worktree (a sibling
     /// directory for a worktree stream), else the project dir. What its
-    /// tool paths are relative to (tsk350 policy, tsk386 claims).
+    /// tool paths are relative to (policy claims).
     /// What running a thread's advisories needs.
     pub fn advisory_deps(&self) -> advisories::AdvisoryDeps {
         advisories::AdvisoryDeps {
@@ -892,7 +892,7 @@ impl Services {
     /// Bootstrap. Run once at app startup. `secrets` is where keys,
     /// tokens and the approval key live: the OS keychain for the shipped
     /// daemon, always; memory only for the browser suite's
-    /// `oxplow-daemon-sim` (tsk948).
+    /// `oxplow-daemon-sim`.
     pub fn boot(
         layout: AppLayout,
         secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
@@ -1087,7 +1087,7 @@ impl Services {
             tracing::warn!(?e, "lsp installer manifest replay failed");
         }
         // Shared PTY liveness — the terminal forwarder stamps it, the
-        // stall watchdog reads it (tsk141).
+        // stall watchdog reads it.
         let output_activity = output_activity::OutputActivity::new();
         let terminal_sessions =
             terminal_sessions::TerminalSessionRegistry::new(pty.clone(), output_activity.clone());
@@ -1170,7 +1170,7 @@ impl Services {
         }
         snapshot_captures.set_primary(primary_stream.id);
         // Built before the metric runner, which reports whole-tree collector sweeps
-        // through it (tsk48).
+        // through it.
         let background_tasks = BackgroundTaskStore::new();
         bridge_background_task_events(&background_tasks, &event_bus);
 
@@ -1667,7 +1667,7 @@ impl Services {
         event_pump.register_async(Arc::new(metrics_service::EntityStates {
             metrics: metrics.clone(),
         }));
-        // A `generated` change reaches the snapshot captures (tsk515).
+        // A `generated` change reaches the snapshot captures.
         event_pump.register_async(Arc::new(config_reactors::WorkspaceFilterConsumer {
             captures: snapshot_captures.clone(),
         }));
@@ -2109,7 +2109,7 @@ mod tests {
         );
     }
 
-    /// P5.A1 (tsk519): every `External` command — one that runs outside
+    /// P5.A1: every `External` command — one that runs outside
     /// the bus's transaction, against a system the bus doesn't own — is
     /// listed here on purpose. Adding one means deciding that its system
     /// owns the state, and saying which system in its summary.

@@ -4,7 +4,7 @@ This doc covers oxplow's own access to models over their APIs: the
 AI providers you configure, the roles that decide which model does what, the
 `ai_*` functions sources and pages call, and how calls are recorded.
 
-> **Status (epic tsk275):** built: providers, keychain keys, roles, the
+> **Status:** built: providers, keychain keys, roles, the
 > client, call records (`oxplow-ai`, `oxplow-app/src/ai_service.rs`,
 > `v_ai_call`), Settings → AI, and the `v_ai_role` / `v_ai_provider` live models, project role overrides,
 > recorded computations (`AiCompute`, `v_ai_result`, P5.E1) and the
@@ -55,7 +55,7 @@ What can be called, as of 2026-09:
   (local servers). `SecretStore` is a trait; tests use `MemorySecrets`.
   Gotcha: on macOS an unsigned dev build is a "different app" after each
   rebuild, so the keychain may prompt again for access.
-- **A key is bound to the URL it was saved for** (tsk346). The keychain
+- **A key is bound to the URL it was saved for**. The keychain
   entry is `{"key", "endpoint"}`, where `endpoint` is the provider's
   normalized `baseUrl` (empty for the kind's default). `ai.yaml` is a
   plain file an agent can edit, so a provider pointed at another host gets
@@ -532,7 +532,7 @@ an active extension's) and both keys the result by and calls on that
 waits on a model. So
 reassigning a role computes afresh — to another model, or to another
 provider serving the same model name (a local and a hosted `llama3.1`
-are two computations, tsk560). `AiService::complete_on` / `decide_on` / `complete_typed_on` /
+are two computations). `AiService::complete_on` / `decide_on` / `complete_typed_on` /
 `stream_typed_on` take the `Bound` and a `CallSite { caller, input_hash }`, so the computing call's `ai_call` row
 carries the hash, and return its row id; plain `complete` / `decide`
 record `input_hash` NULL.
@@ -561,7 +561,7 @@ out of its `ceiling` (10 min of wall clock, model time included), so a
 per-row loop of calls can't run for hours and hold up every scheduled
 source behind it. Past either the worker is killed: no paid calls after
 a timeout. A run cut off keeps
-what it recorded, so its next run gets further (tsk559). Who gets a model is the
+what it recorded, so its next run gets further. Who gets a model is the
 services router's ([extensions-permissions.md](./extensions-permissions.md) "Services"): an
 entity collector whose script names an `ai_*` builtin implies
 `ai.compute`; a **fact collector** gets one when it declares

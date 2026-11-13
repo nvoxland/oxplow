@@ -1,4 +1,4 @@
-//! Entity metrics (tsk322): metrics computed over a semantic-layer view
+//! Entity metrics: metrics computed over a semantic-layer view
 //! (`v_thread`, an extension's `v_*`, …) instead of a measure's facts, sliced by
 //! entity dimensions (a SQL expression over the same view, with an optional
 //! join).
@@ -192,7 +192,7 @@ fn number(c: &SqlCell) -> Option<f64> {
 
 /// Run a read. One row comes back per (bucket, group); past the row cap
 /// the newest ones would be lost, so that's an error rather than a short
-/// answer (tsk367).
+/// answer.
 pub async fn run(
     layer: &crate::sql_gateway::SqlGateway,
     read: &EntityRead<'_>,
@@ -541,7 +541,7 @@ mod tests {
     }
 
     /// A distinct count doesn't add across buckets: the headline is one
-    /// count over the whole range, not the sum of the daily ones (tsk367).
+    /// count over the whole range, not the sum of the daily ones.
     #[tokio::test]
     async fn a_distinct_headline_counts_across_the_range() {
         let l = layer().await;
@@ -576,7 +576,7 @@ mod tests {
     }
 
     /// Past the row cap a read would lose its newest buckets; it errors
-    /// instead (tsk367).
+    /// instead.
     #[tokio::test]
     async fn a_read_past_the_row_cap_errors() {
         let db = seeded_db().await;

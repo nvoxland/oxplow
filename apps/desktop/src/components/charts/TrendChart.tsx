@@ -48,7 +48,7 @@ export function TrendChart({
    *  viewBox, so these also set the **effective text scale**: a 760-wide chart
    *  squeezed into a 310px dashboard tile shrinks its tick labels ~2.4× and
    *  they stop being readable. Callers rendering small (tiles) pass their own
-   *  size so the drawing sits near 1:1 (tsk144). */
+   *  size so the drawing sits near 1:1. */
   width?: number;
   height?: number;
 }) {
@@ -89,7 +89,7 @@ export function TrendChart({
   const tickDecimals = vRange >= 10 ? 0 : vRange >= 1 ? 1 : vRange >= 0.1 ? 2 : 3;
   // NB: named `fmtYTick`, not `fmtTick` — an earlier revision called this
   // `fmtTick` and shadowed the module-level *time* formatter of that name, so
-  // the x axis and the hover tooltip rendered raw epoch ms (tsk144).
+  // the x axis and the hover tooltip rendered raw epoch ms.
   const fmtYTick = (v: number) => (tickDecimals === 0 ? String(Math.round(v)) : v.toFixed(tickDecimals));
   const x = (t: number) => padL + ((t - tMin) / tRange) * (w - padL - padR);
   const y = (v: number) => h - padB - ((v - vMin) / vRange) * (h - padT - padB);
@@ -137,7 +137,7 @@ export function TrendChart({
       ref={svgRef}
       // A viewBox (not fixed width/height alone) so the chart SCALES to the
       // container width instead of clipping its right edge — and the hover
-      // tooltip near the edge scales with it (tsk300).
+      // tooltip near the edge scales with it.
       viewBox={`0 0 ${w} ${h}`}
       preserveAspectRatio="xMidYMid meet"
       style={{

@@ -8,7 +8,7 @@ test("a terminal opens a shell in the project", async ({ page, daemon }) => {
   // a first load. The terminal measures its rows once, when it opens, so it
   // must open in that font, not in the fallback the font then replaces:
   // rows measured in the fallback overflow the pane at its next fit
-  // (tsk1042, under the Answers strip).
+  // (under the Answers strip).
   let releaseFont = () => {};
   const fontHeld = new Promise<void>((resolve) => (releaseFont = resolve));
   await page.route("**/fonts/JetBrainsMonoVariable.woff2", async (route) => {
@@ -61,7 +61,7 @@ test("a burst typed as the terminal appears arrives whole and in order", async (
   await expect(page.locator(".xterm-rows")).toContainText(`burst-${run}-42`);
 });
 
-// tsk1026: a session whose process exited says so, takes no keys, and Start
+// a session whose process exited says so, takes no keys, and Start
 // Again opens a fresh one in the same pane.
 test("an exited shell says so, and Start Again opens a new one", async ({ page, daemon }) => {
   await open(page, daemon, "oxplow:oxplow/page?page=terminal");

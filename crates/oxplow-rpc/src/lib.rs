@@ -40,7 +40,7 @@ use oxplow_app::Services;
 pub struct PluginRuntime {
     pub hook_base_url: String,
     pub mcp_endpoint_url: String,
-    /// Base URL for the OTLP metrics receiver (epic tsk22) — pointed at via the
+    /// Base URL for the OTLP metrics receiver — pointed at via the
     /// agent's `OTEL_EXPORTER_OTLP_ENDPOINT`; the SDK appends `/v1/metrics`.
     pub otlp_base_url: String,
 }
@@ -296,7 +296,7 @@ macro_rules! oxplow_command_table {
                 files_at => $crate::commands::trees::files_at { stream_id: Option<String>, revision: ::oxplow_domain::vcs::Revision } -> Vec<String>,
                 vcs_blame => $crate::commands::vcs::vcs_blame { stream_id: Option<String>, path: String, revision: ::oxplow_domain::vcs::Revision } -> Vec<::oxplow_domain::vcs::BlameLine>,
                 read_workspace_file => $crate::commands::workspace::read_workspace_file { stream_id: Option<String>, relative_path: String } -> ::oxplow_app::workspace_files::WorkspaceFile,
-                // code_quality (duplication only — the metrics scan was retired in tsk229)
+                // code_quality (duplication only — the metrics scan was retired in)
                 // config
                 get_config => $crate::commands::config::get_config {} -> ::oxplow_config::OxplowConfig,
                 get_workspace_context => $crate::commands::config::get_workspace_context {} -> $crate::commands::config::WorkspaceContext,

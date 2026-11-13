@@ -1,4 +1,4 @@
-//! Tool-call reactors (P3.5, tsk475): what a finished tool call records,
+//! Tool-call reactors (P3.5): what a finished tool call records,
 //! as consumers of `agent.tool.finished` on the event pump — checkpointed,
 //! redelivered after a crash and dead-lettered like any other consumer,
 //! instead of the best-effort writes the hook route used to make inline.
@@ -235,7 +235,7 @@ mod tests {
 
     /// In a worktree stream (a sibling directory of the project) an edit's
     /// absolute path is inside the thread's worktree: it is recorded
-    /// repo-relative all the same (tsk386).
+    /// repo-relative all the same.
     #[tokio::test]
     async fn worktree_stream_edits_are_recorded_relative() {
         let f = crate::test_fixtures::services_with_thread().await;

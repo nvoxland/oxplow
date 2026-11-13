@@ -815,7 +815,7 @@ fn client_capabilities() -> Value {
             },
             "documentSymbol": { "hierarchicalDocumentSymbolSupport": true },
             // callHierarchy — who-calls-this / what-this-calls, surfaced via
-            // the lsp_call_hierarchy MCP tool (tsk326).
+            // the lsp_call_hierarchy MCP tool.
             "callHierarchy": { "dynamicRegistration": false },
         },
         "workspace": {
@@ -824,7 +824,7 @@ fn client_capabilities() -> Value {
             "configuration": true,
             "workspaceFolders": true,
             // workspace/symbol — project-wide symbol search, surfaced via
-            // the lsp_workspace_symbols MCP tool (tsk324).
+            // the lsp_workspace_symbols MCP tool.
             "symbol": { "dynamicRegistration": false },
         },
         "window": { "workDoneProgress": true },

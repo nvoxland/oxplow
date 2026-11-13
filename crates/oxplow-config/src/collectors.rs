@@ -7,7 +7,7 @@
 //! script (`starlark` / `jaq`, no I/O, no approval) or a provider's read
 //! (`read`). It writes **entities** (rows a dataset can `ref()`),
 //! **facts** (measurements on declared measures) or **records** (a test,
-//! coverage or analysis report it parses — the project's own, tsk863), and it
+//! coverage or analysis report it parses — the project's own), and it
 //! runs when its **trigger** says: `manual`, `{ every: 15m }`,
 //! `{ on: [<event types>], where: { <payload field>: <value> } }` — when
 //! such an event is logged, after the consumers named in `after:` have
@@ -247,7 +247,7 @@ pub enum Records {
     Analysis,
 }
 
-/// A parser oxplow ships (tsk935: the one table — the config check and
+/// A parser oxplow ships (the one table — the config check and
 /// the parser runtime both read it).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BundledParser {
@@ -1550,7 +1550,7 @@ fn validate(
     })
 }
 
-/// A report collector (`records:`, tsk863): the project's, reading one
+/// A report collector (`records:`): the project's, reading one
 /// report file with a bundled parser (`entry: oxplow:<name>`) or its own
 /// script or program, on `on: { run: test | analysis }` or by hand. It gets
 /// no `input`, `env`, `credentials` or `network`: its whole input is the
@@ -1605,7 +1605,7 @@ fn validate_report_collector(
         ));
     }
     // A test run's reports are tests and coverage, an analysis run's are
-    // analysis (tsk892): another pairing would be parsed and dropped.
+    // analysis: another pairing would be parsed and dropped.
     let reads = |run: RunKind| match run {
         RunKind::Test => records != Records::Analysis,
         RunKind::Analysis => records == Records::Analysis,
@@ -2332,7 +2332,7 @@ mod tests {
         parse_collectors(&Declarer::own("project"), &v, &knows)
     }
 
-    /// tsk863: a report collector names a bundled parser or its own
+    /// a report collector names a bundled parser or its own
     /// script, the report it reads, and the run it reads after.
     #[test]
     fn report_collectors() {
@@ -2422,7 +2422,7 @@ mod tests {
             &format!("{base}  records: logs\n  entry: oxplow:junit\n"),
             "records `logs`",
         );
-        // tsk892: a test run's leg reads tests and coverage, an analysis
+        // a test run's leg reads tests and coverage, an analysis
         // run's analysis — anything else would be parsed and dropped.
         refused(
             &format!("{base}  records: analysis\n  entry: oxplow:eslint\n  on: {{ run: test }}\n"),

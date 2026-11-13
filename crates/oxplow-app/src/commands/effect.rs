@@ -182,11 +182,10 @@ pub struct Unreacted {
 /// at its type's newest version, as the pump delivers it) and has never
 /// reacted to — counted, with the first `keep` of them, oldest first. One
 /// its own run led to is never its trigger (the loop guard), so it is
-/// never planned either (tsk846): an effect that changes what it reacts
+/// never planned either: an effect that changes what it reacts
 /// to would otherwise meet its own changes on every backfill. The
 /// candidates are read `page` at a time by log position, so `where` is
-/// applied to every one in the range, not to a first window of them
-/// (tsk848).
+/// applied to every one in the range, not to a first window of them.
 pub(crate) fn unreacted_tx(
     tx: &rusqlite::Connection,
     vocabulary: &oxplow_domain::vocabulary::Vocabulary,
@@ -209,7 +208,7 @@ pub(crate) fn unreacted_tx(
         n4 = decl.on.len() + 4,
     );
     // What was logged after it started is the live consumer's: a backfill
-    // stops there, so the two never attempt one event at once (tsk847).
+    // stops there, so the two never attempt one event at once.
     // Never started, it has nothing to backfill.
     let live_from = oxplow_db::effect_state_store::start_after_tx(tx, &decl.name())?.unwrap_or(-1);
     let to = range.to_seq.unwrap_or(i64::MAX).min(live_from);
@@ -291,7 +290,7 @@ pub struct Backfilled {
 /// effect is disabled, or after three
 /// failures in a row of its own — one
 /// that will be sent again by itself counts here too, though its health
-/// waits for the retry (tsk932): a provider that's down stops the run.
+/// waits for the retry: a provider that's down stops the run.
 pub async fn backfill(
     svc: &Arc<Services>,
     ext: &Extension,

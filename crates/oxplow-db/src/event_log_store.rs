@@ -752,7 +752,7 @@ mod tests {
     }
 
     /// Subjects are canonical refs of registered kinds; anything else is
-    /// refused before the write (tsk450).
+    /// refused before the write.
     #[tokio::test]
     async fn subjects_must_be_canonical_refs_of_registered_kinds() {
         let db = Database::in_memory();

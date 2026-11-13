@@ -183,7 +183,7 @@ export async function startDaemon({
     });
     spawned.once("close", () => logFile.end());
     // Stdin stays open: it's the daemon's lifeline, and closing it stops
-    // the daemon (tsk1073). A daemon that is already gone refuses the write
+    // the daemon. A daemon that is already gone refuses the write
     // (EPIPE): its exit is what reports that, below.
     spawned.stdin?.on("error", () => {});
     spawned.stdin?.write(`${token}\n`);
@@ -300,8 +300,8 @@ export async function settle(daemon: Daemon): Promise<void> {
 
 /** Do `write`, and resolve with its result once the daemon has said every
  *  dataset in `datasets` changed (`datasetsChanged`). The socket is open before
- *  the write, and the daemon subscribes before it answers the upgrade
- *  (tsk995), so the event can't be missed. */
+ *  the write, and the daemon subscribes before it answers the upgrade,
+ * so the event can't be missed. */
 export async function waitForModels<T>(daemon: Daemon, datasets: string[], write: () => Promise<T>): Promise<T> {
   const url = `${daemon.base.replace(/^http/, "ws")}/events?token=${encodeURIComponent(daemon.token)}`;
   const socket = new WebSocket(url);

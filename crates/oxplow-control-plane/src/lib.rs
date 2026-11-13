@@ -70,7 +70,7 @@ impl ControlPlane {
         format!("http://{}/mcp", self.bind_addr)
     }
 
-    /// Base URL for the OTLP metrics receiver (epic tsk22). This is the
+    /// Base URL for the OTLP metrics receiver. This is the
     /// **base** the agent's OTEL exporter is pointed at via
     /// `OTEL_EXPORTER_OTLP_ENDPOINT`; the SDK appends the signal path
     /// `/v1/metrics` (which [`handle_otlp_metrics`] serves).
@@ -129,7 +129,7 @@ pub async fn spawn(services: Arc<Services>) -> Result<ControlPlane, ControlPlane
 
     let hook_router = Router::new()
         .route("/hook/{event}", post(handle_hook))
-        // OTLP receiver (epic tsk22). Agent CLIs export token usage here —
+        // OTLP receiver. Agent CLIs export token usage here —
         // Claude as metrics, Codex as logs (its `response.completed` event) —
         // attributed by the bearer like a hook. Both signal paths hit one
         // handler; the ingest path decodes metrics-or-logs.
@@ -193,7 +193,7 @@ async fn handle_dev_ping() -> Response {
         .into_response()
 }
 
-/// OTLP/HTTP metrics receiver (epic tsk22). Claude Code exports token usage
+/// OTLP/HTTP metrics receiver. Claude Code exports token usage
 /// here, attributed to the session whose bearer the
 /// exporter carries. The body is logged as one `agent.tokens.reported`
 /// event (`oxplow_app::otlp_ingest`); the `token_usage.otlp` consumer
@@ -207,7 +207,7 @@ async fn handle_otlp_metrics(
     Extension(principal): Extension<Principal>,
     body: axum::body::Bytes,
 ) -> Response {
-    // Opt-in wire-format diagnostic (tsk25): when `OXPLOW_OTLP_DEBUG` names a
+    // Opt-in wire-format diagnostic: when `OXPLOW_OTLP_DEBUG` names a
     // file, append a human-readable dump of every received export to it — used
     // to discover an agent's real OTEL shape (e.g. Codex) from a live run.
     // Off by default, zero cost when unset.
@@ -225,7 +225,7 @@ async fn handle_otlp_metrics(
 }
 
 /// Append a human-readable dump of an OTLP export to the file named by
-/// `OXPLOW_OTLP_DEBUG` (tsk25). No-op when the env var is unset. Best-effort:
+/// `OXPLOW_OTLP_DEBUG`. No-op when the env var is unset. Best-effort:
 /// a file/IO error is ignored (it's a diagnostic, never load-bearing).
 fn otlp_debug_dump(principal: &Principal, body: &[u8]) {
     let Ok(path) = std::env::var("OXPLOW_OTLP_DEBUG") else {
@@ -648,7 +648,7 @@ async fn handle_hook_inner(
         }
     };
     let harness = harness.as_deref();
-    // Token usage (tsk104) is counted from the Stop's `agent.turn.ended`
+    // Token usage is counted from the Stop's `agent.turn.ended`
     // by the `token_usage.turns` pump reactor (P3.7), not in the hook.
 
     // PostToolUse: record the call (knowledge attribution, tool call,

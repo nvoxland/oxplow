@@ -197,7 +197,7 @@ rewrote (updated or deleted in, P8.B3) — are published after each
 through `dataset_input`. A write needs nothing to be seen — the hooks see
 every table, WITHOUT ROWID and a bare `DELETE` included.
 
-**DB dispatch is gated to the pool size (tsk131).** `Database::call`,
+**DB dispatch is gated to the pool size.** `Database::call`,
 `call_mut`, and `transaction` each take a `tokio::sync::Semaphore` permit —
 sized to the r2d2 pool (`max_size`) — *before* `spawn_blocking`, and hold it for
 the duration of the DB work. Without the gate every caller spawned a blocking
@@ -233,19 +233,19 @@ several cores inside one `Database::transaction(f)` closure
 (`crates/oxplow-db/src/database.rs`) — which owns commit/rollback and
 the bounded `SQLITE_BUSY` retry (safe because a rolled-back attempt
 left no trace; that's why `f` is `Fn`, borrowing what it writes rather
-than consuming it). It is the **one write path** (tsk978): no store opens
+than consuming it). It is the **one write path**: no store opens
 a transaction of its own on a raw connection — a test
 (`every_store_write_runs_in_the_retried_transaction`) allows only
-`database.rs` and the open-time model compile in `models.rs`. It begins **IMMEDIATE** (tsk503):
+`database.rs` and the open-time model compile in `models.rs`. It begins **IMMEDIATE**:
 the write lock is taken at BEGIN and waited for under `busy_timeout` — a
 BEGIN still Busy after that wait is retried like a Busy inside the
-closure (tsk1005) — so
+closure — so
 a read-then-write closure (the hook ingest, most `_tx` cores) can't fail
 with `SQLITE_BUSY_SNAPSHOT` when another writer commits between its read
 and its first write. A pure read therefore uses `Database::read` (a
 DEFERRED snapshot that is always rolled back, no write lock), not
 `transaction` — the request, event-by-seq, worktree and turn-signal reads
-and every command that only reads (`View` / `Read`) do (tsk513). **The event-log row is the one
+and every command that only reads (`View` / `Read`) do. **The event-log row is the one
 write that belongs inside the closure**: a producer composes
 `event_log_store::append_tx(tx, &envelope)` next to its state change
 so the log and the state can never disagree (the outbox pattern; see
@@ -287,7 +287,7 @@ the same with no reason of their own.
 
 Every externally-visible entity id is a SQLite **autoincrement INTEGER**
 rendered with a fixed **3-letter type prefix** at the application boundary,
-e.g. `str5` (stream), `thr21` (thread), `tsk38` (task), `req4` (request),
+e.g. `str5` (stream), `thr21` (thread), `tsk42` (task), `req4` (request),
 `not3` (note), `trn9` (agent-turn), `ses4` (agent session), `cmt2` (comment),
 `trm3` (terminal).
 The prefix lives only in Rust (`Display`/serde) and in the TypeScript
@@ -338,7 +338,7 @@ installed one — see [DEV.md](../DEV.md):
   `atomic.rs`): a truncate-then-write that died midway left an
   unparseable file, and both stores read an unparseable file as an empty
   document — so the failure mode was silent loss of the whole restore
-  set or recents list (tsk253). The path is resolved by
+  set or recents list. The path is resolved by
   `oxplow_config::global_config_dir()` so `main.rs` can read it before
   any Tauri handle exists.
 - **`.oxplow/instance.lock`** — a per-project advisory lock (fs2) held
@@ -744,7 +744,7 @@ draft of this doc described a single `snapshot_entry` table with a
   trees hash equal; an un-hashed git entry makes it conservative (an
   extra snapshot, never a missed change). NULL before V96.
 
-**Content identity vs storage address (V96, tsk423).** `blob_hash` is
+**Content identity vs storage address (V96).** `blob_hash` is
 the **address** (where the bytes live); `content_hash` is the
 **identity** (what the bytes are): the xxh3-128 of the bytes, for every
 class that has bytes. They coincide for `oxplow` rows (capture fills
@@ -862,13 +862,13 @@ unchanged; a prior row in the other space (an xxh3) is compared by
 hashing the file, so committing a file already captured dirty records
 nothing. Incremental capture skips a path whose bytes equal its latest row's
 content — by `content_hash`, or for a git-backed row not hashed yet by
-the bytes' git blob OID against its address (tsk439) — so a touch or a
+the bytes' git blob OID against its address — so a touch or a
 formatter no-op is not a change, an oversize file whose
 size and mtime are unchanged, and a tombstone for a path already
 deleted. The sweep's reverse-deletion pass tombstones oversize files too
 (it used to key on `blob_hash`, which oversize rows lack).
 
-**Takes and the operation log (`snapshot_op`, V97, P2.2 tsk424).** A
+**Takes and the operation log (`snapshot_op`, V97, P2.2).** A
 **take** (`SnapshotCaptureService::request_snapshot(TakeRequest)`) drains
 the dirty set and hands the rows to `SqliteSnapshotStore::record_take`,
 which writes — in **one transaction** — the new `snapshot` row (with
@@ -1009,13 +1009,13 @@ bytes are gone — we deliberately never copied them. `read_blob` returns
 Uncommitted working-tree content always takes the `oxplow` path and is
 never at this risk.
 
-**Retention: content expires, records don't (tsk105).** Retention's job
+**Retention: content expires, records don't.** Retention's job
 is bounding the ON-DISK blob copies — the megabytes. The
 `snapshot`/`file_snapshot` ROWS are **never deleted**: they are durable
 records other subsystems replay — the per-path metric fold derives each
 capture's restated set from them, and the ancestry anchors ride the
 parent `snapshot` rows' git stamps — and they only weigh bytes. (The
-pre-tsk105 row prune rotted the fold's replay inputs out from under
+earlier row prune rotted the fold's replay inputs out from under
 durable captures; deleting rows to save disk was aiming at the wrong
 mass.) The daily cleanup (`SnapshotCaptureService::run_cleanup`, boot +
 every 24h) GCs `.oxplow/snapshots/objects/` down to
@@ -1252,7 +1252,7 @@ refs, declared impacts) went with them.
 
 ### `event_log` + `event_consumer_checkpoint` + `event_dead_letter` + `command_audit` — `SqliteEventLogStore` (`crates/oxplow-db/src/event_log_store.rs`, migration `V93__event_log.sql`)
 
-The event log, built in P1.4 (tsk406). **State tables hold current truth; the log
+The event log, built in P1.4. **State tables hold current truth; the log
 records activity and state changes**, and it is written in the *same
 transaction* as the change — the outbox pattern — so the two never
 disagree. The envelope is `oxplow_domain::events::Envelope`
@@ -1282,7 +1282,7 @@ the insert itself rather than a check before it).
 These are the schema's first **STRICT** tables; every later spine table
 is STRICT too.
 
-**Schemas (P1.5, tsk407).** `oxplow_domain::events::schema` has one
+**Schemas (P1.5).** `oxplow_domain::events::schema` has one
 Rust type per `type@v` (`trait EventType { TYPE, V, Payload: JsonSchema,
 upcast }`) and `EventSchemaRegistry`, which holds every type the log
 accepts. It sits with the resources in the running `Vocabulary { events,
@@ -1305,8 +1305,8 @@ type's first schema as its contract and a removed extension's types as
 refuses an unregistered `type@v` or a payload that fails its schema
 (`DomainError::Invalid`, naming the JSON path) before writing. Core
 producers build envelopes with `Envelope::typed::<T>(source, &payload)`
-so the shape is checked by the compiler too. **A payload owns its enums**
-(tsk510): the golden schema is a published contract, so an event uses its
+so the shape is checked by the compiler too. **A payload owns its enums**:
+the golden schema is a published contract, so an event uses its
 own vocabulary type (`ToolDecision`, `LoggedAgentStatus`, `Harness`) with
 public doc comments, converted from the internal type at the producer —
 never an internal enum whose doc comments and variants (a derived-only
@@ -1341,7 +1341,7 @@ Rust doc comment is part of its schema — don't edit it.
 tool input and output, prompts — by the xxh3-128 hex of their bytes (the
 blob store's hash, so refs are uniform): `hash PK, namespace, bytes BLOB,
 size, created_at`, STRICT. A payload carries `ContentRef { hash, size,
-truncated }`. A JSON body is stored by `put_json_tx` (tsk509): serialized
+truncated }`. A JSON body is stored by `put_json_tx`: serialized
 canonically (object keys sorted at every depth, so equal bodies share a
 hash whatever order their keys arrived in) and cut to 256 KiB on a
 character boundary — `size` is the whole body's, `truncated` says only the
@@ -1379,13 +1379,12 @@ restated by the vocabulary reactor, longer than the default refused by
 its rows stay under the window it promised; an extension present without
 a window drops back to the default — unless a declaring extension holds
 the same namespace, which a namesake that declares nothing never speaks
-for, tsk796); core's state namespaces are kept). **A project sets its
+for); core's state namespaces are kept). **A project sets its
 own windows** with the person-only key `eventRetention: { <namespace>:
-{ payloadDays, contentDays } }` (tsk947): each sweep reads it, a core
+{ payloadDays, contentDays } }`: each sweep reads it, a core
 namespace's replaces the default, an extension namespace's is capped at the
 extension's window (`RetentionWindow::at_most`), and core state is refused
-at load (`is_kept_whole`). A window is bounded (`window_problem`,
-tsk985): at least 7 days for a core namespace oxplow reads back (the
+at load (`is_kept_whole`). A window is bounded (`window_problem`,): at least 7 days for a core namespace oxplow reads back (the
 agent policy reads a turn's tool payloads), at least a day for an
 extension's, at most `MAX_DAYS` (36,500 — beyond about 127,000 days the
 cutoff arithmetic used to wrap into the future and wipe the namespace),
@@ -1394,7 +1393,7 @@ and its `contentDays` no longer than its `payloadDays`.
 cutoff to `MAX_DAYS` whatever reaches it. A window naming a namespace
 nothing logs is kept — an extension may be installed later — and reported
 (`SweepReport.unused`, a warning in the log). **An expired event is
-history only** (tsk501): `StoredEvent.payload_expired_at` carries the
+history only**: `StoredEvent.payload_expired_at` carries the
 stamp; the pump checkpoints past it without calling any consumer (a new or
 renamed consumer replaying the log never sees `{}`); `retry_dead_letter`
 refuses one; the sweep marks the pending dead letters of expired events
@@ -1422,7 +1421,7 @@ activity with no state write (a tool call, a page view). Reads:
 `get_tx(id)`.
 
 **Delivery is at least once** — the `EventPump`
-(`crates/oxplow-app/src/event_pump.rs`, P1.7, tsk409). A consumer is
+(`crates/oxplow-app/src/event_pump.rs`, P1.7). A consumer is
 `trait EventConsumer { name, handles(type), handle(&Connection,
 &StoredEvent) }`; the pump reads each consumer's `seq > checkpoint` in
 batches and, per event, runs the handler under a SAVEPOINT and advances
@@ -1439,7 +1438,7 @@ is spawned by `boot.rs` (catches up on boot, then runs on `wake()` — which
 producers call after their commit — or every 5s). A handler error that is retryable (`DomainError::
 Busy`) is not a poison event: the delivery transaction fails and retries,
 and if the database stays busy the event waits, checkpoint unmoved
-(tsk437 review).
+(review).
 
 **The consumers (after P3).** Every reaction to the log, by checkpoint
 name. "Boot" consumers are registered by `Services::boot` and run wherever
@@ -1465,7 +1464,7 @@ and are registered by `crate::boot` — a test that wants them calls their
 | `change.analyze` | async | `snapshot.taken` (that recorded files), `vcs.head.moved` | re-analyzes the stream's working change and the requests' changes, skipping an event a newer one supersedes; dead-letters a failure naming the stream (P7.B4) | boot.rs |
 | `collector.triggers` | async | what enabled collectors' `on:` name (never `collector.synced`) | runs each matching collector for the event, once per event (`collector_run.last_event_id`): an entity collector's rows, or a fact collector through the fact engine (`snapshot.taken`: a delta collector only when the take recorded files, a whole-tree one on every take; anything else over the stream's latest snapshot) — plus `collector_run` and `collector.synced@2` (P7.B3; replaced the metrics bus `SnapshotTaken` arm) | boot.rs |
 
-**Async consumers (P2.6.2, tsk454).** `trait AsyncEventConsumer { name,
+**Async consumers (P2.6.2).** `trait AsyncEventConsumer { name,
 after() -> Vec<String>, handles(type), async handle(&StoredEvent) }`
 (`after` is owned so a consumer can derive it from declarations, as
 `collector.triggers` does; `EventPump::consumer_names` lists what it may
@@ -1482,7 +1481,7 @@ async consumer has its own lock, wake-up and loop (P2.6b), so a slow one —
 a model call — delays only itself: `spawn` starts one loop for the sync
 consumers and one per async consumer, `wake()` wakes them all, and a loop
 that moved its checkpoint wakes the others (its handler may have logged
-what they consume). **Ordering (tsk506):** an async consumer may declare
+what they consume). **Ordering:** an async consumer may declare
 `after()` — consumers whose effect it reads; an event reaches it only once
 each of theirs has checkpointed past it (until then the delivery is
 deferred, checkpoint unmoved, later events behind it), so no reactor reads
@@ -1631,7 +1630,7 @@ A request's rows are `request_observation` (V22, read as
 recomputed; the panel and an agent (`oxplow_query_sql`) read those. The `provenance`/`source` trust spine and the `observed`/`asserted`
 distinction carry on every capture (see `.context/metrics.md`).
 
-### `metric_definition`/`metric_run`/`metric_sample`/`metric_finding` (+ `metric_dimension`/`metric_subject`) — **RETIRED** (dropped in `V49__drop_legacy_metric_tables.sql`, T-E3/tsk50)
+### `metric_definition`/`metric_run`/`metric_sample`/`metric_finding` (+ `metric_dimension`/`metric_subject`) — **RETIRED** (dropped in `V49__drop_legacy_metric_tables.sql`, T-E3/)
 
 The V38 metric cluster + `metric_store.rs` are **gone**. The fact substrate
 (`measure`/`dimension`/`metric_spec`/`metric_capture`/`fact`, V43+) is the sole
@@ -1641,7 +1640,7 @@ capture id. See `.context/metrics.md`. A capture names its stream, thread
 and — V157 — the agent turn it was measured
 in (`turn_id`, FK `agent_turn`, SET NULL; NULL when no turn produced it).
 
-> **Timestamps are fixed-width by construction (tsk243 → tsk387/tsk419).**
+> **Timestamps are fixed-width by construction (→).**
 > Timestamps are RFC 3339 TEXT that SQLite compares lexicographically. The
 > `time` crate's default formatter trims trailing fractional zeros, and `'Z'`
 > sorts after every digit, so a trimmed `…20.5Z` sorted *after* `…20.500001Z`
@@ -1658,7 +1657,7 @@ in (`turn_id`, FK `agent_turn`, SET NULL; NULL when no turn produced it).
 > 3339 text. A new store needs no special handling — there is no other way to
 > turn a `Timestamp` into text.
 
-### `metric_cube` + `metric_live_fact` + `metric_cube_state` — the aggregate cube (`crates/oxplow-db/src/fact_store.rs`, migrations `V62__metric_cube.sql` tsk96 + `V63__branch_aware_cube.sql` tsk97)
+### `metric_cube` + `metric_live_fact` + `metric_cube_state` — the aggregate cube (`crates/oxplow-db/src/fact_store.rs`, migrations `V62__metric_cube.sql` + `V63__branch_aware_cube.sql`)
 
 **Derived tables — the only ones in the schema that hold no source of truth.**
 Every row is 100% reconstructible from `fact`; deleting all three costs speed and
@@ -1674,7 +1673,7 @@ over a few hundred pre-folded rows instead of a replay over every fact (measured
   `(measure, stream, branch, producer, subject_key)` — one partition per branch,
   mirroring the fact fold (V63); a new branch's partition is SEEDED from the
   history visible at its first capture ("visible" = the ancestry rule,
-  tsk102/V65 — see `.context/metrics.md`). `branch` is `''` for a branch-less
+  /V65 — see `.context/metrics.md`). `branch` is `''` for a branch-less
   capture (a WITHOUT ROWID PK can't hold NULL; the `''` mapping lives in the
   store layer only). Sized by live subjects, not history.
 - **`metric_cube_state`** — the watermark, per `(measure, stream, branch)`
@@ -1688,7 +1687,7 @@ the facts don't have; never aggregate coarser than a capture (it's the floor tha
 keeps the tie-back to snapshots and turns working); `dimension.promoted` defines the grain, so
 promoting a dim is a **rebuild**, not a schema change. **Anything that deletes
 captures or facts must invalidate the affected stream's cube in the same
-transaction** — cube rows are frozen at build time and don't cascade (tsk100;
+transaction** — cube rows are frozen at build time and don't cascade (
 `prune_dominated_tree_captures` is the one such caller today, and it invalidates
 only when it actually dropped something, since it runs on every boot). Written outside the
 fact-insert transaction, which is safe only because whole-capture replay is
@@ -1696,7 +1695,7 @@ idempotent and the watermark advances atomically with the rows. Full rationale +
 the read's eligibility rules: **`.context/metrics.md`**.
 
 
-### `test_case_stat` — each test's summary (`V139__test_case_stat.sql`, tsk733)
+### `test_case_stat` — each test's summary (`V139__test_case_stat.sql`)
 
 One row per `(stream, branch, producer, subject)`, STRICT: last status
 and duration, the last duration written as a fact (`recorded_ms`, what the
@@ -1763,8 +1762,8 @@ message, trigger (nullable), created_at`, plus `turn_id`, `request_id`
 
 ### `agent_token_usage` + `agent_token_cursor` — `SqliteTokenUsageStore` (`crates/oxplow-db/src/token_usage_store.rs`, migrations `V35__agent_token_usage.sql`, `V36__agent_token_usage_prompt.sql`)
 
-Per-turn agent token accounting parsed from the session transcript
-(tsk104). On Stop the runtime reads `transcript_path` from the hook
+Per-turn agent token accounting parsed from the session transcript.
+On Stop the runtime reads `transcript_path` from the hook
 payload, splits the NEW tail into one row per agent turn, and writes them
 here. See `.context/agent-model.md` (Token usage capture) for the capture
 flow.
@@ -1781,7 +1780,7 @@ rows through `turn_id` (index `idx_agent_token_usage_turn`). V102 (P3.2) added `
 report carried the counts, so a redelivered event counts once).
 Transcript rows leave `cause` NULL: one transcript chunk can hold several
 turns, and the cursor committing with the rows is what makes their
-redelivery a no-op (tsk498).
+redelivery a no-op.
 `record_batch(rows, cursor)` writes the rows and advances the session's
 cursor in **one transaction**, so the cursor never passes bytes whose rows
 are missing (or vice versa); `insert_tx` / `set_cursor_tx` are the cores.
@@ -1793,7 +1792,7 @@ are missing (or vice versa); `insert_tx` / `set_cursor_tx` are the cores.
   directly (no agent-asserted path). **`model`** is the actual per-turn
   model (e.g. `claude-opus-4-8`) so $ cost can be layered on later;
   display is tokens-only today.
-- **`prompt` (nullable, tsk143)** is the human-authored user prompt that
+- **`prompt` (nullable)** is the human-authored user prompt that
   OPENED the turn — pure observation read from the transcript, never
   generated or sent (no new input surface). Nullable: a turn can be an
   assistant continuation with no fresh prompt at the head of the chunk.
@@ -1884,8 +1883,8 @@ V130 (P7.B1). Each asset's last recompute: `asset` (the primary key —
 the asset has one), `elapsed_ms`; V143 (P8.B4) adds `mode` (`full` /
 `incremental`), `watermark` and `row_count`; V151 adds `definition` (a
 materialized model's SELECT, hashed — a clocked asset recorded for
-another definition is due at once, tsk780). Written by the runner after
-each recompute; read as `v_asset`. **`asset_failure`** (V152, tsk781):
+another definition is due at once). Written by the runner after
+each recompute; read as `v_asset`. **`asset_failure`** (V152):
 an asset's last recompute failure — `failed_at`, `error` — written when
 one fails and deleted in the transaction of the next success; `v_asset`
 (v3) joins it, so an asset that never succeeded is listed too. See [semantic-layer.md](./semantic-layer.md)
@@ -1964,7 +1963,7 @@ V135 (P7.C1). Each extension contribution's health on this machine, keyed
 `namespace` (V6: the namespace it is named in, so it keeps its health when it
 moves to a sibling) + `kind` (`provider` | `collector` | `effect`) +
 `contribution` (its provider's, collector's or effect's id) — V140 put `kind` in
-the key, since a provider and a collector may share an id (tsk721):
+the key, since a provider and a collector may share an id:
 `state` (`ok` / `failing` /
 `disabled`), `reason`, `consecutive_failures`, `last_ok_at`,
 `last_error`, `mean_ms` (a moving average), `next_due_at`, `updated_at`.
@@ -1975,7 +1974,7 @@ running instance, its earliest collector): the last run (or now, when it
 runs now) plus the interval plus one scheduler tick
 (`contribution_health::next_due_ms`); `NULL` for one off any schedule (manual,
 `on:`, disabled, `syncMinutes: 0`). A rate-limited instance
-keeps its last plan (tsk722). The policy is `oxplow-app/src/contribution_health.rs`:
+keeps its last plan. The policy is `oxplow-app/src/contribution_health.rs`:
 three failures in a row disable it, the row and `contribution.disabled@1` in
 one transaction; `oxplow.contribution.enable` clears it (`contribution.enabled@1`).
 `v_contribution_health` adds `dead_letters` (pending dead letters of its

@@ -8,7 +8,7 @@
 //!   (`DatasetsChanged` on `v_code_quality_scan`).
 //!
 //! It writes no facts: a scan anchors only the change's files, and a
-//! capture from it would restate the whole tree from a slice (tsk365).
+//! capture from it would restate the whole tree from a slice.
 //! `oxplow.duplicate_lines` is oxplow-foundation's whole-tree collector's.
 
 use std::collections::BTreeSet;
@@ -111,7 +111,7 @@ impl DuplicationRecorder {
         };
 
         // Storing can fail too; the scan and its task must not be left
-        // "running" when it does (tsk364).
+        // "running" when it does.
         // One write for the whole scan: its findings, their edges and
         // the older scans of this scope it replaces — so a scan announces
         // one change, not one per finding.
@@ -160,7 +160,7 @@ fn paths_fingerprint(paths: &[String]) -> String {
 
 /// Abbreviate a ref for the status-bar label: long refs show their first 7
 /// characters. By characters, not bytes, so a non-ASCII branch name can't
-/// split mid-character (tsk178).
+/// split mid-character.
 fn short_ref(r#ref: &str) -> String {
     if r#ref.chars().count() > 12 {
         r#ref.chars().take(7).collect()
@@ -222,7 +222,7 @@ mod tests {
     }
 
     /// A change's scan records its findings and no facts: it anchors only
-    /// the change's files, so it can't restate the tree (tsk365).
+    /// the change's files, so it can't restate the tree.
     #[tokio::test]
     async fn a_scan_records_its_findings_and_no_facts() {
         let f = crate::test_fixtures::services_with_thread().await;
@@ -255,7 +255,7 @@ mod tests {
         );
     }
 
-    /// P5.B2 (tsk521): a scan reads the revision it names — a commit or
+    /// P5.B2: a scan reads the revision it names — a commit or
     /// a snapshot — never the disk, which has since lost the copies.
     #[tokio::test]
     async fn a_scan_reads_the_revision_it_names() {

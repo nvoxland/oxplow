@@ -1,5 +1,5 @@
 //! An extension's effects (`effects:` in its manifest, P8.D9–D11; **stable
-//! since P11**, tsk956; `.context/extensions-events.md` → "Effects"): a Starlark
+//! since P11**; `.context/extensions-events.md` → "Effects"): a Starlark
 //! script that reacts to a logged event by composing commands, run as
 //! `Actor::Effect` with an agent's rights.
 //!
@@ -228,7 +228,7 @@ pub fn gate(start_after: Option<i64>, seq: i64) -> Gate {
 }
 
 /// Start effect `name` after the log's head now, dropping its scheduled
-/// automatic retries (tsk990): what a test does to have it react to what
+/// automatic retries: what a test does to have it react to what
 /// it logs next. A generation that first runs an effect starts it in its
 /// publication ([`oxplow_db::effect_state_store::start_if_new_tx`]).
 pub async fn start_at_head(

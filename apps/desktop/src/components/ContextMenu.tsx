@@ -90,7 +90,7 @@ export function ContextMenu({ items, header, position, onClose, minWidth = 220, 
       onMouseDown={(event) => event.stopPropagation()}
       // The menu is rendered inline inside the row it acts on, so a
       // menu-item click would otherwise bubble to the row's onClick —
-      // selecting the row / closing the navigator slideout (tsk190).
+      // selecting the row / closing the navigator slideout.
       onClick={(event) => event.stopPropagation()}
     >
       {header ? (
@@ -284,7 +284,7 @@ const menuStyle: CSSProperties = {
   // A menu longer than the window scrolls in place. Without this, position
   // alone can't save it: the root pins to the top margin and everything past
   // the fold is unreachable, and a submenu gets lifted until its FIRST items
-  // are off the top (tsk146).
+  // are off the top.
   maxHeight: MENU_MAX_HEIGHT,
   overflowY: "auto",
   gap: 2,

@@ -2,7 +2,7 @@
 # (`thin_caller_clippy_configs_are_current`); rewrite it with
 # OXPLOW_BLESS=1. The root clippy.toml's settings, then every
 # database write, consent and credential call this crate may not
-# make (tsk903, .context/ipc-and-stores.md).
+# make (.context/ipc-and-stores.md).
 
 # Tests legitimately use `.unwrap()`/`.expect()` for terse assertions, so
 # the `clippy::unwrap_used` / `clippy::expect_used` guardrail (enabled in

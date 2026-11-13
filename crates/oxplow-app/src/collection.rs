@@ -79,7 +79,7 @@ pub fn detect_test_run(command: &str, extra_patterns: &[String]) -> bool {
 }
 
 /// The sub-command of `command` that runs the tests, trimmed — what a test
-/// run shows as its command, not the agent's whole Bash call (tsk1037). A
+/// run shows as its command, not the agent's whole Bash call. A
 /// `--no-run` invocation builds the tests without running any, so it isn't
 /// one.
 pub fn test_run_segment(command: &str, extra_patterns: &[String]) -> Option<String> {
@@ -395,20 +395,20 @@ pub struct Window {
 
 #[derive(Clone)]
 pub struct CollectionService {
-    /// Durable fact layer (epic tsk12): coverage/test/analysis producers
+    /// Durable fact layer: coverage/test/analysis producers
     /// write their atomic facts here; the aggregation engine reads them.
     facts: Arc<SqliteFactStore>,
     nudges: Arc<SqliteAgentNudgeStore>,
     threads: Arc<SqliteThreadStore>,
     snapshots: Arc<SqliteSnapshotStore>,
     /// Each stream's snapshot taker: a run's coverage is pinned to a take
-    /// of the code it measured (tsk883).
+    /// of the code it measured.
     captures: crate::snapshot_capture_registry::SnapshotCaptureRegistry,
     /// The snapshot implementations: a run's measured take is the active
     /// one's mark.
     marks: Option<Arc<oxplow_domain::snapshot::SnapshotRegistry>>,
     /// Each stream's checkout: a thread's reports, report parsers and
-    /// commits are its own worktree's (tsk890).
+    /// commits are its own worktree's.
     worktrees: Arc<crate::worktrees::WorktreeRouter>,
     content: crate::snapshot_content::SnapshotContent,
     vcs: Arc<dyn oxplow_domain::vcs::Vcs>,
@@ -416,10 +416,10 @@ pub struct CollectionService {
     /// The project's extensions: its own declare its report collectors.
     extensions: Arc<crate::extension::extension_catalog::ExtensionCatalog>,
     /// Where a report collector's run is recorded (`collector_run`,
-    /// `collector.synced`) and its health kept (tsk863). Without one (unit
+    /// `collector.synced`) and its health kept. Without one (unit
     /// harnesses) a report is still read, its run unrecorded.
     run_log: Option<crate::collector_runner::RunLog>,
-    /// The metric-ancestry resolver (tsk102) for this service's own
+    /// The metric-ancestry resolver for this service's own
     /// `tree_state_series` call — built in `new` from the stores it already
     /// holds, so the wiring can't be forgotten at a call site. Same rule,
     /// same answers as the engine's resolver (both are pure over the same DB).
@@ -464,8 +464,7 @@ pub struct RunCause {
     /// judged against, however late the event is delivered.
     pub at: oxplow_domain::Timestamp,
     /// When it started (its `agent.tool.requested`, the finished event's
-    /// cause), when known: a report written before is an earlier run's
-    /// (tsk888).
+    /// cause), when known: a report written before is an earlier run's.
     pub started: Option<oxplow_domain::Timestamp>,
 }
 
@@ -490,14 +489,14 @@ impl<'a> Raised<'a> {
     }
 }
 
-/// Where a run's report came from: an event a reactor saw, or a command
-/// (tsk923). What it records is stamped with what that origin knows, never
+/// Where a run's report came from: an event a reactor saw, or a command.
+/// What it records is stamped with what that origin knows, never
 /// a guess.
 #[derive(Debug, Clone, Copy)]
 pub enum RunOrigin<'a> {
     /// An event a reactor saw: the `agent.tool.finished` the collection
     /// reactor detects a run in, or a `test.run.recorded` whose coverage
-    /// the run-reports reactor reads (tsk1015).
+    /// the run-reports reactor reads.
     Event(&'a RunCause),
     /// A command (`oxplow.collector.sync`, `test.run.record`): `turn` is its
     /// actor's open turn when that actor is the thread's own agent, and
@@ -515,7 +514,7 @@ impl<'a> RunOrigin<'a> {
         }
     }
 
-    /// The agent turn the run was made in (tsk483): its tool event's —
+    /// The agent turn the run was made in: its tool event's —
     /// however late that event is delivered, and none when the event had
     /// none — or its command's.
     pub fn turn(self) -> Option<i64> {
@@ -527,7 +526,7 @@ impl<'a> RunOrigin<'a> {
 }
 
 impl CollectionService {
-    /// The turn a command `actor` ran in on `thread` (tsk923): its open
+    /// The turn a command `actor` ran in on `thread`: its open
     /// turn when it is that thread's own agent; none for anyone else — a
     /// person's sync while the agent is mid-turn isn't the agent's.
     pub async fn command_turn(
@@ -555,7 +554,7 @@ impl CollectionService {
         self.vcs.head(root).await.ok().and_then(|h| h.branch)
     }
 
-    /// The checkout `thread` works in: its stream's worktree (tsk890).
+    /// The checkout `thread` works in: its stream's worktree.
     async fn worktree(&self, thread: &ThreadId) -> PathBuf {
         let stream = self.stream_id_for(thread).await.ok().flatten();
         self.worktrees
@@ -644,7 +643,7 @@ impl CollectionService {
     /// What counts as a test run besides the built-in patterns: the
     /// project's `runPatterns`, and its own configured commands — running
     /// the way you declared to run tests is a test run, so `fastCommand`
-    /// (tsk171) detects without a built-in pattern in its script name.
+    ///  detects without a built-in pattern in its script name.
     fn test_patterns(&self) -> Vec<String> {
         let cfg = self.testing_cfg();
         let mut patterns = cfg.run_patterns.clone();
@@ -689,7 +688,7 @@ impl CollectionService {
             .any(|r| r.owner == owner && r.spec.id == id)
     }
 
-    /// `rel` under the checkout `root`, after every symlink (tsk927): `None`
+    /// `rel` under the checkout `root`, after every symlink: `None`
     /// when it isn't there, an error when it resolves outside `root` — a
     /// repo can't point a collector at a file of the person's. The config
     /// check is lexical (no `..`, not absolute); this is the one that
@@ -707,7 +706,7 @@ impl CollectionService {
 
     /// The parser a report collector names: a bundled one, or its own jaq /
     /// Starlark script or program — a program only once a person approved
-    /// it on this machine, as it is now (tsk331).
+    /// it on this machine, as it is now.
     fn report_parser(
         &self,
         collector: &ReportCollector,
@@ -772,14 +771,14 @@ impl CollectionService {
         })
     }
 
-    /// Read one report collector's report (tsk863): when `window` is given,
+    /// Read one report collector's report: when `window` is given,
     /// only a report written inside it (the run's own). A disabled
     /// collector, an unapproved program or a report that isn't there runs
     /// nothing; anything that ran is recorded as the collector's run
     /// (`collector_run`, `collector.synced`) and counts toward its health —
     /// the third failure in a row disables it (P7.C2).
     /// Report paths, parser entries and the paths a report names are
-    /// `root`'s: the checkout the run ran in (tsk890).
+    /// `root`'s: the checkout the run ran in.
     async fn read_report(
         &self,
         collector: &ReportCollector,
@@ -917,7 +916,7 @@ impl CollectionService {
         }
     }
 
-    /// What a detected run's report collectors read (tsk863): each
+    /// What a detected run's report collectors read: each
     /// collector whose `on_run` is `run` and whose report this run wrote
     /// (inside `window`), merged by what it records. A collector reads only
     /// after its own kind of run.
@@ -963,7 +962,7 @@ impl CollectionService {
                     exec,
                     label,
                 } => out.add(output, exec, label),
-                // Why it didn't count, kept for the run's nudge (tsk893); a
+                // Why it didn't count, kept for the run's nudge; a
                 // coverage collector's is the lost coverage's failed capture.
                 ReportRead::Failed(e) | ReportRead::Disabled(e) => {
                     tracing::warn!(collector = %spec.id, "{e}");
@@ -983,7 +982,7 @@ impl CollectionService {
         out
     }
 
-    /// A run's coverage, read from its `test.run.recorded` (tsk1015): the
+    /// A run's coverage, read from its `test.run.recorded`: the
     /// coverage collectors whose report the run wrote — around the time it
     /// was recorded — recorded as the collection reactor records a detected
     /// run's, in the run's turn (the event's anchors). One routine
@@ -1078,14 +1077,14 @@ impl CollectionService {
         origin: RunOrigin<'_>,
     ) -> Result<Option<i64>, DomainError> {
         let cause = origin.cause();
-        // OBSERVE: record the run always; attribution is separate
-        // (tsk263). We only need the stream to record into the substrate.
+        // OBSERVE: record the run always; attribution is separate.
+        // We only need the stream to record into the substrate.
         let Some(stream_id) = self.stream_id_for(thread).await? else {
             return Ok(None);
         };
         let mut payload = serde_json::Map::new();
         // The sub-command that ran the tests; the whole call beside it
-        // when it was more (tsk1037).
+        // when it was more.
         let shown = test_run_segment(command, &self.test_patterns())
             .unwrap_or_else(|| command.trim().to_string());
         if shown != command.trim() {
@@ -1133,16 +1132,16 @@ impl CollectionService {
         if let Some(s) = skipped {
             payload.insert("skipped".into(), json!(s));
         }
-        // Write the run CAPTURE into the durable fact layer (epic tsk12): one
+        // Write the run CAPTURE into the durable fact layer: one
         // fact on `oxplow.test_case` per case, the pass/fail/skip status carried
         // as the `oxplow.status` dimension (and the suite as `oxplow.test_suite`)
         // so Count() sliced by status reconstructs the passed/failed/total
-        // headline. The capture IS the run (T-E1, tsk48): it carries the verbatim
+        // headline. The capture IS the run (T-E1): it carries the verbatim
         // payload in `detail_json` and its id is what the ledger claims. Recorded
         // even report-less (observe-always) — but a run that MEASURED nothing
         // (no report, no asserted counts) records under the `test-run` producer,
         // not `tests`: an empty `tests` capture reads as "suite ran, found 0
-        // tests" to the zero-fill/currency logic (tsk44) and would collapse the
+        // tests" to the zero-fill/currency logic and would collapse the
         // semi-additive oxplow.tests.* timeline to 0. Asserted counts (the MCP
         // sub-agent path) synthesize status-sliced facts — no case identity, but
         // the counts are real case-grain measurements the specs must read.
@@ -1153,11 +1152,11 @@ impl CollectionService {
         {
             let dual = async {
                 // A run with per-case results records them change-only
-                // against each test's summary (tsk733, `record_test_run`);
+                // against each test's summary (`record_test_run`);
                 // asserted counts have no case identity and record plainly.
                 let mut facts = Vec::new();
                 let mut cases: Option<(i64, Option<i64>, Vec<oxplow_db::TestCaseResult>)> = None;
-                // Stop-collecting gate (tsk31): only emit `oxplow.test_case` facts
+                // Stop-collecting gate: only emit `oxplow.test_case` facts
                 // when an enabled metric consumes that measure. When every
                 // `oxplow.tests.*` metric is disabled the facts are skipped and the
                 // run falls through to the record-only `test-run` producer below —
@@ -1174,7 +1173,7 @@ impl CollectionService {
                         else {
                             return Ok::<Option<i64>, DomainError>(None);
                         };
-                        // Per-test DURATION (tsk46), on the same subject as the
+                        // Per-test DURATION, on the same subject as the
                         // status, when its metric is on.
                         let duration = if self
                             .facts
@@ -1246,16 +1245,16 @@ impl CollectionService {
                 // here is a real "found 0"); `test-run` = a run record only,
                 // invisible to the tests metric timeline. A measured run whose
                 // tests metrics are all disabled records as a run record too
-                // (tsk31) — the run is remembered, but nothing feeds a pruned
+                //  — the run is remembered, but nothing feeds a pruned
                 // metric.
                 let producer = if (report.is_some() || counted) && tests_active {
                     "tests"
                 } else {
                     "test-run"
                 };
-                // A test result is about a CODE STATE, not a branch name (tsk95),
+                // A test result is about a CODE STATE, not a branch name,
                 // so stamp the commit the run tested — the fold needs it to be
-                // ancestry-aware (tsk97), and it is NOT backfillable after the
+                // ancestry-aware, and it is NOT backfillable after the
                 // fact. A snapshot carrying its own commit reads exact; otherwise
                 // this falls back to HEAD with `vcs_rev_exact = false`, which
                 // is the normal case: the agent edits, then runs tests, so the
@@ -1376,7 +1375,7 @@ impl CollectionService {
         }
     }
 
-    /// Run report collector `id` by hand (`oxplow.collector.sync`, tsk863): read
+    /// Run report collector `id` by hand (`oxplow.collector.sync`): read
     /// its report now, whenever it was written, and record what it parsed
     /// in `thread` — a test run, a coverage capture or a static-analysis
     /// capture — like a detected run's, with `oxplow.collector.sync project/<id>`
@@ -1480,7 +1479,7 @@ impl CollectionService {
                     }
                 }
                 // No baseline gate: findings are ABSOLUTE (current-file),
-                // not diff-relative like coverage (tsk86).
+                // not diff-relative like coverage.
                 ReportSync::Analysis(
                     match self
                         .record_static_analysis(
@@ -1509,7 +1508,7 @@ impl CollectionService {
         })
     }
 
-    /// The capture-spine detail envelope (T-E1, tsk48): the verbatim per-run
+    /// The capture-spine detail envelope (T-E1): the verbatim per-run
     /// payload wrapped as `{"kind": <detail kind>, "payload": {…}}`, stored in
     /// `metric_capture.detail_json`. The kind discriminates the three run
     /// producers (test-detail / coverage-detail / analysis-detail) for the
@@ -1518,7 +1517,7 @@ impl CollectionService {
         serde_json::to_string(&json!({ "kind": kind, "payload": payload })).ok()
     }
 
-    /// Content identity for an idempotent report ingest (tsk14): a hash over the
+    /// Content identity for an idempotent report ingest: a hash over the
     /// producer, the basis it was measured against (git version + snapshot), and
     /// the verbatim payload envelope, so a REPLAYED report (a hook that fired
     /// twice, `ingest_coverage`/`ingest_analysis` called again) dedupes to the
@@ -1573,12 +1572,12 @@ impl CollectionService {
             .first()
             .cloned()
             .unwrap_or_else(|| "analysis".to_string());
-        // The capture-spine copy of the verbatim payload (T-E1, tsk48).
+        // The capture-spine copy of the verbatim payload (T-E1).
         let capture_detail_json = detail
             .as_ref()
             .and_then(|d| Self::capture_detail("analysis-detail", d));
         let dual = async {
-            // Stop-collecting gate (tsk31): skip the analysis capture entirely when
+            // Stop-collecting gate: skip the analysis capture entirely when
             // no enabled metric consumes `oxplow.lint_hit` (both `oxplow.analysis.*`
             // disabled). The code-quality findings store is written elsewhere and
             // is unaffected.
@@ -1595,7 +1594,7 @@ impl CollectionService {
             };
             // A CLEAN report still writes its (empty) capture — "this
             // analysis ran and found nothing" is what lets the errors/
-            // warnings series drop back to zero (tsk44).
+            // warnings series drop back to zero.
             use oxplow_coverage::Severity::*;
             let mut facts = Vec::with_capacity(report.findings.len());
             for f in &report.findings {
@@ -1635,12 +1634,11 @@ impl CollectionService {
             Ok(Some(id))
         }
         .await;
-        // A failed write is the caller's to report (tsk891).
+        // A failed write is the caller's to report.
         dual
     }
 
-    /// The id of a coverage sub-measure (`oxplow.coverage.branch`/`.function`,
-    /// tsk123) IFF an enabled spec consumes it — else `None` (the per-measure
+    /// The id of a coverage sub-measure (`oxplow.coverage.branch`/`.function`,) IFF an enabled spec consumes it — else `None` (the per-measure
     /// stop-collecting gate). Lookup errors read as "not active" so a
     /// branch/function hiccup never sinks the line-coverage capture.
     async fn active_coverage_measure(&self, key: &str) -> Option<i64> {
@@ -1660,11 +1658,11 @@ impl CollectionService {
             .map(|m| m.id)
     }
 
-    /// OBSERVE-ALWAYS coverage (tsk270): record the **absolute** whole-report
+    /// OBSERVE-ALWAYS coverage: record the **absolute** whole-report
     /// coverage — per-file instrumented/covered line-sets, verbatim, in the
     /// capture's `coverage-detail` envelope + an `oxplow.coverage.abs_pct`
-    /// headline — pinned to a take of the code the report measured
-    /// (tsk883), with NO baseline. A request's diff-coverage is derived from
+    /// headline — pinned to a take of the code the report measured,
+    /// with NO baseline. A request's diff-coverage is derived from
     /// these line-sets with its analysis ([`Self::diff_coverage`]). The
     /// capture is the turn's the run was made in.
     async fn observe_coverage(
@@ -1675,7 +1673,7 @@ impl CollectionService {
         source: &str,
         origin: RunOrigin<'_>,
     ) -> Result<CoverageIngest, DomainError> {
-        // Stop-collecting gate (tsk31): with the coverage metric disabled, no
+        // Stop-collecting gate: with the coverage metric disabled, no
         // enabled spec consumes `oxplow.coverage` — record nothing (no capture, no
         // diff-coverage). Reads see it turned off.
         if !self
@@ -1690,9 +1688,9 @@ impl CollectionService {
             return Ok(CoverageIngest::NoChangedCoverage);
         };
 
-        // The capture IS the run (T-E1, tsk48), in the turn it was made in.
+        // The capture IS the run (T-E1), in the turn it was made in.
         let turn = origin.turn();
-        // Pin to a take of the code the report measured (tsk883),
+        // Pin to a take of the code the report measured,
         // observe-always.
         let pin = self
             .measured_snapshot(thread, stream_id, turn, origin)
@@ -1711,7 +1709,7 @@ impl CollectionService {
             },
         };
 
-        // The run CAPTURE (epic tsk12): one fact on `oxplow.coverage` per file,
+        // The run CAPTURE: one fact on `oxplow.coverage` per file,
         // value = its line-%, numerator/denominator = covered/instrumented
         // counts so the engine re-derives the headline as Σcovered/Σinstrumented
         // (non-additive ratio) instead of averaging pre-rolled percentages; the
@@ -1725,7 +1723,7 @@ impl CollectionService {
                 let Some(measure) = self.facts.get_measure("oxplow.coverage").await? else {
                     return Ok::<Option<i64>, DomainError>(None);
                 };
-                // Branch/function coverage (tsk123) ride the SAME capture as extra
+                // Branch/function coverage ride the SAME capture as extra
                 // per-file facts on their own measures — but only when an enabled
                 // spec consumes them (the stop-collecting gate, per measure), and
                 // only for files whose report actually carried the counts
@@ -1795,7 +1793,7 @@ impl CollectionService {
                 Ok(Some(id))
             }
             .await;
-            // A failed write is the caller's to retry or record (tsk79).
+            // A failed write is the caller's to retry or record.
             capture_id = dual?;
         }
         // No coverage measure: nothing records it.
@@ -1811,7 +1809,7 @@ impl CollectionService {
         })
     }
 
-    /// The snapshot a run's report measured (tsk883 coverage, tsk937
+    /// The snapshot a run's report measured (coverage
     /// analysis): a take of the
     /// stream's worktree now, as the run's report is recorded. The take is
     /// the code the run measured only while nothing changed after the run
@@ -1861,9 +1859,9 @@ impl CollectionService {
     }
 
     /// Derive a window's **diff-coverage** from a run's stored ABSOLUTE
-    /// per-file line-sets (tsk270): the lines that changed between the window's
+    /// per-file line-sets: the lines that changed between the window's
     /// start snapshot and `measured`, the snapshot the run's capture is pinned
-    /// to — the code the run measured, never a working tree (tsk862), so it
+    /// to — the code the run measured, never a working tree, so it
     /// holds for a worktree stream and doesn't drift after the run. Computed
     /// when the analysis is (`request_analysis`), so a run read after the
     /// request finished still produces a diff. Returns `(summary_pct,
@@ -2006,7 +2004,7 @@ impl CollectionService {
         }
     }
 
-    /// The coverage leg with one retry (tsk79). The detached collection task
+    /// The coverage leg with one retry. The detached collection task
     /// runs right after a test command — DB contention or a snapshot-lookup
     /// hiccup is transient, and without a retry one swallowed error means the
     /// run's coverage simply never exists (fatal when it was a request's
@@ -2038,7 +2036,7 @@ impl CollectionService {
         }
     }
 
-    /// Durable visibility for a dropped coverage leg (tsk79): a facts-empty
+    /// Durable visibility for a dropped coverage leg: a facts-empty
     /// `status = failed` coverage capture carrying the error — the same
     /// convention as gauge failures — so the miss is queryable in the
     /// substrate instead of living only in a tty warn. Best-effort.
@@ -2088,7 +2086,7 @@ impl CollectionService {
         if !is_test && !is_analysis {
             return Ok(None);
         }
-        // OBSERVE-ALWAYS (tsk269): tests + analysis are always recorded;
+        // OBSERVE-ALWAYS: tests + analysis are always recorded;
         // attribution is the turn's, never a precondition for recording.
 
         // Reports this run could have written: judged at the run's own
@@ -2097,7 +2095,7 @@ impl CollectionService {
         let window = cause.map_or_else(FreshWindow::ending_now, |c| {
             FreshWindow::of_run(c.started, c.at)
         });
-        // The run's reports are its own checkout's (tsk890).
+        // The run's reports are its own checkout's.
         let root = self.worktree(thread).await;
 
         // Static-analysis ride-along (OBSERVE-ALWAYS): when an analyzer ran,
@@ -2113,7 +2111,7 @@ impl CollectionService {
                 None => (None, "analysis-report".to_string()),
             };
             let analyzers = reads.analyzers.clone();
-            // Leg isolation (tsk79): one leg's transient error must not kill
+            // Leg isolation: one leg's transient error must not kill
             // the legs after it — the test-run + coverage recording below is
             // independent of whether this analysis write landed.
             if let Err(e) = self
@@ -2149,7 +2147,7 @@ impl CollectionService {
             Some((r, source)) => (Some(r.clone()), source),
             None => (None, "post-tool-bash".to_string()),
         };
-        // Leg isolation (tsk79): a failed test-run write still lets the
+        // Leg isolation: a failed test-run write still lets the
         // coverage below record — the report on disk is real either way.
         if let Err(e) = self
             .record_test_run_caused(
@@ -2166,11 +2164,11 @@ impl CollectionService {
         {
             tracing::warn!(error = %e, "test-run ride-along failed");
         }
-        // Coverage ride-along (OBSERVE-ALWAYS, tsk270): record the ABSOLUTE
+        // Coverage ride-along (OBSERVE-ALWAYS): record the ABSOLUTE
         // report always; a request's diff is derived with its analysis (it
         // lands in v_request_observation).
         // A transient error here used to silently drop the run's coverage
-        // (tsk79) — now it retries once and, when both attempts (or the parse
+        //  — now it retries once and, when both attempts (or the parse
         // of a fresh report) lose, records a durable `failed` capture.
         let coverage = reads.coverage();
         if let Some((merged, source)) = &coverage {
@@ -2251,7 +2249,7 @@ impl CollectionService {
             // Already fired for this cause (a redelivered event).
             Ok(None) => {}
             Ok(Some(_)) => {
-                // Project the fired nudge into the metric substrate (tsk216):
+                // Project the fired nudge into the metric substrate:
                 // `agent.nudges.fired` is an agent-activity signal — the agent
                 // drifted off-task often enough to be corrected.
                 self.project_nudge_metric(thread, kind, origin).await;
@@ -2272,7 +2270,7 @@ impl CollectionService {
         };
         let branch = self.current_branch(&self.worktree(thread).await).await;
         let result = async {
-            // Stop-collecting gate (tsk31): skip when the `agent.nudges.fired`
+            // Stop-collecting gate: skip when the `agent.nudges.fired`
             // metric is disabled (nothing consumes `oxplow.nudge`). The nudge
             // itself still fires + persists — only the analytics fact is skipped.
             if !self
@@ -2284,7 +2282,7 @@ impl CollectionService {
                 return Ok::<(), DomainError>(());
             }
             // One fact on the `oxplow.nudge` event measure (value 1), the nudge
-            // kind as subject so Sum() reconstructs the fired count (epic tsk12).
+            // kind as subject so Sum reconstructs the fired count.
             if let Some(measure) = self.facts.get_measure("oxplow.nudge").await? {
                 let fact = NewFact {
                     subject: Some(oxplow_domain::uri::build::keyed(
@@ -2346,7 +2344,7 @@ impl CollectionService {
             .unwrap_or(false)
     }
 
-    /// Record a `static-analysis` observation. OBSERVE-ALWAYS (tsk269): analysis
+    /// Record a `static-analysis` observation. OBSERVE-ALWAYS: analysis
     /// findings are absolute (current-file, not window-relative), so the run is
     /// always recorded, in the turn it was made in. This single kind is both the ran-record (when
     /// `report` is `None` — analyzer ran but regenerated no parseable report) and
@@ -2417,7 +2415,7 @@ impl CollectionService {
         });
 
         // Pin a parsed report's capture to a take of the code the analyzer
-        // ran on (tsk937, as coverage does — tsk883); a report-less run
+        // ran on (as coverage does); a report-less run
         // records no capture, so takes nothing.
         let pin = match report {
             Some(_) => {
@@ -2475,10 +2473,10 @@ impl CollectionService {
     }
 
     /// The observations of `window` (`v_request_observation`, from the
-    /// metric substrate, tsk215): one row per run of its own — its
+    /// metric substrate): one row per run of its own — its
     /// coverage, test and analysis captures with their verbatim `*-detail`
     /// payloads — oldest first: stored in this order, the highest `seq` is
-    /// the latest (tsk1049). `kind` optionally filters.
+    /// the latest. `kind` optionally filters.
     pub async fn observations(
         &self,
         window: &Window,
@@ -2555,7 +2553,7 @@ impl CollectionService {
     /// Roll every metric up over `window` (`v_request_metric_delta`) — the
     /// structured sibling of the oxplow-bundled `metric-deltas` advisory
     /// (which builds the agent-prompt text). Reads the spec catalog and, per
-    /// family, aggregates the window's own facts (epic tsk12, T-D; see metrics.md):
+    /// family, aggregates the window's own facts (T-D; see metrics.md):
     /// - **per-file gauges** (`File`): Σ over the window's files of
     ///   `(current − baseline)` fact value — the slice this work actually
     ///   moved, even on a branch shared with other work. With no files it
@@ -2570,7 +2568,7 @@ impl CollectionService {
     /// coverage → tests → operational, then by title.
     pub async fn metric_deltas(&self, window: &Window) -> Vec<oxplow_db::MetricDelta> {
         // Every metric is a spec now (built-in ∪ producer ∪ config); each read
-        // aggregates the spec's source measure's facts (epic tsk12, T-D).
+        // aggregates the spec's source measure's facts (T-D).
         let Ok(specs) = self.facts.list_specs().await else {
             return vec![];
         };
@@ -2578,7 +2576,7 @@ impl CollectionService {
         // operational families. File gauges are snapshot scans (unstamped),
         // so they read by its files × time below. Full rows (not just ids):
         // an EMPTY capture (a clean analysis run) is a zero record the
-        // stamped read fills in (tsk44).
+        // stamped read fills in.
         let groups = self
             .facts
             .capture_groups(window.members.clone())
@@ -2592,14 +2590,14 @@ impl CollectionService {
         let mut fact_cache = FileDeltaCache::default();
         let mut out: Vec<oxplow_db::MetricDelta> = Vec::new();
         for spec in &specs {
-            // Entity metrics (tsk322) measure the project's data, not a
+            // Entity metrics measure the project's data, not a
             // window's work; they have no window-scoped delta.
             if spec.entity_json.is_some() {
                 continue;
             }
             // One classifier (in `attribution.rs`, beside the write-side
             // `AttributionKind` each family maps to) decides the family; this match
-            // is the only place each family's read computation is named (tsk274).
+            // is the only place each family's read computation is named.
             // A spec whose source measure isn't known (not declared here, or
             // not yet synced) has nothing to read: computing it anyway would
             // read every capture of the window as its own.
@@ -2631,10 +2629,10 @@ impl CollectionService {
                 }
                 // Coverage stays window-relative, on the capture's detail
                 // payload (line-sets aren't in facts yet): the diff is derived
-                // from it (tsk270, T-D scope guard).
+                // from it (T-D scope guard).
                 AttributionFamily::Coverage => self.coverage_delta_for_spec(spec, window).await,
                 // Run + operational read identically now: before→after / `sum` over
-                // the facts of the window's own captures (the tsk37 spine).
+                // the facts of the window's own captures (the spine).
                 AttributionFamily::Run | AttributionFamily::Window => {
                     let producers = match &inputs {
                         Some(i) => i.producers.clone(),
@@ -2764,8 +2762,7 @@ impl CollectionService {
     /// files of the file's `(current − baseline)` value, treating a file
     /// absent from a capture as 0 (sparse emission — how a drop-to-zero is
     /// detected). Facts are scoped to the window's `stream` (gauge captures are
-    /// per-worktree scans — another stream's values must not pollute the delta,
-    /// tsk43). Baseline capture = the latest before the window started; current
+    /// per-worktree scans — another stream's values must not pollute the delta,). Baseline capture = the latest before the window started; current
     /// = the latest at/before the window end (the newest when open; a capture
     /// one of its turns made — a gauge landing just after the end — also
     /// counts). A finished window with no capture in its span
@@ -3034,10 +3031,10 @@ impl CollectionService {
 
     /// Before→after (or `sum` flow) for a run/operational metric over the facts of
     /// the window's OWN captures (its turns', `metric_capture.turn_id`, stamped
-    /// at ingest — tsk37). One series point per capture (within-capture aggregation is the
+    /// at ingest). One series point per capture (within-capture aggregation is the
     /// spec's); `sum`-aggregation specs (token/turn/nudge flows) are summed across
     /// captures, everything else is first→last. A count/sum spec's EMPTY
-    /// capture (a clean analysis run — tsk44) reads as an explicit 0 point, so
+    /// capture (a clean analysis run) reads as an explicit 0 point, so
     /// "3 errors → 0" shows in the panel. `None` when the window has no
     /// captures carrying (or zero-recording) this metric's facts.
     async fn stamped_delta(
@@ -3233,8 +3230,7 @@ impl CollectionService {
                 // Which producers emit this metric's slice, answered as cheaply
                 // as the filter allows. All three branches agree; they differ
                 // only in how much of the measure's history they have to touch,
-                // and on a 900k-fact measure that gap was 38% of backend CPU
-                // (tsk239).
+                // and on a 900k-fact measure that gap was 38% of backend CPU.
                 producers = self.producers_of_slice(measure.id, &filter).await;
             }
             let have: std::collections::HashSet<i64> =
@@ -3279,7 +3275,7 @@ impl CollectionService {
         caps
     }
 
-    /// Coverage delta (the `Coverage` family, tsk270): coverage is
+    /// Coverage delta (the `Coverage` family): coverage is
     /// **observe-always** (absolute) AND **window-relative** (diff vs the
     /// window's start snapshot), so neither the time span nor a stored value
     /// is right. For each coverage run CAPTURE of the window's (its turns' —
@@ -3425,7 +3421,7 @@ fn report_nudge_message(cfg: &oxplow_config::TestingConfig, has_report_collector
     }
 }
 
-/// The report-less nudge when the run's collectors didn't count (tsk893):
+/// The report-less nudge when the run's collectors didn't count:
 /// why each didn't. Running the tests again changes none of it.
 fn unread_reports_message(unread: &[String]) -> String {
     format!(
@@ -3509,19 +3505,19 @@ fn spec_fact_filter(
 }
 
 /// How far back a report's mtime can be and still count as "fresh" for passive
-/// ingestion (tsk269), so collection works whatever the thread is doing
+/// ingestion, so collection works whatever the thread is doing
 /// (observe-always). A report regenerated by the command that just ran is
 /// seconds old; stale reports from prior runs/other stacks fall outside the
 /// window and are skipped (router/anti-replay). 10 minutes is generous
 /// for a slow suite that finishes writing well after its command started.
 const REPORT_FRESH_WINDOW_MS: i64 = 10 * 60 * 1000;
 
-/// Pause before the coverage leg's single retry (tsk79) — long enough for a
+/// Pause before the coverage leg's single retry — long enough for a
 /// DB-contention blip to clear, short enough that the detached task still
 /// finishes well within a test run's shadow.
 const COVERAGE_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
 
-/// Build the ABSOLUTE coverage payload from a report (tsk270): whole-report %
+/// Build the ABSOLUTE coverage payload from a report: whole-report %
 /// plus per-file instrumented/covered line-sets, stored verbatim so the
 /// a request's diff can be derived with its analysis. Returns
 /// `(abs_pct, covered, instrumented, payload)`; `None` when nothing is
@@ -3624,11 +3620,11 @@ struct RunReports {
     exec_coverage: Vec<String>,
     exec_analysis: Vec<String>,
     /// Coverage reports this run wrote that failed to parse, or whose
-    /// collector didn't run (tsk79: a lost coverage run is recorded, not
+    /// collector didn't run (a lost coverage run is recorded, not
     /// only logged).
     coverage_errors: Vec<String>,
     /// Why each collector that should have read a report didn't count:
-    /// disabled, awaiting approval, or its parse failed (tsk893).
+    /// disabled, awaiting approval, or its parse failed.
     unread: Vec<String>,
 }
 
@@ -3686,7 +3682,7 @@ impl RunReports {
 }
 
 /// A run's `source`: `observed` from oxplow's own parse, or flagged
-/// `exec:<ids>` when a program parser contributed ([[tsk162]]).
+/// `exec:<ids>` when a program parser contributed ([[]]).
 fn trust(observed: &str, exec: &[String]) -> String {
     if exec.is_empty() {
         observed.to_string()
@@ -3704,7 +3700,7 @@ pub(crate) struct FreshWindow {
 }
 
 impl FreshWindow {
-    /// A run's reports: written after it `started` (tsk888) — less a
+    /// A run's reports: written after it `started` — less a
     /// second of mtime granularity — or, its start unknown, in the 10
     /// minutes before it `ended`; and by a minute after it ended.
     fn of_run(started: Option<oxplow_domain::Timestamp>, ended: oxplow_domain::Timestamp) -> Self {
@@ -3760,7 +3756,7 @@ fn diff_new_side_lines(old: &str, new: &str) -> BTreeSet<u32> {
     changed
 }
 
-/// What the collection tests declare (tsk863).
+/// What the collection tests declare.
 #[cfg(test)]
 pub(crate) mod test_support {
     /// A project report collector's manifest entry: `records` (`tests` /
@@ -3945,7 +3941,7 @@ mod tests {
         assert!(!detect_test_run("echo hi", &["".into(), "   ".into()]));
     }
 
-    /// tsk1037: a run shows the sub-command that ran the tests, not the
+    /// a run shows the sub-command that ran the tests, not the
     /// agent's whole Bash call (a heredoc that edited a file, a `cd`).
     #[test]
     fn a_test_run_shows_the_sub_command_that_ran_it() {
@@ -4058,7 +4054,7 @@ mod tests {
         assert!(!FreshWindow::around(Timestamp::from_unix_ms(written - hour)).holds(f.path()));
     }
 
-    /// tsk888: a run's own reports are written after it started — one
+    /// a run's own reports are written after it started — one
     /// written before is an earlier run's, however recent. With its start
     /// unknown, the window reaches back 10 minutes.
     #[test]
@@ -4326,7 +4322,7 @@ mod tests {
             seed_turn(&db, TURN, started_at).await;
 
             // The agent's edit, on disk only — line 2 changed, line 4 added.
-            // A coverage run takes the snapshot it measured (tsk883).
+            // A coverage run takes the snapshot it measured.
             std::fs::write(&foo, NEW_FOO).unwrap();
             capture.mark_dirty(foo, oxplow_fs_watch::WatchEventKind::Other);
             // Optional git repo + base commit so HEAD has a parent.
@@ -4354,7 +4350,7 @@ mod tests {
 
             let nudges = Arc::new(SqliteAgentNudgeStore::new(db.clone()));
             // Seed the producer specs the way boot's `seed_catalog` does — the
-            // producers gate their collection on `measure_has_active_spec` (tsk31),
+            // producers gate their collection on `measure_has_active_spec`,
             // so without an active spec over each measure the gate stays closed.
             let facts = Arc::new(oxplow_db::SqliteFactStore::new(db.clone()));
             for spec in crate::test_fixtures::foundation_producer_specs() {
@@ -4425,7 +4421,7 @@ mod tests {
             // is covered by the freshness-window tests (a just-written
             // report's mtime vs. the run is wall-clock/fs-granularity
             // sensitive and would flake here).
-            // tsk270: ingest records ABSOLUTE coverage (instruments {1,2,4},
+            // ingest records ABSOLUTE coverage (instruments {1,2,4},
             // covers {1,2} → 2/3 ≈ 66.7%); the window-relative DIFF (changed∩instr
             // = {2,4}, covered {2} → 50%, line 4 uncovered) is derived at READ.
             let outcome = sync_coverage(&h).await;
@@ -4436,7 +4432,7 @@ mod tests {
                     changed_lines,
                     covered_lines,
                 } => {
-                    // tsk891: `run` is the coverage capture agents claim.
+                    // `run` is the coverage capture agents claim.
                     let capture = h.service.facts.get_capture(run).await.unwrap();
                     assert_eq!(capture.map(|c| c.producer), Some("coverage".to_string()));
                     assert_eq!(changed_lines, 3, "absolute instrumented");
@@ -4475,7 +4471,7 @@ mod tests {
             rows.first().and_then(|r| r.metric_value)
         }
 
-        /// tsk862: the diff is of the code the run measured — the snapshot
+        /// the diff is of the code the run measured — the snapshot
         /// its capture is pinned to — so an edit after the run moves nothing.
         #[tokio::test]
         async fn diff_coverage_ignores_edits_after_the_run() {
@@ -4502,7 +4498,7 @@ mod tests {
             assert!(diff_pct(&h).await.is_some());
         }
 
-        /// tsk862: the diff reads snapshots, never a working tree: with the
+        /// the diff reads snapshots, never a working tree: with the
         /// file gone from the checkout it is still computed — so a worktree
         /// stream, whose files aren't under the project directory, gets one
         /// too (its report is read from its own worktree:
@@ -4516,7 +4512,7 @@ mod tests {
             assert!((pct - 50.0).abs() < 1e-6, "got {pct}");
         }
 
-        /// tsk890: a thread in a worktree stream reads its reports from its
+        /// a thread in a worktree stream reads its reports from its
         /// own worktree, never the primary checkout.
         #[tokio::test]
         async fn a_worktree_threads_report_is_read_from_its_worktree() {
@@ -4588,7 +4584,7 @@ mod tests {
             }
         }
 
-        /// tsk883: a run delivered after an edit landed can't know what it
+        /// a run delivered after an edit landed can't know what it
         /// measured — its coverage is recorded, with no snapshot and so no
         /// diff rather than a wrong one.
         #[tokio::test]
@@ -4629,9 +4625,9 @@ mod tests {
             assert_eq!(diff_pct(&h).await, None);
         }
 
-        /// tsk935: every capture a tool event's run records carries that
+        /// every capture a tool event's run records carries that
         /// event's turn — coverage, analysis and the nudge alike, not only
-        /// the test run (tsk483).
+        /// the test run.
         #[tokio::test]
         async fn coverage_analysis_and_nudge_captures_carry_the_tools_turn() {
             const ESLINT: &str = r#"[{"filePath":"src/a.ts","messages":[{"ruleId":"r","severity":2,"message":"m","line":1,"column":1}]}]"#;
@@ -4733,7 +4729,7 @@ mod tests {
             );
         }
 
-        /// tsk884: `cargo llvm-cov` names files by absolute path. They're
+        /// `cargo llvm-cov` names files by absolute path. They're
         /// read repo-relative, so they diff against the snapshots and their
         /// facts name repo files; a file outside the project is dropped.
         #[tokio::test]
@@ -4768,7 +4764,7 @@ mod tests {
             );
         }
 
-        /// tsk862: a baseline whose bytes are gone (collected) can't be
+        /// a baseline whose bytes are gone (collected) can't be
         /// diffed — no row, not "every line changed".
         #[tokio::test]
         async fn an_expired_baseline_gives_no_diff() {
@@ -4787,7 +4783,7 @@ mod tests {
             let h = build_full(Some(COBERTURA_50PCT), true).await;
             sync_coverage(&h).await;
 
-            // The durable fact layer (epic tsk12; the legacy sample write is
+            // The durable fact layer (the legacy sample write is
             // gone, T-E2): one `oxplow.coverage` fact for the report's single
             // file, carrying the covered/instrumented counts so a module/repo
             // roll-up re-derives Σcovered/Σinstrumented rather than averaging
@@ -4824,7 +4820,7 @@ mod tests {
 
         #[tokio::test]
         async fn a_coverage_report_records_branch_and_function_facts() {
-            // tsk123: a report carrying branch (condition-coverage) + function
+            // a report carrying branch (condition-coverage) + function
             // (methods) data lands per-file facts on oxplow.coverage.branch /
             // .function beside the line facts, num/den = hit/found so the headline
             // reads Σhit/Σfound. Branch 3/4 → 75%, function 1/2 → 50%.
@@ -4880,7 +4876,7 @@ mod tests {
 
         #[tokio::test]
         async fn merged_coverage_reports_keep_branch_and_function_counts() {
-            // tsk160: the passive ride-along is the PRIMARY ingestion path, and
+            // the passive ride-along is the PRIMARY ingestion path, and
             // it merges per-file coverage from every fresh report. It used to
             // copy only the line sets, so branch/function counters arrived as 0
             // and observe_coverage's `*_found > 0` gate meant
@@ -4990,7 +4986,7 @@ mod tests {
 
         #[tokio::test]
         async fn coverage_parse_failure_records_a_failed_capture() {
-            // tsk79: a FRESH but malformed coverage report used to vanish with
+            // a FRESH but malformed coverage report used to vanish with
             // only a tty warn — the run's coverage just never existed. Now the
             // miss is durable: a facts-empty `status=failed` coverage capture
             // (the gauge-failure convention) lands in the substrate.
@@ -5094,7 +5090,7 @@ mod tests {
             .unwrap()
         }
 
-        /// tsk1015: a run reported any way but the agent's own shell command
+        /// a run reported any way but the agent's own shell command
         /// (`oxplow.test.record_run`, a by-hand sync) has its coverage read from its
         /// `test.run.recorded` — the coverage collectors whose report it
         /// wrote — in the run's turn. A run the collection reactor
@@ -5179,7 +5175,7 @@ mod tests {
             assert_eq!(caps.len(), 1, "one run capture");
             assert_eq!(caps[0].provenance, "observed");
             // Stamped with the stream's current snapshot (the code state) so the
-            // panel can group runs into exact iterations (tsk259).
+            // panel can group runs into exact iterations.
             assert!(
                 caps[0].snapshot_id.is_some(),
                 "the run capture carries the stream's current snapshot"
@@ -5197,7 +5193,7 @@ mod tests {
             // A report-less, count-less run (a bare `cargo test` the hook saw) is
             // a run RECORD, not a measurement — it must not read as "suite ran,
             // found 0 tests" and zero the semi-additive oxplow.tests.* timeline
-            // via the tsk44 zero-fill.
+            // via the zero-fill.
             use oxplow_coverage::{TestCase, TestReport, TestStatus, TestSuite};
             let h = build(None).await;
             let report = TestReport {
@@ -5329,9 +5325,9 @@ mod tests {
 
         #[tokio::test]
         async fn test_run_capture_stamps_the_commit_it_tested() {
-            // tsk95: a test result is about a CODE STATE, not a branch name, so
+            // a test result is about a CODE STATE, not a branch name, so
             // the run capture must record which commit it tested. Without it the
-            // per-subject fold can never be ancestry-aware (tsk97) — and it is
+            // per-subject fold can never be ancestry-aware — and it is
             // NOT backfillable: which commit a past run tested is unrecoverable.
             // Gauge captures got this for free via the snapshot-driven
             // `CollectorRunContext`; test runs went unstamped for 125 captures.
@@ -5405,7 +5401,7 @@ mod tests {
 
         #[tokio::test]
         async fn record_test_run_writes_test_detail_finding_to_substrate() {
-            // tsk215: the suite/case tree is kept verbatim on the substrate as a
+            // the suite/case tree is kept verbatim on the substrate as a
             // `test-detail` finding so a page renders off the model.
             use oxplow_coverage::{TestCase, TestReport, TestStatus, TestSuite};
             let h = build(None).await;
@@ -5465,7 +5461,7 @@ mod tests {
             assert_eq!(payload["suites"][0]["name"], "oxplow-app");
             assert_eq!(payload["suites"][0]["cases"][1]["status"], "failed");
 
-            // The durable fact layer (epic tsk12): one `oxplow.test_case` fact
+            // The durable fact layer: one `oxplow.test_case` fact
             // per case, status carried as the `oxplow.status` dim so Count()
             // sliced by status reconstructs the passed/failed headline.
             let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
@@ -5491,7 +5487,7 @@ mod tests {
 
             // Keystone (T-B): the producer test specs re-aggregate these facts to
             // the baked counts through the engine — Count(oxplow.test_case) sliced
-            // by status. The read-flip (tsk26) then serves them from the engine.
+            // by status. The read-flip then serves them from the engine.
             for spec in crate::test_fixtures::foundation_producer_specs() {
                 facts.upsert_spec(spec).await.unwrap();
             }
@@ -5581,7 +5577,7 @@ mod tests {
 
         #[tokio::test]
         async fn record_test_run_stamps_test_case_capture_with_its_turn() {
-            // tsk37: the on-report test producer stamps its fact-capture with
+            // the on-report test producer stamps its fact-capture with
             // the turn the run was made in, so the T-D fact-attribution read
             // (`Members::Turns`) attributes the test facts.
             use oxplow_coverage::{TestCase, TestReport, TestStatus, TestSuite};
@@ -5637,7 +5633,7 @@ mod tests {
 
         #[tokio::test]
         async fn observations_reconstruct_the_panel_shape() {
-            // tsk215: a window's observation rows are reconstructed from the
+            // a window's observation rows are reconstructed from the
             // substrate (its captures + their detail payload).
             use oxplow_coverage::{TestCase, TestReport, TestStatus, TestSuite};
             let h = build(None).await;
@@ -5689,7 +5685,7 @@ mod tests {
                 .is_empty());
         }
 
-        /// tsk1049: a window's runs come oldest first, as `seq` numbers them
+        /// a window's runs come oldest first, as `seq` numbers them
         /// and every reader takes the highest `seq` as the latest. A red run
         /// then a green one reads green last.
         #[tokio::test]
@@ -5740,7 +5736,7 @@ mod tests {
             assert_eq!(failed, vec![1, 0], "the red run, then the green one");
         }
 
-        // ---- metric_deltas (tsk250) -------------------------------
+        // ---- metric_deltas -------------------------------
 
         /// A per-file code-gauge SPEC (category custom → the `File` family) over a
         /// fresh measure, `sum` within a capture (per-file counts total the tree),
@@ -5754,7 +5750,7 @@ mod tests {
         ) -> (i64, oxplow_db::SqliteFactStore) {
             let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
             let measure_key = format!("{key}.m");
-            // Production parity (tsk43): the built-in code gauges seed a
+            // Production parity: the built-in code gauges seed a
             // path-grain measure (`subject_kind: file`) + a `static-quality`
             // spec — the classifier must still route them to the File family
             // (their snapshot-scan captures are never turn-stamped).
@@ -5785,7 +5781,7 @@ mod tests {
         }
 
         /// [`seed_gauge_capture`] against an explicit stream — the cross-worktree
-        /// pollution fixture (tsk43).
+        /// pollution fixture.
         async fn seed_gauge_capture_in_stream(
             facts: &oxplow_db::SqliteFactStore,
             measure_id: i64,
@@ -6184,7 +6180,7 @@ mod tests {
 
         #[tokio::test]
         async fn metric_deltas_ignore_other_streams_captures() {
-            // tsk43: gauge captures are per-worktree scans. A LATER capture from
+            // gauge captures are per-worktree scans. A LATER capture from
             // another stream (same repo-relative path, different worktree content)
             // must not become this window's "current" — the window reads only its
             // own stream's timeline.
@@ -6235,7 +6231,7 @@ mod tests {
 
         #[tokio::test]
         async fn metric_deltas_skip_a_finished_window_with_only_later_captures() {
-            // tsk43: a FINISHED window whose span contains no gauge capture
+            // a FINISHED window whose span contains no gauge capture
             // gets no row — never a later capture's repo changes (the old
             // `.or_else(caps.last())` fallback), and never a fabricated
             // drop-to-zero against an earlier baseline.
@@ -6263,7 +6259,7 @@ mod tests {
 
         #[tokio::test]
         async fn metric_deltas_attribute_analysis_by_own_capture() {
-            // tsk37/T-D: analysis is a run-kind fact attributed by the CAPTURE's
+            // /T-D: analysis is a run-kind fact attributed by the CAPTURE's
             // stamped `turn_id` (set at ingest from the run's tool call), NOT a
             // time window and NOT files. Under two overlapping windows, a
             // capture of turn 1 shows on turn 1's and must NOT pollute the
@@ -6331,7 +6327,7 @@ mod tests {
 
         #[tokio::test]
         async fn metric_deltas_show_analysis_dropping_to_zero() {
-            // tsk44: a CLEAN analysis run writes an EMPTY turn-stamped capture;
+            // a CLEAN analysis run writes an EMPTY turn-stamped capture;
             // the stamped read zero-fills it, so the panel shows "3 → 0" instead
             // of a stuck 3 (or no row) after the agent fixes every lint.
             let h = build(None).await;
@@ -6386,7 +6382,7 @@ mod tests {
 
         #[tokio::test]
         async fn a_clean_only_window_discovers_producers_from_global_history() {
-            // tsk239/tsk242: when the window's ONLY run was clean, its own
+            // when the window's ONLY run was clean, its own
             // captures carry no matching facts, so the producer set that drives
             // the zero-fill has to come from the measure's global history. Two
             // branches serve that now — an unconstrained filter short-circuits
@@ -6489,7 +6485,7 @@ mod tests {
             let start = h.started_at;
             let after = Timestamp::from_unix_ms(start.unix_ms() + 60_000);
             // An operational `sum` flow (tokens): summed over the facts of the
-            // window's OWN captures (`metric_capture.turn_id`, tsk37).
+            // window's OWN captures (`metric_capture.turn_id`).
             let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
             let m = facts
                 .upsert_measure({
@@ -6663,7 +6659,7 @@ mod tests {
             let envelope: serde_json::Value =
                 serde_json::from_str(caps[0].detail_json.as_deref().unwrap()).unwrap();
             assert_eq!(envelope["kind"], "coverage-detail");
-            // tsk270: the stored detail is ABSOLUTE (per-file instrumented/covered
+            // the stored detail is ABSOLUTE (per-file instrumented/covered
             // line-sets + whole-report absPct), not the window-relative diff.
             let payload = envelope["payload"].clone();
             assert!(payload["files"].is_array(), "per-file line-sets kept");
@@ -6746,7 +6742,7 @@ mod tests {
             .unwrap()
         }
 
-        /// tsk863: a test run reads its `on_run: test` collectors, an
+        /// a test run reads its `on_run: test` collectors, an
         /// analyzer run its `on_run: analysis` ones — never the other's.
         #[tokio::test]
         async fn a_run_reads_only_its_on_run_collectors() {
@@ -6775,7 +6771,7 @@ mod tests {
             assert!(analysis.tests().is_none());
         }
 
-        /// tsk863: what a report collector read is its run: a
+        /// what a report collector read is its run: a
         /// `collector_run` row and a `collector.synced`, like any
         /// collector's — caused by the detected run, once per run.
         #[tokio::test]
@@ -6833,7 +6829,7 @@ mod tests {
             assert_eq!(synced[0]["status"], "ok");
         }
 
-        /// tsk863: a program parser reads the report; its output is
+        /// a program parser reads the report; its output is
         /// lower-trust than a built-in parser's.
         #[cfg(unix)]
         #[tokio::test]
@@ -6886,7 +6882,7 @@ mod tests {
             assert_eq!(collector_run(&h, "tests.parse").await.unwrap().0, "ok");
         }
 
-        /// tsk863: a report collector is held to the contribution failure policy
+        /// a report collector is held to the contribution failure policy
         /// (P7.C2): its third failed parse in a row disables it, and a
         /// disabled one reads nothing until a person enables it.
         #[tokio::test]
@@ -6929,7 +6925,7 @@ mod tests {
             ));
         }
 
-        /// tsk863: `oxplow.collector.sync` runs a collector the project declares.
+        /// `oxplow.collector.sync` runs a collector the project declares.
         #[tokio::test]
         async fn an_undeclared_report_collector_is_not_found() {
             let h = build(None).await;
@@ -6956,7 +6952,7 @@ mod tests {
   <class name="Foo" filename="src/foo.rs"><lines><line number="1" hits="3"/></lines></class>
 </classes></package></packages></coverage>"#;
             let h = build(Some(only_line_1)).await;
-            // tsk270: observe records absolute coverage regardless (Stored)…
+            // observe records absolute coverage regardless (Stored)…
             assert!(matches!(
                 sync_coverage(&h).await,
                 CoverageIngest::Stored { .. }
@@ -7037,12 +7033,12 @@ mod tests {
             );
             // A report-LESS run produces no parseable counts, so the substrate
             // records no test sample → the window shows no test-run row
-            // for it (tsk215). The report-less *nudge* is what surfaces the run
+            // for it. The report-less *nudge* is what surfaces the run
             // to the agent; the command-only "ran-record" marker is retired.
             let obs = h.service.observations(&h.window(), Some("test-run")).await;
             assert!(obs.is_empty(), "no substrate row for a report-less run");
             // The fired nudge also records an `oxplow.nudge` event FACT,
-            // subject = the nudge kind (tsk216; the legacy sample is gone, T-E2).
+            // subject = the nudge kind (the legacy sample is gone, T-E2).
             let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
             let measure = facts
                 .get_measure("oxplow.nudge")
@@ -7061,7 +7057,7 @@ mod tests {
 
         #[tokio::test]
         async fn coverage_def_carries_target_thresholds_from_data() {
-            // tsk220: the 50/80 ramp lives on the definition (data), so the
+            // the 50/80 ramp lives on the definition (data), so the
             // renderer colors red/green from it and the nudge fires below target
             // — no hardcoded UI constant.
             let h = build_full(Some(COBERTURA_50PCT), true).await;
@@ -7253,7 +7249,7 @@ mod tests {
             assert!(run().await.is_none(), "once per thread without a request");
         }
 
-        /// tsk893: when the run's reports weren't read because a collector
+        /// when the run's reports weren't read because a collector
         /// failed (or is disabled, or awaits approval), the nudge says so —
         /// not "run the tests again", which the agent just did — and a
         /// coverage collector that didn't run leaves a failed capture.
@@ -7365,7 +7361,7 @@ mod tests {
             assert_eq!(rows[0].trigger.as_deref(), Some("bun test --watch false"));
             assert_eq!(rows[0].request_id.as_deref(), Some("req1"));
 
-            // Dual-written into the durable fact layer (epic tsk12): one fact on
+            // Dual-written into the durable fact layer: one fact on
             // the `oxplow.nudge` event measure so Sum() reconstructs the fired
             // count (the `agent.nudges.fired` spec).
             let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
@@ -7506,7 +7502,7 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            // tsk891: the id is the run's real capture.
+            // the id is the run's real capture.
             let capture = h.service.facts.get_capture(id.unwrap()).await.unwrap();
             assert_eq!(capture.map(|c| c.producer), Some("clippy".to_string()));
             let rows = h
@@ -7579,7 +7575,7 @@ mod tests {
             assert_eq!(envelope["payload"]["errorCount"], 1);
             assert_eq!(envelope["payload"]["warningCount"], 1);
 
-            // The durable fact layer (epic tsk12): one
+            // The durable fact layer: one
             // `oxplow.lint_hit` fact per finding, reported severity/rule/detail
             // in the dedicated columns + the file location on the fact.
             let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
@@ -7610,7 +7606,7 @@ mod tests {
 
         #[tokio::test]
         async fn record_static_analysis_command_only_produces_no_substrate_row() {
-            // tsk215: an analyzer that ran but produced no parseable report has
+            // an analyzer that ran but produced no parseable report has
             // no metric to record, so the substrate has no static-analysis row
             // (the legacy "ran-record" marker is retired — a parseable report is
             // what surfaces analysis now).
@@ -7627,7 +7623,7 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            // tsk891: nothing was recorded, so there's no run to claim.
+            // nothing was recorded, so there's no run to claim.
             assert_eq!(recorded, None);
             let rows = h
                 .service
@@ -7746,7 +7742,7 @@ mod tests {
             // Findings are ABSOLUTE (current-file), not diff-relative like
             // coverage — so a window with no start snapshot must still store
             // (pin = None), matching the passive ride-along. Regression guard
-            // for the dropped baseline gate (tsk86).
+            // for the dropped baseline gate.
             let h = build(None).await;
             let no_base = Window {
                 start_snapshot_id: None,
@@ -7778,8 +7774,7 @@ mod tests {
                 other => panic!("expected Stored with no baseline, got {other:?}"),
             }
             // The observation landed, pinned to a take of the code the
-            // analyzer ran on — not to the window's (missing) start
-            // (tsk937).
+            // analyzer ran on — not to the window's (missing) start.
             let rows = h
                 .service
                 .observations(&no_base, Some("static-analysis"))
@@ -7789,7 +7784,7 @@ mod tests {
             assert_ne!(pinned, h.start_snapshot, "not the window's bracket");
         }
 
-        /// tsk926: an analysis run delivered after its turn ended is that
+        /// an analysis run delivered after its turn ended is that
         /// turn's — the capture is stamped with the turn its event names.
         #[tokio::test]
         async fn a_late_analysis_is_stamped_with_its_events_turn() {
@@ -7841,7 +7836,7 @@ mod tests {
             assert_eq!(stamped, Some(TURN));
         }
 
-        /// tsk927: a report path or a parser entry that a symlink takes
+        /// a report path or a parser entry that a symlink takes
         /// outside the checkout is refused before anything is read — a
         /// repo can't point a collector at a file of the person's.
         #[cfg(unix)]
@@ -7900,7 +7895,7 @@ mod tests {
             );
         }
 
-        /// tsk863: a by-hand run of a collector whose report isn't there
+        /// a by-hand run of a collector whose report isn't there
         /// says so; nothing ran, so nothing is recorded.
         #[tokio::test]
         async fn a_missing_report_is_named() {
@@ -7929,7 +7924,7 @@ mod tests {
         #[tokio::test]
         async fn on_post_tool_use_handles_a_report_less_analysis_command() {
             // A clippy command with no fresh report: the hook runs cleanly and
-            // (no test patterns) returns no nudge. tsk215: a report-less analyzer
+            // (no test patterns) returns no nudge. a report-less analyzer
             // run records no substrate row (a parseable report is what surfaces
             // analysis now).
             let h = build(None).await;

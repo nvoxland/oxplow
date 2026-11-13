@@ -25,7 +25,7 @@ answered, a one-line fix or a command run is not: it needs no task.
 
 ```json
 { "id": "oxtask.task.move",
-  "input": { "id": "<the task's id, tsk12>", "stage": "in_progress" } }
+  "input": { "id": "<the task's id>", "stage": "in_progress" } }
 ```
 
 That also takes it: it's assigned to your thread, and the Work panel shows

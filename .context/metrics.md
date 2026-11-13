@@ -1,6 +1,6 @@
 # Metrics — the unified metric substrate
 
-What this doc covers: oxplow's **metric substrate** (epic tsk213) — one durable,
+What this doc covers: oxplow's **metric substrate** — one durable,
 typed model for any deterministically-computable number tracked over time, the
 successor to the old per-run observation table and (eventually) `code_quality_*`. Coverage,
 tests, clippy findings, token usage — all become *metric definitions* over the
@@ -14,20 +14,20 @@ analysis) are computed from the substrate over the request's window and
 stored per request (`request_observation`, read as `v_request_observation`;
 see "Request attribution" below).
 
-> **✅ Cutover complete (epic tsk12).** The V38
+> **✅ Cutover complete.** The V38
 > `metric_definition`/`metric_run`/`metric_sample`/`metric_finding` cluster and
 > `metric_store.rs` are **gone** (reads flipped in T-C2/T-C3/T-D/T-E1; writes
-> dropped in T-E2; tables dropped in V49, T-E3/tsk50). The fact substrate is
+> dropped in T-E2; tables dropped in V49, T-E3/). The fact substrate is
 > the sole metric store. Sections below that describe V38 mechanics are
 > historical context for why the model looks the way it does.
 
-> **Direction (epic tsk275):** this fact substrate becomes the "facts"
+> **Direction:** this fact substrate becomes the "facts"
 > half of the [semantic layer](./semantic-layer.md), which adds entities,
 > expression/join dimensions and a read-only `v_*` SQL contract. The
 > Metrics pages move into the `oxplow-bundled` extension
 > ([extensions.md](./extensions.md)); the substrate and engine stay core.
 
-## The fact substrate (epic tsk12 — the inversion, in flight)
+## The fact substrate (the inversion, in flight)
 
 **The defect being fixed.** V38 has facts and metrics *inverted*. `metric_sample`
 is labelled "the BI fact grain" but holds *pre-aggregated, per-metric* values
@@ -47,7 +47,7 @@ welded to collection.
 
 ### Schema — `crates/oxplow-db/migrations/V43__metric_facts.sql`, store `crates/oxplow-db/src/fact_store.rs` (`SqliteFactStore`)
 
-> ### ⚠️ Two axes, not one: `temporal_semantics` × `capture_scope` (V54, tsk41)
+> ### ⚠️ Two axes, not one: `temporal_semantics` × `capture_scope` (V54)
 >
 > **`temporal_semantics`** says how values combine OVER TIME.
 > **`capture_scope`** says how much of the population ONE capture speaks for.
@@ -59,7 +59,7 @@ welded to collection.
 > - `capture_scope = per-path` — a capture restates **only the paths in its
 >   snapshot**. This is what a **tree-scanning fact collector** does: after the initial full index,
 >   every snapshot is a per-commit **delta** (5–19 files).
-> - `capture_scope = per-subject` (V55, tsk43) — a capture restates **only the
+> - `capture_scope = per-subject` (V55) — a capture restates **only the
 >   subjects it emitted facts for**. `oxplow.test_case`: a **partial** run
 >   (`bun test src/foo.test.ts`) holds just those cases, so read as `complete` the
 >   metric would report *"the repo has 4 tests"* and lose every failure elsewhere.
@@ -77,7 +77,7 @@ welded to collection.
 > facts from the **latest capture of that producer that scanned that path**
 > (`SqliteFactStore::latest_tree_facts`; per-capture trend via
 > `metric_engine::tree_state_series`). What a capture "scanned" is its
-> **`metric_capture.scan_kind`** (V58, tsk71):
+> **`metric_capture.scan_kind`** (V58):
 > - **`delta`** (default) — the capture's own snapshot `file_snapshot` rows: the
 >   ordinary incremental rescan of just-changed files.
 > - **`full`** — the **reconstructed tree as-of its snapshot** (`tree_at`'s
@@ -102,13 +102,13 @@ welded to collection.
 > - partitioning by **producer** matters: the 10 idiom collectors share
 >   `oxplow.ast_hit` (sliced by `rule`), so without it a later collector's capture would
 >   supersede an earlier collector's facts for the same path.
-> - partitioning by **stream** matters for the same reason (tsk98): a stream is a
+> - partitioning by **stream** matters for the same reason: a stream is a
 >   **worktree**, and the fold reconstructs *one worktree's tree*. Two worktrees
 >   running the same collector share `(producer, path)` keys, so a stream-blind state
 >   lets one worktree's capture evict the other's paths — yielding a point that is
 >   whichever worktree wrote last, per path, and belongs to neither. The state is
 >   therefore keyed **`stream → (producer, path)`**, matching the scoping the fact
->   fetch (tsk75) and the rollup (tsk46) already apply.
+> fetch and the rollup already apply.
 >
 > **An unscoped (`stream = None`) read is a UNION, not a merge.** It replays every
 > stream's captures into one timeline, but each point is still exactly one
@@ -120,7 +120,7 @@ welded to collection.
 > `zero_fill` is **suppressed** for `per-path`: an empty delta capture restated no
 > paths, so it means "nothing changed", not "the repo is zero".
 >
-> **Baseline (tsk71 — no fabricated snapshot).** A snapshot collector's repo-wide total needs it
+> **Baseline (no fabricated snapshot).** A snapshot collector's repo-wide total needs it
 > to have restated the whole tree once — that's a **`scan_kind='full'` capture over
 > the reconstructed tree of an ordinary snapshot** (corpus via
 > `SqliteSnapshotStore::list_tree_files_at` → `build_full_file_map`), NOT a
@@ -139,7 +139,7 @@ welded to collection.
 > pending edits into a NORMAL snapshot (real authored work, correctly attributed;
 > none dirty ⇒ **no snapshot is created**, it anchors to the latest existing one),
 > then runs the sweep. **Boot, the `oxplow.metric.rebuild` command, and the end-to-end
-> tests all call it** (tsk50) — see
+> tests all call it** — see
 > `rebuild_does_not_fabricate_a_snapshot_on_a_clean_tree`. **Not** needed on a
 > branch switch — checkout rewrites the differing files, the watcher marks them
 > dirty, and the delta rescans exactly those paths.
@@ -162,7 +162,7 @@ welded to collection.
 > baseline survive, asserted/failed captures survive, and so does a producer
 > with no per-path fact anywhere — a whole-tree restate of a complete-scope
 > measure (`oxplow.duplicate_lines`, empty on a clean tree) is history, not a
-> baseline (tsk709; before that rule each commit pruned the previous empty
+> baseline (before that rule each commit pruned the previous empty
 > restate and wiped the stream's cube). The post-sweep prune runs only when
 > the sweep baselined a `needing` collector. Accepted trade-off: a
 > per-path measure's TREND loses pre-baseline points; the current fold and every
@@ -174,7 +174,7 @@ welded to collection.
 > `MetricSamplesChanged` every ~10s while an agent runs).
 >
 > **Every `metricSamplesChanged` listener needs a bound on how often it
-> reloads — it bit twice (tsk91); today that is the measure scope plus
+> reloads — it bit twice; today that is the measure scope plus
 > single-flight below.** `RecordedMetricsPage` + `MetricsExplorerPage` reloaded un-debounced,
 > so oxplow burned **~20 CPU-seconds per agent tool call** (bursting to ~500% /
 > ~200 threads, profiled straight to `row_to_fact_row`): a reload is one
@@ -182,10 +182,10 @@ welded to collection.
 > reads, and **each walks its measure's whole history** — `oxplow.test_case` is
 > ~235k facts (+~5k per `test:collect`) and yields ~118 points, one per capture.
 >
-> **The full mitigation stack (tsk191 idle-CPU profile → tsk196/197/198).** The
+> **The full mitigation stack (idle-CPU profile →).** The
 > ~10s OTLP token tick was still spiking to 400%+ while "idle". Three composing
 > fixes, cheapest read to root cause:
-> - **Reads-based refresh** (P4.7, replacing tsk197's `subscribeMetricRefresh`).
+> - **Reads-based refresh** (P4.7, replacing the `subscribeMetricRefresh`).
 >   Each metric reader in `api.ts` returns its rows with the query's `reads`,
 >   and every metric view (`MetricTile`, the Metric page, the Metrics page,
 >   the dashboard's spec and catalog load) re-runs through
@@ -194,13 +194,13 @@ welded to collection.
 >   `datasetsChanged` for `v_metric_catalog` / `v_metric_spec`. The Metrics
 >   page reads every metric's points in one live dataset, `v_metric_point`,
 >   which follows `MetricSamplesChanged` (below).
-> - **Cube read cache** (`cube_rows_for_measure`, tsk196). The read is memoized on
+> - **Cube read cache** (`cube_rows_for_measure`). The read is memoized on
 >   a new **`metric_cube_epoch.version`** counter — distinct from the `epoch`
 >   fence below, which deliberately does NOT move on a fold. `version` is bumped
 >   by AFTER INSERT/UPDATE/DELETE **triggers** on `metric_cube` (so FK cascades
 >   count too), giving exact, staleness-free invalidation. Collapses N-tiles →
 >   1 read per event.
-> - **Measure-scoped event** (tsk198). `MetricSamplesChanged` now carries
+> - **Measure-scoped event**. `MetricSamplesChanged` now carries
 >   `measures: Vec<String>` (the keys the write touched). A consumer that declares
 >   its own `source_measure` skips an event whose measures it doesn't read — so a
 >   token export stops waking a coverage tile. **Fail-open both ways:** an empty
@@ -211,14 +211,14 @@ welded to collection.
 >   site emits it, so none can forget or misname it (a source-tree test holds
 >   that). A capture with no facts is announced with no measures — correctly
 >   fail-open, since a capture with no facts can still move a series (supersede /
->   zero-fill, tsk41/tsk44) in ways the facts can't reveal.
+> zero-fill) in ways the facts can't reveal.
 >
 > **Before optimizing anything in this path, read
 > [performance.md](./performance.md)** — it has the profiling harness (which
 > doubles as the correctness gate), two samply traps that silently produce a
 > wrong ranking, what is already optimized, and what measurement has ruled out.
 >
-> **Bounded reads — Phase 1 (tsk202/tsk204).** The read shape is now windowable.
+> **Bounded reads — Phase 1.** The read shape is now windowable.
 > the series reads take a time window (today `metric_grid` over a range), and
 > a `TimeWindow` threads through `series[_for_spec]_in_stream` → `cube_series`.
 > **The cube windows safely for EVERY scope** — each cube row already carries its
@@ -230,7 +230,7 @@ welded to collection.
 > history, then switches among narrower presets client-side (`filterByRange`) with
 > no re-fetch. `apply_window` is the exact old client filter, moved server-side.
 >
-> **Phase 2 (tsk205) — memoizing the FACT-FALLBACK fold.** `oxplow.high_complexity_fns`
+> **Phase 2 — memoizing the FACT-FALLBACK fold.** `oxplow.high_complexity_fns`
 > / `oxplow.long_functions` (and any per-path/per-subject measure sliced off the
 > cube) **bypass the cube** — their `min_value` threshold filters each fact's own
 > value, which the cube summed away — and replay the whole history via
@@ -242,7 +242,7 @@ welded to collection.
 > ⚠️ **The freshness token is CAPTURE-scoped, not fact-scoped — this is the whole
 > subtlety.** The first cut keyed on `MAX(fact.capture_id)` for the measure and was
 > wrong: a rescan that finds a file clean emits **no fact** and supersedes the old
-> count with 0 (tsk41/tsk44), so the fact max never moves while the series changes.
+> count with 0, so the fact max never moves while the series changes.
 > `rescanning_a_fixed_file_supersedes_its_facts_and_drops_the_metric_to_zero` caught
 > it. `capture_token_for_producers` counts the measure's producers' captures
 > (`COUNT` + `MAX`, so a delete registers too), which sees empty captures — and
@@ -255,7 +255,7 @@ welded to collection.
 > folds. Eliminating that needs per-capture points materialized during the cube
 > build (which already holds the live partition) — re-measured in P12
 > (performance.md, "Bounded series reads, re-measured"): three threshold counts,
-> ~0.5–0.7 s each, are what's left (tsk1019).
+> ~0.5–0.7 s each, are what's left.
 >
 > **Fact collectors must be able to FINISH a whole-tree scan, and a failure must be seen.**
 > The script `Budget` (`oxplow_domain::run`) default (5s) is sized for a report parser over one file. A tree
@@ -264,16 +264,16 @@ welded to collection.
 > timed out on every full-tree run and wrote **nothing** — `oxplow.ts.console_calls`
 > and `oxplow.ts.ts_ignore` had produced **zero facts since the project was indexed**,
 > against a repo with 137 console calls, and the only trace was a `tracing::warn`
-> (tsk47). A failing collector now records a **`status='failed'` capture** (with the
+>. A failing collector now records a **`status='failed'` capture** (with the
 > error and the fingerprint), and a whole-tree sweep is a tracked
 > `BackgroundTaskKind::Metrics` task with per-collector progress that **fails** if any
-> collector failed (tsk48) — so "why is oxplow pegging a core" and "is this metric
+> collector failed — so "why is oxplow pegging a core" and "is this metric
 > trustworthy" both have answers.
 >
 > ⚠️ **Non-`done` captures are invisible to every fold** (`c.status = 'done'` in
 > `latest_tree_facts` / `latest_subject_facts` / `scanned_paths_for_captures`, AND in
 > `captures_for_producers` — the in-memory fold's and the cube build's capture
-> source; the tsk103 review found the latter unfiltered, so the claim used to be
+> source; the review found the latter unfiltered, so the claim used to be
 > false for those two). This is load-bearing: a failure capture carries **no
 > facts**, and on a full-tree snapshot it restates *every path* — so if the fold
 > counted it, one timeout would supersede everything and silently zero the
@@ -287,11 +287,11 @@ welded to collection.
 > `metric_capture.producer_version`, V56; its `v1` material is exactly what the
 > pre-P7.B3 gauges hashed, so a migrated gauge keeps its baseline). That single check
 > covers BOTH a fresh/never-baselined collector (incl. one stuck on deltas because its
-> full scan used to time out, tsk47/tsk49) AND a script change since the last
-> baseline (a full capture at stale logic carries the old fingerprint, tsk45). An
+> full scan used to time out) AND a script change since the last
+> baseline (a full capture at stale logic carries the old fingerprint). An
 > unfingerprintable script matches any-version — one full capture ever.
 >
-> **Per-COLLECTOR, not per-measure, is load-bearing (tsk49).** `oxplow.ast_hit` is one
+> **Per-COLLECTOR, not per-measure, is load-bearing.** `oxplow.ast_hit` is one
 > measure shared by 10 idiom collectors (sliced by `rule`), so "does the measure have
 > facts" says nothing about one collector — a delta-only collector looks done because a
 > *sibling* filled the measure. That is exactly how `oxplow.ts.console_calls` read
@@ -302,7 +302,7 @@ welded to collection.
 > **(2) is not optional either.** A collector's facts are only as good as the code that
 > computed them, so a script change makes them stale but *not* empty. Without the
 > fingerprint a metric fix **silently no-ops** — you correct the query, the number
-> doesn't move, nothing says why (tsk44→tsk45: teaching `repo_allow.star` to match
+> doesn't move, nothing says why (→: teaching `repo_allow.star` to match
 > inner `#![allow(...)]` changed nothing until the captures were hand-deleted).
 > Re-baselining restates every path, so the fold supersedes the stale facts — no
 > deletes, history preserved.
@@ -323,14 +323,14 @@ welded to collection.
   replaces the last — V47/tsk42 fixed test_case/lint_hit from V43's wrong
   `additive`); a **level ratio** whose every capture restates the value
   (coverage) is *also* semi-additive — the headline is the latest capture's
-  Σn/Σd, not a history blend (V50/tsk13 fixed coverage from V43's wrong
+  Σn/Σd, not a history blend (V50/ fixed coverage from V43's wrong
   `non-additive`); only an **accumulating** mean-across-observations ratio
   (one observation per capture, Σ over all captures = the mean) is
   `non-additive`; a request's figures are non-additive too — one placed,
   replacing capture per request, see "Placed, replacing captures"), `fold` (`sum` | `last` | `first` | `avg` |
   `none`, V116 — how the series becomes one number; see "Additivity"),
   `scope`, `description`. (Ratio components ride each fact's num/den; the
-  dead V43 `component_role` column is dropped in place by V159, tsk865 —
+  dead V43 `component_role` column is dropped in place by V159 —
   `ALTER TABLE … DROP COLUMN` rewrites the table without a rebuild, so the
   `fact→measure` CASCADE never fires.)
   oxplow's own measures (below) are declared in **oxplow-foundation**'s
@@ -338,10 +338,10 @@ welded to collection.
   seeded rows and restated their scope): `oxplow.complexity`, `oxplow.fn_length`,
   `oxplow.parameter_count`, `oxplow.todo`, `oxplow.coverage`, `oxplow.test_case`,
   `oxplow.lint_hit`, `oxplow.duplicate_lines`, `oxplow.tokens` (V43), plus `oxplow.coverage.branch` +
-  `oxplow.coverage.function` (V68, tsk123 — per-file branch/function coverage
+  `oxplow.coverage.function` (V68, per-file branch/function coverage
   ratios beside line coverage), plus `oxplow.ast_hit` (V45 — a per-file AST idiom
   occurrence; the per-language idiom collectors record facts on it, distinguished by the
-  `oxplow.rule` dim; see "Per-language idiom collectors", tsk30), plus
+  `oxplow.rule` dim; see "Per-language idiom collectors"), plus
   the four per-request measures `oxplow.request_tokens`,
   `oxplow.request_cycle_time`, `oxplow.request_test_outcome` and
   `oxplow.request_time_to_green` (subject kind `request`, `non-additive`,
@@ -361,13 +361,13 @@ welded to collection.
   (V45 — the lint/idiom name; the engine reads it off the fact's `rule` column),
   `oxplow.tests_stat` (V53 — which per-request test-outcome scalar an
   `oxplow.request_test_outcome` fact is: `at_close`/`peak`/`distinct_failed`/
-  `red_runs`, tsk38).
+  `red_runs`).
   **Declare-to-collect**
-  (planned, tsk17): a fact may only be emitted on defined measures/dimensions;
+  (planned): a fact may only be emitted on defined measures/dimensions;
   historical facts carrying a now-undefined dim are kept but hidden as a slice
   axis (the axis list is catalog-driven).
 - ~~**`subject`** — the subject hierarchy (file→package→repo) for roll-ups.~~
-  **Dropped in V52 (tsk15)** — never got an INSERT/SELECT; the rollup reads
+  **Dropped in V52 ** — never got an INSERT/SELECT; the rollup reads
   package-from-path off the fact directly.
 - **`metric_capture`** (the renamed/generalized `metric_run`) — the **one context
   row**: it holds ALL the "when/where/who/trust" metadata so it isn't duplicated
@@ -380,7 +380,7 @@ welded to collection.
   through it);
   trust `provenance`/`source`. **Captures are durable by default** (they carry
   the facts' context — no independent sweep). The one opt-in exception is
-  `metricRetentionDays` (tsk93, **default 0 = keep everything**): when set, a
+  `metricRetentionDays` (**default 0 = keep everything**): when set, a
   daily pass (`prune_aged_captures`) deletes captures older than the window
   that no current value stands on — turn-stamped captures, each producer's
   newest, and any capture owning a fold-live fact are always kept, the
@@ -389,7 +389,7 @@ welded to collection.
   window is gone. Turning the knob is watching-and-deciding territory, not a
   default.
   >
-  > **Detail COMPACTION is the on-by-default sibling (tsk211).** Distinct from
+  > **Detail COMPACTION is the on-by-default sibling.** Distinct from
   > the prune above: `compact_capture_details` only NULLs `metric_capture.
   > detail_json` — the verbatim per-run payload behind the request's
   > Tests/Coverage view. The capture row and every fact survive, so no metric
@@ -417,14 +417,14 @@ welded to collection.
   > same daily `boot.rs` loop as the prune, but independently of it — the loop
   > used to be gated on `metricRetentionDays > 0`, which would have disabled
   > compaction for everyone.
-  > **Stamp `closest_vcs_rev` on every capture you add (tsk95).** Use
+  > **Stamp `closest_vcs_rev` on every capture you add.** Use
   > `file_ref_version::resolve(store, dir, snap)`: a snapshot with its own commit
   > reads `vcs_rev_exact = true`, otherwise it falls back to HEAD with
   > `exact = false`. **Dirty is the normal case** (the agent edits, then runs
   > tests), which is exactly what the `closest_vcs_rev` +
   > `vcs_rev_exact` pair is for — don't add a third field.
   >
-  > **But commit ancestry alone cannot place a dirty run (tsk97, verified).** A
+  > **But commit ancestry alone cannot place a dirty run (verified).** A
   > dirty run on a feature branch stamps the *fork-point* commit — which is on
   > main — so "visible iff ancestor-or-equal" keeps the branch's results visible
   > from main: the exact cross-contamination it was meant to prevent. Hence the
@@ -508,11 +508,11 @@ welded to collection.
   `fact_line` rows go. The live history was rewritten into holds once, by
   hand, when V43 landed.
 - **`metric_cube`** + **`metric_live_fact`** + **`metric_cube_state`**
-  (`V62__metric_cube.sql`, tsk96; live state + watermark re-keyed per **branch**
-  by `V63__branch_aware_cube.sql`, tsk97) — the **aggregate cube**: the
+  (`V62__metric_cube.sql`; live state + watermark re-keyed per **branch**
+  by `V63__branch_aware_cube.sql`) — the **aggregate cube**: the
   materialized fold. See the box below.
 
-> ### ⚠️ The cube is an accelerator, NEVER a replacement for the facts (V62, tsk96)
+> ### ⚠️ The cube is an accelerator, NEVER a replacement for the facts (V62)
 >
 > **Why it exists.** For a partial-scope measure the read is a stateful replay, so
 > one sparkline over `oxplow.test_case` decoded 240k facts to emit 125 points —
@@ -540,7 +540,7 @@ welded to collection.
 >   `oxplow.coverage.untested_files` 0) filter on a fact's OWN value, which
 >   the cube summed away. The bounds the measure's specs use ARE in the grain
 >   (below), so those specs are served; any other bound is read from facts.
-> **Value bounds are part of the grain (tsk1019).** A bucket is the facts that
+> **Value bounds are part of the grain.** A bucket is the facts that
 > agree on the promoted dims *and on whether they pass each bound a spec of the
 > measure uses*: `dims_key` carries `"value>=11":"1"` / `"0"` per bound
 > (`ValueBound`, `metric_cube.rs`), computed with the test `FactFilter::matches`
@@ -578,7 +578,7 @@ welded to collection.
 > live state is correct for every aggregation by construction, and it is what
 > turns a replay into an increment.
 >
-> **The live state is partitioned per `(stream, BRANCH)`** (V63, tsk97),
+> **The live state is partitioned per `(stream, BRANCH)`** (V63),
 > mirroring the fact fold (50fd1760): a capture evicts/inserts only within its
 > own branch's partition — else a feature branch's failure lands on a point
 > labelled `main` whenever main didn't re-run that test — and a branch's FIRST
@@ -591,24 +591,24 @@ welded to collection.
 > both halves — it began life as the decline guard that refused multi-branch
 > reads while the build lagged the fold, and was FLIPPED, not deleted.
 >
-> **"Visible to it" is the ancestry rule** (tsk102, `metric_visibility.rs` —
+> **"Visible to it" is the ancestry rule** (`metric_visibility.rs` —
 > read `Visibility`'s type docs in `metric_engine.rs` for the rule itself):
 > same branch always sees; cross-branch, C is visible from R iff C's
 > **absorbing commit** (`effective_commit` — the first same-stream, same-branch
 > commit-stamped snapshot at-or-after C; an exact capture is its own anchor) is
-> an ancestor-or-equal of R's **base** (`closest_vcs_rev` — tsk95's stamp
+> an ancestor-or-equal of R's **base** (`closest_vcs_rev` — the stamp
 > IS the base, which is why capture-level stamping stays). Three load-bearing
 > properties, each pinned by test:
 > - **Never anchor a dirty run to its fork point** — `closest_vcs_rev` is
 >   an ancestor of everything, so ancestry over it cannot separate branches
->   (tsk97's disproof). The anchor is the commit that ABSORBED the work.
+> (the disproof). The anchor is the commit that ABSORBED the work.
 > - **As-of-R with the absorbing COMMIT's own timestamp**: work not yet
 >   absorbed when R ran reads visible, permanently — which makes every
 >   resolved `(C, R)` answer IMMUTABLE (new commits only affect future
 >   readers), so the cube's frozen seeds can never diverge from a fresh
 >   fact-path read and no invalidate-on-commit machinery exists or is needed.
 > - **Unresolvable ⇒ visible** (missing branch/stamp/sha, unreadable repo) —
->   never invent strictness from missing data; degraded = pre-tsk102 blind.
+> never invent strictness from missing data; degraded = earlier blind.
 >
 > **One `VisibilityResolver` instance feeds every fold** — the engine's fact
 > fold and the cube's seed share `AppState.metric_visibility`, and
@@ -628,7 +628,7 @@ welded to collection.
 > vs N not cubed yet (fall back). Conflating those is how a materialized read
 > reports 0 instead of admitting it doesn't know. It also makes the build
 > **crash-safe**: the cube is written outside the fact-insert transaction, and
-> since tsk113 the build folds captures in CHUNKS — the in-memory fold's
+> since the build folds captures in CHUNKS — the in-memory fold's
 > evict/insert per capture, one `apply_build_batch` transaction per ~256
 > captures (the profile showed ~10k per-capture transactions rewriting the
 > same hot WAL pages; batching halved the backfill). A torn chunk lands
@@ -645,10 +645,10 @@ welded to collection.
 > the seed is a transactional replace.
 >
 > **Anything that changes what a replay would compute must invalidate the cube**
-> — the tsk100 rule, generalized by the tsk103 review from "anything that deletes
+> — the rule, generalized by the review from "anything that deletes
 > captures or facts". Three invalidators exist, each change-detected and each in
 > the SAME transaction as its change:
-> - **`prune_dominated_tree_captures`** (tsk100) — facts cascade and
+> - **`prune_dominated_tree_captures`** — facts cascade and
 >   `metric_live_fact` self-heals (FK), but `metric_cube` rows are frozen at
 >   build time and don't. Only when it actually dropped something —
 >   `rebuild_metric_baseline` prunes on every boot, and unconditional
@@ -668,7 +668,7 @@ welded to collection.
 > wipe deleted ("covered but rowless" would serve explicit 0s). A fenced pass
 > costs one re-fold; a fenced write costs nothing. Slow, never wrong.
 >
-> **Don't confuse `epoch` with `version` (V72, tsk196).** The same singleton row
+> **Don't confuse `epoch` with `version` (V72).** The same singleton row
 > also carries a `version` counter, but it is a DIFFERENT tool. `epoch` fences
 > WRITERS and moves only on wipes — a fold reads it and must NOT bump it, or
 > concurrent folds would abort each other. `version` invalidates the
@@ -678,7 +678,7 @@ welded to collection.
 > cache serves pre-fold rows forever. Two counters, opposite jobs.
 >
 > The fold's third input — the `file_snapshot` rows the per-path restated
-> sets are derived from — is **durable by construction** since tsk105:
+> sets are derived from — is **durable by construction** since:
 > Local History retention expires only blob CONTENT, never the rows, so
 > replay inputs cannot rot out from under durable captures and no
 > invalidation is needed for retention. See the data-model doc's Retention
@@ -690,9 +690,9 @@ welded to collection.
 > the JOIN and within-request deltas keep working. Branch/thread/stream remain
 > **dimensions you can group by, never partitions that hide rows**.
 >
-> **`dimension.promoted` = the cube's grain** (tsk28's flag, inert until V62).
+> **`dimension.promoted` = the cube's grain** (the flag, inert until V62).
 > Promoted: `oxplow.status` (V62 — cardinality 2, what `tests.passed`/`.failed`
-> filter on) and, since V64 (tsk101), the four filter dims the declining specs
+> filter on) and, since V64, the four filter dims the declining specs
 > needed — `oxplow.rule` (13), `oxplow.token_kind` (4), `oxplow.tests_stat` (4),
 > `oxplow.severity` (1). Measured grain cost of all five: ~1.4× rows.
 > `oxplow.test_suite` stays unpromoted (cardinality 234 ⇒ 18,918 rows, for
@@ -715,12 +715,12 @@ welded to collection.
 > runs outside `record_facts`' transaction (safe: see the watermark, above).
 >
 > - **`MetricCubeBuilder::build_measure`** — dispatches on scope to **two build
->   rules, deliberately not merged** (tsk99):
+> rules, deliberately not merged**:
 >   - **partial** (`build_stream`) — folds captures after the watermark in
 >     chunks: seed a new branch's partition → load each touched partition
 >     ONCE → evict/insert in memory per capture → re-aggregate the **whole
 >     live partition** into that capture's rows → flush the chunk as one
->     transaction (tsk113).
+> transaction.
 >   - **complete** (`build_stream_complete`) — a GROUP BY over the capture's **own**
 >     facts. No `metric_live_fact`, no eviction, no reach-back: every capture
 >     restates the whole population, so `state[N] = facts(N)`.
@@ -743,7 +743,7 @@ welded to collection.
 >   zero); an **empty complete** capture emits **nothing** and is left to
 >   `splice_zero_points`, because `aggregate_series` only ever emitted points for
 >   captures that had matching facts. Complete scope then applies
->   `splice_zero_points` — the **same function** the fact path calls (tsk44), not a
+> `splice_zero_points` — the **same function** the fact path calls, not a
 >   copy. Partial deliberately skips it: an empty partial capture restated nothing,
 >   so it means "nothing changed", not "the repo is zero".
 > - **An asset** (P7.B1, `assets.rs`): the builder is a `Materializer` over
@@ -754,22 +754,22 @@ welded to collection.
 >   Failures are logged, never propagated.
 >
 > **Measured on the real DB (512k facts).** The 5 test specs: **9.26s → 70ms
-> (~131×)**. All **68** specs (both scopes, after tsk99): **11.53s → 1.03s**, with
+> (~131×)**. All **68** specs (both scopes, after): **11.53s → 1.03s**, with
 > **zero divergence** from the fact path on any of them. Backfill ~25s once, in the
 > background. *That 9.26s every ~10s was the CPU burn.* Re-verified after the
-> branch-aware build (tsk97, 590k facts, a genuinely two-branch capture history):
+> branch-aware build (590k facts, a genuinely two-branch capture history):
 > all 68 identical again, **3.74s → 334ms**, 42/68 served; and after V64's dim
-> promotion (tsk101): all 68 identical, **4.07s → 446ms**, 58/68 served. The
+> promotion: all 68 identical, **4.07s → 446ms**, 58/68 served. The
 > harness is `examples/cube_equivalence.rs` — run it against a **fresh `VACUUM
 > INTO` copy** (never the live file, never a copy that's already been built: the
 > oracle must be fact-served, or it's the cube confirming itself).
 >
 > **58 of 68 specs are cube-served** (42 before V64 promoted the four filter
-> dims — tsk101). The 10 that decline are all expected classes: 2 `min_value`
+> dims). The 10 that decline are all expected classes: 2 `min_value`
 > thresholds (permanent, by design) and 8 whose measure or filter matches **no
 > facts yet** (clean collectors, zero `severity=warning` rows) — those cube
 > automatically the moment matching facts exist, and declining them is correct:
-> the fact path owns empty-producer seeding (tsk62). Verify a decline is one of
+> the fact path owns empty-producer seeding. Verify a decline is one of
 > these classes before assuming the cube is working.
 >
 > **The equivalence gate.** Tests take the fact-served oracle **before** the build
@@ -779,7 +779,7 @@ welded to collection.
 > vacuously. Both properties were verified by mutation (bucket the capture's own
 > facts instead of live state → reads 10 where the fold reads 11; force `None` →
 > three tests fail rather than pass green).
-- **`metric_spec`** (`V44__metric_spec.sql`, tsk29) — the **metric-as-a-spec**
+- **`metric_spec`** (`V44__metric_spec.sql`) — the **metric-as-a-spec**
   catalog (the third catalog beside measure + dimension). A metric is NOT a stored
   sample stream (V38's `metric_definition` *owned* `metric_sample` rows); it is a
   **spec computed over facts at read time**: `key` (`oxplow.*` reserved), `title`,
@@ -800,13 +800,13 @@ welded to collection.
   `test`|`coverage`|`event` — read-time only; severity/threshold-state are DERIVED
   from `value` × these, never stored on a fact), `scope`/`category`/`language`.
   **Additive** beside the old `metric_definition` (still FK-referenced by the V38
-  `metric_sample`/`metric_finding`); the retire migration (tsk20) drops the V38
-  cluster once reads flip (tsk26). The migration seeds no rows; the code-metric
+  `metric_sample`/`metric_finding`); the retire migration drops the V38
+  cluster once reads flip. The migration seeds no rows; the code-metric
   specs come from oxplow-foundation's `metrics:` (`oxplow.high_complexity_fns` /
   `long_functions` / `fn_count` / `todos` — a `count` over its measure,
   thresholds via `min_value` — and the per-language idiom specs such as
   `oxplow.rust.unsafe_blocks`, a `Sum(oxplow.ast_hit)` filtered by
-  `dim_eq(oxplow.rule, …)`). Config/global spec seeding lands with the read-flip (tsk26).
+  `dim_eq(oxplow.rule, …)`). Config/global spec seeding lands with the read-flip.
 
 `SqliteFactStore` API: `upsert_measure`/`get_measure`/`list_measures`,
 `upsert_dimension`/`list_dimensions`, `upsert_spec`/`get_spec`/`list_specs`,
@@ -814,7 +814,7 @@ welded to collection.
 backfills `capture_id` into every fact, commits together; **idempotent** when
 the capture carries an `idempotency_key` — a second write with the same key is a
 no-op that returns the existing id, so a replayed report never double-counts,
-tsk14/V51. `metric_capture.idempotency_key` is nullable with a partial unique
+/V51. `metric_capture.idempotency_key` is nullable with a partial unique
 index; the report ingests set it via `CollectionService::ingest_idempotency_key`
 = hash(producer + git version + snapshot + verbatim payload). Keyless captures —
 fact collectors, tokens, lifecycle — always insert fresh), `get_capture`,
@@ -835,22 +835,22 @@ NOT a store method — it lives in `metric_engine::aggregate_facts`.
   as its ratio components so the non-additive collapse (Σn/Σd) yields the mean
   across ALL facts — the V47 mean-across-requests measures (request
   cycle time) would otherwise collapse to a den=0 → 0.0 headline; `compute_rollup(facts, dimension, temporal,
-  current_caps)` → `RollupRow`s (deleted in tsk516 — slices are `metric_grid(…, dim)`), additivity-aware like `range_value` (tsk41) and
-  scoped to the CURRENT captures (tsk44): semi-additive → only facts in the
+  current_caps)` → `RollupRow`s (deleted in slices are `metric_grid(…, dim)`), additivity-aware like `range_value` and
+  scoped to the CURRENT captures: semi-additive → only facts in the
   latest capture per (stream, producer) (`current_capture_ids` — else a deleted
   file's stale last fact haunts the breakdown forever) — summed per
   dim value — **unless** the facts carry ratio components (a level
-  ratio like coverage, tsk13), in which case the per-group value is Σn/Σd, never
+  ratio like coverage), in which case the per-group value is Σn/Σd, never
   a sum of per-file percentages; additive → EVERY fact counts (tokens by model
   is a running total, not the last turn); non-additive → current captures,
   per-group Σnumerator/Σdenominator, never a naive
   sum/average of percentages.
 
-  **Currency is `current_capture_ids` alone — there is NO per-subject dedupe**
-  (tsk157). That set admits at most one capture per `(stream, producer)`, so
+  **Currency is `current_capture_ids` alone — there is NO per-subject dedupe**.
+  That set admits at most one capture per `(stream, producer)`, so
   every fact surviving the filter is from that partition's newest scan, and
   distinct partitions UNION (worktree B never evicts worktree A; one analyzer
-  never evicts another for the same path — the tsk98/tsk106 forbidden shape).
+  never evicts another for the same path — the forbidden shape).
   A `latest per (stream, producer, subject)` map on top of that was a no-op for
   tree-scan measures and silently wrong for occurrence-grained ones:
   `oxplow.lint_hit` and `oxplow.todo` emit one fact PER HIT with the containing
@@ -858,7 +858,7 @@ NOT a store method — it lives in `metric_engine::aggregate_facts`.
   counted hits. The rule is uniform: **any** group whose facts
   have Σden≠0 collapses to Σn/Σd regardless of temporal class.
 
-  **Point-in-time reads describe the headline's own state** (tsk106). For a
+  **Point-in-time reads describe the headline's own state**. For a
   partial-scope measure, `scoped_facts` serves each stream's newest capture's
   `(stream, BRANCH)` partition from the cube's live state
   (`partial_state_facts` → `live_facts`) — visibility-seeded and
@@ -866,23 +866,23 @@ NOT a store method — it lives in `metric_engine::aggregate_facts`.
   so the breakdown/drill-in can never disagree with the headline
   (`a_breakdowns_state_matches_the_branch_aware_headline` pins it). A stream
   the cube hasn't caught up with falls back to the branch-blind SQL folds
-  (`latest_subject_facts`/`latest_tree_facts`) — the pre-tsk106 approximation,
+  (`latest_subject_facts`/`latest_tree_facts`) — the earlier approximation,
   held only while the cube lags. Unscoped reads UNION each stream's own
   current partition (per-worktree states, never merged within a subject);
   note the unscoped *headline* is narrower — the single newest worktree's
   value — a known asymmetry only visible with multiple active worktrees. `dim_value` reads the `severity`/`rule` columns and
   `package`-from-path directly, else `dims_json[key]`. **A dimension has
-  one name, its namespaced key** (tsk945, V166): there are no bare aliases
+  one name, its namespaced key** (V166): there are no bare aliases
   (`language`, `package`, `branch`, `model`); the fact ingest
   (`record_facts_tx` → `check_dims_tx`) refuses a fact whose `dims_json`
   carries an un-namespaced key, naming the conformed `oxplow.<key>` when
   the catalog declares it. A fact collector asks first
-  (`SqliteFactStore::refused_dims`, tsk986): a run whose facts would be
+  (`SqliteFactStore::refused_dims`): a run whose facts would be
   refused is a **failed run** — its `collector_run` row and a failed
   capture say why, health counts it, a `oxplow.collector.sync` errors — never a
   capture rolled back behind a run reported as recorded. The engine
   refuses a bare key to slice or filter by (`series_in_stream` →
-  `bare_dimension`, tsk989), naming the conformed one — a bare key would
+  `bare_dimension`), naming the conformed one — a bare key would
   read nothing, an empty slice that looks like no data — and the built-in
   metrics declare only conformed keys. A namespaced key a `dimensions:` entry
   doesn't declare is not refused: it is recorded and slices like a declared
@@ -897,21 +897,21 @@ NOT a store method — it lives in `metric_engine::aggregate_facts`.
 - Async wrappers `MetricEngine::series(measure_key, agg, filter, group_by)` and
   `rollup(measure_key, dimension)` fetch a measure's facts and aggregate
   (`rollup` parses the measure's `temporal_semantics`, erroring on a malformed
-  value rather than guessing). **Zero-fill (tsk44):** a scan that found nothing
+  value rather than guessing). **Zero-fill:** a scan that found nothing
   writes an EMPTY capture (see the producer section), and `series` splices a
   value-0 point for every such capture of the metric's producers (count/sum
   aggregations, ungrouped) — so a count metric drops back to zero after the last
   offender is fixed instead of showing the previous scan forever. Producers are
   derived from the facts that ever matched the spec's filter
   (`captures_for_producers` on the fact store fetches their captures).
-- **Spec-driven reads** (tsk29 — a metric *key* → its computed result): given a
-  `MetricSpec`, `series_for_spec(spec, group_by)` / `rollup_for_spec(spec, dim)` (deleted, tsk516) /
+- **Spec-driven reads** (a metric *key* → its computed result): given a
+  `MetricSpec`, `series_for_spec(spec, group_by)` / `rollup_for_spec(spec, dim)` (deleted) /
   `headline_for_spec(spec)` resolve the spec's `source_measure` + `aggregation`
   (`FactFilter::from_json` parses `filter_json`) and run the pure cores;
   `headline_for_spec` collapses across time per the *source measure's*
   `temporal_semantics`. Each has an `_in_stream` variant (`series_in_stream` /
   `series_for_spec_in_stream` / `headline_for_spec_in_stream` — the series
-  sibling of the tsk46 rollup scoping): unscoped, per-worktree scans interleave
+  sibling of the rollup scoping): unscoped, per-worktree scans interleave
   into one timeline and a semi-additive headline flips to whichever worktree
   scanned last; the zero-fill only splices the scoped stream's empty captures.
   `headline_from_series` collapses an already-computed series so a summary read
@@ -923,8 +923,8 @@ NOT a store method — it lives in `metric_engine::aggregate_facts`.
   reads return the raw fraction. A formula metric (no `source_measure`) yields empty/None;
   an aggregation the engine can't yet compute (`count_distinct`/`p95`) or a
   malformed `filter_json` is a surfaced `DomainError::Invalid`, never a silent
-  wrong number. This is the bridge the read flip (tsk26) and UI (tsk18) consume.
-- **T-C1 plumbing (additive, tsk26 prep):** `SeriesPoint` carries `branch` +
+  wrong number. This is the bridge the read flip and UI consume.
+- **T-C1 plumbing (additive prep):** `SeriesPoint` carries `branch` +
   `provenance` (one capture → one of each, taken from the bucket's spine in
   `aggregate_series`); `findings_for_spec(spec, capture_id?)` projects a spec's
   filtered facts as `FactFinding`s (the offenders drill-in that replaces the baked
@@ -936,7 +936,7 @@ NOT a store method — it lives in `metric_engine::aggregate_facts`.
   turns made (`Members::Turns`, by `metric_capture.turn_id`; the attribution spine for T-D). These stay
   non-`Type` (out of `bindings.ts`) until T-C3 wires the IPC.
 
-### Spine dimensions and time buckets (tsk321)
+### Spine dimensions and time buckets
 
 - **Spine dimensions.** `oxplow.stream`, `oxplow.thread`, `oxplow.request`
   and `oxplow.vcs_rev` read the fact's capture (arms in
@@ -971,7 +971,7 @@ NOT a store method — it lives in `metric_engine::aggregate_facts`.
   own different `dim_eq` is refused (`FactFilter` holds one pair). Buckets are
   applied before the spec's value scale, so ratios re-divide raw parts.
 
-### Entity metrics and entity dimensions (tsk322)
+### Entity metrics and entity dimensions
 
 A metric can aggregate a semantic-layer view instead of a measure's facts.
 
@@ -998,7 +998,7 @@ combine, which is what the fact path and the detail page's range stat read:
 - `last` for a state metric;
 - `sum` for an event metric whose buckets add up (count / sum);
 - `avg` otherwise, including `count_distinct`: something seen on two days
-  counts once, so its buckets must never be totalled (tsk367).
+  counts once, so its buckets must never be totalled.
 
 The UI shows the entity aggregation (`specAggregation`).
 
@@ -1025,7 +1025,7 @@ The UI shows the entity aggregation (`specAggregation`).
 - **One SQL per read.** Everything aggregates in SQLite and one row per
   (bucket, group) comes back. A read with more than 10k of those (e.g.
   daily buckets × a high-cardinality dimension) is an **error**, never a
-  silently short series missing its newest buckets (tsk367).
+  silently short series missing its newest buckets.
   - The metric's `where`/`time`/`value` are evaluated in an inner query
     over the view alone. Only a dimension's `expr` sees its `join`, so a
     bare column in `where` can't turn ambiguous.
@@ -1136,10 +1136,10 @@ or tree bounds or spend a model key.
 
 Each producer writes atomic facts through `record_facts` (a capture + the
 facts). The legacy V38 sample/finding/run/definition writes were removed in
-T-E2 (tsk49); the change loop announces `MetricSamplesChanged` for what they
+T-E2; the change loop announces `MetricSamplesChanged` for what they
 wrote (P7.B1) — a producer emits nothing itself.
 
-**Collection gate (tsk31).** Before writing, each base-data producer checks
+**Collection gate.** Before writing, each base-data producer checks
 `fact_store.measure_has_active_spec(<measure>)` and skips when no *enabled* metric
 consumes that measure (the spec table = the enabled set after the generation's
 reconcile). So disabling every metric over a measure stops its collection:
@@ -1156,23 +1156,23 @@ Landed:
 
 | producer | where | facts |
 |---|---|---|
-| tokens — OTEL | the `token_usage.otlp` consumer (`token_usage.rs::record_reported`) over `agent.tokens.reported`, which the control-plane `POST /v1/metrics` OTLP receiver logs (`otlp_ingest.rs`) | PER-KIND facts on `oxplow.tokens` (one input + one output per model, sliced by the `oxplow.token_kind` dim), producer `otel-tokens`, one capture per export keyed by its event (`otel-tokens:<event id>`; a retransmit logs no second event). The capture carries the event's anchors: the thread (the exporter's session bearer), its stream and the turn the export measured. `agent.tokens.total` sums both kinds; input/output specs filter by `token_kind`. **Source of the token facts** — see [OTEL token tracking](#otel-token-tracking-tsk22) |
-| prompt-cache tokens (tsk73) | same ingest, same capture | Cache kinds (Claude `cacheRead`/`cacheCreation`) land on **`oxplow.cache_tokens`** — a SEPARATE measure, because `agent.tokens.total` is an unfiltered sum over `oxplow.tokens` and cache facts there would silently change its meaning. Plus one per-model **`oxplow.cache_usage`** ratio fact per export: `num = cache_read`, `den = input + cache_read + cache_creation` (prompt-side; output can't be cached) — non-additive, so the cross-time collapse is the cumulative Σn/Σd hit ratio (`agent.tokens.cache_hit_pct`). An export with NO cache telemetry emits no ratio fact (an agent that doesn't report cache reads as "no data", not 0%). **Token-denominated only — never dollars**: the API returns token counts; a locally maintained price table is invalid by construction (Claude Code's OTEL `cost.usage` *estimate* would be the only defensible future dollar source, not ingested today) |
+| tokens — OTEL | the `token_usage.otlp` consumer (`token_usage.rs::record_reported`) over `agent.tokens.reported`, which the control-plane `POST /v1/metrics` OTLP receiver logs (`otlp_ingest.rs`) | PER-KIND facts on `oxplow.tokens` (one input + one output per model, sliced by the `oxplow.token_kind` dim), producer `otel-tokens`, one capture per export keyed by its event (`otel-tokens:<event id>`; a retransmit logs no second event). The capture carries the event's anchors: the thread (the exporter's session bearer), its stream and the turn the export measured. `agent.tokens.total` sums both kinds; input/output specs filter by `token_kind`. **Source of the token facts** — see [OTEL token tracking](#otel-token-tracking) |
+| prompt-cache tokens | same ingest, same capture | Cache kinds (Claude `cacheRead`/`cacheCreation`) land on **`oxplow.cache_tokens`** — a SEPARATE measure, because `agent.tokens.total` is an unfiltered sum over `oxplow.tokens` and cache facts there would silently change its meaning. Plus one per-model **`oxplow.cache_usage`** ratio fact per export: `num = cache_read`, `den = input + cache_read + cache_creation` (prompt-side; output can't be cached) — non-additive, so the cross-time collapse is the cumulative Σn/Σd hit ratio (`agent.tokens.cache_hit_pct`). An export with NO cache telemetry emits no ratio fact (an agent that doesn't report cache reads as "no data", not 0%). **Token-denominated only — never dollars**: the API returns token counts; a locally maintained price table is invalid by construction (Claude Code's OTEL `cost.usage` *estimate* would be the only defensible future dollar source, not ingested today) |
 | request outcome | oxplow-foundation's **`oxplow.request_outcome` collector** (`collectors/request/outcome.star`, `on: [agent.turn.ended]`; core computes none of it) | Each time a turn of a request ends **and no turn of it is still running** (its input finds no open turn of the request; else the run records nothing for it and the request keeps the figures it had when it last stopped), the request's latest figures, subject the request's URI, as **one capture per request placed at the request's start** (`capture.at` = `v_request.started_at`, the input's `placed_at` column — the one place that choice lives) **that replaces the request's earlier capture** (`capture.replaces` = its URI; see "Placed, replacing captures"). The measures are `non-additive`, `fold: sum`, `complete`, so a period's point is the mean over the requests that started in it, each counted once at its latest figures; a later turn (a job report, a hand-back) updates the figures in the request's start period, never moves it. Decided by the person 2026-11-10 (before: per-subject `fold: last`, which kept every request ever seen in every point — a lifetime mean that went flat; V26 dropped that history). **`oxplow.request_tokens`** (`v_request.input_tokens + output_tokens` over all its turns — input counts cache reads and writes; none when unmetered; the collector runs `after: [token_usage.turns]`, which records a turn's tokens from its transcript once it ends — before it, about 98% of a turn's tokens weren't in yet), **`oxplow.request_cycle_time`** (first prompt to last activity, ms), four **`oxplow.request_test_outcome`** facts sliced by `oxplow.tests_stat` — `at_close` (failed in its latest run), `peak`, `distinct_failed` (asserted failures have no identity, so never fewer than `peak`), `red_runs` — and **`oxplow.request_time_to_green`** (first red run to the first green after it; none when it never went red or never recovered). Its runs are the `tests` captures whose `turn_id` is one of the request's turns. Metrics: `request.tokens`, `request.cycle_time_ms`, `request.time_to_green_ms`, `oxplow.tests.{failed_at_close,peak_failed,distinct_failed,red_runs}`. Decided 2026-11-10 when efforts went: steering and token waste were effort-only and are gone; history starts fresh. Pinned by `a-requests-outcome-is-recorded-when-its-turn-ends`, `a-request-with-no-test-runs-records-no-test-outcome`, `a-requests-outcome-is-placed-at-its-start-and-a-later-turn-replaces-it`, `a-period-of-a-request-metric-counts-each-request-once`, `a-running-request-is-not-recorded-until-it-stops` and `a-requests-test-outcome-keeps-runs-whose-detail-was-compacted` (its runs survive detail compaction: see the compaction box) |
 | request tracked | oxplow-bundled's **`oxplow.request_tracked` collector** (`collectors/request/tracked.star`, `on: [agent.turn.ended]`) | Same mechanism as the request outcome (stopped requests only; one capture per request placed at its start, replacing its earlier one), counted only when the request's turns changed files (`v_tool_call_path`): measure **`oxplow.request_tracked`** is 1 (num 1, den 1) when `v_oxplow_request_link` has a row for the request, else 0 (num 0, den 1); non-additive, `fold: sum`, `complete`. Metric **`tasks.tracked_requests_pct`** (`RATIO(num, den)`, %, higher-better): the share of file-changing requests with a task link. It reads no workflow setting: it measures what happened. Pinned by the `oxplow-bundled` fixtures `a-request-that-changed-files-with-a-task-records-tracked`, `...-with-no-task-records-untracked`, `a-running-request-records-no-tracking`, `a-request-that-changed-no-files-records-no-tracking` and `tracked-requests-is-the-share-of-file-changing-requests-with-a-task` |
 | knowledge pages | oxplow-bundled's **`oxplow.knowledge_pages` collector** (`collectors/knowledge/pages.star`, `on: [oxplow.knowledge_record.changed, snapshot.ref_drifted]`) | Each run restates the current counts from `v_oxplow_knowledge_page` (every store of the knowledge model), per (store, kind), as **one capture that replaces the earlier capture of the same day** (`capture.replaces` = `knowledge-counts:<day>`, placed now), so a day holds its last count. Measures **`knowledge.pages`** and **`knowledge.stale_pages`** (stale = `stale_ref_count > 0`; its facts carry `num` = stale, `den` = pages); `semi-additive`, `fold: last`, `complete`; dims `oxplow.knowledge_store` and `oxplow.knowledge_kind` (the page's own kind: oxwiki's is `note`). Metrics **`knowledge.pages`** (`SUM(value)`, sliceable by both dims) and **`knowledge.stale_pct`** (`RATIO(num, den)`, %, lower-better). A snapshot that changes a file a page cites restates the counts too (`snapshot.ref_drifted`, core's), since a cited file drifting is what makes a page stale; one of an uncited file restates nothing (it ran on every `snapshot.taken` once: ~800 a day, each a capture every metric reader heard). Pinned by the `oxplow-bundled` fixtures `writing-pages-records-the-page-counts-by-store-and-kind`, `deleting-a-page-restates-the-page-count`, `stale-knowledge-is-the-share-of-pages-with-a-stale-file-ref` and `a-snapshot-of-an-uncited-file-leaves-the-page-counts` |
 | request read knowledge | oxplow-bundled's **`oxplow.request_read_knowledge` collector** (`collectors/knowledge/read.star`, `on: [agent.turn.ended]`) | The exact twin of request tracked (stopped requests only, counted only when the request's turns changed files; one capture per request placed at its start, replacing its earlier one): measure **`knowledge.read_requests`** is 1 (num 1, den 1) when `v_oxplow_knowledge_read` has a row with `actor = 'agent'` whose `turn_id` is a turn of the request, else 0 (num 0, den 1). Metric **`knowledge.read_requests_pct`** (`RATIO(num, den)`, %, higher-better): the share of file-changing requests that read a knowledge page. Pinned by the `oxplow-bundled` fixtures `a-request-that-changed-files-and-read-a-page-records-a-read`, `...-and-read-no-page-records-no-read`, `a-running-request-records-no-knowledge-read`, `a-request-that-changed-no-files-records-no-knowledge-read` and `requests-that-read-knowledge-is-the-share-of-file-changing-requests-that-read-a-page` |
-| turns — transcript (tsk22) | `token_usage.rs::record_token_metrics`, from `on_stop` | a `oxplow.turn` fact per model per Stop (turn COUNT = genuine user prompts). The transcript path **no longer projects `oxplow.tokens`** (OTEL owns those); it still records the per-turn `agent_token_usage` rows (with prompt text OTEL lacks). The Claude harness's transcript parse counts each `message.id` once (tsk22), which removed the ~2–3× overcount from Claude repeating a message's `usage` on every content-block line |
+| turns — transcript | `token_usage.rs::record_token_metrics`, from `on_stop` | a `oxplow.turn` fact per model per Stop (turn COUNT = genuine user prompts). The transcript path **no longer projects `oxplow.tokens`** (OTEL owns those); it still records the per-turn `agent_token_usage` rows (with prompt text OTEL lacks). The Claude harness's transcript parse counts each `message.id` once, which removed the ~2–3× overcount from Claude repeating a message's `usage` on every content-block line |
 | nudges (T-B) | `collection.rs::project_nudge_metric` | one `oxplow.nudge` event fact per fired nudge (value 1, subject=the nudge kind) — the `agent.nudges.fired` spec is `Sum(oxplow.nudge)` |
 
 | lint hits | `collection.rs::mirror_analysis_metrics` | one `oxplow.lint_hit` fact per finding (severity/rule/detail columns + file location) |
-| coverage | `collection.rs::observe_coverage` | one `oxplow.coverage` fact per file (value=line-%, num/den=covered/instrumented → engine re-derives Σcov/Σinstr). **Branch + function coverage (tsk123)** ride the SAME capture as extra per-file facts on `oxplow.coverage.branch` / `oxplow.coverage.function` (num/den=hit/found), emitted only for files whose report carried the counts (`*_found > 0`) and only when their spec is enabled (per-measure gate via `active_coverage_measure`). Specs: `oxplow.coverage.branch_pct` / `oxplow.coverage.function_pct` (ratio %, higher-better). **Untested files (tsk124)** is a read-only spec `oxplow.coverage.untested_files` — a `count` over `oxplow.coverage` filtered `max_value: 0` (the new upper-bound `FactFilter` field, cube-ineligible like `min_value`), `findings` display so the drill-in lists which files, lower-better — no new collection |
+| coverage | `collection.rs::observe_coverage` | one `oxplow.coverage` fact per file (value=line-%, num/den=covered/instrumented → engine re-derives Σcov/Σinstr). **Branch + function coverage ** ride the SAME capture as extra per-file facts on `oxplow.coverage.branch` / `oxplow.coverage.function` (num/den=hit/found), emitted only for files whose report carried the counts (`*_found > 0`) and only when their spec is enabled (per-measure gate via `active_coverage_measure`). Specs: `oxplow.coverage.branch_pct` / `oxplow.coverage.function_pct` (ratio %, higher-better). **Untested files ** is a read-only spec `oxplow.coverage.untested_files` — a `count` over `oxplow.coverage` filtered `max_value: 0` (the new upper-bound `FactFilter` field, cube-ineligible like `min_value`), `findings` display so the drill-in lists which files, lower-better — no new collection |
 | test cases | `collection.rs::record_test_run` → `SqliteFactStore::record_test_run` | **change-only** per-case facts on `oxplow.test_case` (status as the `oxplow.status` dim, + `oxplow.test_suite`) and `oxplow.test_duration`: every **failure**, every run; a pass or skip only when the test is new on the branch or changed status; a duration when it moved more than `DURATION_MOVE_RATIO` (50%) **and** `DURATION_MOVE_MIN_MS` (20 ms) from the last one written (constants, not settings — a compression tolerance that changes no pass/fail number). The per-subject fold carries an unchanged test's last fact forward, so every `oxplow.tests.*` number is the same as recording all cases (durations within the tolerance). In the same transaction it upserts each case's `test_case_stat` row (`v_test_case_stat`: last status and duration, runs, failures, flips, last failed / passed, max and mean duration) — where per-test history lives. A replayed run (same idempotency key) changes nothing. Measured on sample usage: ~2.6% of per-case results are written. The request-outcome collector takes the request's runs from its run records, not its facts, since an all-green repeat run writes none. MCP-asserted counts (no report) synthesize status-sliced facts (no case identity). A report-less, count-less run records its capture under the **`test-run`** producer — a run RECORD, not a measurement: an empty `tests` capture would read as "found 0 tests" to the zero-fill/currency logic and collapse the semi-additive `oxplow.tests.*` timeline |
-| duplication | oxplow-foundation's collector `oxplow.duplicate_lines` — whole tree, after ref moves (paced: one scan of the latest tree once they settle for 60 s, at most every 15 min); the change analyzer's scoped scans record findings but no facts (tsk365) | one `oxplow.duplicate_lines` fact per side of each duplicate block (value=line count, subject=`block:path:start-end`); a `full` capture on the snapshot's stream. A zero-hit scan still writes its EMPTY capture (tsk44 currency) — else the last non-empty scan's blocks stay "current" forever |
-| foundation code collectors | `metrics_service.rs::run_one_collector` → `record_collector_facts` (tsk23) | oxplow-foundation's code collectors return `facts`: one fact **per function** on `oxplow.complexity` (high_complexity_fns) / `oxplow.fn_length` (long_functions) / `oxplow.parameter_count` (fn_count), and one per marker on `oxplow.todo` (todos) — the raw grain, for **every** item, not just the offenders |
-| per-language idiom collectors | same path (tsk30) | the ~10 idiom collectors (`oxplow.rust.unsafe_blocks`, `oxplow.ts.any_usage`, `oxplow.csharp.empty_catch`, …) emit one **per-file** `oxplow.ast_hit` fact (value=the file's count, `rule`=the idiom slug, dims carrying the conformed `oxplow.language`); the metric is a `Sum(oxplow.ast_hit)` spec filtered by `dim_eq(oxplow.rule, <slug>)` (the foundation's `metrics:` entries) |
+| duplication | oxplow-foundation's collector `oxplow.duplicate_lines` — whole tree, after ref moves (paced: one scan of the latest tree once they settle for 60 s, at most every 15 min); the change analyzer's scoped scans record findings but no facts | one `oxplow.duplicate_lines` fact per side of each duplicate block (value=line count, subject=`block:path:start-end`); a `full` capture on the snapshot's stream. A zero-hit scan still writes its EMPTY capture (currency) — else the last non-empty scan's blocks stay "current" forever |
+| foundation code collectors | `metrics_service.rs::run_one_collector` → `record_collector_facts` | oxplow-foundation's code collectors return `facts`: one fact **per function** on `oxplow.complexity` (high_complexity_fns) / `oxplow.fn_length` (long_functions) / `oxplow.parameter_count` (fn_count), and one per marker on `oxplow.todo` (todos) — the raw grain, for **every** item, not just the offenders |
+| per-language idiom collectors | same path | the ~10 idiom collectors (`oxplow.rust.unsafe_blocks`, `oxplow.ts.any_usage`, `oxplow.csharp.empty_catch`, …) emit one **per-file** `oxplow.ast_hit` fact (value=the file's count, `rule`=the idiom slug, dims carrying the conformed `oxplow.language`); the metric is a `Sum(oxplow.ast_hit)` spec filtered by `dim_eq(oxplow.rule, <slug>)` (the foundation's `metrics:` entries) |
 
-#### OTEL token tracking (tsk22)
+#### OTEL token tracking
 
 **A Codex collab agent's tokens are not counted.** Its work is a subagent of
 the parent's session (`agent-model.md` "Collab agents are subagents"), but
@@ -1198,7 +1198,7 @@ summed every assistant line) and was Claude-only + format-fragile.
   window_end? }`** in one transaction — deduped by a hash of the body, so an
   SDK retransmit logs nothing; an export for a thread that isn't there
   (deleted, or never) logs nothing, as a hook for one doesn't. The body is
-  untrusted (tsk925): a negative count is dropped. It is
+  untrusted: a negative count is dropped. It is
   anchored to the thread, its stream and **the
   turn the export measured**.
   A Claude export is stamped with when it was *collected* (delta
@@ -1222,7 +1222,7 @@ summed every assistant line) and was Claude-only + format-fragile.
   read per export. Pure + unit-tested:
   - **Claude** — `claude_code.token.usage` **counter** (delta temporality → each
     export is the increment), `type ∈ {input,output,cacheRead,cacheCreation}`
-    (the cache kinds on their own measure, tsk73);
+    (the cache kinds on their own measure);
   - **Codex** exports nothing: its tokens come from its thread's
     `tokenUsage` and ride the turn's Stop ([agent-model.md](./agent-model.md)
     "Codex: its TUI on a thread oxplow observes").
@@ -1234,7 +1234,7 @@ summed every assistant line) and was Claude-only + format-fragile.
     `PluginRuntime`, + the session's bearer.
   - **opencode** is not auto-instrumented (a user's own OTEL plugin pointed at
     the receiver still works).
-  > **Diagnostic (tsk25):** set `OXPLOW_OTLP_DEBUG=<file>` before launching
+  > **Diagnostic:** set `OXPLOW_OTLP_DEBUG=<file>` before launching
   > oxplow — the receiver appends a decoded dump of every OTLP export (metric
   > names + attributes + values) to that file
   > (`otlp_tokens::summarize_metrics_request`). Off by default.
@@ -1253,9 +1253,9 @@ are deliberately NOT stamped — they're whole-tree scans whose baseline predate
 the request, so the File family attributes them by *the request's files
 (`v_turn_file`) × time window*, not by `turn_id`.
 
-**Code-metric unbake (tsk23) — the keystone, and the one non-mechanical producer.**
+**Code-metric unbake — the keystone, and the one non-mechanical producer.**
 A code scan's output used to be baked `samples` (headline) + `findings`
-(offenders drill-in); tsk23 added a `facts` channel, and P7.B3 removed the
+(offenders drill-in) added a `facts` channel, and P7.B3 removed the
 other two. A fact collector now returns only `{"facts": [CollectedFact { measure,
 value, subject?, path?, line?, rule?, num?, den?, dims? }]}` — measure-bound
 atomics (`facts_of` refuses any other shape). `record_collector_facts` resolves each
@@ -1264,7 +1264,7 @@ an undefined measure is dropped with a `tracing::warn!`, never silently written)
 writes the resolvable facts under one capture — the **only** output now (facts-only,
 T-C3b). A ZERO-fact run still writes its (empty) capture — "this scan ran and found
 nothing" is the record the engine zero-fills a series from, so a count metric drops
-back to zero after the last offender is fixed (tsk44; the analysis ingest records
+back to zero after the last offender is fixed (the analysis ingest records
 its capture for a clean report the same way). The count-over-threshold headline is the **spec** (the foundation metric's `metrics:` entry),
 and the equivalence test `code_collector_facts_reaggregate_to_the_expected_headline`
 pins `engine.headline_for_spec(spec) == the expected baked total` for every bundled
@@ -1272,7 +1272,7 @@ code metric — the proof the inversion is faithful. (Strict `> N` in the old ba
 equals `min_value = N+1` on the integer complexity/length measures.) The 4 code
 scripts are unbaked (no `tree:.`/`file:` samples); the baked write path is gone.
 
-**Per-language idiom collectors (tsk30).** The same pattern extends to the ~10
+**Per-language idiom collectors.** The same pattern extends to the ~10
 per-language AST idiom collectors, but they don't have a natural per-subject measure —
 so they share **one** generic measure `oxplow.ast_hit` (a per-file idiom
 occurrence) and are told apart by the `oxplow.rule` dimension (the idiom slug,
@@ -1302,7 +1302,7 @@ each spec's engine headline to the baked total (tokens, tests). New V46 measures
 `oxplow.turn`, `oxplow.nudge` (the producers with no prior
 measure home); new dim `oxplow.token_kind`.
 
-**Decision reversed — nudges are now IN the substrate (T-B, was tsk24).** The
+**Decision reversed — nudges are now IN the substrate (T-B, was).** The
 earlier call kept the advisory nudges (report-less, coverage-target,
 threshold-crossing) out of the substrate. T-B reverses it: with the
 producer-spec layer in place, adding an `oxplow.nudge` event measure + one fact
@@ -1321,7 +1321,7 @@ SQL"), and the views `v_metric_spec`, `v_metric_catalog`, `v_measure`,
 they stand now. The engine's by-dimension rollup (`rollup_for_spec`,
 `compute_rollup`, `RollupRow`) and the never-wired formula evaluator
 (`evaluate_formula`, `BinaryOp`) are deleted: a slice is
-`metric_grid(bucket, dim)` (tsk516). The
+`metric_grid(bucket, dim)`. The
 metric-specific MCP reads (`list_metric_definitions`, `list_metric_samples`,
 `get_metric_summary`, `metric_breakdown`, `list_metric_findings`,
 `list_measures`, `list_dimensions`, `list_facts`, `metric_series`,
@@ -1426,8 +1426,8 @@ dimensions:                        # custom conformed slice axes
   (`load_global_measure_entries`/`load_global_dimension_entries`); auto-active in
   every project (unlike a global metric, which needs a project `use:`). The four
   `load_global_*_entries` loaders share one generic `load_global_entries` helper
-  (tsk17 — they differ only in the doc field + validator).
-- **Read-path caching (tsk17):** `resolved_specs`/`fact_collectors` run on
+  (they differ only in the doc field + validator).
+- **Read-path caching:** `resolved_specs`/`fact_collectors` run on
   **every** snapshot event, so the three global YAML dirs are loaded once into a
   `MetricsService.global_catalog` (`Arc<Mutex<Option<GlobalCatalog>>>`) and
   served from cache (`with_global_catalog`); `reseed` clears it on every
@@ -1452,26 +1452,25 @@ dimensions:                        # custom conformed slice axes
   `resolve_metrics` itself is silent: it runs on every event (through
   `fact_collectors`), so a `use:` naming nothing is reported by
   `unknown_uses` once per generation (boot, config or extension
-  change), never per call (tsk1076).
+  change), never per call.
 - **Adding one** is an edit to the project's extension (`extension.yaml`; a global
   one is a file under the global dir). The old `scaffold_measure` /
   `scaffold_dimension` writers had no caller and were deleted (P4.8).
 - **`promote`** now persists onto the row: the generation threads the resolved
   dimension's `promote` into `NewDimension.promoted`, so `dimension.promoted`
   reflects the config (it was previously parsed but dropped at seed). Still
-  **inert** downstream (see tsk28): the engine loads all facts and filters
+  **inert** downstream (see): the engine loads all facts and filters
   in-app, so the requested generated column + index bites nothing until reads
   go DB-side. Recorded, not yet acted on.
 
-**Not yet done:** a **Dimensions catalog** UI page; `promote_dimension` teeth
-(tsk28); unbaking the per-language idiom scripts (still emit dead `tree:.`/
-`file:` samples, harmless — `run_one_collector` ignores them); formula-spec wiring
-(tsk21). Those are the open children of the epic. Already landed: the **MCP**
-metric-key reads (T-C2), the **IPC + bindings + frontend** read surface (T-C3a,
-tsk39), the **baked-write removal + 4-script unbake** (T-C3b, tsk40), the
+**Not yet done:** a **Dimensions catalog** UI page; `promote_dimension` teeth;
+unbaking the per-language idiom scripts (still emit dead `tree:.`/
+`file:` samples, harmless — `run_one_collector` ignores them); formula-spec wiring.
+Those are the open children of the epic. Already landed: the **MCP**
+metric-key reads (T-C2), the **IPC + bindings + frontend** read surface (T-C3a,), the **baked-write removal + 4-script unbake** (T-C3b), the
 **request-attribution read** (T-D), and the **full V38 retirement** — the
-capture is the run + detail envelopes (T-E1, tsk48), all legacy writes dropped
-(T-E2, tsk49), tables + `metric_store.rs` dropped in V49 (T-E3, tsk50).
+capture is the run + detail envelopes (T-E1), all legacy writes dropped
+(T-E2), tables + `metric_store.rs` dropped in V49 (T-E3).
 
 ---
 
@@ -1561,17 +1560,17 @@ match arm. A formula spec (no source measure) falls through to Window and no-ops
 
 ### Run attribution grain — the causing tool call, not the clock
 
-> **P3 (tsk476):** a run the `collection` reactor records carries the tool
+> **P3:** a run the `collection` reactor records carries the tool
 > event that ran it: the capture is keyed `test-run:<event id>` (a
 > redelivery records nothing new), the turn the command ran in owns it
 > (the event's turn anchor, so its request does), and its
 > `test.run.recorded` is anchored to the turn.
 >
-> **P10 (tsk483):** the capture carries that turn too —
+> **P10:** the capture carries that turn too —
 > `metric_capture.turn_id` (V157, SET NULL when the turn goes), exposed as
 > `v_capture.turn_id` and `v_test_run.turn_id`. A producer stamps what it
 > knows, never a guess, by **where the run came from** (`RunOrigin`,
-> tsk923): a run, coverage, analysis or nudge capture the reactor saw
+>): a run, coverage, analysis or nudge capture the reactor saw
 > takes its causing tool event's turn anchor however late it is recorded
 > (`RunOrigin::Tool` — none when the event had none); one reported by a
 > command (`oxplow.test.record_run`, `oxplow.collector.sync`) takes its actor's open
@@ -1685,7 +1684,7 @@ request's observations can reconstruct full detail:
 | producer | where | emits |
 |---|---|---|
 | coverage / tests / analysis | `crates/oxplow-app/src/collection.rs` (`mirror_coverage_metric` / `mirror_test_metrics` / `mirror_analysis_metrics`, called from `observe_coverage`/`record_test_run`/`record_static_analysis`) | `oxplow.coverage.abs_pct` (absolute; diff derived at read); `oxplow.tests.{passed,failed,total}`; `oxplow.analysis.{errors,warnings}` + a finding per lint hit + a `*-detail` finding carrying the verbatim payload |
-| otel-tokens | `crates/oxplow-app/src/token_usage.rs` (the `token_usage.otlp` consumer of `agent.tokens.reported`, which the control-plane OTLP receiver logs through `otlp_ingest` — tsk22, tsk860) | per-model `agent.tokens.{input,output,total}` from Claude's `claude_code.token.usage` OTEL counter. The fact's subject is the model's ref, `ai_model:<name>` (`uri::build::ai_model_uri`; `subject_kind` is `ai_model`), read back with `id_of(.., AI_MODEL)`. Tokens only — no derived USD cost (rates move; a stale price table is worse than none). The transcript `on_stop` path now projects only `agent.turns` + the per-turn `agent_token_usage` prompt rows |
+| otel-tokens | `crates/oxplow-app/src/token_usage.rs` (the `token_usage.otlp` consumer of `agent.tokens.reported`, which the control-plane OTLP receiver logs through `otlp_ingest`) | per-model `agent.tokens.{input,output,total}` from Claude's `claude_code.token.usage` OTEL counter. The fact's subject is the model's ref, `ai_model:<name>` (`uri::build::ai_model_uri`; `subject_kind` is `ai_model`), read back with `id_of(.., AI_MODEL)`. Tokens only — no derived USD cost (rates move; a stale price table is worse than none). The transcript `on_stop` path now projects only `agent.turns` + the per-turn `agent_token_usage` prompt rows |
 | nudges | `crates/oxplow-app/src/collection.rs` (`project_nudge_metric`, called from `persist_nudge` after a fired nudge records) | `agent.nudges.fired` (event kind, run-less; value 1, subject=the nudge `kind`) — an agent-activity signal |
 | fact collectors | `crates/oxplow-app/src/metrics_service.rs` (`MetricsService`) — the fact engine. Seeds a `metric_spec` per resolved `metrics:` entry; runs each **fact collector** (`fact_collectors()` = the enabled extensions' fact collectors (oxplow-foundation's and the project's own included); a collector that metrics name runs only while one of those metrics is on) on its trigger: `on:` from the `collector.triggers` pump consumer (`run_snapshot_collectors` for `snapshot.taken` that recorded files, `run_event_collectors` over the stream's latest snapshot otherwise), `every:` from the scheduler, `manual` and any explicit run through `oxplow.collector.sync` → `run_collector_by_key(owner, id, stream, source)` | one `fact` per `CollectedFact` the script returns (bound to a defined measure in the collector's `facts`), version/branch/snapshot-stamped, under one `metric_capture` (a failed capture on error), plus a `collector_run` row and a `collector.synced@2` event carrying the `facts` count. `facts_of` refuses any output but `{"facts": [...]}` |
 
@@ -1698,7 +1697,7 @@ the change loop announces `OxplowEvent::MetricSamplesChanged` for what landed.
 
 > **The plan is for these to become bundled collectors** (jaq/Starlark/exec,
 > registered via `with_builtins()`) so producers are *content*, not hardcoded
-> Rust (tsk218). The hardcoded mirror helpers are the interim. The legacy
+> Rust. The hardcoded mirror helpers are the interim. The legacy
 > per-run observation path has already been **dropped** — the substrate
 > is the sole store.
 
@@ -1711,7 +1710,7 @@ the change loop announces `OxplowEvent::MetricSamplesChanged` for what landed.
 
 ## Read surface
 
-> **Flipped (T-C2, tsk35 + T-C3a, tsk39):** the metric-key reads on BOTH the MCP
+> **Flipped (T-C2 + T-C3a):** the metric-key reads on BOTH the MCP
 > and the IPC surface now read the fact substrate via `MetricEngine`
 > spec-wrappers, NOT this V38 store. The paragraph below is the historical V38
 > shape, kept for context; the current IPC wiring + types are in the **IPC**
@@ -1722,7 +1721,7 @@ the change loop announces `OxplowEvent::MetricSamplesChanged` for what landed.
   fact (`oxplow.metric.record`) lands on the metric's source measure under a
   `provenance: asserted` / `source: agent-reported` / `scan_kind: asserted`
   capture **anchored to the stream's latest snapshot for provenance**
-  (tsk71/tsk72 — the snapshot says which tree state the value described;
+  (the snapshot says which tree state the value described;
   the `asserted` scan kind keeps it from being read as a scanned set). A
   formula spec is refused, and so is a `count` spec — one asserted fact
   would read as 1 whatever its value. The fact is stamped to match the
@@ -1730,7 +1729,7 @@ the change loop announces `OxplowEvent::MetricSamplesChanged` for what landed.
   `oxplow.rule`, dims_json otherwise) and carries ratio components for a
   `ratio` spec (den=100 for `%` so the percent round-trips), so the metric's
   own reads include the asserted number.
-- **The desktop reads metrics through SQL** (P4.7, tsk492 — the metric IPC
+- **The desktop reads metrics through SQL** (P4.7, the metric IPC
   reads are gone). `src/metricsSql.ts` builds the queries and row shapes;
   `api.ts` runs them through `query_sql` and returns the rows with the
   query's `reads` (what the views subscribe to): the dashboard tiles read `metric_grid('capture'[, dim])` joined to
@@ -1738,7 +1737,7 @@ the change loop announces `OxplowEvent::MetricSamplesChanged` for what landed.
   `v_metric_spec` (v2 adds `entity_json`); the Metrics and Metric pages are pages
   over `v_metric_point`, `v_metric_catalog` and `v_metric_spec`. There is no metric IPC left: the enable switch is the `oxplow.metric.enable` command. The dimension roll-up, per-capture
   findings, measure series/rollup and delta IPC commands were removed
-  with the UI that used them (tsk309); agents slice with `metric_grid(…, dim)`
+  with the UI that used them; agents slice with `metric_grid(…, dim)`
   and read offenders with `metric_findings()`, and per-request deltas are
   `v_request_metric_delta`. The agent
   gets the same numbers as prompt text via oxplow-bundled's `metric-deltas`
@@ -1751,19 +1750,19 @@ the change loop announces `OxplowEvent::MetricSamplesChanged` for what landed.
 The metric UI is **three pages**, each with one job, all reading the one
 fact table — no per-metric UI code. Recorded Metrics is a declared page (the `metrics-recorded` page, oxplow-bundled's
 `pages/`, with its row expander `metrics-slices`; foundation has none, and its metric pages do not link to it); Metric Detail is the `oxplow/metric` entity page and cross-links to the others in its header. (History: the
-configure surface was split off as a fourth "Metric Settings" page in
-tsk282/tsk80, then **folded back in by tsk117** — per-metric configuration now
+configure surface was split off as a fourth "Metric Settings" page in,
+then **folded back in by per-metric configuration now
 lives on the Metric Detail page; see "The configure surface" below.) Explorer
 and Recorded observe; Detail both observes and **writes** (its Configure block).
 Authoring a *new* metric is **agent work** (the `oxplow.metric.scaffold` command +
-the `/oxplow:new-metric` skill, tsk122) — no page writes one; Recorded Metrics
+the `/oxplow:new-metric` skill) — no page writes one; Recorded Metrics
 just carries a Help blurb pointing there.
 
 - **Metrics Explorer** (`MetricsExplorerPage.tsx` wrapping `MetricsExplorer.tsx`)
   — the marquee page and the rail "Metrics" entry (`metricsExplorerRef()`). Header link: "Recorded metrics →" (the "Configure
-  metrics →" link died with the Settings page, tsk117). A measure's title
+  metrics →" link died with the Settings page). A measure's title
   navigates to the metric's **detail page** (via `onOpenDetail` → `metricRef`).
-> ### ⚠️ A seeded spec does NOT mean an enabled metric (tsk87)
+> ### ⚠️ A seeded spec does NOT mean an enabled metric
 >
 > The generation seeds a foundation **gauge's** spec only while its collector
 > runs: the metric is on by default, or `use:`d when it says `default: off`.
@@ -1868,7 +1867,7 @@ just carries a Help blurb pointing there.
   breakdowns and findings are for agents (`metric_grid(…, dim)`, `v_fact`
   through `oxplow_query_sql`) and pages.
 
-> **Definition descriptions (tsk309).** Every metric carries a one-line
+> **Definition descriptions.** Every metric carries a one-line
 > `description` (on `metric_definition`). It's inherent to the definition — set
 > once and not overridable by a `use:` entry (`resolve_one` reads `def.description`,
 > like trigger). Sources: the foundation's code metrics (the metric's `description:`),
@@ -1876,10 +1875,10 @@ just carries a Help blurb pointing there.
 > and config `key:` entries (`MetricEntry.description` → `ResolvedSpec` →
 > `spec_definition()`).
 
-### The configure surface (tsk282 → folded into Detail/Recorded by tsk117)
+### The configure surface (→ folded into Detail/Recorded by)
 
 There is **no Metric Settings page anymore**. Configuration was a dedicated
-page ("Metrics Catalog" tsk282, retitled "Metric Settings" tsk80) until tsk117
+page ("Metrics Catalog", retitled "Metric Settings") until
 folded it into the surfaces where you already look at a metric:
 
 - **Per-metric config lives on the Metric Detail page** — its About's
@@ -1888,14 +1887,14 @@ folded it into the surfaces where you already look at a metric:
   NOT only the spec: a disabled metric's spec is pruned, so the page still has
   its name and the Enable action. The catalog follows the config edit once the
   project reseeds.
-- **"+ New metric" scaffolding is agent-driven (tsk122).** The inline
+- **"+ New metric" scaffolding is agent-driven.** The inline
   `NewMetricBar.tsx` form was **removed** — authoring a metric always needs the
   collector script edited anyway, which is agent work. The scaffold backend
   is now the `oxplow.metric.scaffold` command (see below), and Recorded Metrics' details rail carries
   a Help blurb (`recorded-new-metric-help`) telling the user to ask their agent
   (the `/oxplow:new-metric` skill).
 - **Retired with the page:** the per-section **tri-state bulk enable/disable**
-  (`GroupCheckbox`/`sectionCheckboxState`, tsk32) — enable/disable is
+  (`GroupCheckbox`/`sectionCheckboxState`) — enable/disable is
   per-metric only now (the `set_metrics_enabled` batch IPC is gone;
   `MetricsService::set_metrics_enabled` remains for tests); and the Explorer's "Configure metrics →"
   header link. The `metrics-catalog` page kind is gone from
@@ -1903,7 +1902,7 @@ folded it into the surfaces where you already look at a metric:
   `metrics-catalog` tab id no longer matches any render branch, so stale tabs
   **drop silently on restore** (the tab-build chain only pushes matched kinds).
 
-The mechanics behind those controls (unchanged by tsk117):
+The mechanics behind those controls (unchanged by):
 
 - **The catalog is a registry of everything available**, NOT a list of metrics
   with recorded data — every metric the system can produce is listed via
@@ -1913,8 +1912,8 @@ The mechanics behind those controls (unchanged by tsk117):
   (toggleable); (3) the built-in always-on producers
   (`builtin_producer_metrics()` — tokens, tests, coverage, analysis,
   request outcome, nudges — listed regardless of recorded data so the user sees they
-  exist, tsk286); (4) every other seeded `metric_definition` — extension
-  metrics and legacy rows. **Every entry is `toggleable: true` (tsk31)** — the
+  exist); (4) every other seeded `metric_definition` — extension
+  metrics and legacy rows. **Every entry is `toggleable: true` ** — the
   "always on" class is retired: producers/extensions can be enabled/disabled just
   like code metrics. `catalog()` reads each row's `enabled` from config
   (`config_state`): a metric that says `default: off` is on only when a non-disabled `use:`
@@ -1958,8 +1957,8 @@ The mechanics behind those controls (unchanged by tsk117):
 - **Targets** are config: a `use:` entry's `target` / `warn_at` / `fail_at`
   in `.oxplow/project.yaml` (the project's choices; never definitions). **Trigger is inherent to the definition** —
   `resolve_one` reads it from the definition (like `compute`) and a `use:`
-  entry can't override it (tsk290).
-- **`oxplow.metric.scaffold` (a command since P4.8; a template since tsk391; now the
+  entry can't override it.
+- **`oxplow.metric.scaffold` (a command since P4.8; a template since; now the
   metric extension)** returns the files of an extension (see
   "Authoring surface"): `MetricsService::metric_scaffold` → `MetricScaffold {
   name, dir, files: [{ path, content }] }`, the same
@@ -1971,7 +1970,7 @@ The mechanics behind those controls (unchanged by tsk117):
   global config dir (there are no global collectors). The runner reads a
   collector's `entry` from its owner's extension folder (`collector_script_text`; oxplow-foundation's scripts are embedded like any bundled extension file).
 
-Metrics are also surfaced **organically off the Metrics pages** (tsk250): the
+Metrics are also surfaced **organically off the Metrics pages**: the
 request's review (`DiffViewPage`'s `oxplow/changes.sections` slot) shows the oxplow-bundled
 `request-metric-deltas` page — the metrics the request moved, before→after with
 Δ, better/worse and any threshold crossing, over `v_request_metric_delta`
@@ -1982,7 +1981,7 @@ Catalog reads/writes: `v_metric_catalog` (the `metric_catalog` table, V106,
 which the generation rewrites from `MetricsService::catalog()` on every
 reseed) and the `oxplow.metric.enable` command — consumed by the Metric Detail
 Configure block and the Metrics rows.
-**Scaffolding is not here** (tsk122): its UI button was retired, and it is
+**Scaffolding is not here**: its UI button was retired, and it is
 now the `oxplow.metric.scaffold` command (P4.8), which calls
 `MetricsService::metric_scaffold`.
 Token and page analytics are oxplow-bundled pages (`usage`) over
@@ -1997,7 +1996,7 @@ Token and page analytics are oxplow-bundled pages (`usage`) over
 3. It then appears in MCP/IPC reads and on the Metrics page automatically — no
    UI code per metric.
 
-## Authoring surface (the four config blocks — epic tsk12, E)
+## Authoring surface (the four config blocks, E)
 
 **A code metric is an extension (current).** `oxplow extension new metric
 <name> [--language rust] [--glob '**/*.rs']` (or the `oxplow.metric.scaffold`
@@ -2048,7 +2047,7 @@ resolved in `crates/oxplow-config/src/lib.rs` (`MetricEntry`→`ResolvedSpec` +
 [semantic-layer.md](./semantic-layer.md) "Collectors"). The fact engine
 (`MetricsService`) seeds a `metric_spec` per resolved metric and runs each
 **fact collector** on its `on`. (Until P7.B3 the producer block was
-`gauges:`; it is now an unknown key, tsk865.)
+`gauges:`; it is now an unknown key.)
 
 ```yaml
 # .oxplow/extensions/project/extension.yaml
@@ -2127,9 +2126,9 @@ metrics:                              # the read SPEC (the chartable metric)
     (`MetricsService::fact_collectors`). A collector's trigger is its own
     (`on` + `where` in `extension.yaml`; the Catalog shows it as
     `on snapshot.taken`). Three families:
-    - **Language-agnostic code metrics** (tsk314) — one metric, all languages —
+    - **Language-agnostic code metrics** — one metric, all languages —
       `oxplow.todos`, `oxplow.fn_count`, `oxplow.high_complexity_fns`,
-      `oxplow.long_functions`, plus **`oxplow.doc_coverage`** (tsk125 — a per-file
+      `oxplow.long_functions`, plus **`oxplow.doc_coverage`** (a per-file
       RATIO of documented-public ÷ public over `code_metrics()`'s `has_doc`;
       measure `oxplow.doc_coverage`, V69, per-path; spec is a `ratio` %,
       higher-better, not a count). Declared with no
@@ -2137,7 +2136,7 @@ metrics:                              # the read SPEC (the chartable metric)
       `source_files()` reader and call a capability (`code_metrics()` /
       `markers()`), so the per-language knowledge lives in `oxplow-code-metrics`,
       not the metric. See "Language-agnostic capability layer" below.
-      `source_files()` **excludes codegen output** (tsk68) via
+      `source_files` **excludes codegen output** via
       `oxplow_code_metrics::is_generated_source` — a `generated` path segment,
       a `.generated.`/`_generated.` basename infix, or a do-not-edit-style
       header (`@generated`, `do not edit`, `autogenerated`) in the first 10
@@ -2150,8 +2149,7 @@ metrics:                              # the read SPEC (the chartable metric)
       `panic_macros`), **TypeScript** (`any_usage`, `non_null_assertions`,
       `console_calls`, `ts_ignore`), **Clojure** (`defn_count`), **C#**
       (`empty_catch`, `blocking_async_calls`).
-    - **Whole-tree scans** (`TREE`) — **`oxplow.duplicate_lines`** (P7.B5,
-      tsk388): `duplicate_blocks(min_lines)` (the host builtin over
+    - **Whole-tree scans** (`TREE`) — **`oxplow.duplicate_lines`** (P7.B5,): `duplicate_blocks(min_lines)` (the host builtin over
       `oxplow_code_dup::detect_duplicates`) and one fact per side of each
       block (value = its line count, subject `block:<path>:<start>-<end>`);
       the spec is a `sum`. It runs on `vcs.head.moved` — logged once for each move
@@ -2163,13 +2161,12 @@ metrics:                              # the read SPEC (the chartable metric)
       reconstructed tree (`build_full_file_map`, `scan_kind = full`), and it
       alone runs on a take that recorded no files (a delta collector has no
       delta there). A clean tree records an empty capture, which clears the
-      metric (tsk44).
+      metric.
 
     This repo dogfoods the language-idiom Rust/TS sets + all four unified code
     metrics through `use:` entries in its own `.oxplow/project.yaml`. The
     complexity/`code_metrics()`-backed collectors and the C# grammar
-    (`tree-sitter-c-sharp` → `Language::CSharp` in `oxplow-code-metrics`) landed in
-    tsk229/tsk230.
+    (`tree-sitter-c-sharp` → `Language::CSharp` in `oxplow-code-metrics`) landed in.
   - **user-global** — `global_config_dir()/{metrics,measures,dimensions}/*.yaml`,
     shared across projects, hot-reloaded by the config watcher. Global
     measures are active everywhere automatically; a global *metric* is enabled
@@ -2204,7 +2201,7 @@ as a template the agent writes and adapts; `oxplow extension check` and
 that is the project's own (a report-derived or `exec` collector) is
 hand-authored in the four blocks of `.oxplow/extensions/project/extension.yaml`.
 
-## Targets & feedback (advise-only, P5/tsk220)
+## Targets & feedback (advise-only, P5/)
 
 A definition's `target` / `warn_at` / `fail_at` (interpreted via `direction`) are
 the single source of red/green — no hardcoded UI ramps. The coverage cut-offs
@@ -2237,10 +2234,10 @@ All three reach the agent as nudges (`v_agent_nudge`), taken by the next
 prompt or tool call (`.context/extensions-commands.md` "Advisories").
 Disabling `oxplow-bundled` turns them off.
 
-## Performance: the `producers_for_measure` memo (tsk130)
+## Performance: the `producers_for_measure` memo
 
 `SqliteFactStore::producers_for_measure` was the single biggest backend CPU sink
-in the tsk129 profile — **309 s inclusive, ~46% of all backend CPU**. Not a
+in the profile — **309 s inclusive, ~46% of all backend CPU**. Not a
 missing index (`idx_fact_measure_capture` covers it): a **call-volume** problem.
 It runs once per measure in `metric_cube::build_measure`, the cube read fold, and
 `metric_engine::partial_state_facts`, so every metric read recomputed an answer
@@ -2287,7 +2284,7 @@ one that deletes facts, `db.memo().invalidate_all()`.
 
 ## Gotchas
 
-- **Config write-back is generic** (tsk355). Every settings write rewrites
+- **Config write-back is generic**. Every settings write rewrites
   `metrics:` in `project.yaml` (`use:` entries and `enabled: false` markers) through
   `oxplow_config::minimal_yaml`: the entry's own serde form, with nulls and empty
   lists and maps dropped. A new field on an entry struct is written back

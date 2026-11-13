@@ -720,7 +720,7 @@ resources:
         );
     }
 
-    /// tsk796: a namesake that declares nothing (`acme_pr` beside
+    /// a namesake that declares nothing (`acme_pr` beside
     /// `acme-pr`) doesn't take the declaring one's retention window away.
     #[tokio::test]
     async fn a_namesake_that_declares_nothing_keeps_the_others_window() {

@@ -434,7 +434,7 @@ mod tests {
         assert_eq!(m.transcript.len(), 4);
     }
 
-    /// tsk570: an error reply is checked against the `error` golden, a
+    /// an error reply is checked against the `error` golden, a
     /// reply must answer a request the other side sent, and a provider
     /// may not send the host's notifications.
     #[test]

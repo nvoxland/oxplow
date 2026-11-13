@@ -21,7 +21,7 @@ pub const RECORDS_READ: &str = "oxplow.records.read";
 #[serde(deny_unknown_fields)]
 pub struct ReadInput {
     /// What to read, by its URI: `oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-40`,
-    /// `oxplow:oxplow/task?id=tsk12&provider=oxtask`, `oxplow:oxplow/commit?sha=<sha>`, `oxplow:oxplow/event?id=<id>#part=output`,
+    /// `oxplow:oxplow/task?id=&provider=oxtask`, `oxplow:oxplow/commit?sha=<sha>`, `oxplow:oxplow/event?id=<id>#part=output`,
     /// `oxplow:oxplow/page?page=<ext>/<slug>`.
     pub uri: String,
     /// The stream whose worktree a `file:` or `page:` ref is read in

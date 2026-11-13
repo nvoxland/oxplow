@@ -228,16 +228,16 @@ why).
   set-link check goes through — and `oxplow-invalid:`, the link an
   unresolvable wikilink is kept as, so it saves back as `[[…]]` instead
   of plain text; a link Tiptap hands over with a null href is passed to
-  the default check, never `.trim()`med (tsk1007). **Never as Link's `protocols`**: Tiptap
+  the default check, never `.trim`med. **Never as Link's `protocols`**: Tiptap
   registers those with linkify (for autolinking, off here), and linkify
   throws on a scheme it can't tokenize — `task`'s underscore broke
-  every rich-text field (tsk974; `InternalLink.test.ts`). `openOnClick:
+  every rich-text field (`InternalLink.test.ts`). `openOnClick:
   false` — click handling is owned by the
   React layer: the `RichTextField` wrapper's `onClick` /
   `onAuxClick` intercepts clicks on `<a>` descendants, parses the
   href via `parseMarkdownLink` and names its ref via `linkRef`
   (both from `MarkdownView` — one resolution for every kind: a task, an
-  extension's ref, a file; tsk976), and routes through
+  extension's ref, a file), and routes through
   `useOptionalPageNavigation`. Plain click → in-tab
   navigate; Cmd/Ctrl/middle/right click → new tab. Cursor placement
   inside link text is sacrificed — arrow in from adjacent text.
@@ -397,7 +397,7 @@ item.threadId }`.
   `docVersion` bumped from `editor.on("update")`, so retyping a deleted
   quote re-attaches its highlight promptly instead of waiting for the
   blur/commit that updates `value`.
-- **Anchors are stored when the document settles** (tsk902): every
+- **Anchors are stored when the document settles**: every
   re-anchor queues the moved anchors (`pendingAnchorsRef`), and
   `flushAnchors` stores them — at once when the editor isn't focused, on
   blur, and on unmount — never per typing pause, since each

@@ -134,7 +134,7 @@ or exact mechanics.
 | External providers — the JSON-RPC/NDJSON protocol crate and meta-model, the fake provider, the host (consent, spawn, handshake), instances and health, Settings → Integrations, the conformance kit and `oxplow extension test` | `.context/providers.md` |
 | Tasks — the `oxplow/task_record` model, bundled's `v_oxplow_task` datasets and task points, oxtask | `.context/tasks.md` |
 | Shared models (contract, being built) — `models:` / `fills:`, `model.write`, fields, markdown bodies, how tasks and knowledge become observed systems | `.context/models.md` |
-| The semantic layer — sources (entities + facts), dimensions, metrics, the `v_*` read contract, `query_sql`, user/extension sources (target design, epic tsk275) | `.context/semantic-layer.md` |
+| The semantic layer — sources (entities + facts), dimensions, metrics, the `v_*` read contract, `query_sql`, user/extension sources (target design) | `.context/semantic-layer.md` |
 | Extensions — the terms (extension, contribution, capability, provider, scope, access, effect) and the index of the extensions docs | `.context/extensions.md` |
 | Extensions — `extension.yaml` (manifest v2), contribution descriptors, `configuration:`, private state, the design rules | `.context/extensions-manifest.md` |
 | Extensions — how pages run today: page files, ids, live set, params, checks, IPC/MCP surfaces, panels, desktop UI | `.context/extensions-page-host.md` |

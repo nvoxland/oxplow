@@ -2,7 +2,7 @@
 //!
 //! Claude/Codex/opencode hooks (via the control plane) and the ACP client
 //! all hand a Claude-shaped [`HookEnvelope`] to [`HookIngestService::ingest`].
-//! One envelope is **one transaction** (P3.3, tsk473): the state it changes
+//! One envelope is **one transaction** (P3.3): the state it changes
 //! (the thread's resume session, the agent turn) and the `agent.*` events
 //! that record it commit together, anchored to the thread's stream and its
 //! open turn. Large bodies (tool input and output)
@@ -25,7 +25,7 @@
 //!   becomes its resume id and logs `agent.session.started` once.
 //! - `SessionEnd`: closes the turns that session left open
 //!   (`session_ended` — an exit mid-turn sends no Stop) with its
-//!   transcript, so their tokens are theirs (tsk924), status
+//!   transcript, so their tokens are theirs, status
 //!   Stopped when it closed one; `agent.session.ended`; `reason: clear` of
 //!   the resume session clears the resume id.
 //!
@@ -562,7 +562,7 @@ fn record_tx(
         // The process that owned any open turn is gone: they end
         // interrupted, before the session start that resets the thread.
         let end = TurnEnd::new(now, TurnOutcome::SessionRestarted);
-        // A resumed session's own turns keep its transcript (tsk924): it
+        // A resumed session's own turns keep its transcript: it
         // is the file their tokens are in. Another session's file isn't.
         if let Some(sid) = session {
             let own = TurnEnd {
@@ -1587,7 +1587,7 @@ fn log_tool_tx(
             })
             .with_dedupe_key_opt(dedupe("finished"));
         // Caused by the call's start, so what reads the run knows when it
-        // began (tsk888: its reports are written after).
+        // began (its reports are written after).
         let requested = match dedupe("requested") {
             Some(key) => oxplow_db::event_log_store::id_by_dedupe_tx(conn, &key)?,
             None => None,
@@ -2566,7 +2566,7 @@ mod tests {
         assert_eq!(of_type(&logged(&svc).await, "agent.tool.finished").len(), 1);
     }
 
-    /// tsk888: a call's `agent.tool.finished` is caused by its
+    /// a call's `agent.tool.finished` is caused by its
     /// `agent.tool.requested` (one tool use id), so what reads the run
     /// knows when it started.
     #[tokio::test]
@@ -2690,7 +2690,7 @@ mod tests {
         assert_eq!(ended, 3, "every end is logged, s1's exit and its clear");
     }
 
-    /// tsk449: a session that ends without a Stop (an exit mid-turn) closes
+    /// a session that ends without a Stop (an exit mid-turn) closes
     /// its own open turn — `session_ended` — so the turn
     /// doesn't hold the quiet-period trigger open forever. Another
     /// session's end leaves it alone.
@@ -2740,7 +2740,7 @@ mod tests {
         assert_eq!(status.last().unwrap().envelope.payload["state"], "stopped");
     }
 
-    /// tsk924: a turn a session end or a restart closes keeps its
+    /// a turn a session end or a restart closes keeps its
     /// transcript, so its tokens are recorded as its own — the session's
     /// own file, for a resume of that session; another session's file is
     /// someone else's.

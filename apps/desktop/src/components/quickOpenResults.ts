@@ -68,7 +68,7 @@ function startsAWord(text: string, token: string): boolean {
 }
 
 /// How well a page matches `tokens` — lower is better — or null when it
-/// doesn't (tsk1031): every token starting a word of its title, then its
+/// doesn't: every token starting a word of its title, then its
 /// title as a subsequence, then its id, then its keywords, where each token
 /// must start a word (a description is long enough to hold any short
 /// subsequence: "todo" was found in "Planning"'s).
@@ -84,8 +84,8 @@ export function pageRank(entry: PageDirectoryEntry, tokens: string[]): number | 
 
 /// Does a result's displayed identity exactly equal the query (case-
 /// insensitive)? Such a result is floated above every fuzzy section — the
-/// "type the thing, jump to it" affordance. tsk51's task-id case falls
-/// out for free: query `tsk30` === the task hit's `ref_id`.
+/// "type the thing, jump to it" affordance. the task-id case falls
+/// out for free: query `tsk42` === the task hit's `ref_id`.
 function isExactMatch(r: QuickOpenResult, q: string): boolean {
   switch (r.kind) {
     case "page":

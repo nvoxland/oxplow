@@ -392,7 +392,7 @@ impl WorkspaceFilter {
                         // the capture sweep), so returning true here stops the
                         // walk before it can ever see the files below — which is
                         // what made `project.yaml` invisible even once the
-                        // per-file rule was right (tsk176).
+                        // per-file rule was right.
                         None => false,
                         // A folder an extension declares watched (`files:` with
                         // `watch: true`) is watched. This can't be expressed
@@ -573,7 +573,7 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
-    /// tsk1083: git's global excludes file (`core.excludesFile`) counts
+    /// git's global excludes file (`core.excludesFile`) counts
     /// like any `.gitignore`; and oxwiki, watched though git ignores it,
     /// is out of a tree (`ignore_in_trees`): trees are git's view.
     #[test]
@@ -1007,7 +1007,7 @@ mod tests {
 
     #[test]
     fn oxplow_dir_honours_its_own_gitignore_negations() {
-        // tsk176: `.oxplow` is oxplow's OWN state dir, so it's ignored by
+        // `.oxplow` is oxplow's OWN state dir, so it's ignored by
         // default — watching the live SQLite would feed oxplow's writes back
         // through its own watcher. But oxplow writes `.oxplow/.gitignore` as
         // `*` / `!.gitignore` / `!project.yaml` precisely so the config is

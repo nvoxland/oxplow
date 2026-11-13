@@ -136,7 +136,7 @@ fn renewal_lock(account: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
 /// The access token for the credential kept under `account`, renewed
 /// first (and kept) when it is about to lapse — or because its service
 /// refused it: `refused` is the access token that was refused, and it is
-/// renewed only while it is still the one stored (tsk928). A caller that
+/// renewed only while it is still the one stored. A caller that
 /// waited on another's renewal, or a refusal of a token another instance
 /// has already replaced, gets what is stored and spends no refresh. A
 /// renewal the service refuses for good (`invalid_grant`) leaves the
@@ -144,7 +144,7 @@ fn renewal_lock(account: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
 ///
 /// Renewals of one account are serialized in this process (a second
 /// finds the token the first stored), and every write first re-reads what
-/// is stored (tsk827): a renewal never writes over a sign-out, and a
+/// is stored: a renewal never writes over a sign-out, and a
 /// refusal for a token another process already replaced uses the
 /// replacement rather than marking the account lapsed. Across processes
 /// the keychain offers no compare-and-swap, so that check narrows the
@@ -503,7 +503,7 @@ async fn token_request(
     };
     // A token request is never sent on: a redirect would re-send the code,
     // the verifier, the refresh token or the secret somewhere the approval
-    // doesn't name (tsk829).
+    // doesn't name.
     let client = reqwest::Client::builder()
         .timeout(TOKEN_TIMEOUT)
         .redirect(reqwest::redirect::Policy::none())
@@ -735,7 +735,7 @@ mod tests {
             sim.secrets(),
             vec![Some("s3cret".to_string()), Some("s3cret".to_string())]
         );
-        // tsk829: in the `Authorization` header (`client_secret_basic`,
+        // in the `Authorization` header (`client_secret_basic`,
         // what every service must take), unless the service says `post`.
         assert_eq!(sim.client_auths(), vec!["basic", "basic"]);
         // And never in the URL the browser opens.
@@ -749,7 +749,7 @@ mod tests {
         assert_eq!(sim.client_auths(), vec!["basic", "basic", "post"]);
     }
 
-    /// tsk829: a token request is never sent on: a redirect would re-send
+    /// a token request is never sent on: a redirect would re-send
     /// the code, the verifier or the refresh token (and the client secret)
     /// somewhere the approval doesn't name.
     #[tokio::test]
@@ -767,7 +767,7 @@ mod tests {
         assert!(elsewhere.grants().is_empty(), "nothing was sent on");
     }
 
-    /// tsk829: the answer's `token_type` must be one oxplow sends (bearer);
+    /// the answer's `token_type` must be one oxplow sends (bearer);
     /// an `expires_in` written as a string is still a lifetime.
     #[tokio::test]
     async fn a_token_answer_is_read_as_services_write_it() {
@@ -831,7 +831,7 @@ mod tests {
             .unwrap();
         assert_ne!(forced, renewed);
         assert_eq!(sim.grants().len(), 3);
-        // tsk928: another caller refused the same token, arriving after the
+        // another caller refused the same token, arriving after the
         // renewal: it gets the renewed one, and spends no refresh.
         assert_eq!(
             access_token(&secrets, "acct", &d, None, Some(&renewed))
@@ -943,7 +943,7 @@ mod tests {
         );
     }
 
-    /// tsk827: signing out while a renewal is in flight stays signed out:
+    /// signing out while a renewal is in flight stays signed out:
     /// the renewal doesn't write its token back over the deletion.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_sign_out_during_a_renewal_stays_signed_out() {
@@ -964,7 +964,7 @@ mod tests {
         assert_eq!(state(secrets.as_ref(), "acct"), SignInState::NotSignedIn);
     }
 
-    /// tsk827: a refusal for a token another process has already replaced
+    /// a refusal for a token another process has already replaced
     /// (its renewal rotated the refresh token) uses the replacement rather
     /// than marking the account lapsed.
     #[tokio::test]
@@ -1030,7 +1030,7 @@ mod tests {
             .into_owned()
     }
 
-    /// tsk830: the stand-in server holds a code to what it was issued for
+    /// the stand-in server holds a code to what it was issued for
     /// (RFC 6749 §4.1.3): the same client, the same redirect, the same
     /// verifier — so a client that mixed them up would fail here.
     #[tokio::test]

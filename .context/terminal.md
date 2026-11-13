@@ -5,7 +5,7 @@ session, plus the file-path link provider that turns `path:line` text
 in terminal output into clickable links that open files in oxplow's
 editor.
 
-## The CSP carve-out that keeps colour working (tsk247)
+## The CSP carve-out that keeps colour working
 
 `tauri.conf.json` sets
 `app.security.dangerousDisableAssetCspModification: ["style-src"]`.
@@ -241,7 +241,7 @@ A closed session's ref no longer opens nothing: it opens the
 `session-transcript` page, which has a **Reopen** action.
 The rows are tested by foundation's `new-session-earlier-*` fixtures.
 
-**Read-only session lookup (tsk139).** `lookup_terminal_session({ uri })`
+**Read-only session lookup.** `lookup_terminal_session({ uri })`
 (core in `crates/oxplow-rpc/src/commands/terminal.rs`; Tauri shim +
 `bindings.ts` `lookupTerminalSession`) returns the live PTY `sessionId` of
 a terminal or an agent session **without spawning**: the registry's read-only
@@ -263,7 +263,7 @@ The surface owns:
   visibly jumps). The wrapper's `background` matches `XTERM_THEME.background`
   so the gutter reads as the terminal's own padding.
 - **It opens xterm only once the mono web font has loaded**
-  (`document.fonts.load`, tsk1042). xterm measures its cells when it opens
+  (`document.fonts.load`). xterm measures its cells when it opens
   and again only *after* a resize, so a terminal opened while JetBrains
   Mono was still loading measured the fallback's 15px rows. Its next fit —
   a strip appearing above it, which changes the pane but not the window —
@@ -279,7 +279,7 @@ The surface owns:
   dropped the `fastScrollModifier` option and hardwired Alt, so it is
   no longer configurable (it was Shift before the v6 upgrade).
 - A custom wheel handler that leaves a Ctrl/Cmd-wheel to the page.
-  Scrollback is xterm's own; there is no tmux history mode (tsk1018).
+  Scrollback is xterm's own; there is no tmux history mode.
 - The agent input bus (`insertIntoAgent`: a page action's draft, Repair
   with the Agent). Nothing drops onto the terminal: what an agent should
   read goes in the context basket (`.context/usability.md` "Add to
@@ -323,7 +323,7 @@ capture the *child's stdin*, not the renderer event stream — the PTY's
 ECHO would otherwise mix a second racing copy of the input into the
 output, testing the wrong direction).
 
-> **tsk93 finding (multi-paragraph paste paragraphs reorder in the web
+> finding (multi-paragraph paste paragraphs reorder in the web
 > UI).** The reorder is **not** in oxplow's web→PTY path (proven by the
 > tests above). It surfaces downstream in the embedded agent CLI's
 > handling of the bracketed paste — the paragraph separators arrive as
@@ -370,7 +370,7 @@ Locked by `input_written_before_the_session_exists_arrives_once_it_does`,
 Each `onData` is its own message, so a bare Escape and the Enter after it
 are two PTY writes, as they were typed. Nothing merges keys any more.
 
-## When a session ends or goes away (tsk1026)
+## When a session ends or goes away
 
 A session's process exiting sends `{type:"exit", exitCode}`; the registry
 then unregisters it (`TerminalSessionRegistry`'s forwarder removes it from
@@ -445,7 +445,7 @@ opens an inline input there, opening the panel again — pressing the menu,
 outside the panel, closed it; the last terminal may close). Close is **not** an inline `InlineConfirm` `×` anymore — it
 matches the stream/thread nav.
 
-Two behaviors the hook fixed here (tsk270), both previously hand-rolled
+Two behaviors the hook fixed here, both previously hand-rolled
 and wrong: the strip had **no outside-press dismissal at all** (only
 Escape), so the panel could sit over the xterm surface swallowing clicks;
 and its close timer cleared `renamingId` outright, so drifting the
@@ -489,7 +489,7 @@ now passes the hook's `guard`, which suppresses the passive closes
   per row text** (`createMemoizedScanner`, a bounded LRU — a hit refreshes
   recency)
   so xterm's per-visible/hovered-row `provideLinks` calls don't re-run
-  the regex over unchanged rows on every scroll/hover (tsk39) — the key
+  the regex over unchanged rows on every scroll/hover — the key
   is the row text, so a content change auto-invalidates. The
   `validatePath` gate is **not** cached (the workspace index can change);
   it's applied fresh on each call over the cached shape matches. `TOKEN_RE`

@@ -41,7 +41,7 @@ command):
 **Guards** (`crates/oxplow-app/src/source_guards.rs`). The thin
 callers — oxplow-rpc, oxplow-mcp, oxplow-control-plane, oxplow-daemon,
 oxplow-tauri-ipc and the desktop shell (`apps/desktop/src-tauri`) —
-are **denied every database write by type** (tsk903): each has a
+are **denied every database write by type**: each has a
 generated `clippy.toml` whose `disallowed-methods` lists every public
 function of oxplow-db that writes (the store traits' methods by their
 trait, `Database::transaction` / `rehearse` included) and every
@@ -70,7 +70,7 @@ and tests that own them. Also:
 `ui_events_have_their_pinned_sources` pins which file may
 push each UI event (its `EMITTERS` table), and
 `every_ui_event_has_an_emitter` fails on a variant with none (a listener
-no one wakes — tsk789). What's left there is a signal no dataset carries —
+no one wakes). What's left there is a signal no dataset carries —
 the config swap, agent status, an orphaned stream
 (`StreamOrphaned`), background tasks, the LSP server list, a snapshot take, VCS refs, the
 workspace, a provider sign-in finishing (`CredentialChanged`: the token
@@ -156,7 +156,7 @@ bespoke IPC/MCP read. The result says what it read (`reads`), and the
 view refreshes through `useRerunOnChange` when `DatasetsChanged` names a
 dataset it read — no per-feature event to add. A bespoke read stays for
 what SQL can't answer (a git or LSP call, a file on disk, an entity an
-extension declared but hasn't synced) is a live dataset when the SQL layer can read it (`v_data_entity`: its row count is counted only for the one name the query pins, since one slow count would fail the whole list, tsk1065).
+extension declared but hasn't synced) is a live dataset when the SQL layer can read it (`v_data_entity`: its row count is counted only for the one name the query pins, since one slow count would fail the whole list).
 
 A new operation that the UI invokes and that mutates persistent state
 touches roughly seven files. They sit in this order:
@@ -208,7 +208,7 @@ touches roughly seven files. They sit in this order:
    `oxplow-tauri-ipc`'s `commands::generated` — the `#[tauri::command]`
    whose only job is to give `tauri-specta` something to derive the TS
    binding from. **Do not hand-write adapters**; they were all deleted
-   in tsk260.
+   in.
 
    `cargo test -p oxplow-tauri-ipc` (`export_ts_bindings`) regenerates
    `apps/desktop/src/tauri-bridge/generated/bindings.ts`; CI fails on a
@@ -362,9 +362,9 @@ union. To add an event:
 (`event.kind`, `event.streamId`, …). A subscriber that filtered on
 `event.type === "foo.changed"` silently never fired — the agent-status
 dot bug came from exactly this mismatch. `subscribeOxplowEvents` hands
-its listener the generated `OxplowEvent` union (P11, tsk963), so a
+its listener the generated `OxplowEvent` union (P11), so a
 filter on a field or kind the union doesn't have fails typecheck. There
-are no hand-written IPC types any more: `api-types.ts` is gone (tsk965)
+are no hand-written IPC types any more: `api-types.ts` is gone
 — a renderer type for what crosses the wire is the generated one, and a
 renderer-side view over it lives beside what builds it (the branch
 pickers' `BranchRef` / `GroupedGitRefs` / `RefOption` in
@@ -543,7 +543,7 @@ UI). Active producers:
 IPC: one method `listBackgroundTasks()` returns the snapshot, as the
 generated `BackgroundTask` (snake_case: `started_at`, `ended_at`, and
 the producer's result JSON-encoded as `result_json`, which
-`taskResult(task)` parses — P11, tsk964; there is no adapter). Renderer
+`taskResult(task)` parses — P11; there is no adapter). Renderer
 subscribes via `subscribeBackgroundTaskEvents(onChange)` (filters
 `background-task.changed` events) and refetches. The renderer never
 writes — only the runtime starts/updates tasks. Cancellation is not
@@ -707,7 +707,7 @@ The collection subsystem (`.context/collection.md`) follows the same
   panel and an agent's `oxplow_query_sql` read the dataset
   (`SqliteRequestAnalysisStore`). Mutations are the
   `oxplow.test.record_run` command and `oxplow.collector.sync` on a report collector
-  (agents run them; P8.A8, tsk863) since the UI never writes observations. A view of them re-runs on
+  (agents run them; P8.A8) since the UI never writes observations. A view of them re-runs on
   `DatasetsChanged` (P8.A2: the bespoke observations-changed event had no
   listener and is gone).
 - **The engine lives in `oxplow-app`, not a store.** `CollectionService`
@@ -834,11 +834,11 @@ surface passes one. The reads stay RPCs (`list_comments_for_target`,
 Views re-read on `DatasetsChanged` naming `v_comment` (comments and their
 messages) — `subscribeCommentEvents` in `api.ts`. The renderer's
 re-anchor after it re-finds a quote is `oxplow.comment.relocate`
-(`relocateComment`, tsk861): recorded when the anchor moved; one already
+(`relocateComment`): recorded when the anchor moved; one already
 where it was is `HandlerOutput::unchanged` and leaves no audit row and no
 event (commands.md step 5), so the re-read it causes ends the loop. The
 field stores anchors only once the document settles (blur, leaving, not
-focused; tsk902), so typing above N comments doesn't run N commands per
+focused), so typing above N comments doesn't run N commands per
 pause.
 
 ## Search index (read dataset + indexer)
@@ -847,7 +847,7 @@ The `search` command/tool is a read over `SqliteSearchStore`
 (`crates/oxplow-db/src/search_store.rs`) — a unified FTS5/BM25 index, not a
 per-domain store. It is **fed**, not written by its callers. Tasks,
 comments, thread notes and knowledge pages are searchable resources derived from a dataset
-(`v_search_<kind>`): an asset per kind (`kind_search.rs`, tsk864)
+(`v_search_<kind>`): an asset per kind (`kind_search.rs`)
 restates the kind whole when a table behind its dataset commits — a move, a
 soft delete, a thread delete included — writing nothing when the rows are
 unchanged. File contents come from snapshot blobs, so the `search.index`

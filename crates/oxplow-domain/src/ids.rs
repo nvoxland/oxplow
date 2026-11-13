@@ -1,7 +1,7 @@
 //! Newtype IDs.
 //!
 //! Every entity id has the same shape: a fixed 3-letter type prefix plus
-//! a SQLite-allocated autoincrement integer, e.g. `tsk38`, `thr21`, `str5`.
+//! a SQLite-allocated autoincrement integer, e.g. `tsk42`, `thr21`, `str5`.
 //! The prefix makes an id self-typing — an agent (or a human) can tell a
 //! thread id from a stream id at a glance, and the MCP boundary can reject
 //! "you passed a thread id where a stream id was expected".

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The headless binaries never build the desktop shell's stack (tsk885).
+# The headless binaries never build the desktop shell's stack.
 #
 #   scripts/check-headless-graph.sh
 #

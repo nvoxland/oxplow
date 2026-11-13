@@ -39,7 +39,7 @@ pub const OXPLOW_EVENT_CHANNEL: &str = oxplow_app::event_channels::OXPLOW;
 ///   `apps/desktop/src/tauri-bridge/generated/shellCommands.ts` by the
 ///   `export_ts_bindings` test below, so the TS table can't drift;
 /// - it is what survives in this crate once the in-process backend is
-///   retired (tsk260).
+///   retired.
 pub const SHELL_ONLY_COMMANDS: &[&str] = &[
     "abort_setup",
     "answer_oauth_redirect",
@@ -181,7 +181,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::forget_page,
             // usage
             commands::generated::record_usage,
-            // code quality (duplication only — metrics scan retired, tsk229)
+            // code quality (duplication only — metrics scan retired)
             // snapshots
             commands::generated::list_snapshot_ops,
             commands::generated::list_files_for_snapshot,

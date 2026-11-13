@@ -869,7 +869,7 @@ export function App() {
   // The launcher (QuickOpen) is the single discovery surface — pages,
   // files, commands, and body search in one box — and has exactly one
   // shortcut: Cmd/Ctrl+P (`oxplow.window.quick_open`'s). The old
-  // Cmd+K / Cmd+Shift+F aliases were removed (tsk59): one door is
+  // Cmd+K / Cmd+Shift+F aliases were removed: one door is
   // clearer, and Cmd+P is the established dev quick-open reflex. Monaco
   // doesn't bind Cmd+P, so no capture-phase interception is needed — the
   // menu accelerator opens the launcher even when the editor is focused.

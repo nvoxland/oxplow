@@ -38,14 +38,13 @@ Logs, tab reports and the socket use the same lightweight `uiClientId.ts` identi
   the `chat` frame carries `ChatEvent` from `Services.chat` — see
   `.context/agent-model.md` → "Chat sessions"; every channel is subscribed
   before the upgrade is answered, so a client that writes once its socket
-  opens never misses the event its write caused — tsk995),
+  opens never misses the event its write caused),
   `GET /health`. Same per-project instance lock as the shell.
   `/ipc` and `/events` require the UI token (see "Auth" below);
   `/health` doesn't. CORS stays permissive so the frontend can run in a
   plain browser (Playwright, a served `dist/`): a page can't obtain the
   token and no cookies are involved, so it exposes nothing.
-- **`crates/oxplow-daemon-sim`** — the browser suite's daemon (P11,
-  tsk948): the same `oxplow_daemon::run_main` (arguments, boot, server),
+- **`crates/oxplow-daemon-sim`** — the browser suite's daemon (P11,): the same `oxplow_daemon::run_main` (arguments, boot, server),
   with its secrets in memory (`MemorySecrets`) instead of the keychain,
   so a headless CI runner needs none and a local run writes no test key
   into the person's. They go with the process. Dev-only: nothing that ships
@@ -81,7 +80,7 @@ Logs, tab reports and the socket use the same lightweight `uiClientId.ts` identi
   WebSocket, not `/ipc`. Pinned by `request lanes` in
   `transport.test.ts`.
 
-  **Which daemon is a per-window question** (tsk258). The shell injects
+  **Which daemon is a per-window question**. The shell injects
   `window.__OXPLOW__ = { base, kind, projectDir }` into every window it creates
   (`src-tauri/src/windows.rs`, `initialization_script` — built through
   `serde_json` so a URL can't break out of the literal), so two project
@@ -102,7 +101,7 @@ Logs, tab reports and the socket use the same lightweight `uiClientId.ts` identi
   drift from the Rust definition. With **no Tauri host at all** (a
   plain browser over a tunnel) a shell command has nowhere to go: the
   transport refuses it itself (`"none"`, a `NOT_FOUND` error), with no
-  request — no daemon serves one (tsk996). `shellAvailable()` is the one
+  request — no daemon serves one. `shellAvailable` is the one
   check for a Tauri host every bridge uses, and the app doesn't ask for
   what only a shell has (the native menu, recent projects) without one.
 
@@ -161,7 +160,7 @@ Logs, tab reports and the socket use the same lightweight `uiClientId.ts` identi
   — no reload prompt. Agents on the daemon box run through the gap.
   (A genuine version/schema skew after a backend upgrade would still
   warrant a reload prompt; there's no skew detection yet, so nothing
-  surfaces one today.) **A refused token is not a drop** (tsk971): an
+  surfaces one today.) **A refused token is not a drop**: an
   `/ipc` 401 marks the transport refused (`isTokenRefused`), each call
   fails `UNAUTHORIZED` with what to do, the socket is closed and never
   retried, and the banner shows `remote-banner-refused` — "this window's
@@ -218,9 +217,9 @@ out of scope.
 Logging: the daemon logs to stderr at `info,rmcp=warn` unless `RUST_LOG`
 says otherwise (`run.rs::run_main`). A line that repeats per event or per
 connection is a bug to fix at its source, not noise to filter: in
-tsk1077, 91% of an hour's log was two such bugs (tsk1071, tsk1078).
+% of an hour's log was two such bugs.
 
-## Auth (tsk345)
+## Auth
 
 Loopback is not a boundary: the agents the daemon runs, the sources it
 sandboxes (localhost is allowed) and any web page the person visits can
@@ -231,7 +230,7 @@ token**; only the person's renderer holds it.
   daemon and hands them over on **stdin** (`--token-stdin`). Never argv,
   the environment or a file: all are readable by other processes of the
   user, the daemon's own agents included.
-- **Lifeline (tsk1073):** after the token the shell keeps that stdin open
+- **Lifeline:** after the token the shell keeps that stdin open
   for as long as it lives. End-of-file means the app is gone (quit,
   crashed, SIGKILLed), and the daemon stops with its agents
   (`daemon_supervisor::stop_when_app_goes`: SIGTERM to its group when it
@@ -255,7 +254,7 @@ token**; only the person's renderer holds it.
 **Ungated: `/health` and custom component bundles** (P6b.D3,
 `oxplow-daemon/src/components.rs`). `GET
 /components/v/{version}/{*path}` serves a custom component's bundle as
-its host loaded it (`load_component`, tsk984): a snapshot of the
+its host loaded it (`load_component`): a snapshot of the
 bundle's files held in `Services::component_bundles`, keyed by its
 version (a hash over the bundle's files and what it may query and run), so the frame runs exactly what
 was hashed. The version is a path segment, so the bundle's relative URLs
@@ -280,7 +279,7 @@ iframe) and lets it load only its own files — `default-src 'none'`,
 scripts, styles, images and fonts from the bundle folder's URL only —
 no `'self'`, which even in a sandboxed frame matches the daemon's whole
 origin (the response URL's; checked in Chromium and WebKit) and would let
-a frame load another bundle's files (tsk983) — `connect-src 'none'`, `form-action 'none'`,
+a frame load another bundle's files — `connect-src 'none'`, `form-action 'none'`,
 `base-uri 'none'` (`bundle_csp`); `/component-lib/` is named as a
 script source (the client library) and a style source (the kit's sheet,
 P11). `style-src` keeps `'unsafe-inline'` for the bundle's own inline
@@ -289,10 +288,10 @@ directive being bounded to the bundle; inline scripts stay refused. The
 page bounds where a frame may go with `frame-src http://127.0.0.1:*
 http://localhost:*` — every loopback name the daemon
 serves a bundle to, since a browser builds its frames' URLs from the base
-it reached the daemon by (tsk1003):
+it reached the daemon by:
 the main window's CSP (`tauri.conf.json`; with no `devCsp`, Tauri
 applies the same `csp` in dev) and, for a plain browser, a one-directive
-meta CSP in `index.html` (P11, tsk960) — the component frame's bound test
+meta CSP in `index.html` (P11) — the component frame's bound test
 keeps the two one value.
 
 ## Dispatch context

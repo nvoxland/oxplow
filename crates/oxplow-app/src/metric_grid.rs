@@ -402,7 +402,7 @@ mod tests {
         p.captured_at.to_text().chars().take(10).collect()
     }
 
-    /// P4.5 (tsk490): a grid's rows are the engine's own series — for every
+    /// P4.5: a grid's rows are the engine's own series — for every
     /// metric, by bucket and by a dimension — and it runs on the one-
     /// connection database (the series are read before the query takes it).
     #[tokio::test]

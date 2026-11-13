@@ -5,7 +5,7 @@
 //! in that window — a crash, a `kill`, the machine losing power — left
 //! an empty or half-written file, and both stores treat a parse failure
 //! as "empty document". So the failure mode was silent data loss: the
-//! restore set or the whole recents list simply gone (tsk253).
+//! restore set or the whole recents list simply gone.
 //!
 //! Writing to a sibling temp file and renaming over the target fixes
 //! that: `rename` is atomic on POSIX, so a reader sees the old document

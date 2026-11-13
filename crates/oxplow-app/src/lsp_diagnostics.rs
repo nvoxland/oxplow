@@ -294,7 +294,7 @@ mod tests {
         assert_eq!((path.as_str(), rows.len()), ("a.rs", 0));
     }
 
-    /// tsk571: the boot clear logs each cleared file at zero, like a
+    /// the boot clear logs each cleared file at zero, like a
     /// crash does — the log never keeps counts the rows no longer hold.
     #[tokio::test]
     async fn the_boot_clear_logs_each_cleared_file_at_zero() {

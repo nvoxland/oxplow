@@ -133,14 +133,14 @@ A new way for config to start a program must go through the same gate.
 
 ## Skeleton + semantic layer (direction, mostly built)
 
-> **Superseded direction (2026-09-28, epic tsk393).** The target is now
+> **Superseded direction (2026-09-28).** The target is now
 > anchors + an event
 > log + SQL datasets, with commands and the scopes they call as the act side, and
 > everything pluggable through the kinds of contribution an extension declares. The section below
 > describes the current code, which that epic moves away from phase by
 > phase.
 
-> **Status (epic tsk275, recorded 2026-09).** Analytics pages no longer
+> **Status (recorded 2026-09).** Analytics pages no longer
 > ship in core: they are pages in the bundled `oxplow-bundled`
 > extension (`.oxplow/extensions/oxplow-bundled-todo/`, compiled in by
 > `crates/oxplow-app/src/bundled_extensions.rs`), and core works with it
@@ -266,7 +266,7 @@ that happens on the main thread (nothing is on screen yet anyway);
 `open_project` / `create_project` from the UI run it on a blocking
 thread so open windows stay responsive.
 
-**Creating and opening are separate doors** (tsk248). `open_project`
+**Creating and opening are separate doors**. `open_project`
 refuses a dir with no `.oxplow/` — it never initializes one — and the
 error names File ▸ New Project…. Creating is `create_project`: it
 validates the dir is *not* already a project, creates `.oxplow/`, and
@@ -331,7 +331,7 @@ filters the list to dirs that are still projects and de-duplicates it
 (the same project twice would open one window and then fail to start a
 second daemon against its own lock). If nothing opened, the launcher
 comes up — so a launch can never end with no window, which is what
-tsk252 was.
+ was.
 
 The set is **owned**, not inferred: the shell writes
 `session.json` = its open project windows, in open order, whenever a

@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 
 import { paramKind, paramOptions, paramOptionsSql } from "./vizParams.js";
 
-// tsk1043: a viz's Task Id / Stream params took raw numbers; oxplow's id
+// a viz's Task Id / Stream params took raw numbers; oxplow's id
 // params pick from what exists instead.
 
 test("oxplow's id params are pickers; anything else is typed", () => {

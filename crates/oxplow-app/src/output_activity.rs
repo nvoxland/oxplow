@@ -4,7 +4,7 @@
 //! hooks are sparse within a single turn: a long turn streams tokens to
 //! the terminal for many minutes while emitting no Pre/PostToolUse
 //! between tool calls. Read against the wall clock, that frozen log
-//! looks like death even though the agent is plainly working (tsk141).
+//! looks like death even though the agent is plainly working.
 //!
 //! This tracker captures the missing cadence signal — the last time the
 //! agent's PTY produced output — so the stall watchdog can tell a busy

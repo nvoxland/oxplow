@@ -1,5 +1,5 @@
 //! Composite the project's `iconTint` behind the app icon so concurrent
-//! oxplow windows are tellable apart in the Dock (tsk246).
+//! oxplow windows are tellable apart in the Dock.
 //!
 //! # Why this is needed at all
 //!

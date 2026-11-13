@@ -1,4 +1,4 @@
-//! Agent token-usage store (tsk104): per-turn token accounting parsed from
+//! Agent token-usage store: per-turn token accounting parsed from
 //! the agent session transcript, attributed to a thread and its turn,
 //! plus a per-session read cursor so successive Stops only sum the new tail
 //! of the transcript.
@@ -27,7 +27,7 @@ pub struct AgentTokenUsage {
     pub agent_kind: String,
     /// Actual model the turn ran on (e.g. `claude-opus-4-8`), for later cost.
     pub model: Option<String>,
-    /// The human-authored user prompt that OPENED this turn (tsk143).
+    /// The human-authored user prompt that OPENED this turn.
     /// Nullable — a turn can be an assistant continuation with no opening
     /// prompt, or an agent kind whose transcript text we don't parse. Pure
     /// observation: read from the transcript, never generated.
@@ -356,7 +356,7 @@ mod tests {
         }
     }
 
-    /// P3.2 (tsk472): the rows and the cursor that consumed their bytes
+    /// P3.2: the rows and the cursor that consumed their bytes
     /// commit together, and a turn's own report counts once.
     #[tokio::test]
     async fn rows_and_cursor_commit_together_and_causes_dedupe() {

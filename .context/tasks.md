@@ -82,7 +82,7 @@ is the store's (oxtask's `oxtask.tasks.set_workflow`), not bundled's.
 
 ## Recognizers (loose ids)
 
-Text and commands name a task by a bare id (`tsk12`) when a live store
+Text and commands name a task by a bare id (`tsk42`) when a live store
 declared the id pattern: `ModelRegistry` (`fills.id_pattern`) is the only
 source. There is no active tracker; every live store's pattern applies.
 

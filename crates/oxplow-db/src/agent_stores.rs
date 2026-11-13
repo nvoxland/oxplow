@@ -1333,7 +1333,7 @@ mod tests {
             .unwrap()
     }
 
-    /// P3.3 (tsk473): outside the hook ingest a turn is closed by restart
+    /// P3.3: outside the hook ingest a turn is closed by restart
     /// recovery, and its `agent.turn.ended` says so.
     #[tokio::test]
     async fn a_restart_close_is_logged_as_recovery() {

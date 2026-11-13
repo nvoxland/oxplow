@@ -216,7 +216,7 @@ mod tests {
         ));
     }
 
-    /// P7 review (tsk724): a listener that fell behind hears that it
+    /// P7 review: a listener that fell behind hears that it
     /// missed moves — which may concern any stream — then the rest.
     #[tokio::test]
     async fn a_listener_that_fell_behind_hears_it_missed_moves() {

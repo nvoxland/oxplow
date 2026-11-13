@@ -7,7 +7,7 @@ import { cleanup, within, fireEvent, render, waitFor } from "@testing-library/re
 const realApi = { ...(await import("../../api.js")) }; // a copy: `mock.module` patches a loaded module in place
 /** Any other read (the Go To section's knowledge pages, …): no rows. Never the
  *  real call — with no Tauri host it throws, and the test would pass only
- *  where another file's mock answered first (tsk1012). */
+ *  where another file's mock answered first. */
 const noRows = { columns: [], rows: [], truncated: false, reads: { datasets: [], tables: [], measures: [] }, freshness: {} };
 let extensionRows: unknown[][] = [];
 /** The failed operations `v_op_error` answers with. */

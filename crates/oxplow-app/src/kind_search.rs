@@ -61,7 +61,7 @@ pub(crate) struct SearchableKind {
     /// The view its rows come from.
     view: String,
     /// The view's SQL as compiled: an edit of the dataset changes it — and
-    /// what the index holds — without touching the tables (tsk851).
+    /// what the index holds — without touching the tables.
     sql: String,
     /// The tables behind the view.
     tables: Vec<String>,
@@ -617,7 +617,7 @@ impl Assets {
         // What was indexed for a resource that is no longer searchable goes —
         // found wherever it is left: its state, its failure, or entries
         // with neither (a restate that committed after a cleanup, or a
-        // process that died between the two), files aside (tsk853).
+        // process that died between the two), files aside.
         let keep: Vec<String> = declared.into_iter().collect();
         self.db()
             .transaction(move |tx| {
@@ -913,7 +913,7 @@ resources:
             vec![("13".to_string(), "Gadget polish".to_string())]
         );
 
-        // Its dataset's SQL changes, its tables don't (tsk851): the index
+        // Its dataset's SQL changes, its tables don't: the index
         // follows the new SQL without waiting for a collector to write.
         write(
             &root,
@@ -945,7 +945,7 @@ resources:
         assert_eq!(state, 0);
     }
 
-    /// tsk854: when the change listener lags it missed some batches — one
+    /// when the change listener lags it missed some batches — one
     /// may have held the `resource` or `dataset` write — so it resyncs the
     /// registry as if those changed, not only the assets' inputs.
     #[tokio::test(flavor = "multi_thread")]
@@ -980,7 +980,7 @@ resources:
         );
     }
 
-    /// tsk852: at start, extension datasets are dropped and compiled again,
+    /// at start, extension datasets are dropped and compiled again,
     /// so for a moment a searchable kind's view isn't there. That is "not
     /// compiled yet", not "gone": its entries stay until `resource` stops
     /// saying it is searchable.
@@ -1031,7 +1031,7 @@ resources:
         assert_eq!(left, vec!["acme/pr"]);
     }
 
-    /// tsk853: what a gone kind left is found from the index and the
+    /// what a gone kind left is found from the index and the
     /// failures too, not only `asset_state`: a restate that committed
     /// after the cleanup (or a process that died between the two) left
     /// entries with no state row, and a kind whose recomputes only ever
@@ -1154,7 +1154,7 @@ resources:
     }
 }
 
-/// Core's kinds (tsk864): tasks, comments and knowledge pages,
+/// Core's kinds: tasks, comments and knowledge pages,
 /// indexed from `v_search_<kind>` by the same assets as an extension's kind.
 #[cfg(test)]
 mod core_tests {

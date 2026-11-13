@@ -467,7 +467,7 @@ impl AiService {
             None => global.providers.push(provider),
         }
         self.save_global(&global)?;
-        // The key is bound to the URL it's saved for (tsk346). This path is
+        // The key is bound to the URL it's saved for. This path is
         // the person's (Settings → AI; UI-only), so saving rebinds a kept
         // key to the provider's URL as it is now.
         let endpoint = endpoint_of(global.providers.iter().find(|p| p.id == id));

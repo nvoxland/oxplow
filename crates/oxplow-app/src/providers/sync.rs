@@ -103,7 +103,7 @@ impl Instance {
                         .join(", ")
                 ),
             })?;
-        // One read of a collector at a time (tsk715): two from the same
+        // One read of a collector at a time: two from the same
         // checkpoint would record its items twice and race the cursor.
         let lock = self
             .reading
@@ -125,7 +125,7 @@ impl Instance {
                 .and_then(|s| s.state);
             // When the read began, for "renewed since": taken once it has
             // its process — one this read started began after it, which
-            // isn't a renewal under it (tsk907).
+            // isn't a renewal under it.
             let mut called = Instant::now();
             let outcome = match self.connection().await {
                 Ok((peer, handle)) => {
@@ -385,7 +385,7 @@ impl Instance {
     /// each record only when it changes its item: one equal to the item's
     /// last `task.recorded` (a write's, or an earlier read's) restates
     /// nothing, and logging it would echo a write back to whatever reacted
-    /// to it (an effect writing the item, tsk799). The checkpoint counts
+    /// to it (an effect writing the item). The checkpoint counts
     /// what was read.
     async fn commit(
         &self,

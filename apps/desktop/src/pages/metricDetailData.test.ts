@@ -91,7 +91,7 @@ test("defaultChartMode follows the spec aggregation", () => {
 });
 
 test("yDomain zero-scale anchors the axis at 0", () => {
-  // The squished case: near-constant ~1.96 data on a 0-based axis (tsk133).
+  // The squished case: near-constant ~1.96 data on a 0-based axis.
   expect(yDomain([1.95, 1.96, 1.96], null, "zero")).toEqual({ min: 0, max: 1.96 });
   // Negative data still spans through 0.
   expect(yDomain([-3, -1], null, "zero")).toEqual({ min: -3, max: 0 });
@@ -120,7 +120,7 @@ test("yDomain auto pads a flat series so it isn't on an edge", () => {
 });
 
 
-// tsk179: breakdown options are whatever the SPEC declares — nothing more.
+// breakdown options are whatever the SPEC declares — nothing more.
 // `package` used to be seeded unconditionally, which meant a token metric
 // offered a breakdown its facts can't answer (they carry no path, so every
 // group is empty) while hiding `model` and `agent`, which they do carry.

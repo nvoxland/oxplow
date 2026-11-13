@@ -1,5 +1,5 @@
 //! A daemon started with `--token-stdin` keeps its stdin as a lifeline to
-//! the app that started it (tsk1073): when the app goes — quit, crash or
+//! the app that started it: when the app goes — quit, crash or
 //! SIGKILL — the pipe closes and the daemon stops, instead of running on
 //! with its agents until the project is next opened.
 

@@ -95,7 +95,7 @@ mod tests {
         assert_eq!(err.code, "INVALID");
     }
 
-    /// P4.3 (tsk488): a physical table is refused unless the person's
+    /// P4.3: a physical table is refused unless the person's
     /// explorer asks for a raw read.
     #[tokio::test]
     async fn query_sql_reads_tables_only_when_raw() {

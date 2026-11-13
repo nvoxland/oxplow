@@ -1,6 +1,6 @@
 import { connectedTo, expect, test } from "../../support/fixtures.js";
 
-// tsk971: a wrong token is refused, not a lost daemon — said once, with
+// a wrong token is refused, not a lost daemon — said once, with
 // how to fix it, no reconnect loop, no "daemon disconnected" overlay, and
 // nothing thrown uncaught.
 test("a page holding the wrong token says its token was refused", async ({ browser, baseURL, daemon }) => {

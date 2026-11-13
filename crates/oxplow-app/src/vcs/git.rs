@@ -1007,7 +1007,7 @@ mod tests {
         }
     }
 
-    /// tsk550: a rev or name that reads as an option never reaches git's
+    /// a rev or name that reads as an option never reaches git's
     /// command line, whoever passes it.
     #[tokio::test]
     async fn options_are_refused_where_revs_and_names_go() {

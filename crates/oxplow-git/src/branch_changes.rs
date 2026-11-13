@@ -32,7 +32,7 @@ pub struct ChangeScopes {
 /// The branch context and the working tree's changes. The context is read
 /// in-process (`git2`, the repo opened once); the one git process a call
 /// spawns is the working tree's `status`, whose untracked walk uses git's
-/// own caches (tsk241).
+/// own caches.
 pub fn get_change_scopes(repo: &Path) -> ChangeScopes {
     let git = crate::repo::is_git_repo(repo)
         .then(|| git2::Repository::open(repo).ok())
@@ -68,7 +68,7 @@ fn collect_working_tree_changes(repo: &Path) -> (Vec<BranchChangeEntry>, Vec<Bra
     // `-z` is not just a separator change: it turns OFF git's C-quoting.
     // Without it, any path needing quotes (a space, any non-ASCII byte)
     // arrives wrapped in `"` with octal escapes, and storing that
-    // verbatim produced phantom directories like `"out` (tsk268).
+    // verbatim produced phantom directories like `"out`.
     //
     // It is also unambiguous by construction: the only two bytes a POSIX
     // filename cannot contain are `/` and NUL, which are exactly the
@@ -212,7 +212,7 @@ fn run_capturing(args: &[&str], cwd: &Path) -> Option<String> {
 }
 
 /// Characterization tests for the two merge steps, pinning the exact
-/// semantics of the linear scans they replaced (tsk238).
+/// semantics of the linear scans they replaced.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -225,8 +225,7 @@ mod tests {
     /// there is no arrow — the record carrying the status codes is the
     /// *destination*, and the source follows as its own NUL-separated
     /// record. Reading it the old way would take the destination as the
-    /// source and drop a record, desynchronising everything after it
-    /// (tsk268).
+    /// source and drop a record, desynchronising everything after it.
     #[test]
     fn a_staged_rename_records_both_paths_under_z() {
         let dir = tempdir().unwrap();
@@ -269,7 +268,7 @@ mod tests {
     /// Taking the porcelain path verbatim stored the quotes and the
     /// escapes, so `out/Internal Metabase Database/x.yaml` surfaced as a
     /// phantom `"out` directory next to the real one, and the recorded
-    /// path pointed at nothing on disk (tsk268).
+    /// path pointed at nothing on disk.
     #[test]
     fn paths_git_quotes_are_recorded_as_the_real_path() {
         let dir = tempdir().unwrap();

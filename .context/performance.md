@@ -23,7 +23,7 @@ Use it for both. Every optimization below was verified this way.
 **It does not cover the request-delta reads.** `cube_equivalence` walks specs and
 the cube; the request metric deltas (the request analysis) are a different read path with
 its own queries, and the biggest single hotspot ever measured here lived in it
-(tsk239, below) while the harness reported a clean profile. A green
+(below) while the harness reported a clean profile. A green
 `cube_equivalence` is necessary, not sufficient — profile the live app too.
 
 ```sh
@@ -64,7 +64,7 @@ of `0x450c`. The flag writes a `.syms.json` sidecar to resolve against.
 
 ## The shape today
 
-After the tsk129 and tsk191 rounds, **there is no dominant hotspot left.**
+After the rounds, **there is no dominant hotspot left.**
 
 | | |
 |---|---|
@@ -75,12 +75,12 @@ After the tsk129 and tsk191 rounds, **there is no dominant hotspot left.**
 
 Already fixed — **do not re-optimize these**:
 
-- `producers_for_measure` was **46% of backend CPU**; memoized (tsk130/tsk153)
+- `producers_for_measure` was **46% of backend CPU**; memoized
   and now absent from the profile entirely.
-- `dim_value` 11.5% → 4.1% (tsk214).
-- `string_to_ts` 2.5% → off the board (tsk215).
+- `dim_value` 11.5% → 4.1%.
+- `string_to_ts` 2.5% → off the board.
 - `representative_facts_by_slice` was **38% of backend CPU** in a live capture;
-  most calls no longer run it at all (tsk239/tsk242, below).
+  most calls no longer run it at all (below).
 
 ## Live-request evidence (2026-10-16)
 
@@ -136,7 +136,7 @@ live view; `materialize: on_change` would recompute on every task edit
 for a read that's cheap enough as is. Revisit when a What Deviated slot
 read shows up in a profile.
 
-## The cube decision at 7.1 M facts (P4.4, tsk489, 2026-09-29)
+## The cube decision at 7.1 M facts (P4.4-09-29)
 
 Measured before `metric_grid()` (P4.5) builds on the engine: the harness on a
 `VACUUM INTO` copy of the live project DB (2.4 GB, **7,097,464 facts**, 47
@@ -161,10 +161,10 @@ declined specs are the next place to look, not the cube.
 
 **The size is per-case test facts:** `oxplow.test_case` (3.16 M) and
 `oxplow.test_duration` (3.06 M) are 88% of all facts — retention or
-aggregation of those is its own task (tsk514; see the next section for what
+aggregation of those is its own task (see the next section for what
 they cost the cube).
 
-## Bounded series reads, re-measured (P12, tsk202, 2026-10-05)
+## Bounded series reads, re-measured (P12-10-05)
 
 The harness on a `VACUUM INTO` copy of the live DB (2.3 GB, **5,969,753
 facts**, 108,667 captures folded in 73.8 s), release build: every series
@@ -178,7 +178,7 @@ for all 73 specs.
 | `oxplow.high_complexity_fns` (declined) | 685 |
 | `oxplow.coverage.untested_files` (declined) | 544 |
 
-So tsk202's shape — a series loading a measure's whole history for the
+So the shape — a series loading a measure's whole history for the
 renderer to filter — is gone: reads take a window, applied server-side, and
 the cube's whole-history read for the largest measure (`oxplow.tokens`, 45 k
 cube rows) is ~10 ms in SQLite. **Pushing the window into the cube's SQL
@@ -203,7 +203,7 @@ asset runner calls `build_all` once per quiet burst of commits to
 
 **The first version of this table said every test run cost ~22 s. It
 didn't:** the harness recorded its one capture with no branch, so it timed
-a new branch's seed, not an incremental fold (tsk704). A test run lands on
+a new branch's seed, not an incremental fold. A test run lands on
 its branch's existing partition and folds in well under a second.
 
 **The seed is the real cost.** A branch's first fold replays the history
@@ -211,14 +211,14 @@ visible to it into its live partition, and for the per-case test measures
 that is every one of ~5 M facts. It is paid once per new branch, and again
 for every branch after anything invalidates the cube (the dominated-capture
 prune — no longer on a clean tree's `oxplow.duplicate_lines` restate,
-tsk709 — or a promoted-dim flip). A per-subject seed is now one SQL query
+or a promoted-dim flip). A per-subject seed is now one SQL query
 over the visible captures (`live_seed_per_subject`: the latest capture per
 `(producer, subject)`), equivalent to the replay and pinned against the
 fact fold, instead of loading every fact into memory; that took the seed
 from 25.3 s to 20.0 s. The query alone is 17.8 s on 5 M facts, and a
 covering index `fact(measure_id, capture_id, subject, path)` only
 brought it to 8.2 s for a large index — **the lever is the volume of
-per-case facts** (tsk514), not the fold.
+per-case facts**, not the fold.
 
 **Where the facts are:** `oxplow.test_case` and `oxplow.test_duration` are
 87.5% of all facts (the `fact` table is 1.9 GB, its indexes another
@@ -226,10 +226,10 @@ per-case facts** (tsk514), not the fold.
 opt-in `metricRetentionDays` keeps unconditionally — so no retention
 setting reclaimed them.
 
-**Change-only test facts (tsk733)** replace the per-case window tried
-first (tsk514, a 7-day prune, removed: on this machine 3.9 M
+**Change-only test facts ** replace the per-case window tried
+first (a 7-day prune, removed: on this machine 3.9 M
 `oxplow.test_case` facts sat inside a single week, ~210 runs a day, so a
-window bounded history but not volume). Measured on a fresh copy (tsk732,
+window bounded history but not volume). Measured on a fresh copy (
 sample usage — 2,302 runs, 5.3 M case results, 99.8% passes): 0.25% of
 results changed status from the test's previous result on the branch,
 2.1% moved duration more than 50% and by at least 20 ms, and 34% of runs
@@ -239,7 +239,7 @@ keeps **~2.6%** of per-case results; per-test history lives in
 `test_case_stat` (12,859 rows for that whole history: one per branch ×
 test). A seed reads what's left.
 
-## Zero-splice producer discovery (tsk239)
+## Zero-splice producer discovery
 
 The request analysis asks, per measure, "which producers emit this metric's slice"
 so a clean run zero-fills instead of reading blank. Answering it by scanning
@@ -373,7 +373,7 @@ asserted confidently (by me) *before* measuring, and was wrong.
   frames**; readers index live frames, not file bytes. WAL size is a
   disk-footprint artifact of the biggest write burst (the automatic checkpoint
   is PASSIVE — it restarts the log in place and reuses the space). The daily
-  pass truncates it (tsk216), but that is housekeeping, not speed.
+  pass truncates it, but that is housekeeping, not speed.
 - **Folding `representative_facts_by_slice`'s join-back into the `GROUP BY` is
   slower, not faster.** SQLite guarantees that with exactly one `min()`/`max()`
   aggregate, bare columns come from the extreme row — so the group can yield the
@@ -382,7 +382,7 @@ asserted confidently (by me) *before* measuring, and was wrong.
   group-by sorter costs more than 277 rowid lookups afterwards. The query keeps
   its "redundant" shape on purpose.
 - **`SELECT DISTINCT producer, rule, severity, dims_json` is not a drop-in for
-  `representative_facts_by_slice`.** tsk239 proposed it as "semantically
+  `representative_facts_by_slice`.** proposed it as "semantically
   equivalent for the caller" at 4.5×. It isn't: `FactFilter::matches` also reads
   `value` and — through `dim_value` — `path`, `subject`, `subject_kind` and
   `branch`, none of which are in the slice tuple. It's a valid path only when
@@ -398,7 +398,7 @@ asserted confidently (by me) *before* measuring, and was wrong.
   (It stays formally unmeasured: mounting it needs `agentStatus === "working"`,
   and no write command sets agent status.)
 
-## A switch during startup waited on the write lock (measured 2026-10-17, tsk1422)
+## A switch during startup waited on the write lock (measured 2026-10-17)
 
 **Symptom.** For the first minutes after a restart the person couldn't
 switch stream or thread; the window's priority lane didn't help.
@@ -449,7 +449,7 @@ Pinned by `an_interactive_write_goes_ahead_of_queued_background_writes`
 (a 700 ms holder and twenty queued writers: the interactive one waited
 2.9–4.0 s without the yield, under 1.3 s with it).
 
-## The window's stall detector reports only a window that was drawing (2026-10-17, tsk1423)
+## The window's stall detector reports only a window that was drawing (2026-10-17)
 
 WKWebView has no long-task observer, so `logger.ts` detects a frozen main
 thread by timer drift: a tick every second, and a `main thread stalled`
@@ -703,9 +703,9 @@ pair (`d.base = :eff_scope`). `v_file` itself was already one `read_dir`
 when the query mentions it; condition it with a param equality, not a
 join or a `CASE`.
 
-## Daemon transport: what a loopback HTTP hop costs (tsk255)
+## Daemon transport: what a loopback HTTP hop costs
 
-Measured for the daemon-backed shell epic ([[tsk254]]), from **inside the real
+Measured for the daemon-backed shell epic ([[]]), from **inside the real
 WKWebView** with embedded assets (the packaged path), against a local
 `oxplow-daemon`. The comparison that matters is Tauri IPC vs daemon HTTP — *not*
 "in-process vs network" — because today's local path is already JSON over
@@ -739,7 +739,7 @@ WS constructor throws. Adding `http://127.0.0.1:* ws://127.0.0.1:*` to
 the page is served by vite over http, so Tauri never applies the configured CSP
 and the restriction is invisible — a dev-mode test of this proves nothing.
 
-## Extension catalog cache (tsk390 / P1.13, tsk415)
+## Extension catalog cache (/ P1.13)
 
 `extensions::load_extensions(root)` parses every bundled page file (about
 forty embedded YAML documents) plus the project's on each call, and it ran
@@ -818,7 +818,7 @@ measured with the sqlite3 CLI: 200k single-statement inserts into a bare
 two-column table took 86 ms with it against 41 ms without — about 0.2 µs
 a row, proportionally less on real tables with indexes.
 
-## The dev loop: build and test time (tsk678, 2026-10-01)
+## The dev loop: build and test time (2026-10-01)
 
 Measured on the 14-core dev Mac (under background load ~11, so expect
 ±30% run to run), for a one-line body edit in `oxplow-app`:

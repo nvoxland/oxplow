@@ -195,8 +195,7 @@ pub fn automatic_in_a_row_tx(
 }
 
 /// Send `key`'s failed attempt again by itself at `at` (RFC 3339): the
-/// automatic attempt sends `resend`, what the failed one composed
-/// (tsk887).
+/// automatic attempt sends `resend`, what the failed one composed.
 pub fn schedule_retry_tx(
     conn: &Connection,
     key: &EffectRunKey,
@@ -223,7 +222,7 @@ pub fn drop_retry_tx(conn: &Connection, key: &EffectRunKey) -> Result<(), Domain
     Ok(())
 }
 
-/// Drop every scheduled retry of `effect` (tsk990): what they would send
+/// Drop every scheduled retry of `effect`: what they would send
 /// was composed by the script as it was, and a new approval is of the
 /// script as it is now. The attempts stay failed, for a person's Retry.
 pub fn drop_retries_of_tx(conn: &Connection, effect: &str) -> Result<usize, DomainError> {
@@ -283,7 +282,7 @@ pub fn due_retries_tx(
 
 /// The attempts a person started — a retry, a backfill — that are still
 /// `started`. No pump delivery makes them, so none redelivers them: at
-/// start, each was cut off (tsk845).
+/// start, each was cut off.
 pub fn person_started_tx(conn: &Connection) -> Result<Vec<EffectRunKey>, DomainError> {
     let mut st = conn
         .prepare(
@@ -352,7 +351,7 @@ fn already(key: &EffectRunKey) -> DomainError {
 /// Claim `key`'s attempt before a run with a step outside the
 /// transaction: a `started` row, keeping `resend` — what it composed, when
 /// every step is safe to send again — so an attempt cut off before it is
-/// recorded can be sent again by itself (tsk954). `Invalid` when that
+/// recorded can be sent again by itself. `Invalid` when that
 /// attempt was already made.
 pub fn claim_tx(
     conn: &Connection,
@@ -383,7 +382,7 @@ pub fn claim_tx(
         return Err(already(key));
     }
     // The attempts before it keep no composition: what a retry sends moves
-    // to the attempt sending it (tsk999). Their `retry_at` stays, a record
+    // to the attempt sending it. Their `retry_at` stays, a record
     // that they were sent again.
     conn.execute(
         "UPDATE effect_run SET resend_json = NULL
@@ -422,8 +421,8 @@ pub fn claimed_tx(conn: &Connection, key: &EffectRunKey) -> Result<Option<Claime
 /// Record how `key`'s attempt ended: its row, or its `started` claim
 /// finished — dropping what the claim composed: only a scheduled retry
 /// keeps a composition ([`schedule_retry_tx`], in the same transaction
-/// when the failure is sent again), so none outlives the retry it was for
-/// (tsk999). `Invalid` when it already ended (a concurrent or earlier
+/// when the failure is sent again), so none outlives the retry it was for.
+/// `Invalid` when it already ended (a concurrent or earlier
 /// delivery got there first).
 pub fn finish_tx(
     conn: &Connection,
@@ -519,8 +518,8 @@ mod tests {
         .unwrap();
     }
 
-    /// tsk954: an attempt claimed with what it composed keeps it while it
-    /// runs — what is sent again when it is cut off. tsk999: finished, it
+    /// an attempt claimed with what it composed keeps it while it
+    /// runs — what is sent again when it is cut off. finished, it
     /// drops it; only a scheduled retry keeps a composition, so none
     /// outlives the retry it was for.
     #[tokio::test]

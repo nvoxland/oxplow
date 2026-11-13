@@ -33,7 +33,7 @@ function harness(deps: Partial<BridgeDeps> = {}, protocol: unknown = BRIDGE_PROT
   );
   const frame = new EventTarget();
   // The `init` the host really sends (`CustomComponentViz` posts this
-  // builder's message), so the library is proven against it (tsk856).
+  // builder's message), so the library is proven against it.
   const first = { ...run(1), config: { id: "x/burn", custom: { component: "burn", props: { color: "accent" } } } } as unknown as VizRun;
   const init = () =>
     frame.dispatchEvent(
@@ -60,7 +60,7 @@ test("connect resolves with what init carried and says ready once", async () => 
   expect(c.params).toEqual({});
   expect(c.props).toEqual({ color: "accent" });
   expect(c.tokens).toEqual({ "--accent": "#08f" });
-  // The kit is a stylesheet the bundle links (tsk961), not text in `init`.
+  // The kit is a stylesheet the bundle links, not text in `init`.
   expect("kitCss" in c).toBe(false);
   expect(c.protocol).toBe(BRIDGE_PROTOCOL);
   await settle();
@@ -68,7 +68,7 @@ test("connect resolves with what init carried and says ready once", async () => 
   h.close();
 });
 
-// tsk961: the theme reaches the frame as custom properties set on its
+// the theme reaches the frame as custom properties set on its
 // root through the CSSOM — the kit's sheet reads them, and no inline
 // <style> is needed.
 test("applyTheme sets each token on the document's root", async () => {

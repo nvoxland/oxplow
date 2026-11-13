@@ -190,9 +190,8 @@ markdown itself, nor edits it in a `<textarea>`.
   refreshes on the event that says it changed (Data on `extensionsChanged`; Integrations'
   page re-runs when the `v_provider_*` models change). Integrations
   also re-reads when an instance's health is recorded (`v_contribution_health`): Enable's own `configChanged` can be read
-  before the instance has started, and nothing else says it finished
-  (tsk1053).
-- **A re-read never wipes what the person typed** (tsk1054). A host
+  before the instance has started, and nothing else says it finished.
+- **A re-read never wipes what the person typed**. A host
   re-reading its data hands a form fresh copies of the same schema and
   saved value, so a form resets its fields on the *content* changing, not
   the object: `SchemaForm` keys on `JSON.stringify` of both, and a row
@@ -211,7 +210,7 @@ markdown itself, nor edits it in a `<textarea>`.
   click-to-edit) or `InlinePromptStrip` (for new-X flows that need a
   target-path entry) instead. `window.confirm` / `window.alert` block
   the renderer, and `no-blocking-dialogs.test.ts` fails on any call
-  (tsk630: the Git dashboard's push / merge / rebase now ask with
+  (the Git dashboard's push / merge / rebase now ask with
   `InlineConfirm`); use `InlineConfirm` for destructive actions on a
   row/button and `showToast({ message, onUndo })` for fire-and-undo
   destructives that aren't tied to a specific row. A destructive command run
@@ -527,7 +526,7 @@ markdown itself, nor edits it in a `<textarea>`.
 ## Destructive actions
 
 - **A button that runs a command asks when the command's spec does**
-  (`SpecConfirm`, `apps/desktop/src/components/SpecConfirm.tsx`; tsk898):
+  (`SpecConfirm`, `apps/desktop/src/components/SpecConfirm.tsx`):
   never a second rule in the page — while the spec loads it asks.
 - **Per-row destructives use `InlineConfirm`** at
   `apps/desktop/src/components/InlineConfirm.tsx`. First click on the trigger
@@ -624,7 +623,7 @@ through one `linkRef(parsed)` and one `openRef(ref, { newTab })` call
 (`components/Markdown/links.ts`, `followLink` and `linkMenu`, which the
 markdown viewer and editor both use). Per-kind click branches are
 how it drifted before — task links honoured the modifier while file,
-directory and commit links silently ignored it (tsk265). A new link kind
+directory and commit links silently ignored it. A new link kind
 gets the behaviour by being added to `linkRef`, not by growing
 another branch.
 
@@ -651,14 +650,14 @@ not a pick and isn't in the address.
 > not hand-roll a fourth copy of the timer, the listeners, and the guard.**
 > The terminal strip was hand-written "modeled on the far-left Navigator"
 > and inherited every one of the bugs below, which is why the behavior is
-> now shared code rather than a convention (tsk269, tsk270).
+> now shared code rather than a convention.
 
 - **Hover must never open anything that occludes an adjacent panel.**
   Hover is involuntary — the pointer crosses your component on its way
   somewhere else. So it may reveal information *in place* (a tooltip, a
   highlight, a row's hidden affordance), but expanding a surface over a
   neighbor requires an explicit click. The Navigator learned this the
-  hard way (tsk269): its 280px panel opened on a zero-dwell `mouseEnter`
+  hard way: its 280px panel opened on a zero-dwell `mouseEnter`
   and covered ~92% of the rail HUD immediately to its right, so simply
   drifting left on the way to a rail row buried the row you were aiming
   at. A dwell delay only makes an involuntary action *slower*, not
@@ -800,7 +799,7 @@ mounts the kit's, so a page moving to the kit's viz (`viz: approvals`, params
   Pure state + persistence live in the sibling `sectionCollapse.ts`
   (unit-tested). Adopters: none now the Metrics page is a page (a grouped page list folds its headings itself).
 - **The page places the controls; they are not pinned above the sections
-  (tsk86).** `SectionCollapseControls` reads state off context, so it can render
+  .** `SectionCollapseControls` reads state off context, so it can render
   anywhere under the provider. Recorded Metrics puts it in the **details rail**
   beside the filters — the rail is the page's control panel (a page's
   too: "A page's controls are in its rail"). It **self-hides**
@@ -812,7 +811,7 @@ mounts the kit's, so a page moving to the kit's viz (`viz: approvals`, params
   context follows the render tree, not the creation site). Any wrapper here would
   sit between the tab body and the page chrome's `height: 100%` column and break
   it.
-- **Still NOT a `Page` prop (tsk84).** `Page` is chrome: it renders `children`
+- **Still NOT a `Page` prop.** `Page` is chrome: it renders `children`
   opaquely and has no idea what sections exist, so a page-layout flag couldn't
   draw the controls without the sections registering themselves anyway — the flag
   would only say "the thing I'm already doing is allowed". The page composing
@@ -987,7 +986,7 @@ declaring *what it is* and mounting the generic layer.
   group lands there and there's no visible Quit. These items are
   OS-standard and state-free, so they stay out of the snapshot (and out
   of the off-Mac in-window `Menubar`).
-- **The File menu keeps creating and opening apart** (tsk248): `New
+- **The File menu keeps creating and opening apart**: `New
   Project…` (`project.new`) is the only command that initializes a
   folder — it picks a dir, creates `.oxplow/`, and opens it in a new
   window. `Open Project…` / `Open Project in New Window…` / `Open
@@ -1029,20 +1028,20 @@ declaring *what it is* and mounting the generic layer.
   one way to find pages, commands, files, and content: the launcher
   (`QuickOpenOverlay`), opened by **Cmd+P** (its `file.quickOpen` menu
   command) and the rail **Search…** button. That is its **only**
-  shortcut — the old Cmd+K / Cmd+Shift+F aliases were removed (tsk59):
+  shortcut — the old Cmd+K / Cmd+Shift+F aliases were removed:
   one door is clearer, and Cmd+P is the established dev quick-open
   reflex. There is no separate command palette or find-in-files overlay.
   Do **not** add a new modal/overlay for discovery, and don't re-add
   alias shortcuts; extend the launcher. See
   `.context/pages-and-tabs.md` → "One Search".
-- **Launcher search behavior (the tsk52 pass).** The launcher searches
+- **Launcher search behavior (the pass).** The launcher searches
   the **whole project** for tasks/knowledge pages/notes/comments (cross-stream), but
   scopes file-body hits to the current stream — another worktree's files
   aren't openable here. Implemented as `searchSite(q, null)` +
   a client-side file-hit stream filter in `buildQuickOpenResults`
   (`quickOpenResults.ts`); filename matches already come from the
   current stream's `v_file` (read once, re-read when what it read changes). An **exact-identity match** — a
-  task id like `tsk30`, or a page/file/knowledge page name equal to the query —
+  task id like `tsk42`, or a page/file/knowledge page name equal to the query —
   floats to the very top, above the fuzzy pages/commands sections
   (`isExactMatch`). Task ids are searchable because `index_task`
   (`crates/oxplow-app/src/indexer.rs`) folds the id into the FTS body
@@ -1094,7 +1093,7 @@ declaring *what it is* and mounting the generic layer.
     `navigator-strip-thread-<id>` (click to switch; a stream glyph also
     opens the panel, and the selected thread's glyph only opens it;
     `title` carries the full name). To open the panel in a test, click `navigator-expand` —
-    **hover does not open it** (tsk269). `navigator-collapse` closes it,
+    **hover does not open it**. `navigator-collapse` closes it,
     as does a click on the `navigator-overlay` background;
     `navigator-strip-empty` is the strip's dead-space expand target and
     `navigator-new-thread-input` is the inline add-thread field.
@@ -1198,8 +1197,8 @@ declaring *what it is* and mounting the generic layer.
   MIME there rather than overloading an existing one, and rather than
   declaring a `const` next to the component that introduced it: that was
   the old shape, and one task MIME ended up defined twice
-  with a unit test whose only job was asserting the copies hadn't drifted
-  (tsk271). The module is deliberately import-free so decoders, pure
+  with a unit test whose only job was asserting the copies hadn't drifted.
+  The module is deliberately import-free so decoders, pure
   helpers, and components can all reach it.
 - **Tabs in the center pane are drag-reorderable.**
   CenterTabs reorders **every non-pinned tab freely across the whole
@@ -1262,7 +1261,7 @@ declaring *what it is* and mounting the generic layer.
   decimal comma vs point, compact "240.4K" at ≥10k) and unit-aware via the
   spec's `unit` (`%` → one decimal; `ms` → humanized duration). A compacted
   display should carry `formatMetricValueExact(...)` in its hover `title`.
-  Deliberately no user-facing locale setting (tsk114): this module is the
+  Deliberately no user-facing locale setting: this module is the
   single seam, so adding one later is a one-line change here.
 
 ## Empty and error states

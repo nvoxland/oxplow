@@ -156,8 +156,8 @@ pub const MANIFEST: &[Capability] = &[
     // Metrics read through SQL (`v_metric_spec`, `v_fact`, `metric_grid()`)
     // on both surfaces, and change through the `metric.*` commands
     // (`run_command`); nothing metric-specific is left on MCP (P4.8).
-    // Architectural zones (tsk251) — agent-only: the agent reads the table
-    // here and writes it with `oxplow.config.set` (tsk411); the renderer only reads
+    // Architectural zones — agent-only: the agent reads the table
+    // here and writes it with `oxplow.config.set`; the renderer only reads
     // it (it rides on `get_config`), so there is no IPC counterpart.
     dataset("list_backlinks", &["v_page_ref"]),
     dataset("list_outbound", &["v_page_ref"]),
@@ -266,7 +266,7 @@ pub const MANIFEST: &[Capability] = &[
     ui("page_action_form", "a form action's form is the person's; an agent runs the command itself"),
     ui(
         "load_component",
-        "the host loads a custom component's bundle for the frame it shows the person (tsk984)",
+        "the host loads a custom component's bundle for the frame it shows the person",
     ),
     ui(
         "invoke_component_command",
@@ -585,7 +585,7 @@ mod tests {
         );
     }
 
-    /// P11 (tsk944): a UI-only row says why an agent has no tool for it.
+    /// P11: a UI-only row says why an agent has no tool for it.
     #[test]
     fn every_ui_only_row_says_why() {
         let silent: Vec<&str> = MANIFEST
@@ -599,7 +599,7 @@ mod tests {
         );
     }
 
-    /// P4.8 (tsk493): metrics are read through SQL and changed through
+    /// P4.8: metrics are read through SQL and changed through
     /// `metric.*` commands, so no surface carries a metric-specific read.
     #[test]
     fn no_surface_carries_a_metric_read() {

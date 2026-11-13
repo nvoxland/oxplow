@@ -400,7 +400,7 @@ test("postprocessWikilinks: broken link round-trips back to the authored [[#13]]
 
 // Every internal link kind has to resolve to a tab the same way, or
 // "open in a new tab" works on some and silently does nothing on
-// others — which is what tsk265 found: task links honoured the caller's
+// others — which is what found: task links honoured the caller's
 // newTab, file / directory / commit links fell through to legacy
 // single-tab callbacks and dropped it.
 

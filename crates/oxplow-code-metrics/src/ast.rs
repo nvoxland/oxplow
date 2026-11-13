@@ -1,5 +1,5 @@
 //! Generic, query-based AST access — the engine behind the metric substrate's
-//! `ast_query` builtin (epic tsk213, P3). The per-function metric
+//! `ast_query` builtin (P3). The per-function metric
 //! walkers in [`crate`] are *one* consumer of tree-sitter; this module exposes
 //! the grammars generically so a bundled or user-authored gauge script can run
 //! an arbitrary tree-sitter S-expression query against source text and get back
@@ -117,7 +117,7 @@ mod tests {
         // `inner_attribute_item`. A query naming only the former silently
         // undercounts crate/module-level suppressions — which are the ones that
         // matter MOST (an inner attribute mutes a lint for a whole file). Pin both
-        // node names so the undercount can't come back (tsk44).
+        // node names so the undercount can't come back.
         let src = r#"
 #![allow(clippy::unwrap_used)]
 

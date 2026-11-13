@@ -951,7 +951,7 @@ pub struct FileSnapshot {
 
 /// One commit-stamped snapshot row — a point where a stream's worktree WAS
 /// exactly a commit. The metric-ancestry resolver anchors dirty captures to
-/// these (tsk102).
+/// these.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StampedSnapshot {
     /// The snapshot row id — captures reference it (`capture.snapshot_id`),
@@ -1549,7 +1549,7 @@ impl SqliteSnapshotStore {
     }
 
     /// Record one take — the only production write path for snapshots
-    /// (P2.2, tsk424). In ONE transaction: the new `snapshot` row (with
+    /// (P2.2). In ONE transaction: the new `snapshot` row (with
     /// its branch, clean-tree commit and `tree_hash`), its file rows, the
     /// `snapshot_op` row and the `snapshot.taken` event. When `rows` is
     /// empty, or the resulting tree equals the parent's (`tree_hash`), no
@@ -1885,7 +1885,7 @@ impl SqliteSnapshotStore {
     }
 
     /// Every commit-stamped snapshot, oldest first — the metric fold's ancestry
-    /// anchor points (tsk102). A stamped snapshot means "this snapshot IS
+    /// anchor points. A stamped snapshot means "this snapshot IS
     /// exactly that commit's tree" (stamped by the capture layer on a clean
     /// worktree, or re-stamped by the git-refs listener when a commit lands on
     /// an unchanged worktree), so the first same-stream, same-branch stamp
@@ -2185,7 +2185,7 @@ impl SqliteSnapshotStore {
     /// excluding paths whose latest row is a deletion tombstone. This is the
     /// whole tree's file rows — content-addressable via `blob_hash`/`storage` —
     /// even though the anchor snapshot itself only lists a delta. The baseline
-    /// gauge sweep (tsk71) builds its full-tree corpus from this instead of
+    /// gauge sweep builds its full-tree corpus from this instead of
     /// requiring a fabricated full-tree snapshot.
     pub async fn list_tree_files_at(
         &self,
@@ -2393,7 +2393,7 @@ impl SqliteSnapshotStore {
     /// age — so every worktree's current tree stays viewable/rollbackable
     /// forever. Every other hash is content the cleanup may expire.
     ///
-    /// The ROWS are never deleted (tsk105): retention's job is bounding the
+    /// The ROWS are never deleted: retention's job is bounding the
     /// on-disk file copies, and the records are a different thing — durable
     /// facts other subsystems replay (the per-path metric fold derives each
     /// capture's RESTATED SET from them, and the ancestry anchors ride the
@@ -2509,7 +2509,7 @@ mod tests {
 
     #[test]
     fn timestamps_serialize_in_the_canonical_fixed_width_form() {
-        // tsk107. Every `ORDER BY … _at` in this store compares these strings
+        // . Every `ORDER BY … _at` in this store compares these strings
         // lexicographically, and the trimmed RFC-3339 the `time` crate emits
         // inverts same-second neighbors ("…20.5Z" > "…20.51Z"). A whole-second
         // value is the deterministic trap: trimmed form has NO fraction.
@@ -2863,7 +2863,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_same_bytes_as_git_and_oxplow_rows_diff_as_unchanged() {
-        // tsk423. Snapshot 1 recorded a.txt from the git odb (address = OID,
+        // . Snapshot 1 recorded a.txt from the git odb (address = OID,
         // content not hashed yet); snapshot 2 re-captured the same bytes
         // into the blob store (address = content = xxh3 "x1").
         let db = Database::in_memory();
@@ -3449,7 +3449,7 @@ mod tests {
         );
     }
 
-    /// P2.11 (tsk435): a listed snapshot carries what its creating op
+    /// P2.11: a listed snapshot carries what its creating op
     /// recorded — its parent (the "previous" a diff starts from), trigger
     /// and whether it ran over budget; the op log lists newest first.
     #[tokio::test]
@@ -4103,7 +4103,7 @@ mod tests {
         let list = store.list_for_path("src/foo.rs").await.unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].size_bytes, 42);
-        // The same row, published as `v_snapshot_file` (tsk944).
+        // The same row, published as `v_snapshot_file`.
         let published = db
             .read(|tx| {
                 let rows = || -> rusqlite::Result<Vec<(String, String, i64)>> {

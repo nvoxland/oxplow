@@ -84,7 +84,7 @@ fn errors_keep_their_meaning() {
     );
 }
 
-/// tsk821: an `Auth` may say which credential was refused (`data.credential`)
+/// an `Auth` may say which credential was refused (`data.credential`)
 /// — a service with two tokens refuses one — and the host renews only it.
 #[test]
 fn auth_carries_its_credential() {
@@ -150,7 +150,7 @@ async fn peers_answer_requests_and_cancellations() {
     answering.await.unwrap();
 }
 
-/// tsk549: once the other side's stream has ended, a new request fails at
+/// once the other side's stream has ended, a new request fails at
 /// once instead of waiting for a reply that can't come.
 #[tokio::test]
 async fn a_request_after_the_other_side_closed_fails_at_once() {

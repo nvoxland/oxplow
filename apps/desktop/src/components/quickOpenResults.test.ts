@@ -118,7 +118,7 @@ describe("buildQuickOpenResults", () => {
     expect(out.results.some((r) => r.kind === "command" && r.entry.id === "git.commit")).toBe(true);
   });
 
-  test("an exact task-id match is hoisted to the very top (tsk51)", () => {
+  test("an exact task-id match is hoisted to the very top", () => {
     const out = buildQuickOpenResults({
       query: "tsk30",
       pages,
@@ -179,7 +179,7 @@ describe("buildQuickOpenResults", () => {
     expect(out.results[0]).toMatchObject({ kind: "hit", hit: { uri: knowledgeUri("oxwiki", "meeting") } });
   });
 
-  // tsk1031: "todo" ranked Planning and two other pages
+  // "todo" ranked Planning and two other pages
   // first — t…o…d…o appears in order somewhere in their long descriptions.
   // A keyword matches at a word's start; a title match ranks first.
   test("a title match ranks first, and keywords match whole words", () => {

@@ -5,7 +5,7 @@
 # (subject "file:<path>", nonzero only), so a request's change attributes
 # through its files. and a per-file `code_metrics.ast_hit` FACT
 # (rule="any_usage") — the metric is the SPEC Sum(code_metrics.ast_hit) filtered by
-# that rule (epic tsk12).
+# that rule.
 def _ts_files():
     out = []
     for f in files("**/*.ts"):

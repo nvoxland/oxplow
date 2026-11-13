@@ -24,7 +24,7 @@ describe("a viz re-runs on what it read", () => {
   });
   test("nothing else re-runs it but its own definition", () => {
     expect(readsChanged({ kind: "tasksChanged" }, task)).toBe(false);
-    // tsk1030: the daemon says when the extension catalog changed; a file
+    // the daemon says when the extension catalog changed; a file
     // path is not the signal.
     expect(pageDefinitionChanged({ kind: "extensionsChanged" })).toBe(true);
     expect(pageDefinitionChanged({ kind: "workspaceChanged", path: ".oxplow/extensions/x/pages/a.yaml" })).toBe(false);

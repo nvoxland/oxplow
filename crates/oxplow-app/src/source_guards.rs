@@ -1,7 +1,7 @@
 //! Source-scan guards over the workspace's production code (P7.B6,
 //! P8.A1, `.context/ipc-and-stores.md`): who may push which UI event, and
 //! the thin callers' generated clippy configs, which deny them every
-//! database write by type (tsk903).
+//! database write by type.
 
 mod db_writes;
 
@@ -170,7 +170,7 @@ const EMITTERS: &[(&str, &str)] = &[
     ("ConfigChanged", "crates/oxplow-app/src/lib.rs"),
     ("CredentialChanged", "crates/oxplow-app/src/commands/credentials.rs"),
     ("CredentialChanged", "crates/oxplow-app/src/providers/registry.rs"),
-    // The extension catalog's own signal (tsk1030): what extensions
+    // The extension catalog's own signal: what extensions
     // contribute isn't a dataset to re-read, and a file path was a guess.
     ("ExtensionsChanged", "crates/oxplow-app/src/boot.rs"),
     ("LspServersChanged", "crates/oxplow-app/src/commands/lsp.rs"),
@@ -241,7 +241,7 @@ fn thin_caller_clippy_toml() -> String {
          # (`thin_caller_clippy_configs_are_current`); rewrite it with\n\
          # OXPLOW_BLESS=1. The root clippy.toml's settings, then every\n\
          # database write, consent and credential call this crate may not\n\
-         # make (tsk903, .context/ipc-and-stores.md).\n\n",
+         # make (.context/ipc-and-stores.md).\n\n",
     );
     out.push_str(&base);
     out.push_str("\ndisallowed-methods = [\n");
@@ -254,7 +254,7 @@ fn thin_caller_clippy_toml() -> String {
     out
 }
 
-/// tsk903: each thin caller's clippy denies, by type, what it may not
+/// each thin caller's clippy denies, by type, what it may not
 /// call — an alias, a store built in place, a trait path or a turbofish
 /// is the same call to the compiler. The list is generated; a change to a
 /// store regenerates it.
@@ -277,7 +277,7 @@ fn thin_caller_clippy_configs_are_current() {
     );
 }
 
-/// tsk903: a write is told by what its body does, not by its name — a
+/// a write is told by what its body does, not by its name — a
 /// `get_or_create` writes, a trait's write is denied through the trait,
 /// and a read through `Database::read` (always rolled back) is a read.
 #[test]
@@ -309,7 +309,7 @@ fn the_write_classifier_tells_writes_from_reads() {
 /// the doc's table (`ipc-and-stores.md` "What stays off the bus").
 const OFF_BUS: &str = "#[expect(clippy::disallowed_methods, reason = \"off the bus: ";
 
-/// tsk785, tsk903: a thin caller's write through a store is listed off
+/// a thin caller's write through a store is listed off
 /// the bus where it is made — `#[expect]`, so it fails once it no longer
 /// writes — with a reason the doc's table gives; nothing else lifts the
 /// denial.
@@ -407,7 +407,7 @@ fn every_ui_event_has_a_listener() {
     assert_eq!(unheard, Vec::<String>::new());
 }
 
-/// tsk789: every UI event has a pinned emitter — a variant the renderer
+/// every UI event has a pinned emitter — a variant the renderer
 /// listens for that nothing sends leaves its view stale.
 #[test]
 fn every_ui_event_has_an_emitter() {
@@ -460,7 +460,7 @@ fn a_test_only_module_is_not_production() {
     assert!(!has("crates/oxplow-app/src/test_fixtures.rs"));
 }
 
-/// What marks code kept for an old shape (tsk865, tsk920): a general
+/// What marks code kept for an old shape: a general
 /// word, matched case-insensitively, and the names of shims already
 /// removed, so neither comes back under any name.
 const LEGACY_MARKERS: &[&str] = &[
@@ -521,7 +521,7 @@ fn desktop_sources() -> Vec<(String, String)> {
     out
 }
 
-/// tsk865, tsk920: no production source keeps a shim, alias or migrator
+/// no production source keeps a shim, alias or migrator
 /// for an old shape — a manifest without `manifest: 2`, a `gauges:`
 /// block, an old slot name, an old impact kind are errors, not
 /// conversions. Any line naming one (`LEGACY_MARKERS`) is either gone or
@@ -570,7 +570,7 @@ fn is_test_double(name: &str) -> bool {
     name.ends_with("-fake") || name.ends_with("-sim")
 }
 
-/// tsk930: a test double (the stand-in OAuth server signs anyone in; the
+/// a test double (the stand-in OAuth server signs anyone in; the
 /// fakes answer whatever a test scripts) is a dev-dependency only — no
 /// workspace crate reaches one through a normal or build edge of the
 /// **resolved** graph (`cargo metadata`), however its manifest spells
@@ -633,7 +633,7 @@ fn no_test_double_is_a_production_dependency() {
         "oxplow-oauth-sim",
         "oxplow-ai-fake",
         "oxplow-provider-fake",
-        // The browser suite's daemon: secrets in memory (tsk948).
+        // The browser suite's daemon: secrets in memory.
         "oxplow-daemon-sim",
     ] {
         assert!(
@@ -691,7 +691,7 @@ fn the_core_never_binds_a_socket_for_a_sign_in() {
     assert!(offenders.is_empty(), "{offenders:#?}");
 }
 
-/// tsk1018: there is no tmux in the app — agents and shells run as
+/// there is no tmux in the app — agents and shells run as
 /// direct PTYs. No tracked source, manifest, script or CI file names it.
 /// Prose (`docs/`, `.context/`, `DEV.md`) may say it's gone or suggest
 /// a person's own multiplexer; `.oxplow/` is this repo's config, not the

@@ -2,8 +2,8 @@
 //!
 //! The unified `search_store` (FTS5/BM25) holds every kind. Tasks,
 //! comments and knowledge pages are search kinds whose rows come
-//! from a dataset (`v_search_<kind>`), indexed as assets by `kind_search`
-//! (tsk864). A file's text comes from snapshot blobs, outside the tables,
+//! from a dataset (`v_search_<kind>`), indexed as assets by `kind_search`.
+//! A file's text comes from snapshot blobs, outside the tables,
 //! so it is ingestion: the `search.index` pump consumer indexes the files
 //! a `snapshot.taken` captured — durable, redelivered after a crash.
 

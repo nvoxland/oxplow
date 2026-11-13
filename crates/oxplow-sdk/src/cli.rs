@@ -678,7 +678,7 @@ mod tests {
         assert_eq!(v["services"][0]["services"][1]["declared"], "declared");
     }
 
-    /// tsk865: there is no `migrate`: a manifest is v2 or doesn't load.
+    /// there is no `migrate`: a manifest is v2 or doesn't load.
     #[test]
     fn usage_errors_exit_two() {
         let dir = tempfile::tempdir().unwrap();

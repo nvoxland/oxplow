@@ -10,7 +10,7 @@ import { extPageUri } from "../../uri/uri.js";
 import type { TabRef } from "../../tabs/tabState.js";
 
 /** Every panel starts open: a collapsed Work hid the task a person had just
- *  added (tsk1045). */
+ *  added. */
 const DEFAULT_COLLAPSED = new Set<string>();
 
 /** An extension panel's id in the layout. */
@@ -60,7 +60,7 @@ export function resolveLayout(available: string[], stored: PanelPlacement[]): Re
 /** The full stored form of a resolved layout (visible first, then hidden),
  *  keeping each placement in `stored` for a panel not available now (an
  *  extension's, before extensions load) right after the entry it followed
- *  there (tsk998): an edit never drops where the person put a panel it
+ *  there: an edit never drops where the person put a panel it
  *  can't see yet. */
 function store(layout: ResolvedLayout, stored: PanelPlacement[], available: string[]): PanelPlacement[] {
   const out: PanelPlacement[] = [
@@ -78,7 +78,7 @@ function store(layout: ResolvedLayout, stored: PanelPlacement[], available: stri
 
 /** Move `panel` right `side` of `target` among the visible panels. Relative,
  *  not an index: an edit made before the stored layout loads is replayed
- *  on it, and must land beside the same panel there (tsk998). */
+ *  on it, and must land beside the same panel there. */
 export function movePanelBeside(
   available: string[],
   stored: PanelPlacement[],
@@ -115,7 +115,7 @@ export function showPanel(available: string[], stored: PanelPlacement[], panel: 
 
 /** Collapse or expand `panel`. Absolute, not a toggle: an edit made
  *  before the stored layout loads is replayed on it, and must mean the
- *  same there (tsk972). */
+ *  same there. */
 export function setCollapsed(
   available: string[],
   stored: PanelPlacement[],
@@ -150,7 +150,7 @@ export interface LayoutSync {
   close(): void;
 }
 
-/** The person's layout kept in step with `panel_layout` (tsk972, tsk998):
+/** The person's layout kept in step with `panel_layout`:
  *
  *  - Until the stored layout has loaded, edits are shown at once and kept;
  *    once it arrives they're replayed on it and saved — never a write over

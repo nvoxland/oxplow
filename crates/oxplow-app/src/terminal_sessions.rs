@@ -2,7 +2,7 @@
 //!
 //! Each session bridges an xterm.js instance in the renderer to a
 //! process in a PTY on the host — a shell, or an agent CLI run directly
-//! (no terminal multiplexer, tsk1018). The renderer
+//! (no terminal multiplexer). The renderer
 //! talks a small JSON protocol:
 //!
 //! - Outgoing (renderer → daemon):
@@ -248,7 +248,7 @@ pub struct TerminalSessionRegistry {
     /// Per-thread PTY liveness. The forwarder stamps it on every output
     /// burst (for sessions spawned with a known thread id) so the stall
     /// watchdog can tell a busy long turn from a dead one — see
-    /// [`crate::output_activity`] and tsk141.
+    /// [`crate::output_activity`] and.
     activity: crate::output_activity::OutputActivity,
     /// Where an agent pane's exit is recorded; set once the ingest is
     /// built (`ingest_exits_into`).
@@ -455,7 +455,7 @@ impl TerminalSessionRegistry {
     /// already killed, leaving a stale `by_key` entry). **Never
     /// spawns** — it only reads the index, so a caller can resolve a
     /// thread's agent PTY without going
-    /// through the spawn-capable `attach_or_create` path (tsk139).
+    /// through the spawn-capable `attach_or_create` path.
     pub async fn session_id_for_key(&self, key: &str) -> Option<String> {
         let session_id = self.by_key.lock().await.get(key).cloned()?;
         // Validate the session is still live; a stale by_key entry
@@ -509,8 +509,7 @@ impl TerminalSessionRegistry {
                     Ok(PaneEvent::Output(bytes)) => {
                         // Stamp PTY liveness for the stall watchdog. Only
                         // thread-bound (agent) panes record; the cadence
-                        // distinguishes a busy long turn from a dead one
-                        // (tsk141).
+                        // distinguishes a busy long turn from a dead one.
                         if let Some(session) = agent.and_then(|pane| pane.session) {
                             activity.record(session, Timestamp::now());
                         }
@@ -548,7 +547,7 @@ impl TerminalSessionRegistry {
                             message: msg,
                         });
                         // Its process is gone: unregister it, so attaching
-                        // to its key starts a fresh one (tsk1026).
+                        // to its key starts a fresh one.
                         if let Some(entry) = sessions.lock().await.remove(&session_id_for_task) {
                             let _ = pty.kill(&entry.pane_id).await;
                         }
@@ -907,7 +906,7 @@ mod tests {
 
     /// Read-only key lookup must never create a session, must find a
     /// live one, and must read as `None` once that session is gone.
-    /// Backs the spawn-free `lookup_terminal_session` IPC (tsk139).
+    /// Backs the spawn-free `lookup_terminal_session` IPC.
     #[tokio::test]
     async fn session_id_for_key_reads_without_spawning() {
         let reg = TerminalSessionRegistry::new(
@@ -1119,7 +1118,7 @@ mod tests {
         );
     }
 
-    /// tsk1026: a session whose process exited is unregistered, so
+    /// a session whose process exited is unregistered, so
     /// attaching to its key again starts a fresh one (an agent the person
     /// quit, opened again) instead of replaying the dead one forever.
     #[tokio::test]
@@ -1271,7 +1270,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    /// Regression for tsk93: a multi-paragraph paste (blank-line
+    /// Regression for a multi-paragraph paste (blank-line
     /// separated, framed as a single bracketed paste the way xterm.js
     /// emits it) must reach the PTY child as one contiguous, in-order
     /// byte sequence — never scrambled. Guards the web→PTY write path

@@ -208,7 +208,7 @@ pub async fn run_main(name: &str, secrets: Arc<dyn oxplow_ai::secrets::SecretSto
         "daemon ready"
     );
     // Publish the endpoint for a shell that didn't spawn us: a second
-    // app opening this project reads it and defers (tsk1063). The stdout
+    // app opening this project reads it and defers. The stdout
     // line below is what a supervising shell reads at spawn.
     let info = oxplow_app::daemon_supervisor::DaemonInfo {
         base_url: format!("http://{}", daemon.bind_addr),
@@ -227,7 +227,7 @@ pub async fn run_main(name: &str, secrets: Arc<dyn oxplow_ai::secrets::SecretSto
     );
 
     // Serve until the server stops or a signal asks us to; either way the
-    // reason is logged (tsk1070). A SIGKILL leaves no trace and the file
+    // reason is logged. A SIGKILL leaves no trace and the file
     // behind, which is why `DaemonSupervisor::stop` clears it too.
     let reason = tokio::select! {
         served = daemon.task => format!("the server stopped: {served:?}"),
@@ -253,12 +253,12 @@ fn log_dir(project_dir: &std::path::Path) -> PathBuf {
 /// Log to stderr (the supervising app's) and to
 /// `.oxplow/logs/daemon.<date>.log`, daily, the last week kept: a packaged
 /// app's stderr goes nowhere, and a daemon that stopped or hung must leave
-/// a trace (tsk1070). Written synchronously, so a crash loses no line.
+/// a trace. Written synchronously, so a crash loses no line.
 fn init_logging(project_dir: &std::path::Path) {
     use tracing_subscriber::prelude::*;
     // The MCP library logs three INFO lines per agent tool connection
     // (opened, input ended, finished): routine, so only its warnings show
-    // unless RUST_LOG asks (tsk1077).
+    // unless RUST_LOG asks.
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,rmcp=warn"));
     let file = tracing_appender::rolling::Builder::new()

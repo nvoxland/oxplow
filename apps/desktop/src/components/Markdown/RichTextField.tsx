@@ -183,7 +183,7 @@ export function RichTextField({
     lastCommittedRef.current = md;
     owner.current.onCommit?.(md);
   };
-  // Re-found comment anchors waiting to be stored (tsk902): written when
+  // Re-found comment anchors waiting to be stored: written when
   // the document settles — on blur, on leaving, or at once when the
   // person isn't typing — never per keystroke pause, since each is a
   // command run on the person's behalf.

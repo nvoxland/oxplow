@@ -26,7 +26,7 @@ File one when it helps the person follow the work:
   "input": { "title": "Fix login redirect loop", "body": "…", "stage": "ready" } }
 ```
 
-The answer names the id it minted (`tsk12`); undo deletes the task. It is
+The answer names the id it minted (`tsk42`); undo deletes the task. It is
 assigned to nobody. Title: imperative, ≤60 chars. One reviewable concern per
 item. An epic is an item with children: file one when the change has three or
 more steps a reviewer would inspect separately; otherwise file a single item.
@@ -45,7 +45,7 @@ rather than filing a new one.
 
 ## Changing items
 
-By the task's id (`tsk12`): `oxtask.task.move { id, stage }`,
+By the task's id (`tsk42`): `oxtask.task.move { id, stage }`,
 `oxtask.task.update { id, title?, body?, priority?, parent? }`,
 `oxtask.task.link { id, to, type }` (`to`: a task id or any uri) and
 `oxtask.task.unlink` (the same input), `oxtask.task.comment { id, body }` (the

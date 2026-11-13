@@ -1,4 +1,4 @@
-//! A snapshot's reconstructed tree, typed (P2.1, tsk423;
+//! A snapshot's reconstructed tree, typed (P2.1;
 //! `.context/data-model.md` "snapshot + file_snapshot").
 //!
 //! A snapshot row is a delta; the tree at snapshot `S` is the latest

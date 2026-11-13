@@ -61,7 +61,7 @@ fn stmt(sql: &str, params: Vec<Value>, expect_changes: Option<usize>) -> Stateme
     }
 }
 
-/// `tsk12`, `12` or a task URI, as the file's id (`tsk12`).
+/// `tsk42`, `12` or a task URI, as the file's id (`tsk42`).
 fn task_id(raw: &str) -> Result<String, String> {
     let id = oxplow_domain::uri::build::task_of_uri(raw).map_or(raw.to_string(), |(_, item)| item);
     let digits = id.strip_prefix("tsk").unwrap_or(&id);

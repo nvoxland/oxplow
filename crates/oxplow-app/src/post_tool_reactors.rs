@@ -1,4 +1,4 @@
-//! Post-tool reactors (P3.6, tsk476): collection and post-tool advisories,
+//! Post-tool reactors (P3.6): collection and post-tool advisories,
 //! as async consumers of `agent.tool.finished` on the event pump. They
 //! used to run on a detached task the hook route spawned and waited up to
 //! 2.5 s for; now they are durable (a crash re-delivers the event), keyed
@@ -15,8 +15,7 @@
 //!   advisories for the turn the tool ran in.
 //! - `collection.run_reports` — a run reported any other way
 //!   (`oxplow.test.record_run`, a by-hand sync) has its coverage read from its
-//!   `test.run.recorded` (`CollectionService::on_test_run_recorded`,
-//!   tsk1015).
+//!   `test.run.recorded` (`CollectionService::on_test_run_recorded`).
 
 use async_trait::async_trait;
 use oxplow_db::Database;
@@ -35,7 +34,7 @@ pub const POST_TOOL_ADVISORIES: &str = "advisories.post_tool";
 pub const RUN_REPORTS: &str = "collection.run_reports";
 
 /// The run `event` finished, with when it started: its cause, the tool
-/// call's `agent.tool.requested` (tsk888), when there is one.
+/// call's `agent.tool.requested`, when there is one.
 async fn cause_of(db: &Database, event: &StoredEvent) -> Result<RunCause, DomainError> {
     let started = match event.envelope.cause.clone() {
         Some(id) => db
@@ -192,7 +191,7 @@ mod tests {
         serde_json::to_value(&rows).unwrap()[0][0].as_i64().unwrap()
     }
 
-    /// P3.6 (tsk476): a Bash test run is recorded by the collection
+    /// P3.6: a Bash test run is recorded by the collection
     /// reactor once — a redelivered event writes no second capture — and
     /// its `test.run.recorded` is anchored to the turn and caused by the
     /// tool event.
@@ -232,7 +231,7 @@ mod tests {
         assert_eq!(run.payload["command"], "cargo test");
     }
 
-    /// tsk483: a run's capture carries the turn its tool call was made in
+    /// a run's capture carries the turn its tool call was made in
     /// — the event's own anchor, however late the reactor records it (here
     /// after that turn ended and another began) — and `v_test_run` and
     /// `v_capture` expose it.

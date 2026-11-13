@@ -53,7 +53,7 @@ pub struct SendInput {
     /// `[[…]]` links are checked).
     #[schemars(extend("contentMediaType" = "text/markdown"))]
     pub body: String,
-    /// The task it hands over (`oxplow:oxplow/task?id=tsk12&provider=oxtask`, or a loose
+    /// The task it hands over (`oxplow:oxplow/task?id=&provider=oxtask`, or a loose
     /// id): taking the handoff moves it onto the recipient thread.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task: Option<String>,

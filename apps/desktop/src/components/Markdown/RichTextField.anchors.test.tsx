@@ -2,7 +2,7 @@ import { knowledgeUri } from "../../uri/uri.js";
 import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { act, cleanup, render } from "@testing-library/react";
 
-// tsk902: a comment's re-found anchor is stored when the document settles
+// a comment's re-found anchor is stored when the document settles
 // — at once when nobody is typing, on blur when someone is — never per
 // typing pause, since each store is a command run on the person's behalf.
 

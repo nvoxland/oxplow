@@ -1,4 +1,4 @@
-//! Supervising per-project `oxplow-daemon` processes (tsk256).
+//! Supervising per-project `oxplow-daemon` processes.
 //!
 //! In the daemon-backed shell one Tauri process owns every window, and
 //! each project's backend runs as its own `oxplow-daemon` child. This
@@ -186,7 +186,7 @@ fn terminate(pid: u32) {
 #[cfg(not(unix))]
 fn terminate(_pid: u32) {}
 
-/// The daemon's side of the lifeline (tsk1073): a supervising app keeps the
+/// The daemon's side of the lifeline: a supervising app keeps the
 /// daemon's stdin open for as long as it lives, so end-of-file means the
 /// app is gone — quit, crashed or killed — and the daemon stops with its
 /// agents (its whole group, when it leads one; just itself when started
@@ -207,7 +207,7 @@ pub fn stop_when_app_goes(project_dir: PathBuf) {
 /// killed here: one whose app died has stopped on its own (the stdin
 /// lifeline, [`stop_when_app_goes`]), so a live one belongs to another
 /// app process or was started by hand. Killing it was how a second launch
-/// took the first app's backend down (tsk1063).
+/// took the first app's backend down.
 pub fn live_daemon(project_dir: &Path) -> Option<DaemonInfo> {
     let info = read_daemon_info(project_dir)?;
     if process_alive(info.pid) {
@@ -285,7 +285,7 @@ struct DaemonHandle {
     child: Child,
     /// The daemon's stdin, held open for as long as this app lives: when
     /// the app goes, however it goes, the pipe closes and the daemon stops
-    /// (`stop_when_app_goes`, tsk1073).
+    /// (`stop_when_app_goes`).
     _lifeline: Option<std::process::ChildStdin>,
     /// Drains the daemon's stdout for the life of the process. Joined on
     /// stop so no reader outlives the child that fed it.
@@ -401,7 +401,7 @@ impl DaemonSupervisor {
                 // the daemon exited ("already open in another process") or
                 // shut its output. That's the signal to go by. A process
                 // closes its pipes a moment before it can be reaped, so
-                // asking `try_wait` here races (tsk326); give it a short
+                // asking `try_wait` here races; give it a short
                 // grace to learn which. `Timeout` is a daemon that is simply
                 // too slow, which says something very different.
                 let message = match why {
@@ -643,7 +643,7 @@ mod tests {
 
     /// Closing stdout is what ends the handshake wait, and it happens a
     /// moment before the process is reaped. The error must come from that
-    /// signal, not from racing `try_wait` (tsk326): this daemon closes its
+    /// signal, not from racing `try_wait`: this daemon closes its
     /// output and lingers, which used to report a 5s timeout instantly.
     #[test]
     fn a_daemon_that_closes_its_output_is_not_reported_as_a_timeout() {

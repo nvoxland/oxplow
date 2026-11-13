@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 
 import { exitBanner, failedLaunch, mayStartNow, readSessionMessage, reopened } from "./terminalSession.js";
 
-// tsk1026: after the daemon restarted, the agent pane kept the dead session's
+// after the daemon restarted, the agent pane kept the dead session's
 // screen and swallowed keystrokes; an agent that exited said nothing.
 
 test("an exit message is read, with its code", () => {

@@ -134,7 +134,7 @@ gates"). It is made visible, all of it bundled over existing datasets
   a `thread_id` param to keep one thread's; `item-shared-work` on a
   task, slot `oxplow/task-detail.sections`), both over the one query
   `shared-work-rows` (`thread_id`, `task`): items
-  that requests on two threads worked on (`v_request_task`; requests
+  that requests on two threads worked on (`v_oxplow_request_link`; requests
   running, or finished in the last day), files two threads' turns changed
   (`v_turn_file` over those requests' turns, only a `claimed` or `sole`
   file: one two concurrent turns could each have changed is no evidence),
@@ -334,7 +334,7 @@ The three in progress:
   by the agent that starts a task. "Waiting on you" is derived;
   `await_user` is gone. (Today the Work panel shows tasks: In progress
   with what the thread's latest request is doing, Up next, and Finished —
-  the done tasks the thread was working, `v_request_task` basis assigned
+  the done tasks the thread was working, `v_oxplow_request_link` basis assigned
   or transition.) Efforts were removed (2026-11-10).
   Hints, first cut: advisories gain a `turn-end` trigger, every param
   (`:thread_id`, `:stream_id`, `:turn_id`, nullable `:request_id`),
@@ -370,7 +370,7 @@ The three in progress:
   only what's active. Skills and slash commands come from extensions
   too (`skills:`), offered the same way; the task guidance and
   `/next-task` moved from core into the task store's extension (`oxtask`). A task tracker
-  declares its id pattern, and a loose id in a command (`tsk12`) is the
+  declares its id pattern, and a loose id in a command (`tsk42`) is the
   active list's item.
   The app's test fixtures (`services_with_thread`, `services_with_task`)
   make a thread, and a task only for tests about tasks.

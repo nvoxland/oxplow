@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-// tsk961: the component kit's stylesheet (served at
+// the component kit's stylesheet (served at
 // `/component-lib/oxplow-kit.css`) styles only through the theme: every
 // `var(--x)` it reads is a token the app's root defines — the ones
 // `applyTheme` sets on a frame's root — and it names no color of its own.

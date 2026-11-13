@@ -1,4 +1,4 @@
-//! What a custom component's frame runs (tsk984): its bundle, keyed by its
+//! What a custom component's frame runs: its bundle, keyed by its
 //! **version** — a hash over the bundle's files and what it may query and
 //! run ([`bundle_version`]). The daemon
 //! serves the frame at `/components/v/<version>/…` from the bundle's folder

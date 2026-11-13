@@ -1,4 +1,4 @@
-/// Page params a person picks rather than types (tsk1043): oxplow's own id
+/// Page params a person picks rather than types: oxplow's own id
 /// params — the names it already fills from context (`stream_id`,
 /// `thread_id`) and the ones a slot binds (`uri` for a task) — choose
 /// from what exists, by title; any other param is typed.

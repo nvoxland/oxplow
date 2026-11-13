@@ -50,7 +50,7 @@ struct RecentDoc {
 /// sidecar (advisory, cross-process) stops a second oxplow sharing the
 /// config dir — a dev build alongside an installed one — from doing the
 /// same; without it, two `record` calls could each read the old list and
-/// the later write would drop the other's entry (tsk253).
+/// the later write would drop the other's entry.
 #[derive(Debug)]
 pub struct RecentProjects {
     json_path: PathBuf,
@@ -181,7 +181,7 @@ mod tests {
     /// two of them racing can each read the old list and the later write
     /// drops the other's entry. The in-process mutex covers threads;
     /// the `.lock` sidecar covers a second oxplow sharing the config
-    /// dir (tsk253).
+    /// dir.
     #[test]
     fn concurrent_records_do_not_lose_entries() {
         let dir = tempfile::tempdir().unwrap();

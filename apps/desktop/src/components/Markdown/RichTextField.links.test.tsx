@@ -6,7 +6,7 @@ import { PageNavigationContext, type PageNavigation } from "../../tabs/PageNavig
 import { pageUri, resourceUri, taskUri } from "../../uri/uri.js";
 import { RichTextField } from "./RichTextField.js";
 
-// tsk976: a link in an editable body opens its page whatever it names —
+// a link in an editable body opens its page whatever it names —
 // a task, an extension's ref — as it does in a read-only one (both through
 // `linkRef` and `openRef`).
 

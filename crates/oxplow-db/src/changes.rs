@@ -167,7 +167,7 @@ mod tests {
         crate::database::map_sql_err(e)
     }
 
-    /// P4.6 (tsk491): a commit says which tables it touched — a bare
+    /// P4.6: a commit says which tables it touched — a bare
     /// `DELETE FROM` (SQLite's truncate shortcut) and a WITHOUT ROWID table
     /// too; a rollback, a temp table and a read say nothing.
     #[tokio::test]

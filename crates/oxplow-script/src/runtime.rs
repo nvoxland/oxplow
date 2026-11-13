@@ -13,8 +13,7 @@
 //! [`Budget`](oxplow_domain::run::Budget) or memory cap (`crate::workers`). [`run_exec`] is a
 //! child process of its own and honours the same budget. It also drains
 //! stdout/stderr on their own threads while writing stdin, because doing
-//! those in sequence deadlocks any streaming filter once a pipe buffer fills
-//! (tsk161).
+//! those in sequence deadlocks any streaming filter once a pipe buffer fills.
 //!
 //! Every engine takes an already-parsed JSON input value (the host applied the
 //! collector's declared container parser first — see `CollectorInput`) and
@@ -314,7 +313,7 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
             // Codegen output (generated/ path, do-not-edit header) is
             // not hand-written code — keep it out of the code-shape
             // corpus so a 3k-line bindings file can't dominate the
-            // fn_length/complexity tails (tsk68).
+            // fn_length/complexity tails.
             .filter(|(path, text)| !oxplow_code_metrics::is_generated_source(path.as_str(), text))
             .collect();
         entries.sort_by(|a, b| a.0.cmp(b.0));
@@ -678,7 +677,7 @@ pub fn run_exec_authorized_at(
 
     let group = crate::process_group::ProcessGroup::new(child.id());
 
-    // Every pipe gets its own thread (tsk161). Writing the whole report to
+    // Every pipe gets its own thread. Writing the whole report to
     // stdin and only THEN calling `wait_with_output` deadlocks any streaming
     // filter: once the child's stdout pipe fills (~64 KB) the child blocks
     // writing, so it stops reading stdin, so the parent blocks writing — and
@@ -1057,7 +1056,7 @@ mod tests {
         EXEC.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// tsk161: the deadlock. A streaming filter that echoes its input can't be
+    /// the deadlock. A streaming filter that echoes its input can't be
     /// fed a payload larger than the pipe buffer unless stdout is drained
     /// concurrently — the child blocks writing stdout, so it stops reading
     /// stdin, so the parent blocks writing, forever. 4 MB through `cat` used to
@@ -1343,14 +1342,14 @@ def transform(input):
         let f = cov.files.get("x").unwrap();
         assert_eq!(f.instrumented.len(), 3);
         assert!(f.covered.is_empty());
-        // Branch/function counts default to 0 when the report omits them (tsk123).
+        // Branch/function counts default to 0 when the report omits them.
         assert_eq!(f.branches_found, 0);
         assert_eq!(f.functions_found, 0);
     }
 
     #[test]
     fn coverage_json_carries_branch_and_function_counts() {
-        // tsk123: the parsers emit camelCase branch/function counts; they
+        // the parsers emit camelCase branch/function counts; they
         // deserialize onto the typed FileCoverage.
         let v = json!({ "files": { "x": {
             "instrumented": [1, 2], "covered": [1],

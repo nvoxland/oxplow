@@ -5,31 +5,31 @@ sources that produce data, the dimensions that slice it, the metrics that
 aggregate it, and the read-only SQL contract (`v_*`) that views, extensions
 and agents query.
 
-> **Status: partly built (epic tsk275).**
+> **Status: partly built.**
 > - **Current:** the `v_*` read contract for core data, plus `oxplow_query_sql` and
 >   the catalog as datasets (`v_dataset`, `v_field`, `v_dataset_lineage`, `v_dataset_test`), and the **fact substrate**
 >   (`measure`, `dimension`, `metric_spec`, `metric_capture`, `fact`, cube),
 >   documented in [metrics.md](./metrics.md).
-> - **Current (tsk289):** extension `exec` sources that bring external
+> - **Current:** extension `exec` sources that bring external
 >   entities in (see "User and extension sources").
 > - **Current:** the agent-activity views, stored
 >   change analysis (`v_change*`), and extension-declared measures,
->   metrics and fact collectors (tsk311, see extensions.md).
-> - **Current (tsk277):** git, LSP-diagnostic and test-run views
+> metrics and fact collectors (see extensions.md).
+> - **Current:** git, LSP-diagnostic and test-run views
 >   (`v_commit*`, `v_branch`, `v_diagnostic`, `v_test_run`, `v_test_case`);
 >   spine dimensions and time buckets on fact metrics; entity metrics and
->   entity (expression/join) dimensions (tsk322, see "Entity metrics" in
+> entity (expression/join) dimensions (see "Entity metrics" in
 >   metrics.md).
-> - **Current (tsk323):** starlark/jq derived sources and `sync: upsert`
+> - **Current:** starlark/jq derived sources and `sync: upsert`
 >   with tombstones.
-> - **Current (tsk324):** the exec-source `network` allowlist, enforced
+> - **Current:** the exec-source `network` allowlist, enforced
 >   on macOS.
-> - **Current (tsk325):** Settings → Data: every entity with its owner and
+> - **Current:** Settings → Data: every entity with its owner and
 >   row count, and the source rows. `v_data_entity` (a live dataset) lists
 >   datasets and unsynced entities without counting; a row's count is read by
 >   pinning its `name`, so a dataset too big to count within the 5 s timeout
->   costs only its own cell (tsk1065).
-> - **Current (P4, epic tsk484):** every published view is a **dataset**
+> costs only its own cell.
+> - **Current (P4):** every published view is a **dataset**
 >   (core files and extensions' `datasets:`, compiled with lineage,
 >   contracts, versions and tests; the registry `v_dataset`, `v_field`, `v_dataset_lineage`, `v_dataset_test` are the
 >   catalog); the read contract is **enforced** by the authorizer;
@@ -68,7 +68,7 @@ A **collector** (the target design called it a *source*) records one of:
 - **facts**: atomic measurements on the fact substrate (a function's
   complexity, a test case's outcome, a token count); or
 - **records**: a test, coverage or analysis report it parses (the
-  project's report collectors, tsk863).
+  project's report collectors).
 
 Extensions (oxplow's own code metrics are oxplow-foundation's) and the project
 declare collectors in the same format. A collector runs on its `on`: `manual`
@@ -91,7 +91,7 @@ different source owns.
 
 Fact dimensions are keys in `fact.dims_json` (plus the capture-spine
 dims), resolved in `metric_engine.rs::dim_value_cached`. **Entity
-dimensions** (current, tsk322) are `dimensions:` entries with `entity`,
+dimensions** (current) are `dimensions:` entries with `entity`,
 `expr` and an optional `join`. They slice entity metrics over the same view.
 Today a dimension applies to metrics over its own view only, not to every
 entity that has the columns.
@@ -105,7 +105,7 @@ dimensions:
 - `median(v_github_pr.merged_at - opened_at)`
 - `avg(fact oxplow.coverage)`
 
-Current (tsk322): a `metrics:` entry with `entity` (plus `where`, `time`,
+Current: a `metrics:` entry with `entity` (plus `where`, `time`,
 `value`, `aggregation`) aggregates a view. `time` makes it an event metric,
 computed live. Without `time` it is a state metric, captured as facts. Both
 kinds go through the same `metric_spec` catalog and read paths (Metrics
@@ -252,7 +252,7 @@ one transaction:
   column ("bump its version"). A column's **doc is part of the contract**:
   rewording one is a bump too, else every database that recorded the
   version refuses to open. Every core dataset was reset to v1 with the
-  migration squash (tsk1081): existing databases had their
+  migration squash: existing databases had their
   `dataset_contract` rows cleared, and the golden below started over.
   Because that check needs a database that recorded
   the version, the core datasets' contracts are also **pinned in a golden**,
@@ -300,7 +300,7 @@ read (`SqlQuery::temp_views`) — see extensions-sdk.md "The SDK".
 
 `datasets::compile_extensions` compiles every enabled extension's datasets in
 one pass after the core ones — in `Database::transaction`, which takes the
-write lock up front and retries `Busy` (tsk977: run on a raw connection,
+write lock up front and retries `Busy` (run on a raw connection,
 the boot pass read first and failed with "database is locked" when
 another boot writer committed meanwhile, and a fresh project never got
 its extensions' datasets until an extension changed): the last pass's extension views go, the
@@ -367,7 +367,7 @@ Declared tests (`not_null`, `unique`, `accepted_values`,
 `error`). A core dataset's failing test is recorded, never a boot failure: a
 data problem in someone's database mustn't make it unopenable
 (`every_core_dataset_passes_its_tests_on_an_empty_database` keeps the
-declarations honest). **Built (P4.2, tsk487):** all 49 core views are
+declarations honest). **Built (P4.2):** all 49 core views are
 datasets (`the_core_datasets_reproduce_the_views_the_migrations_made` proves
 each one's columns and types equal the migration view it replaced),
 `v_dataset`, `v_field`, `v_dataset_lineage`, `v_dataset_test` are datasets over the registry, and `CATALOG` /
@@ -401,7 +401,7 @@ materialized input's own table) — re-run when the registry (`dataset`,
 `dataset_input`) changes. One whose SELECT, contract or input tables
 changed is re-registered, so its first recompute fills it: a contract
 can change under an unchanged SELECT (an input's column changed type),
-and the compiler then recreates the table empty (tsk727). A recompute refills the table, whole, in one
+and the compiler then recreates the table empty. A recompute refills the table, whole, in one
 transaction, after its inputs have been quiet for the coalesce window
 (or three windows after the first change when they never go quiet), and
 is recorded in `asset_state`. It writes only when the answer differs
@@ -444,11 +444,11 @@ rebuild a fresh one; a contract change recreates the table and drops its
 recompute records the asset's `definition` (a dataset's SELECT, hashed —
 `Materializer::definition`, V151), and a record of another definition
 doesn't hold the clock: an edited SELECT rebuilds at once rather than
-serving the old SQL's rows until the clock comes round (tsk780).
+serving the old SQL's rows until the clock comes round.
 What a recompute records and what the clock waits on are one clock,
 `Assets`' `Now` (`Timestamp::now`; tests pass one that follows tokio's
 paused clock with `with_now`, so the `every:` tests run hours of virtual
-time instead of sleeping, tsk794). `dataset.materialize` records `every 1h` (V142 rebuilt `dataset` for the
+time instead of sleeping). `dataset.materialize` records `every 1h` (V142 rebuilt `dataset` for the
 wider CHECK); oxplow-bundled's `co_change_pair` is
 `every: 1h`.
 
@@ -461,7 +461,7 @@ refusal at `file:line` and pointing at `on_change`: **`<column>` is its
 key** (`key: [<column>]`, the table's primary key) — one declared
 INTEGER, unique per row, like a row id or a seq. A watermark two rows
 shared would let the second slip under `>` unseen, since nothing reaches
-the primary key to catch it (tsk777); a unique one can't. Its
+the primary key to catch it; a unique one can't. Its
 SQL is a filter and projection over **inner joins** of append-only
 inputs: it may not group, de-duplicate, window, cap or combine sets
 (`GROUP BY`, `DISTINCT`, `OVER`, `LIMIT`, `UNION` / `INTERSECT` /
@@ -471,7 +471,7 @@ inputs: it may not group, de-duplicate, window, cap or combine sets
 clock or randomness (a date function, `CURRENT_*`, `'now'`, `random()`).
 An outer join or a subquery makes a row already appended depend on rows
 that land later on another input, which no append re-emits and nothing
-at run time notices (tsk778). At run time it refills whole instead when it must:
+at run time notices. At run time it refills whole instead when it must:
 - an input was **rewritten** — an UPDATE or DELETE, not only inserts
   (`Changed.rewrote`, P8.B3; an event payload expiring is an UPDATE);
 - it's the **first build** since it registered (an open, a changed
@@ -479,9 +479,9 @@ at run time notices (tsk778). At run time it refills whole instead when it must:
 The flag is sticky until a recompute succeeds. An append that **hits
 the primary key** isn't a reason to refill: with the watermark the key,
 only SQL that emits one key twice can hit it, and a refill of the same
-SQL fails the same way — it's a failure (tsk781).
+SQL fails the same way — it's a failure.
 
-**A failed recompute is visible** (tsk781). Any recompute that fails —
+**A failed recompute is visible**. Any recompute that fails —
 a keyed dataset's SELECT emitting one key twice, a query error — leaves
 the last good rows in place, keeps its retry flag, and is recorded in
 `asset_failure` (V152) until a recompute succeeds: `v_asset` (v3) shows
@@ -705,7 +705,7 @@ What a query read is what it subscribes to.
   every table touched, the registry included: one `react` for both, so a
   missed batch that held a `dataset`, `dataset_input` or `resource` write
   still re-registers the materialized datasets and the searchable resources'
-  indexes, tsk854),
+  indexes),
   stamps each one's in-memory watermark (`DatasetWatermarks`, derivable, so
   not persisted) and emits `OxplowEvent::DatasetsChanged { datasets }`.
 - **Results:** `SqlQueryResult.freshness` is the watermark of each dataset
@@ -717,7 +717,7 @@ What a query read is what it subscribes to.
   announced with none, fail-open). It is the event's one emitter (P7.B1).
   A `metric_grid()` query's `reads.measures` pairs with it: facts land on
   every OTLP burst, and the measure scope keeps a metric tile quiet unless
-  its own measures moved (tsk198).
+  its own measures moved.
 - **Assets:** the same loop tells the asset runner which tables changed
   (see "Assets").
 - **Pages** run on the daemon as open runs (`crates/oxplow-app/src/pages/open_runs.rs`):
@@ -783,7 +783,7 @@ Derived data whose inputs include the world **outside** the tables (a
 working tree, the VCS tree, a program, an external provider) is ingestion
 instead — a collector or a pump consumer, at-least-once and checkpointed.
 
-A **snapshot blob named by a table row** counts as a table input (tsk862):
+A **snapshot blob named by a table row** counts as a table input:
 content-addressed, it never changes under its name, so a recompute after the
 row lands reads what any later one would. `request_analysis`'s diff coverage
 reads the blobs of the request's start snapshot and of the snapshot a
@@ -833,7 +833,7 @@ and `v_dataset_test` are the catalog of all of them:
 | `v_job_run` | each job run — one execution of a job an extension declares (V56; [extensions-jobs.md](./extensions-jobs.md) "Jobs"): `id`, `job` (`job:<namespace>/<id>`), `uri` (`job_run:<id>`), `extension`, `version`, `contract_version`, `operation`, `state`, `attempt`, `cancellation_requested`, `invoker`, `run_id`, `created_at`, `updated_at`, and its current attempt's `ai_calls`, `tool_calls`, `input_tokens`, `output_tokens`. Never its request or result |
 | `v_job_run_output` | what a job produced as it ran, in order (`job_id`, `attempt`, `seq`): `kind` (`text`, `tool_call`, `tool_result`, `usage`), `at`, `text` (a text row's), `data` (the row as JSON). Written as it streams, so a page over it follows a job live |
 | `v_job_run_observation` | what a job's worker said after its attempt was fenced (a lease recovered, a permission removed, a declaration changed): one row per late result (`id`, `job_id`, `attempt`, `fence`, `at`, `outcome`, `evidence`). Evidence only; it never changes the job |
-| `v_op_error` | operations that failed in front of the person in the app, one row per `ui.op_failed@2` event (`oxplow.ui.report_error`, tsk1072): `event_id`, `at`, `stream_id`, `thread`, `label`, `command`, `message`, `exit_code`, `signal`, `duration_ms`, `output_size`, `audit_id` (v3: the person's failed run's `v_command_audit` row) and `proposal_id` (v3: an approval's proposal), and the person's marks `seen` / `dismissed` (v2: `ui.op_error.seen` / `ui.op_error.dismissed` events, from `oxplow.op_error.*`; the Alerts page lists those not dismissed). The stderr / stdout are the event's `output` body (`oxplow_read` `event:<id>#output`). Kept 30 days, the output 14; an expired event keeps its row with its details NULL and `payload_expired_at` set |
+| `v_op_error` | operations that failed in front of the person in the app, one row per `ui.op_failed@2` event (`oxplow.ui.report_error`): `event_id`, `at`, `stream_id`, `thread`, `label`, `command`, `message`, `exit_code`, `signal`, `duration_ms`, `output_size`, `audit_id` (v3: the person's failed run's `v_command_audit` row) and `proposal_id` (v3: an approval's proposal), and the person's marks `seen` / `dismissed` (v2: `ui.op_error.seen` / `ui.op_error.dismissed` events, from `oxplow.op_error.*`; the Alerts page lists those not dismissed). The stderr / stdout are the event's `output` body (`oxplow_read` `event:<id>#output`). Kept 30 days, the output 14; an expired event keeps its row with its details NULL and `payload_expired_at` set |
 | `v_op_error_output` | what each failed operation printed: `event_id`, `stream_id`, `stderr`, `stdout`, `truncated` — its `ui.op_failed` event's `output` body, read in SQL from `event_content`'s bytes (stored as JSON text). The one event body published to SQL: it is what the person saw on screen. Tool input and output and prompts stay behind `read_event_content` (`v_event_content` lists them without bytes). A failure with nothing captured, or whose body retention removed, has no row |
 | `v_event_content` | large event bodies (tool input/output, prompts) by content hash, without the bytes (V102) |
 | `v_event_dead_letter` | events a consumer failed on, parked with the error; `pending` ones need `oxplow.delivery.retry` / `oxplow.delivery.discard` (V94) |
@@ -854,7 +854,7 @@ and `v_dataset_test` are the catalog of all of them:
 | `v_request_metric_delta`, `v_request_observation` | per request and stream, how each metric moved over the request's window (`crossing`) and the test runs, diff coverage and analysis its turns made, stored by the `request_analysis` asset (collection.md "A request's analysis"); `seq` runs oldest first, so the highest is the latest: every reader takes `ORDER BY seq DESC` as newest. Diff coverage is the request's start snapshot against the snapshot of the run's capture (collection.md) |
 | `v_change`, `v_change_file` (a `working` change's files say `staged` and `untracked`, restated by `change_reactor::watch_working_files` at boot and whenever the stream's refs or index move), `v_change_function`, `v_change_import`, `v_change_duplicate` | stored change analysis (see "Change analysis" below) (V81) |
 | `v_commit`, `v_commit_file`, `v_commit_task`, `v_branch`, `v_tag` | history, branches and tags (V85, V113). The commit indexer (`commit_indexer.rs`, run at boot and on each ref move, `RefMoves`) stores the commits reachable from **every stream's** head — new history whole, up to a 5000-commit horizon (`IndexDepth`), and any older commit a query names by `sha` ("Made on demand") — through the VCS capability (`Vcs::log`/`revision`, `.context/vcs.md`) — with their files (first-parent diff) as it projects them into `page_ref`; `v_commit.parents` (JSON, v2) lets a stream's history be a recursive read from its branch's head. `v_commit_task` reads the indexer's task mention edges and the task → commit links (declared impacts, the requests that worked on the task and made the commit), for every store's tasks. `refresh_refs` restates `v_branch` (`is_default`, v2) and `v_tag` from `Vcs::branches`/`tags` and maps each local branch to the stream checked out on it. The desktop's history panel, dashboard lists, branch picker and new-stream form read these datasets (`apps/desktop/src/vcsHistory.ts`) |
-| `v_test_case_stat` | each test's summary per stream, branch and producer (V139, tsk733): last status and duration, runs, failures, flips, last failed / passed, max and mean duration — updated with every run, the home of per-test history since a run writes change-only per-case facts |
+| `v_test_case_stat` | each test's summary per stream, branch and producer (V139): last status and duration, runs, failures, flips, last failed / passed, max and mean duration — updated with every run, the home of per-test history since a run writes change-only per-case facts |
 | `v_test_run`, `v_test_case` | test runs (V87), views only. A run IS its `metric_capture` (producer `tests`, or `test-run` for a run that measured nothing), and both views read its verbatim `test-detail` payload in `detail_json`: counts from the payload, cases by `json_each` over `suites[].cases[]`. Cases come from the payload, not the `oxplow.test_case` facts, because those are skipped while every tests metric is disabled. `turn_id` is the capture's own: the turn of the tool call that ran it, which puts the run in that turn's request. A run that only reported counts (`oxplow.test.record_run`) has no cases |
 | `v_diagnostic` | what the language servers have published, right now (V86). `lsp_diagnostics.rs` subscribes to the LSP session broadcast and replaces a file's rows per `(stream, language, path)` on each `textDocument/publishDiagnostics` (paths repo-relative, positions 1-based, a URI outside the worktree dropped). Live state: the table is cleared at boot and a server's rows when it restarts, crashes or stops. Only files a server has published appear (usually the open ones, not the whole repo). A view re-runs on `DatasetsChanged` when rows commit; at most every 500 ms per stream, from the first change (so a server that publishes continuously can't starve it), `code.diagnostics.changed@2` is logged per changed file (P5.C5) |
 | `v_symbol` / `v_symbol_capture` | the definitions oxplow's own tree-sitter extraction finds in each stream's files, in every supported language, no language server needed (V62) — the current tree, restated per changed file at each snapshot by the `symbols.collect` pump consumer (`uri` `oxplow:oxplow/symbol?path=<path>&symbol=<id>`, no revision, unique per stream; `kind` from one vocabulary; `container` `::`-joined; `signature` the parameter types in overloading languages; the name's `line`/`col` and the whole symbol's `start_*`..`end_*`), and what each snapshot's collection covered (`files_collected`, `files_failed`: content unreadable at the snapshot). Details: language-support.md "Symbols" |
@@ -862,7 +862,7 @@ and `v_dataset_test` are the catalog of all of them:
 **Column docs live with the dataset, not here.** `datasets.yaml` documents
 every column, and the registry is the catalog: `v_dataset` +
 `v_field`, read through `oxplow_query_sql` (extension entities too —
-their contract is their declared columns; tsk517). The compile at
+their contract is their declared columns). The compile at
 open fails if a view's columns and its declared ones disagree, in name,
 type or order. So changing a view means:
 
@@ -878,7 +878,7 @@ An extension entity `<entity>` owned by extension `<ext>` is exposed as
 ### Querying (current)
 
 - `query_sql(sql, params?, limit?)` over IPC (`querySql` in `api.ts`) and
-  MCP. **Every query goes through the SQL gateway** (P4.1, tsk486):
+  MCP. **Every query goes through the SQL gateway** (P4.1):
   `Services.sql`, `crates/oxplow-app/src/sql_gateway.rs` — MCP and IPC
   `oxplow_query_sql`, pages, advisories, entity metrics, extension checks
   (`oxplow_validate_extension`, `oxplow extension check`) and source inputs alike.
@@ -890,7 +890,7 @@ An extension entity `<entity>` owned by extension `<ext>` is exposed as
     calls) — exactly one `SELECT` or `WITH`, a trailing `;` aside.
   - Real gate: `Statement::readonly()` rejects anything that writes
     (including `WITH … DELETE`).
-  - **The authorizer enforces the read contract** (P4.3, tsk488; it only
+  - **The authorizer enforces the read contract** (P4.3; it only
     recorded in P4.1). The query's own SQL — a CTE body included — may
     read datasets (views) and `temp.*` tables; a stored table is refused as
     "`thread` is a physical table, not a published dataset; read
@@ -900,7 +900,7 @@ An extension entity `<entity>` owned by extension `<ext>` is exposed as
     an unsynced source). A table that doesn't exist at all names the
     published dataset it most likely meant ("no such table: v_threads; did
     you mean `v_thread`?", edit distance, read once the session's authorizer is
-    off — tsk1039). An unknown column names the columns of each published
+    off). An unknown column names the columns of each published
     dataset the query names, and the nearest one ("no such column: titel …;
     did you mean `title`? v_thread has: …"), so an agent's next query is
     right without a discovery query (agents spent about one call in six
@@ -949,7 +949,7 @@ An extension entity `<entity>` owned by extension `<ext>` is exposed as
   `"<blob N bytes>"`.
 - The catalog is SQL: `v_dataset` (name, owner, kind, description) and
   `v_field` (each column's SQL type and doc). The MCP
-  `describe_schema` tool and its IPC twin are gone (tsk517).
+  `describe_schema` tool and its IPC twin are gone.
 - Pages never call models or run collectors on render; they read what
   collectors already produced.
 - Everything an extension adds (entities, relations, dimensions, metrics)
@@ -1009,7 +1009,7 @@ A **collector** brings data in: a program (`exec`), a sandboxed script
 (`starlark` / `jaq`) or a provider's read (`read`). It writes
 **entities** (rows a dataset can `ref()`), **facts** (measurements on
 declared measures) or **records** (a test / coverage / analysis report it
-parses — an own extension's report collectors, tsk863), one of the three. One declaration, `oxplow_config::collectors`
+parses — an own extension's report collectors), one of the three. One declaration, `oxplow_config::collectors`
 (`CollectorSpec`, `parse_collectors`), serves `extension.yaml` (v1
 `sources:` is migrated to it, each `schedule:` becoming an `on:`),
 parsed with a `Declarer { extension, namespace, own }`; `.oxplow/project.yaml`
@@ -1064,8 +1064,7 @@ extension's own declared event types, logged with the run (P9.D2;
   `collector_run` row and `collector.synced@2` with its `facts` count.
   Snapshot runs keep the delta / full-baseline machinery (pending-baseline
   queue, `scan_kind`, fingerprint, dominated-capture prune).
-- A **report collector** (`records: tests | coverage | analysis`,
-  tsk863) is a non-bundled extension's (`Extension::is_own()`; the project's, in
+- A **report collector** (`records: tests | coverage | analysis`,) is a non-bundled extension's (`Extension::is_own`; the project's, in
   `.oxplow/extensions/project/`): it parses one `report:` file with a bundled
   parser (`entry: "oxplow:<junit|lcov|cobertura|jacoco|clippy|eslint>"`)
   or its own jaq / Starlark / exec script (paths relative to the extension
@@ -1094,8 +1093,8 @@ that metrics name runs only while one of them is on.
 - **A fact collector gets no `env` / `credentials` / `network`**, and
   `report` is for fact collectors only.
 
-**No `gauges:`.** The retired producer block is a key neither file has
-(tsk865): `extension.yaml` rejects it like any unknown key. There is no migrator.
+**No `gauges:`.** The retired producer block is a key neither file has:
+`extension.yaml` rejects it like any unknown key. There is no migrator.
 
 **Running.** `on:` collectors, entity and fact alike, run from the
 `collector.triggers` consumer (below). For a fact collector:
@@ -1155,7 +1154,7 @@ type without a `trigger` field:
   event's seq, and its `collector.synced@2` is caused by the event with a
   per-event dedupe key. They commit with what the run wrote — an entity
   collector's rows, or a fact collector's capture and facts
-  (`RunLog::record_with`, tsk712) — so a redelivered event writes nothing,
+  (`RunLog::record_with`) — so a redelivered event writes nothing,
   and no run lands without its record.
 - **Failure.** A failing collector is recorded and announced like any run
   and doesn't dead-letter the event: one broken collector never holds up
@@ -1170,7 +1169,7 @@ type without a `trigger` field:
   `snapshot.taken` event doesn't. `on: [collector.synced]` is
   refused at parse.
 
-**Derived collectors** (`runtime: starlark` or `jaq`, tsk323) compute
+**Derived collectors** (`runtime: starlark` or `jaq`) compute
 entities from data already in the semantic layer:
 
 ```yaml
@@ -1213,7 +1212,7 @@ entities from data already in the semantic layer:
 - **Scripts** are read with `extensions::read_extension_file`, so bundled
   extensions can ship them.
 
-**Incremental sync** (`sync: upsert`, tsk323; default `replace`):
+**Incremental sync** (`sync: upsert`; default `replace`):
 
 - **What a run writes.** The output may add
   `"deleted": {"<name>": [key, …]}`. Each mentioned entity's rows are
@@ -1250,7 +1249,7 @@ component (their `description:`, NULL when absent: none is made up), the same te
 `v_custom_component`; a measure's is on `v_measure`; the other kinds have their own datasets (`v_command`,
 `v_skill`, `v_slot`, `v_custom_component`, `v_metric_spec`, `v_measure`).
 
-**Decisions (epic tsk289, 2026-09-27).**
+**Decisions (2026-09-27).**
 
 - **Storage is a re-syncable cache in the main DB,** not the attached
   per-extension DB the first design sketched. Each entity is a table
@@ -1286,7 +1285,7 @@ component (their `description:`, NULL when absent: none is made up), the same te
   own thread and closed, so a program that never reads it can't block.
   It runs with a 120 s timeout and a 64 MB stdout cap, and both output
   pipes are drained so it can't deadlock.
-- **Network** (tsk324, `net_sandbox.rs`). `network: [api.github.com,
+- **Network** (`net_sandbox.rs`). `network: [api.github.com,
   "*.githubusercontent.com"]` lists the hosts an exec collector may reach:
   - **Pattern syntax.** Lowercase names; `*.` means subdomains only, not
     the bare domain.
@@ -1318,10 +1317,10 @@ component (their `description:`, NULL when absent: none is made up), the same te
 - **Credentials.** `credentials: [NAME]` declares secrets the entry gets
   as env vars. Values live in the OS keychain (`Services.secrets`, shared
   with AI provider keys) under account
-  `source:<project key>:<extension>:<NAME>` (tsk348; the project key is a
+  `source:<project key>:<extension>:<NAME>` (the project key is a
   hash of the canonical project path, shared by its worktrees). So neither
   another extension nor a same-named extension in another repo can read
-  one by declaring the same name. Credentials set before tsk348 (no
+  one by declaring the same name. Credentials set before (no
   project in the account) aren't read; set them again.
   - Anyone sets them, as the command `oxplow.collector.set_credential`
     (`value` is `writeOnly`: no record, event or result carries it; only
@@ -1409,7 +1408,7 @@ oxplow-bundled change cards) only read them.
     (1 + 0.4·Σparams↑) × (1 + (longest new fn − 60)/40)` — using SQLite's
     math functions (`LIBSQLITE3_FLAGS = -DSQLITE_ENABLE_MATH_FUNCTIONS`
     in `.cargo/config.toml`; every database open probes them and refuses
-    a build without, tsk726);
+    a build without);
   - functions: added / deleted / modified (signature and/or body), deltas,
     churn and churn share; unchanged ones aren't stored;
   - imports: added/removed with zones, `cross_zone` for new boundary
@@ -1431,7 +1430,7 @@ oxplow-bundled change cards) only read them.
   the change's latest (`change.events_to` unchanged). The same scan is
   recorded as a code-quality scan (`v_code_quality_scan` /
   `v_code_quality_finding`). It writes **no** `oxplow.duplicate_lines`
-  facts: only a full-tree scan may restate that metric (tsk365) — the
+  facts: only a full-tree scan may restate that metric — the
   oxplow-foundation's collector's, on every ref move (P7.B5,
   [code-quality.md](./code-quality.md)).
   Finished turns scan their end snapshot: `Trees` reads any
@@ -1484,7 +1483,7 @@ oxplow-bundled change cards) only read them.
   on `v_change*`): `useChange` re-ensures when `v_change` changes, so
   asking for a change whose revisions are already stored writes nothing
   (`get_or_create` only reads it) — a write there would announce
-  `v_change` and every open change page would re-ask forever (tsk1024). The
+  `v_change` and every open change page would re-ask forever. The
   in-memory `ChangeStale` / `ChangeAnalyzed` / `CodeQualityScanned` and the
   invalidation loop are gone. Concurrent requests for the same change
   return it `running`.

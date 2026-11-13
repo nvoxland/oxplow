@@ -170,8 +170,7 @@ impl SqliteChangeStore {
     /// row's head moved (its `head_revision` differs from the given one):
     /// its stored results are then of another head and must be recomputed.
     /// A change whose revisions are already these is only read: a write
-    /// would announce `v_change`, and a page re-asks on every announcement
-    /// (tsk1024).
+    /// would announce `v_change`, and a page re-asks on every announcement.
     pub async fn get_or_create(
         &self,
         stream_id: i64,
@@ -794,7 +793,7 @@ mod tests {
         assert_eq!(row.head_revision, Some(Revision::Snapshot(12)));
     }
 
-    /// tsk1024: asking for a change that is already there writes nothing,
+    /// asking for a change that is already there writes nothing,
     /// so it announces nothing: a page re-asks whenever `v_change` changes,
     /// and a write here would make it ask forever.
     #[tokio::test]

@@ -629,7 +629,7 @@ pub struct ComponentInvoke {
 /// Run `call`'s command as the component acting for its viewer, so every
 /// policy applies as if they ran it — a component can offer an action but
 /// never grant a power — when the bundle its frame was loaded at declares
-/// the command and a person approved that version (tsk960, tsk984): what
+/// the command and a person approved that version: what
 /// acts is what was approved, whatever the disk says now.
 pub async fn invoke_component_command(
     svc: &crate::Services,

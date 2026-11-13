@@ -324,7 +324,7 @@ pub(crate) fn change(
 
 /// After commit: apply `key` to the config as it is NOW (another key may
 /// have changed since the handler ran), write that one key into the file —
-/// the rest stays as the person wrote it (tsk1028) — swap memory, wake the
+/// the rest stays as the person wrote it — swap memory, wake the
 /// UI. Holding the write lock across write + swap keeps the file and the
 /// in-memory config in step.
 fn apply_committed(target: &ConfigTarget, key: &str, value: Option<&Value>, layer: Layer) {
@@ -974,7 +974,7 @@ mod tests {
         }
     }
 
-    /// tsk515: `.oxplow/project.yaml` changes only through `config.*` —
+    /// `.oxplow/project.yaml` changes only through `config.*` —
     /// validated, audited, logged and undoable. No other production code
     /// writes it (the config crate defines the writer and tests it).
     #[test]

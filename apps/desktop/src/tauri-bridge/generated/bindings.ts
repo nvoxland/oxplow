@@ -1196,7 +1196,7 @@ export type BackgroundTask = {
 
 export type BackgroundTaskKind = "vcs" | "code-quality" | "lsp" | "snapshot" |
 /**
- *  Recomputing code metrics over the whole tree (the metric baseline, tsk48).
+ *  Recomputing code metrics over the whole tree (the metric baseline).
  *  Slow and CPU-hungry — it must be visible, or "why is oxplow pegging a core?"
  *  has no answer.
  */
@@ -4194,7 +4194,7 @@ export type OAuthDecl = {
 
 /**
  *  A redirect listener: its id — what waits on it, answers it and stops
- *  it (tsk905), never its port — and the port to sign in on.
+ *  it, never its port — and the port to sign in on.
  */
 export type OAuthListener = {
 	id: number,
@@ -4304,7 +4304,7 @@ export type OxplowConfig = {
 	 *  Metric-capture retention window in days: captures older than the
 	 *  cutoff are pruned (facts cascade) — EXCEPT each producer's newest capture, and any capture
 	 *  still contributing a current value to the fold. **0 (the default)
-	 *  keeps everything** (tsk93); pruning trades away per-test drill-down /
+	 *  keeps everything**; pruning trades away per-test drill-down /
 	 *  flakiness horizon for bounded growth, so it is strictly opt-in.
 	 */
 	metricRetentionDays: number,
@@ -4315,7 +4315,7 @@ export type OxplowConfig = {
 	 *
 	 *  This is the knob that bounds a BUSY project: the payload is ~0.5 MB per
 	 *  coverage run, so age alone never catches up with a repo that runs tests
-	 *  dozens of times a day (tsk211). Compaction never changes a metric value
+	 *  dozens of times a day. Compaction never changes a metric value
 	 *  — only the Tests/Coverage panel's detail for old runs is lost.
 	 */
 	metricDetailMaxPerProducer: number,
@@ -4542,8 +4542,8 @@ detail: string | null }) & { actor?: never; client?: never; datasets?: never; er
 } & RunChange |
 /**
  *  One or more metric samples landed in `stream_id` (unified metric
- *  substrate, tsk213). `measures` names the measure keys the write touched
- *  so a consumer can skip an event that can't affect it (tsk198); an EMPTY
+ *  substrate). `measures` names the measure keys the write touched
+ *  so a consumer can skip an event that can't affect it; an EMPTY
  *  list is fail-open — "unknown, refresh anyway" — which is what the
  *  low-frequency emit sites still send. See `.context/metrics.md`.
  */
@@ -4557,7 +4557,7 @@ detail: string | null }) & { actor?: never; client?: never; datasets?: never; er
 /**
  *  The extension catalog may have changed: a file under the primary
  *  worktree's `.oxplow/extensions/` did, or the `extensions` config key
- *  (the catalog's own signal, tsk1030). Every host listing what
+ *  (the catalog's own signal). Every host listing what
  *  extensions contribute — the launcher, pages, panels, slots —
  *  reloads, and a page re-runs its definition.
  */
@@ -4613,7 +4613,7 @@ actor: string; scope: string; op: string; input: unknown }) & { agentSessionId?:
  */
 ({ kind: "credentialChanged"; instance: string; name: string;
 /**
- *  The sign-in this news is about, when it is about one (tsk929):
+ *  The sign-in this news is about, when it is about one:
  *  a row waiting on another sign-in of the same credential
  *  ignores it.
  */
@@ -6276,7 +6276,7 @@ export type SnapshotTrigger =
 "head_moved" |
 /**
  *  A run's reports were recorded (coverage, analysis): the code it
- *  measured, which their captures are pinned to (tsk883).
+ *  measured, which their captures are pinned to.
  */
 "run_measured";
 
@@ -6473,8 +6473,8 @@ export type TestingConfig = {
 	 */
 	command: string | null,
 	/**
-	 *  The coverage-free counterpart to `command`, for the red/green loop
-	 *  (tsk171). It still writes a test report (JUnit), so the
+	 *  The coverage-free counterpart to `command`, for the red/green loop.
+	 *  It still writes a test report (JUnit), so the
 	 *  progression lands in the Tests panel, but skips coverage
 	 *  and should accept a filter.
 	 *
@@ -7349,7 +7349,7 @@ export type WorkspaceFile = {
  *  One row of the project's `zones:` table: the globs that select files
  *  and the zone label they belong to.
  *
- *  Zones are entirely project-defined (tsk251) — oxplow ships no rule
+ *  Zones are entirely project-defined — oxplow ships no rule
  *  table of its own, because a file's architectural role follows from
  *  how *this* project lays out its repo. Order in the table is
  *  load-bearing: [`ZoneRules`](../oxplow_code_deps/zones/struct.ZoneRules.html)

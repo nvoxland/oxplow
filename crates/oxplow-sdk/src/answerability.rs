@@ -687,7 +687,7 @@ pub async fn live_pages(
 mod tests {
     use super::*;
 
-    /// tsk570: a dataset is a table a query reads — not a `v_*` word in a
+    /// a dataset is a table a query reads — not a `v_*` word in a
     /// string, a comment or an alias — whatever its case.
     #[test]
     fn datasets_are_the_tables_a_query_reads() {
@@ -702,7 +702,7 @@ mod tests {
         );
     }
 
-    /// tsk570: a skill names a dataset or command as a whole word, in any
+    /// a skill names a dataset or command as a whole word, in any
     /// case — `v_commit_file` doesn't name `v_commit`.
     #[test]
     fn a_skill_names_a_thing_as_a_whole_word() {

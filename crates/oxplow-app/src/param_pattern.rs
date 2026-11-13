@@ -41,8 +41,8 @@ fn escapable(c: char) -> bool {
 }
 
 /// An id pattern in the one form the desktop's JS and oxplow's Rust read
-/// alike, and that JS's backtracking engine can't be made to hang on
-/// (tsk797, tsk917). The pattern is a run of characters, classes (`[…]`,
+/// alike, and that JS's backtracking engine can't be made to hang on.
+/// The pattern is a run of characters, classes (`[…]`,
 /// not negated, no set operations), `\d`, `\w` and escaped punctuation,
 /// each with at most one quantifier (`? * + {n} {n,} {n,m}`, `n`, `m` ≤
 /// 256), anchored `^…$`, at most 256 characters of printable ASCII. Two
@@ -286,7 +286,7 @@ fn spell(set: u128) -> String {
 
 #[cfg(test)]
 mod tests {
-    /// tsk917: a pattern is kept in one explicit ASCII form, so Rust and
+    /// a pattern is kept in one explicit ASCII form, so Rust and
     /// the desktop's JS read it alike — `\d` is `[0-9]` in both, never
     /// Rust's Unicode digits — and repeats fenced by a character the first
     /// can't match load.
@@ -309,7 +309,7 @@ mod tests {
         assert!(!kept.is_match("\u{0661}\u{0662}"), "Unicode digits");
     }
 
-    /// tsk917: every printable character, spelled alone or in a class,
+    /// every printable character, spelled alone or in a class,
     /// is itself to Rust's engine — the spelling escapes exactly what
     /// either engine reads as syntax.
     #[test]

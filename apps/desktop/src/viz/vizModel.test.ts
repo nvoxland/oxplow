@@ -156,7 +156,7 @@ describe("formatCell", () => {
     expect(formatCell(true)).toBe("yes");
     expect(formatCell("x")).toBe("x");
   });
-  // tsk1038: one time format — a stored timestamp shows in local time, as
+  // one time format — a stored timestamp shows in local time, as
   // the rest of the app does; a day (a chart bucket) stays a day.
   test("a timestamp shows in local time; a date stays a date", () => {
     const at = "2026-10-05T04:55:02.914532Z";

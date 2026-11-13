@@ -12,7 +12,7 @@ use tauri::Manager;
 fn main() {
     // `--version` / `--help` print and exit: before this, the app took
     // them as a launch, and a second app on an open project is not
-    // something to start by accident (tsk1063).
+    // something to start by accident.
     if let Some(text) = info_arg(std::env::args().skip(1)) {
         println!("{text}");
         return;
@@ -255,8 +255,7 @@ fn run_shell(ctx: tauri::Context) {
                 }
             }
             // Tauri sets the dock icon while mapping its own `Ready`, so
-            // this runs strictly after it and the tint isn't overwritten
-            // (tsk246).
+            // this runs strictly after it and the tint isn't overwritten.
             tauri::RunEvent::Ready => icon_tint::apply(icon_tint.as_deref()),
             // Last chance to take the daemons down with us.
             tauri::RunEvent::Exit => app.state::<windows::ShellWindows>().stop_all_daemons(),

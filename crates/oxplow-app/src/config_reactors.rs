@@ -203,7 +203,7 @@ mod tests {
             .ignore(Path::new(path), false)
     }
 
-    /// tsk515: an agent's `oxplow.config.set` on `generated` (not only the
+    /// an agent's `oxplow.config.set` on `generated` (not only the
     /// Settings page) reaches the snapshot captures; unsetting it lifts
     /// the exclusion again.
     #[tokio::test]

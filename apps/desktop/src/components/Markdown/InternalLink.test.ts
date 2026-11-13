@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 
 import { InternalLink } from "./InternalLink.js";
 
-// tsk974: Tiptap registers each of Link's `protocols` with linkify when an
+// Tiptap registers each of Link's `protocols` with linkify when an
 // editor is made, and linkify throws on a scheme it can't tokenize
 // (`task` has an underscore) — so every rich-text field threw. Our
 // schemes are allowed through `isAllowedUri` instead.
@@ -25,7 +25,7 @@ test("internal links are allowed and a script url isn't", () => {
   expect(options.isAllowedUri("javascript:alert(1)", ctx)).toBe(false);
 });
 
-// tsk1007: an invalid wikilink is an `oxplow-invalid:` link (the preprocess
+// an invalid wikilink is an `oxplow-invalid:` link (the preprocess
 // keeps what it can't resolve as one), kept through the editor so it saves
 // back as `[[…]]`; and a link Tiptap hands over without an href doesn't
 // throw.

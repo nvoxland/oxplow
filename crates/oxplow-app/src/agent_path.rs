@@ -1,5 +1,5 @@
 //! Resolve an agent CLI to an absolute path, and widen the PATH handed to
-//! spawned terminals (tsk245).
+//! spawned terminals.
 //!
 //! # Why this exists
 //!
@@ -90,8 +90,8 @@ pub fn search_path_in(path_var: Option<&OsStr>, extra: &[PathBuf]) -> Vec<PathBu
 }
 
 /// Where a program is looked for: the live PATH, then the well-known
-/// install dirs, so a GUI-launched daemon with a thin PATH still finds it
-/// (tsk245). What a harness's launch is given (`LaunchInput::search_path`).
+/// install dirs, so a GUI-launched daemon with a thin PATH still finds it.
+/// What a harness's launch is given (`LaunchInput::search_path`).
 pub fn search_path() -> Vec<PathBuf> {
     let extra = home_dir()
         .map(|h| well_known_bin_dirs(&h))
@@ -201,7 +201,7 @@ pub fn base_pty_env() -> Vec<(String, String)> {
 mod tests {
     use super::*;
 
-    /// tsk1032: another session's markers and an oxplow agent's identity are
+    /// another session's markers and an oxplow agent's identity are
     /// dropped; the person's own Claude configuration passes.
     #[test]
     fn an_agent_inherits_no_session_markers_but_keeps_configuration() {
@@ -250,7 +250,7 @@ mod tests {
 
     #[test]
     fn resolves_from_a_well_known_dir_when_path_does_not_have_it() {
-        // The actual tsk245 failure: a GUI-launched app's PATH has no
+        // The actual failure: a GUI-launched app's PATH has no
         // ~/.local/bin, so PATH lookup fails and only the fallback list saves
         // the launch.
         let tmp = tempfile::tempdir().unwrap();

@@ -240,7 +240,7 @@ describe("refFromTabId", () => {
     expect(diskFilePath("oxplow:oxplow/knowledge?id=a&store=oxwiki")).toBeNull();
   });
 
-  // tsk163: a ref that can't be rebuilt from its own id is a dead row — the
+  // a ref that can't be rebuilt from its own id is a dead row — the
   // launcher's Recent, the rail's History, and the Go To page all reopen pages
   // by id. Two constructors had drifted: `oxplow:oxplow/dashboard?id=%3Cvariant%3E` had no case at
   // all (so every variant reopened as Planning), and `dir:` was matched under

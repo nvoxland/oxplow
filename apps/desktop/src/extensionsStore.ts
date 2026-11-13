@@ -42,7 +42,7 @@ function subscribe(listener: () => void): () => void {
       if (extensionsChanged(event as Record<string, unknown>)) load();
     });
     // A change while the daemon was unreachable sent no event: reload on
-    // reconnect (tsk1030).
+    // reconnect.
     const offReconnect = onRemoteReconnect(load);
     offEvents = () => {
       offChanges();

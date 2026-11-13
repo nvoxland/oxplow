@@ -1,4 +1,4 @@
-//! Network allowlist for `exec` sources (tsk324).
+//! Network allowlist for `exec` sources.
 //!
 //! A source declares the hosts it talks to (`network: [api.github.com,
 //! "*.githubusercontent.com"]`); the list is part of what a person approves.

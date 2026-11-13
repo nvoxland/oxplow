@@ -426,7 +426,7 @@ fn decl_lines(text: &str) -> HashMap<&str, usize> {
 /// watermark is its key — one INTEGER column, unique per row (a row id, a
 /// seq). Appending takes the rows past the table's highest watermark, so a
 /// value two rows shared would let the second slip under it unseen; a
-/// unique one can't (tsk777).
+/// unique one can't.
 fn check_materialize(decl: &DatasetDecl, at: &str) -> Result<(), DomainError> {
     match &decl.materialize {
         Some(m @ Materialize::Every { every }) if m.every().is_none() => Err(invalid(format!(
@@ -468,7 +468,7 @@ fn check_materialize(decl: &DatasetDecl, at: &str) -> Result<(), DomainError> {
 /// rewrites one — a filter and projection over inner joins of append-only
 /// inputs: no grouping, de-duplication, window, cap, set operation, outer
 /// join, subquery (`EXISTS`, `IN (SELECT …)`, a scalar one — a row already
-/// appended would change when a later row lands on another input, tsk778),
+/// appended would change when a later row lands on another input),
 /// randomness or reading of the clock (`file:line` of the first, pointing
 /// at `on_change`).
 fn check_incremental_sql(decl: &DatasetDecl, sql: &str, file: &str) -> Result<(), DomainError> {
@@ -1601,7 +1601,7 @@ pub fn incremental_matches_full(
         [mark],
     );
     if let Err(e) = appended {
-        // With the watermark the key (tsk777), only SQL that emits one key
+        // With the watermark the key, only SQL that emits one key
         // twice hits it — and at run time that's a failure every time.
         return Ok(Some(format!(
             "fails to append the rows past `{watermark}`: {e} — its SQL emits one key more than once"
@@ -1840,8 +1840,7 @@ fn ref_target(
 /// datasets compiled. A dataset that fails — and every dataset reading it —
 /// is left out and reported; the others are published. In `tx`, which
 /// takes the write lock up front (`Database::transaction`): a pass that
-/// read first and wrote after another connection's commit failed
-/// (tsk977).
+/// read first and wrote after another connection's commit failed.
 pub fn compile_extensions(
     tx: &rusqlite::Transaction<'_>,
     extensions: &[ExtensionDatasets],
@@ -2327,7 +2326,7 @@ mod tests {
         format!("v_t_{name}")
     }
 
-    /// P4.2 (tsk487): a core dataset compiles to its view with its documented
+    /// P4.2: a core dataset compiles to its view with its documented
     /// columns, and the registry records it and its input.
     #[test]
     fn the_core_datasets_compile_and_are_recorded() {
@@ -2580,7 +2579,7 @@ mod tests {
     }
 
     /// A reworded column doc at the same version is a changed contract
-    /// (tsk731: P7 did that to `ai_result`, `claim` and `decision`, and
+    /// (P7 did that to `ai_result`, `claim` and `decision`, and
     /// only a database that had recorded the version noticed).
     #[test]
     fn a_contract_changed_at_a_pinned_version_drifts() {
@@ -2740,7 +2739,7 @@ mod tests {
             "watermark type"
         );
         // The watermark is the key: a value two rows share would let the
-        // second slip under `>` unseen (tsk777).
+        // second slip under `>` unseen.
         let yaml = decl("  key: [id]\n")
             .replace("incremental: id", "incremental: n")
             .replace(
@@ -2773,7 +2772,7 @@ mod tests {
                 "datetime(",
             ),
             // A row already appended can change when a later row lands on
-            // another input (tsk778).
+            // another input.
             (
                 "SELECT s.id, t.v FROM source('streams') s\nLEFT JOIN source('threads') t ON t.id = s.id",
                 "LEFT JOIN",
@@ -2918,7 +2917,7 @@ mod tests {
 
     #[test]
     fn dataset_docs_carry_no_plan_labels() {
-        // tsk1044: a dataset's description is read by people (Catalog,
+        // a dataset's description is read by people (Catalog,
         // Explore Data) and agents; a plan code ("(P5.E1)") means nothing
         // to either.
         let yaml = include_str!("../datasets/datasets.yaml");
@@ -3183,7 +3182,7 @@ mod tests {
         assert!(err.contains("may not read itself"), "{err}");
     }
 
-    /// tsk977: the extensions' pass publishes even when another connection
+    /// the extensions' pass publishes even when another connection
     /// is mid-write as it starts and commits while it waits — a pass that
     /// read first and wrote second failed then (`SQLITE_BUSY_SNAPSHOT`,
     /// which no wait fixes), and a fresh project's boot pass never
@@ -3313,7 +3312,7 @@ mod tests {
         );
     }
 
-    /// P4.9 (tsk494): an extension's dataset reads core datasets through
+    /// P4.9: an extension's dataset reads core datasets through
     /// `ref()`, its own by bare name and another extension's as
     /// `ref('<namespace>/<name>')`; each publishes `v_<namespace>_<name>` in the
     /// registry. A recompile replaces the set.
@@ -3540,7 +3539,7 @@ mod tests {
         );
     }
 
-    /// P4.9 (tsk494): an extension dataset's declared tests run after it
+    /// P4.9: an extension dataset's declared tests run after it
     /// publishes; a failure is in `dataset_test` and the extension's errors,
     /// and the view stays published.
     #[test]
@@ -3590,7 +3589,7 @@ mod tests {
         .unwrap();
     }
 
-    /// P4.9 (tsk494): a breaking change ships a new version with the old
+    /// P4.9: a breaking change ships a new version with the old
     /// one kept under `deprecated` — its own view, `…_v1`, held to the
     /// contract v1 published, until its date. A twin without a published
     /// contract, or past its date, isn't kept, and the extension hears why.
@@ -3694,7 +3693,7 @@ mod tests {
         );
     }
 
-    /// P4.9 (tsk494): the check `oxplow extension check` runs works on a
+    /// P4.9: the check `oxplow extension check` runs works on a
     /// read-only database and writes nothing: a good dataset passes, and a
     /// changed contract at a published version fails naming the column.
     #[tokio::test]

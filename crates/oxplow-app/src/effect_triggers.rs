@@ -10,7 +10,7 @@
 //!    nothing. A `started` row is a run interrupted after it claimed a
 //!    step outside the transaction: recorded `failed` ([`cut_off`]) and,
 //!    when its claim kept what it composed, sent again by itself like a
-//!    failure that may pass (tsk954); otherwise a person's.
+//!    failure that may pass; otherwise a person's.
 //! 2. Not started yet, or the event is from before it started
 //!    (`effects::gate`): nothing — it never reacts to the past.
 //! 3. The loop guard: an event its own run caused is never its trigger,
@@ -38,8 +38,8 @@
 //! health, and the attempt that exhausts the retries counts once.
 //! The retry sends exactly what the failed attempt composed, kept with it
 //! while the retry is scheduled ([`Resend`]); a `oxplow.task.create` in it
-//! files on the tracker active when it's sent, as every create does
-//! (tsk1058). An
+//! files on the tracker active when it's sent, as every create does.
+//! An
 //! attempt cut off by oxplow stopping is retried the same way, timed from
 //! when it started — found at start by [`recover_interrupted`] when no
 //! pump delivery will find it. Anything else — a step inside oxplow,
@@ -241,7 +241,7 @@ pub(crate) enum Reacted {
     Stopped(String),
     /// It failed, and will be sent again by itself: not counted yet.
     Retrying(String),
-    /// A scheduled automatic retry that wasn't sent (tsk887): the failed
+    /// A scheduled automatic retry that wasn't sent: the failed
     /// attempt's failure stands, a person's to retry, and counts now.
     NotResent(String),
     /// Nothing was attempted: not its to run (not started, from before it
@@ -306,7 +306,7 @@ pub(crate) const INTERRUPTED: &str =
     "interrupted: a step outside oxplow may have run, so it isn't sent again";
 
 /// Why one is failed whose claim kept what it composed: its every step was
-/// safe to send again (tsk954).
+/// safe to send again.
 pub(crate) const INTERRUPTED_RESENDABLE: &str =
     "interrupted: a step outside oxplow may have run; every step is safe to send again";
 
@@ -315,8 +315,8 @@ pub(crate) const INTERRUPTED_RESENDABLE: &str =
 /// it composed (every step a write to a provider keeping
 /// `idempotent_writes`), it is sent again by itself as a failure that may
 /// pass is, timed from when it started — so one found long after is a
-/// person's (`MAX_RETRY_LATENESS`); otherwise it is a person's now
-/// (tsk954). Serves the pump's redelivery and the start's recovery alike.
+/// person's (`MAX_RETRY_LATENESS`); otherwise it is a person's now.
+/// Serves the pump's redelivery and the start's recovery alike.
 async fn cut_off(svc: &Services, key: &EffectRunKey) -> Result<Reacted, DomainError> {
     let claimed = {
         let key = key.clone();
@@ -338,7 +338,7 @@ async fn cut_off(svc: &Services, key: &EffectRunKey) -> Result<Reacted, DomainEr
         );
     };
     // A start that can't be read can't be timed against the lateness
-    // bound: not sent again, a person's (tsk999).
+    // bound: not sent again, a person's.
     let retry = oxplow_domain::Timestamp::parse(&claimed.started_at)
         .ok()
         .map(|from| Retry {
@@ -367,7 +367,7 @@ struct Retry {
 }
 
 /// Record `key`'s attempt failed for `reason` and, with `retry`, schedule
-/// it to be sent again — in one transaction (tsk999), so a failure meant
+/// it to be sent again — in one transaction, so a failure meant
 /// to be sent again is never left recorded without its retry. Whether this
 /// recorded it, and whether its retry was scheduled.
 async fn fail(
@@ -401,8 +401,8 @@ async fn fail(
 /// At start: every attempt a person or oxplow started (a retry, a
 /// backfill, an automatic attempt) that is still `started` was cut off —
 /// the app stopped between its claim and its record — and no pump
-/// delivery will find it, so each is recovered as [`cut_off`] does
-/// (tsk845, tsk954): Delivery lists it, or it is sent again by itself. A
+/// delivery will find it, so each is recovered as [`cut_off`] does:
+/// Delivery lists it, or it is sent again by itself. A
 /// live one is the pump's: its redelivery finds it. How many were
 /// recovered.
 pub(crate) async fn recover_interrupted(svc: &Arc<Services>) -> Result<usize, DomainError> {
@@ -419,7 +419,7 @@ pub(crate) async fn recover_interrupted(svc: &Arc<Services>) -> Result<usize, Do
             continue;
         }
         recovered += 1;
-        // Counted as the pump counts one it finds (tsk999).
+        // Counted as the pump counts one it finds.
         if let Some((_, decl)) = find_effect(svc, &key.effect) {
             count(&health, &decl, &reacted, Duration::ZERO).await;
         }
@@ -444,7 +444,7 @@ pub(crate) const NOT_REACTED: &str = "hasn't reacted";
 /// - `Backfill`: the first attempt at an event the effect never reacted
 ///   to, whenever it was logged;
 /// - `Auto`: the next attempt at a failed one scheduled to be sent again,
-///   sending exactly what that one composed (tsk887) — a person's retry
+///   sending exactly what that one composed — a person's retry
 ///   composes afresh, from what the effect reads now.
 ///
 /// Every origin passes the loop guard, and runs within its extension's
@@ -470,7 +470,7 @@ pub(crate) async fn run_reaction(
         (ReactionOrigin::Live | ReactionOrigin::Backfill, None) => 1,
         // A live attempt left `started`: the run that claimed it was cut
         // off. A person's (a retry, a backfill) under way is theirs to
-        // record — or the next start's, when it was cut off (tsk847).
+        // record — or the next start's, when it was cut off.
         (ReactionOrigin::Live, Some((attempt, RunState::Started, ReactionOrigin::Live))) => {
             let key = EffectRunKey {
                 effect,
@@ -588,8 +588,8 @@ pub(crate) async fn run_reaction(
             },
         )
     };
-    // An automatic attempt sends exactly what the failed one composed
-    // (tsk887): composing afresh could change a step's input — so its
+    // An automatic attempt sends exactly what the failed one composed:
+    // composing afresh could change a step's input — so its
     // key — and make a write that landed again. Unless every step still
     // goes to a provider that keeps `idempotent_writes`, it isn't sent:
     // the failure is a person's.
@@ -638,7 +638,7 @@ pub(crate) async fn run_reaction(
     let command = effect_command(&svc.commands, calls, events, scopes)
         .map_err(|e| DomainError::Invariant(e.to_string()))?;
     // Kept with its claim when it may be sent again by itself: what an
-    // attempt cut off before its record sends (tsk954).
+    // attempt cut off before its record sends.
     let kept = safe.then(|| resend.clone());
     match svc
         .commands
@@ -657,7 +657,7 @@ pub(crate) async fn run_reaction(
         }
         // Recorded here, or already by the bus (a step failed partway):
         // a failure either way — sent again by itself when it may have
-        // been passing (`Unavailable`, tsk914), that is safe, and it has
+        // been passing (`Unavailable`), that is safe, and it has
         // retries left.
         Err(e) => {
             let reason = e.to_string();
@@ -679,7 +679,7 @@ pub(crate) async fn run_reaction(
 }
 
 /// What a failed attempt composed, kept for its automatic retry to send
-/// exactly (tsk887).
+/// exactly.
 #[derive(serde::Serialize, serde::Deserialize)]
 struct Resend {
     calls: Vec<CommandCall>,
@@ -708,7 +708,7 @@ fn safe_to_resend(_svc: &Services, _calls: &[CommandCall]) -> bool {
 }
 
 /// The longest a service's own "try again in" is waited for by itself: a
-/// longer wait is a person's to retry after (tsk914).
+/// longer wait is a person's to retry after.
 pub(crate) const MAX_ASKED_WAIT: Duration = Duration::from_secs(15 * 60);
 
 /// In `tx`: schedule `key`'s failed attempt to be sent again as `retry`
@@ -736,7 +736,7 @@ fn schedule_retry_tx(
 
 /// How late a retry may be sent by itself: one due longer ago (oxplow was
 /// closed meanwhile) is a person's — the write it would send is from
-/// another time (tsk915).
+/// another time.
 pub(crate) const MAX_RETRY_LATENESS: Duration = Duration::from_secs(60 * 60);
 
 /// Send again every failed attempt whose automatic retry is due by `now`
@@ -758,7 +758,7 @@ pub async fn auto_retry_due(
     let health =
         crate::contribution_health::ContributionHealth::new(svc.db.clone(), svc.vocabulary.clone());
     let mut sent = 0;
-    // One row's error is that row's (tsk932): logged, and the rest go on —
+    // One row's error is that row's: logged, and the rest go on —
     // it is tried again on the next tick.
     for (key, due_at) in due {
         match Box::pin(retry_one(svc, &health, &key, &due_at, now_ms)).await {
@@ -783,13 +783,13 @@ async fn retry_one(
     due_at: &str,
     now_ms: i64,
 ) -> Result<bool, DomainError> {
-    // A due time that can't be read is as late as can be (tsk999).
+    // A due time that can't be read is as late as can be.
     let late = oxplow_domain::Timestamp::parse(due_at).map_or(true, |at| {
         now_ms - at.unix_ms() > MAX_RETRY_LATENESS.as_millis() as i64
     });
     // At its newest version, as the pump, `oxplow.effect.retry` and backfill
-    // hand it over (tsk911). The attempt sends what the failed one
-    // composed (tsk887), so an expired payload doesn't stop it.
+    // hand it over. The attempt sends what the failed one
+    // composed, so an expired payload doesn't stop it.
     let event = match svc
         .event_log_store
         .get(oxplow_domain::EventId(key.event_id.clone()))
@@ -863,7 +863,7 @@ pub fn spawn_auto_retry(state: &Arc<Services>) {
         Duration::from_secs(5),
         |svc| async move {
             // Not before the providers the config names are up: a write
-            // sent to one not yet registered fails for nothing (tsk915).
+            // sent to one not yet registered fails for nothing.
             svc.providers.first_reconciled().await;
             if let Err(error) = auto_retry_due(&svc, oxplow_domain::Timestamp::now()).await {
                 tracing::warn!(%error, "sending effect attempts again failed");
@@ -1190,7 +1190,7 @@ mod tests {
         );
     }
 
-    /// tsk798: a reaction's command shares `oxplow.command.sequence`'s compiled
+    /// a reaction's command shares `oxplow.command.sequence`'s compiled
     /// input schema rather than compiling its own.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_reactions_command_shares_the_sequences_validator() {
@@ -1281,7 +1281,7 @@ mod tests {
         assert!(run[0][1].as_str().unwrap().contains("interrupted"), "{run}");
     }
 
-    /// tsk845: a person's retry or backfill claimed `started` and then cut
+    /// a person's retry or backfill claimed `started` and then cut
     /// off (the app quit mid-step) is no pump delivery, so no redelivery
     /// ever finds it. Starting up does: each such attempt is recorded
     /// failed — interrupted — with what started it, so Delivery lists it
@@ -1309,7 +1309,7 @@ mod tests {
         claim(&cut_off, ReactionOrigin::Backfill).await;
         let live = log(svc, settled(&fx, "taken")).await;
         claim(&live, ReactionOrigin::Live).await;
-        // tsk935: an automatic attempt cut off the same way is recovered too.
+        // an automatic attempt cut off the same way is recovered too.
         let auto = log(svc, settled(&fx, "taken")).await;
         claim(&auto, ReactionOrigin::Auto).await;
 
@@ -1450,7 +1450,7 @@ mod tests {
         assert_eq!(keys.lock().last(), Some(&None));
     }
 
-    /// tsk912: a step that landed before a later one failed is sent again
+    /// a step that landed before a later one failed is sent again
     /// on the retry (its key the same), and its system answers it again —
     /// but its events are logged once, not again under new ids.
     #[tokio::test(flavor = "multi_thread")]
@@ -2189,7 +2189,7 @@ mod tests {
             .map(|o| o.result)
     }
 
-    /// tsk847: what was logged after the effect's approval is the live
+    /// what was logged after the effect's approval is the live
     /// consumer's — a backfill stops at `start_after_seq`, so the two
     /// never attempt one event at once — and a person's attempt under way
     /// (`started` by a retry or a backfill) isn't the live consumer's to
@@ -2259,7 +2259,7 @@ mod tests {
         );
     }
 
-    /// tsk848: a backfill's plan applies `where` to every candidate in its
+    /// a backfill's plan applies `where` to every candidate in its
     /// range, reading them a page at a time: events its `where` excludes
     /// filling the first pages never hide the matches after them.
     #[tokio::test(flavor = "multi_thread")]
@@ -2301,7 +2301,7 @@ mod tests {
         );
     }
 
-    /// tsk846: an event the effect's own run led to is never its trigger
+    /// an event the effect's own run led to is never its trigger
     /// (the loop guard), so a backfill never plans it either: otherwise
     /// an effect that edits what it reacts to would find its own edits
     /// "unreacted" on every backfill, and never get past them.

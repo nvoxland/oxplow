@@ -5,7 +5,7 @@ import { isOxplowScheme } from "../../uri/uri.js";
  * Tiptap Link mark extended to permit our internal URL schemes
  * (`file:`, `dir:`, `commit:`, `task:`, and `oxplow-invalid:` — the
  * link an unresolvable wikilink is kept as, so it saves back as `[[…]]`
- * rather than losing its mark; tsk1007). Tiptap's default `Link` allowlists
+ * rather than losing its mark). Tiptap's default `Link` allowlists
  * http/https/mailto/ftp; without this extension our schemes either
  * get stripped on parse or fail the click-validation in the standard
  * link plugin.
@@ -41,7 +41,7 @@ export const InternalLink = Link.extend({
   // every parse, render and set-link check goes through. Not as Link's
   // `protocols`: Tiptap registers those with linkify (for autolinking,
   // which is off), and linkify throws on a scheme it can't tokenize, so
-  // `task` broke every rich-text field (tsk974).
+  // `task` broke every rich-text field.
   addOptions() {
     return {
       ...this.parent?.(),

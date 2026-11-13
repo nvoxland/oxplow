@@ -74,12 +74,12 @@ describe("an extension's ref kind (P8.D7)", () => {
     expect(extensionWikilinkRef("request:12")).toBe(ACME_PR_URI);
   });
 
-  test("a long id matches as the backend's does (tsk917)", () => {
+  test("a long id matches as the backend's does", () => {
     setResources([ACME_PR]);
     expect(extensionWikilinkRef(`pr:${"1".repeat(300)}`)).toBe(resourceUri("acme/pr", { id: "1".repeat(300) }));
   });
 
-  test("every character the backend spells is itself here (tsk917)", () => {
+  test("every character the backend spells is itself here", () => {
     // The backend's spelling: these escaped, everything else as is.
     const spell = (c: string) => ("\\.+*?()|[]{}^$-&~#".includes(c) ? `\\${c}` : c);
     const printable = Array.from({ length: 95 }, (_, i) => String.fromCharCode(32 + i));

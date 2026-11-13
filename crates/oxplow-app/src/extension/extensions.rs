@@ -1505,7 +1505,7 @@ impl ExtensionFiles for Tree {
     }
     /// A bundle checked from the tree's own paths, when it holds them; a
     /// built bundle usually isn't committed, so none is `Unknown`, not an
-    /// error (tsk784).
+    /// error.
     fn bundle_stat(&self, rel: &str) -> custom_components::BundleLook {
         custom_components::look_in_paths(rel, self.0.keys().map(String::as_str))
     }

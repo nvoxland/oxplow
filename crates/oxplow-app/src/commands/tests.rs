@@ -659,7 +659,7 @@ fn kv_undone_by_noop() -> Handler {
     }))
 }
 
-/// tsk901: a call that says it changed nothing keeps nothing — what it
+/// a call that says it changed nothing keeps nothing — what it
 /// wrote is rolled back, so it can't land unaudited — and one that
 /// returns events (a change) while saying so is refused.
 #[tokio::test(flavor = "multi_thread")]
@@ -699,7 +699,7 @@ async fn an_unchanged_call_keeps_nothing_and_cant_carry_events() {
     );
 }
 
-/// tsk901: an undo, or a person's approval, whose run changes nothing
+/// an undo, or a person's approval, whose run changes nothing
 /// is still recorded — its row has to be marked.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_undo_or_approval_that_changes_nothing_is_still_recorded() {
@@ -1566,7 +1566,7 @@ async fn audits_of(db: &Database, name: &str) -> Vec<oxplow_db::command_audit_st
         .collect()
 }
 
-/// P7 review (tsk713): a composite with a step outside the transaction
+/// P7 review: a composite with a step outside the transaction
 /// runs its steps in order, each landing as it runs — one audit row
 /// and one `command.executed` naming them all, and no undo (a system
 /// outside the bus can't be rolled back with it).
@@ -1693,7 +1693,7 @@ async fn a_composites_own_events_land_with_its_steps_only_when_all_landed() {
     assert_eq!(announced().await.len(), 1, "a failed run announces nothing");
 }
 
-/// P7 review (tsk713): a step that fails stops the run; the steps
+/// P7 review: a step that fails stops the run; the steps
 /// before it stand, and the one audit row says what landed and what
 /// failed.
 #[tokio::test(flavor = "multi_thread")]
@@ -1728,7 +1728,7 @@ async fn a_failed_step_stops_the_run_and_what_landed_stands() {
     assert!(rows[0].inverse.is_none());
 }
 
-/// P7 review (tsk713): every step is checked before any runs — its
+/// P7 review: every step is checked before any runs — its
 /// input, a job's tools, the agent policy — and a step that asks makes
 /// the run ask once; an agent's run is a proposal (with no dry run:
 /// nothing outside the transaction runs before a person decides).

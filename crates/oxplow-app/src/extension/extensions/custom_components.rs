@@ -5,8 +5,8 @@
 //! read`, and the commands it may invoke (`commands`). It renders without
 //! approval;
 //! one that declares `commands` is a program a person approves before its
-//! `invoke` runs them with their rights (tsk960), at the version of the
-//! bundle it loaded (tsk984). A bundled extension's component runs the same
+//! `invoke` runs them with their rights, at the version of the
+//! bundle it loaded. A bundled extension's component runs the same
 //! way: its bundle is served from the embedded files, hashed and approved
 //! like a project's.
 //!
@@ -94,7 +94,7 @@ pub enum BundleLook {
     /// It isn't there (on disk: not a folder).
     Absent,
     /// It can't be told from these files: a revision's tree, where a built
-    /// bundle usually isn't committed. Taken as declared (tsk784).
+    /// bundle usually isn't committed. Taken as declared.
     Unknown,
     Found(BundleStat),
 }
@@ -172,10 +172,10 @@ pub fn stat_bundle(dir: &Path) -> Option<BundleStat> {
 pub const LIB_SCRIPT: &str = "/component-lib/oxplow-component.js";
 
 /// What `ext`'s components ask for that their frame would refuse without a
-/// word (tsk961), as check errors at the file: each bundle's `index.html`
+/// word, as check errors at the file: each bundle's `index.html`
 /// ([`page_problems`]) — the one page a frame shows, since a nested frame
 /// is refused and navigating away ends the component — read through
-/// `read`, the files of the extension under check (tsk994: a candidate
+/// `read`, the files of the extension under check (a candidate
 /// under review, a revision, the folder on disk, or a bundled extension's
 /// embedded files). A page `read` can't find (a revision's tree rarely holds a built bundle)
 /// is skipped: loading says when a bundle has no `index.html`.
@@ -374,7 +374,7 @@ pub fn page_problems(html: &str, index: bool) -> Vec<Diagnostic> {
 }
 
 /// A URL the frame would fetch from somewhere other than its own bundle
-/// folder or oxplow's `/component-lib/` (tsk983): one with a scheme
+/// folder or oxplow's `/component-lib/`: one with a scheme
 /// (`data:` too, for a script or stylesheet — `data` says when it's a
 /// load that may take one), a protocol-relative `//host`, an absolute path
 /// elsewhere on the daemon, or a relative one whose `..` climbs out of the
@@ -645,7 +645,7 @@ pub fn parse_custom_components(
 #[cfg(test)]
 mod tests {
 
-    /// tsk784: a revision's tree loads a custom component cleanly — checked
+    /// a revision's tree loads a custom component cleanly — checked
     /// from the bundle's paths when the tree holds them, and taken as is
     /// when it doesn't (a built bundle usually isn't committed). A bundle
     /// that's there but has no `index.html` is still an error.
@@ -739,7 +739,7 @@ mod tests {
 
     const LIB_TAG: &str = "<script src=\"/component-lib/oxplow-component.js\"></script>";
 
-    /// P11 (tsk961): what a bundle's CSP would refuse without a word — an
+    /// P11: what a bundle's CSP would refuse without a word — an
     /// inline script or event handler, a module, anything from outside the
     /// bundle — is an error at check, and so is an `index.html` that never
     /// loads the client library. The kit's sheet and the bundle's own
@@ -773,7 +773,7 @@ mod tests {
             let problems = said(&page_problems(&format!("{LIB_TAG}{html}"), true));
             assert!(problems.contains(says), "{html}: {problems}");
         }
-        // tsk983: the frame loads its own folder and the library only — a
+        // the frame loads its own folder and the library only — a
         // path that leaves the bundle is refused, so it's reported.
         for (html, says) in [
             (
@@ -808,7 +808,7 @@ mod tests {
                 "{inside}"
             );
         }
-        // tsk994: no panic on an `=` attribute before a multibyte char, and
+        // no panic on an `=` attribute before a multibyte char, and
         // it doesn't swallow the next tag.
         assert!(page_problems(&format!("{LIB_TAG}<a =\"x\"é>"), true).is_empty());
         assert!(said(&page_problems(
@@ -875,7 +875,7 @@ mod tests {
         );
     }
 
-    /// tsk994: the lints read the files of the extension being checked —
+    /// the lints read the files of the extension being checked —
     /// a candidate under review is not what's installed — through the read
     /// the check is given.
     #[test]
@@ -929,7 +929,7 @@ mod tests {
         );
     }
 
-    /// tsk961: the check reports a bundle's page problems at the page —
+    /// the check reports a bundle's page problems at the page —
     /// a bundled extension's as a project's: they share one runtime.
     #[tokio::test]
     async fn a_bundles_pages_are_checked_whatever_its_origin() {
@@ -1111,7 +1111,7 @@ mod tests {
         }
     }
 
-    /// P11 (tsk962): `custom_components` is stable, so a shared extension
+    /// P11: `custom_components` is stable, so a shared extension
     /// declares one like a private one, and its page's custom viz loads.
     #[test]
     fn a_shared_extension_loads_a_component_and_its_page() {

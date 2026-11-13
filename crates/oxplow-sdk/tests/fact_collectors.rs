@@ -1,4 +1,4 @@
-//! tsk1047: `oxplow extension test` runs a fact collector's examples offline,
+//! `oxplow extension test` runs a fact collector's examples offline,
 //! over the files an example gives it, and compares the facts — the walk's
 //! todo-watch collector could only be tested live.
 

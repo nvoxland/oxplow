@@ -166,7 +166,7 @@ mod tests {
     use super::*;
     use crate::test_fixtures::{commit_all, services_with_thread};
 
-    /// P5.B4 (tsk523): the stream reads name versions as revisions — the
+    /// P5.B4: the stream reads name versions as revisions — the
     /// commit's detail, blame of the working file, a merge base.
     #[tokio::test]
     async fn stream_reads_speak_revisions() {

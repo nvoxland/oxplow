@@ -400,7 +400,7 @@ fn invalid(e: rusqlite::Error) -> DomainError {
 }
 
 /// A query that didn't prepare. An unknown table names the published dataset
-/// it most likely meant (tsk1039: `v_tree_facts` → `v_tree_fact`); an
+/// it most likely meant (`v_tree_facts` → `v_tree_fact`); an
 /// unknown column names the columns of the datasets `sql` reads, and the
 /// nearest one — so the next query can be right without a discovery query.
 fn prepare_failed(conn: &rusqlite::Connection, sql: &str, e: rusqlite::Error) -> DomainError {
@@ -549,7 +549,7 @@ fn view_names(
 
 /// Table → the datasets whose view reads it (`dataset_input`, sources; a
 /// materialized dataset's own table → that dataset), the table's own dataset
-/// (`v_<table>`) first, then by name (tsk922). Empty before the registry
+/// (`v_<table>`) first, then by name. Empty before the registry
 /// exists.
 fn source_readers(
     conn: &rusqlite::Connection,
@@ -764,7 +764,7 @@ impl<'c> ReadSession<'c> {
 
     /// Why a statement didn't prepare: the authorizer's refusal, or the
     /// error itself — read once the session has ended, so naming the dataset
-    /// it most likely meant can read the schema (tsk1039).
+    /// it most likely meant can read the schema.
     fn failed(self, conn: &rusqlite::Connection, sql: &str, e: rusqlite::Error) -> DomainError {
         let refused = self.refusal();
         drop(self);
@@ -1397,7 +1397,7 @@ mod tests {
         );
     }
 
-    /// P4.1 (tsk486): a query says what it read — the views, through other
+    /// P4.1: a query says what it read — the views, through other
     /// views too, and any table its own SQL read (not one a view read).
     #[tokio::test]
     async fn a_query_reports_what_it_read() {
@@ -1442,7 +1442,7 @@ mod tests {
         assert_eq!(checked.datasets, vec!["v_thread".to_string()]);
     }
 
-    /// tsk1039: a misspelled dataset names the one it most likely meant —
+    /// a misspelled dataset names the one it most likely meant —
     /// an agent's page query and `extension check` read the same error.
     #[tokio::test]
     async fn an_unknown_dataset_suggests_the_nearest_one() {
@@ -1462,7 +1462,7 @@ mod tests {
         assert!(!err.contains("did you mean"), "nothing near it: {err}");
     }
 
-    /// P4.3 (tsk488): the read contract is enforced — a query's own SQL
+    /// P4.3: the read contract is enforced — a query's own SQL
     /// reads only datasets, and a refused table points at the datasets over
     /// it; the explorer's raw mode reads anything, still recorded.
     #[tokio::test]
@@ -1541,7 +1541,7 @@ mod tests {
             .unwrap();
     }
 
-    /// P4.5a (tsk490): a query's temp tables exist for it alone — created
+    /// P4.5a: a query's temp tables exist for it alone — created
     /// and filled on its connection, read like a dataset, gone afterwards
     /// even when the query fails.
     #[tokio::test]

@@ -1,6 +1,6 @@
 //! The comments people anchored in pages (`comment.read`, `oxplow.comment.list`)
 //! and, `knowledge.read`, how far a knowledge page's pinned file ref
-//! has drifted from the file (`oxplow.knowledge.drift`).
+//! has drifted from the file (`oxplow_ref_drift`).
 
 use oxplow_domain::comment::CommentThread;
 use oxplow_domain::stores::CommentStore;

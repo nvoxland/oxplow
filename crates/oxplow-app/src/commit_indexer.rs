@@ -525,7 +525,7 @@ mod tests {
         );
     }
 
-    /// P5.B5 (tsk524): the indexer walks every stream's head, so a commit
+    /// P5.B5: the indexer walks every stream's head, so a commit
     /// made only on a worktree stream's branch reaches `v_commit` (with its
     /// parents), `v_branch` marks the default branch, and tags are in
     /// `v_tag`. A stream's history is a recursive read from its head.
@@ -657,7 +657,7 @@ mod tests {
             serde_json::json!([["base"], ["init"], ["only on the side branch"]])
         );
 
-        // tsk573: a checkout the stream's row doesn't know yet (the branch
+        // a checkout the stream's row doesn't know yet (the branch
         // reconciler hasn't run): the branch a workspace has checked out
         // is its stream's, read from the workspace's head.
         git(&side_dir, &["checkout", "-q", "-b", "b5-moved"]);
@@ -793,7 +793,7 @@ mod tests {
         assert_eq!(n2, 0, "second pass must skip already-indexed commits");
     }
 
-    /// tsk568: more new commits than a window are indexed whole — the
+    /// more new commits than a window are indexed whole — the
     /// walk goes on below the window while its oldest is new — and a
     /// pass stops at its cap.
     #[tokio::test]

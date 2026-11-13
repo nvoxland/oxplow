@@ -1,6 +1,6 @@
-//! Agent token-usage capture (tsk104).
+//! Agent token-usage capture.
 //!
-//! **Two sources, split by tsk22.** The durable `oxplow.tokens` **facts** now
+//! **Two sources, split by.** The durable `oxplow.tokens` **facts** now
 //! come from **OpenTelemetry**: the control-plane `POST /v1/metrics` receiver
 //! logs each export as `agent.tokens.reported` ([`crate::otlp_ingest`], decode
 //! in [`crate::otlp_tokens`]) and the `token_usage.otlp` consumer counts it
@@ -92,7 +92,7 @@ fn read_complete_tail(path: &Path, offset: u64) -> Option<(String, u64)> {
 /// while leaving any in-flight partial tail for the next read. Returns 0
 /// when the file has no complete line yet or can't be opened. Used to SEED
 /// the cursor on the first capture for a session so the prior transcript is
-/// never ingested as one lump (tsk142).
+/// never ingested as one lump.
 fn complete_offset(path: &Path) -> u64 {
     let Ok(mut file) = std::fs::File::open(path) else {
         return 0;
@@ -110,7 +110,7 @@ fn complete_offset(path: &Path) -> u64 {
 /// Per-(stop, model) turn count, accumulated across the turns in one Stop so
 /// the substrate gets one `oxplow.turn` fact per model rather than one per turn.
 /// Token totals are no longer projected here — OTEL owns the `oxplow.tokens`
-/// facts (epic tsk22); this path keeps only the turn count (which the parser
+/// facts; this path keeps only the turn count (which the parser
 /// gets right per genuine user prompt) plus the per-turn `agent_token_usage`
 /// rows (with prompt text OTEL lacks).
 #[derive(Default)]
@@ -132,7 +132,7 @@ pub struct TurnRecord {
     /// The `agent.turn.ended` event id. It keys the `oxplow.turn` facts
     /// capture, and — only for counts the turn reported itself (one row per
     /// event) — the row, so a redelivery records them once. Transcript rows
-    /// are not keyed by it: a chunk can hold several turns (tsk498), and
+    /// are not keyed by it: a chunk can hold several turns, and
     /// their idempotency is the cursor committing with them.
     pub cause: Option<String>,
 }
@@ -156,7 +156,7 @@ pub struct TokenUsageService {
     usage: Arc<SqliteTokenUsageStore>,
     threads: Arc<SqliteThreadStore>,
     sessions: Arc<SqliteAgentSessionStore>,
-    /// Durable fact layer (epic tsk12): per-kind token totals land as facts
+    /// Durable fact layer: per-kind token totals land as facts
     /// on the `oxplow.tokens` measure.
     facts: Arc<SqliteFactStore>,
     /// Who reads a transcript: the turn's harness (`AgentHarness::turns`).
@@ -227,8 +227,8 @@ impl TokenUsageService {
         // attaching to an already-long transcript): there is no stored cursor.
         // SEED it to the current end-of-history WITHOUT ingesting the prior
         // transcript — otherwise the whole file lands as one giant turns:1
-        // lump. We only attribute tokens spent while oxplow was watching
-        // (tsk142). A real `Some(0)` cursor (a session we genuinely started
+        // lump. We only attribute tokens spent while oxplow was watching.
+        // A real `Some(0)` cursor (a session we genuinely started
         // at byte 0) still takes the normal ingest path.
         let offset = match self.usage.cursor(&session_key).await? {
             Some(offset) => offset,
@@ -323,7 +323,7 @@ impl TokenUsageService {
         cursor: Option<(String, u64)>,
     ) -> Result<RecordedTurns, DomainError> {
         // One row per turn — each carrying its opening prompt, model, and the
-        // usage of the assistant messages that answered it (tsk143). While we
+        // usage of the assistant messages that answered it. While we
         // record, accumulate per-model totals for the metric projection.
         let mut rows = Vec::new();
         let mut by_model: std::collections::HashMap<String, TokenAgg> =
@@ -411,13 +411,13 @@ impl TokenUsageService {
         by_model: &std::collections::HashMap<String, TokenAgg>,
         rec: &TurnRecord,
     ) -> Result<(), DomainError> {
-        // Turn facts only (epic tsk22): the `oxplow.tokens` facts now come from
+        // Turn facts only: the `oxplow.tokens` facts now come from
         // the OTEL producer (`record_reported`) — accurate + multi-agent —
         // so the transcript path projects just the `oxplow.turn` count (one
         // fact per model; additive event measure, model a conformed dimension).
         // The per-turn `agent_token_usage` rows (with prompt text) are recorded
         // above; those are what this path still uniquely provides.
-        // Stop-collecting gate (tsk31): skip the turn facts when `agent.turns` is
+        // Stop-collecting gate: skip the turn facts when `agent.turns` is
         // disabled (nothing consumes `oxplow.turn`).
         if !self
             .facts
@@ -436,7 +436,7 @@ impl TokenUsageService {
                         subject: Some(oxplow_domain::uri::build::ai_model_uri(model)),
                         // json! (not format!) — the model id comes verbatim from
                         // external session JSONL; a quote/backslash in it must
-                        // not poison the dims JSON (tsk46).
+                        // not poison the dims JSON.
                         dims_json: Some(serde_json::json!({ "oxplow.model": model }).to_string()),
                         ..NewFact::new(tm.id, agg.turns as f64)
                     });
@@ -456,10 +456,10 @@ impl TokenUsageService {
 
     /// Count an agent's reported tokens (`agent.tokens.reported`, logged
     /// by [`crate::otlp_ingest`] from an OTLP export — the OpenTelemetry
-    /// successor to the transcript-parse token facts, epic tsk22): per
+    /// successor to the transcript-parse token facts): per
     /// model and kind, input/output on `oxplow.tokens`, cache kinds on
     /// `oxplow.cache_tokens`, plus one per-model `oxplow.cache_usage`
-    /// hit-ratio fact (tsk73) — all under one capture carrying the event's
+    /// hit-ratio fact — all under one capture carrying the event's
     /// thread, stream and turn, keyed by the event so a redelivery
     /// counts nothing twice. How many facts it wrote.
     pub async fn record_reported(
@@ -473,10 +473,10 @@ impl TokenUsageService {
         };
         let reported: AgentTokensReportedV2 = serde_json::from_value(env.payload.clone())
             .map_err(|e| DomainError::Invalid(format!("agent.tokens.reported: {e}")))?;
-        // Stop-collecting gates (tsk31), one per measure this export can feed:
+        // Stop-collecting gates, one per measure this export can feed:
         // input/output → `oxplow.tokens` (the agent.tokens.* specs), cache
         // kinds → `oxplow.cache_tokens`, and the per-model hit-ratio fact →
-        // `oxplow.cache_usage` (tsk73). Cache rides SEPARATE measures because
+        // `oxplow.cache_usage`. Cache rides SEPARATE measures because
         // `agent.tokens.total` is an unfiltered sum over `oxplow.tokens` —
         // cache facts there would silently change its meaning.
         let tokens_measure = self.active_measure("oxplow.tokens").await?;
@@ -508,7 +508,7 @@ impl TokenUsageService {
                 ..NewFact::new(m.id, c.value as f64)
             });
         }
-        // Per-model prompt-cache hit ratio (tsk73): num = cache_read, den =
+        // Per-model prompt-cache hit ratio: num = cache_read, den =
         // input + cache_read + cache_creation (prompt-side; output can't be
         // cached). Emitted only when the export carried cache telemetry at
         // all — an agent that doesn't report cache kinds must read as "no
@@ -552,7 +552,7 @@ impl TokenUsageService {
         Ok(count)
     }
 
-    /// `key`'s measure, when a spec still consumes it (tsk31).
+    /// `key`'s measure, when a spec still consumes it.
     async fn active_measure(&self, key: &str) -> Result<Option<oxplow_db::Measure>, DomainError> {
         if !self
             .facts
@@ -704,7 +704,7 @@ mod tests {
         crate::test_fixtures::init_git_repo(dir.path());
         let svc = crate::Services::in_memory(dir.path()).await.unwrap();
         // Seed the catalog as boot does — the token/turn producers gate collection
-        // on `measure_has_active_spec` (tsk31), so the specs must exist.
+        // on `measure_has_active_spec`, so the specs must exist.
         let stream = svc.streams.ensure_primary().await.unwrap();
         let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
         (svc, dir, thread.id)
@@ -753,7 +753,7 @@ mod tests {
         svc.agent_turn_store.list_open(&thread).await.unwrap()[0].id
     }
 
-    /// P3.7 (tsk477): a turn's tokens are counted by the `token_usage.turns`
+    /// P3.7: a turn's tokens are counted by the `token_usage.turns`
     /// reactor from its `agent.turn.ended` — the transcript tail for Claude
     /// — anchored to the turn; a redelivery reads nothing
     /// twice because the cursor moved with the rows.
@@ -799,7 +799,7 @@ mod tests {
                 .unwrap()
         };
         assert_eq!(turn_ids, vec![Some(turn.value())]);
-        // tsk483: the turn facts' capture carries its turn too.
+        // the turn facts' capture carries its turn too.
         let capture_turns: Vec<Option<i64>> = {
             let sl = crate::sql_gateway::SqlGateway::new(svc.db.clone());
             let r = sl
@@ -863,7 +863,7 @@ mod tests {
 
         // Bootstrap Stop: the session already has one assistant message when
         // oxplow first sees it. The first capture seeds the cursor to the end
-        // WITHOUT recording (history isn't attributed; tsk142).
+        // WITHOUT recording (history isn't attributed).
         std::fs::write(&path, format!("{ASSISTANT_LINE}\n")).unwrap();
         let id0 = svc
             .token_usage
@@ -949,7 +949,7 @@ mod tests {
 
     #[tokio::test]
     async fn first_capture_seeds_cursor_without_ingesting_history() {
-        // tsk142: on a fresh daemon attaching to an already-long session,
+        // on a fresh daemon attaching to an already-long session,
         // the first Stop has no stored cursor. It must SEED the cursor to the
         // current transcript end WITHOUT ingesting the prior history as one
         // giant turns:1 lump — we only attribute tokens spent while watching.
@@ -1015,7 +1015,7 @@ mod tests {
 
     #[tokio::test]
     async fn on_stop_splits_a_multi_prompt_chunk_into_one_row_per_turn() {
-        // tsk143: two prompts in a single Stop chunk must
+        // two prompts in a single Stop chunk must
         // yield two turn rows. (Bootstrap seeds first, so we land the prompts
         // on the second Stop.)
         let (svc, _dir, thread) = service_fixture().await;
@@ -1039,7 +1039,7 @@ mod tests {
             .is_none());
 
         // Append two full turns, then Stop once: [A → turn][B → turn]. As
-        // the reactor records it (tsk498): one `agent.turn.ended` is the
+        // the reactor records it: one `agent.turn.ended` is the
         // cause of both rows, and both must land.
         {
             let mut f = std::fs::OpenOptions::new()
@@ -1092,7 +1092,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_reported_export_records_facts_once() {
-        // tsk22: an OTLP metrics export lands per-kind token facts on
+        // an OTLP metrics export lands per-kind token facts on
         // `oxplow.tokens`, and a retransmit of the identical export is a no-op.
         let (svc, _dir, thread) = service_fixture().await;
         let body = crate::otlp_tokens::tests::encoded_claude_export("claude-opus-4-8", 100, 20);
@@ -1146,7 +1146,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_reported_export_records_cache_facts_and_hit_ratio() {
-        // tsk73: cache kinds land on `oxplow.cache_tokens` (NOT `oxplow.tokens`
+        // cache kinds land on `oxplow.cache_tokens` (NOT `oxplow.tokens`
         // — `agent.tokens.total` must keep meaning input+output), plus one
         // per-model `oxplow.cache_usage` ratio fact: num = cache_read, den =
         // prompt-side total (input + cache_read + cache_creation).
@@ -1235,7 +1235,7 @@ mod tests {
 
     #[tokio::test]
     async fn on_stop_projects_turn_facts_not_token_facts() {
-        // tsk22 (transcript split): the Stop-hook transcript path now projects
+        //  (transcript split): the Stop-hook transcript path now projects
         // only `oxplow.turn` facts — the `oxplow.tokens` facts come from the
         // OTEL producer (see `a_reported_export_records_facts_once`).
         let (svc, _dir, thread) = service_fixture().await;

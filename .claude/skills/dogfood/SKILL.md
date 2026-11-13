@@ -76,8 +76,8 @@ selectors; screenshot when looks matter, and read the image.
 3. **Work concurrently while it runs.** Explore other surfaces, file
    bugs, test features (comments, search, dashboards), brief a second
    thread, or run a second stream in parallel. Useful IPC for
-   inspection: `oxplow_query_sql` over `v_task` / `v_request` (a thread's
-   work, a task's requests via `v_request_task`), `list_threads` (`{"streamId":"str1"}`),
+   inspection: `oxplow_query_sql` over `v_oxplow_task` / `v_request` (a thread's
+   work, a task's requests via `v_oxplow_request_link`), `list_threads` (`{"streamId":"str1"}`),
    `v_request_observation`, `run_command` to file a task
    (`{"name":"task.create","input":{"title":…,"body":…,"state":"todo","native":{"thread":"thr1"}},"confirmed":false}`;
    no `native.thread` = backlog).

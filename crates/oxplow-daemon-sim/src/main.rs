@@ -1,6 +1,6 @@
 //! `oxplow-daemon-sim --project <dir> [--bind …] [--init] [--token-stdin]`
 //!
-//! The daemon for oxplow's browser suite (P11, tsk948): the same server,
+//! The daemon for oxplow's browser suite (P11): the same server,
 //! boot and arguments as `oxplow-daemon`, with its secrets — keys, tokens,
 //! the approval key — in memory, so a headless runner needs no keychain
 //! and a local run writes no test key into the person's. They go with the

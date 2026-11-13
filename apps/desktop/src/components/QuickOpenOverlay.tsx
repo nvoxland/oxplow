@@ -362,7 +362,7 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
         }}
         // While it is open the launcher is where typing goes. After a reload
         // the window settles under it — a restored tab or terminal mounts and
-        // takes focus — and the keys that follow reached neither (tsk1055).
+        // takes focus — and the keys that follow reached neither.
         // Focus leaving for somewhere outside it, with the launcher still
         // showing, comes back; a click outside closes it first (the
         // backdrop), and focus inside it is left alone.

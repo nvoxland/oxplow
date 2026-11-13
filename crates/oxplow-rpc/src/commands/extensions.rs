@@ -96,7 +96,7 @@ pub async fn component_form(
 }
 
 /// Load the bundle of component `id` (`<extension>/<component id>`) as it
-/// is now, for its frame (tsk984): the version the daemon serves it at
+/// is now, for its frame: the version the daemon serves it at
 /// (`/components/v/<version>/`) and the frame invokes with.
 pub async fn load_component(svc: &Services, id: String) -> Result<String, IpcError> {
     Ok(oxplow_app::viz_actions::load_component_pinned(svc, root(svc), &id).await?)

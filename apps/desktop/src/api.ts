@@ -239,7 +239,7 @@ export type DesktopBridge = ReturnType<typeof buildBridge>;
 let cachedBridge: DesktopBridge | null = null;
 
 // The wire's own shapes, from the generated bindings: nothing converts a
-// shape at the boundary (P11, tsk963–964).
+// shape at the boundary (P11).
 export type { BackgroundTask, OxplowConfig, OxplowEvent };
 export type { OpOutcome } from "./tauri-bridge/index.js";
 
@@ -407,7 +407,7 @@ export async function getCommand(name: string): Promise<CommandSpec> {
 }
 
 /** Load component `id`'s bundle (`<extension>/<component id>`) as it is
- *  now, for its frame (tsk984): the version the daemon serves it at and
+ *  now, for its frame: the version the daemon serves it at and
  *  the frame invokes with. */
 export async function loadComponent(id: string): Promise<string> {
   return unwrap(await commands.loadComponent(id));
@@ -1607,7 +1607,7 @@ export async function probeDaemon(): Promise<boolean> {
     return true;
   } catch (e) {
     // A refused token is the daemon answering: it's there, and the
-    // banner says what's wrong (tsk971).
+    // banner says what's wrong.
     return e instanceof IpcCallError && e.code === "UNAUTHORIZED";
   }
 }

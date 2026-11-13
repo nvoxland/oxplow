@@ -176,7 +176,7 @@ pub async fn run_boot_orchestration(
     }
 
     // Snapshot cleanup loop — expires blob CONTENT older than the configured
-    // retention window (tsk105: the rows are permanent records; each
+    // retention window (the rows are permanent records; each
     // (stream, path)'s newest content is kept at any age). Runs ~60s after
     // boot and every 24h. `snapshotRetentionDays: 0` disables it.
     {
@@ -198,7 +198,7 @@ pub async fn run_boot_orchestration(
     // `on:` collectors (P7.B3), after the consumers they may name.
     crate::collector_triggers::register(state);
     // Extensions' effects (P8.D10), approved ones only — and a person's
-    // retry or backfill the last run left half-done, recorded (tsk845).
+    // retry or backfill the last run left half-done, recorded.
     crate::effect_triggers::register(state);
     match crate::effect_triggers::recover_interrupted(state).await {
         Ok(0) => {}
@@ -231,7 +231,7 @@ pub async fn run_boot_orchestration(
     crate::providers::sync::spawn_sync_scheduler(state);
     register_stored_analyses(state);
 
-    // Metric retention loop (tsk93) — OPT-IN: `metricRetentionDays` defaults
+    // Metric retention loop — OPT-IN: `metricRetentionDays` defaults
     // to 0 = keep everything (per-test history is what makes the substrate
     // worth having). When enabled, a daily pass prunes captures older than
     // the window that no current value stands on — each producer's newest, and fold-live facts' captures are always kept
@@ -257,7 +257,7 @@ pub async fn run_boot_orchestration(
                         Err(e) => tracing::warn!(error = %e, "metric retention pass failed"),
                     }
                 }
-                // Detail compaction (tsk211) runs INDEPENDENTLY of the prune
+                // Detail compaction runs INDEPENDENTLY of the prune
                 // above: it is on by default, because nulling a drill-in payload
                 // can't change a metric value, whereas the prune deletes facts
                 // and stays opt-in. `detail_json` was 200 MB of a 795 MB DB here
@@ -290,7 +290,7 @@ pub async fn run_boot_orchestration(
                     Ok(_) => {}
                     Err(e) => tracing::warn!(error = %e, "metric detail compaction failed"),
                 }
-                // Return the WAL's high-water mark to the OS (tsk216). The
+                // Return the WAL's high-water mark to the OS. The
                 // automatic checkpoint is PASSIVE — it restarts the WAL in place
                 // and reuses the space — so after a big write burst (a metric
                 // rebuild took it to 169MB here) the file parks at that size
@@ -548,7 +548,7 @@ pub async fn run_boot_orchestration(
         });
     }
 
-    // Metric aggregate cube (tsk96), an asset (P7.B1): it reads the capture
+    // Metric aggregate cube, an asset (P7.B1): it reads the capture
     // and fact tables, so it folds what lands after each quiet burst of
     // commits to them; its first build here is the backfill. Purely an
     // accelerator — an unbuilt cube is a slow read, never a wrong one.
@@ -557,7 +557,7 @@ pub async fn run_boot_orchestration(
             .with_visibility(state.metric_visibility.clone()),
     ));
 
-    // Tree-metric BASELINE (tsk41). A `per-path` measure folds over each capture's
+    // Tree-metric BASELINE. A `per-path` measure folds over each capture's
     // snapshot file rows, so a repo-wide total needs ONE snapshot listing the whole
     // tree. On a fresh project — or after the V54 wipe — there isn't one, and delta
     // snapshots alone never get there (a file only enters the fold once some commit

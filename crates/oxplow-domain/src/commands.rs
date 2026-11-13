@@ -1092,7 +1092,7 @@ pub enum CommandError {
     Failed { message: String },
     /// The system outside oxplow it reached couldn't answer just now — it
     /// erred, timed out, or asked to wait (`retry_after_ms`): the one
-    /// failure worth sending again by itself (tsk914). Whatever else fails
+    /// failure worth sending again by itself. Whatever else fails
     /// is `Failed` and waits for a person.
     Unavailable {
         message: String,

@@ -660,7 +660,7 @@ mod tests {
         id
     }
 
-    /// P5.B2 (tsk521): a snapshot reads through `Trees` — its files, one
+    /// P5.B2: a snapshot reads through `Trees` — its files, one
     /// file's bytes, and its text corpus — whatever the disk holds now.
     #[tokio::test]
     async fn a_snapshot_reads_through_trees() {
@@ -689,7 +689,7 @@ mod tests {
         assert!(trees.read_at(&ws, &rev, "../x").await.is_err());
     }
 
-    /// Conformance 7 (P5.B3, tsk522): a snapshot taken on a clean
+    /// Conformance 7 (P5.B3): a snapshot taken on a clean
     /// workspace maps to its head revision and back, and diffs empty
     /// against it; one taken with an edit maps to none.
     #[tokio::test]
@@ -1048,7 +1048,7 @@ mod tests {
         );
     }
 
-    /// tsk177: a filtered path is out of scope on both sides — never
+    /// a filtered path is out of scope on both sides — never
     /// "deleted" because the working tree hides it.
     #[tokio::test]
     async fn a_filtered_path_is_not_reported_deleted() {
@@ -1076,7 +1076,7 @@ mod tests {
         assert!(deleted.is_empty(), "{deleted:?}");
     }
 
-    /// tsk1083: oxplow watches oxwiki though git ignores it, but a tree
+    /// oxplow watches oxwiki though git ignores it, but a tree
     /// is git's view: oxwiki is not uncommitted work.
     #[tokio::test]
     async fn the_working_tree_leaves_out_the_git_ignored_oxwiki() {
@@ -1102,7 +1102,7 @@ mod tests {
         assert!(d.contains_key(".oxplow/project.yaml"), "{d:?}");
     }
 
-    /// tsk552: a diff between two commits honours the workspace filter
+    /// a diff between two commits honours the workspace filter
     /// like every other pair — an excluded path isn't reported.
     #[tokio::test]
     async fn a_commit_diff_leaves_out_filtered_paths() {

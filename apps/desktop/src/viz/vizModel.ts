@@ -343,7 +343,7 @@ export function cellLinkRef(
 /** A stored timestamp (ISO-8601 with a time and a zone), not a bare date. */
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$/;
 
-/** Whether `v` is a stored timestamp — shown in local time (tsk1038). */
+/** Whether `v` is a stored timestamp — shown in local time. */
 export function isTimestamp(v: SqlCell): v is string {
   return typeof v === "string" && TIMESTAMP.test(v);
 }
@@ -351,7 +351,7 @@ export function isTimestamp(v: SqlCell): v is string {
 /** Plain-text rendering of one cell: by its column's `format` when it
  *  has one; else a timestamp in local time, as the rest of the app shows
  *  times, and a number with its `unit` (another cell's value,
- *  `PageColumn.unit`) as a metric value (tsk1038). */
+ *  `PageColumn.unit`) as a metric value. */
 export function formatCell(v: SqlCell, unit?: SqlCell, format?: ColumnFormat | null): string {
   if (v === null) return "—";
   if (typeof v === "boolean") return v ? "yes" : "no";
