@@ -872,12 +872,12 @@ commands:
   # Foundation's own settings (`configuration:`): read with their stamps,
   # written as a compare-and-swap on them.
   - name: settings.read
-    summary: The effective settings of oxplow's own extensions (they share the namespace's one configuration — the review policy, the task workflow), where each came from, and the stamps a write needs.
+    summary: The effective settings of oxplow's own extensions (they share the namespace's one configuration — how changed files are ranked, which files change together, when a request counts as a struggle), where each came from, and the stamps a write needs.
     scope: extension_config.read
     op: snapshot
     example: {}
   - name: settings.write
-    summary: Set the project or personal settings of oxplow's own extensions — the review policy, the task workflow (a compare-and-swap on the stamps `oxplow.settings.read` returns).
+    summary: Set the project or personal settings of oxplow's own extensions — how changed files are ranked, which files change together, when a request counts as a struggle (a compare-and-swap on the stamps `oxplow.settings.read` returns).
     scope: extension_config.write
     op: compare_exchange
     example: {"schema_version": 2, "project": {"expected": {"schema_version": 2, "revision": 0}, "values": {"review": "off"}}, "personal": null}
