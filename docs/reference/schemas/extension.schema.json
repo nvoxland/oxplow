@@ -1914,7 +1914,7 @@
       "type": "object",
       "properties": {
         "to": {
-          "description": "The view it joins to, e.g. `v_task` or `v_github_review`.",
+          "description": "The view it joins to, e.g. `v_oxplow_task` or `v_github_review`.",
           "type": "string"
         },
         "on": {

@@ -1624,7 +1624,7 @@ impl EventType for TaskStateChanged {
 }
 
 // The task events are the interface's: core logs them for every
-// list, from the verb a `oxplow.task.*` command ran and what the list
+// list, from the verb a `oxtask.task.*` command ran and what the list
 // answered (`.context/tasks.md`).
 
 /// `task.created@2`: an item was filed on a task tracker, in `state`.
@@ -1701,7 +1701,7 @@ impl EventType for TaskLinked {
 }
 
 /// `task.unlinked@1`: an item's link was removed
-/// (`oxplow.task.unlink`, or undoing a link).
+/// (`oxtask.task.unlink`, or undoing a link).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TaskUnlinkedV1 {
@@ -1739,9 +1739,9 @@ impl EventType for TaskCommented {
 }
 
 /// `task.assigned@1`: who is going to work on an item, or its place
-/// in their queue, changed (`oxplow.task.assign`, `.reorder`; a
+/// in their queue, changed (`oxtask.task.assign`, `.reorder`; a
 /// closed item or a closed thread's releases it). Core's record, for every
-/// provider; the `tasks.project` consumer keeps `v_task.assignee`
+/// provider; the `tasks.project` consumer keeps `v_oxplow_task.assignee`
 /// and `rank` from it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

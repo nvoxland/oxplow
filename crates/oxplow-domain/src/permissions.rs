@@ -5,7 +5,7 @@
 //! `permissions:` is a list in the grammar of a script's `needs:` — a
 //! scope id, or `<scope>:<qualifier>` — of the scopes a person decides
 //! about: `[sql.read, files.read, ai.compute, process.run, agent.write,
-//! network:api.github.com, secrets:GH_TOKEN, commands:oxplow.task.*]`.
+//! network:api.github.com, secrets:GH_TOKEN, commands:oxtask.task.*]`.
 //!
 //! The baseline needs no declaration: pages and the rest of the
 //! declarative UI, its own datasets, its own commands and the scripts that
@@ -57,7 +57,7 @@ pub struct Permissions {
     /// Ad-hoc SQL: a script's `scope("sql.read")`, a component's own query.
     pub sql: Option<SqlAccess>,
     /// Commands outside its own namespace it may run, as patterns:
-    /// `oxplow.task.*` (`*` is one segment, `**` the rest).
+    /// `oxtask.task.*` (`*` is one segment, `**` the rest).
     pub commands: Vec<String>,
     /// The project's files outside the bus.
     pub files: Option<FilesAccess>,

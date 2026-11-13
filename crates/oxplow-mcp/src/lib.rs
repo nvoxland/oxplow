@@ -147,10 +147,10 @@ pub struct RunCommandParams {
 
 #[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct ListCommandsParams {
-    /// One command's id (`oxplow.task.create`): it alone, in full.
+    /// One command's id (`oxtask.task.create`): it alone, in full.
     #[serde(default)]
     pub id: Option<String>,
-    /// The start of the ids wanted (`oxplow.task.`): each, in full.
+    /// The start of the ids wanted (`oxtask.task.`): each, in full.
     #[serde(default)]
     pub prefix: Option<String>,
 }
@@ -263,7 +263,7 @@ impl OxplowMcp {
     #[tool(
         description = "The commands this agent may run through `run_command`. With no \
                        arguments: every command's `id` and one-line `summary`. With `id` (one \
-                       command) or `prefix` (an area, `oxplow.task.`): each with its \
+                       command) or `prefix` (an area, `oxtask.task.`): each with its \
                        `input_schema`, an `example` input that fits it, whether a person \
                        `confirm`s it and whether it is `undoable`. Read a command this way \
                        before its first run. Commands are the one write path: every run is \

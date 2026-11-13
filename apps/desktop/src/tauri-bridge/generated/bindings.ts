@@ -1403,7 +1403,7 @@ export type CollectorRuntime =
 "jaq" |
 /**
  *  A provider instance's collector (`oxplow.provider.sync`): its records
- *  land in the capability's dataset (`v_task`).
+ *  land in the capability's dataset (`v_oxplow_task`).
  */
 "read";
 
@@ -2368,7 +2368,7 @@ export type EntityDecl = {
  *  tells agents and page authors how the data connects.
  */
 export type EntityRelation = {
-	/**  The view it joins to, e.g. `v_task` or `v_github_review`. */
+	/**  The view it joins to, e.g. `v_oxplow_task` or `v_github_review`. */
 	to: string,
 	/**  The SQL join condition, e.g. `v_github_pr.head_branch = v_stream.branch`. */
 	on: string,
@@ -2941,7 +2941,7 @@ export type FieldDecl = {
 	values?: string[],
 	/**
 	 *  Set by the list itself (who filed it, when it synced): shown, never
-	 *  edited — a `oxplow.task.update` that names it is refused.
+	 *  edited — a `oxtask.task.update` that names it is refused.
 	 */
 	read_only?: boolean,
 };

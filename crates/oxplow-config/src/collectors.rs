@@ -69,7 +69,7 @@ pub struct EntityColumn {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EntityRelation {
-    /// The view it joins to, e.g. `v_task` or `v_github_review`.
+    /// The view it joins to, e.g. `v_oxplow_task` or `v_github_review`.
     pub to: String,
     /// The SQL join condition, e.g. `v_github_pr.head_branch = v_stream.branch`.
     pub on: String,
@@ -323,7 +323,7 @@ pub enum CollectorRuntime {
     /// A sandboxed jq program: no I/O, so no approval.
     Jaq,
     /// A provider instance's collector (`oxplow.provider.sync`): its records
-    /// land in the capability's dataset (`v_task`).
+    /// land in the capability's dataset (`v_oxplow_task`).
     Read,
 }
 

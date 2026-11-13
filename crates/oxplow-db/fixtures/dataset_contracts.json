@@ -14583,6 +14583,76 @@
         }
       ],
       "key": []
+    },
+    "16": {
+      "columns": [
+        {
+          "name": "capability",
+          "type": "TEXT",
+          "doc": "`snapshots`, `vcs`, `agent_harness`, `ai_provider`."
+        },
+        {
+          "name": "provider",
+          "type": "TEXT",
+          "doc": "The implementation's id: what `activeProviders` names, a task ref's segment (`oxplow:oxplow/task?id=…&provider=<provider>`), a knowledge page's store (`oxwiki`), `git`, `none`."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension declaring it; NULL for core's."
+        },
+        {
+          "name": "features",
+          "type": "TEXT",
+          "doc": "The features it declares, as JSON (`vcs`: `isolated_workspaces`, `remotes`, `rename_detection`; `snapshots`: `contents`)."
+        },
+        {
+          "name": "active",
+          "type": "INTEGER",
+          "doc": "1 on the capability's active implementation."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "How a person names it. (v3)"
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "doc": "How it's loaded: `core`, `builtin`, `external`, `script` (an extension's script implementation), `none`; `unknown` for a choice nothing provides. (v12: `script`)"
+        },
+        {
+          "name": "available",
+          "type": "INTEGER",
+          "doc": "0 for a chosen implementation that isn't there to use. (v3)"
+        },
+        {
+          "name": "chosen_by",
+          "type": "TEXT",
+          "doc": "On the active row, why it's the one: `personal` (a person's own `.oxplow/personal.yaml`), `project` (`activeProviders`), `default`, `fallback` (the choice isn't available), or `declared` on every row of a capability many implementations serve; `setting` on an implementation its extension's setting turned off (`when:` in its declaration: listed, `active = 0`). NULL on the rest. (v3; v14: `setting`)"
+        },
+        {
+          "name": "capability_title",
+          "type": "TEXT",
+          "doc": "How a person names the capability (`Task tracker`). (v4)"
+        },
+        {
+          "name": "choosable",
+          "type": "INTEGER",
+          "doc": "1 when a project chooses the capability's implementation; 0 for one core fixes (`vcs`) or one many serve at once (`knowledge`). (v4)"
+        },
+        {
+          "name": "optional",
+          "type": "INTEGER",
+          "doc": "1 when the capability may be `none`. (v4)"
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "doc": "One sentence saying what this implementation is (`description:` in `implementations:`); NULL when its declaration says nothing or it is core's own. Joins `v_contribution` where `kind = 'implementation'` on `extension` and `local = capability || '.' || provider`."
+        }
+      ],
+      "key": []
     }
   },
   "command_proposal": {
@@ -14947,6 +15017,91 @@
           "name": "command",
           "type": "TEXT",
           "doc": "The command (`oxplow.config.set`, `oxplow.task.delete`)."
+        },
+        {
+          "name": "input",
+          "type": "TEXT",
+          "doc": "Its input (JSON)."
+        },
+        {
+          "name": "actor_kind",
+          "type": "TEXT",
+          "doc": "Who proposed it: `agent`, `page` or `effect`."
+        },
+        {
+          "name": "actor_id",
+          "type": "TEXT",
+          "doc": "The proposing thread (`thr3`), page or effect, when known."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread it was proposed in (v_thread.id), if any."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream it was proposed in, if any."
+        },
+        {
+          "name": "key",
+          "type": "TEXT",
+          "doc": "What it supersedes on: `oxplow:oxplow/config?key=<key>` for a config change, else the command and its input."
+        },
+        {
+          "name": "preview",
+          "type": "TEXT",
+          "doc": "The confirmation preview (JSON: command, summary, input, destructive)."
+        },
+        {
+          "name": "dry_run",
+          "type": "TEXT",
+          "doc": "What it would have done when proposed (JSON: a config key's before/after, a composite's children); NULL when it can't be dry-run."
+        },
+        {
+          "name": "decision",
+          "type": "TEXT",
+          "doc": "`pending`, `approved`, `declined` or `superseded`."
+        },
+        {
+          "name": "decided_at",
+          "type": "TEXT",
+          "doc": "When it was decided or superseded."
+        },
+        {
+          "name": "audit_id",
+          "type": "INTEGER",
+          "doc": "The approving run's command audit row."
+        },
+        {
+          "name": "superseded_by",
+          "type": "INTEGER",
+          "doc": "The proposal that replaced it."
+        }
+      ],
+      "key": []
+    },
+    "6": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Proposal id."
+        },
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/proposal?id=<id>`."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "command",
+          "type": "TEXT",
+          "doc": "The command (`oxplow.config.set`, `oxtask.task.delete`)."
         },
         {
           "name": "input",
@@ -24484,6 +24639,63 @@
       "key": [
         "id"
       ]
+    },
+    "4": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Audit row id, in run order."
+        },
+        {
+          "name": "at",
+          "type": "TEXT",
+          "doc": "When it ran (RFC 3339)."
+        },
+        {
+          "name": "command",
+          "type": "TEXT",
+          "doc": "The command id (`oxtask.task.create`)."
+        },
+        {
+          "name": "actor_kind",
+          "type": "TEXT",
+          "doc": "Who ran it: `human`, `agent`, `page`, `component`, `system`, `effect` or `job`."
+        },
+        {
+          "name": "actor_id",
+          "type": "TEXT",
+          "doc": "The actor, by kind: an agent's thread (`thr3`), a page's or effect's id; NULL for a person or the system."
+        },
+        {
+          "name": "outcome",
+          "type": "TEXT",
+          "doc": "`ok`; `invalid` (its input was refused); `denied` (the actor may not run it); `error` (it ran and failed)."
+        },
+        {
+          "name": "error",
+          "type": "TEXT",
+          "doc": "What went wrong, for an outcome other than `ok`."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread it ran on, if any (v_thread.id)."
+        },
+        {
+          "name": "session_id",
+          "type": "INTEGER",
+          "doc": "The agent session that ran it, if any (v_agent_session.id)."
+        },
+        {
+          "name": "via",
+          "type": "TEXT",
+          "doc": "What the actor ran it through, when not directly: `assistant:ast3` for a command the Assistant ran for the person, which they approved. Assistant sessions live in memory, so an id may repeat after a restart. NULL otherwise. (v2)"
+        }
+      ],
+      "key": [
+        "id"
+      ]
     }
   },
   "lens": {
@@ -26161,6 +26373,36 @@
           "name": "id",
           "type": "TEXT",
           "doc": "`<resource>.<action>` (`records.read`, `task_tracker.write`)."
+        },
+        {
+          "name": "access",
+          "type": "TEXT",
+          "doc": "`view`, `read`, `record` or `write`: what a run over the scope may change."
+        },
+        {
+          "name": "host",
+          "type": "TEXT",
+          "doc": "Where its handler lives: `daemon`, `window` or `shell`."
+        },
+        {
+          "name": "spends",
+          "type": "INT",
+          "doc": "1 when a run over it spends the person's money (a model call on their provider key), so a tool over it asks before it runs; 0 otherwise. (v2)"
+        },
+        {
+          "name": "summary",
+          "type": "TEXT",
+          "doc": "What it lets a handler do."
+        }
+      ],
+      "key": []
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "`<resource>.<action>` (`records.read`, `comment.write`)."
         },
         {
           "name": "access",
@@ -29899,6 +30141,38 @@
       "key": [
         "name"
       ]
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "The view to query (`v_oxplow_task`, `v_my_gh_pr`)."
+        },
+        {
+          "name": "owner",
+          "type": "TEXT",
+          "doc": "`core`, or the extension that provides it."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`sql` (a dataset file), `entity` (an extension's synced data) or `declared` (an entity whose source hasn't synced: no view yet)."
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "doc": "What it holds."
+        },
+        {
+          "name": "row_count",
+          "type": "INT",
+          "doc": "Its row count, when the query pins `name`; else NULL."
+        }
+      ],
+      "key": [
+        "name"
+      ]
     }
   },
   "effect_backfill": {
@@ -30982,6 +31256,66 @@
         }
       ],
       "key": []
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "view",
+          "type": "TEXT",
+          "doc": "The view to query (`v_oxplow_task`)."
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "doc": "The dataset's name within its owner (`task`)."
+        },
+        {
+          "name": "owner",
+          "type": "TEXT",
+          "doc": "`core`, or the extension that declares it."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`sql` (compiled from a SQL file) or `entity` (an extension's synced entity)."
+        },
+        {
+          "name": "version",
+          "type": "INTEGER",
+          "doc": "Contract version: a change to the fields bumps it."
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "doc": "What the view holds."
+        },
+        {
+          "name": "sql",
+          "type": "TEXT",
+          "doc": "The SELECT the view was compiled from, references resolved."
+        },
+        {
+          "name": "compiled_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 time of the open that compiled it."
+        },
+        {
+          "name": "materialize",
+          "type": "TEXT",
+          "doc": "NULL when it's computed on read (a view); `on_change` when it's stored and recomputed when an input changes; `every <d>` (`every 1h`) when it's stored and recomputed on that clock; `incremental <column>` when it's stored and kept by appending rows past that watermark."
+        },
+        {
+          "name": "ai_context",
+          "type": "TEXT",
+          "doc": "Guidance for an agent reading the dataset, as JSON `{\"instructions\", \"synonyms\", \"examples\"}`; NULL when none. Not part of the contract."
+        },
+        {
+          "name": "relationships",
+          "type": "TEXT",
+          "doc": "How its fields point into other datasets, as a JSON array of `{\"from\", \"to\", \"to_view\", \"to_field\"}` (`from` its field, `to` as declared, `<dataset>.<field>`, resolved to that dataset's view and field); NULL when it declares none. Not part of the contract."
+        }
+      ],
+      "key": []
     }
   },
   "field": {
@@ -31154,6 +31488,68 @@
           "name": "id",
           "type": "TEXT",
           "doc": "The command id on the bus: `oxplow.task.create`."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The enabled extension whose manifest declares it; NULL for a command core registers itself."
+        },
+        {
+          "name": "summary",
+          "type": "TEXT",
+          "doc": "What it does, one sentence or more: what `list_commands` and the launcher show."
+        },
+        {
+          "name": "scope",
+          "type": "TEXT",
+          "doc": "The scope whose operation backs it (`v_scope.id`); NULL for one a script or a provider runs."
+        },
+        {
+          "name": "access",
+          "type": "TEXT",
+          "doc": "What it may touch: `view`, `read`, `record`, `write` or `external`."
+        },
+        {
+          "name": "confirm",
+          "type": "TEXT",
+          "doc": "When a person confirms it: `never`, `always` or `destructive`."
+        },
+        {
+          "name": "confirms",
+          "type": "INT",
+          "doc": "1 when a person confirms it before it runs."
+        },
+        {
+          "name": "undoable",
+          "type": "INT",
+          "doc": "1 when `commands.undo` can reverse a run."
+        },
+        {
+          "name": "ui_label",
+          "type": "TEXT",
+          "doc": "What a person reads in search and menus; NULL when it is not offered to a person by itself."
+        },
+        {
+          "name": "ui_group",
+          "type": "TEXT",
+          "doc": "What search lists it under (`Git`, `Tasks`); NULL for none."
+        }
+      ],
+      "key": [
+        "uri"
+      ]
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/command?command=<id>`."
+        },
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "The command id on the bus: `oxtask.task.create`."
         },
         {
           "name": "extension",
@@ -31559,6 +31955,31 @@
           "name": "title",
           "type": "TEXT",
           "doc": "Its view name (`v_task`)."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Its description, name and owner; never its SQL."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Always NULL: datasets belong to the project."
+        }
+      ],
+      "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/dataset?dataset=<name>`, or `<extension>/<name>` for an extension's: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Its view name (`v_oxplow_task`)."
         },
         {
           "name": "body",

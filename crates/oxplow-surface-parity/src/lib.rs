@@ -152,7 +152,7 @@ pub const MANIFEST: &[Capability] = &[
     agent("oxplow_preview_collector"),
     dataset("list_streams", &["v_stream"]),
     // The task interface, read for the agent; the UI reads the
-    // datasets (`v_task`).
+    // datasets (`v_oxplow_task`).
     // Metrics read through SQL (`v_metric_spec`, `v_fact`, `metric_grid()`)
     // on both surfaces, and change through the `metric.*` commands
     // (`run_command`); nothing metric-specific is left on MCP (P4.8).

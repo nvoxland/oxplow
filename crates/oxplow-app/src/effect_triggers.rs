@@ -37,7 +37,7 @@
 //! ([`RETRY_DELAYS`]); waiting, it doesn't count against the effect's
 //! health, and the attempt that exhausts the retries counts once.
 //! The retry sends exactly what the failed attempt composed, kept with it
-//! while the retry is scheduled ([`Resend`]); a `oxplow.task.create` in it
+//! while the retry is scheduled ([`Resend`]); a `oxtask.task.create` in it
 //! files on the tracker active when it's sent, as every create does.
 //! An
 //! attempt cut off by oxplow stopping is retried the same way, timed from

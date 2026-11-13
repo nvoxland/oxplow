@@ -77,7 +77,7 @@ pub struct ProviderContract {
     /// record`: core's call is what a person confirms and what is gated.
     pub verbs: &'static [Verb],
     /// The command family a verb runs as (`oxplow.task` →
-    /// `oxplow.task.create`), so an inverse naming a verb undoes
+    /// `oxtask.task.create`), so an inverse naming a verb undoes
     /// through it; `None` when core calls the verbs itself.
     pub dispatch: Option<&'static str>,
     /// The event types it may emit, each `(type, v)`; the schema it

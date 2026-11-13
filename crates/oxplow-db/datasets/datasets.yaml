@@ -869,11 +869,11 @@
     - { not_null: uri }
     - { unique: uri }
 - name: search_dataset
-  version: 1
+  version: 2
   description: "What site search indexes for each dataset `v_dataset` publishes: the `dataset` kind's index is restated from these rows when they change."
   fields:
     - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/dataset?dataset=<name>`, or `<extension>/<name>` for an extension's: what a hit opens." }
-    - { name: "title", type: "TEXT", doc: "Its view name (`v_task`)." }
+    - { name: "title", type: "TEXT", doc: "Its view name (`v_oxplow_task`)." }
     - { name: "body", type: "TEXT", doc: "Its description, name and owner; never its SQL." }
     - { name: "stream_id", type: "TEXT", doc: "Always NULL: datasets belong to the project." }
   tests:
@@ -1696,13 +1696,13 @@
     - { not_null: source_uri }
     - { not_null: target_uri }
 - name: capability_provider
-  version: 15
+  version: 16
   description: "Each capability's implementations — core's, the built-ins extensions declare (`oxplow-bundled`'s defaults, `oxplow-foundation`'s agent harnesses and AI providers), running provider instances', and `none` for an optional capability — with the features each declares, which is active and why. A capability many implementations serve at once (`agent_harness`, `acp_adapter`, `ai_provider`) has every declared row active. A choice that isn't available (its extension disabled, its instance stopped) is listed with `available = 0`; the active row is then the fallback. Settings lists the choices from here, and the UI shows an implementation's enhancements only when its features allow them."
   fields:
     - { name: "capability", type: "TEXT", doc: "`snapshots`, `vcs`, `agent_harness`, `ai_provider`." }
     - { name: "provider", type: "TEXT", doc: "The implementation's id: what `activeProviders` names, a task ref's segment (`oxplow:oxplow/task?id=…&provider=<provider>`), a knowledge page's store (`oxwiki`), `git`, `none`." }
     - { name: "extension", type: "TEXT", doc: "The extension declaring it; NULL for core's." }
-    - { name: "features", type: "TEXT", doc: "The features it declares, as JSON (`task_tracker`: `hierarchy`, `comments`, `links`, `delete`, `idempotent_writes`; `vcs`: `isolated_workspaces`, `remotes`, `rename_detection`; `snapshots`: `contents`)." }
+    - { name: "features", type: "TEXT", doc: "The features it declares, as JSON (`vcs`: `isolated_workspaces`, `remotes`, `rename_detection`; `snapshots`: `contents`)." }
     - { name: "active", type: "INTEGER", doc: "1 on the capability's active implementation." }
     - { name: "title", type: "TEXT", doc: "How a person names it. (v3)" }
     - { name: "source", type: "TEXT", doc: "How it's loaded: `core`, `builtin`, `external`, `script` (an extension's script implementation), `none`; `unknown` for a choice nothing provides. (v12: `script`)" }
@@ -1716,13 +1716,13 @@
     - { not_null: capability }
     - { not_null: provider }
 - name: command_audit
-  version: 3
+  version: 4
   key: [id]
   description: "Every command run on the bus, as audited: who ran it, how it ended, and the error when it didn't. The record of how agents, people, pages and effects use oxplow's commands — count them by `command`, `actor_kind` and `outcome`. A run refused before it started (`invalid`: its input didn't match the command's schema; `denied`: the actor may not run it) is a row too."
   fields:
     - { name: "id", type: "INTEGER", doc: "Audit row id, in run order." }
     - { name: "at", type: "TEXT", doc: "When it ran (RFC 3339)." }
-    - { name: "command", type: "TEXT", doc: "The command id (`oxplow.task.create`)." }
+    - { name: "command", type: "TEXT", doc: "The command id (`oxtask.task.create`)." }
     - { name: "actor_kind", type: "TEXT", doc: "Who ran it: `human`, `agent`, `page`, `component`, `system`, `effect` or `job`." }
     - { name: "actor_id", type: "TEXT", doc: "The actor, by kind: an agent's thread (`thr3`), a page's or effect's id; NULL for a person or the system." }
     - { name: "outcome", type: "TEXT", doc: "`ok`; `invalid` (its input was refused); `denied` (the actor may not run it); `error` (it ran and failed)." }
@@ -1837,22 +1837,22 @@
   fields:
     - { name: "path", type: "TEXT", doc: "Repo-relative file path." }
 - name: scope
-  version: 2
+  version: 3
   description: "Every scope a command may need (`needs:` in a manifest): what it lets a run change, where its handler runs, and what it lets a handler do. Read live when a query names it. A command's access is the strongest among its scopes."
   fields:
-    - { name: "id", type: "TEXT", doc: "`<resource>.<action>` (`records.read`, `task_tracker.write`)." }
+    - { name: "id", type: "TEXT", doc: "`<resource>.<action>` (`records.read`, `comment.write`)." }
     - { name: "access", type: "TEXT", doc: "`view`, `read`, `record` or `write`: what a run over the scope may change." }
     - { name: "host", type: "TEXT", doc: "Where its handler lives: `daemon`, `window` or `shell`." }
     - { name: "spends", type: "INT", doc: "1 when a run over it spends the person's money (a model call on their provider key), so a tool over it asks before it runs; 0 otherwise. (v2)" }
     - { name: "summary", type: "TEXT", doc: "What it lets a handler do." }
 - name: command_proposal
-  version: 5
+  version: 6
   description: "Commands an agent ran that need a person's confirmation: each kept with its preview and what it would have done, until a person approves (the command then runs as them) or declines it. A newer proposal with the same `key` supersedes a pending one. The Alerts panel shows the pending ones."
   fields:
     - { name: "id", type: "INTEGER", doc: "Proposal id." }
     - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/proposal?id=<id>`." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
-    - { name: "command", type: "TEXT", doc: "The command (`oxplow.config.set`, `oxplow.task.delete`)." }
+    - { name: "command", type: "TEXT", doc: "The command (`oxplow.config.set`, `oxtask.task.delete`)." }
     - { name: "input", type: "TEXT", doc: "Its input (JSON)." }
     - { name: "actor_kind", type: "TEXT", doc: "Who proposed it: `agent`, `page` or `effect`." }
     - { name: "actor_id", type: "TEXT", doc: "The proposing thread (`thr3`), page or effect, when known." }
@@ -2019,10 +2019,10 @@
   tests:
     - { not_null: source }
 - name: dataset
-  version: 2
+  version: 3
   description: "Datasets: every published view, as compiled at this open — core ones and each extension's. Read a dataset's fields in `v_field`, when a materialized one was last recomputed in `v_asset`, what it reads in `v_dataset_lineage` and its declared tests' results in `v_dataset_test`."
   fields:
-    - { name: view, type: TEXT, doc: "The view to query (`v_task`)." }
+    - { name: view, type: TEXT, doc: "The view to query (`v_oxplow_task`)." }
     - { name: name, type: TEXT, doc: "The dataset's name within its owner (`task`)." }
     - { name: owner, type: TEXT, doc: "`core`, or the extension that declares it." }
     - { name: kind, type: TEXT, doc: "`sql` (compiled from a SQL file) or `entity` (an extension's synced entity)." }
@@ -2250,11 +2250,11 @@
     - { name: "branch", type: "TEXT", doc: "The capture's branch; NULL for operational facts with no worktree." }
     - { name: "stream_id", type: "INT", doc: "The stream whose captures were read." }
 - name: data_entity
-  version: 2
+  version: 3
   key: [name]
   description: "What can be queried: every published dataset (`v_dataset`'s rows) and every entity an enabled extension declares but has not synced. Read live. `WHERE name = 'v_commit'` also counts that dataset's rows (`row_count`); the list leaves `row_count` NULL, since counting each is a query of its own."
   fields:
-    - { name: "name", type: "TEXT", doc: "The view to query (`v_task`, `v_my_gh_pr`)." }
+    - { name: "name", type: "TEXT", doc: "The view to query (`v_oxplow_task`, `v_my_gh_pr`)." }
     - { name: "owner", type: "TEXT", doc: "`core`, or the extension that provides it." }
     - { name: "kind", type: "TEXT", doc: "`sql` (a dataset file), `entity` (an extension's synced data) or `declared` (an entity whose source hasn't synced: no view yet)." }
     - { name: "description", type: "TEXT", doc: "What it holds." }
@@ -2270,12 +2270,12 @@
     - { name: "to_seq", type: "INT", doc: "The log position of the last; NULL when none." }
     - { name: "batch", type: "INT", doc: "The most one backfill run reacts to; the rest wait for another run." }
 - name: command
-  version: 1
+  version: 2
   key: [uri]
   description: "Every registered command, one row each, as `list_commands` shows it: its URI (`v_contribution.uri` for an extension's own), its id, who declares it, a one-sentence summary, the scope behind it, whether a person confirms it and whether it can be undone, and how a person meets it. Read live from the command registry."
   fields:
     - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/command?command=<id>`." }
-    - { name: "id", type: "TEXT", doc: "The command id on the bus: `oxplow.task.create`." }
+    - { name: "id", type: "TEXT", doc: "The command id on the bus: `oxtask.task.create`." }
     - { name: "extension", type: "TEXT", doc: "The enabled extension whose manifest declares it; NULL for a command core registers itself." }
     - { name: "summary", type: "TEXT", doc: "What it does, one sentence or more: what `list_commands` and the launcher show." }
     - { name: "scope", type: "TEXT", doc: "The scope whose operation backs it (`v_scope.id`); NULL for one a script or a provider runs." }

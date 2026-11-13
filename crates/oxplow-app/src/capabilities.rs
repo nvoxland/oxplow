@@ -931,7 +931,7 @@ impl CapabilityRegistry {
     }
 
     /// [`Self::publish`] at construction, before there's a runtime: so the
-    /// first read of `v_capability_provider` (and of `v_task`, which
+    /// first read of `v_capability_provider` (and of `v_oxplow_task`, which
     /// shows the active list's items) sees what's active.
     pub fn publish_now(
         &self,

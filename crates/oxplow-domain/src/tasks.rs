@@ -174,7 +174,7 @@ pub struct FieldDecl {
     #[serde(default)]
     pub values: Vec<String>,
     /// Set by the list itself (who filed it, when it synced): shown, never
-    /// edited — a `oxplow.task.update` that names it is refused.
+    /// edited — a `oxtask.task.update` that names it is refused.
     #[serde(default)]
     pub read_only: bool,
 }
