@@ -15,7 +15,7 @@ use crate::database::{map_sql_err, Database};
 /// One implementation of a capability.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CapabilityProvider {
-    /// `snapshots`, `vcs`, `knowledge`.
+    /// `snapshots`, `vcs`, `agent_harness`.
     pub capability: String,
     /// The implementation's id (`oxplow`, `git`, `issues`, `none`).
     pub provider: String,
@@ -42,17 +42,6 @@ pub struct CapabilityProvider {
     pub capability_title: String,
     pub choosable: bool,
     pub optional: bool,
-    /// Its own fields, as it declares them (a JSON array).
-    pub fields: Value,
-    /// A task tracker's stages, in order, as it declares them (a JSON array
-    /// of `{ id, title, bucket }`); `[]` for any other.
-    pub stages: Value,
-    /// A knowledge store's kinds of page, as it declares them (a JSON array
-    /// of `{ id, title, bucket }`); `[]` for any other.
-    pub kinds: Value,
-    /// What a task tracker's own ids look like (a regex matched whole), if
-    /// it says: how its ids are recognized in text.
-    pub id_pattern: Option<String>,
     /// One sentence saying what it is; `None` when its declaration says nothing.
     pub description: Option<String>,
 }
@@ -61,9 +50,8 @@ fn insert_tx(conn: &Connection, row: &CapabilityProvider) -> Result<(), DomainEr
     conn.execute(
         "INSERT INTO capability_provider
            (capability, provider, extension, features_json, active, title, source, available,
-            chosen_by, capability_title, choosable, optional, fields_json, id_pattern, description,
-            stages_json, kinds_json)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+            chosen_by, capability_title, choosable, optional, description)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         params![
             row.capability,
             row.provider,
@@ -77,11 +65,7 @@ fn insert_tx(conn: &Connection, row: &CapabilityProvider) -> Result<(), DomainEr
             row.capability_title,
             row.choosable,
             row.optional,
-            row.fields.to_string(),
-            row.id_pattern,
             row.description,
-            row.stages.to_string(),
-            row.kinds.to_string(),
         ],
     )
     .map_err(map_sql_err)?;
@@ -99,17 +83,13 @@ pub fn list_tx(conn: &Connection) -> Result<Vec<CapabilityProvider>, DomainError
     let mut stmt = conn
         .prepare(
             "SELECT capability, provider, extension, features_json, active, title, source,
-                    available, chosen_by, capability_title, choosable, optional, fields_json,
-                    id_pattern, description, stages_json, kinds_json
+                    available, chosen_by, capability_title, choosable, optional, description
                FROM capability_provider ORDER BY capability, provider",
         )
         .map_err(map_sql_err)?;
     let rows = stmt
         .query_map([], |r| {
             let features: String = r.get(3)?;
-            let fields: String = r.get(12)?;
-            let stages: String = r.get(15)?;
-            let kinds: String = r.get(16)?;
             Ok(CapabilityProvider {
                 capability: r.get(0)?,
                 provider: r.get(1)?,
@@ -123,11 +103,7 @@ pub fn list_tx(conn: &Connection) -> Result<Vec<CapabilityProvider>, DomainError
                 capability_title: r.get(9)?,
                 choosable: r.get(10)?,
                 optional: r.get(11)?,
-                fields: serde_json::from_str(&fields).unwrap_or(Value::Null),
-                id_pattern: r.get(13)?,
-                description: r.get(14)?,
-                stages: serde_json::from_str(&stages).unwrap_or(Value::Null),
-                kinds: serde_json::from_str(&kinds).unwrap_or(Value::Null),
+                description: r.get(12)?,
             })
         })
         .map_err(map_sql_err)?;
@@ -169,10 +145,6 @@ mod tests {
             capability_title: capability.into(),
             choosable: true,
             optional: false,
-            fields: serde_json::json!([]),
-            stages: serde_json::json!([]),
-            kinds: serde_json::json!([]),
-            id_pattern: None,
             description: None,
         }
     }

@@ -509,7 +509,6 @@ pub fn parse(
                         model: raw.model,
                         stores,
                         fields: fields_of(raw.fields)?,
-                        provider: false,
                         id_pattern: raw.id_pattern,
                         stages: raw.stages,
                         files: raw.files.map(files_of).transpose()?,

@@ -8,19 +8,13 @@
 //!   (`read_at` only with `OXPLOW_FAKE_FEATURES=contents`), marks a worktree
 //!   and answers what changed between marks; what it marked stays in
 //!   memory and the `mark`s answered are counted in its state (`marks`).
-//! - `knowledge`: declares [`knowledge_declarations`], keeps pages (in its
-//!   state), and each write answers the page's `knowledge.page.recorded`
-//!   event; collector `knowledge_pages` streams the pages changed after the
-//!   cursor, in revision order, as `$/record` followed by a `$/state`
-//!   checkpoint `{ cursor, seen }` — opaque to the host.
 //! - `filesystem`: declares [`filesystem_declarations`] (`write` only with
 //!   `OXPLOW_FAKE_FEATURES=writable`) and serves an in-memory tree, seeded
 //!   from `OXPLOW_FAKE_FILES` (a JSON object of path → base64).
 //! - `agent_harness`: declares [`harness_declarations`].
 //!
 //! Every mode has the same config (it needs a `team`, a string; a clean
-//! `check` returns the handle `fake:<team>`), takes the instance it is
-//! from `OXPLOW_PROVIDER_ID` (`fake` by default), and has the hooks below.
+//! `check` returns the handle `fake:<team>`) and has the hooks below.
 //! With `OXPLOW_FAKE_STATE` (a file) its service's state is kept there and
 //! read back at start, so it outlives the process as a real service's
 //! does; without, it lives in memory.
@@ -34,7 +28,7 @@
 //! hooks — `""` clears them — keeping only what the fake declared at
 //! `initialize` (`bad-declarations`), which a running process can't take
 //! back. They act in every mode; the ones on a `read` need a collector,
-//! which only the knowledge mode has:
+//! which only the snapshots mode has:
 //! - `fail-next:<n>` — the next `n` `check` / `invoke` / `read` calls fail
 //!   (`Internal`);
 //! - `slow-check:<ms>` — every `check` takes `ms` first;
@@ -68,7 +62,7 @@
 //!   answers what it read beside its result (`read`);
 //! - `config-read` — as `host-read`, but the read is of the provider's own
 //!   extension configuration (`host/call` `extension_config.read`);
-//! - on a knowledge `read`: `checkpoint-at-end` (one `$/state`, after the
+//! - on a snapshots `read`: `checkpoint-at-end` (one `$/state`, after the
 //!   last record), `progress` (`$/progress` before each record, then 100 ms
 //!   over it), `read-fail-after:<n>` (`Internal` after streaming and
 //!   checkpointing `n` records), `stuck-cursor` (every `$/state` is
@@ -83,8 +77,9 @@
 //! **Generic hooks the app tests can use, by command:** the snapshots
 //! mode's `mark { stream, worktree, trigger }` and `changed { stream,
 //! from, to }` (a `mark` of an empty directory is enough) carry every
-//! invoke hook above; the knowledge mode's `write_page` / `delete_page`
-//! and collector `knowledge_pages` carry those and the read hooks.
+//! invoke hook above, and its collector `marks` (one `mark` record per
+//! `mark` answered, in order, with a `$/state` checkpoint `{ cursor, seen }`
+//! — opaque to the host) carries the read hooks.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -99,19 +94,17 @@ use tokio::sync::{oneshot, Mutex};
 
 mod filesystem;
 mod harness;
-mod knowledge;
 mod snapshots;
 
 pub use filesystem::declarations as filesystem_declarations;
 pub use harness::declarations as harness_declarations;
-pub use knowledge::declarations as knowledge_declarations;
 pub use snapshots::declarations as snapshots_declarations;
 
 pub const PROVIDER: &str = "fake";
 
 /// The capability it implements (`OXPLOW_FAKE_CAPABILITY`): snapshots, the
-/// default, or an agent harness ([`harness_declarations`]), knowledge or
-/// filesystem provider.
+/// default, an agent harness ([`harness_declarations`]) or a filesystem
+/// provider.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Capability {
     AgentHarness,
@@ -120,8 +113,6 @@ pub enum Capability {
     Snapshots {
         contents: bool,
     },
-    /// A knowledge provider ([`knowledge_declarations`]).
-    Knowledge,
     /// A filesystem provider ([`filesystem_declarations`]); `writable` is
     /// its feature of that name.
     FileSystem {
@@ -142,10 +133,9 @@ impl Capability {
         match name.unwrap_or("snapshots") {
             "agent_harness" => Ok(Capability::AgentHarness),
             "snapshots" => Ok(Capability::Snapshots { contents: false }),
-            "knowledge" => Ok(Capability::Knowledge),
             "filesystem" => Ok(Capability::FileSystem { writable: false }),
             other => Err(format!(
-                "the fake implements agent_harness, snapshots, knowledge or filesystem, not `{other}`"
+                "the fake implements agent_harness, snapshots or filesystem, not `{other}`"
             )),
         }
     }
@@ -328,8 +318,6 @@ pub fn declarations() -> InitializeResult {
 
 #[derive(Default)]
 struct World {
-    /// The instance it is: its refs' provider segment.
-    id: String,
     capability: Capability,
     /// How many `mark`s it answered (a snapshots provider's), kept with
     /// its state; what it marked stays in memory.
@@ -340,8 +328,6 @@ struct World {
     snapshot_marks: snapshots::Marks,
     /// A filesystem provider's files.
     files: filesystem::Files,
-    /// A knowledge provider's pages, by id.
-    pages: knowledge::Pages,
     hooks: Hooks,
     /// Bumped by every write.
     rev: u64,
@@ -362,8 +348,6 @@ struct Saved {
     #[serde(default)]
     marks: u64,
     #[serde(default)]
-    pages: knowledge::Pages,
-    #[serde(default)]
     last_context: Option<Value>,
 }
 
@@ -377,7 +361,6 @@ impl World {
             rev: self.rev,
             answered: self.answered.clone(),
             marks: self.marks,
-            pages: self.pages.clone(),
             last_context: self.last_context.clone(),
         };
         let kept = path
@@ -402,7 +385,6 @@ impl World {
         self.rev = saved.rev;
         self.answered = saved.answered;
         self.marks = saved.marks;
-        self.pages = saved.pages;
         self.last_context = saved.last_context;
     }
 }
@@ -419,13 +401,12 @@ pub enum Served {
     Crashed,
 }
 
-/// Serve the protocol on `reader` / `writer` as instance `id` of
+/// Serve the protocol on `reader` / `writer` as a provider of
 /// `capability` until the stream ends, a `shutdown`, or a `crash` hook.
 pub async fn serve<R, W>(
     reader: R,
     writer: W,
     hooks: &str,
-    id: &str,
     state: Option<std::path::PathBuf>,
     capability: Capability,
 ) -> Served
@@ -435,7 +416,6 @@ where
 {
     let (peer, mut incoming) = Peer::spawn(reader, writer);
     let mut world = World {
-        id: id.to_string(),
         capability,
         hooks: Hooks::parse(hooks),
         state,
@@ -602,7 +582,6 @@ async fn handle(
             };
             let declared = match capability {
                 Capability::AgentHarness => harness_declarations(),
-                Capability::Knowledge => knowledge_declarations(),
                 Capability::Snapshots { contents } => snapshots_declarations(contents),
                 Capability::FileSystem { writable } => filesystem_declarations(writable),
             };
@@ -656,9 +635,9 @@ async fn handle(
         method::DISCOVER => {
             let p: DiscoverParams = parse(params)?;
             require_handle(&p.handle)?;
-            // A knowledge store reads its pages; the others read nothing.
+            // A snapshots provider reads its marks; the others read nothing.
             let (name, description) = match world.lock().await.capability {
-                Capability::Knowledge => ("knowledge_page", "A page as the fake keeps it."),
+                Capability::Snapshots { .. } => ("mark", "A mark as the fake counts it."),
                 _ => return Ok(json!({ "entities": [] })),
             };
             Ok(serde_json::to_value(DiscoverResult {
@@ -720,13 +699,6 @@ async fn handle(
                 Capability::AgentHarness => {
                     json!({ "result": harness::answer(&p.command, &p.input)?, "events": [] })
                 }
-                Capability::Knowledge => {
-                    let mut w = world.lock().await;
-                    let w = &mut *w;
-                    let (result, events) =
-                        knowledge::answer(&w.id, &mut w.pages, &mut w.rev, &p.command, &p.input)?;
-                    json!({ "result": result, "events": events })
-                }
                 Capability::FileSystem { writable } => {
                     let result = world
                         .lock()
@@ -769,8 +741,10 @@ async fn handle(
             refuse_auth(world).await?;
             let p: ReadParams = parse(params)?;
             require_handle(&p.handle)?;
-            let (collector, entity) = ("knowledge_pages", "knowledge_page");
-            if p.collector != collector || world.lock().await.capability != Capability::Knowledge {
+            let (collector, entity) = ("marks", "mark");
+            if p.collector != collector
+                || !matches!(world.lock().await.capability, Capability::Snapshots { .. })
+            {
                 return Err(ProtocolError::InvalidInput {
                     field: "/collector".into(),
                     message: format!("no collector `{}`", p.collector),
@@ -803,13 +777,10 @@ async fn handle(
                 .unwrap_or(0);
             let (hooks, rows) = {
                 let w = world.lock().await;
-                let mut rows: Vec<(u64, Value)> = w
-                    .pages
-                    .values()
-                    .filter(|page| page.rev > after)
-                    .map(|page| (page.rev, page.record().clone()))
+                // One record per mark answered, numbered from 1.
+                let rows: Vec<(u64, Value)> = (after + 1..=w.marks)
+                    .map(|n| (n, json!({ "mark": n })))
                     .collect();
-                rows.sort_by_key(|(rev, _)| *rev);
                 (w.hooks.clone(), rows)
             };
             let total = rows.len();

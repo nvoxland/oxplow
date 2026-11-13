@@ -316,7 +316,6 @@ macro_rules! oxplow_command_table {
                 list_snapshot_ops => $crate::commands::snapshot::list_snapshot_ops { stream_id: ::oxplow_domain::StreamId, limit: Option<u32> } -> Vec<::oxplow_db::SnapshotOp>,
                 get_snapshot_stats => $crate::commands::snapshot::get_snapshot_stats { snapshot_id: ::oxplow_domain::SnapshotId } -> ::oxplow_db::SnapshotStats,
                 get_blob_storage_bytes => $crate::commands::snapshot::get_blob_storage_bytes {} -> ::oxplow_domain::ByteSize,
-                list_knowledge_pages_for_snapshots => $crate::commands::snapshot::list_knowledge_pages_for_snapshots { snapshot_ids: Vec<::oxplow_domain::SnapshotId> } -> Vec<$crate::commands::snapshot::SnapshotKnowledgePage>,
                 list_files_for_snapshot => $crate::commands::snapshot::list_files_for_snapshot { snapshot_id: ::oxplow_domain::SnapshotId } -> Vec<::oxplow_db::FileSnapshot>,
                 get_file_snapshot => $crate::commands::snapshot::get_file_snapshot { file_snapshot_id: ::oxplow_domain::FileSnapshotId } -> Option<::oxplow_db::FileSnapshot>,
                 // background

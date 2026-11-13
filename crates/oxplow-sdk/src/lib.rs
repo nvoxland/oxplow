@@ -106,7 +106,7 @@ impl Kind {
                 capability: "snapshots",
             }),
             "implementation" => Some(Kind::Implementation {
-                capability: "knowledge",
+                capability: "agent_harness",
             }),
             "collector" => Some(Kind::Collector),
             "metric" => Some(Kind::Metric),
@@ -404,12 +404,6 @@ pub fn scaffold_with(
     match kind {
         Kind::Provider { capability } => {
             let starter = provider_starter(capability);
-            // A knowledge store fills the knowledge model, which bundled
-            // declares (with the `oxplow/knowledge` resource its pages' URIs
-            // name).
-            if capability == "knowledge" {
-                manifest.push_str("requires: [oxplow-bundled]\n");
-            }
             manifest.push_str(
                 "# A provider runs its program (bin/provider) with your authority:\n\
                  # oxplow doesn't confine it. Deploying it asks you first.\n\
@@ -430,9 +424,6 @@ pub fn scaffold_with(
             }
         }
         Kind::Implementation { capability } => {
-            if capability == "knowledge" {
-                manifest.push_str("requires: [oxplow-bundled]\n");
-            }
             manifest.push_str(&implementation_manifest(capability, &provider_id, name));
         }
         Kind::Collector
@@ -886,15 +877,6 @@ fn provider_starter(capability: &str) -> ProviderStarter {
             data: serde_json::Value::Null,
             on: &[],
         },
-        "knowledge" => ProviderStarter {
-            input: "{ command: write_page, input: { id: example, body: '# Example', verified_files: [], removed_files: [] } }"
-                .to_string(),
-            expect: "the page's id",
-            fixture: "{ id: example }".to_string(),
-            needs: None,
-            data: serde_json::Value::Null,
-            on: &["edit"],
-        },
         _ => {
             let verb = oxplow_domain::capability::contract(capability)
                 .and_then(|c| c.verbs.first())
@@ -1002,23 +984,6 @@ fn verb_input(capability: &str, verb: &str) -> (String, serde_json::Value) {
             json!({ "type": "object", "required": ["path", "content"],
                     "additionalProperties": false,
                     "properties": { "path": str_prop, "content": str_prop } }),
-        ),
-        ("knowledge", "write_page") => (
-            "Write a page, creating it or replacing its body — `id` the page's (none: derive one \
-             from the title) — and answer its `knowledge.page.recorded` event: its URI \
-             (`oxplow:oxplow/knowledge?id=…&store=<this instance>`), its `kind` and the `uris` it \
-             links (`oxplow:oxplow/file?path=…`, another page's knowledge URI)."
-                .into(),
-            json!({ "type": "object", "required": ["body", "verified_files", "removed_files"],
-                    "additionalProperties": false,
-                    "properties": { "id": str_prop, "title": str_prop, "body": str_prop,
-                                    "verified_files": { "type": "array", "items": str_prop },
-                                    "removed_files": { "type": "array", "items": str_prop } } }),
-        ),
-        ("knowledge", "delete_page") => (
-            "Delete a page: {}, answering its record with `deleted: true`.".into(),
-            json!({ "type": "object", "required": ["id"], "additionalProperties": false,
-                    "properties": { "id": str_prop } }),
         ),
         _ => (
             format!("TODO: what `{verb}` does."),
@@ -1575,11 +1540,10 @@ mod tests {
             Kind::Extension,
             Kind::provider("agent_harness").unwrap(),
             Kind::provider("snapshots").unwrap(),
-            Kind::provider("knowledge").unwrap(),
             Kind::provider("filesystem").unwrap(),
             Kind::implementation("agent_harness").unwrap(),
             Kind::implementation("snapshots").unwrap(),
-            Kind::implementation("knowledge").unwrap(),
+            Kind::implementation("filesystem").unwrap(),
             Kind::implementation("filesystem").unwrap(),
             Kind::Collector,
             Kind::Metric,
@@ -1683,25 +1647,6 @@ mod tests {
         assert_eq!(verbs, ["mark", "changed"]);
         assert_eq!(d["event_types"].as_array().map(Vec::len), Some(0));
         assert_eq!(d["collectors"].as_array().map(Vec::len), Some(0));
-
-        let dir = tempfile::tempdir().unwrap();
-        scaffold(
-            dir.path(),
-            Kind::provider("knowledge").unwrap(),
-            "shelf",
-            None,
-        )
-        .unwrap();
-        let d = declarations(dir.path(), "shelf");
-        let verbs: Vec<&str> = d["commands"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|c| c["name"].as_str().unwrap())
-            .collect();
-        assert!(verbs.contains(&"write_page"), "{verbs:?}");
-        assert_eq!(d["event_types"][0]["type"], "knowledge.page.recorded");
-        assert_eq!(d["collectors"][0]["entity"], "knowledge_page");
     }
 
     /// The feature-gated harness verbs have real descriptions to declare

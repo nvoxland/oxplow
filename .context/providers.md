@@ -3,7 +3,7 @@
 An external provider is a program oxplow talks to — an issue tracker's bridge, a
 docs system's — that implements one of oxplow's capabilities outside the
 app (P5.D): one core gives a provider contract (the agent harness,
-snapshots, knowledge, a filesystem; "What a provider may implement"). This doc
+snapshots, a filesystem; "What a provider may implement"). This doc
 covers the protocol (D1), the fake provider (D2), what a provider may
 implement, the host with its permission and spawn rules (D3), instances with health (D4), the
 conformance kit with `oxplow extension test` (D5). There is no task
@@ -64,7 +64,7 @@ manifest `needs` (`sql.read`: `args` `{ sql, params? }` →
 rows), `key` naming the idempotency key of the `invoke` it serves so the
 call is recorded with that run. `Instance::invoke(run, …)` registers the
 run under the key for the call's length (`HostCalls::begin`), whichever
-verb it is — a command, knowledge, snapshot or harness
+verb it is — a command, snapshot, filesystem or harness
 verb. Refused (`InvalidInput` at `/scope`)
 for one it doesn't need or that isn't there, and for one naming no
 `invoke` under way: nothing a provider does of oxplow is outside a run.
@@ -102,11 +102,11 @@ stub generation for provider authors.
 A scripted provider, lib + bin, that the host's tests and the conformance
 kit drive over real stdio. `OXPLOW_FAKE_CAPABILITY` picks the capability it
 implements; unset, it is a **snapshots** provider. The modes: `snapshots`
-(the default), `filesystem`, `agent_harness` (`harness_declarations`) and
-`knowledge` (going away with that capability: add no new uses). Every mode
-has the same config, requiring `team`: `check` returns handle `fake:<team>`
-or a `/team` problem. It takes its instance id from `OXPLOW_PROVIDER_ID`
-(`fake` by default). The doc comment at the top of
+(the default), `filesystem` and `agent_harness` (`harness_declarations`).
+Every mode has the same config, requiring `team`: `check` returns handle
+`fake:<team>` or a `/team` problem. The snapshots mode also has a collector
+`marks` (one `mark` record per `mark` answered, with a `$/state` checkpoint
+`{ cursor, seen }`) that the read hooks act on. The doc comment at the top of
 `crates/oxplow-provider-fake/src/lib.rs` is the full list of modes and
 hooks.
 
@@ -135,7 +135,7 @@ token), `lose-reply` (the next invoke lands and is never answered),
 `host-read` (an invoke first reads the host, `host/call` `sql.read`, and
 answers what it read beside its result) and `config-read` (the same for the
 extension's own configuration, `extension_config.read`). The hooks that act on a `read` need a
-collector, which only the knowledge mode has: `progress` (a read sends
+collector, which only the snapshots mode has (its marks): `progress` (a read sends
 `$/progress` before each record, then takes 100 ms over it),
 `read-fail-after:<n>` (a read fails after `n` checkpointed records),
 `stuck-cursor` (every `$/state` is `{ cursor: 0 }`), `checkpoint-at-end`
@@ -192,28 +192,6 @@ changed by `write`. It has one revision, `v1`: no `rev` or `v1` reads it,
 any other is `InvalidInput`. Every file's `modified_at` is a fixed
 `1700000000000`; folders are implied by file paths.
 
-**As a knowledge provider** (`OXPLOW_FAKE_CAPABILITY=knowledge`) it
-declares `knowledge_declarations()` — the `knowledge` capability with
-`features: { edit: true }` and `data: { kinds: [note] }`, the verbs
-`write_page { id?, title?, body, verified_files, removed_files }` →
-`{ id }` and `delete_page { id }` (each `confirm: never`, `access:
-record`, inputs `additionalProperties: false`), the event type
-`knowledge.page.recorded@3`, a `knowledge_pages` collector over entity
-`knowledge_page` (`discover` lists it), and the same `team` config; the
-event's schema is core's. Pages live in its state
-like items do. Every verb answers the page's record as that event:
-`{ page: { uri: "oxplow:oxplow/knowledge?id=<id>&store=<store>", kind?, url?, author?, title, body, uris, updated_at, deleted } }`.
-`uris` is the body's `[[…]]` interiors in oxplow's grammar (one with a `/`
-or a `.` is `oxplow:oxplow/file?path=<path>`, `<store>:<id>` that store's
-page, a bare one an oxwiki page); with no `id` it takes one from the title
-(lowercased, other characters `-`); the title defaults to
-the id; `verified_files` and `removed_files` are accepted and ignored (it
-keeps no pins). There is no `link` verb: core adds the link and writes
-the page through `write_page`. `delete_page` answers the record with `deleted: true`, and a page that is
-absent or already deleted is `InvalidInput`. `read` of `knowledge_pages`
-streams the pages changed after the cursor in revision order, each
-followed by a `$/state` checkpoint `{ cursor, seen }`.
-
 ## The host (`crates/oxplow-app/src/providers/`)
 
 **The manifest kind** (`spec.rs`): `providers:` is a stable kind (since the command model's
@@ -261,14 +239,14 @@ a verb runs as (so an inverse naming a verb undoes through it), the event
 types it may emit, what its collectors stream, the URIs an instance owns,
 and whether it keeps items.
 
-| | `agent_harness` | `snapshots` | `knowledge` | `filesystem` |
-|---|---|---|---|---|
-| verbs | `launch`, `tool_use`, `render`; `turns` ← transcript, `token_readings` ← telemetry, `refresh_text` ← runtime_text, `prompt` and `subagent` ← subagents | `mark`, `changed`; `read_at` ← contents | `write_page`, `delete_page` | `stat`, `read`, `list`; `write` ← writable |
-| verbs run as | core's call: a session's launch, the hook route, the OTLP route, a transcript read, a text refresh | core's call: every take core makes (a turn's end, a measured run, an archive) | `oxplow.knowledge.<verb>`, after core checks the page against its record | core's call: a reader's `stat`, `read` and `list` for a file URI naming the filesystem |
-| declares as `data` | `env_markers`, `settings` | nothing | `kinds` (`{ id, title, bucket }`; none means `note`); feature `edit` | nothing |
-| may emit | nothing | nothing | `knowledge.page.recorded@3` | nothing |
-| collectors stream | nothing | nothing | `knowledge_page` rows, logged as `knowledge.page.recorded@3` `{ page: row }` | nothing |
-| owns URIs | none | none | `oxplow/knowledge` (its `store` param names the store) | none (its id is the `filesystem` param of the file URIs it serves) |
+| | `agent_harness` | `snapshots` | `filesystem` |
+|---|---|---|---|
+| verbs | `launch`, `tool_use`, `render`; `turns` ← transcript, `token_readings` ← telemetry, `refresh_text` ← runtime_text, `prompt` and `subagent` ← subagents | `mark`, `changed`; `read_at` ← contents | `stat`, `read`, `list`; `write` ← writable |
+| verbs run as | core's call: a session's launch, the hook route, the OTLP route, a transcript read, a text refresh | core's call: every take core makes (a turn's end, a measured run, an archive) | core's call: a reader's `stat`, `read` and `list` for a file URI naming the filesystem |
+| declares as `data` | `env_markers`, `settings` | nothing | nothing |
+| may emit | nothing | nothing | nothing |
+| collectors stream | nothing | nothing | nothing |
+| owns URIs | none | none | none (its id is the `filesystem` param of the file URIs it serves) |
 
 There is no task tracker capability: a task is a row of the shared model
 `oxplow/task_record`, filled by a store ([tasks.md](./tasks.md)). A
@@ -285,15 +263,14 @@ harness's (`agent_harness::HarnessHost`) registers an `ExternalHarness` in
 `Services.harnesses` under the instance id, beside the built-ins (a
 catalog reload keeps it); the snapshots' (`snapshots::SnapshotsHost`)
 registers an `ExternalSnapshots` in `Services.snapshots`; the
-knowledge's (`knowledge::KnowledgeHost`) registers an `ExternalKnowledge`
-in `Services.knowledge`; the filesystem's
+the filesystem's
 (`filesystems::FileSystemsHost`) registers an `ExternalFileSystem` in
 `Services.filesystems` ([filesystems.md](./filesystems.md)). A record row carries its own `uri`; the host
 logs it as the contract's event with the row under the contract's key,
 that URI the subject and the instance the source (`provider:<id>`: whose
 record it is). A URI of a resource with no `provider` param
-(`oxplow/knowledge`) is no instance's, so any well-formed one is an
-instance's own (`registry::owns`).
+is no instance's, so any well-formed one is an instance's own
+(`registry::owns`).
 
 Each host's `prepare` validates declarations and constructs its adapter
 without changing a live registry or starting a process. It returns a
@@ -320,28 +297,6 @@ the previous generation's), not with the instances.
 A candidate that is rejected before publication is marked stopped and shut down
 directly; cleanup does not withdraw by name or touch an incumbent's
 maps/database rows. Process supervision starts after publication.
-
-**A knowledge provider** is one knowledge store (an Obsidian vault, a
-Confluence or MediaWiki space); several stores run at once, with no
-priority, and oxplow's own store is oxwiki. Core keeps the record (`.context/knowledge.md` "The
-capability"). The page commands check a write against core's record
-first — the id, every link it adds, the URIs it verifies or removes —
-then invoke the verb: `write_page { id?, title?, body, verified_files,
-removed_files }` (the body in oxplow's markdown), `delete_page { id }`.
-A store with `edit` off is never written. Core does the link command
-itself (it adds `- [[target]]` under `## Related` and writes the page
-through `write_page`). The store declares its kinds as `data: { kinds }`.
-Each answers the page's `knowledge.page.recorded@3 { page: { uri, kind?,
-url?, author?, title, body, uris, updated_at, deleted } }`: `body` what it keeps (in its own
-grammar if it likes), `uris` what the page links **in oxplow's grammar**
-(`oxplow:oxplow/file?path=src/lib.rs`, `oxplow:oxplow/knowledge?id=other&store=oxwiki`) — core links and pins
-from those, never parsing a foreign body. A write answering no record of
-the page fails. Core records the row, the edges and the pins from it and
-logs `knowledge.page.written` after the store's own record. Its collector
-streams its pages edited outside oxplow as the same records;
-`knowledge::KnowledgeRecords` restates them while the store is enabled
-(a body the record already holds restates nothing; `deleted` takes the
-page out).
 
 **A snapshots provider** marks the worktree; core keeps the record
 (`snapshot`, `file_snapshot`, `snapshot_op`, `snapshot.taken`), so
@@ -532,7 +487,7 @@ One spelling everywhere, because the id is used as it stands:
 
 | Keyed on the **instance id** | Keyed on the **provider (program)** |
 |---|---|
-| the URI's `provider` param (`oxplow:oxplow/knowledge?id=a&provider=wiki_acme`) and `check_subject` | the extension's deployment (`.oxplow/runtime/extensions/<ext>/<hash>/`) |
+| the URI's `provider` param (`oxplow:oxplow/file?path=a&provider=files_acme`) and `check_subject` | the extension's deployment (`.oxplow/runtime/extensions/<ext>/<hash>/`) |
 | an extension command's `instance` (`tracker.snapshot.mark { instance: issues_acme }`) | the extension's permissions (`process.run`, `network`, `secrets`) |
 | the capability registry id, `v_capability_provider.provider`, the `activeProviders` value | the Extensions page's provider row, `declaration_impact` |
 | `OXPLOW_PROVIDER_ID` (the provider is told which instance it is) | the kit's fixtures and transcripts (it tests the program, as its default instance) |
@@ -851,9 +806,8 @@ owner's), missing, or disabled is left out with that state on its row, and one
 whose start failed or hung is published failing, restarting with backoff and
 counted by `contribution_health` — every other extension and instance
 activates. A started instance is handed to its capability's host at
-publication — for a knowledge store, `ExternalKnowledge` in
-`Services.knowledge` (each host's adapter, "What a provider may
-implement") — and its **other** declared commands on the bus as
+publication (each host's adapter, "What a provider may
+implement") and its **other** declared commands on the bus as
 `<id>.<name>` (`External`, `Experimental`; confirm / access / undoable as declared). Its capability's verbs are never
 commands of their own: core's call of the verb is the one write surface. A refusal —
 unconfigured, a handshake that doesn't match — registers
@@ -881,9 +835,9 @@ instance), or `<family>.<verb>` for a capability verb (its contract's
 `dispatch`, when it has one). A capability verb can't be
 declared this way: core calls it. An instance registers only its
 capability's implementation (no bus namespace). **A provider emits only
-its capability's event types** (its contract's `events`: `knowledge` →
-`knowledge.page.recorded@3` — a published version's schema never changes,
-since declarations are compared to it exactly): declaring any other type — another core one such as
+its capability's event types** (its contract's `events`; a published
+version's schema never changes, since declarations are compared to it
+exactly; no capability's contract has any today): declaring any other type — another core one such as
 `contribution.enabled`, which would clear another contribution's disable — is
 refused when the manifest loads, and the declared schema must equal
 core's (checked at enable). Its own types are P7. A command's run
@@ -990,8 +944,7 @@ checkpoint it last stored
 (`provider_collector_state`, [data-model.md](./data-model.md)), through
 `start_streaming`. Each `$/record` must be the collector's entity — the
 one its contract streams — and a row of its own (its `uri`), valid as
-the contract's event; it is kept as that envelope (`knowledge.page.recorded@3`
-`{ page }`, the actor's source) until the
+the contract's event; it is kept as that envelope (the actor's source) until the
 next `$/state`, which commits the batch **and** the checkpoint in one
 transaction, so a read that fails midway keeps exactly what its last
 checkpoint covered and the next read resumes there. A record equal to its
@@ -1200,12 +1153,7 @@ and the throwaway host the conformance suite runs in
   capability's suite: when the instance made the project's snapshots, the captures following it,
   `snapshot_conformance::suite` on the primary stream (round-trip, an
   unchanged mark keeps its snapshot, diffs with deletions, turn-end
-  anchoring, the budget recorded), which both built-ins pass too; or —
-  the instance enabled as a knowledge store —
-  `knowledge_conformance::suite` through the page commands (a write lands
-  the page, its body and its event; pins go stale and re-pin; a dangling
-  link is refused; a link lands; a delete takes the page), which oxwiki
-  passes too.
+  anchoring, the budget recorded), which both built-ins pass too; or the harness or filesystem suite.
 - **A script implementation's suite** (`suites::script_suite`): for each
   `implementations:` entry whose entry is a script, the same capability
   suite (`capability_suite`, shared with the providers') on a fork of the
@@ -1313,13 +1261,3 @@ Runtime catalog reads use the committed snapshot plus immediate explicit-disable
 and missing-folder revocation, without loading changed declarations. Some
 native/background and synchronous metadata entrypoints still need reader-pin
 review, and metric catalog reseeding remains separate.
-
-## The read adapter into the record models
-
-A provider instance's `knowledge.page.recorded` records are also written
-into bundled's `oxplow/knowledge_record` model under the instance's id
-(`providers/model_records.rs`, consumer `records.models`; it is
-knowledge-only), beside the `knowledge.records` projection, which goes in a
-later phase. A task is not read this way: a task store fills
-`oxplow/task_record` through `fills:` ([tasks.md](./tasks.md)). See
-`.context/models.md` "Providers". A provider program changes nothing.

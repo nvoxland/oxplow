@@ -74,9 +74,9 @@ page bodies, task touched files, findings) — no manual upkeep.
 The capture skill guides agents to retain useful exploratory Q&A:
 walkthroughs, rationale, comparisons, and recommendations. The agent
 searches existing pages first, then creates or updates one through
-`oxplow.knowledge.write_page`. The command maintains the page, links,
-and freshness references together. With oxwiki it also writes the
-markdown file. Name the store when more than one is on.
+the store's command (oxwiki: `oxwiki.page.write`). The command checks the
+page's links, writes the markdown file, and oxplow derives the page's links
+and freshness references from it.
 
 This works on non-writer threads too: recording understanding is
 independent of permission to edit the stream's worktree.

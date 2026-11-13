@@ -3,7 +3,7 @@
 //! oxplow-foundation's included, so no resource is special. A declaration
 //! says what its params are; the registry checks a URI against it.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -237,9 +237,19 @@ pub struct ResourceRegistry {
     /// `tsk42` (or `ENG-12`) in text one of a store's items. The first told
     /// of wins an id two would match.
     task_ids: Vec<TaskIds>,
-    /// The enabled knowledge stores' ids: what makes `[[<store>:<id>]]`
-    /// one of their pages.
-    knowledge_stores: BTreeSet<String>,
+    /// The knowledge stores (the stores of the knowledge model), each with
+    /// how its page ids look when it says: what makes `[[<store>:<id>]]`, and
+    /// a bare `[[slug]]` its pattern matches, one of its pages. The first
+    /// told of wins a bare id two would match.
+    knowledge_ids: Vec<KnowledgeIds>,
+}
+
+/// A knowledge store and how its page ids look, as its fill declares them.
+#[derive(Debug, Clone)]
+struct KnowledgeIds {
+    store: String,
+    /// The pattern, matched whole; none: only `[[<store>:<id>]]` names its pages.
+    whole: Option<Regex>,
 }
 
 /// A task tracker's ids, as it declares them (`TaskTracker::id_pattern`).
@@ -273,20 +283,46 @@ impl ResourceRegistry {
         self
     }
 
-    /// This registry recognizing `[[<store>:<id>]]` for these knowledge
-    /// stores (the enabled ones), set by the app.
-    pub fn with_knowledge_stores<I, S>(mut self, ids: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
-        self.knowledge_stores = ids.into_iter().map(Into::into).collect();
+    /// This registry also recognizing `store`'s pages: `[[<store>:<id>]]`,
+    /// and a bare `[[id]]` when `pattern` (a regex matched whole) says it is
+    /// one of its ids. Set by the app from the knowledge model's fills.
+    pub fn with_knowledge_store(
+        mut self,
+        store: &str,
+        pattern: Option<&str>,
+    ) -> Result<Self, ResourceError> {
+        let whole = pattern
+            .map(|p| Regex::new(&format!("^(?:{p})$")))
+            .transpose()
+            .map_err(|e| ResourceError::BadPattern {
+                resource: KNOWLEDGE.into(),
+                param: "id".into(),
+                error: e.to_string(),
+            })?;
+        self.knowledge_ids.push(KnowledgeIds {
+            store: store.into(),
+            whole,
+        });
+        Ok(self)
+    }
+
+    /// This registry recognizing no knowledge store.
+    pub fn without_knowledge_stores(mut self) -> Self {
+        self.knowledge_ids.clear();
         self
     }
 
     /// Whether `id` is one of the knowledge stores this registry recognizes.
     pub fn is_knowledge_store(&self, id: &str) -> bool {
-        self.knowledge_stores.contains(id)
+        self.knowledge_ids.iter().any(|k| k.store == id)
+    }
+
+    /// `text`, whole, as one of a knowledge store's page ids: that page's URI.
+    pub fn knowledge_uri_of(&self, text: &str) -> Option<String> {
+        self.knowledge_ids
+            .iter()
+            .find(|k| k.whole.as_ref().is_some_and(|w| w.is_match(text)))
+            .map(|k| super::build::knowledge_uri(&k.store, text))
     }
 
     /// `text`, whole, as one of a task store's ids: that item's URI.

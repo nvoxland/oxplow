@@ -138,15 +138,13 @@ models:
     refs**, ref types `file_pin` / `dir_pin` (not `file_mention`, so a
     reader tells them apart): new ones pinned to the primary stream's
     latest snapshot, existing ones keep their pin, an edge verified under
-    a still-cited `dir_pin` is kept on a rewrite (today's
-    `knowledge_record::write_page_tx`). Staleness is `v_ref_pin`
+    a still-cited `dir_pin` is kept on a rewrite (the model store's pin). Staleness is `v_ref_pin`
     (`source`, `source_resource`, `path`, `kind` file|dir,
     `pinned_snapshot_id`, `latest_snapshot_id`, `stale`): a file is stale
     when its primary snapshot is newer than its pin or it was never
     pinned; a dir is stale when any file under it is.
   - A pinned source drifting is the generic event `snapshot.ref_drifted@1 {
-    source, snapshot, paths }` (today's `knowledge.page.drifted`, for any
-    pinned source), so counts follow drift and not every snapshot.
+    source, snapshot, paths }` (for any pinned source), so counts follow drift and not every snapshot.
   - **Verify** is core's `oxplow.refs.verify { uri, files? }`: re-pin the
     named (or all) pinned edges of a source to now, checked against its
     `file_pin` / `dir_pin` edges (cited, or under a cited dir). It never
@@ -282,33 +280,7 @@ fills:
 - **Cursor.** A collector may return `"cursor": {...}`; it is kept in
   `collector_run.cursor_json` and given back as `x["cursor"]` on the next
   run. A failed run keeps the old cursor.
-- **Providers (knowledge only).** A provider process's `read` stream is
-  turned into the same `models` output for its instance's store (its
-  instance id), applied with `models::apply_tx`. `providers/model_records.rs`
-  (`records.models`, an async pump consumer) turns each
-  `knowledge.page.recorded` of a running provider instance into a
-  `ModelOutput` for `oxplow/knowledge_record` (store = the instance id,
-  `upsert` of one row or `delete`), applied with `apply_tx`: cause
-  `trigger`, the record's anchors, source `provider:<instance>`. A page
-  row's stated `uris` are its `refs`. The fill comes from the registry:
-  `ModelRegistry::with_provider_fills` adds, from the generation's
-  capability rows, one fill per available external knowledge instance,
-  written as the provider's extension; the views list its store because
-  the fill is in the swapped registry. Bundled off (the model undeclared)
-  -> no fill, the consumer returns without error. **One writer per
-  store.** A provider fill carries `provider: true` (set only by
-  `with_provider_fills`, never by a manifest), and the consumer writes
-  only through such a fill. **Reconcile.** A record that arrives with no
-  provider fill is dropped by the consumer, and the provider sync never
-  resends it, so a publication states a store when its provider fill
-  appears: `model_records::reconcile_if_needed_tx`, run in
-  `PreparedExtensionDatabase::with_vocabulary` after the capability rows
-  are restated. It writes the latest `knowledge.page.recorded` of each
-  page of the store from the event log with cause `reconcile` (a deleted
-  page stays out; a record that won't write is warned about, not fatal).
-  An `asset_state` marker `model_reconcile:<model>:<store>` makes it run
-  once per fill; a publication without the fill drops the marker, so a
-  fill that goes away and comes back is stated again.
+- **Providers.** A provider process's collectors stream entity rows (`providers.md`); no capability turns them into model rows. A store of a model is an extension whose collector or commands write it.
   **There is no task provider.** A tracker
   outside oxplow (a Linear-like service) is an ordinary extension: a
   collector that pulls its data fills `oxplow/task_record` through
@@ -337,7 +309,7 @@ undone. To build:
 
 ## Reads of rows, links and drift (core, generic)
 
-What a store of any model gets from core, with no knowledge capability:
+What a store of any model gets from core:
 
 - **`record.read { record, via }`** (core event, namespace `record`): an
   agent's read of a row. `oxplow_read` of any URI of a model's resource
@@ -437,11 +409,11 @@ models:
     children:
       links: { key: [to, type], columns: { to: uri, type: { type: text, values: [blocks, discovered_from, relates_to, duplicates, supersedes, replies_to, about] } }, edge: { to: to, type_from: type, prefix: "task_link:" } }
       comments: { key: [id], columns: { id: text, author: text, at: time, body: { type: text, markdown: {} } } }
-  - name: knowledge_page
+  - name: knowledge_record
     resource: knowledge        # oxplow/knowledge?id=<id>&store=<store>
     open: true
     key: id
-    change_event: oxplow.knowledge_page.changed
+    change_event: oxplow.knowledge_record.changed
     search: { title: title, body: body }
     columns:
       id: text
@@ -756,7 +728,7 @@ and two contributors, and the store filter.
 ## What core keeps for tasks
 
 Core holds no task table, command or reader. The read adapter
-(`providers/model_records.rs`) is knowledge-only, and the loose-id
+Loose-id
 recognizers come from the models' `fills.id_pattern` alone.
 `v_oxplow_contribution_repair` and `v_oxplow_commit_task` are bundled's
 datasets. The `oxplow.task` fact dimension is declared by bundled over its

@@ -384,6 +384,8 @@ mod tests {
         )
         .with_task_ids("oxtask", r"tsk\d+")
         .unwrap()
+        .with_knowledge_store("oxwiki", Some("[a-z0-9]+(-[a-z0-9]+)*"))
+        .unwrap()
     }
 
     fn task(id: &str) -> String {

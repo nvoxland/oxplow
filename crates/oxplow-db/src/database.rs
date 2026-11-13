@@ -2682,15 +2682,12 @@ mod tests {
             "threads",
             "thread_selection",
             "agent_turn",
-            "knowledge_page",
             "page_visit",
             "usage_event",
             "code_quality_scan",
             "code_quality_finding",
             "file_snapshot",
             "snapshot",
-            "knowledge_page_touch",
-            "knowledge_page_read",
             "model_field_value",
             "model_field_decl",
             "model_stage_decl",
@@ -2762,6 +2759,10 @@ mod tests {
             "oxtask_link",
             "oxtask_note",
             "request_task",
+            // V35: knowledge pages are the shared model's rows too.
+            "knowledge_page",
+            "knowledge_page_touch",
+            "knowledge_page_read",
         ];
         let mut stmt = conn
             .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")

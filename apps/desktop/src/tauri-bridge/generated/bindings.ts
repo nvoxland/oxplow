@@ -421,11 +421,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listKnowledgePagesForSnapshots: (snapshotIds: SnapshotId[]) => typedError<SnapshotKnowledgePage[], IpcError_Serialize>(__TAURI_INVOKE("list_knowledge_pages_for_snapshots", { snapshotIds })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	getFileSnapshot: (fileSnapshotId: FileSnapshotId) => typedError<{
 	id: number,
 	stream_id: StreamId,
@@ -3395,7 +3390,7 @@ export type ImplementationDecl = {
 	/**  How a person names it; the built-in's own title when absent. */
 	title: string | null,
 	/**
-	 *  The built-in it is (`oxplow:oxwiki`); its features are core's to
+	 *  The built-in it is (`oxplow:snapshot-hashes`); its features are core's to
 	 *  say. `None` for an AI provider, which names its kind instead.
 	 */
 	entry: string | null,
@@ -6201,13 +6196,6 @@ export type SlotEdge = "start" | "end";
 
 /**  A `snapshot` row. */
 export type SnapshotId = number;
-
-/**  An oxwiki page whose file changed in a snapshot. */
-export type SnapshotKnowledgePage = {
-	snapshot_id: SnapshotId,
-	/**  The page's URI (`oxplow:oxplow/knowledge?id=<slug>&store=oxwiki`). */
-	uri: string,
-};
 
 /**  One row of the operation log (`snapshot_op`). */
 export type SnapshotOp = {

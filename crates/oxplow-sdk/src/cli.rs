@@ -19,7 +19,7 @@ usage:
       (--origin = the request/thread ref that asked for it), one example
       and its fixture, and the kind's starter: a page with a row action; a
       provider of --capability (snapshots, the default,
-      agent_harness, knowledge or filesystem)
+      agent_harness or filesystem)
       with its contract's declarations, a stub program and test config; a
       script implementation of --capability: its
       `implementations:` entry and one Starlark function per verb (stubs to
@@ -800,20 +800,20 @@ mod tests {
             "implementation",
             "shelf",
             "--capability",
-            "knowledge",
+            "filesystem",
             "--root",
             root,
         ]);
         assert_eq!(code, 0, "{err}");
         let ext = dir.path().join(".oxplow/extensions/shelf");
         let manifest = std::fs::read_to_string(ext.join("extension.yaml")).unwrap();
-        assert!(manifest.contains("capability: knowledge\n"), "{manifest}");
+        assert!(manifest.contains("capability: filesystem\n"), "{manifest}");
         assert!(
             manifest.contains("entry: implementations/shelf.star\n"),
             "{manifest}"
         );
         let script = std::fs::read_to_string(ext.join("implementations/shelf.star")).unwrap();
-        for verb in ["write_page", "delete_page"] {
+        for verb in ["stat", "read", "list"] {
             assert!(script.contains(&format!("def {verb}(x):")), "{script}");
         }
         let (code, _, err) = cli(&[

@@ -27,7 +27,6 @@ pub mod grant;
 pub mod hook;
 pub mod ids;
 pub mod json;
-pub mod knowledge;
 pub mod language_id;
 pub mod ordering;
 pub mod permissions;

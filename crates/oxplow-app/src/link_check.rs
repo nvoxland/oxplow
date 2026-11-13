@@ -64,8 +64,8 @@ pub fn check_links_in(world: &LinkWorld<'_>, body: &str) -> Vec<LinkWarning> {
                 target: link.raw.clone(),
                 reason: format!(
                     "`[[{}]]` is not a recognized reference — use a task's own id \
-                     as its list writes it (never the GitHub `#42` form), `[[some-slug]]` for an \
-                     oxwiki page, `[[<store>:<id>]]` for another knowledge store's page, \
+                     as its list writes it (never the GitHub `#42` form), `[[some-id]]` for a \
+                     knowledge store's page, `[[<store>:<id>]]` for another's, \
                      `[[path/to/file.rs]]` for a file, or `[[git:<sha>]]` for a commit",
                     link.raw
                 ),
@@ -257,16 +257,6 @@ fn missing_reason(world: &LinkWorld<'_>, reference: &Reference) -> Option<String
         Reference::Knowledge { store, id } => {
             let uri = oxplow_domain::uri::build::knowledge_uri(store, id);
             if world.this_page == Some(uri.as_str()) {
-                return None;
-            }
-            // Core's own record of a page kept by a built-in store (oxwiki's
-            // built-in, a provider's) holds it too, until that record goes
-            // with the built-in (the removal's last step).
-            if exists(
-                world.conn,
-                "SELECT 1 FROM knowledge_page WHERE uri = ?1",
-                &uri,
-            ) {
                 return None;
             }
             match oxplow_domain::uri::OxplowUri::parse(&uri) {

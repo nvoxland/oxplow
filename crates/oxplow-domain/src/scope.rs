@@ -335,20 +335,6 @@ pub const SCOPES: &[Scope] = &[
         summary: "Record intent for this extension's declared jobs or request their cancellation; execution requires its own current approval.",
     },
     Scope {
-        id: "knowledge.read",
-        access: Access::Read,
-        host: Host::Daemon,
-        spends: false,
-        summary: "Read the drift of knowledge pages' refs from the code they name.",
-    },
-    Scope {
-        id: "knowledge.write",
-        access: Access::Record,
-        host: Host::Daemon,
-        spends: false,
-        summary: "Write the project's knowledge: pages, notes and links.",
-    },
-    Scope {
         id: "links.check",
         access: Access::Read,
         host: Host::Daemon,

@@ -89,24 +89,6 @@ pub fn init_git_repo(dir: &Path) {
     let tree = repo.find_tree(tree_id).unwrap();
     repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
         .unwrap();
-    disable_oxwiki_extension(dir);
-}
-
-/// The oxwiki extension is on by default and stands core's built-in oxwiki
-/// down; core's knowledge tests (which go with the built-in) run on the
-/// built-in, so a test project starts with the extension off. A test of the
-/// extension writes its own personal settings. Git excludes the file.
-pub fn disable_oxwiki_extension(dir: &Path) {
-    let personal = dir.join(".oxplow/personal.yaml");
-    if !personal.exists() {
-        std::fs::create_dir_all(dir.join(".oxplow")).unwrap();
-        std::fs::write(&personal, "disableExtensions: [oxwiki]\n").unwrap();
-        let exclude = dir.join(".git/info/exclude");
-        let mut text = std::fs::read_to_string(&exclude).unwrap_or_default();
-        text.push_str("\n/.oxplow/personal.yaml\n");
-        std::fs::create_dir_all(exclude.parent().unwrap()).unwrap();
-        std::fs::write(exclude, text).unwrap();
-    }
 }
 
 /// Stage everything in `dir` and commit it on HEAD; the new sha.

@@ -1,14 +1,14 @@
 # Provider protocol
 
 A provider is a program that implements one of oxplow's capabilities
-for it (snapshots, knowledge, an agent harness or a filesystem). oxplow starts the program, talks to it over
+for it (snapshots, an agent harness or a filesystem). oxplow starts the program, talks to it over
 stdin/stdout, and reads and writes through it.
 
 ```sh
 oxplow extension new provider my-snapshots   # declarations, a stub program, a test config
 oxplow extension new provider my-agent --capability agent_harness
 oxplow extension new provider my-fs --capability filesystem
-oxplow extension new provider my-shelf --capability knowledge
+oxplow extension new provider my-shelf --capability filesystem
 oxplow extension test my-snapshots           # handshake, examples, conformance suite
 ```
 
@@ -39,20 +39,6 @@ refuse unknown keys (`read_at` only with `contents`):
   of `null` is the empty tree.
 - `read_at { handle, path }` → `{ bytes }`, base64: a file's bytes at a
   marked state. An unknown handle or path is `InvalidInput`.
-
-A knowledge provider is one knowledge store. It keeps pages in its own
-store and declares the `knowledge` capability. It may declare
-`features: { edit: true }` (a store with edit off is never written by
-oxplow) and `data: { kinds: [{ id, title, bucket }] }`, where `bucket` is
-`note`, `memory` or `instruction` (no kinds means `note`). It answers
-`write_page { id?, title?, body, verified_files, removed_files }` and
-`delete_page { id }`, and emits `knowledge.page.recorded@3`
-with `{ page: { uri: "oxplow:oxplow/knowledge?id=<id>&store=<store>", kind?, url?, author?, title, body, uris, updated_at,
-deleted } }` for every page it writes or deletes (each verb answers it,
-and a `knowledge_pages` collector over the entity `knowledge_page`
-streams them all). `uris` states the page's outbound references in
-oxplow's URIs (`oxplow:oxplow/file?path=<path>`, `oxplow:oxplow/knowledge?id=<id>&store=<store>`); oxplow never parses a
-foreign body.
 
 ## Declaring one
 
@@ -148,8 +134,8 @@ The standard JSON-RPC codes, plus:
 - **Exits are noticed.** A process that exits on its own is restarted
   after a backoff. Three failures in a row (calls, starts or exits)
   disable the instance until a person turns it back on.
-- **You emit only your capability's events.** A knowledge store's are
-  `knowledge.page.recorded`, for its own pages; a snapshots provider emits none.
+- **You emit only your capability's events.** No capability's contract has
+  any today.
 
 ## Testing
 

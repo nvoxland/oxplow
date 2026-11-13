@@ -179,7 +179,7 @@ its scope trace.
   thread and stream, caused by the event), entity and fact collectors (a child of the
   run that ran them, named for the collector), provider invokes (on the
   wire as `InvokeParams.context`; `host/call`s are answered only inside
-  a registered run) and knowledge, snapshot and harness verbs. A page
+  a registered run) and snapshot, filesystem and harness verbs. A page
   acting is `Actor::Page { page_id, on_behalf_of }` (source: the page's
   URI; a node's id is in `actor_id`) and a component acting is
   `Actor::Component` (source: its contribution ref); both act for the

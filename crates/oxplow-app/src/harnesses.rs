@@ -126,11 +126,7 @@ mod tests {
             extension: Some("oxplow-foundation".into()),
             source: Source::BuiltIn(entry),
             features: serde_json::json!({}),
-            fields: serde_json::json!([]),
-            stages: serde_json::json!([]),
-            kinds: serde_json::Value::Array(Vec::new()),
             offered: true,
-            id_pattern: None,
             icon: None,
             config: serde_json::json!({}),
             description: None,
@@ -215,7 +211,6 @@ mod tests {
             &[
                 declared("agent_harness", "claude", "oxplow:claude-code"),
                 declared("agent_harness", "codex", "oxplow:codex-cli"),
-                declared("knowledge", "oxwiki", "oxplow:oxwiki"),
             ],
         );
         assert_eq!(r.names(), ["claude", "codex"]);

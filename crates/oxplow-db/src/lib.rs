@@ -42,8 +42,6 @@ mod fact_chain;
 pub mod fact_store;
 pub mod git_store;
 pub mod handoff_store;
-pub mod knowledge_page_store;
-pub mod knowledge_record;
 pub mod model_store;
 pub mod op_error_store;
 pub mod page_ref_projections;
@@ -109,7 +107,6 @@ pub use fact_store::{
 };
 pub use git_store::{GitBranchRow, GitCommitFileRow, GitCommitRow, GitTagRow, SqliteGitStore};
 pub use handoff_store::SqliteHandoffStore;
-pub use knowledge_page_store::{KnowledgePage, SqliteKnowledgePageStore};
 pub use page_ref_projections::{FileRefVersion, OwnedFileRefVersion};
 pub use page_ref_store::{PageRefEdge, PageRefStore, SourceSlice, SqlitePageRefStore};
 pub use panel_layout_store::{PanelPlacement, SqlitePanelLayoutStore};

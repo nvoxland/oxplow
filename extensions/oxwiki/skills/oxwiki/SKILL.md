@@ -22,8 +22,12 @@ before you create (the `knowledge` skill says how), then write:
 - Every `[[link]]` must resolve: a dangling one is refused and named; fix or
   drop it and run again. A bare `[[some-page]]` is an oxwiki page.
 - The answer names the page (`id`, `page`, its uri). The page shows up as a
-  row a moment later (the file is watched); a hand edit of the file does
-  too, so never write the folder's files yourself.
+  row a moment later (the file is watched), and so does a direct edit of the
+  file in the primary checkout. In a worktree, never write the folder's files
+  yourself: only the primary checkout's folder is watched, so a page written
+  into a worktree's own `.oxplow/oxwiki` is lost (the write is refused);
+  `oxwiki.page.write` writes to the primary checkout from anywhere. Use it
+  by default: it checks links and can be undone.
 
 `oxwiki.page.delete { id }` deletes a page (the person confirms); both undo.
 

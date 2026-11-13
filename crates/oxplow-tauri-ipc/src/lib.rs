@@ -185,7 +185,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             // snapshots
             commands::generated::list_snapshot_ops,
             commands::generated::list_files_for_snapshot,
-            commands::generated::list_knowledge_pages_for_snapshots,
             commands::generated::get_file_snapshot,
             commands::generated::get_snapshot_stats,
             commands::generated::get_blob_storage_bytes,

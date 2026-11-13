@@ -321,12 +321,6 @@ async fn snapshot_reads_empty_for_fresh_project() {
             .unwrap()
             .is_empty()
     );
-    assert!(
-        commands::generated::list_knowledge_pages_for_snapshots(app.state(), vec![999.into()])
-            .await
-            .unwrap()
-            .is_empty()
-    );
     let _ = commands::generated::get_blob_storage_bytes(app.state())
         .await
         .unwrap();

@@ -83,9 +83,6 @@ pub mod harnesses;
 pub mod hook_ingest;
 pub mod indexer;
 pub mod kind_search;
-pub mod knowledge;
-pub mod knowledge_conformance;
-pub mod knowledge_drift;
 pub mod link_check;
 pub mod live_datasets;
 #[cfg(test)]
@@ -555,16 +552,8 @@ pub struct Services {
     pub extension_checks: commands::agent_reads::extensions::ExtensionChecksSlot,
     /// The daemon's line to its window: the window's capabilities' calls.
     pub client_host: Arc<client_host::ClientHost>,
-    /// The enabled knowledge stores, every one in use at once: oxwiki, an
-    /// extension's (`.context/knowledge.md`).
-    pub knowledge: Arc<oxplow_domain::knowledge::KnowledgeStores>,
     /// Which collectors feed which datasets (`collection_coverage`).
     pub feeds: Arc<collection_coverage::Feeds>,
-    /// Whether oxwiki is an enabled store (its watch and repair run only
-    /// then).
-    pub oxwiki: Arc<oxplow_oxwiki::OxwikiPresence>,
-    /// Core's record of every store's pages.
-    pub knowledge_pages: Arc<oxplow_db::SqliteKnowledgePageStore>,
     /// The shared models the enabled extensions declare and fill
     /// (`.context/models.md`).
     pub models: models::Models,
@@ -958,28 +947,15 @@ impl Services {
         let page_runs = pages::open_runs::PageRuns::default();
         event_bus.reach_open_runs(page_runs.clone());
         let ref_moves = ref_moves::RefMoves::new(event_bus.clone());
-        // Where pages are kept: oxwiki when foundation declares it, a
-        // provider's instance once it runs — every one in use at once.
-        let knowledge = Arc::new(oxplow_domain::knowledge::KnowledgeStores::new());
         let models = models::Models::default();
         let event_pump = Arc::new(event_pump::EventPump::new(
             db.clone(),
             (*event_log_store).clone(),
             vec![
                 Arc::new(tool_call_reactors::ToolCallProjection),
-                Arc::new(knowledge::KnowledgeAttribution),
-                Arc::new(knowledge::KnowledgeFileReads {
-                    stores: knowledge.clone(),
-                    project_dir: layout.project_dir.clone(),
-                    vocabulary: vocabulary.clone(),
-                }),
-                Arc::new(knowledge::KnowledgeReads),
                 Arc::new(record_reads::RecordFileReads {
                     models: models.clone(),
                     project_dir: layout.project_dir.clone(),
-                    vocabulary: vocabulary.clone(),
-                }),
-                Arc::new(knowledge::KnowledgeDrift {
                     vocabulary: vocabulary.clone(),
                 }),
                 Arc::new(ref_drift::RefDrift {
@@ -991,7 +967,6 @@ impl Services {
                 }),
             ],
         ));
-        let knowledge_pages = Arc::new(oxplow_db::SqliteKnowledgePageStore::new(db.clone()));
         let page_visit_store = Arc::new(SqlitePageVisitStore::new(db.clone()));
         let usage_store = Arc::new(SqliteUsageStore::new(db.clone()));
         let code_quality_store = Arc::new(SqliteCodeQualityStore::new(db.clone()));
@@ -1297,11 +1272,7 @@ impl Services {
                     source: capabilities::Source::Core,
                     features: serde_json::to_value(vcs.features())
                         .unwrap_or(serde_json::Value::Null),
-                    fields: serde_json::Value::Array(Vec::new()),
-                    stages: serde_json::Value::Array(Vec::new()),
-                    kinds: serde_json::Value::Array(Vec::new()),
                     offered: true,
-                    id_pattern: None,
                     icon: None,
                     config: serde_json::json!({}),
                     description: None,
@@ -1377,22 +1348,11 @@ impl Services {
                 })
             },
         }));
-        // The vocabulary reads the active task tracker's own ids in text
-        // (`tsk42`), as that list declares them, and `[[<store>:<id>]]` for
-        // the enabled knowledge stores; from the first read, and at every
-        // rebuild (a switch rebuilds it).
-        let recognizers: vocabulary_reactor::Recognize = {
-            let (capabilities, config) = (capabilities.clone(), config_arc.clone());
-            Arc::new(move || capabilities.recognizers(&config_service::read_config(&config)))
-        };
-        {
-            // oxplow-foundation's resources, built in, until the service's
-            // first pass adds every enabled extension's.
-            let mut boot = oxplow_domain::vocabulary::Vocabulary::core();
-            boot.resources = vocabulary_reactor::recognizing(boot.resources, &recognizers());
-            vocabulary.swap(boot);
-        }
-        let vocabulary_service = Arc::new(vocabulary_reactor::VocabularyService::new(recognizers));
+        // oxplow-foundation's resources, built in, until the service's first
+        // pass adds every enabled extension's (and what its models make text
+        // recognize: a store's ids, `tsk42`, a bare `[[slug]]`).
+        vocabulary.swap(oxplow_domain::vocabulary::Vocabulary::core());
+        let vocabulary_service = Arc::new(vocabulary_reactor::VocabularyService);
         let agent_policy = Arc::new(agent_policy::AgentPolicy);
         let commands = Arc::new(
             commands::CommandBus::new(
@@ -1497,12 +1457,6 @@ impl Services {
         {
             commands.add_op(command).expect("core ops register");
         }
-        let oxwiki = Arc::new(oxplow_oxwiki::OxwikiPresence::default());
-        event_pump.register_async(Arc::new(providers::knowledge::KnowledgeRecords {
-            stores: knowledge.clone(),
-            db: db.clone(),
-            vocabulary: event_log_store.vocabulary().clone(),
-        }));
         let providers = providers::ProviderRegistry::new(
             providers::HostDeps {
                 project_dir: layout.project_dir.clone(),
@@ -1527,9 +1481,6 @@ impl Services {
             &commands,
             vec![
                 Arc::new(providers::agent_harness::HarnessHost(harnesses.clone())),
-                Arc::new(providers::knowledge::KnowledgeHost {
-                    stores: knowledge.clone(),
-                }),
                 Arc::new(providers::filesystems::FileSystemsHost::new(
                     filesystems.clone(),
                 )),
@@ -1593,11 +1544,6 @@ impl Services {
             vocabulary: event_log_store.vocabulary().clone(),
             layer: sql.clone(),
         });
-        event_pump.register_async(providers::model_records::consumer(
-            models.clone(),
-            db.clone(),
-            event_log_store.vocabulary().clone(),
-        ));
         let collector_runner = collector_runner::CollectorRunner {
             models: models.clone(),
             project_dir: layout.project_dir.clone(),
@@ -1620,16 +1566,6 @@ impl Services {
         sql.on_demand().bind(services_slot.clone());
         let panel_layout_store = oxplow_db::SqlitePanelLayoutStore::new(db.clone());
         let ui_preference_store = oxplow_db::SqliteUiPreferenceStore::new(db.clone());
-        for command in knowledge::ops(knowledge::KnowledgeTarget {
-            project_dir: layout.project_dir.clone(),
-            vcs: vcs.clone(),
-            db: db.clone(),
-            vocabulary: event_log_store.vocabulary().clone(),
-            stores: knowledge.clone(),
-            oxwiki: oxwiki.clone(),
-        }) {
-            commands.add_op(command).expect("knowledge ops register");
-        }
         for command in commands::config_commands::ops(config_target.clone())
             .into_iter()
             .chain(commands::agent_settings::ops(
@@ -1809,10 +1745,7 @@ impl Services {
             capabilities,
             snapshots,
             providers,
-            knowledge,
             feeds,
-            oxwiki,
-            knowledge_pages,
             models,
             page_visit_store,
             usage_store,
@@ -2255,13 +2188,6 @@ mod tests {
                 "oxplow.git.publish",
                 "oxplow.git.rebase",
                 "oxplow.git.revert",
-                // The page's store keeps it (oxwiki's file, a provider's
-                // service); core records what it kept.
-                "oxplow.knowledge.delete_page",
-                "oxplow.knowledge.drift",
-                "oxplow.knowledge.link",
-                // Bundled's menu entry for write_page, over its form.
-                "oxplow.knowledge.write_page",
                 // A download into .oxplow/lsp/, a person's call (P8.A9).
                 "oxplow.lsp.install_server",
                 "oxplow.lsp.remove_server",
@@ -2363,6 +2289,10 @@ mod tests {
                 "oxtask.task.unparent",
                 "oxtask.task.update",
                 "oxtask.tasks.set_workflow",
+                // oxwiki's commands compose a write of its own folder.
+                "oxwiki.page.delete",
+                "oxwiki.page.restore",
+                "oxwiki.page.write",
             ]
         );
     }

@@ -588,64 +588,6 @@ async fn extension_test_runs_the_harness_suite_over_a_harness_provider() {
     );
 }
 
-/// `extension test` runs the knowledge suite over a knowledge provider —
-/// here the fake in knowledge mode — made the throwaway project's knowledge
-/// store; `ran` shows it.
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread")]
-async fn extension_test_runs_the_knowledge_suite_over_a_knowledge_provider() {
-    let dir = project().await;
-    let ext = dir.path().join(".oxplow/extensions/shelf");
-    std::fs::create_dir_all(ext.join("bin")).unwrap();
-    std::fs::create_dir_all(ext.join("fixtures")).unwrap();
-    let write = "{ command: write_page, input: { id: example, body: '# Example', verified_files: [], removed_files: [] } }";
-    std::fs::write(
-        ext.join("extension.yaml"),
-        format!("manifest: 2\nname: shelf\nintent:\n  purpose: Knowledge over the protocol.\n  examples:\n    - {{ name: basic, input: {write}, expect: the page }}\nrequires: [oxplow-bundled]\npermissions: [process.run]\nproviders:\n  - id: shelf\n    capability: knowledge\n    entry: bin/provider\n    declarations: provider.json\n"),
-    )
-    .unwrap();
-    std::fs::write(
-        ext.join("fixtures/basic.yaml"),
-        format!("when: {write}\nexpect: {{ id: example }}\n"),
-    )
-    .unwrap();
-    std::fs::write(
-        ext.join("fixtures/provider-shelf.yaml"),
-        "config: { team: core }\n",
-    )
-    .unwrap();
-    std::fs::write(
-        ext.join("provider.json"),
-        serde_json::to_string_pretty(&oxplow_provider_fake::knowledge_declarations()).unwrap(),
-    )
-    .unwrap();
-    std::fs::write(
-        ext.join("bin/provider"),
-        format!(
-            "#!/bin/sh\nOXPLOW_FAKE_CAPABILITY=knowledge exec '{}' \"$@\"\n",
-            fake_bin().display()
-        ),
-    )
-    .unwrap();
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        std::fs::set_permissions(
-            ext.join("bin/provider"),
-            std::fs::Permissions::from_mode(0o755),
-        )
-        .unwrap();
-    }
-    let blessed = test_extension(dir.path(), "shelf", true).await.unwrap();
-    assert_eq!(blessed.error_lines(), Vec::<String>::new());
-    let report = test_extension(dir.path(), "shelf", false).await.unwrap();
-    assert_eq!(report.error_lines(), Vec::<String>::new());
-    assert!(
-        report.ran.iter().any(|r| r == "knowledge suite"),
-        "{:?}",
-        report.ran
-    );
-}
-
 /// `extension test` runs the snapshot suite over a snapshots provider —
 /// here the fake in snapshots mode, keeping contents — made the throwaway
 /// project's snapshots; `ran` shows it.
@@ -762,58 +704,6 @@ async fn a_scaffolded_snapshots_provider_is_red_until_a_program_speaks_for_it() 
     );
 }
 
-/// A scaffolded knowledge provider is red until a program speaks for it; the
-/// fake in knowledge mode behind it passes the kit — its scaffolded example
-/// (a page written) and the knowledge suite.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_scaffolded_knowledge_provider_is_red_until_a_program_speaks_for_it() {
-    let dir = project().await;
-    scaffold(
-        dir.path(),
-        Kind::provider("knowledge").unwrap(),
-        "shelf",
-        Some("oxplow:oxplow/request?id=req1"),
-    )
-    .unwrap();
-    let report = test_extension(dir.path(), "shelf", false).await.unwrap();
-    assert!(
-        report
-            .error_lines()
-            .join("\n")
-            .contains("initialize failed"),
-        "{:?}",
-        report.errors
-    );
-    let ext = dir.path().join(".oxplow/extensions/shelf");
-    std::fs::write(
-        ext.join("bin/provider"),
-        format!(
-            "#!/bin/sh\nOXPLOW_FAKE_CAPABILITY=knowledge exec '{}' \"$@\"\n",
-            fake_bin().display()
-        ),
-    )
-    .unwrap();
-    std::fs::write(
-        ext.join("provider.json"),
-        serde_json::to_string_pretty(&oxplow_provider_fake::knowledge_declarations()).unwrap(),
-    )
-    .unwrap();
-    std::fs::write(
-        ext.join("fixtures/provider-shelf.yaml"),
-        "config: { team: core }\n",
-    )
-    .unwrap();
-    let blessed = test_extension(dir.path(), "shelf", true).await.unwrap();
-    assert_eq!(blessed.error_lines(), Vec::<String>::new());
-    let report = test_extension(dir.path(), "shelf", false).await.unwrap();
-    assert_eq!(report.error_lines(), Vec::<String>::new());
-    assert!(
-        report.ran.iter().any(|r| r == "knowledge suite"),
-        "{:?}",
-        report.ran
-    );
-}
-
 /// A scaffolded script implementation checks clean,
 /// and is red until its verbs are written: its stubs fail the capability's
 /// conformance suite.
@@ -822,7 +712,7 @@ async fn a_scaffolded_script_implementation_is_red_until_its_verbs_are_written()
     let dir = project().await;
     scaffold(
         dir.path(),
-        Kind::implementation("knowledge").unwrap(),
+        Kind::implementation("agent_harness").unwrap(),
         "shelf",
         Some("oxplow:oxplow/request?id=req1"),
     )
@@ -840,7 +730,7 @@ async fn a_scaffolded_script_implementation_is_red_until_its_verbs_are_written()
     assert!(report.ok, "{}", render_findings(&report, Format::Text));
     let report = test_extension(dir.path(), "shelf", false).await.unwrap();
     assert!(
-        report.ran.iter().any(|r| r == "knowledge suite"),
+        report.ran.iter().any(|r| r == "agent_harness suite"),
         "{:?}",
         report.ran
     );
@@ -848,7 +738,7 @@ async fn a_scaffolded_script_implementation_is_red_until_its_verbs_are_written()
         report
             .error_lines()
             .iter()
-            .any(|e| e.contains("knowledge conformance")),
+            .any(|e| e.contains("agent_harness conformance")),
         "{:?}",
         report.errors
     );

@@ -196,9 +196,6 @@ mod tests {
             crate::test_fixtures::init_git_repo(dir.path());
             std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
             std::fs::write(dir.path().join(".oxplow/project.yaml"), yaml).unwrap();
-            // The defaults are what this test is about: not the fixture's
-            // personal setting that turns oxwiki off.
-            std::fs::remove_file(dir.path().join(".oxplow/personal.yaml")).unwrap();
             dir
         };
 
@@ -221,10 +218,6 @@ mod tests {
                 .is_some_and(|s| s.extensions().iter().any(|e| e.name == name && e.enabled))
         };
         assert!(runs(&svc, "oxtask") && runs(&svc, "oxwiki"));
-        // The oxwiki extension keeps the store: core's built-in stands down
-        // (two keepers of one folder would write its pages twice).
-        assert!(svc.knowledge.enabled().is_empty(), "built-in stands down");
-        assert!(!svc.oxwiki.present());
 
         // Listed, with bundled on: both activate with nothing held.
         let dir = project("extensions: [oxplow-bundled, oxtask, oxwiki]\n");
@@ -258,7 +251,6 @@ mod tests {
     async fn the_default_configuration_writes_reads_links_and_searches_a_page() {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
-        std::fs::remove_file(dir.path().join(".oxplow/personal.yaml")).unwrap();
         let svc = crate::Services::in_memory(dir.path()).await.unwrap();
         svc.streams.ensure_primary().await.unwrap();
         crate::test_fixtures::activate(&svc).await;

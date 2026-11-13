@@ -4584,7 +4584,6 @@ dependencies = [
  "oxplow-lsp",
  "oxplow-lsp-installer",
  "oxplow-oauth-sim",
- "oxplow-oxwiki",
  "oxplow-provider-fake",
  "oxplow-provider-protocol",
  "oxplow-pty",
@@ -4838,7 +4837,6 @@ dependencies = [
  "oxplow-config",
  "oxplow-db",
  "oxplow-domain",
- "oxplow-oxwiki",
  "oxplow-sdk",
  "oxplow-workspace-hack",
  "rusqlite",
@@ -4991,7 +4989,6 @@ dependencies = [
  "oxplow-db",
  "oxplow-domain",
  "oxplow-git",
- "oxplow-oxwiki",
  "oxplow-sdk",
  "oxplow-workspace-hack",
  "rmcp",
@@ -5027,21 +5024,6 @@ dependencies = [
  "sha2 0.11.0",
  "tokio",
  "url",
-]
-
-[[package]]
-name = "oxplow-oxwiki"
-version = "0.8.0"
-dependencies = [
- "async-trait",
- "oxplow-db",
- "oxplow-domain",
- "oxplow-fs-watch",
- "oxplow-workspace-hack",
- "rusqlite",
- "tempfile",
- "tokio",
- "tracing",
 ]
 
 [[package]]

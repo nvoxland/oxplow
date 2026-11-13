@@ -730,18 +730,6 @@ async fn capability_suite(
             // environment would: its PATH, then the install dirs.
             oxplow_app::harness_conformance::suite(svc, id, &json!({}), &kit_search_path(env)).await
         }
-        providers::knowledge::KnowledgeHost::CAPABILITY => {
-            // Every enabled store is in use at once: once published, the
-            // one under test is one of them, and the suite names it.
-            publish_generation(svc).await?;
-            if svc.knowledge.get(id).is_none() {
-                return Err(format!("`{id}` isn't an enabled knowledge store"));
-            }
-            oxplow_app::conformance::SuiteRun {
-                findings: oxplow_app::knowledge_conformance::suite(svc, id, &Actor::Human).await,
-                left: Vec::new(),
-            }
-        }
         providers::snapshots::SnapshotsHost::CAPABILITY => {
             // The one under test is the project's snapshots, and
             // the captures follow it now (the throwaway host's pump

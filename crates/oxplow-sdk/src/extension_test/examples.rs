@@ -406,7 +406,7 @@ pub(super) async fn job_example(
                 .svc
                 .sql
                 .query_sql(
-                    "SELECT 1 FROM v_knowledge_page WHERE uri = ?1",
+                    "SELECT 1 FROM v_oxplow_knowledge_page WHERE uri = ?1",
                     vec![oxplow_db::SqlCell::Text(page.clone())],
                     None,
                 )

@@ -184,11 +184,7 @@ mod tests {
                     .map(|f| (f.to_string(), serde_json::Value::Bool(true)))
                     .collect(),
             ),
-            fields: serde_json::json!([]),
-            stages: serde_json::json!([]),
-            kinds: serde_json::Value::Array(Vec::new()),
             offered: true,
-            id_pattern: None,
             icon: None,
             config: serde_json::json!({}),
             description: None,

@@ -845,13 +845,7 @@ mod tests {
         let paths: Vec<_> = files.iter().map(|f| f.path.as_str()).collect();
         assert_eq!(
             paths,
-            vec![
-                ".gitignore",
-                ".oxplow/personal.yaml",
-                "dist/bundle.js",
-                "secret.log",
-                "src/main.rs"
-            ]
+            vec![".gitignore", "dist/bundle.js", "secret.log", "src/main.rs"]
         );
     }
 }

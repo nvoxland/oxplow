@@ -369,9 +369,9 @@ was deleted with its tests.
 **Watching, end to end** is one Rust test, `real_watch_tests.rs` in
 `oxplow-app`: services booted as the daemon boots them over a real temp git
 project and its real watcher. A file edit, a folder made after the watch
-started, a 3,000-file burst, a hand-written knowledge page, a `generated.exclude`
+started, a 3,000-file burst, a `generated.exclude`
 edit of `project.yaml`, and a stream made later (its own ignore rules, its
-commits) each reach `v_change_file`, `v_snapshot_file`, `v_knowledge_page`,
+commits) each reach `v_change_file`, `v_snapshot_file`,
 `v_file` or `v_commit`. No browser is involved, so it is not an e2e spec.
 
 ## The last callers (P5.B7)

@@ -24,17 +24,6 @@ pub struct ListCommentsParams {
     pub status: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct KnowledgeDriftParams {
-    /// The page's store: needed only when several are enabled.
-    #[serde(default)]
-    pub store: Option<String>,
-    /// The store's page id (oxwiki: its slug).
-    pub id: String,
-    /// Repo-relative file path referenced by the page.
-    pub path: String,
-}
-
 /// A comment thread with the typed context it was anchored in resolved,
 /// so the agent sees *what the highlighted thing is*: `primary` is the
 /// target (a task, a file…), `context_chain` the ancestor regions
@@ -132,70 +121,48 @@ fn resolve_comment_scope(
 }
 
 pub fn ops(services: ServicesSlot) -> Vec<Op> {
-    vec![
-        read_op(
-            "comment.read",
-            "list",
-            services.clone(),
-            |svc, _, p: ListCommentsParams| async move {
-                let threads = match resolve_comment_scope(p.scope.as_deref(), p.id.as_deref())? {
-                    CommentScope::Thread(id) => svc
-                        .comment_store
-                        .list_for_thread(&id)
-                        .await
-                        .map_err(failed)?,
-                    CommentScope::Stream(id) => svc
-                        .comment_store
-                        .list_for_stream(&id)
-                        .await
-                        .map_err(failed)?,
-                };
-                let status = p.status.as_deref().unwrap_or("all");
-                let filtered: Vec<_> = threads
-                    .into_iter()
-                    .filter(|t| match status {
-                        "needs_response" => t.needs_response(),
-                        "open" => t.comment.status == CommentStatus::Open,
-                        _ => true,
-                    })
-                    .collect();
-                let mut enriched = Vec::with_capacity(filtered.len());
-                for t in filtered {
-                    let primary = ref_resolver::resolve_ref(&svc, &t.comment.target).await;
-                    let context_chain =
-                        ref_resolver::resolve_refs(&svc, &t.comment.context_chain).await;
-                    let referenced = ref_resolver::resolve_refs(&svc, &t.comment.referenced).await;
-                    enriched.push(EnrichedCommentThread {
-                        thread: t,
-                        primary,
-                        context_chain,
-                        referenced,
-                    });
-                }
-                result_of(enriched)
-            },
-        ),
-        read_op(
-            "knowledge.read",
-            "drift",
-            services,
-            |svc, _, p: KnowledgeDriftParams| async move {
-                let store = svc.knowledge.resolve(p.store.as_deref())?;
-                let page = oxplow_domain::uri::build::knowledge_uri(store.id(), &p.id);
-                let drift = crate::knowledge_drift::compute_knowledge_drift(
-                    &svc.page_ref_store,
-                    &svc.snapshot_store,
-                    &svc.snapshot_content,
-                    &svc.layout.project_dir,
-                    &page,
-                    &p.path,
-                )
-                .await
-                .map_err(failed)?;
-                result_of(drift)
-            },
-        ),
-    ]
+    vec![read_op(
+        "comment.read",
+        "list",
+        services.clone(),
+        |svc, _, p: ListCommentsParams| async move {
+            let threads = match resolve_comment_scope(p.scope.as_deref(), p.id.as_deref())? {
+                CommentScope::Thread(id) => svc
+                    .comment_store
+                    .list_for_thread(&id)
+                    .await
+                    .map_err(failed)?,
+                CommentScope::Stream(id) => svc
+                    .comment_store
+                    .list_for_stream(&id)
+                    .await
+                    .map_err(failed)?,
+            };
+            let status = p.status.as_deref().unwrap_or("all");
+            let filtered: Vec<_> = threads
+                .into_iter()
+                .filter(|t| match status {
+                    "needs_response" => t.needs_response(),
+                    "open" => t.comment.status == CommentStatus::Open,
+                    _ => true,
+                })
+                .collect();
+            let mut enriched = Vec::with_capacity(filtered.len());
+            for t in filtered {
+                let primary = ref_resolver::resolve_ref(&svc, &t.comment.target).await;
+                let context_chain =
+                    ref_resolver::resolve_refs(&svc, &t.comment.context_chain).await;
+                let referenced = ref_resolver::resolve_refs(&svc, &t.comment.referenced).await;
+                enriched.push(EnrichedCommentThread {
+                    thread: t,
+                    primary,
+                    context_chain,
+                    referenced,
+                });
+            }
+            result_of(enriched)
+        },
+    )]
 }
 
 #[cfg(test)]

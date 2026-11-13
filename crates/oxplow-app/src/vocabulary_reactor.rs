@@ -22,7 +22,6 @@
 //! the same transaction that checks it.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
 use oxplow_db::event_retention::{restate_declared_tx, DeclaredRetention};
 use oxplow_db::event_type_store::{recorded_schema_tx, restate_tx, EventTypeRow};
@@ -36,26 +35,22 @@ use crate::extension::extension_event_types::EventTypes;
 use crate::extension::extensions::Extension;
 use oxplow_domain::uri::resources::{ResourceDecl, ResourceRegistry};
 
-/// What the generation needs of the host to build a vocabulary: the
-/// active task tracker's id recognizer, asked at each build.
-pub struct VocabularyService {
-    /// What the vocabulary recognizes in text from the capabilities in use.
-    recognizers: Recognize,
-}
+/// What the generation needs of the host to build a vocabulary.
+pub struct VocabularyService;
 
-/// What text names through what is in use: the live task stores' ids (a
-/// store's `id_pattern`, how `tsk42` is read — from the model registry) and
-/// the enabled knowledge stores (how `[[<store>:<id>]]` is read).
+/// What text names through what is in use, from the model registry: the
+/// live task stores' ids (a store's `id_pattern`, how `tsk42` is read) and
+/// the knowledge stores (how `[[<store>:<id>]]` is read, and a bare
+/// `[[id]]` a store's `id_pattern` matches).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Recognizers {
     /// `(store, pattern)` per task store whose ids text may name loosely;
     /// the first match wins.
     pub task_ids: Vec<(String, String)>,
-    pub knowledge_stores: Vec<String>,
+    /// `(store, pattern)` per knowledge store; the pattern, when it says,
+    /// makes a bare id one of its pages.
+    pub knowledge_stores: Vec<(String, Option<String>)>,
 }
-
-/// The recognizers, asked at each build.
-pub type Recognize = Arc<dyn Fn() -> Recognizers + Send + Sync>;
 
 /// What one enabled extension brings to the vocabulary.
 #[derive(serde::Serialize)]
@@ -87,13 +82,9 @@ pub struct PreparedVocabulary {
 }
 
 impl PreparedVocabulary {
-    /// Freeze one candidate's enabled declarations with a host-selected
-    /// task recognizer. This permits capability and vocabulary candidates to
-    /// use the same planned selection without changing either live registry.
-    pub fn prepare(
-        snapshot: &CatalogSnapshot,
-        recognizers: Recognizers,
-    ) -> Result<Self, VocabularyErrors> {
+    /// Freeze one candidate's enabled declarations and what its models make
+    /// text recognize, without changing the database or either live registry.
+    pub fn prepare(snapshot: &CatalogSnapshot) -> Result<Self, VocabularyErrors> {
         let errors: VocabularyErrors = snapshot
             .extensions()
             .iter()
@@ -103,14 +94,12 @@ impl PreparedVocabulary {
         if !errors.is_empty() {
             return Err(errors);
         }
-        // The live task stores' own id patterns (`fills.id_pattern`), after
-        // what the host recognizes.
-        let mut recognizers = recognizers;
-        for ids in crate::models::ModelRegistry::of(snapshot.extensions()).task_ids() {
-            if !recognizers.task_ids.contains(&ids) {
-                recognizers.task_ids.push(ids);
-            }
-        }
+        // The live stores' own id patterns (`fills.id_pattern`).
+        let models = crate::models::ModelRegistry::of(snapshot.extensions());
+        let recognizers = Recognizers {
+            task_ids: models.task_ids(),
+            knowledge_stores: models.knowledge_stores(),
+        };
         Ok(Self {
             generation: snapshot.generation().to_string(),
             declared: declarations(snapshot.extensions()),
@@ -142,8 +131,25 @@ impl PreparedVocabulary {
                 vocabulary.resources = vocabulary
                     .resources
                     .clone()
-                    .with_knowledge_stores(self.recognizers.knowledge_stores.iter().cloned());
-                vocabulary.resources = vocabulary.resources.clone().without_task_ids();
+                    .without_knowledge_stores()
+                    .without_task_ids();
+                for (store, pattern) in &self.recognizers.knowledge_stores {
+                    match vocabulary
+                        .resources
+                        .clone()
+                        .with_knowledge_store(store, pattern.as_deref())
+                    {
+                        Ok(resources) => vocabulary.resources = resources,
+                        Err(error) => {
+                            errors.entry("<host>".to_string()).or_default().push(
+                                Diagnostic::error(
+                                    "activation.knowledge_id_recognizer",
+                                    format!("knowledge id recognizer: {error}"),
+                                ),
+                            );
+                        }
+                    }
+                }
                 for (provider, pattern) in &self.recognizers.task_ids {
                     match vocabulary
                         .resources
@@ -202,37 +208,14 @@ fn declarations(extensions: &[Extension]) -> Declared {
 }
 
 impl VocabularyService {
-    pub fn new(recognizers: Recognize) -> Self {
-        Self { recognizers }
-    }
-
-    /// Capture declarations and the current host recognizer from one catalog
-    /// snapshot. Coordinated capability changes should instead supply their
-    /// planned recognizer to PreparedVocabulary::prepare.
+    /// Capture declarations and what the models make text recognize from one
+    /// catalog snapshot.
     pub fn prepare(
         &self,
         snapshot: &CatalogSnapshot,
     ) -> Result<PreparedVocabulary, VocabularyErrors> {
-        PreparedVocabulary::prepare(snapshot, (self.recognizers)())
+        PreparedVocabulary::prepare(snapshot)
     }
-}
-
-/// `resources` recognizing what `recognizers` say: the active task
-/// tracker's ids (or none) and the enabled knowledge stores.
-pub fn recognizing(resources: ResourceRegistry, recognizers: &Recognizers) -> ResourceRegistry {
-    let mut resources = resources
-        .with_knowledge_stores(recognizers.knowledge_stores.iter().cloned())
-        .without_task_ids();
-    for (provider, pattern) in &recognizers.task_ids {
-        resources = match resources.clone().with_task_ids(provider, pattern) {
-            Ok(with) => with,
-            Err(e) => {
-                tracing::warn!(provider, error = %e, "a task store's id pattern doesn't compile");
-                resources
-            }
-        };
-    }
-    resources
 }
 
 /// The vocabulary `declared` makes, checked against and restated into

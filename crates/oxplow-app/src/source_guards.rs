@@ -1424,7 +1424,7 @@ fn pages_take_spec_types_from_the_spec_module() {
 /// and re-export nothing, or put it under a facade such as `extension/`.
 #[test]
 fn the_crate_root_exposes_no_more_modules() {
-    const PUB_MODS: usize = 133;
+    const PUB_MODS: usize = 130;
     let lib = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"))
         .expect("lib.rs");
     let count = lib.lines().filter(|l| l.starts_with("pub mod ")).count();

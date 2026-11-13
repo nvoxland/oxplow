@@ -2131,54 +2131,6 @@ impl SqliteSnapshotStore {
             .await
     }
 
-    /// For each input snapshot id, the oxwiki pages (their URIs) whose
-    /// `.md` file changed in that snapshot's file_snapshot rows. Cheap
-    /// targeted query for the Local History dashboard's knowledge badges —
-    /// avoids fetching the full file list per snapshot.
-    pub async fn list_knowledge_pages_for_snapshots(
-        &self,
-        snapshot_ids: Vec<i64>,
-    ) -> Result<Vec<(i64, String)>, DomainError> {
-        if snapshot_ids.is_empty() {
-            return Ok(vec![]);
-        }
-        self.db
-            .call(move |conn| {
-                let placeholders: Vec<String> =
-                    (1..=snapshot_ids.len()).map(|i| format!("?{i}")).collect();
-                let dir = oxplow_domain::knowledge::OXWIKI_DIR;
-                let sql = format!(
-                    "SELECT snapshot_id, path FROM file_snapshot \
-                     WHERE snapshot_id IN ({}) \
-                       AND path LIKE '{dir}/%.md'",
-                    placeholders.join(",")
-                );
-                let mut stmt = conn.prepare(&sql)?;
-                let params_iter: Vec<&dyn rusqlite::ToSql> = snapshot_ids
-                    .iter()
-                    .map(|id| id as &dyn rusqlite::ToSql)
-                    .collect();
-                let rows = stmt.query_map(rusqlite::params_from_iter(params_iter), |row| {
-                    let sid: i64 = row.get("snapshot_id")?;
-                    let path: String = row.get("path")?;
-                    let slug = path
-                        .strip_prefix(oxplow_domain::knowledge::OXWIKI_DIR)
-                        .and_then(|s| s.strip_prefix('/'))
-                        .and_then(|s| s.strip_suffix(".md"))
-                        .unwrap_or(&path);
-                    Ok((
-                        sid,
-                        oxplow_domain::uri::build::knowledge_uri(
-                            oxplow_domain::knowledge::OXWIKI,
-                            slug,
-                        ),
-                    ))
-                })?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()
-            })
-            .await
-    }
-
     pub async fn list_files_for_snapshot(
         &self,
         snapshot_id: i64,

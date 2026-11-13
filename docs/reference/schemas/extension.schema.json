@@ -3422,7 +3422,7 @@
           "default": null
         },
         "entry": {
-          "description": "The built-in it is (`oxplow:oxwiki`), or a script in the extension\nthat implements the capability's verbs.",
+          "description": "The built-in it is (`oxplow:snapshot-hashes`), or a script in the extension\nthat implements the capability's verbs.",
           "type": [
             "string",
             "null"
@@ -3481,7 +3481,7 @@
           "default": null
         },
         "when": {
-          "description": "Offered only while a setting of the extension's own configuration\nis one of `in` (`{ config: /oxwiki, in: [true] }`); otherwise it is\ndeclared but off.",
+          "description": "Offered only while a setting of the extension's own configuration\nis one of `in` (`{ config: /store, in: [true] }`); otherwise it is\ndeclared but off.",
           "anyOf": [
             {
               "$ref": "#/definitions/ConfigCondition"

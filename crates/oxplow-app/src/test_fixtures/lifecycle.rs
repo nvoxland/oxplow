@@ -59,10 +59,7 @@ pub(crate) fn write_extension_as(project: &Path, hooks: &str, capability: &str) 
     .unwrap();
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let declared = match capability {
-        "knowledge" => oxplow_provider_fake::knowledge_declarations(),
-        _ => oxplow_provider_fake::declarations(),
-    };
+    let declared = oxplow_provider_fake::declarations();
     std::fs::write(
         dir.join("provider.json"),
         serde_json::to_string_pretty(&declared).unwrap(),

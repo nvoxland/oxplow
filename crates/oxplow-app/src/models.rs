@@ -38,19 +38,11 @@ pub struct FillSpec {
     pub stores: Vec<String>,
     /// The store's own fields.
     pub fields: Vec<FieldDecl>,
-    /// Added by `with_provider_fills` for a running provider instance, never
-    /// declared by an extension. Only such a fill is the provider read
-    /// adapter's to write through (`providers::model_records`): a store an
-    /// extension fills has its own writer.
-    #[serde(default)]
-    pub provider: bool,
     /// How its items' ids look in text (a regex matched whole, `tsk[0-9]+`):
-    /// a loose id that matches is its store's item (`fills.id_pattern`, or a
-    /// provider instance's declared `id_pattern`).
+    /// a loose id that matches is its store's item (`fills.id_pattern`).
     #[serde(default)]
     pub id_pattern: Option<String>,
-    /// Its store's workflow, in order (`fills.stages`, or a provider
-    /// instance's declared stages): each stage's id, title and bucket.
+    /// Its store's workflow, in order (`fills.stages`): each stage's id, title and bucket.
     #[serde(default)]
     pub stages: Vec<oxplow_domain::tasks::StageDecl>,
     /// The files its store keeps its rows in (`fills.files`): an agent's read
@@ -140,81 +132,6 @@ impl ModelRegistry {
     }
 }
 
-/// The model a provider instance of `capability` fills under its own id
-/// (`.context/models.md` "Providers"): its records are read as that
-/// model's rows by `providers::model_records`.
-pub fn provider_model(capability: &str) -> Option<&'static str> {
-    match capability {
-        "knowledge" => Some("oxplow/knowledge_record"),
-        _ => None,
-    }
-}
-
-impl ModelRegistry {
-    /// Add the fills of the running provider instances (`rows` are the
-    /// capability rows of a generation): an external instance of a task
-    /// tracker fills `oxplow/task_record`, of a knowledge store
-    /// `oxplow/knowledge_record`, as store = its instance id, written by its
-    /// extension; its own fields are the fill's. Nothing is added when the
-    /// model isn't declared and open (bundled off), or when another
-    /// extension already writes that store id.
-    pub fn with_provider_fills(
-        mut self,
-        rows: &[oxplow_db::capability_store::CapabilityProvider],
-    ) -> Self {
-        for row in rows
-            .iter()
-            .filter(|r| r.source == "external" && r.available)
-        {
-            let (Some(extension), Some(model)) = (&row.extension, provider_model(&row.capability))
-            else {
-                continue;
-            };
-            let Some(spec) = self.models.get(model) else {
-                continue;
-            };
-            if !spec.open {
-                continue;
-            }
-            let taken = self
-                .fills
-                .iter()
-                .any(|f| f.model == model && f.stores.contains(&row.provider));
-            if taken {
-                continue;
-            }
-            let fields =
-                serde_json::from_value::<Vec<oxplow_domain::tasks::FieldDecl>>(row.fields.clone())
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|f| FieldDecl {
-                        name: f.name,
-                        title: f.title,
-                        kind: match f.kind {
-                            oxplow_domain::tasks::FieldKind::Enum => "enum",
-                            oxplow_domain::tasks::FieldKind::Text => "text",
-                            oxplow_domain::tasks::FieldKind::Number => "number",
-                        }
-                        .into(),
-                        values: (!f.values.is_empty()).then_some(f.values),
-                        read_only: f.read_only,
-                    })
-                    .collect();
-            self.fills.push(FillSpec {
-                extension: extension.clone(),
-                model: model.into(),
-                stores: vec![row.provider.clone()],
-                fields,
-                provider: true,
-                id_pattern: row.id_pattern.clone(),
-                stages: serde_json::from_value(row.stages.clone()).unwrap_or_default(),
-                files: None,
-            });
-        }
-        self
-    }
-}
-
 impl ModelRegistry {
     /// The row whose file `rel` (a path from the project root) is, as a
     /// fill's `files` says: `(model id, row uri)`.
@@ -259,6 +176,26 @@ impl ModelRegistry {
             })
             .filter_map(|f| f.id_pattern.as_ref().map(|p| (f, p)))
             .flat_map(|(f, p)| f.stores.iter().map(move |s| (s.clone(), p.clone())))
+            .collect()
+    }
+
+    /// Each store of the knowledge model (one whose resource is
+    /// `oxplow/knowledge`) with how its page ids look in text, when its fill
+    /// says: what makes `[[<store>:<id>]]`, and a bare `[[id]]` the pattern
+    /// matches, one of its pages.
+    pub fn knowledge_stores(&self) -> Vec<(String, Option<String>)> {
+        self.fills
+            .iter()
+            .filter(|f| {
+                self.models
+                    .get(&f.model)
+                    .is_some_and(|m| m.decl.resource == oxplow_domain::uri::resources::KNOWLEDGE)
+            })
+            .flat_map(|f| {
+                f.stores
+                    .iter()
+                    .map(move |s| (s.clone(), f.id_pattern.clone()))
+            })
             .collect()
     }
 }
@@ -330,7 +267,7 @@ impl ModelRegistry {
     /// namespace (`v_model_field_decl`).
     /// Each live store of each model: `(model, store, extension, provider,
     /// id_pattern)`.
-    pub fn store_decls(&self) -> Vec<(String, String, String, bool, Option<String>)> {
+    pub fn store_decls(&self) -> Vec<(String, String, String, Option<String>)> {
         self.fills
             .iter()
             .filter(|f| self.models.contains_key(&f.model))
@@ -340,7 +277,6 @@ impl ModelRegistry {
                         f.model.clone(),
                         store.clone(),
                         f.extension.clone(),
-                        f.provider,
                         f.id_pattern.clone(),
                     )
                 })
@@ -759,7 +695,6 @@ mod tests {
             model: "shelf/book".into(),
             stores: vec!["shelf-folder".into()],
             fields: vec![],
-            provider: false,
             id_pattern: None,
             stages: vec![],
             files: None,
@@ -861,7 +796,6 @@ mod tests {
             model: "x/task".into(),
             stores: vec!["tracker".into()],
             fields: vec![],
-            provider: false,
             id_pattern: Some("tsk[0-9]+".into()),
             stages: vec![],
             files: None,
@@ -871,7 +805,6 @@ mod tests {
             model: "x/task".into(),
             stores: vec!["quiet".into()],
             fields: vec![],
-            provider: false,
             id_pattern: None,
             stages: vec![],
             files: None,

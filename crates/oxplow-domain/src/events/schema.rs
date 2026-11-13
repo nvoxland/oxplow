@@ -194,17 +194,7 @@ impl EventSchemaRegistry {
         r.register::<TaskAssigned>().expect("core type registers");
         r.register::<ThreadCheckpoint>()
             .expect("core type registers");
-        r.register::<KnowledgePageWritten>()
-            .expect("core type registers");
-        r.register::<KnowledgePageDeleted>()
-            .expect("core type registers");
-        r.register::<KnowledgePageRecorded>()
-            .expect("core type registers");
-        r.register::<KnowledgePageRead>()
-            .expect("core type registers");
         r.register::<RecordRead>().expect("core type registers");
-        r.register::<KnowledgePageDrifted>()
-            .expect("core type registers");
         r.register::<RefDrifted>().expect("core type registers");
         r.register::<HandoffSent>().expect("core type registers");
         r.register::<HandoffSettled>().expect("core type registers");
@@ -1849,78 +1839,6 @@ impl EventType for ContributionEnabled {
     type Payload = ContributionEnabledV1;
 }
 
-/// `knowledge.page.written@3`: a knowledge page's row and edges were
-/// restated from its body — by `oxplow.knowledge.write_page` / `link` /
-/// `resync`, or by oxwiki's watcher after a hand edit
-/// (`system:oxwiki_watch`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct KnowledgePageWrittenV3 {
-    /// The page (`oxplow:oxplow/knowledge?id=<id>&store=<store>`).
-    pub page: String,
-    /// The store that keeps it (`oxwiki`, an instance's id).
-    pub store: String,
-    /// Every ref the page now points at (`oxplow:oxplow/file?path=src/lib.rs`,
-    /// `oxplow:oxplow/knowledge?id=x&store=oxwiki`, …).
-    pub outbound: Vec<String>,
-    /// The snapshot its new refs are pinned to, when there is one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub snapshot: Option<i64>,
-}
-
-pub struct KnowledgePageWritten;
-impl EventType for KnowledgePageWritten {
-    const TYPE: &'static str = "knowledge.page.written";
-    const V: u32 = 3;
-    type Payload = KnowledgePageWrittenV3;
-}
-
-/// A knowledge page as a store records it: what a provider's write verb
-/// answers and its collector streams. The body is what it keeps; the refs
-/// are what the page links, in oxplow's grammar (`oxplow:oxplow/file?path=src/lib.rs`,
-/// `oxplow:oxplow/knowledge?id=other&store=vault`), which core pins and links from — never
-/// parsed out of a body in the store's own grammar.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct KnowledgePageRecord {
-    /// `oxplow:oxplow/knowledge?id=<id>&store=<store>`: the store is the
-    /// recording instance's.
-    pub uri: String,
-    /// One of the kinds the store declares; absent: its first.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub kind: Option<String>,
-    /// Where the person opens it in the store's own app.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub url: Option<String>,
-    /// Who last changed it, as the store names them.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub author: Option<String>,
-    pub title: String,
-    pub body: String,
-    /// What it links, as URIs.
-    pub uris: Vec<String>,
-    /// RFC 3339: when the store last changed it.
-    pub updated_at: String,
-    /// It was deleted in the store.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub deleted: bool,
-}
-
-/// `knowledge.page.recorded@3`: a knowledge store's page, as it recorded
-/// it (`.context/knowledge.md` "The capability").
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct KnowledgePageRecordedV3 {
-    pub page: KnowledgePageRecord,
-}
-
-pub struct KnowledgePageRecorded;
-impl EventType for KnowledgePageRecorded {
-    const TYPE: &'static str = "knowledge.page.recorded";
-    const V: u32 = 3;
-    type Payload = KnowledgePageRecordedV3;
-}
-
 /// How an agent read a knowledge page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -1938,17 +1856,6 @@ impl ReadVia {
             ReadVia::File => "file",
         }
     }
-}
-
-/// `knowledge.page.read@1`: an agent read a knowledge page — through
-/// `oxplow_read` (`via: tool`), or its own read of the page's file (`via:
-/// file`, caused by the tool call). A person's opens are their page visits.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct KnowledgePageReadV1 {
-    /// The page (`oxplow:oxplow/knowledge?id=<id>&store=<store>`).
-    pub page: String,
-    pub via: ReadVia,
 }
 
 /// `record.read@1`: an agent read a row of a shared model — through
@@ -1969,36 +1876,6 @@ impl EventType for RecordRead {
     const TYPE: &'static str = "record.read";
     const V: u32 = 1;
     type Payload = RecordReadV1;
-}
-
-pub struct KnowledgePageRead;
-impl EventType for KnowledgePageRead {
-    const TYPE: &'static str = "knowledge.page.read";
-    const V: u32 = 1;
-    type Payload = KnowledgePageReadV1;
-}
-
-/// `knowledge.page.drifted@1`: a snapshot of the primary stream changed
-/// files a recorded knowledge page cites, so what the page says of them may
-/// no longer hold (`v_knowledge_ref.stale`), whether or not it was stale
-/// already. Caused by the `snapshot.taken`. What re-counts stale pages
-/// follows it instead of every snapshot.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct KnowledgePageDriftedV1 {
-    /// The page (`oxplow:oxplow/knowledge?id=<id>&store=<store>`).
-    pub page: String,
-    /// The snapshot that changed them.
-    pub snapshot: i64,
-    /// The cited files it changed (repo-relative).
-    pub paths: Vec<String>,
-}
-
-pub struct KnowledgePageDrifted;
-impl EventType for KnowledgePageDrifted {
-    const TYPE: &'static str = "knowledge.page.drifted";
-    const V: u32 = 1;
-    type Payload = KnowledgePageDriftedV1;
 }
 
 /// `snapshot.ref_drifted@1`: a snapshot of the primary stream changed files a
@@ -2104,22 +1981,6 @@ impl EventType for UiOpErrorDismissed {
     const TYPE: &'static str = "ui.op_error.dismissed";
     const V: u32 = 1;
     type Payload = UiOpErrorMarkV1;
-}
-
-/// `knowledge.page.deleted@3`: a knowledge page is gone, its row and
-/// edges with it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct KnowledgePageDeletedV3 {
-    /// The page (`oxplow:oxplow/knowledge?id=<id>&store=<store>`).
-    pub page: String,
-}
-
-pub struct KnowledgePageDeleted;
-impl EventType for KnowledgePageDeleted {
-    const TYPE: &'static str = "knowledge.page.deleted";
-    const V: u32 = 3;
-    type Payload = KnowledgePageDeletedV3;
 }
 
 /// `handoff.sent@2`: work was handed from one thread to another
@@ -2313,11 +2174,6 @@ mod tests {
                 ("file.saved", 1),
                 ("handoff.sent", 2),
                 ("handoff.settled", 2),
-                ("knowledge.page.deleted", 3),
-                ("knowledge.page.drifted", 1),
-                ("knowledge.page.read", 1),
-                ("knowledge.page.recorded", 3),
-                ("knowledge.page.written", 3),
                 ("record.read", 1),
                 ("snapshot.ref_drifted", 1),
                 ("snapshot.taken", 3),

@@ -81,15 +81,7 @@ impl PreparedProviderGeneration {
                     .as_ref()
                     .map(|capability| capability.features().clone())
                     .unwrap_or_default(),
-                fields: serde_json::Value::Array(Vec::new()),
-                stages: serde_json::Value::Array(Vec::new()),
-                kinds: staged
-                    .capability
-                    .as_ref()
-                    .map(|capability| capability.kinds().clone())
-                    .unwrap_or_default(),
                 offered: true,
-                id_pattern: None,
                 icon: None,
                 config: serde_json::json!({}),
                 description: None,

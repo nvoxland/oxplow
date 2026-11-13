@@ -68,17 +68,9 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                     ReadError::Storage(e) => failed(e),
                     other => invalid("/uri", other.to_string()),
                 })?;
-                // An agent reading a knowledge page is a read of it. A read
-                // runs unrecorded (its events go nowhere), so it logs this
-                // one itself.
-                if matches!(invocation.actor(), Actor::Agent { .. })
-                    && out.resource == oxplow_domain::uri::resources::KNOWLEDGE
-                {
-                    crate::knowledge::log_read(&svc, invocation.actor(), &out.uri)
-                        .await
-                        .map_err(failed)?;
-                }
-                // Any row of a shared model is read the same way.
+                // An agent reading a row of a shared model is a read of it. A
+                // read runs unrecorded (its events go nowhere), so it logs
+                // this one itself.
                 if matches!(invocation.actor(), Actor::Agent { .. }) {
                     crate::record_reads::log_read(&svc, invocation.actor(), &out.uri)
                         .await

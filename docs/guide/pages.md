@@ -15,7 +15,7 @@ can **Save as knowledge page** or **Save as Page** to keep it.
 
 Everything oxplow tracks is exposed as read-only SQL views: `v_oxplow_task`
 (the tasks of every store that fills the task model), `v_request`,
-`v_thread`, `v_comment`, `v_knowledge_page`, `v_turn_file`, `v_agent_turn`,
+`v_thread`, `v_comment`, `v_oxplow_knowledge_page`, `v_turn_file`, `v_agent_turn`,
 `v_token_usage`, `v_fact`, and more.
 
 **Explore Data** (launcher → Data) lists every view in its rail. Pick one to

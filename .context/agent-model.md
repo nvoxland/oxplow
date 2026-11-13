@@ -356,7 +356,7 @@ or an `lsp.servers` entry in `.oxplow/project.yaml`. `v_lsp_server` says
 what's configured, installed and running.
 
 **Knowledge and links.** Knowledge reads are `oxplow_query_sql` over
-`v_oxplow_knowledge_page` / `v_knowledge_pin` (stale pins) and `v_page_ref` (the
+`v_oxplow_knowledge_page` / `v_oxplow_knowledge_ref` (stale pins) and `v_page_ref` (the
 backlinks graph, both directions), plus `oxplow_search` with `resources: ["oxplow/knowledge"]`;
 `oxplow_knowledge_drift({ store?, id, path })` returns one stale ref's unified diff
 (`status` drifted, unchanged, not_a_ref, no_pin, binary or no_contents).
@@ -1430,10 +1430,12 @@ The write guard is one policy every transport asks, not logic in the hook
 route. It is isolation only; nothing waits on tracked work
 ([work-tracking.md](./work-tracking.md)).
 
-**The two rules:** no thread may change another stream's worktree, and
-knowledge pages are written by command. Everything else is open to every
-thread: its own stream's worktree, files outside every stream, the shared
-knowledge pages (through the store's command: `oxwiki.page.write`), and oxplow's own objects —
+**The two rules:** no thread may change another stream's worktree, and a
+store's row files in a worktree are written by the store's command.
+Everything else is open to every thread: its own stream's worktree, files
+outside every stream, the shared knowledge pages (through the store's command:
+`oxwiki.page.write`, or directly in the primary checkout), and oxplow's own
+objects —
 tasks, notes, comments. The bus's `WriteGate` asks only that
 a `Write` command's thread be open; `Record` commands skip it
 ([commands.md](./commands.md) "The pipeline").
@@ -1475,12 +1477,17 @@ or move) is refused in two places, and nowhere else
   every thread (`write_guard::foreign_worktree_reason`, naming the path
   and the tree). Its own stream's worktree, and an absolute path outside
   every stream's (`~/.claude/plans/foo.md`), are allowed.
-- **A store's rows are written by command.** A direct write to a file a
-  store keeps its rows in — a fill's `files: { folder, suffix }`, the
-  primary project's `.oxplow/oxwiki/<slug>.md` for oxwiki — is denied for
-  every thread (`write_guard::record_file_reason`, from the fills the
-  running generation holds: any store that declares files is covered);
-  the refusal names the store and its extension, whose command writes it.
+- **A store's row files in a worktree are written by command.** A thread
+  in the primary checkout may write a file a store keeps its rows in (a
+  fill's `files: { folder, suffix }`, `.oxplow/oxwiki/<slug>.md` for oxwiki):
+  the store's collector converges it, and `record.read` and the touch follow
+  as for any page. A thread in any other worktree is refused a write to
+  `<its worktree>/<folder>/<id><suffix>` of any fill's `files:`
+  (`write_guard::record_file_reason`, from the fills the running generation
+  holds, so any store that declares files is covered): only the primary
+  checkout's folder is watched (`.oxplow` is git-ignored), so the page would
+  be silently lost. The refusal names the store and its extension, whose
+  command writes to the primary checkout from anywhere.
 - **Shell isn't classified.** An agent's shell commands aren't checked.
 - MCP tools are never refused here: their writes are commands, gated on
   the bus.

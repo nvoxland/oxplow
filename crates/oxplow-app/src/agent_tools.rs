@@ -233,7 +233,6 @@ mod tests {
                 "oxplow_find_page",
                 "oxplow_get_open_page",
                 "oxplow_get_skill",
-                "oxplow_knowledge_drift",
                 "oxplow_list_comments",
                 "oxplow_list_tabs",
                 "oxplow_navigate",

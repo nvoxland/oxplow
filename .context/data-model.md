@@ -1118,34 +1118,14 @@ boot backfill (`symbol_collector::backfill`) refills an empty index from each
 live stream's latest snapshot. Read as `v_symbol` / `v_symbol_capture`; see
 [language-support.md](./language-support.md) "Symbols".
 
-### `knowledge_page` — `KnowledgePageStore` (`crates/oxplow-db/src/knowledge_page_store.rs`)
+### Knowledge pages: no table
 
-The record of the knowledge capability: one row per page of every store
-(oxwiki and any store an extension adds). Columns: `uri` (PK, the page's
-`oxplow:oxplow/knowledge?id=<id>&store=<store>`), `store`, `id` (the
-store's own page id; oxwiki's slug), `kind` (one of the store's declared
-kinds), `title`, `url`, `author`, `body`, `body_hash`, `excerpt`,
-`body_size_bytes`, `files_json` / `dirs_json` (the parsed file and
-`[[dir:…]]` refs), `created_at` and `updated_at`.
-
-For oxwiki the file is the page: it lives at `.oxplow/oxwiki/<slug>.md`
-(not committed — a personal knowledge base), and the row is written with
-the file in one run (`crates/oxplow-oxwiki`, `OxwikiStore`). For another
-store the row is the record the store's `knowledge.page.recorded@3`
-event made. The writers are `knowledge_page_store::upsert_tx` /
-`delete_tx`, inside `oxplow.knowledge.write_page`'s transaction, the
-oxwiki file watch, or the record consumer — see
-[knowledge.md](./knowledge.md) for the write path, pins and hand-edit
-convergence. A disabled store's rows stay recorded; the dataset hides
-them. V28 dropped `wiki_page` and its sibling tables and deleted the
-wiki's old events, `page_ref` rows, visits, bookmarks, usage events,
-search entries, comments and context items (no data carried over).
-
-`knowledge_page_read (id, uri, thread_id, turn_id, via, at)` records an
-agent's reads of a page (`via` `tool` or `file`), written by the
-`knowledge.reads` consumer from `knowledge.page.read` and file-read tool
-calls. `v_knowledge_read` adds a person's page visits
-(`.context/knowledge.md` "Reads").
+Core keeps no table of knowledge pages, their reads or their touches (V35
+dropped `knowledge_page`, `knowledge_page_read` and `knowledge_page_touch`).
+A page is a row of the shared model `oxplow/knowledge_record`
+(`model__oxplow__knowledge_record`), kept by a store; the reads and the
+touches are bundled's own models; the datasets are `v_oxplow_knowledge_*`
+([knowledge.md](./knowledge.md), [models.md](./models.md)).
 
 ### `page_ref` — unified cross-page reference graph (`crates/oxplow-db/src/page_ref_store.rs`, migration `V11__page_ref.sql`)
 
@@ -1182,48 +1162,14 @@ pointing at that snapshot get their `closest_vcs_rev` set and
 in `oxplow_app::file_ref_version`; callers don't pass any of these
 fields by hand — the oxwiki file sync fills them automatically.
 
-**Page sync preserves unchanged pins.** `sync_from_disk_with_refs_versioned`
-calls `SqlitePageRefStore::merge_source` (NOT `replace_source`).
-Each edge is matched against the existing row by the PK; existing
-edges keep their `local_snapshot_id` / `closest_vcs_rev` /
-`vcs_rev_exact`. Only newly-added edges get the current
-snapshot pin. Edges removed from the body are deleted. So editing
-unrelated prose doesn't re-stamp every file ref's freshness — the
-pin only advances when the body actively re-adds the ref OR when
-the agent explicitly verifies it (next paragraph). The oxwiki sync
-also strips `@<version>` literals (`@disk`, `@HEAD`, `@<sha>`,
-etc.) from `[[…]]` and `(file:…@…)` / `(dir:…@…)` body forms
-before parsing, and writes the normalised body back to disk —
-version state lives in the row, not the prose.
-
-**Verification edges under cited dirs survive a write.** One exception
-to "edges not in the body are deleted": a `knowledge_file_ref` edge whose
-`target_id` is a file under a directory the body cites
-(`[[dir:…]]`) is re-included (`path_under_any_dir`) so `merge_source`
-preserves it and its pin. These are **verification edges**, made by
-`oxplow.knowledge.write_page`'s `verified_files` when the agent verifies a fact
-against a specific file it references only by directory. They self-clean: once
-the covering `[[dir:…]]` ref leaves the body, the edge is no longer
-re-included and gets pruned.
-
-**`verified_files` / `removed_files`.** `oxplow.knowledge.write_page` takes
-the paths the agent re-read against the new body (`verified_files`: re-
-pinned to the current snapshot; a file under a cited directory is
-materialized as an edge) and the paths it took out (`removed_files`:
-must be gone). Refs left in the body but in NEITHER list keep their
-existing pin — that's how "this content relies on a stale source" stays
-accurate ([knowledge.md](./knowledge.md)).
-Skill prompt at `crates/oxplow-agent-text/assets/skills/oxplow-knowledge/SKILL.md`.
-
-**User-facing Freshness view.** `v_knowledge_ref` (read by
-`knowledge.ts`'s `readKnowledgeFreshness`) joins `page_ref` with the latest
-primary-stream `file_snapshot` per target path, a `stale` flag per ref.
-The foundation's `wiki-freshness` page
-(with `id=<id>`) shows
-the table with per-ref + per-page "Mark verified" actions, which run
-`oxplow.knowledge.verify_files` (re-writing the page with those refs in
-`verified_files`). The knowledge page chrome adds a `Freshness (N stale)` action
-chip that routes to the page.
+**A model row's body keeps its pins.** A shared model's markdown column with
+`pins: true` is projected by `model_store` (`models.md` "Markdown bodies"): the
+row's file and directory refs are `file_pin` / `dir_pin` edges, each pinned to
+the primary stream's latest snapshot when it is first added, and kept as they
+are when the body is rewritten (editing unrelated prose doesn't re-stamp every
+ref). `oxplow.refs.verify { uri, files? }` re-pins the named refs (all when
+none are named); `v_ref_pin` says which are stale. A directory ref's verified
+file edges under it survive a rewrite while the directory is still cited.
 
 Every stored `source_uri` / `target_uri` is a canonical URI (see
 `.context/resources.md`), built by the owner's builder
@@ -1246,7 +1192,7 @@ at v4 without that column.
 `V101__uri_names.sql` then renamed the columns that held a URI under the
 name `ref` (`task.uri` / `parent_uri`, `task_link.from_uri` /
 `to_uri`, `search_entry.uri`, …) and moved
-`knowledge.page.recorded` to v2; see
+a provider's page event to v2 (since removed); see
 "The rename (V101)" there.
 
 **Writers own slices by `ref_type`.** A single `source_uri`
@@ -1265,7 +1211,7 @@ renamed the `task_…` spellings: a mention is `task_mention` /
 
 | Owner | Source | Slice (`ref_type`s) |
 |---|---|---|
-| `pages.rs` (`oxplow-oxwiki`) | the knowledge page's URI | full source — uses `replace_source`; a page's file and dir links are `knowledge_file_ref` / `knowledge_dir_ref`, its wikilinks `wikilink` |
+| `model_store::write_tx` (`oxplow-db`), for a model's markdown columns | the row's URI | the body's edges: `file_pin` / `dir_pin` (pinned columns) or `file_mention` / `dir_mention`, `wikilink`, `task_mention`, … |
 | `task_refs::restate_tx` (`oxplow-db`), run by the `page_ref.task` consumer on an item's events and by the boot repair — any list's item, from `task` / `task_link` / `task_comment` | the task's URI, body slice | `task_mention`, `wikilink`, `file_mention`, `dir_mention`, `finding_mention`, `commit_mention` |
 | (the same) | link slice | `task_link:<type>` — every type with the prefix, the list's own (V28 dropped the CHECK naming oxplow's six) |
 | (the same) | comment slice: the comments' mentions, as the item's own edges (V28 dropped the old `oxtask_note` sources) | `comment_file_ref`, `comment_dir_ref`, `comment_wikilink`, `comment_task_mention`, `comment_finding_mention`, `comment_commit_mention` |
@@ -1505,7 +1451,6 @@ and are registered by `crate::boot` — a test that wants them calls their
 |---|---|---|---|---|
 | `page_ref.task` | sync | `task.created` / `edited` | re-projects a task's body-mention edges | boot |
 | `tool_call.project` | sync | `agent.tool.requested`, `agent.tool.finished`, `agent.turn.ended` | the `agent_tool_call` row (one per call: opened at the request, closed at the finish, abandoned at its turn's end; V6) | boot |
-| `knowledge.attribution` | sync | `agent.tool.finished` | marks an edited, indexed knowledge page touched by the thread | boot |
 | `ui.push` | sync | `snapshot.taken` (that recorded files), `vcs.head.moved` | the renderer's `SnapshotTaken` on the UI bus (P7.B6) | boot |
 | `metrics.entity_states` | async | `task.*`, `snapshot.taken`, `collector.synced` | re-captures state entity metrics, throttled per metric (P7.B6) | boot |
 | `config.workspace_filter` | async | `config.changed` (`generated`) | the snapshot captures' filter | boot |
@@ -1589,27 +1534,6 @@ system writer; a bus command will pass its actor's source and its
 
 V93 also dropped `task_event` (a per-task audit table nothing had written
 since V1) and wiped `page_visit` (its rows carried pre-canonical tab ids).
-
-### `knowledge_page_touch` — knowledge-page thread-update tracking (table in `crates/oxplow-db/migrations/` + helpers in `crates/oxplow-db/src/knowledge_page_store.rs`)
-
-Per-thread attribution side table for knowledge page edits. Pages
-themselves are global (one body per page, shared across all
-threads/streams), but the rail's "Finished" list filters by which thread
-last touched each page.
-
-Columns: `thread_id, uri, last_seen_at`. One row per thread and page, so
-repeated edits in the same thread upsert in place. The `v_knowledge_touch`
-dataset (v4) reads it.
-
-One writer: the `knowledge.attribution` pump consumer
-(`knowledge::KnowledgeAttribution`), from `knowledge.page.written`
-events carrying a thread anchor — a command run by an agent's thread
-([knowledge.md](./knowledge.md)).
-
-A hand edit (the watcher) and a person's save from the editor carry no
-thread, so they mark nothing — guessing would be worse than abstaining.
-Deleting a page drops its touch rows, so removed pages don't linger on
-the rail under their last author.
 
 ### `usage_event` — `UsageStore` (`crates/oxplow-db/src/analytics_stores.rs`)
 
@@ -1943,7 +1867,7 @@ V128 (P6b.C2; V15 adds `title`, `source`, `available`, `chosen_by`; V16
 the capability's own `capability_title`, `choosable`, `optional`).
 Each capability's implementations and their features (`capability`,
 `provider` — the primary key — `extension`, NULL for core's,
-`features_json`, `kinds_json` (a knowledge store's declared page kinds, `[]` for none; `v_capability_provider` v13 publishes it as `kinds`), `active`). Restated whole (`reset`) by the app's
+`features_json`, `active`). Restated whole (`reset`) by the app's
 `CapabilityRegistry` (`capabilities.rs`) at boot, when the extensions
 change, as an instance starts or stops, and on each reconcile. An
 external provider's `provider` is its **instance
@@ -2128,8 +2052,8 @@ Insert publishes `page-visit.changed` for renderer-side invalidation.
 The Work panel's "Finished" group is the bundled extension's
 `thread_tasks` model: the done tasks a request on the thread worked on
 (`v_oxplow_request_link.thread_id`, `v_oxplow_task.closed_at`, whichever
-store holds the task) and the knowledge pages it wrote (`v_knowledge_touch`, over
-`knowledge_page_touch`), newest first. "Clear" runs
+store holds the task) and the knowledge pages it wrote (`v_oxplow_knowledge_touch`, over bundled's
+`knowledge_touch_record` model), newest first. "Clear" runs
 `oxplow.tasks.clear_finished`, which logs an event the
 `finished_cleared` model reads, so entries closed before it are hidden
 until something newer lands.
@@ -2226,7 +2150,7 @@ binary (`apps/desktop/src-tauri/src/main.rs`) runs it at boot and every
 24h with a 14-day window, mirroring the snapshot cleanup loop. Open
 comments are never swept.
 
-Change fan-out: a comment's writes are the `knowledge.*` comment
+Change fan-out: a comment's writes are the `oxplow.comment.*`
 commands (P8.A6); the renderer re-reads the comment models on
 `DatasetsChanged` — there is no comment-specific event.
 
@@ -2251,7 +2175,7 @@ enforces identity, treating global rows' `NULL` stream as `''`).
   — the feed's own `version` column, else its title-and-body hash; V77
   renamed V164's `content_hash` — and `apply_restate_tx` writes only
   entries added, changed or gone); bundled's read `v_oxplow_search_task`
-  (every store's tasks) / `v_search_comment` / `_knowledge` and the feeds for the other resources named above
+  (every store's tasks) / `v_search_comment` / `v_oxplow_search_knowledge` and the feeds for the other resources named above
   (`models/search_<kind>.sql`; `.context/extensions-events.md` "Resources" says
   how a resource gets one, and the models' docs say
   what each indexes and whether archived work is included). Files are upserted by the `search.index` pump consumer from

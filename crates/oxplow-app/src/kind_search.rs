@@ -1170,7 +1170,6 @@ mod core_tests {
     async fn services() -> (Arc<Services>, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         git2::Repository::init(dir.path()).unwrap();
-        crate::test_fixtures::disable_oxwiki_extension(dir.path());
         let svc = Services::in_memory(dir.path())
             .await
             .expect("in-memory services");
@@ -1247,7 +1246,6 @@ mod core_tests {
     async fn knowledge_pages_are_indexed() {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
-        std::fs::remove_file(dir.path().join(".oxplow/personal.yaml")).unwrap();
         let svc = Services::in_memory(dir.path()).await.unwrap();
         svc.streams.ensure_primary().await.unwrap();
         crate::test_fixtures::activate(&svc).await;

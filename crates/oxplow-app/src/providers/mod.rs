@@ -16,8 +16,6 @@ pub mod agent_harness;
 pub mod endpoint;
 pub mod filesystems;
 pub mod host;
-pub mod knowledge;
-pub mod model_records;
 pub mod oauth;
 pub mod registry;
 pub mod script;

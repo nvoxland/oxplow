@@ -1354,20 +1354,12 @@ commands:
     scope: hints.write
     op: dismiss_all
     example: {}
-  # knowledge.read
   - name: comment.list
     summary: "List comments. Threaded annotations the user anchored to a text selection in a page (knowledge page body, code file line, task detail). `id` is a thread (`thr…`) or stream (`str…`) id; `scope` is inferred from its prefix, so usually pass only `id`. `status` filters: \"all\" (default), \"open\", or \"needs_response\" (open follow-ups whose latest message isn't yours — what the user wants you to act on). Each result carries the anchored `quote`, the message thread, and `intent` (note vs followup). Reply with `oxplow.knowledge.reply_comment { comment, body }`; resolve with `oxplow.knowledge.update_comment { comment, status: \"resolved\" }`."
     scope: comment.read
     op: list
     tool: list_comments
     example: {"id": "str1", "status": "needs_response"}
-  - name: knowledge.drift
-    summary: "What a knowledge page's file drifted. The unified diff between the snapshot the file was pinned to and the file's CURRENT on-disk content — so you can read just what drifted instead of re-opening the whole file. Find the drifted files with `oxplow.sql.query` over `v_knowledge_ref` (`stale = 1`; per page, `v_knowledge_page.stale_ref_count`), then call this per file. Returns `{ page, path, pinned_snapshot_id, status, unified_diff, truncated }`; `status` is one of drifted | unchanged | not_a_ref | no_pin | binary | no_contents (the pin was taken by 'Track changes only', which keeps no text)."
-    scope: knowledge.read
-    op: drift
-    tool: knowledge_drift
-    example: {"store": "oxwiki", "id": "architecture", "path": "src/app/main.py"}
-  # knowledge.write
   - name: comment.add
     summary: "Comment on a span of a page (its `target`), with a first message. `intent`: `note` (the agent leaves it alone) or `followup` (the agent should act on it). An agent comments on its own stream, in its own thread."
     scope: comment.write
@@ -1379,17 +1371,6 @@ commands:
     op: delete
     confirm: destructive
     example: {"comment": "cmt12"}
-  - name: knowledge.delete_page
-    summary: "Delete a knowledge page (`id`, of `store`: needed only when several stores are enabled) and its links."
-    scope: knowledge.write
-    op: delete_page
-    confirm: destructive
-    example: {"id": "auth-flow"}
-  - name: knowledge.link
-    summary: "Link a knowledge page (`id`, of `store`) to a page, file, directory, task or commit: added under its Related heading and written through its store."
-    scope: knowledge.write
-    op: link
-    example: {"id": "auth-flow", "target": "src/session.rs"}
   - name: comment.relocate
     summary: "Store where a comment's quote (`cmt12`) sits in its page's content now (`selectors_json`), or that it is gone (`orphaned`). The renderer's, after it re-finds the quote."
     scope: comment.write
@@ -1400,26 +1381,11 @@ commands:
     scope: comment.write
     op: reply
     example: {"comment": "cmt4", "body": "Fixed in the page."}
-  - name: knowledge.resync
-    summary: "Restate an oxwiki page from its file in .oxplow/oxwiki (the repair when a row and its file disagree); a missing file deletes the page."
-    scope: knowledge.write
-    op: resync
-    example: {"id": "auth-flow"}
   - name: comment.update
     summary: "Change a comment (`cmt12`): its `intent`, its `status` (`open` / `resolved`), or re-attach it to a new span (`quote` and `selectors_json` together)."
     scope: comment.write
     op: update
     example: {"comment": "cmt4", "status": "resolved"}
-  - name: knowledge.verify_files
-    summary: "Re-pin a page's files to now without rewriting it: `files` are the files you re-read against the page as it stands (all of the page's files when omitted). The page is the one core records; a file the page does not cite is refused."
-    scope: knowledge.write
-    op: verify_files
-    example: {"id": "auth-flow", "files": ["src/auth.rs"]}
-  - name: knowledge.write_page
-    summary: "Write a knowledge page: its body, every [[link]] resolving, and the files you re-read against it (verified_files) or took out (removed_files). `store` names where it's kept (needed only when several stores are enabled); `id` is the store's page id (omitted: derived from the title)."
-    scope: knowledge.write
-    op: write_page
-    example: {"id": "auth-flow", "title": "Auth flow", "body": "# Auth flow\n\nThe callback validates `next` before redirecting. See [[src/auth.rs]].", "verified_files": ["src/auth.rs"]}
   - name: lsp.restart_server
     summary: "Restart a stream's language server for a language: the session is torn down and started again with the open documents replayed."
     scope: lsp.control

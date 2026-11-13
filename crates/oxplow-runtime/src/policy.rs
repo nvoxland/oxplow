@@ -1,6 +1,6 @@
 //! The tool policy every agent transport asks: may this thread run this
 //! tool now? It is isolation only — the write guard (no thread touches
-//! another stream's worktree; oxwiki pages are written by command). It never
+//! another stream's worktree; a store's row files in a worktree are written by command). It never
 //! asks for tracked work (`.context/work-tracking.md`). The hook route asks
 //! it with Claude-shaped payloads; the ACP client asks it with ACP tool
 //! calls. The answer carries the reason text only; each transport renders
@@ -131,9 +131,12 @@ pub fn decide_tool(intent: &ToolIntent<'_>, facts: &PolicyFacts<'_>) -> PolicyDe
                 .into_owned()
         })
         .collect();
-    // A store's row file is written by its command, whatever the thread.
+    // A store's row file in a worktree is written by its command: only the
+    // primary checkout's folder is followed.
     for p in &resolved {
-        if let Some(reason) = record_file_reason(Some(p), Some(&project), facts.record_folders) {
+        if let Some(reason) =
+            record_file_reason(Some(p), Some(&own), Some(&project), facts.record_folders)
+        {
             return PolicyDecision::Deny {
                 layer: DenyLayer::WriteGuard,
                 reason,
@@ -250,17 +253,77 @@ mod tests {
             layer(&decide(IntentKind::WorktreeWrite, &["/proj-wt/src/a.rs"])),
             Some(DenyLayer::WriteGuard)
         );
-        // oxwiki, shared, is written by command, not by a tool, whatever
-        // the thread.
-        for d in [
-            decide_in_worktree(&["/proj/.oxplow/oxwiki/x.md"]),
+    }
+
+    /// A store's row files: in the primary checkout a direct write is
+    /// allowed (the store's collector converges it); in a worktree, the
+    /// worktree's own copy of the folder is refused (only the primary is
+    /// watched, so the page would be silently lost) naming the store's
+    /// command, which writes to the primary from anywhere. Other files of
+    /// the worktree are its thread's to write.
+    #[test]
+    fn a_store_file_is_written_directly_in_the_primary_and_by_command_in_a_worktree() {
+        // The primary's thread writes the store's file itself.
+        assert_eq!(
             decide(IntentKind::WorktreeWrite, &["/proj/.oxplow/oxwiki/x.md"]),
-        ] {
-            assert!(
-                matches!(&d, PolicyDecision::Deny { layer: DenyLayer::WriteGuard, reason }
-                    if reason.contains("`oxwiki.*` commands")),
-                "{d:?}"
+            PolicyDecision::Allow
+        );
+        // A worktree thread's own copy of the folder is refused, naming the
+        // extension whose command writes it.
+        let d = decide_in_worktree(&["/proj-wt/.oxplow/oxwiki/x.md"]);
+        assert!(
+            matches!(&d, PolicyDecision::Deny { layer: DenyLayer::WriteGuard, reason }
+                if reason.contains("`oxwiki.*` commands")
+                    && reason.contains("primary checkout")),
+            "{d:?}"
+        );
+        // Its other files, and the folder's files that aren't rows, are its own.
+        assert_eq!(
+            decide_in_worktree(&["/proj-wt/src/a.rs", "/proj-wt/.oxplow/oxwiki/notes.txt"]),
+            PolicyDecision::Allow
+        );
+        // `..` doesn't dodge the refusal.
+        let d = decide_in_worktree(&["/proj-wt/src/../.oxplow/oxwiki/x.md"]);
+        assert_eq!(layer(&d), Some(DenyLayer::WriteGuard), "{d:?}");
+        // The primary's folder, from a worktree thread, is another stream's
+        // tree: refused as before.
+        let d = decide_in_worktree(&["/proj/.oxplow/oxwiki/x.md"]);
+        assert!(
+            matches!(&d, PolicyDecision::Deny { reason, .. } if reason.contains("another stream")),
+            "{d:?}"
+        );
+    }
+
+    /// A symlink in a worktree that leads into its store folder doesn't dodge
+    /// the refusal either.
+    #[test]
+    fn a_symlink_into_a_worktrees_store_folder_is_refused_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().canonicalize().unwrap();
+        let primary = base.join("proj");
+        let worktree = base.join("proj-wt");
+        std::fs::create_dir_all(worktree.join(".oxplow/oxwiki")).unwrap();
+        std::fs::create_dir_all(&primary).unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(worktree.join(".oxplow/oxwiki"), worktree.join("lnk"))
+                .unwrap();
+            let paths = vec![format!("{}/lnk/x.md", worktree.display())];
+            let folders = oxwiki();
+            let d = decide_tool(
+                &ToolIntent {
+                    label: "Write",
+                    kind: IntentKind::WorktreeWrite,
+                    paths: &paths,
+                },
+                &PolicyFacts {
+                    worktree_root: &worktree,
+                    other_roots: std::slice::from_ref(&primary),
+                    project_dir: &primary,
+                    record_folders: &folders,
+                },
             );
+            assert_eq!(layer(&d), Some(DenyLayer::WriteGuard), "{d:?}");
         }
     }
 

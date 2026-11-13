@@ -315,7 +315,7 @@ async fn a_rate_limit_refuses_one_write() {
         .is_ok());
 }
 
-/// The read hooks, on the knowledge mode's collector — `progress` (each
+/// The read hooks, on the snapshots mode's collector of marks — `progress` (each
 /// `$/progress` fits its golden) and `read-fail-after:<n>` (checkpointed
 /// records, then a failure).
 #[tokio::test]
@@ -330,7 +330,7 @@ async fn the_read_hooks_stream_progress_and_fail_midway() {
                 method::READ,
                 &ReadParams {
                     handle: handle.clone(),
-                    collector: "knowledge_pages".into(),
+                    collector: "marks".into(),
                     state: None,
                 },
             )
@@ -347,11 +347,12 @@ async fn the_read_hooks_stream_progress_and_fail_midway() {
         }
         (result, seen)
     }
-    let (_child, peer, mut incoming) = spawn_as("knowledge", "fake", "progress", None);
+    let dir = tempfile::tempdir().unwrap();
+    let (_child, peer, mut incoming) = spawn_as("snapshots", "fake", "progress", None);
     initialize(&peer).await;
     let handle = check(&peer).await;
-    for id in ["a", "b", "c"] {
-        invoke(&peer, &handle, "write_page", page_write(id, "x"))
+    for stream in ["a", "b", "c"] {
+        invoke(&peer, &handle, "mark", mark_of(dir.path(), stream))
             .await
             .unwrap();
     }
@@ -379,8 +380,8 @@ async fn the_read_hooks_stream_progress_and_fail_midway() {
         .collect();
     assert_eq!(states.len(), 2, "checkpointed before failing");
 
-    // A snapshots provider has no collector to read.
-    let (_child, peer, _incoming) = spawn("");
+    // Only a snapshots provider has a collector to read.
+    let (_child, peer, _incoming) = spawn_as("agent_harness", "fake", "", None);
     initialize(&peer).await;
     let handle = check(&peer).await;
     let refused: Result<ReadResult, _> = peer
@@ -388,7 +389,7 @@ async fn the_read_hooks_stream_progress_and_fail_midway() {
             method::READ,
             &ReadParams {
                 handle,
-                collector: "knowledge_pages".into(),
+                collector: "marks".into(),
                 state: None,
             },
         )
@@ -399,23 +400,11 @@ async fn the_read_hooks_stream_progress_and_fail_midway() {
     );
 }
 
-/// The fake is whichever instance the host says it is — its refs carry
-/// `OXPLOW_PROVIDER_ID` — and, under `needs:<NAME>`, its `check` says when
-/// the credential `<NAME>` didn't reach it.
+/// Under `needs:<NAME>` the fake's `check` says when the credential
+/// `<NAME>` didn't reach it.
 #[tokio::test]
-async fn the_fake_takes_its_id_from_the_host_and_reports_a_missing_credential() {
+async fn the_fake_reports_a_missing_credential() {
     let dir = tempfile::tempdir().unwrap();
-    let (_child, peer, _incoming) = spawn_as("knowledge", "fake_second", "", None);
-    initialize(&peer).await;
-    let handle = check(&peer).await;
-    let written = invoke(&peer, &handle, "write_page", page_write("one", "x"))
-        .await
-        .unwrap();
-    assert_eq!(
-        written.events[0].payload["page"]["uri"],
-        oxplow_domain::uri::build::knowledge_uri("fake_second", "one")
-    );
-
     let checked = |peer: Peer| async move {
         let result: CheckResult = peer
             .call(
@@ -812,213 +801,4 @@ async fn a_read_only_filesystem_provider_has_no_write() {
         matches!(refused, Err(ProtocolError::InvalidInput { .. })),
         "{refused:?}"
     );
-}
-
-/// Its knowledge mode (`OXPLOW_FAKE_CAPABILITY=knowledge`): pages that
-/// answer their `knowledge.page.recorded` event, and a collector of them.
-fn spawn_knowledge(state: Option<&std::path::Path>) -> (Child, Peer, Receiver<Incoming>) {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_oxplow-provider-fake"));
-    cmd.env("OXPLOW_FAKE_CAPABILITY", "knowledge")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .kill_on_drop(true);
-    if let Some(state) = state {
-        cmd.env("OXPLOW_FAKE_STATE", state);
-    }
-    let mut child = cmd.spawn().expect("spawn the fake");
-    let stdout = child.stdout.take().expect("piped stdout");
-    let stdin = child.stdin.take().expect("piped stdin");
-    let (peer, incoming) = Peer::spawn(stdout, stdin);
-    (child, peer, incoming)
-}
-
-fn page_write(id: &str, body: &str) -> Value {
-    json!({ "id": id, "body": body, "verified_files": [], "removed_files": [] })
-}
-
-/// A page of the fake (the instance `fake`).
-fn page(id: &str) -> String {
-    oxplow_domain::uri::build::knowledge_uri("fake", id)
-}
-
-#[tokio::test]
-async fn as_a_knowledge_provider_it_declares_its_verbs_event_and_collector() {
-    let (_child, peer, _incoming) = spawn_knowledge(None);
-    let declared = initialize(&peer).await;
-    assert_eq!(declared, oxplow_provider_fake::knowledge_declarations());
-    let capability = &declared.capabilities[0];
-    assert_eq!(capability.capability, "knowledge");
-    assert_eq!(capability.features, json!({ "edit": true }));
-    assert_eq!(capability.data["kinds"][0]["bucket"], "note");
-    assert_eq!(
-        declared
-            .commands
-            .iter()
-            .map(|c| c.name.as_str())
-            .collect::<Vec<_>>(),
-        vec!["write_page", "delete_page"]
-    );
-    for c in &declared.commands {
-        assert_eq!((c.confirm.as_str(), c.access.as_str()), ("never", "record"));
-        assert_eq!(
-            c.input_schema["additionalProperties"],
-            json!(false),
-            "{}",
-            c.name
-        );
-    }
-    assert_eq!(
-        (
-            declared.event_types[0].event_type.as_str(),
-            declared.event_types[0].v
-        ),
-        ("knowledge.page.recorded", 3)
-    );
-    assert_eq!(
-        (
-            declared.collectors[0].name.as_str(),
-            declared.collectors[0].entity.as_str()
-        ),
-        ("knowledge_pages", "knowledge_page")
-    );
-}
-
-#[tokio::test]
-async fn as_a_knowledge_provider_a_write_answers_the_page_and_its_record() {
-    let (_child, peer, _incoming) = spawn_knowledge(None);
-    initialize(&peer).await;
-    let handle = check(&peer).await;
-    let wrote = invoke(
-        &peer,
-        &handle,
-        "write_page",
-        page_write(
-            "design",
-            "See [[src/lib.rs]] and [[other-page]], [[vault:Notes]], [[src/lib.rs]] again.",
-        ),
-    )
-    .await
-    .unwrap();
-    assert_eq!(wrote.result, json!({ "id": "design" }));
-    assert_eq!(wrote.events.len(), 1);
-    let event = &wrote.events[0];
-    assert_eq!(event.event_type, "knowledge.page.recorded");
-    assert_eq!(event.v, 3);
-    assert_eq!(event.subject, vec![page("design")]);
-    let record = &event.payload["page"];
-    assert_eq!(record["uri"], page("design"));
-    assert_eq!(record["kind"], "note");
-    assert_eq!(record["title"], "design");
-    assert_eq!(
-        record["uris"],
-        json!([
-            "oxplow:oxplow/file?path=src/lib.rs",
-            "oxplow:oxplow/knowledge?id=other-page&store=oxwiki",
-            "oxplow:oxplow/knowledge?id=Notes&store=vault",
-        ])
-    );
-    assert!(record.get("deleted").is_none());
-    assert!(record["updated_at"].as_str().unwrap().ends_with('Z'));
-
-    // With no id it takes one from the title.
-    let titled = invoke(
-        &peer,
-        &handle,
-        "write_page",
-        json!({ "title": "Auth Flow", "body": "x", "verified_files": [], "removed_files": [] }),
-    )
-    .await
-    .unwrap();
-    assert_eq!(titled.result, json!({ "id": "auth-flow" }));
-    assert_eq!(titled.events[0].payload["page"]["uri"], page("auth-flow"));
-
-    let deleted = invoke(&peer, &handle, "delete_page", json!({ "id": "design" }))
-        .await
-        .unwrap();
-    assert_eq!(deleted.result, json!({}));
-    assert_eq!(deleted.events[0].payload["page"]["deleted"], json!(true));
-
-    for (verb, input) in [
-        ("delete_page", json!({ "id": "design" })),
-        ("delete_page", json!({ "id": "nope" })),
-        (
-            "write_page",
-            json!({ "body": "x", "verified_files": [], "removed_files": [] }),
-        ),
-    ] {
-        let refused = invoke(&peer, &handle, verb, input).await;
-        assert!(
-            matches!(refused, Err(ProtocolError::InvalidInput { .. })),
-            "{verb}: {refused:?}"
-        );
-    }
-}
-
-#[tokio::test]
-async fn as_a_knowledge_provider_it_streams_changed_pages_and_keeps_them() {
-    let dir = tempfile::tempdir().unwrap();
-    let state = dir.path().join("state.json");
-    {
-        let (_child, peer, _incoming) = spawn_knowledge(Some(&state));
-        initialize(&peer).await;
-        let handle = check(&peer).await;
-        invoke(&peer, &handle, "write_page", page_write("a", "one"))
-            .await
-            .unwrap();
-        invoke(&peer, &handle, "write_page", page_write("b", "two"))
-            .await
-            .unwrap();
-    }
-    // A new process reads back what the old one kept.
-    let (_child, peer, mut incoming) = spawn_knowledge(Some(&state));
-    initialize(&peer).await;
-    let handle = check(&peer).await;
-    invoke(&peer, &handle, "write_page", page_write("a", "uno"))
-        .await
-        .unwrap();
-    let read = |state: Value| {
-        let peer = peer.clone();
-        let handle = handle.clone();
-        async move {
-            peer.call::<_, Value>(
-                method::READ,
-                &ReadParams {
-                    handle,
-                    collector: "knowledge_pages".into(),
-                    state: Some(state),
-                },
-            )
-            .await
-        }
-    };
-    let reader = tokio::spawn(async move {
-        let mut rows = Vec::new();
-        let mut checkpoints = Vec::new();
-        while let Some(Incoming::Notification { method, params }) = incoming.recv().await {
-            match method.as_str() {
-                notify::RECORD => rows.push(params),
-                notify::STATE => checkpoints.push(params),
-                _ => {}
-            }
-            if rows.len() == 2 && checkpoints.len() == 2 {
-                break;
-            }
-        }
-        (rows, checkpoints)
-    });
-    // Everything, then — after its cursor — only what changed since.
-    read(json!({})).await.expect("read");
-    let (rows, checkpoints) = reader.await.unwrap();
-    assert!(rows.iter().all(|r| r["entity"] == "knowledge_page"));
-    let slugs: Vec<_> = rows
-        .iter()
-        .map(|r| r["row"]["uri"].as_str().unwrap().to_string())
-        .collect();
-    assert_eq!(
-        slugs,
-        vec![page("b"), page("a")],
-        "in revision order, a's rewrite last"
-    );
-    assert_eq!(rows[1]["row"]["body"], "uno");
-    assert_eq!(checkpoints[1]["state"]["cursor"], json!(3));
 }

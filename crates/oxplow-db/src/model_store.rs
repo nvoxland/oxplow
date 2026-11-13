@@ -15,7 +15,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::database::{map_sql_err, ts_to_string};
-use crate::page_ref_store::PageRefEdge;
 use oxplow_domain::vcs::Revision;
 
 /// A declared column's type.
@@ -570,19 +569,19 @@ pub fn replace_field_decls_tx(
 }
 
 /// Restate every live store of every model (`model_store_decl`):
-/// `(model, store, extension, provider, id_pattern)`.
+/// `(model, store, extension, id_pattern)`.
 pub fn replace_store_decls_tx(
     conn: &rusqlite::Connection,
-    decls: &[(String, String, String, bool, Option<String>)],
+    decls: &[(String, String, String, Option<String>)],
 ) -> Result<(), DomainError> {
     conn.execute("DELETE FROM model_store_decl", [])
         .map_err(map_sql_err)?;
-    for (model, store, extension, provider, id_pattern) in decls {
+    for (model, store, extension, id_pattern) in decls {
         conn.execute(
             "INSERT OR IGNORE INTO model_store_decl
-               (model, store, extension, provider, id_pattern)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![model, store, extension, provider, id_pattern],
+               (model, store, extension, id_pattern)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![model, store, extension, id_pattern],
         )
         .map_err(map_sql_err)?;
     }
@@ -1268,15 +1267,6 @@ fn register_field_view_tx(
 pub struct Pin {
     pub snapshot_id: Option<i64>,
     pub revision: Option<String>,
-}
-
-impl Pin {
-    pub(crate) fn stamp(&self, edge: PageRefEdge) -> PageRefEdge {
-        match self.snapshot_id {
-            Some(id) => edge.with_version(id, self.revision.clone(), self.revision.is_some()),
-            None => edge,
-        }
-    }
 }
 
 pub fn pin_tx(conn: &rusqlite::Connection) -> Result<Pin, DomainError> {

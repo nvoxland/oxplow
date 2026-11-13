@@ -58,16 +58,6 @@ pub const BUILT_INS: &[BuiltIn] = &[
         features: &[],
         config_schema: None,
     },
-    // Knowledge: oxwiki, pages as Markdown under `.oxplow/oxwiki`. Its
-    // pages' URIs carry its id, so it's declared under `oxwiki` only.
-    BuiltIn {
-        entry: "oxplow:oxwiki",
-        capability: "knowledge",
-        provider: Some("oxwiki"),
-        title: "oxwiki",
-        features: &["edit"],
-        config_schema: None,
-    },
     // Agent harnesses: what runs in an agent session.
     harness(
         "oxplow:claude-code",
@@ -216,20 +206,9 @@ pub struct Implementation {
     pub source: Source,
     /// The features it declares.
     pub features: Value,
-    /// Its own fields, as it declares them (a JSON array of `FieldDecl`).
-    pub fields: Value,
-    /// A task tracker's stages, as it declares them (a JSON array of
-    /// `StageDecl`); `[]` for any other.
-    pub stages: Value,
-    /// A knowledge store's kinds of page, as it declares them (a JSON array
-    /// of `KindDecl`, its `data.kinds`); `[]`: `note` for a knowledge store,
-    /// nothing for any other.
-    pub kinds: Value,
     /// Whether a setting offers it now (`when:` in its declaration; true
     /// without one). One that isn't is declared but off: listed, never used.
     pub offered: bool,
-    /// What its items' own ids look like (a task tracker's), when it says.
-    pub id_pattern: Option<String>,
     /// Its logo as a data URI, when its declaration has an `icon:`.
     pub icon: Option<String>,
     /// What its declaration configures (`config:`, checked against its
@@ -240,19 +219,6 @@ pub struct Implementation {
 }
 
 impl Implementation {
-    /// A knowledge store's kinds of page, as it declares them (`data.kinds`),
-    /// `note` when it declares none; `[]` for any other capability.
-    pub fn kinds(&self) -> Value {
-        if self.capability != crate::knowledge::CAPABILITY {
-            return Value::Array(Vec::new());
-        }
-        match &self.kinds {
-            Value::Array(list) if !list.is_empty() => self.kinds.clone(),
-            _ => serde_json::to_value([oxplow_domain::knowledge::KindDecl::note()])
-                .expect("kinds serialize"),
-        }
-    }
-
     /// Whether it declares `feature`.
     pub fn has_feature(&self, feature: &str) -> bool {
         self.features
@@ -284,12 +250,8 @@ impl Implementation {
             extension: None,
             source: Source::None,
             features: Value::Object(features),
-            fields: Value::Array(Vec::new()),
-            stages: Value::Array(Vec::new()),
-            kinds: Value::Array(Vec::new()),
             offered: true,
             // Nothing in text is none's: it keeps no items.
-            id_pattern: None,
             icon: None,
             config: Value::Object(Default::default()),
             description: None,
@@ -468,7 +430,6 @@ pub struct PreparedCapabilities {
     base: Arc<()>,
     candidate: RegistryState,
     active: Active,
-    recognizers: crate::vocabulary_reactor::Recognizers,
     rows: Vec<CapabilityProvider>,
     resolved: Vec<(&'static str, Resolved)>,
 }
@@ -502,10 +463,6 @@ impl PreparedCapabilities {
     /// The `v_capability_provider` rows this candidate will hold.
     pub fn rows(&self) -> &[CapabilityProvider] {
         &self.rows
-    }
-
-    pub fn recognizers(&self) -> crate::vocabulary_reactor::Recognizers {
-        self.recognizers.clone()
     }
 
     pub(crate) fn selected(&self, capability: &str) -> Option<&str> {
@@ -574,11 +531,7 @@ impl CapabilityRegistry {
                         extension: None,
                         source: Source::BuiltIn(b.entry),
                         features: built_in_features(b),
-                        fields: Value::Array(Vec::new()),
-                        stages: Value::Array(Vec::new()),
-                        kinds: serde_json::Value::Array(Vec::new()),
                         offered: true,
-                        id_pattern: None,
                         icon: None,
                         config: Value::Object(Default::default()),
                         description: None,
@@ -716,8 +669,7 @@ impl CapabilityRegistry {
         candidate.revision = Arc::new(());
         let all = candidate.implementations();
         let (rows, resolved) = Self::rows_from(&all, config);
-        let models =
-            crate::models::ModelRegistry::of(snapshot.extensions()).with_provider_fills(&rows);
+        let models = crate::models::ModelRegistry::of(snapshot.extensions());
         candidate.live_models = Arc::new(
             models
                 .models
@@ -732,7 +684,6 @@ impl CapabilityRegistry {
             base,
             candidate,
             active,
-            recognizers: Self::recognizers_from(&all, config),
             rows,
             resolved,
         })
@@ -945,29 +896,6 @@ impl CapabilityRegistry {
 
     /// The active task tracker's id recognizer under `config`: its id and
     /// declared `id_pattern`, if it declares one (none doesn't).
-    /// What text names through the implementations in use under `config`.
-    pub fn recognizers(&self, config: &OxplowConfig) -> crate::vocabulary_reactor::Recognizers {
-        let config = self.read_effective_config(config);
-        Self::recognizers_from(&self.implementations(), &config)
-    }
-
-    fn recognizers_from(
-        all: &[Implementation],
-        _config: &OxplowConfig,
-    ) -> crate::vocabulary_reactor::Recognizers {
-        let mut knowledge_stores: Vec<String> = all
-            .iter()
-            .filter(|i| i.offered && i.capability == crate::knowledge::CAPABILITY)
-            .map(|i| i.id.clone())
-            .collect();
-        knowledge_stores.sort();
-        knowledge_stores.dedup();
-        crate::vocabulary_reactor::Recognizers {
-            task_ids: Vec::new(),
-            knowledge_stores,
-        }
-    }
-
     /// The config the last generation published; before the first one
     /// (boot's `initialize`) `fallback`, the config as it is now.
     fn read_effective_config(&self, fallback: &OxplowConfig) -> Arc<OxplowConfig> {
@@ -1056,10 +984,6 @@ impl CapabilityRegistry {
                     capability_title: spec.title.into(),
                     choosable: spec.choosable,
                     optional: spec.optional,
-                    fields: i.fields.clone(),
-                    stages: i.stages.clone(),
-                    kinds: i.kinds(),
-                    id_pattern: i.id_pattern.clone(),
                     description: i.description.clone(),
                 });
             }
@@ -1081,10 +1005,6 @@ impl CapabilityRegistry {
                         capability_title: spec.title.into(),
                         choosable: spec.choosable,
                         optional: spec.optional,
-                        fields: Value::Array(Vec::new()),
-                        stages: Value::Array(Vec::new()),
-                        kinds: Value::Array(Vec::new()),
-                        id_pattern: None,
                         description: None,
                     });
                 }
@@ -1188,11 +1108,7 @@ fn declared(
         extension: Some(e.name.clone()),
         source: Source::BuiltIn(b.entry),
         features: built_in_features(b),
-        fields: Value::Array(Vec::new()),
-        stages: Value::Array(Vec::new()),
-        kinds: serde_json::Value::Array(Vec::new()),
         offered: true,
-        id_pattern: None,
         icon: d.icon.clone(),
         config: d.config.clone(),
         description: d.description.clone(),
@@ -1222,17 +1138,7 @@ fn script_implementation(
         extension: Some(e.name.clone()),
         source: Source::Script,
         features,
-        fields: serde_json::Value::Array(Vec::new()),
-        stages: serde_json::Value::Array(Vec::new()),
-        kinds: script
-            .declared
-            .capabilities
-            .iter()
-            .find(|c| c.capability == d.capability)
-            .and_then(|c| c.data.get("kinds").cloned())
-            .unwrap_or_default(),
         offered: true,
-        id_pattern: None,
         icon: d.icon.clone(),
         config: d.config.clone(),
         description: d.description.clone(),
@@ -1254,11 +1160,7 @@ fn provider_implementation(
         extension: Some(e.name.clone()),
         source: Source::ProviderKind(kind.name),
         features: serde_json::json!({ "decide_native": kind.decides_natively }),
-        fields: serde_json::Value::Array(Vec::new()),
-        stages: serde_json::Value::Array(Vec::new()),
-        kinds: serde_json::Value::Array(Vec::new()),
         offered: true,
-        id_pattern: None,
         icon: d.icon.clone(),
         config: d.config.clone(),
         description: d.description.clone(),
@@ -1524,11 +1426,7 @@ mod tests {
             extension: Some("oxplow-bundled".into()),
             source: Source::BuiltIn(entry),
             features: Value::Null,
-            fields: serde_json::Value::Array(Vec::new()),
-            stages: serde_json::Value::Array(Vec::new()),
-            kinds: serde_json::Value::Array(Vec::new()),
             offered: true,
-            id_pattern: None,
             icon: None,
             config: Value::Object(Default::default()),
             description: None,
@@ -1629,11 +1527,7 @@ mod tests {
             extension: Some("tracker".into()),
             source: Source::External,
             features: Value::Null,
-            fields: serde_json::Value::Array(Vec::new()),
-            stages: serde_json::Value::Array(Vec::new()),
-            kinds: serde_json::Value::Array(Vec::new()),
             offered: true,
-            id_pattern: None,
             icon: None,
             config: Value::Object(Default::default()),
             description: None,
@@ -1880,11 +1774,7 @@ mod tests {
                 extension: Some("tracker".into()),
                 source: Source::External,
                 features: Value::Null,
-                fields: serde_json::Value::Array(Vec::new()),
-                stages: serde_json::Value::Array(Vec::new()),
-                kinds: serde_json::Value::Array(Vec::new()),
                 offered: true,
-                id_pattern: None,
                 icon: None,
                 config: serde_json::json!({}),
                 description: None,

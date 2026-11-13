@@ -6,11 +6,15 @@ use oxplow_domain::uri::{canonical_wikilink, classify_wikilinks, OxplowUri, Refe
 /// oxplow-foundation's resources with oxtask as the task tracker
 /// (`tsk<n>`) and oxwiki and a vault as the knowledge stores.
 fn tasks() -> ResourceRegistry {
-    oxplow_domain::uri::resources::foundation()
-        .clone()
-        .with_task_ids("oxtask", r"tsk\d+")
-        .expect("the pattern compiles")
-        .with_knowledge_stores(["oxwiki", "vault"])
+    oxplow_domain::uri::resources::with_bundled_knowledge(
+        oxplow_domain::uri::resources::foundation().clone(),
+    )
+    .with_task_ids("oxtask", r"tsk\d+")
+    .expect("the pattern compiles")
+    .with_knowledge_store("oxwiki", Some("[a-z0-9]+(-[a-z0-9]+)*"))
+    .expect("the pattern compiles")
+    .with_knowledge_store("vault", None)
+    .expect("a store with no pattern")
 }
 
 #[test]

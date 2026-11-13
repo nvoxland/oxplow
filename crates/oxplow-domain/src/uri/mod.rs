@@ -18,7 +18,7 @@
 //!    - `tsk<digits>` → task ref
 //!    - `path/with/slash.ext[@version][:line]` → file ref
 //!    - `<store>:<id>` for an enabled knowledge store → that store's page
-//!    - `bare-slug` (kebab-case, no slash, no extension) → an oxwiki page
+//!    - a bare id a knowledge store's fill says is its own → that store's page
 //!
 //!    Custom display text after `|` is stripped (`[[a/b.ts|label]]`).
 //!
@@ -152,7 +152,8 @@ fn named(resource: &str, params: &[(&str, &str)], view: &[(&str, &str)]) -> Opti
 /// - `path/file.ext[@version][:line]` → a file (`@disk` / `@local` mean
 ///   the working tree and add no revision)
 /// - `<store>:<id>` for an enabled knowledge store → that store's page
-/// - a bare 7–40 hex sha → a commit; `bare-slug` → an oxwiki page
+/// - a bare 7–40 hex sha → a commit; a bare id one knowledge store's fill
+///   says is its own → that store's page
 pub fn canonical_wikilink(resources: &ResourceRegistry, interior: &str) -> Option<OxplowUri> {
     let interior = interior.trim();
     if interior.is_empty() {
@@ -222,7 +223,7 @@ pub fn canonical_wikilink(resources: &ResourceRegistry, interior: &str) -> Optio
         let view: Vec<(&str, &str)> = line.as_deref().map(|l| ("lines", l)).into_iter().collect();
         return named(resources::FILE, &params, &view);
     }
-    // A bare commit sha or oxwiki slug. `word:tail` is an attempted
+    // A bare commit sha or a knowledge store's page id. `word:tail` is an attempted
     // `prefix:value` with an unknown prefix, not a slug named `word`.
     if interior.contains(':') {
         return None;
@@ -230,12 +231,9 @@ pub fn canonical_wikilink(resources: &ResourceRegistry, interior: &str) -> Optio
     if looks_like_commit_sha(interior) {
         return named(resources::COMMIT, &[("sha", interior)], &[]);
     }
-    if looks_like_slug(interior) {
-        return named(
-            resources::KNOWLEDGE,
-            &[("store", crate::knowledge::OXWIKI), ("id", interior)],
-            &[],
-        );
+    // One of a knowledge store's own page ids, as its fill declares them.
+    if let Some(uri) = resources.knowledge_uri_of(interior) {
+        return OxplowUri::parse(&uri).ok();
     }
     None
 }
@@ -487,20 +485,6 @@ fn looks_like_file(s: &str) -> bool {
         }
     }
     false
-}
-
-fn looks_like_slug(s: &str) -> bool {
-    if s.is_empty() || s.len() > 80 {
-        return false;
-    }
-    if s.contains('/') || s.contains('.') || s.contains(' ') {
-        return false;
-    }
-    if matches!(s.len(), 7..=40) && s.chars().all(|c| c.is_ascii_hexdigit()) {
-        return false;
-    }
-    s.chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 fn looks_like_commit_sha(s: &str) -> bool {
@@ -787,9 +771,10 @@ mod tests {
     /// oxplow-foundation's resources with oxtask as the task tracker
     /// (`tsk<n>`).
     fn tasks_kinds() -> ResourceRegistry {
-        resources::foundation()
-            .clone()
+        resources::with_bundled_knowledge(resources::foundation().clone())
             .with_task_ids("oxtask", r"tsk\d+")
+            .unwrap()
+            .with_knowledge_store("oxwiki", Some("[a-z0-9]+(-[a-z0-9]+)*"))
             .unwrap()
     }
 
@@ -946,10 +931,10 @@ mod tests {
     }
 
     /// `[[<store>:<id>]]` names an enabled knowledge store's page; a store
-    /// that isn't enabled names nothing, and a bare slug is oxwiki's.
+    /// that isn't enabled names nothing, and a bare id is the store whose pattern matches it.
     #[test]
     fn a_store_qualified_wikilink_names_that_stores_page() {
-        let kinds = tasks_kinds().with_knowledge_stores(["vault"]);
+        let kinds = tasks_kinds().with_knowledge_store("vault", None).unwrap();
         let r = extract(
             &kinds,
             "see [[vault:Notes/Design Doc]], [[gone:x]] and [[intro]]",
@@ -973,7 +958,13 @@ mod tests {
     /// prefix's meaning wins.
     #[test]
     fn a_store_id_never_shadows_a_prefix() {
-        let kinds = tasks_kinds().with_knowledge_stores(["dir", "git", "commit"]);
+        let kinds = tasks_kinds()
+            .with_knowledge_store("dir", None)
+            .unwrap()
+            .with_knowledge_store("git", None)
+            .unwrap()
+            .with_knowledge_store("commit", None)
+            .unwrap();
         let r = extract(&kinds, "[[dir:src]] [[git:abc1234]] [[commit:abc1234]]");
         assert_eq!(r.dirs, vec!["src"]);
         assert_eq!(r.commits, vec!["abc1234"]);

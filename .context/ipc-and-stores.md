@@ -2,7 +2,7 @@
 
 
 What this doc covers: the layered flow you follow whenever a feature
-needs persistence + IPC + UI, with `knowledge_page` as a worked example.
+needs persistence + IPC + UI, with knowledge pages as a worked example.
 For the actual data shapes, see [data-model.md](./data-model.md).
 
 ## The 7-layer flow
@@ -272,12 +272,12 @@ agent's commands only. Two bodies for one read drift — the deleted
 `validate_extension` dry-ran a check's SQL on the project's database,
 which `oxplow_sdk::check` says a check never does.
 
-## Worked example: `knowledge_page`
+## Worked example: knowledge pages
 
-Reads of a persisted feature are datasets now (P6): the `knowledge_page`
-table is published as `v_knowledge_page` / `v_knowledge_body` /
-`v_knowledge_ref`, the desktop reads them with `querySql`
-(`knowledge.ts`), and writes are `knowledge.*` commands through the bus.
+Reads of a persisted feature are datasets (P6): a knowledge page is a row of
+a shared model, published as `v_oxplow_knowledge_page` (and `_read`, `_touch`,
+`_ref`), the desktop reads them with `querySql` (`knowledge.ts`), and writes
+are the store's own commands through the bus.
 A new feature follows that shape: a dataset for what the UI and agents
 read, a command for each write — no typed read RPC.
 

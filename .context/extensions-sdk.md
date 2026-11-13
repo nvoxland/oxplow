@@ -6,7 +6,7 @@ The SDK behind `oxplow extension new|check|test` and the answerability check. Pa
 
 `crates/oxplow-sdk` (P1.14; target §10.5) is the one
 implementation behind three doors: the `oxplow extension new|check|test`
-CLI, the agent's `oxplow_validate_extension`, and `write_page`. Every
+CLI, the agent's `oxplow_validate_extension`, and `extension.write_page`. Every
 door gives an author the same report, so an agent editing from a terminal
 and one calling MCP read identical `file:line: what — fix` lines.
 

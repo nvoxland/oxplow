@@ -8,7 +8,6 @@ use oxplow_domain::diagnostic::Diagnostic;
 
 pub struct PreparedRuntimeAdapters {
     harnesses: crate::harnesses::PreparedHarnesses,
-    knowledge: crate::knowledge::PreparedKnowledge,
     snapshots: crate::snapshots::PreparedSnapshots,
     models: crate::ai_service::PreparedModelProviders,
     scripts: crate::providers::script::PreparedScripts,
@@ -51,21 +50,6 @@ impl PreparedRuntimeAdapters {
         }
         Ok(Self {
             harnesses: crate::harnesses::prepare_built_ins(&declared),
-            knowledge: crate::knowledge::prepare_built_ins(
-                &declared,
-                &svc.layout.project_dir,
-                // Core's built-in oxwiki stands down while an enabled
-                // extension's fill claims its store.
-                snapshot.extensions().iter().any(|e| {
-                    e.enabled
-                        && e.shared_models.fills.iter().any(|f| {
-                            f.model == "oxplow/knowledge_record"
-                                && f.stores
-                                    .iter()
-                                    .any(|s| s == oxplow_domain::knowledge::OXWIKI)
-                        })
-                }),
-            ),
             snapshots: crate::snapshots::prepare_built_ins(
                 &declared,
                 &svc.snapshot_captures,
@@ -83,7 +67,6 @@ impl PreparedRuntimeAdapters {
     /// coherent activation boundary.
     pub(crate) fn publish_maps(self, svc: &Services) {
         self.harnesses.publish(&svc.harnesses);
-        self.knowledge.publish_maps(&svc.knowledge, &svc.oxwiki);
         self.snapshots
             .publish(&svc.snapshots, &svc.snapshot_captures);
         self.models.publish(svc.ai.providers());

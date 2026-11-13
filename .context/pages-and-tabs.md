@@ -438,8 +438,8 @@ A shown view (a `temp/` page) also offers **Save as knowledge page…** and **Sa
 Both read the YAML through the file read (`readAt(streamId, "<id>.yaml",
 { filesystem: "oxplow:temp" })`), so the saved page is exactly the file. The
 forms live in the rail (Enter submits, Escape cancels). Saving as a knowledge page
-runs `oxplow.knowledge.write_page` with an `oxplow-page` fence, so the
-saved page remains live. Saving as a page runs
+offers the `oxplow/knowledge.new` point (each store's own command, with the
+title and an `oxplow-page` fence as the body), so the saved page remains live. Saving as a page runs
 `oxplow.extension.write_page { extension, page, spec, deploy: true }`,
 then opens that page; the extension defaults to app preference
 `pages.extension`, else `my-pages`, and a successful save remembers it.
@@ -792,13 +792,11 @@ the agent text — while a hidden-title section that draws nothing takes no
 space and a filling one (the terminal) takes the page's height with no
 margin; an embed or a slot takes its title from the page it shows):
 
-- **Renderers.** `wiki-page` (`for: oxplow/knowledge`, default, tab label
-  `{{param.slug}}`, `comments: true`): a `markdown` viz over
-  `v_knowledge_body` with an `edit: true` Save on
-  `oxplow.knowledge.write_page` and Delete Page, a `detail` of last edit
-  and freshness, and a `table` of the cited files with Mark verified (a
-  page not yet written is a row with an empty body, made by its first
-  Save). `editor` (`for: oxplow/file`, `accepts: { rev: absent, filesystem: absent }`,
+- **Renderers.** `knowledge-page` (`for: oxplow/knowledge`, default, tab label
+  the page's title, `comments: true`): a `markdown` viz over
+  `v_oxplow_knowledge_page`, a `detail` of last edit and freshness, a `table`
+  of the cited files with Mark verified, and a `sections` slot a store mounts
+  its Edit part into. `editor` (`for: oxplow/file`, `accepts: { rev: absent, filesystem: absent }`,
   default, label `{{param.path|basename}}`, `comments: true`): an `editor`
   viz of the working file, `#lines=` landed on — the editor edits only
   the local working tree, so a URI naming a revision or a filesystem

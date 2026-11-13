@@ -1381,8 +1381,6 @@ fn instance_in(resource: &str, r: &str) -> Option<String> {
 /// mutate a live registry; publication is a synchronous map change only.
 pub struct PreparedProviderCapability {
     features: Value,
-    /// A knowledge store's kinds of page (its `data.kinds`); `[]` otherwise.
-    kinds: Value,
     publish: Box<dyn FnOnce() + Send>,
 }
 
@@ -1390,19 +1388,8 @@ impl PreparedProviderCapability {
     pub(super) fn new(features: Value, publish: impl FnOnce() + Send + 'static) -> Self {
         Self {
             features,
-            kinds: Value::Array(Vec::new()),
             publish: Box::new(publish),
         }
-    }
-
-    /// With the kinds of page it keeps (a knowledge store's).
-    pub(super) fn with_kinds(mut self, kinds: Value) -> Self {
-        self.kinds = kinds;
-        self
-    }
-
-    pub fn kinds(&self) -> &Value {
-        &self.kinds
     }
 
     pub fn features(&self) -> &Value {

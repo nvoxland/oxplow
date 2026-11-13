@@ -89,8 +89,7 @@ source. There is no active tracker; every live store's pattern applies.
 ## External providers
 
 There is no task provider contract: a JSON-RPC provider cannot implement
-tasks, and the read adapter (`providers/model_records.rs`) is
-knowledge-only. A tracker outside oxplow (a Linear-like service) comes in
+tasks. A tracker outside oxplow (a Linear-like service) comes in
 as an ordinary extension whose collector pulls its data into
 `oxplow/task_record` through `fills:`; the extension declares whatever
 commands it wants like any other.

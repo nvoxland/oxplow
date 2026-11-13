@@ -4,9 +4,9 @@
 //!
 //! ```yaml
 //! implementations:
-//!   - capability: knowledge
-//!     id: oxwiki
-//!     entry: oxplow:oxwiki
+//!   - capability: snapshots
+//!     id: hashes
+//!     entry: oxplow:snapshot-hashes
 //! ```
 //!
 //! An entry names a built-in in core's standard library
@@ -40,7 +40,7 @@ pub struct ImplementationDecl {
     pub id: String,
     /// How a person names it; the built-in's own title when absent.
     pub title: Option<String>,
-    /// The built-in it is (`oxplow:oxwiki`); its features are core's to
+    /// The built-in it is (`oxplow:snapshot-hashes`); its features are core's to
     /// say. `None` for an AI provider, which names its kind instead.
     pub entry: Option<String>,
     /// An AI provider's Rust kind (`anthropic`, `openai_compatible`,
@@ -100,7 +100,7 @@ pub(crate) struct ImplementationFile {
     id: String,
     #[serde(default)]
     title: Option<String>,
-    /// The built-in it is (`oxplow:oxwiki`), or a script in the extension
+    /// The built-in it is (`oxplow:snapshot-hashes`), or a script in the extension
     /// that implements the capability's verbs.
     #[serde(default)]
     entry: Option<String>,
@@ -140,7 +140,7 @@ pub(crate) struct ImplementationFile {
     #[schemars(with = "Option<serde_json::Value>")]
     data: Option<Value>,
     /// Offered only while a setting of the extension's own configuration
-    /// is one of `in` (`{ config: /oxwiki, in: [true] }`); otherwise it is
+    /// is one of `in` (`{ config: /store, in: [true] }`); otherwise it is
     /// declared but off.
     #[serde(default)]
     when: Option<super::config_schema::ConfigCondition>,
@@ -777,7 +777,7 @@ mod tests {
         .unwrap();
         let yaml = |pointer: &str| {
             let manifest = format!(
-                "implementations:\n  - {{ capability: knowledge, id: oxwiki, entry: \"oxplow:oxwiki\", when: {{ config: {pointer}, in: [true] }} }}\n"
+                "implementations:\n  - {{ capability: snapshots, id: hashes, entry: \"oxplow:snapshot-hashes\", when: {{ config: {pointer}, in: [true] }} }}\n"
             );
             let doc: Value = serde_yaml::from_str(&manifest).unwrap();
             parse_implementations(
@@ -1156,47 +1156,6 @@ mod tests {
         );
     }
 
-    /// A built-in whose items' refs carry a provider
-    /// (`oxplow:oxplow/knowledge?id=…&store=oxwiki`) is declared under that
-    /// id and no other: its refs would otherwise name a list that refuses
-    /// them.
-    #[test]
-    fn a_built_in_is_declared_under_the_provider_its_refs_carry() {
-        let (decls, errors) =
-            parse("  - { capability: knowledge, id: pages, entry: oxplow:oxwiki }\n");
-        assert!(decls.is_empty());
-        assert_eq!(errors.len(), 1, "{errors:?}");
-        assert!(
-            errors[0].message.contains("`oxplow:oxwiki`") && errors[0].message.contains("`oxwiki`"),
-            "{}",
-            errors[0].message
-        );
-    }
-
-    /// A declaration's `config:` is checked against its built-in's schema;
-    /// one that takes none (every built-in today) refuses any.
-    #[test]
-    fn config_is_checked_against_the_built_ins_schema() {
-        let errors = |yaml: &str| {
-            parse(yaml)
-                .1
-                .iter()
-                .map(|d| d.message.clone())
-                .collect::<Vec<_>>()
-                .join("\n")
-        };
-        assert!(errors(
-            "  - { capability: agent_harness, id: claude, entry: oxplow:claude-code, config: { a: 1 } }\n"
-        )
-        .contains("takes no config"));
-        // A many-capability's default id is anyone's to declare.
-        assert!(parse(
-            "  - { capability: agent_harness, id: claude, entry: oxplow:claude-code }\n"
-        )
-        .1
-        .is_empty());
-    }
-
     #[test]
     fn what_core_doesnt_know_is_refused() {
         let errors = |yaml: &str| {
@@ -1216,8 +1175,8 @@ mod tests {
                 .contains("built-ins")
         );
         assert!(
-            errors("  - { capability: snapshots, id: x, entry: oxplow:oxwiki }\n")
-                .contains("implements `knowledge`")
+            errors("  - { capability: snapshots, id: x, entry: oxplow:claude-code }\n")
+                .contains("implements `agent_harness`")
         );
         assert!(
             errors("  - { capability: snapshots, id: none, entry: oxplow:snapshots }\n")

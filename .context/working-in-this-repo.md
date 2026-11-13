@@ -169,13 +169,6 @@ something is held; fix the source if the problem is in it; quit oxplow;
 back to an earlier deployment instead, use `oxplow.extension.rollback`
 from inside oxplow (it needs foundation running).
 
-`knowledge` runs the `oxplow.knowledge.*` commands on the same bus with oxplow's
-oxwiki as the store (`--store` names it; the default is `oxwiki`), whatever the project has
-enabled (pages are `.oxplow/oxwiki/<slug>.md`, recorded as the app records them,
-links checked). `list`, `show` and `search` read the recorded `knowledge_page`
-rows (`search` is a case-insensitive substring over id, title and body, not
-the site search index). `knowledge delete` is confirmed by being named.
-
 `--help` / `-h` / `help` print this and do nothing, before the database
 is opened; an option a command doesn't take is refused (both used to
 become a task's title — tasks named `--help`).

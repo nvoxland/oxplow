@@ -130,7 +130,7 @@ or exact mechanics.
 | Request-scoped collection (test-run + diff-coverage observations, report collectors and their bundled parsers, the `testing:` profile, `/oxplow:configure`) | `.context/collection.md` |
 | Resources and their URIs — building, reading, storing or linking any `<kind>:<id>` string in Rust, SQL, Starlark or TS (builders, readers, `uri` columns, dead links); the grammar and type registry; resource / renderer / view | `.context/resources.md` "Using refs" |
 | Commands — the command bus (spec, actors, validate → policy → confirm → run + audit + `command.executed` in one transaction, undo), adding a command | `.context/commands.md` |
-| Knowledge — the knowledge capability (several stores at once; oxwiki is oxplow's own), `knowledge.write_page` and its sibling commands, pins, hand-edit convergence, the oxwiki write guard | `.context/knowledge.md` |
+| Knowledge — pages as rows of the shared knowledge model (several stores at once; oxwiki is oxplow's own extension), bundled's `v_oxplow_knowledge_*` datasets and points, the store write guard | `.context/knowledge.md` |
 | External providers — the JSON-RPC/NDJSON protocol crate and meta-model, the fake provider, the host (consent, spawn, handshake), instances and health, Settings → Integrations, the conformance kit and `oxplow extension test` | `.context/providers.md` |
 | Tasks — the `oxplow/task_record` model, bundled's `v_oxplow_task` datasets and task points, oxtask | `.context/tasks.md` |
 | Shared models (contract, being built) — `models:` / `fills:`, `model.write`, fields, markdown bodies, how tasks and knowledge become observed systems | `.context/models.md` |

@@ -1095,14 +1095,14 @@ mod tests {
         let svc = &fx.svc;
         extension(
             svc,
-            "  - id: react\n    summary: s\n    on: [handoff.settled]\n    entry: skip.star\n    after: [knowledge.records]\n",
+            "  - id: react\n    summary: s\n    on: [handoff.settled]\n    entry: skip.star\n    after: [refs.drift]\n",
             &[("skip.star", "def transform(x):\n    return {\"skip\": \"x\"}\n")],
         )
         .await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
         assert_eq!(
             consumer.after_for("handoff.settled"),
-            vec!["knowledge.records".to_string()]
+            vec!["refs.drift".to_string()]
         );
         assert!(consumer.after_for("snapshot.taken").is_empty());
     }

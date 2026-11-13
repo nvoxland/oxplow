@@ -1,27 +1,16 @@
 //! `oxplow-dev`: helpers for working on oxplow itself, never shipped.
 //!
-//! `oxplow-dev knowledge …` does the same for the project's knowledge
-//! pages, through the `knowledge.*` commands, with oxwiki as the store
-//! (`--store oxwiki`, the one it runs), whatever the project has enabled.
-//!
 //! `oxplow-dev task …` works over oxtask's own file (`oxtask_file.rs`)
 //! when the project has the oxtask extension enabled; without it there is
-//! no task tracker for it to reach. Knowledge goes through the
-//! `knowledge.*` commands on a command bus over the project's database, as
-//! the app would — validation, audit, events and all. The database is
-//! opened as it is (`Database::open_existing`): nothing migrated or
-//! recompiled under the running app. See
-//! `.context/working-in-this-repo.md` "oxplow-dev".
+//! no task tracker for it to reach. Nothing is migrated or recompiled under
+//! the running app. See `.context/working-in-this-repo.md` "oxplow-dev".
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 mod oxtask_file;
 
-use oxplow_app::commands::CommandBus;
-use oxplow_db::{Database, SqliteEventLogStore};
-use oxplow_domain::{Actor, ThreadId};
-use serde_json::{json, Map, Value};
+use oxplow_db::Database;
 
 const USAGE: &str = "\
 oxplow-dev task list [--all]                 open tasks (--all: every state)
@@ -33,11 +22,6 @@ oxplow-dev task comment <id> <body>
 oxplow-dev task link <id> <target> <blocks|discovered_from|relates_to|duplicates|supersedes|replies_to|about>
 oxplow-dev task unlink <id> <target> <link type>
 
-oxplow-dev knowledge list [--store oxwiki]   the pages (id, title)
-oxplow-dev knowledge show <id> [--store S]
-oxplow-dev knowledge write <id> [--title T] [--file F] [--store S]   body from F, else stdin
-oxplow-dev knowledge delete <id> [--store S]
-oxplow-dev knowledge search <text> [--store S]   pages whose id, title or body has it
 oxplow-dev extension status                  what the next boot would run, and what it
                                              would hold back and why (safe while oxplow runs)
 oxplow-dev extension deploy [<name>]         deploy <name>'s source as the app does,
@@ -103,10 +87,6 @@ async fn run(mut args: Vec<String>, env_thread: Option<String>) -> Result<String
             }
             let file = oxtask_file::OxtaskFile::open(&project, thread.as_deref())?;
             file.run(&args[1..], USAGE)
-        }
-        Some("knowledge") => {
-            let dev = Dev::open(&project, thread.as_deref())?;
-            dev.knowledge(args.split_off(1)).await
         }
         Some("extension") => extension(&project, &args[1..]).await,
         _ => Err(format!("usage:\n{USAGE}")),
@@ -351,219 +331,11 @@ fn take_flag(args: &mut Vec<String>, name: &str) -> Option<String> {
     Some(value)
 }
 
-/// The knowledge commands over the project's database.
-struct Dev {
-    db: Database,
-    bus: Arc<CommandBus>,
-    actor: Actor,
-}
-
-impl Dev {
-    fn open(project: &Path, thread: Option<&str>) -> Result<Self, String> {
-        let layout = oxplow_app::AppLayout::for_project(project);
-        let db = Database::open_existing(&layout.state_db_path)
-            .map_err(|e| format!("{}: {e}", layout.state_db_path.display()))?;
-        let vocabulary = oxplow_domain::vocabulary::VocabularyHandle::core();
-        let log = SqliteEventLogStore::new(db.clone(), vocabulary.clone());
-        let pump = Arc::new(oxplow_app::event_pump::EventPump::new(
-            db.clone(),
-            log.clone(),
-            vec![],
-        ));
-        // No `with_capabilities`: every registered command is offered,
-        // whatever the project has active.
-        let bus = Arc::new(CommandBus::new(
-            db.clone(),
-            log,
-            Arc::new(oxplow_app::agent_policy::AgentPolicy),
-            pump,
-        ));
-        // oxwiki as the knowledge store, whatever the project has enabled:
-        // pages are `.oxplow/oxwiki/<slug>.md`, recorded as the app does.
-        let stores = Arc::new(oxplow_domain::knowledge::KnowledgeStores::new());
-        stores.register(Arc::new(oxplow_oxwiki::OxwikiStore {
-            project_dir: layout.project_dir.clone(),
-        }));
-        let oxwiki = Arc::new(oxplow_oxwiki::OxwikiPresence::default());
-        oxwiki.set(true);
-        for op in oxplow_app::knowledge::ops(oxplow_app::knowledge::KnowledgeTarget {
-            project_dir: layout.project_dir.clone(),
-            vcs: Arc::new(oxplow_app::vcs::GitProvider),
-            db: db.clone(),
-            vocabulary: oxplow_domain::vocabulary::VocabularyHandle::core(),
-            stores,
-            oxwiki,
-        })
-        .into_iter()
-        {
-            bus.add_op(op).map_err(|e| e.to_string())?;
-        }
-        // Declared as oxplow's own commands in its foundation extension.
-        oxplow_app::extension::extension_commands::register_declared(&bus);
-        let actor = match thread {
-            Some(t) => Actor::Agent {
-                session_id: None,
-                thread_id: Some(
-                    t.parse::<ThreadId>()
-                        .map_err(|_| format!("`{t}` isn't a thread id (thr1)"))?,
-                ),
-                stream_id: None,
-            },
-            None => Actor::Human,
-        };
-        Ok(Self { db, bus, actor })
-    }
-
-    /// `oxplow-dev knowledge …`: the pages through the knowledge commands.
-    async fn knowledge(&self, mut args: Vec<String>) -> Result<String, String> {
-        let title = take_flag(&mut args, "--title");
-        let file = take_flag(&mut args, "--file");
-        let store = take_flag(&mut args, "--store")
-            .unwrap_or_else(|| oxplow_domain::knowledge::OXWIKI.to_string());
-        if let Some(unknown) = args.iter().find(|a| a.starts_with("--")) {
-            return Err(format!("unknown option `{unknown}`\nusage:\n{USAGE}"));
-        }
-        let arg = |i: usize, what: &str| {
-            args.get(i)
-                .cloned()
-                .ok_or_else(|| format!("missing {what}\nusage:\n{USAGE}"))
-        };
-        let page_input = |id: String| {
-            let mut input = Map::new();
-            input.insert("store".into(), json!(store));
-            input.insert("id".into(), json!(id));
-            input
-        };
-        match args.first().map(String::as_str) {
-            Some("list") => {
-                let rows = self
-                    .rows(
-                        "SELECT id, title FROM knowledge_page WHERE store = ?1 ORDER BY id",
-                        vec![store.clone()],
-                    )
-                    .await?;
-                Ok(rows
-                    .iter()
-                    .map(|r| format!("{}\t{}", r[0], r[1]))
-                    .collect::<Vec<_>>()
-                    .join("\n"))
-            }
-            Some("show") => {
-                let id = arg(1, "<id>")?;
-                let rows = self
-                    .rows(
-                        "SELECT title, body FROM knowledge_page WHERE store = ?1 AND id = ?2",
-                        vec![store.clone(), id.clone()],
-                    )
-                    .await?;
-                let r = rows.first().ok_or_else(|| format!("no page `{id}`"))?;
-                Ok(r[1].clone())
-            }
-            Some("search") => {
-                let needle = format!("%{}%", arg(1, "<text>")?);
-                let rows = self
-                    .rows(
-                        "SELECT id, title FROM knowledge_page
-                          WHERE store = ?1 AND (id LIKE ?2 OR title LIKE ?2 OR body LIKE ?2)
-                          ORDER BY id",
-                        vec![store.clone(), needle],
-                    )
-                    .await?;
-                Ok(rows
-                    .iter()
-                    .map(|r| format!("{}\t{}", r[0], r[1]))
-                    .collect::<Vec<_>>()
-                    .join("\n"))
-            }
-            Some("write") => {
-                let id = arg(1, "<id>")?;
-                let body = match file {
-                    Some(path) => {
-                        std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?
-                    }
-                    None => {
-                        let mut body = String::new();
-                        std::io::Read::read_to_string(&mut std::io::stdin(), &mut body)
-                            .map_err(|e| e.to_string())?;
-                        body
-                    }
-                };
-                let mut input = page_input(id);
-                input.insert("body".into(), json!(body));
-                put(&mut input, "title", title);
-                self.command("oxplow.knowledge.write_page", input).await
-            }
-            Some("delete") => {
-                // Naming the page to delete is the confirmation.
-                self.confirmed_command("oxplow.knowledge.delete_page", page_input(arg(1, "<id>")?))
-                    .await
-            }
-            _ => Err(format!("usage:\n{USAGE}")),
-        }
-    }
-
-    /// Run `name` through the bus; its result, pretty.
-    async fn command(&self, name: &str, input: Map<String, Value>) -> Result<String, String> {
-        self.run_command(name, input, false).await
-    }
-
-    /// [`Self::command`] for one that asks to be confirmed, which the person
-    /// running it here has just done.
-    async fn confirmed_command(
-        &self,
-        name: &str,
-        input: Map<String, Value>,
-    ) -> Result<String, String> {
-        self.run_command(name, input, true).await
-    }
-
-    async fn run_command(
-        &self,
-        name: &str,
-        input: Map<String, Value>,
-        confirmed: bool,
-    ) -> Result<String, String> {
-        let out = self
-            .bus
-            .run(&self.actor, name, Value::Object(input), confirmed)
-            .await
-            .map_err(|e| e.to_string())?;
-        let result = out.result;
-        serde_json::to_string_pretty(&result).map_err(|e| e.to_string())
-    }
-
-    /// `sql`'s rows as text.
-    async fn rows(&self, sql: &str, params: Vec<String>) -> Result<Vec<Vec<String>>, String> {
-        let sql = sql.to_string();
-        self.db
-            .read(move |c| {
-                let mut stmt = c.prepare(&sql).map_err(oxplow_db::map_sql_err)?;
-                let n = stmt.column_count();
-                let rows = stmt
-                    .query_map(rusqlite::params_from_iter(params.iter()), |r| {
-                        (0..n)
-                            .map(|i| r.get::<_, Option<String>>(i).map(Option::unwrap_or_default))
-                            .collect::<Result<Vec<_>, _>>()
-                    })
-                    .map_err(oxplow_db::map_sql_err)?;
-                rows.collect::<Result<Vec<_>, _>>()
-                    .map_err(oxplow_db::map_sql_err)
-            })
-            .await
-            .map_err(|e| e.to_string())
-    }
-}
-
-fn put(input: &mut Map<String, Value>, key: &str, value: Option<String>) {
-    if let Some(v) = value {
-        input.insert(key.into(), json!(v));
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use rusqlite::Connection;
+    use serde_json::Value;
 
     /// A project the app has set up: its database migrated with its
     /// models compiled, and its primary stream.
@@ -692,88 +464,6 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.contains("tsk"), "{err}");
-    }
-
-    /// Knowledge pages are read and written through the knowledge commands,
-    /// oxwiki the store: a page written (body from a file) is listed, shown
-    /// and found by search, its links are checked, and a deleted page is
-    /// gone — the record and the file as the app keeps them.
-    #[tokio::test]
-    async fn knowledge_pages_are_read_and_written_through_the_knowledge_commands() {
-        let dir = project().await;
-        let p = dir.path();
-        let body = p.join("body.md");
-        std::fs::write(&body, "# Wombats\n\nThey dig burrows.\n").unwrap();
-        let body = body.display().to_string();
-        let written = dev(p, &["knowledge", "write", "wombats", "--file", &body])
-            .await
-            .unwrap();
-        assert!(
-            written.contains(r#""page": "oxplow:oxplow/knowledge?id=wombats&store=oxwiki""#),
-            "{written}"
-        );
-        assert!(p.join(".oxplow/oxwiki/wombats.md").is_file());
-        assert!(dev(p, &["knowledge", "list"])
-            .await
-            .unwrap()
-            .contains("wombats\tWombats"));
-        let shown = dev(p, &["knowledge", "show", "wombats"]).await.unwrap();
-        assert!(shown.contains("They dig burrows."), "{shown}");
-        assert!(dev(p, &["knowledge", "search", "BURROWS"])
-            .await
-            .unwrap()
-            .contains("wombats"));
-        assert!(dev(p, &["knowledge", "search", "platypus"])
-            .await
-            .unwrap()
-            .is_empty());
-        // A title replaces the heading; a link that doesn't resolve is refused.
-        dev(
-            p,
-            &[
-                "knowledge",
-                "write",
-                "wombats",
-                "--title",
-                "Wombat facts",
-                "--file",
-                &body,
-            ],
-        )
-        .await
-        .unwrap();
-        assert!(dev(p, &["knowledge", "list"])
-            .await
-            .unwrap()
-            .contains("wombats\tWombat facts"));
-        std::fs::write(&body, "# Bad\n\nSee [[file:nope/missing.rs]].\n").unwrap();
-        let err = dev(p, &["knowledge", "write", "bad", "--file", &body])
-            .await
-            .unwrap_err();
-        assert!(err.contains("nope/missing.rs"), "{err}");
-        assert!(!dev(p, &["knowledge", "list"])
-            .await
-            .unwrap()
-            .contains("bad"));
-        dev(p, &["knowledge", "delete", "wombats"]).await.unwrap();
-        assert!(!p.join(".oxplow/oxwiki/wombats.md").exists());
-        assert!(dev(p, &["knowledge", "list"]).await.unwrap().is_empty());
-    }
-
-    #[tokio::test]
-    async fn a_bad_knowledge_call_says_how_to_call() {
-        let dir = project().await;
-        for args in [
-            &["knowledge", "frobnicate"][..],
-            &["knowledge", "show"],
-            &["knowledge", "write", "x", "--bogus", "1"],
-        ] {
-            let err = dev(dir.path(), args).await.unwrap_err();
-            assert!(
-                err.contains("usage") || err.contains("missing"),
-                "{args:?}: {err}"
-            );
-        }
     }
 
     /// A project developing oxplow (`enableBundledExtensions: false`):

@@ -368,13 +368,6 @@ implementations:
 
   **Which capabilities a script can implement** (each is held by a test in `providers/script_capabilities.rs`, a small
   extension against the capability's conformance suite):
-  - `knowledge` works: `write_page` and `delete_page` answer the
-    page's `knowledge.page.recorded@3`; `delete_page` reads the
-    page back from `v_knowledge_page` / `v_knowledge_body` (`sql.read`).
-    The entry may declare `features: { edit: true }` and
-    `data: { kinds: [...] }`. It is one more store beside oxwiki and passes
-    `knowledge_conformance::suite` once enabled. The record's
-    `updated_at` is the script's to state (core stamps its own row).
   - `agent_harness` works for a terminal harness: `launch` answers a
     `pty` spec (the identity env passed on, never on the command line),
     `tool_use` and `render` map hooks. It is registered by id beside the

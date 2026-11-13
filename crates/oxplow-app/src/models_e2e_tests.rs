@@ -584,7 +584,7 @@ async fn a_models_stores_are_read_as_model_store() {
         .svc
         .sql
         .query_sql(
-            "SELECT extension || '|' || provider || '|' || coalesce(id_pattern, '-') FROM v_model_store WHERE model = 'oxplow/task_record' AND store = 'zz'",
+            "SELECT extension || '|' || coalesce(id_pattern, '-') FROM v_model_store WHERE model = 'oxplow/task_record' AND store = 'zz'",
             vec![],
             None,
         )
@@ -592,6 +592,6 @@ async fn a_models_stores_are_read_as_model_store() {
         .unwrap();
     assert_eq!(
         out.rows,
-        vec![vec![oxplow_db::SqlCell::Text("zz|0|zz[0-9]+".into())]]
+        vec![vec![oxplow_db::SqlCell::Text("zz|zz[0-9]+".into())]]
     );
 }

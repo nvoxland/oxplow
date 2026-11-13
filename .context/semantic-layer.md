@@ -121,7 +121,7 @@ What core publishes, by where it comes from. Each row names its datasets
 |---|---|---|
 | work | `stream`, `thread`, `request`, `context_read` (tasks are the task model's datasets, `.context/tasks.md`) | cycle time, lifecycle |
 | collectors | `collector` (each enabled extension's collectors with their trigger, enabled flag, state and last run: a plain view over `contribution`, `collector_run` and `contribution_health`; the machine's network and credential standing are the live `collector_state` / `collector_credential`) | — |
-| knowledge | `knowledge_page`, `comment` | freshness |
+| knowledge | `comment`; the knowledge pages are bundled's `knowledge_page` (`v_oxplow_knowledge_page`) | freshness |
 | git | `commit`, `commit_file`, `commit_task`, `branch`, and change analysis (`change`, `change_file`, `change_function`, `change_import`, `change_duplicate`, `change_test_file`) | churn |
 | snapshots | `snapshot`, `snapshot_op` | — |
 | lsp | `diagnostic` | diagnostic counts by severity |
@@ -811,8 +811,8 @@ and `v_dataset_test` are the catalog of all of them:
 |---|---|
 | `v_stream` | streams (worktrees) |
 | `v_thread` | threads within a stream |
-| `v_knowledge_touch` | which threads wrote which knowledge pages, and when each last did (`page`, `thread_id`, `last_seen_at`; the rail's Finished section, v4) |
-| `v_knowledge_page` / `v_knowledge_ref` | knowledge pages of the enabled stores (v5: `uri, store, id, kind, bucket, title, url, author, excerpt, body_size, outbound_uris, stale_ref_count, updated_at`; a disabled store's pages stay recorded but hidden; the body is `v_knowledge_body`, pins are `v_knowledge_pin` keyed by `page`, search is `v_search_knowledge`) with their outbound refs and `stale_ref_count`, and each page's file refs with their pin and `stale` (P5.C4; knowledge.md) |
+| `v_oxplow_knowledge_touch` | which threads wrote which knowledge pages, and when each last did (`page`, `thread_id`, `last_seen_at`; bundled's dataset over its `knowledge_touch_record` model; the rail's Finished section) |
+| `v_oxplow_knowledge_page` / `_read` / `_ref` | every store's knowledge pages (`uri, store, id, kind, title, url, author, excerpt, body, body_size, outbound_uris, stale_ref_count, read_count, agent_read_count, last_read_at, updated_at`), their reads (agents' from `record.read`, people's opens) and the pins each page holds (`v_ref_pin` of the pages): bundled's datasets over the shared knowledge model |
 | `v_oxplow_task` | every store's tasks, bundled's dataset over the model `oxplow/task_record` (`uri`, `native_id`, `provider`, `title`, `body`, `state` (the bucket), `stage` and `stage_title` (the store's own stage, as it declares it), `parent_uri`, `assignee`, `rank`, `native` JSON, `created_at`, `updated_at`, `closed_at`), excluding deleted; oxtask tasks are `oxplow:oxplow/task?id=tsk<n>&provider=oxtask` |
 | `v_comment` | comment threads, with first-message `body` and `message_count` |
 | `v_comment_message` | each message of a thread, by `comment` (the thread's URI) and `position` from 1, with `author` and `body` |

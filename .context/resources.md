@@ -72,7 +72,7 @@ saying the id it names.
 | `event`, `job_run` | the UUID |
 | `collector`, `job` | the contribution id: `triage/todos` |
 | `commit`, vcs.head.moved `from` / `to` | the sha |
-| knowledge.page.* `page` | the page's URI (`oxplow:oxplow/knowledge?id=…&store=…`) |
+| `record.read` `record` | the row's URI (`oxplow:oxplow/knowledge?id=…&store=…`) |
 
 **What stays a URI:** a field that can name anything (`uri` when it isn't
 fixed, `target`, `subject`, `evidence`, comment `context_chain` /
@@ -305,9 +305,7 @@ they were.
 `symbol.uri`, `change_function.uri`.
 `wiki_page.file_refs_json` / `dir_refs_json` (the table is `knowledge_page` now) became `files_json` /
 `dirs_json`: a knowledge page's citation is a file path, so its names say `files`
-(`verify_refs` is now `oxplow.knowledge.verify_files`, with `files`,
-`verified_files`, `removed_files`). Events: stored
-`knowledge.page.recorded` rows are v2 (`page.uri`, `page.uris`). Undo
+(`verify_refs` became `oxplow.refs.verify`, with `files`). Undo
 inverses and pending proposals had their input keys renamed (`ref` to
 `uri`, `parent_ref`, `evidence_ref`, `refs` and the rest likewise). The
 core datasets, command inputs and results, templates (`{{uri}}`,
@@ -316,7 +314,7 @@ core datasets, command inputs and results, templates (`{{uri}}`,
 
 It left alone: `ref('<dataset>')` in dataset SQL (a dataset reference, not a
 URI), git refs (`branch_ref`, `basis_ref`, `ref_moves`), `page_ref` and
-its `ref_type`, `v_knowledge_ref`, `TabRef`, and internal identifiers
+its `ref_type`, `v_oxplow_knowledge_ref`, `TabRef`, and internal identifiers
 that sit on no wire (`resolve_ref`, `refOpener.ts`, `refFromTabId`).
 
 ## The desktop

@@ -749,7 +749,7 @@ mod tests {
             "manifest: 2\nname: acme\nintent: { purpose: p, origin: null, examples: [] }\n\
              permissions: [ai.compute]\n\
              implementations:\n\
-             \x20 - { capability: knowledge, id: oxwiki, entry: \"oxplow:oxwiki\" }\n\
+             \x20 - { capability: snapshots, id: hashes, entry: \"oxplow:snapshot-hashes\" }\n\
              \x20 - { capability: ai_provider, id: tidy, provider: openai_compatible }\n",
         );
         let ext = load_extensions(dir.path())
@@ -764,7 +764,7 @@ mod tests {
         assert_eq!(
             ids,
             [
-                "oxplow:oxplow/implementation?implementation=acme/knowledge.oxwiki",
+                "oxplow:oxplow/implementation?implementation=acme/snapshots.hashes",
                 "oxplow:oxplow/implementation?implementation=acme/ai_provider.tidy"
             ]
         );

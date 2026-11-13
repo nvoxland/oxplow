@@ -335,25 +335,6 @@ pub async fn run_boot_orchestration(
         });
     }
 
-    // oxwiki's watch: keeps its record in step with `.oxplow/oxwiki/<slug>.md`
-    // (a scan each time oxwiki becomes an enabled store, then debounced
-    // re-syncs on change).
-    {
-        let sync = oxplow_oxwiki::watch::Sync {
-            db: state.db.clone(),
-            vocabulary: state.vocabulary.clone(),
-            project_dir: state.layout.project_dir.clone(),
-        };
-        let presence = state.oxwiki.clone();
-        let watches = state.stream_watches.clone();
-        let mut watching = watching.clone();
-        tokio::spawn(async move {
-            let _ = watching.wait_for(|up| *up).await;
-            let changes = watches.subscribe_primary(oxplow_oxwiki::watch::scope());
-            oxplow_oxwiki::watch::follow(changes, sync, presence);
-        });
-    }
-
     // Observers' triggers (`start`, `files`, `sqlite` in a collector's
     // `on:`), once the watches they hear are up.
     {

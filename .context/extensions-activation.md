@@ -167,7 +167,7 @@ the datasets, vocabulary and contribution descriptors in one savepoint
 ## Prepared native runtime adapters
 
 `PreparedRuntimeAdapters` captures one CatalogSnapshot and constructs declared
-task, harness, knowledge, snapshot and model-provider
+harness, snapshot and model-provider
 maps without changing running registries. It rejects enabled load errors and
 strict AI factory failures before any map publication. Script/gate objects
 are constructed but no process, handshake, network call or paid probe runs.

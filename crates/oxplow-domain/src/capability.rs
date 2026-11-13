@@ -165,56 +165,6 @@ pub const SNAPSHOTS: ProviderContract = ProviderContract {
     data: None,
 };
 
-/// A knowledge store's (`.context/knowledge.md` "The capability"): the
-/// page commands dispatch to its verbs, each answering the page's
-/// `knowledge.page.recorded@1` (the body it kept and the refs it states),
-/// and its collector streams its pages (edited outside oxplow) as the same
-/// records. Its pages are `oxplow:oxplow/knowledge?id=<slug>&store=oxwiki`: bare refs, the active store's.
-pub const KNOWLEDGE: ProviderContract = ProviderContract {
-    verbs: &[
-        Verb {
-            name: "write_page",
-            needs: Need::Always,
-        },
-        Verb {
-            name: "delete_page",
-            needs: Need::Always,
-        },
-    ],
-    dispatch: None,
-    events: &[("knowledge.page.recorded", 3)],
-    records: Some(Record {
-        entity: "knowledge_page",
-        event: ("knowledge.page.recorded", 3),
-        key: "page",
-    }),
-    resource: Some("oxplow/knowledge"),
-    data: Some(KNOWLEDGE_DATA),
-};
-
-/// What a knowledge store declares of itself: its kinds of page, each in
-/// one of core's buckets (`knowledge::KindDecl`); none declared: `note`.
-pub const KNOWLEDGE_DATA: &str = r#"{
-  "type": "object",
-  "additionalProperties": false,
-  "properties": {
-    "kinds": {
-      "type": "array",
-      "minItems": 1,
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["id", "title", "bucket"],
-        "properties": {
-          "id": { "type": "string", "minLength": 1 },
-          "title": { "type": "string", "minLength": 1 },
-          "bucket": { "enum": ["note", "memory", "instruction"] }
-        }
-      }
-    }
-  }
-}"#;
-
 /// An agent harness's (`.context/agent-model.md`): core launches its
 /// sessions through it, has it map its tool hooks and render its answers,
 /// and — as its features say — read its transcript and telemetry and
@@ -347,16 +297,6 @@ pub const CAPABILITIES: &[CapabilitySpec] = &[
         default: "git",
         features: &[],
         provider: None,
-    },
-    CapabilitySpec {
-        id: "knowledge",
-        title: "Knowledge",
-        choosable: false,
-        optional: false,
-        many: true,
-        default: "oxwiki",
-        features: &["edit"],
-        provider: Some(&KNOWLEDGE),
     },
     CapabilitySpec {
         id: "agent_harness",
@@ -579,7 +519,6 @@ mod tests {
             );
         }
         assert_eq!(choosable().map(|c| c.id).collect::<Vec<_>>(), ["snapshots"]);
-        assert_eq!(spec("knowledge").map(|c| c.optional), Some(false));
         for c in CAPABILITIES.iter().filter(|c| c.many) {
             assert!(
                 !c.choosable && !c.optional,
@@ -594,7 +533,6 @@ mod tests {
                 .map(|c| (c.id, c.default))
                 .collect::<Vec<_>>(),
             [
-                ("knowledge", "oxwiki"),
                 ("agent_harness", "claude"),
                 ("ai_provider", "anthropic"),
                 ("filesystem", "local")
@@ -605,7 +543,7 @@ mod tests {
     }
 
     /// What a process may implement is what core gives a contract:
-    /// snapshots, knowledge, an agent harness and a filesystem. The rest are core's or built-ins'.
+    /// snapshots, an agent harness and a filesystem. The rest are core's or built-ins'.
     #[test]
     fn a_process_implements_only_a_capability_with_a_contract() {
         assert_eq!(
@@ -614,7 +552,7 @@ mod tests {
                 .filter(|c| c.provider.is_some())
                 .map(|c| c.id)
                 .collect::<Vec<_>>(),
-            ["snapshots", "knowledge", "agent_harness", "filesystem"]
+            ["snapshots", "agent_harness", "filesystem"]
         );
         assert!(contract("vcs").is_none() && contract("nope").is_none());
     }
@@ -623,16 +561,6 @@ mod tests {
     /// feature is one the capability declares.
     #[test]
     fn a_contracts_verbs_follow_the_declared_features() {
-        let knowledge = contract("knowledge").unwrap();
-        assert_eq!(
-            knowledge.required(&serde_json::json!({})),
-            ["write_page", "delete_page"]
-        );
-        assert_eq!(knowledge.resource, Some("oxplow/knowledge"));
-        assert_eq!(
-            knowledge.records.map(|r| (r.entity, r.event, r.key)),
-            Some(("knowledge_page", ("knowledge.page.recorded", 3), "page"))
-        );
         let snapshots = contract("snapshots").unwrap();
         assert_eq!(
             snapshots.required(&serde_json::json!({})),

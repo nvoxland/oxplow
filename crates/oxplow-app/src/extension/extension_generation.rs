@@ -137,7 +137,7 @@ impl PreparedExtensionDatabase {
         if !conflicts.is_empty() {
             return Err(conflicts);
         }
-        let vocabulary = PreparedVocabulary::prepare(snapshot, capabilities.recognizers())?;
+        let vocabulary = PreparedVocabulary::prepare(snapshot)?;
         Ok(Self::with_vocabulary(
             snapshot,
             vocabulary,
@@ -198,15 +198,7 @@ impl PreparedExtensionDatabase {
         Self {
             configurations,
             entities: crate::collector_runner::declared_entity_tables(snapshot.extensions()),
-            models: {
-                // The running provider instances fill the record models under
-                // their own ids (`providers::model_records`).
-                let registry = crate::models::ModelRegistry::of(snapshot.extensions());
-                match &capabilities {
-                    Some(c) => registry.with_provider_fills(c.rows()),
-                    None => registry,
-                }
-            },
+            models: crate::models::ModelRegistry::of(snapshot.extensions()),
             datasets,
             vocabulary,
             contributions,
@@ -336,10 +328,6 @@ impl PreparedExtensionDatabase {
             if let Some(capabilities) = &self.capabilities {
                 capabilities.restate_tx(tx, &vocabulary)?;
             }
-            // A provider fill that appears states what the log holds for its
-            // store (the capability rows stand now: a task's stage is read
-            // from them).
-            crate::providers::model_records::reconcile_if_needed_tx(tx, &self.models, &vocabulary)?;
             Ok(vocabulary)
         })();
         match result {

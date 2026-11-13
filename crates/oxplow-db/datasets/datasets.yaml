@@ -1696,10 +1696,10 @@
     - { not_null: source_uri }
     - { not_null: target_uri }
 - name: capability_provider
-  version: 14
-  description: "Each capability's implementations — core's, the built-ins extensions declare (`oxplow-bundled`'s defaults, `oxplow-foundation`'s agent harnesses and AI providers), running provider instances', and `none` for an optional capability — with the features each declares, which is active and why. A capability many implementations serve at once (`agent_harness`, `acp_adapter`, `ai_provider`, `knowledge`) has every declared row active. A choice that isn't available (its extension disabled, its instance stopped) is listed with `available = 0`; the active row is then the fallback. Settings lists the choices from here, and the UI shows an implementation's enhancements only when its features allow them."
+  version: 15
+  description: "Each capability's implementations — core's, the built-ins extensions declare (`oxplow-bundled`'s defaults, `oxplow-foundation`'s agent harnesses and AI providers), running provider instances', and `none` for an optional capability — with the features each declares, which is active and why. A capability many implementations serve at once (`agent_harness`, `acp_adapter`, `ai_provider`) has every declared row active. A choice that isn't available (its extension disabled, its instance stopped) is listed with `available = 0`; the active row is then the fallback. Settings lists the choices from here, and the UI shows an implementation's enhancements only when its features allow them."
   fields:
-    - { name: "capability", type: "TEXT", doc: "`task_tracker`, `snapshots`, `vcs`, `knowledge`, `agent_harness`, `ai_provider`." }
+    - { name: "capability", type: "TEXT", doc: "`snapshots`, `vcs`, `agent_harness`, `ai_provider`." }
     - { name: "provider", type: "TEXT", doc: "The implementation's id: what `activeProviders` names, a task ref's segment (`oxplow:oxplow/task?id=…&provider=<provider>`), a knowledge page's store (`oxwiki`), `git`, `none`." }
     - { name: "extension", type: "TEXT", doc: "The extension declaring it; NULL for core's." }
     - { name: "features", type: "TEXT", doc: "The features it declares, as JSON (`task_tracker`: `hierarchy`, `comments`, `links`, `delete`, `idempotent_writes`; `vcs`: `isolated_workspaces`, `remotes`, `rename_detection`; `snapshots`: `contents`)." }
@@ -1711,10 +1711,6 @@
     - { name: "capability_title", type: "TEXT", doc: "How a person names the capability (`Task tracker`). (v4)" }
     - { name: "choosable", type: "INTEGER", doc: "1 when a project chooses the capability's implementation; 0 for one core fixes (`vcs`) or one many serve at once (`knowledge`). (v4)" }
     - { name: "optional", type: "INTEGER", doc: "1 when the capability may be `none`. (v4)" }
-    - { name: "fields", type: "TEXT", doc: "Its own fields as a JSON array of `{ name, title, kind: enum|text|number, values? }`: what a task tracker keeps in `native` (oxtask: `priority`)." }
-    - { name: "stages", type: "TEXT", doc: "A task tracker's stages, in order, as a JSON array of `{ id, title, bucket }`: what the screens draw (a board's columns, a state picker). Each is in one of core's buckets — `backlog`, `todo`, `in_progress`, `blocked`, `done`, `canceled` — and the first of a bucket is where naming the bucket lands (oxtask: `backlog`, `ready`, `in_progress`, `blocked`, `done`, `canceled`). `[]` for any other capability. (v10)" }
-    - { name: "kinds", type: "TEXT", doc: "A knowledge store's kinds of page, as a JSON array of `{ id, title, bucket }`; each is in one of core's buckets — `note`, `memory`, `instruction` — and the first is a page's when its store says none (oxwiki: `note`). `[]` for any other capability. (v13)" }
-    - { name: "id_pattern", type: "TEXT", doc: "What a task tracker's own ids look like, a regex matched whole (oxtask: `tsk\\d+`): how its ids are recognized in text, as core's vocabulary recognizes them. NULL when it doesn't say. (v6)" }
     - { name: "description", type: "TEXT", doc: "One sentence saying what this implementation is (`description:` in `implementations:`); NULL when its declaration says nothing or it is core's own. Joins `v_contribution` where `kind = 'implementation'` on `extension` and `local = capability || '.' || provider`." }
   tests:
     - { not_null: capability }
@@ -1963,45 +1959,6 @@
   tests:
     - { not_null: id }
     - { unique: id }
-- name: knowledge_page
-  version: 6
-  description: "Knowledge pages: one row per page of every enabled store (oxwiki, an extension's), with what it links to and how many of its file refs have drifted since they were pinned. A disabled store's pages are hidden until it's enabled again. A page's full text is `v_knowledge_body`; search them with the `oxplow_search` tool. (v5: store-qualified pages, several stores, kinds and buckets)"
-  fields:
-    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/knowledge?id=<id>&store=<store>`." }
-    - { name: "store", type: "TEXT", doc: "The store that keeps it (`oxwiki`, an instance's id; `v_capability_provider.provider` where `capability = 'knowledge'`)." }
-    - { name: "id", type: "TEXT", doc: "The store's own page id (oxwiki's slug, a vault path, a uuid); link it with `[[<id>]]` for oxwiki, `[[<store>:<id>]]` for another store." }
-    - { name: "kind", type: "TEXT", doc: "The page's kind, one its store declares (`v_capability_provider.kinds`; oxwiki: `note`)." }
-    - { name: "bucket", type: "TEXT", doc: "What its kind is for, as core acts on it: `note`, `memory` or `instruction`." }
-    - { name: "title", type: "TEXT", doc: "The page's title (oxwiki: its first `# ` heading, else its slug)." }
-    - { name: "url", type: "TEXT", doc: "Where to open it in its store's own app; NULL for oxwiki." }
-    - { name: "author", type: "TEXT", doc: "Who last changed it, as its store names them; NULL when the store doesn't say." }
-    - { name: "excerpt", type: "TEXT", doc: "Start of the body." }
-    - { name: "body_size", type: "INTEGER", doc: "Size of the full body, bytes." }
-    - { name: "outbound_uris", type: "TEXT", doc: "JSON array of every ref the page links to (`oxplow:oxplow/file?path=src/lib.rs`, `oxplow:oxplow/knowledge?id=other&store=oxwiki`, `oxplow:oxplow/task?id=tsk42&provider=oxtask`)." }
-    - { name: "stale_ref_count", type: "INT", doc: "Its `stale` rows in v_knowledge_ref: file refs whose file has a newer primary-stream snapshot than the one the URI was pinned to (or that were never pinned but have been snapshotted): what may no longer hold." }
-    - { name: "read_count", type: "INT", doc: "How many times it was read: by an agent (`oxplow_read`, or its own read of the page's file) and by a person (opening it). Each read is a row of `v_knowledge_read`. (v6)" }
-    - { name: "agent_read_count", type: "INT", doc: "How many of those reads were an agent's (`oxplow_read`, or its own read of the page's file): what agents use, apart from a person flipping to its tab. (v6)" }
-    - { name: "last_read_at", type: "TEXT", doc: "When it was last read (RFC 3339); NULL when never. (v6)" }
-    - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp." }
-  tests:
-    - { not_null: uri }
-    - { unique: uri }
-    - { accepted_values: { column: bucket, values: [note, memory, instruction] } }
-- name: knowledge_read
-  version: 1
-  description: "Every read of a knowledge page of an enabled store: an agent's — through `oxplow_read` (`via: tool`, `knowledge.page.read`) or its own read of the page's file (`via: file`) — and a person's opening it (`via: open`, a page visit). Count what is read, by whom and how; `v_knowledge_page.read_count` counts these rows."
-  fields:
-    - { name: "uri", type: "TEXT", doc: "The page (v_knowledge_page.uri)." }
-    - { name: "actor", type: "TEXT", doc: "Who read it: `agent` or `person`." }
-    - { name: "thread_id", type: "INTEGER", doc: "The thread it was read on (v_thread.id); NULL when no thread was." }
-    - { name: "turn_id", type: "INTEGER", doc: "An agent's turn it was read in (v_agent_turn.id); NULL for a person's read or when the turn isn't known." }
-    - { name: "via", type: "TEXT", doc: "How: `tool` (`oxplow_read`), `file` (the agent read the page's file itself) or `open` (a person opened it)." }
-    - { name: "at", type: "TEXT", doc: "When (RFC 3339)." }
-  tests:
-    - { not_null: uri }
-    - { accepted_values: { column: actor, values: [agent, person] } }
-    - { accepted_values: { column: via, values: [tool, file, open] } }
-    - { relationships: { column: uri, to: knowledge_page, field: uri } }
 - name: model_field_decl
   version: 1
   description: "The fields every enabled extension declares on a shared model: a store's under its store id, another extension's under its namespace. Shared screens draw an item's fields from it without knowing its store."
@@ -2015,13 +1972,12 @@
     - { name: "values", type: "TEXT", doc: "An enum's values, as a JSON list; NULL otherwise." }
     - { name: "read_only", type: "INT", doc: "1 when screens show it but don't edit it." }
 - name: model_store
-  version: 1
-  description: "Each live store of a shared model, as the enabled extensions fill it and the running provider instances state it: who fills it, whether it is a provider instance's, and how its ids look in text (a loose `tsk12` is a link to its item)."
+  version: 2
+  description: "Each live store of a shared model, as the enabled extensions fill it: who fills it and how its ids look in text (a loose `tsk12` is a link to its item)."
   fields:
     - { name: "model", type: "TEXT", doc: "The model (`<owner namespace>/<model>`)." }
     - { name: "store", type: "TEXT", doc: "The store id." }
-    - { name: "extension", type: "TEXT", doc: "The extension that fills it (a provider instance's extension for its store)." }
-    - { name: "provider", type: "INT", doc: "1 when a running provider instance's (the read adapter writes it), else 0." }
+    - { name: "extension", type: "TEXT", doc: "The extension that fills it." }
     - { name: "id_pattern", type: "TEXT", doc: "How its items' ids look in text, a regex matched whole (`tsk[0-9]+`); NULL when it doesn't say." }
 - name: model_stage
   version: 1
@@ -2062,53 +2018,6 @@
     - { name: "stale", type: "INT", doc: "1 when it changed after the pin (or was captured but never pinned)." }
   tests:
     - { not_null: source }
-- name: knowledge_pin
-  version: 4
-  description: "Each knowledge page's file refs and how current they are, every recorded page's (an enabled store's or not): the one definition of staleness `v_knowledge_ref` and `v_knowledge_page.stale_ref_count` both read."
-  fields:
-    - { name: "page", type: "TEXT", doc: "The page (`oxplow:oxplow/knowledge?id=<id>&store=<store>`)." }
-    - { name: "path", type: "TEXT", doc: "The file it relies on (workspace-relative)." }
-    - { name: "pinned_snapshot_id", type: "INTEGER", doc: "The snapshot the URI was pinned to (written or verified against); NULL if never pinned." }
-    - { name: "pinned_vcs_rev", type: "TEXT", doc: "The VCS revision nearest the pin (v_commit.sha for git); NULL without one." }
-    - { name: "pinned_vcs_rev_exact", type: "INT", doc: "1 when the pinned snapshot is exactly `pinned_vcs_rev` (a clean worktree), else 0." }
-    - { name: "latest_snapshot_id", type: "INT", doc: "The file's latest primary-stream snapshot (the stream a pin comes from); NULL if it was never captured there." }
-    - { name: "stale", type: "INT", doc: "1 when the file changed after the pin (or was captured but never pinned)." }
-  tests:
-    - { not_null: page }
-- name: knowledge_ref
-  version: 4
-  description: "Each knowledge page's file refs and how current they are: the snapshot a URI was pinned to against the file's latest — both the primary stream's, the one definition of staleness every reader uses. `stale` rows are what `v_knowledge_page.stale_ref_count` counts; `oxplow_knowledge_drift` shows one's diff."
-  fields:
-    - { name: "page", type: "TEXT", doc: "The page (`oxplow:oxplow/knowledge?id=<id>&store=<store>`, v_knowledge_page.uri)." }
-    - { name: "path", type: "TEXT", doc: "The file it relies on (workspace-relative)." }
-    - { name: "pinned_snapshot_id", type: "INTEGER", doc: "The snapshot the URI was pinned to (written or verified against); NULL if never pinned." }
-    - { name: "pinned_vcs_rev", type: "TEXT", doc: "The VCS revision nearest the pin (v_commit.sha for git); NULL without one." }
-    - { name: "pinned_vcs_rev_exact", type: "INT", doc: "1 when the pinned snapshot is exactly `pinned_vcs_rev` (a clean worktree), else 0." }
-    - { name: "latest_snapshot_id", type: "INT", doc: "The file's latest primary-stream snapshot (the stream a pin comes from); NULL if it was never captured there." }
-    - { name: "stale", type: "INT", doc: "1 when the file changed after the pin (or was captured but never pinned)." }
-  tests:
-    - { not_null: page }
-    - { relationships: { column: page, to: knowledge_page, field: uri } }
-- name: knowledge_body
-  version: 4
-  description: "Each knowledge page's full markdown body, apart from v_knowledge_page so listing pages never reads bodies."
-  fields:
-    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/knowledge?id=<id>&store=<store>` (v_knowledge_page.uri)." }
-    - { name: "body", type: "TEXT", doc: "The page's markdown, as its store kept it." }
-  tests:
-    - { not_null: uri }
-    - { unique: uri }
-    - { relationships: { column: uri, to: knowledge_page, field: uri } }
-- name: knowledge_touch
-  version: 4
-  description: "Which threads wrote or updated which knowledge pages, and when a thread last did (the rail's Finished section)."
-  fields:
-    - { name: "page", type: "TEXT", doc: "The page (`oxplow:oxplow/knowledge?id=<id>&store=<store>`, v_knowledge_page.uri)." }
-    - { name: "thread_id", type: "INTEGER", doc: "The thread (v_thread.id)." }
-    - { name: "last_seen_at", type: "TEXT", doc: "RFC 3339 timestamp of that thread's latest write to it." }
-  tests:
-    - { not_null: page }
-    - { relationships: { column: page, to: knowledge_page, field: uri } }
 - name: dataset
   version: 2
   description: "Datasets: every published view, as compiled at this open — core ones and each extension's. Read a dataset's fields in `v_field`, when a materialized one was last recomputed in `v_asset`, what it reads in `v_dataset_lineage` and its declared tests' results in `v_dataset_test`."

@@ -1,6 +1,7 @@
 //! The write guard: the two places no agent writes with a tool. A row a
 //! store keeps as a file (a fill's `files:`; an oxwiki page) is written by its
-//! extension's command, and no thread changes another stream's
+//! extension's command from a worktree (only the primary checkout's folder is
+//! followed), and no thread changes another stream's
 //! worktree (the primary checkout included). Within its own worktree any
 //! thread may write — the stream's threads share it, and who works there
 //! at once is the person's call (`.context/agent-model.md` "Isolation").
@@ -21,38 +22,47 @@ pub struct RecordFolder {
     pub extension: String,
 }
 
-/// Why an agent may not write `raw_path` itself, when it is a row of a store
-/// (`<project>/<folder>/<id><suffix>` of a [`RecordFolder`]): the store's
-/// extension writes it with its own command — validated, linked and
-/// audited, the file following — whatever the thread. A person's hand edit
-/// still converges through the store's collector.
+/// Why an agent may not write `raw_path` itself, when it is a row file of a
+/// store in the thread's own worktree and that worktree is not the primary
+/// checkout (`<worktree>/<folder>/<id><suffix>` of a [`RecordFolder`]).
+/// Only the primary checkout's folder is watched (`.oxplow` is git-ignored,
+/// so a worktree's copy is never committed or followed): a page written there
+/// would be silently lost. The store's extension's command writes it, to the
+/// primary checkout, from anywhere. In the primary checkout itself a direct
+/// write is fine: the store's collector converges it.
 pub fn record_file_reason(
     raw_path: Option<&str>,
+    worktree_root: Option<&Path>,
     project_dir: Option<&Path>,
     folders: &[RecordFolder],
 ) -> Option<String> {
-    let (raw, project_dir) = (raw_path?, project_dir?);
+    let (raw, worktree_root, project_dir) = (raw_path?, worktree_root?, project_dir?);
+    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    if canon(worktree_root) == canon(project_dir) {
+        return None;
+    }
     let path = Path::new(raw);
     let abs = if path.is_absolute() {
         path.to_path_buf()
     } else {
-        project_dir.join(path)
+        worktree_root.join(path)
     };
     folders.iter().find_map(|f| {
         let name_fits = f.suffix.is_empty()
             || abs
                 .file_name()
                 .is_some_and(|n| n.to_string_lossy().ends_with(f.suffix.as_str()));
-        (name_fits && is_inside(&abs, &project_dir.join(f.folder.trim_end_matches('/')))).then(
+        (name_fits && is_inside(&abs, &worktree_root.join(f.folder.trim_end_matches('/')))).then(
             || {
                 format!(
-                    "`{}` is a row of store `{}` (`{}`), kept by the extension `{}`: write it \
-                     with that extension's command, never a tool (mcp__oxplow__list_commands \
-                     lists the `{}.*` commands; its skill says which). The command validates, \
-                     links and audits it, and the file follows.",
+                    "`{}` is a row of store `{}` (`{}`) in this worktree's `{}`, which isn't \
+                     watched, so the page would be lost: write it with the extension `{}`'s \
+                     command (mcp__oxplow__list_commands lists the `{}.*` commands; its skill \
+                     says which), which writes to the primary checkout from anywhere.",
                     abs.display(),
                     f.store,
                     f.model,
+                    f.folder,
                     f.extension,
                     f.extension
                 )
@@ -115,22 +125,45 @@ mod tests {
     }
 
     #[test]
-    fn a_stores_row_file_is_written_by_its_extensions_command() {
-        let project = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(project.path().join(".oxplow/oxwiki")).unwrap();
-        let target = project.path().join(".oxplow/oxwiki/captured.md");
+    fn a_stores_row_file_in_a_worktree_is_written_by_its_extensions_command() {
+        let primary = tempfile::tempdir().unwrap();
+        let worktree = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(worktree.path().join(".oxplow/oxwiki")).unwrap();
+        let target = worktree.path().join(".oxplow/oxwiki/captured.md");
         std::fs::write(&target, "").unwrap();
-        let reason =
-            record_file_reason(target.to_str(), Some(project.path()), &oxwiki()).expect("refused");
+        let reason = record_file_reason(
+            target.to_str(),
+            Some(worktree.path()),
+            Some(primary.path()),
+            &oxwiki(),
+        )
+        .expect("refused");
         assert!(
             reason.contains("store `oxwiki`") && reason.contains("`oxwiki.*` commands"),
             "{reason}"
         );
-        assert!(record_file_reason(Some("src/a.rs"), Some(project.path()), &oxwiki()).is_none());
-        // Not a row: no suffix match; no store declared the files: no guard.
-        let other = project.path().join(".oxplow/oxwiki/notes.txt");
-        assert!(record_file_reason(other.to_str(), Some(project.path()), &oxwiki()).is_none());
-        assert!(record_file_reason(target.to_str(), Some(project.path()), &[]).is_none());
+        // The primary writes it itself; other files and non-rows are free.
+        assert!(record_file_reason(
+            target.to_str(),
+            Some(primary.path()),
+            Some(primary.path()),
+            &oxwiki()
+        )
+        .is_none());
+        let other = worktree.path().join(".oxplow/oxwiki/notes.txt");
+        for p in [Some("src/a.rs"), other.to_str()] {
+            assert!(
+                record_file_reason(p, Some(worktree.path()), Some(primary.path()), &oxwiki())
+                    .is_none()
+            );
+        }
+        assert!(record_file_reason(
+            target.to_str(),
+            Some(worktree.path()),
+            Some(primary.path()),
+            &[]
+        )
+        .is_none());
     }
 
     /// Another stream's tree is refused, naming it; the thread's own tree

@@ -45,9 +45,10 @@ Commands validate inputs and apply actor permissions, confirmation,
 audit, and transaction rules. The session/thread context identifies
 where a call came from.
 
-Knowledge page writes use `oxplow.knowledge.write_page`, which maintains the page
-and its references together. Capturing understanding works from
-non-writer threads too; it needs an enabled knowledge store to retain it.
+Knowledge page writes use the store's own command (oxwiki's is
+`oxwiki.page.write`), which checks the page's links and writes it; oxplow
+derives its references. Capturing understanding works from non-writer threads
+too; it needs an enabled knowledge store to retain it.
 
 ## What you choose
 

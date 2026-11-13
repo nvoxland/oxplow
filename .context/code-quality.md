@@ -175,7 +175,7 @@ in the background. `DuplicationRecorder::record`
 - **stored in one write** (`SqliteCodeQualityStore::finish_scan_with_findings`):
   the findings, their `finding → file` page refs and the scan's `done`
   status commit together, so a scan announces one `DatasetsChanged`, not
-  two per finding. That burst (`page_ref` feeds `v_knowledge_page` and
+  two per finding. That burst (`page_ref` feeds `v_oxplow_knowledge_page` and
   `v_thread_work`) used to keep the webview re-reading knowledge pages and Work
   models for the whole store and made typing lag;
 - **only the latest scan per scope is kept**: the same write deletes the

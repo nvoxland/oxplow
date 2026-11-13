@@ -289,14 +289,16 @@ loading spinner) by:
 The recursive `fs.watch` falls back to per-subdir watching on platforms
 that don't support recursive mode.
 
-### Oxwiki
+### Watched folders
 
-`crates/oxplow-oxwiki/src/watch.rs`: a `Scope` on the primary's watch
-(`.oxplow/oxwiki/`). Each batch of `.md` changes runs `pages::sync_page` per slug
-(`crates/oxplow-oxwiki/src/pages.rs`); a rescan runs
-`scan_and_sync_all`. Every write is treated identically — agent and user edits
-both re-baseline freshness — so this is the single sync path for oxwiki's
-`knowledge_page` metadata. See `data-model.md` → `knowledge_page`.
+An extension that keeps files under `.oxplow/` declares the folder with
+`files: [{ path: .oxplow/<name>, access: write, watch: true }]`; the
+primary's watch follows it though git ignores it
+(`oxplow_fs_watch::set_declared_watched_folders`, published per generation),
+and the extension's `files:` trigger hears a change in it. oxwiki's
+`.oxplow/oxwiki/` is one: its collector converges every page file — an agent's
+direct write, a person's edit — into the knowledge model's rows. See
+`knowledge.md` and `extensions-permissions.md` "Declared folders".
 
 ### Config
 
