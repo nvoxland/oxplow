@@ -38,7 +38,6 @@ pub const CORE_NAMESPACES: &[&str] = &[
     "stream",
     "snapshot",
     "vcs",
-    "task",
     "knowledge",
     "comment",
     "record",
@@ -181,17 +180,8 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<TestCoverageRecorded>()
             .expect("core type registers");
-        r.register::<TaskDeleted>().expect("core type registers");
         r.register::<CollectorSynced>()
             .expect("core type registers");
-        r.register::<TaskEdited>().expect("core type registers");
-        r.register::<TaskCreated>().expect("core type registers");
-        r.register::<TaskLinked>().expect("core type registers");
-        r.register::<TaskUnlinked>().expect("core type registers");
-        r.register::<TaskCommented>().expect("core type registers");
-        r.register::<TaskStateChanged>()
-            .expect("core type registers");
-        r.register::<TaskAssigned>().expect("core type registers");
         r.register::<ThreadCheckpoint>()
             .expect("core type registers");
         r.register::<RecordRead>().expect("core type registers");
@@ -1602,173 +1592,6 @@ impl EventType for ThreadCheckpoint {
     type Payload = ThreadCheckpointV2;
 }
 
-/// `task.state_changed@1`: a `task.*` command put an item in
-/// a canonical state — logged by core for every provider, anchored to the
-/// thread of whoever ran it (`.context/tasks.md`). A create always
-/// logs one; for a provider oxplow can't read the prior state of, a
-/// transition or update that names a state logs one even when the item
-/// was already there.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct TaskStateChangedV1 {
-    /// `oxplow:oxplow/task?id=<id>&provider=<provider>`.
-    pub task: String,
-    pub to: crate::tasks::Bucket,
-}
-
-pub struct TaskStateChanged;
-impl EventType for TaskStateChanged {
-    const TYPE: &'static str = "task.state_changed";
-    const V: u32 = 1;
-    type Payload = TaskStateChangedV1;
-}
-
-// The task events are the interface's: core logs them for every
-// list, from the verb a `oxtask.task.*` command ran and what the list
-// answered (`.context/tasks.md`).
-
-/// `task.created@2`: an item was filed on a task tracker, in `state`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct TaskCreatedV2 {
-    /// `oxplow:oxplow/task?id=<id>&provider=<list>`.
-    pub task: String,
-    /// The canonical state it was filed in.
-    pub state: crate::tasks::Bucket,
-}
-
-pub struct TaskCreated;
-impl EventType for TaskCreated {
-    const TYPE: &'static str = "task.created";
-    const V: u32 = 2;
-    type Payload = TaskCreatedV2;
-}
-
-/// `task.deleted@2`: an item was deleted from its task tracker.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct TaskDeletedV2 {
-    /// `oxplow:oxplow/task?id=<id>&provider=<list>`.
-    pub task: String,
-}
-
-pub struct TaskDeleted;
-impl EventType for TaskDeleted {
-    const TYPE: &'static str = "task.deleted";
-    const V: u32 = 2;
-    type Payload = TaskDeletedV2;
-}
-
-/// `task.edited@2`: a command changed an item's fields — not its
-/// state, which is `task.state_changed`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct TaskEditedV2 {
-    /// `oxplow:oxplow/task?id=<id>&provider=<list>`.
-    pub task: String,
-    /// The fields the command set: `title`, `body`, `parent`, `stage` (a
-    /// move between two stages of one bucket; a move to another bucket is
-    /// `task.state_changed`), and `native.<name>` for each of the
-    /// list's own fields.
-    pub fields: Vec<String>,
-}
-
-pub struct TaskEdited;
-impl EventType for TaskEdited {
-    const TYPE: &'static str = "task.edited";
-    const V: u32 = 2;
-    type Payload = TaskEditedV2;
-}
-
-/// `task.linked@2`: a typed link from an item to another of the
-/// same list, or to any ref it is about.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct TaskLinkedV2 {
-    /// The item linked from (`oxplow:oxplow/task?id=<id>&provider=<list>`).
-    pub task: String,
-    /// What it links to: an item, or any ref.
-    pub target: String,
-    /// One of the list's own link types.
-    pub link_type: String,
-}
-
-pub struct TaskLinked;
-impl EventType for TaskLinked {
-    const TYPE: &'static str = "task.linked";
-    const V: u32 = 2;
-    type Payload = TaskLinkedV2;
-}
-
-/// `task.unlinked@1`: an item's link was removed
-/// (`oxtask.task.unlink`, or undoing a link).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct TaskUnlinkedV1 {
-    /// The item linked from (`oxplow:oxplow/task?id=<id>&provider=<list>`).
-    pub task: String,
-    /// What it linked to.
-    pub target: String,
-    pub link_type: String,
-}
-
-pub struct TaskUnlinked;
-impl EventType for TaskUnlinked {
-    const TYPE: &'static str = "task.unlinked";
-    const V: u32 = 1;
-    type Payload = TaskUnlinkedV1;
-}
-
-/// `task.commented@2`: a comment was added to an item.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct TaskCommentedV2 {
-    /// `oxplow:oxplow/task?id=<id>&provider=<list>`.
-    pub task: String,
-    /// The list's own id for the comment, unique on the item, when its
-    /// answer named one (the `comment` verb's `result.comment`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub comment: Option<String>,
-}
-
-pub struct TaskCommented;
-impl EventType for TaskCommented {
-    const TYPE: &'static str = "task.commented";
-    const V: u32 = 2;
-    type Payload = TaskCommentedV2;
-}
-
-/// `task.assigned@1`: who is going to work on an item, or its place
-/// in their queue, changed (`oxtask.task.assign`, `.reorder`; a
-/// closed item or a closed thread's releases it). Core's record, for every
-/// provider; the `tasks.project` consumer keeps `v_oxplow_task.assignee`
-/// and `rank` from it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct TaskAssignedV1 {
-    /// `oxplow:oxplow/task?id=<id>&provider=<list>`.
-    pub task: String,
-    /// Who it was assigned to: a thread's URI, the person's; absent, nobody.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub from: Option<String>,
-    /// Who it's assigned to now; absent, nobody.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub to: Option<String>,
-    /// Placed just before this item of `to`'s queue.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub before: Option<String>,
-    /// Placed just after this item of `to`'s queue (neither: at its end).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub after: Option<String>,
-}
-
-pub struct TaskAssigned;
-impl EventType for TaskAssigned {
-    const TYPE: &'static str = "task.assigned";
-    const V: u32 = 1;
-    type Payload = TaskAssignedV1;
-}
-
 /// How many diagnostics of each severity a file has.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -2196,14 +2019,6 @@ mod tests {
                 ("snapshot.ref_drifted", 1),
                 ("snapshot.taken", 3),
                 ("stream.archived", 1),
-                ("task.assigned", 1),
-                ("task.commented", 2),
-                ("task.created", 2),
-                ("task.deleted", 2),
-                ("task.edited", 2),
-                ("task.linked", 2),
-                ("task.state_changed", 1),
-                ("task.unlinked", 1),
                 ("terminal.closed", 1),
                 ("terminal.opened", 1),
                 ("terminal.renamed", 1),
@@ -2218,7 +2033,7 @@ mod tests {
                 ("vcs.head.moved", 3),
             ]
         );
-        assert_eq!(r.latest("task.created"), Some(2));
+        assert_eq!(r.latest("thread.closed"), Some(1));
         assert_eq!(r.latest("agent.turn.ended"), Some(5));
         assert_eq!(r.owner("config.changed", 2), Some(None));
     }
@@ -2243,27 +2058,22 @@ mod tests {
     #[test]
     fn validate_accepts_the_typed_shape_and_names_the_violation() {
         let r = crate::vocabulary::Vocabulary::core();
-        let ok = Envelope::typed::<TaskStateChanged>(
+        let ok = Envelope::typed::<ThreadClosed>(
             "human",
-            &TaskStateChangedV1 {
-                task: "oxplow:oxplow/task?id=tsk4&provider=oxtask".into(),
-                to: crate::tasks::Bucket::InProgress,
+            &ThreadClosedV1 {
+                thread: "thr3".into(),
             },
         );
-        assert_eq!(ok.event_type, "task.state_changed");
+        assert_eq!(ok.event_type, "thread.closed");
         assert_eq!(ok.v, 1);
         r.validate_envelope(&ok).unwrap();
 
         let bad = r
-            .validate(
-                "task.state_changed",
-                1,
-                &json!({"task": "x", "to": "flying"}),
-            )
+            .validate("thread.closed", 1, &json!({"thread": 7}))
             .unwrap_err();
         let msg = bad.to_string();
         assert!(
-            msg.contains("task.state_changed@1") && msg.contains("/to"),
+            msg.contains("thread.closed@1") && msg.contains("/thread"),
             "{msg}"
         );
 
@@ -2280,7 +2090,7 @@ mod tests {
     #[test]
     fn unknown_types_and_versions_are_refused() {
         let r = EventSchemaRegistry::core();
-        let e = r.validate("task.state_changed", 2, &json!({})).unwrap_err();
+        let e = r.validate("thread.closed", 2, &json!({})).unwrap_err();
         assert!(e.to_string().contains("newest is v1"), "{e}");
         let e = r.validate("acme.thing", 1, &json!({})).unwrap_err();
         assert!(e.to_string().contains("not registered"), "{e}");
@@ -2317,7 +2127,7 @@ mod tests {
     }
     struct Squatter;
     impl EventType for Squatter {
-        const TYPE: &'static str = "task.hijacked";
+        const TYPE: &'static str = "thread.hijacked";
         const V: u32 = 1;
         type Payload = ConfigChangedV2;
     }
@@ -2364,7 +2174,7 @@ mod tests {
         // Core can't register into an extension's namespace either, and a
         // second registration of the same type@v collides.
         assert!(r.register::<AcmeDecided>().is_err());
-        assert!(r.register::<TaskStateChanged>().is_err());
+        assert!(r.register::<ThreadClosed>().is_err());
     }
 
     #[test]
@@ -2460,6 +2270,6 @@ mod tests {
         assert_eq!((v, same), (2, json!({"n": 5, "note": "x"})));
         assert!(r.upcast_to_latest("acme.thing", 3, json!({})).is_err());
         // The default upcast refuses: a type that bumps V must define one.
-        assert!(TaskStateChanged::upcast(0, json!({})).is_err());
+        assert!(ThreadClosed::upcast(0, json!({})).is_err());
     }
 }

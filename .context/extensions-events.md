@@ -97,7 +97,7 @@ the provider host was), so a kind carries no stability.
 starts like any (K1), when the generation that first runs it publishes.
 A task an effect (or oxplow
 itself) files has no `author` — it isn't the person's; its
-`task.created` and the run's audit name the effect (its `native`
+`oxplow.task_record.changed` and the run's audit name the effect (its `native`
 `author` is null). The loader limits effects to no kind of extension.
 
 **Retention** (P8.D5) is the extension's window for its namespace's payloads
@@ -442,11 +442,11 @@ confirms"):
 effects:
   - id: announce-done          # [a-z0-9-]+, unique in the extension
     summary: Note a finished item on its thread.
-    on: [task.state_changed]  # core types, its own, or another extension's ("Event types")
+    on: [thread.closed]  # core types, its own, or another extension's ("Event types")
     where: { to: done }            # optional: payload fields equal to these; a list (`to: [done, canceled]`) equals any of them
     needs: [sql.read]              # the scopes its script calls: only what a script can (`scope_calls::CALLABLE`)
     entry: effects/announce.star   # transform({event}) → {commands, events?} | {skip}
-    after: [page_ref.task]    # optional: what it runs after on one event ("Ordering")
+    after: [change.analyze]   # optional: what it runs after on one event ("Ordering")
 ```
 
 **One trigger grammar.** An effect's `on`/`where` are a collector's —

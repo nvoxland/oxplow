@@ -1119,7 +1119,7 @@ mod ordering_tests {
             yaml.push_str("effects:\n");
             for (id, after) in effects {
                 yaml.push_str(&format!(
-                    "  - {{ id: {id}, summary: s, on: [task.state_changed], entry: e.star, after: [{after}] }}\n"
+                    "  - {{ id: {id}, summary: s, on: [thread.closed], entry: e.star, after: [{after}] }}\n"
                 ));
             }
         }
@@ -1127,7 +1127,7 @@ mod ordering_tests {
             yaml.push_str("collectors:\n");
             for (id, after) in collectors {
                 yaml.push_str(&format!(
-                    "  - {{ id: {id}, runtime: starlark, entry: c.star, on: [task.state_changed], after: [{after}], entities: [{{ name: {id}, key: k, columns: {{ k: text }} }}] }}\n"
+                    "  - {{ id: {id}, runtime: starlark, entry: c.star, on: [thread.closed], after: [{after}], entities: [{{ name: {id}, key: k, columns: {{ k: text }} }}] }}\n"
                 ));
             }
         }

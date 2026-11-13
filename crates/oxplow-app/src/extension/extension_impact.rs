@@ -2670,14 +2670,14 @@ mod tests {
             std::fs::write(
                 dir.join("extension.yaml"),
                 format!(
-                    "manifest: 2\nname: acme\nintent:\n  purpose: p\n  examples:\n    - {{ name: basic, input: x, expect: y }}\neffects:\n  - {{ id: on-done, summary: s, on: [task.state_changed]{filter}, entry: e.star }}\n"
+                    "manifest: 2\nname: acme\nintent:\n  purpose: p\n  examples:\n    - {{ name: basic, input: x, expect: y }}\neffects:\n  - {{ id: on-done, summary: s, on: [thread.closed]{filter}, entry: e.star }}\n"
                 ),
             )
             .unwrap();
             std::fs::write(dir.join("e.star"), script).unwrap();
             std::fs::write(
                 dir.join("fixtures/basic.yaml"),
-                "when: { effect: on-done, event: { type: task.state_changed, payload: { task: \"task:oxplow:tsk1\", to: done } } }\nexpect: { commands: [oxplow.task.comment] }\n",
+                "when: { effect: on-done, event: { type: thread.closed, payload: { thread: thr1 } } }\nexpect: { commands: [oxplow.task.comment] }\n",
             )
             .unwrap();
         };
@@ -2688,7 +2688,7 @@ mod tests {
         );
         write(
             new.path(),
-            ", where: { to: done }",
+            ", where: { thread: thr1 }",
             "def transform(x):\n    return {\"skip\": \"not today\"}\n",
         );
         let (eb, ea) = (
@@ -2730,7 +2730,7 @@ mod tests {
                 .filter(|l| l.starts_with("Effect"))
                 .collect::<Vec<_>>(),
             vec![
-                "Effect on-done: on task.state_changed → on task.state_changed where to = done",
+                "Effect on-done: on thread.closed → on thread.closed where thread = thr1",
                 "Effect on-done on fixture basic: runs [oxplow.task.comment] → skips (not today)",
             ]
         );
@@ -3121,13 +3121,13 @@ mod tests {
                     id: "on-done".into(),
                     change: Change::Changed,
                     before: Some(EffectTrigger {
-                        on: vec!["task.state_changed".into()],
+                        on: vec!["thread.closed".into()],
                         filter: BTreeMap::new(),
                         needs: Vec::new(),
                     }),
                     after: Some(EffectTrigger {
-                        on: vec!["task.state_changed".into()],
-                        filter: [("to".to_string(), vec!["done".to_string()])].into(),
+                        on: vec!["thread.closed".into()],
+                        filter: [("thread".to_string(), vec!["thr1".to_string()])].into(),
                         needs: Vec::new(),
                     }),
                     outputs: vec![EffectOutput {
@@ -3173,7 +3173,7 @@ mod tests {
             vec![
                 "Collector gh: now reaches api.example.com (was none)",
                 "Provider fake: command `delete` added (destructive)",
-                "Effect on-done: on task.state_changed → on task.state_changed where to = done",
+                "Effect on-done: on thread.closed → on thread.closed where thread = thr1",
                 "Effect on-done on fixture basic: runs [oxplow.task.comment] → skips (not today)",
                 "Effect ping: added — on vcs.head.moved",
                 "Collector gh on fixture two: 2 thing → fails (boom)",

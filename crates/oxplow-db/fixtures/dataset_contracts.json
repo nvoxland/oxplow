@@ -8300,6 +8300,101 @@
         }
       ],
       "key": []
+    },
+    "7": {
+      "columns": [
+        {
+          "name": "seq",
+          "type": "INTEGER",
+          "doc": "Insert order — the delivery order consumers checkpoint on."
+        },
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "Public identity (UUIDv7; sorts by time)."
+        },
+        {
+          "name": "type",
+          "type": "TEXT",
+          "doc": "`namespace.name`, e.g. `thread.closed`."
+        },
+        {
+          "name": "v",
+          "type": "INTEGER",
+          "doc": "Schema version of `type`."
+        },
+        {
+          "name": "at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "doc": "What emitted it: `human`, `agent:thr3`, `task_service`, …"
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "Anchor, when known."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Anchor, when known."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "Anchor (agent_turn), when known."
+        },
+        {
+          "name": "snapshot_id",
+          "type": "INTEGER",
+          "doc": "Anchor, when known."
+        },
+        {
+          "name": "agent_session_id",
+          "type": "INTEGER",
+          "doc": "Anchor (v_agent_session.id): the agent session it happened in, when known."
+        },
+        {
+          "name": "subject",
+          "type": "TEXT",
+          "doc": "JSON array of the canonical refs the event is about."
+        },
+        {
+          "name": "payload",
+          "type": "TEXT",
+          "doc": "JSON, validated against `type@v`'s schema."
+        },
+        {
+          "name": "payload_hash",
+          "type": "TEXT",
+          "doc": "Content hash when the body lives in the content store."
+        },
+        {
+          "name": "payload_expired_at",
+          "type": "TEXT",
+          "doc": "When retention replaced the payload with `{}` (the envelope stays); NULL while it's kept."
+        },
+        {
+          "name": "cause",
+          "type": "TEXT",
+          "doc": "The event id that caused this one."
+        },
+        {
+          "name": "dedupe_key",
+          "type": "TEXT",
+          "doc": "Emitter-derived key; unique."
+        },
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/event?id=<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
+        }
+      ],
+      "key": []
     }
   },
   "event_checkpoint": {

@@ -1212,8 +1212,6 @@ type: `record_mention` / `comment_record_mention`; a link is `task_link:<type>`)
 | Owner | Source | Slice (`ref_type`s) |
 |---|---|---|
 | `model_store::write_tx` (`oxplow-db`), for a model's markdown columns | the row's URI | the body's edges: `file_pin` / `dir_pin` (pinned columns) or `file_mention` / `dir_mention`, `record_mention`, … |
-| `task_refs::restate_tx` (`oxplow-db`), run by the `page_ref.task` consumer on an item's events and by the boot repair — any list's item, from `task` / `task_link` / `task_comment` | the task's URI, body slice | `record_mention`, `file_mention`, `dir_mention`, `finding_mention`, `commit_mention` |
-| (the same) | link slice | `task_link:<type>` — every type with the prefix, the list's own (V28 dropped the CHECK naming oxplow's six) |
 | (the same) | comment slice: the comments' mentions, as the item's own edges (V28 dropped the old `oxtask_note` sources) | `comment_file_ref`, `comment_dir_ref`, `comment_record_mention`, `comment_finding_mention`, `comment_commit_mention` |
 | `analytics_stores::SqliteCodeQualityStore::append_finding` | the finding's URI | full source |
 | `commit_indexer.rs` (`oxplow-app`) | the commit's URI | full source — diff yields `touched_file`, message yields the same body-mention set |
@@ -1448,10 +1446,9 @@ and are registered by `crate::boot` — a test that wants them calls their
 
 | Consumer | Kind | On | Does | Registered |
 |---|---|---|---|---|
-| `page_ref.task` | sync | `task.created` / `edited` | re-projects a task's body-mention edges | boot |
 | `tool_call.project` | sync | `agent.tool.requested`, `agent.tool.finished`, `agent.turn.ended` | the `agent_tool_call` row (one per call: opened at the request, closed at the finish, abandoned at its turn's end; V6) | boot |
 | `ui.push` | sync | `snapshot.taken` (that recorded files), `vcs.head.moved` | the renderer's `SnapshotTaken` on the UI bus (P7.B6) | boot |
-| `metrics.entity_states` | async | `task.*`, `snapshot.taken`, `collector.synced` | re-captures state entity metrics, throttled per metric (P7.B6) | boot |
+| `metrics.entity_states` | async | `snapshot.taken`, `collector.synced` | re-captures state entity metrics, throttled per metric (P7.B6) | boot |
 | `config.workspace_filter` | async | `config.changed` (`generated`) | the snapshot captures' filter | boot |
 | `thread.checkpoint` | async | `snapshot.taken` (`turn_end`) | logs `thread.checkpoint` (changed since the turn began, writing tool count) | `Services::new` |
 | `collection` | async | `agent.tool.finished` (Bash) | test / analysis / coverage captures, `test.*` events, nudges | boot |
@@ -1502,13 +1499,6 @@ of a person or a page for one, never an agent's (`commands/delivery.rs`);
 the list is `v_event_dead_letter`. Also
 `v_event`, `v_event_dead_letter`, `v_event_checkpoint` in the semantic
 layer (V94). Nothing is skipped silently.
-
-**Consumers so far.** `PageRefTaskConsumer` (`page_ref.task`,
-`crates/oxplow-app/src/page_ref_consumers.rs`) re-projects a task's
-body-mention `page_ref` edges on core's `task.created` /
-`task.edited` through the `replace_source_for_ref_types_tx` core,
-checkpointed and dead-lettered like any other consumer. The task
-store's own insert/update (not the commands') still project inline.
 
 `command_audit` (who ran which command, the input, outcome, the undo as
 `inverse_json`, `undone_by`, `scopes_json` — V27, named so in V34: the scopes the run called and how often,

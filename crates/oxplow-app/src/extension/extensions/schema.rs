@@ -135,13 +135,13 @@ mod tests {
         assert!(problems(&schema, OK).is_empty());
         assert!(!problems(&schema, &format!("{OK}gauges: []\n")).is_empty());
         let effect =
-            "effects:\n  - { id: on-done, summary: s, on: [task.state_changed], entry: e.star }\n";
+            "effects:\n  - { id: on-done, summary: s, on: [thread.closed], entry: e.star }\n";
         assert!(
             problems(&schema, &format!("{OK}{effect}")).is_empty(),
             "{:?}",
             problems(&schema, &format!("{OK}{effect}"))
         );
-        let stray = "effects:\n  - { id: on-done, summary: s, on: [task.state_changed], entry: e.star, when: now }\n";
+        let stray = "effects:\n  - { id: on-done, summary: s, on: [thread.closed], entry: e.star, when: now }\n";
         assert!(!problems(&schema, &format!("{OK}{stray}")).is_empty());
     }
 

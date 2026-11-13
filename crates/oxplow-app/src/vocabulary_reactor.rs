@@ -948,7 +948,7 @@ resources:
     #[tokio::test]
     async fn a_subscription_to_no_type_at_all_is_refused_at_load() {
         let d = tempfile::tempdir().unwrap();
-        for bad in ["task.nope", "beta.nope", "nope"] {
+        for bad in ["thread.nope", "beta.nope", "nope"] {
             write(
                 d.path(),
                 ".oxplow/extensions/beta/extension.yaml",

@@ -615,9 +615,9 @@ the task; a point nothing answers for an item is skipped.
 ```yaml
 effects:
   - id: announce-done
-    summary: Note a finished item on its thread.
-    on: [task.state_changed]
-    where: { to: done }
+    summary: Note a closed thread.
+    on: [thread.closed]
+    where: { thread: thr3 }
     needs: [sql.read]
     entry: effects/announce.star    # transform({ event }) → { commands } | { skip: "why" }
 ```
@@ -635,7 +635,7 @@ which run first:
 ```yaml
 effects:
   - id: notify
-    on: [task.state_changed]
+    on: [thread.closed]
     entry: effects/notify.star
     after: [react, "collector:acme/gather", change.analyze]
 ```
@@ -645,8 +645,7 @@ An entry is one of:
 - a short URI: `effect:<namespace>/<id>` or `collector:<namespace>/<id>`,
   any extension's (the short forms of `oxplow:oxplow/effect?effect=…` and
   `oxplow:oxplow/collector?collector=…`);
-- one of oxplow's own steps, by name (`change.analyze`, `collection`,
-  `page_ref.task`, …), or as `consumer:<name>`.
+- one of oxplow's own steps, by name (`change.analyze`, `collection`, …), or as `consumer:<name>`.
 
 A target nothing declares, or contributions that wait on each other, is
 a load error, and the contribution doesn't run. A target in a disabled
@@ -668,12 +667,12 @@ triggered it):
 
 ```json
 {
-  "id": "0199…", "type": "task.state_changed", "v": 1, "seq": 812,
+  "id": "0199…", "type": "thread.closed", "v": 1, "seq": 812,
   "at": "2026-10-09T14:02:11.120000Z", "source": "agent:thr3",
-  "subject": ["oxplow:oxplow/task?id=tsk4&provider=oxtask"],
+  "subject": ["oxplow:oxplow/thread?id=thr3"],
   "anchors": { "stream_id": "str1", "thread_id": "thr3",
                "turn_id": 41, "agent_session_id": "ses2", "snapshot_id": null },
-  "payload": { "task": "oxplow:oxplow/task?id=tsk4&provider=oxtask", "to": "done" },
+  "payload": { "thread": "thr3" },
   "cause": null
 }
 ```

@@ -383,7 +383,7 @@ impl Instance {
 
     /// Append `batch` and the checkpoint covering it, in one transaction —
     /// each record only when it changes its item: one equal to the item's
-    /// last `task.recorded` (a write's, or an earlier read's) restates
+    /// last logged record (a write's, or an earlier read's) restates
     /// nothing, and logging it would echo a write back to whatever reacted
     /// to it (an effect writing the item). The checkpoint counts
     /// what was read.

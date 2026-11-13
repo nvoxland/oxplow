@@ -19,7 +19,7 @@ use crate::extension::extension_job_stream_tests::{
 };
 use crate::extension::extension_private_state_tests::{declare, write, write_state, CONFIGURATION};
 use crate::test_fixtures::lifecycle::{
-    booted, log_task_done, page, problem, readable, CONFIGURATION_V2,
+    booted, log_thread_closed, page, problem, readable, CONFIGURATION_V2,
 };
 use crate::test_fixtures::ThreadFixture;
 
@@ -117,7 +117,7 @@ impl Alpha {
   - id: seen
     runtime: starlark
     entry: collectors/seen.star
-    on: [task.state_changed]{settle}
+    on: [thread.closed]{settle}
     input: \"SELECT :event_seq AS ev\"
     sync: upsert
     entities:
@@ -125,7 +125,7 @@ impl Alpha {
 effects:
   - id: note
     summary: Note a finished task.
-    on: [task.state_changed]
+    on: [thread.closed]
     entry: effects/note.star
 event_types:
   types:
@@ -232,10 +232,10 @@ fn page_title(fx: &ThreadFixture) -> Option<String> {
         .map(|l| l.title)
 }
 
-/// A task is done: the collector and the effect react to it, as the
+/// A thread closed: the collector and the effect react to it, as the
 /// event pump runs them.
 async fn verified(fx: &ThreadFixture) {
-    log_task_done(&fx.svc, fx.thread, "reviewer").await;
+    log_thread_closed(&fx.svc, fx.thread, "reviewer").await;
     assert!(
         fx.svc.event_pump.settle_all(Duration::from_secs(10)).await,
         "the consumers handled it"

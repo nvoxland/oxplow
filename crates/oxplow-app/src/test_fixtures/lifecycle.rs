@@ -103,21 +103,20 @@ pub(crate) async fn page(
     }
 }
 
-/// Log a `task.state_changed` moving `task` (an item's id on `issues`) to
-/// done on `thread` and return it as stored: an event an `on:` collector or
-/// effect can react to.
-pub(crate) async fn log_task_done(
+/// Log a `thread.closed` on `thread`, whose payload names `name` as the
+/// thread (a stand-in id; the schema takes any string), and return it as
+/// stored: an event an `on:` collector or effect can react to.
+pub(crate) async fn log_thread_closed(
     svc: &crate::Services,
     thread: oxplow_domain::ThreadId,
-    task: &str,
+    name: &str,
 ) -> oxplow_domain::StoredEvent {
     use oxplow_domain::events::Anchors;
     use oxplow_domain::Envelope;
-    let env = Envelope::typed::<oxplow_domain::events::schema::TaskStateChanged>(
+    let env = Envelope::typed::<oxplow_domain::events::schema::ThreadClosed>(
         "human",
-        &oxplow_domain::events::schema::TaskStateChangedV1 {
-            task: format!("oxplow:oxplow/task?id={task}&provider=issues"),
-            to: oxplow_domain::tasks::Bucket::Done,
+        &oxplow_domain::events::schema::ThreadClosedV1 {
+            thread: name.to_string(),
         },
     )
     .with_anchors(Anchors {

@@ -2190,6 +2190,74 @@ mod tests {
         assert_eq!(versions, vec![4, 4]);
     }
 
+    /// V38 drops the events of the task types core no longer defines
+    /// (`task.*` and `task.recorded`), with what waited on them, and keeps
+    /// every other event.
+    #[test]
+    fn v38_drops_the_dead_task_events_and_what_was_keyed_to_them() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(37))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
+        for (id, ty) in [
+            ("a", "task.created"),
+            ("b", "task.state_changed"),
+            ("c", "task.recorded"),
+            ("d", "task.assigned"),
+            ("k", "thread.closed"),
+            ("m", "oxplow.task_record.changed"),
+        ] {
+            conn.execute(
+                "INSERT INTO event_log (id, type, v, at, source, subject, payload)
+                 VALUES (?1, ?2, 1, 'a', 's', '[]', '{}')",
+                [id, ty],
+            )
+            .unwrap();
+        }
+        let seq = |id: &str| -> i64 {
+            conn.query_row("SELECT seq FROM event_log WHERE id = ?1", [id], |r| {
+                r.get(0)
+            })
+            .unwrap()
+        };
+        for id in ["a", "k"] {
+            let n = seq(id);
+            conn.execute(
+                "INSERT INTO event_dead_letter (consumer, event_seq, error, first_failed_at, last_failed_at)
+                 VALUES ('x', ?1, 'boom', 'a', 'a')",
+                [n],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO effect_run (effect, event_id, event_seq, state, started_at)
+                 VALUES ('x/e', ?1, ?2, 'ok', 'a')",
+                rusqlite::params![id, n],
+            )
+            .unwrap();
+        }
+        let kept = seq("k");
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let left = |sql: &str| -> Vec<String> {
+            conn.prepare(sql)
+                .unwrap()
+                .query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        assert_eq!(
+            left("SELECT id FROM event_log ORDER BY seq"),
+            vec!["k", "m"]
+        );
+        assert_eq!(
+            left("SELECT CAST(event_seq AS TEXT) FROM event_dead_letter"),
+            vec![kept.to_string()]
+        );
+        assert_eq!(left("SELECT event_id FROM effect_run"), vec!["k"]);
+    }
+
     /// V8 makes every logged prompt and peer message one delivery event at
     /// @3: an old prompt's source is unknown, a peer's message keeps its
     /// sender.

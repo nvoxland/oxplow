@@ -755,7 +755,7 @@ mod tests {
             now.unix_ms() - 31 * DAY_MS,
         ));
         db.transaction(move |tx| {
-            for (id, ty) in [("e1", "agent.tool.finished"), ("e2", "task.created")] {
+            for (id, ty) in [("e1", "agent.tool.finished"), ("e2", "thread.closed")] {
                 tx.execute(
                     "INSERT INTO event_log (id, type, v, at, source, subject, payload)
                        VALUES (?1, ?2, 1, ?3, 'test', '[]', '{\"tool\":\"Bash\"}')",
@@ -815,7 +815,7 @@ mod tests {
             for (id, ty, at) in [
                 ("e1", "agent.tool.finished", &old31),
                 ("e2", "agent.tool.finished", &old2),
-                ("e3", "task.created", &old31),
+                ("e3", "thread.closed", &old31),
             ] {
                 tx.execute(
                     "INSERT INTO event_log (id, type, v, at, source, subject, payload)

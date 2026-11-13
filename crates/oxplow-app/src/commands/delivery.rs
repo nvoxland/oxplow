@@ -165,7 +165,7 @@ mod tests {
 
     /// Park an event for `consumer`, as the pump would on a failure.
     async fn park(fx: &crate::test_fixtures::ThreadFixture, consumer: &str) -> i64 {
-        crate::test_fixtures::lifecycle::log_task_done(&fx.svc, fx.thread, "parked").await;
+        crate::test_fixtures::lifecycle::log_thread_closed(&fx.svc, fx.thread, "parked").await;
         let consumer = consumer.to_string();
         fx.svc
             .db

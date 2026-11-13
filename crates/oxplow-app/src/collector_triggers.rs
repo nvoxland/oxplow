@@ -232,7 +232,7 @@ impl AsyncEventConsumer for CollectorTriggers {
 
     /// Only the collectors `event_type` triggers wait on their `after:`:
     /// a `snapshot.taken` collector doesn't wait on the
-    /// `change.analyze` a `task.state_changed` collector names.
+    /// `change.analyze` a `thread.closed` collector names.
     fn after_for(&self, event_type: &str) -> Vec<String> {
         self.predecessors(Some(event_type))
     }
@@ -348,7 +348,7 @@ impl CollectorTriggers {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_fixtures::lifecycle::log_task_done as log;
+    use crate::test_fixtures::lifecycle::log_thread_closed as log;
     use oxplow_domain::Envelope;
     use serde_json::json;
 
@@ -375,9 +375,9 @@ mod tests {
 
     const SEEN: &str = "def transform(input):\n    return {\"entities\": {\"seen\": [{\"ev\": r[\"ev\"], \"id\": r[\"id\"], \"thread\": r[\"thread\"], \"kind\": input[\"event\"][\"type\"]} for r in input[\"rows\"]]}}\n";
 
-    fn on_task_done(filter: &str) -> String {
+    fn on_thread_closed(filter: &str) -> String {
         format!(
-            "  - id: seen\n    runtime: starlark\n    entry: seen.star\n    on: [task.state_changed]{filter}\n    input: \"SELECT :thread_id AS thread, :event_seq AS ev, :event_id AS id\"\n    sync: upsert\n    entities:\n      - {{ name: seen, key: ev, columns: {{ ev: int, id: text, thread: int, kind: text }} }}\n"
+            "  - id: seen\n    runtime: starlark\n    entry: seen.star\n    on: [thread.closed]{filter}\n    input: \"SELECT :thread_id AS thread, :event_seq AS ev, :event_id AS id\"\n    sync: upsert\n    entities:\n      - {{ name: seen, key: ev, columns: {{ ev: int, id: text, thread: int, kind: text }} }}\n"
         )
     }
 
@@ -434,7 +434,7 @@ mod tests {
     #[tokio::test]
     async fn an_on_collector_runs_once_per_event_with_its_anchors() {
         let fx = crate::test_fixtures::services_with_thread().await;
-        extension(&fx.svc, &on_task_done(""), &[("seen.star", SEEN)]).await;
+        extension(&fx.svc, &on_thread_closed(""), &[("seen.star", SEEN)]).await;
         let consumer = CollectorTriggers::new(Arc::downgrade(&fx.svc));
         let ev = log(&fx.svc, fx.thread, "reviewer").await;
         assert!(consumer.handles(&ev.envelope.event_type));
@@ -448,7 +448,7 @@ mod tests {
                 ev.seq,
                 ev.envelope.id.to_string(),
                 fx.thread.value(),
-                "task.state_changed"
+                "thread.closed"
             ]])
         );
         assert_eq!(
@@ -473,7 +473,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_thread().await;
         extension(
             &fx.svc,
-            &on_task_done("\n    settle: 30s"),
+            &on_thread_closed("\n    settle: 30s"),
             &[("seen.star", SEEN)],
         )
         .await;
@@ -517,7 +517,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_thread().await;
         extension(
             &fx.svc,
-            &on_task_done("\n    idle: 2m"),
+            &on_thread_closed("\n    idle: 2m"),
             &[("seen.star", SEEN)],
         )
         .await;
@@ -568,9 +568,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_thread().await;
         extension(
             &fx.svc,
-            &on_task_done(
-                "\n    where: { task: \"oxplow:oxplow/task?id=reviewer&provider=issues\" }",
-            ),
+            &on_thread_closed("\n    where: { thread: \"reviewer\" }"),
             &[("seen.star", SEEN)],
         )
         .await;
@@ -596,9 +594,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_thread().await;
         extension(
             &fx.svc,
-            &on_task_done(
-                "\n    where: { task: [\"oxplow:oxplow/task?id=a&provider=issues\", \"oxplow:oxplow/task?id=reviewer&provider=issues\"] }",
-            ),
+            &on_thread_closed("\n    where: { thread: [\"a\", \"reviewer\"] }"),
             &[("seen.star", SEEN)],
         )
         .await;
@@ -622,13 +618,13 @@ mod tests {
     #[tokio::test]
     async fn a_failing_collector_is_recorded_not_dead_lettered() {
         let fx = crate::test_fixtures::services_with_thread().await;
-        let broken = on_task_done("")
+        let broken = on_thread_closed("")
             .replace("id: seen", "id: broken")
             .replace("entry: seen.star", "entry: broken.star")
             .replace("name: seen", "name: broken");
         extension(
             &fx.svc,
-            &format!("{broken}{}", on_task_done("")),
+            &format!("{broken}{}", on_thread_closed("")),
             &[
                 ("seen.star", SEEN),
                 ("broken.star", "def transform(input):\n    return 1 // 0\n"),
@@ -661,13 +657,13 @@ mod tests {
         crate::test_fixtures::install_code_metrics(&fx.svc.layout.project_dir);
         extension(
             &fx.svc,
-            &on_task_done("").replace("    input:", "    after: [change.analyze]\n    input:"),
+            &on_thread_closed("").replace("    input:", "    after: [change.analyze]\n    input:"),
             &[("seen.star", SEEN)],
         )
         .await;
         let consumer = CollectorTriggers::new(Arc::downgrade(&fx.svc));
         assert_eq!(
-            consumer.after_for("task.state_changed"),
+            consumer.after_for("thread.closed"),
             vec!["change.analyze".to_string()]
         );
         // predecessors follow the event's own collectors — an event
@@ -681,11 +677,11 @@ mod tests {
             ],
             "every predecessor, for ordering"
         );
-        assert!(consumer.handles("task.state_changed"));
+        assert!(consumer.handles("thread.closed"));
         // The default-on code gauges (the test extension's) handle `snapshot.taken`; an
         // event no collector names isn't handled.
         assert!(consumer.handles("snapshot.taken"));
-        assert!(!consumer.handles("task.created"));
+        assert!(!consumer.handles("thread.checkpoint"));
         assert!(!consumer.handles("collector.synced"));
     }
 
@@ -695,7 +691,7 @@ mod tests {
     async fn collectors_run_after_the_collectors_they_name() {
         let fx = crate::test_fixtures::services_with_thread().await;
         let one = |id: &str, after: &str| {
-            on_task_done("")
+            on_thread_closed("")
                 .replace("  - id: seen\n", &format!("  - id: {id}\n"))
                 .replace("name: seen,", &format!("name: {id},"))
                 .replace("entry: seen.star", &format!("entry: {id}.star"))
@@ -732,7 +728,8 @@ mod tests {
         let fx = crate::test_fixtures::services_with_thread().await;
         let held = extension(
             &fx.svc,
-            &on_task_done("").replace("    input:", "    after: [no.such_consumer]\n    input:"),
+            &on_thread_closed("")
+                .replace("    input:", "    after: [no.such_consumer]\n    input:"),
             &[("seen.star", SEEN)],
         )
         .await;
@@ -879,7 +876,7 @@ mod tests {
         for (trigger, events, says) in [
             (
                 "",
-                "[{\"type\": \"task.created\", \"payload\": {}}]".to_string(),
+                "[{\"type\": \"thread.checkpoint\", \"payload\": {}}]".to_string(),
                 "may emit only the event types `acme-pr` declares",
             ),
             (

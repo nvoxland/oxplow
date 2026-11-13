@@ -614,12 +614,12 @@
     - { name: "end_col", type: "INTEGER", doc: "End column (1-based)." }
     - { name: "updated_at", type: "TEXT", doc: "When the server last published this file (RFC 3339)." }
 - name: event
-  version: 6
+  version: 7
   description: "The event log: every activity and state change, oldest first by `seq`, written in the same transaction as the change it records (.context/data-model.md \"event_log\")."
   fields:
     - { name: "seq", type: "INTEGER", doc: "Insert order — the delivery order consumers checkpoint on." }
     - { name: "id", type: "TEXT", doc: "Public identity (UUIDv7; sorts by time)." }
-    - { name: "type", type: "TEXT", doc: "`namespace.name`, e.g. `task.state_changed`." }
+    - { name: "type", type: "TEXT", doc: "`namespace.name`, e.g. `thread.closed`." }
     - { name: "v", type: "INTEGER", doc: "Schema version of `type`." }
     - { name: "at", type: "TEXT", doc: "RFC 3339 timestamp." }
     - { name: "source", type: "TEXT", doc: "What emitted it: `human`, `agent:thr3`, `task_service`, …" }

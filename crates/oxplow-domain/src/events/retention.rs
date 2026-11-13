@@ -42,7 +42,7 @@ impl RetentionWindow {
 }
 
 /// Core's expiring namespaces and their default windows. A core
-/// namespace not listed is state (`snapshot`, `vcs`, `task`, …): its
+/// namespace not listed is state (`snapshot`, `vcs`, `thread`, …): its
 /// events are kept whole.
 pub const CORE_WINDOWS: &[(&str, RetentionWindow)] = &[
     ("agent", RetentionWindow::new(30, 14)),

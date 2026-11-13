@@ -4854,7 +4854,10 @@ mod tests {
             subscribes("oxplow", &[], "oxplow.tasks.finished_cleared"),
             Subscribes::Foreign
         );
-        assert_eq!(subscribes("oxplow", &[], "task.nope"), Subscribes::Unknown);
+        assert_eq!(
+            subscribes("oxplow", &[], "thread.nope"),
+            Subscribes::Unknown
+        );
     }
 
     /// An extension's errors as the lines a person reads, one per line.
@@ -4884,7 +4887,7 @@ mod tests {
     fn a_broken_list_entry_is_an_error_at_its_own_line() {
         for (block, says) in [
             ("commands:\n  - name: a.b\n    summary: S.\n    entry: h.star\n  - name: c.d\n    bogus: 1\n", "command"),
-            ("effects:\n  - id: a\n    summary: S.\n    on: [task.state_changed]\n    entry: e.star\n  - id: b\n    bogus: 1\n", "effect"),
+            ("effects:\n  - id: a\n    summary: S.\n    on: [thread.closed]\n    entry: e.star\n  - id: b\n    bogus: 1\n", "effect"),
             ("collectors:\n  - id: a\n    runtime: starlark\n    entry: c.star\n  - id: b\n    bogus: 1\n", "collector"),
             ("skills:\n  - name: a\n    file: a.md\n  - name: b\n    bogus: 1\n", "skill"),
             ("implementations:\n  - id: a\n    capability: snapshots\n  - id: b\n    bogus: 1\n", "implementation"),
@@ -6655,7 +6658,7 @@ commands:
         std::fs::create_dir_all(dir.join("commands")).unwrap();
         std::fs::write(
             dir.join("extension.yaml"),
-            "manifest: 2\nname: x\nintent:\n  purpose: p\npermissions: [ai.compute]\neffects:\n  - { id: e, summary: s, on: [task.state_changed], entry: effects/e.star, needs: [ai.discover] }\ncommands:\n  - { name: c.go, summary: s, entry: commands/c.star, needs: [ai.discover], input_schema: { type: object, additionalProperties: false } }\n",
+            "manifest: 2\nname: x\nintent:\n  purpose: p\npermissions: [ai.compute]\neffects:\n  - { id: e, summary: s, on: [thread.closed], entry: effects/e.star, needs: [ai.discover] }\ncommands:\n  - { name: c.go, summary: s, entry: commands/c.star, needs: [ai.discover], input_schema: { type: object, additionalProperties: false } }\n",
         )
         .unwrap();
         let script = "def transform(x):\n    r = scope(\"ai.discover\", {\"role\": \"summarize\"})\n    if not r[\"dataset\"]:\n        return {\"skip\": r[\"problem\"]}\n    return {\"commands\": []}\n";

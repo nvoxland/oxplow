@@ -6,9 +6,9 @@
 //! ```yaml
 //! effects:
 //!   - id: announce-done          # [a-z0-9-]+, unique in the extension
-//!     summary: Note a finished item on its thread.
-//!     on: [task.state_changed]
-//!     where: { to: done }        # optional: payload fields equal to these
+//!     summary: Note a closed thread.
+//!     on: [thread.closed]
+//!     where: { thread: thr3 }  # optional: payload fields equal to these
 //!     needs: [sql.read]              # the scopes its script calls
 //!     entry: effects/announce.star   # transform({event}) → {commands, events?} | {skip}
 //!     after: [page_ref.task]    # optional: what it runs after on one event
@@ -554,9 +554,9 @@ name: acme
 intent: { purpose: Effects., origin: null, examples: [] }
 effects:
   - id: announce-done
-    summary: Note a finished item.
-    on: [task.state_changed]
-    where: { to: done }
+    summary: Note a closed thread.
+    on: [thread.closed]
+    where: { thread: thr3 }
     entry: effects/announce.star
 ";
 
@@ -588,10 +588,10 @@ effects:
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         let e = &ext.effects[0];
         assert_eq!(e.name(), "acme/announce-done");
-        assert_eq!(e.on, vec!["task.state_changed".to_string()]);
+        assert_eq!(e.on, vec!["thread.closed".to_string()]);
         assert_eq!(
-            e.filter.get("to").map(Vec::as_slice),
-            Some(["done".to_string()].as_slice())
+            e.filter.get("thread").map(Vec::as_slice),
+            Some(["thr3".to_string()].as_slice())
         );
         assert_eq!(e.declared_at, ".oxplow/extensions/acme/extension.yaml:5");
     }
@@ -600,10 +600,10 @@ effects:
     fn a_broken_effect_is_an_error_at_its_line() {
         for (from, to, says) in [
             (
-                "on: [task.state_changed]",
+                "on: [thread.closed]",
                 // A core namespace's type that doesn't exist (another
                 // extension's would be a subscription: P9.D1).
-                "on: [task.never]",
+                "on: [thread.never]",
                 "isn't a registered event type",
             ),
             (

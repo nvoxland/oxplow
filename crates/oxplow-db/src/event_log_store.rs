@@ -554,7 +554,7 @@ mod tests {
     use super::*;
     use oxplow_domain::events::schema::{
         ActorKind, CommandExecuted, CommandExecutedV5, CommandOutcome, ConfigChanged,
-        ConfigChangedV2, TaskStateChanged, TaskStateChangedV1,
+        ConfigChangedV2, ThreadClosed, ThreadClosedV1,
     };
     use serde_json::{json, Value};
 
@@ -621,11 +621,10 @@ mod tests {
     async fn append_commits_with_the_state_change_and_reads_back_in_order() {
         let db = Database::in_memory();
         let store = store(&db);
-        let e1 = Envelope::typed::<TaskStateChanged>(
+        let e1 = Envelope::typed::<ThreadClosed>(
             "human",
-            &TaskStateChangedV1 {
-                task: "oxplow:oxplow/task?id=tsk4&provider=oxtask".into(),
-                to: oxplow_domain::tasks::Bucket::InProgress,
+            &ThreadClosedV1 {
+                thread: "thr4".into(),
             },
         )
         .with_dedupe_key("k1")

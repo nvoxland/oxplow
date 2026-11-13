@@ -144,7 +144,7 @@ impl VocabularyHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::schema::{EventType, TaskStateChanged};
+    use crate::events::schema::{EventType, ThreadClosed};
 
     /// Core's vocabulary is built once per process: compiling every core
     /// event type's schema was most of what building a test's services
@@ -171,12 +171,12 @@ mod tests {
         ));
         let held = handle.clone();
         let before = held.current();
-        assert!(!before.is_registered(TaskStateChanged::TYPE, TaskStateChanged::V));
+        assert!(!before.is_registered(ThreadClosed::TYPE, ThreadClosed::V));
         handle.swap(Vocabulary::core());
         assert!(held
             .current()
-            .is_registered(TaskStateChanged::TYPE, TaskStateChanged::V));
-        assert!(!before.is_registered(TaskStateChanged::TYPE, TaskStateChanged::V));
+            .is_registered(ThreadClosed::TYPE, ThreadClosed::V));
+        assert!(!before.is_registered(ThreadClosed::TYPE, ThreadClosed::V));
     }
 
     /// Two handles in one process don't share resources: what one adds,
