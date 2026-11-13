@@ -600,6 +600,11 @@
               "$ref": "#/definitions/FolderAccess"
             }
           ]
+        },
+        "watch": {
+          "description": "A folder directly under `.oxplow/` that oxplow watches (the\nextension's `files` trigger hears it) and snapshots, though git\nignores it: the extension's own store of files, as oxwiki's pages are.\nOnly a folder under `.oxplow/` may say so, and it may not be one of\noxplow's own.",
+          "type": "boolean",
+          "default": false
         }
       },
       "additionalProperties": false,

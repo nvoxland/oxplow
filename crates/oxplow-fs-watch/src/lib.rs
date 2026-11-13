@@ -22,7 +22,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 pub use filter::{
-    exclude_file, is_ignore_file, should_ignore_workspace_watch_path, WorkspaceFilter,
+    exclude_file, is_ignore_file, set_declared_watched_folders, should_ignore_workspace_watch_path,
+    WorkspaceFilter,
 };
 pub use notify::RecursiveMode;
 use notify::{RecommendedWatcher, Watcher};

@@ -255,8 +255,10 @@ pub fn check_path(folders: &[Folder], path: &str, write: bool) -> Result<String,
     if !oxplow_domain::service::valid_path(trimmed) {
         return refuse("has `..`, `.` or an empty part, or is empty");
     }
-    if let Some(why) = crate::extension::extensions::storage::reserved(trimmed) {
-        return refuse(why);
+    if !crate::extension::extensions::storage::in_watched(folders, trimmed) {
+        if let Some(why) = crate::extension::extensions::storage::reserved(trimmed) {
+            return refuse(why);
+        }
     }
     let Some(folder) = folders
         .iter()
@@ -390,10 +392,12 @@ mod tests {
             Folder {
                 path: "shelf".into(),
                 access: FolderAccess::Write,
+                watch: false,
             },
             Folder {
                 path: "docs/notes".into(),
                 access: FolderAccess::Read,
+                watch: false,
             },
         ]
     }

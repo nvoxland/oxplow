@@ -121,6 +121,25 @@ enum FilterEntry {
     Path(PathBuf),
 }
 
+/// The folders directly under `.oxplow/` that extensions declare watched
+/// (`files:` entries with `watch: true`), by name. Process-wide, like the
+/// extension catalog they come from: the host replaces it with each
+/// published generation, and every filter reads it.
+static DECLARED_FOLDERS: RwLock<Vec<String>> = RwLock::new(Vec::new());
+
+/// Folders core itself names until the extension that keeps them declares
+/// them: oxwiki's, until it does (`files:` in its manifest).
+const BUILT_IN_FOLDERS: &[&str] = &["oxwiki"];
+
+/// Replace the folders extensions declare watched (names under `.oxplow/`).
+pub fn set_declared_watched_folders(names: impl IntoIterator<Item = String>) {
+    *write(&DECLARED_FOLDERS) = names.into_iter().collect();
+}
+
+fn is_watched_folder(name: &str) -> bool {
+    BUILT_IN_FOLDERS.contains(&name) || read(&DECLARED_FOLDERS).iter().any(|n| n == name)
+}
+
 impl WorkspaceFilter {
     /// Exclude-only filter with no `.gitignore` awareness — for tests
     /// and callers that have no project root. Equivalent to
@@ -379,15 +398,15 @@ impl WorkspaceFilter {
                         // what made `project.yaml` invisible even once the
                         // per-file rule was right (tsk176).
                         None => false,
-                        // oxwiki is watched. This can't be expressed in
-                        // `.gitignore`: it is deliberately NOT committed, but it
-                        // IS snapshotted (Local History's oxwiki badges read
-                        // `list_knowledge_pages_for_snapshots`). `.gitignore` answers
-                        // "should this be committed?"; this filter answers
-                        // "should oxplow watch this?" — and for oxwiki those
-                        // differ, so the one distinction gitignore can't carry
-                        // lives here.
-                        Some("oxwiki") if watching => false,
+                        // A folder an extension declares watched (`files:` with
+                        // `watch: true`) is watched. This can't be expressed
+                        // in `.gitignore`: such a folder is deliberately NOT
+                        // committed, but it IS snapshotted. `.gitignore`
+                        // answers "should this be committed?"; this filter
+                        // answers "should oxplow watch this?" — and for these
+                        // those differ, so the one distinction gitignore can't
+                        // carry lives here.
+                        Some(name) if watching && is_watched_folder(name) => false,
                         // Extension sources are watched for the same reason:
                         // an agent's edits to one are its work (snapshotted,
                         // given to its turn), committed or not. Watching
@@ -742,6 +761,25 @@ mod tests {
         assert!(!f.ignore(Path::new("node_modules/x"), false));
         assert!(!f.ignore(Path::new("target/debug"), false));
         assert!(!f.ignore(Path::new("src/main.rs"), false));
+    }
+
+    /// A folder an extension declares watched is heard and snapshotted; git's
+    /// view of a tree still leaves it out; an undeclared one is oxplow's own.
+    #[test]
+    fn a_declared_folder_is_watched_and_a_tree_still_follows_git() {
+        let f = WorkspaceFilter::with_user_entries(Vec::<String>::new());
+        let page = Path::new(".oxplow/notes/a.md");
+        assert!(f.ignore(page, false), "undeclared: oxplow's own");
+        set_declared_watched_folders(["notes".to_string()]);
+        assert!(!f.ignore(page, false), "declared: watched");
+        assert!(
+            !f.ignore(Path::new(".oxplow/notes"), true),
+            "and its folder"
+        );
+        assert!(f.ignore_in_trees(page, false), "a tree is git's view");
+        assert!(f.ignore(Path::new(".oxplow/other/a.md"), false));
+        set_declared_watched_folders(Vec::new());
+        assert!(f.ignore(page, false), "undeclared again");
     }
 
     #[test]

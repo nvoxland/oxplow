@@ -40,6 +40,13 @@ pub struct FolderFile {
     pub path: String,
     /// `read` for `files.read`; `write` also allows `files.write`.
     pub access: FolderAccess,
+    /// A folder directly under `.oxplow/` that oxplow watches (the
+    /// extension's `files` trigger hears it) and snapshots, though git
+    /// ignores it: the extension's own store of files, as oxwiki's pages are.
+    /// Only a folder under `.oxplow/` may say so, and it may not be one of
+    /// oxplow's own.
+    #[serde(default)]
+    pub watch: bool,
 }
 
 /// A folder the extension may use, its `path` relative to the project root
@@ -48,6 +55,9 @@ pub struct FolderFile {
 pub struct Folder {
     pub path: String,
     pub access: FolderAccess,
+    /// See [`FolderFile::watch`].
+    #[serde(default)]
+    pub watch: bool,
 }
 
 /// What an extension declares for the store and file services. Host-side
@@ -61,24 +71,79 @@ pub struct ExtensionStorage {
     pub folders: Vec<Folder>,
 }
 
+/// The folders directly under `.oxplow/` that are oxplow's own: no extension
+/// may declare one as its watched folder.
+const OXPLOW_OWN_DIRS: &[&str] = &[
+    "extensions",
+    "extensions-data",
+    "runtime",
+    "logs",
+    "snapshots",
+    "blobs",
+    "objects",
+    "lsp",
+    "lsp-cache",
+    "global-config",
+];
+
 /// Why no extension may declare (or reach) `path`: `.git` at any depth, in
 /// any case (macOS is case-insensitive), is git's; `.oxplow` is oxplow's own
 /// data (other extensions' store files in `extensions-data`, the extensions'
-/// sources in `extensions`, the database ...). The one exception is
-/// `.oxplow/oxwiki`: oxwiki's markdown files are its store, so the extension
-/// that holds them needs write access there. `path` is already a valid path.
+/// sources in `extensions`, the database ...) — except a folder directly
+/// under it that an extension declares `watch: true` ([`watched_problem`]).
+/// `path` is already a valid path.
 pub(crate) fn reserved(path: &str) -> Option<&'static str> {
     let parts: Vec<&str> = path.trim_end_matches('/').split('/').collect();
     if parts.iter().any(|p| p.eq_ignore_ascii_case(".git")) {
         return Some("`.git` is git's");
     }
     if parts[0].eq_ignore_ascii_case(".oxplow") {
-        let oxwiki = parts.len() >= 2 && parts[1] == "oxwiki";
-        if !oxwiki {
-            return Some("`.oxplow` is oxplow's own data (only `.oxplow/oxwiki` is open)");
-        }
+        return Some(
+            "`.oxplow` is oxplow's own data (declare a folder under it with `watch: true`)",
+        );
     }
     None
+}
+
+/// Why `path` can't be a watched folder: it is one folder directly under
+/// `.oxplow/`, not one of oxplow's own, and not `.git`'s.
+pub(crate) fn watched_problem(path: &str) -> Option<&'static str> {
+    let parts: Vec<&str> = path.trim_end_matches('/').split('/').collect();
+    if parts.iter().any(|p| p.eq_ignore_ascii_case(".git")) {
+        return Some("`.git` is git's");
+    }
+    if parts.len() != 2 || parts[0] != ".oxplow" {
+        return Some("a watched folder is one folder directly under `.oxplow/`");
+    }
+    if OXPLOW_OWN_DIRS
+        .iter()
+        .any(|d| d.eq_ignore_ascii_case(parts[1]))
+    {
+        return Some("that folder of `.oxplow/` is oxplow's own");
+    }
+    None
+}
+
+/// The names (under `.oxplow/`) of the folders the enabled `extensions`
+/// declare watched: what the file watch and the snapshots follow.
+pub(crate) fn watched_names(extensions: &[super::Extension]) -> Vec<String> {
+    let mut names: Vec<String> = extensions
+        .iter()
+        .filter(|e| e.enabled)
+        .flat_map(|e| e.storage.folders.iter())
+        .filter(|f| f.watch)
+        .filter_map(|f| f.path.strip_prefix(".oxplow/").map(str::to_string))
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// Whether `path` lies in a declared watched folder.
+pub(crate) fn in_watched(folders: &[Folder], path: &str) -> bool {
+    folders
+        .iter()
+        .any(|f| f.watch && (path == f.path || path.starts_with(&format!("{}/", f.path))))
 }
 
 /// Read and check the two keys. `files` is the extension's own folder, for
@@ -100,7 +165,11 @@ pub(crate) fn load(
         let path = folder.path.trim_end_matches('/');
         let problem = if !oxplow_domain::service::valid_path(path) {
             Some("a folder is relative to the project root, with no `..`, `.` or empty parts")
-        } else if let Some(why) = reserved(path) {
+        } else if let Some(why) = if folder.watch {
+            watched_problem(path)
+        } else {
+            reserved(path)
+        } {
             Some(why)
         } else if out.folders.iter().any(|f| f.path == path) {
             Some("it is declared twice")
@@ -117,6 +186,7 @@ pub(crate) fn load(
             None => out.folders.push(Folder {
                 path: path.to_string(),
                 access: folder.access,
+                watch: folder.watch,
             }),
         }
     }
@@ -180,6 +250,9 @@ mod tests {
             ".oxplow/oxwiki/../extensions",
             ".oxplow/oxwikix",
             ".oxplow/oxwiki2/a",
+            // Without `watch: true` nothing under `.oxplow` is open.
+            ".oxplow/oxwiki",
+            ".oxplow/oxwiki/pages",
         ] {
             let ext = load_tree(
                 &format!("files:\n  - {{ path: '{path}', access: write }}\n"),
@@ -187,12 +260,7 @@ mod tests {
             );
             assert!(ext.storage.folders.is_empty(), "{path} was kept");
         }
-        for path in [
-            ".oxplow/oxwiki",
-            ".oxplow/oxwiki/pages",
-            "gitless",
-            "a/.github",
-        ] {
+        for path in ["gitless", "a/.github"] {
             let ext = load_tree(
                 &format!("files:\n  - {{ path: '{path}', access: write }}\n"),
                 &[],
@@ -201,25 +269,88 @@ mod tests {
         }
     }
 
+    /// A folder directly under `.oxplow/` is declared watched with `watch:
+    /// true`; nothing else under `.oxplow` is, and oxplow's own folders are
+    /// not.
+    #[test]
+    fn a_watched_folder_is_one_folder_under_oxplow_that_is_not_oxplows() {
+        for (path, kept) in [
+            (".oxplow/oxwiki", true),
+            (".oxplow/notes/", true),
+            (".oxplow/extensions", false),
+            (".oxplow/extensions-data", false),
+            (".oxplow/logs", false),
+            (".OXPLOW/Runtime", false),
+            (".oxplow", false),
+            (".oxplow/a/b", false),
+            ("docs", false),
+            (".oxplow/.git", false),
+        ] {
+            let ext = load_tree(
+                &format!("files:\n  - {{ path: '{path}', access: write, watch: true }}\n"),
+                &[],
+            );
+            assert_eq!(ext.storage.folders.len(), usize::from(kept), "{path}");
+            if kept {
+                assert!(ext.storage.folders[0].watch);
+            }
+        }
+    }
+
+    /// The folders the enabled extensions declare watched reach the file
+    /// watch's filter when a generation is published, and leave with the
+    /// extension.
+    #[tokio::test]
+    async fn a_published_watched_folder_reaches_the_file_watch() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::test_fixtures::init_git_repo(dir.path());
+        let write = |rel: &str, body: &str| {
+            let p = dir.path().join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, body).unwrap();
+        };
+        write(
+            ".oxplow/extensions/acme/extension.yaml",
+            "manifest: 2\nname: acme\nintent:\n  purpose: p\nfiles:\n  - { path: .oxplow/jotter, access: write, watch: true }\n",
+        );
+        let svc = crate::Services::in_memory(dir.path()).await.unwrap();
+        let problems = crate::test_fixtures::activate_with_problems(&svc).await;
+        assert!(problems.is_empty(), "{problems:?}");
+        let filter = oxplow_fs_watch::WorkspaceFilter::with_user_entries(Vec::<String>::new());
+        let page = std::path::Path::new(".oxplow/jotter/a.md");
+        assert!(!filter.ignore(page, false), "declared, so watched");
+        std::fs::write(
+            dir.path().join(".oxplow/personal.yaml"),
+            "disableExtensions: [acme]\n",
+        )
+        .unwrap();
+        crate::test_fixtures::activate(&svc).await;
+        assert!(filter.ignore(page, false), "off with the extension");
+    }
+
     #[test]
     fn the_run_time_path_check_refuses_the_same_places() {
         let f = [Folder {
             path: ".oxplow/oxwiki".into(),
             access: FolderAccess::Write,
+            watch: true,
         }];
         // Even a folder that slipped through never opens these.
         let all = [
             Folder {
                 path: ".GIT".into(),
                 access: FolderAccess::Write,
+                watch: false,
             },
             Folder {
                 path: "sub".into(),
                 access: FolderAccess::Write,
+                watch: false,
             },
             Folder {
                 path: ".oxplow".into(),
                 access: FolderAccess::Write,
+                watch: false,
             },
         ];
         for path in [
@@ -256,11 +387,13 @@ mod tests {
             vec![
                 Folder {
                     path: "shelf".into(),
-                    access: FolderAccess::Write
+                    access: FolderAccess::Write,
+                    watch: false
                 },
                 Folder {
                     path: "docs".into(),
-                    access: FolderAccess::Read
+                    access: FolderAccess::Read,
+                    watch: false
                 },
             ]
         );

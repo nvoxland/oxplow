@@ -808,6 +808,9 @@ impl ExtensionActivation {
                         .expect("adapter candidate consumed only after successful commit")
                         .publish_maps(&svc);
                     svc.feeds.restate(published.extensions());
+                    oxplow_fs_watch::set_declared_watched_folders(
+                        crate::extension::extensions::storage::watched_names(published.extensions()),
+                    );
                     bundles
                         .lock()
                         .unwrap_or_else(|error| error.into_inner())

@@ -576,9 +576,17 @@ host's own statements (the migration record, the commit) run without it.
 **Declared folders (`files:`).** A folder is refused at load, and every path
 is refused at run time (`check_path`), when any part is `.git` (compared
 without case, at any depth), or when it is in `.oxplow` (also without case)
-except under `.oxplow/oxwiki`. `.oxplow` holds oxplow's own data (other
-extensions' store files in `extensions-data`, the extensions' sources); oxwiki's
-markdown files are its store, so exactly `.oxplow/oxwiki` stays open.
+unless it is a **watched folder**. `.oxplow` holds oxplow's own data (other
+extensions' store files in `extensions-data`, the extensions' sources, the
+database). An extension whose files live there declares
+`{ path: .oxplow/<name>, access: write, watch: true }`: one folder directly
+under `.oxplow/`, never one of oxplow's own (`extensions`, `extensions-data`,
+`runtime`, `logs`, `snapshots`, …). Oxplow then watches it though git ignores
+it (the extension's `files:` trigger hears a change in it) and snapshots it; a
+tree (a diff, the working tree) is still git's view and leaves it out. The host
+publishes the enabled extensions' watched folders with each generation
+(`oxplow_fs_watch::set_declared_watched_folders`); until oxwiki declares its
+own, core names `.oxplow/oxwiki` itself in the same list.
 
 The file is removed with the extension's data (`extension_deploy::remove`),
 never on a disable.
