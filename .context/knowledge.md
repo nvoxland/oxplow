@@ -70,9 +70,15 @@ states the pages it holds (a snapshot or upserts), and `models.md` says what
 core does with the rows (events, edges, pins, search). `links.check` (a
 service) lets a store refuse a body whose `[[links]]` don't resolve. Bundled
 declares two action points a store's commands join: `oxplow/knowledge.new`
-(title?, body?) and `oxplow/knowledge.delete` (uri). The knowledge page has a
-`sections` slot (`oxplow/knowledge-page.sections`) a store mounts its edit
-part into.
+(title?, body?) and `oxplow/knowledge.delete` (uri). The knowledge page's text (its `body` node)
+is the replaceable target `knowledge.detail.body`, bound to the page's own
+store (the URI's `store`): with no replacement it is oxplow's read-only
+markdown, and the extension that fills the model as that store may draw an
+editor in its place (`ui.mounts: { page: …, at: knowledge.detail.body }`; the
+page takes `uri`). oxwiki does, so an oxwiki page shows one body, editable
+with Save on `oxwiki.page.write`, and another store's page stays read-only.
+The page keeps its `sections` slot (`oxplow/knowledge-page.sections`) for any
+extension's extra part.
 
 `oxplow.refs.verify { uri, files? }` re-pins a page's cited files to now (any
 model row's pinned refs); `oxplow_ref_drift { uri, path }` shows one pinned

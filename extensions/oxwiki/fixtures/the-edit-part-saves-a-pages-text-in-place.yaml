@@ -1,5 +1,6 @@
-# The knowledge page offers Edit (this part, mounted into its `sections`
-# slot): an oxwiki page's text is saved back to its file under the same id;
+# The knowledge page's text is this part (it replaces the page's body,
+# `knowledge.detail.body`, for an oxwiki page): its text is saved back to
+# its file under the same id;
 # another store's page has nothing to edit here.
 requires: [oxplow-bundled]
 given:

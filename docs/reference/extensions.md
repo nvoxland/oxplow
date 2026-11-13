@@ -601,6 +601,7 @@ The same table is the `v_replaceable` dataset.
 | `task.list` | list | no | 2 | `scope`, `thread_id` | — |
 | `task.detail` | description editor | no | 1 | `uri` | — |
 | `task.detail.state` | state control | yes | 1 | `uri` | — |
+| `knowledge.detail.body` | page body | yes | 1 | `uri` | — |
 | `vcs.history.graph` | history graph | no | 2 | `head_sha`, `reveal_sha`, `limit` | `q`, `author`, `branch` |
 <!-- replaceables:end -->
 

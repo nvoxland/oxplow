@@ -23620,7 +23620,7 @@
         {
           "name": "target",
           "type": "TEXT",
-          "doc": "The sub-component: `task.board`, `task.list`, `task.detail`, `task.detail.state`, `vcs.history.graph`."
+          "doc": "The sub-component: `task.board`, `task.list`, `task.detail`, `task.detail.state`, `knowledge.detail.body`, `vcs.history.graph`."
         },
         {
           "name": "capability",
@@ -23657,7 +23657,7 @@
         {
           "name": "target",
           "type": "TEXT",
-          "doc": "The sub-component: `task.board`, `task.list`, `task.detail`, `task.detail.state`, `vcs.history.graph`."
+          "doc": "The sub-component: `task.board`, `task.list`, `task.detail`, `task.detail.state`, `knowledge.detail.body`, `vcs.history.graph`."
         },
         {
           "name": "capability",
@@ -23699,7 +23699,7 @@
         {
           "name": "target",
           "type": "TEXT",
-          "doc": "The sub-component: `task.board`, `task.list`, `task.detail`, `task.detail.state`, `vcs.history.graph`."
+          "doc": "The sub-component: `task.board`, `task.list`, `task.detail`, `task.detail.state`, `knowledge.detail.body`, `vcs.history.graph`."
         },
         {
           "name": "capability",
@@ -23741,7 +23741,7 @@
         {
           "name": "target",
           "type": "TEXT",
-          "doc": "The sub-component: `task.board`, `task.list`, `task.detail`, `task.detail.state`, `vcs.history.graph`."
+          "doc": "The sub-component: `task.board`, `task.list`, `task.detail`, `task.detail.state`, `knowledge.detail.body`, `vcs.history.graph`."
         },
         {
           "name": "capability",

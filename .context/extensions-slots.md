@@ -121,6 +121,7 @@ than handing it props it does not know.
 | `task.list` | the Task List's list (the `list` node of bundled's `task-list` page; v2): its filters and New Task… stay oxplow's | model `oxplow/task_record` | no | `scope` (`thread` / `stream` / `me` / `pool` / `all`: whom the items are assigned to), `thread_id` (applies when `scope` is `thread`) | — |
 | `task.detail` | a task's description editor (the `body` node of the `task` page): the state, fields, About, links, comments, activity and the mounts stay oxplow's | model `oxplow/task_record` | no | `uri` (the item) | — |
 | `task.detail.state` | a task's State (the `state` node) — never its Move To (the About node's menu), so a replacement cannot strand an item | model `oxplow/task_record` | yes | `uri` (the item) | — |
+| `knowledge.detail.body` | a knowledge page's body (the `body` node of bundled's `knowledge-page`): oxplow's own is the read-only markdown; About, referenced files, backlinks, comments and mounts stay oxplow's. oxwiki's replacement is an editor with Save | model `oxplow/knowledge_record` | yes, by the URI's `store` (a task's is `provider`; the table's `provider_param`) | `uri` (the page) | — |
 | `vcs.history.graph` | Git History's commits (a node of the `git-history` page): oxplow's own is a plain list | `vcs` | no | `head_sha` (the stream's head), `reveal_sha` (a commit to scroll to and mark, or null), `limit` | `q`, `author`, `branch` (Git History's filters; v2) |
 
 **Who places a target.** A page node marked `replaceable: <target>`
@@ -180,7 +181,7 @@ label }`).
 the enabled extensions' replacements of the target, only when one exists:
 - **bound**: the **item's own store** decides, so another store's item
   never gets a page that sends this one's states. The store is the
-  `provider` param of the node's `uri` param (a task's URI carries it);
+  node's `uri` param's `provider_param` (the table's: `provider` on a task's URI, `store` on a knowledge page's);
   which extension fills it is the model registry's answer at run time, not
   at load, so installing or switching one needs no reload;
 - **unbound**: the person's choice (`replacements`), or the only

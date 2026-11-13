@@ -574,6 +574,51 @@ async fn a_model_bound_target_is_replaced_by_the_items_own_store() {
     assert_eq!(r.tree.replaced_by, None, "oxtask's items keep oxplow's own");
 }
 
+/// A knowledge page's body (`knowledge.detail.body`) is bound to the page's
+/// store, which its URI names as `store` (a task's names `provider`): the
+/// extension that fills the knowledge model as that store replaces it, and
+/// another store's page keeps oxplow's own.
+#[tokio::test]
+async fn a_knowledge_body_is_replaced_by_the_pages_own_store() {
+    let dir = tempfile::tempdir().unwrap();
+    crate::test_fixtures::init_git_repo(dir.path());
+    let write = |rel: &str, body: &str| {
+        let p = dir.path().join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, body).unwrap();
+    };
+    write(
+        ".oxplow/extensions/acme/extension.yaml",
+        "manifest: 2\nname: acme\nintent:\n  purpose: test\n",
+    );
+    write(
+        ".oxplow/extensions/acme/pages/host.yaml",
+        "title: Host\nparams: [{ name: uri }]\nloaders:\n  own: { sql: \"SELECT 1 AS n\" }\nview: { id: body, viz: table, from: own, replaceable: knowledge.detail.body }\n",
+    );
+    write(
+        ".oxplow/extensions/beta/extension.yaml",
+        "manifest: 2\nname: beta\nrequires: [oxplow-bundled]\nintent:\n  purpose: test\nfills:\n  - model: oxplow/knowledge_record\n    stores: [beta]\nui:\n  mounts:\n    - { page: body, at: knowledge.detail.body }\n",
+    );
+    write(
+        ".oxplow/extensions/beta/pages/body.yaml",
+        "title: Body\nparams: [{ name: uri }]\nloaders:\n  echo: { sql: \"SELECT :uri AS uri\" }\nview: { viz: table, from: echo }\n",
+    );
+    let svc = crate::Services::in_memory(dir.path()).await.unwrap();
+    let problems = crate::test_fixtures::activate_with_problems(&svc).await;
+    assert!(problems.is_empty(), "{problems:?}");
+
+    let beta = "oxplow:oxplow/knowledge?id=p1&store=beta";
+    let r = run(&svc, "acme/host", &[("uri", SqlCell::Text(beta.into()))]).await;
+    assert_eq!(r.tree.replaced_by.as_deref(), Some("beta"));
+
+    let other = "oxplow:oxplow/knowledge?id=p1&store=elsewhere";
+    let r = run(&svc, "acme/host", &[("uri", SqlCell::Text(other.into()))]).await;
+    assert_eq!(
+        r.tree.replaced_by, None,
+        "another store's page keeps oxplow's own"
+    );
+}
+
 /// A loader with no columns (nothing came back, or it failed) is not a
 /// table SQLite can hold: what reads it yields no rows, or says what it
 /// read failed, never a syntax error.

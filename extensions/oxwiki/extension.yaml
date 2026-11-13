@@ -49,7 +49,7 @@ commands:
       properties:
         id: { type: string, pattern: "^[a-z0-9]+(-[a-z0-9]+)*$", description: "The page's id: kebab-case. Give it to replace or add to a page." }
         title: { type: string, description: "A new page's title: its id is made from it." }
-        body: { type: string, description: "The page, in markdown." }
+        body: { type: string, contentMediaType: text/markdown, description: "The page, in markdown." }
       additionalProperties: false
     entry: commands/write.star
     needs: [files.read, links.check]
@@ -88,6 +88,7 @@ skills:
   - { name: note, kind: command, file: commands/note.md, needs: [model:oxplow/knowledge_record] }
 ui:
   mounts:
-    # Edit an oxwiki page in place on the shared knowledge page (empty on
-    # another store's page).
-    - { page: edit-page, at: oxplow/knowledge-page.sections, title: Edit }
+    # An oxwiki page's text is an editor in place of the knowledge page's
+    # read-only body (the target is bound to the page's own store, so another
+    # store's page keeps the read-only text).
+    - { page: edit-page, at: knowledge.detail.body }

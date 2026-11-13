@@ -54,6 +54,19 @@
     "about": "A task's state control (the `state` part of the `task` document; its Move To is never replaced, so an item can always move): `uri` is the item. The extension that fills the task model as the item's own store (its `provider`) replaces it: it shows that store's own states."
   },
   {
+    "target": "knowledge.detail.body",
+    "model": "oxplow/knowledge_record",
+    "bound_to_provider": true,
+    "provider_param": "store",
+    "version": 1,
+    "props": [
+      "uri"
+    ],
+    "view": [],
+    "label": "page body",
+    "about": "A knowledge page's body (the `body` node of the `knowledge-page` page): `uri` is the page. Its About, referenced files, backlinks, comments and mounts stay oxplow's. The extension that fills the knowledge model as the page's own store (the URI's `store`) replaces it: oxwiki draws its pages' text as an editor, a store that keeps its pages read-only leaves oxplow's own read-only text."
+  },
+  {
     "target": "vcs.history.graph",
     "capability": "vcs",
     "bound_to_provider": false,

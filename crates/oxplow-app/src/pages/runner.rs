@@ -1060,9 +1060,13 @@ impl PageRunner<'_> {
         let first = candidates.first()?;
         let provider_extension = match (first.bound_to_provider, params.get("uri")) {
             (true, Some(SqlCell::Text(uri))) => {
+                // The URI param naming the item's own store: a task's
+                // `provider`, a knowledge page's `store` (the table's).
+                let param = oxplow_domain::replaceable::replaceable(target)
+                    .map_or("provider", |r| r.provider_param);
                 let provider = oxplow_domain::uri::OxplowUri::parse(uri)
                     .ok()?
-                    .param("provider")?
+                    .param(param)?
                     .to_string();
                 match &first.model {
                     // A model's item: the extension that fills the model as

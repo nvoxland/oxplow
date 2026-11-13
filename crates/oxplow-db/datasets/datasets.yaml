@@ -1206,7 +1206,7 @@
   key: [target]
   description: "The core sub-components an extension may replace with a page (`ui.replacements`), each with its versioned props contract: what the replacement is given, and must declare, instead of any host state. Which extension replaces one is the person's choice (`replacements:` in the project config) or, for a bound target, its provider's."
   fields:
-    - { name: "target", type: "TEXT", doc: "The sub-component: `task.board`, `task.list`, `task.detail`, `task.detail.state`, `vcs.history.graph`." }
+    - { name: "target", type: "TEXT", doc: "The sub-component: `task.board`, `task.list`, `task.detail`, `task.detail.state`, `knowledge.detail.body`, `vcs.history.graph`." }
     - { name: "capability", type: "TEXT", doc: "What it belongs to: a capability (`vcs`), or `model:<owner>/<model>` for a shared model's items (`model:oxplow/task_record`)." }
     - { name: "bound", type: "INTEGER", doc: "1 when only the extension that holds the item may replace it: its own provider's, or the one that fills the model as the item's store (a task's states); 0 when any extension may, and the person chooses." }
     - { name: "version", type: "INTEGER", doc: "The contract's version; a declaration may pin it (`version:`)." }

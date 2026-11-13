@@ -89,7 +89,10 @@ rail:
       when: store_url
 view:
   stack:
+  # The text, as its store's own page may draw it instead
+  # (`knowledge.detail.body`: oxwiki's is an editor); oxplow's own is read-only.
   - id: body
+    replaceable: knowledge.detail.body
     title: Page
     hide_title: true
     from: body

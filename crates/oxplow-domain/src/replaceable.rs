@@ -28,6 +28,9 @@ pub struct Replaceable {
     /// target may be replaced by any extension; the person chooses among
     /// several (`replacements:`).
     pub bound_to_provider: bool,
+    /// The `uri` param a bound target reads the item's own store from:
+    /// `provider` for a task's URI, `store` for a knowledge page's.
+    pub provider_param: &'static str,
     /// The contract's version: bumped when `props` or their meaning
     /// change. A declaration may pin it (`version:`); one pinned to
     /// another version doesn't load.
@@ -52,12 +55,18 @@ struct Row {
     #[serde(default)]
     model: Option<String>,
     bound_to_provider: bool,
+    #[serde(default = "default_provider_param")]
+    provider_param: String,
     version: u32,
     props: Vec<String>,
     view: Vec<String>,
     label: String,
     #[serde(default)]
     about: String,
+}
+
+fn default_provider_param() -> String {
+    "provider".to_string()
 }
 
 /// Leak a string for the life of the process: the table is read once.
@@ -90,6 +99,7 @@ pub fn all() -> &'static [Replaceable] {
                     capability: keep(r.capability),
                     model: r.model.map(keep),
                     bound_to_provider: r.bound_to_provider,
+                    provider_param: keep(r.provider_param),
                     version: r.version,
                     props: keep_all(r.props),
                     view: keep_all(r.view),
@@ -205,6 +215,18 @@ mod tests {
         assert_eq!(
             replaceable("task.detail.state").map(|r| r.bound_to_provider),
             Some(true)
+        );
+        assert_eq!(
+            replaceable("knowledge.detail.body").map(|r| r.subject()),
+            Some("model:oxplow/knowledge_record".to_string())
+        );
+        assert_eq!(
+            replaceable("knowledge.detail.body").map(|r| (r.bound_to_provider, r.provider_param)),
+            Some((true, "store"))
+        );
+        assert_eq!(
+            replaceable("task.detail.state").map(|r| r.provider_param),
+            Some("provider")
         );
         assert!(replaceable("vcs.conflict.resolver").is_none());
     }

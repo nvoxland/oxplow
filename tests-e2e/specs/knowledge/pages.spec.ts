@@ -168,12 +168,14 @@ test("a knowledge page's Source view edits the stored text", async ({ page, daem
   await expect(body.locator(".ProseMirror strong")).toHaveText("more");
 });
 
-// The New Knowledge Page form is a page of the app: a title and a markdown
-// body (the rich text editor), no id. Submitting writes the page and the
-// form gives way to it.
+// New page on the index opens bundled's New Knowledge Page, which offers each
+// store's own write as a button (oxwiki's New Page); that button opens the
+// store's form: a title and a markdown body (the rich text editor), no id.
+// Submitting writes the page and the form gives way to it.
 test("New page on the Knowledge index writes a page and opens it", async ({ page, daemon }) => {
   await open(page, daemon, "oxplow:oxplow/page?page=knowledge");
   await shown(page).getByRole("button", { name: /New page/ }).click();
+  await shown(page).getByRole("button", { name: "New Page", exact: true }).click();
   // The body is markdown: the rich text editor. Enter there is a new line,
   // so the form is submitted from the title.
   await shown(page).locator('[contenteditable="true"]').first().fill("They like the sun.");

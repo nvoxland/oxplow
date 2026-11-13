@@ -55,9 +55,17 @@ pub async fn command_open_after(
         .into_iter()
         .find(|s| s.id == id)
         .ok_or_else(|| IpcError::invalid(format!("no command `{id}`")))?;
+    // An extension's command answers `{ result, children }` (the composed
+    // run's shape): the page binds from its own answer.
+    let answer = match &result.0 {
+        serde_json::Value::Object(o) if o.contains_key("children") => {
+            o.get("result").unwrap_or(&result.0)
+        }
+        other => other,
+    };
     spec.ui
         .as_ref()
-        .map_or(Ok(None), |ui| ui.open_after_for(&result.0))
+        .map_or(Ok(None), |ui| ui.open_after_for(answer))
         .map_err(|e| IpcError::invalid(format!("`{id}`: {e}")))
 }
 
@@ -270,6 +278,14 @@ mod tests {
         };
         assert_eq!(
             open(json!({ "page": "my-pages/health" })).await.unwrap(),
+            json!("oxplow:oxplow/page?page=my-pages/health")
+        );
+        // An extension's command answers `{ result, children }`: the page
+        // is bound from its own answer, not the envelope.
+        assert_eq!(
+            open(json!({ "result": { "page": "my-pages/health" }, "children": [] }))
+                .await
+                .unwrap(),
             json!("oxplow:oxplow/page?page=my-pages/health")
         );
         let err = open(json!({})).await.unwrap_err();
