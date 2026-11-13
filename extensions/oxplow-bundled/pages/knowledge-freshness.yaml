@@ -13,7 +13,7 @@ params:
   role: filter
   label: Knowledge page (its id)
 answers:
-- {"question":"Which files does this knowledge page cite, and which have changed?","params":{"store":"oxwiki","id":"auth-flow"},"skill":"oxplow-knowledge"}
+- {"question":"Which files does this knowledge page cite, and which have changed?","params":{"store":"oxwiki","id":"auth-flow"},"skill":"knowledge"}
 loaders:
   # The page itself: the one row the page's actions read.
   row:
@@ -30,7 +30,7 @@ loaders:
              CASE WHEN r.stale THEN 'stale' ELSE 'fresh' END AS status,
              CASE WHEN r.stale THEN 'warning' ELSE 'success' END AS tone, r.stale
       FROM v_oxplow_knowledge_page p
-      JOIN v_knowledge_pin r ON r.page = p.uri
+      JOIN v_oxplow_knowledge_ref r ON r.page = p.uri
       WHERE p.store = :store AND p.id = :id
       ORDER BY r.stale DESC, r.path
 view:

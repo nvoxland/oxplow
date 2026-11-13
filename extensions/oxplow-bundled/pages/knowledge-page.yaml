@@ -27,9 +27,9 @@ loaders:
     sql: |
       SELECT p.store, p.kind, p.author, p.updated_at, p.read_count, p.last_read_at,
              CASE WHEN p.stale_ref_count = 0 THEN 'fresh'
-                  WHEN p.stale_ref_count = (SELECT count(*) FROM v_knowledge_pin r WHERE r.page = p.uri) THEN 'very stale'
+                  WHEN p.stale_ref_count = (SELECT count(*) FROM v_oxplow_knowledge_ref r WHERE r.page = p.uri) THEN 'very stale'
                   ELSE 'stale' END AS freshness,
-             (SELECT count(*) FROM v_knowledge_pin r WHERE r.page = p.uri) AS cited_files,
+             (SELECT count(*) FROM v_oxplow_knowledge_ref r WHERE r.page = p.uri) AS cited_files,
              p.stale_ref_count AS stale_files,
              p.url AS store_url
       FROM v_oxplow_knowledge_page p WHERE p.uri = :uri
@@ -37,7 +37,7 @@ loaders:
     sql: |
       SELECT r.path, CASE WHEN r.stale THEN 'changed since this page was written' ELSE 'current' END AS status,
              CASE WHEN r.stale THEN 'warning' ELSE 'success' END AS tone, r.stale
-      FROM v_knowledge_pin r WHERE r.page = :uri
+      FROM v_oxplow_knowledge_ref r WHERE r.page = :uri
       ORDER BY r.stale DESC, r.path
   # What links here: the tasks, commits and knowledge pages that name it.
   backlinks:

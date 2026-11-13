@@ -7,7 +7,7 @@ description: Writing a knowledge page in oxwiki, the project's own wiki of markd
 
 oxwiki keeps a page as a markdown file, `.oxplow/oxwiki/<id>.md`, whichever
 checkout you work in (the command always writes the primary's folder). Find
-before you create (the `oxplow-knowledge` skill says how), then write:
+before you create (the `knowledge` skill says how), then write:
 
 `run_command oxwiki.page.write { id?, title?, body }` — the whole page.
 

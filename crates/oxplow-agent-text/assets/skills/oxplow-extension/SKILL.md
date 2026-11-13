@@ -54,7 +54,7 @@ shows a draft page over the project's real data: a look, not a test.
 - `references/repair-and-sharing.md`: repair, share.
 - `references/reading-data.md`: before reporting numbers.
 
-Rules in other skills: wikilinks and URIs in prose, `oxplow-knowledge`;
+Rules in other skills: wikilinks and URIs in prose, `knowledge`;
 waiting on the person, `oxplow-runtime`; tests in the foreground,
 `oxplow-collection`; metrics, `oxplow-metrics`. A person approves an
 extension's `permissions:` and a new `build:` command at deploy; your

@@ -90,7 +90,7 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
     `the-reminder-is-only-for-the-agent-tracks-workflow`, `next-task-*`.
   - `oxwiki` (`oxwiki`): the knowledge store as an extension (on by default): `.oxplow/oxwiki/<slug>.md` pages, `oxwiki.page.write` / `delete` / `restore`, a collector filling bundled's `knowledge_record` model, the `oxwiki` skill and `/note`. `knowledge.md` "The oxwiki extension". Fixtures are its own.
 
-- **The knowledge metrics** (in `oxplow-bundled`). The `oxplow.knowledge_pages` collector restates the page counts (`knowledge.pages`, `knowledge.stale_pages`, sliced by `oxplow.knowledge_store` and `oxplow.knowledge_bucket`) when a page of the model changes (`oxplow.knowledge_record.changed`) and when a snapshot changes a file a page cites (`snapshot.ref_drifted`); the `oxplow.request_read_knowledge` collector records, per stopped request that changed files, whether an agent read a page (`knowledge.read_requests`). Metrics: `knowledge.pages`, `knowledge.stale_pct`, `knowledge.read_requests_pct`. See `metrics.md` (knowledge pages, request read knowledge).
+- **The knowledge metrics** (in `oxplow-bundled`). The `oxplow.knowledge_pages` collector restates the page counts (`knowledge.pages`, `knowledge.stale_pages`, sliced by `oxplow.knowledge_store` and `oxplow.knowledge_kind`) when a page of the model changes (`oxplow.knowledge_record.changed`) and when a snapshot changes a file a page cites (`snapshot.ref_drifted`); the `oxplow.request_read_knowledge` collector records, per stopped request that changed files, whether an agent read a page (`knowledge.read_requests`). Metrics: `knowledge.pages`, `knowledge.stale_pct`, `knowledge.read_requests_pct`. See `metrics.md` (knowledge pages, request read knowledge).
 - **The tracking metric** (in `oxplow-bundled`). The `oxplow.request_tracked` collector records, per stopped request that changed files, whether it has a task linked; the `tasks.tracked_requests_pct` metric is the share. See `metrics.md` (request tracked).
 - **The review packet**. Its pages, mounted in
   the `sections` slots of `oxplow/diff-view` (the Changes
@@ -430,8 +430,9 @@ extension" has the read contract.
   and stale counts), Pages (newest change first; a filter over title and
   body; Delete in the row's right-click menu, confirmed, through the
   `oxplow/knowledge.delete` point), Stale pages, and Recent reads and writes
-  (`record.read` events). New page opens `new-knowledge-page`. It also
+  (`v_oxplow_knowledge_read`). New page opens `new-knowledge-page`. It also
   answers which pages cite a file (its `path` param).
+- Bundled's own models `knowledge_read_record` (written by the `oxplow.knowledge_read` collector from `record.read`) and `knowledge_touch_record` (by `oxplow.knowledge_touch`, from the change event's thread) back `v_oxplow_knowledge_read` / `_touch`; `v_oxplow_knowledge_ref` is `v_ref_pin` of the pages. Its `knowledge` skill reads and finds pages (gated on the knowledge model).
 - `knowledge-page` (`for: oxplow/knowledge`, default): the tab is the
   page's title. The body is the markdown (read-only: a store's own page
   would replace it to edit). The rail has About (store, kind, author, last

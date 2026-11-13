@@ -52,6 +52,28 @@ declares no store then) and goes in step 5 of the removal. The extension:
   Core's `v_knowledge_page` / `v_knowledge_body` stay for the built-in until
   step 5. With bundled off the resource is undeclared and a `[[link]]` to a
   page is unrecognized, as a task's is.
+- **Reads and touches** are bundled's own models, written by its own
+  collectors (the observed-systems way: core keeps no table for them):
+  `oxplow/knowledge_read_record` (collector `oxplow.knowledge_read`, on
+  `record.read`: an agent's read of a page through `oxplow_read` or its file;
+  key = page, time, via, turn) and `oxplow/knowledge_touch_record` (collector
+  `oxplow.knowledge_touch`, on `oxplow.knowledge_record.changed`: the thread
+  whose run made the change, from the event's thread anchor, so a person's
+  edit of a file touches nothing; key = thread and page, `last_seen`). Their
+  datasets: `v_oxplow_knowledge_read` (`uri`, `actor`, `thread_id`,
+  `turn_id`, `via`, `at`; a person's opens are `page_visit` rows, core's),
+  `v_oxplow_knowledge_touch` (`page`, `thread_id`, `last_seen_at`) and
+  `v_oxplow_knowledge_ref` (`v_ref_pin` of the pages: `page`, `path`, `kind`,
+  `pinned_*`, `stale`). `v_oxplow_knowledge_page`'s read and stale columns
+  come from them, so no bundled reader reads core's `v_knowledge_*`; the Work
+  panel's Finished list reads the touches. A dataset that reads a view that
+  reads views, in a compound select, trips the lineage check (`reads … without
+  ref()`): read a model view directly or use CTEs.
+- **Kinds.** The metrics slice by `oxplow.knowledge_kind` (the page's kind,
+  oxwiki: `note`), not by core's bucket.
+- **Skill.** Bundled's `knowledge` skill (gated on the model) is the read and
+  find half of what core's `oxplow-knowledge` skill was, with the link rules;
+  oxwiki's `oxwiki` skill is the writing half.
 - **Points.** Bundled declares `oxplow/knowledge.new` (title?, body?: the
   desktop's Save as knowledge page offers it) and `oxplow/knowledge.delete`
   (the index's row Delete); the store's own commands join them (oxwiki:

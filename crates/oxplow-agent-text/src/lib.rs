@@ -78,7 +78,6 @@ macro_rules! skill {
 /// lives in references the agent opens when it needs them.
 const OXPLOW_SKILLS: &[SkillFiles] = &[
     skill!("oxplow-runtime", ["commands"]),
-    skill!("oxplow-knowledge", ["search-existing"]),
     skill!("oxplow-mermaid", ["syntax"]),
     skill!("oxplow-collection", ["custom-parsers"]),
     skill!(

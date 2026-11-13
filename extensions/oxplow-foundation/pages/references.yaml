@@ -6,8 +6,8 @@ params:
 - name: source
   default: ""
 answers:
-- {"question":"What points at this file — pages, commits, tasks?","about":"oxplow/file","params":{"target":"oxplow:oxplow/file?path=src/lib.rs"},"skill":"oxplow-knowledge"}
-- {"question":"What does this knowledge page point at?","params":{"source":"oxplow:oxplow/knowledge?id=auth-flow&store=oxwiki"},"skill":"oxplow-knowledge"}
+- {"question":"What points at this file — pages, commits, tasks?","about":"oxplow/file","params":{"target":"oxplow:oxplow/file?path=src/lib.rs"},"skill":"knowledge"}
+- {"question":"What does this knowledge page point at?","params":{"source":"oxplow:oxplow/knowledge?id=auth-flow&store=oxwiki"},"skill":"knowledge"}
 loaders:
   pointing_at:
     sql: "SELECT source_uri, ref_type FROM v_page_ref WHERE target_uri = :target ORDER BY source_uri"

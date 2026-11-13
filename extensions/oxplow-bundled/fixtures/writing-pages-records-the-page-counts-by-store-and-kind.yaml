@@ -8,5 +8,5 @@ expect: { rows: [{ pages: 2.0 }] }
 steps:
   - when: { sql: "SELECT \"oxplow.knowledge_store\" AS store, MEASURE('knowledge.pages') AS pages FROM metric_grid('month', 'oxplow.knowledge_store')" }
     expect: { rows: [{ store: oxwiki, pages: 2.0 }] }
-  - when: { sql: "SELECT \"oxplow.knowledge_bucket\" AS bucket, MEASURE('knowledge.pages') AS pages FROM metric_grid('month', 'oxplow.knowledge_bucket')" }
-    expect: { rows: [{ bucket: note, pages: 2.0 }] }
+  - when: { sql: "SELECT \"oxplow.knowledge_kind\" AS kind, MEASURE('knowledge.pages') AS pages FROM metric_grid('month', 'oxplow.knowledge_kind')" }
+    expect: { rows: [{ kind: note, pages: 2.0 }] }

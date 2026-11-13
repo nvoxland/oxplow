@@ -14,9 +14,9 @@ params:
 - name: path
   default: ''
 answers:
-- {"question":"Which knowledge pages are there, and which store keeps each?","params":{},"skill":"oxplow-knowledge"}
-- {"question":"Which knowledge pages cite files that changed since they were written?","params":{},"skill":"oxplow-knowledge"}
-- {"question":"Which knowledge pages talk about this file?","about":"oxplow/file","params":{"path":"src/lib.rs"},"skill":"oxplow-knowledge"}
+- {"question":"Which knowledge pages are there, and which store keeps each?","params":{},"skill":"knowledge"}
+- {"question":"Which knowledge pages cite files that changed since they were written?","params":{},"skill":"knowledge"}
+- {"question":"Which knowledge pages talk about this file?","about":"oxplow/file","params":{"path":"src/lib.rs"},"skill":"knowledge"}
 loaders:
   # The form a new page is written in; none while no store that oxplow
   # writes is on.
@@ -62,15 +62,14 @@ loaders:
                coalesce(p.author, '') AS who
         FROM v_oxplow_knowledge_page p
         UNION ALL
-        SELECT p.uri, p.id, p.title, 'Read', r.at, 'agent (' || json_extract(r.payload, '$.via') || ')'
-        FROM v_event r JOIN v_oxplow_knowledge_page p ON p.uri = json_extract(r.payload, '$.record')
-        WHERE r.type = 'record.read')
+        SELECT p.uri, p.id, p.title, 'Read', r.at, r.actor || ' (' || r.via || ')'
+        FROM v_oxplow_knowledge_read r JOIN v_oxplow_knowledge_page p ON p.uri = r.uri)
       ORDER BY at DESC LIMIT 20
   about_file:
     sql: |
       SELECT p.uri, p.title, p.store,
              CASE WHEN r.stale THEN 'changed since the page was written' ELSE 'current' END AS stale
-      FROM v_knowledge_pin r JOIN v_oxplow_knowledge_page p ON p.uri = r.page
+      FROM v_oxplow_knowledge_ref r JOIN v_oxplow_knowledge_page p ON p.uri = r.page
       WHERE :path <> '' AND r.path = :path
       ORDER BY p.title
 actions:

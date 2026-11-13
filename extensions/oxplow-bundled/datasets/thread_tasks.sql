@@ -44,7 +44,7 @@ finished AS (
   ) WHERE n = 1
   UNION ALL
   SELECT k.thread_id, p.title, 'knowledge', p.uri, k.last_seen_at
-  FROM ref('knowledge_touch') k JOIN ref('knowledge_page') p ON p.uri = k.page
+  FROM ref('knowledge_touch') k JOIN ref('knowledge_record') p ON p.uri = k.page
 ),
 -- s1..s3 order the In progress block: each epic (s1 = 0) with its
 -- children right after its header, then the stand-alone tasks (s1 = 1).

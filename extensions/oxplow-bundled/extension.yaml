@@ -129,13 +129,12 @@ datasets:
       - { name: stream_id, type: TEXT, doc: "Its thread's stream (`str1`); NULL for an unassigned task." }
   - name: knowledge_page
     version: 1
-    description: "the knowledge pages of every store over the shared knowledge model (the read contract for pages, and what the `oxplow/knowledge` resource resolves through): title, kind and bucket, excerpt, body, the URIs it links, how many of the files it cites changed since it was pinned, and its reads."
+    description: "the knowledge pages of every store over the shared knowledge model (the read contract for pages, and what the `oxplow/knowledge` resource resolves through): title, kind, excerpt, body, the URIs it links, how many of the files it cites changed since it was pinned, and its reads."
     fields:
       - { name: uri, type: TEXT, doc: "The page's URI (`oxplow:oxplow/knowledge?id=…&store=…`)." }
       - { name: store, type: TEXT, doc: "The store that keeps it (oxwiki, an extension's)." }
       - { name: id, type: TEXT, doc: "The store's own page id (oxwiki: its slug)." }
       - { name: kind, type: TEXT, doc: "The store's kind of page." }
-      - { name: bucket, type: TEXT, doc: "note, memory or instruction." }
       - { name: title, type: TEXT, doc: "Title." }
       - { name: url, type: TEXT, doc: "Where the store keeps it, when it says." }
       - { name: author, type: TEXT, doc: "Who last wrote it, as the store records it." }
@@ -148,6 +147,35 @@ datasets:
       - { name: agent_read_count, type: INT, doc: "Reads by agents." }
       - { name: last_read_at, type: TEXT, doc: "When it was last read (RFC 3339); NULL if never." }
       - { name: updated_at, type: TEXT, doc: "Updated (RFC 3339)." }
+  - name: knowledge_read
+    version: 1
+    description: "every read of a knowledge page: an agent's (the `knowledge_read_record` model, from `record.read`) and a person's (their page visits)."
+    fields:
+      - { name: uri, type: TEXT, doc: "The page's URI." }
+      - { name: actor, type: TEXT, doc: "`agent` or `person`." }
+      - { name: thread_id, type: INT, doc: "The thread that read it; NULL when unknown." }
+      - { name: turn_id, type: INT, doc: "The agent turn that read it; NULL for a person's." }
+      - { name: via, type: TEXT, doc: "`tool` or `file` for an agent, `open` for a person." }
+      - { name: at, type: TEXT, doc: "When (RFC 3339)." }
+  - name: knowledge_touch
+    version: 1
+    description: "which threads wrote which knowledge pages, and when last (the `knowledge_touch_record` model)."
+    fields:
+      - { name: page, type: TEXT, doc: "The page's URI." }
+      - { name: thread_id, type: INT, doc: "The thread (`v_thread.id`)." }
+      - { name: last_seen_at, type: TEXT, doc: "When it last wrote the page (RFC 3339)." }
+  - name: knowledge_ref
+    version: 1
+    description: "the files and directories each knowledge page pins, and whether each changed since (`v_ref_pin` of the pages)."
+    fields:
+      - { name: page, type: TEXT, doc: "The page's URI." }
+      - { name: path, type: TEXT, doc: "The file or directory." }
+      - { name: kind, type: TEXT, doc: "`file` or `dir`." }
+      - { name: pinned_snapshot_id, type: INTEGER, doc: "The snapshot it was pinned to; NULL if never pinned." }
+      - { name: pinned_vcs_rev, type: TEXT, doc: "The VCS revision nearest the pin." }
+      - { name: pinned_vcs_rev_exact, type: INT, doc: "1 when the pin is exactly that revision." }
+      - { name: latest_snapshot_id, type: INT, doc: "The latest primary snapshot of it." }
+      - { name: stale, type: INT, doc: "1 when it changed after the pin." }
   - name: search_knowledge
     version: 1
     description: "what site search indexes for each knowledge page, in `v_oxplow_search_knowledge`'s shape: its title and its body."
@@ -319,6 +347,18 @@ resources:
     resolve: knowledge_page
     searchable: search_knowledge
     icon: book-open
+  - name: knowledge_read_record
+    label: Knowledge read
+    description: "An agent's read of a knowledge page (oxplow's own record of it)."
+    params:
+      store: { required: true }
+      id: { required: true }
+  - name: knowledge_touch_record
+    label: Knowledge touch
+    description: "The last time a thread wrote a knowledge page."
+    params:
+      store: { required: true }
+      id: { required: true }
   - name: request_task
     label: Request link
     description: "A link from a request to a task its turns changed, and how (filed, transition, assigned, edited; prompt for a link moved from core, where a person's prompt named the task)."
@@ -331,6 +371,10 @@ resources:
 # (`request_task`) is written by its own collector.
 fills:
   - model: oxplow/request_task
+    stores: [oxplow]
+  - model: oxplow/knowledge_read_record
+    stores: [oxplow]
+  - model: oxplow/knowledge_touch_record
     stores: [oxplow]
 models:
   - name: request_task
@@ -345,6 +389,26 @@ models:
       thread: uri
       turn_id: int
       at: time
+  - name: knowledge_read_record
+    resource: knowledge_read_record
+    key: key
+    columns:
+      # page|at|via|turn: the read's name.
+      key: text
+      page: uri
+      thread: uri
+      turn_id: int
+      via: { type: text, values: [tool, file] }
+      at: time
+  - name: knowledge_touch_record
+    resource: knowledge_touch_record
+    key: key
+    columns:
+      # thread|page: the touch's name.
+      key: text
+      page: uri
+      thread: uri
+      last_seen: time
   - name: task_record
     resource: task
     open: true
@@ -521,6 +585,7 @@ panels:
 # What the agent reads about the task model, while it has a live store.
 skills:
   - { name: tasks, file: skills/tasks/SKILL.md, needs: [model:oxplow/task_record] }
+  - { name: knowledge, file: skills/knowledge/SKILL.md, needs: [model:oxplow/knowledge_record] }
 # Whether the work was tracked: of the requests that changed files, the share
 # that has a task linked. It reads no workflow setting: it measures what
 # happened, whatever the workflow.
@@ -590,19 +655,35 @@ collectors:
          AND NOT EXISTS (SELECT 1 FROM v_oxplow_request_task x
                           WHERE x.key = r.uri || '|' || w.uri || '|assigned')
     sync: upsert
+  - id: oxplow.knowledge_read
+    doc: "Keeps an agent's read of a knowledge page (a `record.read` of a page, through a tool or its file) as a row of the `oxplow/knowledge_read_record` model."
+    runtime: starlark
+    entry: collectors/knowledge/reads.star
+    on: [record.read]
+    input: |
+      SELECT th.uri AS thread_uri FROM v_thread th WHERE th.id = :thread_id
+    sync: upsert
+  - id: oxplow.knowledge_touch
+    doc: "Keeps which thread wrote a knowledge page (a change of the knowledge model made in a thread's run: a store's command; a person's edit of a file has no thread) as a row of the `oxplow/knowledge_touch_record` model."
+    runtime: starlark
+    entry: collectors/knowledge/touches.star
+    on: [oxplow.knowledge_record.changed]
+    input: |
+      SELECT th.uri AS thread_uri FROM v_thread th WHERE th.id = :thread_id
+    sync: upsert
   # What the project knows: the pages it keeps, restated whenever a page is
   # written, recorded or deleted, and whether a request read any.
   - id: oxplow.knowledge_pages
-    doc: How many knowledge pages there are and how many are stale, by store and bucket, restated when a page is written, changed or deleted (oxplow.knowledge_record.changed), and when a snapshot changes a file a page cites (snapshot.ref_drifted), since a cited file drifting is what makes a page stale; a snapshot of an uncited file restates nothing.
+    doc: How many knowledge pages there are and how many are stale, by store and kind, restated when a page is written, changed or deleted (oxplow.knowledge_record.changed), and when a snapshot changes a file a page cites (snapshot.ref_drifted), since a cited file drifting is what makes a page stale; a snapshot of an uncited file restates nothing.
     runtime: starlark
     entry: collectors/knowledge/pages.star
     on: [oxplow.knowledge_record.changed, snapshot.ref_drifted]
     input: |
-      SELECT n.placed_at, n.day, g.store, g.bucket, g.pages, g.stale
+      SELECT n.placed_at, n.day, g.store, g.kind, g.pages, g.stale
         FROM (SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now') AS placed_at, date('now') AS day) n
-        LEFT JOIN (SELECT store, bucket, count(*) AS pages,
+        LEFT JOIN (SELECT store, kind, count(*) AS pages,
                           sum(CASE WHEN stale_ref_count > 0 THEN 1 ELSE 0 END) AS stale
-                     FROM v_oxplow_knowledge_page GROUP BY store, bucket) g ON 1 = 1
+                     FROM v_oxplow_knowledge_page GROUP BY store, kind) g ON 1 = 1
     facts: [knowledge.pages, knowledge.stale_pages]
   - id: oxplow.request_read_knowledge
     doc: Whether a request that changed files read a knowledge page, recorded when a turn of it ends and none of its turns runs.
@@ -611,10 +692,8 @@ collectors:
     on: [agent.turn.ended]
     input: |
       SELECT r.uri AS request,
-             EXISTS (SELECT 1 FROM v_event k JOIN v_agent_turn kt ON kt.id = k.turn_id
-                      WHERE k.type = 'record.read'
-                        AND json_extract(k.payload, '$.record') LIKE 'oxplow:oxplow/knowledge?%'
-                        AND kt.request_id = r.id) AS read,
+             EXISTS (SELECT 1 FROM v_oxplow_knowledge_read k JOIN v_agent_turn kt ON kt.id = k.turn_id
+                      WHERE k.actor = 'agent' AND kt.request_id = r.id) AS read,
              r.started_at AS placed_at
         FROM v_agent_turn t
         JOIN v_request r ON r.id = t.request_id
@@ -628,10 +707,10 @@ dimensions:
   - {"key": "work.priority", "label": "Priority", "entity": "v_oxplow_task", "expr": "json_extract(e.native, '$.priority')", "description": "The priority of a task."}
   - {"key": "oxplow.task", "label": "Task", "valueType": "entity-ref", "subjectKind": "task", "from": {"dataset": "v_oxplow_request_link", "by": "request_id", "value": "task", "order": "CASE basis WHEN 'prompt' THEN 0 WHEN 'edited' THEN 1 WHEN 'filed' THEN 1 WHEN 'transition' THEN 2 ELSE 3 END, at"}, "description": "The task a fact's request worked on: the one the prompt named, else the one it filed or edited, else the one it moved."}
   - {"key": "oxplow.knowledge_store", "label": "Knowledge store", "valueType": "categorical", "description": "The store that keeps a knowledge page, such as oxwiki."}
-  - {"key": "oxplow.knowledge_bucket", "label": "Knowledge bucket", "valueType": "categorical", "description": "What a knowledge page is for: note, memory or instruction."}
+  - {"key": "oxplow.knowledge_kind", "label": "Knowledge kind", "valueType": "categorical", "description": "The kind of page its store keeps it as (oxwiki: note)."}
 measures:
   # The page counts: one capture per day, replaced when a page changes.
-  - {"key": "knowledge.pages", "title": "Knowledge pages", "unit": "count", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "complete", "description": "How many knowledge pages there are, by store and bucket, as of the day's last change."}
+  - {"key": "knowledge.pages", "title": "Knowledge pages", "unit": "count", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "complete", "description": "How many knowledge pages there are, by store and kind, as of the day's last change."}
   - {"key": "knowledge.stale_pages", "title": "Stale knowledge pages", "unit": "count", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "complete", "description": "How many knowledge pages cite a file that changed since the page was pinned; num is the stale pages, den the pages."}
   # One capture per request at its start, replaced when the request is
   # recorded again: 1 when an agent read a page, 0 when not.
@@ -643,6 +722,6 @@ metrics:
   - {"key":"task.completed","title":"Tasks completed","entity":"v_oxplow_task","where":"state = 'done'","time":"closed_at","aggregation":"count","unit":"tasks","category":"operational","description":"Tasks done, by the day they were closed."}
   - {"key":"task.open","title":"Open tasks","entity":"v_oxplow_task","where":"state IN ('todo', 'in_progress', 'blocked')","aggregation":"count","unit":"tasks","category":"operational","description":"Tasks ready, in progress or blocked, captured over time."}
   - {"key":"tasks.tracked_requests_pct","title":"Tracked requests","measure": "oxplow.request_tracked", "expression": "RATIO(num, den)", "unit":"%","direction":"higher-better","displayKind":"gauge","category":"operational","description":"The share of the requests that changed files which have a task link.","sliceableDims":["oxplow.branch"]}
-  - {"key":"knowledge.pages","title":"Knowledge pages","measure": "knowledge.pages", "expression": "SUM(value)", "unit":"count","direction":"neutral","displayKind":"gauge","category":"operational","description":"How many knowledge pages the enabled stores keep.","sliceableDims":["oxplow.knowledge_store","oxplow.knowledge_bucket"]}
-  - {"key":"knowledge.stale_pct","title":"Stale knowledge","measure": "knowledge.stale_pages", "expression": "RATIO(num, den)", "unit":"%","direction":"lower-better","displayKind":"gauge","category":"operational","description":"The share of knowledge pages that cite a file which changed since the page was pinned.","sliceableDims":["oxplow.knowledge_store","oxplow.knowledge_bucket"]}
+  - {"key":"knowledge.pages","title":"Knowledge pages","measure": "knowledge.pages", "expression": "SUM(value)", "unit":"count","direction":"neutral","displayKind":"gauge","category":"operational","description":"How many knowledge pages the enabled stores keep.","sliceableDims":["oxplow.knowledge_store","oxplow.knowledge_kind"]}
+  - {"key":"knowledge.stale_pct","title":"Stale knowledge","measure": "knowledge.stale_pages", "expression": "RATIO(num, den)", "unit":"%","direction":"lower-better","displayKind":"gauge","category":"operational","description":"The share of knowledge pages that cite a file which changed since the page was pinned.","sliceableDims":["oxplow.knowledge_store","oxplow.knowledge_kind"]}
   - {"key":"knowledge.read_requests_pct","title":"Requests that read knowledge","measure": "knowledge.read_requests", "expression": "RATIO(num, den)", "unit":"%","direction":"higher-better","displayKind":"gauge","category":"operational","description":"The share of the requests that changed files in which an agent read a knowledge page.","sliceableDims":["oxplow.branch"]}

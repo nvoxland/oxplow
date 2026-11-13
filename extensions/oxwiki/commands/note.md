@@ -3,7 +3,7 @@ description: Keep what you just worked out as a knowledge page.
 ---
 
 Keep what you learned in this conversation — or the exploration the
-person points at — as a knowledge page, following the **`oxplow-knowledge`**
+person points at — as a knowledge page, following the **`knowledge`**
 (finding) and **`oxwiki`** (writing) skills. `$ARGUMENTS`, when given, is
 the topic (or the page to add to).
 
