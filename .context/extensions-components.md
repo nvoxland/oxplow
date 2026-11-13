@@ -352,6 +352,12 @@ around it** (`component_harness.rs`, `PageAt::ui`):
   `null` when it refused it or the component cleared it. The server drives
   it one op at a time (`/harness/next`): a DOM step for the agent, a nav-bar
   press, a view change, new rows.
+- **Start-up wait**: the test waits up to `START_WAIT` (60 s) for the page's
+  `drawing` word — the window is a process start plus a page load, which a
+  loaded machine stretches far past a few seconds (a fixed 10 s made
+  `ui:` steps flake under load). A window that exits ends the wait at once
+  and the error names the exit; at the bound the error says what never came
+  and for how long (`first_signal`).
 - **The window** is the shell's `oxplow component-harness <url>`: one
   window, no Dock icon, never focused, no project, daemon, menu or IPC; it
   quits at `/harness/done`. Tests run while the person works, so it is

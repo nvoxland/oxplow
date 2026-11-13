@@ -152,9 +152,9 @@ impl PageAt<'_> {
         // A window that draws no frames (the display locked or asleep)
         // can't lay a component out: its steps aren't run, never failed, nor
         // are the steps after them, which read what they did.
-        match harness.drawing(std::time::Duration::from_secs(10)).await {
-            Some(true) => {}
-            Some(false) => {
+        match harness.drawing().await {
+            Ok(true) => {}
+            Ok(false) => {
                 harness.close().await;
                 return unrun(
                     report,
@@ -165,9 +165,9 @@ impl PageAt<'_> {
                     "run it again with the display awake",
                 );
             }
-            None => {
+            Err(why) => {
                 harness.close().await;
-                return fail(report, "the harness's page never started".into());
+                return fail(report, why);
             }
         }
         let ok = self
