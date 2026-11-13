@@ -254,9 +254,14 @@ fn run_shell(ctx: tauri::Context) {
                     show_launcher(app);
                 }
             }
-            // Tauri sets the dock icon while mapping its own `Ready`, so
-            // this runs strictly after it and the tint isn't overwritten.
-            tauri::RunEvent::Ready => icon_tint::apply(icon_tint.as_deref()),
+            // An unbundled run gets oxplow's icon first (macOS has no `.app`
+            // to take it from), then the project's tint goes behind it.
+            // Tauri sets its own icon while mapping `Ready`, so this runs
+            // strictly after it and nothing here is overwritten.
+            tauri::RunEvent::Ready => {
+                icon_tint::install_bundle_icon();
+                icon_tint::apply(icon_tint.as_deref());
+            }
             // Last chance to take the daemons down with us.
             tauri::RunEvent::Exit => app.state::<windows::ShellWindows>().stop_all_daemons(),
             _ => {}

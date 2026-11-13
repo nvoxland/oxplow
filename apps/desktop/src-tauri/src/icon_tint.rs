@@ -97,9 +97,66 @@ pub fn apply(tint: Option<&str>) {
 #[cfg(not(target_os = "macos"))]
 pub fn apply(_tint: Option<&str>) {}
 
+/// The icon an installed oxplow's `.app` carries, embedded for a run that
+/// has none.
+#[cfg(target_os = "macos")]
+const BUNDLE_ICON: &[u8] = include_bytes!("../icons/icon.icns");
+
+/// Whether the main bundle at `bundle_path` is an `.app`: one has its own
+/// icon; an unbundled binary's main bundle is just its folder.
+pub fn is_app_bundle(bundle_path: &str) -> bool {
+    std::path::Path::new(bundle_path)
+        .extension()
+        .is_some_and(|e| e == "app")
+}
+
+/// Give an unbundled run (`./target/debug/oxplow`, what `bun run run:dev`
+/// starts) oxplow's own Dock icon. macOS takes an app's icon from its `.app`,
+/// and Tauri only sets it at runtime in its `dev` mode, which the
+/// `custom-protocol` feature this shell always builds with turns off — so a
+/// bare binary would show the generic executable icon. An installed `.app`
+/// keeps its bundle icon. Call before [`apply`], which tints whatever icon
+/// is current.
+#[cfg(target_os = "macos")]
+pub fn install_bundle_icon() {
+    use objc2::{AllocAnyThread, MainThreadMarker};
+    use objc2_app_kit::{NSApplication, NSImage};
+    use objc2_foundation::{NSBundle, NSData};
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        tracing::warn!("dock icon skipped: not on the main thread");
+        return;
+    };
+    if is_app_bundle(&NSBundle::mainBundle().bundlePath().to_string()) {
+        return;
+    }
+    let data = NSData::with_bytes(BUNDLE_ICON);
+    let Some(icon) = NSImage::initWithData(NSImage::alloc(), &data) else {
+        tracing::warn!("dock icon skipped: the embedded icon didn't load");
+        return;
+    };
+    let app = NSApplication::sharedApplication(mtm);
+    unsafe { app.setApplicationIconImage(Some(&icon)) };
+}
+
+/// Non-macOS builds have no Dock.
+#[cfg(not(target_os = "macos"))]
+pub fn install_bundle_icon() {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_an_app_bundle_carries_its_own_icon() {
+        assert!(is_app_bundle("/Applications/Oxplow.app"));
+        assert!(is_app_bundle(
+            "/Users/me/oxplow/target/debug/bundle/macos/oxplow.app"
+        ));
+        // An unbundled run's main bundle is the binary's folder.
+        assert!(!is_app_bundle("/Users/me/oxplow/target/debug"));
+        assert!(!is_app_bundle(""));
+    }
 
     #[test]
     fn apply_is_a_no_op_without_a_usable_tint() {
