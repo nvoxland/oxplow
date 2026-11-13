@@ -1202,7 +1202,7 @@
   tests:
     - { not_null: event_type }
 - name: replaceable
-  version: 4
+  version: 5
   key: [target]
   description: "The core sub-components an extension may replace with a page (`ui.replacements`), each with its versioned props contract: what the replacement is given, and must declare, instead of any host state. Which extension replaces one is the person's choice (`replacements:` in the project config) or, for a bound target, its provider's."
   fields:
