@@ -237,12 +237,27 @@ one transaction:
 
 - resolves `ref()` / `source()` with the tokenizer — an unknown dataset or
   table, or a non-literal argument, is an error at `file:line:col`;
+- is **per dataset**: one that fails to resolve, compile or check is
+  reported on its own (`file:line:col`, first), and only the datasets
+  that `ref()` it fail with "reads `x`, which didn't compile"; every other
+  dataset still compiles, in a check. (A publish still replaces the whole
+  candidate or none — `replace_extensions` rolls back on any error — so
+  the check, which sees the candidate's models through stand-ins, is where
+  the one real error shows.)
 - orders the datasets so each is created after what it reads (a cycle is an
   error naming each dataset and where it wrote its first `ref()`);
 - drops the owner's previous views and creates the new ones;
 - checks **lineage**: everything the authorizer reports the view reading
   directly (`ReadSession::direct_inputs`) must be a declared `ref()` or
-  `source()` — reading a table without `source()` fails. The converse
+  `source()` — reading a table without `source()` fails. A dataset may
+  read datasets that read datasets, to any depth, and may be a top-level
+  `UNION` / `UNION ALL` over `ref()`s and `source()`s: what an inner view
+  reads is its own, never the dataset's, and each arm is checked as the
+  statement's own SQL. A check compiles datasets to **temp views**, which
+  the authorizer reports as `temp.<view>`; `ReadSession` records those
+  under the view's name (only a temp *table* keeps `temp.`), else a nested
+  view looked like an undeclared read (a check failed where the publish
+  passed). The converse
   isn't checked: each declared input is a call in the SQL, substituted
   into it, so it's read by construction (and SQLite can't always say so —
   a dataset made only of CTEs reports its reads under the CTEs' names, P7.B5);

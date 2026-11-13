@@ -766,6 +766,38 @@ fn shape(decl: &ModelDecl) -> Vec<(String, &'static str)> {
     out
 }
 
+/// The views `decl` publishes, each with its columns and SQL types, as
+/// [`ensure_model_tx`] creates them: what a check stands in for before the
+/// model's first activation, so a dataset reading one resolves and checks
+/// its columns whether or not the model has been published yet.
+pub fn view_shapes(decl: &ModelDecl) -> Vec<(String, Vec<(String, &'static str)>)> {
+    let text = |names: &[&str]| -> Vec<(String, &'static str)> {
+        names.iter().map(|n| (n.to_string(), "TEXT")).collect()
+    };
+    let mut live: Vec<(String, &'static str)> =
+        vec![("uri".into(), "TEXT"), ("store".into(), "TEXT")];
+    live.extend(decl.columns.iter().map(|c| (c.name.clone(), c.ty.sql())));
+    live.push(("fields".into(), "TEXT"));
+    live.push(("written_at".into(), "TEXT"));
+    let mut all = live.clone();
+    all.push(("removed_at".into(), "TEXT"));
+    let mut out = vec![
+        (decl.view(), live),
+        (decl.view_all(), all),
+        (
+            format!("{}_field", decl.view()),
+            text(&["uri", "namespace", "name", "value", "kind"]),
+        ),
+    ];
+    if decl.search.is_some() {
+        out.push((
+            decl.search_view(),
+            text(&["uri", "title", "body", "version"]),
+        ));
+    }
+    out
+}
+
 /// Create (or bring up to date) `decl`'s table and view, and record the
 /// view as its owner's dataset. A new column is added in place; a removed
 /// or retyped one rebuilds the table in place, its rows and their fields
@@ -2576,6 +2608,27 @@ mod tests {
 
     /// `book` with children: `links` (an edge typed by `kind`) and
     /// `notes` (a markdown body).
+    /// The shapes a check stands in with are the views the model creates:
+    /// the same columns, in order.
+    #[test]
+    fn view_shapes_are_the_views_the_model_creates() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::database::migrate_and_compile(&mut conn).unwrap();
+        let decl = book();
+        ensure_model_tx(&conn, &decl).unwrap();
+        for (view, shape) in view_shapes(&decl) {
+            let names: Vec<String> = conn
+                .prepare("SELECT name FROM pragma_table_info(?1) ORDER BY cid")
+                .unwrap()
+                .query_map([&view], |r| r.get(0))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap();
+            let want: Vec<String> = shape.into_iter().map(|(n, _)| n).collect();
+            assert_eq!(names, want, "{view}");
+        }
+    }
+
     fn linked_book() -> ModelDecl {
         let mut d = book();
         let mut kind = ModelColumn::new("kind", ModelType::Text);

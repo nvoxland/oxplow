@@ -2636,6 +2636,130 @@ mod tests {
         }
     }
 
+    /// A check of an extension already published compiles its datasets to
+    /// temp views that shadow the published ones, and the authorizer reports
+    /// their reads as `temp.<view>`: a dataset over datasets that read
+    /// datasets — a top-level UNION among them — passes lineage there as it
+    /// does published, and a raw table read still fails.
+    #[test]
+    fn nested_and_union_datasets_pass_lineage_in_a_check_too() {
+        let published_good = |good: &[DatasetSource]| {
+            let mut conn = fresh();
+            assert_eq!(
+                publish(&mut conn, &[ext("t", good.to_vec())]).unwrap()["t"].len(),
+                0
+            );
+            conn
+        };
+        let good = [
+            source("a", "SELECT CAST(id AS INTEGER) AS id FROM ref('thread')", &["id INT"]),
+            source("b", "SELECT CAST(id AS INTEGER) AS id FROM ref('a')", &["id INT"]),
+            source("c", "SELECT CAST(id AS INTEGER) AS id FROM ref('b') WHERE id > 0", &["id INT"]),
+            source(
+                "u",
+                "SELECT CAST(id AS INTEGER) AS id FROM ref('c') UNION ALL SELECT CAST(id AS INTEGER) FROM ref('b') UNION SELECT CAST(id AS INTEGER) FROM ref('thread')",
+                &["id NUM"],
+            ),
+            source(
+                "n",
+                "SELECT CAST(count(*) AS INTEGER) AS id FROM ref('u')",
+                &["id INT"],
+            ),
+        ];
+        let conn = published_good(&good);
+        let checked = check_extensions(&conn, &[ext("t", good.to_vec())], &[]).unwrap();
+        assert_eq!(checked.errors["t"], Vec::<String>::new());
+        let mut bad = good.to_vec();
+        bad.push(source(
+            "raw",
+            "SELECT CAST(id AS INTEGER) AS id FROM ref('c') UNION ALL SELECT CAST(id AS INTEGER) FROM threads",
+            &["id INT"],
+        ));
+        let conn = published_good(&good);
+        let checked = check_extensions(&conn, &[ext("t", bad)], &[]).unwrap();
+        let errors = checked.errors["t"].join("\n");
+        assert!(
+            errors.contains("datasets/raw.sql: reads threads without ref()/source()"),
+            "{errors}"
+        );
+        assert_eq!(checked.errors["t"].len(), 1, "{errors}");
+    }
+
+    /// A check stands in for a model's views before the model has been
+    /// published (or after a failed activation rolled it back): datasets
+    /// over them resolve, nested ones included, and the one real failure is
+    /// the only error.
+    #[test]
+    fn a_check_stands_in_for_a_models_views() {
+        use crate::collector_store::StoredType;
+        let conn = fresh();
+        let stub = |view: &str| EntityStub {
+            owner: "t".into(),
+            namespace: "t".into(),
+            name: view.into(),
+            view: view.into(),
+            columns: vec![
+                ("uri".into(), StoredType::Text),
+                ("title".into(), StoredType::Text),
+            ],
+        };
+        let stubs = [stub("v_t_book"), stub("v_t_book_field")];
+        let checked = check_extensions(
+            &conn,
+            &[ext(
+                "t",
+                vec![
+                    source("a", "SELECT CAST(uri AS TEXT) AS uri FROM ref('book')", &["uri TEXT"]),
+                    source("b", "SELECT CAST(uri AS TEXT) AS uri FROM ref('book_field') UNION ALL SELECT uri FROM ref('a')", &["uri TEXT"]),
+                    source("bad", "SELECT CAST(id AS INTEGER) AS id FROM threads", &["id INT"]),
+                    source("c", "SELECT CAST(uri AS TEXT) AS uri FROM ref('b')", &["uri TEXT"]),
+                ],
+            )],
+            &stubs,
+        )
+        .unwrap();
+        let t = &checked.errors["t"];
+        assert!(t[0].contains("datasets/bad.sql: reads threads"), "{t:?}");
+        assert_eq!(t.len(), 1, "{t:?}");
+    }
+
+    /// One dataset's failure is its own: the others publish, and the first
+    /// error names the dataset that failed, not one reading it.
+    #[test]
+    fn one_failing_dataset_leaves_the_others_published_and_is_named_first() {
+        let mut conn = fresh();
+        let errors = publish(
+            &mut conn,
+            &[ext(
+                "t",
+                vec![
+                    source(
+                        "ok1",
+                        "SELECT CAST(id AS INTEGER) AS id FROM ref('thread')",
+                        &["id INT"],
+                    ),
+                    source(
+                        "bad",
+                        "SELECT CAST(id AS INTEGER) AS id FROM threads",
+                        &["id INT"],
+                    ),
+                    source("after", "SELECT id FROM ref('bad')", &["id INT"]),
+                    source("ok2", "SELECT id FROM ref('ok1')", &["id INT"]),
+                ],
+            )],
+        )
+        .unwrap();
+        let t = &errors["t"];
+        assert!(t[0].contains("datasets/bad.sql: reads threads"), "{t:?}");
+        assert!(
+            t[1].contains("reads `v_t_bad`, which didn't compile"),
+            "{t:?}"
+        );
+        assert_eq!(t.len(), 2, "{t:?}");
+        let names: Vec<String> = published(&conn).into_iter().map(|p| p.0).collect();
+        assert_eq!(names, vec!["v_t_ok1", "v_t_ok2"]);
+    }
+
     #[test]
     fn a_contract_changed_at_the_same_version_fails_naming_the_column() {
         let mut conn = fresh();
