@@ -15,8 +15,10 @@ import { open, shown, load } from "../../support/ui.js";
 // command in the ☰. The `ui`-less half of this — what a page's run holds —
 // is every foundation fixture's, which runs with only foundation on.
 
-/** The other extensions that ship with, or are in, the e2e project. */
-const OTHERS = ["oxplow-bundled", "e2e", "github"];
+/** The other extensions that ship with, or are in, the e2e project, in the
+ *  order they can be turned off: an extension only after those that require
+ *  it (oxplow-bundled is required by the rest, oxtask by e2e). */
+const OTHERS = ["e2e", "github", "oxtask", "oxwiki", "oxplow-bundled"];
 
 /** A few commits (one a merge) and one file not committed. */
 function history(daemon: Daemon) {

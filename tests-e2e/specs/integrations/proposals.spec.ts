@@ -1,13 +1,18 @@
-import { fileTask, ipc, run } from "../../support/daemon.js";
+import { existsSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
+import { fileTask, ipc } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { shown, load } from "../../support/ui.js";
 
-// The test extension's effect deletes a task titled "[delete]": a
-// destructive step oxplow never runs for an effect, so it waits as a
-// proposal for a person.
+// The test extension's effect deletes the project's file doomed.txt for a
+// task titled "[delete]": a destructive step oxplow never runs for an effect,
+// so it waits as a proposal for a person.
 
 test("an effect's destructive step waits in Alerts until a person approves it", async ({ page, daemon }) => {
   await load(page);
+  const doomed = join(daemon.project, "doomed.txt");
+  writeFileSync(doomed, "soon gone\n");
   await fileTask(daemon, "Pear [delete]");
   // The dock's Alerts icon counts it once the effect has run (it runs in the
   // background, so wait for that). It opens the Alerts panel, which links
@@ -19,13 +24,8 @@ test("an effect's destructive step waits in Alerts until a person approves it", 
   const card = page.locator('[data-testid^="proposal-"]').filter({ hasText: "destructive" }).first();
   await expect(card).toBeVisible();
   const id = (await card.getAttribute("data-testid"))!.replace("proposal-", "");
-  const live = async () =>
-    (
-      await ipc<{ rows: unknown[][] }>(daemon, "query_sql", {
-        sql: "SELECT count(*) FROM v_oxplow_task WHERE title = 'Pear [delete]'",
-      })
-    ).rows[0]?.[0];
-  expect(await live()).toBe(1);
+  const live = () => (existsSync(doomed) ? 1 : 0);
+  expect(live()).toBe(1);
   await page.getByTestId(`proposal-approve-${id}-trigger`).click();
   await page.getByTestId(`proposal-approve-${id}-confirm`).click();
   await expect(shown(page).getByTestId(`proposal-${id}`)).toHaveCount(0);
@@ -34,10 +34,11 @@ test("an effect's destructive step waits in Alerts until a person approves it", 
 
 test("approving a proposal whose run fails keeps the failure on its card, recorded once", async ({ page, daemon }) => {
   await load(page);
-  const made = await fileTask(daemon, "Quince [delete]");
+  await fileTask(daemon, "Quince [delete]");
   await expect(page.getByTestId("dock-alerts-badge")).toHaveText("1");
-  // The task goes another way first, so the delete the effect asked for fails.
-  await run(daemon, "oxtask.task.delete", { id: made.result.id });
+  // The file was never there (or goes another way first), so the delete the
+  // effect asked for fails.
+  rmSync(join(daemon.project, "doomed.txt"), { force: true });
   await page.getByTestId("dock-alerts").click();
   await page.getByTestId("dock-panel-open-page").getByTestId("open-page-link").click();
   const card = shown(page).locator('[data-testid^="proposal-"]').filter({ hasText: "destructive" }).first();

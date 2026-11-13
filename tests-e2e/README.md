@@ -26,8 +26,11 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
   `the_suite_fixture_declares_what_the_fake_does`), an effect, a dataset, a
   page, and a resource. Private, since `providers` is still
   experimental. The effect comments on each created task; a title with
-  `[fail]` makes it fail (Delivery, Retry) and one with `[delete]` makes it
-  delete the task (a proposal). Nothing in it is approved until a spec
+  `[fail]` makes it fail (Delivery, Retry: it comments in a stream that
+  doesn't exist) and one with `[delete]` makes it delete the project's
+  `doomed.txt` (a proposal). The effect uses core commands (`oxplow.comment.add`,
+  `oxplow.file.delete`), since an effect can't compose a task store's own
+  `oxtask.task.*`: they write outside the transaction. Nothing in it is approved until a spec
   approves it. A spec that needs a model's answer (triage) points a
   `typesafe` provider at a stand-in for Jev's API of its own, so nothing
   leaves the machine.

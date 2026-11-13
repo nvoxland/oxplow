@@ -1439,7 +1439,7 @@ mod tests {
             r.set_declared(vec![
                 builtin("snapshots", "oxplow", "oxplow:snapshots"),
                 builtin("snapshots", "hashes", "oxplow:snapshot-hashes"),
-                builtin("knowledge", "oxwiki", "oxplow:oxwiki"),
+                builtin("acme_store", "acme", "oxplow:acme"),
             ]);
         }
         r
@@ -1673,7 +1673,7 @@ mod tests {
             .sql
             .query_sql(
                 "SELECT capability, provider, active, chosen_by, available FROM v_capability_provider
-                  WHERE capability IN ('snapshots', 'knowledge') ORDER BY capability, provider",
+                  WHERE capability = 'snapshots' ORDER BY capability, provider",
                 vec![],
                 None,
             )

@@ -7,9 +7,9 @@ intent:
   origin: null
   examples: []
 # Its providers run programs, its effect reads with its own SQL and
-# comments on (or deletes) tasks.
+# comments on tasks (or deletes a file).
 requires: [oxplow-bundled, oxtask]
-permissions: [process.run, sql.read, commands:oxtask.task.comment, commands:oxtask.task.delete]
+permissions: [process.run, sql.read, commands:oxplow.comment.add, commands:oxplow.file.delete]
 # `bin/provider` and `bin/scripted` are written when a suite daemon starts:
 # they run the oxplow-provider-fake binary this checkout built, the second in
 # harness mode.
@@ -28,7 +28,7 @@ effects:
   - id: note-created
     summary: >-
       Comments on each created oxtask task; one titled "[fail]" fails, one
-      titled "[delete]" asks to delete it.
+      titled "[delete]" asks to delete the file doomed.txt.
     on: [oxplow.task_record.changed]
     where: { cause: trigger }
     entry: effects/note.star

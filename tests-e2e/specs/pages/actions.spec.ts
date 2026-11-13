@@ -13,11 +13,12 @@ import { open, shown } from "../../support/ui.js";
 // options is a submenu of them, the row's own checked.
 
 const manifest = `requires: [oxplow-bundled, oxtask]
-permissions: [commands:oxtask.task.create, commands:oxtask.task.delete]
+permissions: [sql.read, commands:oxtask.task.create, commands:oxtask.task.delete, commands:oxplow.comment.add]
 commands:
   - name: secret.save
-    summary: Files a wallaby named by the label, with a secret token that is never kept.
+    summary: Notes a wallaby named by the label, with a secret token that is never kept.
     entry: handlers/save.star
+    needs: [sql.read]
     unrecorded: [token]
     input_schema:
       type: object
@@ -27,15 +28,20 @@ commands:
         token: { type: string, writeOnly: true }
 `;
 
+// A task store's own commands write outside the transaction, so a command of
+// an extension can't compose one: this one notes the wallaby as a comment.
 const handler = `def transform(x):
-    return {"commands": [{"name": "oxtask.task.create", "input": {"title": "Wallaby " + x["input"]["label"]}}]}
+    stream = scope("sql.read", {"sql": "SELECT 'str' || id AS stream FROM v_stream LIMIT 1", "params": {}})[0]["stream"]
+    return {"commands": [{"name": "oxplow.comment.add", "input": {"stream": stream, "target": "oxplow:oxplow/file?path=wallabies", "body": "Wallaby " + x["input"]["label"]}}]}
 `;
 
 const pageYaml = `title: Action Wallaby
 category: Data
 loaders:
   rows:
-    sql: SELECT uri, native_id AS id, title, stage, title NOT LIKE '%locked%' AS can_rename FROM v_oxplow_task WHERE title LIKE 'Wallaby %' ORDER BY title
+    sql: SELECT uri, native_id AS id, title, stage, title NOT LIKE '%locked%' AS can_rename FROM v_oxplow_task WHERE title LIKE 'Wallaby %'
+      UNION ALL SELECT uri, NULL, body, NULL, 1 FROM v_comment WHERE body LIKE 'Wallaby %'
+      ORDER BY title
   marks:
     sql: SELECT 'ready' AS value, 'Ready' AS label UNION ALL SELECT 'in_progress', 'Started' UNION ALL SELECT 'done', 'Finished'
 view:
@@ -51,6 +57,7 @@ view:
     form: true
     fields: [title, body]
     input: { title: 'Wallaby ' }
+    then: stay
   - id: keep-secret
     label: Add with a secret
     command: e2e_actions.secret.save
@@ -90,7 +97,9 @@ const formPage = `title: Form Wallaby
 category: Data
 loaders:
   rows:
-    sql: SELECT '' AS label, uri, title FROM v_oxplow_task WHERE title LIKE 'Wallaby %' ORDER BY title
+    sql: SELECT '' AS label, uri, title FROM v_oxplow_task WHERE title LIKE 'Wallaby %'
+      UNION ALL SELECT '', uri, body FROM v_comment WHERE body LIKE 'Wallaby %'
+      ORDER BY title
 view:
   stack:
   - id: made
