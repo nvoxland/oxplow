@@ -85,15 +85,15 @@ async fn sweep_stream(
             bts.fail(&task_id, e.to_string(), None);
         }
     }
-    // Release the effort-start gate on every path — including failure. A
-    // failed sweep leaves a best-effort baseline; blocking efforts forever
-    // would be worse than a partial one.
+    // Release the initial-sweep gate on every path — including failure. A
+    // failed sweep leaves a best-effort baseline; blocking its waiters
+    // forever would be worse than a partial one.
     svc.mark_initial_complete();
 }
 
 /// Run recovery + seed the primary stream, then spawn the standard
 /// background tasks (snapshot watchers + startup sweep + cleanup,
-/// comment cleanup, workspace + wiki + config watchers, diagnostics,
+/// comment cleanup, workspace + oxwiki + config watchers, diagnostics,
 /// page-ref restate, commit indexer).
 ///
 /// The two awaited steps run synchronously on purpose: the first
@@ -159,9 +159,9 @@ pub async fn run_boot_orchestration(
 
     // Startup sweep: backfills changes that landed while the daemon wasn't
     // running, on every stream. Off the boot path because hashing a large
-    // worktree can take a few seconds. Each stream's effort-start gate is up
-    // the instant boot returns, so an agent dispatched during the sweep can't
-    // open an effort whose start snapshot reflects a half-captured tree.
+    // worktree can take a few seconds. Each stream's initial-sweep gate is up
+    // the instant boot returns, so a run marked during the sweep doesn't read
+    // a half-captured tree.
     {
         let captures = state.snapshot_captures.clone();
         for svc in captures.list() {
@@ -176,7 +176,7 @@ pub async fn run_boot_orchestration(
     }
 
     // Snapshot cleanup loop — expires blob CONTENT older than the configured
-    // retention window (tsk105: the rows are permanent records; each
+    // retention window (the rows are permanent records; each
     // (stream, path)'s newest content is kept at any age). Runs ~60s after
     // boot and every 24h. `snapshotRetentionDays: 0` disables it.
     {
@@ -190,17 +190,15 @@ pub async fn run_boot_orchestration(
 
     // The event pump: delivers the log to its consumers (page_ref
     // projections first); catches up on anything logged while down.
-    crate::effort_reactors::register(state);
     crate::indexer::register(state);
     crate::symbol_collector::register(state);
-    // A stream's working tree and open efforts, re-analyzed as it moves (P7.B4).
+    // A stream's working tree, re-analyzed as it moves (P7.B4).
     crate::change_reactor::register(state);
-    crate::effort_landing::register(state);
     crate::capabilities::register(state);
     // `on:` collectors (P7.B3), after the consumers they may name.
     crate::collector_triggers::register(state);
     // Extensions' effects (P8.D10), approved ones only — and a person's
-    // retry or backfill the last run left half-done, recorded (tsk845).
+    // retry or backfill the last run left half-done, recorded.
     crate::effect_triggers::register(state);
     match crate::effect_triggers::recover_interrupted(state).await {
         Ok(0) => {}
@@ -214,8 +212,9 @@ pub async fn run_boot_orchestration(
     crate::config_reactors::register(state);
     // Scripts run in workers bounded by the project's `scripts:` config.
     crate::config_reactors::apply_script_limits(&crate::config_service::read_config(&state.config));
-    // A collector that registered a new entity may let a dataset compile.
-    crate::extension::extension_datasets::register(state);
+    // A collector that registered a new entity may let a dataset compile,
+    // and a settings write republishes the datasets that read it.
+    register_extension_datasets(state);
     state.event_pump.clone().spawn();
     // `every:` collectors: the scheduler runs `oxplow.collector.sync` as the system.
     crate::collector_runner::spawn_scheduler(state);
@@ -230,14 +229,12 @@ pub async fn run_boot_orchestration(
     // The agent runtimes' skills: what's offered now.
     crate::capabilities::refresh_agent_text(state).await;
     crate::providers::sync::spawn_sync_scheduler(state);
-    // Open efforts' evidence, an asset over the tables it reads (P7.B6).
-    crate::effort_evidence::register(state);
+    register_stored_analyses(state);
 
-    // Metric retention loop (tsk93) — OPT-IN: `metricRetentionDays` defaults
+    // Metric retention loop — OPT-IN: `metricRetentionDays` defaults
     // to 0 = keep everything (per-test history is what makes the substrate
     // worth having). When enabled, a daily pass prunes captures older than
-    // the window that no current value stands on — effort-stamped captures,
-    // each producer's newest, and fold-live facts' captures are always kept
+    // the window that no current value stands on — each producer's newest, and fold-live facts' captures are always kept
     // (see `prune_aged_captures`). Config is re-read each pass, so flipping
     // the setting takes effect without a restart.
     {
@@ -260,7 +257,7 @@ pub async fn run_boot_orchestration(
                         Err(e) => tracing::warn!(error = %e, "metric retention pass failed"),
                     }
                 }
-                // Detail compaction (tsk211) runs INDEPENDENTLY of the prune
+                // Detail compaction runs INDEPENDENTLY of the prune
                 // above: it is on by default, because nulling a drill-in payload
                 // can't change a metric value, whereas the prune deletes facts
                 // and stays opt-in. `detail_json` was 200 MB of a 795 MB DB here
@@ -293,7 +290,7 @@ pub async fn run_boot_orchestration(
                     Ok(_) => {}
                     Err(e) => tracing::warn!(error = %e, "metric detail compaction failed"),
                 }
-                // Return the WAL's high-water mark to the OS (tsk216). The
+                // Return the WAL's high-water mark to the OS. The
                 // automatic checkpoint is PASSIVE — it restarts the WAL in place
                 // and reuses the space — so after a big write burst (a metric
                 // rebuild took it to 169MB here) the file parks at that size
@@ -338,38 +335,14 @@ pub async fn run_boot_orchestration(
         });
     }
 
-    // Wiki notes watcher: keeps `wiki_page` rows in sync with
-    // `.oxplow/wiki/<slug>.md` on disk (initial scan + debounced
-    // re-syncs on change).
+    // Observers' triggers (`start`, `files`, `sqlite` in a collector's
+    // `on:`), once the watches they hear are up.
     {
-        let wiki_store = state.wiki_page_store.clone();
-        let wiki_db = state.db.clone();
-        let wiki_vocabulary = state.vocabulary.clone();
-        let wiki_dir = state.layout.project_dir.clone();
-        let wiki = state.wiki.clone();
-        let bts = state.background_tasks.clone();
-        let task = bts.start(StartInput {
-            kind: BackgroundTaskKind::NotesResync,
-            label: "Initial wiki notes scan".into(),
-            ..Default::default()
-        });
-        let task_id = task.id.clone();
-        let watches = state.stream_watches.clone();
+        let services = state.clone();
         let mut watching = watching.clone();
         tokio::spawn(async move {
             let _ = watching.wait_for(|up| *up).await;
-            // Subscribed before the scan: a change is in it or heard after.
-            let changes = watches.subscribe_primary(crate::wiki_pages_watch::scope());
-            crate::wiki_pages_watch::follow(
-                changes,
-                wiki_dir,
-                wiki_db,
-                wiki_vocabulary,
-                wiki_store,
-                wiki,
-            )
-            .await;
-            bts.complete(&task_id, None);
+            crate::observer_triggers::supervise(&services);
         });
     }
 
@@ -487,7 +460,7 @@ pub async fn run_boot_orchestration(
         });
     }
 
-    // Page-ref graph repair: re-project every existing work item, effort,
+    // Page-ref graph repair: re-project every existing task,
     // finding and handoff into `page_ref` — only when a migration or a
     // new build may have left it drifted (`page_ref_backfill::needs_repair`).
     {
@@ -495,8 +468,6 @@ pub async fn run_boot_orchestration(
         let vocabulary = state.vocabulary.clone();
         let page_refs = state.page_ref_store.clone();
         let sources = crate::page_ref_backfill::Sources {
-            db: state.db.clone(),
-            efforts: state.effort_store.clone(),
             findings: state.code_quality_store.clone(),
             handoffs: state.handoff_store.clone(),
         };
@@ -561,7 +532,7 @@ pub async fn run_boot_orchestration(
     // LSP diagnostics → `v_diagnostic` (live state; cleared here first).
     crate::lsp_diagnostics::spawn(state.clone());
 
-    // Search: the task / comment / note / wiki kinds are assets
+    // Search: the task / comment / knowledge kinds are assets
     // (`kind_search`, registered by the change loop); files are the
     // `search.index` pump consumer's.
 
@@ -577,7 +548,7 @@ pub async fn run_boot_orchestration(
         });
     }
 
-    // Metric aggregate cube (tsk96), an asset (P7.B1): it reads the capture
+    // Metric aggregate cube, an asset (P7.B1): it reads the capture
     // and fact tables, so it folds what lands after each quiet burst of
     // commits to them; its first build here is the backfill. Purely an
     // accelerator — an unbuilt cube is a slow read, never a wrong one.
@@ -586,7 +557,7 @@ pub async fn run_boot_orchestration(
             .with_visibility(state.metric_visibility.clone()),
     ));
 
-    // Tree-metric BASELINE (tsk41). A `per-path` measure folds over each capture's
+    // Tree-metric BASELINE. A `per-path` measure folds over each capture's
     // snapshot file rows, so a repo-wide total needs ONE snapshot listing the whole
     // tree. On a fresh project — or after the V54 wipe — there isn't one, and delta
     // snapshots alone never get there (a file only enters the fold once some commit
@@ -608,4 +579,19 @@ pub async fn run_boot_orchestration(
         });
     }
     Ok(())
+}
+
+/// The stored analyses pages read but can't compute — each request's
+/// (`request_analysis`: `v_request_observation`, `v_request_metric_delta`),
+/// assets over what they read. Boot registers them, and so does a
+/// throwaway oxplow that runs an extension's examples.
+pub fn register_stored_analyses(state: &std::sync::Arc<crate::Services>) {
+    crate::request_analysis::register(state);
+}
+
+/// What republishes extensions' datasets when what they read changes: a
+/// collector's new entity, a settings write (`config()`). Boot registers
+/// it, and so does a throwaway oxplow that runs an extension's examples.
+pub fn register_extension_datasets(state: &std::sync::Arc<crate::Services>) {
+    crate::extension::extension_datasets::register(state);
 }

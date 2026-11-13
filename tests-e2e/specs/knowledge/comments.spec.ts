@@ -11,14 +11,14 @@ import { open, shown } from "../../support/ui.js";
 // foundation's fixture's; the comment opened on its page is only seen here.
 test("the Comments inbox opens a thread on its page", async ({ page, daemon }) => {
   writeFileSync(join(daemon.project, "otters.md"), "# Otters\n\nThey hold hands.\n");
-  const added = await run<{ result: { comment: { id: string } } }>(daemon, "oxplow.knowledge.add_comment", {
+  const added = await run<{ result: { comment: { id: string } } }>(daemon, "oxplow.comment.add", {
     stream: daemon.stream,
     target: "oxplow:oxplow/file?path=otters.md",
     quote: "hold hands",
     intent: "followup",
     body: "Is that true?",
   });
-  await run(daemon, "oxplow.knowledge.reply_comment", { comment: added.result.comment.id, body: "Checking." });
+  await run(daemon, "oxplow.comment.reply", { comment: added.result.comment.id, body: "Checking." });
 
   await open(page, daemon, "oxplow:oxplow/page?page=comments");
   const inbox = shown(page).getByTestId("page-file");

@@ -1,7 +1,7 @@
 import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
-// tsk972: the stored panel layout loads after the first render. A toggle
+// the stored panel layout loads after the first render. A toggle
 // the person makes before it arrives is theirs: the late load doesn't
 // undo it, and doesn't lose the rest of what was stored either.
 

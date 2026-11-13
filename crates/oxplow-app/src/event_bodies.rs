@@ -2,7 +2,7 @@
 //! prompt's text — for the
 //! activity panel (a person, any stream) and the MCP `read_event_content`
 //! tool (an agent, its own stream only). One routine for both, so the
-//! scope and the size cap can't differ between them (tsk509).
+//! scope and the size cap can't differ between them.
 
 use oxplow_domain::events::schema::ContentRef;
 use oxplow_domain::{DomainError, EventId, StreamId};
@@ -105,7 +105,7 @@ mod tests {
     /// stream's; a person reads any.
     #[tokio::test]
     async fn a_body_is_read_by_event_scoped_and_capped() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let big = "x".repeat(MAX_READ_BYTES * 2);
         let body = serde_json::json!({
             "tool_name": "Bash",
@@ -117,6 +117,7 @@ mod tests {
             .ingest(HookEnvelope {
                 session_title: None,
                 turn_run: None,
+                reading: Default::default(),
                 kind: HookKind::PostToolUse,
                 thread_id: Some(f.thread),
                 stream_id: None,
@@ -127,7 +128,7 @@ mod tests {
                 decision: None::<ToolDecision>,
                 tool: crate::test_fixtures::claude_tool(HookKind::PostToolUse, &body),
                 subagent: None,
-                peer: None,
+                harness_turn: None,
             })
             .await
             .unwrap();
@@ -171,13 +172,14 @@ mod tests {
     /// open turn too, which the turn row (holding the first) never saw.
     #[tokio::test]
     async fn a_reprompts_text_is_kept_with_its_event() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         for text in ["first ask", "and then this"] {
             f.svc
                 .hook_ingest
                 .ingest(HookEnvelope {
                     session_title: None,
                     turn_run: None,
+                    reading: Default::default(),
                     kind: HookKind::UserPromptSubmit,
                     thread_id: Some(f.thread),
                     stream_id: None,
@@ -188,7 +190,7 @@ mod tests {
                     decision: None,
                     tool: None,
                     subagent: None,
-                    peer: None,
+                    harness_turn: None,
                 })
                 .await
                 .unwrap();

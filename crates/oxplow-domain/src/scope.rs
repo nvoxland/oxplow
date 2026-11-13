@@ -6,7 +6,7 @@
 //! same way; a call to one the command didn't declare is refused.
 //!
 //! Not to be confused with [`crate::capability`]: the swappable slots a
-//! project chooses an implementation of (`work_items`, `snapshots`). A
+//! project chooses an implementation of (`snapshots`). A
 //! command's `needs` may name both; each name is looked up in its own
 //! catalog.
 
@@ -173,6 +173,20 @@ pub const SCOPES: &[Scope] = &[
         summary: "Run the project's and extensions' collectors now, syncing what they read.",
     },
     Scope {
+        id: "comment.read",
+        access: Access::Read,
+        host: Host::Daemon,
+        spends: false,
+        summary: "Read the comments people anchored to text in pages, files and tasks.",
+    },
+    Scope {
+        id: "comment.write",
+        access: Access::Record,
+        host: Host::Daemon,
+        spends: false,
+        summary: "Write comments: add, reply, change, relocate and delete them.",
+    },
+    Scope {
         id: "config.read",
         access: Access::Read,
         host: Host::Daemon,
@@ -236,13 +250,6 @@ pub const SCOPES: &[Scope] = &[
         summary: "Run an extension's effect again: retry a reaction, backfill past events.",
     },
     Scope {
-        id: "efforts.write",
-        access: Access::Record,
-        host: Host::Daemon,
-        spends: false,
-        summary: "Open, update, link and close efforts; record and review their claims and decisions.",
-    },
-    Scope {
         id: "extension_config.read",
         access: Access::Read,
         host: Host::Daemon,
@@ -278,11 +285,19 @@ pub const SCOPES: &[Scope] = &[
         summary: "Turn a disabled extension contribution back on.",
     },
     Scope {
+        id: "files.read",
+        access: Access::Read,
+        host: Host::Daemon,
+        spends: false,
+        summary: "Read and list the files in the folders an extension's `files:` declares.",
+    },
+    Scope {
         id: "files.write",
         access: Access::Write,
         host: Host::Daemon,
         spends: false,
-        summary: "Write files in a worktree (restore one from a snapshot).",
+        summary: "Write files in a worktree (restore one from a snapshot), or in the folders an \
+                  extension's `files:` declares with write access.",
     },
     Scope {
         id: "handoffs.write",
@@ -320,18 +335,11 @@ pub const SCOPES: &[Scope] = &[
         summary: "Record intent for this extension's declared jobs or request their cancellation; execution requires its own current approval.",
     },
     Scope {
-        id: "knowledge.read",
+        id: "links.check",
         access: Access::Read,
         host: Host::Daemon,
         spends: false,
-        summary: "Read the wiki's comments and the drift of its refs from the code they name.",
-    },
-    Scope {
-        id: "knowledge.write",
-        access: Access::Record,
-        host: Host::Daemon,
-        spends: false,
-        summary: "Write the project's wiki: pages, notes, comments and links.",
+        summary: "Check the `[[…]]` links in a body against the project: which are not a recognized reference, or name something that isn't there.",
     },
     Scope {
         id: "lsp.control",
@@ -367,6 +375,13 @@ pub const SCOPES: &[Scope] = &[
         host: Host::Daemon,
         spends: false,
         summary: "Enable, record and rebuild metrics (changes the configuration and the facts).",
+    },
+    Scope {
+        id: "model.write",
+        access: Access::Record,
+        host: Host::Daemon,
+        spends: false,
+        summary: "Write on a shared model's items: the composing extension's own fields (`fields:`), and re-pin an item's pinned refs.",
     },
     Scope {
         id: "pages.author",
@@ -454,6 +469,20 @@ pub const SCOPES: &[Scope] = &[
         summary: "Atomically replace the calling extension's own private state or cache with a version/revision check.",
     },
     Scope {
+        id: "store.sql",
+        access: Access::Read,
+        host: Host::Daemon,
+        spends: false,
+        summary: "Read the calling extension's own SQLite file (`storage: { sqlite: true }`) with SQL that changes nothing.",
+    },
+    Scope {
+        id: "store.write",
+        access: Access::Write,
+        host: Host::Daemon,
+        spends: false,
+        summary: "Write to the calling extension's own SQLite file (`storage: { sqlite: true }`), as the extension itself.",
+    },
+    Scope {
         id: "streams.write",
         access: Access::Record,
         host: Host::Daemon,
@@ -525,13 +554,6 @@ pub const SCOPES: &[Scope] = &[
         summary: "Show the window's search box (Quick Open) or its find-in-file bar.",
     },
     Scope {
-        id: "work_items.write",
-        access: Access::Record,
-        host: Host::Daemon,
-        spends: false,
-        summary: "Create, update, move, link, comment on and delete work items.",
-    },
-    Scope {
         id: "worktrees.write",
         access: Access::Write,
         host: Host::Daemon,
@@ -582,6 +604,6 @@ mod tests {
             strongest_access(&needs(&["sql.read", "tabs.write"])),
             Some(Access::Read)
         );
-        assert_eq!(strongest_access(&needs(&["work_items"])), None);
+        assert_eq!(strongest_access(&needs(&["snapshots"])), None);
     }
 }

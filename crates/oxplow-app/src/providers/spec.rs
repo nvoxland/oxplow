@@ -4,7 +4,7 @@
 //! ```yaml
 //! providers:
 //!   - id: fake                     # the ref segment and command namespace
-//!     capability: work_items
+//!     capability: snapshots
 //!     entry: bin/provider          # a program in the extension folder
 //!     args: [--stdio]
 //!     env: [TRACKER_URL]           # host variables passed through
@@ -13,21 +13,6 @@
 //!     declarations: provider.json  # the InitializeResult, checked in
 //! ```
 //!
-//! Or, instead of an `entry`, an MCP server behind oxplow's adapter
-//! (P7.A6) — its command, the Starlark mapping and the pinned tools, all
-//! in the folder:
-//!
-//! ```yaml
-//!     adapter:
-//!       mcp: { command: [bin/notes-server, --stdio] }
-//!       mapping: mcp/notes.star
-//!       tools: mcp/tools.json
-//! ```
-//!
-//! The server may instead be one reached over HTTP (P9.B4): `mcp: { url:
-//! https://mcp.example.com/mcp, auth: TOKEN }`, `auth` naming the
-//! credential sent as its bearer token.
-//!
 //! The declarations file is what a person approves (with the program):
 //! the live `initialize` must equal it.
 
@@ -35,9 +20,6 @@ use oxplow_provider_protocol::model::InitializeResult;
 use serde::{Deserialize, Serialize};
 
 use oxplow_domain::capability::{self, ProviderContract};
-
-/// A host reference cannot choose a process environment control variable.
-pub(crate) const HOST_SECRET_BEARER: &str = "OXPLOW_MCP_BEARER";
 
 /// The capabilities a provider may implement: the ones core gives a
 /// contract (`oxplow_domain::capability::ProviderContract`).
@@ -63,18 +45,15 @@ pub fn contract_of(spec: &ProviderSpec) -> &'static ProviderContract {
 pub struct ProviderSpec {
     /// The provider's id: its program's approval (`<extension>/<id>`) and
     /// the id of its default instance — an instance's id is its refs'
-    /// segment (`oxplow:oxplow/work_item?id=…&provider=<id>`) and its commands' namespace
+    /// segment (`oxplow:oxplow/task?id=…&provider=<id>`) and its commands' namespace
     /// (`<id>.estimate`).
     pub id: String,
     pub capability: String,
-    /// The program, relative to the extension folder — or `adapter`.
+    /// The program, relative to the extension folder.
     #[serde(default)]
     pub entry: Option<String>,
     #[serde(default)]
     pub args: Vec<String>,
-    /// An MCP server run through oxplow's adapter, instead of an `entry`.
-    #[serde(default)]
-    pub adapter: Option<AdapterSpec>,
     /// Host environment variables passed through by name.
     #[serde(default)]
     pub env: Vec<String>,
@@ -88,16 +67,6 @@ pub struct ProviderSpec {
     pub network: Vec<String>,
     /// The checked-in `InitializeResult` (JSON), relative to the folder.
     pub declarations: String,
-    /// What a work list's own ids look like (a regex matched whole:
-    /// `[A-Z]+-\d+`), so a loose id resolves to its item while it's the
-    /// active work list.
-    #[serde(default)]
-    pub id_pattern: Option<String>,
-    /// A work list's own fields (kept in an item's `native`), so screens
-    /// render and edit them: `[{ name, title, kind: enum|text|number,
-    /// values? }]`.
-    #[serde(default)]
-    pub fields: Vec<oxplow_domain::work_items::FieldDecl>,
     /// The scopes it calls over the protocol (`host/call`,
     /// `sql.read` or `state.read`): part of what its approval covers, and the only ones it
     /// may call.
@@ -164,7 +133,7 @@ pub struct CredentialDecl {
     pub name: String,
     /// Obtained by signing in rather than pasted (P9.B3).
     pub oauth: Option<OAuthDecl>,
-    /// An inert host-owned secret identity, usable only as a remote MCP bearer.
+    /// An inert host-owned secret identity: the value lives in the host's secret store.
     #[serde(rename = "secretRef")]
     pub secret_ref: Option<oxplow_domain::extension_secret::SecretRef>,
 }
@@ -271,9 +240,10 @@ impl schemars::JsonSchema for CredentialDecl {
 fn credentials_problem(spec: &ProviderSpec) -> Option<String> {
     let id = &spec.id;
     for (i, c) in spec.credentials.iter().enumerate() {
-        if c.secret_ref.is_some() && !spec.is_host_secret_bearer(c) {
+        if c.secret_ref.is_some() && c.oauth.is_some() {
             return Some(format!(
-                "provider `{id}`: host secret references require the remote MCP bearer credential"
+                "provider `{id}`: credential `{}` is a host secret reference or a sign-in, not both",
+                c.name
             ));
         }
         if spec.credentials[..i].iter().any(|o| o.name == c.name) {
@@ -312,60 +282,6 @@ fn credentials_problem(spec: &ProviderSpec) -> Option<String> {
     None
 }
 
-/// An MCP server as a provider: oxplow's adapter runs `mcp`'s
-/// server and translates through `mapping`, refusing a server whose tools
-/// aren't `tools`.
-#[derive(
-    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
-)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct AdapterSpec {
-    pub mcp: McpServer,
-    /// The Starlark mapping (`transform(x)`), relative to the folder.
-    pub mapping: String,
-    /// The pinned tools (`[{ name, description, inputSchema }]`, JSON).
-    pub tools: String,
-}
-
-/// How the adapter reaches the MCP server: exactly one of the two.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type, schemars::JsonSchema)]
-#[serde(untagged)]
-#[schemars(deny_unknown_fields)]
-pub enum McpServer {
-    /// A program in the folder, spoken to over its stdio.
-    Command { command: Vec<String> },
-    /// A server reached over streamable HTTP. `auth` names the
-    /// credential whose value is sent as its bearer token.
-    Url { url: String, auth: Option<String> },
-}
-
-impl<'de> Deserialize<'de> for McpServer {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct File {
-            #[serde(default)]
-            command: Option<Vec<String>>,
-            #[serde(default)]
-            url: Option<String>,
-            #[serde(default)]
-            auth: Option<String>,
-        }
-        let file = File::deserialize(deserializer)?;
-        match (file.command, file.url, file.auth) {
-            (Some(command), None, None) => Ok(McpServer::Command { command }),
-            (Some(_), None, Some(_)) => Err(serde::de::Error::custom(
-                "`auth` goes with a `url`: the bearer token of a server reached over HTTP",
-            )),
-            (None, Some(url), auth) => Ok(McpServer::Url { url, auth }),
-            _ => Err(serde::de::Error::custom(
-                "`mcp` names either `command` (a program in the folder) or `url` (a server \
-                 reached over HTTP), not both or neither",
-            )),
-        }
-    }
-}
-
 /// `value` as a URL a secret may be sent to: https, or plain http on
 /// loopback (what a local service speaks).
 fn secure_url(value: &str) -> Option<url::Url> {
@@ -383,40 +299,14 @@ pub fn instance_name(namespace: &str, id: &str) -> String {
 }
 
 impl ProviderSpec {
-    /// References are consumed by the shipped HTTP transport only, never a
-    /// package executable, stdio server or extension script environment.
-    pub(crate) fn is_host_secret_bearer(&self, credential: &CredentialDecl) -> bool {
-        credential.oauth.is_none()
-            && credential.name == HOST_SECRET_BEARER
-            && matches!(self.adapter.as_ref().map(|adapter| &adapter.mcp),
-                Some(McpServer::Url { auth: Some(name), .. }) if name == &credential.name)
-    }
-
     /// Its credentials' names.
     pub fn credential_names(&self) -> Vec<String> {
         self.credentials.iter().map(|c| c.name.clone()).collect()
     }
 
-    /// Its credentials as an approval lists them ([`CredentialDecl::grant`]),
-    /// the one a server by url gets as its bearer token marked so — which
-    /// secret leaves the machine for it is part of what is approved
-    /// (tsk834).
+    /// Its credentials as an approval lists them ([`CredentialDecl::grant`]).
     pub fn credential_grants(&self) -> Vec<String> {
-        let bearer = match self.adapter.as_ref().map(|a| &a.mcp) {
-            Some(McpServer::Url { auth, .. }) => auth.as_deref(),
-            _ => None,
-        };
-        self.credentials
-            .iter()
-            .map(|c| {
-                let grant = c.grant();
-                if bearer == Some(c.name.as_str()) {
-                    format!("{grant} (sent to the server as its bearer token)")
-                } else {
-                    grant
-                }
-            })
-            .collect()
+        self.credentials.iter().map(|c| c.grant()).collect()
     }
 
     /// Whether `name` is a client secret: a credential a signed-in one's
@@ -437,78 +327,19 @@ impl ProviderSpec {
         format!("{namespace}/{}", self.id)
     }
 
-    /// The program of its own it runs, relative to the folder, and its
-    /// arguments: its `entry` and `args`, or its MCP server's command —
-    /// what its approval names.
+    /// The program it runs, relative to the folder, and its arguments:
+    /// its `entry` and `args` — what its approval names.
     pub fn program(&self) -> (String, Vec<String>) {
-        match self.adapter.as_ref().map(|a| &a.mcp) {
-            Some(McpServer::Command { command }) => command.split_first().map_or_else(
-                || (String::new(), Vec::new()),
-                |(s, rest)| (s.clone(), rest.to_vec()),
-            ),
-            // Nothing of its own runs here: what it "runs" is the server
-            // at its url.
-            Some(McpServer::Url { url, .. }) => (url.clone(), Vec::new()),
-            None => (self.entry.clone().unwrap_or_default(), self.args.clone()),
-        }
-    }
-
-    /// Whether what it runs is a server elsewhere (an MCP server by
-    /// `url`) rather than a program of its folder.
-    pub fn is_remote(&self) -> bool {
-        matches!(
-            self.adapter.as_ref().map(|a| &a.mcp),
-            Some(McpServer::Url { .. })
-        )
-    }
-
-    /// What the host executes in the folder: its `entry` with `args`, or
-    /// `adapter_bin` (oxplow's MCP adapter) with the adapter's files and
-    /// the server's command (after `--`) or its `--url` and the name of
-    /// its bearer's credential — every path relative to the folder.
-    pub fn launch(
-        &self,
-        adapter_bin: &std::path::Path,
-    ) -> (Option<std::path::PathBuf>, Vec<String>) {
-        match &self.adapter {
-            Some(a) => {
-                let mut args: Vec<String> = [
-                    "--declarations",
-                    &self.declarations,
-                    "--mapping",
-                    &a.mapping,
-                    "--tools",
-                    &a.tools,
-                ]
-                .iter()
-                .map(|s| s.to_string())
-                .collect();
-                match &a.mcp {
-                    McpServer::Command { command } => {
-                        args.push("--".into());
-                        args.extend(command.iter().cloned());
-                    }
-                    McpServer::Url { url, auth } => {
-                        args.extend(["--url".to_string(), url.clone()]);
-                        if let Some(name) = auth {
-                            args.extend(["--auth-env".to_string(), name.clone()]);
-                        }
-                    }
-                }
-                (Some(adapter_bin.to_path_buf()), args)
-            }
-            None => (None, self.args.clone()),
-        }
+        (self.entry.clone().unwrap_or_default(), self.args.clone())
     }
 }
 
-/// A provider as declared: its spec, its checked-in declarations (`None`
-/// when they can't be read) and, behind the MCP adapter, its pinned tools.
+/// A provider as declared: its spec and its checked-in declarations (`None`
+/// when they can't be read).
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeclaredProvider {
     pub spec: ProviderSpec,
     pub declarations: Option<InitializeResult>,
-    pub tools: Vec<serde_json::Value>,
 }
 
 impl DeclaredProvider {
@@ -517,38 +348,8 @@ impl DeclaredProvider {
         DeclaredProvider {
             spec: spec.clone(),
             declarations: read_declarations(spec, read).ok(),
-            tools: read_pinned_tools(spec, read).unwrap_or_default(),
         }
     }
-}
-
-/// An adapter provider's pinned tools: a JSON list, each with a `name`.
-/// Empty for a provider with an `entry`.
-pub fn read_pinned_tools(
-    spec: &ProviderSpec,
-    read: &dyn Fn(&str) -> Option<String>,
-) -> Result<Vec<serde_json::Value>, String> {
-    let Some(adapter) = &spec.adapter else {
-        return Ok(Vec::new());
-    };
-    let id = &spec.id;
-    let text = read(&adapter.tools).ok_or_else(|| {
-        format!(
-            "provider `{id}`: tools `{}` doesn't exist in the extension",
-            adapter.tools
-        )
-    })?;
-    let tools: Vec<serde_json::Value> = serde_json::from_str(&text)
-        .ok()
-        .filter(|t: &Vec<serde_json::Value>| t.iter().all(|t| t["name"].is_string()))
-        .ok_or_else(|| {
-            format!(
-                "provider `{id}`: tools `{}` must be a JSON list of `{{ name, description, \
-                 inputSchema }}` — the server's tools/list, pinned",
-                adapter.tools
-            )
-        })?;
-    Ok(tools)
 }
 
 /// What's wrong with `spec`'s `needs`: the scopes its `host/call`s
@@ -561,98 +362,26 @@ fn needs_problem(spec: &ProviderSpec) -> Option<String> {
     })
 }
 
-/// What's wrong with how `spec` names what runs: exactly one of `entry`
-/// and `adapter`, and every file it names inside the folder.
-fn program_problem(spec: &ProviderSpec, read: &dyn Fn(&str) -> Option<String>) -> Option<String> {
+/// What's wrong with how `spec` names what runs: an `entry` inside the
+/// folder, and args that stay inside it.
+fn program_problem(spec: &ProviderSpec) -> Option<String> {
     let id = &spec.id;
-    match (&spec.entry, &spec.adapter) {
-        (Some(_), Some(_)) | (None, None) => Some(format!(
-            "provider `{id}`: name either `entry` or `adapter` (a program, or an MCP server behind oxplow's adapter), not both or neither"
-        )),
-        (Some(entry), None) => {
-            if !inside(entry) {
-                Some(format!(
-                    "provider `{id}`: entry `{entry}` must be a path inside the extension folder"
-                ))
-            } else {
-                spec.args.iter().find(|a| !arg_inside(a)).map(|bad| {
-                    format!(
-                        "provider `{id}`: arg `{bad}` names a path outside the extension folder (or its \
-                         manifest or pages); a provider runs only what its approval covers"
-                    )
-                })
-            }
-        }
-        (None, Some(adapter)) => {
-            if !spec.args.is_empty() {
-                return Some(format!(
-                    "provider `{id}`: `args` go with an `entry`; an adapter's server takes them in `command`"
-                ));
-            }
-            match &adapter.mcp {
-                McpServer::Command { command } => {
-                    let Some((server, args)) = command.split_first() else {
-                        return Some(format!("provider `{id}`: adapter `mcp.command` is empty"));
-                    };
-                    if !inside(server) {
-                        return Some(format!(
-                            "provider `{id}`: the MCP server `{server}` must be a program inside the \
-                             extension folder (its approval covers what runs)"
-                        ));
-                    }
-                    if let Some(bad) = args.iter().find(|a| !arg_inside(a)) {
-                        return Some(format!(
-                            "provider `{id}`: server arg `{bad}` names a path outside the extension folder"
-                        ));
-                    }
-                }
-                McpServer::Url { url, auth } => {
-                    let Some(parsed) = secure_url(url) else {
-                        return Some(format!(
-                            "provider `{id}`: the MCP server's `url` must be https (http only on \
-                             loopback): `{url}`"
-                        ));
-                    };
-                    let host = parsed.host_str().unwrap_or_default();
-                    if !crate::net_sandbox::host_allowed(host, &spec.network) {
-                        return Some(format!(
-                            "provider `{id}`: `network` must list `{host}`, its MCP server's host"
-                        ));
-                    }
-                    if let Some(auth) = auth {
-                        if !spec.credentials.iter().any(|c| c.name == *auth) {
-                            return Some(format!(
-                                "provider `{id}` declares no credential `{auth}` (`mcp.auth` names \
-                                 the one sent as the server's bearer token)"
-                            ));
-                        }
-                        // A client secret is the host's to send with token
-                        // requests and never reaches the process.
-                        if spec.is_client_secret(auth) {
-                            return Some(format!(
-                                "provider `{id}`: `mcp.auth` names `{auth}`, but `{auth}` is a \
-                                 client secret — the host's alone, never sent to the server; \
-                                 name the credential the server takes as its bearer token"
-                            ));
-                        }
-                    }
-                }
-            }
-            for (what, path) in [("mapping", &adapter.mapping), ("tools", &adapter.tools)] {
-                if !inside(path) {
-                    return Some(format!(
-                        "provider `{id}`: {what} `{path}` must be a file inside the extension folder"
-                    ));
-                }
-                if read(path).is_none() {
-                    return Some(format!(
-                        "provider `{id}`: {what} `{path}` doesn't exist in the extension"
-                    ));
-                }
-            }
-            read_pinned_tools(spec, read).err()
-        }
+    let Some(entry) = &spec.entry else {
+        return Some(format!(
+            "provider `{id}`: name an `entry` (the program it runs)"
+        ));
+    };
+    if !inside(entry) {
+        return Some(format!(
+            "provider `{id}`: entry `{entry}` must be a path inside the extension folder"
+        ));
     }
+    spec.args.iter().find(|a| !arg_inside(a)).map(|bad| {
+        format!(
+            "provider `{id}`: arg `{bad}` names a path outside the extension folder (or its \
+             manifest or pages); a provider runs only what its approval covers"
+        )
+    })
 }
 
 /// A path inside the extension folder that the approval's tree hash
@@ -811,8 +540,8 @@ pub fn check_declarations(spec: &ProviderSpec, declared: &InitializeResult) -> R
             ));
         }
     }
-    // Core's call of a verb — `work_item.<verb>`, the effort policy's
-    // dispatcher — is what a person confirms and what is gated: a verb
+    // Core's call of a verb — `task.<verb>`, a dispatcher — is what a
+    // person confirms and what is gated: a verb
     // records and never asks on its own.
     for command in declared
         .commands
@@ -860,7 +589,7 @@ pub fn parse_providers(
                 spec.capability,
                 capabilities().collect::<Vec<_>>().join(", ")
             ))
-        } else if let Some(problem) = program_problem(&spec, read) {
+        } else if let Some(problem) = program_problem(&spec) {
             Some(problem)
         } else if let Some(problem) = credentials_problem(&spec) {
             Some(problem)
@@ -877,30 +606,6 @@ pub fn parse_providers(
             .find(|h| !crate::net_sandbox::valid_host_pattern(h))
         {
             Some(format!("provider `{id}`: `{bad}` isn't a host pattern"))
-        } else if let Some(problem) = (!spec.fields.is_empty() && !contract_of(&spec).items)
-            .then(|| {
-                format!(
-                    "provider `{id}`: fields are a work list's; `{}` has none",
-                    spec.capability
-                )
-            })
-            .or_else(|| {
-                oxplow_domain::work_items::fields_problem(&spec.fields)
-                    .map(|p| format!("provider `{id}`: {p}"))
-            })
-        {
-            Some(problem)
-        } else if let Some(pattern) = &spec.id_pattern {
-            match regex::Regex::new(pattern) {
-                Err(e) => Some(format!(
-                    "provider `{id}`: id_pattern `{pattern}` isn't a regex: {e}"
-                )),
-                Ok(_) if !contract_of(&spec).items => Some(format!(
-                    "provider `{id}`: id_pattern is a work list's; `{}` has no ids",
-                    spec.capability
-                )),
-                Ok(_) => read_declarations(&spec, read).err(),
-            }
         } else {
             read_declarations(&spec, read).err()
         };

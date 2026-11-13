@@ -1,0 +1,18 @@
+# A request with a turn still open has not stopped: nothing is recorded.
+requires: [oxwiki]
+given:
+  - { command: oxwiki.page.write, input: { title: Greeting notes, body: "# Greeting notes\n\nThe greeting says hello." } }
+  - observe:
+      turn:
+        prompt: Fix the greeting
+        open: true
+        tools:
+          - { name: Read, kind: read, paths: [".oxplow/oxwiki/greeting-notes.md"], ok: true }
+          - { name: Edit, kind: edit, paths: [a.txt], ok: true }
+  - observe:
+      event:
+        type: agent.turn.ended
+        payload: { turn: trn1, thread: thr1, outcome: completed }
+        anchors: { thread_id: thr1, turn_id: 1 }
+when: { sql: "SELECT count(*) AS n FROM v_fact WHERE measure_key = 'knowledge.read_requests'" }
+expect: { rows: [{ n: 0 }] }

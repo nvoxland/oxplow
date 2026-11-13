@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import type { VizRun } from "../tauri-bridge/generated/bindings.js";
 
-// tsk984: the host loads the component's bundle (its version) before it
+// the host loads the component's bundle (its version) before it
 // shows a frame, and the frame is served that version.
 const realApi = { ...(await import("../api.js")) }; // a copy: `mock.module` patches a loaded module in place
 const loads: string[] = [];

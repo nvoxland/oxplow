@@ -1,0 +1,50 @@
+title: Links
+description: "A task's links from both ends — what it blocks, relates to or was found from, and what links to it — with Link… and, on its own end, Unlink: where its list keeps links."
+needs:
+- model:oxplow/task_record
+params:
+- name: uri
+- name: id
+loaders:
+  links:
+    sql: |
+      SELECT l.to_uri AS other, coalesce((SELECT w.title FROM v_oxplow_task w WHERE w.uri = l.to_uri), l.to_uri) AS item,
+             (SELECT w.state FROM v_oxplow_task w WHERE w.uri = l.to_uri) AS icon,
+             replace(l.link_type, '_', ' ') AS kind, l.link_type, 'to' AS direction, 1 AS outbound
+      FROM v_oxplow_task_link l WHERE l.from_uri = :uri
+      UNION ALL
+      SELECT l.from_uri, coalesce((SELECT w.title FROM v_oxplow_task w WHERE w.uri = l.from_uri), l.from_uri),
+             (SELECT w.state FROM v_oxplow_task w WHERE w.uri = l.from_uri),
+             replace(l.link_type, '_', ' ') || ' (from it)', l.link_type, 'from', 0
+      FROM v_oxplow_task_link l WHERE l.to_uri = :uri
+view:
+  stack:
+  - id: links
+    title: Links
+    hide_title: true
+    from: links
+    viz: list
+    group:
+      by: kind
+    columns:
+    - key: item
+      label: Item
+      icon: icon
+      link:
+        kind: page
+        from: other
+    empty: No links.
+    actions:
+    - id: unlink
+      label: Unlink
+      point: oxplow/task.unlink
+      row: true
+      when: outbound
+      context:
+        uri: '{{param.uri}}'
+        to: '{{row.other}}'
+        type: '{{row.link_type}}'
+  # Link… is the store's own form.
+  - action_point: oxplow/task.link
+    context:
+      uri: { param: uri }

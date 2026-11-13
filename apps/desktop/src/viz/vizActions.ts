@@ -19,6 +19,8 @@ export interface VizActionDeps {
     confirmed: boolean,
     /** Where the dragged row landed, for a drag action. */
     drop?: Drop | null,
+    /** The `value` of the option pressed, for an action with options. */
+    option?: string | null,
   ): Promise<CommandOutcome>;
   /** A toast; with `undo`, it offers Undo. */
   toast(message: string, undo?: () => void, open?: () => void): void;
@@ -42,7 +44,13 @@ export interface VizActionDeps {
 /** What pressing an action came to: it ran, the command asks the person
  *  first (press again confirmed; `confirm` is what it asks about beyond
  *  itself, one line each), or it failed (recorded). */
-export type VizActionOutcome = "done" | { confirm: string[] } | "failed";
+export type VizActionOutcome = "done" | { confirm: string[] } | { skipped: string } | "failed";
+
+/** What a run says of the rows nothing answered: the one's why, or how many
+ *  of the run's rows were skipped. */
+export function skipSummary(label: string, why: string[], total: number): string {
+  return total === 1 ? `${label}: skipped — ${why[0]}` : `${label}: ${why.length} of ${total} skipped — ${why[0]}`;
+}
 
 /** A row as its column → value map (what a row action binds `{{row.*}}`
  *  to). */
@@ -111,11 +119,12 @@ export async function performVizAction(
   confirmed: boolean,
   deps: VizActionDeps,
   drop: Drop | null = null,
+  option: string | null = null,
 ): Promise<VizActionOutcome> {
   const ran = await deps.run(
     action.label,
     async () => {
-      const outcome = await deps.press(run.config.id, action.id, run.params, row, streamId, confirmed, drop);
+      const outcome = await deps.press(run.config.id, action.id, run.params, row, streamId, confirmed, drop, option);
       // An `open` action ran nothing: it says the URI to open, as a link does.
       if (action.open) {
         const uri = (outcome.result as { opened?: unknown } | null)?.opened;
@@ -134,6 +143,11 @@ export async function performVizAction(
   if (action.open) {
     deps.openPage((outcome.result as { opened: string }).opened, false);
     return "done";
+  }
+  // A point action whose row nothing answers ran nothing: it says why.
+  const skipped = (outcome.result as { skipped?: unknown } | null)?.skipped;
+  if (action.point && typeof skipped === "string") {
+    return { skipped };
   }
   // A run that came back undoable offers its Undo.
   const auditId = outcome.inverse && outcome.audit_id != null ? outcome.audit_id : null;

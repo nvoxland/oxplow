@@ -34,28 +34,28 @@ Ordered roughly by risk surface — earlier tasks hit the newest/roughest code.
 
 ### Work-panel & queue (highest-churn surface)
 
-1. **Create a work item from scratch.** Open the "new work item" flow, fill in
+1. **Create a task from scratch.** Open the "new task" flow, fill in
    title, kind, priority, and acceptance criteria. Save. Verify it appears in
    the correct status section. Then create a second one using "Save and
    Another" and confirm the form resets cleanly.
 
-2. **Inline-edit a work item's title, status, and priority** without opening a
+2. **Inline-edit a task's title, status, and priority** without opening a
    detail pane. Tab between fields. Hit Esc mid-edit and confirm nothing was
    saved. Re-edit and hit Enter and confirm it persists. Look for focus/blur
    race conditions.
 
-3. **Drag a work item between status sections** (To Do → Human Check → Done).
+3. **Drag a task between status sections** (To Do → Human Check → Done).
    Confirm the drop-target highlight is clear, the status actually changes, and
    the item lands in the right place. Try dragging onto an empty section.
 
 4. **Reorder items within a status section using Shift+↑/↓** keyboard nav.
    Confirm selection moves as expected and `sort_index` updates visibly.
 
-5. **Move a work item between threads** by dragging it onto another thread tab
+5. **Move a task between threads** by dragging it onto another thread tab
    in the ThreadRail. Then drag an item from the backlog into the active thread.
    Verify it appears in the queue immediately.
 
-6. **Delete a work item** via right-click (per usability.md's destructive-
+6. **Delete a task** via right-click (per usability.md's destructive-
    actions convention). Confirm the confirmation UX is clear and undo/recovery
    options (if any) are obvious.
 
@@ -103,7 +103,7 @@ Ordered roughly by risk surface — earlier tasks hit the newest/roughest code.
 Keep this pinned — friction usually traces back to one of these:
 
 - `src/ui/components/Plan/PlanPane.tsx`, `WorkGroupList.tsx`,
-  `WorkItemDetail.tsx` — work panel, inline edit, drag-to-status
+  `TaskDetail.tsx` — work panel, inline edit, drag-to-status
 - `src/ui/components/ThreadRail.tsx`, `StreamRail.tsx` — thread/stream tabs
 - `src/ui/components/LeftPanel/FileTree.tsx` — file tree
 - `src/ui/components/EditorPane.tsx` — Monaco host

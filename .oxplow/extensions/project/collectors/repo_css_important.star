@@ -1,5 +1,5 @@
 # repo.css_important — `!important` declarations (the specificity escape
-# hatch, see .context/theming.md). Re-added single-concern (tsk61). CSS files
+# hatch, see.context/theming.md). Re-added single-concern. CSS files
 # are scanned whole-text (no AST grammar for css here); TS/TSX only inside
 # string/template nodes, where an inline-style `!important` would live.
 def transform(input):

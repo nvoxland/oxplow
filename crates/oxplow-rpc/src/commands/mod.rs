@@ -23,7 +23,6 @@ pub mod background;
 pub mod bus;
 pub mod comments;
 pub mod config;
-pub mod effort;
 pub mod extensions;
 pub mod git;
 pub mod hooks;

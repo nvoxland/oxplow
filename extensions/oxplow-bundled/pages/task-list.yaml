@@ -1,0 +1,213 @@
+title: Task List
+description: "The task tracker's items in one of its stages, whoever they're assigned to, with epics over their children, the finished ones latest first, and a quick add."
+icon: check-square
+category: Work
+keywords: tasks list backlog history done finished in progress
+needs:
+- model:oxplow/task_record
+params:
+# One of the list's stages, as it names them; `todo` is its first to-do
+# stage (a bucket names its first stage).
+- name: state
+  type: choice
+  role: filter
+  label: State
+  default: todo
+  options_from: '#state_options'
+- name: priority
+  type: choice
+  role: filter
+  label: Priority
+  default: any
+  options:
+  - { value: any, label: Any }
+  - { value: urgent, label: Urgent }
+  - { value: high, label: High }
+  - { value: medium, label: Medium }
+  - { value: low, label: Low }
+- name: q
+  type: search
+  role: filter
+  label: Search
+# The stream whose threads Assign to offers.
+- name: stream_id
+answers:
+- {"question":"What work is in progress?","params":{"state":"in_progress"},"skill":"tasks"}
+- {"question":"What is in the backlog?","params":{"state":"backlog"},"skill":"tasks"}
+- {"question":"What is ready to work on?","params":{"state":"todo"},"skill":"tasks"}
+- {"question":"What has been finished lately?","params":{"state":"done"},"skill":"tasks"}
+loaders:
+  # The form a new item is filed with.
+  row:
+    sql: SELECT uri('oxplow/page', 'page', 'new-task') AS new_task
+  # The list's stages: the State filter's options, and Mark's.
+  stages:
+    page: oxplow/task-stages
+    loader: task_stages
+  state_options:
+    sql: SELECT filter AS value, label FROM stages ORDER BY ord
+  marks:
+    sql: SELECT value, label FROM stages ORDER BY ord
+  # Who Assign to offers: the stream's open threads, then you.
+  assignees:
+    sql: |
+      SELECT * FROM (SELECT t.uri AS value, t.title AS label FROM v_thread t
+                     WHERE t.stream_id = :stream_id AND t.closed_at IS NULL AND t.archived_at IS NULL
+                     ORDER BY t.sort_index, t.id)
+      UNION ALL
+      SELECT uri('oxplow/person'), 'You'
+  # What the quick add files: in the stage the list shows (its first to-do
+  # stage while it shows a started or closed one), for nobody.
+  new_item:
+    sql: |
+      SELECT coalesce((SELECT s.value FROM stages s
+                        WHERE (s.filter = :state OR s.value = :state) AND s.bucket IN ('backlog', 'todo', 'blocked')),
+                      'ready') AS stage
+  items:
+    page: oxplow/task-rows
+    loader: items
+    params:
+      show: all
+      state: { param: state }
+      priority: { param: priority }
+      q: { param: q }
+      stream_id: { param: stream_id }
+  # Every item in the stage; a row names who it's assigned to, when anyone is.
+  list:
+    sql: |
+      SELECT i.*, CASE WHEN i.assignee IS NOT NULL THEN i.assignee_title END AS assignee_shown
+      FROM items i
+      ORDER BY i.ord
+actions:
+- { id: new, label: New Task…, open: new_task, prominent: true, icon: plus }
+# The quick add sits in the rail (Details), above the filters.
+rail:
+  id: add
+  title: New task
+  action_point: oxplow/task.new
+view:
+  id: list
+  replaceable: task.list
+  title: Task List
+  from: list
+  viz: list
+  depth: depth
+  # An urgent or high item's coloured bar, as on the board's cards.
+  edge: prio_tone
+  columns:
+  - key: title
+    label: Task
+    link:
+      kind: page
+      from: uri
+  - key: summary
+    label: Description
+    format: markdown
+  - key: assignee_shown
+    label: Assigned to
+  - key: closed_at
+    label: Closed
+    format: relative
+  empty: Nothing here in this stage. Add one under New task.
+  actions:
+  - id: reorder
+    label: Reorder
+    command: oxplow.tasks.reorder
+    row: true
+    drag: true
+    input:
+      uri: '{{row.uri}}'
+      before: '{{before.uri}}'
+  - id: nest
+    label: Nest under
+    point: oxplow/task.edit
+    row: true
+    drag: true
+    when: can_nest
+    context:
+      uri: '{{row.uri}}'
+      parent: '{{onto.id}}'
+  # Mark ▸ the list's stages, the row's own checked.
+  - id: mark
+    label: Mark
+    point: oxplow/task.move
+    row: true
+    bulk: true
+    options_from: marks
+    current: stage
+    context:
+      uri: '{{row.uri}}'
+      stage: '{{option.value}}'
+  - id: priority-urgent
+    label: Priority Urgent
+    point: oxplow/task.edit
+    row: true
+    bulk: true
+    when: can_prioritize
+    context:
+      uri: '{{row.uri}}'
+      priority: urgent
+  - id: priority-high
+    label: Priority High
+    point: oxplow/task.edit
+    row: true
+    bulk: true
+    when: can_prioritize
+    context:
+      uri: '{{row.uri}}'
+      priority: high
+  - id: priority-medium
+    label: Priority Medium
+    point: oxplow/task.edit
+    row: true
+    bulk: true
+    when: can_prioritize
+    context:
+      uri: '{{row.uri}}'
+      priority: medium
+  - id: priority-low
+    label: Priority Low
+    point: oxplow/task.edit
+    row: true
+    bulk: true
+    when: can_prioritize
+    context:
+      uri: '{{row.uri}}'
+      priority: low
+  - id: unparent
+    label: Make top-level
+    point: oxplow/task.unparent
+    row: true
+    bulk: true
+    when: has_parent
+    context:
+      uri: '{{row.uri}}'
+  # Assign to ▸ the stream's threads and you; a closed item is nobody's.
+  - id: assign
+    label: Assign to
+    command: oxplow.tasks.assign
+    row: true
+    bulk: true
+    when: is_open
+    options_from: assignees
+    current: assignee
+    input:
+      uri: '{{row.uri}}'
+      to: '{{option.value}}'
+  - id: unassign
+    label: Unassign
+    command: oxplow.tasks.assign
+    row: true
+    bulk: true
+    when: assigned
+    input:
+      uri: '{{row.uri}}'
+      to: null
+  - id: delete
+    label: Delete
+    point: oxplow/task.delete
+    row: true
+    bulk: true
+    when: can_delete
+    context:
+      uri: '{{row.uri}}'

@@ -926,13 +926,19 @@ impl LiveSources {
     ) -> Result<Vec<Vec<SqlCell>>, DomainError> {
         use oxplow_domain::agent::harness::HarnessError;
         let stream = self.stream(stream).await?;
+        let generation = self
+            .db
+            .read(|tx| oxplow_db::agent_session_store::newest_binding_tx(tx))
+            .await?;
         let harnesses = self.harnesses.all();
         let answers = futures::future::join_all(harnesses.iter().map(|h| {
             let stream = &stream;
             async move {
                 (
                     h.id().to_string(),
-                    self.saved_conversations.list(h.as_ref(), stream).await,
+                    self.saved_conversations
+                        .list(h.as_ref(), stream, generation)
+                        .await,
                 )
             }
         }))
@@ -1500,7 +1506,10 @@ impl LiveSources {
                     text(r.label.clone()),
                     text(r.extension.clone()),
                     flag(r.bound_to_provider),
-                    text(r.capability.clone()),
+                    text(match &r.model {
+                        Some(model) => format!("model:{model}"),
+                        None => r.capability.clone(),
+                    }),
                     opt(chosen.get(&r.target).cloned()),
                 ]);
             }

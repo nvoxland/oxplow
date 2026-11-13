@@ -16,14 +16,21 @@
 pub struct Replaceable {
     /// Its name: `<capability's noun>.<component>`.
     pub target: &'static str,
-    /// The capability it belongs to.
+    /// The capability it belongs to; empty for a target of a shared model.
     pub capability: &'static str,
-    /// Whether only the extension of a provider of `capability` may
-    /// replace it — the provider of the thing it shows (a work item's),
-    /// else the capability's **active** one. An unbound target may be
-    /// replaced by any extension; the person chooses among several
-    /// (`replacements:`).
+    /// The shared model it shows items of (`oxplow/task_record`), for a
+    /// target that belongs to a model rather than a capability.
+    pub model: Option<&'static str>,
+    /// Whether only the extension that holds the thing it shows may replace
+    /// it: for a capability's target the extension of the item's own
+    /// provider (else the capability's **active** one), for a model's the
+    /// extension that fills the model as the item's own store. An unbound
+    /// target may be replaced by any extension; the person chooses among
+    /// several (`replacements:`).
     pub bound_to_provider: bool,
+    /// The `uri` param a bound target reads the item's own store from:
+    /// `provider` for a task's URI, `store` for a knowledge page's.
+    pub provider_param: &'static str,
     /// The contract's version: bumped when `props` or their meaning
     /// change. A declaration may pin it (`version:`); one pinned to
     /// another version doesn't load.
@@ -43,14 +50,23 @@ pub struct Replaceable {
 #[derive(serde::Deserialize)]
 struct Row {
     target: String,
+    #[serde(default)]
     capability: String,
+    #[serde(default)]
+    model: Option<String>,
     bound_to_provider: bool,
+    #[serde(default = "default_provider_param")]
+    provider_param: String,
     version: u32,
     props: Vec<String>,
     view: Vec<String>,
     label: String,
     #[serde(default)]
     about: String,
+}
+
+fn default_provider_param() -> String {
+    "provider".to_string()
 }
 
 /// Leak a string for the life of the process: the table is read once.
@@ -81,7 +97,9 @@ pub fn all() -> &'static [Replaceable] {
                 .map(|r| Replaceable {
                     target: keep(r.target),
                     capability: keep(r.capability),
+                    model: r.model.map(keep),
                     bound_to_provider: r.bound_to_provider,
+                    provider_param: keep(r.provider_param),
                     version: r.version,
                     props: keep_all(r.props),
                     view: keep_all(r.view),
@@ -92,6 +110,17 @@ pub fn all() -> &'static [Replaceable] {
                 .into_boxed_slice(),
         )
     })
+}
+
+impl Replaceable {
+    /// What it belongs to as a need reads: the capability's name, or
+    /// `model:<owner>/<model>`.
+    pub fn subject(&self) -> String {
+        match self.model {
+            Some(model) => format!("model:{model}"),
+            None => self.capability.to_string(),
+        }
+    }
 }
 
 /// The `replacements:` value that keeps oxplow's own component.
@@ -160,23 +189,44 @@ mod tests {
             assert!(r.version >= 1, "{}", r.target);
             assert!(!r.props.is_empty(), "{}", r.target);
             assert!(!r.props.contains(&"stream_id"), "{}", r.target);
-            // A target is named for what its capability is about:
-            // `work_item.*` for `work_items`, `effort.*` for
-            // `effort_policy`, `vcs.*` for `vcs`.
-            let noun = r.target.split('.').next().unwrap_or_default();
-            assert!(r.capability.starts_with(noun), "{}", r.target);
+            // A target belongs to a capability or to a shared model, not
+            // both and not neither; `vcs.*` is the `vcs` capability's.
+            assert!(
+                r.capability.is_empty() != r.model.is_none(),
+                "{}: a capability or a model",
+                r.target
+            );
+            if r.target.starts_with("vcs.") {
+                assert_eq!(r.capability, "vcs", "{}", r.target);
+            }
         }
         assert_eq!(
-            replaceable("work_item.board").map(|r| r.bound_to_provider),
+            replaceable("task.detail.state").map(|r| r.subject()),
+            Some("model:oxplow/task_record".to_string())
+        );
+        assert_eq!(
+            replaceable("vcs.history.graph").map(|r| r.subject()),
+            Some("vcs".to_string())
+        );
+        assert_eq!(
+            replaceable("task.board").map(|r| r.bound_to_provider),
             Some(false)
         );
         assert_eq!(
-            replaceable("work_item.detail.state").map(|r| r.bound_to_provider),
+            replaceable("task.detail.state").map(|r| r.bound_to_provider),
             Some(true)
         );
         assert_eq!(
-            replaceable("effort.verdict").map(|r| (r.bound_to_provider, r.props)),
-            Some((false, &["effort_id"][..]))
+            replaceable("knowledge.detail.body").map(|r| r.subject()),
+            Some("model:oxplow/knowledge_record".to_string())
+        );
+        assert_eq!(
+            replaceable("knowledge.detail.body").map(|r| (r.bound_to_provider, r.provider_param)),
+            Some((true, "store"))
+        );
+        assert_eq!(
+            replaceable("task.detail.state").map(|r| r.provider_param),
+            Some("provider")
         );
         assert!(replaceable("vcs.conflict.resolver").is_none());
     }
@@ -195,8 +245,8 @@ mod tests {
             Some((2, &["q", "author", "branch"][..]))
         );
         assert_eq!(
-            replaceable("work_item.board").map(|r| r.view),
-            Some(&[][..])
+            replaceable("task.board").map(|r| r.view),
+            Some(&["show", "priority", "q"][..])
         );
     }
 }

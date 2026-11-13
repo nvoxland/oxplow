@@ -1,15 +1,18 @@
 manifest: 2
 name: oxplow-bundled
 namespace: oxplow
-description: What comes with oxplow beyond its foundation, cleaned up. Holds the review datasets, event types and commands so far; the rest moves here from oxplow-bundled-todo one piece at a time.
+description: What comes with oxplow beyond its foundation, cleaned up. Holds the review and analysis datasets, their settings and the Work board so far; the rest moves here from oxplow-bundled-todo one piece at a time.
 engine: ">=0.7"
-# Its commands read the review datasets with their own SQL.
-permissions: [sql.read]
+# Its `tasks` skill (reading the task model) is written to the agent's runtime.
+permissions: [files.read, agent.write, sql.read, 'commands:oxplow.model.set_fields', 'commands:oxplow.tasks.assign']
+# Its Work board is a custom component in TypeScript (src/board/), built
+# into dist/ when oxplow is built and on every deploy; dist/ isn't committed.
+build: { run: "bun run build", output: dist, exclude: [node_modules] }
 intent:
   purpose: >-
     Hold the optional features oxplow ships once each has been cleaned up. So
-    far that is the review and analysis datasets, their settings and the
-    verdict decorators, event types and commands. Their names come from the
+    far that is the review and analysis datasets, their settings, the Work
+    panel and board, and their event types and commands. Their names come from the
     `oxplow` namespace, so they stay when a piece moves between extensions.
   origin: null
 datasets:
@@ -40,90 +43,449 @@ datasets:
       - { name: expected, type: "", doc: "Its usual partners, `, `-separated (for `usual-co-changers-absent`)." }
       - { name: dormant_days, type: "", doc: "Days since a commit last touched it (for `dormant`; 90 when never)." }
   - name: deviation
-    version: 1
-    description: "Files each effort changed outside the area its work item names: a file is in the area when the item's title or body names it, or one of its directories at least two levels deep (`src/ui`). An item that names no area has none."
+    version: 2
+    description: "Files each request changed outside the area its tasks name: a file is in the area when a task's title or body names it, or one of its directories at least two levels deep (`src/ui`). A request whose tasks name no area has none."
     fields:
-      - { name: effort_id, type: INTEGER, doc: "The effort (v_effort.id)." }
+      - { name: request_id, type: INT, doc: "The request (v_request.id)." }
       - { name: path, type: TEXT, doc: "Repo-relative file path." }
-      - { name: change_kind, type: TEXT, doc: "`created`, `updated` or `deleted`." }
   - name: struggle
-    version: 1
-    description: "Where the agent had trouble in an effort, by this review policy's thresholds: a file edited 5+ times (`repeated_edits`) or 3+ failed shell commands (`failed_commands`). Likely places for mistakes."
+    version: 2
+    description: "Where the agent had trouble in a request, by this review policy's thresholds: a file edited 5+ times (`repeated_edits`) or 3+ failed shell commands (`failed_commands`). Likely places for mistakes."
     fields:
-      - { name: effort_id, type: INTEGER, doc: "Effort." }
+      - { name: request_id, type: INT, doc: "The request (v_request.id)." }
       - { name: thread_id, type: INTEGER, doc: "Thread." }
       - { name: agent_session_id, type: INTEGER, doc: "The agent session it happened in; NULL when not recorded." }
       - { name: kind, type: "", doc: "`repeated_edits` or `failed_commands`." }
       - { name: subject, type: TEXT, doc: "The file path, or `shell` (failed shell commands, whatever the harness)." }
       - { name: count, type: "", doc: "How many edits / failures." }
-  - name: claim_status
-    version: 3
-    key: [uri]
-    description: "Whether each of the agent's claims is backed, by this review policy's rule: it cites evidence (`v_claim.evidence` — a run, a test, a file, or `reviewer` when a person verified it) or a person verified it (`v_claim.review`), or it is `tests_pass` and its effort's latest test run (`v_test_run`) passed with at least one test. A claim a person dismissed has no row: it counts neither as backed nor as unbacked."
+  - name: commit_task
+    version: 1
+    description: "The tasks each commit was for: the ones its message mentions (`tsk42`, `[[tsk42]]`, by a store's id pattern), the ones that declared it as an impact, and the ones a request that worked on them made it (`v_commit_request` joined to `v_oxplow_request_link`)."
     fields:
-      - { name: uri, type: TEXT, doc: "The claim (`v_claim.uri`)." }
-      - { name: effort_id, type: INTEGER, doc: "Its effort (v_effort.id), if one was open." }
-      - { name: verified, type: INT, doc: "1 when something backs it, else 0." }
-      - { name: backed_by, type: TEXT, doc: "`evidence` (it cites some) or `latest run` (a passing latest test run backs `tests pass`); NULL when nothing does." }
-  - name: verdicts
-    version: 3
-    key: [seq]
-    materialize: { incremental: seq }
-    description: "Every verdict a reviewer gave (`oxplow.review.accepted` / `.changes_requested`), oldest first — appended as each lands, so reading the latest never scans the log. Read from the events' envelopes alone, which retention keeps: a verdict outlives its payload."
+      - { name: sha, type: TEXT, doc: "The commit." }
+      - { name: task, type: TEXT, doc: "The task (`v_oxplow_task.uri`)." }
+  - name: contribution_repair
+    version: 1
+    description: "The open repair task of a contribution (the one linked `about` it, not done or canceled), filed by the repair effect."
     fields:
-      - { name: seq, type: INTEGER, doc: "The verdict's event (v_event.seq)." }
-      - { name: uri, type: TEXT, doc: "The effort reviewed (`oxplow:oxplow/effort?id=eff<id>`)." }
-      - { name: verdict, type: TEXT, doc: "`accepted` or `changes_requested`." }
-      - { name: forced, type: "", doc: "1 when accepted although claims were unverified or decisions unreviewed (the event names them)." }
-  - name: verdict
-    version: 2
-    key: [uri]
-    description: "Each effort's latest verdict, as its decorators show it: a chip on the effort's page and a badge where a page row links to it."
-    fields:
-      - { name: uri, type: TEXT, doc: "The effort (`oxplow:oxplow/effort?id=eff<id>`)." }
-      - { name: label, type: TEXT, doc: "`Accepted`, `Accepted (forced)` or `Changes requested`." }
-      - { name: color, type: TEXT, doc: "`green`, `orange` or `red`." }
+      - { name: uri, type: TEXT, doc: "The contribution's URI (`v_contribution_health.uri`)." }
+      - { name: repair_item, type: TEXT, doc: "The open repair task's URI." }
   - name: finished_cleared
     version: 2
     key: [thread_id]
-    description: "When the person last cleared each thread's Finished list in the Work panel (`oxplow.work.clear_finished`), read from the events' envelopes."
+    # Stored: it reads the event log, which every agent event writes, and a
+    # live view of it would make the Work panel re-run on each one. A
+    # recompute that finds the same rows writes nothing, so its readers
+    # hear only a clear.
+    materialize: on_change
+    description: "When the person last cleared each thread's Finished list in the Work panel (`oxplow.tasks.clear_finished`), read from the events' envelopes."
     fields:
       - { name: thread_id, type: INT, doc: "The thread (v_thread.id)." }
       - { name: cleared_at, type: TEXT, doc: "When it was last cleared (RFC 3339)." }
-  - name: thread_work
-    version: 4
-    description: "Each thread's Work panel, one row per line in display order, from the active work list (`v_work_item`): what's in progress (the item, under its epic with the epic's other children, and an open effort no item names), up to 10 ready items, and the last 5 finished items, wiki pages and unlinked efforts since the list was cleared."
+  - name: task
+    version: 1
+    description: "the tasks of every store over the shared task model (the read contract for tasks). `native` is the store's own fields, `assignee` and `rank` oxplow's."
+    fields:
+      - { name: uri, type: TEXT, doc: "The task's URI." }
+      - { name: provider, type: TEXT, doc: "Its store." }
+      - { name: native_id, type: TEXT, doc: "The store's own id." }
+      - { name: title, type: TEXT, doc: "Title." }
+      - { name: body, type: TEXT, doc: "Markdown body." }
+      - { name: state, type: TEXT, doc: "Its bucket." }
+      - { name: stage, type: TEXT, doc: "The store's own stage." }
+      - { name: stage_title, type: TEXT, doc: "How the store names its stage." }
+      - { name: native, type: TEXT, doc: "The store's own fields as JSON." }
+      - { name: parent_uri, type: TEXT, doc: "The parent task's URI; NULL at top level." }
+      - { name: assignee, type: TEXT, doc: "A thread's or the person's URI; NULL for nobody." }
+      - { name: rank, type: REAL, doc: "Its place in the assignee's queue." }
+      - { name: closed_at, type: TEXT, doc: "When it was closed; NULL while open." }
+      - { name: created_at, type: TEXT, doc: "Created (RFC 3339)." }
+      - { name: updated_at, type: TEXT, doc: "Updated (RFC 3339)." }
+  - name: task_link
+    version: 1
+    description: "the links of every store's tasks."
+    fields:
+      - { name: from_uri, type: TEXT, doc: "The task the link is from." }
+      - { name: to_uri, type: TEXT, doc: "What it points at." }
+      - { name: to_kind, type: TEXT, doc: "The target's resource kind." }
+      - { name: link_type, type: TEXT, doc: "The link type." }
+      - { name: created_at, type: TEXT, doc: "When the link was made (RFC 3339)." }
+  - name: task_comment
+    version: 1
+    description: "the comments of every store's tasks, over the shared model's comments child. `id` is the store's own comment id (oxtask: `cmt3`; core's was `oxtask_note:3`)."
+    fields:
+      - { name: id, type: TEXT, doc: "The store's own id for the comment." }
+      - { name: uri, type: TEXT, doc: "The task it's on." }
+      - { name: body, type: TEXT, doc: "Markdown body." }
+      - { name: author, type: TEXT, doc: "Who wrote it, as the store records it (oxtask: a thread's or the person's URI)." }
+      - { name: created_at, type: TEXT, doc: "RFC 3339 timestamp." }
+  - name: search_task
+    version: 1
+    description: "what site search indexes for each task, in `v_oxplow_search_task`'s shape, over `task`: its own id, its body, then its comments; tasks assigned to an archived thread or stream are left out."
+    fields:
+      - { name: uri, type: TEXT, doc: "The task's canonical ref: what a hit opens." }
+      - { name: title, type: TEXT, doc: "The task's title." }
+      - { name: body, type: TEXT, doc: "Its own id (so typing `tsk42` finds it), then its body, then its comments." }
+      - { name: stream_id, type: TEXT, doc: "Its thread's stream (`str1`); NULL for an unassigned task." }
+  - name: knowledge_page
+    version: 1
+    description: "the knowledge pages of every store over the shared knowledge model (the read contract for pages, and what the `oxplow/knowledge` resource resolves through): title, kind, excerpt, body, the URIs it links, how many of the files it cites changed since it was pinned, and its reads."
+    fields:
+      - { name: uri, type: TEXT, doc: "The page's URI (`oxplow:oxplow/knowledge?id=…&store=…`)." }
+      - { name: store, type: TEXT, doc: "The store that keeps it (oxwiki, an extension's)." }
+      - { name: id, type: TEXT, doc: "The store's own page id (oxwiki: its slug)." }
+      - { name: kind, type: TEXT, doc: "The store's kind of page." }
+      - { name: title, type: TEXT, doc: "Title." }
+      - { name: url, type: TEXT, doc: "Where the store keeps it, when it says." }
+      - { name: author, type: TEXT, doc: "Who last wrote it, as the store records it." }
+      - { name: excerpt, type: TEXT, doc: "The start of its body." }
+      - { name: body, type: TEXT, doc: "Markdown body." }
+      - { name: body_size, type: INT, doc: "Bytes of body." }
+      - { name: outbound_uris, type: TEXT, doc: "JSON array of the URIs it links." }
+      - { name: stale_ref_count, type: INT, doc: "How many of the files it cites changed since the page was pinned." }
+      - { name: read_count, type: INT, doc: "Reads by agents and people." }
+      - { name: agent_read_count, type: INT, doc: "Reads by agents." }
+      - { name: last_read_at, type: TEXT, doc: "When it was last read (RFC 3339); NULL if never." }
+      - { name: updated_at, type: TEXT, doc: "Updated (RFC 3339)." }
+  - name: knowledge_read
+    version: 1
+    description: "every read of a knowledge page: an agent's (the `knowledge_read_record` model, from `record.read`) and a person's (their page visits)."
+    fields:
+      - { name: uri, type: TEXT, doc: "The page's URI." }
+      - { name: actor, type: TEXT, doc: "`agent` or `person`." }
+      - { name: thread_id, type: INT, doc: "The thread that read it; NULL when unknown." }
+      - { name: turn_id, type: INT, doc: "The agent turn that read it; NULL for a person's." }
+      - { name: via, type: TEXT, doc: "`tool` or `file` for an agent, `open` for a person." }
+      - { name: at, type: TEXT, doc: "When (RFC 3339)." }
+  - name: knowledge_touch
+    version: 1
+    description: "which threads wrote which knowledge pages, and when last (the `knowledge_touch_record` model)."
+    fields:
+      - { name: page, type: TEXT, doc: "The page's URI." }
+      - { name: thread_id, type: INT, doc: "The thread (`v_thread.id`)." }
+      - { name: last_seen_at, type: TEXT, doc: "When it last wrote the page (RFC 3339)." }
+  - name: knowledge_ref
+    version: 1
+    description: "the files and directories each knowledge page pins, and whether each changed since (`v_ref_pin` of the pages)."
+    fields:
+      - { name: page, type: TEXT, doc: "The page's URI." }
+      - { name: path, type: TEXT, doc: "The file or directory." }
+      - { name: kind, type: TEXT, doc: "`file` or `dir`." }
+      - { name: pinned_snapshot_id, type: INTEGER, doc: "The snapshot it was pinned to; NULL if never pinned." }
+      - { name: pinned_vcs_rev, type: TEXT, doc: "The VCS revision nearest the pin." }
+      - { name: pinned_vcs_rev_exact, type: INT, doc: "1 when the pin is exactly that revision." }
+      - { name: latest_snapshot_id, type: INT, doc: "The latest primary snapshot of it." }
+      - { name: stale, type: INT, doc: "1 when it changed after the pin." }
+  - name: search_knowledge
+    version: 1
+    description: "what site search indexes for each knowledge page, in `v_oxplow_search_knowledge`'s shape: its title and its body."
+    fields:
+      - { name: uri, type: TEXT, doc: "The page's canonical ref: what a hit opens." }
+      - { name: title, type: TEXT, doc: "The page's title." }
+      - { name: body, type: TEXT, doc: "Its body." }
+      - { name: stream_id, type: TEXT, doc: "Always NULL: a page is project-wide." }
+      - { name: version, type: TEXT, doc: "Changes whenever the page's text does (its `updated_at`): a recompute reads the text of rows whose version moved only." }
+  - name: request_link
+    version: 1
+    description: "the tasks each request worked on, in `v_oxplow_request_link`'s shape (request, task, basis, turn, thread_id, at, turns, started_at, last_ended_at, request_id), over the `request_task` model. `basis` keeps the model's names: `filed` and `edited` are core's `command`."
+    fields:
+      - { name: request, type: TEXT, doc: "The request (`v_request.uri`)." }
+      - { name: task, type: TEXT, doc: "The task's URI; it may dangle." }
+      - { name: basis, type: TEXT, doc: "`prompt`, `filed`, `edited`, `transition` or `assigned`." }
+      - { name: turn, type: TEXT, doc: "The turn the evidence was recorded in (`v_agent_turn.uri`)." }
+      - { name: thread_id, type: INT, doc: "That turn's thread (`v_thread.id`); NULL when no turn was named." }
+      - { name: at, type: TEXT, doc: "When the link was recorded (RFC 3339)." }
+      - { name: turns, type: INT, doc: "How many turns the request has so far." }
+      - { name: started_at, type: TEXT, doc: "When the request's first turn started." }
+      - { name: last_ended_at, type: TEXT, doc: "When its latest turn ended; NULL while one runs." }
+      - { name: request_id, type: INT, doc: "The request's id (`v_request.id`)." }
+  - name: thread_work_badge
+    version: 1
+    description: "A label for each thread that worked on tasks: how many are done and how many still open (\"3 done · 1 open\"), over the tasks its requests worked on. Decorates thread rows (Closed Threads)."
+    fields:
+      - { name: uri, type: TEXT, doc: "The thread's URI." }
+      - { name: label, type: TEXT, doc: "\"3 done · 1 open\"." }
+  - name: session_task_badge
+    version: 1
+    description: "One label per task the requests of a session's turns worked on (its title), in the order they were first worked on. Decorates agent session rows (Thread sessions)."
+    fields:
+      - { name: uri, type: TEXT, doc: "The agent session's URI." }
+      - { name: label, type: TEXT, doc: "A task's title." }
+  - name: snapshot_work_badge
+    version: 1
+    description: "A label per task the request of the turn that took a snapshot worked on: \"completed: X\" for a turn's end take, \"in flight: X\" for another take of a turn. Decorates snapshot rows (Local History)."
+    fields:
+      - { name: uri, type: TEXT, doc: "The snapshot's URI." }
+      - { name: label, type: TEXT, doc: "\"completed: X\" or \"in flight: X\"." }
+  - name: thread_tasks
+    version: 9
+    description: "Each thread's Work panel, one row per line in display order: the tasks the thread is working on (a project-manager view of tasks, never of turns or requests). In progress is the tasks assigned to it in progress (under their epic with the epic's other children); Up next is the ready and blocked tasks assigned to the thread, in its queue's order; Finished is the done tasks a request on the thread worked on (each once) and the knowledge pages it touched, since the list was cleared. It reads no request, so it changes only when tasks, their requests' links or the thread's knowledge touches do; what a thread's request is doing now is v_request's (the Work panel reads it for its own thread)."
     fields:
       - { name: thread_id, type: INT, doc: "The thread (v_thread.id)." }
-      - { name: grp, type: TEXT, doc: "`In progress`, `Ready` or `Finished`." }
+      - { name: grp, type: TEXT, doc: "`In progress`, `Up next` or `Finished`." }
       - { name: g, type: INT, doc: "The group's place (0, 1, 3)." }
       - { name: ord, type: INT, doc: "The line's place in its group." }
       - { name: title, type: TEXT, doc: "What to show." }
-      - { name: icon, type: TEXT, doc: "A viz icon name: a work-item state (`todo`, `in_progress`, `done`, …), `epic` or `wiki`." }
-      - { name: uri, type: TEXT, doc: "What the line opens (`work_item:…`, `oxplow:oxplow/wiki?slug=<slug>`, `oxplow:oxplow/effort?id=eff<id>`)." }
+      - { name: icon, type: TEXT, doc: "A viz icon name: a task state (`todo`, `blocked`, `in_progress`, `done`, …), `epic` or `knowledge`." }
+      - { name: uri, type: TEXT, doc: "What the line opens (a task's URI, a knowledge page's)." }
       - { name: depth, type: INT, doc: "1 for an epic's child, else 0." }
-      - { name: active, type: INT, doc: "1 for the item, or the unlinked effort, in progress." }
+      - { name: active, type: INT, doc: "1 for a task in progress on this thread." }
+effects:
+  - id: assign-on-start
+    summary: An agent starting a task puts it last in its thread's queue; closing a task clears its assignee and place.
+    on: [oxplow.task_record.changed]
+    where: { cause: trigger }
+    entry: effects/assign_on_start.star
+  # A closed thread's open tasks, and an archived stream's threads', go back
+  # to nobody; a taken handoff's task goes to the recipient. Core did these
+  # on its own tables; before the flip the model holds no live task, so they
+  # find nothing.
+  - id: release-on-thread-close
+    summary: A closed thread's open tasks go back to nobody, last in their queue.
+    on: [thread.closed]
+    needs: [sql.read]
+    entry: effects/release_on_close.star
+  - id: release-on-stream-archive
+    summary: An archived stream's threads' open tasks go back to nobody.
+    on: [stream.archived]
+    needs: [sql.read]
+    entry: effects/release_on_close.star
+  - id: take-handoff-task
+    summary: Taking a handoff moves its task to the receiving thread, last in its queue.
+    on: [handoff.settled]
+    where: { state: taken }
+    needs: [sql.read]
+    entry: effects/take_handoff_task.star
+# Places where several task stores offer one action: a task page draws "New
+# Task" once, whichever stores are on (a button with one, a menu with
+# several). A store's command joins with `ui: { at: oxplow/task.new }`.
+action_points:
+  - name: knowledge.new
+    label: New Page
+    doc: Write a knowledge page. Each knowledge store offers its own way.
+    context:
+      title?: string
+      body?: string
+  - name: knowledge.delete
+    label: Delete Page
+    doc: Delete a knowledge page, for whichever store keeps it.
+    item: uri
+    context:
+      uri: uri
+  - name: task.new
+    label: New Task
+    doc: File a task. Each task store offers its own way.
+    context:
+      parent?: uri
+      thread_id?: int
+  # What can be done to a task, for whichever store holds it: the store's
+  # command joins the point for its own items. Shared pages and the Work
+  # board run these and name no store's command.
+  - name: task.move
+    label: Move Task
+    doc: Put a task in one of its list's stages.
+    item: uri
+    context:
+      uri: uri
+      stage: string
+  - name: task.edit
+    label: Edit Task
+    doc: Change a task's title, description or parent epic. A store's own fields (priority, …) are its own edit part's.
+    item: uri
+    context:
+      uri: uri
+      title?: string
+      body?: string
+      parent?: uri
+  - name: task.unparent
+    label: Make Top-level
+    doc: Take a task out of its epic.
+    item: uri
+    context:
+      uri: uri
+  - name: task.delete
+    label: Delete Task
+    doc: Delete a task.
+    item: uri
+    context:
+      uri: uri
+  - name: task.comment
+    label: Comment
+    doc: Add a comment to a task.
+    item: uri
+    context:
+      uri: uri
+  - name: task.link
+    label: Link
+    doc: Link a task to another item.
+    item: uri
+    context:
+      uri: uri
+      to?: string
+      type?: string
+  - name: task.unlink
+    label: Unlink
+    doc: Remove a link from a task.
+    item: uri
+    context:
+      uri: uri
+      to: string
+      type: string
+# What a request's work touched: one row per request, task and basis.
+resources:
+  - name: task
+    description: "A task, epic or other item of the project's task model."
+    label: Task
+    params: { provider: { required: true, pattern: '^[a-z][a-z0-9_-]*$' }, id: { required: true } }
+    resolve: task
+    searchable: search_task
+    icon: check-square
+  - name: knowledge
+    description: "A page of one of the project's knowledge stores (oxwiki, an extension's)."
+    label: Knowledge page
+    params: { store: { required: true, pattern: '^[a-z][a-z0-9_-]*$' }, id: { required: true } }
+    resolve: knowledge_page
+    searchable: search_knowledge
+    icon: book-open
+  - name: knowledge_read_record
+    label: Knowledge read
+    description: "An agent's read of a knowledge page (oxplow's own record of it)."
+    params:
+      store: { required: true }
+      id: { required: true }
+  - name: knowledge_touch_record
+    label: Knowledge touch
+    description: "The last time a thread wrote a knowledge page."
+    params:
+      store: { required: true }
+      id: { required: true }
+  - name: request_task
+    label: Request link
+    description: "A link from a request to a task its turns changed, and how (filed, transition, assigned, edited; prompt for a link moved from core, where a person's prompt named the task)."
+    params:
+      store: { required: true }
+      id: { required: true }
+# The shared task and knowledge models every store fills, and oxplow's
+# own fields on a task (who it is assigned to, its place in their queue).
+# Stores write them through their collectors; this extension's own model
+# (`request_task`) is written by its own collector.
+fills:
+  - model: oxplow/request_task
+    stores: [oxplow]
+  - model: oxplow/knowledge_read_record
+    stores: [oxplow]
+  - model: oxplow/knowledge_touch_record
+    stores: [oxplow]
+models:
+  - name: request_task
+    resource: request_task
+    key: key
+    columns:
+      # request|task|basis: the row's name.
+      key: text
+      request: uri
+      task: uri
+      basis: { type: text, values: [filed, transition, assigned, edited, prompt] }
+      thread: uri
+      turn_id: int
+      at: time
+  - name: knowledge_read_record
+    resource: knowledge_read_record
+    key: key
+    columns:
+      # page|at|via|turn: the read's name.
+      key: text
+      page: uri
+      thread: uri
+      turn_id: int
+      via: { type: text, values: [tool, file] }
+      at: time
+  - name: knowledge_touch_record
+    resource: knowledge_touch_record
+    key: key
+    columns:
+      # thread|page: the touch's name.
+      key: text
+      page: uri
+      thread: uri
+      last_seen: time
+  - name: task_record
+    resource: task
+    open: true
+    key: id
+    store_param: provider
+    change_event: oxplow.task_record.changed
+    search: { title: title, body: body }
+    columns:
+      id: text
+      title: { type: text, markdown: {} }
+      body: { type: text, markdown: {} }
+      state: { type: text, values: [backlog, todo, in_progress, blocked, done, canceled] }
+      stage: text
+      stage_title: text
+      parent: { type: uri, edge: task_record.parent }
+      closed_at: time
+      created_at: time
+      updated_at: time
+    children:
+      links:
+        key: [to, type]
+        columns:
+          to: uri
+          type: { type: text, values: [blocks, discovered_from, relates_to, duplicates, supersedes, replies_to, about] }
+          at: time
+        edge: { to: to, type_from: type, prefix: "task_record_link:" }
+      comments:
+        key: [id]
+        columns: { id: text, author: text, author_kind: { type: text, values: [person, agent, system] }, at: time, body: { type: text, markdown: {} } }
+  - name: knowledge_record
+    resource: knowledge
+    open: true
+    key: id
+    change_event: oxplow.knowledge_record.changed
+    search: { title: title, body: body }
+    columns:
+      id: text
+      title: text
+      body: { type: text, markdown: { pins: true } }
+      kind: text
+      url: text
+      author: text
+      updated_at: time
+fields:
+  - model: oxplow/task_record
+    fields:
+      - { name: assignee, title: Assignee, kind: text }
+      - { name: rank, title: Rank, kind: number }
 event_types:
   types:
-    - type: oxplow.review.accepted
-      v: 1
-      schema: event_types/accepted.json
-      summary: A person accepted an effort's work. Subject — the effort, its work item and any claim or decision accepted unchecked.
-    - type: oxplow.review.changes_requested
-      v: 1
-      schema: event_types/changes_requested.json
-      summary: A person sent an effort's work back with changes requested. Subject — the effort and its work item.
-    - type: oxplow.work.finished_cleared
+    - type: oxplow.tasks.finished_cleared
       v: 1
       schema: event_types/finished_cleared.json
       summary: A person cleared a thread's Finished list in the Work panel. Subject — the thread.
 ui:
-  # The verdict where the effort is shown: it shows; it never acts.
+  # Task facts on foundation's pages, which read no task: a label after any
+  # cell that links to the thread, session or snapshot.
   decorators:
-    - { dataset: verdict, resource: oxplow/effort, placement: ref-chip, label: label, color: color }
-    - { dataset: verdict, resource: oxplow/effort, placement: row-badge, label: label, color: color }
+    - { dataset: thread_work_badge, resource: oxplow/thread, placement: row-badge, label: label }
+    - { dataset: session_task_badge, resource: oxplow/agent_session, placement: row-badge, label: label }
+    - { dataset: snapshot_work_badge, resource: oxplow/snapshot, placement: row-badge, label: label }
+  # A task's page shows the agent's tokens on it and what another
+  # thread shares with it.
+  mounts:
+    # The request summary's tasks (foundation's page reads no task).
+    - { page: request-tasks, at: oxplow/request-summary.sections, position: { after: request }, title: Tasks }
+    - { page: contribution-repair, at: oxplow/contribution-health.repair }
+    - { page: task-tokens, at: oxplow/task-detail.sections }
+    - { page: item-shared-work, at: oxplow/task-detail.sections }
+    # A request's Changes page shows where it left its task's area and
+    # where its agent struggled (empty on a snapshot's or a turn's).
+    - { page: change-task, at: oxplow/diff-view.sections, position: { after: header }, title: Task }
+    - { page: change-task-description, at: oxplow/diff-view.sections, position: { after: header }, title: Description }
+    - { page: what-deviated, at: oxplow/diff-view.sections }
+    - { page: struggled, at: oxplow/diff-view.sections }
 configuration:
-  version: 1
+  version: 2
   schema:
     type: object
     additionalProperties: false
@@ -149,7 +511,7 @@ configuration:
       struggle:
         type: object
         additionalProperties: false
-        description: When the agent is said to have struggled in an effort.
+        description: When the agent is said to have struggled in a request.
         properties:
           repeatedEdits: { type: integer, minimum: 1, description: Edits of one file at or above which it counts. }
           failedCommands: { type: integer, minimum: 1, description: Failed shell commands at or above which they count. }
@@ -161,81 +523,7 @@ commands:
   # This extension's review-policy settings (`configuration:` above), through
   # the host's configuration scope. A person sets them; a change republishes
   # the datasets that read them.
-  - name: review_policy.read
-    summary: The review policy's effective settings, where each came from, and the stamps a write needs.
-    scope: extension_config.read
-    op: snapshot
-    example: {}
-  - name: review_policy.write
-    summary: Set the review policy's project or personal settings (a compare-and-swap on the stamps `review_policy.read` returns).
-    scope: extension_config.write
-    op: compare_exchange
-    example: {"schema_version": 1, "project": {"expected": {"schema_version": 1, "revision": 2}, "values": {"struggle": {"repeatedEdits": 4}}}, "personal": null}
-  - name: review.accept
-    summary: Accept an effort's work — comment the review on its work item and mark it done. Refuses while a claim is unverified (a dismissed one doesn't count) or an inferred decision unreviewed, unless forced.
-    input_schema:
-      type: object
-      required: [effort]
-      properties:
-        effort: { type: string, description: "The effort (`eff<id>`)." }
-        force: { type: boolean, description: "Accept even with unverified claims or unreviewed decisions; they're listed in the comment." }
-      additionalProperties: false
-    entry: handlers/accept.star
-    needs: [sql.read]
-    confirm: always
-    ui: { label: Accept Review, group: Review, about: oxplow/effort, about_when: work_item, input: { effort: "{{uri.id}}" } }
-    examples:
-      - name: reviewed
-        input: { effort: "eff1" }
-        answers: { sql.read: [[{ work_item: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", unverified: "[]", inferred: "[]", deviated: "[]" }]] }
-        expect_commands: [oxplow.work_item.comment, oxplow.work_item.transition]
-      - name: an unverified claim
-        input: { effort: "eff1" }
-        answers: { sql.read: [[{ work_item: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", unverified: '[{"claim":"oxplow:oxplow/claim?id=1","statement":"tests pass"}]', inferred: "[]", deviated: "[]" }]] }
-        refused: 1 unverified claim
-      - name: forced
-        input: { effort: "eff1", force: true }
-        answers: { sql.read: [[{ work_item: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", unverified: '[{"claim":"oxplow:oxplow/claim?id=1","statement":"tests pass"}]', inferred: "[]", deviated: "[]" }]] }
-        expect_commands: [oxplow.work_item.comment, oxplow.work_item.transition]
-      - name: another provider's item
-        input: { effort: "eff2" }
-        answers: { sql.read: [[{ work_item: "oxplow:oxplow/work_item?id=ENG-12&provider=issues", unverified: "[]", inferred: "[]", deviated: "[]" }]] }
-        expect_commands: [oxplow.work_item.comment, oxplow.work_item.transition]
-      - name: no work item
-        input: { effort: "eff3" }
-        answers: { sql.read: [[{ work_item: null, unverified: "[]", inferred: "[]", deviated: "[]" }]] }
-        refused: has no work item
-  - name: review.request_changes
-    summary: Send an effort's work back — comment a checklist of its unverified claims, inferred decisions and files outside its work item's area (and your note) on the item, and move it back to todo.
-    input_schema:
-      type: object
-      required: [effort]
-      properties:
-        effort: { type: string, description: "The effort (`eff<id>`)." }
-        note: { type: string, description: "What else to change." }
-      additionalProperties: false
-    entry: handlers/request_changes.star
-    needs: [sql.read]
-    confirm: always
-    ui: { label: Request Changes, group: Review, about: oxplow/effort, about_when: work_item, input: { effort: "{{uri.id}}" } }
-    examples:
-      - name: a file outside the area
-        input: { effort: "eff1" }
-        answers: { sql.read: [[{ work_item: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", unverified: "[]", inferred: "[]", deviated: '["src/db/store.py"]' }]] }
-        expect_commands: [oxplow.work_item.comment, oxplow.work_item.transition]
-      - name: nothing to ask for
-        input: { effort: "eff1" }
-        answers: { sql.read: [[{ work_item: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", unverified: "[]", inferred: "[]", deviated: "[]" }]] }
-        refused: nothing to ask for
-      - name: another provider's item
-        input: { effort: "eff2", note: "Add the migration." }
-        answers: { sql.read: [[{ work_item: "oxplow:oxplow/work_item?id=ENG-12&provider=issues", unverified: "[]", inferred: "[]", deviated: "[]" }]] }
-        expect_commands: [oxplow.work_item.comment, oxplow.work_item.transition]
-      - name: no work item
-        input: { effort: "eff3", note: "x" }
-        answers: { sql.read: [[{ work_item: null, unverified: "[]", inferred: "[]", deviated: "[]" }]] }
-        refused: has no work item
-  - name: work.clear_finished
+  - name: tasks.clear_finished
     summary: Clear a thread's Finished list in the Work panel — what finished before now stops showing there.
     input_schema:
       type: object
@@ -247,3 +535,193 @@ commands:
     access: record
     examples:
       - { name: clears, input: { thread_id: 3 }, expect_commands: [] }
+  # Who works on a task and its place in their queue, over the shared task
+  # model's two oxplow fields.
+  - name: tasks.assign
+    summary: "Assign a task to a thread, the person, or nobody, at the end of that queue. Undoable."
+    input_schema:
+      type: object
+      required: [uri]
+      properties:
+        uri: { type: string, description: "The task's URI." }
+        to: { type: [string, "null"], description: "A thread's URI (oxplow:oxplow/thread?id=thr1), oxplow:oxplow/person, or null for nobody." }
+      additionalProperties: false
+    example: {"uri": "oxplow:oxplow/task?id=tsk1", "to": "oxplow:oxplow/person"}
+    entry: handlers/assign.star
+    needs: [sql.read]
+    access: write
+  - name: tasks.reorder
+    summary: "Move a task within its assignee's queue (or among the unassigned): before or after another task there. Undoable."
+    input_schema:
+      type: object
+      required: [uri]
+      properties:
+        uri: { type: string, description: "The task's URI." }
+        before: { type: string, description: "Put it before this task (same queue)." }
+        after: { type: string, description: "Put it after this task (same queue)." }
+      additionalProperties: false
+    example: {"uri": "oxplow:oxplow/task?id=tsk1", "before": "oxplow:oxplow/task?id=tsk2"}
+    entry: handlers/reorder.star
+    needs: [sql.read]
+    access: write
+custom_components:
+  # The Work board: the tasks as cards in a column per stage, its own
+  # toolbar, drag and card menu; oxplow draws its nav bar and confirms.
+  - id: board
+    title: Board
+    description: "The tasks as a kanban board: a column per stage of the list, drag a card to move it, a card's menu to set its stage, fields and assignee."
+    bundle: dist/board
+    commands: [oxplow.tasks.assign, oxplow.tasks.reorder]
+    # Whichever store holds a card answers these: the board names no store's command.
+    action_points: [oxplow/task.move, oxplow/task.edit, oxplow/task.unparent, oxplow/task.delete]
+panels:
+  # What the thread is working on: its open task (with its epic), the
+  # items assigned to it next, and what it finished; collapsed, the task.
+  # Its header has no count, and opens the Work board.
+  - { id: work, title: Work, icon: list-checks, scope: thread, body: work-panel, collapsed: work-line, open: 'oxplow:oxplow/page?page=work' }
+  # What is assigned to the person: their open tasks, counted; the header
+  # opens the Assigned to you page. Project-wide, so the thread is not a param.
+  - { id: assigned, title: Assigned to you, icon: user, scope: project, body: assigned-panel, collapsed: assigned-line, count: assigned-count, open: 'oxplow:oxplow/page?page=assigned-to-you' }
+# What the agent reads about the task model, while it has a live store.
+skills:
+  - { name: tasks, file: skills/tasks/SKILL.md, needs: [model:oxplow/task_record] }
+  - { name: knowledge, file: skills/knowledge/SKILL.md, needs: [model:oxplow/knowledge_record] }
+# Whether the work was tracked: of the requests that changed files, the share
+# that has a task linked. It reads no workflow setting: it measures what
+# happened, whatever the workflow.
+collectors:
+  - id: oxplow.request_tracked
+    doc: Whether a request that changed files has a task linked, recorded when a turn of it ends and none of its turns runs.
+    runtime: starlark
+    entry: collectors/request/tracked.star
+    on: [agent.turn.ended]
+    input: |
+      SELECT r.uri AS request,
+             EXISTS (SELECT 1 FROM v_oxplow_request_link rt WHERE rt.request_id = r.id) AS tracked,
+             r.started_at AS placed_at
+        FROM v_agent_turn t
+        JOIN v_request r ON r.id = t.request_id
+       WHERE t.id = :turn_id
+         AND NOT EXISTS (SELECT 1 FROM v_agent_turn o
+                          WHERE o.request_id = t.request_id AND o.ended_at IS NULL)
+         AND EXISTS (SELECT 1 FROM v_tool_call_path p JOIN v_agent_turn pt ON pt.id = p.turn_id
+                      WHERE pt.request_id = t.request_id)
+    facts: [oxplow.request_tracked]
+  - id: oxplow.request_task
+    doc: "Links the request of the turn a task changed in to the task (the `oxplow/request_task` model), when the change's cause is a command or a field write (a reconcile links nothing)."
+    runtime: starlark
+    entry: collectors/request/task_links.star
+    on: [oxplow.task_record.changed]
+    where: { cause: [trigger, fields] }
+    input: |
+      SELECT r.uri AS request, t.thread_id AS thread_id, th.uri AS thread_uri,
+             (SELECT group_concat(x.key, char(10)) FROM v_oxplow_request_task x
+               WHERE x.request = r.uri) AS known
+        FROM v_agent_turn t
+        JOIN v_request r ON r.id = t.request_id
+        LEFT JOIN v_thread th ON th.id = t.thread_id
+       WHERE t.id = :turn_id
+    sync: upsert
+  - id: oxplow.request_task_prompt
+    doc: "Links the request of a person's prompt to the tasks the prompt names (basis `prompt`), from the edges the prompt logging records."
+    runtime: starlark
+    entry: collectors/request/prompt_links.star
+    on: [agent.prompt.submitted]
+    input: |
+      SELECT r.uri AS request, th.uri AS thread_uri, p.target_uri AS task
+        FROM v_agent_turn t
+        JOIN v_request r ON r.id = t.request_id
+        JOIN v_thread th ON th.id = t.thread_id
+        JOIN v_page_ref p ON p.source_uri = t.uri AND p.ref_type = 'prompt_mention'
+                         AND p.target_resource = 'oxplow/task'
+       -- A link keeps the first evidence (core's insert or ignore).
+       WHERE t.id = :turn_id
+         AND NOT EXISTS (SELECT 1 FROM v_oxplow_request_task x
+                          WHERE x.key = r.uri || '|' || p.target_uri || '|prompt')
+    sync: upsert
+  - id: oxplow.request_task_assigned
+    doc: "Links the request of a turn that ended to the tasks in progress and assigned to its thread (basis `assigned`)."
+    runtime: starlark
+    entry: collectors/request/assigned_links.star
+    on: [agent.turn.ended]
+    input: |
+      SELECT r.uri AS request, th.uri AS thread_uri, w.uri AS task
+        FROM v_agent_turn t
+        JOIN v_request r ON r.id = t.request_id
+        JOIN v_thread th ON th.id = t.thread_id
+        JOIN v_oxplow_task w ON w.assignee = th.uri AND w.state = 'in_progress'
+       -- A link keeps the first evidence (core's insert or ignore).
+       WHERE t.id = :turn_id
+         AND NOT EXISTS (SELECT 1 FROM v_oxplow_request_task x
+                          WHERE x.key = r.uri || '|' || w.uri || '|assigned')
+    sync: upsert
+  - id: oxplow.knowledge_read
+    doc: "Keeps an agent's read of a knowledge page (a `record.read` of a page, through a tool or its file) as a row of the `oxplow/knowledge_read_record` model."
+    runtime: starlark
+    entry: collectors/knowledge/reads.star
+    on: [record.read]
+    input: |
+      SELECT th.uri AS thread_uri FROM v_thread th WHERE th.id = :thread_id
+    sync: upsert
+  - id: oxplow.knowledge_touch
+    doc: "Keeps which thread wrote a knowledge page (a change of the knowledge model made in a thread's run: a store's command; a person's edit of a file has no thread) as a row of the `oxplow/knowledge_touch_record` model."
+    runtime: starlark
+    entry: collectors/knowledge/touches.star
+    on: [oxplow.knowledge_record.changed]
+    input: |
+      SELECT th.uri AS thread_uri FROM v_thread th WHERE th.id = :thread_id
+    sync: upsert
+  # What the project knows: the pages it keeps, restated whenever a page is
+  # written, recorded or deleted, and whether a request read any.
+  - id: oxplow.knowledge_pages
+    doc: How many knowledge pages there are and how many are stale, by store and kind, restated when a page is written, changed or deleted (oxplow.knowledge_record.changed), and when a snapshot changes a file a page cites (snapshot.ref_drifted), since a cited file drifting is what makes a page stale; a snapshot of an uncited file restates nothing.
+    runtime: starlark
+    entry: collectors/knowledge/pages.star
+    on: [oxplow.knowledge_record.changed, snapshot.ref_drifted]
+    input: |
+      SELECT n.placed_at, n.day, g.store, g.kind, g.pages, g.stale
+        FROM (SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now') AS placed_at, date('now') AS day) n
+        LEFT JOIN (SELECT store, kind, count(*) AS pages,
+                          sum(CASE WHEN stale_ref_count > 0 THEN 1 ELSE 0 END) AS stale
+                     FROM v_oxplow_knowledge_page GROUP BY store, kind) g ON 1 = 1
+    facts: [knowledge.pages, knowledge.stale_pages]
+  - id: oxplow.request_read_knowledge
+    doc: Whether a request that changed files read a knowledge page, recorded when a turn of it ends and none of its turns runs.
+    runtime: starlark
+    entry: collectors/knowledge/read.star
+    on: [agent.turn.ended]
+    input: |
+      SELECT r.uri AS request,
+             EXISTS (SELECT 1 FROM v_oxplow_knowledge_read k JOIN v_agent_turn kt ON kt.id = k.turn_id
+                      WHERE k.actor = 'agent' AND kt.request_id = r.id) AS read,
+             r.started_at AS placed_at
+        FROM v_agent_turn t
+        JOIN v_request r ON r.id = t.request_id
+       WHERE t.id = :turn_id
+         AND NOT EXISTS (SELECT 1 FROM v_agent_turn o
+                          WHERE o.request_id = t.request_id AND o.ended_at IS NULL)
+         AND EXISTS (SELECT 1 FROM v_tool_call_path p JOIN v_agent_turn pt ON pt.id = p.turn_id
+                      WHERE pt.request_id = t.request_id)
+    facts: [knowledge.read_requests]
+dimensions:
+  - {"key": "work.priority", "label": "Priority", "entity": "v_oxplow_task", "expr": "json_extract(e.native, '$.priority')", "description": "The priority of a task."}
+  - {"key": "oxplow.task", "label": "Task", "valueType": "entity-ref", "subjectKind": "task", "from": {"dataset": "v_oxplow_request_link", "by": "request_id", "value": "task", "order": "CASE basis WHEN 'prompt' THEN 0 WHEN 'edited' THEN 1 WHEN 'filed' THEN 1 WHEN 'transition' THEN 2 ELSE 3 END, at"}, "description": "The task a fact's request worked on: the one the prompt named, else the one it filed or edited, else the one it moved."}
+  - {"key": "oxplow.knowledge_store", "label": "Knowledge store", "valueType": "categorical", "description": "The store that keeps a knowledge page, such as oxwiki."}
+  - {"key": "oxplow.knowledge_kind", "label": "Knowledge kind", "valueType": "categorical", "description": "The kind of page its store keeps it as (oxwiki: note)."}
+measures:
+  # The page counts: one capture per day, replaced when a page changes.
+  - {"key": "knowledge.pages", "title": "Knowledge pages", "unit": "count", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "complete", "description": "How many knowledge pages there are, by store and kind, as of the day's last change."}
+  - {"key": "knowledge.stale_pages", "title": "Stale knowledge pages", "unit": "count", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "complete", "description": "How many knowledge pages cite a file that changed since the page was pinned; num is the stale pages, den the pages."}
+  # One capture per request at its start, replaced when the request is
+  # recorded again: 1 when an agent read a page, 0 when not.
+  - {"key": "knowledge.read_requests", "title": "Request read knowledge", "unit": "count", "subjectKind": "request", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "1 when an agent read a knowledge page in a request that changed files, else 0, as of its latest turn."}
+  # One capture per request at its start, replaced when the request is
+  # recorded again: 1 when tracked, 0 when not.
+  - {"key": "oxplow.request_tracked", "title": "Request tracked", "unit": "count", "subjectKind": "request", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "1 when a request that changed files has a task linked, else 0, as of its latest turn."}
+metrics:
+  - {"key":"task.completed","title":"Tasks completed","entity":"v_oxplow_task","where":"state = 'done'","time":"closed_at","aggregation":"count","unit":"tasks","category":"operational","description":"Tasks done, by the day they were closed."}
+  - {"key":"task.open","title":"Open tasks","entity":"v_oxplow_task","where":"state IN ('todo', 'in_progress', 'blocked')","aggregation":"count","unit":"tasks","category":"operational","description":"Tasks ready, in progress or blocked, captured over time."}
+  - {"key":"tasks.tracked_requests_pct","title":"Tracked requests","measure": "oxplow.request_tracked", "expression": "RATIO(num, den)", "unit":"%","direction":"higher-better","displayKind":"gauge","category":"operational","description":"The share of the requests that changed files which have a task link.","sliceableDims":["oxplow.branch"]}
+  - {"key":"knowledge.pages","title":"Knowledge pages","measure": "knowledge.pages", "expression": "SUM(value)", "unit":"count","direction":"neutral","displayKind":"gauge","category":"operational","description":"How many knowledge pages the enabled stores keep.","sliceableDims":["oxplow.knowledge_store","oxplow.knowledge_kind"]}
+  - {"key":"knowledge.stale_pct","title":"Stale knowledge","measure": "knowledge.stale_pages", "expression": "RATIO(num, den)", "unit":"%","direction":"lower-better","displayKind":"gauge","category":"operational","description":"The share of knowledge pages that cite a file which changed since the page was pinned.","sliceableDims":["oxplow.knowledge_store","oxplow.knowledge_kind"]}
+  - {"key":"knowledge.read_requests_pct","title":"Requests that read knowledge","measure": "knowledge.read_requests", "expression": "RATIO(num, den)", "unit":"%","direction":"higher-better","displayKind":"gauge","category":"operational","description":"The share of the requests that changed files in which an agent read a knowledge page.","sliceableDims":["oxplow.branch"]}

@@ -35,11 +35,13 @@ pub const CORE_NAMESPACES: &[&str] = &[
     "agent",
     "capability",
     "thread",
+    "stream",
     "snapshot",
     "vcs",
-    "effort",
-    "work_item",
+    "task",
     "knowledge",
+    "comment",
+    "record",
     "handoff",
     "test",
     "code",
@@ -150,7 +152,6 @@ impl EventSchemaRegistry {
         r.register::<VcsHeadMoved>().expect("core type registers");
         r.register::<VcsCommitIndexed>()
             .expect("core type registers");
-        r.register::<EffortLanded>().expect("core type registers");
         r.register::<AgentTurnStarted>()
             .expect("core type registers");
         r.register::<AgentTurnEnded>().expect("core type registers");
@@ -168,8 +169,6 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<AgentSubagentFinished>()
             .expect("core type registers");
-        r.register::<AgentPeerMessageReceived>()
-            .expect("core type registers");
         r.register::<AgentContextCompacted>()
             .expect("core type registers");
         r.register::<AgentStatusChanged>()
@@ -182,53 +181,27 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<TestCoverageRecorded>()
             .expect("core type registers");
-        r.register::<WorkItemDeleted>()
-            .expect("core type registers");
-        r.register::<EffortOpened>().expect("core type registers");
-        r.register::<EffortClosed>().expect("core type registers");
-        r.register::<EffortLinked>().expect("core type registers");
-        r.register::<EffortRetitled>().expect("core type registers");
-        r.register::<EffortClaimDismissed>()
-            .expect("core type registers");
-        r.register::<EffortClaimVerified>()
-            .expect("core type registers");
-        r.register::<EffortDecisionReviewed>()
-            .expect("core type registers");
-        r.register::<EffortDecisionsInferred>()
-            .expect("core type registers");
-        r.register::<EffortFinished>().expect("core type registers");
+        r.register::<TaskDeleted>().expect("core type registers");
         r.register::<CollectorSynced>()
             .expect("core type registers");
-        r.register::<WorkItemEdited>().expect("core type registers");
-        r.register::<WorkItemCreated>()
+        r.register::<TaskEdited>().expect("core type registers");
+        r.register::<TaskCreated>().expect("core type registers");
+        r.register::<TaskLinked>().expect("core type registers");
+        r.register::<TaskUnlinked>().expect("core type registers");
+        r.register::<TaskCommented>().expect("core type registers");
+        r.register::<TaskStateChanged>()
             .expect("core type registers");
-        r.register::<WorkItemLinked>().expect("core type registers");
-        r.register::<WorkItemUnlinked>()
-            .expect("core type registers");
-        r.register::<WorkItemCommented>()
-            .expect("core type registers");
-        r.register::<WorkItemRecorded>()
-            .expect("core type registers");
-        r.register::<WorkItemStateChanged>()
-            .expect("core type registers");
+        r.register::<TaskAssigned>().expect("core type registers");
         r.register::<ThreadCheckpoint>()
             .expect("core type registers");
-        r.register::<KnowledgePageWritten>()
-            .expect("core type registers");
-        r.register::<KnowledgePageDeleted>()
-            .expect("core type registers");
-        r.register::<KnowledgePageRecorded>()
-            .expect("core type registers");
+        r.register::<RecordRead>().expect("core type registers");
+        r.register::<RefDrifted>().expect("core type registers");
         r.register::<HandoffSent>().expect("core type registers");
         r.register::<HandoffSettled>().expect("core type registers");
-        r.register::<KnowledgeNoteWritten>()
-            .expect("core type registers");
-        r.register::<KnowledgeNoteDeleted>()
-            .expect("core type registers");
-        r.register::<KnowledgeCommentWritten>()
-            .expect("core type registers");
-        r.register::<KnowledgeCommentDeleted>()
-            .expect("core type registers");
+        r.register::<ThreadClosed>().expect("core type registers");
+        r.register::<StreamArchived>().expect("core type registers");
+        r.register::<CommentWritten>().expect("core type registers");
+        r.register::<CommentDeleted>().expect("core type registers");
         r.register::<CodeDiagnosticsChanged>()
             .expect("core type registers");
         r.register::<ContributionEnabled>()
@@ -577,7 +550,7 @@ pub enum CommandOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CommandExecutedV5 {
-    /// The command's name (`oxplow.work_item.transition`, `oxplow.config.set`).
+    /// The command's name (`oxplow.thread.mark`, `oxplow.config.set`).
     pub command: String,
     pub actor_kind: ActorKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -849,7 +822,7 @@ impl EventType for FileDeleted {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CapabilitySwitchedV1 {
-    /// `work_items`, `effort_policy`, `snapshots`.
+    /// `snapshots`, `knowledge`.
     pub capability: String,
     /// The implementation id that was active (`none` for nothing).
     pub from: String,
@@ -928,7 +901,7 @@ impl EventType for EffectResult {
     type Payload = EffectResultV5;
 }
 
-/// `snapshot.taken@3` (tsk883): v1, its trigger able to say
+/// `snapshot.taken@3`: v1, its trigger able to say
 /// `run_measured` — the take that pins a run's reports to the code it
 /// measured.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -962,27 +935,42 @@ impl EventType for SnapshotTaken {
     type Payload = SnapshotTakenV3;
 }
 
-/// `vcs.head.moved@2`: HEAD moved while the worktree was clean, so the
-/// latest snapshot now also is that commit.
+/// `vcs.head.moved@3`: a stream's HEAD moved (a commit, checkout, merge,
+/// reset in its worktree), whether the tree was clean or not. Logged once
+/// per move, after the take that follows it. A ref moving elsewhere in the
+/// repository is not one. Collectors that follow commits (the
+/// `where`-less `on: [vcs.head.moved]`) run on it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct VcsHeadMovedV2 {
+pub struct VcsHeadMovedV3 {
     /// The stream (`str1`).
     pub stream: String,
-    /// The snapshot re-stamped with the new commit.
-    pub snapshot: i64,
-    /// The commit (its sha) the snapshot pointed at before, if any.
+    /// The snapshot re-stamped with the new commit; absent when the tree was
+    /// not clean, so the next take records the commit instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot: Option<i64>,
+    /// The commit (its sha) HEAD pointed at before, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<String>,
-    /// The commit (its sha) HEAD points at now.
-    pub to: String,
+    /// The commit (its sha) HEAD points at now; absent before the first commit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
 }
 
 pub struct VcsHeadMoved;
 impl EventType for VcsHeadMoved {
     const TYPE: &'static str = "vcs.head.moved";
-    const V: u32 = 2;
-    type Payload = VcsHeadMovedV2;
+    const V: u32 = 3;
+    type Payload = VcsHeadMovedV3;
+    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
+        match from_v {
+            // v2 is v3 with a snapshot and a commit always present.
+            2 => Ok(payload),
+            _ => Err(DomainError::Invalid(format!(
+                "vcs.head.moved@{from_v} has no upcast"
+            ))),
+        }
+    }
 }
 
 /// `vcs.commit.indexed@2`: the commit indexer stored a commit it hadn't
@@ -1006,10 +994,12 @@ impl EventType for VcsCommitIndexed {
     type Payload = VcsCommitIndexedV2;
 }
 
-/// `agent.turn.started@2`: a person's prompt opened a turn.
+/// `agent.turn.started@3`: a turn opened — by a person's prompt, a
+/// background job reporting back, a subagent's hand-back or another
+/// session's message (`source`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct AgentTurnStartedV2 {
+pub struct AgentTurnStartedV3 {
     /// The turn (`trn12`).
     pub turn: String,
     /// The thread (`thr3`).
@@ -1017,13 +1007,20 @@ pub struct AgentTurnStartedV2 {
     /// The harness session id, when it reported one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<String>,
+    /// What opened it. Turns logged before sources were read `unknown`.
+    pub source: crate::hook::TurnSource,
+    /// The turn whose work this one goes on with, when the harness named
+    /// it: the one whose tool call started the background job, or in
+    /// which the subagent started (`trn11`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cause_turn: Option<String>,
 }
 
 pub struct AgentTurnStarted;
 impl EventType for AgentTurnStarted {
     const TYPE: &'static str = "agent.turn.started";
-    const V: u32 = 2;
-    type Payload = AgentTurnStartedV2;
+    const V: u32 = 3;
+    type Payload = AgentTurnStartedV3;
 }
 
 /// A turn's token counts, when the harness reported them with the turn
@@ -1039,11 +1036,12 @@ pub struct TurnUsage {
     pub model: Option<String>,
 }
 
-/// `agent.turn.ended@3`: a turn closed, with what the token-usage reactor
-/// needs to count it — the transcript to read, or the counts themselves.
+/// `agent.turn.ended@5`: a turn closed — how (`outcome`), what it left
+/// running, and what the token-usage reactor needs to count it (the
+/// transcript to read, or the counts themselves).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct AgentTurnEndedV3 {
+pub struct AgentTurnEndedV5 {
     /// The turn (`trn12`).
     pub turn: String,
     /// The thread (`thr3`).
@@ -1055,13 +1053,21 @@ pub struct AgentTurnEndedV3 {
     /// Counts reported with the turn (ACP).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<TurnUsage>,
+    /// The jobs and subagents still running when it ended, when the
+    /// harness said.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub left_running: Option<Vec<crate::hook::RunningWork>>,
+    /// The harness's own words for the error that ended it (`outcome:
+    /// errored`): `name: message`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 pub struct AgentTurnEnded;
 impl EventType for AgentTurnEnded {
     const TYPE: &'static str = "agent.turn.ended";
-    const V: u32 = 3;
-    type Payload = AgentTurnEndedV3;
+    const V: u32 = 5;
+    type Payload = AgentTurnEndedV5;
 }
 
 /// Where a large or sensitive body lives: `event_content.hash` (xxh3-128
@@ -1200,7 +1206,7 @@ pub struct TokenCount {
 
 /// `agent.tokens.reported@2`: an agent's own telemetry (an OTLP export)
 /// reported token counts. Anchored to the turn the export's time window
-/// fell in — exports lag the turn — and the thread's single open effort.
+/// fell in — exports lag the turn.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AgentTokensReportedV2 {
@@ -1219,30 +1225,41 @@ impl EventType for AgentTokensReported {
     type Payload = AgentTokensReportedV2;
 }
 
-/// `agent.prompt.submitted@2`: a person sent the agent a prompt. Every
-/// prompt logs one; only a prompt with no turn open also opens a turn
-/// (`reprompt` says it landed inside an open one).
+/// `agent.prompt.submitted@3`: a prompt reached the agent — a person's,
+/// a background job's report, a subagent's hand-back, another session's
+/// message (`source`). Every delivery logs one; one with no turn open also
+/// opens a turn (`reprompt` says it landed inside an open one).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct AgentPromptSubmittedV2 {
+pub struct AgentPromptSubmittedV3 {
     /// The thread (`thr3`).
     pub thread: String,
-    /// The turn it opened (`trn12`).
+    /// The turn it opened, or the one it was delivered into (`trn12`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<String>,
     pub reprompt: bool,
-    /// The text the person submitted, stored in `event_content`.
+    /// Who it came from. Rows logged before sources were read `unknown`.
+    pub source: crate::hook::TurnSource,
+    /// The text the harness delivered, stored in `event_content`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<ContentRef>,
+    /// On another session's message: the sender's own name for its
+    /// session (its socket when it has no name).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sender: Option<String>,
+    /// On a background job's report or a subagent's hand-back: the
+    /// harness's id for the job (the subagent's id).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub job: Option<String>,
 }
 
 pub struct AgentPromptSubmitted;
 impl EventType for AgentPromptSubmitted {
     const TYPE: &'static str = "agent.prompt.submitted";
-    const V: u32 = 2;
-    type Payload = AgentPromptSubmittedV2;
+    const V: u32 = 3;
+    type Payload = AgentPromptSubmittedV3;
 }
 
 /// What oxplow's agent policy said about a tool call.
@@ -1272,9 +1289,12 @@ pub struct SubagentRef {
 /// as is (no subagent).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct AgentToolRequestedV3 {
+pub struct AgentToolRequestedV4 {
     pub tool: String,
     pub kind: crate::agent::tool::ToolKind,
+    /// The harness's id for the call, the same on its finish.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call: Option<String>,
     /// The files it names, repo-relative inside the worktree.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub paths: Vec<String>,
@@ -1294,18 +1314,23 @@ pub struct AgentToolRequestedV3 {
 pub struct AgentToolRequested;
 impl EventType for AgentToolRequested {
     const TYPE: &'static str = "agent.tool.requested";
-    const V: u32 = 3;
-    type Payload = AgentToolRequestedV3;
+    const V: u32 = 4;
+    type Payload = AgentToolRequestedV4;
 }
 
-/// `agent.tool.finished@3`: a tool call returned (PostToolUse). As
-/// `agent.tool.finished@2`, plus the subagent that made the call, when it
-/// wasn't the session's own agent. v2 upcasts as is (no subagent).
+/// `agent.tool.finished@4`: a tool call returned (PostToolUse), caused by
+/// its `agent.tool.requested` when one was logged.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct AgentToolFinishedV3 {
+pub struct AgentToolFinishedV4 {
     pub tool: String,
     pub kind: crate::agent::tool::ToolKind,
+    /// The harness's id for the call, the same on its request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call: Option<String>,
+    /// How long it ran, in milliseconds, as the harness timed it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub paths: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1332,8 +1357,8 @@ pub struct AgentToolFinishedV3 {
 pub struct AgentToolFinished;
 impl EventType for AgentToolFinished {
     const TYPE: &'static str = "agent.tool.finished";
-    const V: u32 = 3;
-    type Payload = AgentToolFinishedV3;
+    const V: u32 = 4;
+    type Payload = AgentToolFinishedV4;
 }
 
 /// `agent.subagent.started@2`: a subagent of the session started.
@@ -1377,29 +1402,6 @@ impl EventType for AgentSubagentFinished {
     const TYPE: &'static str = "agent.subagent.finished";
     const V: u32 = 2;
     type Payload = AgentSubagentFinishedV2;
-}
-
-/// `agent.peer_message.received@2`: another agent session's message
-/// reached the thread's agent as a prompt (Claude Code's cross-session
-/// message). Observed only: oxplow never sends one.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct AgentPeerMessageReceivedV2 {
-    /// The thread (`thr3`).
-    pub thread: String,
-    /// The turn it opened, or the one it arrived in (`trn12`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub turn: Option<String>,
-    /// The sender's own name for its session (its socket when it has no
-    /// name).
-    pub from: String,
-}
-
-pub struct AgentPeerMessageReceived;
-impl EventType for AgentPeerMessageReceived {
-    const TYPE: &'static str = "agent.peer_message.received";
-    const V: u32 = 2;
-    type Payload = AgentPeerMessageReceivedV2;
 }
 
 /// `agent.context.compacted@2`: the agent's context was summarized to make
@@ -1526,118 +1528,6 @@ impl EventType for TestCoverageRecorded {
     type Payload = TestCoverageRecordedV1;
 }
 
-/// `effort.opened@3`: a span of a thread's work began, linked to a work
-/// item or not (`.context/work-tracking.md`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct EffortOpenedV3 {
-    /// The effort (`eff12`).
-    pub effort: String,
-    /// `oxplow:oxplow/work_item?id=tsk42&provider=oxplow`, or another provider's item, when linked.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub work_item: Option<String>,
-    /// The thread doing the work (`thr3`).
-    pub thread: String,
-    /// The start snapshot, when the open already had it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub start_snapshot: Option<i64>,
-}
-
-pub struct EffortOpened;
-impl EventType for EffortOpened {
-    const TYPE: &'static str = "effort.opened";
-    const V: u32 = 3;
-    type Payload = EffortOpenedV3;
-}
-
-/// `effort.claim_verified@2` (P7.C4): a reviewer verified one of an
-/// effort's claims (`oxplow.effort.verify_claim`), naming what backs it — or
-/// took that back (`oxplow.effort.unverify_claim`, `evidence` absent).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct EffortClaimVerifiedV2 {
-    /// The claim's id.
-    pub claim: i64,
-    /// The effort it's on (`eff12`), when on one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub effort: Option<String>,
-    /// What backs it now (`reviewer`, `oxplow:oxplow/run?id=12`); absent once unverified.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub evidence: Option<String>,
-}
-
-pub struct EffortClaimVerified;
-impl EventType for EffortClaimVerified {
-    const TYPE: &'static str = "effort.claim_verified";
-    const V: u32 = 2;
-    type Payload = EffortClaimVerifiedV2;
-}
-
-/// `effort.claim_dismissed@2`: a reviewer dismissed one of an effort's
-/// claims (`oxplow.effort.dismiss_claim`: the agent didn't claim it, or
-/// didn't mean it) — or took that back (`oxplow.effort.reopen_claim`,
-/// `dismissed: false`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct EffortClaimDismissedV2 {
-    /// The claim's id.
-    pub claim: i64,
-    /// The effort it's on (`eff12`), when on one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub effort: Option<String>,
-    /// Dismissed now; `false` once reopened.
-    pub dismissed: bool,
-}
-
-pub struct EffortClaimDismissed;
-impl EventType for EffortClaimDismissed {
-    const TYPE: &'static str = "effort.claim_dismissed";
-    const V: u32 = 2;
-    type Payload = EffortClaimDismissedV2;
-}
-
-/// `effort.decision_reviewed@2` (P7.C4): a reviewer confirmed or
-/// dismissed an inferred decision, or reopened one they had reviewed.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct EffortDecisionReviewedV2 {
-    /// The decision's id.
-    pub decision: i64,
-    /// The effort it's on (`eff12`), when on one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub effort: Option<String>,
-    /// `confirmed`, `dismissed` or `inferred` (reopened).
-    pub outcome: String,
-}
-
-pub struct EffortDecisionReviewed;
-impl EventType for EffortDecisionReviewed {
-    const TYPE: &'static str = "effort.decision_reviewed";
-    const V: u32 = 2;
-    type Payload = EffortDecisionReviewedV2;
-}
-
-/// `effort.decisions_inferred@2`: a model's proposals replaced an
-/// effort's inferred decisions (`oxplow.effort.replace_inferred_decisions`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct EffortDecisionsInferredV2 {
-    /// The effort (`eff12`).
-    pub effort: String,
-    /// The effort's work item, when it has one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub work_item: Option<String>,
-    /// How many inferred decisions it holds now.
-    pub count: u32,
-}
-
-pub struct EffortDecisionsInferred;
-impl EventType for EffortDecisionsInferred {
-    const TYPE: &'static str = "effort.decisions_inferred";
-    const V: u32 = 2;
-    type Payload = EffortDecisionsInferredV2;
-}
-
 /// `collector.synced@2` (P7.B3): a collector ran — by hand
 /// (`oxplow.collector.sync`), on its schedule, or for an event its `on:` trigger
 /// names (then the envelope's `cause` is that event). Logged in the
@@ -1683,8 +1573,8 @@ pub enum CheckpointReason {
 }
 
 /// `thread.checkpoint@2`: a point in a thread's work oxplow observed, with
-/// what changed since the turn began — what an effort policy reacts to
-/// without reading snapshots or harness tool names
+/// what changed since the turn began — what a reactor reacts to without
+/// reading snapshots or harness tool names
 /// (`.context/work-tracking.md`). Logged by the `thread.checkpoint`
 /// consumer once a turn's end take lands.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -1712,239 +1602,171 @@ impl EventType for ThreadCheckpoint {
     type Payload = ThreadCheckpointV2;
 }
 
-/// `work_item.state_changed@1`: a `work_item.*` command put an item in
+/// `task.state_changed@1`: a `task.*` command put an item in
 /// a canonical state — logged by core for every provider, anchored to the
-/// thread of whoever ran it (`.context/work-items.md`). A create always
+/// thread of whoever ran it (`.context/tasks.md`). A create always
 /// logs one; for a provider oxplow can't read the prior state of, a
 /// transition or update that names a state logs one even when the item
 /// was already there.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct WorkItemStateChangedV1 {
-    /// `oxplow:oxplow/work_item?id=<id>&provider=<provider>`.
-    pub work_item: String,
-    pub to: crate::work_items::CanonicalState,
+pub struct TaskStateChangedV1 {
+    /// `oxplow:oxplow/task?id=<id>&provider=<provider>`.
+    pub task: String,
+    pub to: crate::tasks::Bucket,
 }
 
-pub struct WorkItemStateChanged;
-impl EventType for WorkItemStateChanged {
-    const TYPE: &'static str = "work_item.state_changed";
+pub struct TaskStateChanged;
+impl EventType for TaskStateChanged {
+    const TYPE: &'static str = "task.state_changed";
     const V: u32 = 1;
-    type Payload = WorkItemStateChangedV1;
+    type Payload = TaskStateChangedV1;
 }
 
-/// `effort.linked@2`: an effort's work item was set, changed or cleared
-/// (`oxplow.effort.link`).
+// The task events are the interface's: core logs them for every
+// list, from the verb a `oxtask.task.*` command ran and what the list
+// answered (`.context/tasks.md`).
+
+/// `task.created@2`: an item was filed on a task tracker, in `state`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct EffortLinkedV2 {
-    /// The effort (`eff12`).
-    pub effort: String,
-    /// The work item it's linked to now; absent when unlinked.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub work_item: Option<String>,
-}
-
-pub struct EffortLinked;
-impl EventType for EffortLinked {
-    const TYPE: &'static str = "effort.linked";
-    const V: u32 = 2;
-    type Payload = EffortLinkedV2;
-}
-
-/// `effort.landed@2`: a commit holds an open effort's work — every file
-/// the effort changed is in the commit as the effort left it (`complete`),
-/// or only some of them. What an effort policy closes an effort on.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct EffortLandedV2 {
-    /// The effort (`eff12`).
-    pub effort: String,
-    /// The commit's sha.
-    pub commit: String,
-    pub complete: bool,
-}
-
-pub struct EffortLanded;
-impl EventType for EffortLanded {
-    const TYPE: &'static str = "effort.landed";
-    const V: u32 = 2;
-    type Payload = EffortLandedV2;
-}
-
-/// `effort.retitled@2`: an effort's own title was set or cleared
-/// (`oxplow.effort.update`); cleared, it shows its default again.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct EffortRetitledV2 {
-    /// The effort (`eff12`).
-    pub effort: String,
-    /// Its title now; absent when cleared.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
-}
-
-pub struct EffortRetitled;
-impl EventType for EffortRetitled {
-    const TYPE: &'static str = "effort.retitled";
-    const V: u32 = 2;
-    type Payload = EffortRetitledV2;
-}
-
-/// `effort.closed@3`: a span of a thread's work ended, linked to a work
-/// item or not, and what closed it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct EffortClosedV3 {
-    /// The effort (`eff12`).
-    pub effort: String,
-    /// The linked work item, when there is one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub work_item: Option<String>,
-    /// The end snapshot, when the close already had it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub end_snapshot: Option<i64>,
-    /// What closed it: `commit`, `switch`, `person`, `agent` or `system`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub closed_by: Option<String>,
-}
-
-pub struct EffortClosed;
-impl EventType for EffortClosed {
-    const TYPE: &'static str = "effort.closed";
-    const V: u32 = 3;
-    type Payload = EffortClosedV3;
-}
-
-// The work-item events are the interface's: core logs them for every
-// list, from the verb a `oxplow.work_item.*` command ran and what the list
-// answered (`.context/work-items.md`).
-
-/// `work_item.created@2`: an item was filed on a work list, in `state`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct WorkItemCreatedV2 {
-    /// `oxplow:oxplow/work_item?id=<id>&provider=<list>`.
-    pub work_item: String,
+pub struct TaskCreatedV2 {
+    /// `oxplow:oxplow/task?id=<id>&provider=<list>`.
+    pub task: String,
     /// The canonical state it was filed in.
-    pub state: crate::work_items::CanonicalState,
+    pub state: crate::tasks::Bucket,
 }
 
-pub struct WorkItemCreated;
-impl EventType for WorkItemCreated {
-    const TYPE: &'static str = "work_item.created";
+pub struct TaskCreated;
+impl EventType for TaskCreated {
+    const TYPE: &'static str = "task.created";
     const V: u32 = 2;
-    type Payload = WorkItemCreatedV2;
+    type Payload = TaskCreatedV2;
 }
 
-/// `work_item.deleted@2`: an item was deleted from its work list.
+/// `task.deleted@2`: an item was deleted from its task tracker.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct WorkItemDeletedV2 {
-    /// `oxplow:oxplow/work_item?id=<id>&provider=<list>`.
-    pub work_item: String,
+pub struct TaskDeletedV2 {
+    /// `oxplow:oxplow/task?id=<id>&provider=<list>`.
+    pub task: String,
 }
 
-pub struct WorkItemDeleted;
-impl EventType for WorkItemDeleted {
-    const TYPE: &'static str = "work_item.deleted";
+pub struct TaskDeleted;
+impl EventType for TaskDeleted {
+    const TYPE: &'static str = "task.deleted";
     const V: u32 = 2;
-    type Payload = WorkItemDeletedV2;
+    type Payload = TaskDeletedV2;
 }
 
-/// `work_item.edited@2`: a command changed an item's fields — not its
-/// state, which is `work_item.state_changed`.
+/// `task.edited@2`: a command changed an item's fields — not its
+/// state, which is `task.state_changed`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct WorkItemEditedV2 {
-    /// `oxplow:oxplow/work_item?id=<id>&provider=<list>`.
-    pub work_item: String,
-    /// The fields the command set: `title`, `body`, `parent`, `rank` (its
-    /// place in its list), `list` (moved to another), and
-    /// `native.<name>` for each of the list's own fields.
+pub struct TaskEditedV2 {
+    /// `oxplow:oxplow/task?id=<id>&provider=<list>`.
+    pub task: String,
+    /// The fields the command set: `title`, `body`, `parent`, `stage` (a
+    /// move between two stages of one bucket; a move to another bucket is
+    /// `task.state_changed`), and `native.<name>` for each of the
+    /// list's own fields.
     pub fields: Vec<String>,
 }
 
-pub struct WorkItemEdited;
-impl EventType for WorkItemEdited {
-    const TYPE: &'static str = "work_item.edited";
+pub struct TaskEdited;
+impl EventType for TaskEdited {
+    const TYPE: &'static str = "task.edited";
     const V: u32 = 2;
-    type Payload = WorkItemEditedV2;
+    type Payload = TaskEditedV2;
 }
 
-/// `work_item.linked@2`: a typed link from an item to another of the
+/// `task.linked@2`: a typed link from an item to another of the
 /// same list, or to any ref it is about.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct WorkItemLinkedV2 {
-    /// The item linked from (`oxplow:oxplow/work_item?id=<id>&provider=<list>`).
-    pub work_item: String,
+pub struct TaskLinkedV2 {
+    /// The item linked from (`oxplow:oxplow/task?id=<id>&provider=<list>`).
+    pub task: String,
     /// What it links to: an item, or any ref.
     pub target: String,
     /// One of the list's own link types.
     pub link_type: String,
 }
 
-pub struct WorkItemLinked;
-impl EventType for WorkItemLinked {
-    const TYPE: &'static str = "work_item.linked";
+pub struct TaskLinked;
+impl EventType for TaskLinked {
+    const TYPE: &'static str = "task.linked";
     const V: u32 = 2;
-    type Payload = WorkItemLinkedV2;
+    type Payload = TaskLinkedV2;
 }
 
-/// `work_item.unlinked@1`: an item's link was removed
-/// (`oxplow.work_item.unlink`, or undoing a link).
+/// `task.unlinked@1`: an item's link was removed
+/// (`oxtask.task.unlink`, or undoing a link).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct WorkItemUnlinkedV1 {
-    /// The item linked from (`oxplow:oxplow/work_item?id=<id>&provider=<list>`).
-    pub work_item: String,
+pub struct TaskUnlinkedV1 {
+    /// The item linked from (`oxplow:oxplow/task?id=<id>&provider=<list>`).
+    pub task: String,
     /// What it linked to.
     pub target: String,
     pub link_type: String,
 }
 
-pub struct WorkItemUnlinked;
-impl EventType for WorkItemUnlinked {
-    const TYPE: &'static str = "work_item.unlinked";
+pub struct TaskUnlinked;
+impl EventType for TaskUnlinked {
+    const TYPE: &'static str = "task.unlinked";
     const V: u32 = 1;
-    type Payload = WorkItemUnlinkedV1;
+    type Payload = TaskUnlinkedV1;
 }
 
-/// `work_item.commented@2`: a comment was added to an item.
+/// `task.commented@2`: a comment was added to an item.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct WorkItemCommentedV2 {
-    /// `oxplow:oxplow/work_item?id=<id>&provider=<list>`.
-    pub work_item: String,
+pub struct TaskCommentedV2 {
+    /// `oxplow:oxplow/task?id=<id>&provider=<list>`.
+    pub task: String,
     /// The list's own id for the comment, unique on the item, when its
     /// answer named one (the `comment` verb's `result.comment`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comment: Option<String>,
 }
 
-pub struct WorkItemCommented;
-impl EventType for WorkItemCommented {
-    const TYPE: &'static str = "work_item.commented";
+pub struct TaskCommented;
+impl EventType for TaskCommented {
+    const TYPE: &'static str = "task.commented";
     const V: u32 = 2;
-    type Payload = WorkItemCommentedV2;
+    type Payload = TaskCommentedV2;
 }
 
-/// `work_item.recorded@3`: a list's item as it now stands — how every
-/// list's items reach the work-item interface (the `work_items.project`
-/// consumer upserts it by ref), with its rank, links, comments and list
-/// when it states them. A list's verbs answer with it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+/// `task.assigned@1`: who is going to work on an item, or its place
+/// in their queue, changed (`oxtask.task.assign`, `.reorder`; a
+/// closed item or a closed thread's releases it). Core's record, for every
+/// provider; the `tasks.project` consumer keeps `v_oxplow_task.assignee`
+/// and `rank` from it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct WorkItemRecordedV3 {
-    pub item: crate::work_items::WorkItemRecord,
+pub struct TaskAssignedV1 {
+    /// `oxplow:oxplow/task?id=<id>&provider=<list>`.
+    pub task: String,
+    /// Who it was assigned to: a thread's URI, the person's; absent, nobody.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    /// Who it's assigned to now; absent, nobody.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
+    /// Placed just before this item of `to`'s queue.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before: Option<String>,
+    /// Placed just after this item of `to`'s queue (neither: at its end).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after: Option<String>,
 }
 
-pub struct WorkItemRecorded;
-impl EventType for WorkItemRecorded {
-    const TYPE: &'static str = "work_item.recorded";
-    const V: u32 = 3;
-    type Payload = WorkItemRecordedV3;
+pub struct TaskAssigned;
+impl EventType for TaskAssigned {
+    const TYPE: &'static str = "task.assigned";
+    const V: u32 = 1;
+    type Payload = TaskAssignedV1;
 }
 
 /// How many diagnostics of each severity a file has.
@@ -2017,63 +1839,67 @@ impl EventType for ContributionEnabled {
     type Payload = ContributionEnabledV1;
 }
 
-/// `knowledge.page.written@2`: a knowledge page's row and edges were
-/// restated from its body — by `oxplow.knowledge.write_page` / `link` /
-/// `resync`, or by the wiki watcher after a hand edit
-/// (`system:wiki_watch`).
+/// How an agent read a knowledge page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ReadVia {
+    /// Through a tool (`oxplow_read`).
+    Tool,
+    /// Its own read of the page's file (a store whose pages are files).
+    File,
+}
+
+impl ReadVia {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ReadVia::Tool => "tool",
+            ReadVia::File => "file",
+        }
+    }
+}
+
+/// `record.read@1`: an agent read a row of a shared model — through
+/// `oxplow_read` (`via: tool`), or its own read of the file the row's store
+/// keeps it in (`via: file`, caused by the tool call; the store's `files`
+/// declaration in its `fills`). Whatever keeps reads of a model's rows follows
+/// this event; a person's opens are their page visits.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct KnowledgePageWrittenV2 {
-    /// The page's slug.
-    pub page: String,
-    /// Every ref the page now points at (`oxplow:oxplow/file?path=src/lib.rs`, `oxplow:oxplow/wiki?slug=x`, …).
-    pub outbound: Vec<String>,
-    /// The snapshot its new refs are pinned to, when there is one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub snapshot: Option<i64>,
+pub struct RecordReadV1 {
+    /// The row (`oxplow:oxplow/knowledge?id=<id>&store=<store>`).
+    pub record: String,
+    pub via: ReadVia,
 }
 
-pub struct KnowledgePageWritten;
-impl EventType for KnowledgePageWritten {
-    const TYPE: &'static str = "knowledge.page.written";
-    const V: u32 = 2;
-    type Payload = KnowledgePageWrittenV2;
+pub struct RecordRead;
+impl EventType for RecordRead {
+    const TYPE: &'static str = "record.read";
+    const V: u32 = 1;
+    type Payload = RecordReadV1;
 }
 
-/// A knowledge page as a store records it: what a provider's write verb
-/// answers and its collector streams. The body is what it keeps; the refs
-/// are what the page links, in oxplow's grammar (`oxplow:oxplow/file?path=src/lib.rs`,
-/// `oxplow:oxplow/wiki?slug=other`), which core pins and links from — never parsed out of a
-/// body in the store's own grammar.
+/// `snapshot.ref_drifted@1`: a snapshot of the primary stream changed files a
+/// source's pinned refs cite (`file_pin` / `dir_pin` edges, a shared
+/// model's pinned markdown column), so what it says of them may no longer
+/// hold (`v_ref_pin.stale`), whether or not it was stale already. Caused by
+/// the `snapshot.taken`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct KnowledgePageRecord {
-    /// `oxplow:oxplow/wiki?slug=<slug>`.
-    pub uri: String,
-    pub title: String,
-    pub body: String,
-    /// What it links, as URIs.
-    pub uris: Vec<String>,
-    /// RFC 3339: when the store last changed it.
-    pub updated_at: String,
-    /// It was deleted in the store.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub deleted: bool,
+pub struct RefDriftedV1 {
+    /// The source that pins them (a model row's URI).
+    pub source: String,
+    /// The snapshot that changed them.
+    pub snapshot: i64,
+    /// The changed files it cites, or that are under a directory it cites
+    /// (repo-relative).
+    pub paths: Vec<String>,
 }
 
-/// `knowledge.page.recorded@2`: a knowledge store's page, as it recorded
-/// it (`.context/knowledge.md` "The capability").
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct KnowledgePageRecordedV2 {
-    pub page: KnowledgePageRecord,
-}
-
-pub struct KnowledgePageRecorded;
-impl EventType for KnowledgePageRecorded {
-    const TYPE: &'static str = "knowledge.page.recorded";
-    const V: u32 = 2;
-    type Payload = KnowledgePageRecordedV2;
+pub struct RefDrifted;
+impl EventType for RefDrifted {
+    const TYPE: &'static str = "snapshot.ref_drifted";
+    const V: u32 = 1;
+    type Payload = RefDriftedV1;
 }
 
 /// `ui.op_failed@2`: an operation the person started in the app failed, as
@@ -2157,57 +1983,6 @@ impl EventType for UiOpErrorDismissed {
     type Payload = UiOpErrorMarkV1;
 }
 
-/// `knowledge.page.deleted@2`: a knowledge page is gone, its row and
-/// edges with it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct KnowledgePageDeletedV2 {
-    /// The page's slug.
-    pub page: String,
-}
-
-pub struct KnowledgePageDeleted;
-impl EventType for KnowledgePageDeleted {
-    const TYPE: &'static str = "knowledge.page.deleted";
-    const V: u32 = 2;
-    type Payload = KnowledgePageDeletedV2;
-}
-
-/// `knowledge.note.written@3`: a thread note was added or its body
-/// changed.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct KnowledgeNoteWrittenV3 {
-    /// The note (`not3`).
-    pub note: String,
-    /// The thread it's on (`thr3`).
-    pub thread: String,
-}
-
-pub struct KnowledgeNoteWritten;
-impl EventType for KnowledgeNoteWritten {
-    const TYPE: &'static str = "knowledge.note.written";
-    const V: u32 = 3;
-    type Payload = KnowledgeNoteWrittenV3;
-}
-
-/// `knowledge.note.deleted@3`: a thread note is gone.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct KnowledgeNoteDeletedV3 {
-    /// The note (`not3`).
-    pub note: String,
-    /// The thread it was on (`thr3`).
-    pub thread: String,
-}
-
-pub struct KnowledgeNoteDeleted;
-impl EventType for KnowledgeNoteDeleted {
-    const TYPE: &'static str = "knowledge.note.deleted";
-    const V: u32 = 3;
-    type Payload = KnowledgeNoteDeletedV3;
-}
-
 /// `handoff.sent@2`: work was handed from one thread to another
 /// (`oxplow.handoff.send`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -2219,9 +1994,9 @@ pub struct HandoffSentV2 {
     pub from_thread: String,
     /// The receiving thread (`thr4`).
     pub to_thread: String,
-    /// The work item it hands over, when it names one.
+    /// The task it hands over, when it names one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub work_item: Option<String>,
+    pub task: Option<String>,
 }
 
 pub struct HandoffSent;
@@ -2254,65 +2029,75 @@ impl EventType for HandoffSettled {
     type Payload = HandoffSettledV2;
 }
 
-/// `knowledge.comment.written@3`: a comment (a threaded annotation on a
+/// `thread.closed@1`: a thread was closed (`oxplow.thread.close`): its
+/// sessions ended with it, and what it was working on goes back to nobody
+/// (bundled releases its tasks).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ThreadClosedV1 {
+    /// The thread (`thr3`).
+    pub thread: String,
+}
+
+pub struct ThreadClosed;
+impl EventType for ThreadClosed {
+    const TYPE: &'static str = "thread.closed";
+    const V: u32 = 1;
+    type Payload = ThreadClosedV1;
+}
+
+/// `stream.archived@1`: a stream was archived (`oxplow.stream.archive`):
+/// its threads' sessions ended and its working copy may be gone; what its
+/// threads were working on goes back to nobody.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct StreamArchivedV1 {
+    /// The stream (`str2`).
+    pub stream: String,
+    /// Its threads (`thr3`), each.
+    pub threads: Vec<String>,
+}
+
+pub struct StreamArchived;
+impl EventType for StreamArchived {
+    const TYPE: &'static str = "stream.archived";
+    const V: u32 = 1;
+    type Payload = StreamArchivedV1;
+}
+
+/// `comment.written@1`: a comment (a threaded annotation on a
 /// page) was created or changed — a reply, its intent, status or anchor.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct KnowledgeCommentWrittenV3 {
+pub struct CommentWrittenV1 {
     /// The comment (`cmt5`).
     pub comment: String,
     /// What it annotates: a URI.
     pub target: String,
 }
 
-pub struct KnowledgeCommentWritten;
-impl EventType for KnowledgeCommentWritten {
-    const TYPE: &'static str = "knowledge.comment.written";
-    const V: u32 = 3;
-    type Payload = KnowledgeCommentWrittenV3;
+pub struct CommentWritten;
+impl EventType for CommentWritten {
+    const TYPE: &'static str = "comment.written";
+    const V: u32 = 1;
+    type Payload = CommentWrittenV1;
 }
 
-/// `knowledge.comment.deleted@3`: a comment is gone, its messages with it.
+/// `comment.deleted@1`: a comment is gone, its messages with it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct KnowledgeCommentDeletedV3 {
+pub struct CommentDeletedV1 {
     /// The comment (`cmt5`).
     pub comment: String,
     /// What it annotated: a URI.
     pub target: String,
 }
 
-pub struct KnowledgeCommentDeleted;
-impl EventType for KnowledgeCommentDeleted {
-    const TYPE: &'static str = "knowledge.comment.deleted";
-    const V: u32 = 3;
-    type Payload = KnowledgeCommentDeletedV3;
-}
-
-/// `effort.finished@3`: a closed effort has its end snapshot
-/// pinned and its lifecycle metrics projected. Logged once per effort by the
-/// effort-lifecycle consumer (dedupe key `effort.finished:<effort>`),
-/// caused by the `effort.closed` it handled; what the effort reactors
-/// (evidence, inferred decisions) and the `effort.finished` collectors
-/// consume.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct EffortFinishedV3 {
-    /// The effort (`eff12`).
-    pub effort: String,
-    /// The linked work item, when there is one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub work_item: Option<String>,
-    /// The end snapshot.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub end_snapshot: Option<i64>,
-}
-
-pub struct EffortFinished;
-impl EventType for EffortFinished {
-    const TYPE: &'static str = "effort.finished";
-    const V: u32 = 3;
-    type Payload = EffortFinishedV3;
+pub struct CommentDeleted;
+impl EventType for CommentDeleted {
+    const TYPE: &'static str = "comment.deleted";
+    const V: u32 = 1;
+    type Payload = CommentDeletedV1;
 }
 
 /// Whether `event_type` is one of core's types (any version) — what a
@@ -2356,19 +2141,18 @@ mod tests {
             versions,
             vec![
                 ("agent.context.compacted", 2),
-                ("agent.peer_message.received", 2),
                 ("agent.plan.proposed", 2),
-                ("agent.prompt.submitted", 2),
+                ("agent.prompt.submitted", 3),
                 ("agent.session.ended", 2),
                 ("agent.session.started", 3),
                 ("agent.status.changed", 2),
                 ("agent.subagent.finished", 2),
                 ("agent.subagent.started", 2),
                 ("agent.tokens.reported", 2),
-                ("agent.tool.finished", 3),
-                ("agent.tool.requested", 3),
-                ("agent.turn.ended", 3),
-                ("agent.turn.started", 2),
+                ("agent.tool.finished", 4),
+                ("agent.tool.requested", 4),
+                ("agent.turn.ended", 5),
+                ("agent.turn.started", 3),
                 ("capability.switched", 1),
                 ("code.diagnostics.changed", 2),
                 ("collector.synced", 2),
@@ -2376,21 +2160,13 @@ mod tests {
                 ("command.declined", 2),
                 ("command.executed", 5),
                 ("command.proposed", 4),
+                ("comment.deleted", 1),
+                ("comment.written", 1),
                 ("config.changed", 2),
                 ("contribution.disabled", 1),
                 ("contribution.enabled", 1),
                 ("contribution.job.completed", 2),
                 ("effect.result", 5),
-                ("effort.claim_dismissed", 2),
-                ("effort.claim_verified", 2),
-                ("effort.closed", 3),
-                ("effort.decision_reviewed", 2),
-                ("effort.decisions_inferred", 2),
-                ("effort.finished", 3),
-                ("effort.landed", 2),
-                ("effort.linked", 2),
-                ("effort.opened", 3),
-                ("effort.retitled", 2),
                 ("file.created", 1),
                 ("file.deleted", 1),
                 ("file.directory_created", 1),
@@ -2398,64 +2174,61 @@ mod tests {
                 ("file.saved", 1),
                 ("handoff.sent", 2),
                 ("handoff.settled", 2),
-                ("knowledge.comment.deleted", 3),
-                ("knowledge.comment.written", 3),
-                ("knowledge.note.deleted", 3),
-                ("knowledge.note.written", 3),
-                ("knowledge.page.deleted", 2),
-                ("knowledge.page.recorded", 2),
-                ("knowledge.page.written", 2),
+                ("record.read", 1),
+                ("snapshot.ref_drifted", 1),
                 ("snapshot.taken", 3),
+                ("stream.archived", 1),
+                ("task.assigned", 1),
+                ("task.commented", 2),
+                ("task.created", 2),
+                ("task.deleted", 2),
+                ("task.edited", 2),
+                ("task.linked", 2),
+                ("task.state_changed", 1),
+                ("task.unlinked", 1),
                 ("terminal.closed", 1),
                 ("terminal.opened", 1),
                 ("terminal.renamed", 1),
                 ("test.coverage.recorded", 1),
                 ("test.run.recorded", 3),
                 ("thread.checkpoint", 2),
+                ("thread.closed", 1),
                 ("ui.op_error.dismissed", 1),
                 ("ui.op_error.seen", 1),
                 ("ui.op_failed", 2),
                 ("vcs.commit.indexed", 2),
-                ("vcs.head.moved", 2),
-                ("work_item.commented", 2),
-                ("work_item.created", 2),
-                ("work_item.deleted", 2),
-                ("work_item.edited", 2),
-                ("work_item.linked", 2),
-                ("work_item.recorded", 3),
-                ("work_item.state_changed", 1),
-                ("work_item.unlinked", 1),
+                ("vcs.head.moved", 3),
             ]
         );
-        assert_eq!(r.latest("work_item.created"), Some(2));
-        assert_eq!(r.latest("agent.turn.ended"), Some(3));
+        assert_eq!(r.latest("task.created"), Some(2));
+        assert_eq!(r.latest("agent.turn.ended"), Some(5));
         assert_eq!(r.owner("config.changed", 2), Some(None));
     }
 
     #[test]
     fn validate_accepts_the_typed_shape_and_names_the_violation() {
         let r = crate::vocabulary::Vocabulary::core();
-        let ok = Envelope::typed::<WorkItemStateChanged>(
+        let ok = Envelope::typed::<TaskStateChanged>(
             "human",
-            &WorkItemStateChangedV1 {
-                work_item: "oxplow:oxplow/work_item?id=tsk4&provider=oxplow".into(),
-                to: crate::work_items::CanonicalState::InProgress,
+            &TaskStateChangedV1 {
+                task: "oxplow:oxplow/task?id=tsk4&provider=oxtask".into(),
+                to: crate::tasks::Bucket::InProgress,
             },
         );
-        assert_eq!(ok.event_type, "work_item.state_changed");
+        assert_eq!(ok.event_type, "task.state_changed");
         assert_eq!(ok.v, 1);
         r.validate_envelope(&ok).unwrap();
 
         let bad = r
             .validate(
-                "work_item.state_changed",
+                "task.state_changed",
                 1,
-                &json!({"work_item": "x", "to": "flying"}),
+                &json!({"task": "x", "to": "flying"}),
             )
             .unwrap_err();
         let msg = bad.to_string();
         assert!(
-            msg.contains("work_item.state_changed@1") && msg.contains("/to"),
+            msg.contains("task.state_changed@1") && msg.contains("/to"),
             "{msg}"
         );
 
@@ -2472,9 +2245,7 @@ mod tests {
     #[test]
     fn unknown_types_and_versions_are_refused() {
         let r = EventSchemaRegistry::core();
-        let e = r
-            .validate("work_item.state_changed", 2, &json!({}))
-            .unwrap_err();
+        let e = r.validate("task.state_changed", 2, &json!({})).unwrap_err();
         assert!(e.to_string().contains("newest is v1"), "{e}");
         let e = r.validate("acme.thing", 1, &json!({})).unwrap_err();
         assert!(e.to_string().contains("not registered"), "{e}");
@@ -2511,7 +2282,7 @@ mod tests {
     }
     struct Squatter;
     impl EventType for Squatter {
-        const TYPE: &'static str = "work_item.hijacked";
+        const TYPE: &'static str = "task.hijacked";
         const V: u32 = 1;
         type Payload = ConfigChangedV2;
     }
@@ -2558,7 +2329,7 @@ mod tests {
         // Core can't register into an extension's namespace either, and a
         // second registration of the same type@v collides.
         assert!(r.register::<AcmeDecided>().is_err());
-        assert!(r.register::<WorkItemStateChanged>().is_err());
+        assert!(r.register::<TaskStateChanged>().is_err());
     }
 
     #[test]
@@ -2654,6 +2425,6 @@ mod tests {
         assert_eq!((v, same), (2, json!({"n": 5, "note": "x"})));
         assert!(r.upcast_to_latest("acme.thing", 3, json!({})).is_err());
         // The default upcast refuses: a type that bumps V must define one.
-        assert!(WorkItemStateChanged::upcast(0, json!({})).is_err());
+        assert!(TaskStateChanged::upcast(0, json!({})).is_err());
     }
 }

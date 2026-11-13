@@ -97,21 +97,20 @@ ORDER BY last_status = 'failed' DESC, flips DESC, subject
 test that fails once and stays red is failing, not flaky. Add
 `AND branch = '<branch>'` for one branch.
 
-### Efforts per thread
+### Requests per thread
 
 ```sql
 SELECT t.id AS thread_id, t.title,
-       count(e.id) AS efforts,
-       count(e.id) FILTER (WHERE e.ended_at IS NULL) AS open
+       count(r.id) AS requests,
+       count(r.id) FILTER (WHERE r.state = 'running') AS running
 FROM v_thread t
-LEFT JOIN v_effort e ON e.thread_id = t.id
+LEFT JOIN v_request r ON r.thread_id = t.id
 GROUP BY t.id, t.title
-ORDER BY efforts DESC, t.id
+ORDER BY requests DESC, t.id
 ```
 
-The `LEFT JOIN` keeps a thread with no efforts as a row of zeros. Count
-`e.id`, never `*` or a test on `e.ended_at` alone: a thread with no effort
-has one all-NULL joined row, and `ended_at IS NULL` is true for it.
+The `LEFT JOIN` keeps a thread with no requests as a row of zeros. Count
+`r.id`, never `*`: a thread with no request has one all-NULL joined row.
 
 ### Token usage per thread and agent
 
@@ -125,7 +124,7 @@ GROUP BY thread_id, agent_kind
 ORDER BY tokens DESC, thread_id
 ```
 
-A usage row is one report from an agent turn; it carries the thread, the
-effort and the turn, not the session, so group by thread (and join
+A usage row is one report from an agent turn; it carries the thread and
+the turn, not the session, so group by thread (and join
 `v_agent_session` on `thread_id` for its sessions). Cache reads are
 reported apart from input and output: add them only if you mean them.

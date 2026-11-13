@@ -78,11 +78,21 @@ pub fn tool_use(t: &ToolCall) -> Option<ToolUse> {
         command,
         detail,
         call_id: Some(t.id.clone()).filter(|id| !id.is_empty()),
+        // How long it ran, when the agent's output says (Codex's `durationMs`).
+        duration_ms: t.raw_output.as_ref().and_then(|o| {
+            ["duration_ms", "durationMs"]
+                .iter()
+                .find_map(|k| o.get(*k).and_then(|x| x.as_u64()))
+        }),
         ok,
         exit_code,
         question: None,
         plan: None,
         subagent: None,
+        sent: None,
+        started_job: None,
+        input: Some(t.raw_input.clone().unwrap_or_else(|| serde_json::json!({}))),
+        output: tool_response(t),
     })
 }
 
@@ -224,11 +234,11 @@ mod tests {
         assert_eq!(tool_use(&call(ToolKind::Think)), None);
         assert_eq!(tool_use(&call(ToolKind::SwitchMode)), None);
         let mut mcp = call(ToolKind::Other);
-        mcp.title = "mcp__oxplow__list_work_items (MCP)".into();
+        mcp.title = "mcp__oxplow__list_tasks (MCP)".into();
         let u = tool_use(&mcp).unwrap();
         assert_eq!(
             (u.kind, u.name.as_str()),
-            (Kind::Mcp, "mcp__oxplow__list_work_items")
+            (Kind::Mcp, "mcp__oxplow__list_tasks")
         );
         let mut named = call(ToolKind::Other);
         named.name = Some("custom".into());

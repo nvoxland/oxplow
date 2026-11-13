@@ -109,7 +109,7 @@ export function SchemaForm({
   const label = submitLabel ?? (mode === "edit" ? "Save" : "Submit");
   // Keyed on content: a host re-reading its data passes fresh copies of
   // the same schema and starting value, and that mustn't throw away what
-  // the person typed (tsk1054). A different starting value does.
+  // the person typed. A different starting value does.
   const schemaText = JSON.stringify(schema);
   const initialText = JSON.stringify(initial ?? {});
   // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the content

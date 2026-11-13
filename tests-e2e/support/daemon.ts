@@ -32,7 +32,7 @@ export const LOG_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", ".out
  *  spec ever starts a real agent CLI. The suite's extensions are on; the
  *  fixtures deploy them once the daemon has started (boot deploys nothing). */
 function projectYaml(): string {
-  return `agents: [scripted]\nextensions: [oxplow-bundled, e2e, github]\nextensionInstances:\n  e2e/scripted: { enabled: true, config: { team: core } }\n`;
+  return `agents: [scripted]\nextensions: [oxplow-bundled, oxtask, oxwiki, e2e, github]\nextensionInstances:\n  e2e/scripted: { enabled: true, config: { team: core } }\n`;
 }
 
 /** Put the suite's test extension's source (`tests-e2e/fixtures/extension`)
@@ -183,7 +183,7 @@ export async function startDaemon({
     });
     spawned.once("close", () => logFile.end());
     // Stdin stays open: it's the daemon's lifeline, and closing it stops
-    // the daemon (tsk1073). A daemon that is already gone refuses the write
+    // the daemon. A daemon that is already gone refuses the write
     // (EPIPE): its exit is what reports that, below.
     spawned.stdin?.on("error", () => {});
     spawned.stdin?.write(`${token}\n`);
@@ -300,8 +300,8 @@ export async function settle(daemon: Daemon): Promise<void> {
 
 /** Do `write`, and resolve with its result once the daemon has said every
  *  dataset in `datasets` changed (`datasetsChanged`). The socket is open before
- *  the write, and the daemon subscribes before it answers the upgrade
- *  (tsk995), so the event can't be missed. */
+ *  the write, and the daemon subscribes before it answers the upgrade,
+ * so the event can't be missed. */
 export async function waitForModels<T>(daemon: Daemon, datasets: string[], write: () => Promise<T>): Promise<T> {
   const url = `${daemon.base.replace(/^http/, "ws")}/events?token=${encodeURIComponent(daemon.token)}`;
   const socket = new WebSocket(url);
@@ -333,14 +333,38 @@ export async function waitForModels<T>(daemon: Daemon, datasets: string[], write
 
 type SearchHit = { kind: string; title: string };
 
-/** Wait until site search finds `query` among `kind` hits (`task`,
- *  `wiki`): the index is built in the background after a write. */
-/** Wait until site search finds `query` under `resource` (`wiki` is
- *  `oxplow/wiki`; a name with a `/` is taken as it is). */
+/** Wait until site search finds `query` under `resource` (`task`,
+ *  `knowledge`: `oxplow/<name>`; a name with a `/` is taken as it is). The
+ *  index is built in the background after a write. */
 export async function searchable(daemon: Daemon, query: string, resource: string): Promise<void> {
   const name = resource.includes("/") ? resource : `oxplow/${resource}`;
   await until(`search to index "${query}" (${name})`, 30_000, async () => {
     const hits = await ipc<SearchHit[]>(daemon, "search", { query, streamId: null, resources: [name], limit: 10 });
     return hits.length > 0;
   });
+}
+
+/** File a task in oxtask, the project's task store, and give it to the
+ *  thread the pages open on (`assign: false` leaves it for nobody). The answer
+ *  is shaped like a command's run, `{ result: { uri, id } }`, so a spec reads
+ *  `.result.uri` as it did. */
+export async function fileTask(
+  daemon: Daemon & { thread: string },
+  title: string,
+  opts: { stage?: string; body?: string; parent?: string; priority?: string; assign?: boolean } = {},
+): Promise<{ result: { uri: string; id: string } }> {
+  // A script command's run answers `{ result: <its finish(...)>, children }`.
+  const made = await run<{ result: { result: { id: string } } }>(daemon, "oxtask.task.create", {
+    title,
+    stage: opts.stage ?? "ready",
+    ...(opts.body === undefined ? {} : { body: opts.body }),
+    ...(opts.parent === undefined ? {} : { parent: opts.parent }),
+    ...(opts.priority === undefined ? {} : { priority: opts.priority }),
+  });
+  const id = made.result.result.id;
+  const uri = `oxplow:oxplow/task?id=${id}&provider=oxtask`;
+  if (opts.assign !== false) {
+    await run(daemon, "oxplow.tasks.assign", { uri, to: `oxplow:oxplow/thread?id=${daemon.thread}` });
+  }
+  return { result: { uri, id } };
 }

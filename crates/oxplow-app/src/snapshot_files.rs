@@ -1,4 +1,4 @@
-//! Reading and restoring captured files (P2.9, tsk433): one place for what
+//! Reading and restoring captured files (P2.9): one place for what
 //! the RPC and MCP snapshot tools do, with honest ids —
 //! a **`file_snapshot` id** names one captured file row, a **`snapshot`
 //! id** a whole capture (read a path *at* it).
@@ -215,7 +215,7 @@ mod tests {
     /// primary checkout.
     #[tokio::test]
     async fn a_worktree_streams_file_restores_into_its_worktree() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let worktree = tempfile::tempdir().unwrap();
         let now = Timestamp::from_unix_ms(1);
         let stream = f
@@ -260,7 +260,6 @@ mod tests {
                 trigger: SnapshotTrigger::Manual,
                 thread_id: None,
                 turn_id: None,
-                effort_id: None,
                 budget: None,
                 provider: None,
             })

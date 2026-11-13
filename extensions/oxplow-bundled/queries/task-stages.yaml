@@ -1,0 +1,23 @@
+title: Task stages
+description: "The task stores' stages (`v_model_stage`), in their order: `value` (the stage's id), `label` (how the list names it), `bucket` (which of core's six it is in: backlog, todo, in_progress, blocked, done, canceled), `ord`, `is_default` (1 for a bucket's first stage, what a command given the bucket lands on) and `filter`: the stage named the way a filter takes it, by its bucket for a bucket's first stage, so a page's `todo` default is the list's first to-do stage whatever the list calls it."
+needs:
+- model:oxplow/task_record
+loaders:
+  task_stages:
+    sql: |
+      WITH st AS (
+        SELECT CAST(s.id AS TEXT) AS value, CAST(s.title AS TEXT) AS label,
+               CAST(s.bucket AS TEXT) AS bucket, CAST(s.position AS INTEGER) AS ord
+        FROM v_model_stage s
+        WHERE s.model = 'oxplow/task_record'
+      ),
+      ranked AS (
+        SELECT st.*, st.ord = (SELECT min(o.ord) FROM st o WHERE o.bucket = st.bucket) AS is_default FROM st
+      )
+      SELECT r.value, r.label, r.bucket, r.ord, r.is_default,
+             -- A stage whose id is a bucket's name is in that bucket, so
+             -- the name is the stage's own.
+             CASE WHEN r.is_default AND NOT EXISTS (SELECT 1 FROM st o WHERE o.value = r.bucket)
+                  THEN r.bucket ELSE r.value END AS filter
+      FROM ranked r
+      ORDER BY r.ord

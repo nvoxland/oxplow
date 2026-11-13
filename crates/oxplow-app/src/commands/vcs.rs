@@ -625,14 +625,14 @@ mod tests {
     use oxplow_domain::Actor;
     use serde_json::json;
 
-    use crate::test_fixtures::{commit_all, services_with_effort};
+    use crate::test_fixtures::{commit_all, services_with_thread};
 
     /// A git op that failed outright — a push with nowhere to go — is the
     /// run's failure, its log the message, and its audit row says `error`:
     /// never an `ok` row whose result says it failed.
     #[tokio::test]
     async fn a_failed_git_op_is_a_failed_run() {
-        let f = services_with_effort().await;
+        let f = services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         std::fs::write(root.join("a.txt"), "one\n").unwrap();
@@ -693,7 +693,7 @@ mod tests {
     /// may call is its harness's to decide.
     #[tokio::test]
     async fn a_page_runs_git_for_its_presser_and_only_a_person_is_asked() {
-        let f = services_with_effort().await;
+        let f = services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         std::fs::write(root.join("a.txt"), "one\n").unwrap();
@@ -758,13 +758,13 @@ mod tests {
         );
     }
 
-    /// P5.B6 (tsk525): an agent runs VCS commands on its own stream only
+    /// P5.B6: an agent runs VCS commands on its own stream only
     /// (as its terminal's git reaches only its own worktree); a destructive
     /// one needs a person's confirmation; the audit row holds what the VCS
     /// reported.
     #[tokio::test]
     async fn vcs_commands_are_an_agents_on_its_own_stream_confirmed_and_audited() {
-        let f = services_with_effort().await;
+        let f = services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         std::fs::write(root.join("a.txt"), "one\n").unwrap();
@@ -900,7 +900,7 @@ mod tests {
     /// A first commit (no parent) has nothing to go back to.
     #[tokio::test]
     async fn a_commit_is_undone_by_a_soft_reset() {
-        let f = services_with_effort().await;
+        let f = services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         std::fs::write(root.join("a.txt"), "one\n").unwrap();
@@ -945,7 +945,7 @@ mod tests {
     /// can undo it.
     #[tokio::test]
     async fn a_commit_a_page_makes_for_the_person_is_undoable() {
-        let f = services_with_effort().await;
+        let f = services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         std::fs::write(root.join("a.txt"), "one\n").unwrap();
@@ -976,7 +976,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_first_commit_has_no_inverse() {
-        let f = services_with_effort().await;
+        let f = services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         let stream = svc.stream_store.list().await.unwrap()[0].id.to_string();
@@ -1001,7 +1001,7 @@ mod tests {
     /// changes, or mid-merge.
     #[tokio::test]
     async fn undoing_a_commit_is_refused_when_it_moved_on_was_pushed_or_is_mid_merge() {
-        let f = services_with_effort().await;
+        let f = services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         std::fs::write(root.join("a.txt"), "one\n").unwrap();

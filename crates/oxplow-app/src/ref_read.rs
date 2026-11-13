@@ -4,15 +4,15 @@
 //!
 //! - the **row** of the dataset its resource resolves through (its
 //!   declaration's `resolve:`), every column, by its `ref`;
-//! - what sits **beside** it, for the resources that have some: a work
-//!   item's links and comments, a commit's files, an effort's files;
+//! - what sits **beside** it, for the resources that have some: a
+//!   task's links and comments, a commit's files, a turn's files;
 //! - its **content**, for the resources whose body no dataset holds: a file
 //!   at a revision (`oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-40`;
 //!   the working tree when it names none, in the stream asked for else the
 //!   caller's), an event's stored body (`#part=input`, `output`, `prompt`,
 //!   `result` or `summary`; the caller's own stream's only), a model call's
 //!   (`#part=request` or `response`; not one another agent's thread asked
-//!   for), a page's definition.
+//!   for), a page's definition, a knowledge page's body.
 //!
 //! Content is cut at [`MAX_CONTENT`] bytes, saying so.
 
@@ -39,14 +39,14 @@ const MAX_RELATED: usize = 200;
 pub struct RefRead {
     /// The URI as read, canonical.
     pub uri: String,
-    /// Its resource (`oxplow/effort`).
+    /// Its resource (`oxplow/turn`).
     pub resource: String,
     /// The resolving dataset's row, every column; `None` for a resource no
     /// dataset holds (a file).
     pub row: Option<Map<String, Value>>,
     /// What sits beside it, by name (`links`, `comments`, `files`).
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    pub related: BTreeMap<&'static str, Vec<Map<String, Value>>>,
+    pub related: BTreeMap<String, Vec<Map<String, Value>>>,
     /// Its body, for a resource whose body no dataset holds.
     pub content: Option<String>,
     /// The content was cut at [`MAX_CONTENT`].
@@ -69,24 +69,14 @@ pub enum ReadError {
 /// query's `?1` the URI (its view left out).
 const RELATED: &[(&str, &str, &str)] = &[
     (
-        r::WORK_ITEM,
-        "links",
-        "SELECT * FROM v_work_item_link WHERE from_uri = ?1 ORDER BY created_at",
-    ),
-    (
-        r::WORK_ITEM,
-        "comments",
-        "SELECT * FROM v_work_item_comment WHERE uri = ?1 ORDER BY created_at",
-    ),
-    (
         r::COMMIT,
         "files",
         "SELECT * FROM v_commit_file WHERE sha = (SELECT sha FROM v_commit WHERE uri = ?1) ORDER BY path",
     ),
     (
-        r::EFFORT,
+        r::TURN,
         "files",
-        "SELECT * FROM v_effort_file WHERE effort_id = (SELECT id FROM v_effort WHERE uri = ?1) ORDER BY path",
+        "SELECT * FROM v_turn_file WHERE turn_id = (SELECT id FROM v_agent_turn WHERE uri = ?1) ORDER BY path",
     ),
 ];
 
@@ -171,7 +161,28 @@ pub async fn read(
                     .ok_or_else(|| ReadError::NotFound(reference.clone()))?,
             );
             for (_, name, sql) in RELATED.iter().filter(|(k, _, _)| *k == resource) {
-                out.related.insert(name, rows(svc, sql, &reference).await?);
+                out.related
+                    .insert(name.to_string(), rows(svc, sql, &reference).await?);
+            }
+            // A model's children are its items' related rows, by the child's
+            // name (a name core already lists keeps core's).
+            let models = svc.models.current();
+            for spec in models
+                .models
+                .values()
+                .filter(|m| m.decl.resource == resource)
+            {
+                for child in &spec.decl.children {
+                    if out.related.contains_key(&child.name) {
+                        continue;
+                    }
+                    let sql = format!(
+                        "SELECT * FROM \"{}\" WHERE parent = ?1",
+                        spec.decl.child_view(child).replace('"', "")
+                    );
+                    out.related
+                        .insert(child.name.clone(), rows(svc, &sql, &reference).await?);
+                }
             }
             match (resource.as_str(), part) {
                 (r::EVENT, Some(part)) => {
@@ -413,8 +424,6 @@ async fn ai_call_body(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_domain::Actor;
-    use serde_json::json;
 
     /// A project with `src/a.txt` committed as three lines, then edited in
     /// the working tree.
@@ -527,54 +536,6 @@ mod tests {
             .await,
             Err(ReadError::NotFound(_))
         ));
-    }
-
-    /// A work item is its row with its links and comments beside it.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn a_work_item_is_its_row_links_and_comments() {
-        let (_dir, svc) = project().await;
-        let created = |title: &str| {
-            let svc = svc.clone();
-            let title = title.to_string();
-            async move {
-                svc.commands
-                    .run(
-                        &Actor::Human,
-                        "oxplow.work_item.create",
-                        json!({ "title": title }),
-                        false,
-                    )
-                    .await
-                    .unwrap()
-                    .result["uri"]
-                    .as_str()
-                    .unwrap()
-                    .to_string()
-            }
-        };
-        let item = created("Fix the login loop").await;
-        let other = created("Ship it").await;
-        for (id, input) in [
-            (
-                "oxplow.work_item.link",
-                json!({ "uri": item, "target": other, "link_type": "blocks" }),
-            ),
-            (
-                "oxplow.work_item.comment",
-                json!({ "uri": item, "body": "Seen on Safari only." }),
-            ),
-        ] {
-            svc.commands
-                .run(&Actor::Human, id, input, false)
-                .await
-                .unwrap();
-        }
-        let read = read(&svc, &item, &Reader::default(), None).await.unwrap();
-        let row = read.row.unwrap();
-        assert_eq!(row["title"], "Fix the login loop");
-        assert_eq!(read.related["links"][0]["to_uri"], json!(other));
-        assert_eq!(read.related["comments"][0]["body"], "Seen on Safari only.");
-        assert_eq!(read.content, None);
     }
 
     /// Any kind a dataset owns reads as that dataset's row; one no dataset owns,

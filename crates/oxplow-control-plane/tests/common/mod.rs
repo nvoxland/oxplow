@@ -36,7 +36,7 @@ pub async fn boot() -> (
     let root = dir.path().canonicalize().unwrap();
     let services = Services::in_memory(&root).await.unwrap();
     // Seed the catalog as boot does — the OTLP token producer gates collection on
-    // `measure_has_active_spec` (tsk31), so the token specs must exist.
+    // `measure_has_active_spec`, so the token specs must exist.
     let cp = spawn(services.clone()).await.unwrap();
     (cp, services, root, dir)
 }

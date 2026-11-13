@@ -1,6 +1,6 @@
 # repo.inline_styles — `style={…}` JSX attributes (inline style-object
 # density; this app leans on them heavily — a migration-pressure signal, see
-# .context/theming.md). Re-added single-concern (tsk61). The attribute name is
+# .context/theming.md). Re-added single-concern. The attribute name is
 # a property_identifier under jsx_attribute.
 def transform(input):
     facts = []

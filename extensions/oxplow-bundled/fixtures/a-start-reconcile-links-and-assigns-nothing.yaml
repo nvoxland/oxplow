@@ -1,0 +1,13 @@
+# A start reconcile links nothing and assigns nobody (a reconcile means
+# "catching up", not "this happened now"): the task filed in the turn keeps
+# its one `filed` link, and the reconcile adds none.
+requires: [oxtask]
+given:
+  - observe: { turn: { prompt: File it, during: [{ command: oxtask.task.create, input: { title: Filed, stage: ready }, as: agent }] } }
+when: { collector: oxtask/tasks, trigger: start }
+expect: { ok: true }
+steps:
+  - when: { sql: "SELECT group_concat(basis) AS bases FROM v_oxplow_request_task" }
+    expect: { rows: [{ bases: filed }] }
+  - when: { sql: "SELECT state, assignee FROM v_oxplow_task" }
+    expect: { rows: [{ state: todo, assignee: null }] }

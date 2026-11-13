@@ -4,7 +4,7 @@ import type { Editor } from "@tiptap/core";
 import { useEditorState } from "@tiptap/react";
 import { Bold, Code, Heading2, Heading3, Italic, Link2, MessageSquarePlus } from "lucide-react";
 
-import { type MentionRef, preprocessWikilinks } from "./MarkdownView.js";
+import { type MentionRef, preprocessWikilinks } from "./markdownLinks.js";
 
 /**
  * The editor's selection toolbar (`.context/markdown.md`): floated over a

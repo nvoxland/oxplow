@@ -45,7 +45,7 @@ Oxplow and extensions ask for a role, not a model:
 | Role | Used for |
 |---|---|
 | `main` | general reasoning |
-| `summarize` | summaries of sessions, efforts and changes |
+| `summarize` | summaries of sessions, requests and changes |
 | `decide` | typed yes/no, choice and score questions (Jev fits well) |
 
 A role with no model assigned just isn't available. Anything that needs it
@@ -79,21 +79,6 @@ anything is sent, naming the role and the restriction. Extensions choose
 which role or profile they use, but they can't lift a restriction.
 `oxplow extension check` warns when an extension's AI profile needs
 something its model is restricted from.
-
-## What oxplow uses them for
-
-- **Decisions and claims Oxplow noticed.** When an effort closes, a model
-  reads that effort's conversation, final answers and tool calls. It lists
-  decisions the agent made without recording them, and the claims its
-  answers made about its work ("the tests pass", "no behavior change").
-  They show on the effort's review, next to the decisions the agent did
-  record; you confirm or dismiss a decision, and verify or dismiss a
-  claim. They're guesses, and your agent never sees them. The model is the
-  one you bind to an extension's own role in Settings → AI, or your
-  `main` model until you do. Nothing runs until one of them has a model,
-  and its extension is deployed with the permissions it declares (Settings →
-  Extensions). **Infer Again** on the list asks once more, say after you bind
-  another model.
 
 ## What your agent can do
 

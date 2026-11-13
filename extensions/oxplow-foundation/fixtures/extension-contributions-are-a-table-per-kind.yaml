@@ -32,7 +32,7 @@ expect:
       rows:
         contains:
           - { title: oxplow.agent.draft, description: "Put text in the shown thread's agent input, unsent." }
-    skills: { rows: { contains: [{ description: $any }] } }
+    skills: { rows: 0 }
     components: { rows: { contains: [{ title: Integrations }] } }
     metrics:
       rows:
@@ -42,5 +42,5 @@ expect:
     dimensions: { rows: { contains: [{ title: Agent, description: The coding agent that did the work. }] } }
     implementations: { rows: { contains: [{ title: Claude, description: Runs Claude Code as a coding agent. }] } }
     resources: { rows: { contains: [{ title: Commit, description: A git commit. }] } }
-    collectors: { rows: { contains: [{ description: "How an effort's tests went, recorded when it finishes." }] } }
+    collectors: { rows: { contains: [{ description: "How a request went — its tokens, its cycle time and its tests — recorded when a turn of it ends." }] } }
   text: { contains: ["## Metrics", "Count of nudges fired to the agent."] }

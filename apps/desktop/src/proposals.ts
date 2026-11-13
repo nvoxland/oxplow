@@ -40,7 +40,7 @@ export interface Proposal {
   /** The proposing thread (`thr3`) or page. */
   actorId: string | null;
   threadId: number | null;
-  /** The proposing thread's title, as a person knows it (tsk1044). */
+  /** The proposing thread's title, as a person knows it. */
   threadTitle: string | null;
   /** `config:<key>` for a config change, else the command and its input. */
   key: string;
@@ -166,7 +166,7 @@ export function sourceOf(p: Proposal): Source {
   return {
     kind: "agent",
     label: p.threadTitle ?? p.actorId ?? "An agent",
-    ...(thread ? { uri: pageTabRef("thread-work", { thread }).id } : {}),
+    ...(thread ? { uri: pageTabRef("thread-tasks", { thread }).id } : {}),
   };
 }
 

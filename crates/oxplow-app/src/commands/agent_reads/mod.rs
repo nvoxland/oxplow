@@ -1,7 +1,7 @@
 //! The agent's reads as operations of read scopes (`records.read`,
 //! `sql.read`, `search.read`, `pages.read`, `agent_text.read`,
 //! `lsp.read`, `vcs.read`, `extensions.check`,
-//! `collectors.preview`, `ai.compute`, `knowledge.read`, `changes.read`).
+//! `collectors.preview`, `ai.compute`, `comment.read`, `changes.read`).
 //! Each is `Access::Read` on the daemon, with an `External` handler that
 //! reads live state through `Services`; `extensions/oxplow-foundation`
 //! declares the commands over them (`oxplow.records.read`,
@@ -21,13 +21,14 @@ use crate::Services;
 pub mod ai;
 pub mod changes;
 pub mod collectors;
+pub mod comments;
 pub mod extensions;
 pub mod ids;
-pub mod knowledge;
 pub mod lsp;
 pub mod page_tools;
 pub mod pages;
 pub mod records;
+pub mod refs;
 pub mod search;
 pub mod skill;
 pub mod sql;
@@ -47,7 +48,8 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
     ops.extend(extensions::ops(services.clone()));
     ops.extend(collectors::ops(services.clone()));
     ops.extend(ai::ops(services.clone()));
-    ops.extend(knowledge::ops(services.clone()));
+    ops.extend(comments::ops(services.clone()));
+    ops.extend(refs::ops(services.clone()));
     ops.extend(changes::ops(services.clone()));
     ops
 }

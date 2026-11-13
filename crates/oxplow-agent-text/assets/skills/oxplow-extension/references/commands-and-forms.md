@@ -2,14 +2,14 @@
 
 - **A command on a URI's menus** (its page's Commands, a row's
   right-click) says so in its own `ui`: `ui: { label, group?, about:
-  oxplow/work_item, input?: { uri: "{{uri}}" } }` (`about` is a resource
+  oxplow/task, input?: { uri: "{{uri}}" } }` (`about` is a resource
   name, `<namespace>/<name>`; `"{{uri.id}}"` binds the URI's key param, such as
   the id, alone). In a page's ☰ it sits at the top level among the page's
   own actions, sorted by label (`group` is the palette's heading and the
   row menu's grouping, not a ☰ submenu). Add `about_when: <column>` to
   offer it only on a ref whose row has that column truthy (not null, 0,
   `""`, false) — a column of the dataset the resource resolves through,
-  `closed` or `has_work_item`: a ref in another state is not offered the
+  `closed` or `has_task`: a ref in another state is not offered the
   command, so use it where the operation refuses some states. To offer
   another command there with a fixed input, declare your own over the
   same operation.
@@ -17,8 +17,7 @@
   name: item.estimate, summary, provider: <your provider id>, op:
   estimate, ui? }]` — the operation's input (plus an optional
   `instance`) and access come from its declarations; it runs on the
-  instance its `uri` (or `instance`) names. Its capability verbs aren't
-  declared: they run as `oxplow.work_item.<verb>`.
+  instance its `uri` (or `instance`) names.
 
 - **`commands:`** register commands of your own, as
   `<namespace>.<area>.<verb>`: `{ name: area.verb, summary, input_schema,
@@ -29,7 +28,7 @@
   list `sql.read` in `needs`) and returns `{ commands: [{ name, input }],
   result? }`
   — or `{ refuse: "why" }` to decline (the caller sees the reason).
-  Splice text an agent wrote (a claim, a decision) into a comment or
+  Splice text an agent wrote into a comment or
   body with `md_text(text)`: one inert line, so it can't add headings,
   links or items;
   those core commands run as the caller, each one's own policy and
@@ -54,12 +53,18 @@
   invoke one of its `commands` (a
   component that declares any runs them under the extension's
   permissions, approved when it was deployed; a command that asks
-  still asks) or navigate. Its `index.html` loads
+  still asks), run an **action point** it lists in `action_points: [<id>]`
+  (`invokePoint(point, context, command?)` runs the one command that
+  answers the point for the context, as the person; a drag of a card to
+  another column is "move this item to stage X" — the store that joined
+  the point answers, so the component names no store's command and needs
+  no `commands:` for it; `command` picks one when several answer) or
+  navigate. Its `index.html` loads
   oxplow's client library with a plain `<script
   src="/component-lib/oxplow-component.js">` before its own plain script
   (no modules: a sandboxed frame can't load them), and the script calls
   `oxplow.connect().then((component) => …)` for `component.data` (each
-  loader's rows by name), `onUpdate(({ data, changed }) => …)`, `invoke` and `navigate`; it never
+  loader's rows by name), `onUpdate(({ data, changed }) => …)`, `invoke`, `invokePoint` and `navigate`; it never
   fetches (a page loader feeds it). `$OXPLOW_BIN extension new
   component <name>` scaffolds a working one; `docs/guide/pages.md` has
   the reference; `dashboards.md` has an example. A component written in TypeScript or with a library is
@@ -104,8 +109,8 @@
   is its subtitle (a page action's form is about the page, its title).
   `input` values that aren't `fixed` are where the fields start (bind the
   text a person sees, e.g. a `display_name` column, not an empty one).
-  `{ id: edit, label: Edit…, command: oxplow.work_item.update, row: true,
-  form: true, about: title, fixed: [uri], input: { uri: "{{row.uri}}", title: "{{row.title}}" } }`.
+  `{ id: edit, label: Edit…, command: oxtask.task.update, row: true,
+  form: true, about: title, fixed: [id], input: { id: "{{row.native_id}}", title: "{{row.title}}" } }`.
 - **How a form's fields read** (an action's `fields`, or a form node's):
   `fields: [{ name: title, label: Name, help: What the tab shows. }, native]`
   lists the only fields shown, in order (the rest keep `input`'s value),
@@ -126,6 +131,23 @@
   cards between columns; `bulk: true` runs once per marked row; `key: f`
   runs on the cursor row. You run the command yourself; these are the
   person's gestures.
+- **An action point instead of a command** (`point: oxplow/task.move,
+  context: { uri: "{{row.uri}}", stage: "{{option.value}}" }`): whichever
+  command a store joined to the point (and accepts that item) runs, so the
+  page names no store's command. `context:` binds like `input:`; `command:`
+  beside it picks one when several answer; `bulk`, `drag`, `row` and
+  `options_from` work as usual. A row nothing answers is skipped with a
+  reason, not failed. No `form` with it.
+- **One action, many choices** (a row action): `options_from: <loader>`
+  offers each row of that loader of this page (`value`, `label`, an
+  optional `group`) as an entry of a submenu, and binds the one picked as
+  `{{option.value}}` / `{{option.label}}`; `current: <column>` is the
+  row's column holding the option it is in now, shown checked and not
+  offered. A Mark ▸ of a list's stages:
+  `{ id: mark, label: Mark, point: oxplow/task.move, row: true,
+  options_from: stages, current: stage, context: { uri: "{{row.uri}}", stage: "{{option.value}}" } }`.
+  With `bulk: true` the marked rows get a select. No `form`, `drag`,
+  `edit`, `group` or `key` with it.
 - **In a component**, a `<form>` is fine: handle `submit` in your script
   (`preventDefault`) and run the command with `invoke`. A refusal rejects
   with `{ code, message, field? }`: when it names a `field`, show `message`

@@ -13,8 +13,7 @@
 //! [`Budget`](oxplow_domain::run::Budget) or memory cap (`crate::workers`). [`run_exec`] is a
 //! child process of its own and honours the same budget. It also drains
 //! stdout/stderr on their own threads while writing stdin, because doing
-//! those in sequence deadlocks any streaming filter once a pipe buffer fills
-//! (tsk161).
+//! those in sequence deadlocks any streaming filter once a pipe buffer fills.
 //!
 //! Every engine takes an already-parsed JSON input value (the host applied the
 //! collector's declared container parser first — see `CollectorInput`) and
@@ -163,6 +162,20 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
         };
         Ok(crate::helpers::md_text(&text, limit as usize))
     }
+    /// The 32 lower-case hex digits of `text`'s UTF-8 bytes' xxh3-128: the
+    /// identity oxplow keys a blob by, so a snapshots script can report a
+    /// file's. Pure.
+    fn xxh3_128(text: &str) -> anyhow::Result<String> {
+        Ok(format!(
+            "{:032x}",
+            xxhash_rust::xxh3::xxh3_128(text.as_bytes())
+        ))
+    }
+    /// `text`'s size in UTF-8 bytes (`len` counts characters): the size of
+    /// the file the text was read from. Pure.
+    fn utf8_len(text: &str) -> anyhow::Result<u32> {
+        Ok(u32::try_from(text.len()).unwrap_or(u32::MAX))
+    }
     fn lines<'v>(
         content: &str,
         heap: starlark::values::Heap<'v>,
@@ -300,7 +313,7 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
             // Codegen output (generated/ path, do-not-edit header) is
             // not hand-written code — keep it out of the code-shape
             // corpus so a 3k-line bindings file can't dominate the
-            // fn_length/complexity tails (tsk68).
+            // fn_length/complexity tails.
             .filter(|(path, text)| !oxplow_code_metrics::is_generated_source(path.as_str(), text))
             .collect();
         entries.sort_by(|a, b| a.0.cmp(b.0));
@@ -416,6 +429,20 @@ pub fn check_starlark(path: &str, script: &str) -> Result<(), String> {
 /// Whether `script` parses and defines each of `functions` at the top
 /// level of its module; a message naming the first one missing.
 pub fn check_starlark_defines(path: &str, script: &str, functions: &[&str]) -> Result<(), String> {
+    let defined = top_level_defs(path, script)?;
+    for name in functions {
+        if !defined.iter().any(|d| d == name) {
+            return Err(format!(
+                "must define `{name}` (`def {name}(x):`) at the top level"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// The functions `script` (the file at `path`) defines at the top level of
+/// its module, in order; a message when it doesn't parse.
+pub fn top_level_defs(path: &str, script: &str) -> Result<Vec<String>, String> {
     use starlark::syntax::ast::StmtP;
     use starlark::syntax::{AstModule, Dialect};
     let ast = AstModule::parse(path, script.to_string(), &Dialect::Standard)
@@ -424,17 +451,13 @@ pub fn check_starlark_defines(path: &str, script: &str, functions: &[&str]) -> R
         StmtP::Statements(stmts) => stmts.iter().collect::<Vec<_>>(),
         _ => vec![ast.statement()],
     };
-    for name in functions {
-        let defines = top
-            .iter()
-            .any(|s| matches!(&s.node, StmtP::Def(d) if d.name.ident == *name));
-        if !defines {
-            return Err(format!(
-                "must define `{name}` (`def {name}(x):`) at the top level"
-            ));
-        }
-    }
-    Ok(())
+    Ok(top
+        .iter()
+        .filter_map(|s| match &s.node {
+            StmtP::Def(d) => Some(d.name.ident.clone()),
+            _ => None,
+        })
+        .collect())
 }
 
 /// Run a Starlark script against `input`. The script must define
@@ -654,7 +677,7 @@ pub fn run_exec_authorized_at(
 
     let group = crate::process_group::ProcessGroup::new(child.id());
 
-    // Every pipe gets its own thread (tsk161). Writing the whole report to
+    // Every pipe gets its own thread. Writing the whole report to
     // stdin and only THEN calling `wait_with_output` deadlocks any streaming
     // filter: once the child's stdout pipe fills (~64 KB) the child blocks
     // writing, so it stops reading stdin, so the parent blocks writing — and
@@ -989,6 +1012,20 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// `xxh3_128(text)` is the 32 lower-case hex digits oxplow keys a blob
+    /// by (`BlobStore::hash`) of the text's UTF-8 bytes: what a snapshots
+    /// script reports as a file's identity. `utf8_len` is the size in those
+    /// bytes (a string's `len` counts characters).
+    #[test]
+    fn xxh3_128_and_utf8_len_name_a_text_as_the_blob_store_does() {
+        let script = "def f(x):\n    return [xxh3_128(\"abc\"), xxh3_128(\"é\"), xxh3_128(\"\"), utf8_len(\"é\"), len(\"é\")]\n";
+        let hex = |bytes: &[u8]| format!("{:032x}", xxhash_rust::xxh3::xxh3_128(bytes));
+        assert_eq!(
+            run_starlark_fn(script, "f", &json!({})).unwrap(),
+            json!([hex(b"abc"), hex("é".as_bytes()), hex(b""), 2, 1])
+        );
+    }
+
     /// A script may define several functions the host calls by name (an
     /// AI provider's `request` and `response`); the check names what's
     /// missing.
@@ -1019,7 +1056,7 @@ mod tests {
         EXEC.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// tsk161: the deadlock. A streaming filter that echoes its input can't be
+    /// the deadlock. A streaming filter that echoes its input can't be
     /// fed a payload larger than the pipe buffer unless stdout is drained
     /// concurrently — the child blocks writing stdout, so it stops reading
     /// stdin, so the parent blocks writing, forever. 4 MB through `cat` used to
@@ -1305,14 +1342,14 @@ def transform(input):
         let f = cov.files.get("x").unwrap();
         assert_eq!(f.instrumented.len(), 3);
         assert!(f.covered.is_empty());
-        // Branch/function counts default to 0 when the report omits them (tsk123).
+        // Branch/function counts default to 0 when the report omits them.
         assert_eq!(f.branches_found, 0);
         assert_eq!(f.functions_found, 0);
     }
 
     #[test]
     fn coverage_json_carries_branch_and_function_counts() {
-        // tsk123: the parsers emit camelCase branch/function counts; they
+        // the parsers emit camelCase branch/function counts; they
         // deserialize onto the typed FileCoverage.
         let v = json!({ "files": { "x": {
             "instrumented": [1, 2], "covered": [1],

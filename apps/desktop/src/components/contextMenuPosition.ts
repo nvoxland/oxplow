@@ -1,4 +1,4 @@
-// Viewport-fitting math for `ContextMenu` (tsk146). Pure and React-free so the
+// Viewport-fitting math for `ContextMenu`. Pure and React-free so the
 // off-screen cases are unit-testable — the happy-dom harness does no layout, so
 // a rendered menu reports a zero-sized rect and a "is the top on screen?"
 // assertion would pass vacuously.

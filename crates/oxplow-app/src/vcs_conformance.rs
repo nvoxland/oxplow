@@ -64,7 +64,7 @@ pub async fn a_commit_reads_back_what_it_captured(p: &dyn Vcs, ws: &Path) {
     assert_ne!(objects.id_of(b"two\n"), *id);
     assert_eq!(objects.read(&objects.id_of(b"never stored")), None);
     // One path, without walking the tree: the same id; nothing for a
-    // directory or a missing path (tsk553).
+    // directory or a missing path.
     std::fs::create_dir_all(ws.join("dir")).unwrap();
     write(ws, "dir/b.txt", "b\n");
     let second = commit(p, ws, "second").await;

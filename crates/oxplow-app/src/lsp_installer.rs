@@ -312,7 +312,7 @@ mod tests {
         assert_eq!(listed[0].config.language_id, "rust");
         assert_eq!(listed[0].package, "rust-analyzer");
         assert_eq!(listed[0].version, "v1");
-        // tsk556: an installed server covers its language's files, so
+        // an installed server covers its language's files, so
         // code intelligence and the symbol collector find it.
         assert_eq!(mgr.language_for_path("src/lib.rs").as_deref(), Some("rust"));
         assert_eq!(mgr.language_for_path("notes.md"), None);

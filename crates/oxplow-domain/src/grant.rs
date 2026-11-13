@@ -76,7 +76,8 @@ impl Grant {
         let ok = match need {
             Need::Scope(s) => match crate::service::need_scope(s) {
                 "sql.read" => p.sql.is_some(),
-                "tree.read" => p.files.is_some(),
+                "tree.read" | "files.read" => p.files.is_some(),
+                "files.write" => p.files == Some(crate::permissions::FilesAccess::Write),
                 "ai.compute" | "ai.discover" => p.ai,
                 _ => true,
             },
@@ -96,7 +97,8 @@ impl Grant {
         Err(match need {
             Need::Scope(s) => match crate::service::need_scope(s) {
                 "sql.read" => "sql.read".to_string(),
-                "tree.read" => "files.read".to_string(),
+                "tree.read" | "files.read" => "files.read".to_string(),
+                "files.write" => "files.write".to_string(),
                 _ => "ai.compute".to_string(),
             },
             Need::Dataset(_) => "sql.read".to_string(),
@@ -260,7 +262,7 @@ mod tests {
     #[test]
     fn a_need_is_decided_against_the_extensions_permissions() {
         let g = granted(
-            "[process.run, \"network:*.githubusercontent.com\", network:api.github.com, secrets:GH_TOKEN, commands:oxplow.work_item.*]",
+            "[process.run, \"network:*.githubusercontent.com\", network:api.github.com, secrets:GH_TOKEN, commands:oxplow.task.*]",
         );
         let declared = GrantRequest {
             scopes: ["ai.compute".to_string(), "sql.read".to_string()].into(),
@@ -287,7 +289,7 @@ mod tests {
             Decision::Denied("not declared".into())
         );
         assert_eq!(
-            d(Need::Command("oxplow.work_item.transition".into())),
+            d(Need::Command("oxplow.task.transition".into())),
             Decision::Allowed
         );
         assert_eq!(

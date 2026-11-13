@@ -1,0 +1,23 @@
+# Ids are minted by the insert from the row number: two creates never share
+# one. Each new row logs one `upserted` change event, in the command's run.
+requires: [oxplow-bundled, oxtask]
+given:
+  - { command: oxtask.task.create, input: { title: First } }
+when: { command: oxtask.task.create, input: { title: Second } }
+expect: { ok: true, result: { id: tsk2 } }
+steps:
+  - when: { sql: "SELECT id, title, state FROM v_oxplow_task_record ORDER BY id" }
+    expect:
+      rows:
+        - { id: tsk1, title: First, state: backlog }
+        - { id: tsk2, title: Second, state: backlog }
+  - when:
+      sql: |
+        SELECT json_extract(payload, '$.id') AS id, json_extract(payload, '$.op') AS op,
+               json_extract(payload, '$.store') AS store
+        FROM v_event WHERE type = 'oxplow.task_record.changed'
+        ORDER BY id
+    expect:
+      rows:
+        - { id: tsk1, op: upserted, store: oxtask }
+        - { id: tsk2, op: upserted, store: oxtask }

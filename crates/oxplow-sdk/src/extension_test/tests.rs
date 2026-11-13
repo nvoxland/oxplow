@@ -12,10 +12,10 @@ fn write(root: &Path, rel: &str, body: &str) {
 /// intent example per kind, each with its fixture.
 fn tally(root: &Path, collector_expect: &str, command_expect: &str) {
     write(
-            root,
-            ".oxplow/extensions/tally/extension.yaml",
-            &format!(
-                "manifest: 2
+        root,
+        ".oxplow/extensions/tally/extension.yaml",
+        &format!(
+            "manifest: 2
 name: tally
 intent:
   purpose: Count things.
@@ -28,7 +28,7 @@ collectors:
   - id: things
     runtime: starlark
     entry: collectors/things.star
-    input: \"SELECT uri FROM v_work_item\"
+    input: \"SELECT uri FROM v_thread\"
     entities:
       - {{ name: thing, key: id, columns: {{ id: int, label: text }} }}
   - id: shell
@@ -45,14 +45,14 @@ datasets:
       - {{ name: label, type: TEXT, doc: Its label. }}
 commands:
   - name: work.note
-    summary: Note a work item.
-    input_schema: {{ type: object, required: [uri], properties: {{ uri: {{ type: string }} }} }}
+    summary: Note a thread.
+    input_schema: {{ type: object, required: [thread], properties: {{ thread: {{ type: string }} }} }}
     entry: handlers/note.star
     examples:
-      - {{ name: happy, input: {{ uri: \"work_item:oxplow:tsk1\" }}, expect_commands: {command_expect} }}
+      - {{ name: happy, input: {{ thread: \"thr1\" }}, expect_commands: {command_expect} }}
 "
-            ),
-        );
+        ),
+    );
     write(
             root,
             ".oxplow/extensions/tally/collectors/things.star",
@@ -71,7 +71,7 @@ commands:
     write(
             root,
             ".oxplow/extensions/tally/handlers/note.star",
-            "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.comment\", \"input\": {\"uri\": x[\"input\"][\"uri\"], \"body\": \"noted\"}}]}\n",
+            "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.thread.rename\", \"input\": {\"thread\": x[\"input\"][\"thread\"], \"title\": \"noted\"}}]}\n",
         );
     write(
             root,
@@ -99,12 +99,12 @@ commands:
     write(
         root,
         ".oxplow/extensions/tally/README.md",
-        "Read `v_tally_labelled`; note a work item with `tally.work.note`.\n",
+        "Read `v_tally_labelled`; note a thread with `tally.work.note`.\n",
     );
     write(
             root,
             ".oxplow/extensions/tally/questions.yaml",
-            "- question: Which things are labelled?\n  skill: README.md\n  reaches:\n    sql: SELECT id, label FROM v_tally_labelled\n  shape: { columns: [id, label] }\n- question: Note a work item.\n  skill: README.md\n  reaches:\n    command: tally.work.note\n    input: { uri: \"work_item:oxplow:tsk1\" }\n",
+            "- question: Which things are labelled?\n  skill: README.md\n  reaches:\n    sql: SELECT id, label FROM v_tally_labelled\n  shape: { columns: [id, label] }\n- question: Note a thread.\n  skill: README.md\n  reaches:\n    command: tally.work.note\n    input: { thread: thr1 }\n",
         );
 }
 
@@ -117,7 +117,7 @@ async fn extension_test_runs_a_collector_that_calls_a_model_against_the_fixture_
     tally(
         dir.path(),
         "{ entities: { thing: 2 } }",
-        "[oxplow.work_item.comment]",
+        "[oxplow.thread.rename]",
     );
     write(
             dir.path(),
@@ -146,7 +146,7 @@ async fn extension_test_runs_every_kinds_examples() {
     tally(
         dir.path(),
         "{ entities: { thing: 2 } }",
-        "[oxplow.work_item.comment]",
+        "[oxplow.thread.rename]",
     );
     let report = test_extension(dir.path(), "tally", false).await.unwrap();
     assert_eq!(report.error_lines(), Vec::<String>::new());
@@ -169,7 +169,7 @@ async fn extension_test_runs_every_kinds_examples() {
     tally(
         dir.path(),
         "{ entities: { thing: 3 } }",
-        "[oxplow.work_item.comment]",
+        "[oxplow.thread.rename]",
     );
     let report = test_extension(dir.path(), "tally", false).await.unwrap();
     let errors = report.error_lines().join("\n");
@@ -184,12 +184,12 @@ async fn extension_test_runs_every_kinds_examples() {
     tally(
         dir.path(),
         "{ entities: { thing: 2 } }",
-        "[oxplow.work_item.transition]",
+        "[oxplow.thread.mark]",
     );
     let report = test_extension(dir.path(), "tally", false).await.unwrap();
     let errors = report.error_lines().join("\n");
     assert!(
-            errors.contains("example `happy`: composed [oxplow.work_item.comment] but `expect_commands` is [oxplow.work_item.transition]"),
+            errors.contains("example `happy`: composed [oxplow.thread.rename] but `expect_commands` is [oxplow.thread.mark]"),
             "{errors}"
         );
 }
@@ -201,13 +201,13 @@ fn producer_and_consumer(root: &Path, version: u32) {
             root,
             ".oxplow/extensions/maker/extension.yaml",
             &format!(
-                "manifest: 2\nname: maker\nintent:\n  purpose: Make items.\ndatasets:\n  - name: items\n    version: {version}\n    description: Items.\n    fields:\n      - {{ name: uri, type: TEXT, doc: A work item. }}\nexports:\n  - {{ contribution: oxplow:oxplow/dataset?dataset=maker/items, version: {version}, visibility: stable }}\n"
+                "manifest: 2\nname: maker\nintent:\n  purpose: Make items.\ndatasets:\n  - name: items\n    version: {version}\n    description: Items.\n    fields:\n      - {{ name: uri, type: TEXT, doc: A task. }}\nexports:\n  - {{ contribution: oxplow:oxplow/dataset?dataset=maker/items, version: {version}, visibility: stable }}\n"
             ),
         );
     write(
         root,
         ".oxplow/extensions/maker/datasets/items.sql",
-        "SELECT uri FROM ref('work_item')\n",
+        "SELECT uri FROM ref('thread')\n",
     );
     write(
             root,
@@ -282,7 +282,7 @@ async fn a_read_commands_example_checks_its_result() {
         tally(
             dir.path(),
             "{ entities: { thing: 2 } }",
-            "[oxplow.work_item.comment]",
+            "[oxplow.thread.rename]",
         );
         let manifest = dir.path().join(".oxplow/extensions/tally/extension.yaml");
         let yaml = std::fs::read_to_string(&manifest).unwrap().replace(
@@ -416,8 +416,8 @@ async fn a_scaffolded_effect_tests_clean_and_a_mismatch_names_its_fixture() {
     std::fs::write(
         &fixture,
         text.replace(
-            "commands: [oxplow.work_item.comment]",
-            "commands: [oxplow.work_item.update]",
+            "commands: [oxplow.thread.rename]",
+            "commands: [oxplow.thread.mark]",
         ),
     )
     .unwrap();
@@ -437,15 +437,15 @@ async fn an_event_fixture_lists_the_commands_an_effect_ran_not_their_sequence() 
     let dir = tempfile::tempdir().unwrap();
     crate::scaffold(dir.path(), crate::Kind::Effect, "notes", None).unwrap();
     write(
-            dir.path(),
-            ".oxplow/extensions/notes/fixtures/basic.yaml",
-            "requires: [oxplow-bundled]\ngiven: [{ command: oxplow.work_item.create, input: { title: T }, bind: t }]
+        dir.path(),
+        ".oxplow/extensions/notes/fixtures/basic.yaml",
+        "given: [{ command: oxplow.thread.create, input: { stream: str1, title: T }, bind: t }]
 when:
-  event: { type: work_item.state_changed, payload: { work_item: $t.uri, to: done } }
+  event: { type: thread.closed, payload: { thread: $t.id } }
 expect:
-  commands: [oxplow.work_item.comment]
+  commands: [oxplow.thread.rename]
 ",
-        );
+    );
     let report = test_extension(dir.path(), "notes", false).await.unwrap();
     assert!(report.ok, "{:?}", report.errors);
 }
@@ -457,15 +457,15 @@ async fn a_command_fixture_lists_the_commands_an_effect_ran_not_their_sequence()
     let dir = tempfile::tempdir().unwrap();
     crate::scaffold(dir.path(), crate::Kind::Effect, "notes", None).unwrap();
     write(
-            dir.path(),
-            ".oxplow/extensions/notes/fixtures/basic.yaml",
-            "requires: [oxplow-bundled]\ngiven: [{ command: oxplow.work_item.create, input: { title: T, state: in_progress }, bind: t }]
-when: { command: oxplow.work_item.transition, input: { uri: $t.uri, to: done } }
+        dir.path(),
+        ".oxplow/extensions/notes/fixtures/basic.yaml",
+        "given: [{ command: oxplow.thread.create, input: { stream: str1, title: T }, bind: t }]
+when: { command: oxplow.thread.close, input: { thread: $t.id } }
 expect:
   ok: true
-  commands: [oxplow.work_item.comment]
+  commands: [oxplow.thread.rename]
 ",
-        );
+    );
     let report = test_extension(dir.path(), "notes", false).await.unwrap();
     assert!(report.ok, "{:?}", report.errors);
 }
@@ -536,10 +536,10 @@ async fn a_given_observes_an_event_the_effects_react_to() {
     write(
         dir.path(),
         ".oxplow/extensions/notes/fixtures/basic.yaml",
-        "requires: [oxplow-bundled]\ngiven:
-  - { command: oxplow.work_item.create, input: { title: T }, bind: t }
-  - observe: { event: { type: work_item.state_changed, payload: { work_item: $t.uri, to: done } } }
-when: { sql: SELECT count(*) AS n FROM v_work_item_comment }
+        "given:
+  - { command: oxplow.thread.create, input: { stream: str1, title: T }, bind: t }
+  - observe: { event: { type: thread.closed, payload: { thread: $t.id } } }
+when: { sql: SELECT count(*) AS n FROM v_thread WHERE title LIKE 'TODO%' }
 expect: { rows: [{ n: 1 }] }
 ",
     );
@@ -601,30 +601,8 @@ expect:
     assert!(report.ok, "{:?}", report.errors);
 }
 
-/// `observe: { change }` of an effort's change takes the effort's id.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_given_observes_an_efforts_change() {
-    let dir = tempfile::tempdir().unwrap();
-    crate::scaffold(dir.path(), crate::Kind::Command, "notes", None).unwrap();
-    write(
-            dir.path(),
-            ".oxplow/extensions/notes/fixtures/basic.yaml",
-            "requires: [oxplow-bundled]\ngiven:
-  - { command: oxplow.effort.open, input: { thread: thr1 } }
-  - observe: { change: { kind: effort, target: eff1, files: [{ path: src/a.rs, additions: 10, deletions: 4 }] } }
-when:
-  sql: SELECT c.kind, c.target, f.deletions FROM v_change c JOIN v_change_file f ON f.change_id = c.id
-expect:
-  rows:
-    - { kind: effort, target: '1', deletions: 4 }
-",
-        );
-    let report = test_extension(dir.path(), "notes", false).await.unwrap();
-    assert!(report.ok, "{:?}", report.errors);
-}
-
 /// `observe: { test_run }` records a run's cases as a run recorder does:
-/// a capture of the effort with a fact per case.
+/// a capture of the turn with a fact per case.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_given_observes_a_test_run() {
     let dir = tempfile::tempdir().unwrap();
@@ -632,10 +610,10 @@ async fn a_given_observes_a_test_run() {
     write(
             dir.path(),
             ".oxplow/extensions/notes/fixtures/basic.yaml",
-            "requires: [oxplow-bundled]\ngiven:
-  - { command: oxplow.effort.open, input: { thread: thr1 } }
-  - observe: { test_run: { effort: eff1, at: \"2026-01-01T00:00:00Z\", cases: [{ name: a, status: passed }, { name: b, status: failed }] } }
-  - observe: { test_run: { effort: eff1, at: \"2026-01-01T00:01:00Z\", asserted_failed: 2 } }
+            "given:
+  - observe: { turn: { prompt: run the tests } }
+  - observe: { test_run: { turn: 1, at: \"2026-01-01T00:00:00Z\", cases: [{ name: a, status: passed }, { name: b, status: failed }] } }
+  - observe: { test_run: { turn: 1, at: \"2026-01-01T00:01:00Z\", asserted_failed: 2 } }
 when:
   sql: SELECT dims_json, count(*) AS n FROM v_fact WHERE measure_key = 'oxplow.test_case' GROUP BY dims_json ORDER BY n
 expect:
@@ -1005,149 +983,6 @@ expect:
     assert!(report.ok, "{:?}", report.errors);
 }
 
-/// `observe: { evidence }` sets the observations an effort's page
-/// reads.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_given_observes_an_efforts_evidence() {
-    let dir = tempfile::tempdir().unwrap();
-    crate::scaffold(dir.path(), crate::Kind::Command, "notes", None).unwrap();
-    write(
-            dir.path(),
-            ".oxplow/extensions/notes/fixtures/basic.yaml",
-            "requires: [oxplow-bundled]\ngiven:
-  - { command: oxplow.effort.open, input: { thread: thr1 } }
-  - observe:
-      evidence:
-        effort: eff1
-        observations:
-          - { kind: test-run, payload: { passed: 4, failed: 1 } }
-          - { kind: diff-coverage, metric_value: 79.5, payload: { summaryPct: 79.5 } }
-when:
-  sql: SELECT kind, metric_value, provenance FROM v_effort_observation WHERE effort_id = 1 ORDER BY seq
-expect:
-  rows:
-    - { kind: test-run, metric_value: null, provenance: observed }
-    - { kind: diff-coverage, metric_value: 79.5 }
-",
-        );
-    let report = test_extension(dir.path(), "notes", false).await.unwrap();
-    assert!(report.ok, "{:?}", report.errors);
-}
-
-/// A policy that opens an item's effort when it starts on a thread,
-/// and closes its open efforts (read through `scope`) when it ends.
-const TIDY: &str = r#"
-def transform(x):
-    e = x["event"]
-    if e["type"] != "work_item.state_changed":
-        return {"skip": "not an item's move"}
-    item = e["payload"]["work_item"]
-    to = e["payload"]["to"]
-    thread = e["anchors"].get("thread_id")
-    if to == "in_progress" and thread != None:
-        return {"commands": [{"name": "oxplow.effort.open",
-                              "input": {"thread": thread, "work_item": item}}]}
-    if to == "done" or to == "canceled":
-        rows = scope("sql.read", {"sql": "SELECT uri FROM v_effort WHERE work_item = :w AND ended_at IS NULL",
-                                  "params": {"w": item}})
-        return {"commands": [{"name": "oxplow.effort.close",
-                              "input": {"effort": uri.param(r["uri"], "id"), "reason": "switch"}}
-                             for r in rows]}
-    return {"skip": "a move that changes no effort"}
-"#;
-
-/// The acme extension: `script` as the effort policy `tidy`, with an
-/// example per reaction — a checkpoint (`basic`, expecting
-/// `basic_expect`), a start on a thread, a finish whose read is
-/// answered.
-fn policy(root: &Path, script: &str, basic_expect: &str) {
-    write(
-            root,
-            ".oxplow/extensions/acme/extension.yaml",
-            "manifest: 2
-name: acme
-intent:
-  purpose: Open and close efforts as items start and finish.
-  examples:
-    - { name: basic, expect: nothing to do }
-    - { name: start, expect: its effort opens }
-    - { name: finish, expect: its effort closes }
-permissions: [sql.read, commands:oxplow.effort.*]
-implementations:
-  - { capability: effort_policy, id: tidy, title: Tidy, entry: policies/tidy.star, needs: [sql.read] }
-",
-        );
-    write(root, ".oxplow/extensions/acme/policies/tidy.star", script);
-    write(
-            root,
-            ".oxplow/extensions/acme/fixtures/basic.yaml",
-            &format!(
-                "when: {{ implementation: tidy, event: {{ type: thread.checkpoint, payload: {{ thread: thr1, turn: trn1, reason: turn_end, snapshot: 1, changed: false, writing_tools: 0 }} }} }}\nexpect: {basic_expect}\n"
-            ),
-        );
-    write(
-            root,
-            ".oxplow/extensions/acme/fixtures/start.yaml",
-            "requires: [oxplow-bundled]\nwhen: { implementation: tidy, event: { type: work_item.state_changed, payload: { work_item: \"work_item:oxplow:tsk1\", to: in_progress }, anchors: { thread_id: thr1 } } }\nexpect: { commands: [oxplow.effort.open] }\n",
-        );
-    write(
-            root,
-            ".oxplow/extensions/acme/fixtures/finish.yaml",
-            "requires: [oxplow-bundled]\nwhen: { implementation: tidy, event: { type: work_item.state_changed, payload: { work_item: \"work_item:oxplow:tsk1\", to: done } }, answers: { sql.read: [[{ uri: \"oxplow:oxplow/effort?id=eff3\" }]] } }\nexpect: { commands: [oxplow.effort.close] }\n",
-        );
-}
-
-/// A scripted effort policy's examples dry-run its script (a read
-/// answered by the fixture), and the effort-policy suite runs over it
-/// in a throwaway host.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_policy_script_runs_its_examples_and_the_suite() {
-    let dir = tempfile::tempdir().unwrap();
-    policy(dir.path(), TIDY, "{ skip: $any }");
-    let report = test_extension(dir.path(), "acme", false).await.unwrap();
-    assert!(report.ok, "{:?}", report.errors);
-    for ran in [
-        "example basic",
-        "example start",
-        "example finish",
-        "effort_policy suite",
-    ] {
-        assert!(
-            report.ran.iter().any(|r| r == ran),
-            "{ran}: {:?}",
-            report.ran
-        );
-    }
-}
-
-/// A policy example that doesn't match what the script answers is a
-/// finding at its fixture; one naming no policy of the extension names
-/// what it named.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_policy_example_that_doesnt_match_names_its_fixture() {
-    let dir = tempfile::tempdir().unwrap();
-    policy(dir.path(), TIDY, "{ commands: [oxplow.effort.open] }");
-    let finish = dir
-        .path()
-        .join(".oxplow/extensions/acme/fixtures/finish.yaml");
-    let text = std::fs::read_to_string(&finish).unwrap();
-    std::fs::write(
-        &finish,
-        text.replace("implementation: tidy", "implementation: nope"),
-    )
-    .unwrap();
-    let report = test_extension(dir.path(), "acme", false).await.unwrap();
-    let errors = report.error_lines().join("\n");
-    assert!(
-        errors.contains("acme/fixtures/basic.yaml:2: effort policy `tidy` skipped"),
-        "{errors}"
-    );
-    assert!(
-        errors.contains("acme/fixtures/finish.yaml: example `finish` names effort policy `nope`"),
-        "{errors}"
-    );
-}
-
 /// An example's event is the event envelope the runtime would hand
 /// over: what the fixture doesn't give is `null` (no made-up id or
 /// seq), `source` is `fixture`; and a fixture that couldn't happen —
@@ -1158,22 +993,25 @@ async fn an_example_event_is_the_envelope_and_one_that_couldnt_happen_says_why()
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     let shape = "def transform(x):\n    e = x[\"event\"]\n    return {\"skip\": \"%s %s %s %s %s\" % (e[\"v\"], e[\"source\"], e[\"id\"], e[\"seq\"], e[\"anchors\"][\"turn_id\"])}\n";
-    policy(root, shape, "{ skip: \"2 fixture None None None\" }");
-    // `start` and `finish` aren't this script's; only `basic` stays.
-    for gone in ["start", "finish"] {
-        std::fs::remove_file(root.join(format!(".oxplow/extensions/acme/fixtures/{gone}.yaml")))
-            .unwrap();
-    }
-    let manifest = root.join(".oxplow/extensions/acme/extension.yaml");
-    let text = std::fs::read_to_string(&manifest).unwrap();
-    std::fs::write(
-            &manifest,
-            text.replace(
-                "    - { name: start, expect: its effort opens }\n    - { name: finish, expect: its effort closes }\n",
-                "",
-            ),
-        )
-        .unwrap();
+    write(
+        root,
+        ".oxplow/extensions/acme/extension.yaml",
+        "manifest: 2
+name: acme
+intent:
+  purpose: Show the envelope an effect hears.
+  examples:
+    - { name: basic, expect: the envelope's fields }
+effects:
+  - { id: tidy, summary: Show the envelope., on: [thread.checkpoint], entry: tidy.star }
+",
+    );
+    write(root, ".oxplow/extensions/acme/tidy.star", shape);
+    write(
+        root,
+        ".oxplow/extensions/acme/fixtures/basic.yaml",
+        "when: { effect: tidy, event: { type: thread.checkpoint, payload: { thread: thr1, turn: trn1, reason: turn_end, snapshot: 1, changed: false, writing_tools: 0 } } }\nexpect: { skip: \"2 fixture None None None\" }\n",
+    );
     let report = test_extension(root, "acme", false).await.unwrap();
     let errors = report.error_lines().join("\n");
     assert!(!errors.contains("fixtures/basic.yaml"), "{errors}");
@@ -1199,9 +1037,7 @@ async fn an_example_event_is_the_envelope_and_one_that_couldnt_happen_says_why()
         write(
             root,
             ".oxplow/extensions/acme/fixtures/basic.yaml",
-            &format!(
-                "when: {{ implementation: tidy, event: {event} }}\nexpect: {{ skip: $any }}\n"
-            ),
+            &format!("when: {{ effect: tidy, event: {event} }}\nexpect: {{ skip: $any }}\n"),
         );
         let report = test_extension(root, "acme", false).await.unwrap();
         let errors = report.error_lines().join("\n");
@@ -1271,23 +1107,6 @@ effects:
     );
 }
 
-/// A policy that opens efforts and never closes one fails the suite,
-/// at the manifest.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_policy_script_that_never_closes_fails_the_suite() {
-    let dir = tempfile::tempdir().unwrap();
-    let opens_only = TIDY.replace(r#"if to == "done" or to == "canceled":"#, "if False:");
-    policy(dir.path(), &opens_only, "{ skip: $any }");
-    let report = test_extension(dir.path(), "acme", false).await.unwrap();
-    let errors = report.error_lines().join("\n");
-    assert!(
-        errors.contains(
-            "acme/extension.yaml: effort_policy conformance `a_finished_item_closes_its_effort`"
-        ),
-        "{errors}"
-    );
-}
-
 /// Event-type and ref-kind fixtures: a payload checked against the
 /// declared schema (and its upcast), a wikilink against the declared
 /// kind; a wrong expectation is a finding at its fixture.
@@ -1341,8 +1160,8 @@ fn one_rule_compares_what_an_example_expects() {
         "$any is a value that's there"
     );
     assert!(holds(json!({ "missing": null })));
-    let no = json!({ "ok": false, "refused": "`tsk9` isn't a work item" });
-    assert!(compare(&json!({ "refused": "isn't a work item" }), &no).is_none());
+    let no = json!({ "ok": false, "refused": "`tsk9` isn't a task" });
+    assert!(compare(&json!({ "refused": "isn't a task" }), &no).is_none());
     assert!(compare(&json!({ "refused": "is archived" }), &no).is_some());
     assert!(holds(
         json!({ "rows": { "$exact": [{ "a": 1, "b": 2 }, { "a": 3, "b": 4 }] } })
@@ -1458,12 +1277,12 @@ event_types:
     );
     let scenario = |last: &str| {
         format!(
-                "requires: [oxplow-bundled]\ngiven: [{{ command: oxplow.work_item.create, input: {{ title: Fix it }}, bind: item }}]
-when: {{ event_type: acme.merged, payload: {{ pr: $item.uri }} }}
+                "given: [{{ command: oxplow.thread.create, input: {{ stream: str1, title: Fix it }}, bind: item }}]
+when: {{ event_type: acme.merged, payload: {{ pr: $item.id }} }}
 expect: {{ valid: true }}
 steps:
-  - when: {{ v: 1, payload: {{ number: $item.uri }} }}
-    expect: {{ valid: true, upcast: {{ pr: $item.uri }} }}
+  - when: {{ v: 1, payload: {{ number: $item.id }} }}
+    expect: {{ valid: true, upcast: {{ pr: $item.id }} }}
   - when: {{ payload: {{ number: 1 }} }}
     expect: {{ valid: {last} }}
 "
@@ -1523,39 +1342,39 @@ event_types:
     write(
             root,
             ".oxplow/extensions/acme/pages/titles.yaml",
-            "title: Titles\nloaders:\n  titles: { sql: \"SELECT title FROM v_work_item\" }\nview: { viz: table, from: titles }\n",
+            "title: Titles\nloaders:\n  titles: { sql: \"SELECT title FROM v_thread WHERE title <> 'Thread'\" }\nview: { viz: table, from: titles }\n",
         );
     write(
             root,
             ".oxplow/extensions/acme/pages/count.yaml",
-            "title: Count\nloaders:\n  n: { sql: \"SELECT COUNT(*) AS n FROM v_work_item\" }\nview: { viz: number, from: n }\n",
+            "title: Count\nloaders:\n  n: { sql: \"SELECT COUNT(*) AS n FROM v_thread WHERE title <> 'Thread'\" }\nview: { viz: number, from: n }\n",
         );
     write(
-            root,
-            ".oxplow/extensions/acme/fixtures/merged.yaml",
-            "requires: [oxplow-bundled]\ngiven: [{ command: oxplow.work_item.create, input: { title: Fix it } }]
+        root,
+        ".oxplow/extensions/acme/fixtures/merged.yaml",
+        "given: [{ command: oxplow.thread.create, input: { stream: str1, title: Fix it } }]
 when: { event_type: acme.merged, payload: { pr: 1 } }
 expect: { valid: true }
 steps:
-  - when: { sql: \"SELECT title FROM v_work_item\" }
+  - when: { sql: \"SELECT title FROM v_thread WHERE title <> 'Thread'\" }
     expect: { rows: [{ title: Fix it }] }
   - expect: { valid: true }
 ",
-        );
+    );
     write(
-            root,
-            ".oxplow/extensions/acme/fixtures/paged.yaml",
-            "requires: [oxplow-bundled]\ngiven: [{ command: oxplow.work_item.create, input: { title: Fix it } }]
+        root,
+        ".oxplow/extensions/acme/fixtures/paged.yaml",
+        "given: [{ command: oxplow.thread.create, input: { stream: str1, title: Fix it } }]
 when: { page: titles }
 expect: { loaders: { titles: { rows: [{ title: Fix it }] } } }
 steps:
   - when: { page: count }
     expect: { loaders: { n: { rows: [{ n: 1 }] } } }
-  - when: { sql: \"SELECT COUNT(*) AS n FROM v_work_item\" }
+  - when: { sql: \"SELECT COUNT(*) AS n FROM v_thread WHERE title <> 'Thread'\" }
     expect: { rows: [{ n: 1 }] }
   - expect: { loaders: { titles: { rows: 1 } } }
 ",
-        );
+    );
     let report = test_extension(root, "acme", false).await.unwrap();
     assert_eq!(report.error_lines(), Vec::<String>::new());
 }
@@ -1670,26 +1489,26 @@ async fn extension_test_opens_a_form_page_and_compares_what_it_starts_with() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     write(
-            root,
-            ".oxplow/extensions/editor/extension.yaml",
-            "manifest: 2
+        root,
+        ".oxplow/extensions/editor/extension.yaml",
+        "manifest: 2
 name: editor
 intent:
-  purpose: Edit work items.
+  purpose: Edit threads.
   examples:
-    - { name: edit, input: { form: edit-item, params: { uri: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' } }, expect: the ref is fixed }
+    - { name: edit, input: { form: edit-item, params: { thread: thr1 } }, expect: the ref is fixed }
 ",
-        );
+    );
     write(
             root,
             ".oxplow/extensions/editor/pages/edit-item.yaml",
-            "title: Edit\nparams: [{ name: uri }]\nloaders:\n  item: { sql: \"SELECT title, body FROM v_work_item WHERE uri = :uri\" }\n\
-             view: { viz: form, from: item, form: { command: oxplow.work_item.update, defaults: { uri: '{{param.uri}}' }, fixed: [uri], fields: [title, body] } }\n",
+            "title: Edit\nparams: [{ name: thread }]\nloaders:\n  item: { sql: \"SELECT title, prompt FROM v_thread WHERE id = :thread\" }\n\
+             view: { viz: form, from: item, form: { command: oxplow.thread.rename, defaults: { thread: '{{param.thread}}' }, fixed: [thread], fields: [title] } }\n",
         );
     write(
             root,
             ".oxplow/extensions/editor/fixtures/edit.yaml",
-            "requires: [oxplow-bundled]\nwhen: { form: edit-item, params: { uri: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' } }\nexpect: { values: { uri: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' }, fixed: [uri], fields: [title, body] }\n",
+            "when: { form: edit-item, params: { thread: thr1 } }\nexpect: { values: { thread: thr1 }, fixed: [thread], fields: [title] }\n",
         );
     let report = test_extension(root, "editor", false).await.unwrap();
     assert_eq!(report.error_lines(), Vec::<String>::new());
@@ -1700,10 +1519,10 @@ intent:
     );
 
     write(
-            root,
-            ".oxplow/extensions/editor/fixtures/edit.yaml",
-            "requires: [oxplow-bundled]\nwhen: { form: edit-item, params: { uri: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' } }\nexpect: { fixed: [uri, title] }\n",
-        );
+        root,
+        ".oxplow/extensions/editor/fixtures/edit.yaml",
+        "when: { form: edit-item, params: { thread: thr1 } }\nexpect: { fixed: [thread, title] }\n",
+    );
     let errors = test_extension(root, "editor", false)
         .await
         .unwrap()
@@ -1711,13 +1530,67 @@ intent:
         .join("\n");
     assert!(
         errors.contains(
-            ".oxplow/extensions/editor/fixtures/edit.yaml:3: form `edit-item` opened with"
+            ".oxplow/extensions/editor/fixtures/edit.yaml:2: form `edit-item` opened with"
         ),
         "{errors}"
     );
 }
 
-/// A page with a work-item loader, one param and an answer.
+/// A query example's `steps` run as a page example's do: each `when`
+/// re-runs what it names and checks its `expect`. A step that doesn't
+/// hold is a finding, never passed over.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_query_fixtures_steps_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        ".oxplow/extensions/kinds/extension.yaml",
+        "manifest: 2\nname: kinds\nintent:\n  purpose: test\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/kinds/queries/options.yaml",
+        "title: Options\nparams: [{ name: n, default: 2 }]\nloaders:\n  every: { rows: [{ value: 1, label: one }, { value: 2, label: two }] }\n  some: { sql: 'SELECT value, label FROM every WHERE value <= :n' }\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/kinds/fixtures/query.yaml",
+        "when: { query: options, params: { n: 1 } }\nexpect: { rows: 1 }\nsteps:\n  - when: { query: options, params: { n: 2 } }\n    expect: { rows: 2 }\n",
+    );
+    let report = test_extension(root, "kinds", false).await.unwrap();
+    assert_eq!(report.error_lines(), Vec::<String>::new());
+
+    write(
+        root,
+        ".oxplow/extensions/kinds/fixtures/query.yaml",
+        "when: { query: options, params: { n: 1 } }\nexpect: { rows: 1 }\nsteps:\n  - when: { query: options, params: { n: 2 } }\n    expect: { rows: 5 }\n",
+    );
+    let errors = test_extension(root, "kinds", false)
+        .await
+        .unwrap()
+        .error_lines()
+        .join("\n");
+    assert!(errors.contains("steps[0]"), "{errors}");
+
+    // A step a query example can't run (it has no actions) says so.
+    write(
+        root,
+        ".oxplow/extensions/kinds/fixtures/query.yaml",
+        "when: { query: options }\nexpect: { rows: 2 }\nsteps:\n  - press: { action: go }\n",
+    );
+    let errors = test_extension(root, "kinds", false)
+        .await
+        .unwrap()
+        .error_lines()
+        .join("\n");
+    assert!(
+        errors.contains("steps[0]: a query example's step is"),
+        "{errors}"
+    );
+}
+
+/// A page with a task loader, one param and an answer.
 fn pager(root: &Path, query: &str, answer_params: &str, expect: &str) {
     write(
         root,
@@ -1725,7 +1598,7 @@ fn pager(root: &Path, query: &str, answer_params: &str, expect: &str) {
         "manifest: 2
 name: pager
 intent:
-  purpose: Show work items.
+  purpose: Show tasks.
   examples:
     - { name: created, input: { page: items }, expect: the created item is listed }
 ",
@@ -1750,8 +1623,8 @@ answers:
         root,
         ".oxplow/extensions/pager/fixtures/created.yaml",
         &format!(
-            "requires: [oxplow-bundled]\ngiven:
-  - {{ command: oxplow.work_item.create, input: {{ title: Write the page test }} }}
+            "given:
+  - {{ command: oxplow.thread.create, input: {{ stream: str1, title: Write the page test }} }}
 when: {{ page: items }}
 expect: {expect}
 "
@@ -1759,7 +1632,7 @@ expect: {expect}
     );
 }
 
-const LIST: &str = "SELECT title FROM v_work_item WHERE title = 'Write the page test'";
+const LIST: &str = "SELECT title FROM v_thread WHERE title = 'Write the page test'";
 
 /// A part is tested with `when: { part }` as a page is, a query with
 /// `when: { query }` against its last loader's rows (or a named loader's);
@@ -1912,7 +1785,7 @@ async fn extension_test_names_the_page_row_that_differs() {
         .error_lines()
         .join("\n");
     assert!(
-        errors.contains("fixtures/created.yaml:5: page `items` loader `items` returned")
+        errors.contains("fixtures/created.yaml:4: page `items` loader `items` returned")
             && errors.contains("Something else")
             && errors.contains("Write the page test"),
         "{errors}"
@@ -1991,12 +1864,12 @@ fn paged(root: &Path, page: &str, fixtures: &[(&str, &str)]) {
         })
         .collect();
     write(
-            root,
-            ".oxplow/extensions/paged/extension.yaml",
-            &format!(
-                "manifest: 2\nname: paged\nintent:\n  purpose: Show work items.\n  examples:\n{examples}"
-            ),
-        );
+        root,
+        ".oxplow/extensions/paged/extension.yaml",
+        &format!(
+            "manifest: 2\nname: paged\nintent:\n  purpose: Show tasks.\n  examples:\n{examples}"
+        ),
+    );
     write(root, ".oxplow/extensions/paged/pages/items.yaml", page);
     for (name, body) in fixtures {
         write(
@@ -2007,16 +1880,16 @@ fn paged(root: &Path, page: &str, fixtures: &[(&str, &str)]) {
     }
 }
 
-/// A page of one work item by `uri`, with a row action.
+/// A page of one task by `uri`, with a row action.
 const BY_URI: &str = "title: Items
-params: [{ name: uri }]
+params: [{ name: id }]
 loaders:
-  items: { sql: \"SELECT title, uri FROM v_work_item WHERE uri = :uri\" }
+  items: { sql: \"SELECT title, 'thr' || id AS id FROM v_thread WHERE 'thr' || id = :id\" }
 view:
   from: items
   viz: table
   actions:
-    - { id: start, label: Start, command: oxplow.work_item.transition, input: { uri: '{{row.uri}}', to: in_progress }, row: true }
+    - { id: start, label: Start, command: oxplow.thread.mark, input: { thread: '{{row.id}}', mark: amber }, row: true }
 ";
 
 /// A fixture binds a step's result (`bind: <name>`) and a value of a
@@ -2032,19 +1905,19 @@ async fn a_page_fixture_binds_values_and_runs_its_steps() {
         BY_URI,
         &[(
             "bound",
-            "requires: [oxplow-bundled]\ngiven:
-  - { command: oxplow.work_item.create, input: { title: First }, bind: first }
-when: { page: items, params: { uri: $first.uri } }
+            "given:
+  - { command: oxplow.thread.create, input: { stream: str1, title: First }, bind: first }
+when: { page: items, params: { id: $first.id } }
 expect:
-  loaders: { items: { rows: [{ title: First, uri: $first.uri }] } }
+  loaders: { items: { rows: [{ title: First, id: $first.id }] } }
   nodes: [{ id: items, kind: viz, actions: [start] }]
 steps:
   - expect: { loaders: { items: { rows: 1 } } }
     bind: { title: 'loaders.items.rows[0].title' }
-  - given: [{ command: oxplow.work_item.create, input: { title: Second }, bind: second }]
-  - params: { uri: $second.uri }
+  - given: [{ command: oxplow.thread.create, input: { stream: str1, title: Second }, bind: second }]
+  - params: { id: $second.id }
     expect: { loaders: { items: { rows: [{ title: Second }] } } }
-  - params: { uri: $first.uri }
+  - params: { id: $first.id }
     expect: { loaders: { items: { rows: [{ title: $title }] } } }
 ",
         )],
@@ -2058,9 +1931,9 @@ steps:
         BY_URI,
         &[(
             "bound",
-            "requires: [oxplow-bundled]\ngiven:
-  - { command: oxplow.work_item.create, input: { title: First }, bind: first }
-when: { page: items, params: { uri: $first.uri } }
+            "given:
+  - { command: oxplow.thread.create, input: { stream: str1, title: First }, bind: first }
+when: { page: items, params: { id: $first.id } }
 steps:
   - expect: { loaders: { items: { rows: [{ title: Other }] } } }
 ",
@@ -2102,17 +1975,17 @@ async fn a_page_fixture_checks_rows_it_contains_and_an_actions_details() {
     let root = dir.path();
     let page = "title: Items
 loaders:
-  items: { sql: \"SELECT title, uri FROM v_work_item ORDER BY title\" }
+  items: { sql: \"SELECT title, id FROM v_thread WHERE title <> 'Thread' ORDER BY title\" }
 view:
   from: items
   viz: table
   actions:
-    - { id: start, label: Start, command: oxplow.work_item.transition, input: { uri: '{{row.uri}}', to: in_progress }, row: true }
+    - { id: start, label: Start, command: oxplow.thread.mark, input: { thread: '{{row.id}}', mark: amber }, row: true }
 ";
-    let given = "requires: [oxplow-bundled]\ngiven:
-  - { command: oxplow.work_item.create, input: { title: First } }
-  - { command: oxplow.work_item.create, input: { title: Second } }
-  - { command: oxplow.work_item.create, input: { title: Third } }
+    let given = "given:
+  - { command: oxplow.thread.create, input: { stream: str1, title: First } }
+  - { command: oxplow.thread.create, input: { stream: str1, title: Second } }
+  - { command: oxplow.thread.create, input: { stream: str1, title: Third } }
 when: { page: items }
 ";
     paged(
@@ -2159,6 +2032,73 @@ when: { page: items }
     );
 }
 
+/// A page's row action may name an action point instead of a command: a
+/// fixture's `press` runs the command that answers it, and `expect` sees
+/// what it answered; a row nothing answers is skipped, not refused.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_page_fixture_presses_a_point_action() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        ".oxplow/extensions/pointed/extension.yaml",
+        "manifest: 2
+name: pointed
+intent:
+  purpose: Presses a point.
+  examples:
+    - { name: pressed, input: { page: items }, expect: items }
+permissions: [commands:oxplow.thread.mark]
+action_points:
+  - { name: item.start, label: Start, context: { thread: string } }
+commands:
+  - name: item.start
+    summary: Mark it.
+    input_schema: { type: object, required: [thread], properties: { thread: { type: string } } }
+    entry: handlers/start.star
+    examples:
+      - { name: happy, input: { thread: \"thr1\" }, expect_commands: [oxplow.thread.mark] }
+    ui: { label: Start, at: pointed/item.start, input: { thread: \"{{context.thread}}\" } }
+",
+    );
+    write(
+        root,
+        ".oxplow/extensions/pointed/handlers/start.star",
+        "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.thread.mark\", \"input\": {\"thread\": x[\"input\"][\"thread\"], \"mark\": \"amber\"}}]}\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/pointed/pages/items.yaml",
+        "title: Items
+params: [{ name: id }]
+loaders:
+  items: { sql: \"SELECT title, 'thr' || id AS id, mark FROM v_thread WHERE 'thr' || id = :id\" }
+view:
+  from: items
+  viz: table
+  actions:
+    - { id: start, label: Start, point: pointed/item.start, context: { thread: '{{row.id}}' }, row: true }
+    - { id: nobody, label: Nobody, point: pointed/item.start, command: pointed.item.other, context: { thread: '{{row.id}}' }, row: true }
+",
+    );
+    write(
+        root,
+        ".oxplow/extensions/pointed/fixtures/pressed.yaml",
+        "given: [{ command: oxplow.thread.create, input: { stream: str1, title: First }, bind: first }]
+when: { page: items, params: { id: $first.id } }
+expect: { loaders: { items: { rows: [{ mark: null }] } } }
+steps:
+  - press: { action: start, node: items, row: { id: $first.id } }
+    expect: { ok: true }
+  - expect: { loaders: { items: { rows: [{ mark: amber }] } } }
+  - press: { action: nobody, node: items, row: { id: $first.id } }
+    expect: { ok: false, refused: $any }
+",
+    );
+    let report = test_extension(root, "pointed", false).await.unwrap();
+    assert_eq!(report.error_lines(), Vec::<String>::new());
+}
+
 /// A page step presses one of its actions for real, as a person would:
 /// on a row (`row:` its columns), with what it answered or why it said
 /// no checked by `expect`, and the page run again shows what it did.
@@ -2167,23 +2107,23 @@ async fn a_page_fixture_presses_an_action() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     let page = "title: Items
-params: [{ name: uri }]
+params: [{ name: id }]
 loaders:
-  items: { sql: \"SELECT title, uri, state FROM v_work_item WHERE uri = :uri\" }
+  items: { sql: \"SELECT title, 'thr' || id AS id, mark FROM v_thread WHERE 'thr' || id = :id\" }
 view:
   from: items
   viz: table
   actions:
-    - { id: start, label: Start, command: oxplow.work_item.transition, input: { uri: '{{row.uri}}', to: in_progress }, row: true }
+    - { id: start, label: Start, command: oxplow.thread.mark, input: { thread: '{{row.id}}', mark: amber }, row: true }
 ";
     let fixture = |press: &str| {
         format!(
-                "requires: [oxplow-bundled]\ngiven: [{{ command: oxplow.work_item.create, input: {{ title: First }}, bind: first }}]
-when: {{ page: items, params: {{ uri: $first.uri }} }}
-expect: {{ loaders: {{ items: {{ rows: [{{ state: todo }}] }} }} }}
+                "given: [{{ command: oxplow.thread.create, input: {{ stream: str1, title: First }}, bind: first }}]
+when: {{ page: items, params: {{ id: $first.id }} }}
+expect: {{ loaders: {{ items: {{ rows: [{{ mark: null }}] }} }} }}
 steps:
   - {press}
-  - expect: {{ loaders: {{ items: {{ rows: [{{ state: in_progress }}] }} }} }}
+  - expect: {{ loaders: {{ items: {{ rows: [{{ mark: amber }}] }} }} }}
 "
             )
     };
@@ -2193,7 +2133,7 @@ steps:
         &[(
             "pressed",
             &fixture(
-                "press: { action: start, node: items, row: { uri: $first.uri } }
+                "press: { action: start, node: items, row: { id: $first.id } }
     expect: { ok: true }",
             ),
         )],
@@ -2207,10 +2147,10 @@ steps:
             page,
             &[(
                 "pressed",
-                "requires: [oxplow-bundled]\ngiven: [{ command: oxplow.work_item.create, input: { title: First }, bind: first }]
-when: { page: items, params: { uri: $first.uri } }
+                "given: [{ command: oxplow.thread.create, input: { stream: str1, title: First }, bind: first }]
+when: { page: items, params: { id: $first.id } }
 steps:
-  - press: { action: start, node: items, row: { uri: \"oxplow:oxplow/work_item?id=tsk404&provider=oxplow\" } }
+  - press: { action: start, node: items, row: { id: thr404 } }
     expect: { ok: false, refused: $any }
 ",
             )],
@@ -2224,7 +2164,7 @@ steps:
         page,
         &[(
             "pressed",
-            &fixture("press: { action: begin, node: items, row: { uri: $first.uri } }"),
+            &fixture("press: { action: begin, node: items, row: { id: $first.id } }"),
         )],
     );
     let errors = test_extension(root, "paged", false)
@@ -2238,6 +2178,55 @@ steps:
     );
 }
 
+/// A press of an action with options names the one picked (`option:`):
+/// it binds as `{{option.value}}`, and one the page doesn't offer is
+/// refused.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_page_fixture_presses_an_action_with_an_option() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let page = "title: Items
+params: [{ name: id }]
+loaders:
+  items: { sql: \"SELECT title, 'thr' || id AS id, mark FROM v_thread WHERE 'thr' || id = :id\" }
+  marks: { sql: \"SELECT 'amber' AS value, 'Amber' AS label\" }
+view:
+  from: items
+  viz: table
+  actions:
+    - { id: mark, label: Mark, command: oxplow.thread.mark, input: { thread: '{{row.id}}', mark: '{{option.value}}' }, row: true, options_from: marks, current: mark }
+";
+    let fixture = |option: &str, expect: &str| {
+        format!(
+            "given: [{{ command: oxplow.thread.create, input: {{ stream: str1, title: First }}, bind: first }}]
+when: {{ page: items, params: {{ id: $first.id }} }}
+steps:
+  - press: {{ action: mark, node: items, row: {{ id: $first.id }}, option: {option} }}
+    expect: {expect}
+"
+        )
+    };
+    paged(
+        root,
+        page,
+        &[(
+            "pressed",
+            &(fixture("amber", "{ ok: true }")
+                + "  - expect: { loaders: { items: { rows: [{ mark: amber }] } } }\n"),
+        )],
+    );
+    let report = test_extension(root, "paged", false).await.unwrap();
+    assert_eq!(report.error_lines(), Vec::<String>::new());
+
+    paged(
+        root,
+        page,
+        &[("pressed", &fixture("done", "{ ok: false, refused: $any }"))],
+    );
+    let report = test_extension(root, "paged", false).await.unwrap();
+    assert_eq!(report.error_lines(), Vec::<String>::new());
+}
+
 /// A page step submits a form node with what a person would fill in,
 /// and the command it names runs for real.
 #[tokio::test(flavor = "multi_thread")]
@@ -2248,16 +2237,15 @@ async fn a_page_fixture_submits_a_form() {
         root,
         "title: New item
 loaders:
-  items: { sql: \"SELECT title FROM v_work_item\" }
+  items: { sql: \"SELECT title FROM v_thread WHERE title <> 'Thread'\" }
 view:
   stack:
-    - { id: add, title: Add, viz: form, form: { command: oxplow.work_item.create } }
+    - { id: add, title: Add, viz: form, form: { command: oxplow.thread.create, defaults: { stream: str1 }, fixed: [stream] } }
     - { id: items, title: Items, viz: table, from: items }
 ",
         &[(
             "submitted",
-            "requires: [oxplow-bundled]
-when: { page: items }
+            "when: { page: items }
 expect: { loaders: { items: { rows: 0 } } }
 steps:
   - submit: { node: add, input: { title: Written } }
@@ -2337,8 +2325,8 @@ datasets:
     );
     let fixture = |want: &str| {
         format!(
-                "requires: [oxplow-bundled]\ngiven: [{{ command: oxplow.work_item.create, input: {{ title: Three }} }}]
-when: {{ sql: \"SELECT title FROM v_acme_prs UNION ALL SELECT title FROM v_work_item WHERE title = :t ORDER BY title\", params: {{ t: Three }} }}
+                "given: [{{ command: oxplow.thread.create, input: {{ stream: str1, title: Three }} }}]
+when: {{ sql: \"SELECT title FROM v_acme_prs UNION ALL SELECT title FROM v_thread WHERE title = :t ORDER BY title\", params: {{ t: Three }} }}
 expect: {{ rows: {want} }}
 "
             )
@@ -2362,7 +2350,7 @@ expect: {{ rows: {want} }}
         .error_lines()
         .join("\n");
     assert!(
-        errors.contains("fixtures/read.yaml:4: page `query` loader `rows` returned"),
+        errors.contains("fixtures/read.yaml:3: page `query` loader `rows` returned"),
         "{errors}"
     );
 }
@@ -2380,17 +2368,17 @@ async fn a_fixture_runs_a_command_for_real() {
             &[
                 (
                     "ran",
-                    "requires: [oxplow-bundled]\ngiven: [{ command: oxplow.work_item.create, input: { title: First }, bind: first }]
-when: { command: oxplow.work_item.transition, input: { uri: $first.uri, to: in_progress } }
+                    "given: [{ command: oxplow.thread.create, input: { stream: str1, title: First }, bind: first }]
+when: { command: oxplow.thread.mark, input: { thread: $first.id, mark: amber } }
 expect: { ok: true, commands: [] }
 steps:
-  - when: { input: { uri: \"oxplow:oxplow/work_item?id=tsk404&provider=oxplow\", to: done } }
+  - when: { input: { thread: thr404, mark: amber } }
     expect: { ok: false, refused: $any }
 ",
                 ),
                 (
                     "wrong",
-                    "requires: [oxplow-bundled]\nwhen: { command: oxplow.work_item.transition, input: { uri: \"oxplow:oxplow/work_item?id=tsk404&provider=oxplow\", to: done } }
+                    "when: { command: oxplow.thread.mark, input: { thread: thr404, mark: amber } }
 expect: { ok: true }
 ",
                 ),
@@ -2403,7 +2391,7 @@ expect: { ok: true }
         .join("\n");
     assert!(!errors.contains("fixtures/ran.yaml"), "{errors}");
     assert!(
-        errors.contains("fixtures/wrong.yaml:3: command `oxplow.work_item.transition` gave"),
+        errors.contains("fixtures/wrong.yaml:2: command `oxplow.thread.mark` gave"),
         "{errors}"
     );
 }
@@ -2437,19 +2425,19 @@ datasets:
     write(
         root,
         ".oxplow/extensions/acme/datasets/titles.sql",
-        "SELECT uri AS id, title FROM ref('work_item')",
+        "SELECT uri AS id, title FROM ref('thread') WHERE title <> 'Thread'",
     );
     write(
-            root,
-            ".oxplow/extensions/acme/fixtures/stored.yaml",
-            "requires: [oxplow-bundled]\ngiven: [{ command: oxplow.work_item.create, input: { title: Fix it } }]
+        root,
+        ".oxplow/extensions/acme/fixtures/stored.yaml",
+        "given: [{ command: oxplow.thread.create, input: { stream: str1, title: Fix it } }]
 when: { sql: \"SELECT title FROM v_acme_titles\" }
 expect: { rows: [{ title: Fix it }] }
 steps:
-  - given: [{ command: oxplow.work_item.create, input: { title: Another } }]
+  - given: [{ command: oxplow.thread.create, input: { stream: str1, title: Another } }]
   - expect: { rows: 2 }
 ",
-        );
+    );
     let report = test_extension(root, "acme", false).await.unwrap();
     assert_eq!(report.error_lines(), Vec::<String>::new());
 }
@@ -2475,16 +2463,16 @@ advisories:
     on: prompt
     once_per: turn
     heading: \"# Hello\"
-    query: \"SELECT uri AS key, 'Hello ' || title AS message FROM v_work_item ORDER BY title\"
+    query: \"SELECT uri AS key, 'Hello ' || title AS message FROM v_thread WHERE title <> 'Thread' ORDER BY title\"
 ",
     );
     let fixture = |want: &str| {
         format!(
-                "requires: [oxplow-bundled]\ngiven: [{{ command: oxplow.work_item.create, input: {{ title: Fix it }} }}]
+            "given: [{{ command: oxplow.thread.create, input: {{ stream: str1, title: Fix it }} }}]
 when: {{ advisory: hello }}
 expect: {{ lines: {want} }}
 "
-            )
+        )
     };
     write(
         root,
@@ -2510,6 +2498,226 @@ expect: {{ lines: {want} }}
     );
 }
 
+/// `when: { context }` runs one of the extension's agent contexts for a
+/// thread as the app would: its `text` is what the agent is told, `null`
+/// when it has nothing to say.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fixture_runs_an_agent_context() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        ".oxplow/extensions/acme/extension.yaml",
+        "manifest: 2
+name: acme
+intent:
+  purpose: Says what is next.
+  examples:
+    - { name: next, input: { context: next }, expect: the first thread }
+permissions: [agent.write]
+context:
+  - id: next
+    doc: The first thread.
+    query: \"SELECT 'Next: ' || title AS text FROM v_thread WHERE :thread_id IS NOT NULL AND title <> 'Thread' ORDER BY title LIMIT 1\"
+",
+    );
+    let fixture = |given: &str, want: &str| {
+        format!(
+            "{given}
+when: {{ context: next }}
+expect: {{ text: {want} }}
+"
+        )
+    };
+    let given =
+        "given: [{ command: oxplow.thread.create, input: { stream: str1, title: Fix it } }]";
+    let errors = |want: &'static str, given: &'static str| async move {
+        write(
+            root,
+            ".oxplow/extensions/acme/fixtures/next.yaml",
+            &fixture(given, want),
+        );
+        test_extension(root, "acme", false)
+            .await
+            .unwrap()
+            .error_lines()
+            .join("\n")
+    };
+    assert_eq!(errors("\"Next: Fix it\"", given).await, "");
+    assert_eq!(errors("null", "").await, "", "no thread: nothing to say");
+    let wrong = errors("null", given).await;
+    assert!(
+        wrong.contains("fixtures/next.yaml: context `next` said"),
+        "{wrong}"
+    );
+    // A query that fails is the fixture's error, never "nothing to say".
+    let manifest =
+        std::fs::read_to_string(root.join(".oxplow/extensions/acme/extension.yaml")).unwrap();
+    write(
+        root,
+        ".oxplow/extensions/acme/extension.yaml",
+        &manifest.replace(
+            "SELECT 'Next: ' || title AS text",
+            "SELECT json_extract('not json', '$') || title AS text",
+        ),
+    );
+    let failed = errors("null", given).await;
+    assert!(
+        failed.contains("context `next` couldn't be read"),
+        "{failed}"
+    );
+}
+
+/// `when: { action_point }` asks what a named action point offers as the
+/// shell would draw it: nothing with no contributor, a button with one, a
+/// menu with several; the commands are listed by id.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fixture_asks_what_an_action_point_draws() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let command = |name: &str, at: &str| {
+        format!(
+            "  - name: {name}
+    summary: Make one.
+    input_schema: {{ type: object, properties: {{ thread_id: {{ type: integer }} }} }}
+    entry: handlers/make.star
+    examples:
+      - {{ name: happy, input: {{ thread_id: 1 }}, expect_commands: [] }}
+    ui: {{ label: {name}, at: {at}, input: {{ thread_id: \"{{{{context.thread_id}}}}\" }} }}
+"
+        )
+    };
+    let manifest = |commands: &str| {
+        format!(
+            "manifest: 2
+name: acme
+intent:
+  purpose: Makes things.
+  examples:
+    - {{ name: drawn, input: {{ action_point: thing.new }}, expect: what it draws }}
+action_points:
+  - {{ name: thing.new, label: New Thing, context: {{ \"thread_id?\": int }} }}
+commands:
+{commands}"
+        )
+    };
+    write(
+        root,
+        ".oxplow/extensions/acme/handlers/make.star",
+        "def transform(x):\n    return {\"commands\": []}\n",
+    );
+    let fixture = |draws: &str, commands: &str| {
+        format!(
+            "when: {{ action_point: thing.new, context: {{ thread_id: 3 }} }}\nexpect: {{ draws: {draws}, commands: {commands} }}\n"
+        )
+    };
+    // No contributor: a command at another point does not count.
+    write(
+        root,
+        ".oxplow/extensions/acme/extension.yaml",
+        &manifest(&command("thing.other", "acme/other.point")),
+    );
+    write(
+        root,
+        ".oxplow/extensions/acme/fixtures/drawn.yaml",
+        &fixture("none", "[]"),
+    );
+    let report = test_extension(root, "acme", false).await.unwrap();
+    assert_eq!(report.error_lines(), Vec::<String>::new());
+    // One: a button.
+    write(
+        root,
+        ".oxplow/extensions/acme/extension.yaml",
+        &manifest(&command("thing.make", "acme/thing.new")),
+    );
+    write(
+        root,
+        ".oxplow/extensions/acme/fixtures/drawn.yaml",
+        &fixture("button", "[acme.thing.make]"),
+    );
+    let report = test_extension(root, "acme", false).await.unwrap();
+    assert_eq!(report.error_lines(), Vec::<String>::new());
+    // Several: a menu.
+    let two = format!(
+        "{}{}",
+        command("thing.make", "acme/thing.new"),
+        command("thing.also", "acme/thing.new")
+    );
+    write(
+        root,
+        ".oxplow/extensions/acme/extension.yaml",
+        &manifest(&two),
+    );
+    write(
+        root,
+        ".oxplow/extensions/acme/fixtures/drawn.yaml",
+        &fixture("menu", "[acme.thing.also, acme.thing.make]"),
+    );
+    let report = test_extension(root, "acme", false).await.unwrap();
+    assert_eq!(report.error_lines(), Vec::<String>::new());
+    // A wrong expectation names the point.
+    write(
+        root,
+        ".oxplow/extensions/acme/fixtures/drawn.yaml",
+        &fixture("button", "$any"),
+    );
+    let errors = test_extension(root, "acme", false)
+        .await
+        .unwrap()
+        .error_lines()
+        .join("\n");
+    assert!(
+        errors.contains("action point `acme/thing.new` offered"),
+        "{errors}"
+    );
+}
+
+/// `when: { item_commands }` lists the commands about an item: its store
+/// filter (`ui.about.accepts.store`) keeps a command off other stores' items.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fixture_asks_which_commands_an_item_is_offered() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        ".oxplow/extensions/acme/extension.yaml",
+        "manifest: 2
+name: acme
+intent:
+  purpose: Acts on work items.
+  examples:
+    - { name: offered, input: { item_commands: \"oxplow:oxplow/knowledge?id=page1&store=oxwiki\" }, expect: the store's commands }
+commands:
+  - name: item.fix
+    summary: Fix it.
+    input_schema: { type: object, required: [uri], properties: { uri: { type: string } } }
+    entry: handlers/fix.star
+    examples:
+      - { name: happy, input: { uri: \"oxplow:oxplow/knowledge?id=page1\" }, expect_commands: [] }
+    ui: { label: Fix, about: { resource: oxplow/knowledge, accepts: { store: oxwiki } } }
+  - name: item.other
+    summary: Other.
+    input_schema: { type: object, required: [uri], properties: { uri: { type: string } } }
+    entry: handlers/fix.star
+    examples:
+      - { name: happy, input: { uri: \"oxplow:oxplow/knowledge?id=page1\" }, expect_commands: [] }
+    ui: { label: Other, about: { resource: oxplow/knowledge, accepts: { store: [gh, jira] } } }
+",
+    );
+    write(
+        root,
+        ".oxplow/extensions/acme/handlers/fix.star",
+        "def transform(x):\n    return {\"commands\": []}\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/acme/fixtures/offered.yaml",
+        "when: { item_commands: \"oxplow:oxplow/knowledge?id=page1&store=oxwiki\" }\nexpect: { commands: [acme.item.fix] }\n",
+    );
+    let report = test_extension(root, "acme", false).await.unwrap();
+    assert_eq!(report.error_lines(), Vec::<String>::new());
+}
+
 /// A page's `ui:` step runs its custom component's own code in the
 /// app's webview against the test's oxplow: what it draws, what it asks
 /// the shell (a title, actions) and what it invokes, through clicks,
@@ -2532,15 +2740,15 @@ intent:
   purpose: Cards.
   examples:
     - { name: drawn, input: { page: board }, expect: cards }
-permissions: [commands:oxplow.work_item.create]
+permissions: [commands:oxplow.thread.create]
 custom_components:
-  - { id: cards, title: Cards, commands: [oxplow.work_item.create] }
+  - { id: cards, title: Cards, commands: [oxplow.thread.create] }
 ",
     );
     write(
             root,
             ".oxplow/extensions/cards/pages/board.yaml",
-            "title: Board\nloaders:\n  items: { sql: \"SELECT title FROM v_work_item ORDER BY title\" }\nview: { component: { id: cards, props: { heading: Work } } }\n",
+            "title: Board\nloaders:\n  items: { sql: \"SELECT title FROM v_thread WHERE title <> 'Thread' ORDER BY title\" }\nview: { component: { id: cards, props: { heading: Work } } }\n",
         );
     write(
             root,
@@ -2567,23 +2775,23 @@ custom_components:
   c.onUpdate(function (u) { draw(u.data); });
   c.setTitle('Cards: ' + c.data.items.rows.length);
   c.setActions([{ id: 'add', label: 'Add' }]);
-  c.onAction(function (id) { if (id === 'add') c.invoke('oxplow.work_item.create', { title: 'From the bar' }); });
+  c.onAction(function (id) { if (id === 'add') c.invoke('oxplow.thread.create', { stream: 'str1', title: 'From the bar' }); });
   document.getElementById('go').addEventListener('click', function () {
-    c.invoke('oxplow.work_item.create', { title: document.getElementById('t').value });
+    c.invoke('oxplow.thread.create', { stream: 'str1', title: document.getElementById('t').value });
   });
 });
 ",
         );
     let fixture = |last: u32| {
         format!(
-                "requires: [oxplow-bundled]\ngiven: [{{ command: oxplow.work_item.create, input: {{ title: First }} }}]
+                "given: [{{ command: oxplow.thread.create, input: {{ stream: str1, title: First }} }}]
 when: {{ page: board }}
 steps:
   - ui:
       - expect: {{ count: {{ li: 1 }}, text: {{ \"#heading\": Work }}, title: \"Cards: 1\", actions: [add] }}
       - fill: {{ \"#t\": Second }}
       - click: \"#go\"
-      - expect: {{ count: {{ li: 2 }}, invoked: [{{ command: oxplow.work_item.create, ok: true }}] }}
+      - expect: {{ count: {{ li: 2 }}, invoked: [{{ command: oxplow.thread.create, ok: true }}] }}
       - press: add
       - expect: {{ count: {{ li: {last} }} }}
 "
@@ -2618,6 +2826,90 @@ steps:
             && errors.contains("<li>From the bar</li>"),
         "{errors}"
     );
+}
+
+/// A component runs an action point it declares: `invokePoint` in a `ui`
+/// step reaches the command that joined the point, with the context bound
+/// into its input, and the harness records the call (`point`, `context`).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_ui_step_runs_an_action_point_the_component_declares() {
+    assert!(
+        crate::component_harness::shell().is_some(),
+        "no oxplow app to draw the harness: build it first (`bun run build:dev`)"
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        ".oxplow/extensions/pointer/extension.yaml",
+        "manifest: 2
+name: pointer
+intent:
+  purpose: Runs a point.
+  examples:
+    - { name: drawn, input: { page: board }, expect: board }
+permissions: [commands:oxplow.thread.create]
+action_points:
+  - { name: card.add, label: Add, context: { title: string } }
+commands:
+  - name: card.add
+    summary: Add a card.
+    input_schema: { type: object, required: [title], properties: { title: { type: string } } }
+    entry: handlers/add.star
+    examples:
+      - { name: happy, input: { title: A }, expect_commands: [oxplow.thread.create] }
+    ui: { label: Add, at: pointer/card.add, input: { title: \"{{context.title}}\" } }
+custom_components:
+  - { id: board, action_points: [pointer/card.add] }
+",
+    );
+    write(
+        root,
+        ".oxplow/extensions/pointer/handlers/add.star",
+        "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.thread.create\", \"input\": {\"stream\": \"str1\", \"title\": x[\"input\"][\"title\"]}}]}\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/pointer/pages/board.yaml",
+        "title: Board\nloaders:\n  items: { sql: \"SELECT title FROM v_thread WHERE title <> 'Thread' ORDER BY title\" }\nview: { component: { id: board } }\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/pointer/components/board/index.html",
+        "<!doctype html><html><head><title>b</title></head><body><ul id=\"list\"></ul><button id=\"go\">Go</button><p id=\"err\"></p>\
+         <script src=\"/component-lib/oxplow-component.js\"></script><script src=\"app.js\"></script></body></html>",
+    );
+    write(
+        root,
+        ".oxplow/extensions/pointer/components/board/app.js",
+        "oxplow.connect().then(function (c) {
+  var draw = function (data) {
+    var list = document.getElementById('list');
+    list.innerHTML = '';
+    data.items.rows.forEach(function (r) { var li = document.createElement('li'); li.textContent = r[0]; list.appendChild(li); });
+  };
+  draw(c.data);
+  c.onUpdate(function (u) { draw(u.data); });
+  document.getElementById('go').addEventListener('click', function () {
+    c.invokePoint('pointer/card.add', { title: 'Dragged' });
+  });
+});
+",
+    );
+    write(
+        root,
+        ".oxplow/extensions/pointer/fixtures/drawn.yaml",
+        "given: [{ command: oxplow.thread.create, input: { stream: str1, title: First } }]
+when: { page: board }
+steps:
+  - ui:
+      - expect: { count: { li: 1 } }
+      - click: \"#go\"
+      - expect: { count: { li: 2 }, invoked: [{ point: pointer/card.add, ok: true }] }
+",
+    );
+    let report = test_extension(root, "pointer", false).await.unwrap();
+    assert_eq!(report.error_lines(), Vec::<String>::new());
 }
 
 /// A window that draws no frames (the display locked or asleep) leaves
@@ -2752,9 +3044,9 @@ intent:
   purpose: Cards.
   examples:
     - { name: drawn, input: { page: board }, expect: cards }
-permissions: [commands:oxplow.work_item.create]
+permissions: [commands:oxplow.thread.create]
 custom_components:
-  - { id: cards, title: Cards, commands: [oxplow.work_item.create] }
+  - { id: cards, title: Cards, commands: [oxplow.thread.create] }
 ",
     );
     write(
@@ -2764,7 +3056,7 @@ custom_components:
 params:
   - { name: kind, role: filter, default: all }
 loaders:
-  items: { sql: \"SELECT title FROM v_work_item WHERE :kind = 'all' OR title LIKE :kind || '%' ORDER BY title\" }
+  items: { sql: \"SELECT title FROM v_thread WHERE title <> 'Thread' AND (:kind = 'all' OR title LIKE :kind || '%') ORDER BY title\" }
 view: { component: { id: cards } }
 ",
         );
@@ -2800,24 +3092,24 @@ async fn a_ui_enter_submits_the_form_a_field_is_in() {
     e.preventDefault();
     if (!t.value) { document.getElementById('err').textContent = 'Required'; return; }
     document.getElementById('err').textContent = '';
-    c.invoke('oxplow.work_item.create', { title: t.value });
+    c.invoke('oxplow.thread.create', { stream: 'str1', title: t.value });
   });
 });
 ",
     );
     write(
-            root,
-            ".oxplow/extensions/cards/fixtures/drawn.yaml",
-            "requires: [oxplow-bundled]\nwhen: { page: board }
+        root,
+        ".oxplow/extensions/cards/fixtures/drawn.yaml",
+        "when: { page: board }
 steps:
   - ui:
       - key: { on: \"#t\", key: Enter }
       - expect: { text: { \"#err\": Required }, invoked: [] }
       - fill: { \"#t\": Second }
       - key: { on: \"#t\", key: Enter }
-      - expect: { text: { \"#err\": \"\" }, invoked: [{ command: oxplow.work_item.create, ok: true }] }
+      - expect: { text: { \"#err\": \"\" }, invoked: [{ command: oxplow.thread.create, ok: true }] }
 ",
-        );
+    );
     let report = test_extension(root, "cards", false).await.unwrap();
     assert_eq!(report.error_lines(), Vec::<String>::new());
 }
@@ -2858,9 +3150,9 @@ async fn a_ui_view_param_runs_the_page_again_with_it() {
     write(
         root,
         ".oxplow/extensions/cards/fixtures/drawn.yaml",
-        "requires: [oxplow-bundled]\ngiven:
-  - { command: oxplow.work_item.create, input: { title: Alpha } }
-  - { command: oxplow.work_item.create, input: { title: Beta } }
+        "given:
+  - { command: oxplow.thread.create, input: { stream: str1, title: Alpha } }
+  - { command: oxplow.thread.create, input: { stream: str1, title: Beta } }
 when: { page: board }
 steps:
   - ui:
@@ -2952,7 +3244,7 @@ async fn a_ui_step_drives_a_component_a_replacement_stands_in_with() {
     write(
             root,
             ".oxplow/extensions/host/pages/board.yaml",
-            "title: Board\nparams: [{ name: scope, default: all }, { name: thread_id }]\nloaders:\n  own: { sql: \"SELECT 1 AS n\" }\nview: { id: cards, viz: table, from: own, replaceable: work_item.board }\n",
+            "title: Board\nparams: [{ name: scope, default: all }, { name: thread_id }]\nloaders:\n  own: { sql: \"SELECT 1 AS n\" }\nview: { id: cards, viz: table, from: own, replaceable: task.board }\n",
         );
     write(
         root,
@@ -2968,13 +3260,13 @@ custom_components:
   - { id: lanes, title: Lanes }
 ui:
   mounts:
-    - { page: board, at: work_item.board }
+    - { page: board, at: task.board }
 ",
     );
     write(
             root,
             ".oxplow/extensions/lanes/pages/board.yaml",
-            "title: Lanes\nparams: [{ name: scope }, { name: thread_id }]\nloaders:\n  items: { sql: \"SELECT title FROM v_work_item ORDER BY title\" }\nview: { id: board, component: { id: lanes } }\n",
+            "title: Lanes\nparams: [{ name: scope }, { name: thread_id }]\nloaders:\n  items: { sql: \"SELECT title FROM v_thread WHERE title <> 'Thread' ORDER BY title\" }\nview: { id: board, component: { id: lanes } }\n",
         );
     write(
             root,
@@ -2996,9 +3288,9 @@ ui:
 ",
     );
     write(
-            root,
-            ".oxplow/extensions/lanes/fixtures/drawn.yaml",
-            "requires: [oxplow-bundled]\ngiven: [{ command: oxplow.work_item.create, input: { title: First } }]
+        root,
+        ".oxplow/extensions/lanes/fixtures/drawn.yaml",
+        "given: [{ command: oxplow.thread.create, input: { stream: str1, title: First } }]
 when: { page: host/board }
 expect: { nodes: [{ id: cards/board }] }
 steps:
@@ -3008,7 +3300,7 @@ steps:
     ui:
       - expect: { count: { li: 1 } }
 ",
-        );
+    );
     let report = test_extension(root, "lanes", false).await.unwrap();
     assert_eq!(report.error_lines(), Vec::<String>::new());
 }
@@ -3037,7 +3329,7 @@ async fn an_empty_row_list_is_no_rows() {
 async fn page_fixtures_dont_see_each_others_data() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
-    let fixture = "requires: [oxplow-bundled]\ngiven: [{ command: oxplow.work_item.create, input: { title: Mine } }]
+    let fixture = "given: [{ command: oxplow.thread.create, input: { stream: str1, title: Mine } }]
 when: { page: items }
 expect: { loaders: { items: { rows: 1 } } }
 ";
@@ -3045,7 +3337,7 @@ expect: { loaders: { items: { rows: 1 } } }
         root,
         "title: Items
 loaders:
-  items: { sql: \"SELECT title FROM v_work_item WHERE title = 'Mine'\" }
+  items: { sql: \"SELECT title FROM v_thread WHERE title = 'Mine'\" }
 view: { from: items, viz: table }
 ",
         &[("one", fixture), ("two", fixture)],
@@ -3142,31 +3434,31 @@ async fn a_report_renders_as_junit() {
 }
 
 /// What a step's command sets off — a reactor hearing its event —
-/// has happened before the next step and the run: switching the work
-/// list off through its command empties the work-item interface.
+/// has happened before the next step and the run: closing a thread
+/// through its command empties the list of open threads.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_steps_reactions_land_before_the_page_runs() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     paged(
-            root,
-            "title: Items
+        root,
+        "title: Items
 loaders:
-  items: { sql: \"SELECT title FROM v_work_item\" }
+  items: { sql: \"SELECT title FROM v_thread WHERE closed_at IS NULL AND title <> 'Thread'\" }
 view: { from: items, viz: table }
 ",
-            &[(
-                "switched",
-                "requires: [oxplow-bundled]\ngiven:
-  - { command: oxplow.work_item.create, input: { title: Filed } }
+        &[(
+            "switched",
+            "given:
+  - { command: oxplow.thread.create, input: { stream: str1, title: Filed }, bind: filed }
 when: { page: items }
 expect: { loaders: { items: { rows: [{ title: Filed }] } } }
 steps:
-  - given: [{ command: oxplow.capability.choose, input: { capability: work_items, provider: none }, confirmed: true }]
+  - given: [{ command: oxplow.thread.close, input: { thread: $filed.id } }]
   - expect: { loaders: { items: { rows: 0 } } }
 ",
-            )],
-        );
+        )],
+    );
     let report = test_extension(root, "paged", false).await.unwrap();
     assert_eq!(report.error_lines(), Vec::<String>::new());
 }
@@ -3290,7 +3582,7 @@ fn in_the_source_folder(root: &std::path::Path, report: &TestReport) -> Vec<Stri
 #[tokio::test(flavor = "multi_thread")]
 async fn a_loader_that_fails_names_the_source_folder_not_the_running_copy() {
     let dir = tempfile::tempdir().unwrap();
-    kept_under_extensions(dir.path(), "SELECT nope FROM v_work_item");
+    kept_under_extensions(dir.path(), "SELECT nope FROM v_thread");
     let report = test_extension(dir.path(), "lists", false).await.unwrap();
     let lines = in_the_source_folder(dir.path(), &report);
     assert!(
@@ -3304,7 +3596,7 @@ async fn a_loader_that_fails_names_the_source_folder_not_the_running_copy() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_fixture_that_differs_and_an_example_with_no_fixture_name_the_source_folder() {
     let dir = tempfile::tempdir().unwrap();
-    kept_under_extensions(dir.path(), "SELECT title FROM v_work_item");
+    kept_under_extensions(dir.path(), "SELECT title FROM v_thread");
     let report = test_extension(dir.path(), "lists", false).await.unwrap();
     let lines = in_the_source_folder(dir.path(), &report);
     assert!(
@@ -3464,4 +3756,400 @@ async fn a_panel_fixture_names_its_scope_not_params_and_checks_the_count() {
         errors.contains("panel `open/open`'s count is null at `count`, the example expects 3"),
         "{errors}"
     );
+}
+
+/// The shelf extension: a collector that follows a folder of notes and its
+/// own SQLite file, and the fixtures that run it as each trigger.
+fn shelf(root: &Path, fixtures: &[(&str, &str)]) {
+    write(
+        root,
+        ".oxplow/extensions/shelf/extension.yaml",
+        "manifest: 2
+name: shelf
+intent:
+  purpose: Follow a folder of notes.
+  examples:
+    - { name: start, input: { collector: books }, expect: every note on start }
+    - { name: changed, input: { collector: books }, expect: the changed notes }
+    - { name: moved, input: { collector: books }, expect: the notes that are left }
+    - { name: failing, input: { collector: books }, expect: a failure said }
+permissions: [files.read]
+storage: { sqlite: true }
+files:
+  - { path: shelf, access: read }
+collectors:
+  - id: books
+    runtime: starlark
+    entry: collectors/books.star
+    needs: [files.read]
+    on: [start, { files: \"shelf/*.md\" }, { sqlite: own }]
+    sync: upsert
+    entities:
+      - { name: book, key: path, columns: { path: text, title: text } }
+",
+    );
+    write(
+        root,
+        ".oxplow/extensions/shelf/storage/migrations/V1__t.sql",
+        "CREATE TABLE t (x);",
+    );
+    write(
+        root,
+        ".oxplow/extensions/shelf/collectors/books.star",
+        "def transform(x):
+    paths = []
+    if x[\"trigger\"] == \"start\":
+        paths = [f[\"path\"] for f in scope(\"files.list\", {\"path\": \"shelf\"})[\"files\"]]
+    elif x[\"trigger\"] == \"files\":
+        paths = [c[\"path\"] for c in x[\"changed\"] if c[\"op\"] != \"removed\"]
+    rows = []
+    for p in paths:
+        body = scope(\"files.read\", {\"path\": p})[\"body\"]
+        if body.startswith(\"!\"):
+            fail(\"cannot read \" + p)
+        rows.append({\"path\": p, \"title\": body.strip()})
+    return {\"entities\": {\"book\": rows}}
+",
+    );
+    for (name, body) in fixtures {
+        write(
+            root,
+            &format!(".oxplow/extensions/shelf/fixtures/{name}.yaml"),
+            body,
+        );
+    }
+}
+
+/// `given` makes, removes and moves project files, and a collector's
+/// `when: { collector, trigger }` runs it for real as `start` or as a files
+/// change, storing what it brings.
+#[tokio::test(flavor = "multi_thread")]
+async fn extension_test_runs_a_collector_as_the_trigger_that_fires_it() {
+    let dir = tempfile::tempdir().unwrap();
+    shelf(
+        dir.path(),
+        &[
+            (
+                "start",
+                "given:
+  - { files: { \"shelf/a.md\": \"Dune\", \"shelf/b.md\": \"Emma\" } }
+when: { collector: books, trigger: start }
+expect: { ok: true, result: { book: 2 } }
+",
+            ),
+            (
+                "changed",
+                "given:
+  - { files: { \"shelf/a.md\": \"Dune\", \"shelf/b.md\": \"Emma\" } }
+when: { collector: books, trigger: { files: [{ path: shelf/b.md, op: created }] } }
+expect: { ok: true, result: { book: 1 } }
+",
+            ),
+            (
+                "moved",
+                "given:
+  - { files: { \"shelf/a.md\": \"Dune\", \"shelf/b.md\": \"Emma\", \"shelf/c.md\": \"Ulysses\" } }
+  - { remove_files: [shelf/b.md] }
+  - { rename_files: [{ from: shelf/c.md, to: shelf/d.md }] }
+when: { collector: books, trigger: start }
+expect: { ok: true, result: { book: 2 } }
+steps:
+  - given: [{ remove_files: [shelf/a.md] }]
+    expect: { ok: true, result: { book: 1 } }
+",
+            ),
+            (
+                "failing",
+                "given:
+  - { files: { \"shelf/a.md\": \"!\" } }
+when: { collector: books, trigger: { files: [{ path: shelf/a.md, op: modified }] } }
+expect: { ok: false, problems: [\"cannot read shelf/a.md\"] }
+",
+            ),
+        ],
+    );
+    let report = test_extension(dir.path(), "shelf", false).await.unwrap();
+    assert_eq!(report.error_lines(), Vec::<String>::new());
+    for ran in [
+        "example start",
+        "example changed",
+        "example moved",
+        "example failing",
+    ] {
+        assert!(
+            report.ran.iter().any(|r| r == ran),
+            "{ran}: {:?}",
+            report.ran
+        );
+    }
+}
+
+/// A wrong expectation, a trigger the collector's `on:` doesn't list, and a
+/// path outside the project are findings at the fixture.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_trigger_fixture_that_cannot_happen_is_a_finding() {
+    let dir = tempfile::tempdir().unwrap();
+    shelf(
+        dir.path(),
+        &[
+            (
+                "start",
+                "given:
+  - { files: { \"shelf/a.md\": \"Dune\" } }
+when: { collector: books, trigger: start }
+expect: { ok: true, result: { book: 5 } }
+",
+            ),
+            (
+                "changed",
+                "when: { collector: books, trigger: { files: [{ path: other/x.md, op: created }] } }
+expect: { ok: true }
+",
+            ),
+            (
+                "moved",
+                "given:
+  - { files: { \"../escape.md\": \"x\" } }
+when: { collector: books, trigger: start }
+expect: { ok: true }
+",
+            ),
+            (
+                "failing",
+                "when: { collector: books, trigger: sometimes }
+expect: { ok: true }
+",
+            ),
+        ],
+    );
+    let report = test_extension(dir.path(), "shelf", false).await.unwrap();
+    let errors = report.error_lines().join("\n");
+    assert!(
+        errors.contains("collector `books` returned 1 at `/result/book`"),
+        "{errors}"
+    );
+    assert!(
+        errors.contains("`other/x.md` isn't matched by its `files:` globs"),
+        "{errors}"
+    );
+    assert!(
+        errors.contains("`../escape.md` isn't a path inside the project"),
+        "{errors}"
+    );
+    assert!(
+        errors.contains("trigger \"sometimes\" isn't one of"),
+        "{errors}"
+    );
+}
+
+/// The ledger extension: a collector that states the rows of its own SQLite
+/// file on `start` and on a `sqlite` change, and the fixtures that write
+/// the file from outside.
+fn ledger(root: &Path, fixtures: &[(&str, &str)]) {
+    write(
+        root,
+        ".oxplow/extensions/ledger/extension.yaml",
+        "manifest: 2
+name: ledger
+intent:
+  purpose: Follow a table in the extension's own file.
+  examples:
+    - { name: seen, input: { collector: entries }, expect: the row an outside write made }
+    - { name: bad, input: { collector: entries }, expect: a finding }
+    - { name: missing, input: { collector: entries }, expect: a finding }
+storage: { sqlite: true }
+collectors:
+  - id: entries
+    runtime: starlark
+    entry: collectors/entries.star
+    needs: [store.sql]
+    on: [start, { sqlite: own }]
+    sync: upsert
+    entities:
+      - { name: entry, key: id, columns: { id: text, title: text } }
+",
+    );
+    write(
+        root,
+        ".oxplow/extensions/ledger/storage/migrations/V1__entry.sql",
+        "CREATE TABLE entry (id TEXT PRIMARY KEY, title TEXT);",
+    );
+    write(
+        root,
+        ".oxplow/extensions/ledger/collectors/entries.star",
+        "def transform(x):
+    rows = scope(\"store.sql\", {\"sql\": \"SELECT id, title FROM entry\"})[\"rows\"]
+    return {\"entities\": {\"entry\": rows}}
+",
+    );
+    for (name, body) in fixtures {
+        write(
+            root,
+            &format!(".oxplow/extensions/ledger/fixtures/{name}.yaml"),
+            body,
+        );
+    }
+}
+
+/// `given: store_sql` writes an extension's own file from outside, as a
+/// person's sqlite3 would, and the next `sqlite` trigger sees the row.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_given_store_sql_is_an_outside_write_the_next_sqlite_trigger_sees() {
+    let dir = tempfile::tempdir().unwrap();
+    ledger(
+        dir.path(),
+        &[
+            (
+                "seen",
+                "given:
+  - { store_sql: { extension: ledger, sql: \"INSERT INTO entry (id, title) VALUES (?1, ?2)\", params: [e1, Dune] } }
+when: { collector: entries, trigger: sqlite }
+expect: { ok: true, result: { entry: 1 } }
+",
+            ),
+            (
+                "bad",
+                "given:
+  - { store_sql: { extension: ledger, sql: \"INSERT INTO nope (id) VALUES (1)\" } }
+when: { collector: entries, trigger: sqlite }
+expect: { ok: true }
+",
+            ),
+            (
+                "missing",
+                "given:
+  - { store_sql: { extension: nobody, sql: \"SELECT 1\" } }
+when: { collector: entries, trigger: sqlite }
+expect: { ok: true }
+",
+            ),
+        ],
+    );
+    let report = test_extension(dir.path(), "ledger", false).await.unwrap();
+    let errors = report.error_lines().join("\n");
+    assert!(
+        report.ran.iter().any(|r| r == "example seen"),
+        "{:?}",
+        report.ran
+    );
+    assert!(
+        !errors.contains("fixtures/seen.yaml"),
+        "the outside write is seen: {errors}"
+    );
+    assert!(
+        errors.contains("fixtures/bad.yaml") && errors.contains("`store_sql`"),
+        "{errors}"
+    );
+    assert!(
+        errors.contains("fixtures/missing.yaml") && errors.contains("no loaded extension `nobody`"),
+        "{errors}"
+    );
+}
+
+/// The quarantine extension: two collectors filling a store of bundled's
+/// task model, one with only good rows and one with a row bundled
+/// quarantines (a state that isn't a bucket).
+fn quarantine(root: &Path, fixtures: &[(&str, &str)]) {
+    write(
+        root,
+        ".oxplow/extensions/quarantine/extension.yaml",
+        "manifest: 2
+name: quarantine
+requires: [oxplow-bundled]
+intent:
+  purpose: Fill a store with a row that is quarantined.
+  examples:
+    - { name: said, input: { collector: mixed }, expect: the quarantine said }
+    - { name: none, input: { collector: good }, expect: no quarantine }
+    - { name: none-but-some, input: { collector: mixed }, expect: a finding }
+    - { name: some-but-none, input: { collector: good }, expect: a finding }
+    - { name: wrong-text, input: { collector: mixed }, expect: a finding }
+fills:
+  - model: oxplow/task_record
+    stores: [qstore]
+    id_pattern: \"q[0-9]+\"
+    stages:
+      - { id: backlog, title: Backlog, bucket: backlog }
+      - { id: next, title: Next, bucket: todo }
+      - { id: working, title: Working, bucket: in_progress }
+      - { id: finished, title: Finished, bucket: done }
+collectors:
+  - id: good
+    runtime: starlark
+    entry: collectors/good.star
+    on: [start]
+  - id: mixed
+    runtime: starlark
+    entry: collectors/mixed.star
+    on: [start]
+",
+    );
+    for (collector, extra) in [
+        ("good", ""),
+        ("mixed", "\n    rows.append(row(\"q2\", \"bogus\"))"),
+    ] {
+        write(
+            root,
+            &format!(".oxplow/extensions/quarantine/collectors/{collector}.star"),
+            &format!(
+                "def row(id, state):
+    return {{\"id\": id, \"title\": id, \"state\": state, \"stage\": \"backlog\", \"stage_title\": \"Backlog\", \"created_at\": \"2026-01-01T00:00:00Z\", \"updated_at\": \"2026-01-01T00:00:00Z\", \"links\": [], \"comments\": []}}
+
+def transform(x):
+    rows = [row(\"q1\", \"backlog\")]{extra}
+    return {{\"models\": [{{\"model\": \"oxplow/task_record\", \"store\": \"qstore\", \"snapshot\": rows}}]}}
+"
+            ),
+        );
+    }
+    for (name, body) in fixtures {
+        write(
+            root,
+            &format!(".oxplow/extensions/quarantine/fixtures/{name}.yaml"),
+            body,
+        );
+    }
+}
+
+/// A collector fixture's `problems` are checked on an ok run too: what the
+/// run quarantined. A list that names text the run didn't say, or any text
+/// on a run that quarantined nothing, is a finding; an empty list says
+/// "none".
+#[tokio::test(flavor = "multi_thread")]
+async fn a_collector_fixtures_problems_are_checked_on_an_ok_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = |collector: &str, problems: &str| {
+        format!(
+            "requires: [oxplow-bundled]
+when: {{ collector: {collector}, trigger: start }}
+expect: {{ ok: true, problems: {problems} }}
+"
+        )
+    };
+    quarantine(
+        dir.path(),
+        &[
+            ("said", &fixture("mixed", "[bogus]")),
+            ("none", &fixture("good", "[]")),
+            ("none-but-some", &fixture("mixed", "[]")),
+            ("some-but-none", &fixture("good", "[oops]")),
+            ("wrong-text", &fixture("mixed", "[nothing like this]")),
+        ],
+    );
+    let report = test_extension(dir.path(), "quarantine", false)
+        .await
+        .unwrap();
+    let errors = report.error_lines().join("\n");
+    for passing in ["said", "none"] {
+        assert!(
+            !errors.contains(&format!("fixtures/{passing}.yaml")),
+            "{passing}: {errors}"
+        );
+    }
+    for failing in ["none-but-some", "some-but-none", "wrong-text"] {
+        assert!(
+            errors.contains(&format!("fixtures/{failing}.yaml")) && errors.contains("problems"),
+            "{failing}: {errors}"
+        );
+    }
 }

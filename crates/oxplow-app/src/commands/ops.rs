@@ -1,12 +1,12 @@
 //! The scopes' **operations** (`.context/commands.md` "Scopes"): the
 //! native behavior behind the commands extensions declare. A scope
-//! (`work_items.write`) is in the domain's catalog; each of its
+//! (`knowledge.write`) is in the domain's catalog; each of its
 //! operations (`transition`) is registered here with what only Rust can
 //! supply — the input schema of the type its handler reads, the handler,
 //! whether it returns an inverse, a per-input confirmation, a check
 //! before the transaction.
 //!
-//! A manifest's command names one (`scope: work_items.write`, `op:
+//! A manifest's command names one (`scope: knowledge.write`, `op:
 //! transition`) and says the rest — summary, confirmation, ui —
 //! so oxplow's own commands are declared like any extension's
 //! (`extensions/oxplow-foundation`), and any extension may declare one
@@ -22,7 +22,7 @@ use super::{Command, ConfirmFor, Handler, Precheck};
 
 /// One operation of a scope.
 pub struct Op {
-    /// Its scope: `work_items.write`.
+    /// Its scope: `knowledge.write`.
     pub scope: String,
     /// Its name within the scope: `transition`.
     pub name: String,

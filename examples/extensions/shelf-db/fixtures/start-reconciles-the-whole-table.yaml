@@ -1,0 +1,16 @@
+# `start` states the full snapshot whatever the cursor: a book added and a
+# book removed since the last run are both put right.
+requires: [shelf, shelf-db]
+given:
+  - { command: shelf_db.book.add, input: { title: Dune } }
+when: { collector: shelf_db/books, trigger: sqlite }
+expect: { ok: true }
+steps:
+  - when: { command: shelf_db.book.add, input: { title: Emma } }
+    expect: { ok: true }
+  - when: { command: shelf_db.book.remove, input: { id: dune } }
+    expect: { ok: true }
+  - when: { collector: shelf_db/books, trigger: start }
+    expect: { ok: true }
+  - when: { sql: "SELECT id FROM v_shelf_book" }
+    expect: { rows: [{ id: emma }] }

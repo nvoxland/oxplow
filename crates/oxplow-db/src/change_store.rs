@@ -35,8 +35,8 @@ pub struct ChangeRow {
     /// The event log's highest seq when the analysis began.
     #[specta(type = Option<oxplow_domain::JsNumber>)]
     pub events_to: Option<i64>,
-    /// What the analysis was computed from (the build, its trees, an
-    /// effort's own files); a rerun from the same needn't recompute.
+    /// What the analysis was computed from (the build, its trees, a
+    /// request's own files); a rerun from the same needn't recompute.
     pub analyzed_from: Option<String>,
 }
 
@@ -170,8 +170,7 @@ impl SqliteChangeStore {
     /// row's head moved (its `head_revision` differs from the given one):
     /// its stored results are then of another head and must be recomputed.
     /// A change whose revisions are already these is only read: a write
-    /// would announce `v_change`, and a page re-asks on every announcement
-    /// (tsk1024).
+    /// would announce `v_change`, and a page re-asks on every announcement.
     pub async fn get_or_create(
         &self,
         stream_id: i64,
@@ -681,9 +680,6 @@ mod tests {
         assert_eq!(listed, vec![(1, "git:abc..working".to_string())]);
     }
 
-    /// An effort analyzed while open (head: the working tree) that has since
-    /// closed (head: its end snapshot) must be recomputed; the store says
-    /// when the head moved.
     fn file_row(path: &str, additions: i64, staged: Option<bool>) -> ChangeFileRow {
         ChangeFileRow {
             path: path.into(),
@@ -780,24 +776,24 @@ mod tests {
     async fn get_or_create_reports_a_moved_head() {
         let store = SqliteChangeStore::new(Database::in_memory());
         let (_, moved) = store
-            .get_or_create(1, "effort", "7", None, &Revision::Working)
+            .get_or_create(1, "turn", "7", None, &Revision::Working)
             .await
             .unwrap();
         assert!(!moved, "new rows didn't move");
         let (_, moved) = store
-            .get_or_create(1, "effort", "7", None, &Revision::Working)
+            .get_or_create(1, "turn", "7", None, &Revision::Working)
             .await
             .unwrap();
         assert!(!moved);
         let (row, moved) = store
-            .get_or_create(1, "effort", "7", None, &Revision::Snapshot(12))
+            .get_or_create(1, "turn", "7", None, &Revision::Snapshot(12))
             .await
             .unwrap();
         assert!(moved);
         assert_eq!(row.head_revision, Some(Revision::Snapshot(12)));
     }
 
-    /// tsk1024: asking for a change that is already there writes nothing,
+    /// asking for a change that is already there writes nothing,
     /// so it announces nothing: a page re-asks whenever `v_change` changes,
     /// and a write here would make it ask forever.
     #[tokio::test]

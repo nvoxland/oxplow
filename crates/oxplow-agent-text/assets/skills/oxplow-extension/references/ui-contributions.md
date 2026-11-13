@@ -12,19 +12,17 @@
     `oxplow/uncommitted-changes.sections` → `change_id` (the
     `v_change*` analysis; the page's `row` loader) — `at: { before: commit }`
     puts a strip above the uncommitted page;
-  - `oxplow/diff-view.sections` (an effort's or a range's diff) →
-    `effort_id`, `change_id`, …;
-  - `oxplow/work-item.sections` (a work item's page, whichever
+  - `oxplow/diff-view.sections` (a turn's, a request's or a range's diff) →
+    `change_id`, …;
+  - `oxplow/task-detail.sections` (a task's page, whichever
     list; oxplow-bundled's, so declare `requires: [oxplow-bundled]`) → `uri`;
-  - `oxplow/tasks.sections` (the Tasks page; also needs `requires: [oxplow-bundled]`) → `thread_id`,
-    `stream_id`;
   - `oxplow/new-session.sections` (sections `start`, `earlier`) →
     `thread_id`.
   `oxplow_find_page`/`oxplow.page.describe` on a page's file shows its slot
   nodes; read a page's loaders to learn the params it binds.
 
 - **`ui.decorators`** add a label to the URIs of one resource: `{ dataset,
-  resource: oxplow/work_item, placement: ref-chip | row-badge, label, color?
+  resource: oxplow/task, placement: ref-chip | row-badge, label, color?
   }` — the dataset (this extension's) needs a `uri` column plus the `label`
   (and `color`) columns; a chip shows on that URI's page, a badge after a
   linked cell in a row.
@@ -47,36 +45,31 @@
 
 ## Replacing a core view
 
-When a person wants their own Board, Tasks list or work item editor, an
-extension replaces that core view with a page (or a component) — no work
-list provider needed. The views and their props are `v_replaceable`; the
+When a person wants their own Board, Tasks list or task editor, an
+extension replaces that core view with a page (or a component) — no task store needed. The views and their props are `v_replaceable`; the
 page declares each prop as a param:
 
 ```yaml
 ui:
   mounts:
-    - { page: swimlanes, at: work_item.board, version: 1 }   # props: scope, thread_id
-    - { page: edit-item, at: work_item.detail, version: 1 }  # props: uri
+    - { page: swimlanes, at: task.board, version: 2 }   # props: scope, thread_id (stream_id is implicit)
+    - { page: edit-item, at: task.detail, version: 1 }  # props: uri
 ```
 
-- Read items from `v_work_item`; change them only through the interface
-  commands (`oxplow.work_item.update`, `transition`, `reorder` — when the
-  active list's `features` in `v_capability_provider` include `ordering` —
-  and `move`), so the view works with whichever list is active. A component
+- Read items from `v_oxplow_task`; change them only through the task
+  action points (`oxplow/task.move`, `task.edit`, … — the item's store
+  answers) and `oxplow.tasks.assign` (who works on it) and `reorder` (its
+  place in that assignee's queue; both bundled's, for every store), so the
+  view works with whichever store holds the task. A component
   declares the commands it runs (`commands:`); one outside the extension's
   namespace also needs `commands:<pattern>`, approved at deploy.
-- **An effort's verdict** (`effort.verdict`, props `effort_id`) is the first
-  line of an effort's review page, and core has none of its own: to change
-  review rules ("block on a dropped table", "coverage of 90"), replace it
-  with a page that judges the effort from `v_test_run`,
-  `v_effort_observation`, `v_change_function` and your own facts. A `tone`
-  column (`success`, `warning`, `danger`) colors a line.
 - The person picks whose view shows: Settings → Integrations, or
   `replacements: { <target>: <extension> | oxplow }` in the project config
   (a person-only key: tell them, don't set it). One extension replacing a
   view shows by itself.
-- The page around the view stays oxplow's (the Board's scope picker, a work
-  item's state pill and Move To), so an item can always move.
+- The page around the view stays oxplow's (the Task List's filters, a task's state pill and Move To), so an item can always move. The Tasks
+  board is a whole custom page: its stand-in draws its filters too, through
+  the shared view (`show`, `priority`, `q`).
 - A target whose `view` (in `v_replaceable`) lists keys shares them with its
   page: a replacement component reads `component.viewParams`, writes
   `setViewParams` and follows `onViewParams` for exactly those keys (any

@@ -2,7 +2,7 @@
 when:
   page: oxplow/collector
   params:
-    uri: "oxplow:oxplow/collector?collector=oxplow/oxplow.effort_test_outcome"
+    uri: "oxplow:oxplow/collector?collector=oxplow/oxplow.request_outcome"
 expect:
   see_also:
     contains:

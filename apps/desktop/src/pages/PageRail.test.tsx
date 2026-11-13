@@ -120,9 +120,8 @@ test("a filter's options_from is resolved by the daemon for the page and param, 
       <PageRail run={run} runId="run-1" onApply={() => {}} streamId="str1" />
     </PageReadsContext.Provider>,
   );
-  await waitFor(() => expect(getByTestId("page-param-scope-value").textContent).toBe("All files"));
-  expect(asked).toEqual([["options", "acme/files", "scope", { stream_id: "str1", scope: "all" }, "str1"]]);
-  fireEvent.click(getByTestId("page-param-scope-value"));
   const edit = getByTestId("page-param-scope-edit") as HTMLSelectElement;
+  await waitFor(() => expect(edit.selectedOptions[0]?.textContent).toBe("All files"));
+  expect(asked).toEqual([["options", "acme/files", "scope", { stream_id: "str1", scope: "all" }, "str1"]]);
   expect([...edit.options].map((o) => o.textContent)).toEqual(["All files", "Mine"]);
 });

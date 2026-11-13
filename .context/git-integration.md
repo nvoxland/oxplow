@@ -16,18 +16,18 @@ when the stream appears (boot, `oxplow.stream.create`) and ends it, and everythi
 hung off it, when the stream goes (archive, orphan). Off it hang the snapshot
 capture, the workspace announcements and the VCS's refs watch. What follows a
 few paths of the primary worktree subscribes to that same watch with a `Scope`,
-which names paths the filter need not keep: the wiki (`.oxplow/wiki`), the config
+which names paths the filter need not keep: oxwiki (`.oxplow/oxwiki`), the config
 (`.oxplow/project.yaml`, the personal file, `.oxplow/extensions`) and version
 control appearing (what is directly at the root). The only other watch is the
 user-global metrics folder, outside every project.
 
 Boot starts the watches first. What reads the disk at boot (the startup sweep,
-the wiki scan) waits for them, so a change is in what it read or heard after.
+the oxwiki scan) waits for them, so a change is in what it read or heard after.
 
 Every stream then sweeps, one at a time with the primary first (`boot::sweep_all`), so
 what changed in any worktree while oxplow was off is in a snapshot soon after start.
-Each stream's effort-start gate holds until its own sweep ends. A stream made after
-boot needs none: nothing can have changed while oxplow was off. A worktree stream's
+A stream made after
+boot needs no sweep: nothing can have changed while oxplow was off. A worktree stream's
 history is sparse, so its sweep records only real changes (`data-model.md`).
 
 ### Batches, and events as hints (the `FsWatcher` contract)
@@ -45,21 +45,33 @@ a rescan by checking the disk there. A rescan comes from:
   top-level directories, `pending.rs`);
 - a kept top-level directory appearing, or the rules stopping ignoring one.
 
+**A build rescans the root on macOS.** FSEvents drops events for a stream
+whose writes outrun it, and says so as a `user dropped` rescan *of the root*,
+with no hint where: 30,000 files written to an ignored `target/` (a test
+run) delivered 1,793 events and one root drop even to a watcher that did
+nothing per event, and oxplow swept the worktree 8 times for it (measured
+2026-11-11; on the day's log, ~1,500 sweeps). Pruning at registration
+can't prevent it (above), so a root rescan must cost what it finds: the
+sweep is a stat walk that queues nothing; the config reload announces
+`ConfigChanged` only when the file reads differently, and the extension
+listing is written only when its rows differ, since each announcement
+re-runs every open page that follows it.
+
 | Subscriber | A path | A rescan |
 |---|---|---|
 | Snapshot capture | dirty | `enqueue_tree_diff(under)`: the startup sweep, limited to a directory |
 | Workspace | `WorkspaceChanged`; one `index_moved` per batch | `WorkspaceChanged` with no path; `index_moved` |
-| Wiki | `sync_page` | `scan_and_sync_all` |
-| Config | reload, or restate sources | both |
+| Oxwiki | `sync_page` | `scan_and_sync_all` |
+| Config | reload (announced only when it differs), restate sources (written only when they differ), or announce global metrics | reload and restate; global metrics when the rescan covers their folder |
 | Refs | re-read the state | same |
 
 Each picks when it reads, per consumer:
 
 - `next_batch()`: at once. **Snapshot capture uses this** so its
   in-memory dirty set is always current the instant a snapshot is
-  requested (a 250ms wait let an edit's watch event lag the
-  effort-completion snapshot, so genuinely-edited files showed up as
-  `claimed_but_not_changed` in the effort file-review).
+  requested (a 250ms wait let an edit's watch event lag a
+  turn's end snapshot, so a file the turn genuinely edited was missing from
+  the turn's files).
 - `next_batch_after(window)`: a burst as one batch. This is what the
   general-purpose, UI-facing consumers use, so a `git checkout` or save-storm
   fires one round of notifications instead of one per touched file.
@@ -71,7 +83,7 @@ subscribing to *two* of them still gets two callbacks for one user action
 debounce says nothing about how long the resulting work takes — if it
 outruns the window, calls overlap.
 
-That bit the branch-changes summary in `App.tsx` (tsk238): it subscribes
+That bit the branch-changes summary in `App.tsx`: it subscribes
 to both `vcsRefsChanged` and `workspaceChanged`, and each refresh runs
 `listBranchChanges` → 4+ git subprocesses including a
 `status --untracked-files=all` worktree walk. Agent edit storms drove a
@@ -81,7 +93,7 @@ It was fixed with a trailing debounce **plus single-flight** (one queued
 follow-up, so the summary can't end stale); the helper (`coalesced-refresh.ts`)
 went with the last two views that used it, which are pages now (a page re-runs
 the loaders whose reads changed, once per change). Write it again for any new expensive refresh fed by more
-than one event stream. And each scan is cheaper (tsk241): `get_change_scopes`
+than one event stream. And each scan is cheaper: `get_change_scopes`
 (`oxplow-git/src/branch_changes.rs`) reads the branch, its base and its
 upstream in-process through `git2`, the repo opened once, so the one git
 process a scan spawns is the `status` — whose untracked walk uses git's
@@ -96,7 +108,9 @@ event stream.
 **Nothing here is a hardcoded path list.** `WorkspaceFilter`
 (`crates/oxplow-fs-watch`) is the single source of truth and layers, in
 order: `.git` (the only hardcoded segment — `DEFAULT_IGNORED_SEGMENTS`)
-and `.oxplow` defaults → `generated.include` (forces a path back in) →
+and the root's `.oxplow` defaults (only the root's: a file or folder named
+`.oxplow` deeper down, such as an installed skill's marker, is the
+project's and follows its `.gitignore`) → `generated.include` (forces a path back in) →
 `generated.exclude` → **`.gitignore`**, root + nested, with full
 hierarchical semantics, under the exclude file and git's global
 excludes file (`core.excludesFile`, found as git finds it).
@@ -105,8 +119,8 @@ because a Rust/JS repo gitignores them, not because we name them.
 
 Two questions, one filter: `ignore` is "should oxplow watch this?" and
 `ignore_in_trees` is "would git see it?" (what `Trees` uses: diffs, the
-working tree, the Uncommitted panel). They differ only on
-`.oxplow/wiki/`, which is watched and snapshotted though git ignores it,
+working tree, the Git panel). They differ only on
+`.oxplow/oxwiki/`, which is watched and snapshotted though git ignores it,
 so it is never reported as uncommitted.
 
 `FsWatcher::watch_workspace` registers the way the OS works (`Registration`):
@@ -260,10 +274,12 @@ loading spinner) by:
 
 - The Directory page's loaders (`v_file`, `v_branch`, `v_change` follow it).
 - `SnapshotCapture::spawn_git_refs_listener` — requests a snapshot for
-  the stream, so every commit lands a snapshot row stamped with the new
+  the stream **only when this worktree's own HEAD moved** (branch or
+  commit differs from the one it last saw; the HEAD at start is the first
+  one seen) and logs `vcs.head.moved { from, to }` after the take, so every commit lands a snapshot row stamped with the new
   HEAD (`snapshot.revision`/`branch`) even when the worktree
   didn't change. Beyond Local History, those rows are the **anchor
-  points for metric ancestry** (tsk97/tsk102): a dirty test run's code
+  points for metric ancestry**: a dirty test run's code
   is placed by the *next* same-branch commit-stamped snapshot — the
   commit that absorbed it, not the fork point its `closest_vcs_rev`
   names. The metric fold partitions per `(stream, branch)` and its
@@ -273,13 +289,16 @@ loading spinner) by:
 The recursive `fs.watch` falls back to per-subdir watching on platforms
 that don't support recursive mode.
 
-### Wiki
+### Watched folders
 
-`crates/oxplow-app/src/wiki_pages_watch.rs`: a `Scope` on the primary's watch.
-Each batch of `.md` changes runs `wiki_pages::sync_page` per slug; a rescan runs
-`scan_and_sync_all`. Every write is treated identically — agent and user edits
-both re-baseline freshness — so this is the single sync path for `wiki_page`
-metadata. See `data-model.md` → `wiki_page`.
+An extension that keeps files under `.oxplow/` declares the folder with
+`files: [{ path: .oxplow/<name>, access: write, watch: true }]`; the
+primary's watch follows it though git ignores it
+(`oxplow_fs_watch::set_declared_watched_folders`, published per generation),
+and the extension's `files:` trigger hears a change in it. oxwiki's
+`.oxplow/oxwiki/` is one: its collector converges every page file — an agent's
+direct write, a person's edit — into the knowledge model's rows. See
+`knowledge.md` and `extensions-permissions.md` "Declared folders".
 
 ### Config
 
@@ -554,12 +573,12 @@ the UI entry points for user-driven commits. oxplow never steers the agent to
 commit. The Directory page (the Files launcher entry) is only the tree: no commit, pull or push, and no
 branch status (the Git page has those).
 
-### Commits are not policed (tsk250)
+### Commits are not policed
 
 Neither hook comments on a commit. The Stop hook emits no commit
-directives, and the PostToolUse Bash hook watches `git commit` only to run
-the revert/token-waste leg — the **commit-hygiene nudge** that used to flag
-committed files outside the open effort's changed set was removed. It
+directives, and the PostToolUse Bash hook doesn't look for `git commit` at
+all — the **commit-hygiene nudge** that used to flag
+committed files outside the work's changed set was removed. It
 second-guessed a decision the committing actor had already made (nothing to
 disentangle: one commit, one actor), and it hardcoded a `docs/` warning
 about this repo's own auto-deploy workflow, which oxplow can't assume of any
@@ -581,7 +600,7 @@ classified.
 from **every stream's** head as deep as `IndexDepth::DEFAULT` says — a
 window of 500, doubled while the oldest it read was new (a pull longer
 than the window is indexed whole, no gap), up to 5000, which is also the
-horizon: a first boot indexes the newest 5000 (tsk568) — through the VCS capability (`Vcs::log`, `Vcs::revision`;
+horizon: a first boot indexes the newest 5000 — through the VCS capability (`Vcs::log`, `Vcs::revision`;
 [vcs.md](./vcs.md)) — stores them (`v_commit`, `v_commit_file`),
 restates branches and tags (`v_branch`, `v_tag`), and projects each
 commit into the unified `page_ref` graph (see
@@ -590,37 +609,37 @@ commit into the unified `page_ref` graph (see
 - Diff against parent#0 → one `(commit:<sha>) -- touched_file -->
   (file:<path>)` edge per file.
 - Subject + body run through `oxplow_domain::uri::extract` so the
-  same wikilink + inline-mention rules used by wiki bodies and
+  same wikilink + inline-mention rules used by knowledge page bodies and
   task descriptions also apply to commit messages
   (`wi-…`, `[[architecture]]`, `[[finding:fnd-1]]`, bare 7-40 hex shas).
-- **Linked to the task by its work** (`commit_links.rs`, tsk1035). An
-  agent's commit rarely names its task (and agents name tasks by title),
-  so each new commit is checked against the efforts that closed in the
-  two weeks before it: it **holds** an effort's work when they share a
-  file and the commit's object for every shared file is the object the
-  effort's end-snapshot bytes would be (`Vcs::object_at` against
-  `ObjectStore::id_of`; a partial commit holds it too). It's linked by a
-  `(work item URI) -- committed --> (commit URI)` edge — the shape of
-  a declared impact, the effort in `source_extra` — which `v_commit_work_item`
-  (v2) and the commit's backlinks read. The other order (committed, then
-  the task closed) is the `effort.commits` reaction to `effort.finished`,
-  over the commits since the effort started. An effort whose end-snapshot
-  bytes have expired from Local History (or were never kept) can't be
-  shown to hold anything, so it simply doesn't match; it must never error,
-  or one old effort stops the commit linking to every other.
+- **Linked to the requests that made it** (`commit_links.rs`,
+  `oxplow_db::commit_request_store`, `commit_request`). As a commit is
+  indexed, for each path it changed: the requests on the commit's stream
+  (the stream whose worktree it was indexed from) that changed the path
+  since the previous commit that held it, where the file as the work left
+  it is the commit's content. A snapshot's file row keeps the git blob id of
+  the bytes it captured (`file_snapshot.git_oid`: a git-backed row's address
+  already is one; an oxplow-stored row gets it at capture, read back from
+  the blob just written; a hashes-only take, a deleted or an oversize row
+  has none), so the match compares ids and reads no bytes, and survives
+  Local History expiry. The requests come from the turns' files
+  (`v_turn_file`, a time join with the stream's snapshot line) and each
+  turn's request, never from `request.thread_id`: a request can span
+  threads and streams. One row per (commit, path, request) with its
+  **basis** (`named`: an edit call of one of its turns named the path;
+  `reported`: the harness said a shell call changed it; `observed`: it
+  changed while the request ran and nothing else says) and its
+  **confidence** (`sole`: one request changed the path; `shared`: several
+  did, as two threads on one file). `v_commit_request` reads it both ways; a
+  commit made outside oxplow, or of a file edited again since, has no rows,
+  and a commit with no task still links to its requests. Nothing is closed
+  by a commit. The `task → commit` edge is **derived**
+  (`v_commit_task`): through the task's requests (`v_oxplow_request_link`), from
+  the commit's message, and from a declared impact; it is not stored.
 - **Logged as `vcs.commit.indexed`** `{ commit, stream, committed_at }`,
   once per commit (dedupe key), anchored to the stream whose workspace
   found it — every commit, unlike `vcs.head.moved`, which needs a clean
-  worktree. The `effort.landing` consumer (`effort_landing.rs`) compares
-  it with each **open** effort on that stream by content: the effort's
-  files — recorded, plus what its thread's running turn has changed so far
-  (a mid-turn commit comes before those are observed) — as they are in the
-  worktree now, against the commit's version of each. It holds the effort
-  when it touches one of them and has every file it touches as the effort
-  left it, and holds it whole (`complete`) when that's true of all of
-  them. Either way it logs `effort.landed { effort, commit, complete }`
-  and links a linked effort's item to the commit; the effort policy closes
-  on a complete landing (`.context/work-tracking.md`, rule 3).
+  worktree.
 
 Idempotent. Each commit is keyed by its full sha, and a one-row
 existence probe before re-diffing skips already-indexed commits, so
@@ -652,7 +671,14 @@ they came from the in-app commit affordance or an external
 
 `SnapshotCaptureService::spawn_git_refs_listener` (wired from the
 desktop boot in `apps/desktop/src-tauri/src/main.rs`) subscribes to
-the ref moves (`RefMoves`) of its stream. On each event it drains
+the ref moves (`RefMoves`) of its stream. The channel fires for any change
+under the repository's `refs/` (a commit in another worktree, a fetch, a
+`packed-refs` rewrite, a lock file), so the listener reads the worktree's
+own HEAD and acts only when it differs from the one it last saw (the HEAD
+at start is the first one seen, so starting is not a move; a move whose take
+failed, or found no snapshot yet, is kept for the next ref event); the commit
+indexer, the branch reconciler and the branch list still hear every ref.
+When HEAD moved it drains
 any pending dirty paths via `request_snapshot(SnapshotSourceKind::GitRefs)`,
 then — if the worktree is clean and HEAD differs from the latest
 snapshot's `revision` — **re-stamps the latest snapshot's
@@ -662,7 +688,9 @@ representation of disk; it just now also corresponds to a new commit
 (common after `git commit`, `git commit --amend`, or a fast-forward
 pull that moves HEAD without altering the working tree).
 
-After the re-stamp the service emits a 0-file
+When the take has landed the listener logs `vcs.head.moved@3 { stream,
+from, to, snapshot? }` (`snapshot` only when it re-stamped one), once per
+move. After the re-stamp the service emits a 0-file
 `FileSnapshotsBatchCreated` event so renderer subscribers (Local
 History dashboard, change analysis) refetch and pick up the new
 `revision`.

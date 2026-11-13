@@ -1,4 +1,4 @@
-//! What the person saw go wrong in the app (tsk1072): `oxplow.ui.report_error`
+//! What the person saw go wrong in the app: `oxplow.ui.report_error`
 //! records an operation that failed in front of them — a merge, a save,
 //! a query — as `ui.op_failed@2`, so the agent can read what they read
 //! (`v_op_error`, the output through `read_event_content`). A person's
@@ -42,7 +42,7 @@ pub struct ReportErrorInput {
     pub thread: Option<String>,
     /// The stream the app was showing (`str1`), for an error from no
     /// thread: its agent reads the output. A thread names its own stream,
-    /// so not with `thread` (tsk1079).
+    /// so not with `thread`.
     #[serde(default)]
     pub stream: Option<String>,
     /// The signal that killed the process (`SIGKILL`).
@@ -186,12 +186,12 @@ mod tests {
             .collect()
     }
 
-    /// tsk1072: an error the person saw is in `v_op_error` for the agent to
+    /// an error the person saw is in `v_op_error` for the agent to
     /// read through `oxplow_query_sql`, and its captured output is the event's
     /// `output` body, readable by an agent of the thread's stream.
     #[tokio::test]
     async fn a_reported_error_is_readable_by_an_agent_through_v_op_error() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let out = fx
             .svc
             .commands
@@ -256,11 +256,11 @@ mod tests {
         );
     }
 
-    /// tsk1072: a report with nothing captured has no body, and one from no
+    /// a report with nothing captured has no body, and one from no
     /// thread has no anchors.
     #[tokio::test]
     async fn a_report_without_output_or_thread_has_neither() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         fx.svc
             .commands
             .run(
@@ -279,12 +279,12 @@ mod tests {
         assert!(rows[0]["command"].is_null());
     }
 
-    /// tsk1079: an error from no thread names the stream the app showed, so
+    /// an error from no thread names the stream the app showed, so
     /// that stream's agent can read its output; a thread names its own, so
     /// both together are refused.
     #[tokio::test]
     async fn a_report_from_no_thread_is_anchored_to_its_stream() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let stream = oxplow_domain::StreamId::new(1);
         fx.svc
             .commands
@@ -327,11 +327,11 @@ mod tests {
         );
     }
 
-    /// tsk1072: once retention expires the payload (`{}`), the error stays a
+    /// once retention expires the payload (`{}`), the error stays a
     /// row — when it happened, where — with its details NULL.
     #[tokio::test]
     async fn an_expired_report_keeps_its_row_without_details() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         fx.svc
             .commands
             .run(
@@ -366,7 +366,7 @@ mod tests {
     /// run logs one.
     #[tokio::test]
     async fn an_agent_may_report_a_ui_error() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let agent = Actor::Agent {
             session_id: None,
             thread_id: Some(ThreadId::new(fx.thread.value())),

@@ -1,0 +1,184 @@
+title: Request summary
+description: 'A request at a glance: its prompt, state, turns, tool calls and tokens; the tasks it worked on and on what evidence; the files its turns changed (claimed or sole); its test runs, diff coverage and static analysis; the metrics it moved; and the commits that hold its files. Name it as `req3`. Its changes, file by file, are its Changes page (`oxplow:oxplow/request?id=req3`).'
+label: 'Summary of {{param.request}}'
+tool: request_summary
+params:
+- name: request
+  label: Request (`req3`)
+answers:
+- {"question":"What did this request do: its tasks, its files, its tests and its commits?","params":{"request":"req1"},"skill":"oxplow-runtime"}
+- {"question":"Which tests did this request run, and how much of what it changed do they cover?","params":{"request":"req1"},"skill":"oxplow-runtime"}
+- {"question":"Which commits hold this request's work?","params":{"request":"req1"},"skill":"oxplow-runtime"}
+loaders:
+  request:
+    sql: |
+      SELECT r.id, r.uri, r.prompt, r.source, r.state, r.started_at, r.last_activity_at,
+             r.turns, r.threads, r.tool_calls, r.input_tokens, r.output_tokens, r.jobs_running,
+             th.title AS thread, th.uri AS thread_uri,
+             'Open its changes' AS changes
+      FROM v_request r
+      LEFT JOIN v_thread th ON th.id = r.thread_id
+      WHERE r.uri = uri('oxplow/request', 'id', :request)
+  files:
+    sql: |
+      SELECT f.path, f.stream_id, max(f.confidence = 'claimed') AS claimed,
+             min(f.first_changed_at) AS first_changed_at, max(f.last_changed_at) AS last_changed_at
+      FROM v_agent_turn t
+      JOIN v_turn_file f ON f.turn_id = t.id
+      WHERE t.request_id = :id AND f.confidence IN ('claimed', 'sole')
+      GROUP BY f.stream_id, f.path
+      ORDER BY f.path
+    params:
+      id:
+        from: request.id
+  tests:
+    sql: |
+      -- Oldest first, as they ran: a test run's counts, diff coverage's
+      -- percent of the changed lines covered, static analysis' errors and
+      -- warnings.
+      SELECT o.kind, o.stream_id, o.seq, o.provenance, o.created_at,
+             CAST(json_extract(o.payload_json, '$.passed') AS INT) AS passed,
+             CAST(json_extract(o.payload_json, '$.failed') AS INT) AS failed,
+             CAST(json_extract(o.payload_json, '$.total') AS INT) AS total,
+             o.metric_value AS value
+      FROM v_request_observation o
+      WHERE o.request_id = :id
+      ORDER BY o.stream_id, o.seq
+    params:
+      id:
+        from: request.id
+  metrics:
+    sql: |
+      SELECT d.key, d.title, d.unit, d.baseline, d.current, d.delta, d.crossing, d.stream_id
+      FROM v_request_metric_delta d
+      WHERE d.request_id = :id AND d.changed = 1
+      ORDER BY d.title, d.stream_id
+    params:
+      id:
+        from: request.id
+  commits:
+    sql: |
+      SELECT cr.sha, substr(cr.sha, 1, 7) AS short, c.subject, c.committed_at,
+             count(DISTINCT cr.path) AS files
+      FROM v_commit_request cr
+      LEFT JOIN v_commit c ON c.sha = cr.sha
+      WHERE cr.request = :uri
+      GROUP BY cr.sha
+      ORDER BY c.committed_at DESC, cr.sha
+    params:
+      uri:
+        from: request.uri
+view:
+  stack:
+  - id: request
+    title: About
+    from: request
+    viz: detail
+    lead: prompt
+    columns:
+    - key: state
+      label: State
+    - key: source
+      label: Started by
+    - key: thread
+      label: Thread
+      link:
+        kind: page
+        from: thread_uri
+    - key: started_at
+      label: Started
+      format: datetime
+    - key: last_activity_at
+      label: Last active
+      format: relative
+    - key: turns
+      label: Turns
+    - key: tool_calls
+      label: Tool calls
+    - key: input_tokens
+      label: Tokens read
+      format: integer
+    - key: output_tokens
+      label: Tokens written
+      format: integer
+    - key: jobs_running
+      label: Jobs running
+    - key: changes
+      label: Changes
+      link:
+        kind: request
+        from: id
+    empty: No request by that id.
+  - slot: sections
+  - id: files
+    title: Files
+    from: files
+    viz: table
+    columns:
+    - key: path
+      label: File
+      link:
+        kind: file
+    - key: last_changed_at
+      label: Last changed
+      format: relative
+    empty: Its turns changed no file.
+  - id: tests
+    title: Tests and coverage
+    from: tests
+    viz: table
+    columns:
+    - key: kind
+      label: Run
+    - key: created_at
+      label: When
+      format: datetime
+    - key: passed
+      label: Passed
+    - key: failed
+      label: Failed
+    - key: total
+      label: Tests
+    - key: value
+      label: Value
+    empty: It ran no tests and measured no coverage.
+  - id: metrics
+    title: Metric changes
+    from: metrics
+    viz: table
+    columns:
+    - key: title
+      label: Metric
+      link:
+        kind: metric
+        from: key
+    - key: baseline
+      label: Before
+      unit: unit
+    - key: current
+      label: After
+      unit: unit
+    - key: delta
+      label: Change
+      unit: unit
+    - key: crossing
+      label: Past
+    empty: It moved no metric.
+  - id: commits
+    title: Commits
+    from: commits
+    viz: table
+    columns:
+    - key: subject
+      label: Commit
+      link:
+        kind: commit
+        from: sha
+    - key: short
+      label: Sha
+    - key: committed_at
+      label: When
+      format: datetime
+    - key: files
+      label: Its files
+    empty: No commit holds its work yet.

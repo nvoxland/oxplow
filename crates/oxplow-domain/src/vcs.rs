@@ -682,7 +682,7 @@ mod revision_tests {
         assert_eq!(wide.is_ancestor_or_equal("r128", "r0"), Some(false));
     }
 
-    /// tsk550: a revision that reads as a command-line option is refused,
+    /// a revision that reads as a command-line option is refused,
     /// so it can't reach git's argv as a flag.
     #[test]
     fn a_revision_cannot_be_an_option() {
@@ -692,7 +692,7 @@ mod revision_tests {
         assert!("git:HEAD~1".parse::<Revision>().is_ok());
     }
 
-    /// P5.B2 (tsk521): a revision round-trips through its wire string and
+    /// P5.B2: a revision round-trips through its wire string and
     /// the ref grammar's `@rev` slot, where the working tree is the
     /// omitted slot.
     #[test]

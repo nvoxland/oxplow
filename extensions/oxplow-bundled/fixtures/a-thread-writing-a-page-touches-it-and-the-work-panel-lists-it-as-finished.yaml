@@ -1,0 +1,22 @@
+# A page a thread writes by command is a touch of that thread (the last
+# time it wrote it); a person's write, with no thread, touches nothing. The
+# Work panel's Finished list shows the pages the thread touched.
+requires: [oxwiki]
+given:
+  - observe:
+      turn:
+        prompt: Write it down
+        during:
+          - { command: oxwiki.page.write, input: { title: Gears, body: "# Gears\n\nTurn." }, as: agent }
+  - { command: oxwiki.page.write, input: { title: Teeth, body: "# Teeth\n\nBite." } }
+when: { sql: "SELECT page, thread_id FROM v_oxplow_knowledge_touch ORDER BY page" }
+expect:
+  rows:
+    - { page: "oxplow:oxplow/knowledge?id=gears&store=oxwiki", thread_id: 1 }
+steps:
+  - when: { sql: "SELECT grp, title, icon FROM v_oxplow_thread_tasks WHERE thread_id = 1" }
+    expect: { rows: [{ grp: Finished, title: Gears, icon: knowledge }] }
+  - when: { command: oxwiki.page.write, input: { id: gears, body: "# Gears\n\nTurn again." }, as: agent }
+    expect: { ok: true }
+  - when: { sql: "SELECT count(*) AS n FROM v_oxplow_knowledge_touch" }
+    expect: { rows: [{ n: 1 }] }

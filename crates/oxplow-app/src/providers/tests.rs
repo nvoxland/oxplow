@@ -1,6 +1,6 @@
 //! P5.D3: the host over the real fake provider process — consent before
 //! execution, the handshake against the approved declarations, and the
-//! work-items conformance suite through `ExternalWorkItems`.
+//! snapshots conformance suite through its host adapter.
 
 use std::path::{Path, PathBuf};
 
@@ -13,10 +13,7 @@ use crate::extension::extensions::Extension;
 #[cfg(unix)]
 use crate::test_fixtures::lifecycle::write_extension;
 use crate::test_fixtures::lifecycle::{fake_bin, EXT};
-use crate::test_fixtures::{
-    services_with_effort, services_with_task_effort, EffortFixture, TaskEffortFixture,
-};
-use crate::work_items_conformance::{suite, ServicesProbe, WorkItemsProbe as _};
+use crate::test_fixtures::{services_with_thread, ThreadFixture};
 
 /// The manifest `text` with `secrets` declared beside its `process` permission.
 fn permit_secrets(text: &str, secrets: &[&str]) -> String {
@@ -34,9 +31,11 @@ fn permit_secrets(text: &str, secrets: &[&str]) -> String {
     )
 }
 
-/// Whether instance `id` runs: its work list is registered.
+/// Whether instance `id` runs: its health is ready.
 fn running(svc: &crate::Services, id: &str) -> bool {
-    svc.work_items.get(id).is_ok()
+    svc.providers
+        .health(&format!("tracker/{id}"))
+        .is_some_and(|h| h.state == InstanceState::Ready)
 }
 
 fn extension(project: &Path) -> Extension {
@@ -50,20 +49,18 @@ fn extension(project: &Path) -> Extension {
 
 /// Deploys the extension, which publishes a generation that can start
 /// its provider.
-async fn deploy(fx: &EffortFixture, _ext: &Extension) {
+async fn deploy(fx: &ThreadFixture, _ext: &Extension) {
     crate::test_fixtures::activate_with_problems(&fx.svc).await;
 }
 
 /// The fixture with the tracker extension (running the fake with
 /// `hooks`) deployed on this machine.
 #[cfg(unix)]
-async fn deployed(hooks: &str) -> (EffortFixture, Extension) {
-    let fx = services_with_effort().await;
+async fn deployed(hooks: &str) -> (ThreadFixture, Extension) {
+    let fx = services_with_thread().await;
     write_extension(&fx.svc.layout.project_dir, hooks);
     let ext = extension(&fx.svc.layout.project_dir);
     deploy(&fx, &ext).await;
-    // The fake is the project's tracker: where every create files.
-    make_active(&fx, "fake").await;
     crate::test_fixtures::activate(&fx.svc).await;
     (fx, ext)
 }
@@ -72,7 +69,7 @@ const INSTANCE: &str = "tracker/fake";
 
 /// Enable the instance in the project's config (in memory, as a
 /// reconcile reads it).
-fn configure(fx: &EffortFixture, enabled: bool, config: serde_json::Value) {
+fn configure(fx: &ThreadFixture, enabled: bool, config: serde_json::Value) {
     fx.svc.config.write().unwrap().extension_instances.insert(
         INSTANCE.into(),
         oxplow_config::ExtensionInstanceConfig {
@@ -82,39 +79,6 @@ fn configure(fx: &EffortFixture, enabled: bool, config: serde_json::Value) {
             provider: None,
         },
     );
-}
-
-/// Make `provider` the active work list, as a `oxplow.config.set` would leave it:
-/// the config, and the capability rows the interface reads.
-async fn make_active(fx: &EffortFixture, provider: &str) {
-    // Unchanged, no new generation: the running instances keep running.
-    let unchanged = fx
-        .svc
-        .config
-        .read()
-        .unwrap()
-        .active_providers
-        .get("work_items")
-        .is_some_and(|current| current == provider);
-    if unchanged {
-        return;
-    }
-    fx.svc
-        .config
-        .write()
-        .unwrap()
-        .active_providers
-        .insert("work_items".into(), provider.into());
-    republish(fx);
-    crate::test_fixtures::activate_with_problems(&fx.svc).await;
-}
-
-fn republish(fx: &EffortFixture) {
-    let config = crate::config_service::read_config(&fx.svc.config);
-    fx.svc
-        .capabilities
-        .publish_now(&config, &fx.svc.db)
-        .unwrap();
 }
 
 /// Enable `spec`'s default instance with `config`, as the person's
@@ -155,7 +119,7 @@ async fn turn_off(svc: &std::sync::Arc<crate::Services>, instance: &str) {
     crate::test_fixtures::activate_with_problems(svc).await;
 }
 
-async fn logged(fx: &EffortFixture, event_type: &str) -> Vec<serde_json::Value> {
+async fn logged(fx: &ThreadFixture, event_type: &str) -> Vec<serde_json::Value> {
     let t = event_type.to_string();
     fx.svc
         .db
@@ -263,17 +227,7 @@ async fn three_failures_in_a_row_disable_an_instance_until_it_is_enabled() {
         InstanceState::Failing { .. }
     ));
     for _ in 0..2 {
-        let failed = fx
-            .svc
-            .commands
-            .run(
-                &Actor::Human,
-                "oxplow.work_item.create",
-                json!({ "title": "x" }),
-                false,
-            )
-            .await;
-        assert!(failed.is_err());
+        assert!(mark_on_fake(&fx).await.is_err());
     }
     let health = providers.health(INSTANCE).unwrap();
     let InstanceState::Disabled { reason } = &health.state else {
@@ -324,456 +278,15 @@ async fn three_failures_in_a_row_disable_an_instance_until_it_is_enabled() {
     assert!(running(&fx.svc, "fake"));
 }
 
-/// P7.A7: the suite reads the provider back after its writes — a read
-/// that doesn't restate what the writes recorded is a finding.
-#[cfg(unix)]
-#[tokio::test]
-async fn the_suite_finds_a_read_that_doesnt_restate_the_writes() {
-    let (fx, ext) = deployed("stale-read").await;
-    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
-    // Its start's first read, in the background (tsk716).
-    first_read(&fx).await;
-    let provider = fx.svc.work_items.get("fake").unwrap();
-    let findings = suite(
-        &fx.svc.work_items_client(),
-        &provider.id,
-        provider.features,
-        None,
-        &ServicesProbe(&fx.svc),
-        &Actor::Human,
-    )
-    .await
-    .findings;
-    assert!(
-        findings
-            .iter()
-            .any(|f| f.check == "sync" && f.message.contains("stale")),
-        "{findings:?}"
-    );
-}
-
-/// P10: a provider that declares `idempotent_writes` and doesn't keep
-/// it (the fake under `forget-keys`) fails the suite; one that doesn't
-/// declare it isn't asked.
-#[cfg(unix)]
-#[tokio::test]
-async fn the_suite_finds_a_provider_that_forgets_its_keys() {
-    for (hooks, finds) in [("forget-keys", true), ("plain-writes", false)] {
-        let (fx, ext) = deployed(hooks).await;
-        enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
-        first_read(&fx).await;
-        let provider = fx.svc.work_items.get("fake").unwrap();
-        let findings = suite(
-            &fx.svc.work_items_client(),
-            &provider.id,
-            provider.features,
-            None,
-            &ServicesProbe(&fx.svc),
-            &Actor::Human,
-        )
-        .await
-        .findings;
-        assert_eq!(
-            findings.iter().any(|f| f.check == "idempotent_writes"),
-            finds,
-            "{hooks}: {findings:?}"
-        );
-    }
-}
-
-#[cfg(unix)]
-#[tokio::test]
-async fn the_work_items_suite_passes_through_the_host_over_the_fake() {
-    let (fx, ext) = deployed("").await;
-    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
-    // Its start's first read, in the background (tsk716).
-    first_read(&fx).await;
-    let provider = fx.svc.work_items.get("fake").unwrap();
-    let actor = Actor::Agent {
-        session_id: None,
-        thread_id: Some(ThreadId::new(fx.thread.value())),
-        stream_id: None,
-    };
-    let findings = suite(
-        &fx.svc.work_items_client(),
-        &provider.id,
-        provider.features,
-        None,
-        &ServicesProbe(&fx.svc),
-        &actor,
-    )
-    .await
-    .findings;
-    assert_eq!(findings, vec![]);
-
-    // Its writes are `work_item.*` runs, audited once each; its health
-    // counts the calls.
-    let audited = fx
-        .svc
-        .db
-        .read(|c| {
-            c.query_row(
-                "SELECT count(*) FROM command_audit WHERE command = 'oxplow.work_item.transition' AND outcome = 'ok'",
-                [],
-                |r| r.get::<_, i64>(0),
-            )
-            .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
-        })
-        .await
-        .unwrap();
-    assert!(audited >= 5, "{audited}");
-    let health = fx.svc.providers.health(INSTANCE).unwrap();
-    assert_eq!(health.state, InstanceState::Ready);
-    assert!(health.mean_invoke_ms.is_some() && health.last_ok_at.is_some());
-}
-
-/// P7.A1: `work_item.*` is the one write surface — another provider's
-/// item moves through its process as `oxplow.work_item.transition`, one audit
-/// row, its `work_item.recorded` caused by the run. The provider's verbs
-/// aren't commands of their own; its extra command is.
-#[cfg(unix)]
-#[tokio::test]
-async fn work_item_commands_write_another_providers_items_through_its_process() {
-    let (fx, ext) = deployed("").await;
-    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
-    // Its start's first read, in the background (tsk716).
-    first_read(&fx).await;
-    // Its extra command is its extension's, declared over its operation.
-    let estimate = fx
-        .svc
-        .commands
-        .spec("tracker.item.estimate")
-        .expect("its extension's command");
-    assert_eq!(estimate.atomicity, oxplow_domain::Atomicity::External);
-    assert_eq!(
-        estimate.op,
-        Some(oxplow_domain::OpRef {
-            scope: oxplow_domain::uri::build::keyed("oxplow/provider", "tracker/fake"),
-            op: "estimate".into()
-        })
-    );
-
-    let items = fx.svc.work_items_client();
-    let item = items
-        .create(
-            &Actor::Human,
-            crate::work_items::NewItem {
-                title: "theirs".into(),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap()
-        .expect("the list keeps it");
-    assert_eq!(item, "oxplow:oxplow/work_item?id=W-1&provider=fake");
-    // It runs on the instance its `ref` is of; one naming an instance that
-    // doesn't run is refused.
-    let estimated = fx
-        .svc
-        .commands
-        .run(
-            &Actor::Human,
-            "tracker.item.estimate",
-            json!({ "uri": item, "points": 5 }),
-            false,
-        )
-        .await
-        .unwrap();
-    assert!(estimated.audit_id.is_some(), "a record is audited");
-    let err = fx
-        .svc
-        .commands
-        .run(
-            &Actor::Human,
-            "tracker.item.estimate",
-            json!({ "uri": item, "points": 5, "instance": "fake_nope" }),
-            false,
-        )
-        .await
-        .unwrap_err();
-    assert!(
-        err.to_string().contains("no running instance `fake_nope`"),
-        "{err}"
-    );
-    let moved = items
-        .transition(
-            &Actor::Human,
-            &item,
-            oxplow_domain::work_items::CanonicalState::Done,
-            None,
-        )
-        .await
-        .unwrap();
-    let executed = moved.event_id.clone().unwrap();
-    let events = fx.svc.event_log_store.read_after(0, 500).await.unwrap();
-    let caused: Vec<&str> = events
-        .iter()
-        .filter(|e| e.envelope.cause.as_ref() == Some(&executed))
-        .map(|e| e.envelope.event_type.as_str())
-        .collect();
-    assert_eq!(
-        caused,
-        vec!["work_item.recorded", "work_item.state_changed"]
-    );
-    let commands: Vec<String> = fx
-        .svc
-        .commands
-        .audit_store()
-        .list_recent(10)
-        .await
-        .unwrap()
-        .into_iter()
-        .map(|r| r.command)
-        .collect();
-    // The fixture opened its effort; starting the instance read it once
-    // (as the system), then the writes — the refused estimate audited too.
-    assert_eq!(
-        commands,
-        vec![
-            "oxplow.work_item.transition",
-            "tracker.item.estimate",
-            "tracker.item.estimate",
-            "oxplow.work_item.create",
-            "oxplow.provider.sync",
-            "oxplow.effort.open"
-        ]
-    );
-
-    // Undo dispatches again: the provider's inverse is renamed to
-    // `oxplow.work_item.transition` and moves the item back.
-    assert_eq!(
-        moved.inverse.as_ref().unwrap().name,
-        "oxplow.work_item.transition"
-    );
-    items
-        .undo(&Actor::Human, moved.audit_id.unwrap())
-        .await
-        .unwrap();
-    fx.svc.event_pump.run_once().await.unwrap();
-    let state = ServicesProbe(&fx.svc).record(&item).await.unwrap().state;
-    assert_eq!(state, oxplow_domain::work_items::CanonicalState::Todo);
-}
-
-/// P7 review (tsk713): a composite over another provider's item runs its
-/// calls as steps through the provider's process — the comment, then the
-/// transition — recorded as one run whose `work_item.recorded` events it
-/// caused, and not undoable.
-/// tsk1058: an outside tracker's item is filed on a thread like any
-/// other — the one a person names, else an agent's own — and the
-/// tracker never sees it: the thread is oxplow's record.
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread")]
-async fn an_outside_item_is_filed_on_the_thread_named_or_the_agents() {
-    let (fx, ext) = deployed("").await;
-    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
-    first_read(&fx).await;
-    let thread_of = |item: String| {
-        let svc = fx.svc.clone();
-        async move {
-            svc.event_pump.run_once().await.unwrap();
-            let out = svc
-                .sql
-                .query_sql(
-                    "SELECT thread_id FROM v_work_item WHERE uri = ?1",
-                    vec![oxplow_db::SqlCell::Text(item)],
-                    None,
-                )
-                .await
-                .unwrap();
-            serde_json::to_value(out.rows).unwrap()
-        }
-    };
-    let named = fx
-        .svc
-        .commands
-        .run(
-            &Actor::Human,
-            crate::commands::work_item::CREATE,
-            json!({ "title": "named", "thread": fx.thread.to_string() }),
-            false,
-        )
-        .await
-        .unwrap();
-    let named = named.result["uri"].as_str().unwrap().to_string();
-    assert_eq!(
-        oxplow_domain::uri::build::work_item_of_uri(&named).map(|(provider, _)| provider),
-        Some("fake".to_string()),
-        "{named}"
-    );
-    assert_eq!(thread_of(named).await, json!([[fx.thread.value()]]));
-    let agent = Actor::Agent {
-        session_id: None,
-        thread_id: Some(fx.thread),
-        stream_id: None,
-    };
-    let own = fx
-        .svc
-        .commands
-        .run(
-            &agent,
-            crate::commands::work_item::CREATE,
-            json!({ "title": "own" }),
-            false,
-        )
-        .await
-        .unwrap();
-    let own = own.result["uri"].as_str().unwrap().to_string();
-    assert_eq!(thread_of(own).await, json!([[fx.thread.value()]]));
-}
-
-#[cfg(unix)]
-#[tokio::test]
-async fn a_composite_writes_another_providers_item_as_steps() {
-    let (fx, ext) = deployed("").await;
-    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
-    first_read(&fx).await;
-    let item = fx
-        .svc
-        .work_items_client()
-        .create(
-            &Actor::Human,
-            crate::work_items::NewItem {
-                title: "theirs".into(),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap()
-        .expect("the list keeps it");
-    let out = fx
-        .svc
-        .commands
-        .run(
-            &Actor::Human,
-            "oxplow.command.sequence",
-            json!({ "calls": [
-                { "name": "oxplow.work_item.comment", "input": { "uri": item, "body": "Looks good." } },
-                { "name": "oxplow.work_item.transition", "input": { "uri": item, "to": "done" } },
-            ] }),
-            false,
-        )
-        .await
-        .unwrap();
-    assert!(out.inverse.is_none());
-    let executed = out.event_id.clone().unwrap();
-    let events = fx.svc.event_log_store.read_after(0, 500).await.unwrap();
-    let caused = events
-        .iter()
-        .filter(|e| e.envelope.cause.as_ref() == Some(&executed))
-        .filter(|e| e.envelope.event_type == "work_item.recorded")
-        .count();
-    assert_eq!(caused, 2, "each step's record, caused by the one run");
-    let audits = fx.svc.commands.audit_store().list_recent(10).await.unwrap();
-    assert_eq!(audits[0].command, "oxplow.command.sequence");
-    assert!(!audits
-        .iter()
-        .any(|a| a.command == "oxplow.work_item.comment"));
-    fx.svc.event_pump.run_once().await.unwrap();
-    let state = ServicesProbe(&fx.svc).record(&item).await.unwrap().state;
-    assert_eq!(state, oxplow_domain::work_items::CanonicalState::Done);
-}
-
-/// P7.A1: a provider's verb input is checked against what it declares
-/// (its `native` fields included) before the process is called; another
-/// provider's parent or link target is refused at its field; an agent's
-/// delete runs without asking.
-#[cfg(unix)]
-#[tokio::test]
-async fn an_external_verb_input_is_checked_and_stays_on_its_provider() {
-    let (fx, ext) = deployed("").await;
-    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
-    // Its start's first read, in the background (tsk716).
-    first_read(&fx).await;
-    let run = |input: serde_json::Value, name: &'static str| {
-        let svc = fx.svc.clone();
-        async move { svc.commands.run(&Actor::Human, name, input, false).await }
-    };
-    let err = run(
-        json!({ "title": "x", "native": { "points": "many" } }),
-        "oxplow.work_item.create",
-    )
-    .await
-    .unwrap_err();
-    assert!(
-        matches!(&err, oxplow_domain::CommandError::Invalid { field: Some(f), .. } if f == "/native/points"),
-        "{err:?}"
-    );
-    let ours = crate::work_items::PROVIDER;
-    // An oxplow item: refused for its provider before it's looked up.
-    let task = "oxplow:oxplow/work_item?id=tsk1&provider=oxplow".to_string();
-    let err = run(
-        json!({ "title": "x", "parent_uri": task }),
-        "oxplow.work_item.create",
-    )
-    .await
-    .unwrap_err();
-    assert!(
-        matches!(&err, oxplow_domain::CommandError::Invalid { field: Some(f), message }
-            if f == "/parent_uri" && message.contains(ours)),
-        "{err:?}"
-    );
-    let item = run(json!({ "title": "x" }), "oxplow.work_item.create")
-        .await
-        .unwrap()
-        .result["uri"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    let err = run(
-        json!({ "uri": item, "target": task, "link_type": "relates_to" }),
-        "oxplow.work_item.link",
-    )
-    .await
-    .unwrap_err();
-    assert!(
-        matches!(&err, oxplow_domain::CommandError::Invalid { field: Some(f), .. } if f == "/target"),
-        "{err:?}"
-    );
-    let err = run(
-        json!({ "uri": item, "to": "done", "native_state": "Doing" }),
-        "oxplow.work_item.transition",
-    )
-    .await
-    .unwrap_err();
-    assert!(err.to_string().contains("native_state"), "{err}");
-
-    // Delete is destructive: a person is asked, an agent's run is not.
-    let agent = Actor::Agent {
-        session_id: None,
-        thread_id: Some(ThreadId::new(fx.thread.value())),
-        stream_id: None,
-    };
-    let err = run(json!({ "uri": item }), "oxplow.work_item.delete")
-        .await
-        .unwrap_err();
-    assert!(
-        matches!(err, oxplow_domain::CommandError::NeedsConfirmation { .. }),
-        "{err:?}"
-    );
-    fx.svc
-        .commands
-        .run(
-            &agent,
-            "oxplow.work_item.delete",
-            json!({ "uri": item }),
-            false,
-        )
-        .await
-        .unwrap();
-    fx.svc.event_pump.run_once().await.unwrap();
-    assert!(ServicesProbe(&fx.svc).record(&item).await.is_none());
-}
-
 /// P6b.C2: a running instance's capability and features are a model row
-/// (as the host reads them); stopped, it's no longer available — still
-/// listed, as the project's choice, with `available = 0`.
+/// (as the host reads them); stopped, it's no longer published.
 #[cfg(unix)]
 #[tokio::test]
 async fn a_running_instance_publishes_its_features() {
     let (fx, ext) = deployed("").await;
     let store = oxplow_db::SqliteCapabilityStore::new(fx.svc.db.clone());
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
-    // Its start's first read, in the background (tsk716).
+    // Its start's first read, in the background.
     first_read(&fx).await;
     let fake = store
         .list()
@@ -782,30 +295,26 @@ async fn a_running_instance_publishes_its_features() {
         .into_iter()
         .find(|r| r.provider == "fake")
         .expect("published");
-    assert_eq!(fake.capability, "work_items");
+    assert_eq!(fake.capability, "snapshots");
     assert_eq!(fake.extension.as_deref(), Some("tracker"));
-    let declared = fx.svc.work_items.get("fake").unwrap().features;
-    assert_eq!(fake.features, serde_json::to_value(declared).unwrap());
     turn_off(&fx.svc, INSTANCE).await;
-    let stopped = store
+    // A stopped instance is no longer published.
+    assert!(store
         .list()
         .await
         .unwrap()
         .into_iter()
-        .find(|r| r.provider == "fake")
-        .expect("the project's choice stays listed");
-    assert!(!stopped.available && !stopped.active);
+        .all(|r| r.provider != "fake"));
 }
 
 /// Protocol 3's `host/call`: a provider whose manifest `needs` `sql.read`
-/// reads oxplow's models while it serves a command; the read is recorded
-/// with the run (its audit row's capabilities). One that doesn't need it
-/// is refused, and so is its command.
+/// reads oxplow's models while it serves a command. One that doesn't need
+/// it is refused, and so is its command.
 #[cfg(unix)]
 #[tokio::test]
 async fn a_provider_reads_the_host_through_what_it_needs() {
     for (needs, reads) in [(true, true), (false, false)] {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let root = fx.svc.layout.project_dir.clone();
         write_extension(&root, "host-read");
         if needs {
@@ -821,44 +330,18 @@ async fn a_provider_reads_the_host_through_what_it_needs() {
         let ext = extension(&root);
         assert_eq!(ext.providers[0].needs.is_empty(), !needs);
         deploy(&fx, &ext).await;
-        make_active(&fx, "fake").await;
         enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
         crate::test_fixtures::activate(&fx.svc).await;
-        let item = fx
-            .svc
-            .work_items_client()
-            .create(
-                &Actor::Human,
-                crate::work_items::NewItem {
-                    title: "theirs".into(),
-                    ..Default::default()
-                },
-            )
-            .await
-            .unwrap()
-            .unwrap();
-        let ran = fx
-            .svc
-            .commands
-            .run(
-                &Actor::Human,
-                "tracker.item.estimate",
-                json!({ "uri": item, "points": 2 }),
-                false,
-            )
-            .await;
+        let worktree = tempfile::tempdir().unwrap();
+        let ran = invoke_on(
+            &fx,
+            INSTANCE,
+            "mark",
+            json!({ "stream": "s1", "worktree": worktree.path(), "trigger": "manual" }),
+        )
+        .await;
         if reads {
-            let out = ran.unwrap();
-            assert_eq!(out.result["read"], json!([{ "n": 7 }]));
-            let audit = fx
-                .svc
-                .commands
-                .audit_store()
-                .get(out.audit_id.unwrap())
-                .await
-                .unwrap()
-                .unwrap();
-            assert_eq!(audit.scopes, [("sql.read".to_string(), 1)].into());
+            assert_eq!(ran.unwrap().result["read"], json!([{ "n": 7 }]));
         } else {
             let err = ran.unwrap_err().to_string();
             assert!(err.contains("isn't in the command's `needs`"), "{err}");
@@ -873,7 +356,7 @@ async fn a_provider_reads_the_host_through_what_it_needs() {
 #[cfg(unix)]
 #[tokio::test]
 async fn a_provider_reads_its_extensions_configuration_through_host_call() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let root = fx.svc.layout.project_dir.clone();
     write_extension(&root, "config-read");
     let manifest = root.join(".oxplow/extensions/tracker/extension.yaml");
@@ -890,7 +373,6 @@ async fn a_provider_reads_its_extensions_configuration_through_host_call() {
     let ext = extension(&root);
     assert!(ext.errors.is_empty(), "{:?}", ext.errors);
     deploy(&fx, &ext).await;
-    make_active(&fx, "fake").await;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     crate::test_fixtures::activate(&fx.svc).await;
     let namespace = oxplow_db::extension_config_store::ConfigNamespace::new(
@@ -902,102 +384,18 @@ async fn a_provider_reads_its_extensions_configuration_through_host_call() {
         .compare_exchange(namespace, None, 1, json!({ "limit": 9 }))
         .await
         .unwrap();
-    let item = fx
-        .svc
-        .work_items_client()
-        .create(
-            &Actor::Human,
-            crate::work_items::NewItem {
-                title: "theirs".into(),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap()
-        .unwrap();
-    let out = fx
-        .svc
-        .commands
-        .run(
-            &Actor::Human,
-            "tracker.item.estimate",
-            json!({ "uri": item, "points": 2 }),
-            false,
-        )
-        .await
-        .unwrap();
+    let worktree = tempfile::tempdir().unwrap();
+    let out = invoke_on(
+        &fx,
+        INSTANCE,
+        "mark",
+        json!({ "stream": "s1", "worktree": worktree.path(), "trigger": "manual" }),
+    )
+    .await
+    .unwrap();
     assert_eq!(out.result["read"]["values"], json!({ "limit": 9 }));
     assert_eq!(out.result["read"]["origins"]["/limit"], json!("project"));
-    let audit = fx
-        .svc
-        .commands
-        .audit_store()
-        .get(out.audit_id.unwrap())
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(
-        audit.scopes,
-        [("extension_config.read".to_string(), 1)].into()
-    );
 }
-
-/// A capability verb's `host/call`s are recorded with the
-/// `work_item.<verb>` run that called it, as a provider's own command's
-/// are with its run.
-#[cfg(unix)]
-#[tokio::test]
-async fn a_verbs_host_reads_are_recorded_with_its_run() {
-    let fx = services_with_effort().await;
-    let root = fx.svc.layout.project_dir.clone();
-    write_extension(&root, "host-read");
-    let manifest = root.join(".oxplow/extensions/tracker/extension.yaml");
-    let text = std::fs::read_to_string(&manifest).unwrap();
-    let text = text.replacen(
-        "permissions: [process.run]",
-        "permissions: [sql.read, process.run]",
-        1,
-    );
-    std::fs::write(&manifest, format!("{text}    needs: [sql.read]\n")).unwrap();
-    let ext = extension(&root);
-    deploy(&fx, &ext).await;
-    make_active(&fx, "fake").await;
-    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
-    let item = fx
-        .svc
-        .work_items_client()
-        .create(
-            &Actor::Human,
-            crate::work_items::NewItem {
-                title: "theirs".into(),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap()
-        .unwrap();
-    let out = fx
-        .svc
-        .commands
-        .run(
-            &Actor::Human,
-            "oxplow.work_item.update",
-            json!({ "uri": item, "title": "renamed" }),
-            false,
-        )
-        .await
-        .unwrap();
-    let audit = fx
-        .svc
-        .commands
-        .audit_store()
-        .get(out.audit_id.unwrap())
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(audit.scopes, [("sql.read".to_string(), 1)].into());
-}
-
 /// A provider's command is declared in its extension's manifest over an
 /// operation its declarations list (`provider:` + `op:`): its input is the
 /// operation's, with an optional `instance`; a capability verb, an
@@ -1005,44 +403,35 @@ async fn a_verbs_host_reads_are_recorded_with_its_run() {
 /// at its line.
 #[cfg(unix)]
 #[tokio::test]
-async fn a_provider_command_is_declared_over_an_operation_it_lists() {
-    let fx = services_with_effort().await;
+async fn a_provider_command_is_declared_over_an_operation_it_lists_and_no_verb() {
+    let fx = services_with_thread().await;
     let root = fx.svc.layout.project_dir.clone();
     write_extension(&root, "");
     let ext = extension(&root);
-    let estimate = ext
-        .commands
-        .iter()
-        .find(|c| c.name == "tracker.item.estimate")
-        .unwrap();
-    let schema = estimate.input_schema.as_ref().unwrap();
-    assert_eq!(schema["required"], json!(["uri", "points"]));
-    assert_eq!(schema["properties"]["instance"]["type"], json!("string"));
+    assert!(ext.commands.is_empty());
     let manifest = root.join(".oxplow/extensions/tracker/extension.yaml");
     let base = std::fs::read_to_string(&manifest).unwrap();
     for (entry, says) in [
-        (
-            "  - { name: item.comment, summary: S., provider: fake, op: comment }\n",
-            "`comment` is a work_items verb",
-        ),
         (
             "  - { name: item.nope, summary: S., provider: fake, op: nope }\n",
             "its declarations have no command `nope`",
         ),
         (
-            "  - { name: item.other, summary: S., provider: other, op: estimate }\n",
+            "  - { name: item.other, summary: S., provider: other, op: nope }\n",
             "no provider `other`",
         ),
-        // A provider's inverse names its operation: one command per
-        // operation, so the undo is the command that ran.
         (
-            "  - { name: item.guess, summary: S., provider: fake, op: estimate }\n",
-            "`fake`'s `estimate` already backs `tracker.item.estimate`",
+            "  - { name: item.mark, summary: S., provider: fake, op: mark }\n",
+            "`mark` is a snapshots verb: core calls it",
         ),
     ] {
         std::fs::write(
             &manifest,
-            base.replacen("permissions:", &format!("{entry}permissions:"), 1),
+            base.replacen(
+                "permissions:",
+                &format!("commands:\n{entry}permissions:"),
+                1,
+            ),
         )
         .unwrap();
         let loaded = crate::extension::extensions::load_extensions(&root)
@@ -1071,7 +460,7 @@ fn a_coverage_runs_profile_path_reaches_the_provider() {
 #[cfg(unix)]
 #[tokio::test]
 async fn provider_args_stay_inside_the_extension_folder() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, "");
     let manifest = project.join(".oxplow/extensions/tracker/extension.yaml");
@@ -1099,22 +488,15 @@ async fn provider_args_stay_inside_the_extension_folder() {
     );
 }
 
-const ADAPTER_MANIFEST: &str = "manifest: 2\nname: tracker\nintent:\n  purpose: notes over MCP\n  examples: [{ name: a }]\npermissions: [process.run]\nproviders:\n  - id: notes\n    capability: work_items\n    adapter:\n      mcp: { command: [bin/server, --stdio] }\n      mapping: mcp/x.star\n      tools: mcp/tools.json\n    declarations: provider.json\n";
+const PROGRAM_MANIFEST: &str = "manifest: 2\nname: tracker\nintent:\n  purpose: a program\n  examples: [{ name: a }]\npermissions: [process.run]\nproviders:\n  - id: notes\n    capability: snapshots\n    entry: bin/server\n    args: [--stdio]\n    declarations: provider.json\n";
 
-/// A private extension whose provider is an MCP server behind oxplow's
-/// adapter: the server, its mapping and its pinned tools.
-fn write_adapter_extension(project: &Path) -> PathBuf {
+/// A private extension whose provider is a program of its folder, started
+/// with an argument.
+fn write_program_extension(project: &Path) -> PathBuf {
     let dir = project.join(".oxplow/extensions").join(EXT);
     std::fs::create_dir_all(dir.join("bin")).unwrap();
-    std::fs::create_dir_all(dir.join("mcp")).unwrap();
-    std::fs::write(dir.join("extension.yaml"), ADAPTER_MANIFEST).unwrap();
+    std::fs::write(dir.join("extension.yaml"), PROGRAM_MANIFEST).unwrap();
     std::fs::write(dir.join("bin/server"), "#!/bin/sh\n").unwrap();
-    std::fs::write(dir.join("mcp/x.star"), "def transform(x):\n    return {}\n").unwrap();
-    std::fs::write(
-        dir.join("mcp/tools.json"),
-        r#"[{ "name": "list_items", "description": "List.", "inputSchema": { "type": "object" } }]"#,
-    )
-    .unwrap();
     std::fs::write(
         dir.join("provider.json"),
         serde_json::to_string_pretty(&oxplow_provider_fake::declarations()).unwrap(),
@@ -1123,61 +505,95 @@ fn write_adapter_extension(project: &Path) -> PathBuf {
     dir
 }
 
-/// P7.A6: an adapter provider names its MCP server (a command), its
-/// mapping and its pinned tools, each inside the folder — instead of an
-/// `entry`, never with one.
-#[tokio::test]
-async fn an_adapter_provider_names_its_server_mapping_and_tools_inside_the_folder() {
-    let fx = services_with_effort().await;
-    let project = fx.svc.layout.project_dir.clone();
-    let dir = write_adapter_extension(&project);
-    let ext = extension(&project);
-    let adapter = ext.providers[0]
-        .adapter
-        .as_ref()
-        .expect("an adapter provider");
-    assert_eq!(
-        adapter.mcp,
-        spec::McpServer::Command {
-            command: vec!["bin/server".into(), "--stdio".into()]
-        }
-    );
-    for (from, to, says) in [
-        ("    adapter:\n", "    entry: bin/server\n    adapter:\n", "either `entry` or `adapter`"),
-        ("    adapter:\n      mcp: { command: [bin/server, --stdio] }\n      mapping: mcp/x.star\n      tools: mcp/tools.json\n", "", "either `entry` or `adapter`"),
-        ("mapping: mcp/x.star", "mapping: ../x.star", "../x.star"),
-        ("tools: mcp/tools.json", "tools: /tmp/tools.json", "/tmp/tools.json"),
-        ("tools: mcp/tools.json", "tools: mcp/missing.json", "mcp/missing.json"),
-        ("command: [bin/server, --stdio]", "command: [/usr/local/bin/npx, server]", "/usr/local/bin/npx"),
-        ("command: [bin/server, --stdio]", "command: [bin/server, ../../x.js]", "../../x.js"),
-    ] {
-        assert!(ADAPTER_MANIFEST.contains(from), "{from}");
-        std::fs::write(dir.join("extension.yaml"), ADAPTER_MANIFEST.replace(from, to)).unwrap();
-        let loaded = crate::extension::extensions::load_extensions(&project)
-            .into_iter()
-            .find(|e| e.name == EXT)
-            .unwrap();
-        assert!(loaded.providers.is_empty(), "{to}");
-        assert!(
-            loaded.errors.iter().any(|e| loaded.shown(e).contains(says)),
-            "{to}: {:?}",
-            loaded.errors
-        );
-    }
-    std::fs::write(dir.join("mcp/tools.json"), "{}").unwrap();
-    std::fs::write(dir.join("extension.yaml"), ADAPTER_MANIFEST).unwrap();
-    let loaded = crate::extension::extensions::load_extensions(&project)
+/// `manifest` loaded as the tracker extension, whose providers are empty
+/// and whose errors name `says`.
+fn assert_refused(project: &Path, dir: &Path, manifest: &str, says: &str) {
+    std::fs::write(dir.join("extension.yaml"), manifest).unwrap();
+    let loaded = crate::extension::extensions::load_extensions(project)
         .into_iter()
         .find(|e| e.name == EXT)
         .unwrap();
+    assert!(loaded.providers.is_empty(), "{says}");
     assert!(
-        loaded
-            .errors
-            .iter()
-            .any(|e| loaded.shown(e).contains("mcp/tools.json")),
-        "pinned tools are a list: {:?}",
+        loaded.errors.iter().any(|e| loaded.shown(e).contains(says)),
+        "{says}: {:?}",
         loaded.errors
     );
+}
+
+/// A provider names a program (an `entry`) and arguments, each inside
+/// the extension folder.
+#[tokio::test]
+async fn a_provider_names_its_program_and_args_inside_the_folder() {
+    let fx = services_with_thread().await;
+    let project = fx.svc.layout.project_dir.clone();
+    let dir = write_program_extension(&project);
+    let ext = extension(&project);
+    assert_eq!(
+        ext.providers[0].program(),
+        ("bin/server".into(), vec!["--stdio".into()])
+    );
+    for (from, to, says) in [
+        ("    entry: bin/server\n", "", "name an `entry`"),
+        (
+            "entry: bin/server",
+            "entry: /usr/local/bin/npx",
+            "/usr/local/bin/npx",
+        ),
+        ("entry: bin/server", "entry: ../x", "../x"),
+        ("args: [--stdio]", "args: [../../x.js]", "../../x.js"),
+    ] {
+        assert!(PROGRAM_MANIFEST.contains(from), "{from}");
+        assert_refused(&project, &dir, &PROGRAM_MANIFEST.replace(from, to), says);
+    }
+}
+
+/// A provider's credentials are declared once each, sign in only over
+/// https (or loopback), and a client secret names a pasted credential of
+/// the provider.
+#[tokio::test]
+async fn a_providers_credentials_are_declared_and_checked() {
+    let fx = services_with_thread().await;
+    let project = fx.svc.layout.project_dir.clone();
+    let dir = write_program_extension(&project);
+    let signed_in = |authorize: &str, secret: &str| {
+        PROGRAM_MANIFEST.replace(
+            "process.run]",
+            "process.run, secrets:NOTES_TOKEN, secrets:SIGNED_IN]",
+        ) + &format!(
+            "    credentials:\n      - NOTES_TOKEN\n      - name: SIGNED_IN\n        oauth: \
+                 {{ authorize_url: \"{authorize}\", token_url: \"https://svc.example.com/token\", \
+                 client_id: oxplow, client_secret: {secret} }}\n"
+        )
+    };
+    for (manifest, says) in [
+        (
+            PROGRAM_MANIFEST.replace("process.run]", "process.run, secrets:NOTES_TOKEN]")
+                + "    credentials: [NOTES_TOKEN, NOTES_TOKEN]\n",
+            "declared twice",
+        ),
+        (
+            signed_in("http://svc.example.com/authorize", "NOTES_TOKEN"),
+            "must be https",
+        ),
+        (
+            signed_in("https://svc.example.com/authorize", "NOPE"),
+            "must name another credential",
+        ),
+        (
+            signed_in("https://svc.example.com/authorize", "SIGNED_IN"),
+            "must name another credential",
+        ),
+    ] {
+        assert_refused(&project, &dir, &manifest, says);
+    }
+    // On loopback, plain http is what a local service speaks.
+    std::fs::write(
+        dir.join("extension.yaml"),
+        signed_in("http://127.0.0.1:8123/authorize", "NOTES_TOKEN"),
+    )
+    .unwrap();
+    extension(&project);
 }
 
 /// A provider runs from its extension's deployment, not from the live
@@ -1185,7 +601,7 @@ async fn an_adapter_provider_names_its_server_mapping_and_tools_inside_the_folde
 #[cfg(unix)]
 #[tokio::test]
 async fn a_provider_runs_from_its_deployment() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, "");
     let script = project.join(".oxplow/extensions/tracker/bin/provider");
@@ -1203,7 +619,7 @@ async fn a_provider_runs_from_its_deployment() {
     let ext = extension(&project);
     deploy(&fx, &ext).await;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
-    // Its start's first read, in the background (tsk716).
+    // Its start's first read, in the background.
     first_read(&fx).await;
     // It ran in its extension's deployment, not in the live tree.
     let ran_in = std::path::PathBuf::from(std::fs::read_to_string(&cwd_file).unwrap().trim())
@@ -1223,13 +639,13 @@ async fn a_provider_runs_from_its_deployment() {
     );
 }
 
-/// tsk548: a provider may emit only its capability's event types — a
+/// a provider may emit only its capability's event types — a
 /// declared `contribution.enabled` (which would clear another contribution's
 /// automatic disable) is refused when the manifest loads.
 #[cfg(unix)]
 #[tokio::test]
 async fn a_provider_cannot_declare_another_core_event_type() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, "");
     let mut declared = oxplow_provider_fake::declarations();
@@ -1255,63 +671,14 @@ async fn a_provider_cannot_declare_another_core_event_type() {
     assert!(
         loaded.errors.iter().any(|e| {
             let e = loaded.shown(e);
-            e.contains("contribution.enabled@1") && e.contains("work_items")
+            e.contains("contribution.enabled@1") && e.contains("snapshots")
         }),
         "{:?}",
         loaded.errors
     );
 }
 
-/// tsk548: an event's subjects are the provider's own items and its
-/// extension, nothing else.
-#[test]
-fn a_provider_event_names_only_its_own_refs() {
-    use super::registry::check_subject;
-    // P9.B1: the id is the instance's — a second instance of `fake` may
-    // name its own items, not the first's.
-    assert!(check_subject(
-        "work_items",
-        "fake_second",
-        "tracker",
-        "oxplow:oxplow/work_item?id=W-1&provider=fake_second"
-    )
-    .is_ok());
-    assert!(check_subject(
-        "work_items",
-        "fake_second",
-        "tracker",
-        "oxplow:oxplow/work_item?id=W-1&provider=fake"
-    )
-    .is_err());
-    assert!(check_subject(
-        "work_items",
-        "fake",
-        "tracker",
-        "oxplow:oxplow/work_item?id=W-1&provider=fake"
-    )
-    .is_ok());
-    assert!(check_subject(
-        "work_items",
-        "fake",
-        "tracker",
-        "oxplow:oxplow/extension?name=tracker"
-    )
-    .is_ok());
-    for bad in [
-        "oxplow:oxplow/work_item?id=tsk1&provider=oxplow",
-        "oxplow:oxplow/extension?name=other",
-        "oxplow:oxplow/wiki?slug=page",
-        "oxplow:oxplow/file?path=src/a.rs",
-        "garbage",
-    ] {
-        assert!(
-            check_subject("work_items", "fake", "tracker", bad).is_err(),
-            "{bad}"
-        );
-    }
-}
-
-/// tsk549: a provider whose `check` hangs times out — counted as a
+/// a provider whose `check` hangs times out — counted as a
 /// failure — and never blocks stopping it.
 #[cfg(unix)]
 #[tokio::test]
@@ -1338,7 +705,7 @@ async fn a_hung_check_times_out_and_the_instance_can_still_stop() {
     );
 }
 
-/// tsk549: a hung `invoke` times out (with `$/cancel`) and counts as a
+/// a hung `invoke` times out (with `$/cancel`) and counts as a
 /// failure, instead of blocking the caller forever with health `ready`.
 #[cfg(unix)]
 #[tokio::test]
@@ -1346,26 +713,18 @@ async fn a_hung_invoke_times_out_and_counts() {
     let (fx, ext) = deployed("").await;
     let providers = &fx.svc.providers;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
-    // Its start's first read, in the background (tsk716).
+    // Its start's first read, in the background.
     first_read(&fx).await;
     set_hooks(&fx, "slow:30000").await;
-    let ran = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        fx.svc.commands.run(
-            &Actor::Human,
-            "oxplow.work_item.create",
-            json!({ "title": "x" }),
-            false,
-        ),
-    )
-    .await
-    .expect("the call returns once it times out");
+    let ran = tokio::time::timeout(std::time::Duration::from_secs(10), mark_on_fake(&fx))
+        .await
+        .expect("the call returns once it times out");
     let err = ran.unwrap_err().to_string();
     assert!(err.contains("timed out"), "{err}");
     assert_eq!(providers.health(INSTANCE).unwrap().consecutive_failures, 1);
 }
 
-/// tsk569: a disable while an instance is starting wins — the start
+/// a disable while an instance is starting wins — the start
 /// doesn't bring back what was just disabled.
 #[cfg(unix)]
 #[tokio::test]
@@ -1390,7 +749,7 @@ async fn a_disable_while_starting_keeps_the_instance_off() {
     ));
 }
 
-/// tsk569: when whether an instance was disabled can't be read, a
+/// when whether an instance was disabled can't be read, a
 /// reconcile doesn't start it (it fails closed).
 #[cfg(unix)]
 #[tokio::test]
@@ -1431,12 +790,18 @@ async fn deploying_updated_declarations_restarts_the_instance() {
     write_extension(&project, "bad-declarations");
     std::fs::write(
         project.join(".oxplow/extensions/tracker/provider.json"),
-        serde_json::to_string_pretty(&oxplow_provider_fake::bad_declarations()).unwrap(),
+        serde_json::to_string_pretty(&oxplow_provider_fake::bad_declarations(
+            oxplow_provider_fake::declarations(),
+        ))
+        .unwrap(),
     )
     .unwrap();
     crate::test_fixtures::activate_with_problems(&fx.svc).await;
     let running = fx.svc.providers.get(INSTANCE).await.expect("running");
-    assert_eq!(running.declared, oxplow_provider_fake::bad_declarations());
+    assert_eq!(
+        running.declared,
+        oxplow_provider_fake::bad_declarations(oxplow_provider_fake::declarations())
+    );
     assert_eq!(
         fx.svc.providers.health(INSTANCE).unwrap().state,
         InstanceState::Ready
@@ -1451,10 +816,9 @@ async fn deploying_updated_declarations_restarts_the_instance() {
         .into_iter()
         .find(|r| r.provider == "fake")
         .expect("republished");
-    let features = crate::providers::work_items::features_of;
     assert_eq!(
-        features(&row.features),
-        features(&running.declared.capabilities[0].features)
+        row.features,
+        serde_json::to_value(&running.declared.capabilities[0].features).unwrap()
     );
 }
 
@@ -1480,7 +844,7 @@ async fn unreadable_declarations_are_held_back_naming_the_file() {
     );
 }
 
-/// tsk569: enabling from Settings writes nothing when the enable itself
+/// enabling from Settings writes nothing when the enable itself
 /// fails — the config never says enabled for an instance that wasn't.
 #[cfg(unix)]
 #[tokio::test]
@@ -1508,106 +872,32 @@ async fn a_failed_enable_writes_no_config() {
     assert!(!running(&fx.svc, "fake"));
 }
 
-/// tsk569, P7.A1: a capability verb is run by `work_item.<verb>` (whose
-/// spec is what a person confirms), never on its own: it is
-/// `confirm: never` and `access: record`; a provider declaring `delete`
-/// must declare the verb.
+/// The fake's spec, as an implementation of `capability`.
 #[cfg(unix)]
-#[test]
-fn a_capability_verb_is_record_and_never_confirms() {
-    let (spec, declared) = {
-        let dir = tempfile::tempdir().unwrap();
-        write_extension(dir.path(), "");
-        (
-            extension(dir.path()).providers[0].clone(),
-            oxplow_provider_fake::declarations(),
-        )
-    };
-    spec::check_declarations(&spec, &declared).unwrap();
-    for (field, value) in [("confirm", "always"), ("access", "write")] {
-        let mut changed = declared.clone();
-        for c in changed
-            .commands
-            .iter_mut()
-            .filter(|c| c.name == "transition")
-        {
-            match field {
-                "confirm" => c.confirm = value.into(),
-                _ => c.access = value.into(),
-            }
-        }
-        let err = spec::check_declarations(&spec, &changed).unwrap_err();
-        assert!(err.contains("transition") && err.contains(field), "{err}");
-    }
-    // The extra command isn't a verb: it may ask.
-    let mut asking = declared.clone();
-    for c in asking.commands.iter_mut().filter(|c| c.name == "estimate") {
-        c.confirm = "always".into();
-    }
-    spec::check_declarations(&spec, &asking).unwrap();
-    let mut no_delete = declared;
-    no_delete.commands.retain(|c| c.name != "delete");
-    let err = spec::check_declarations(&spec, &no_delete).unwrap_err();
-    assert!(err.contains("`delete`"), "{err}");
-}
-
-/// The fake's spec, as an effort policy.
-#[cfg(unix)]
-fn policy_spec() -> spec::ProviderSpec {
+fn fake_spec(capability: &str) -> spec::ProviderSpec {
     let dir = tempfile::tempdir().unwrap();
     write_extension(dir.path(), "");
     let mut spec = extension(dir.path()).providers[0].clone();
-    spec.capability = "effort_policy".into();
+    spec.capability = capability.into();
     spec
 }
 
-/// A process may implement any capability with a contract: an effort
-/// policy declares `react`, and the contract's rules hold for it as for a
-/// work list — its verb is `confirm: never`, `access: record`, and it may
-/// emit nothing of core's.
-#[cfg(unix)]
-#[test]
-fn a_provider_may_implement_an_effort_policy_by_its_contract() {
-    let spec = policy_spec();
-    spec::check_declarations(&spec, &oxplow_provider_fake::policy_declarations()).unwrap();
-    let mut silent = oxplow_provider_fake::policy_declarations();
-    silent.commands.clear();
-    let err = spec::check_declarations(&spec, &silent).unwrap_err();
-    assert!(
-        err.contains("effort_policy") && err.contains("`react`"),
-        "{err}"
-    );
-    let mut asking = oxplow_provider_fake::policy_declarations();
-    asking.commands[0].confirm = "always".into();
-    let err = spec::check_declarations(&spec, &asking).unwrap_err();
-    assert!(err.contains("react") && err.contains("confirm"), "{err}");
-    let mut emitting = oxplow_provider_fake::policy_declarations();
-    emitting.event_types = oxplow_provider_fake::declarations().event_types;
-    let err = spec::check_declarations(&spec, &emitting).unwrap_err();
-    assert!(
-        err.contains("work_item.recorded@3") && err.contains("may emit only"),
-        "{err}"
-    );
-}
-
-/// A harness's declarations: the fake policy's, its `react` verb copied
-/// under each of `verbs`, the capability `agent_harness` with `features`
-/// and `data`.
+/// A harness's declarations: the fake harness's, its first verb copied
+/// under each of `verbs`, with `features` and `data`.
 fn harness_declarations(
     verbs: &[&str],
     features: serde_json::Value,
     data: serde_json::Value,
 ) -> oxplow_provider_protocol::model::InitializeResult {
-    let mut declared = oxplow_provider_fake::policy_declarations();
-    let react = declared.commands[0].clone();
+    let mut declared = oxplow_provider_fake::harness_declarations();
+    let verb = declared.commands[0].clone();
     declared.commands = verbs
         .iter()
         .map(|v| oxplow_provider_protocol::model::CommandDecl {
             name: (*v).into(),
-            ..react.clone()
+            ..verb.clone()
         })
         .collect();
-    declared.capabilities[0].capability = "agent_harness".into();
     declared.capabilities[0].features = features;
     declared.capabilities[0].data = data;
     declared
@@ -1620,8 +910,7 @@ fn harness_declarations(
 #[cfg(unix)]
 #[test]
 fn a_provider_may_implement_an_agent_harness_by_its_contract() {
-    let mut spec = policy_spec();
-    spec.capability = "agent_harness".into();
+    let spec = fake_spec("agent_harness");
     let data = json!({
         "env_markers": ["ACME_SESSION"],
         "settings": [{ "key": "model", "title": "Model" }]
@@ -1670,16 +959,16 @@ fn a_provider_may_implement_an_agent_harness_by_its_contract() {
 /// A capability whose contract asks for nothing more takes no `data`.
 #[cfg(unix)]
 #[test]
-fn a_policy_declares_no_data() {
-    let spec = policy_spec();
-    let mut declared = oxplow_provider_fake::policy_declarations();
+fn a_snapshots_provider_declares_no_data() {
+    let spec = fake_spec("snapshots");
+    let mut declared = oxplow_provider_fake::snapshots_declarations(false);
     declared.capabilities[0].data = json!({ "anything": 1 });
     let err = spec::check_declarations(&spec, &declared).unwrap_err();
     assert!(err.contains("declares no `data`"), "{err}");
 }
 
 /// The manifest names any capability with a contract; one without (the
-/// VCS), or a work list's own fields on a policy, is refused.
+/// VCS), or an item-keeping capability's own fields on another, is refused.
 #[test]
 fn a_manifest_names_a_capability_a_process_may_implement() {
     let manifest = |capability: &str, extra: &str| {
@@ -1688,8 +977,9 @@ fn a_manifest_names_a_capability_a_process_may_implement() {
         )
     };
     let read = |rel: &str| {
-        (rel == "provider.json")
-            .then(|| serde_json::to_string(&oxplow_provider_fake::policy_declarations()).unwrap())
+        (rel == "provider.json").then(|| {
+            serde_json::to_string(&oxplow_provider_fake::snapshots_declarations(false)).unwrap()
+        })
     };
     let parse = |text: String| {
         spec::parse_providers(&serde_yaml::from_str(&text).unwrap(), &|rel| {
@@ -1700,7 +990,7 @@ fn a_manifest_names_a_capability_a_process_may_implement() {
             }
         })
     };
-    let (specs, errors) = parse(manifest("effort_policy", ""));
+    let (specs, errors) = parse(manifest("snapshots", ""));
     assert_eq!((specs.len(), errors), (1, Vec::<String>::new()));
     let (_, errors) = parse(manifest("vcs", ""));
     assert!(
@@ -1708,507 +998,73 @@ fn a_manifest_names_a_capability_a_process_may_implement() {
         "{errors:?}"
     );
     let (_, errors) = parse(manifest(
-        "effort_policy",
+        "snapshots",
         "    fields: [{ name: points, title: Points, kind: number }]\n",
     ));
-    assert!(errors[0].contains("fields are a work list's"), "{errors:?}");
-    let (_, errors) = parse(manifest("effort_policy", "    idPattern: \"P-\\\\d+\"\n"));
+    assert!(errors[0].contains("unknown field `fields`"), "{errors:?}");
+    let (_, errors) = parse(manifest("snapshots", "    idPattern: \"P-\\\\d+\"\n"));
     assert!(
-        errors[0].contains("id_pattern is a work list's"),
+        errors[0].contains("unknown field `idPattern`") || errors[0].contains("unknown field"),
         "{errors:?}"
     );
 }
 
-/// An instance's event names its own refs, of its capability's kind; one
-/// that owns none names only its extension.
-#[test]
-fn an_event_names_only_its_capabilitys_own_refs() {
-    use super::registry::check_subject;
-    assert!(check_subject(
-        "work_items",
-        "fake",
-        "tracker",
-        "oxplow:oxplow/work_item?id=W-1&provider=fake"
+/// Mark an empty worktree on `instance`'s process as the person, and
+/// answer the handle it marked (`m1`, `m2`, …).
+async fn mark_on(
+    fx: &ThreadFixture,
+    instance: &str,
+) -> Result<String, oxplow_domain::CommandError> {
+    let worktree = tempfile::tempdir().unwrap();
+    let out = invoke_on(
+        fx,
+        instance,
+        "mark",
+        json!({ "stream": "s1", "worktree": worktree.path(), "trigger": "manual" }),
     )
-    .is_ok());
-    assert!(check_subject(
-        "effort_policy",
-        "fake",
-        "tracker",
-        "oxplow:oxplow/work_item?id=W-1&provider=fake"
-    )
-    .is_err());
-    assert!(check_subject(
-        "effort_policy",
-        "fake",
-        "tracker",
-        "oxplow:oxplow/extension?name=tracker"
-    )
-    .is_ok());
+    .await?;
+    Ok(out.result["handle"].as_str().unwrap().to_string())
 }
 
-/// The fake's three items, filed through `oxplow.work_item.create`.
-async fn three_items(fx: &EffortFixture) -> Vec<String> {
-    let items = fx.svc.work_items_client();
-    let mut refs = Vec::new();
-    for title in ["one", "two", "three"] {
-        refs.push(
-            items
-                .create(
-                    &Actor::Human,
-                    crate::work_items::NewItem {
-                        title: title.into(),
-                        ..Default::default()
-                    },
-                )
-                .await
-                .unwrap()
-                .expect("the list keeps it"),
-        );
-    }
-    refs
-}
-
-/// A person enables the fake and makes it the project's work list: an item
-/// made with no provider named reaches the tracker's own state, and a sync
-/// brings it back into oxplow's datasets.
-#[cfg(unix)]
-#[tokio::test]
-async fn an_item_made_with_no_provider_named_reaches_the_tracker_and_comes_back_on_a_sync() {
-    let (fx, ext) = deployed("").await;
-    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
-    first_read(&fx).await;
-    let one = |sql: &'static str| {
-        let svc = fx.svc.clone();
-        async move {
-            svc.sql
-                .query_sql(sql, vec![], None)
-                .await
-                .unwrap()
-                .rows
-                .len()
-        }
-    };
-    assert_eq!(
-        one("SELECT 1 FROM v_provider_instance WHERE instance = 'tracker/fake' AND enabled = 1 AND state = 'ready'")
-            .await,
-        1,
-        "enabled and ready"
-    );
-    assert_eq!(
-        one("SELECT 1 FROM v_capability_provider WHERE capability = 'work_items' AND provider = 'fake' AND active = 1 AND available = 1")
-            .await,
-        1,
-        "the active work list"
-    );
-    let titles = |fx: &EffortFixture| {
-        let svc = fx.svc.clone();
-        async move {
-            svc.sql
-                .query_sql("SELECT title FROM v_work_item", vec![], None)
-                .await
-                .unwrap()
-                .rows
-                .into_iter()
-                .map(|r| {
-                    serde_json::to_value(r).unwrap()[0]
-                        .as_str()
-                        .unwrap()
-                        .to_string()
-                })
-                .collect::<Vec<_>>()
-        }
-    };
-    let state = || {
-        std::fs::read_dir(fx.svc.layout.project_dir.join(".oxplow"))
-            .unwrap()
-            .flatten()
-            .filter(|e| e.file_name().to_string_lossy().starts_with("fake-state-"))
-            .map(|e| std::fs::read_to_string(e.path()).unwrap())
-            .collect::<String>()
-    };
-    for title in ["Kiwi from oxplow", "Kiwi from the command"] {
-        fx.svc
-            .commands
-            .run(
-                &Actor::Human,
-                "oxplow.work_item.create",
-                json!({ "title": title }),
-                false,
-            )
-            .await
-            .unwrap();
-        assert!(state().contains(title), "{title} is in the tracker's state");
-    }
-    fx.svc
-        .commands
-        .run(
-            &Actor::Human,
-            sync::SYNC,
-            json!({ "instance": INSTANCE, "collector": "work_items" }),
-            false,
-        )
-        .await
-        .unwrap();
-    fx.svc.event_pump.run_once().await.unwrap();
-    let after = titles(&fx).await;
-    for title in ["Kiwi from oxplow", "Kiwi from the command"] {
-        assert!(after.iter().any(|t| t == title), "{title} in {after:?}");
-    }
-}
-
-async fn collector_state(fx: &EffortFixture) -> oxplow_db::CollectorState {
-    oxplow_db::SqliteProviderCollectorStore::new(fx.svc.db.clone())
-        .get(INSTANCE, "work_items")
-        .await
-        .unwrap()
-        .expect("a read was recorded")
-}
-
-/// How many `work_item.recorded` events name `item`.
-async fn recorded_for(fx: &EffortFixture, item: &str) -> usize {
-    logged(fx, "work_item.recorded")
-        .await
-        .iter()
-        .filter(|p| p["item"]["uri"] == item)
-        .count()
-}
-
-/// P7.A3: a read streams the provider's items into `work_item` and keeps
-/// its cursor; the next read resumes from it. Starting an instance reads
-/// it once.
-#[cfg(unix)]
-#[tokio::test]
-async fn a_read_streams_records_into_work_item_and_keeps_its_cursor() {
-    let (fx, ext) = deployed("").await;
-    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
-    // Its start's first read, in the background (tsk716).
-    first_read(&fx).await;
-    let first = first_read(&fx).await;
-    assert_eq!(
-        (first.status.as_str(), first.records),
-        ("ok", 0),
-        "read once on start, in the background"
-    );
-    let refs = three_items(&fx).await;
-
-    let out = fx
+/// Call `command` of `instance`'s process as the person, straight at it.
+async fn invoke_on(
+    fx: &ThreadFixture,
+    instance: &str,
+    command: &str,
+    input: serde_json::Value,
+) -> Result<oxplow_provider_protocol::model::InvokeResult, oxplow_domain::CommandError> {
+    let running = fx
         .svc
-        .commands
-        .run(
-            &Actor::Human,
-            sync::SYNC,
-            json!({ "instance": INSTANCE }),
-            false,
-        )
+        .providers
+        .get(instance)
         .await
-        .unwrap();
-    assert_eq!(out.result["reads"][0]["records"], 3);
-    let state = collector_state(&fx).await;
-    assert_eq!(state.records, 3);
-    assert_eq!(state.state, Some(json!({ "cursor": 3, "seen": 3 })));
-    for r in &refs {
-        assert_eq!(
-            recorded_for(&fx, r).await,
-            1,
-            "its create's; the read restated it, so recorded nothing new (tsk799)"
-        );
-    }
-    // The next read resumes after the cursor: nothing new.
-    let again = fx
-        .svc
-        .commands
-        .run(
-            &Actor::Human,
-            sync::SYNC,
-            json!({ "instance": INSTANCE }),
-            false,
-        )
-        .await
-        .unwrap();
-    assert_eq!(again.result["reads"][0]["records"], 0);
-    fx.svc.event_pump.run_once().await.unwrap();
-    assert!(ServicesProbe(&fx.svc).record(&refs[2]).await.is_some());
-
-    let err = fx
-        .svc
-        .commands
-        .run(
-            &Actor::Human,
-            sync::SYNC,
-            json!({ "instance": INSTANCE, "collector": "nope" }),
-            false,
-        )
-        .await
-        .unwrap_err();
-    assert!(
-        matches!(&err, oxplow_domain::CommandError::Invalid { field: Some(f), .. } if f == "/collector"),
-        "{err:?}"
-    );
+        .expect("the instance exists");
+    let run =
+        oxplow_domain::run::RunContext::core(Actor::Human, oxplow_domain::run::Mode::External);
+    running.invoke(&run, command, input, None).await
 }
 
-/// P7 review (tsk716): starting an instance doesn't wait for its first
-/// read — a team with thousands of issues would hold up the Enable button
-/// and every reconcile — but the read still happens, in the background.
-#[cfg(unix)]
-#[tokio::test]
-async fn enabling_returns_before_the_first_read_finishes() {
-    // The first read is held until the test releases it, so "enable came
-    // back first" doesn't depend on how long anything takes.
-    // (No commas or spaces: hooks are a comma-separated list.)
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let hold = std::env::temp_dir().join(format!(
-        "oxplow-release-read-{}-{nanos}",
-        std::process::id()
-    ));
-    let (fx, ext) = deployed(&format!("hold-read-file:{}", hold.display())).await;
-    // A guard against waiting for a read that is held for good (which is
-    // what enabling that waited for the read would do), not a time bound.
-    tokio::time::timeout(
-        std::time::Duration::from_secs(120),
-        enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })),
-    )
-    .await
-    .expect("enable waited for the first read");
-    // Enable has returned and the read has not: it is under way (or about to
-    // be) and cannot end.
-    let store = oxplow_db::SqliteProviderCollectorStore::new(fx.svc.db.clone());
-    let state = store.get(INSTANCE, "work_items").await.unwrap();
-    assert!(
-        state.as_ref().is_none_or(|s| s.status == "reading"),
-        "enable returned only after the first read finished: {state:?}"
-    );
-    // Released, the read still happens, in the background.
-    std::fs::write(&hold, b"go").unwrap();
-    let read = first_read(&fx).await;
-    let _ = std::fs::remove_file(&hold);
-    assert_eq!(read.status, "ok", "{read:?}");
-}
-
-/// The instance's first read, once its background sync lands.
-async fn first_read(fx: &EffortFixture) -> oxplow_db::CollectorState {
-    let store = oxplow_db::SqliteProviderCollectorStore::new(fx.svc.db.clone());
+/// Waits until the fake runs: its health is ready.
+async fn first_read(fx: &ThreadFixture) {
     for _ in 0..200 {
-        if let Some(state) = store.get(INSTANCE, "work_items").await.unwrap() {
-            if state.status != "reading" {
-                return state;
-            }
+        if running(&fx.svc, "fake") {
+            return;
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
     panic!(
-        "the first read never landed: {:?}",
-        store.get(INSTANCE, "work_items").await.unwrap()
+        "the fake never became ready: {:?}",
+        fx.svc.providers.health(INSTANCE)
     );
-}
-
-/// P7 review (tsk715): two syncs of one collector at once don't both read
-/// from the same checkpoint — the second waits, then resumes after the
-/// first — so each item is recorded once and the cursor never goes back.
-#[cfg(unix)]
-#[tokio::test]
-async fn concurrent_syncs_of_one_collector_record_each_item_once() {
-    let (fx, ext) = deployed("").await;
-    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
-    // Its start's first read, in the background (tsk716).
-    first_read(&fx).await;
-    let refs = three_items(&fx).await;
-    set_hooks(&fx, "slow:300").await;
-    let sync = || {
-        fx.svc.commands.run(
-            &Actor::Human,
-            sync::SYNC,
-            json!({ "instance": INSTANCE }),
-            false,
-        )
-    };
-    let (a, b) = tokio::join!(sync(), sync());
-    let records = [a.unwrap(), b.unwrap()]
-        .iter()
-        .map(|r| r.result["reads"][0]["records"].as_u64().unwrap())
-        .sum::<u64>();
-    assert_eq!(records, 3, "the items were read once between them");
-    for r in &refs {
-        assert_eq!(
-            recorded_for(&fx, r).await,
-            1,
-            "its create's; the read restated it (tsk799)"
-        );
-    }
-    assert_eq!(
-        collector_state(&fx).await.state,
-        Some(json!({ "cursor": 3, "seen": 3 }))
-    );
-}
-
-/// P7.A3: a read that fails midway keeps the records its last checkpoint
-/// covered (the next read resumes there), and the failure counts; a
-/// record of another provider's item fails the read and writes nothing.
-#[cfg(unix)]
-#[tokio::test]
-async fn a_failed_read_keeps_what_its_checkpoints_covered() {
-    let (fx, ext) = deployed("").await;
-    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
-    // Its start's first read, in the background (tsk716).
-    first_read(&fx).await;
-    let refs = three_items(&fx).await;
-    set_hooks(&fx, "read-fail-after:2").await;
-    let err = fx
-        .svc
-        .commands
-        .run(
-            &Actor::Human,
-            sync::SYNC,
-            json!({ "instance": INSTANCE }),
-            false,
-        )
-        .await
-        .unwrap_err();
-    assert!(err.to_string().contains("after 2 records"), "{err}");
-    let state = collector_state(&fx).await;
-    assert_eq!((state.status.as_str(), state.records), ("error", 2));
-    assert_eq!(state.state, Some(json!({ "cursor": 2, "seen": 2 })));
-    assert_eq!(recorded_for(&fx, &refs[2]).await, 1, "only its create's");
-    assert_eq!(
-        fx.svc
-            .providers
-            .health(INSTANCE)
-            .unwrap()
-            .consecutive_failures,
-        1
-    );
-
-    set_hooks(&fx, "bad-record").await;
-    let before = logged(&fx, "work_item.recorded").await.len();
-    let err = fx
-        .svc
-        .commands
-        .run(
-            &Actor::Human,
-            sync::SYNC,
-            json!({ "instance": INSTANCE }),
-            false,
-        )
-        .await
-        .unwrap_err();
-    assert!(
-        err.to_string()
-            .contains("oxplow:oxplow/work_item?id=X-1&provider=other"),
-        "{err}"
-    );
-    assert_eq!(logged(&fx, "work_item.recorded").await.len(), before);
-}
-
-/// P7.A3: a read that sends nothing for the call timeout is cancelled
-/// and counts as a failure.
-#[cfg(unix)]
-#[tokio::test]
-async fn a_silent_read_is_cancelled_and_counts() {
-    let (fx, ext) = deployed("").await;
-    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
-    // Its start's first read, in the background (tsk716).
-    first_read(&fx).await;
-    set_hooks(&fx, "slow:5000").await;
-    let err = fx
-        .svc
-        .commands
-        .run(
-            &Actor::Human,
-            sync::SYNC,
-            json!({ "instance": INSTANCE }),
-            false,
-        )
-        .await
-        .unwrap_err();
-    assert!(err.to_string().contains("sent nothing"), "{err}");
-    assert_eq!(
-        fx.svc
-            .providers
-            .health(INSTANCE)
-            .unwrap()
-            .consecutive_failures,
-        1
-    );
-}
-
-/// P7.A3: the schedule reads each running instance's collectors that are
-/// due, as the system and audited; one read just now isn't due again; an
-/// instance set to `syncMinutes: 0` is read only on request.
-#[cfg(unix)]
-#[tokio::test]
-async fn scheduled_syncs_run_due_collectors_as_the_system() {
-    let (fx, _ext) = deployed("").await;
-    configure(&fx, true, json!({ "team": "core" }));
-    crate::test_fixtures::activate(&fx.svc).await;
-    // Its start's first read, in the background (tsk716).
-    first_read(&fx).await;
-    // Starting read it once; it isn't due again for five minutes.
-    assert_eq!(fx.svc.providers.sync_due().await, 0);
-    fx.svc
-        .db
-        .transaction(|tx| {
-            tx.execute(
-                "UPDATE provider_collector_state SET last_read_at = '2020-01-01T00:00:00.000000Z'",
-                [],
-            )
-            .map(|_| ())
-            .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
-        })
-        .await
-        .unwrap();
-    assert_eq!(fx.svc.providers.sync_due().await, 1);
-    // P7 review (tsk722): the schedule says when the instance is next due:
-    // its read plus five minutes plus the scheduler's tick.
-    let (due, fresh) =
-        crate::collector_runner::tests::due_and_fresh(&fx.svc, "tracker", "fake").await;
-    let due = oxplow_domain::Timestamp::parse(&due.expect("next_due_at is set"))
-        .unwrap()
-        .unix_ms();
-    let expected = oxplow_domain::Timestamp::now().unix_ms() + 6 * 60_000;
-    assert!((expected - due).abs() < 30_000, "{due} vs {expected}");
-    assert!(fresh);
-    let audits = fx.svc.commands.audit_store().list_recent(10).await.unwrap();
-    let syncs: Vec<_> = audits.iter().filter(|r| r.command == sync::SYNC).collect();
-    assert!(syncs.len() >= 2, "{audits:?}");
-    assert!(syncs
-        .iter()
-        .all(|r| r.actor_kind == oxplow_domain::events::schema::ActorKind::System));
-
-    fx.svc
-        .config
-        .write()
-        .unwrap()
-        .extension_instances
-        .get_mut(INSTANCE)
-        .unwrap()
-        .sync_minutes = Some(0);
-    fx.svc
-        .db
-        .transaction(|tx| {
-            tx.execute(
-                "UPDATE provider_collector_state SET last_read_at = '2020-01-01T00:00:00.000000Z'",
-                [],
-            )
-            .map(|_| ())
-            .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
-        })
-        .await
-        .unwrap();
-    assert_eq!(fx.svc.providers.sync_due().await, 0);
-    let (due, _) = crate::collector_runner::tests::due_and_fresh(&fx.svc, "tracker", "fake").await;
-    assert_eq!(due, None, "read only on request: never late");
 }
 
 /// Send the running fake new script hooks.
-async fn set_hooks(fx: &EffortFixture, hooks: &str) {
+async fn set_hooks(fx: &ThreadFixture, hooks: &str) {
     let instance = fx.svc.providers.get(INSTANCE).await.expect("running");
     instance.hook(hooks).await;
 }
 
-/// tsk1001: a hooks notification replaces the last one — `set_hooks(fx,
+/// a hooks notification replaces the last one — `set_hooks(fx,
 /// "")` clears a slow call — so a test that sets hooks and clears them
 /// runs on the fake it means to.
 #[cfg(unix)]
@@ -2217,132 +1073,24 @@ async fn the_fakes_hooks_are_replaced_not_merged() {
     let (fx, _ext) = enabled_fake().await;
     set_hooks(&fx, "slow:30000").await;
     set_hooks(&fx, "").await;
-    let created = tokio::time::timeout(std::time::Duration::from_secs(10), create_on_fake(&fx))
+    let created = tokio::time::timeout(std::time::Duration::from_secs(10), mark_on_fake(&fx))
         .await
         .expect("the slow hook was cleared");
     created.unwrap();
 }
 
-/// Run `oxplow.work_item.create` on the fake as the person.
-async fn create_on_fake(
-    fx: &EffortFixture,
-) -> Result<oxplow_domain::CommandOutcome, oxplow_domain::CommandError> {
-    make_active(fx, "fake").await;
-    fx.svc
-        .commands
-        .run(
-            &Actor::Human,
-            "oxplow.work_item.create",
-            json!({ "title": "x" }),
-            false,
-        )
-        .await
+/// Mark on the fake as the person.
+async fn mark_on_fake(fx: &ThreadFixture) -> Result<String, oxplow_domain::CommandError> {
+    mark_on(fx, INSTANCE).await
 }
 
 #[cfg(unix)]
-async fn enabled_fake() -> (EffortFixture, Extension) {
+async fn enabled_fake() -> (ThreadFixture, Extension) {
     let (fx, ext) = deployed("").await;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
-    // Its start's first read, in the background (tsk716).
+    // Its start's first read, in the background.
     first_read(&fx).await;
     (fx, ext)
-}
-
-/// P7.A4: a short rate limit is waited out and the call retried once; it
-/// never counts as a failure.
-#[cfg(unix)]
-#[tokio::test]
-async fn a_short_rate_limit_is_waited_out_and_doesnt_count() {
-    let (fx, _ext) = enabled_fake().await;
-    set_hooks(&fx, "rate-limit:200").await;
-    let started = std::time::Instant::now();
-    create_on_fake(&fx).await.unwrap();
-    assert!(started.elapsed() >= std::time::Duration::from_millis(200));
-    let health = fx.svc.providers.health(INSTANCE).unwrap();
-    assert_eq!(health.consecutive_failures, 0);
-    assert_eq!(health.rate_limited_until, None, "the success clears it");
-
-    // A read is retried the same way, from its last checkpoint.
-    set_hooks(&fx, "rate-limit:100").await;
-    let out = fx
-        .svc
-        .commands
-        .run(
-            &Actor::Human,
-            sync::SYNC,
-            json!({ "instance": INSTANCE }),
-            false,
-        )
-        .await
-        .unwrap();
-    assert_eq!(out.result["reads"][0]["records"], 1);
-}
-
-/// P7.A4: a long rate limit fails the call honestly, without counting,
-/// and the schedule waits it out.
-#[cfg(unix)]
-#[tokio::test]
-async fn a_long_rate_limit_fails_without_counting_and_defers_the_schedule() {
-    let (fx, _ext) = enabled_fake().await;
-    set_hooks(&fx, "rate-limit:60000").await;
-    let err = create_on_fake(&fx).await.unwrap_err().to_string();
-    assert!(
-        err.contains("rate limited") && err.contains("try again in 60s"),
-        "{err}"
-    );
-    let health = fx.svc.providers.health(INSTANCE).unwrap();
-    assert_eq!(health.consecutive_failures, 0);
-    assert!(health.rate_limited_until.is_some());
-    fx.svc
-        .db
-        .transaction(|tx| {
-            tx.execute(
-                "UPDATE provider_collector_state SET last_read_at = '2020-01-01T00:00:00.000000Z'",
-                [],
-            )
-            .map(|_| ())
-            .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
-        })
-        .await
-        .unwrap();
-    configure(&fx, true, json!({ "team": "core" }));
-    assert_eq!(fx.svc.providers.sync_due().await, 0, "it waits");
-}
-
-/// P7.A4: what a read in progress says shows on the instance while it
-/// runs, and goes when it ends.
-#[cfg(unix)]
-#[tokio::test]
-async fn progress_shows_on_the_instance_while_a_read_runs() {
-    let (fx, _ext) = enabled_fake().await;
-    three_items(&fx).await;
-    set_hooks(&fx, "progress").await;
-    let svc = fx.svc.clone();
-    let reading = tokio::spawn(async move {
-        svc.commands
-            .run(
-                &Actor::Human,
-                sync::SYNC,
-                json!({ "instance": INSTANCE }),
-                false,
-            )
-            .await
-    });
-    let mut seen = Vec::new();
-    while !reading.is_finished() {
-        if let Some(a) = fx.svc.providers.health(INSTANCE).unwrap().activity {
-            if !seen.contains(&a) {
-                seen.push(a);
-            }
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
-    reading.await.unwrap().unwrap();
-    assert!(
-        seen.contains(&"work_items: record 1 of 3 (33%)".to_string()),
-        "{seen:?}"
-    );
-    assert_eq!(fx.svc.providers.health(INSTANCE).unwrap().activity, None);
 }
 
 /// P7.A4: rate limits interleaved with failures neither count nor reset
@@ -2352,9 +1100,9 @@ async fn progress_shows_on_the_instance_while_a_read_runs() {
 async fn three_failures_disable_it_with_rate_limits_interleaved() {
     let (fx, _ext) = enabled_fake().await;
     set_hooks(&fx, "fail-next:1").await;
-    assert!(create_on_fake(&fx).await.is_err());
+    assert!(mark_on_fake(&fx).await.is_err());
     set_hooks(&fx, "rate-limit:60000").await;
-    assert!(create_on_fake(&fx).await.is_err());
+    assert!(mark_on_fake(&fx).await.is_err());
     assert_eq!(
         fx.svc
             .providers
@@ -2364,127 +1112,18 @@ async fn three_failures_disable_it_with_rate_limits_interleaved() {
         1
     );
     set_hooks(&fx, "fail-next:2").await;
-    assert!(create_on_fake(&fx).await.is_err());
-    assert!(create_on_fake(&fx).await.is_err());
+    assert!(mark_on_fake(&fx).await.is_err());
+    assert!(mark_on_fake(&fx).await.is_err());
     assert!(matches!(
         fx.svc.providers.health(INSTANCE).unwrap().state,
         InstanceState::Disabled { .. }
     ));
 }
 
-/// tsk799: an effect that writes another provider's item doesn't hear its
-/// own write again when the next read restates it. The write's
-/// `work_item.recorded` is caused by the effect's run (the loop guard
-/// sees it); a read that brings back the same item records nothing new,
-/// so nothing echoes — sync after sync.
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread")]
-async fn an_effect_doesnt_hear_its_own_external_write_echoed_by_a_read() {
-    let fx = services_with_effort().await;
-    let project = fx.svc.layout.project_dir.clone();
-    write_extension(&project, "");
-    let dir = project.join(".oxplow/extensions").join(EXT);
-    let manifest = std::fs::read_to_string(dir.join("extension.yaml")).unwrap();
-    std::fs::write(
-        dir.join("extension.yaml"),
-        format!("{}effects:\n  - id: shout\n    summary: Shout a recorded item's title.\n    on: [work_item.recorded]\n    entry: shout.star\n", manifest.replacen("permissions: [process.run]", "permissions: [process.run, commands:oxplow.work_item.*]", 1)),
-    )
-    .unwrap();
-    std::fs::write(
-        dir.join("shout.star"),
-        "def transform(x):\n    item = x[\"event\"][\"payload\"][\"item\"]\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"uri\": item[\"uri\"], \"title\": item[\"title\"] + \"!\"}}]}\n",
-    )
-    .unwrap();
-    let ext = extension(&project);
-    deploy(&fx, &ext).await;
-    make_active(&fx, "fake").await;
-    let decl = &ext.effects[0];
-    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
-    first_read(&fx).await;
-    crate::test_fixtures::start_effect(&fx.svc, &decl.name()).await;
-
-    let consumer = crate::effect_triggers::EffectTriggers::new(std::sync::Arc::downgrade(&fx.svc));
-    let mut seen = fx
-        .svc
-        .event_log_store
-        .read_after(0, 10_000)
-        .await
-        .unwrap()
-        .len() as i64;
-    // Hand the consumer what was logged since last time, as the pump would.
-    let deliver = |seen: i64| {
-        let (svc, consumer) = (&fx.svc, &consumer);
-        async move {
-            let mut at = seen;
-            loop {
-                let events = svc.event_log_store.read_after(at, 100).await.unwrap();
-                if events.is_empty() {
-                    return at;
-                }
-                for e in &events {
-                    use crate::event_pump::AsyncEventConsumer as _;
-                    // An effect runs for its event's thread; these events
-                    // are the person's, so anchor them to the fixture's.
-                    let mut e = e.clone();
-                    e.envelope.anchors.thread_id = Some(fx.thread);
-                    consumer.handle(&e).await.unwrap();
-                    at = e.seq;
-                }
-            }
-        }
-    };
-    let item = fx
-        .svc
-        .work_items_client()
-        .create(
-            &Actor::Human,
-            crate::work_items::NewItem {
-                title: "theirs".into(),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap()
-        .expect("the list keeps it");
-    seen = deliver(seen).await;
-    for _ in 0..3 {
-        fx.svc
-            .commands
-            .run(
-                &Actor::Human,
-                sync::SYNC,
-                json!({ "instance": INSTANCE }),
-                false,
-            )
-            .await
-            .unwrap();
-        seen = deliver(seen).await;
-    }
-    let runs = fx
-        .svc
-        .sql
-        .query_sql("SELECT count(*) FROM v_effect_run", vec![], None)
-        .await
-        .unwrap()
-        .rows;
-    assert_eq!(
-        serde_json::to_value(runs).unwrap(),
-        json!([[1]]),
-        "one reaction, to the person's create"
-    );
-    let titles: Vec<String> = logged(&fx, "work_item.recorded")
-        .await
-        .iter()
-        .filter(|p| p["item"]["uri"] == item.as_str())
-        .map(|p| p["item"]["title"].as_str().unwrap().to_string())
-        .collect();
-    assert_eq!(titles.last().map(String::as_str), Some("theirs!"));
-}
-
 /// Another instance of the tracker's `provider` (in memory, as a
 /// reconcile reads it).
 fn configure_named(
-    fx: &EffortFixture,
+    fx: &ThreadFixture,
     instance: &str,
     provider: Option<&str>,
     config: serde_json::Value,
@@ -2502,7 +1141,7 @@ fn configure_named(
 
 const SECOND: &str = "tracker/fake_second";
 
-async fn instance_rows(fx: &EffortFixture) -> Vec<(String, String, i64, String)> {
+async fn instance_rows(fx: &ThreadFixture) -> Vec<(String, String, i64, String)> {
     let out = fx
         .svc
         .sql
@@ -2625,145 +1264,7 @@ async fn provider_instances_are_managed_by_commands_and_read_as_a_model() {
     assert_eq!(instance_rows(&fx).await.len(), 1);
 }
 
-/// tsk841: removing an instance — here one whose provider is gone, which
-/// is when the row offers Remove — takes everything of it: its config,
-/// the active-provider choice naming it, its read checkpoints (an
-/// instance added again under the id starts fresh) and its health row. An
-/// extension that no longer declares the provider has no credentials left
-/// to name.
-#[cfg(unix)]
-#[tokio::test]
-async fn removing_an_instance_leaves_nothing_behind() {
-    let fx = services_with_effort().await;
-    let project = fx.svc.layout.project_dir.clone();
-    write_extension(&project, "needs:FAKE_TOKEN");
-    let manifest = project
-        .join(".oxplow/extensions")
-        .join(EXT)
-        .join("extension.yaml");
-    let text = std::fs::read_to_string(&manifest).unwrap();
-    std::fs::write(
-        &manifest,
-        format!(
-            "{}    credentials: [FAKE_TOKEN]\n",
-            permit_secrets(&text, &["FAKE_TOKEN"])
-        ),
-    )
-    .unwrap();
-    deploy(&fx, &extension(&project)).await;
-    let providers = &fx.svc.providers;
-    providers
-        .add_instance(&Actor::Human, SECOND, "fake", Scope::Project)
-        .await
-        .unwrap();
-    crate::test_fixtures::activate_with_problems(&fx.svc).await;
-    providers
-        .set_credential(SECOND, "FAKE_TOKEN", Some("t0ken"))
-        .unwrap();
-    providers
-        .set_instance(&Actor::Human, SECOND, true, json!({ "team": "second" }))
-        .await
-        .unwrap();
-    crate::test_fixtures::activate_with_problems(&fx.svc).await;
-    let states = oxplow_db::SqliteProviderCollectorStore::new(fx.svc.db.clone());
-    for _ in 0..200 {
-        if states
-            .get(SECOND, "work_items")
-            .await
-            .unwrap()
-            .is_some_and(|s| s.status != "reading")
-        {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    }
-    fx.svc
-        .commands
-        .run(
-            &Actor::Human,
-            crate::commands::config_commands::SET,
-            json!({ "key": "activeProviders", "value": { "work_items": "fake_second" } }),
-            true,
-        )
-        .await
-        .unwrap();
-    let account = crate::collector_runner::instance_credential_account(
-        &fx.svc.providers.deps.project,
-        EXT,
-        "fake_second",
-        "FAKE_TOKEN",
-    );
-    assert!(fx.svc.secrets.get(&account).unwrap().is_some());
-
-    // Its provider goes from the extension.
-    let text = std::fs::read_to_string(&manifest).unwrap();
-    // (Its command goes with it: an edit that leaves a command naming a
-    // provider that isn't there is held back, not applied.)
-    std::fs::write(
-        &manifest,
-        text.replace("- id: fake", "- id: fake_renamed")
-            .replace("provider: fake\n", "provider: fake_renamed\n"),
-    )
-    .unwrap();
-    crate::test_fixtures::activate(&fx.svc).await;
-    providers
-        .remove_instance(&Actor::Human, SECOND)
-        .await
-        .unwrap();
-    crate::test_fixtures::activate_with_problems(&fx.svc).await;
-
-    let config = fx.svc.config.read().unwrap().clone();
-    assert!(!config.extension_instances.contains_key(SECOND));
-    assert_eq!(config.active_providers.get("work_items"), None);
-    assert_eq!(states.for_instance(SECOND).await.unwrap(), vec![]);
-    assert_eq!(
-        oxplow_db::contribution_health_store::SqliteContributionHealthStore::new(fx.svc.db.clone())
-            .get(&registry::contribution_key(SECOND))
-            .await
-            .unwrap(),
-        None
-    );
-
-    // A global instance of an extension this project has, that doesn't
-    // resolve, is listed — so it can be removed here.
-    let global = fx.svc.layout.state_dir.join("global-config");
-    oxplow_config::GlobalInstances::update(&global, |all| {
-        all.insert(
-            "tracker/fake_lost".into(),
-            oxplow_config::ExtensionInstanceConfig {
-                enabled: true,
-                provider: Some("fake".into()),
-                ..Default::default()
-            },
-        );
-        Ok::<_, ()>(())
-    })
-    .unwrap()
-    .unwrap();
-    crate::test_fixtures::activate(&fx.svc).await;
-    let lost = providers
-        .list()
-        .await
-        .into_iter()
-        .find(|v| v.instance == "tracker/fake_lost")
-        .expect("listed");
-    assert!(
-        matches!(lost.health.state, InstanceState::Missing { .. }),
-        "{:?}",
-        lost.health.state
-    );
-    providers
-        .remove_instance(&Actor::Human, "tracker/fake_lost")
-        .await
-        .unwrap();
-    crate::test_fixtures::activate_with_problems(&fx.svc).await;
-    assert!(oxplow_config::GlobalInstances::load(&global)
-        .unwrap()
-        .instances
-        .is_empty());
-}
-
-/// tsk840: an instance oxplow can't run as configured — its id is a
+/// an instance oxplow can't run as configured — its id is a
 /// command namespace something else already owns — says so on its row,
 /// rather than showing enabled and "Off" with no reason.
 #[cfg(unix)]
@@ -2799,7 +1300,7 @@ async fn a_refused_enable_says_why() {
     );
 }
 
-/// tsk837: a person's Enables on two rows at once — the second while the
+/// a person's Enables on two rows at once — the second while the
 /// first still checks — both stand. Each write is a read-modify-write of
 /// the instances as they are when it writes, not as they were before its
 /// check.
@@ -2859,30 +1360,10 @@ async fn two_instances_of_one_provider_run_side_by_side() {
     assert!(running(&fx.svc, "fake"));
     assert!(running(&fx.svc, "fake_second"));
 
-    let items = fx.svc.work_items_client();
-    let new = crate::work_items::NewItem {
-        title: "theirs".into(),
-        ..Default::default()
-    };
-    // Each instance numbers its own items: the instance is in the ref.
-    make_active(&fx, "fake_second").await;
-    assert_eq!(
-        items
-            .create(&Actor::Human, new.clone())
-            .await
-            .unwrap()
-            .expect("the list keeps it"),
-        "oxplow:oxplow/work_item?id=W-1&provider=fake_second"
-    );
-    make_active(&fx, "fake").await;
-    assert_eq!(
-        items
-            .create(&Actor::Human, new.clone())
-            .await
-            .unwrap()
-            .expect("the list keeps it"),
-        "oxplow:oxplow/work_item?id=W-1&provider=fake"
-    );
+    // Each instance is its own process: each numbers its own marks.
+    assert_eq!(mark_on(&fx, SECOND).await.unwrap(), "m1");
+    assert_eq!(mark_on(&fx, INSTANCE).await.unwrap(), "m1");
+    assert_eq!(mark_on(&fx, INSTANCE).await.unwrap(), "m2");
     let listed = fx
         .svc
         .sql
@@ -2909,7 +1390,7 @@ async fn two_instances_of_one_provider_run_side_by_side() {
     turn_off(&fx.svc, SECOND).await;
     assert!(!running(&fx.svc, "fake_second"));
     assert!(running(&fx.svc, "fake"));
-    assert!(items.create(&Actor::Human, new).await.is_ok());
+    assert!(mark_on(&fx, INSTANCE).await.is_ok());
 }
 
 /// P9.B1: a credential is an instance's — set for one, another instance
@@ -2917,7 +1398,7 @@ async fn two_instances_of_one_provider_run_side_by_side() {
 #[cfg(unix)]
 #[tokio::test]
 async fn an_instance_credential_is_its_own() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, "needs:FAKE_TOKEN");
     let manifest = project
@@ -3055,7 +1536,7 @@ async fn a_named_instance_says_which_provider_it_is() {
 /// there unless `with_tracker` is false.
 #[cfg(unix)]
 async fn sibling_project(
-    fx: &EffortFixture,
+    fx: &ThreadFixture,
     hooks: &str,
     with_tracker: bool,
 ) -> (std::sync::Arc<crate::Services>, tempfile::TempDir) {
@@ -3103,14 +1584,14 @@ fn declare_token(root: &Path) {
     .unwrap();
 }
 
-/// tsk842: a global instance's credential is the person's in every
+/// a global instance's credential is the person's in every
 /// project, so changing it in one restarts it in every other — on their
 /// next tick — not only here: a rotated token must never keep running on
 /// the old value elsewhere.
 #[cfg(unix)]
 #[tokio::test]
 async fn a_global_credential_change_restarts_it_in_every_project() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, "needs:FAKE_TOKEN");
     declare_token(&project);
@@ -3167,82 +1648,7 @@ async fn state_of(svc: &crate::Services, instance: &str) -> Option<InstanceState
         .map(|v| v.health.state)
 }
 
-/// P9.B2: a global instance belongs to the person, not a project: it runs
-/// in every project of this machine that has its extension, and isn't
-/// listed where the extension isn't.
-#[cfg(unix)]
-#[tokio::test]
-async fn a_global_instance_runs_in_every_project_with_the_extension() {
-    let (fx, _ext) = deployed("").await;
-    let providers = &fx.svc.providers;
-    let added = providers
-        .add_instance(&Actor::Human, SHARED, "fake", Scope::Global)
-        .await
-        .unwrap();
-    assert_eq!((added.scope, added.overridden), (Scope::Global, false));
-    providers
-        .set_instance(&Actor::Human, SHARED, true, json!({ "team": "shared" }))
-        .await
-        .unwrap();
-    crate::test_fixtures::activate_with_problems(&fx.svc).await;
-    // It is in the machine's file, not the project's.
-    assert!(fx.svc.config.read().unwrap().extension_instances.is_empty());
-    let global = fx.svc.layout.state_dir.join("global-config");
-    let file = oxplow_config::GlobalInstances::load(&global).unwrap();
-    assert!(file.instances[SHARED].enabled);
-    assert_eq!(state_of(&fx.svc, SHARED).await, Some(InstanceState::Ready));
-
-    let (other, _other_dir) = sibling_project(&fx, "", true).await;
-    crate::test_fixtures::activate(&other).await;
-    let there = other
-        .providers
-        .list()
-        .await
-        .into_iter()
-        .find(|v| v.instance == SHARED)
-        .expect("listed where its extension is");
-    assert_eq!(
-        (there.scope, there.health.state),
-        (Scope::Global, InstanceState::Ready)
-    );
-    assert!(running(&other, "fake_shared"));
-
-    let (bare, _bare_dir) = sibling_project(&fx, "", false).await;
-    crate::test_fixtures::activate(&bare).await;
-    assert_eq!(
-        state_of(&bare, SHARED).await,
-        None,
-        "no such extension there"
-    );
-
-    // An agent may write the machine's file too.
-    let agent = Actor::Agent {
-        session_id: None,
-        thread_id: Some(fx.thread),
-        stream_id: None,
-    };
-    providers
-        .add_instance(&agent, "tracker/fake_other", "fake", Scope::Global)
-        .await
-        .unwrap();
-    providers
-        .remove_instance(&Actor::Human, "tracker/fake_other")
-        .await
-        .unwrap();
-    // Removing it stops it everywhere it is read.
-    providers
-        .remove_instance(&Actor::Human, SHARED)
-        .await
-        .unwrap();
-    crate::test_fixtures::activate_with_problems(&fx.svc).await;
-    assert_eq!(state_of(&fx.svc, SHARED).await, None);
-    assert!(other.providers.reconcile_if_global_changed().await);
-    crate::test_fixtures::activate_with_problems(&other).await;
-    assert_eq!(state_of(&other, SHARED).await, None);
-    assert!(!running(&other, "fake_shared"));
-}
-
-/// tsk843: a person turns a global instance off in one project from its
+/// a person turns a global instance off in one project from its
 /// row: the project gets its own entry, off, with the global one's config
 /// — every other project keeps running it, and removing the entry brings
 /// the global one back here.
@@ -3347,7 +1753,7 @@ async fn a_project_entry_overrides_a_global_instance_whole() {
     assert_eq!(state_of(&fx.svc, SHARED).await, Some(InstanceState::Ready));
 }
 
-/// tsk838: a project's entry is the project's own — its config and its
+/// a project's entry is the project's own — its config and its
 /// credentials — whether or not the person has a global instance of the
 /// same name. One appearing (added in another project) or going doesn't
 /// move this project's instance onto the global credentials, nor take its
@@ -3355,7 +1761,7 @@ async fn a_project_entry_overrides_a_global_instance_whole() {
 #[cfg(unix)]
 #[tokio::test]
 async fn a_project_instance_keeps_its_credentials_beside_a_global_one() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, "needs:FAKE_TOKEN");
     let manifest = project
@@ -3442,7 +1848,7 @@ async fn a_project_instance_keeps_its_credentials_beside_a_global_one() {
 #[cfg(unix)]
 #[tokio::test]
 async fn a_global_instances_credential_is_shared_across_projects() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let project = fx.svc.layout.project_dir.clone();
     let credentialed = |root: &Path| {
         let manifest = root
@@ -3545,7 +1951,7 @@ async fn a_process_the_host_ended_for_revoked_authority_counts_no_failure() {
     assert!(!matches!(health.state, InstanceState::Failing { .. }));
 }
 
-/// tsk820: a call's outcome is its instance's while that instance runs.
+/// a call's outcome is its instance's while that instance runs.
 /// One that finishes after the instance was stopped — the first read an
 /// enable starts, say — changes nothing: not "Ready" for something that
 /// isn't running, not a failure counted against it.
@@ -3706,41 +2112,6 @@ async fn a_generation_restarts_only_the_instances_it_changed() {
     );
 }
 
-/// tsk836: a stopped instance never starts again. A read still holding
-/// it — a `oxplow.provider.sync` looping over collectors when a person turned
-/// it off and on — doesn't restart its process, and whatever that late
-/// read meets is never the running successor's: here the extension's
-/// folder changed since its approval, which a restart of the old one
-/// would report as `unapproved` and stop the healthy successor for.
-#[cfg(unix)]
-#[tokio::test]
-async fn a_late_read_on_a_stopped_instance_doesnt_touch_its_successor() {
-    let (fx, _ext) = deployed("").await;
-    configure(&fx, true, json!({ "team": "core" }));
-    crate::test_fixtures::activate(&fx.svc).await;
-    first_read(&fx).await;
-    let was_running = fx.svc.providers.get(INSTANCE).await.unwrap();
-    configure(&fx, false, json!({ "team": "core" }));
-    crate::test_fixtures::activate(&fx.svc).await;
-    configure(&fx, true, json!({ "team": "core" }));
-    crate::test_fixtures::activate(&fx.svc).await;
-    let successor = fx.svc.providers.get(INSTANCE).await.unwrap();
-    assert!(!std::sync::Arc::ptr_eq(&was_running, &successor));
-    // The folder isn't what was approved any more.
-    write_extension(&fx.svc.layout.project_dir, "progress");
-
-    let late = was_running.read("work_items").await;
-    assert!(late.is_err(), "a stopped instance doesn't read: {late:?}");
-    let still = fx.svc.providers.get(INSTANCE).await.expect("still running");
-    assert!(std::sync::Arc::ptr_eq(&still, &successor));
-    assert_eq!(
-        fx.svc.providers.health(INSTANCE).map(|h| h.state),
-        Some(InstanceState::Ready)
-    );
-    // Nothing of it came back to life.
-    assert!(!was_running.has_process().await);
-}
-
 /// The tracker extension, its provider's credential `FAKE_TOKEN` obtained
 /// by signing in at `authorize` / `token` (P9.B3), plus `more` credential
 /// entries (YAML list items, indented six spaces).
@@ -3776,7 +2147,7 @@ fn write_oauth_extension(project: &Path, hooks: &str, authorize: &str, token: &s
 #[cfg(unix)]
 #[tokio::test]
 async fn an_oauth_credential_is_declared_and_checked() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let project = fx.svc.layout.project_dir.clone();
     let (authorize, token) = (
         "https://auth.example.com/authorize",
@@ -3845,13 +2216,12 @@ async fn an_oauth_credential_is_declared_and_checked() {
 /// the person signs in for at a stand-in authorization server (`more`:
 /// further lines of the manifest, continuing the `oauth:` block).
 #[cfg(unix)]
-async fn signing_in(hooks: &str, more: &str) -> (EffortFixture, OAuthSim) {
-    let fx = services_with_effort().await;
+async fn signing_in(hooks: &str, more: &str) -> (ThreadFixture, OAuthSim) {
+    let fx = services_with_thread().await;
     let sim = OAuthSim::start().await;
     let project = fx.svc.layout.project_dir.clone();
     write_oauth_extension(&project, hooks, &sim.authorize_url, &sim.token_url, more);
     deploy(&fx, &extension(&project)).await;
-    make_active(&fx, "fake").await;
     crate::test_fixtures::activate_with_problems(&fx.svc).await;
     (fx, sim)
 }
@@ -3875,7 +2245,7 @@ async fn browse(page: &crate::providers::BegunSignIn) -> String {
 
 /// Hand `redirect` to the sign-in for `name`, as the shell does.
 async fn complete(
-    fx: &EffortFixture,
+    fx: &ThreadFixture,
     name: &str,
     redirect: &str,
 ) -> Result<SignInCompletion, DomainError> {
@@ -3885,7 +2255,7 @@ async fn complete(
         .await
 }
 
-/// tsk909: a sign-in stores its token to the account it began for. When
+/// a sign-in stores its token to the account it began for. When
 /// the instance's entry changes under it — a global one turned off here,
 /// so the project's own entry replaces it — the redirect is refused and
 /// nothing is stored to the old account.
@@ -3924,7 +2294,7 @@ async fn a_sign_in_whose_account_changed_meanwhile_is_refused() {
 
 /// Start a sign-in, do what the person's browser does, and hand the
 /// redirect over as the shell does. What the renderer then hears.
-async fn sign_in(fx: &EffortFixture, name: &str) -> Option<String> {
+async fn sign_in(fx: &ThreadFixture, name: &str) -> Option<String> {
     let mut ui = fx.svc.events.subscribe_ui();
     let page = fx
         .svc
@@ -3978,7 +2348,7 @@ fn sign_in_state(views: &[ProviderInstanceView], name: &str) -> (bool, Option<oa
     (c.set, c.sign_in.clone())
 }
 
-fn unconfigured_at(fx: &EffortFixture) -> (String, String) {
+fn unconfigured_at(fx: &ThreadFixture) -> (String, String) {
     match fx.svc.providers.health(INSTANCE).map(|h| h.state) {
         Some(InstanceState::Unconfigured { problems }) => {
             (problems[0].path.clone(), problems[0].message.clone())
@@ -4002,7 +2372,7 @@ async fn signing_in_starts_the_instance_on_the_access_token_alone() {
     let (path, message) = unconfigured_at(&fx);
     assert_eq!(path, "/credentials/FAKE_TOKEN");
     assert!(message.contains("isn't signed in"), "{message}");
-    assert!(fx.svc.work_items.get("fake").is_err(), "nothing registered");
+    assert!(!running(&fx.svc, "fake"), "nothing registered");
     assert_eq!(
         sign_in_state(&providers.list().await, "FAKE_TOKEN"),
         (false, Some(oauth::SignInState::NotSignedIn))
@@ -4034,7 +2404,7 @@ async fn signing_in_starts_the_instance_on_the_access_token_alone() {
         providers.health(INSTANCE).map(|h| h.state),
         Some(InstanceState::Ready)
     );
-    create_on_fake(&fx).await.unwrap();
+    mark_on_fake(&fx).await.unwrap();
     assert_eq!(sim.grants(), vec!["authorization_code"]);
     assert_eq!(
         sign_in_state(&providers.list().await, "FAKE_TOKEN"),
@@ -4048,7 +2418,7 @@ async fn signing_in_starts_the_instance_on_the_access_token_alone() {
     providers.credential_changed(INSTANCE).await;
     crate::test_fixtures::activate_with_problems(&fx.svc).await;
     assert_eq!(unconfigured_at(&fx).0, "/credentials/FAKE_TOKEN");
-    assert!(fx.svc.work_items.get("fake").is_err());
+    assert!(!running(&fx.svc, "fake"));
 }
 
 /// P9.B3: a token about to lapse is renewed before the process starts.
@@ -4083,7 +2453,7 @@ async fn a_refused_token_is_renewed_and_the_call_tried_once_more() {
     first_read(&fx).await;
     // Its service now takes only the next token; the process holds at-2.
     set_hooks(&fx, "accepts:FAKE_TOKEN=at-3").await;
-    create_on_fake(&fx).await.unwrap();
+    mark_on_fake(&fx).await.unwrap();
     assert_eq!(sim.grants(), vec!["authorization_code", "refresh_token"]);
     let health = fx.svc.providers.health(INSTANCE).unwrap();
     assert_eq!(
@@ -4092,22 +2462,8 @@ async fn a_refused_token_is_renewed_and_the_call_tried_once_more() {
     );
     // The process that answered was started on the renewed token.
     set_hooks(&fx, "accepts:FAKE_TOKEN=at-3").await;
-    create_on_fake(&fx).await.unwrap();
+    mark_on_fake(&fx).await.unwrap();
     assert_eq!(sim.grants().len(), 2);
-
-    // A read is retried the same way.
-    set_hooks(&fx, "accepts:FAKE_TOKEN=at-4").await;
-    fx.svc
-        .commands
-        .run(
-            &Actor::Human,
-            sync::SYNC,
-            json!({ "instance": INSTANCE }),
-            false,
-        )
-        .await
-        .unwrap();
-    assert_eq!(sim.grants().len(), 3);
     assert_eq!(
         fx.svc
             .providers
@@ -4118,37 +2474,28 @@ async fn a_refused_token_is_renewed_and_the_call_tried_once_more() {
     );
 }
 
-/// tsk907: a read that starts the process itself, and is refused, renews
+/// a call that starts the process itself, and is refused, renews
 /// the token — the process it started began after the read did, which
 /// isn't "started since" the refusal.
 #[cfg(unix)]
 #[tokio::test]
-async fn a_read_that_starts_the_process_renews_a_refused_token() {
+async fn a_call_that_starts_the_process_renews_a_refused_token() {
     // Its service takes only the renewed token; its `check` doesn't look.
     let (fx, sim) = signing_in("accepts:FAKE_TOKEN=at-3,lax-check", "").await;
     configure(&fx, true, json!({ "team": "core" }));
     assert_eq!(sign_in(&fx, "FAKE_TOKEN").await, None);
-    // The process goes away, so the next read starts it.
+    // The process goes away, so the next call starts it.
     set_hooks(&fx, "crash").await;
-    let _ = create_on_fake(&fx).await;
-    fx.svc
-        .commands
-        .run(
-            &Actor::Human,
-            sync::SYNC,
-            json!({ "instance": INSTANCE }),
-            false,
-        )
-        .await
-        .unwrap();
+    let _ = mark_on_fake(&fx).await;
+    mark_on_fake(&fx).await.unwrap();
     assert_eq!(refreshes(&sim), 1, "{:?}", sim.grants());
 }
 
 /// Two credentials signed in at the stand-in, `FAKE_TOKEN` and
 /// `OTHER_TOKEN`, the instance ready on both.
 #[cfg(unix)]
-async fn signed_in_twice(hooks: &str) -> (EffortFixture, OAuthSim) {
-    let fx = services_with_effort().await;
+async fn signed_in_twice(hooks: &str) -> (ThreadFixture, OAuthSim) {
+    let fx = services_with_thread().await;
     let sim = OAuthSim::start().await;
     let project = fx.svc.layout.project_dir.clone();
     let other = format!(
@@ -4157,7 +2504,6 @@ async fn signed_in_twice(hooks: &str) -> (EffortFixture, OAuthSim) {
     );
     write_oauth_extension(&project, hooks, &sim.authorize_url, &sim.token_url, &other);
     deploy(&fx, &extension(&project)).await;
-    make_active(&fx, "fake").await;
     configure(&fx, true, json!({ "team": "core" }));
     assert_eq!(sign_in(&fx, "FAKE_TOKEN").await, None);
     assert_eq!(sign_in(&fx, "OTHER_TOKEN").await, None);
@@ -4165,12 +2511,12 @@ async fn signed_in_twice(hooks: &str) -> (EffortFixture, OAuthSim) {
     (fx, sim)
 }
 
-/// tsk910: a slow token exchange holds up only its own credential's
+/// a slow token exchange holds up only its own credential's
 /// sign-in — another credential's begins meanwhile.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_slow_exchange_holds_up_only_its_own_sign_in() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let sim = OAuthSim::start().await;
     let project = fx.svc.layout.project_dir.clone();
     let other = format!(
@@ -4214,7 +2560,7 @@ async fn a_slow_exchange_holds_up_only_its_own_sign_in() {
     ));
 }
 
-/// tsk906: once a redirect is taken as the sign-in's, the finish runs to
+/// once a redirect is taken as the sign-in's, the finish runs to
 /// its end even when its caller goes away mid-exchange (a dropped
 /// connection to a remote daemon): the token is kept and the renderer
 /// hears it, rather than the sign-in vanishing.
@@ -4262,7 +2608,7 @@ async fn a_finish_runs_to_its_end_when_its_caller_goes_away() {
     ));
 }
 
-/// tsk906: the browser hears how its sign-in went as soon as the token is
+/// the browser hears how its sign-in went as soon as the token is
 /// kept — not after the instance has restarted on it (a slow `check`).
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
@@ -4310,7 +2656,7 @@ async fn next_news(
     .expect("news of the sign-in")
 }
 
-/// tsk929: a sign-in replaced by a newer one (another window's Sign in)
+/// a sign-in replaced by a newer one (another window's Sign in)
 /// says so, naming itself, so the row waiting on it stops waiting; and a
 /// person's cancel ends a sign-in at once — nothing of it kept — with its
 /// news saying so.
@@ -4357,7 +2703,7 @@ fn refreshes(sim: &OAuthSim) -> usize {
         .count()
 }
 
-/// tsk908: an `Auth` that names nothing, from a provider handed a pasted
+/// an `Auth` that names nothing, from a provider handed a pasted
 /// key beside its sign-in, could be about either: it renews nothing, and
 /// the sign-in stays good — the refusal is the call's failure.
 #[cfg(unix)]
@@ -4372,7 +2718,7 @@ async fn an_unnamed_auth_beside_a_pasted_key_renews_nothing() {
     assert_eq!(sign_in(&fx, "FAKE_TOKEN").await, None);
     first_read(&fx).await;
     set_hooks(&fx, "refuse-auth").await;
-    let err = create_on_fake(&fx).await.unwrap_err().to_string();
+    let err = mark_on_fake(&fx).await.unwrap_err().to_string();
     assert!(err.contains("authentication failed"), "{err}");
     assert_eq!(refreshes(&sim), 0, "{:?}", sim.grants());
     assert!(
@@ -4384,7 +2730,7 @@ async fn an_unnamed_auth_beside_a_pasted_key_renews_nothing() {
     );
 }
 
-/// tsk821: an `Auth` that names its credential renews that one alone.
+/// an `Auth` that names its credential renews that one alone.
 #[cfg(unix)]
 #[tokio::test]
 async fn an_auth_renews_only_the_credential_it_names() {
@@ -4399,11 +2745,11 @@ async fn an_auth_renews_only_the_credential_it_names() {
     set_hooks(&fx, "accepts:FAKE_TOKEN=never").await;
     // Renewed and tried again on a fresh process (which starts without
     // the hook), so the call lands.
-    create_on_fake(&fx).await.unwrap();
+    mark_on_fake(&fx).await.unwrap();
     assert_eq!(refreshes(&sim), 1, "FAKE_TOKEN only: {:?}", sim.grants());
 }
 
-/// tsk821: renewing the credential an `Auth` named never touches another:
+/// renewing the credential an `Auth` named never touches another:
 /// when the service refuses the renewal for good, only the named one
 /// reads "sign in again".
 #[cfg(unix)]
@@ -4412,7 +2758,7 @@ async fn an_auth_never_lapses_a_credential_it_didnt_name() {
     let (fx, sim) = signed_in_twice("").await;
     set_hooks(&fx, "accepts:FAKE_TOKEN=never").await;
     sim.revoke();
-    assert!(create_on_fake(&fx).await.is_err());
+    assert!(mark_on_fake(&fx).await.is_err());
     let views = fx.svc.providers.list().await;
     assert!(
         matches!(
@@ -4432,7 +2778,7 @@ async fn an_auth_never_lapses_a_credential_it_didnt_name() {
     );
 }
 
-/// tsk821: an `Auth` that names no credential renews one only when the
+/// an `Auth` that names no credential renews one only when the
 /// instance signs in for exactly one — with two, it can't know which, so
 /// it renews none and the refusal is the call's failure.
 #[cfg(unix)]
@@ -4440,12 +2786,12 @@ async fn an_auth_never_lapses_a_credential_it_didnt_name() {
 async fn an_unnamed_auth_with_two_sign_ins_renews_nothing() {
     let (fx, sim) = signed_in_twice("").await;
     set_hooks(&fx, "refuse-auth").await;
-    let err = create_on_fake(&fx).await.unwrap_err().to_string();
+    let err = mark_on_fake(&fx).await.unwrap_err().to_string();
     assert!(err.contains("authentication failed"), "{err}");
     assert_eq!(refreshes(&sim), 0, "{:?}", sim.grants());
 }
 
-/// tsk821: with one signed-in credential, an unnamed `Auth` is its.
+/// with one signed-in credential, an unnamed `Auth` is its.
 #[cfg(unix)]
 #[tokio::test]
 async fn an_unnamed_auth_with_one_sign_in_renews_it() {
@@ -4454,7 +2800,7 @@ async fn an_unnamed_auth_with_one_sign_in_renews_it() {
     assert_eq!(sign_in(&fx, "FAKE_TOKEN").await, None);
     first_read(&fx).await;
     set_hooks(&fx, "refuse-auth").await;
-    create_on_fake(&fx).await.unwrap();
+    mark_on_fake(&fx).await.unwrap();
     assert_eq!(refreshes(&sim), 1, "{:?}", sim.grants());
 }
 
@@ -4487,17 +2833,17 @@ async fn a_revoked_sign_in_stops_the_instance_and_says_sign_in_again() {
     configure(&fx, true, json!({ "team": "core" }));
     assert_eq!(sign_in(&fx, "FAKE_TOKEN").await, None);
     first_read(&fx).await;
-    assert!(fx.svc.work_items.get("fake").is_ok());
+    assert!(running(&fx.svc, "fake"));
     sim.revoke();
     set_hooks(&fx, "accepts:FAKE_TOKEN=never").await;
-    let err = create_on_fake(&fx).await.unwrap_err().to_string();
+    let err = mark_on_fake(&fx).await.unwrap_err().to_string();
     assert!(err.contains("sign in again"), "{err}");
     // The next generation can't start it without its credential.
     crate::test_fixtures::activate_with_problems(&fx.svc).await;
     let (path, message) = unconfigured_at(&fx);
     assert_eq!(path, "/credentials/FAKE_TOKEN");
     assert!(message.contains("sign in again"), "{message}");
-    assert!(fx.svc.work_items.get("fake").is_err(), "nothing registered");
+    assert!(!running(&fx.svc, "fake"), "nothing registered");
     assert!(!running(&fx.svc, "fake"));
     assert_eq!(
         sign_in_state(&fx.svc.providers.list().await, "FAKE_TOKEN"),
@@ -4709,7 +3055,7 @@ async fn a_sign_in_whose_endpoints_changed_meanwhile_sends_nothing() {
     );
 }
 
-/// tsk935: two sign-ins under way at once — another instance's — each
+/// two sign-ins under way at once — another instance's — each
 /// takes only its own redirect: one handed the other's is refused and
 /// waits on, and nothing is exchanged for the wrong one.
 #[cfg(unix)]
@@ -4758,7 +3104,7 @@ async fn one_sign_ins_redirect_is_never_anothers() {
     }
 }
 
-/// tsk935: a sign-in finished after its new endpoints were approved
+/// a sign-in finished after its new endpoints were approved
 /// meanwhile still sends its code nowhere: it began against the old ones,
 /// and only the comparison with the declaration it began with catches it
 /// (the approval check passes).
@@ -4828,118 +3174,7 @@ async fn an_unfinished_sign_in_ends_after_its_wait() {
     assert!(late.contains("under way"), "{late}");
 }
 
-/// The adapter manifest with its server reached by url, authenticated by
-/// the credential `NOTES_TOKEN`.
-fn url_manifest() -> String {
-    ADAPTER_MANIFEST
-        .replace(
-            "permissions: [process.run]",
-            "permissions: [network:mcp.example.com, secrets:NOTES_TOKEN]",
-        )
-        .replace(
-            "      mcp: { command: [bin/server, --stdio] }\n",
-            "      mcp: { url: \"https://mcp.example.com/mcp\", auth: NOTES_TOKEN }\n",
-        )
-        + "    credentials: [NOTES_TOKEN]\n    network: [mcp.example.com]\n"
-}
-
-/// P9.B4: an adapter's MCP server may be one reached by `url` instead of
-/// a command — https (or loopback), a host its `network` lists, and its
-/// bearer a credential it declares.
-#[tokio::test]
-async fn an_adapter_server_by_url_is_declared_and_checked() {
-    let fx = services_with_effort().await;
-    let project = fx.svc.layout.project_dir.clone();
-    let dir = write_adapter_extension(&project);
-    std::fs::remove_file(dir.join("bin/server")).unwrap();
-    let manifest = url_manifest();
-    std::fs::write(dir.join("extension.yaml"), &manifest).unwrap();
-    let ext = extension(&project);
-    assert_eq!(
-        ext.providers[0].adapter.as_ref().unwrap().mcp,
-        spec::McpServer::Url {
-            url: "https://mcp.example.com/mcp".into(),
-            auth: Some("NOTES_TOKEN".into()),
-        }
-    );
-    for (from, to, says) in [
-        (
-            "mcp: { url: \"https://mcp.example.com/mcp\", auth: NOTES_TOKEN }",
-            "mcp: { url: \"https://mcp.example.com/mcp\", command: [bin/server] }",
-            "names either `command`",
-        ),
-        (
-            "mcp: { url: \"https://mcp.example.com/mcp\", auth: NOTES_TOKEN }",
-            "mcp: {}",
-            "names either `command`",
-        ),
-        (
-            "mcp: { url: \"https://mcp.example.com/mcp\", auth: NOTES_TOKEN }",
-            "mcp: { command: [bin/server], auth: NOTES_TOKEN }",
-            "`auth` goes with a `url`",
-        ),
-        // The bearer never crosses the network in the clear.
-        (
-            "https://mcp.example.com/mcp",
-            "http://mcp.example.com/mcp",
-            "must be https",
-        ),
-        (
-            "https://mcp.example.com/mcp",
-            "ftp://mcp.example.com/mcp",
-            "must be https",
-        ),
-        (
-            "network: [mcp.example.com]",
-            "network: [other.example.com]",
-            "`network` must list `mcp.example.com`",
-        ),
-        (
-            "auth: NOTES_TOKEN }",
-            "auth: OTHER }",
-            "declares no credential `OTHER`",
-        ),
-        // tsk835: a client secret is the host's alone — never the
-        // process's, so never its bearer either.
-        (
-            "    credentials: [NOTES_TOKEN]\n",
-            "    credentials:\n      - NOTES_TOKEN\n      - name: SIGNED_IN\n        oauth: \
-             { authorize_url: \"https://mcp.example.com/authorize\", token_url: \
-             \"https://mcp.example.com/token\", client_id: oxplow, client_secret: NOTES_TOKEN }\n",
-            "`NOTES_TOKEN` is a client secret",
-        ),
-        (
-            "    adapter:\n",
-            "    args: [--x]\n    adapter:\n",
-            "`args` go with an `entry`",
-        ),
-    ] {
-        assert!(manifest.contains(from), "{from}");
-        std::fs::write(dir.join("extension.yaml"), manifest.replace(from, to)).unwrap();
-        let loaded = crate::extension::extensions::load_extensions(&project)
-            .into_iter()
-            .find(|e| e.name == EXT)
-            .unwrap();
-        assert!(loaded.providers.is_empty(), "{to}");
-        assert!(
-            loaded.errors.iter().any(|e| loaded.shown(e).contains(says)),
-            "{to}: {:?}",
-            loaded.errors
-        );
-    }
-    // On loopback, plain http is what a local server speaks.
-    std::fs::write(
-        dir.join("extension.yaml"),
-        manifest
-            .replace("https://mcp.example.com/mcp", "http://127.0.0.1:8123/mcp")
-            .replace("network: [mcp.example.com]", "network: [127.0.0.1]")
-            .replace("network:mcp.example.com", "network:127.0.0.1"),
-    )
-    .unwrap();
-    extension(&project);
-}
-
-/// tsk826: two sign-ins for one credential started at once leave one
+/// two sign-ins for one credential started at once leave one
 /// under way — the later one — and the earlier one's redirect does
 /// nothing.
 #[cfg(unix)]
@@ -4970,7 +3205,7 @@ async fn two_sign_ins_at_once_leave_one_under_way() {
     assert_eq!(sim.grants(), vec!["authorization_code"]);
 }
 
-/// tsk826: removing a project's replacement of a global instance ends a
+/// removing a project's replacement of a global instance ends a
 /// sign-in under way for it too.
 #[cfg(unix)]
 #[tokio::test]
@@ -5000,985 +3235,7 @@ async fn removing_a_project_replacement_ends_its_sign_in() {
     assert!(refused.contains("under way"), "{refused}");
 }
 
-/// tsk828: several calls refused at once renew the sign-in once, and each
-/// is tried again on the one renewed token.
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread")]
-async fn calls_refused_together_renew_once() {
-    let (fx, sim) = signing_in("", "").await;
-    configure(&fx, true, json!({ "team": "core" }));
-    assert_eq!(sign_in(&fx, "FAKE_TOKEN").await, None);
-    first_read(&fx).await;
-    // Its service now takes only the next token; the process holds at-2.
-    set_hooks(&fx, "accepts:FAKE_TOKEN=at-3").await;
-    let calls: Vec<_> = (0..3)
-        .map(|_| {
-            let svc = fx.svc.clone();
-            tokio::spawn(async move {
-                svc.commands
-                    .run(
-                        &Actor::Human,
-                        "oxplow.work_item.create",
-                        json!({ "title": "x" }),
-                        false,
-                    )
-                    .await
-            })
-        })
-        .collect();
-    for call in calls {
-        call.await.unwrap().unwrap();
-    }
-    assert_eq!(sim.grants(), vec!["authorization_code", "refresh_token"]);
-}
-
-/// P10: a call cut off because a renewal ended its process may have
-/// landed: it is sent again only to a provider that keeps
-/// `idempotent_writes` (under the same key); toward any other the cut-off
-/// is the call's failure. A call its service refused (`Auth`) never
-/// landed, and is sent again either way.
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread")]
-async fn a_call_cut_off_by_a_renewal_is_not_resent_without_a_key() {
-    for (hooks, resent) in [("", true), ("plain-writes", false)] {
-        let (fx, _sim) = signing_in(hooks, "").await;
-        configure(&fx, true, json!({ "team": "core" }));
-        assert_eq!(sign_in(&fx, "FAKE_TOKEN").await, None);
-        first_read(&fx).await;
-        // One call under way (it waits before it writes) ...
-        let started = fx.svc.layout.project_dir.join("invoke-started");
-        set_hooks(
-            &fx,
-            &format!("slow:5000,started-file:{}", started.display()),
-        )
-        .await;
-        let svc = fx.svc.clone();
-        let under_way = tokio::spawn(async move {
-            svc.commands
-                .run(
-                    &Actor::Human,
-                    "oxplow.work_item.create",
-                    json!({ "title": "cut off" }),
-                    false,
-                )
-                .await
-        });
-        // The fake says when it has the call: no guess at timing.
-        while !started.exists() {
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        // ... when another is refused, and its renewal ends the process.
-        set_hooks(&fx, "accepts:FAKE_TOKEN=at-3").await;
-        create_on_fake(&fx).await.unwrap();
-        let cut_off = under_way.await.unwrap();
-        assert_eq!(cut_off.is_ok(), resent, "{hooks:?}: {cut_off:?}");
-    }
-}
-
-/// The tracker extension with the fake (running with `hooks`) and an
-/// effect `file` that reacts to an oxplow task moved to done with the
-/// calls `script` composes (it may read with `sql.read`); both approved,
-/// the provider enabled.
-#[cfg(unix)]
-async fn with_effect(hooks: &str, script: &str) -> TaskEffortFixture {
-    let fx = services_with_task_effort().await;
-    let project = fx.svc.layout.project_dir.clone();
-    write_extension(&project, hooks);
-    let dir = project.join(".oxplow/extensions").join(EXT);
-    let manifest = std::fs::read_to_string(dir.join("extension.yaml")).unwrap();
-    std::fs::write(
-        dir.join("extension.yaml"),
-        manifest.replacen(
-            "permissions: [process.run",
-            "permissions: [sql.read, commands:oxplow.work_item.*, process.run",
-            1,
-        ) + "effects:\n  - id: file\n    summary: File an item on the tracker.\n    on: [work_item.state_changed]\n    where: { to: done }\n    needs: [sql.read]\n    entry: file.star\n",
-    )
-    .unwrap();
-    std::fs::write(dir.join("file.star"), script).unwrap();
-    let ext = extension(&project);
-    deploy(&fx, &ext).await;
-    make_active(&fx, "fake").await;
-    let decl = ext.effects[0].clone();
-    crate::test_fixtures::start_effect(&fx.svc, &decl.name()).await;
-    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
-    first_read(&fx).await;
-    fx
-}
-
-/// The effect's script: one write to the fake.
-const FILE_ON_FAKE: &str = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"from effect\"}}]}\n";
-
-/// The fixture's task moved to done, anchored to its thread as the command
-/// that makes it would be: an effect reacting runs for that thread.
-fn done_envelope(fx: &TaskEffortFixture) -> oxplow_domain::Envelope {
-    use oxplow_domain::events::schema::{WorkItemStateChanged, WorkItemStateChangedV1};
-    let mut env = oxplow_domain::Envelope::typed::<WorkItemStateChanged>(
-        "human",
-        &WorkItemStateChangedV1 {
-            work_item: oxplow_tasks::work_item_ref(fx.task),
-            to: oxplow_domain::work_items::CanonicalState::Done,
-        },
-    );
-    env.anchors.thread_id = Some(fx.thread);
-    env
-}
-
-/// Move the fixture's task to done (what the effect reacts to) and let
-/// the effect react.
-async fn react(fx: &TaskEffortFixture) -> oxplow_domain::StoredEvent {
-    let env = done_envelope(fx);
-    let id = env.id.clone();
-    fx.svc.event_log_store.append(env).await.unwrap();
-    let ev = fx.svc.event_log_store.get(id).await.unwrap().unwrap();
-    use crate::event_pump::AsyncEventConsumer as _;
-    crate::effect_triggers::EffectTriggers::new(std::sync::Arc::downgrade(&fx.svc))
-        .handle(&ev)
-        .await
-        .unwrap();
-    ev
-}
-
-async fn effect_runs(fx: &EffortFixture) -> serde_json::Value {
-    let rows = fx
-        .svc
-        .sql
-        .query_sql(
-            "SELECT attempt, origin, state, retry_at IS NOT NULL FROM v_effect_run ORDER BY attempt",
-            vec![],
-            None,
-        )
-        .await
-        .unwrap()
-        .rows;
-    serde_json::to_value(rows).unwrap()
-}
-
-/// The effect's consecutive failures, as its health counts them.
-async fn effect_failures(fx: &EffortFixture) -> i64 {
-    let health = crate::contribution_health::ContributionHealth::new(
-        fx.svc.db.clone(),
-        fx.svc.vocabulary.clone(),
-    );
-    let key = oxplow_db::ContributionKey {
-        namespace: EXT.into(),
-        contribution: "file".into(),
-        kind: "effect",
-    };
-    health
-        .get(&key)
-        .await
-        .unwrap()
-        .map_or(0, |h| h.consecutive_failures)
-}
-
-/// `secs` from now.
-fn in_secs(secs: i64) -> oxplow_domain::Timestamp {
-    oxplow_domain::Timestamp::from_unix_ms(oxplow_domain::Timestamp::now().unix_ms() + secs * 1000)
-}
-
-/// P10: a step whose reply was lost (it landed; the call timed out) is
-/// sent again by itself — the reaction's every step goes to a provider
-/// that keeps `idempotent_writes` — under the same key, so it lands once.
-/// The attempt awaiting its retry isn't counted against the effect.
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread")]
-async fn a_lost_reply_is_sent_again_and_lands_once() {
-    let fx = with_effect("lose-reply", FILE_ON_FAKE).await;
-    react(&fx).await;
-    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 1]]));
-    assert_eq!(effect_failures(&fx).await, 0, "awaiting its retry");
-    // Not due yet; then due.
-    assert_eq!(
-        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(1))
-            .await
-            .unwrap(),
-        0
-    );
-    assert_eq!(
-        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(11))
-            .await
-            .unwrap(),
-        1
-    );
-    assert_eq!(
-        effect_runs(&fx).await,
-        json!([[1, "live", "failed", 1], [2, "auto", "ok", 0]])
-    );
-    let probe = ServicesProbe(&fx.svc);
-    assert_eq!(probe.sync("fake").await, Ok(true));
-    probe.settle().await;
-    assert_eq!(probe.titled("fake", "from effect").await.len(), 1);
-    assert_eq!(effect_failures(&fx).await, 0);
-}
-
-/// tsk887: an automatic retry sends exactly what the failed attempt
-/// composed — not a fresh composition — so a write that landed under the
-/// first attempt's key isn't made again when what the effect reads
-/// changed in between.
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread")]
-async fn an_automatic_retry_sends_what_the_failed_attempt_composed() {
-    // Reads something oxplow holds that can change between attempts: the
-    // fixture's thread's title (thread 1).
-    let titled_from_the_thread = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT title FROM v_thread WHERE id = 1\"})\n    return {\"commands\": [{\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"after \" + rows[0][\"title\"]}}]}\n";
-    let fx = with_effect("lose-reply", titled_from_the_thread).await;
-    assert_eq!(fx.thread, ThreadId::new(1));
-    let rows = fx
-        .svc
-        .sql
-        .query_sql("SELECT title FROM v_thread WHERE id = 1", vec![], None)
-        .await
-        .unwrap()
-        .rows;
-    let title = serde_json::to_value(rows).unwrap()[0][0]
-        .as_str()
-        .unwrap()
-        .to_string();
-    react(&fx).await;
-    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 1]]));
-    // What the effect reads changes before its retry.
-    fx.svc
-        .db
-        .transaction(|c| {
-            c.execute("UPDATE threads SET title = 'renamed' WHERE id = 1", [])
-                .map_err(oxplow_db::map_sql_err)?;
-            Ok(())
-        })
-        .await
-        .unwrap();
-    assert_eq!(
-        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(11))
-            .await
-            .unwrap(),
-        1
-    );
-    assert_eq!(
-        effect_runs(&fx).await,
-        json!([[1, "live", "failed", 1], [2, "auto", "ok", 0]])
-    );
-    let probe = ServicesProbe(&fx.svc);
-    assert_eq!(probe.sync("fake").await, Ok(true));
-    probe.settle().await;
-    assert_eq!(
-        probe.titled("fake", &format!("after {title}")).await.len(),
-        1
-    );
-    assert_eq!(probe.titled("fake", "after renamed").await.len(), 0);
-}
-
-/// tsk887: a scheduled retry is sent only while every step it would send
-/// still goes to a provider keeping `idempotent_writes`: with the
-/// provider gone, it isn't sent, and the failure counts — a person's.
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread")]
-async fn a_retry_whose_provider_went_away_is_not_sent() {
-    let fx = with_effect("lose-reply", FILE_ON_FAKE).await;
-    react(&fx).await;
-    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 1]]));
-    turn_off(&fx.svc, INSTANCE).await;
-    assert_eq!(
-        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(11))
-            .await
-            .unwrap(),
-        0
-    );
-    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 0]]));
-    assert_eq!(effect_failures(&fx).await, 1);
-}
-
-/// P10: only a reaction whose every step is a write to a provider
-/// keeping `idempotent_writes` is sent again by itself: toward a provider
-/// that doesn't declare it, or with a step inside oxplow beside it, the
-/// failure waits for a person's retry, and counts.
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread")]
-async fn an_interrupted_attempt_retries_only_toward_a_declaring_provider() {
-    let with_a_task_step = "def transform(x):\n    ref = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"uri\": ref, \"title\": \"filed\"}}, {\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"from effect\"}}]}\n";
-    for (hooks, script) in [
-        ("lose-reply,plain-writes", FILE_ON_FAKE),
-        ("lose-reply", with_a_task_step),
-    ] {
-        let fx = with_effect(hooks, script).await;
-        react(&fx).await;
-        assert_eq!(
-            effect_runs(&fx).await,
-            json!([[1, "live", "failed", 0]]),
-            "{hooks}"
-        );
-        assert_eq!(effect_failures(&fx).await, 1, "{hooks}");
-        assert_eq!(
-            crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(3600))
-                .await
-                .unwrap(),
-            0,
-            "{hooks}"
-        );
-    }
-}
-
-/// tsk914: only a failure that may have been passing is sent again by
-/// itself. A later step's refused input (after an earlier one landed) and
-/// a refusal of credentials renewal can't fix wait for a person.
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread")]
-async fn a_failure_that_wont_pass_isnt_retried() {
-    let bad_second = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"from effect\"}}, {\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"second\", \"native_state\": \"Nonsense\"}}]}\n";
-    for (hooks, script) in [("", bad_second), ("refuse-auth", FILE_ON_FAKE)] {
-        let fx = with_effect(hooks, script).await;
-        react(&fx).await;
-        assert_eq!(
-            effect_runs(&fx).await,
-            json!([[1, "live", "failed", 0]]),
-            "{hooks}: no retry scheduled"
-        );
-    }
-}
-
-/// tsk914: a rate limit's own wait decides when the retry goes — no
-/// sooner — and one asking for longer than the most oxplow waits by
-/// itself is a person's.
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread")]
-async fn a_rate_limited_reaction_waits_as_asked() {
-    let fx = with_effect("", FILE_ON_FAKE).await;
-    set_hooks(&fx, "rate-limit:120000").await;
-    react(&fx).await;
-    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 1]]));
-    assert_eq!(
-        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(30))
-            .await
-            .unwrap(),
-        0,
-        "not before the service said"
-    );
-    assert_eq!(
-        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(125))
-            .await
-            .unwrap(),
-        1
-    );
-    let fx = with_effect("", FILE_ON_FAKE).await;
-    set_hooks(&fx, "rate-limit:3600000").await;
-    react(&fx).await;
-    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 0]]));
-}
-
-/// tsk932: a backfill against a provider that keeps failing in a way that
-/// may pass stops after three failures in a row — those will be sent again
-/// by themselves, but the run doesn't press on into the outage.
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread")]
-async fn a_backfill_stops_after_three_failures_even_while_they_retry() {
-    let fx = with_effect("", FILE_ON_FAKE).await;
-    for _ in 0..5 {
-        let env = done_envelope(&fx);
-        fx.svc.event_log_store.append(env).await.unwrap();
-    }
-    // Approved again past them: they are the past a backfill reacts to.
-    crate::test_fixtures::start_effect(&fx.svc, &format!("{EXT}/file")).await;
-    set_hooks(&fx, "fail-next:20").await;
-    let (ext, decl) =
-        crate::effect_triggers::find_effect(&fx.svc, &format!("{EXT}/file")).expect("its effect");
-    let out = crate::commands::effect::backfill(
-        &fx.svc,
-        &ext,
-        &decl,
-        &crate::commands::effect::Range {
-            from_seq: None,
-            since: None,
-            to_seq: None,
-        },
-        50,
-        None,
-    )
-    .await
-    .unwrap();
-    assert_eq!((out.failed, out.remaining), (3, 2), "{out:?}");
-    assert!(out.stopped.unwrap().contains("in a row"));
-}
-
-/// tsk935: a backfill's attempt whose reply was lost is sent again by
-/// itself, as a live one is, and lands once.
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread")]
-async fn a_backfill_attempt_whose_reply_was_lost_is_sent_again() {
-    let fx = with_effect("", FILE_ON_FAKE).await;
-    fx.svc
-        .event_log_store
-        .append(done_envelope(&fx))
-        .await
-        .unwrap();
-    crate::test_fixtures::start_effect(&fx.svc, &format!("{EXT}/file")).await;
-    set_hooks(&fx, "lose-reply").await;
-    let (ext, decl) =
-        crate::effect_triggers::find_effect(&fx.svc, &format!("{EXT}/file")).expect("its effect");
-    let out = crate::commands::effect::backfill(
-        &fx.svc,
-        &ext,
-        &decl,
-        &crate::commands::effect::Range {
-            from_seq: None,
-            since: None,
-            to_seq: None,
-        },
-        50,
-        None,
-    )
-    .await
-    .unwrap();
-    assert_eq!(out.failed, 1, "{out:?}");
-    assert_eq!(
-        effect_runs(&fx).await,
-        json!([[1, "backfill", "failed", 1]])
-    );
-    assert_eq!(
-        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(11))
-            .await
-            .unwrap(),
-        1
-    );
-    assert_eq!(
-        effect_runs(&fx).await,
-        json!([[1, "backfill", "failed", 1], [2, "auto", "ok", 0]])
-    );
-    let probe = ServicesProbe(&fx.svc);
-    assert_eq!(probe.sync("fake").await, Ok(true));
-    probe.settle().await;
-    assert_eq!(probe.titled("fake", "from effect").await.len(), 1);
-}
-
-/// tsk915: a retry overdue by more than an hour (oxplow was closed
-/// meanwhile) isn't sent by itself — what it would send is from another
-/// time — and the failure it waited on counts.
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread")]
-async fn a_long_overdue_retry_is_a_persons() {
-    let fx = with_effect("lose-reply", FILE_ON_FAKE).await;
-    react(&fx).await;
-    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 1]]));
-    assert_eq!(
-        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(2 * 3600))
-            .await
-            .unwrap(),
-        0
-    );
-    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 0]]));
-    assert_eq!(effect_failures(&fx).await, 1);
-}
-
-/// Append the event the fixture's effect reacts to, and cut its attempt
-/// off with its write under way — what oxplow stopping does: `run` drives
-/// the attempt, and is dropped once the fake has the call (its write still
-/// lands after). The fake's hooks are cleared after.
-async fn cut_off<F, Fut>(
-    fx: &crate::test_fixtures::TaskEffortFixture,
-    run: F,
-) -> oxplow_domain::StoredEvent
-where
-    F: FnOnce(std::sync::Arc<crate::Services>, oxplow_domain::StoredEvent) -> Fut,
-    Fut: std::future::Future<Output = ()> + Send + 'static,
-{
-    let env = done_envelope(fx);
-    let id = env.id.clone();
-    fx.svc.event_log_store.append(env).await.unwrap();
-    let ev = fx.svc.event_log_store.get(id).await.unwrap().unwrap();
-    let started = fx.svc.layout.project_dir.join("invoke-started");
-    let _ = std::fs::remove_file(&started);
-    set_hooks(fx, &format!("slow:1500,started-file:{}", started.display())).await;
-    let under_way = tokio::spawn(run(fx.svc.clone(), ev.clone()));
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-    while !started.exists() {
-        assert!(
-            std::time::Instant::now() < deadline && !under_way.is_finished(),
-            "the attempt never reached the fake"
-        );
-        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-    }
-    under_way.abort();
-    let _ = under_way.await;
-    set_hooks(fx, "").await;
-    ev
-}
-
-/// The pump delivering `ev` to the effects.
-async fn deliver(svc: std::sync::Arc<crate::Services>, ev: oxplow_domain::StoredEvent) {
-    use crate::event_pump::AsyncEventConsumer as _;
-    crate::effect_triggers::EffectTriggers::new(std::sync::Arc::downgrade(&svc))
-        .handle(&ev)
-        .await
-        .unwrap();
-}
-
-/// tsk954: an attempt cut off by oxplow stopping, its every step a write
-/// to a provider keeping `idempotent_writes`, kept what it composed with
-/// its claim: found again (the pump's redelivery), it is failed and sent
-/// again by itself from when it started — and lands once.
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread")]
-async fn an_attempt_cut_off_by_a_stop_is_sent_again_and_lands_once() {
-    let fx = with_effect("", FILE_ON_FAKE).await;
-    let ev = cut_off(&fx, deliver).await;
-    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "started", 0]]));
-    deliver(fx.svc.clone(), ev).await;
-    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 1]]));
-    assert_eq!(effect_failures(&fx).await, 0, "awaiting its retry");
-    assert_eq!(
-        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(11))
-            .await
-            .unwrap(),
-        1
-    );
-    assert_eq!(
-        effect_runs(&fx).await,
-        json!([[1, "live", "failed", 1], [2, "auto", "ok", 0]])
-    );
-    let probe = ServicesProbe(&fx.svc);
-    assert_eq!(probe.sync("fake").await, Ok(true));
-    probe.settle().await;
-    assert_eq!(probe.titled("fake", "from effect").await.len(), 1);
-}
-
-/// tsk954: cut off toward a provider that doesn't keep `idempotent_writes`,
-/// nothing was kept to send again: the interrupted attempt is a person's,
-/// and counts.
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread")]
-async fn a_cut_off_attempt_toward_a_plain_provider_waits_for_a_person() {
-    let fx = with_effect("plain-writes", FILE_ON_FAKE).await;
-    let ev = cut_off(&fx, deliver).await;
-    deliver(fx.svc.clone(), ev).await;
-    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 0]]));
-    assert_eq!(effect_failures(&fx).await, 1);
-    assert_eq!(
-        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(3600))
-            .await
-            .unwrap(),
-        0
-    );
-}
-
-/// tsk954: a person's backfill cut off with its write under way is found
-/// at start (`recover_interrupted`) and sent again by itself, like a live
-/// attempt.
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread")]
-async fn a_cut_off_backfill_is_sent_again_at_start() {
-    let fx = with_effect("", FILE_ON_FAKE).await;
-    cut_off(&fx, |svc, _| async move {
-        // Approved again after the event: it's the past a backfill covers.
-        crate::test_fixtures::start_effect(&svc, &format!("{EXT}/file")).await;
-        let (ext, decl) =
-            crate::effect_triggers::find_effect(&svc, &format!("{EXT}/file")).expect("its effect");
-        let range = crate::commands::effect::Range {
-            from_seq: None,
-            since: None,
-            to_seq: None,
-        };
-        let _ = crate::commands::effect::backfill(&svc, &ext, &decl, &range, 50, None).await;
-    })
-    .await;
-    assert_eq!(
-        effect_runs(&fx).await,
-        json!([[1, "backfill", "started", 0]])
-    );
-    assert_eq!(
-        crate::effect_triggers::recover_interrupted(&fx.svc)
-            .await
-            .unwrap(),
-        1
-    );
-    assert_eq!(
-        effect_runs(&fx).await,
-        json!([[1, "backfill", "failed", 1]])
-    );
-    assert_eq!(
-        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(11))
-            .await
-            .unwrap(),
-        1
-    );
-    let probe = ServicesProbe(&fx.svc);
-    assert_eq!(probe.sync("fake").await, Ok(true));
-    probe.settle().await;
-    assert_eq!(probe.titled("fake", "from effect").await.len(), 1);
-}
-
-/// tsk1001: an automatic attempt cut off with its write under way is found
-/// at start and sent again by itself — the reaction's second automatic
-/// attempt, a minute after it started — and lands once.
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread")]
-async fn a_cut_off_automatic_attempt_is_sent_again_at_start() {
-    let fx = with_effect("lose-reply", FILE_ON_FAKE).await;
-    react(&fx).await;
-    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 1]]));
-    cut_off(&fx, |svc, _| async move {
-        let _ = crate::effect_triggers::auto_retry_due(&svc, in_secs(11)).await;
-    })
-    .await;
-    assert_eq!(
-        effect_runs(&fx).await,
-        json!([[1, "live", "failed", 1], [2, "auto", "started", 0]])
-    );
-    assert_eq!(
-        crate::effect_triggers::recover_interrupted(&fx.svc)
-            .await
-            .unwrap(),
-        1
-    );
-    assert_eq!(
-        effect_runs(&fx).await,
-        json!([[1, "live", "failed", 1], [2, "auto", "failed", 1]])
-    );
-    assert_eq!(effect_failures(&fx).await, 0, "awaiting its retry");
-    assert_eq!(
-        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(75))
-            .await
-            .unwrap(),
-        1
-    );
-    let probe = ServicesProbe(&fx.svc);
-    assert_eq!(probe.sync("fake").await, Ok(true));
-    probe.settle().await;
-    assert_eq!(probe.titled("fake", "from effect").await.len(), 1);
-}
-
-/// tsk954: a cut-off attempt's retry is due from when it started, so one
-/// found more than an hour later (oxplow was closed meanwhile) isn't sent
-/// by itself: it's a person's, and counts.
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread")]
-async fn a_cut_off_attempt_found_an_hour_late_is_a_persons() {
-    let fx = with_effect("", FILE_ON_FAKE).await;
-    let ev = cut_off(&fx, deliver).await;
-    deliver(fx.svc.clone(), ev).await;
-    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 1]]));
-    assert_eq!(
-        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(2 * 3600))
-            .await
-            .unwrap(),
-        0
-    );
-    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 0]]));
-    assert_eq!(effect_failures(&fx).await, 1);
-}
-
-/// `provider` the active work-items tracker (none: oxplow's own list),
-/// published as a generation.
-async fn set_active(fx: &EffortFixture, provider: Option<&str>) {
-    {
-        let mut config = fx.svc.config.write().unwrap();
-        match provider {
-            Some(p) => config
-                .active_providers
-                .insert("work_items".into(), p.into()),
-            None => config.active_providers.remove("work_items"),
-        };
-    }
-    republish(fx);
-    crate::test_fixtures::activate_with_problems(&fx.svc).await;
-}
-
-/// tsk1058: every item goes to the tracker active when it's filed — a
-/// retry too, not wherever the first attempt went (that pin, tsk999, is
-/// gone). Pointed at oxplow's own list meanwhile, which keeps no
-/// idempotent writes, the attempt isn't sent again by itself: it's a
-/// person's, and theirs files on oxplow.
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread")]
-async fn a_retry_files_on_the_tracker_active_when_sent() {
-    let unnamed = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"from effect\"}}]}\n";
-    let fx = with_effect("lose-reply", unnamed).await;
-    crate::effect_triggers::register(&fx.svc);
-    set_active(&fx, Some("fake")).await;
-    let ev = react(&fx).await;
-    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 1]]));
-    set_active(&fx, None).await;
-    assert_eq!(
-        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(11))
-            .await
-            .unwrap(),
-        0,
-        "oxplow's list keeps no idempotent writes: not sent by itself"
-    );
-    let probe = ServicesProbe(&fx.svc);
-    assert!(probe.titled("oxplow", "from effect").await.is_empty());
-    let out = fx
-        .svc
-        .commands
-        .run(
-            &Actor::Human,
-            crate::commands::effect::RETRY,
-            json!({ "effect": format!("{EXT}/file"), "event": &ev.envelope.id.to_string().to_string() }),
-            true,
-        )
-        .await
-        .unwrap();
-    assert_eq!(out.result["outcome"], "ok", "{}", out.result);
-    probe.settle().await;
-    assert_eq!(probe.titled("oxplow", "from effect").await.len(), 1);
-}
-
-/// tsk999: an attempt cut off and found at start counts toward its
-/// effect's health, as one found by the pump does.
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread")]
-async fn a_cut_off_found_at_start_counts_toward_health() {
-    let fx = with_effect("plain-writes", FILE_ON_FAKE).await;
-    cut_off(&fx, |svc, _| async move {
-        crate::test_fixtures::start_effect(&svc, &format!("{EXT}/file")).await;
-        let (ext, decl) =
-            crate::effect_triggers::find_effect(&svc, &format!("{EXT}/file")).expect("its effect");
-        let range = crate::commands::effect::Range {
-            from_seq: None,
-            since: None,
-            to_seq: None,
-        };
-        let _ = crate::commands::effect::backfill(&svc, &ext, &decl, &range, 50, None).await;
-    })
-    .await;
-    assert_eq!(
-        crate::effect_triggers::recover_interrupted(&fx.svc)
-            .await
-            .unwrap(),
-        1
-    );
-    assert_eq!(
-        effect_runs(&fx).await,
-        json!([[1, "backfill", "failed", 0]])
-    );
-    assert_eq!(effect_failures(&fx).await, 1);
-}
-
-/// tsk999: a cut-off attempt whose start time can't be read can't be
-/// timed against the lateness bound: it's a person's, not sent again.
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread")]
-async fn a_cut_off_attempt_whose_start_cant_be_read_is_a_persons() {
-    let fx = with_effect("", FILE_ON_FAKE).await;
-    let ev = cut_off(&fx, deliver).await;
-    fx.svc
-        .db
-        .transaction(|tx| {
-            tx.execute("UPDATE effect_run SET started_at = 'not a time'", [])
-                .map_err(oxplow_db::map_sql_err)?;
-            Ok(())
-        })
-        .await
-        .unwrap();
-    deliver(fx.svc.clone(), ev).await;
-    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 0]]));
-    assert_eq!(effect_failures(&fx).await, 1);
-}
-
-/// tsk935: a reaction cut off midway — its first write landed, its reply
-/// lost, the second never sent — is sent again whole under the same keys:
-/// each write lands once.
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread")]
-async fn a_reaction_cut_off_midway_lands_each_step_once() {
-    let two = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"first\"}}, {\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"second\"}}]}\n";
-    let fx = with_effect("lose-reply", two).await;
-    react(&fx).await;
-    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 1]]));
-    assert_eq!(
-        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(11))
-            .await
-            .unwrap(),
-        1
-    );
-    let probe = ServicesProbe(&fx.svc);
-    assert_eq!(probe.sync("fake").await, Ok(true));
-    probe.settle().await;
-    for title in ["first", "second"] {
-        assert_eq!(probe.titled("fake", title).await.len(), 1, "{title}");
-    }
-}
-
-/// tsk935: a person's retry of a reaction whose automatic one is waiting
-/// takes its place: the reaction runs once more, and the scheduled retry
-/// sends nothing after it.
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread")]
-async fn a_persons_retry_takes_the_place_of_a_scheduled_one() {
-    let fx = with_effect("lose-reply", FILE_ON_FAKE).await;
-    // The commands a person runs effects with, as boot registers them.
-    crate::effect_triggers::register(&fx.svc);
-    let ev = react(&fx).await;
-    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 1]]));
-    let out = fx
-        .svc
-        .commands
-        .run(
-            &Actor::Human,
-            crate::commands::effect::RETRY,
-            json!({ "effect": format!("{EXT}/file"), "event": &ev.envelope.id.to_string().to_string() }),
-            true,
-        )
-        .await
-        .unwrap();
-    assert_eq!(out.result["outcome"], "ok", "{}", out.result);
-    assert_eq!(
-        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(11))
-            .await
-            .unwrap(),
-        0,
-        "nothing left to send by itself"
-    );
-    let probe = ServicesProbe(&fx.svc);
-    assert_eq!(probe.sync("fake").await, Ok(true));
-    probe.settle().await;
-    assert_eq!(probe.titled("fake", "from effect").await.len(), 1);
-}
-
-/// A person's Retry all runs every reaction whose latest attempt failed,
-/// once each, and says how many came out right; with none failed it is
-/// unchanged.
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread")]
-async fn a_persons_retry_all_runs_every_failed_reaction_again() {
-    let fx = with_effect("lose-reply", FILE_ON_FAKE).await;
-    crate::effect_triggers::register(&fx.svc);
-    react(&fx).await;
-    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 1]]));
-    let out = fx
-        .svc
-        .commands
-        .run(
-            &Actor::Human,
-            crate::commands::effect::RETRY_ALL,
-            json!({}),
-            true,
-        )
-        .await
-        .unwrap();
-    assert_eq!(out.result["retried"], json!(1), "{}", out.result);
-    assert_eq!(out.result["ok"], json!(1), "{}", out.result);
-    assert_eq!(
-        out.result["reactions"][0]["outcome"], "ok",
-        "{}",
-        out.result
-    );
-    let again = fx
-        .svc
-        .commands
-        .run(
-            &Actor::Human,
-            crate::commands::effect::RETRY_ALL,
-            json!({}),
-            true,
-        )
-        .await
-        .unwrap();
-    assert_eq!(again.result["retried"], json!(0), "{}", again.result);
-    let probe = ServicesProbe(&fx.svc);
-    assert_eq!(probe.sync("fake").await, Ok(true));
-    probe.settle().await;
-    assert_eq!(probe.titled("fake", "from effect").await.len(), 1);
-}
-
-/// tsk935: the loop `spawn_auto_retry` starts (after the first reconcile)
-/// sends a due retry by itself.
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread")]
-async fn the_retry_loop_sends_a_due_retry() {
-    let fx = with_effect("lose-reply", FILE_ON_FAKE).await;
-    react(&fx).await;
-    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 1]]));
-    // Due now, rather than in ten seconds.
-    let past = in_secs(-1).to_string();
-    fx.svc
-        .db
-        .transaction(move |tx| {
-            tx.execute(
-                "UPDATE effect_run SET retry_at = ?1 WHERE retry_at IS NOT NULL",
-                [&past],
-            )
-            .map_err(oxplow_db::map_sql_err)?;
-            Ok(())
-        })
-        .await
-        .unwrap();
-    // The loop waits for the first reconcile; the config keeps the
-    // instance it enabled.
-    configure(&fx, true, json!({ "team": "core" }));
-    crate::test_fixtures::activate(&fx.svc).await;
-    crate::effect_triggers::spawn_auto_retry(&fx.svc);
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    loop {
-        let runs = effect_runs(&fx).await;
-        // The attempt's row exists from the moment it starts; what this
-        // asserts is how it ended.
-        if runs
-            .as_array()
-            .is_some_and(|r| r.len() == 2 && r[1][2] != "started")
-        {
-            assert_eq!(runs[1], json!([2, "auto", "ok", 0]));
-            break;
-        }
-        assert!(std::time::Instant::now() < deadline, "never sent: {runs}");
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }
-}
-
-/// tsk935: every way a scheduled retry can't run drops it, so the failure
-/// is a person's: the effect disabled (its failure counts), or the effect
-/// gone from its extension (nothing left to count it on).
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread")]
-async fn a_retry_that_cant_run_is_dropped() {
-    let key = oxplow_db::ContributionKey {
-        namespace: EXT.into(),
-        contribution: "file".into(),
-        kind: "effect",
-    };
-    for (case, counted) in [("disabled", 1), ("gone", 0)] {
-        let fx = with_effect("lose-reply", FILE_ON_FAKE).await;
-        react(&fx).await;
-        assert_eq!(
-            effect_runs(&fx).await,
-            json!([[1, "live", "failed", 1]]),
-            "{case}"
-        );
-        let dir = fx
-            .svc
-            .layout
-            .project_dir
-            .join(".oxplow/extensions")
-            .join(EXT);
-        match case {
-            "disabled" => crate::contribution_health::ContributionHealth::new(
-                fx.svc.db.clone(),
-                fx.svc.vocabulary.clone(),
-            )
-            .disable(&key, "a person turned it off")
-            .await
-            .unwrap(),
-            _ => {
-                let manifest = std::fs::read_to_string(dir.join("extension.yaml")).unwrap();
-                let cut = manifest.find("effects:").unwrap();
-                std::fs::write(dir.join("extension.yaml"), &manifest[..cut]).unwrap();
-            }
-        }
-        crate::test_fixtures::activate_with_problems(&fx.svc).await;
-        assert_eq!(
-            crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(11))
-                .await
-                .unwrap(),
-            0,
-            "{case}"
-        );
-        assert_eq!(
-            effect_runs(&fx).await,
-            json!([[1, "live", "failed", 0]]),
-            "{case}"
-        );
-        assert_eq!(effect_failures(&fx).await, counted, "{case}");
-    }
-}
-
-/// tsk915: what waits for the providers the config names (the automatic
+/// what waits for the providers the config names (the automatic
 /// retries' first tick) waits for the registry's first reconcile.
 #[tokio::test]
 async fn the_first_reconcile_is_waited_for() {
@@ -5998,59 +3255,6 @@ async fn the_first_reconcile_is_waited_for() {
     )
     .await
     .expect("at once after it has");
-}
-
-/// P10: at most two automatic attempts, 10 s then 60 s after the failure
-/// before; the attempt that exhausts them counts as the one failure.
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread")]
-async fn auto_retry_stops_after_two_and_counts_one_failure() {
-    let fx = with_effect("", FILE_ON_FAKE).await;
-    set_hooks(&fx, "fail-next:3").await;
-    react(&fx).await;
-    assert_eq!(effect_runs(&fx).await, json!([[1, "live", "failed", 1]]));
-    assert_eq!(
-        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(11))
-            .await
-            .unwrap(),
-        1
-    );
-    // The second waits 60 s from the first retry's failure.
-    assert_eq!(
-        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(30))
-            .await
-            .unwrap(),
-        0
-    );
-    assert_eq!(
-        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(75))
-            .await
-            .unwrap(),
-        1
-    );
-    assert_eq!(
-        effect_runs(&fx).await,
-        json!([
-            [1, "live", "failed", 1],
-            [2, "auto", "failed", 1],
-            [3, "auto", "failed", 0]
-        ])
-    );
-    assert_eq!(effect_failures(&fx).await, 1);
-    // tsk913: the provider counts the one write once too — its re-sends
-    // under the same key aren't three failures that halt the instance.
-    let health = fx.svc.providers.health(INSTANCE).unwrap();
-    assert_eq!(health.consecutive_failures, 1, "{health:?}");
-    assert!(
-        !matches!(health.state, InstanceState::Disabled { .. }),
-        "{health:?}"
-    );
-    assert_eq!(
-        crate::effect_triggers::auto_retry_due(&fx.svc, in_secs(3600))
-            .await
-            .unwrap(),
-        0
-    );
 }
 
 /// Stopping an instance asks its process to shut down — it finishes and
@@ -6086,53 +3290,6 @@ async fn a_process_that_wont_exit_is_killed_after_its_grace() {
     assert!(stopped);
 }
 
-async fn syncs(fx: &EffortFixture) -> i64 {
-    fx.svc
-        .db
-        .read(|c| {
-            c.query_row(
-                "SELECT count(*) FROM command_audit WHERE command = 'oxplow.provider.sync'",
-                [],
-                |r| r.get(0),
-            )
-            .map_err(oxplow_db::map_sql_err)
-        })
-        .await
-        .unwrap()
-}
-
-/// A provider says what it reads changed (`host/changed`): the host reads
-/// it now, through `oxplow.provider.sync` like the schedule, rather than at
-/// the next poll — and announcements close together are one read.
-#[cfg(unix)]
-#[tokio::test]
-async fn a_change_the_provider_announces_is_read_now() {
-    let (fx, _ext) = deployed("").await;
-    configure(&fx, true, json!({ "team": "core" }));
-    crate::test_fixtures::activate(&fx.svc).await;
-    first_read(&fx).await;
-    let before = syncs(&fx).await;
-    let instance = fx.svc.providers.get(INSTANCE).await.unwrap();
-    let (peer, _) = instance.connection().await.unwrap();
-    for _ in 0..3 {
-        peer.notify("fake/changed", json!({ "collectors": ["work_items"] }))
-            .await
-            .unwrap();
-    }
-    for _ in 0..200 {
-        if syncs(&fx).await > before {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-    }
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-    assert_eq!(
-        syncs(&fx).await,
-        before + 1,
-        "three announcements, one read"
-    );
-}
-
 /// A process that exits on its own is noticed when it exits, not at the
 /// next call: the exit counts toward its health and it starts again.
 #[cfg(unix)]
@@ -6158,37 +3315,6 @@ async fn a_process_that_exits_is_restarted_and_counted() {
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
     }
     assert!(restarted, "{:?}", fx.svc.providers.health(INSTANCE));
-}
-
-/// A read keeps the records it streams only until its next `$/state`: one
-/// that streams more than `max_uncheckpointed` (100 in-memory) without a
-/// checkpoint fails rather than growing without end.
-#[cfg(unix)]
-#[tokio::test]
-async fn a_read_must_checkpoint_within_its_limit() {
-    let (fx, ext) = deployed("").await;
-    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
-    first_read(&fx).await;
-    for _ in 0..101 {
-        create_on_fake(&fx).await.unwrap();
-    }
-    set_hooks(&fx, "checkpoint-at-end").await;
-    let err = fx
-        .svc
-        .commands
-        .run(
-            &Actor::Human,
-            sync::SYNC,
-            json!({ "instance": INSTANCE }),
-            false,
-        )
-        .await
-        .unwrap_err();
-    assert!(
-        err.to_string()
-            .contains("more than 100 records without a `$/state`"),
-        "{err}"
-    );
 }
 
 /// Leaving (the daemon exits) shuts every running instance's process down
@@ -6241,314 +3367,6 @@ async fn a_provider_needs_only_scopes_host_call_serves() {
     );
 }
 
-const POLICY: &str = "steward/fake";
-
-/// A private extension whose provider runs the fake as an effort policy
-/// with `hooks` (its state, `reacts` included, kept beside the project).
-#[cfg(unix)]
-fn write_policy_extension(project: &Path, hooks: &str) {
-    let dir = project.join(".oxplow/extensions/steward");
-    std::fs::create_dir_all(dir.join("bin")).unwrap();
-    std::fs::write(
-        dir.join("extension.yaml"),
-        "manifest: 2\nname: steward\nintent:\n  purpose: the fake effort policy\n  examples: [{ name: a }]\npermissions: [process.run, sql.read, commands:oxplow.effort.**]\nproviders:\n  - id: fake\n    capability: effort_policy\n    entry: bin/provider\n    declarations: provider.json\n    needs: [sql.read]\n",
-    )
-    .unwrap();
-    let script = dir.join("bin/provider");
-    std::fs::write(
-        &script,
-        format!(
-            "#!/bin/sh\nOXPLOW_FAKE_CAPABILITY=effort_policy OXPLOW_FAKE_HOOKS='{hooks}' OXPLOW_FAKE_STATE=\"{}/fake-policy-$OXPLOW_PROVIDER_ID.json\" exec '{}' \"$@\"\n",
-            project.join(".oxplow").display(),
-            fake_bin().display()
-        ),
-    )
-    .unwrap();
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-    std::fs::write(
-        dir.join("provider.json"),
-        serde_json::to_string_pretty(&oxplow_provider_fake::policy_declarations()).unwrap(),
-    )
-    .unwrap();
-}
-
-/// The fixture with the policy extension approved and its instance
-/// running; the fixture's own effort closed, so the policy's are the only
-/// ones open.
-#[cfg(unix)]
-async fn running_policy(hooks: &str) -> (EffortFixture, Extension) {
-    let fx = services_with_effort().await;
-    let project = fx.svc.layout.project_dir.clone();
-    write_policy_extension(&project, hooks);
-    let ext = crate::extension::extensions::load_extensions(&project)
-        .into_iter()
-        .find(|e| e.name == "steward")
-        .expect("the policy extension loads");
-    assert!(ext.errors.is_empty(), "{:?}", ext.errors);
-    deploy(&fx, &ext).await;
-    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
-    fx.svc
-        .commands
-        .run(
-            &Actor::Human,
-            crate::commands::effort::CLOSE,
-            json!({ "effort": fx.effort.to_string() }),
-            false,
-        )
-        .await
-        .unwrap();
-    (fx, ext)
-}
-
-/// `id` as the project's effort policy.
-async fn choose_policy(fx: &EffortFixture, id: &str) {
-    fx.svc
-        .config
-        .write()
-        .unwrap()
-        .active_providers
-        .insert("effort_policy".into(), id.into());
-    republish(fx);
-    crate::test_fixtures::activate_with_problems(&fx.svc).await;
-}
-
-/// A task filed on the fixture's thread, moved by the thread's agent to
-/// `to` (its anchors carry the thread); the policy has reacted when this
-/// returns.
-async fn agent_moves(fx: &EffortFixture, item: &str, to: &str) {
-    let agent = Actor::Agent {
-        session_id: None,
-        thread_id: Some(fx.thread),
-        stream_id: Some(oxplow_domain::StreamId::new(1)),
-    };
-    fx.svc
-        .commands
-        .run(
-            &agent,
-            crate::commands::work_item::NAME,
-            json!({ "uri": item, "to": to }),
-            false,
-        )
-        .await
-        .unwrap();
-    fx.svc
-        .event_pump
-        .settle(
-            &[crate::effort_policy::NAME],
-            std::time::Duration::from_secs(10),
-        )
-        .await;
-}
-
-async fn file_task(fx: &EffortFixture) -> String {
-    make_active(fx, "oxplow").await;
-    let out = fx
-        .svc
-        .commands
-        .run(
-            &Actor::Human,
-            crate::commands::work_item::CREATE,
-            json!({ "title": "policy work", "thread": fx.thread.to_string() }),
-            false,
-        )
-        .await
-        .unwrap();
-    out.result["uri"].as_str().unwrap().to_string()
-}
-
-/// `(work_item, open?)` of the thread's efforts, oldest first, and the
-/// source of the last `effort.opened`.
-async fn policy_efforts(fx: &EffortFixture) -> (Vec<(Option<String>, bool)>, Option<String>) {
-    use oxplow_db::SqlCell;
-    let efforts = fx
-        .svc
-        .sql
-        .query_sql(
-            "SELECT work_item, ended_at IS NULL FROM v_effort WHERE thread_id = ?1 ORDER BY id",
-            vec![SqlCell::Int(fx.thread.value())],
-            None,
-        )
-        .await
-        .unwrap()
-        .rows
-        .into_iter()
-        .map(|r| {
-            let item = match &r[0] {
-                SqlCell::Text(t) => Some(t.clone()),
-                _ => None,
-            };
-            (item, matches!(r[1], SqlCell::Int(1)))
-        })
-        .collect();
-    let source = fx
-        .svc
-        .db
-        .read(|c| {
-            Ok(c.query_row(
-                "SELECT source FROM event_log WHERE type = 'effort.opened' ORDER BY seq DESC LIMIT 1",
-                [],
-                |r| r.get::<_, String>(0),
-            )
-            .ok())
-        })
-        .await
-        .unwrap();
-    (efforts, source)
-}
-
-/// How many `react`s the fake answered.
-fn reacts(fx: &EffortFixture) -> u64 {
-    std::fs::read_to_string(
-        fx.svc
-            .layout
-            .project_dir
-            .join(".oxplow/fake-policy-fake.json"),
-    )
-    .ok()
-    .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-    .and_then(|v| v["reacts"].as_u64())
-    .unwrap_or(0)
-}
-
-/// A provider process as the project's effort policy: it is listed under
-/// the capability while it runs; a task its thread's agent starts opens an
-/// effort linked to it, run as `effect:effort_policy:fake`, and finishing
-/// the task closes it — the close read through `host/call`.
-#[cfg(unix)]
-#[tokio::test]
-async fn a_provider_is_the_projects_effort_policy() {
-    let (fx, _ext) = running_policy("").await;
-    let listed = fx
-        .svc
-        .sql
-        .query_sql(
-            "SELECT provider FROM v_capability_provider WHERE capability = 'effort_policy' ORDER BY provider",
-            vec![],
-            None,
-        )
-        .await
-        .unwrap();
-    assert!(
-        serde_json::to_value(&listed.rows)
-            .unwrap()
-            .to_string()
-            .contains("\"fake\""),
-        "{:?}",
-        listed.rows
-    );
-    choose_policy(&fx, "fake").await;
-    let task = file_task(&fx).await;
-    agent_moves(&fx, &task, "in_progress").await;
-    let (efforts, source) = policy_efforts(&fx).await;
-    assert_eq!(
-        efforts.last().unwrap(),
-        &(Some(task.clone()), true),
-        "{efforts:?}"
-    );
-    assert_eq!(source.as_deref(), Some("effect:effort_policy:fake"));
-    agent_moves(&fx, &task, "done").await;
-    let (efforts, _) = policy_efforts(&fx).await;
-    assert!(efforts.iter().all(|e| !e.1), "it closed: {efforts:?}");
-}
-
-/// What the fake provider last kept of its state.
-fn fake_policy_state(fx: &EffortFixture) -> serde_json::Value {
-    std::fs::read_to_string(
-        fx.svc
-            .layout
-            .project_dir
-            .join(".oxplow/fake-policy-fake.json"),
-    )
-    .ok()
-    .and_then(|t| serde_json::from_str(&t).ok())
-    .unwrap_or_default()
-}
-
-/// A provider is told the run each call is part of: the policy's react
-/// runs as its effect actor, caused by the item's move, on the agent's
-/// thread.
-#[cfg(unix)]
-#[tokio::test]
-async fn a_policy_provider_is_told_the_run_it_reacts_in() {
-    let (fx, _ext) = running_policy("").await;
-    choose_policy(&fx, "fake").await;
-    let task = file_task(&fx).await;
-    agent_moves(&fx, &task, "in_progress").await;
-    let context = fake_policy_state(&fx)["last_context"].clone();
-    assert!(
-        context["run"].as_str().is_some_and(|r| !r.is_empty()),
-        "{context}"
-    );
-    assert_eq!(context["actor"], "effect:effort_policy:fake", "{context}");
-    assert!(context["cause"].as_str().is_some(), "{context}");
-    assert_eq!(
-        context["anchors"]["thread_id"],
-        fx.thread.to_string(),
-        "{context}"
-    );
-}
-
-/// Only the chosen policy hears events: with `oxplow` or `none` active,
-/// the running provider is asked nothing.
-#[cfg(unix)]
-#[tokio::test]
-async fn a_provider_policy_not_chosen_hears_nothing() {
-    let (fx, _ext) = running_policy("").await;
-    for chosen in ["oxplow", "none"] {
-        choose_policy(&fx, chosen).await;
-        let task = file_task(&fx).await;
-        agent_moves(&fx, &task, "in_progress").await;
-        agent_moves(&fx, &task, "done").await;
-    }
-    assert_eq!(reacts(&fx), 0);
-}
-
-/// What a policy composes is checked before any of it runs: a command
-/// that doesn't exist runs nothing, and the task's state stands.
-#[cfg(unix)]
-#[tokio::test]
-async fn a_provider_policy_composing_no_command_runs_nothing() {
-    let (fx, _ext) = running_policy("bogus-react").await;
-    choose_policy(&fx, "fake").await;
-    let task = file_task(&fx).await;
-    agent_moves(&fx, &task, "in_progress").await;
-    assert!(reacts(&fx) > 0, "it was asked");
-    let (efforts, _) = policy_efforts(&fx).await;
-    assert!(efforts.iter().all(|e| !e.1), "nothing opened: {efforts:?}");
-    let state = fx
-        .svc
-        .sql
-        .query_sql(
-            "SELECT state FROM v_work_item WHERE uri = ?1",
-            vec![oxplow_db::SqlCell::Text(task)],
-            None,
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        serde_json::to_value(&state.rows).unwrap(),
-        json!([["in_progress"]])
-    );
-}
-
-/// A stopped instance is no policy: the choice falls back to `none`, and
-/// starting a task opens nothing.
-#[cfg(unix)]
-#[tokio::test]
-async fn a_stopped_provider_policy_resolves_to_none() {
-    let (fx, _ext) = running_policy("").await;
-    choose_policy(&fx, "fake").await;
-    turn_off(&fx.svc, POLICY).await;
-    let config = crate::config_service::read_config(&fx.svc.config);
-    assert_eq!(fx.svc.capabilities.active(&config, "effort_policy"), "none");
-    assert!(!fx.svc.effort_policies.has("fake"));
-    let task = file_task(&fx).await;
-    agent_moves(&fx, &task, "in_progress").await;
-    let (efforts, _) = policy_efforts(&fx).await;
-    assert!(efforts.iter().all(|e| !e.1), "nothing opened: {efforts:?}");
-}
-
 const HARNESS: &str = "conductor/fake";
 
 /// A private extension whose provider runs the fake as an agent harness
@@ -6584,8 +3402,8 @@ fn write_harness_extension(project: &Path, hooks: &str) {
 /// The fixture with the harness extension approved and its instance
 /// running.
 #[cfg(unix)]
-async fn running_harness(hooks: &str) -> (EffortFixture, Extension) {
-    let fx = services_with_effort().await;
+async fn running_harness(hooks: &str) -> (ThreadFixture, Extension) {
+    let fx = services_with_thread().await;
     let project = fx.svc.layout.project_dir.clone();
     write_harness_extension(&project, hooks);
     let ext = crate::extension::extensions::load_extensions(&project)
@@ -6734,7 +3552,7 @@ async fn a_slow_harness_provider_reads_as_none_on_the_hook_path() {
 /// A launch's input for the fixture's thread, programs looked for in
 /// `search_path`.
 fn launch_input(
-    fx: &EffortFixture,
+    fx: &ThreadFixture,
     search_path: Vec<PathBuf>,
 ) -> oxplow_domain::agent::harness::LaunchInput {
     use oxplow_domain::agent::harness::{Endpoints, LaunchInput, SessionIds};
@@ -6802,11 +3620,11 @@ fn write_snapshots_extension(project: &Path, contents: bool) {
 async fn running_snapshots(
     contents: bool,
 ) -> (
-    EffortFixture,
+    ThreadFixture,
     oxplow_domain::StreamId,
     std::sync::Arc<crate::snapshot_capture::SnapshotCaptureService>,
 ) {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let project = fx.svc.layout.project_dir.clone();
     write_snapshots_extension(&project, contents);
     let ext = crate::extension::extensions::load_extensions(&project)
@@ -6838,7 +3656,7 @@ async fn running_snapshots(
 }
 
 /// `id` as the project's snapshots, its switch applied.
-async fn choose_snapshots(fx: &EffortFixture, id: &str) {
+async fn choose_snapshots(fx: &ThreadFixture, id: &str) {
     fx.svc
         .config
         .write()
@@ -6853,7 +3671,7 @@ async fn choose_snapshots(fx: &EffortFixture, id: &str) {
 }
 
 async fn mark_turn(
-    fx: &EffortFixture,
+    fx: &ThreadFixture,
     stream: oxplow_domain::StreamId,
 ) -> oxplow_domain::snapshot::Marked {
     let mut request = oxplow_domain::snapshot::MarkRequest::new(
@@ -6973,169 +3791,11 @@ async fn a_snapshots_provider_without_contents_records_identities_only() {
     );
 }
 
-/// A project extension `shelf` whose provider `shelf` is the fake as a
-/// knowledge store, its pages kept in `state` (seeded by the caller, as a
-/// store holding pages written outside oxplow).
-#[cfg(unix)]
-fn write_knowledge_extension(project: &Path, state: &Path) {
-    let dir = project.join(".oxplow/extensions/shelf");
-    std::fs::create_dir_all(dir.join("bin")).unwrap();
-    std::fs::write(
-        dir.join("extension.yaml"),
-        "manifest: 2\nname: shelf\nintent:\n  purpose: the fake knowledge store\n  examples: [{ name: a }]\npermissions: [process.run]\nproviders:\n  - id: shelf\n    capability: knowledge\n    entry: bin/provider\n    declarations: provider.json\n",
-    )
-    .unwrap();
-    let script = dir.join("bin/provider");
-    std::fs::write(
-        &script,
-        format!(
-            "#!/bin/sh\nOXPLOW_FAKE_CAPABILITY=knowledge OXPLOW_FAKE_STATE='{}' exec '{}' \"$@\"\n",
-            state.display(),
-            fake_bin().display()
-        ),
-    )
-    .unwrap();
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-    std::fs::write(
-        dir.join("provider.json"),
-        serde_json::to_string_pretty(&oxplow_provider_fake::knowledge_declarations()).unwrap(),
-    )
-    .unwrap();
-}
-
-/// A provider process as the project's knowledge store: a page written
-/// through `oxplow.knowledge.write_page` lands in its service and in core's
-/// record (pinned, its links from the refs it states), a page written
-/// outside oxplow comes in on a sync, a delete takes a page out of both,
-/// and the wiki's files are never touched.
-#[cfg(unix)]
-#[tokio::test]
-async fn a_knowledge_provider_keeps_pages_and_core_records_them() {
-    let fx = services_with_effort().await;
-    let project = fx.svc.layout.project_dir.clone();
-    let state = project.join(".oxplow/fake-knowledge.json");
-    std::fs::create_dir_all(state.parent().unwrap()).unwrap();
-    std::fs::write(
-        &state,
-        serde_json::to_string(&json!({
-            "items": {}, "next": 1, "rev": 1, "answered": {},
-            "pages": { "outside": { "rev": 1, "record": {
-                "uri": "oxplow:oxplow/wiki?slug=outside", "title": "Outside", "body": "# Outside\n\nWritten in the vault.\n",
-                "uris": [], "updated_at": "2026-10-09T00:00:01Z"
-            } } }
-        }))
-        .unwrap(),
-    )
-    .unwrap();
-    write_knowledge_extension(&project, &state);
-    let ext = crate::extension::extensions::load_extensions(&project)
-        .into_iter()
-        .find(|e| e.name == "shelf")
-        .expect("the knowledge extension loads");
-    assert!(ext.errors.is_empty(), "{:?}", ext.errors);
-    deploy(&fx, &ext).await;
-    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
-    fx.svc
-        .config
-        .write()
-        .unwrap()
-        .active_providers
-        .insert(crate::knowledge::CAPABILITY.into(), "shelf".into());
-    crate::test_fixtures::activate_with_problems(&fx.svc).await;
-    fx.svc
-        .event_pump
-        .settle(
-            &[crate::knowledge::KnowledgeSwitch::NAME],
-            std::time::Duration::from_secs(10),
-        )
-        .await;
-    assert!(!fx.svc.wiki.live());
-
-    // A page written outside oxplow comes in on a sync.
-    fx.svc
-        .commands
-        .run(
-            &Actor::Human,
-            sync::SYNC,
-            json!({ "instance": "shelf/shelf" }),
-            false,
-        )
-        .await
-        .unwrap();
-    fx.svc
-        .event_pump
-        .settle(
-            &[super::knowledge::KnowledgeRecords::NAME],
-            std::time::Duration::from_secs(10),
-        )
-        .await;
-    let page = fx.svc.wiki_page_store.get("outside").await.unwrap();
-    assert_eq!(page.map(|p| p.title), Some("Outside".into()));
-
-    // A write through the command lands in the store and the record.
-    std::fs::create_dir_all(project.join("src")).unwrap();
-    std::fs::write(project.join("src/lib.rs"), "fn a() {}\n").unwrap();
-    let out = fx
-        .svc
-        .commands
-        .run(
-            &Actor::Human,
-            crate::knowledge::WRITE_PAGE,
-            json!({ "slug": "design", "body": "# Design\n\nSee [[src/lib.rs]].\n",
-                    "verified_files": ["src/lib.rs"] }),
-            true,
-        )
-        .await
-        .unwrap();
-    assert_eq!(out.result["page"], "design");
-    assert!(!project.join(".oxplow/wiki/design.md").exists());
-    let body: Option<String> = fx
-        .svc
-        .wiki_page_store
-        .body("design")
-        .await
-        .unwrap()
-        .map(|(_, body)| body);
-    assert_eq!(body.as_deref(), Some("# Design\n\nSee [[src/lib.rs]].\n"));
-    let fresh = crate::knowledge::freshness(&fx.svc.db, "oxplow:oxplow/wiki?slug=design")
-        .await
-        .unwrap();
-    assert_eq!(
-        fresh.iter().map(|f| f.target.as_str()).collect::<Vec<_>>(),
-        ["oxplow:oxplow/file?path=src/lib.rs"]
-    );
-    let saved = std::fs::read_to_string(&state).unwrap();
-    assert!(
-        saved.contains("oxplow:oxplow/wiki?slug=design"),
-        "the store kept it: {saved}"
-    );
-
-    // A delete takes it out of both.
-    fx.svc
-        .commands
-        .run(
-            &Actor::Human,
-            crate::knowledge::DELETE_PAGE,
-            json!({ "slug": "design" }),
-            true,
-        )
-        .await
-        .unwrap();
-    assert!(fx
-        .svc
-        .wiki_page_store
-        .get("design")
-        .await
-        .unwrap()
-        .is_none());
-}
-
 /// A provider's `host/call` `sql.read` reads through the SQL gateway, as a
 /// command's or an effect's script does: the metric functions answer.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_providers_host_read_reaches_the_metric_functions() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let grant = oxplow_domain::grant::Grant::from_permissions(
         "tracker",
         &oxplow_domain::permissions::Permissions {
@@ -7209,8 +3869,8 @@ fn write_filesystem_extension(
 /// The fixture with the filesystem extension `name` approved and its
 /// instance `store` running.
 #[cfg(unix)]
-async fn running_filesystem(name: &str, writable: bool) -> EffortFixture {
-    let fx = services_with_effort().await;
+async fn running_filesystem(name: &str, writable: bool) -> ThreadFixture {
+    let fx = services_with_thread().await;
     let project = fx.svc.layout.project_dir.clone();
     write_filesystem_extension(
         &project,

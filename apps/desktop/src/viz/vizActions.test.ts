@@ -4,10 +4,10 @@ import { createFailureStore, createInlineClaims } from "../commands/actionFailur
 import { createRunner } from "../commands/runForPerson.js";
 import { IpcCallError } from "../ipc-error.js";
 import type { FormStart, PageAction, VizRun } from "../tauri-bridge/generated/bindings.js";
-import { actionDoes, actionEnabled, actionOffered, offeredWholePage, openAfterAction, performVizAction, promptField, rowRecord, type VizActionDeps } from "./vizActions.js";
+import { skipSummary, actionDoes, actionEnabled, actionOffered, offeredWholePage, openAfterAction, performVizAction, promptField, rowRecord, type VizActionDeps } from "./vizActions.js";
 
 const run = { config: { id: "acme/prs" }, params: { repo: "x" } } as unknown as VizRun;
-const action: PageAction = { id: "finish", label: "Finish", command: "oxplow.work_item.transition", input: {}, row: false };
+const action: PageAction = { id: "finish", label: "Finish", command: "acme.issue.transition", input: {}, row: false };
 
 /** A runner whose record is the log: `error <label>: <message>`. */
 function runnerTo(log: string[]) {
@@ -44,32 +44,32 @@ test("an action runs its command with the run's params and row", async () => {
   expect(log).toEqual([
     `run acme/prs finish {"repo":"x"} {"id":7} str1 false`,
     "toast ✓ Finish",
-    "open_after oxplow.work_item.transition {}",
+    "open_after acme.issue.transition {}",
   ]);
 });
 
 test("an action whose command names a page to open opens it once it ran", async () => {
-  const { d, log } = deps(undefined, "oxplow:oxplow/wiki?slug=lib");
+  const { d, log } = deps(undefined, "oxplow:oxplow/knowledge?id=lib&store=oxwiki");
   expect(await performVizAction(action, run, null, null, false, d)).toBe("done");
-  expect(log.slice(-2)).toEqual([`open_after oxplow.work_item.transition {}`, "open oxplow:oxplow/wiki?slug=lib"]);
+  expect(log.slice(-2)).toEqual([`open_after acme.issue.transition {}`, "open oxplow:oxplow/knowledge?id=lib&store=oxwiki"]);
 });
 
 const done = { result: {}, audit_id: 1, event_id: null, inverse: null };
 
 test("`then: replace` opens the page in place of the viz's page", async () => {
-  const { d, log } = deps(undefined, "oxplow:oxplow/work_item?id=tsk9&provider=oxplow");
+  const { d, log } = deps(undefined, "oxplow:oxplow/task?id=tsk9&provider=oxtask");
   await openAfterAction({ ...action, then: "replace" }, done, d);
-  expect(log.at(-1)).toBe("replace with oxplow:oxplow/work_item?id=tsk9&provider=oxplow");
+  expect(log.at(-1)).toBe("replace with oxplow:oxplow/task?id=tsk9&provider=oxtask");
 });
 
 test("`then: stay` opens nothing, without asking where", async () => {
-  const { d, log } = deps(undefined, "oxplow:oxplow/work_item?id=tsk9&provider=oxplow");
+  const { d, log } = deps(undefined, "oxplow:oxplow/task?id=tsk9&provider=oxtask");
   await openAfterAction({ ...action, then: "stay" }, done, d);
   expect(log).toEqual([]);
 });
 
 test("`then: close` closes the viz's page, without asking where", async () => {
-  const { d, log } = deps(undefined, "oxplow:oxplow/work_item?id=tsk9&provider=oxplow");
+  const { d, log } = deps(undefined, "oxplow:oxplow/task?id=tsk9&provider=oxtask");
   const closed: string[] = [];
   await openAfterAction({ ...action, then: "close" }, done, { ...d, closePage: () => closed.push("closed") });
   expect(closed).toEqual(["closed"]);
@@ -251,4 +251,20 @@ test("a button with `enabled` is enabled only while that column of the one row i
   expect(actionEnabled(push, result(1))).toBe(true);
   expect(actionEnabled(push, result(0))).toBe(false);
   expect(actionEnabled({ enabled: null } as Parameters<typeof actionEnabled>[0], result(0))).toBe(true);
+});
+
+test("a point action whose row nothing answers says it was skipped, and is not a failure", async () => {
+  const { d, log } = deps();
+  const skipping: VizActionDeps = {
+    ...d,
+    press: async () => ({ result: { skipped: "nothing answers `oxplow/task.move` for this item" }, audit_id: null, event_id: null, inverse: null }),
+  };
+  const point: PageAction = { id: "mark", label: "Mark", command: null, point: "oxplow/task.move", input: {}, row: true } as PageAction;
+  expect(await performVizAction(point, run, { id: 1 }, null, false, skipping)).toEqual({ skipped: "nothing answers `oxplow/task.move` for this item" });
+  expect(log).toEqual([]);
+});
+
+test("a run says how many of its rows were skipped", () => {
+  expect(skipSummary("Mark", ["nothing answers it"], 1)).toBe("Mark: skipped — nothing answers it");
+  expect(skipSummary("Mark", ["nothing answers it", "nothing answers it"], 5)).toBe("Mark: 2 of 5 skipped — nothing answers it");
 });

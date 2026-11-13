@@ -3,8 +3,8 @@
 when:
   page: oxplow/collector
   params:
-    uri: "oxplow:oxplow/collector?collector=oxplow/oxplow.effort_test_outcome"
+    uri: "oxplow:oxplow/collector?collector=oxplow/oxplow.request_outcome"
 expect:
   nodes:
     - { id: about, kind: viz, viz: detail }
-  text: { contains: ["## About [node about]\n\nHow an effort's tests went, recorded whe"] }
+  text: { contains: ["## About [node about]\n\nHow a request went — its tokens, its cycle time and its tests — recorded when"] }

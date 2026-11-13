@@ -126,8 +126,7 @@ mod tests {
             extension: Some("oxplow-foundation".into()),
             source: Source::BuiltIn(entry),
             features: serde_json::json!({}),
-            fields: serde_json::json!([]),
-            id_pattern: None,
+            offered: true,
             icon: None,
             config: serde_json::json!({}),
             description: None,
@@ -188,7 +187,7 @@ mod tests {
     /// the running registry lists it.
     #[tokio::test]
     async fn the_built_in_agents_ship_a_logo() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let listed = listing(&fx.svc.harnesses, &fx.svc.capabilities, &[]);
         for id in ["claude", "codex", "opencode"] {
             let icon = listed
@@ -212,7 +211,6 @@ mod tests {
             &[
                 declared("agent_harness", "claude", "oxplow:claude-code"),
                 declared("agent_harness", "codex", "oxplow:codex-cli"),
-                declared("work_items", "oxplow", "oxplow:tasks"),
             ],
         );
         assert_eq!(r.names(), ["claude", "codex"]);

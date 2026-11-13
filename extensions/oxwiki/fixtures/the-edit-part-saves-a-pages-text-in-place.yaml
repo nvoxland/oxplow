@@ -1,0 +1,18 @@
+# The knowledge page's text is this part (it replaces the page's body,
+# `knowledge.detail.body`, for an oxwiki page): its text is saved back to
+# its file under the same id;
+# another store's page has nothing to edit here.
+requires: [oxplow-bundled]
+given:
+  - { command: oxwiki.page.write, input: { title: Ferrets, body: "# Ferrets\n\nThey steal socks.\n" } }
+when: { part: edit-page, params: { uri: "oxplow:oxplow/knowledge?id=ferrets&store=oxwiki" } }
+expect:
+  loaders: { body: { rows: [{ id: ferrets, title: Ferrets }] } }
+steps:
+  - press: { action: save, node: body, row: { id: ferrets }, input: { body: "# Ferrets\n\nThey steal socks and keys.\n" } }
+    expect: { ok: true }
+  - expect:
+      loaders:
+        body: { rows: [{ id: ferrets, body: "# Ferrets\n\nThey steal socks and keys.\n" }] }
+  - params: { uri: "oxplow:oxplow/knowledge?id=x&store=elsewhere" }
+    expect: { loaders: { body: { rows: 0 } } }

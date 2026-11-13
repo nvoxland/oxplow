@@ -4,8 +4,7 @@ import { DisclosureGlyph } from "./Disclosure.js";
 import { createContext, useContext, type CSSProperties, type ReactNode } from "react";
 
 import { useSectionCollapse } from "../components/CollapsibleSections.js";
-import { ICONS } from "../icons.js";
-import { isIconName } from "../iconNames.js";
+import { iconFor } from "../icons.js";
 import type { TabRef } from "../tabs/tabState.js";
 import { ActionButtons } from "./ActionButtons.js";
 import { OpenPageLink } from "./OpenPageLink.js";
@@ -85,7 +84,7 @@ export function Section({
   const Heading = `h${level}` as "h2";
   const collapse = useSectionCollapse(id, collapsible, defaultCollapsed);
   const open = collapse ? collapse.expanded : true;
-  const Icon = icon && isIconName(icon) ? ICONS[icon] : undefined;
+  const Icon = iconFor(icon);
   return (
     <SectionLevelContext.Provider value={level}>
       <section

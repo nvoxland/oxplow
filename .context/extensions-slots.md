@@ -14,8 +14,8 @@ Slots, replacements, commands in core menus and decorators: how an extension ext
     `Extension.ui.page_slots`.
   - The mounted page runs as an embed: its params come by name from the
     host's params, else from the first row of the host's loaders. So the
-    changes page (`diff-view`) offers `change_id` and `effort_id` from its
-    loader row; the work item page offers `uri`; the diff page offers
+    changes page (`diff-view`) offers `change_id` from its
+    loader row; the task page offers `uri`; the diff page offers
     `path` in its `file-header` slot (bundled's co-change page mounts
     there). The host draws each mounted page as a section titled by its
     page.
@@ -33,7 +33,7 @@ nothing. A mount is an entry in the mounting extension's manifest:
 ```yaml
 ui:
   mounts:
-    - { page: item-tokens, at: oxplow/work-item.sections, position: { before: links }, title: Tokens }
+    - { page: item-tokens, at: oxplow/task-detail.sections, position: { before: links }, title: Tokens }
 ```
 
 `slot` is the host's slot name; `page` is a slug of the mounting
@@ -65,11 +65,12 @@ loaders' first rows and params are what a mount can take):
 
 | Slot | Host page | Params a mount may take |
 |---|---|---|
-| `oxplow/diff-view.sections` | the Changes page (an effort's or a range's diff; nodes `effort`, `header`, `description`, `verdict`, `concurrent`, `files`, `extensions`) | `uri`, `start`, `end`, `stream_id`, and the page's row (`effort_id`, `change_id`, …) |
-| `oxplow/work-item.sections` | the Work Item page (nodes `state`, `fields`, `body`, `info`, `links`, `comments`, `activity`) | `uri`, `thread_id`, `stream_id` |
-| `oxplow/tasks.sections` | the Tasks page (nodes `list`, `summary`, `backlog`; `at: { before: list }` puts a strip above the list) | `show`, `priority`, `thread_id`, `stream_id` |
+| `oxplow/diff-view.sections` | the Changes page (a request's, a turn's or a range's diff; nodes `header`, `description`, `concurrent` (the other requests, on any thread, whose turns changed the same files in the same window), `files`, `extensions`) | `uri`, `start`, `end`, `stream_id`, and the page's row (`change_id`, …) |
+| `oxplow/task-detail.sections` | the Task page (nodes `state`, `fields`, `body`, `info`, `links`, `comments`, `activity`) | `uri`, `thread_id`, `stream_id` |
+| `oxplow/knowledge-page.sections` | a knowledge page (the end of its stack; oxwiki mounts its Edit part) | `uri`, `store`, `id` |
 | `oxplow/commit.sections` | a commit's page (nodes `detail`, `files`) | `uri`, `sha`, `stream_id`, and `change_id` (the page's row) |
 | `oxplow/uncommitted-changes.sections` | Uncommitted Changes (nodes `commit`, `files`; `at: { before: commit }` puts a strip above everything) | `stream_id`, and `change_id` (the page's row) |
+| `oxplow/settings.integrations` | Settings → Integrations, under Capabilities: an extension's own settings for the project. oxtask mounts its Task workflow (`task-workflow-settings`) | none (the page's params: `area`) |
 | `oxplow/new-session.sections` | the New Session page (nodes `start`, `earlier`) | `stream_id`, `thread_id`, `q` |
 | `oxplow/diff.file-header` | the Diff page (one file between two revisions; the slot sits above the diff). oxplow-bundled mounts its `file-co-change` page here | `path`, `left`, `right`, `label`, `base`, `lines` |
 
@@ -96,13 +97,13 @@ scope made of part-pages, not a placement of one page.
 ```yaml
 ui:
   mounts:
-    - { page: swimlanes, at: work_item.board, version: 1 }
+    - { page: swimlanes, at: task.board, version: 2 }
 ```
 
 The targets are one table of data, `crates/oxplow-domain/data/replaceable.json`
 (read by `oxplow_domain::replaceable::all()`; `fixtures/replaceable.json` pins
 its targets so it only shrinks):
-each a `target`, the `capability` it belongs to, whether it is **bound to
+each a `target`, the `capability` (or shared `model`) it belongs to, whether it is **bound to
 a provider**, its contract's **version**, its **props contract** — the
 params the replacement page is given instead of any host state — and its
 **view**: the host page's view params the replacement shares, read
@@ -114,13 +115,13 @@ is published as `v_replaceable` and generated into the reference
 `version:` must be the contract's: a changed contract refuses it rather
 than handing it props it does not know.
 
-| Target | Core component | Capability | Bound | Props | View |
+| Target | Core component | Belongs to | Bound | Props | View |
 |---|---|---|---|---|---|
-| `work_item.board` | the Board's columns of cards (the `board` page's node) | `work_items` | no | `scope` (`thread` / `backlog` / `all`), `thread_id` (applies when `scope` is `thread`) | — |
-| `work_item.list` | the Tasks page's list: the scope picker, detail pane and backlog drawer stay oxplow's | `work_items` | no | `scope` (`thread` / `stream` / `all`), `thread_id` (the thread when `scope` is `thread`, else null) | — |
-| `work_item.detail` | a work item's description editor (the `body` node of the `work-item` page): the state, fields, About, links, comments, activity and the mounts stay oxplow's | `work_items` | no | `uri` (the item) | — |
-| `work_item.detail.state` | a work item's State (the `state` node) — never its Move To (the About node's menu), so a replacement cannot strand an item | `work_items` | yes | `uri` (the item) | — |
-| `effort.verdict` | an effort's verdict, the first line of its page (the `verdict` node of the `diff-view` page). Core has **none of its own**: with no replacement, or `oxplow` chosen, the page shows nothing. oxplow-bundled's `effort-verdict` is the default | `effort_policy` | no | `effort_id` (the effort's row id) | — |
+| `task.board` | the Work board (the `board` component node of bundled's `work` page; v2) | model `oxplow/task_record` | no | `scope` (`thread` / `stream` / `me` / `pool` / `all`: whom the items are assigned to), `thread_id` (applies when `scope` is `thread`); a page's implicit `stream_id` applies when `scope` is `stream` | — |
+| `task.list` | the Task List's list (the `list` node of bundled's `task-list` page; v2): its filters and New Task… stay oxplow's | model `oxplow/task_record` | no | `scope` (`thread` / `stream` / `me` / `pool` / `all`: whom the items are assigned to), `thread_id` (applies when `scope` is `thread`) | — |
+| `task.detail` | a task's description editor (the `body` node of the `task` page): the state, fields, About, links, comments, activity and the mounts stay oxplow's | model `oxplow/task_record` | no | `uri` (the item) | — |
+| `task.detail.state` | a task's State (the `state` node) — never its Move To (the About node's menu), so a replacement cannot strand an item | model `oxplow/task_record` | yes | `uri` (the item) | — |
+| `knowledge.detail.body` | a knowledge page's body (the `body` node of bundled's `knowledge-page`): oxplow's own is the read-only markdown; About, referenced files, backlinks, comments and mounts stay oxplow's. oxwiki's replacement is an editor with Save | model `oxplow/knowledge_record` | yes, by the URI's `store` (a task's is `provider`; the table's `provider_param`) | `uri` (the page) | — |
 | `vcs.history.graph` | Git History's commits (a node of the `git-history` page): oxplow's own is a plain list | `vcs` | no | `head_sha` (the stream's head), `reveal_sha` (a commit to scroll to and mark, or null), `limit` | `q`, `author`, `branch` (Git History's filters; v2) |
 
 **Who places a target.** A page node marked `replaceable: <target>`
@@ -141,15 +142,15 @@ own and why). The page's params must cover the contract so
 the props exist; a page with a `replaceable` node is not warned about
 params it passes on.
 
-**Bound or not.** A bound target shows one provider's own thing — the
-state control lists that tracker's states — so only the extension of the
-provider whose item it shows replaces it. Every other target is a **view**:
-the Board, the list and the editor show the capability as a whole, reading
-`v_work_item` and changing items through the interface commands
-(`oxplow.work_item.update`, `transition`, `reorder`, `move`), so they work
-with whichever list is active and any extension may bring one — a view
-needs no provider. Choosing a presentation is separate from installing a
-work list.
+**Bound or not.** A bound target shows one store's own thing — the
+state control lists that store's stages — so only the extension that fills
+the model as the item's own store replaces it. Every other target is a
+**view**: the Board, the list and the editor show the model as a whole,
+reading `v_oxplow_task` and changing items through the task action points
+(`oxplow/task.move`, `task.edit`, … and bundled's `oxplow.tasks.assign`
+and `reorder`), so they work with whichever store holds the task and any
+extension may bring one — a view needs no store. Choosing a presentation
+is separate from installing a store.
 
 **Whose shows** is the person's: `replacements: { <target>: <extension> |
 oxplow }`, one project key validated against the table. An extension
@@ -160,16 +161,16 @@ provider's extension's. Settings → Integrations lists each replaced
 target with that choice (a `<select>`: Default, oxplow's own, each
 extension). Every target has a `label` a person reads, in the same table
 ("board", "state control", "history graph"), carried on each
-`UiReplacement`. A state control replacement lists the tracker's own
-states, each with **Move Here** (`oxplow.work_item.transition` with the
-`native_state`); oxplow's Move To stays beside it.
+`UiReplacement`. A state control replacement lists the store's own
+stages, each with **Move Here** (the `oxplow/task.move` point with the
+stage id); oxplow's Move To stays beside it.
 
 **At load** (`replacements::parse_replacements`, errors at the entry's
 line): the target is in the table; the page is one of the extension's and
 declares **every** prop (a replacement takes the whole contract — a Board
 that ignores `scope` is not the Board); a pinned `version` is the
-contract's; for a bound target, the extension brings a provider of the
-target's capability (`providers:`); a target is replaced once per
+contract's; for a bound target, the extension fills the target's model
+(`fills:`) or brings a provider of its capability (`providers:`); a target is replaced once per
 extension. The viewer's stream is not a prop: a page that declares
 `stream_id` gets it, as everywhere. Valid ones are
 `ExtensionUi.replacements` (`UiReplacement { id: <namespace>/<target>,
@@ -178,15 +179,14 @@ label }`).
 
 **In the run** (`PageRunner::replacement` → `replacements::chosen`), from
 the enabled extensions' replacements of the target, only when one exists:
-- **bound**: the **item's own provider** decides, whichever is active, so
-  another provider's item never gets a page that sends this one's states.
-  The provider is the `provider` param of the node's `uri` param (a work
-  item's URI carries it); which extension brings it is the capability
-  registry's answer at run time, not at load, so installing or switching
-  one needs no reload;
+- **bound**: the **item's own store** decides, so another store's item
+  never gets a page that sends this one's states. The store is the
+  node's `uri` param's `provider_param` (the table's: `provider` on a task's URI, `store` on a knowledge page's);
+  which extension fills it is the model registry's answer at run time, not
+  at load, so installing or switching one needs no reload;
 - **unbound**: the person's choice (`replacements`), or the only
   candidate; no provider is read;
-- no candidate, a provider no extension brings (oxplow's own), several
+- no candidate, a store no extension fills, several
   unbound candidates and no choice, or `oxplow` chosen → the node's own
   content, `replaced_by` unset;
 - chosen → its page runs as the node's embed with the props it declares;
@@ -198,7 +198,7 @@ has `replaced_by`): the embed (kit vizzes, or `viz: custom` with its
 sandbox and, for an extension that isn't oxplow's own, a "by <extension>" mark,
 sharing the view its target's contract lists) under a hover title naming
 the extension (`replacement-<target>`, no chip), kept fresh as any page run is. The page's own chrome
-(the Board's scope picker) stays oxplow's. A run with an `error` draws
+(a Task List's filters) stays oxplow's; the Work board has none, so its stand-in shares its filters (`view`). A run with an `error` draws
 the core component under a line saying whose it was and why ("beads's
 board couldn't load: …. Showing oxplow's.", `replacement-fallback`),
 outside the replacement's frame: no badge. Nothing is decided in the
@@ -206,14 +206,14 @@ desktop, so the wrong component never flashes.
 
 Showing one records `usage { kind: "replacement", key: <namespace>/<target> }`
 (the evidence a kind needs to be promoted), once per replacement drawn
-without an error. Agents read work items from `v_work_item` either way.
+without an error. Agents read tasks from `v_oxplow_task` either way.
 The rules are tested in Rust (`replacements::chosen`'s tests, the runner's
 `a_replaceable_node_runs_the_replacement_that_stands_in_for_it`); which
 replacement a page shows is a fixture's (`loaders: { <node>/<loader> }`,
 a `ui` step on the embedded component); the badge, the fallback line and
 choosing one on Settings are the e2e specs'. The pages with every
 enhancement off are `tests-e2e/specs/pages/plain.spec.ts`'s
-([work-items.md](./work-items.md), "Conformance").
+([tasks.md](./tasks.md), "Conformance").
 
 **The first real one: the history graph.** oxplow-bundled's
 `history-graph` component (`components/history-graph/`, classic scripts on
@@ -237,18 +237,18 @@ against its page — lanes, merge lanes, child-before-parent order,
 filters, reveal, Cmd-click.
 
 **The example that proves views and forms: `examples/extensions/task-views`.**
-An extension with no provider of its own, replacing `work_item.board`
+An extension with no provider of its own, replacing `task.board`
 (the `swimlanes` component: a column per canonical state, drag a card to
-another column to `oxplow.work_item.transition` it, drag within a column to
-`reorder` it only when the active provider's `features` include `ordering`,
+another column to move it (`oxplow/task.move`), drag within a column to
+`reorder` it in its assignee's queue,
 click a title to rename it through an inline `<form>` with `ox-input` and a
 field refusal shown in `ox-error`, a click on a card `navigate`s, a
 Cmd/Ctrl-click opens a new tab, and a `DENIED` refusal is one line above the
-board), `work_item.list` (`compact-list`, a `viz: table` with Done and an
-`Edit…` form action) and `work_item.detail` (`edit-item`, a `viz: form` over
-`oxplow.work_item.update` with `uri` fixed). It reads `v_work_item` and
-changes items only through the interface commands, so it works with any
-list. `viz/swimlanes.test.ts` runs the bundle's script against its page;
+board), `task.list` (`compact-list`, a `viz: table` with Done and an
+`Edit…` form action) and `task.detail` (`edit-item`, a `viz: form` over
+the `oxplow/task.edit` point with `uri` fixed). It reads `v_oxplow_task`
+and changes items only through the task action points, so it works with any
+store. `viz/swimlanes.test.ts` runs the bundle's script against its page;
 `every_example_scaffolds_checks_and_tests_clean` checks it clean and runs its fixtures.
 
 A form (`FormViz`) re-reads its start values when it resets, so after a
@@ -256,14 +256,14 @@ successful Save it shows what was saved, not the title it first opened
 with. Activation takes a cloned snapshot of the config (`read_config`)
 rather than holding its read guard across the transaction: a nested read
 behind a waiting config reload would otherwise deadlock the daemon when
-the active work list switched
+a capability's choice switched
 (`tests-e2e/specs/components/task-views.spec.ts` is its regression test).
 
 ## Commands in core menus (a command's `ui.about`)
 
 A command an extension declares meets a person through its own `ui`
 ([commands.md](./commands.md) "Offering a command to a person"). One
-**about a resource** (`ui: { label, group, about: oxplow/work_item, input: {
+**about a resource** (`ui: { label, group, about: oxplow/task, input: {
 uri: "{{uri}}" } }`) is offered on a URI of that resource. It shows in
 its page's nav-bar ☰ (at the top level, sorted by label with the page's
 own actions) and in the right-click menu of a row for the row's URI (a
@@ -304,7 +304,7 @@ one of the extension's **datasets** on URIs of a resource:
 ```yaml
 ui:
   decorators:
-    - { dataset: flags, resource: oxplow/work_item, placement: ref-chip, label: label, color: color }
+    - { dataset: flags, resource: oxplow/task, placement: ref-chip, label: label, color: color }
 ```
 
 The dataset (`v_<namespace>_<dataset>`) must declare a `uri` column and the
@@ -326,17 +326,89 @@ color is used only when it is a plain one (`#rgb…` or a CSS color name,
 `safeColor`). Decorations are additive: a decorator whose query fails
 shows nothing.
 
-**Promoted to stable** on its first-party use: oxplow-bundled shows each
-effort's latest verdict on the effort — a `ref-chip` on its page and a
-`row-badge` where a row links to it. Its dataset `verdict` (`Accepted`,
-`Accepted (forced)` or `Changes requested`; green, orange, red) reads
-`verdicts`, which keeps every verdict event (`materialize: {
-incremental: seq }`, appended as each lands; a rewrite of the log —
-retention's payload expiry, a restart's refill — refills it whole). It
-reads only the events' **envelopes**: the type says the verdict
-(`oxplow.review.accepted` / `.changes_requested`) and the subject what
-it was about — the effort first, then its work item, then each claim and
-decision an acceptance took unchecked (any makes it forced). Retention
-keeps envelopes and an extension's payloads go after 30 days at most, so
-a verdict a decorator shows must not live in its payload. It shows; it
-never acts.
+A decorator shows; it never acts.
+
+## Action points and the store filter
+
+Part of the shared-models work. Built: named action points, the object
+form of `ui.about` with its store filter, and the SDK fixture kinds that
+test them. **Not built:** the per-point default setting (Settings, then a
+split button) and "a store's item commands default to their own stores"
+(`fills:` exists now; the default is still to build). The store filter
+reads the store from the item URI's param the item's shared model names
+(`store_param`: tasks keep `provider`), falling back to `store`.
+
+**A named action point** is a place where several extensions offer the
+same kind of action ("New Task") and none of them owns the page.
+
+- **Declared by its owner**, in the manifest (`extensions/action_points.rs`):
+  `action_points: [{ name: task.new, label: New Task, doc?, context: {
+  parent?: uri, thread_id?: int } }]`. Its id is `<namespace>/<name>`
+  (`oxplow/task.new`). A context key is typed `string`, `uri`, `int` or
+  `bool`; `name?` marks it optional.
+- **Placed by a page:** a view node `{ action_point: oxplow/task.new,
+  context: { parent: { param: uri } } }`. Its `context` values are bound
+  the way an embed's `params` are (`{ param: x }`, `{ from: loader.col }`
+  or a literal): the run resolves them (`RunNode.action_point`). The node
+  is refused in an inline page.
+- **Joined by a command:** `ui: { at: oxplow/task.new, input: { parent:
+  "{{context.parent}}" } }`. `{{context.<key>}}` is a whole-string binding
+  of the point's context; a key the page left out stays unset. Without an
+  `input` the command gets the whole context. `at` excludes `about`. A
+  command that needs more than the context sets `ui.form`: the form page
+  opens with the context's keys as its params (the path item commands use
+  with `?uri=`).
+- **Drawn by the shell** (`components/ActionPoint.tsx`; the rule
+  `drawsFor`, stated in Rust by `Draws::for_count`): nothing with no
+  contributor, a button with one, a menu (the context menu under a button
+  labelled with the point's label) with several. Menu order: by command id,
+  which starts with the owning extension's namespace.
+- **One list, two kinds of key.** Item commands (`ui.about`) and point
+  commands (`ui.at`) are the same list in the command registry
+  (`commands/ref_commands.rs`: `OfferKey::Item(kind)` or
+  `OfferKey::Point(id)`, `offered`). Search lists neither.
+- **Asked through** IPC `action_point_commands { point, context }`
+  (`commands/action_point_offers.rs`): `{ point, label, draws, commands: [{
+  id, label, input }] }`, each `input` already bound. A context key the
+  point does not declare or of the wrong type is an error; a missing
+  required key offers nothing. Item commands are asked through
+  `ref_commands { uri }` as before. Neither is an MCP tool: an agent lists
+  what it may run with `list_commands`.
+
+**An item point.** A point may name its **item**: `item: uri`, a required
+`uri` context key (`action_points: [{ name: task.move, label: Move, item:
+uri, context: { uri: uri, stage: string } }]`). A command that joins it may
+carry `ui.accepts: { store: <id> | [ids] }` (with `at` only; an item
+command's filter stays in `about`): the point offers it only when the
+item's store passes, by the same rule as below (the store param is the
+item's model's `store_param`). A command with `accepts` at a point with no
+item is never offered; one without `accepts` always is. This is how a
+shared page (bundled's task pages, the Work board) offers "move this
+task" without naming any store: each store joins the point for its own
+items.
+
+A command at an item point binds the item in its input: `{{uri}}` is the
+item's URI and `{{uri.<param>}}` one of its params (`{{uri.id}}`), as an item
+command's do (`CommandUi::point_input`); a key the item lacks leaves the
+entry out.
+
+**One command, one action: `about` and `at` together.** A command may have
+both — it is offered on its item (`about`) and at a point (`at`), the same
+action. The store filter is then `about.accepts`, which serves the point
+too; `ui.accepts` is only for a point command with no `about` filter, and
+declaring both is refused ("one store filter"). A `form` command at a point
+opens its form with the context's keys (and the `{{uri}}` bindings) as
+params; the form's submit is the input.
+
+**The store filter.** `ui.about` is either the resource kind (a string) or
+`{ resource, accepts?: { store: <id> | [ids] } }`. An item URI's `store`
+param is matched like a renderer's `accepts` rule: an id equal to the
+entry, or `present`, `absent` or an anchored id pattern
+(`pages::renderers::takes`); a list is any-of. The command shows only on
+items whose store passes; an item with no `store` param passes only a
+filter that says `absent`.
+
+**Tests.** A fixture `when: { action_point: <id | name>, context? }` has
+`expect: { draws: none | button | menu, commands?: [ids] }`; `when: {
+item_commands: <uri> }` has `expect: { commands: [ids] }`
+(`oxplow-agent-text/.../references/testing.md`).

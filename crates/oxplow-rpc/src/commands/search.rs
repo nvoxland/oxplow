@@ -8,9 +8,9 @@ use crate::error::IpcError;
 /// Site-wide BM25 search across every searchable resource
 /// (`v_resource.searchable`) and per-stream file contents; each hit names
 /// the URI it found. `stream_id` scopes file/stream-bound hits to one
-/// worktree (project-global hits like wiki always included); `None`
+/// worktree (project-global hits like knowledge pages always included); `None`
 /// searches everything. `resources` optionally restricts to some of those
-/// (`oxplow/wiki`, or `oxplow/file`). Results are ranked best-first.
+/// (`oxplow/knowledge`, or `oxplow/file`). Results are ranked best-first.
 pub async fn search(
     svc: &Services,
     query: String,

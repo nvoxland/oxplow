@@ -7,7 +7,7 @@ params:
 - name: uri
   label: Implementation
 answers:
-- {"question":"What does this implementation provide, and is it in use?","about":"oxplow/implementation","params":{"uri":"oxplow:oxplow/implementation?implementation=oxplow/work_items.oxplow"},"skill":"oxplow-extension"}
+- {"question":"What does this implementation provide, and is it in use?","about":"oxplow/implementation","params":{"uri":"oxplow:oxplow/implementation?implementation=oxplow/snapshots.oxplow"},"skill":"oxplow-extension"}
 loaders:
   about:
     sql: |

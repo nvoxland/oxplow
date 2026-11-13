@@ -1,0 +1,70 @@
+title: Git
+description: The stream's uncommitted files as a folder tree, each with its status mark (A M D U), a folder with the marks under it — with the files git doesn't track yet, or without — or an overview (the changes in one line, then where its branch stands against its upstream and, on a worktree, the default branch, with the buttons that act on it), as the panel's header picks.
+params:
+- name: stream_id
+  label: Stream
+# The panel's header toggle: every part declares it, so they agree.
+- name: show
+  role: filter
+  label: Show
+  default: changed_untracked
+  options:
+  - { value: changed_untracked, label: Uncommitted and untracked, icon: assets/file-plus.svg }
+  - { value: changed, label: Uncommitted, icon: assets/file-diff.svg }
+  - { value: overview, label: Overview, icon: layout-dashboard }
+loaders:
+  # The stream's files: the one statement, which the Uncommitted page reads too.
+  uncommitted:
+    page: oxplow/worktree-files
+    loader: files
+    params: { stream_id: { param: stream_id }, show: { param: show } }
+  # The changes in one line, the Overview's first.
+  uncommitted_line:
+    page: oxplow/worktree-files
+    loader: line
+    params: { stream_id: { param: stream_id }, show: { param: show } }
+view:
+  switch:
+    param: show
+    children:
+    # Either files view (the first child stands for any value but `overview`).
+    - id: files
+      title: Files
+      hide_title: true
+      from: uncommitted
+      viz: tree
+      tree:
+        path: path
+        status: status
+      columns:
+      - key: path
+        label: File
+        link:
+          kind: file
+          from: file_path
+      empty: Working tree clean
+    # The changes in one line (the collapsed view's), then where the branch
+    # stands with its buttons: Git Status's part, without the branch's name.
+    - id: overview
+      title: Overview
+      hide_title: true
+      stack:
+      - id: changes
+        title: Changes
+        hide_title: true
+        from: uncommitted_line
+        viz: list
+        columns:
+        - key: changes
+          label: Changes
+          format: marks
+          link:
+            kind: page
+            from: page
+        empty: Working tree clean
+      - id: branch
+        title: Branch
+        hide_title: true
+        embed:
+          page: oxplow/git-branch
+          params: { with_branch: '0', publish_worktree: '0' }

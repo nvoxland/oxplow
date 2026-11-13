@@ -1,0 +1,25 @@
+# The Changes page of a request shows the first task its request worked on
+# and that task's description: bundled's two sections of foundation's page
+# (parts mounted in its `sections` slot, which reads no task). A turn's
+# changes, or a range picked with an end, show neither.
+requires: [oxtask]
+given:
+  - { command: oxtask.task.create, input: { title: Fix the hover state, body: "Make the hover state clearer.", stage: ready } }
+  - observe:
+      turn:
+        prompt: Fix the hover state
+        during:
+          - { command: oxtask.task.move, input: { id: tsk1, stage: in_progress }, as: agent }
+when: { part: change-task, params: { uri: "oxplow:oxplow/request?id=req1", end: "" } }
+expect:
+  loaders:
+    change_task: { rows: [{ item: Fix the hover state, item_ref: "oxplow:oxplow/task?id=tsk1&provider=oxtask" }] }
+steps:
+  - when: { part: change-task-description, params: { uri: "oxplow:oxplow/request?id=req1", end: "" } }
+    expect: { loaders: { description: { rows: [{ body: Make the hover state clearer. }] } } }
+  - when: { part: change-task, params: { uri: "oxplow:oxplow/turn?id=trn1", end: "" } }
+    expect: { loaders: { change_task: { rows: 0 } } }
+  - when: { part: change-task, params: { uri: "oxplow:oxplow/request?id=req1", end: "working" } }
+    expect: { loaders: { change_task: { rows: 0 } } }
+  - when: { part: change-task-description, params: { uri: "oxplow:oxplow/turn?id=trn1", end: "" } }
+    expect: { loaders: { description: { rows: 0 } } }

@@ -1,0 +1,19 @@
+# The open repair task of a contribution is the one linked `about` it that is
+# not done or canceled; a closed one is no repair task any more. The
+# contribution-health page's repair part reads this dataset.
+requires: [oxtask]
+given:
+  - command: oxtask.task.create
+    input:
+      title: "Repair work hot: boom"
+      stage: ready
+      links: [{ to: "oxplow:oxplow/collector?collector=work/hot", type: about }]
+  - command: oxtask.task.create
+    input:
+      title: "Repair work cold: boom"
+      stage: done
+      links: [{ to: "oxplow:oxplow/collector?collector=work/cold", type: about }]
+when: { sql: "SELECT uri, repair_item FROM v_oxplow_contribution_repair ORDER BY uri" }
+expect:
+  rows:
+    - { uri: "oxplow:oxplow/collector?collector=work/hot", repair_item: "oxplow:oxplow/task?id=tsk1&provider=oxtask" }

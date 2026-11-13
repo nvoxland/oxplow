@@ -66,7 +66,14 @@ export function bindInput(template: unknown, ctx: OfferContext): { input: unknow
 }
 
 /** `spec`'s entry, run with `input` (or its form). */
-function offer(spec: CommandSpec, input: unknown, ctx: OfferContext, deps: OfferDeps, ref?: string): CommandEntry {
+function offer(
+  spec: CommandSpec,
+  input: unknown,
+  ctx: OfferContext,
+  deps: OfferDeps,
+  ref?: string,
+  formParams?: Record<string, unknown>,
+): CommandEntry {
   const ui = spec.ui!;
   const group = ui.group ?? "Commands";
   return {
@@ -86,7 +93,8 @@ function offer(spec: CommandSpec, input: unknown, ctx: OfferContext, deps: Offer
       // window's own forms.
       if (ui.form) {
         if (!ui.form.includes(":")) return deps.openForm(ui.form);
-        return deps.openPage(ref ? withPageParams(ui.form, { uri: ref }) : ui.form);
+        const params = formParams ?? (ref ? { uri: ref } : null);
+        return deps.openPage(params ? withPageParams(ui.form, params as Record<string, string>) : ui.form);
       }
       if (ui.background) return deps.runInBackground(ui.label, spec.id, input);
       void deps.run(ui.label, spec.id, input).then(async (out) => {
@@ -103,7 +111,7 @@ export function commandOffers(specs: CommandSpec[], ctx: OfferContext, deps: Off
   const out: CommandEntry[] = [];
   for (const spec of specs) {
     const ui = spec.ui;
-    if (!ui || ui.about) continue;
+    if (!ui || ui.about || ui.at) continue;
     // A form gathers the input itself; otherwise it must bind here.
     const bound = ui.form ? { input: null } : bindInput(ui.input, ctx);
     if (bound) out.push(offer(spec, bound.input, ctx, deps));
@@ -129,6 +137,27 @@ export function refOffers(
     if (!ui || !applies.includes(spec.id)) continue;
     const bound = ui.form ? { input: null } : bindInput(ui.input ?? { uri: "{{uri}}" }, { ...ctx, ref });
     if (bound) out.push(offer(spec, bound.input, ctx, deps, ref));
+  }
+  return out;
+}
+
+/** The commands an action point offers (`action_point_commands`: the ids
+ *  that joined it and the input each runs with, bound from the point's
+ *  context by the server), as entries run the way the window runs any
+ *  offer. A command that opens a form is given the input as the form's
+ *  params. */
+export function pointOffers(
+  specs: CommandSpec[],
+  commands: ReadonlyArray<{ id: string; input: unknown }>,
+  ctx: OfferContext,
+  deps: OfferDeps,
+): CommandEntry[] {
+  const out: CommandEntry[] = [];
+  for (const c of commands) {
+    const spec = specs.find((s) => s.id === c.id);
+    if (!spec?.ui) continue;
+    const form = c.input && typeof c.input === "object" ? (c.input as Record<string, unknown>) : undefined;
+    out.push(offer(spec, c.input, ctx, deps, undefined, form));
   }
   return out;
 }

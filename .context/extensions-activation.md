@@ -23,30 +23,31 @@ in (a row's extension is `v_contribution`'s for its `uri`; Enable takes
   included, a lost race to another delivery not; `skipped` and `proposed`
   never do, and a reaction whose commands ran starts the count over. Nothing cascades: a page over its view still runs.
 - **Repairing.** Core detects and reports (the health row,
-  `contribution.disabled@1`, the Extensions page) with or without a work
-  list. Filing the repair item is the bundled effect
-  `oxplow/repair-disabled` (`effects/repair_disabled.star`, on
-  `contribution.disabled`, `needs: [sql.read]`): it composes
-  `oxplow.work_item.create` on the active work list — whichever provider
-  that is, never a task table — titled `Repair <namespace> <contribution>:
-  <reason>`. Its body is what failed (the reason), where it is declared
-  (`v_contribution` file:line), its recent failures (a collector's failed
-  syncs, an effect's failed reactions, else the last error) and what to do.
-  It no longer carries the declaration YAML, `intent.purpose`, the
-  `extension check` output or the `engine:` line — none is readable through
-  `sql.read`; the item says to run `oxplow extension check`/`test`. A later
-  disable while the item is open comments on it (`oxplow.work_item.comment`);
-  once it is done or canceled the next disable files a new one. **The
-  open item is found by its link**: it is created with `links: [{ target:
-  <contribution URI>, link_type: about }]`, and the open one is the not-done
-  `v_work_item` with a `v_work_item_link` `about` the contribution's URI.
-  The title is for people and never matched.
-  `v_contribution_health.repair_item` is that same open item (the table
-  keeps no `repair_item`). With no running work list
-  (`none`, or the chosen tracker down) the effect skips; it is a bundled
-  effect like `verify-unchecked`, so **repair items appear once its
-  extension is enabled**, and disabling the effect stops new ones. It runs as an anchorless effect (the event has no thread), so the
-  thread gate doesn't apply. oxplow never sends the item to an agent.
+  `contribution.disabled@1`, the Extensions page), with or without a task
+  store. Filing the repair task is **oxtask's** effect `oxtask/repair-disabled`
+  (`extensions/oxtask/effects/repair_disabled.star`, on `contribution.disabled`,
+  `needs: [sql.read]`): it composes `oxtask.task.create`, titled `Repair
+  <namespace> <contribution>: <reason>`. It is a store's effect because
+  bundled names no store's command and an effect can't run an action point.
+  Its body is what failed (the reason), where it is declared (`v_contribution`
+  file:line), its recent failures (a collector's failed syncs, an effect's
+  failed reactions, else the last error) and what to do. It carries no
+  declaration YAML, `intent.purpose`, `extension check` output or `engine:`
+  line — none is readable through `sql.read`; the task says to run `oxplow
+  extension check`/`test`. A later disable while the task is open comments on
+  it (`oxtask.task.comment`); once it is done or canceled the next disable
+  files a new one. **The open task is found by its link**: it is created with
+  `links: [{ to: <contribution URI>, type: about }]`, and the open one is the
+  not-done oxtask task in `v_oxplow_task` with a `v_oxplow_task_link`
+  `about` the contribution's URI. The title is for people and never matched.
+  Bundled's dataset `v_oxplow_contribution_repair` is that same open task (the
+  contribution-health table keeps no `repair_item`), and bundled's part
+  `oxplow/contribution-repair`, mounted in the health page's `repair` slot,
+  shows it with **Repair with the Agent**. With oxtask off nothing files and
+  the part is empty. It is an effect like `verify-unchecked`, so **repair tasks
+  appear once oxtask is enabled** and its effect approved; disabling the effect
+  stops new ones. It runs as an anchorless effect (the event has no thread),
+  so the thread gate doesn't apply. oxplow never sends the task to an agent.
 - **The events** are `contribution.disabled@1 { contribution, reason }` and
   `contribution.enabled@1 { contribution }`, `contribution` the URI
   (`collector:triage/todos`, `effect:…`, `provider:…`).
@@ -59,10 +60,10 @@ in (a row's extension is `v_contribution`'s for its `uri`; Enable takes
   `v_contribution_health`): `OK` with its average time, a missed schedule and
   undelivered events; `Failing (N in a row): <error>`; or `Disabled:
   <reason>` with **Enable Again** (`oxplow.contribution.enable` through
-  `personCommands`) and, while its repair item is open, **Repair with
-  the Agent** — one line in the agent's input, `Repair the extension
-  described in [oxplow uri <repair item>] — read it first.`, never sent
-  (the repair brief is the item's body; `no-agent-input-automation.test.ts`
+  `personCommands`) and, while its repair task is open, **Repair with
+  the Agent** (bundled's part) — one line in the agent's input, `Repair the
+  extension described in [oxplow uri <repair task>] — read it first.`, never
+  sent (the repair brief is the task's body; `no-agent-input-automation.test.ts`
   pins the button as its only caller). Settings → Data → **Undelivered events**
   (the `alerts-deliveries` page, mounted in `oxplow/settings-data.sections`) lists the pending dead letters with Retry and Discard; the
   rail's Alerts shows "N events couldn't be delivered" while any wait.
@@ -100,7 +101,7 @@ namespace and revision checks.
 ## Database generation candidates
 
 `VocabularyService::prepare` freezes enabled vocabulary declarations and the
-host work item recognizer from a CatalogSnapshot without writing or swapping.
+host task recognizer from a CatalogSnapshot without writing or swapping.
 Enabled load errors reject preparation. `PreparedVocabulary::replace_tx` uses
 a savepoint and rejects the complete set on any event/ref/subscription or
 recognizer diagnostic, restoring event contracts, retention and resource rows.
@@ -119,7 +120,7 @@ and vocabulary replacement and contribution restatement inside a surrounding
 savepoint: any diagnostic or storage failure restores the whole candidate.
 `prepare_with_capabilities` also includes prepared capability rows and switch
 events, rejecting mismatched catalog identities. Vocabulary then uses the
-candidate's planned work list recognizer rather than the old live selection.
+candidate's planned recognizers rather than the old live selection.
 It returns a vocabulary for publication only after the outer transaction commits.
 Storage or rollback errors require the caller to abort; logical diagnostics stay
 separate from retryable contention. This helper executes no external work.
@@ -149,7 +150,7 @@ coordinate provider process/adaptor publication with the other registries.
 
 **Capability candidates.** `PreparedCapabilities`
 (`crates/oxplow-app/src/capabilities.rs`) freezes candidate declarations,
-resolved choices, features, work-item recognition and the
+resolved choices, features, task recognition and the
 `v_capability_provider` rows from one catalog plus the registry's captured
 state; each snapshot, selection, recognizer and row computation uses that
 one captured implementation list, so feature resolution never rereads a
@@ -166,7 +167,7 @@ the datasets, vocabulary and contribution descriptors in one savepoint
 ## Prepared native runtime adapters
 
 `PreparedRuntimeAdapters` captures one CatalogSnapshot and constructs declared
-work-item, harness, effort-policy, knowledge, snapshot and model-provider
+harness, snapshot and model-provider
 maps without changing running registries. It rejects enabled load errors and
 strict AI factory failures before any map publication. Script/gate objects
 are constructed but no process, handshake, network call or paid probe runs.
@@ -216,7 +217,7 @@ before the DB permit, then held through commit and adapter swaps. Retired proces
 shut down, successful startup health is recorded and initial sync is queued after
 the publication transaction and reader boundary are released. Command owner metadata, command handlers, host config
 and capability state are reserved on the blocking worker before commit and held
-through all map swaps. Wiki/snapshot follow policies use the candidate's captured
+through all map swaps. Knowledge/snapshot follow policies use the candidate's captured
 selection, avoiding recursive capability/config reads while those locks are held.
 Precommit rejection retains the previous active snapshot. A panic after the
 commit (the in-memory maps part swapped, the boundary refusing readers) is
@@ -285,8 +286,7 @@ active, so a new unpinned reader fails the suite where it first runs.
 
 - *Pinned* (`ExtensionActivation::read`, or the pin a `RunContext` carries):
   a reader that joins declarations to another generation-owned map —
-  commands, capabilities, providers, datasets. The agent-text refresh and the
-  effort policy's owner lookup pin for exactly this. A task-local does not
+  commands, capabilities, providers, datasets. The agent-text refresh pins for exactly this. A task-local does not
   cross into `spawn_blocking`; use `ExtensionActivation::spawn_blocking`,
   which carries the caller's pins (the command router does).
 - `ExtensionCatalog::unpinned(root, reason)`: a reader whose whole answer

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`vcs.head.moved@3`: a stream's HEAD moved (a commit, checkout, merge,\nreset in its worktree), whether the tree was clean or not. Logged once\nper move, after the take that follows it. A ref moving elsewhere in the\nrepository is not one. Collectors that follow commits (the\n`where`-less `on: [vcs.head.moved]`) run on it.",
+  "properties": {
+    "from": {
+      "description": "The commit (its sha) HEAD pointed at before, if any.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "snapshot": {
+      "description": "The snapshot re-stamped with the new commit; absent when the tree was\nnot clean, so the next take records the commit instead.",
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "stream": {
+      "description": "The stream (`str1`).",
+      "type": "string"
+    },
+    "to": {
+      "description": "The commit (its sha) HEAD points at now; absent before the first commit.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "stream"
+  ],
+  "title": "VcsHeadMovedV3",
+  "type": "object"
+}

@@ -1,0 +1,36 @@
+# Only a command that filed, moved, updated or commented on a task is
+# evidence its request worked on it (core's rule). A change of oxplow's
+# fields alone is not: a reorder of unranked tasks links none, and the close
+# effect clearing the assignee links none besides the close's own
+# `transition`. An assignment to the turn's own thread is `assigned`.
+requires: [oxtask]
+given:
+  - observe:
+      turn:
+        prompt: Start three
+        during:
+          - { command: oxtask.task.create, input: { title: A, stage: ready }, as: agent }
+          - { command: oxtask.task.create, input: { title: B, stage: ready }, as: agent }
+          - { command: oxtask.task.move, input: { id: tsk1, stage: in_progress }, as: agent }
+          - { command: oxtask.task.move, input: { id: tsk2, stage: in_progress }, as: agent }
+when: { sql: "SELECT basis, count(*) AS n FROM v_oxplow_request_task GROUP BY basis ORDER BY basis" }
+expect: { rows: [{ basis: assigned, n: 2 }, { basis: filed, n: 2 }, { basis: transition, n: 2 }] }
+steps:
+  # A reorder in a later request, by the agent: no `edited` link (the turn's
+  # end links the two tasks it still holds as `assigned`, as core does).
+  - given:
+      - observe:
+          turn:
+            prompt: Put B first
+            during: [{ command: oxplow.tasks.reorder, input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", before: "oxplow:oxplow/task?id=tsk1&provider=oxtask" }, as: agent }]
+  - when: { sql: "SELECT basis, count(*) AS n FROM v_oxplow_request_task WHERE request = (SELECT uri FROM v_request WHERE id = 2) GROUP BY basis" }
+    expect: { rows: [{ basis: assigned, n: 2 }] }
+  # A close clears the assignee (a fields change): the close's own
+  # `transition` link, and the other task the turn's end still finds held.
+  - given:
+      - observe:
+          turn:
+            prompt: Finish A
+            during: [{ command: oxtask.task.move, input: { id: tsk1, stage: done }, as: agent }]
+  - when: { sql: "SELECT basis, task = 'oxplow:oxplow/task?id=tsk1&provider=oxtask' AS a FROM v_oxplow_request_task WHERE request = (SELECT uri FROM v_request WHERE id = 3) ORDER BY basis" }
+    expect: { rows: [{ basis: assigned, a: 0 }, { basis: transition, a: 1 }] }

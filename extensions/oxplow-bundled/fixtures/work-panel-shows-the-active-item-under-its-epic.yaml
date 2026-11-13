@@ -1,0 +1,23 @@
+# An item with children is an epic: the active item shows under it in
+# "In progress", with the epic's other children indented beside it, and
+# the epic itself is never up next. A ready child shows in Up next too.
+requires: [oxtask]
+given:
+  - { command: oxtask.task.create, input: { title: The epic, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Doing it, stage: in_progress, parent: tsk1 } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: After it, stage: ready, parent: tsk1 } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk3&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Standalone, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk4&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+when: { part: oxplow/work-panel, params: { thread_id: 1 } }
+expect:
+  loaders:
+    work:
+      rows:
+        - { grp: In progress, title: The epic, icon: epic, depth: 0, active: 0 }
+        - { grp: In progress, title: Doing it, depth: 1, active: 1 }
+        - { grp: In progress, title: After it, depth: 1, active: 0 }
+        - { grp: Up next, title: After it }
+        - { grp: Up next, title: Standalone }

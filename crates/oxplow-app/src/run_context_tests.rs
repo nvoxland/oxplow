@@ -23,12 +23,12 @@ fn write(root: &Path, rel: &str, body: &str) {
 }
 
 /// `acme`: an event type, an `on:` collector, an effect and a command.
-fn acme(root: &Path, task: &str) {
+fn acme(root: &Path, thread: &str) {
     write(
         root,
         ".oxplow/extensions/acme/extension.yaml",
         "manifest: 2\nname: acme\nversion: 1.2.0\nintent: { purpose: Runs., origin: null, examples: [] }\n\
-         permissions: [commands:oxplow.work_item.update]\n\
+         permissions: [commands:oxplow.thread.rename]\n\
          event_types:\n  types:\n    - { type: acme.merged, v: 1, schema: merged.json, summary: A merge. }\n\
          collectors:\n\
          \x20 - id: star\n    runtime: starlark\n    entry: star.star\n    on: [acme.merged]\n    entities:\n      - { name: seen, key: k, columns: { k: text } }\n\
@@ -48,7 +48,7 @@ fn acme(root: &Path, task: &str) {
         "def transform(input):\n    return {\"entities\": {\"seen\": [{\"k\": \"x\"}]}}\n",
     );
     let compose = format!(
-        "{{\"commands\": [{{\"name\": \"oxplow.work_item.update\", \"input\": {{\"uri\": \"{task}\", \"title\": \"merged\"}}}}]}}"
+        "{{\"commands\": [{{\"name\": \"oxplow.thread.rename\", \"input\": {{\"thread\": \"{thread}\", \"title\": \"merged\"}}}}]}}"
     );
     write(
         root,
@@ -96,11 +96,11 @@ async fn rows(svc: &Services, sql: &str) -> Vec<Vec<Value>> {
 /// rows that already recorded it name it.
 #[tokio::test(flavor = "multi_thread")]
 async fn every_run_is_recorded_once_as_itself() {
-    let fx = crate::test_fixtures::services_with_task_effort().await;
+    let fx = crate::test_fixtures::services_with_thread().await;
     let svc = &fx.svc;
     let root = svc.layout.project_dir.clone();
-    let task = oxplow_tasks::work_item_ref(fx.task);
-    acme(&root, &task);
+    let subject = oxplow_domain::uri::build::thread_uri(fx.thread);
+    acme(&root, &fx.thread.to_string());
     crate::test_fixtures::activate_with_problems(svc).await;
     crate::test_fixtures::activate(svc).await;
     let env = Envelope::new("acme.merged", 1, "test", json!({ "number": 1 }))
@@ -109,7 +109,7 @@ async fn every_run_is_recorded_once_as_itself() {
             thread_id: Some(fx.thread),
             ..Anchors::default()
         })
-        .with_subject([task.clone()]);
+        .with_subject([subject.clone()]);
     let id = env.id.clone();
     svc.event_log_store.append(env).await.unwrap();
     let event: StoredEvent = svc.event_log_store.get(id).await.unwrap().unwrap();
@@ -162,7 +162,7 @@ async fn every_run_is_recorded_once_as_itself() {
             thread_id: Some(fx.thread),
             ..Anchors::default()
         })
-        .with_subject([task.clone()]);
+        .with_subject([subject.clone()]);
     let id = env.id.clone();
     svc.event_log_store.append(env).await.unwrap();
     let second = svc.event_log_store.get(id).await.unwrap().unwrap();
@@ -248,14 +248,14 @@ async fn every_run_is_recorded_once_as_itself() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_run_records_what_its_grant_decided() {
     use std::os::unix::fs::PermissionsExt;
-    let fx = crate::test_fixtures::services_with_task_effort().await;
+    let fx = crate::test_fixtures::services_with_thread().await;
     let svc = &fx.svc;
     let root = svc.layout.project_dir.clone();
     write(
         &root,
         ".oxplow/extensions/acme/extension.yaml",
         "manifest: 2\nname: acme\nintent: { purpose: Runs., origin: null, examples: [] }\n\
-         permissions: [sql.read, process.run, network:api.github.com, secrets:GH_TOKEN, commands:oxplow.work_item.update]\n\
+         permissions: [sql.read, process.run, network:api.github.com, secrets:GH_TOKEN, commands:oxplow.thread.rename]\n\
          collectors:\n\
          \x20 - id: gh\n    runtime: exec\n    entry: sync.sh\n    credentials: [GH_TOKEN]\n    network: [api.github.com]\n    entities:\n      - { name: pr, key: n, columns: { n: int } }\n\
          commands:\n\

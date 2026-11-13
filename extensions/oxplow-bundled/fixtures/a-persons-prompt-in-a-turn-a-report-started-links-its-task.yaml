@@ -1,0 +1,15 @@
+# The prompt decides, not the turn: a person's prompt that lands in a turn a
+# background job's report started (a reprompt) still links the tasks it
+# names, as core does; the report's own text links none.
+requires: [oxtask]
+given:
+  - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude }, bind: ses }
+  - { command: oxtask.task.create, input: { title: Named } }
+  - observe: { turn: { session: $ses.id, prompt: start, answer: one, tools: [{ name: Bash, kind: shell, command: sleep 1, ok: true, call_id: c1, started_job: j1 }] } }
+  - observe: { turn: { session: $ses.id, prompt: "report mentioning [oxplow uri oxplow:oxplow/task?id=tsk1&provider=oxtask]", job: c1, open: true } }
+  - observe: { turn: { session: $ses.id, prompt: "and also look at [oxplow uri oxplow:oxplow/task?id=tsk1&provider=oxtask]", answer: two } }
+when: { sql: "SELECT source FROM v_agent_turn ORDER BY id" }
+expect: { rows: [{ source: person }, { source: background_job }] }
+steps:
+  - when: { sql: "SELECT basis, turn_id FROM v_oxplow_request_task WHERE basis = 'prompt'" }
+    expect: { rows: [{ basis: prompt, turn_id: 2 }] }

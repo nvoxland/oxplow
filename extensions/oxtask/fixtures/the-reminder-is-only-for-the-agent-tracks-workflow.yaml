@@ -1,0 +1,15 @@
+# The untracked-work reminder is oxtask's "agent tracks everything"
+# workflow: with the workflow set to "person files, agent works" (or off,
+# or custom), an edit with no task is not reminded.
+requires: [oxplow-bundled, oxtask]
+given:
+  - { command: oxtask.tasks.set_workflow, input: { workflow: person_files } }
+  - observe: { turn: { prompt: Fix the greeting, tools: [{ name: Edit, kind: edit, paths: [greeting.txt], ok: true }] } }
+when: { sql: "SELECT count(*) AS n FROM v_agent_nudge WHERE kind = 'oxtask/untracked-work'" }
+expect: { rows: [{ n: 0 }] }
+steps:
+  - given:
+      - { command: oxtask.tasks.set_workflow, input: { workflow: agent_tracks } }
+      - observe: { turn: { prompt: Fix the farewell, tools: [{ name: Edit, kind: edit, paths: [farewell.txt], ok: true }] } }
+  - when: { sql: "SELECT count(*) AS n FROM v_agent_nudge WHERE kind = 'oxtask/untracked-work'" }
+    expect: { rows: [{ n: 1 }] }

@@ -15,7 +15,7 @@ test("no stored layout: every panel in default order, all open", () => {
   const out = resolveLayout(["ext:acme/inbox", "ext:gh/prs"], []);
   expect(out.order).toEqual(["ext:acme/inbox", "ext:gh/prs"]);
   expect(out.hidden).toEqual([]);
-  // Work too (tsk1045): collapsed, it hid the task a person had just added.
+  // Work too: collapsed, it hid the task a person had just added.
   expect([...out.collapsed]).toEqual([]);
 });
 
@@ -53,7 +53,7 @@ test("revealing a panel shows it when hidden and expands it when collapsed", () 
   expect(out.collapsed.has("ext:acme/inbox")).toBe(false);
 });
 
-// tsk998: an edit made before an extension's panels are available keeps
+// an edit made before an extension's panels are available keeps
 // where the person put them.
 test("an edit keeps the placements of panels not available yet", () => {
   const stored = [

@@ -237,7 +237,7 @@ mod tests {
     #[tokio::test]
     async fn draft_status_compares_the_streams_checkout_with_what_runs() {
         use oxplow_domain::stores::StreamStore as _;
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let ext = svc.layout.project_dir.join(".oxplow/extensions/acme");
         let write = |dir: &Path, rel: &str, text: &str| {

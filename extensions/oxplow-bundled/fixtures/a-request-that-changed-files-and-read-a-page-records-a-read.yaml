@@ -1,0 +1,13 @@
+# A request whose turn read a knowledge page (its file, as an agent's own
+# read) and edited a file records 1 for the request.
+requires: [oxwiki]
+given:
+  - { command: oxwiki.page.write, input: { title: Greeting notes, body: "# Greeting notes\n\nThe greeting says hello." } }
+  - observe:
+      turn:
+        prompt: Fix the greeting
+        tools:
+          - { name: Read, kind: read, paths: [".oxplow/oxwiki/greeting-notes.md"], ok: true }
+          - { name: Edit, kind: edit, paths: [a.txt], ok: true }
+when: { sql: "SELECT value FROM v_fact WHERE measure_key = 'knowledge.read_requests'" }
+expect: { rows: [{ value: 1.0 }] }

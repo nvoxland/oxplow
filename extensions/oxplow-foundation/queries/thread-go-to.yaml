@@ -1,0 +1,53 @@
+title: Thread Go To
+description: "The pages a thread goes to, of one kind (`mode`): its bookmarks (`bookmarks`, as `thread-bookmarks` has them), the pages it opened last (`recent`), or the ones it opens most over 30 days (`top`) — `limit` at most for the last two (20 unless given: the panel's body, which grows to show them all; its collapsed icons ask for 6). Each row's `grp` names the kind, `at` when it was last opened (recent), `times` how often (top)."
+params:
+- name: thread_id
+- name: mode
+- name: limit
+  default: '20'
+loaders:
+  # What the thread has bookmarked: the one rule.
+  bookmarks:
+    page: oxplow/thread-bookmarks
+    loader: bookmarks
+    params: { thread_id: { param: thread_id } }
+  pages:
+    sql: |
+      WITH
+      visit AS (
+        SELECT page_id AS uri, page_kind, label, visited_at,
+               row_number() OVER (PARTITION BY page_id ORDER BY visited_at DESC, id DESC) AS latest
+        FROM v_page_visit
+        WHERE thread_id = :thread_id AND page_kind <> 'agent_session'
+      ),
+      recent AS (
+        SELECT uri, page_kind, label, visited_at, row_number() OVER (ORDER BY visited_at DESC) AS ord
+        FROM visit WHERE latest = 1
+      ),
+      top AS (
+        SELECT uri, page_kind, label, visits, row_number() OVER (ORDER BY visits DESC, last DESC) AS ord FROM (
+          SELECT uri, max(CASE latest WHEN 1 THEN page_kind END) AS page_kind,
+                 max(CASE latest WHEN 1 THEN label END) AS label,
+                 count(*) AS visits, max(visited_at) AS last
+          FROM visit
+          WHERE visited_at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-30 days')
+          GROUP BY uri
+        )
+      ),
+      row AS (
+        SELECT row_number() OVER (ORDER BY added_at DESC, id DESC) AS ord,
+               'Bookmarks' AS grp, uri, page_kind, title AS label, NULL AS at, NULL AS visits
+        FROM bookmarks WHERE :mode = 'bookmarks'
+        UNION ALL
+        SELECT ord, 'Recent', uri, page_kind, label, visited_at, NULL FROM recent
+        WHERE :mode = 'recent' AND ord <= CAST(:limit AS INTEGER)
+        UNION ALL
+        SELECT ord, 'Most visited', uri, page_kind, label, NULL, visits FROM top
+        WHERE :mode = 'top' AND ord <= CAST(:limit AS INTEGER)
+      )
+      SELECT r.grp,
+             coalesce(nullif(trim(r.label), ''), r.uri) AS title,
+             r.page_kind, r.uri, r.at,
+             CASE WHEN r.visits IS NULL THEN NULL ELSE r.visits || '×' END AS times
+      FROM row r
+      ORDER BY r.ord

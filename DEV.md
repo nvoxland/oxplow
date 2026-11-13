@@ -105,7 +105,7 @@ daemon; it *copies* the one staged in `apps/desktop/src-tauri/binaries/`
 (`externalBin`) over `target/debug/oxplow-daemon`, every time
 oxplow-desktop's build script runs. So **stage before you build the
 shell** (`bash apps/desktop/src-tauri/scripts/stage-sidecars.sh debug`
-builds the daemon, the MCP adapter and the script worker (every script run needs it in `target/debug/`, beside the executable) and restages
+builds the daemon and the script worker (every script run needs it in `target/debug/`, beside the executable) and restages
 the ones that changed): a bare `cargo build -p oxplow-desktop` or
 `cargo build --bin oxplow` runs whatever daemon was staged last, even
 right after you built a new one. The symptom is a backend older than
@@ -298,20 +298,18 @@ Runs Vite + cargo to produce platform installers in
 
 **The bundle carries three binaries.** Every project window is backed by
 an `oxplow-daemon` child, so the daemon ships beside the shell as a
-Tauri **sidecar** (`bundle.externalBin`), and so does oxplow's MCP
-adapter, `oxplow-provider-mcp`, which the daemon runs for a provider
-declared with `adapter:` (P7.A6). `beforeBuildCommand` runs
-`src-tauri/scripts/stage-sidecars.sh`, which builds both and copies them
-to `src-tauri/binaries/<name>-<target-triple>` (gitignored). Tauri then
-places them next to the shell — `Oxplow.app/Contents/MacOS/` on macOS —
-which is exactly where `BundledDaemon::binary_path()` and
-`providers::host::adapter_bin()` look.
+Tauri **sidecar** (`bundle.externalBin`), and so does the script worker.
+`beforeBuildCommand` runs `src-tauri/scripts/stage-sidecars.sh`, which
+builds them and copies them to `src-tauri/binaries/<name>-<target-triple>`
+(gitignored). Tauri then places them next to the shell —
+`Oxplow.app/Contents/MacOS/` on macOS — which is exactly where
+`BundledDaemon::binary_path()` looks.
 
 A bundle without it can't open any project, and the shell says so
 ("no oxplow-daemon next to the app"). Note the script path is relative
 to `apps/desktop`, not `src-tauri`: that is the cwd Tauri runs
 `beforeBuildCommand` in, and getting it wrong is silent until you look
-inside the bundle (tsk263).
+inside the bundle.
 
 **Staging is not only a packaging step.** `externalBin` makes
 tauri-build validate the sidecar from `oxplow-desktop`'s *build
@@ -322,7 +320,7 @@ script*, so `cargo test`, `cargo clippy --all-targets` and even a bare
 resource path `binaries/oxplow-daemon-<triple>` doesn't exist
 ```
 
-Run it once and everything compiles (tsk266):
+Run it once and everything compiles:
 
 ```
 bash apps/desktop/src-tauri/scripts/stage-sidecars.sh debug
@@ -510,7 +508,7 @@ gitignored. On a fresh clone, your IDE will report
   `--amend` a shipped commit.
 - **Tests**: real DB (`Database::in_memory()` or tempfile-backed),
   real SQLite, no mocking.
-- **Work items as durable records**: every Edit/Write to project
+- **Tasks as durable records**: every Edit/Write to project
   files needs a tracked task. See AGENTS.md for filing rules.
 
 ## Release

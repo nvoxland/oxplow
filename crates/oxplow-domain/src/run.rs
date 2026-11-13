@@ -225,6 +225,9 @@ pub struct RunContext {
     run: RunId,
     parent: Option<RunId>,
     contribution: Option<ContributionRef>,
+    /// The contribution whose script composed this run, when another
+    /// contribution's command (a core command it composes) runs under it.
+    composed_by: Option<ContributionRef>,
     actor: Actor,
     anchors: Anchors,
     subject: Vec<String>,
@@ -245,6 +248,9 @@ pub struct RunContext {
     /// session running a command for a person (`assistant:ast3`). Its
     /// audit rows say so (`command_audit.via`).
     via: Option<String>,
+    /// An undo replaying an inverse the bus recorded: what its children
+    /// write was authorized when the run it undoes was composed.
+    replaying: bool,
 }
 
 impl RunContext {
@@ -253,6 +259,8 @@ impl RunContext {
             run: RunId::generate(),
             parent: None,
             contribution,
+            composed_by: None,
+            replaying: false,
             anchors: actor.anchors(),
             actor,
             subject: Vec::new(),
@@ -479,6 +487,10 @@ impl RunContext {
         RunContext {
             run: RunId::generate(),
             parent: Some(self.run.clone()),
+            composed_by: match &contribution {
+                Some(_) => self.contribution.clone(),
+                None => self.composed_by.clone(),
+            },
             contribution: contribution.or_else(|| self.contribution.clone()),
             actor: self.actor.clone(),
             anchors: self.anchors.clone(),
@@ -499,7 +511,20 @@ impl RunContext {
             host_generation: self.host_generation.clone(),
             decided,
             via: self.via.clone(),
+            replaying: self.replaying,
         }
+    }
+
+    /// This run replays an inverse the bus recorded (an undo): its
+    /// children are trusted as the run they undo was.
+    pub fn replaying_inverse(mut self) -> Self {
+        self.replaying = true;
+        self
+    }
+
+    /// Whether this run is an undo's replay of a recorded inverse.
+    pub fn is_replaying_inverse(&self) -> bool {
+        self.replaying
     }
 
     pub fn run(&self) -> &RunId {
@@ -512,6 +537,13 @@ impl RunContext {
 
     pub fn contribution_ref(&self) -> Option<&ContributionRef> {
         self.contribution.as_ref()
+    }
+
+    /// The contribution whose script composed this run's command, for a
+    /// command that acts for its composer (an extension writing its own file).
+    /// `None` for a command run directly.
+    pub fn composed_by(&self) -> Option<&ContributionRef> {
+        self.composed_by.as_ref()
     }
 
     /// The extension it belongs to.

@@ -1,4 +1,4 @@
-//! The metric aggregation engine (epic tsk12, child tsk15) — the heart of
+//! The metric aggregation engine — the heart of
 //! "metrics are definitions computed over facts."
 //!
 //! A metric is NOT a stored row stream; it's a spec (a source measure + an
@@ -13,12 +13,12 @@
 //!     collapses to one number ([`range_value`]): semi-additive snapshots take the
 //!     LAST capture; additive events SUM the captures; ratios re-derive Σnum/Σden.
 //!
-//! The producers (tsk14) feed facts; SQL reads these results through
+//! The producers feed facts; SQL reads these results through
 //! `metric_grid()` and `metric_findings()` (P4.5, P4.8); and the materialized
-//! fold lives in `metric_cube` (tsk96) — this engine's fact path remains the
+//! fold lives in `metric_cube` — this engine's fact path remains the
 //! ORACLE the cube is verified against.
 //!
-//! Visibility policy (tsk109): items are `pub` only when a sibling crate uses
+//! Visibility policy: items are `pub` only when a sibling crate uses
 //! them (the shared types — `Aggregation`, `FactFilter`, `FactFinding`,
 //! `SeriesPoint` — plus `MetricEngine` itself) or the
 //! `cube_equivalence` example needs them (noted on each). Everything else the
@@ -211,8 +211,8 @@ pub fn fold(points: &[SeriesPoint], how: Fold) -> Option<Folded> {
     })
 }
 
-/// `complete` | `per-path` | `per-subject` — what ONE capture RESTATES (V54
-/// tsk41; per-subject V55 tsk43). A **separate axis** from [`Temporal`]:
+/// `complete` | `per-path` | `per-subject` — what ONE capture RESTATES (V54;
+/// per-subject V55). A **separate axis** from [`Temporal`]:
 /// additivity says how values combine over time, completeness says how much of
 /// the population a single capture speaks for.
 ///
@@ -234,7 +234,7 @@ pub enum CaptureScope {
     /// [`tree_state_series`].
     PerPath,
     /// A capture restates only **the subjects it emitted facts for** — for
-    /// `oxplow.test_case`, the cases the run actually executed (V55, tsk43). The
+    /// `oxplow.test_case`, the cases the run actually executed (V55). The
     /// value is the latest fact per `(producer, subject)`, so a PARTIAL test run
     /// updates just the tests it ran instead of making the metric report a 4-test
     /// repo. Unlike `PerPath` there's no external scanned set (a run has no snapshot
@@ -280,8 +280,7 @@ pub fn parse_capture_scope(
 
 /// A simple conjunctive predicate over a fact. Covers the common metric filters
 /// (count-over-threshold; severity/dimension equality). This is the deserialized
-/// shape of a spec's `filter_json`. Richer predicates land with the config layer
-/// (tsk17).
+/// shape of a spec's `filter_json`. Richer predicates land with the config layer.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FactFilter {
     /// Keep facts with `value >= min_value` (e.g. complexity ≥ threshold).
@@ -311,7 +310,7 @@ impl FactFilter {
     /// zero-splice producer discovery in `collection` answers "which producers
     /// emit this measure's slice" with the memoized `producers_for_measure`
     /// instead of a ~900k-row representative scan when nothing can be filtered
-    /// out anyway (tsk239).
+    /// out anyway.
     pub fn is_unconstrained(&self) -> bool {
         self.min_value.is_none()
             && self.max_value.is_none()
@@ -378,7 +377,7 @@ impl FactFilter {
 
 /// One point in a metric's time series: a single capture's aggregated value.
 /// A capture has one branch + one provenance, so a point carries them directly
-/// (the read surface renders them without a second lookup, tsk26).
+/// (the read surface renders them without a second lookup).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct SeriesPoint {
     pub capture_id: i64,
@@ -399,7 +398,7 @@ pub struct SeriesPoint {
     pub source: Option<String>,
 }
 
-/// An inclusive `captured_at` window for a series read (tsk202). Bounds the
+/// An inclusive `captured_at` window for a series read. Bounds the
 /// series to the caller's visible range so the read cost tracks the window, not
 /// the measure's whole history. Either bound may be open. `None` (the default)
 /// reads everything.
@@ -443,7 +442,7 @@ fn apply_window(points: Vec<SeriesPoint>, window: Option<TimeWindow>) -> Vec<Ser
 #[derive(Debug, Clone, Default)]
 pub struct SeriesRead {
     /// Slice by a dimension (conformed, `dims_json`, or a spine dim such as
-    /// `oxplow.work_item`).
+    /// a derived dimension).
     pub group_by: Option<String>,
     /// Scope to one stream; `None` reads all.
     pub stream: Option<i64>,
@@ -455,8 +454,8 @@ pub struct SeriesRead {
 }
 
 /// A located item behind a metric — the read-time "finding" view over a spec's
-/// filtered facts (the offenders drill-in), replacing the baked `metric_finding`
-/// (epic tsk12, tsk26). `severity` is the fact's reported severity (lint) or,
+/// filtered facts (the offenders drill-in), replacing the baked `metric_finding`.
+/// `severity` is the fact's reported severity (lint) or,
 /// absent one, DERIVED from the value against the spec's thresholds × direction.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct FactFinding {
@@ -488,13 +487,13 @@ pub(crate) fn dim_value(f: &FactRow, dimension: &str) -> Option<String> {
 }
 
 /// A fact's `dims_json`, parsed **at most once** and reused across that fact's
-/// dimension lookups (tsk214).
+/// dimension lookups.
 ///
 /// Without this, resolving N JSON-backed dimensions for one fact meant N full
 /// `serde_json` parses of the same string, each allocating a map to read a
 /// single key. `dims_key` does exactly that — once per promoted dim, over every
 /// live fact, for every capture — which made `dim_value` 11.5% of on-CPU time
-/// in the tsk208 profile. Column- and spine-backed dims never touch the JSON at
+/// in the profile. Column- and spine-backed dims never touch the JSON at
 /// all, so a cache that only materializes on first JSON-backed lookup costs
 /// nothing on the cheap paths.
 #[derive(Default)]
@@ -521,7 +520,7 @@ pub(crate) fn dim_value_cached(
             Some(package_of(path))
         }
         // Pseudo-dimensions off the capture/fact spine (not `dims_json`), so
-        // `group_by` is uniform server-side (tsk26): branch, the raw subject, and
+        // `group_by` is uniform server-side: branch, the raw subject, and
         // the model (an `oxplow:oxplow/ai_model?name=<name>` subject → the bare id, else the dims_json
         // `oxplow.model`).
         "oxplow.branch" => f.branch.clone(),
@@ -537,30 +536,75 @@ pub(crate) fn dim_value_cached(
             }
             _ => dims.get(f).and_then(|d| dim_from_map(d, "oxplow.model")),
         },
-        // The capture spine: who/where a fact was measured (tsk321).
+        // The capture spine: who/where a fact was measured.
         "oxplow.stream" => Some(f.stream_id.to_string()),
         "oxplow.thread" => f.thread_id.map(|v| v.to_string()),
-        "oxplow.effort" => f.effort_id.map(|v| v.to_string()),
-        "oxplow.work_item" => f.work_item.clone(),
+        "oxplow.request" => f.request_id.map(|v| v.to_string()),
         "oxplow.vcs_rev" => f.closest_vcs_rev.clone(),
-        key => dims.get(f).and_then(|d| dim_from_map(d, key)),
+        key => dims
+            .get(f)
+            .and_then(|d| dim_from_map(d, key))
+            .or_else(|| f.derived.get(key).cloned()),
     }
 }
 
-/// Dimensions read off the capture spine (stream, thread, effort, work item, git
+/// A fact dimension an extension's dataset answers (`from:` in its
+/// `dimensions:`): the fact's `by` key is looked up in the dataset's column of
+/// the same name, and the value is the dataset's `value` column of the first
+/// row in `order`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DerivedDimension {
+    pub key: String,
+    pub dataset: String,
+    pub by: String,
+    pub value: String,
+    pub order: Option<String>,
+}
+
+/// The derived dimensions in force. Process-wide, like the dimension
+/// catalog it comes from: the metrics service replaces it on every reseed (an
+/// extension turned off takes its dimensions with it), and the engine, the
+/// cube and the filter classification read it.
+static DERIVED_DIMENSIONS: std::sync::RwLock<Vec<DerivedDimension>> =
+    std::sync::RwLock::new(Vec::new());
+
+/// Replace the derived dimensions in force.
+pub fn set_derived_dimensions(dims: Vec<DerivedDimension>) {
+    *DERIVED_DIMENSIONS
+        .write()
+        .unwrap_or_else(|e| e.into_inner()) = dims;
+}
+
+fn derived_dimensions() -> Vec<DerivedDimension> {
+    DERIVED_DIMENSIONS
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+
+fn is_derived_dim(dimension: &str) -> bool {
+    DERIVED_DIMENSIONS
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .any(|d| d.key == dimension)
+}
+
+/// Dimensions read off the capture spine (stream, thread, request, git
 /// version). Sliceable on the fact path only: the cube never buckets by them,
-/// because a capture's effort is stamped when the effort closes, after the
-/// cube may already have folded it.
+/// because a capture's turn is linked to its request (and the request to its
+/// tasks) after the cube may already have folded it.
 pub(crate) const SPINE_DIMS: &[&str] = &[
     "oxplow.stream",
     "oxplow.thread",
-    "oxplow.effort",
-    "oxplow.work_item",
+    "oxplow.request",
     "oxplow.vcs_rev",
 ];
 
+/// A dimension that reads outside a fact's own slice: the capture spine, and
+/// the ones an extension's dataset answers.
 pub(crate) fn is_spine_dim(dimension: &str) -> bool {
-    SPINE_DIMS.contains(&dimension)
+    SPINE_DIMS.contains(&dimension) || is_derived_dim(dimension)
 }
 
 /// Whether a dimension resolves entirely from a [`FactSliceKey`] — i.e. from
@@ -627,7 +671,7 @@ fn aggregate_facts(facts: &[&FactRow], agg: Aggregation) -> (f64, Option<f64>, O
             // Carry (Σvalues, count) as ratio components so the non-additive
             // cross-time collapse (Σn/Σd in `range_value`) yields the mean
             // across ALL facts — the V47 mean-across-closes measures
-            // (cycle_time, effort) die to a den=0 → 0.0 otherwise.
+            // (cycle time, say) die to a den=0 → 0.0 otherwise.
             (sum / count, Some(sum), Some(count))
         }
         Aggregation::Min => (
@@ -660,18 +704,18 @@ fn aggregate_facts(facts: &[&FactRow], agg: Aggregation) -> (f64, Option<f64>, O
 }
 
 /// A RATIO cell that is 0/0 is NO DATA, not 0% — a coverage capture over zero
-/// instrumented lines must not render the worst possible reading (tsk109;
+/// instrumented lines must not render the worst possible reading (
 /// a ratio over nothing has no value). Every point-emit site skips
 /// such a cell — the fact fold, `aggregate_series`, and the cube's serve arms
 /// share this ONE predicate so they cannot drift.
 ///
-/// The numerator is part of the test (tsk156): a zero denominator with a
+/// The numerator is part of the test: a zero denominator with a
 /// NON-zero numerator is a real numerator-only contribution, not an empty
-/// cell. `oxplow.token_waste` is built that way on purpose — an effort close
-/// appends (num 0 / den spend) and a detected revert appends (num spend /
-/// den 0), so Σn/Σd over the measure is the wasted share. Testing the
-/// denominator alone matched the revert leg exactly and dropped it, which
-/// pinned `task.tokens.wasted_pct` at 0% for every possible input.
+/// cell. A two-legged append-only ratio is built that way on purpose — one
+/// leg appends (num 0 / den spend) and the other (num spend / den 0), so
+/// Σn/Σd over the measure is the share. Testing the denominator alone
+/// matched the second leg exactly and dropped it, which pinned such a share
+/// at 0% for every possible input.
 ///
 /// Only `Ratio`: an `avg` cell's denominator is its fact count, which is
 /// nonzero whenever there is anything to emit.
@@ -683,8 +727,8 @@ pub(crate) fn ratio_empty(
     matches!(agg, Aggregation::Ratio) && denominator == Some(0.0) && numerator.unwrap_or(0.0) == 0.0
 }
 
-/// The decomposable aggregate of a BUCKET of facts — the cube's stored cell
-/// (tsk96). It exists so a read can re-derive an aggregation by **merging cells**
+/// The decomposable aggregate of a BUCKET of facts — the cube's stored cell.
+/// It exists so a read can re-derive an aggregation by **merging cells**
 /// instead of re-reading the facts: one `(capture × promoted dims)` cube answers
 /// several specs that slice it differently, because every aggregation we serve
 /// survives bucketing.
@@ -801,7 +845,7 @@ pub(crate) fn aggregate_series(
     // Captures in first-seen (time-ascending) order; groups SORTED within a
     // capture — matching `tree_state_series` and the cube's BTreeMap buckets,
     // so a grouped cube-served read is identical to the fact-served one
-    // including point ORDER (tsk109 — an order-sensitive consumer like
+    // including point ORDER (an order-sensitive consumer like
     // `range_value`'s `.last()` must land on the same point either way).
     let mut caps: Vec<i64> = Vec::new();
     let mut by_cap: HashMap<i64, BTreeMap<Option<String>, Vec<&FactRow>>> = HashMap::new();
@@ -835,7 +879,7 @@ pub(crate) fn aggregate_series(
         for (group, fs) in groups {
             let captured_at = fs[0].captured_at;
             let (value, numerator, denominator) = aggregate_facts(&fs, agg);
-            // A zero-denominator ratio capture is no data, not 0% (tsk109).
+            // A zero-denominator ratio capture is no data, not 0%.
             if ratio_empty(agg, numerator, denominator) {
                 continue;
             }
@@ -857,8 +901,8 @@ pub(crate) fn aggregate_series(
     out
 }
 
-/// Which earlier captures a reading capture may fold in — the ancestry rule
-/// (tsk97), as a PURE lookup so the fold stays unit-testable and never shells out
+/// Which earlier captures a reading capture may fold in — the ancestry rule,
+/// as a PURE lookup so the fold stays unit-testable and never shells out
 /// to git per capture per read. A git-backed resolver populates it once per read
 /// (cached); the fold only asks.
 ///
@@ -877,7 +921,7 @@ pub(crate) fn aggregate_series(
 ///   (abandoned work) ⇒ C is its own branch's business only.
 /// - **`base_commit(R)`** — the closest ANCESTOR commit at-or-before R; R's code is
 ///   `base_commit(R) + delta`. This is exactly what `closest_vcs_rev` records
-///   (HEAD at record time, or the snapshot's own commit when exact — tsk95).
+///   (HEAD at record time, or the snapshot's own commit when exact).
 ///
 /// # Resolution is as-of-R, and that makes it IMMUTABLE
 ///
@@ -889,7 +933,7 @@ pub(crate) fn aggregate_series(
 /// future readers' — so the cube's frozen seeds can never diverge from a fresh
 /// fact-path read, and no invalidate-on-commit machinery is needed.
 ///
-/// # Why not plain commit ancestry (tsk97's original rule — DISPROVEN)
+/// # Why not plain commit ancestry (the original rule — DISPROVEN)
 ///
 /// 100% of test captures are dirty, and a dirty run on a branch stamps
 /// `closest_vcs_rev` to the **fork point**, which is on main. Ancestry on that
@@ -918,7 +962,7 @@ pub struct Visibility {
 }
 
 impl Visibility {
-    /// Fold everything into everything — the pre-tsk97 behavior, and the fallback
+    /// Fold everything into everything — the earlier behavior, and the fallback
     /// whenever ancestry can't be resolved.
     pub fn blind() -> Self {
         Self::default()
@@ -969,7 +1013,7 @@ pub(crate) fn repo_scalar_key(f: &FactRow) -> Option<&str> {
 /// The state key a fact folds under for `scope` — and it MUST match the
 /// scope's EVICTION key (the restated set), or a fact legally carrying both
 /// identities (`subject` + `path`) is inserted under one and evicted by
-/// the other, accumulating forever on every path that folds it (tsk109).
+/// the other, accumulating forever on every path that folds it.
 /// `None` = a repo-scalar assertion (no identity at all), same under either
 /// preference order.
 pub(crate) fn fold_key(scope: CaptureScope, f: &FactRow) -> Option<&str> {
@@ -978,13 +1022,13 @@ pub(crate) fn fold_key(scope: CaptureScope, f: &FactRow) -> Option<&str> {
         // identity; a path is just its location.
         CaptureScope::PerSubject => f.subject.as_deref().or(f.path.as_deref()),
         // Per-path restates scanned paths. Complete never folds state, but a
-        // fourth scope must decide here rather than inherit (tsk103).
+        // fourth scope must decide here rather than inherit.
         CaptureScope::PerPath | CaptureScope::Complete => repo_scalar_key(f),
     }
 }
 
 /// The trend for a **partial-scope** measure: the repo-wide value **as of each
-/// capture** (V54, tsk41).
+/// capture** (V54).
 ///
 /// A partial capture restates only what it scanned/ran, so [`aggregate_series`]
 /// (one point per capture, over that capture's own facts) would plot *delta-sized*
@@ -1009,7 +1053,7 @@ pub(crate) fn fold_key(scope: CaptureScope, f: &FactRow) -> Option<&str> {
 /// of this series, or the single-shot SQL fold), so the hot path stays cheap.
 /// The read-side parameters of one partial-scope fold — grouped so
 /// [`tree_state_series`]' signature stays a readable set of inputs as they
-/// accrete (visibility arrived with tsk97, scope with tsk109).
+/// accrete (visibility arrived with, scope with).
 pub(crate) struct FoldRead<'a> {
     pub agg: Aggregation,
     pub filter: &'a FactFilter,
@@ -1038,7 +1082,7 @@ pub(crate) fn tree_state_series(
     // the older no matter which spec's page reads the fold. Deciding it from
     // the filtered list let an error-filtered spec keep a superseded error
     // assertion alive forever — and diverge from the cube, whose durable live
-    // state is filter-agnostic by design (tsk103 review).
+    // state is filter-agnostic by design (review).
     let mut scalar_asserted: std::collections::HashSet<i64> = std::collections::HashSet::new();
     for f in facts {
         if fold_key(scope, f).is_none() {
@@ -1081,12 +1125,12 @@ pub(crate) fn tree_state_series(
     // The live tree, per (STREAM, BRANCH).
     //
     // Stream, because a stream is a WORKTREE and the fold reconstructs one
-    // worktree's tree (tsk98) — two worktrees running the same gauge share
+    // worktree's tree — two worktrees running the same gauge share
     // `(producer, path)` keys, so a stream-blind state lets one worktree's capture
     // evict the other's paths and yields a point belonging to neither.
     //
     // Branch, because a capture may only fold in what its own code state descends
-    // from (tsk97). One branch-blind state lets a feature branch's failure land on
+    // from. One branch-blind state lets a feature branch's failure land on
     // a point labelled `main` whenever main didn't re-run that test.
     let mut state: HashMap<(i64, Option<String>), Tree<'_>> = HashMap::new();
     let mut out: Vec<SeriesPoint> = Vec::new();
@@ -1179,7 +1223,7 @@ pub(crate) fn tree_state_series(
 
 /// Splice value-0 points into `points` for every capture in `caps` that produced
 /// none — the pure half of [`MetricEngine::zero_fill`], factored out so the CUBE
-/// path (tsk99) applies the identical rule instead of reimplementing it (a second
+/// path applies the identical rule instead of reimplementing it (a second
 /// copy is a second thing to drift).
 ///
 /// Only count/sum have a meaningful zero (avg/min/max/last/ratio of nothing is
@@ -1238,7 +1282,7 @@ pub(crate) fn range_value(series: &[SeriesPoint], how: Fold) -> Option<f64> {
 /// The CURRENT capture per (stream, producer): the newest capture in the union
 /// of the kept facts' captures and the producers' capture rows (which include
 /// EMPTY zero-hit captures — so a scan that found nothing empties the rollup
-/// rather than leaving the previous scan's values standing, tsk44). A stream is
+/// rather than leaving the previous scan's values standing). A stream is
 /// a worktree and a producer is one scan kind, so "the latest scan" is per
 /// (stream, producer) — a measure fed by several gauges keeps each gauge's
 /// latest capture.
@@ -1278,10 +1322,10 @@ pub(crate) fn current_capture_ids(
     best.values().map(|&(_, id)| id).collect()
 }
 
-/// Memoized FACT-FALLBACK series (tsk205), valid only for one `(max capture,
+/// Memoized FACT-FALLBACK series, valid only for one `(max capture,
 /// epoch)` generation of a measure.
 ///
-/// The cube path already has its own cache (tsk196); this covers the reads that
+/// The cube path already has its own cache; this covers the reads that
 /// BYPASS the cube — `min_value`/`max_value` threshold specs
 /// (`oxplow.high_complexity_fns`, `oxplow.long_functions`) and off-cube slices —
 /// which re-fold the measure's whole fact history on every call. With N metric
@@ -1357,11 +1401,11 @@ pub fn missing_metric(key: &str, listed: Option<bool>) -> String {
 pub struct MetricEngine {
     facts: SqliteFactStore,
     fold_memo: Arc<Mutex<FoldMemo>>,
-    /// The ancestry resolver for the partial fold's cross-branch rule
-    /// (tsk102). `None` (tests, callers without a repo) ⇒ [`Visibility::blind`]
-    /// — pre-tsk102 behavior, never an error.
+    /// The ancestry resolver for the partial fold's cross-branch rule.
+    /// `None` (tests, callers without a repo) ⇒ [`Visibility::blind`]
+    /// — earlier behavior, never an error.
     visibility: Option<std::sync::Arc<crate::metric_visibility::VisibilityResolver>>,
-    /// Entity metrics read through the semantic layer (tsk322).
+    /// Entity metrics and derived dimensions read through the semantic layer.
     layer: crate::sql_gateway::SqlGateway,
 }
 
@@ -1373,6 +1417,14 @@ impl MetricEngine {
             fold_memo: Arc::new(Mutex::new(FoldMemo::default())),
             visibility: None,
         }
+    }
+
+    /// Read entity metrics and derived dimensions through `layer`: the app's
+    /// gateway, which speaks the extensions' datasets (the default one speaks
+    /// core's only).
+    pub fn with_layer(mut self, layer: crate::sql_gateway::SqlGateway) -> Self {
+        self.layer = layer;
+        self
     }
 
     /// Attach the ancestry resolver. **The cube's builder must get the same
@@ -1388,7 +1440,7 @@ impl MetricEngine {
 
     /// The time series for a measure under an aggregation + filter, optionally
     /// sliced by a conformed dimension. Empty when the measure is unknown.
-    /// Count/sum series are ZERO-FILLED from the producers' captures (tsk44):
+    /// Count/sum series are ZERO-FILLED from the producers' captures:
     /// a scan that found nothing writes an EMPTY capture, and the fill turns it
     /// into an explicit value-0 point so the metric drops back to zero.
     pub async fn series(
@@ -1403,9 +1455,9 @@ impl MetricEngine {
     }
 
     /// [`Self::series`] scoped to one stream (worktree) — per-worktree scans
-    /// don't interleave into one timeline (the series sibling of the tsk46
+    /// don't interleave into one timeline (the series sibling of the
     /// rollup scoping). `None` reads across all streams. `window` bounds the
-    /// series to a `captured_at` range (tsk202); `None` reads the whole history.
+    /// series to a `captured_at` range; `None` reads the whole history.
     pub async fn series_in_stream(
         &self,
         measure_key: &str,
@@ -1428,7 +1480,7 @@ impl MetricEngine {
         };
         let scope = parse_capture_scope(measure_key, &measure.capture_scope)?;
 
-        // The aggregate cube (tsk96): a GROUP BY over a few hundred PRE-FOLDED
+        // The aggregate cube: a GROUP BY over a few hundred PRE-FOLDED
         // rows instead of a replay over every fact. It answers only the reads it
         // can answer exactly and returns `None` for the rest, which fall through
         // to the code below — the base facts answer everything, so this is a
@@ -1456,7 +1508,7 @@ impl MetricEngine {
         // metric views refreshing off one event now cost ONE fold, not N.
         // The token is CAPTURE-scoped over the measure's producers, not
         // fact-scoped: a rescan that finds a file clean emits no fact and
-        // supersedes the old count with 0 (tsk41/tsk44), so a `MAX(fact.capture_id)`
+        // supersedes the old count with 0, so a `MAX(fact.capture_id)`
         // token would never move while the series changed — caught by
         // `rescanning_a_fixed_file_supersedes_its_facts_and_drops_the_metric_to_zero`.
         //
@@ -1509,9 +1561,9 @@ impl MetricEngine {
         stream: Option<i64>,
     ) -> Result<Vec<SeriesPoint>, DomainError> {
         // A trend legitimately reads the measure's history (one point per
-        // capture) — but stream-bounded SQL-side (tsk75), never loaded whole
+        // capture) — but stream-bounded SQL-side, never loaded whole
         // then filtered in Rust.
-        let facts: Vec<FactRow> = match stream {
+        let mut facts: Vec<FactRow> = match stream {
             Some(s) => {
                 self.facts
                     .facts_for_measure_in_stream(measure.id, s)
@@ -1519,6 +1571,7 @@ impl MetricEngine {
             }
             None => self.facts.facts_for_measure(measure.id).await?,
         };
+        self.stamp_derived(&mut facts).await;
 
         // The producers whose scans emit this metric's slice — derived from the
         // facts that (ever) matched the filter, so an unrelated producer's
@@ -1528,7 +1581,7 @@ impl MetricEngine {
             .filter(|f| filter.matches(f))
             .map(|f| f.producer.clone())
             .collect();
-        // Chicken-and-egg for the analysis measure (tsk62): an analyzer that
+        // Chicken-and-egg for the analysis measure: an analyzer that
         // has been CLEAN since day one has zero lint_hit facts, so the
         // fact-derived set is empty and its "ran, found nothing" captures
         // could never zero-fill — `oxplow.analysis.*` read blank forever
@@ -1548,7 +1601,7 @@ impl MetricEngine {
         // population — a `per-path` tree gauge's snapshot delta, or a `per-subject`
         // test run's executed cases. One point per capture would plot "the files in
         // that commit" / "the tests in that run", not the repo. Replay them into a
-        // running state instead (tsk41/tsk43). The two differ only in WHAT a capture
+        // running state instead. The two differ only in WHAT a capture
         // restates: the snapshot's file rows, or the capture's own subjects.
         //
         // Zero-fill is deliberately NOT applied: an empty capture restated nothing, so
@@ -1569,7 +1622,7 @@ impl MetricEngine {
                     let mut m: HashMap<i64, Vec<String>> = HashMap::new();
                     for f in &facts {
                         // The scope's fold key, not subject alone — the
-                        // eviction set must match the insertion key (tsk109).
+                        // eviction set must match the insertion key.
                         if let Some(s) = fold_key(scope, f) {
                             m.entry(f.capture_id).or_default().push(s.to_string());
                         }
@@ -1578,7 +1631,7 @@ impl MetricEngine {
                 }
                 // Unreachable — this whole branch is guarded by `is_partial()`
                 // above. Listed (not wildcarded) so a future fourth scope must
-                // decide its restated set here, at compile time (tsk103).
+                // decide its restated set here, at compile time.
                 CaptureScope::Complete => HashMap::new(),
             };
             let visibility = match &self.visibility {
@@ -1622,7 +1675,7 @@ impl MetricEngine {
     }
 
     /// Splice value-0 points into `points` for every capture of `producers`
-    /// that produced none (the empty "scanned, found nothing" record — tsk44).
+    /// that produced none (the empty "scanned, found nothing" record).
     /// Only count/sum aggregations have a meaningful zero (avg/min/max/last/
     /// ratio of nothing is undefined → left sparse), and only ungrouped series
     /// are filled (an empty capture carries no group values). A stream-scoped
@@ -1658,28 +1711,92 @@ impl MetricEngine {
         measure: &oxplow_db::Measure,
         stream: Option<i64>,
     ) -> Result<Vec<FactRow>, DomainError> {
-        // Exhaustive on purpose (tsk103 review): scope conflation is the V54
+        // Exhaustive on purpose (review): scope conflation is the V54
         // bug class, and every scope picks a DIFFERENT fold — a wildcard arm
         // would let a future fourth scope compile clean and silently read as
         // whichever default it fell into.
-        match parse_capture_scope(&measure.key, &measure.capture_scope)? {
+        let mut facts = match parse_capture_scope(&measure.key, &measure.capture_scope)? {
             scope @ (CaptureScope::PerSubject | CaptureScope::PerPath) => {
-                self.partial_state_facts(measure, scope, stream).await
+                self.partial_state_facts(measure, scope, stream).await?
             }
-            CaptureScope::Complete => Ok(self
+            CaptureScope::Complete => self
                 .facts
                 .facts_for_measure(measure.id)
                 .await?
                 .into_iter()
                 .filter(|f| stream.is_none_or(|s| f.stream_id == s))
-                .collect()),
+                .collect(),
+        };
+        self.stamp_derived(&mut facts).await;
+        Ok(facts)
+    }
+
+    /// Give each fact its value on every derived dimension (an extension's
+    /// `from:` dimension), asking each dimension's dataset once for the keys
+    /// the facts carry. A dataset that can't be read (its extension is off)
+    /// leaves its dimension absent: the facts have no value on it, and
+    /// nothing fails.
+    pub(crate) async fn stamp_derived(&self, facts: &mut [FactRow]) {
+        for dim in derived_dimensions() {
+            let key_of = |f: &FactRow| -> Option<i64> {
+                match dim.by.as_str() {
+                    "request_id" => f.request_id,
+                    "thread_id" => f.thread_id,
+                    "turn_id" => f.turn_id,
+                    "stream_id" => Some(f.stream_id),
+                    _ => None,
+                }
+            };
+            let keys: std::collections::BTreeSet<i64> = facts.iter().filter_map(key_of).collect();
+            if keys.is_empty() {
+                continue;
+            }
+            let list = keys
+                .iter()
+                .map(i64::to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
+            let order = dim
+                .order
+                .as_deref()
+                .map(|o| format!(", {o}"))
+                .unwrap_or_default();
+            let sql = format!(
+                "SELECT {by}, {value} FROM {dataset} WHERE {by} IN ({list}) ORDER BY {by}{order}",
+                by = dim.by,
+                value = dim.value,
+                dataset = dim.dataset,
+            );
+            let Ok(rows) = self.layer.query_sql(&sql, Vec::new(), None).await else {
+                continue;
+            };
+            // The first row of each key, in the dimension's order.
+            let mut values: HashMap<i64, String> = HashMap::new();
+            for row in rows.rows {
+                let [oxplow_db::SqlCell::Int(k), v] = &row[..] else {
+                    continue;
+                };
+                let v = match v {
+                    oxplow_db::SqlCell::Text(t) => t.clone(),
+                    oxplow_db::SqlCell::Int(i) => i.to_string(),
+                    oxplow_db::SqlCell::Real(r) => r.to_string(),
+                    oxplow_db::SqlCell::Bool(b) => b.to_string(),
+                    oxplow_db::SqlCell::Null(()) => continue,
+                };
+                values.entry(*k).or_insert(v);
+            }
+            for f in facts.iter_mut() {
+                if let Some(v) = key_of(f).and_then(|k| values.get(&k)) {
+                    f.derived.insert(dim.key.clone(), v.clone());
+                }
+            }
         }
     }
 
     /// The CURRENT state of a partial-scope measure: per stream, the newest
     /// capture's `(stream, BRANCH)` partition — exactly the state the series'
     /// last point describes, so the headline and its own breakdown/drill-in
-    /// can never disagree (tsk106, closing the tsk97/tsk98 gap for
+    /// can never disagree (closing the gap for
     /// point-in-time reads).
     ///
     /// Served from the cube's durable live state when the watermark covers the
@@ -1687,7 +1804,7 @@ impl MetricEngine {
     /// inherits its pre-fork history) and branch-partitioned, and reading it
     /// is cheaper than the SQL window fold it replaces. A stream the cube
     /// hasn't caught up with falls back to the branch-BLIND SQL fold — the
-    /// pre-tsk106 approximation, held only for the seconds the cube lags.
+    /// earlier approximation, held only for the seconds the cube lags.
     ///
     /// Unscoped reads UNION each stream's own current partition (a
     /// per-worktree breakdown that mixes no states); they do not collapse to
@@ -1755,8 +1872,8 @@ impl MetricEngine {
                 // scalar (`oxplow.metric.record` with no subject) — are not in it. They aren't tree
                 // facts: with no path there is nothing to supersede them per-path, so they
                 // keep the plain per-producer currency rule (latest assertion wins). Without
-                // this an asserted number would silently vanish from every read. SQL-side
-                // (tsk75): this used to load the measure's ENTIRE history to find the
+                // this an asserted number would silently vanish from every read. SQL-side:
+                // this used to load the measure's ENTIRE history to find the
                 // usually-zero scalars.
                 let scalars: Vec<FactRow> =
                     self.facts.pathless_scalar_facts(measure.id, stream).await?;
@@ -1771,7 +1888,7 @@ impl MetricEngine {
                 Ok(folded)
             }
             // Unreachable — only the partial arms above call this. Listed so a
-            // fourth scope must decide its fallback at compile time (tsk103).
+            // fourth scope must decide its fallback at compile time.
             CaptureScope::Complete => Ok(Vec::new()),
         }
     }
@@ -1780,7 +1897,7 @@ impl MetricEngine {
     /// fact of an additive (event) measure; otherwise only the current ones —
     /// the tree fold for a per-path measure, the latest capture per (stream,
     /// producer) for a complete one, so a fixed `unsafe` block or a deleted
-    /// file stops showing up, and a zero-hit rescan empties it (tsk44).
+    /// file stops showing up, and a zero-hit rescan empties it.
     pub(crate) async fn current_facts(
         &self,
         measure: &oxplow_db::Measure,
@@ -1799,7 +1916,7 @@ impl MetricEngine {
     /// The currency gate for a point-in-time read, per `capture_scope`.
     ///
     /// - `complete`: every capture restates the whole population, so "current" is
-    ///   the latest capture per (stream, producer) — the existing gate (tsk44).
+    ///   the latest capture per (stream, producer) — the existing gate.
     /// - `per-path`: currency is *per path*, not per capture, and the fold has
     ///   already applied it — every fact it returned IS current. So the gate must
     ///   be a no-op; applying the capture-level gate here would (wrongly) keep only
@@ -1817,7 +1934,7 @@ impl MetricEngine {
 
     /// The current-capture set for a fact slice: the latest capture per
     /// (stream, producer), including the producers' EMPTY zero-hit captures
-    /// (see [`current_capture_ids`], tsk44).
+    /// (see [`current_capture_ids`]).
     async fn current_captures(
         &self,
         kept: &[FactRow],
@@ -1859,7 +1976,7 @@ impl MetricEngine {
 
     /// [`Self::series_for_spec`] scoped to one stream (worktree) — see
     /// [`Self::series_in_stream`]. `None` reads across all streams. `window`
-    /// bounds the series to a `captured_at` range (tsk202).
+    /// bounds the series to a `captured_at` range.
     pub async fn series_for_spec_in_stream(
         &self,
         spec: &MetricSpec,
@@ -1880,7 +1997,7 @@ impl MetricEngine {
     }
 
     /// A spec's series with the full set of read options: group-by, an extra
-    /// dimension filter on top of the spec's own, and time buckets (tsk321).
+    /// dimension filter on top of the spec's own, and time buckets.
     pub async fn series_for_spec_read(
         &self,
         spec: &MetricSpec,
@@ -1935,7 +2052,7 @@ impl MetricEngine {
         Ok(series)
     }
 
-    /// Why `key` can't slice or filter facts, when it's a bare key (tsk989):
+    /// Why `key` can't slice or filter facts, when it's a bare key:
     /// a dimension has one name, its namespaced one (V166), so a bare key
     /// would read nothing — an empty slice that looks like no data. It
     /// names the conformed `oxplow.<key>` when the catalog declares it.
@@ -1984,7 +2101,7 @@ impl MetricEngine {
             })
     }
 
-    /// An entity metric's series (tsk322): an event metric bucketed by its
+    /// An entity metric's series: an event metric bucketed by its
     /// `time` (daily unless asked otherwise), or a state metric's current value
     /// per group, stamped now.
     async fn entity_series(
@@ -2119,12 +2236,13 @@ impl MetricEngine {
             return Ok(Vec::new());
         };
         let filter = spec_filter(spec)?;
-        let facts = match capture_id {
+        let mut facts = match capture_id {
             // Pinned drill-in: exactly that capture's facts — never the whole
-            // measure history filtered in Rust (tsk75).
+            // measure history filtered in Rust.
             Some(c) => self.facts.facts_for_captures(measure.id, vec![c]).await?,
             None => self.current_facts(&measure).await?,
         };
+        self.stamp_derived(&mut facts).await;
         let facts: Vec<FactRow> = facts
             .into_iter()
             .filter(|f| filter.matches(f))
@@ -2168,8 +2286,8 @@ impl MetricEngine {
 /// `None`. `neutral` metrics (no better/worse) never cross. The worse side is
 /// "higher" for `lower-better` and "lower" for `higher-better`. A value AT a
 /// threshold hasn't crossed it (`target: 80, warnAt: 80` means 80 is fine),
-/// as the Metrics page's `metricStatus` reads it too. Shared by the effort
-/// panel's read (`collection.rs`) and the fact finding view.
+/// as the Metrics page's `metricStatus` reads it too. Shared by a request's
+/// delta read (`collection.rs`) and the fact finding view.
 pub fn threshold_state(
     direction: &str,
     value: f64,
@@ -2274,8 +2392,9 @@ mod tests {
             snapshot_id: None,
             stream_id: 1,
             thread_id: None,
-            effort_id: None,
-            work_item: None,
+            turn_id: None,
+            request_id: None,
+            derived: Default::default(),
             provenance: "observed".into(),
             source: "test".into(),
             producer: "test.gauge".into(),
@@ -2284,7 +2403,7 @@ mod tests {
 
     #[test]
     fn cube_cells_reaggregate_to_the_same_value_as_the_raw_facts() {
-        // tsk96: the cube can only exist if every aggregation it serves is
+        // the cube can only exist if every aggregation it serves is
         // DECOMPOSABLE — bucket the facts, aggregate each bucket, merge the
         // buckets, and you must land on exactly what aggregating all the facts
         // at once gives. This is the proof, and it is what lets one
@@ -2405,14 +2524,13 @@ mod tests {
     }
 
     #[test]
-    fn ratio_keeps_a_numerator_only_capture_so_token_waste_can_reach_100pct() {
-        // tsk156: `oxplow.token_waste` is a two-legged append-only ratio. An
-        // effort CLOSE contributes (num 0 / den spend); a detected revert
-        // contributes (num spend / den 0) in its OWN capture, so Σn/Σd across
-        // the measure is the wasted share. The tsk109 "zero-denominator ratio
-        // is no data" guard matched the revert leg's shape exactly and dropped
-        // it, pinning task.tokens.wasted_pct at 0% for every input. A cell
-        // carrying a numerator IS data; only 0/0 is empty.
+    fn ratio_keeps_a_numerator_only_capture_so_a_two_legged_share_can_reach_100pct() {
+        // a two-legged append-only ratio. One leg contributes
+        // (num 0 / den spend); the other contributes (num spend / den 0) in
+        // its OWN capture, so Σn/Σd across the measure is the share. The
+        //  "zero-denominator ratio is no data" guard matched the second
+        // leg's shape exactly and dropped it, pinning the share at 0% for
+        // every input. A cell carrying a numerator IS data; only 0/0 is empty.
         let facts = vec![
             FactRow {
                 numerator: Some(0.0),
@@ -2429,16 +2547,16 @@ mod tests {
         assert_eq!(
             series.len(),
             2,
-            "the revert leg must survive as its own point"
+            "the second leg must survive as its own point"
         );
-        // Σnum/Σden = 5000/5000: all metered spend was later reverted.
+        // Σnum/Σden = 5000/5000: the whole share.
         assert_eq!(range_value(&series, Fold::Sum), Some(1.0));
     }
 
     #[test]
     fn range_value_sums_a_non_ratio_read_of_a_non_additive_measure() {
-        // tsk156, second symptom: `task.tokens.wasted` is a `sum` metric over
-        // the non-additive `oxplow.token_waste` measure. A summed point carries
+        // , second symptom: a `sum` metric over a non-additive
+        // measure. A summed point carries
         // no numerator/denominator, so the Σn/Σd branch found Σden = 0 and
         // reported NO DATA — the MCP headline read empty even with waste
         // recorded. (The desktop UI masked it by recomputing from the series.)
@@ -2456,7 +2574,7 @@ mod tests {
 
     #[test]
     fn ratio_still_drops_a_genuinely_empty_zero_over_zero_capture() {
-        // The tsk109 case must keep working: a coverage capture over zero
+        // The case must keep working: a coverage capture over zero
         // instrumented lines is no data, not the worst possible reading.
         let facts = vec![FactRow {
             numerator: Some(0.0),
@@ -2472,7 +2590,7 @@ mod tests {
 
     #[test]
     fn range_value_semi_additive_ratio_reads_the_latest_capture_not_a_blend() {
-        // tsk13: coverage is a semi-additive LEVEL ratio. Capture 1 = 50%
+        // coverage is a semi-additive LEVEL ratio. Capture 1 = 50%
         // (1/2), capture 2 = 85% (17/20). The in-range headline is the
         // latest capture (0.85), NOT the Σn/Σd blend across both (18/22 ≈
         // 0.818) that non-additive accumulation gives.
@@ -2554,7 +2672,7 @@ mod tests {
         let f = FactFilter::from_json("{\"min_value\":10.0}").unwrap();
         assert_eq!(f.min_value, Some(10.0));
         assert!(f.severity.is_none());
-        // max_value (tsk124) parses and defaults to None.
+        // max_value parses and defaults to None.
         assert!(f.max_value.is_none());
         assert_eq!(
             FactFilter::from_json("{\"max_value\":0.0}")
@@ -2578,7 +2696,7 @@ mod tests {
 
     #[test]
     fn unconstrained_filter_is_the_one_that_keeps_every_fact() {
-        // tsk239/tsk242: callers use this to skip work a no-op filter can't
+        // callers use this to skip work a no-op filter can't
         // change the answer of. It must be conservative — true ONLY when every
         // predicate is absent, since a caller acting on `true` never looks at
         // the facts at all.
@@ -2599,7 +2717,7 @@ mod tests {
 
     #[test]
     fn every_pseudo_dimension_is_classified_as_slice_key_or_not() {
-        // tsk239/tsk242: `dim_is_slice_key` is the negative image of the match
+        // `dim_is_slice_key` is the negative image of the match
         // in `dim_value_cached`, and nothing in the compiler holds them
         // together — a new pseudo-dimension reading `path`/`branch`/`subject`
         // silently starts resolving off a slice key that doesn't carry it.
@@ -2613,8 +2731,7 @@ mod tests {
             subject_kind: Some(oxplow_domain::uri::resources::AI_MODEL.into()),
             branch: Some("feature/x".into()),
             thread_id: Some(4),
-            effort_id: Some(9),
-            work_item: Some("oxplow:oxplow/work_item?id=ENG-12&provider=issues".into()),
+            request_id: Some(9),
             closest_vcs_rev: Some("abc123".into()),
             severity: Some("error".into()),
             rule: Some("E1".into()),
@@ -2655,8 +2772,7 @@ mod tests {
             "oxplow.model",
             "oxplow.stream",
             "oxplow.thread",
-            "oxplow.effort",
-            "oxplow.work_item",
+            "oxplow.request",
             "oxplow.vcs_rev",
         ] {
             assert!(!dim_is_slice_key(key), "{key} reads outside the slice key");
@@ -2668,20 +2784,73 @@ mod tests {
         }
     }
 
+    /// A dimension an extension's dataset answers: each fact gets the first
+    /// row (in the declared order) of the dataset under its key; with the
+    /// dataset unreadable the dimension is absent and nothing fails.
+    #[tokio::test]
+    async fn a_derived_dimension_is_read_through_its_dataset() {
+        let (engine, facts, _) = engine_fixture().await;
+        facts
+            .database()
+            .transaction(|tx| {
+                tx.execute_batch(
+                    "INSERT INTO threads (id, stream_id, title, created_at, updated_at)
+                     VALUES (10, 1, 'first', 'x', 'x'), (11, 1, 'second', 'x', 'x');",
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let derived = |dataset: &str| DerivedDimension {
+            key: "acme.title".into(),
+            dataset: dataset.into(),
+            by: "stream_id".into(),
+            value: "title".into(),
+            order: Some("id DESC".into()),
+        };
+        let mut rows = vec![
+            FactRow {
+                stream_id: 1,
+                ..fact(1, "2026-06-30T00:00:00Z", 1.0)
+            },
+            FactRow {
+                stream_id: 2,
+                ..fact(1, "2026-06-30T00:00:00Z", 1.0)
+            },
+        ];
+        set_derived_dimensions(vec![derived("v_thread")]);
+        engine.stamp_derived(&mut rows).await;
+        assert_eq!(dim_value(&rows[0], "acme.title").as_deref(), Some("second"));
+        assert_eq!(dim_value(&rows[1], "acme.title"), None, "no thread there");
+        // Read outside a fact's own slice, never bucketed by the cube.
+        assert!(is_spine_dim("acme.title"));
+        assert!(!dim_is_slice_key("acme.title"));
+
+        // The dataset isn't there (its extension is off): the dimension is
+        // absent and the read goes on.
+        set_derived_dimensions(vec![derived("v_not_there")]);
+        let mut rows = vec![FactRow {
+            stream_id: 1,
+            ..fact(1, "2026-06-30T00:00:00Z", 1.0)
+        }];
+        engine.stamp_derived(&mut rows).await;
+        assert_eq!(dim_value(&rows[0], "acme.title"), None);
+        set_derived_dimensions(Vec::new());
+        assert!(!is_spine_dim("acme.title"));
+    }
+
     #[test]
     fn spine_dimensions_read_the_capture_it_came_from() {
         let f = FactRow {
             thread_id: Some(4),
-            effort_id: Some(9),
-            work_item: Some("oxplow:oxplow/work_item?id=tsk12&provider=oxplow".into()),
+            request_id: Some(9),
             closest_vcs_rev: Some("abc123".into()),
             ..fact(1, "2026-06-30T00:00:00Z", 1.0)
         };
         let got: Vec<_> = [
             "oxplow.stream",
             "oxplow.thread",
-            "oxplow.effort",
-            "oxplow.work_item",
+            "oxplow.request",
             "oxplow.vcs_rev",
         ]
         .iter()
@@ -2693,15 +2862,14 @@ mod tests {
                 Some(f.stream_id.to_string()),
                 Some("4".into()),
                 Some("9".into()),
-                Some("oxplow:oxplow/work_item?id=tsk12&provider=oxplow".into()),
                 Some("abc123".into())
             ]
         );
-        // Unattributed facts have no effort/work-item group rather than a blank one.
+        // Unattributed facts have no request group rather than a blank one.
         let bare = fact(1, "2026-06-30T00:00:00Z", 1.0);
-        assert_eq!(dim_value(&bare, "oxplow.work_item"), None);
-        // The cube never buckets by these: an effort is stamped on its
-        // captures at close, after the cube may have folded them.
+        assert_eq!(dim_value(&bare, "oxplow.request"), None);
+        // The cube never buckets by these: a turn is linked to its request
+        // after the cube may have folded its captures.
         assert!(SPINE_DIMS.iter().all(|d| is_spine_dim(d)));
         assert!(!is_spine_dim("oxplow.language"));
     }
@@ -2822,7 +2990,7 @@ mod tests {
         // A `complete` measure (the NewMeasure default): these tests exercise the
         // COMPLETE-capture engine path — count-over-threshold, headline-is-the-last-
         // capture, zero-fill, stream scoping — where every capture restates the whole
-        // population. The real `oxplow.complexity` is `per-path` (V54, tsk41) and is
+        // population. The real `oxplow.complexity` is `per-path` (V54) and is
         // covered by the tree-fold tests below, which set up snapshots.
         let complexity = facts
             .upsert_measure(oxplow_db::NewMeasure::new("acme.complexity", "Complexity"))
@@ -2844,7 +3012,7 @@ mod tests {
 
     #[tokio::test]
     async fn clean_analyzer_reads_zero_not_blank() {
-        // tsk62: an analyzer that has been clean since day one has ZERO
+        // an analyzer that has been clean since day one has ZERO
         // `oxplow.lint_hit` facts, so fact-derived producer discovery finds
         // nothing and its "ran, found nothing" captures could never zero-fill
         // — `oxplow.analysis.*` read blank forever instead of 0. The seed from
@@ -2867,7 +3035,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_fold_memo_never_serves_a_stale_series() {
-        // tsk205: the fact-fallback fold is memoized per (measure, read shape)
+        // the fact-fallback fold is memoized per (measure, read shape)
         // for one (max capture, epoch) generation. The ONLY thing that must not
         // happen is a stale read — a new capture for the measure has to be
         // visible on the very next call.
@@ -2931,9 +3099,9 @@ mod tests {
 
     #[tokio::test]
     async fn the_fold_memo_is_invalidated_by_an_empty_superseding_capture() {
-        // tsk205 REGRESSION. The first cut keyed the memo on `MAX(fact.capture_id)`
+        //  REGRESSION. The first cut keyed the memo on `MAX(fact.capture_id)`
         // for the measure, which is wrong: a rescan that finds the file clean
-        // emits NO fact and supersedes the old count with 0 (tsk41/tsk44), so the
+        // emits NO fact and supersedes the old count with 0, so the
         // fact max never moved and the memo served the pre-rescan value forever.
         // (`rescanning_a_fixed_file_supersedes_its_facts_and_drops_the_metric_to_zero`
         // caught it.) The token is capture-scoped over the producers, so an empty
@@ -2968,7 +3136,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_fold_memo_is_scoped_per_measure_not_global() {
-        // tsk205: the whole point of a per-measure token. A write to ANOTHER
+        // the whole point of a per-measure token. A write to ANOTHER
         // measure (the ~10s OTLP token export is the real case) must not
         // invalidate this measure's memo — a global version key would have
         // evicted it every 10s and re-folded the whole history.
@@ -3022,7 +3190,7 @@ mod tests {
 
     #[tokio::test]
     async fn windowed_series_equals_the_full_series_filtered_to_the_window() {
-        // tsk202: a windowed read must return exactly the full series filtered to
+        // a windowed read must return exactly the full series filtered to
         // the window — the same filter the renderer used to apply client-side,
         // moved server-side. This exercises the COMPLETE fact path (no cube built).
         let (engine, facts, complexity) = engine_fixture().await;
@@ -3108,108 +3276,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_spec_series_groups_by_work_item_filters_by_it_and_buckets_by_day() {
-        let db = Database::in_memory();
-        db.transaction(|c| {
-            c.execute_batch(
-                "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
-                   VALUES (1, 'primary', 'p', 'main', 'refs/heads/main', 'local', '/r', '2026-01-01', '2026-01-01');
-                 INSERT INTO threads (id, stream_id, title, created_at, updated_at)
-                   VALUES (1, 1, 'T', '2026-01-01', '2026-01-01');
-                 INSERT INTO task (id, thread_id, title, status, priority, created_by, created_at, updated_at)
-                   VALUES (1, 1, 'One', 'done', 'medium', 'agent', '2026-01-01', '2026-01-01'),
-                          (2, 1, 'Two', 'done', 'medium', 'agent', '2026-01-01', '2026-01-01');
-                 INSERT INTO effort (id, work_item, thread_id, started_at, ended_at)
-                   VALUES (7, 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 1, '2026-01-01', '2026-01-02'), (8, 'oxplow:oxplow/work_item?id=tsk2&provider=oxplow', 1, '2026-01-01', '2026-01-02');",
-            )
-            .map_err(|e| DomainError::Invalid(e.to_string()))
-        })
-        .await
-        .unwrap();
-        let facts = SqliteFactStore::new(db);
-        let mut m = oxplow_db::NewMeasure::new("acme.tokens", "Tokens");
-        m.temporal_semantics = "additive".into();
-        m.fold = Some("sum".into());
-        let tokens = facts.upsert_measure(m).await.unwrap();
-        for (at, effort, value) in [
-            ("2026-06-30T10:00:00Z", 7, 10.0),
-            ("2026-06-30T11:00:00Z", 8, 5.0),
-            ("2026-06-30T12:00:00Z", 7, 3.0),
-            ("2026-07-01T09:00:00Z", 7, 1.0),
-        ] {
-            let mut cap = cap_at(at);
-            cap.effort_id = Some(effort);
-            facts
-                .record_facts(cap, vec![NewFact::new(tokens, value)])
-                .await
-                .unwrap();
-        }
-        facts
-            .upsert_spec(NewMetricSpec::base(
-                "acme.spend",
-                "Spend",
-                "acme.tokens",
-                "sum",
-            ))
-            .await
-            .unwrap();
-        let spec = facts.get_spec("acme.spend").await.unwrap().unwrap();
-        let engine = MetricEngine::new(facts);
-        let read = |r: SeriesRead| {
-            let (engine, spec) = (&engine, &spec);
-            async move {
-                engine
-                    .series_for_spec_read(spec, &r)
-                    .await
-                    .unwrap()
-                    .into_iter()
-                    .filter(|p| p.value != 0.0)
-                    .map(|p| (p.group, p.value))
-                    .collect::<Vec<_>>()
-            }
-        };
-        let task = |t: &str| {
-            Some(oxplow_domain::uri::build::work_item_uri(
-                "oxplow",
-                &format!("tsk{t}"),
-            ))
-        };
-        assert_eq!(
-            read(SeriesRead {
-                group_by: Some("oxplow.work_item".into()),
-                ..SeriesRead::default()
-            })
-            .await,
-            vec![
-                (task("1"), 10.0),
-                (task("2"), 5.0),
-                (task("1"), 3.0),
-                (task("1"), 1.0)
-            ]
-        );
-        assert_eq!(
-            read(SeriesRead {
-                group_by: Some("oxplow.work_item".into()),
-                bucket: Some(crate::metric_bucket::TimeBucket::Day),
-                ..SeriesRead::default()
-            })
-            .await,
-            vec![(task("1"), 13.0), (task("2"), 5.0), (task("1"), 1.0)]
-        );
-        assert_eq!(
-            read(SeriesRead {
-                dim_eq: Some((
-                    "oxplow.work_item".into(),
-                    "oxplow:oxplow/work_item?id=tsk2&provider=oxplow".into()
-                )),
-                ..SeriesRead::default()
-            })
-            .await,
-            vec![(None, 5.0)]
-        );
-    }
-
-    #[tokio::test]
     async fn findings_for_spec_projects_offenders_with_derived_severity() {
         let (engine, facts, complexity) = engine_fixture().await;
         facts
@@ -3257,7 +3323,7 @@ mod tests {
 
     #[tokio::test]
     async fn count_with_max_value_keeps_only_facts_at_or_below() {
-        // tsk124: `oxplow.coverage.untested_files` is a `count` with
+        // `oxplow.coverage.untested_files` is a `count` with
         // `max_value: 0` — the files at 0% coverage. The upper-bound filter keeps
         // value ≤ max and drops the rest.
         let (engine, facts, complexity) = engine_fixture().await;
@@ -3403,7 +3469,7 @@ mod tests {
         assert_eq!(engine.headline_for_spec(&spec).await.unwrap(), None);
     }
 
-    /// tsk945: a dimension is requested by its conformed key — the one
+    /// a dimension is requested by its conformed key — the one
     /// name it has. A bare request (`language`, `package`, `branch`,
     /// `model`) is just an undeclared key, never an alias.
     #[test]
@@ -3428,7 +3494,7 @@ mod tests {
 
     #[test]
     fn avg_series_carries_components_so_the_non_additive_collapse_is_the_mean() {
-        // Mean-across-closes measures (cycle time, efforts-per-task; V47) are
+        // Mean-across-closes measures (cycle time, say; V47) are
         // non-additive with `avg` aggregation: capture 1 has one close (100),
         // capture 2 has two (200, 400).
         let facts = vec![
@@ -3449,16 +3515,15 @@ mod tests {
 
     #[tokio::test]
     async fn avg_spec_over_non_additive_measure_headlines_the_mean_across_captures() {
-        // effort.cycle_time_ms's exact shape: aggregation `avg` over the
-        // non-additive oxplow.cycle_time measure, one fact per close carrying
-        // numerator=value / denominator=1 (tsk42).
+        // A cycle-time metric's shape: aggregation `avg` over a non-additive
+        // measure, one fact per close carrying numerator=value /
+        // denominator=1 (tsk42).
         let (engine, facts, _c) = engine_fixture().await;
-        let cycle = facts
-            .get_measure("oxplow.cycle_time")
-            .await
-            .unwrap()
-            .expect("migration seeds oxplow.cycle_time")
-            .id;
+        let mut m = oxplow_db::NewMeasure::new("acme.cycle_time", "Cycle time");
+        m.temporal_semantics = "non-additive".into();
+        m.fold = Some("sum".into());
+        m.capture_scope = "complete".into();
+        let cycle = facts.upsert_measure(m).await.unwrap();
         for (at, v) in [
             ("2026-06-30T10:00:00Z", 100.0),
             ("2026-06-30T11:00:00Z", 200.0),
@@ -3467,7 +3532,7 @@ mod tests {
                 .record_facts(
                     NewMetricCapture {
                         captured_at: Some(ts(at)),
-                        ..NewMetricCapture::done(1, "effort-lifecycle", "builtin")
+                        ..NewMetricCapture::done(1, "acme-lifecycle", "builtin")
                     },
                     vec![NewFact {
                         numerator: Some(v),
@@ -3478,7 +3543,7 @@ mod tests {
                 .await
                 .unwrap();
         }
-        let spec = NewMetricSpec::base("acme.cycle", "Cycle", "oxplow.cycle_time", "avg");
+        let spec = NewMetricSpec::base("acme.cycle", "Cycle", "acme.cycle_time", "avg");
         facts.upsert_spec(spec).await.unwrap();
         let spec = facts.get_spec("acme.cycle").await.unwrap().unwrap();
         assert_eq!(
@@ -3533,7 +3598,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_feature_branchs_failure_never_lands_on_a_main_point() {
-        // tsk97, THE bug. The fold reaches back for any subject a capture didn't
+        // , THE bug. The fold reaches back for any subject a capture didn't
         // restate — and 119 of 125 real captures are partial, so reach-back is the
         // NORMAL path. Branch-blind, a feature branch's failure lands on a point
         // labelled `main` whenever main didn't re-run that test:
@@ -3614,7 +3679,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_partial_fold_keeps_each_streams_state_separate() {
-        // tsk98: the fold's live state is per WORKTREE. Two worktrees run the
+        // the fold's live state is per WORKTREE. Two worktrees run the
         // same gauge over the same subjects, so they share `(producer, subject)`
         // keys — a state keyed on those alone lets worktree B's run EVICT
         // worktree A's subjects, and the resulting point describes no repo state
@@ -3682,7 +3747,7 @@ mod tests {
     #[tokio::test]
     async fn stream_scoped_zero_fill_skips_other_streams_empty_captures() {
         // A zero-hit scan in ANOTHER worktree must not splice a value-0 point
-        // into this stream's series (the tsk44 fill is per the scoped slice).
+        // into this stream's series (the fill is per the scoped slice).
         let (engine, facts, complexity) = engine_fixture().await;
         facts
             .record_facts(

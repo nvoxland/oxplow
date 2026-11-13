@@ -1,38 +1,36 @@
 //! Wikilink validity checker.
 //!
-//! Given a body (wiki page, task summary/description, thread note),
+//! Given a body (knowledge page, task summary/description, handoff),
 //! flags every `[[…]]` wikilink whose target is invalid — either an
 //! **unrecognized ref shape** (e.g. `[[#13]]`, the GitHub form) or a
-//! **recognized ref whose object doesn't exist** (`[[tsk999]]`,
+//! **recognized ref whose object doesn't exist** (`[[]]`,
 //! `[[missing-slug]]`, `[[src/gone.rs]]`). MCP write tools surface the
 //! result so the authoring agent can self-correct in the same turn.
 //!
 //! Classification (recognized-or-not) lives in
 //! [`oxplow_domain::uri::classify_wikilinks`]; this module adds only the
 //! existence probes — the database, the project's files and the VCS's
-//! revision graph — synchronously, so `oxplow.knowledge.write_page` refuses a
-//! dangling link inside its transaction.
+//! revision graph — synchronously, so a store's write command refuses a dangling link
+//! (`links.check`, and core's own commands inside their transaction).
 
 use serde::{Deserialize, Serialize};
 
 use oxplow_domain::uri::{classify_wikilinks, Reference};
 use oxplow_domain::vcs::RevisionGraph;
 
-use crate::Services;
-
 /// One invalid wikilink found in a body.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LinkWarning {
     /// The raw `[[…]]` interior as authored (the target, e.g. `#13`,
-    /// `tsk999`, `missing-slug`).
+    /// `tsk42`, `missing-slug`).
     pub target: String,
     /// Why it's invalid — human/LLM-readable, actionable.
     pub reason: String,
 }
 
 /// What a link check looks things up in: the database, the project's
-/// files and its revision graph. `this_page` is the wiki page being
-/// written, which may link to itself before its row exists.
+/// files and its revision graph. `this_page` is the knowledge page being
+/// written (its URI), which may link to itself before its row exists.
 pub struct LinkWorld<'a> {
     pub conn: &'a rusqlite::Connection,
     /// The resources links may name (the running vocabulary's).
@@ -52,8 +50,7 @@ pub fn check_links_in(world: &LinkWorld<'_>, body: &str) -> Vec<LinkWarning> {
         match (&link.reference, &link.canonical) {
             // A resource the vocabulary knows with no typed probe here: one a
             // dataset holds (its `resolve:`)
-            // is checked against it, any other is a link as it stands
-            // (tsk894).
+            // is checked against it, any other is a link as it stands.
             (None, Some(canonical)) => {
                 if let Some(reason) = unresolved_ref(world, canonical) {
                     out.push(LinkWarning {
@@ -65,9 +62,9 @@ pub fn check_links_in(world: &LinkWorld<'_>, body: &str) -> Vec<LinkWarning> {
             (None, None) => out.push(LinkWarning {
                 target: link.raw.clone(),
                 reason: format!(
-                    "`[[{}]]` is not a recognized reference — use a work item's own id \
-                     as its list writes it (never the GitHub `#42` form), `[[some-slug]]` for a \
-                     wiki page, \
+                    "`[[{}]]` is not a recognized reference — use a task's own id \
+                     as its list writes it (never the GitHub `#42` form), `[[some-id]]` for a \
+                     knowledge store's page, `[[<store>:<id>]]` for another's, \
                      `[[path/to/file.rs]]` for a file, or `[[git:<sha>]]` for a commit",
                     link.raw
                 ),
@@ -87,7 +84,7 @@ pub fn check_links_in(world: &LinkWorld<'_>, body: &str) -> Vec<LinkWarning> {
 
 /// What a command checks a body's links against: the project and its
 /// VCS, and the database and vocabulary for a check outside a command's
-/// transaction (a work item's, any list's). Notes and the work-item
+/// transaction (a task's, any list's). Notes and the task
 /// commands carry one.
 #[derive(Clone)]
 pub struct LinkDeps {
@@ -108,45 +105,6 @@ impl LinkDeps {
         thread: Option<oxplow_domain::ThreadId>,
     ) -> Vec<LinkWarning> {
         self.warnings_tx(ctx.conn, &ctx.events.vocabulary.resources, body, thread)
-    }
-
-    /// The links in a work item's `body` that don't resolve, on a read of
-    /// its own — for any list's write, which runs outside the bus's
-    /// transaction. The worktree is `thread`'s, else the list `item` is on
-    /// as the interface holds it.
-    pub async fn item_warnings(
-        &self,
-        body: String,
-        thread: Option<oxplow_domain::ThreadId>,
-        item: Option<String>,
-    ) -> Vec<LinkWarning> {
-        let deps = self.clone();
-        let read = self
-            .db
-            .read(move |tx| {
-                use rusqlite::OptionalExtension;
-                let thread = match (thread, &item) {
-                    (Some(t), _) => Some(t),
-                    (None, Some(item)) => tx
-                        .query_row(
-                            "SELECT thread_id FROM work_item WHERE uri = ?1",
-                            [item],
-                            |r| r.get::<_, Option<i64>>(0),
-                        )
-                        .optional()
-                        .map_err(oxplow_db::map_sql_err)?
-                        .flatten()
-                        .map(oxplow_domain::ThreadId::new),
-                    (None, None) => None,
-                };
-                let vocabulary = deps.vocabulary.current();
-                Ok(deps.warnings_tx(tx, &vocabulary.resources, &body, thread))
-            })
-            .await;
-        read.unwrap_or_else(|error| {
-            tracing::warn!(%error, "checking a work item's links failed");
-            Vec::new()
-        })
     }
 
     fn warnings_tx(
@@ -192,46 +150,61 @@ pub(crate) fn worktree_of_tx(
     .filter(|p| p.is_dir())
 }
 
-/// [`check_links_in`] over the app's services, for the tools that report
-/// warnings rather than refuse (task and note bodies).
-pub async fn check_links(services: &Services, body: &str) -> Vec<LinkWarning> {
-    check_links_at(
-        &services.db,
-        &services.vocabulary,
-        &services.layout.project_dir,
-        &*services.vcs,
-        body,
+/// The worktree of the thread, else the stream, a run is anchored to, when
+/// it has one on disk.
+pub(crate) fn worktree_of_anchors_tx(
+    conn: &rusqlite::Connection,
+    anchors: &oxplow_domain::events::Anchors,
+) -> Option<std::path::PathBuf> {
+    use rusqlite::OptionalExtension;
+    if let Some(thread) = anchors.thread_id {
+        if let Some(root) = worktree_of_tx(conn, thread) {
+            return Some(root);
+        }
+    }
+    let stream = anchors.stream_id?;
+    conn.query_row(
+        "SELECT worktree_path FROM streams WHERE id = ?1",
+        [stream.value()],
+        |r| r.get::<_, String>(0),
     )
-    .await
+    .optional()
+    .ok()
+    .flatten()
+    .map(std::path::PathBuf::from)
+    .filter(|p| p.is_dir())
 }
 
 /// [`check_links_in`] against a project's database and VCS, for a command
-/// run outside the bus's transaction (`oxplow.effort.report`).
+/// run outside the bus's transaction. Files are looked for under `root`
+/// (the checkout the caller works in); `this_page` is a page that may link
+/// to itself. A database error is an error, never a pass.
 pub async fn check_links_at(
     db: &oxplow_db::Database,
     vocabulary: &oxplow_domain::vocabulary::VocabularyHandle,
-    project_dir: &std::path::Path,
+    root: &std::path::Path,
     vcs: &dyn oxplow_domain::vcs::Vcs,
     body: &str,
-) -> Vec<LinkWarning> {
-    let project_dir = project_dir.to_path_buf();
-    let graph = vcs.revision_graph(&project_dir);
+    this_page: Option<&str>,
+) -> Result<Vec<LinkWarning>, oxplow_domain::DomainError> {
+    let root = root.to_path_buf();
+    let graph = vcs.revision_graph(&root);
     let body = body.to_string();
+    let this_page = this_page.map(str::to_string);
     let vocabulary = vocabulary.current();
     db.read(move |conn| {
         Ok(check_links_in(
             &LinkWorld {
                 conn,
                 resources: &vocabulary.resources,
-                project_dir: &project_dir,
+                project_dir: &root,
                 graph: &*graph,
-                this_page: None,
+                this_page: this_page.as_deref(),
             },
             &body,
         ))
     })
     .await
-    .unwrap_or_default()
 }
 
 fn exists(conn: &rusqlite::Connection, sql: &str, param: &dyn rusqlite::ToSql) -> bool {
@@ -260,31 +233,48 @@ fn unresolved_ref(
             [&at],
             |_| Ok(()),
         )
-        .optional()
-        .ok()?;
-    found
-        .is_none()
-        .then(|| format!("`{at}` does not exist (no row in `{resolve}`)"))
+        .optional();
+    match found {
+        Ok(None) => Some(format!("`{at}` does not exist (no row in `{resolve}`)")),
+        Ok(Some(())) => None,
+        // A dataset that can't be read says so; the link isn't passed.
+        Err(e) => Some(format!("`{at}` could not be checked in `{resolve}`: {e}")),
+    }
 }
 
 /// `Some(reason)` when a recognized reference's object doesn't exist,
 /// `None` when it resolves.
 fn missing_reason(world: &LinkWorld<'_>, reference: &Reference) -> Option<String> {
     match reference {
-        // Through the interface: the active list's items.
-        Reference::WorkItem(uri) => {
-            (!exists(world.conn, "SELECT 1 FROM v_work_item WHERE uri = ?1", uri))
-                .then(|| format!("work item `{uri}` does not exist"))
+        // Through the task resource's `resolve:` dataset, whichever it is.
+        Reference::Task(uri) => match oxplow_domain::uri::OxplowUri::parse(uri) {
+            Ok(canonical) => unresolved_ref(world, &canonical),
+            Err(_) => Some(format!("task `{uri}` does not exist")),
+        },
+        // Through the knowledge resource's `resolve:` dataset, whichever it
+        // is; a page may link to itself before its row exists.
+        Reference::Knowledge { store, id } => {
+            let uri = oxplow_domain::uri::build::knowledge_uri(store, id);
+            if world.this_page == Some(uri.as_str()) {
+                return None;
+            }
+            match oxplow_domain::uri::OxplowUri::parse(&uri) {
+                Ok(canonical) => unresolved_ref(world, &canonical).map(|why| {
+                    if why.contains("could not be checked") {
+                        why
+                    } else {
+                        format!("knowledge page `{id}` of `{store}` does not exist")
+                    }
+                }),
+                Err(_) => Some(format!("knowledge page `{id}` of `{store}` does not exist")),
+            }
         }
-        Reference::Wiki(slug) => (world.this_page != Some(slug.as_str())
-            && !exists(world.conn, "SELECT 1 FROM wiki_page WHERE slug = ?1", slug))
-        .then(|| format!("wiki page `{slug}` does not exist")),
         Reference::Commit(sha) => world
             .graph
             .resolve(sha)
             .is_none()
             .then(|| format!("commit `{sha}` was not found")),
-        // A file at a revision is looked for there (tsk895); one on disk in
+        // A file at a revision is looked for there; one on disk in
         // the worktree.
         Reference::File(detail) => match &detail.version {
             oxplow_domain::uri::RefVersion::Ref(rev) => {
@@ -329,6 +319,46 @@ mod tests {
         dir
     }
 
+    async fn check_links(services: &Services, body: &str) -> Vec<LinkWarning> {
+        check_links_at(
+            &services.db,
+            &services.vocabulary,
+            &services.layout.project_dir,
+            &*services.vcs,
+            body,
+            None,
+        )
+        .await
+        .unwrap()
+    }
+
+    /// A page may link to itself before its row exists: the `this_page` it
+    /// is written under passes, another page that isn't there doesn't.
+    #[tokio::test]
+    async fn a_page_may_link_to_itself() {
+        let dir = git_repo();
+        let services = Services::in_memory(dir.path()).await.unwrap();
+        let me = oxplow_domain::uri::build::knowledge_uri("oxwiki", "me");
+        let warnings = check_links_at(
+            &services.db,
+            &services.vocabulary,
+            &services.layout.project_dir,
+            &*services.vcs,
+            "Me [[me]], not [[you]].",
+            Some(&me),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            warnings
+                .iter()
+                .map(|w| w.target.as_str())
+                .collect::<Vec<_>>(),
+            vec!["you"],
+            "{warnings:?}"
+        );
+    }
+
     #[tokio::test]
     async fn flags_unrecognized_github_style_ref() {
         let dir = git_repo();
@@ -339,9 +369,9 @@ mod tests {
         assert!(warnings[0].reason.contains("not a recognized reference"));
     }
 
-    /// tsk894: a ref of any kind the vocabulary knows is a link. One of a
+    /// a ref of any kind the vocabulary knows is a link. One of a
     /// kind no dataset holds (a shell page) is a link as it stands; one a
-    /// dataset holds — an effort, core's or an extension's — is checked
+    /// dataset holds — a request, core's or an extension's — is checked
     /// against that dataset's rows.
     #[tokio::test]
     async fn accepts_refs_of_kinds_with_no_probe() {
@@ -349,70 +379,17 @@ mod tests {
         let services = Services::in_memory(dir.path()).await.unwrap();
         let warnings = check_links(&services, "See [[page:settings]].").await;
         assert!(warnings.is_empty(), "got {warnings:?}");
-        let warnings = check_links(&services, "See [[effort:eff1]].").await;
+        let warnings = check_links(&services, "See [[request:req1]].").await;
         assert_eq!(warnings.len(), 1, "got {warnings:?}");
-        assert!(warnings[0].reason.contains("no row in `v_effort`"));
-        // A work item is checked against the active list's items: another
+        assert!(warnings[0].reason.contains("no row in `v_request`"));
+        // A task is checked against the active list's items: another
         // list's isn't one.
-        let warnings = check_links(&services, "See [[work_item:issues:ENG-12]].").await;
+        let warnings = check_links(&services, "See [[task:issues:ENG-12]].").await;
         assert_eq!(warnings.len(), 1, "got {warnings:?}");
     }
 
     #[tokio::test]
-    async fn flags_nonexistent_task() {
-        let dir = git_repo();
-        let services = Services::in_memory(dir.path()).await.unwrap();
-        let warnings = check_links(&services, "Blocked by [[tsk999]].").await;
-        assert_eq!(warnings.len(), 1);
-        assert_eq!(warnings[0].target, "tsk999");
-        assert!(
-            warnings[0]
-                .reason
-                .contains("`oxplow:oxplow/work_item?id=tsk999&provider=oxplow` does not exist"),
-            "{}",
-            warnings[0].reason
-        );
-    }
-
-    /// A work-item link checks the interface: with no list, an existing
-    /// oxplow task is nothing it can point at.
-    #[tokio::test]
-    async fn a_task_link_checks_the_active_list() {
-        let dir = git_repo();
-        let services = Services::in_memory(dir.path()).await.unwrap();
-        let task =
-            crate::test_fixtures::file_item(&services, serde_json::json!({ "title": "Real task" }))
-                .await;
-        services
-            .config
-            .write()
-            .unwrap()
-            .personal_active_providers
-            .insert("work_items".into(), "none".into());
-        let config = crate::config_service::read_config(&services.config);
-        services
-            .capabilities
-            .publish(&config, &services.db)
-            .await
-            .unwrap();
-        let warnings = check_links(&services, &format!("See [[{}]].", task)).await;
-        assert_eq!(warnings.len(), 1, "{warnings:?}");
-    }
-
-    #[tokio::test]
-    async fn accepts_existing_task() {
-        let dir = git_repo();
-        let services = Services::in_memory(dir.path()).await.unwrap();
-        let task =
-            crate::test_fixtures::file_item(&services, serde_json::json!({ "title": "Real task" }))
-                .await;
-        let body = format!("Done in [[{}]].", task);
-        let warnings = check_links(&services, &body).await;
-        assert!(warnings.is_empty(), "got {warnings:?}");
-    }
-
-    #[tokio::test]
-    async fn flags_missing_wiki_slug_but_not_code_fenced() {
+    async fn flags_missing_knowledge_page_but_not_code_fenced() {
         let dir = git_repo();
         let services = Services::in_memory(dir.path()).await.unwrap();
         // The fenced example must be ignored; only the prose link counts.
@@ -433,7 +410,7 @@ mod tests {
         assert!(warnings[0].reason.contains("does not exist"));
     }
 
-    /// tsk895: a file pinned to a revision is looked for at that revision,
+    /// a file pinned to a revision is looked for at that revision,
     /// not on disk — one since deleted is still a good link.
     #[tokio::test]
     async fn a_pinned_file_is_checked_at_its_revision() {

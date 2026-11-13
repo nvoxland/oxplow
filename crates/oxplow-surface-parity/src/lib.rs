@@ -151,17 +151,13 @@ pub const MANIFEST: &[Capability] = &[
     // A dry run for an agent writing a source in its worktree.
     agent("oxplow_preview_collector"),
     dataset("list_streams", &["v_stream"]),
-    // The work-item interface, read for the agent; the UI reads the
-    // datasets (`v_work_item`).
-    // Per-effort metric roll-up for the task-page panel (tsk250): the
-    // agent gets the same numbers as prompt text via oxplow-bundled's
-    // `metric-deltas` advisory (over `v_effort_metric_delta`).
-    dataset("list_efforts_in_window", &["v_effort"]),
+    // The task interface, read for the agent; the UI reads the
+    // datasets (`v_oxplow_task`).
     // Metrics read through SQL (`v_metric_spec`, `v_fact`, `metric_grid()`)
     // on both surfaces, and change through the `metric.*` commands
     // (`run_command`); nothing metric-specific is left on MCP (P4.8).
-    // Architectural zones (tsk251) — agent-only: the agent reads the table
-    // here and writes it with `oxplow.config.set` (tsk411); the renderer only reads
+    // Architectural zones — agent-only: the agent reads the table
+    // here and writes it with `oxplow.config.set`; the renderer only reads
     // it (it rides on `get_config`), so there is no IPC counterpart.
     dataset("list_backlinks", &["v_page_ref"]),
     dataset("list_outbound", &["v_page_ref"]),
@@ -195,6 +191,10 @@ pub const MANIFEST: &[Capability] = &[
     ui(
         "ref_commands",
         "which commands about a ref apply to it (its kind, and each `ui.about_when` on its row), for the window's menus; an agent lists all it may run with `list_commands`",
+    ),
+    ui(
+        "action_point_commands",
+        "what a named action point offers for a context (the commands that joined it with `ui.at`, and how to draw them), for the window's pages; an agent lists all it may run with `list_commands`",
     ),
     ui(
         "register_client_host",
@@ -266,11 +266,15 @@ pub const MANIFEST: &[Capability] = &[
     ui("page_action_form", "a form action's form is the person's; an agent runs the command itself"),
     ui(
         "load_component",
-        "the host loads a custom component's bundle for the frame it shows the person (tsk984)",
+        "the host loads a custom component's bundle for the frame it shows the person",
     ),
     ui(
         "invoke_component_command",
         "a custom component's bridged command, from its sandboxed frame through the host (P6b.D2)",
+    ),
+    ui(
+        "invoke_component_point",
+        "a custom component's bridged action point, from its sandboxed frame through the host; an agent runs the point's command itself",
     ),
     ui(
         "run_component_sql",
@@ -327,8 +331,8 @@ pub const MANIFEST: &[Capability] = &[
     // ---- agent-only (orchestration / agent affordances) ----
     // One reader for anything a ref names.
     agent("oxplow_read"),
-    agent("oxplow_wiki_ref_drift"),
-    // ---- collection (effort-scoped observations) ----
+    agent("oxplow_ref_drift"),
+    // ---- collection (observations) ----
     agent("oxplow_code_definition"),
     agent("oxplow_code_hover"),
     agent("oxplow_code_references"),
@@ -336,10 +340,10 @@ pub const MANIFEST: &[Capability] = &[
     agent("oxplow_code_workspace_symbols"),
     agent("oxplow_code_call_hierarchy"),
     agent("oxplow_navigate"),
-    agent("oxplow_thread_work"),
-    agent("oxplow_work_next"),
-    agent("oxplow_effort_summary"),
+    agent("oxplow_thread_tasks"),
+    agent("oxtask_next_task"),
     agent("oxplow_catalog"),
+    agent("oxplow_request_summary"),
     // ---- git ----
     agent("oxplow_vcs_status"),
     agent("oxplow_diff"),
@@ -407,7 +411,6 @@ pub const MANIFEST: &[Capability] = &[
         "records the person's use of oxplow, as they work",
     ),
     // ---- snapshots (UI presentation helpers) ----
-    dataset("list_wiki_slugs_for_snapshots", &["v_snapshot_file"]),
     ui(
         "get_blob_storage_bytes",
         "the blob store's size on disk, for Local History's storage card",
@@ -432,8 +435,6 @@ pub const MANIFEST: &[Capability] = &[
         "get_workspace_context",
         "the window's project path and VCS state, for the shell",
     ),
-    // ---- efforts ----
-    dataset("list_efforts_at_snapshots", &["v_effort"]),
     // ---- workspace file I/O (agent uses Read/Write tools) ----
     ui(
         "read_workspace_file",
@@ -584,7 +585,7 @@ mod tests {
         );
     }
 
-    /// P11 (tsk944): a UI-only row says why an agent has no tool for it.
+    /// P11: a UI-only row says why an agent has no tool for it.
     #[test]
     fn every_ui_only_row_says_why() {
         let silent: Vec<&str> = MANIFEST
@@ -598,7 +599,7 @@ mod tests {
         );
     }
 
-    /// P4.8 (tsk493): metrics are read through SQL and changed through
+    /// P4.8: metrics are read through SQL and changed through
     /// `metric.*` commands, so no surface carries a metric-specific read.
     #[test]
     fn no_surface_carries_a_metric_read() {

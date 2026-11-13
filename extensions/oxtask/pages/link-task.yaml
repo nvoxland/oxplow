@@ -1,0 +1,21 @@
+title: Link task
+description: "The form to link an oxtask task to another task (its id) or any URI."
+icon: link
+params:
+- name: uri
+- name: to
+- name: type
+loaders:
+  item:
+    sql: |
+      SELECT uri_param(:uri, 'id') AS id, coalesce(:to, '') AS "to", coalesce(nullif(:type, ''), 'relates_to') AS type
+view:
+  from: item
+  viz: form
+  form:
+    command: oxtask.task.link
+    then: replace
+    fields:
+    - id
+    - to
+    - type

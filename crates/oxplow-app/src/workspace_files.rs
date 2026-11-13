@@ -604,7 +604,7 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
-    /// tsk551: a path that is the workspace itself is never deleted,
+    /// a path that is the workspace itself is never deleted,
     /// renamed or written.
     #[test]
     fn the_workspace_root_itself_is_never_a_target() {
@@ -626,11 +626,11 @@ mod tests {
         assert!(dir.path().join("keep.txt").exists());
     }
 
-    /// tsk551: a write names its stream, and an unknown or missing one is
+    /// a write names its stream, and an unknown or missing one is
     /// refused rather than landing in the primary worktree.
     #[tokio::test]
     async fn writes_refuse_an_unknown_stream_instead_of_the_primary() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let files = &fx.svc.workspace_files;
         let primary = fx.svc.layout.project_dir.clone();
         for stream in [None, Some("str999"), Some("junk")] {
@@ -645,11 +645,11 @@ mod tests {
         assert!(!primary.join("leak.txt").exists());
     }
 
-    /// tsk573: a stream's file list and text search honour its own
+    /// a stream's file list and text search honour its own
     /// workspace's `.gitignore`, not the primary's.
     #[tokio::test]
     async fn a_streams_files_follow_its_own_ignores() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let other = tempdir().unwrap();
         std::fs::write(other.path().join(".gitignore"), "local.txt\n").unwrap();
         std::fs::write(other.path().join("local.txt"), "needle\n").unwrap();
@@ -787,7 +787,7 @@ mod tests {
 
     #[test]
     fn relative_root_resolves_children_without_false_escape() {
-        // Regression (tsk160): a relative root like `.` made
+        // Regression: a relative root like `.` made
         // `normalize_path` collapse to "", so every child
         // false-positived as escaping the root and killed the whole
         // listing. The guard now absolutizes the root so containment is

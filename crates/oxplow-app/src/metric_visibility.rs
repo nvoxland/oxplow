@@ -1,4 +1,4 @@
-//! The metric-ancestry RESOLVER (tsk102) — populates [`Visibility`] from
+//! The metric-ancestry RESOLVER — populates [`Visibility`] from
 //! commit-stamped snapshots so the fold's cross-branch rule runs on real
 //! ancestry instead of `blind()`.
 //!
@@ -6,7 +6,7 @@
 //! docs first. This module supplies its three inputs:
 //!
 //! - **`base_commit(R)`** is already ON the capture: `closest_vcs_rev` is
-//!   HEAD at record time (or the snapshot's own commit when exact) — tsk95's
+//!   HEAD at record time (or the snapshot's own commit when exact) — the
 //!   stamping IS the base, which is why that stamping stays.
 //! - **`effective_commit(C)`** comes from the commit-stamped snapshots: the
 //!   first same-stream, same-branch stamp at-or-after C names the commit that
@@ -60,7 +60,7 @@ pub fn resolve(
 ) -> Visibility {
     let mut vis = Visibility::blind();
 
-    // base_commit — already on the capture (tsk95): HEAD at record time, or
+    // base_commit — already on the capture: HEAD at record time, or
     // the snapshot's own commit when exact. Exactness doesn't matter for the
     // base: either way it is the closest ancestor commit of the code read.
     for c in captures {
@@ -191,7 +191,7 @@ impl AncestryOracle for GraphOracle {
 ///
 /// Every failure path yields [`Visibility::blind`] — resolution is an
 /// accelerant for correctness of CROSS-branch reads, and its absence is
-/// exactly the pre-tsk102 behavior, so it must never break a metrics read.
+/// exactly the earlier behavior, so it must never break a metrics read.
 pub struct VisibilityResolver {
     snapshots: SqliteSnapshotStore,
     oracle: std::sync::Arc<Mutex<Box<dyn AncestryOracle + Send>>>,
@@ -221,7 +221,7 @@ impl VisibilityResolver {
         // the commits the bases reach, on the first read after boot) — run
         // it off the async workers so a cold cache can't stall
         // the runtime, and so readers queueing on the oracle Mutex park a
-        // blocking thread, not a worker (tsk103 review). The lock is never
+        // blocking thread, not a worker (review). The lock is never
         // held across an await either way.
         let captures = captures.to_vec();
         let oracle = self.oracle.clone();
@@ -302,7 +302,6 @@ mod tests {
             id,
             stream_id: 1,
             thread_id: None,
-            effort_id: None,
             producer: "tests".into(),
             status: "done".into(),
             error: None,
@@ -389,7 +388,7 @@ mod tests {
 
     #[test]
     fn a_merged_branchs_results_become_visible_to_main() {
-        // The semantic tsk97 always wanted for free: after the merge commit M,
+        // The semantic always wanted for free: after the merge commit M,
         // FA is an ancestor of main's base, so feat-a's results ARE main
         // history. Before the merge (base B) they are not.
         let on_feat_a = cap(1, Some("feat-a"), 20, Some("A"));
@@ -435,7 +434,7 @@ mod tests {
 
     #[test]
     fn a_dirty_run_anchors_to_the_absorbing_commit_not_the_fork_point() {
-        // The disproof pin (tsk97): ancestry on `closest_vcs_rev` (= the
+        // The disproof pin: ancestry on `closest_vcs_rev` (= the
         // fork point A, which IS an ancestor of everything) cannot separate
         // branches. The anchor must be FA — the commit that absorbed the work.
         let on_feat_a = cap(1, Some("feat-a"), 20, Some("A"));
@@ -623,7 +622,7 @@ mod tests {
 
     #[test]
     fn a_pulled_commits_old_committer_time_cannot_backdate_absorption() {
-        // tsk103 review. A commit made ELSEWHERE and pulled in carries a
+        //  review. A commit made ELSEWHERE and pulled in carries a
         // committer time arbitrarily older than the moment this repo first
         // contained it. If absorption used the commit's own time alone, a
         // reader recorded before the pull would flip from visible to strict

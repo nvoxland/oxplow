@@ -11,7 +11,7 @@ use std::{os::unix::fs::PermissionsExt, path::Path, time::Duration};
 use oxplow_domain::Actor;
 use serde_json::json;
 
-use crate::test_fixtures::{services_with_task_effort, TaskEffortFixture};
+use crate::test_fixtures::{services_with_thread, ThreadFixture};
 
 fn manifest(version: &str) -> String {
     let version = if version.is_empty() {
@@ -38,13 +38,13 @@ fn write(root: &Path, rel: &str, body: &str) {
 
 /// A program that says it started, waits to be released, then reports a row.
 #[cfg(unix)]
-async fn long_collector(fx: &TaskEffortFixture) {
+async fn long_collector(fx: &ThreadFixture) {
     long_collector_at(fx, "1.0.0").await;
 }
 
 /// [`long_collector`] with the extension at `version` (none when empty).
 #[cfg(unix)]
-async fn long_collector_at(fx: &TaskEffortFixture, version: &str) {
+async fn long_collector_at(fx: &ThreadFixture, version: &str) {
     let root = fx.svc.layout.project_dir.clone();
     write(
         &root,
@@ -70,7 +70,7 @@ async fn long_collector_at(fx: &TaskEffortFixture, version: &str) {
 /// Start the collector through the bus, as a person would, and wait until
 /// its program is running.
 async fn start(
-    fx: &TaskEffortFixture,
+    fx: &ThreadFixture,
 ) -> tokio::task::JoinHandle<Result<oxplow_domain::CommandOutcome, oxplow_domain::CommandError>> {
     let svc = fx.svc.clone();
     let run = tokio::spawn(async move {
@@ -94,11 +94,11 @@ async fn start(
     run
 }
 
-fn release(fx: &TaskEffortFixture) {
+fn release(fx: &ThreadFixture) {
     std::fs::write(fx.svc.layout.project_dir.join("release"), "").unwrap();
 }
 
-async fn seen(fx: &TaskEffortFixture) -> serde_json::Value {
+async fn seen(fx: &ThreadFixture) -> serde_json::Value {
     serde_json::to_value(
         fx.svc
             .sql
@@ -115,7 +115,7 @@ async fn seen(fx: &TaskEffortFixture) -> serde_json::Value {
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn an_activation_does_not_wait_for_a_running_collector() {
-    let fx = services_with_task_effort().await;
+    let fx = services_with_thread().await;
     long_collector(&fx).await;
     let run = start(&fx).await;
 
@@ -148,7 +148,7 @@ async fn an_activation_does_not_wait_for_a_running_collector() {
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_collector_does_not_publish_across_a_change_to_its_extension() {
-    let fx = services_with_task_effort().await;
+    let fx = services_with_thread().await;
     long_collector(&fx).await;
     let run = start(&fx).await;
 
@@ -173,7 +173,7 @@ async fn a_collector_does_not_publish_across_a_change_to_its_extension() {
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_collector_does_not_publish_across_a_same_version_redeploy() {
-    let fx = services_with_task_effort().await;
+    let fx = services_with_thread().await;
     long_collector(&fx).await;
     let run = start(&fx).await;
 
@@ -197,7 +197,7 @@ async fn a_collector_does_not_publish_across_a_same_version_redeploy() {
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_collector_does_not_publish_across_an_unversioned_redeploy() {
-    let fx = services_with_task_effort().await;
+    let fx = services_with_thread().await;
     long_collector_at(&fx, "").await;
     let run = start(&fx).await;
 
@@ -221,7 +221,7 @@ async fn a_collector_does_not_publish_across_an_unversioned_redeploy() {
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_collector_does_not_publish_after_its_extension_is_disabled() {
-    let fx = services_with_task_effort().await;
+    let fx = services_with_thread().await;
     long_collector(&fx).await;
     let run = start(&fx).await;
 
@@ -246,12 +246,12 @@ async fn a_collector_does_not_publish_after_its_extension_is_disabled() {
 /// generation, and stops being valid when that extension is disabled.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_effects_run_holds_no_generation_and_ends_with_its_extension() {
-    let fx = services_with_task_effort().await;
+    let fx = services_with_thread().await;
     let root = fx.svc.layout.project_dir.clone();
     write(
         &root,
         ".oxplow/extensions/acme/extension.yaml",
-        "manifest: 2\nname: acme\nversion: 1.0.0\nintent: { purpose: p, origin: null, examples: [] }\neffects:\n  - id: note\n    summary: s\n    on: [work_item.state_changed]\n    entry: note.star\n",
+        "manifest: 2\nname: acme\nversion: 1.0.0\nintent: { purpose: p, origin: null, examples: [] }\neffects:\n  - id: note\n    summary: s\n    on: [thread.closed]\n    entry: note.star\n",
     );
     write(
         &root,
@@ -264,12 +264,11 @@ async fn an_effects_run_holds_no_generation_and_ends_with_its_extension() {
         .next()
         .expect("the effect is declared");
     let event = {
-        use oxplow_domain::events::schema::{WorkItemStateChanged, WorkItemStateChangedV1};
-        let env = oxplow_domain::Envelope::typed::<WorkItemStateChanged>(
+        use oxplow_domain::events::schema::{ThreadClosed, ThreadClosedV1};
+        let env = oxplow_domain::Envelope::typed::<ThreadClosed>(
             "human",
-            &WorkItemStateChangedV1 {
-                work_item: oxplow_tasks::work_item_ref(fx.task),
-                to: oxplow_domain::work_items::CanonicalState::Done,
+            &ThreadClosedV1 {
+                thread: fx.thread.to_string(),
             },
         );
         let id = env.id.clone();

@@ -1,0 +1,38 @@
+# A request's outcome is one capture, placed at the request's start (its
+# first prompt), so a trend puts the request in the period it started in. A
+# later turn of it (a background job's report) records its figures again:
+# the new capture replaces the old one, still at the request's start.
+given:
+  - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude }, bind: ses }
+  - observe:
+      turn:
+        session: $ses.id
+        prompt: Fix the failing tests
+        tools: [{ name: Bash, kind: shell, command: "sleep 9", call_id: c1, ok: true }]
+        runs:
+          - { at: "2026-01-01T00:00:01Z", cases: [{ name: a, status: failed }] }
+  - observe:
+      turn:
+        session: $ses.id
+        job: c1
+        prompt: "<task-notification>c1</task-notification>"
+        runs:
+          - { at: "2026-01-01T00:00:31Z", cases: [{ name: a, status: passed }] }
+when:
+  sql: |
+    SELECT f.subject, f.value,
+           abs(julianday(c.captured_at) - julianday(r.started_at)) * 86400000 < 1 AS at_start
+      FROM v_fact f
+      JOIN v_capture c ON c.id = f.capture_id
+      JOIN v_request r ON r.uri = f.subject
+     WHERE f.measure_key = 'oxplow.request_test_outcome'
+       AND f.dims_json = '{"oxplow.tests_stat":"red_runs"}'
+expect:
+  rows:
+    - { subject: "oxplow:oxplow/request?id=req1", value: 1.0, at_start: 1 }
+steps:
+  # One capture holds the request's figures: the first turn's was replaced.
+  - when: { sql: "SELECT count(DISTINCT capture_id) AS n FROM v_fact WHERE measure_key = 'oxplow.request_cycle_time'" }
+    expect: { rows: [{ n: 1 }] }
+  - when: { sql: "SELECT value FROM v_fact WHERE measure_key = 'oxplow.request_test_outcome' AND dims_json = '{\"oxplow.tests_stat\":\"at_close\"}'" }
+    expect: { rows: [{ value: 0.0 }] }

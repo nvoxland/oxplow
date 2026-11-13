@@ -1,0 +1,28 @@
+# To Do on the board: an epic's items under its heading in one block (the
+# epic's own card is the heading), the loose ones after; a heading folds its items
+# away; a card shows its description's first sentence under its title,
+# its markdown drawn.
+requires: [oxtask]
+given:
+  - { command: oxtask.task.create, input: { title: An epic, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Its child, stage: ready, parent: tsk1, priority: urgent } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Loose item, body: "## Why\n\nIt breaks **the build** in `ci.yml`. Then more.", stage: ready, priority: low } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk3&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+when: { page: work, params: { show: thread, priority: any, thread_id: 1, stream_id: 1 } }
+steps:
+  - ui:
+      - expect:
+          count: { '[data-testid="column-ready"] .epic': 1, '[data-testid="column-ready"] .ox-card.nested': 1, '[data-testid="column-ready"] .epic-group .ox-card': 1, '[data-testid="column-ready"] .ox-card': 2 }
+          text:
+            '[data-testid="column-ready"] .epic-title': An epic
+            '[data-testid="column-ready"] .ox-card.nested.prio-urgent .card-title': Its child
+            '[data-testid="column-ready"] .ox-card.prio-low .card-title': Loose item
+            '[data-testid="column-ready"] .ox-card.prio-low .card-desc': It breaks the build in ci.yml.
+            '[data-testid="column-ready"] .ox-card.prio-low .card-desc strong': the build
+            '[data-testid="column-ready"] .ox-card.prio-low .card-desc code': ci.yml
+      - click: '[data-testid="column-ready"] .epic-toggle'
+      - expect: { count: { '[data-testid="column-ready"] .ox-card.nested': 0, '[data-testid="column-ready"] .ox-card': 1 } }
+      - click: '[data-testid="column-ready"] .epic-title'
+      - expect: { navigated: ["oxplow:oxplow/task?id=tsk1&provider=oxtask"] }

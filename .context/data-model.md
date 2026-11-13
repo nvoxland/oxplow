@@ -2,7 +2,7 @@
 
 
 What this doc covers: the SQLite tables, their store classes, and the
-`sort_index` queue invariant for tasks. If you're adding a new persisted concept, also
+assignment queues. If you're adding a new persisted concept, also
 read [ipc-and-stores.md](./ipc-and-stores.md).
 
 ## Extension jobs
@@ -91,7 +91,9 @@ its active provider declaration, independently of the invoking command.
 Public write commands still require private audit/proposal input handling.
 Neither configuration nor state has a migration runner: a stored configuration layer at
 another schema version fails closed until the extension's own command rewrites it at its
-version — after a rollback too, where the layer is newer than the running version. The
+version — after a rollback too, where the layer is newer than the running version. One
+exception: a layer behind a raised version whose values the new schema still takes is
+restamped by the publication (`extensions-manifest.md` "Changing the schema version"). The
 lower-level store APIs grant no authority themselves. Configuration continues to
 use the project/personal file layers. A file edit and a SQLite
 reset cannot be represented as one atomic DB transaction.
@@ -102,18 +104,29 @@ All persistence lives in one SQLite file under `.oxplow/local.sqlite`, opened
 through `Database::open` (`crates/oxplow-db/src/database.rs`). Every store is
 a thin class wrapping that connection. Schema changes go through versioned
 refinery migrations in `crates/oxplow-db/migrations/`, append-only; never
-edit a prior version. **The history has been squashed twice.** Each
+edit a prior version. **The history has been squashed three times.** Each
 time every migration so far became one `V1__baseline.sql`: the schema
 they built, dumped from `sqlite_master` (tables, then indexes, then
 triggers; no views, no FTS shadow tables), with the rows they seeded. The
-second squash took V1 (the first baseline) through V124. The `V<n>` names
+second squash took V1 (the first baseline) through V124; the third took
+V1 through V8 when "work item" became "task" everywhere (the tables, the
+columns, the event types, the URIs) and oxplow's own list's tables became
+`oxtask`, `oxtask_note` and `oxtask_link`. The `V<n>` names
 elsewhere in these docs are that history — which step brought a table in
 — not files that exist. Existing databases were converted once, outside
 the app, by a script that checked their tables, indexes and triggers equal
 a fresh baseline's (views and materialized `m_v_*` tables aside) and
 rewrote `refinery_schema_history` to the baseline row. With no other
 users, a squash like that is the sanctioned way to drop history; editing a
-migration in place is not.
+migration in place is not. The one exception: a migration that has
+never applied on any database (it failed inside its transaction
+everywhere it ran) has no checksum stored, so it is fixed in place.
+A migration that rebuilds a table to widen a CHECK moves rows to the new
+value in the rebuild's `INSERT … SELECT`, never with an `UPDATE` before
+it: the old table's check refuses the new value, and a fresh test
+database has no rows to show it. Test such a migration on a database
+migrated to the version before it (`runner().set_target(Target::Version(n))`)
+that holds a row it moves.
 
 A sweeping rename (an id, a column, a command) skips the applied
 migrations and the published model golden (`fixtures/dataset_contracts.json`,
@@ -184,7 +197,7 @@ rewrote (updated or deleted in, P8.B3) — are published after each
 through `dataset_input`. A write needs nothing to be seen — the hooks see
 every table, WITHOUT ROWID and a bare `DELETE` included.
 
-**DB dispatch is gated to the pool size (tsk131).** `Database::call`,
+**DB dispatch is gated to the pool size.** `Database::call`,
 `call_mut`, and `transaction` each take a `tokio::sync::Semaphore` permit —
 sized to the r2d2 pool (`max_size`) — *before* `spawn_blocking`, and hold it for
 the duration of the DB work. Without the gate every caller spawned a blocking
@@ -212,7 +225,7 @@ worker unwinds. Thin callers are denied both the helper and its commit method.
 
 **Transactions.** One user-visible action that spans multiple writes
 to the same DB must commit as ONE transaction. The pattern (see the
-`transactional-boundaries-design` wiki page): store write ops are
+`transactional-boundaries-design` knowledge page): store write ops are
 split into sync `*_tx(conn, …)` cores (free functions in the store's
 module, taking `&rusqlite::Connection`); the async store method is a
 thin `db.call` wrapper over its core; multi-write actions compose
@@ -220,19 +233,19 @@ several cores inside one `Database::transaction(f)` closure
 (`crates/oxplow-db/src/database.rs`) — which owns commit/rollback and
 the bounded `SQLITE_BUSY` retry (safe because a rolled-back attempt
 left no trace; that's why `f` is `Fn`, borrowing what it writes rather
-than consuming it). It is the **one write path** (tsk978): no store opens
+than consuming it). It is the **one write path**: no store opens
 a transaction of its own on a raw connection — a test
 (`every_store_write_runs_in_the_retried_transaction`) allows only
-`database.rs` and the open-time model compile in `models.rs`. It begins **IMMEDIATE** (tsk503):
+`database.rs` and the open-time model compile in `models.rs`. It begins **IMMEDIATE**:
 the write lock is taken at BEGIN and waited for under `busy_timeout` — a
 BEGIN still Busy after that wait is retried like a Busy inside the
-closure (tsk1005) — so
+closure — so
 a read-then-write closure (the hook ingest, most `_tx` cores) can't fail
 with `SQLITE_BUSY_SNAPSHOT` when another writer commits between its read
 and its first write. A pure read therefore uses `Database::read` (a
 DEFERRED snapshot that is always rolled back, no write lock), not
-`transaction` — the effort, event-by-seq, worktree and turn-signal reads
-and every command that only reads (`View` / `Read`) do (tsk513). **The event-log row is the one
+`transaction` — the request, event-by-seq, worktree and turn-signal reads
+and every command that only reads (`View` / `Read`) do. **The event-log row is the one
 write that belongs inside the closure**: a producer composes
 `event_log_store::append_tx(tx, &envelope)` next to its state change
 so the log and the state can never disagree (the outbox pattern; see
@@ -241,26 +254,15 @@ so the log and the state can never disagree (the outbox pattern; see
 snapshot requests — runs AFTER commit, never inside the closure. Don't
 convert existing single-op methods preemptively — extract a `_tx` core
 the first time an op needs to join a transaction. Current users:
-the task-store status cores (`set_status_tx`,
-`update_with_status_tx`, `insert_tx`), the effort cores
-(`start_tx` / `finish_tx`), `record_take`, and every `Tx` command
+`record_take` and every `Tx` command
 handler (which runs in the bus's transaction).
 
-**Lifecycle invariant.** At most one effort is open per thread (the
-V5 unique index `idx_effort_open_per_thread`), and a task's status never
-opens or closes one: `oxplow_tasks::store::write_status_tx` (the core of
-`set_status_tx` / `update_with_status_tx`, behind
-`oxplow.work_item.transition` / `update` / `create`), `soft_delete` and
-`move_task` touch the task alone — `get_task_tx` sees live rows only, so
-a deleted task takes no edits. Efforts open, close and link through the
-`effort.*` commands, which the effort policy runs as it reacts to
-`work_item.state_changed` (`.context/work-tracking.md`). Boot recovery
+**Lifecycle invariant.** A task's stage never opens or closes a
+turn or a request: a task is a row of the shared model, and writing it
+touches the task alone. A request is read live from its turns
+(`.context/work-tracking.md`); nothing opens or closes it. Boot recovery
 (`crates/oxplow-app/src/recovery.rs`) only closes turns the previous run
-left open: an effort open across a restart is legal. Snapshot pins are
-taken after commit by the effort-lifecycle consumer
-on the event pump (`set_start_snapshot` / `set_end_snapshot`; see
-"event_log" → async consumers) — an effort row is never gated on
-snapshot success, and a crash between the two is resumed, not lost.
+left open.
 
 **Error typing.** Store failures surface as typed `DomainError`
 variants, not stringified blobs: `map_sql_err`
@@ -285,16 +287,15 @@ the same with no reason of their own.
 
 Every externally-visible entity id is a SQLite **autoincrement INTEGER**
 rendered with a fixed **3-letter type prefix** at the application boundary,
-e.g. `str5` (stream), `thr21` (thread), `tsk38` (task), `eff7` (effort),
+e.g. `str5` (stream), `thr21` (thread), `tsk42` (task), `req4` (request),
 `not3` (note), `trn9` (agent-turn), `ses4` (agent session), `cmt2` (comment),
 `trm3` (terminal).
 The prefix lives only in Rust (`Display`/serde) and in the TypeScript
 bindings (each id type is a `string`); **DB columns and the FKs that point
 at them are plain `INTEGER`**. The single source of truth is
 `oxplow_domain::EntityKind` (prefix ↔ label ↔ kind) in
-`crates/oxplow-domain/src/ids.rs` — core's entities; a work list's ids
-are its own (`oxplow_tasks::{TaskId, TaskLinkId}`, `tsk<n>` / `lnk<n>`,
-declared to core by its id pattern); each id newtype (`StreamId`, `ThreadId`,
+`crates/oxplow-domain/src/ids.rs` — core's entities; a task store's ids
+are its own (oxtask's `tsk<n>`, declared to core by its `fills.id_pattern`); each id newtype (`StreamId`, `ThreadId`,
 …) is an `i64` wrapper generated by one macro, with `AnyId { kind, value }`
 as the type-erased form for polymorphic boundaries (the MCP
 `expect_id_kind` validator). Rowid `0` is the `placeholder()` sentinel
@@ -302,7 +303,7 @@ as the type-erased form for polymorphic boundaries (the MCP
 A polymorphic reference is stored as a URI ([resources.md](./resources.md)):
 `page_ref.source_uri`/`target_uri` and `search_entry.uri` (and every
 model's `uri` column) hold `oxplow:<namespace>/<resource>?<params>`
-(`event_log.id` is a UUIDv7, also TEXT). Refs in prose/wiki use the bare
+(`event_log.id` is a UUIDv7, also TEXT). Refs in prose and knowledge pages use the bare
 self-typed sugar, e.g. `[[tsk42]]`.
 
 ## Global state (outside `.oxplow/`)
@@ -337,7 +338,7 @@ installed one — see [DEV.md](../DEV.md):
   `atomic.rs`): a truncate-then-write that died midway left an
   unparseable file, and both stores read an unparseable file as an empty
   document — so the failure mode was silent loss of the whole restore
-  set or recents list (tsk253). The path is resolved by
+  set or recents list. The path is resolved by
   `oxplow_config::global_config_dir()` so `main.rs` can read it before
   any Tauri handle exists.
 - **`.oxplow/instance.lock`** — a per-project advisory lock (fs2) held
@@ -414,7 +415,7 @@ Streams never look outside the project root for data; see
 `archived_at` (migration v4, nullable TEXT) — soft-delete stamp set
 by the rail's "Remove…" action. `StreamStore::list` filters
 `archived_at IS NULL` so archived streams disappear from the rail
-without dropping rows that history (efforts, snapshots, page_visit)
+without dropping rows that history (requests, snapshots, page_visit)
 references. Pre-migration rows stay NULL and remain visible. Primary
 streams cannot be archived.
 
@@ -546,114 +547,9 @@ running an older DB get the columns/tables dropped on first launch with
 the new binary; existing rows are not migrated forward (no surface
 reads them).
 
-### `task` — `SqliteTaskStore` (`crates/oxplow-tasks/src/store.rs`)
+### Core's task tables (gone, `V34__drop_core_tasks.sql`)
 
-The actual TODO list. Singular table name, `id INTEGER PRIMARY KEY
-AUTOINCREMENT` — stored as a plain integer, surfaced as `tsk<int>` (see
-[Entity ids](#entity-ids)). The
-`kind` column was dropped: there is no `epic`/`subtask`/`bug`/`note`
-discriminator any more. An **epic is any task that has children** —
-i.e. any row that's a `parent_id` target. The UI reads it through the
-interface — an item that is some item's `parent_uri`
-(a page's `depth` column); there's no flag on the row itself.
-
-Statuses: `ready`, `in_progress`, `blocked`, `done`, `canceled`,
-`archived`. `archived` is a terminal state that hides the item from
-the default Work panel view — archived rows fold into the Done
-section's bucketing but aren't rendered unless the user flips the "Show
-archived (N)" toggle in the Done section header. The same header carries
-an "Archive all" action that bulk-archives every visible Done/Canceled
-row. The work-next page's blocker check reads the interface, where
-archived is done or canceled. `parent_id` chains items under
-epics. The `description` (markdown) is the single prose field, structured
-however the author sees fit — the model is not prompted toward any
-template, and is meant to be human-readable, wiki-formatted for
-readability. Task links express dependencies (`blocks`, `discovered_from`,
-`relates_to`, …) via the `task_link` join table.
-
-`thread_id` is nullable — items with `thread_id IS NULL` belong to the
-**backlog** (a global, stream-less queue). The store API uses the constant
-`BACKLOG_SCOPE` as a sentinel string in event payloads so listeners can
-distinguish backlog changes from in-thread changes.
-
-`author` (migration v26, nullable TEXT) — semantic origin of the row,
-distinct from `created_by` (which just classifies the SQL writer as
-`user`/`agent`/`system`). Values: `'user'` (explicit user-initiated
-create), `'agent'` (a `oxplow.work_item.create` run by an agent-driven
-actor), or `NULL` (legacy rows). Pre-v29 DBs
-also held `'agent-auto'` rows synthesized by the removed auto-file
-listener; migration v29 cancels any such still-in_progress rows, and
-the read path maps the legacy string to `null` so older terminal rows
-continue to load under the narrowed enum.
-
-The `description` column is the task's single canonical prose body.
-(An earlier developer/executive/terse audience-variant feature added a
-`description_variants` column in V27; it was removed in V29 along with
-`effort.summary_variants` and `comment.section_anchor` — see the
-V29 migration. Tasks/efforts/wiki pages now carry one body each.)
-
-`note_count` is a computed column added to every `Task` returned by the
-store (via COUNT subquery over `task_note`). It drives the note badge on
-list rows and is always 0 when no notes exist.
-
-`category` and `tags` were removed in V19 (`drop_task_category_tags`).
-Both were settable via the rail UI and MCP create/update params but
-nothing read `tags`, only `BacklogDrawer` showed `category`, and
-nothing populated either automatically — they were vestigial. The
-Backlog page never actually grouped or filtered by them despite the
-old doc claim.
-
-`completed_at` is set on entering `done` and kept when a done task is
-archived (archiving is tidying, not undoing); moving anywhere else clears
-it (`Task::set_status`).
-
-### `work_item` — every provider's work items (migration `V115__work_item.sql`, P5.C1)
-
-One row per work item, keyed by its URI (`oxplow:oxplow/work_item?id=<id>&provider=<provider>`):
-`provider`, `title`, `body`, canonical `state` (`todo`, `in_progress`,
-`blocked`, `done`, `canceled`), the provider's own `native_state`, its
-other fields as `native` JSON, `parent_uri`, timestamps and
-`deleted_at`; since V17 the interface's own `thread_id` (the list it's
-on, NULL = backlog), `rank` (order on the list) and `closed_at` (when it
-first reached done or canceled; reopened, NULL). Published as
-`v_work_item`: live rows **of the active work list only** (a join on the
-active `work_items` row of `capability_provider`, so with none it's
-empty). oxplow's tasks publish no model of their own (`v_task`,
-`v_task_link` and `v_task_note` were removed): everything reads the
-interface, and oxplow's own fields are `native_state` and `native`.
-
-**`work_item_link`** `(from_uri, to_uri, link_type, created_at)` and
-**`work_item_comment`** `(id, uri, body, author, created_at)` (V17) are
-the interface's links and comments, published as `v_work_item_link` /
-`v_work_item_comment` over the active list's items, restated from each
-list's records (a comment's id is `<item ref>#<the list's id for it>`;
-V29 re-keyed oxplow's `task_note:<n>` to `#not<n>` and dropped the
-triggers that copied `task_link` / `task_note` in).
-`link_type` is the list's own (V28 dropped V17's CHECK naming oxplow's
-six). An item's page refs are restated from these and `work_item`
-(`work_item_refs::restate_tx`, "page_ref" below).
-`capability_provider.fields_json` (V18) is an implementation's declared
-fields. Capability rows are published when services are built
-(`CapabilityRegistry::publish_now`), so the first read sees the active
-list.
-
-Every list's rows arrive by projection from its `work_item.recorded`
-records (`work_items.project`; [work-items.md](./work-items.md) "One
-writer"), oxplow's tasks' included: their verbs answer with the record
-of every task they changed (`oxplow_tasks::record::record_tx`). oxplow's
-mapping: `ready` → `todo`; `archived` → `done` when `completed_at` is
-set, else `canceled`; the rest by name. `rank` is the task's
-`sort_index`, its list (`List`) its thread. (Archiving keeps
-`completed_at`; before V115 it cleared it, so V122 restored it — and
-`done` — for every task whose last archive the event log shows came
-`from: done`. Tasks archived before the event log existed have no record
-and stay `canceled`.) `native` carries a list's declared fields (oxplow:
-`priority`, `author`; V29 dropped the rest). A row's `thread_id` is the
-list its record states, else the thread that filed it (first record);
-`closed_at` when a record first closed it. Threads and streams are
-archived, never deleted in use: a hard delete (tests) cascades oxplow's
-task rows but leaves their interface rows (V29 dropped the trigger that
-followed it).
+Core keeps no tasks. A task is a row of the shared model `oxplow/task_record`, read as `v_oxplow_task` (with `v_oxplow_task_link`, `v_oxplow_task_comment` and `v_oxplow_request_link`) and written by its store (`.context/tasks.md`, `.context/models.md`). V34 dropped the tables core kept before — `task`, `task_link`, `task_comment`, `task_assignment`, `oxtask`, `oxtask_link`, `oxtask_note` and `request_task` — with their indexes, change-counter triggers and counter rows, and the `event_log_task_uri` index. What requests worked on is the model `request_task` (`model__oxplow__request_task`), which is another table.
 
 ### `symbol` + `symbol_capture` — code symbols (migration `V62__symbols_from_tree_sitter.sql`)
 
@@ -675,15 +571,13 @@ concurrent duplicate keeps the first (`ON CONFLICT DO NOTHING`). The
 same migration adds `ai_call.input_hash`. Read as `v_ai_result`; see
 [ai-providers.md](./ai-providers.md) "Recorded computations".
 
-### `task_note` (`oxplow-tasks` `satellite.rs`)
+### Thread notes (gone)
 
-**`task_note`** holds only the comments on oxplow's tasks
-(`oxplow.work_item.comment`; `task_id` NOT NULL), which reach
-`work_item_comment` through the task's record. Thread notes (`thread_note`,
+Thread notes (`thread_note`,
 the per-thread capture pad of `oxplow.knowledge.add_note`) are gone: V112
 dropped the table with its `page_ref` edges and search rows, and with the
 commands, `v_thread_note`, `v_search_thread_note` and the `oxplow/thread_note`
-resource. What an agent leaves for the next one is an effort, a decision or
+resource. What an agent leaves for the next one is a request's record or
 a handoff.
 
 ### Old UI units, answers and database dashboards (gone, V113)
@@ -706,7 +600,7 @@ Work handed from one thread to another (`oxplow.handoff.*`,
 [agent-model.md](./agent-model.md) "Handoffs and native messaging"):
 `from_thread_id`, `from_session_id` (NULL for a person or an effect),
 `from_actor` (CHECK `user` / `agent` / `effect` / `job` / `system`),
-`to_thread_id` (CHECK it isn't the sender's), `work_item` (a ref),
+`to_thread_id` (CHECK it isn't the sender's), `task` (a ref),
 `body`, `sent_at`, `delivered_at` + `delivered_to_session_id` (stamped by
 `SqliteHandoffStore::mark_delivered` once the agent has the prompt or
 injected context that carries it), `state` (CHECK `open` / `taken` / `declined` /
@@ -726,161 +620,96 @@ count — `rename_tx`, `delete_tx`); read as `v_terminal` (with its `uri`,
 `oxplow:oxplow/terminal?id=trm<n>`, the key the shell's PTY is registered
 under: [terminal.md](./terminal.md) "Terminals are rows").
 
-### `effort` — `EffortStore` (`crates/oxplow-db/src/effort_store.rs`)
+### `request` and the work recorded on it (`V11`, `V16`, `V18`–`V25`)
 
-**V5 (inferred work tracking, [work-tracking.md](./work-tracking.md)).**
-An effort is a span of one thread's work, and oxplow is moving to open
-and close it itself. V5 made `work_item` nullable (NULL = unlinked; the
-`''` the old default stored became NULL), allowed **at most one open
-effort per thread** (`idx_effort_open_per_thread`; the migration closed
-every older open one per thread as `system`) and dropped the
-one-open-per-work-item index. It added `title` (an override; `v_effort.title`
-is it, else the item's title, else the first line of the thread's first
-prompt in the span) and `closed_by` (`commit`, `switch`, `person`,
-`agent`, `system`). Done by column — add, copy, drop, rename — since
-migrations then ran with foreign keys on, where rebuilding the table
-cascaded away the child rows. In Rust
-`Effort.work_item` is `Option<String>`; `start_tx(conn, ev,
-work_item: Option<&str>, …)` and `finish_tx(conn, ev, id, &EffortEnd)`;
-the events are `effort.opened@3` / `effort.closed@3` (with `closed_by`) /
-`effort.finished@3`, plus `effort.linked@2` and
-`effort.retitled@2`. Opening an effort on a thread that has one open
-closes that one first (`switch`).
+A **turn** (`agent_turn`) is one prompt-to-stop run of an agent. A
+**request** is the turn that started something and every turn that
+followed from it (a background job's report, a subagent's hand-back, a
+matched peer message), joined by the cause links set when each turn opens.
+Efforts were removed (2026-11-10); the request and its evidence replace
+them. **V25** dropped their data: the `effort`, `effort_file`,
+`effort_metric_delta`, `effort_observation_row` and
+`effort_evidence_state` tables; every `effort_id` column
+(`agent_nudge`, `agent_token_usage`, `agent_tool_call`, `metric_capture`,
+`once_mark`, `snapshot_op`, `event_log`, `extension_run`; the tables with
+a foreign key rebuilt, every token row and capture kept); the effort
+events, their measures, specs and the effort producers' captures; the
+`effort` change kind; the effort-projected `page_ref` edges and search
+entries; the `effort_policy` capability rows; and an effort-only once
+mark. A take an effort asked for (`effort_start` / `effort_end`) stays,
+as `manual`, in `snapshot_op` and its `snapshot.taken` payload. A nudge
+whose cause only an effort told apart keeps its row without its cause.
+`extension_job_context` drops `anchors.effort_id` from stored contexts.
+On a copy of a real database (2.1 GB, 150k captures, 1.9M facts, 340k
+events) it ran in 12 s.
 
-**Adoption and as-of closes.** `start_tx(conn, ev, &EffortStart)` may
-start an effort in the past (`adopt_since`, clamped to the thread's
-previous effort's end): it then stamps itself onto the thread's
-un-efforted rows since then in the derived tables that carry an effort
-(`EFFORT_STAMPED`: `agent_tool_call`, `agent_token_usage`,
-`metric_capture`, `agent_nudge`, `claim`, `decision`).
-`finish_tx` at a past point releases the rows after it. The event log is
-not restamped: an event keeps the anchors it was written with.
-`effort_at_tx(thread, at)` names the effort whose span covers a moment.
-Writers take the thread's open effort (`open_for_thread_tx`,
-`find_open_for_thread`); the old "single open effort", list-of-open and
-target-overlap scoring went with the one-open-per-thread rule.
-What follows describes the task-driven lifecycle still in place until
-the effort policy lands.
+- **`request`** (V11): `id`, `thread_id` (`ON DELETE CASCADE`),
+  `first_turn_id`. `agent_turn.request_id` is the request a turn belongs
+  to: its cause turn's, else a new one. The row holds identity and
+  membership only. Work recorded against a turn (tool calls, tokens, test
+  runs, jobs) is the request's through the turn, so no other row repeats
+  it. `v_request` reads the totals through the turns and the state live:
+  `waiting_on_person`, `running`, `waiting_on_work` (a job one of its
+  turns started has not reported) or `finished`. Its URI is
+  `oxplow:oxplow/request?id=req<n>`.
+- **`request_task`** (V16): the tasks a request worked on, one row per
+  (request, task URI, basis). `basis` is `prompt` (a person's prompt in
+  the request named the task), `command` (the agent ran a task command on
+  it in a turn), `transition` (a task transition in a turn) or `assigned`
+  (it was in progress and assigned to the thread when a turn of the
+  request ended; the weakest). `turn_id` is the turn the evidence came
+  from. It is observed, never
+  stated: nothing here opens, closes or moves a task. `task_uri` is not a
+  foreign key, because a task's store may drop it. Bundled's model
+  `request_task` holds these rows and `v_oxplow_request_link` reads them. A task's requests are the task's work; the task page reads
+  them there.
+- **`commit_request`** (V20): the requests a commit's changes came from,
+  one row per (commit, path, request). `basis` is `named` (an edit call of
+  one of its turns named the path), `reported` (the harness said a shell
+  call changed it) or `observed` (it changed while the request ran and
+  nothing else says). `confidence` is `sole` (one request changed it since
+  the previous commit that held it) or `shared`. `v_commit_request` reads
+  it; the task→commit edge derives through requests
+  ([git-integration.md](./git-integration.md) "Linked to the requests that
+  made it"). `file_snapshot.git_oid` (V20) is a captured file's git blob
+  id, so a commit's content matches a capture without reading bytes.
+- **`agent_tool_call_path`** (V18): every file a tool call names
+  (`named`) or its harness reports it changed (`reported`; Claude Code's
+  `bashEditDiff`). `agent_tool_call.path` keeps the first only. V18
+  backfilled the rows from the finishes' payloads. `v_tool_call_path`
+  reads it; `v_tool_call` carries `agent_session_id`, `subagent_id` and
+  `subagent_kind`.
+- **`turn_file`** (V21): the files that changed during each turn: turn,
+  path, stream, first and last change, `timed`, `shared`. It is a time
+  join of a turn with its stream's snapshot line, stored. The
+  `snapshot_op_turn_file` trigger writes it when a take is logged (a take
+  that changed nothing logs none); V21 backfilled it once. Several writers
+  can change one worktree at once, so it is best-effort. `v_turn_file`
+  adds the claim (`named` or `reported`, from `agent_tool_call_path`) and
+  the confidence: `claimed` (a call of the turn named or reported the
+  file), `shared` (another turn on the stream ran while it changed) or
+  `sole`.
+- **`request_analysis`**, **`request_metric_delta`**,
+  **`request_observation`** (V22): a request's stored analysis on one
+  stream (a request can span streams). `request_analysis` holds the span
+  of the request's turns there, its start and end snapshots, and `sig`,
+  the signature of the inputs it was computed from (a differing one is
+  stale). The deltas and the observations (tests, diff coverage, static
+  analysis) hang off it with `ON DELETE CASCADE`. Read as
+  `v_request_metric_delta` and `v_request_observation`; see
+  [collection.md](./collection.md) "A request's analysis".
+- **Pacing** (V24): `once_mark.request_id` and `agent_nudge.request_id`
+  scope a one-shot mark and a nudge's dedupe to the request of the turn
+  they belong to, so a once-per-request hint fires again for the next
+  request.
+- **A run** (a test, coverage or analysis capture) belongs to the turn
+  whose tool call caused it: `metric_capture.turn_id`, read through
+  `agent_turn.request_id`. `v_test_run` carries it. See
+  [metrics.md](./metrics.md) for how request reads use it.
 
-An **effort** is one bracketed span of work on a **work item**, today
-one `in_progress → done` (or blocked/canceled) cycle of a task. V100
-(P2.5a, tsk427) renamed `task_effort` → `effort` and `task_effort_file`
-→ `effort_file` in place (RENAME / ADD COLUMN / DROP COLUMN, never DROP
-TABLE, so every child row survived; see the migration's header) and
-replaced the `task_id` FK with `work_item TEXT NOT NULL`, a canonical
-URI (`oxplow:oxplow/work_item?id=tsk42&provider=oxplow`, or another provider's
-`oxplow:oxplow/work_item?id=ENG-12&provider=issues`; built with `uri::build::work_item_uri`).
-`v_effort` / `v_effort_file` carry the ref only (no oxplow task id: a
-reader joins `v_work_item` on it, so it sees the active list's item and
-nothing with none). An effort goes with its thread (`thread_id … ON
-DELETE CASCADE`), not its work item: an effort another stream's thread
-linked to a deleted item survives as history — readers LEFT JOIN
-`v_work_item`. Claims and decisions name the item they were made on the
-same way (`claim.work_item`, `decision.work_item`, V22, which rebuilt
-both tables from their old `task_id` foreign keys); so do metric facts'
-spine dimension `oxplow.work_item`. A claim carries a reviewer's verdict
-in `claim.review` (`verified` or `dismissed`, NULL while unreviewed; V75):
-claims are read from the agent's answers, and reading an effort again
-replaces only its unreviewed ones.
-
-In Rust the row is `Effort { work_item, … }`; `EffortStore` (was `TaskEffortStore`)
-is keyed by the ref — `start(work_item, …)` refuses anything that isn't
-a `work_item` ref (`uri::build::validate_work_item_uri`),
-`find_open_for_work_item`, `most_recent_for_work_item`,
-`list_for_work_item`, `work_item_for_effort`. The effort's `page_ref`
-slice is projected from the work item's provider-scoped id, so another
-provider's item gets edges too. The UI mirrors the helpers in
-`apps/desktop/src/workItemRef.ts` (`workItemRef`, `taskIdOfWorkItemRef`,
-`workItemLabel`); an effort on another provider's item shows its label
-and has no task page. Columns: `work_item`,
-`thread_id`, `started_at`, `ended_at`,
-`start_snapshot_id`, `end_snapshot_id`, `summary` (free-form text
-an optional `oxplow.effort.report` wrote describing what shipped; `v_effort`
-(v3) reads it, else the final message of the effort's last turn),
-`impacts_json` (V12 — nullable TEXT holding a JSON array of declared
-`EffortImpact` rows of the form `{kind, id, action?}`; the LLM uses this
-to call out wiki pages it created, tasks it completed, commits it
-referenced, etc. Each row projects into `page_ref` under
-`ref_type=impact` with the action carried in `source_extra`).
-Opened and closed by the `effort.*` commands (the effort policy runs
-them as items start and finish; `.context/work-tracking.md`):
-
-- an open pins a start snapshot, linked to `start_snapshot_id`;
-- a close pins an end snapshot, linked to `end_snapshot_id`.
-  Capture de-dupes by content hash — an unchanged tree reuses the
-  latest existing snapshot id rather than writing a near-identical row
-  — so `end_snapshot_id` is set whenever the stream holds any snapshot
-  (on a no-op close it falls back to the effort's `start_snapshot_id`).
-  It is null only while the effort is open: `end_snapshot_id` null ⇔
-  effort in progress. There is no time-based minimum gap.
-
-`summary` is the effort's single canonical prose body, written by
-`oxplow.effort.report` on the thread's open (else latest) effort; nothing writes
-it otherwise — `v_effort.summary` falls back to the last turn's
-`agent_turn.answer` at read. Closing a thread (`oxplow.thread.close`) or
-archiving its stream (`oxplow.stream.archive`, end snapshot taken first) closes
-its open effort, `closed_by` `system`.
-
-Re-opening a task (done → in_progress) on a thread gives it a second effort. At most one effort is open per thread.
-
-`effort_file` records an effort's files. Columns: `effort_id`, `path`,
-`change_kind`, `local_snapshot_id`, `closest_vcs_rev`, `vcs_rev_exact`,
-`source` (V7: `claimed` | `observed`), primary key `(effort_id, path)`;
-read as `v_effort_file`. Two writers, both as the work happens: the
-`effort.claim` reactor claims each file an edit names (`kind: edit`,
-whatever its harness calls it) for the effort it happened in
-(`record_file`, `INSERT OR REPLACE`, `source = 'claimed'` — a claim
-replaces an observation); the `effort.observe` consumer records every
-other path a thread's turn changed as `observed` on the effort holding
-the turn (`observe_files_tx`: skipped when another thread's overlapping
-effort claimed it, never overwriting a row). A file two threads changed
-at once and neither claimed is observed by both. Nothing is declared by
-the agent and nothing is reconciled at close.
-
-V44 (attribution past the door) adds the agent session to the record, all
-`ALTER … ADD COLUMN` with NULL for older rows: `agent_tool_call.
-agent_session_id` (from the finished event's anchor), `subagent_id` and
-`subagent_kind` (from the event's optional `subagent {id, kind}`);
-`effort_file.agent_session_id` (a claimed row: the session whose edit
-named the file) and `shared` (`NOT NULL DEFAULT 0`: an observed file more
-than one session's turns could have changed) — set by `observe_files_tx` from `agent_stores::sessions_active_tx` (one session active in the window: the row carries it; more: `shared = 1`, no session; a path two sessions observe becomes shared; a claimed row is never touched); `claim.agent_session_id`
-(the acting session — a reasoning claim lands on *that session's* open
-turn, not the thread's newest). `v_tool_call`, `v_effort_file`, `v_claim`
-expose them (oxplow-bundled's `v_oxplow_struggle` groups tool calls by session too).
-See agent-model.md's "Per-effort write log" for the flow. Consumed by `get_effort_files`
-(`crates/oxplow-tauri-ipc/src/commands/effort.rs`) over the
-`EffortStore` and `SnapshotStore`: when ≥2 efforts share an end
-snapshot AND this effort has ≥1 row here, the pair-diff is filtered
-to those paths; 0 rows → fall back to raw pair-diff ("assume all");
-1 effort → raw pair-diff.
-
-Read API: `listEffortsForTask(itemId)`, `listOpenEfforts()`,
-`listEffortsForSnapshot(snapshotId)`,
-`listEffortsForPath(path)` (closed
-efforts that touched `path` via `effort_file`, joined to the
-owning task's title/status, newest-first by `ended_at` — drives
-the local-blame overlay described in `.context/editor-and-monaco.md`).
-The task page reads a task's efforts and each one's changed files in one
-read over the models — `v_effort` left-joined to `v_effort_file`
-(`workItems.readTaskEfforts` → `effortDetailsFromResult`), not an RPC
-per effort.
-
-**Commit↔item attribution is intentionally NOT tracked.** A
-`task_commit` junction (migration v27) was never written or read and
-was dropped in V100, with the equally dead `task_effort_turn`. Users commit outside oxplow all the time (IDE buttons,
-CLI, CI rebases, merges, squashes) and oxplow has no authoritative hook
-there. A blame-style feature built on that data would lie more often
-than it'd be useful. If a future feature wants "show me commits for
-this item," the answer is to scope `git log` by the files
-in `effort_file`.
-
-A **run** (a test, coverage or analysis capture) is the effort its
-causing tool call was in: `metric_capture.effort_id`, stamped at ingest
-from the tool event's effort anchor (else the thread's open effort) and
-restamped when an effort adopts the turn. `v_test_run.effort_id` (v2)
-reads it directly. `metric_capture.effort_id` is SET NULL on effort GC, so
-the capture rows outlive their effort. See `.context/metrics.md` for how
-effort reads use it.
+A request has no task column. A task links to requests through
+the model `request_task`; the page reading a task's requests joins
+`v_oxplow_request_link` to `v_request`.
 
 ### `snapshot` + `file_snapshot` — `SnapshotStore` (`crates/oxplow-db/src/analytics_stores.rs`)
 
@@ -915,7 +744,7 @@ draft of this doc described a single `snapshot_entry` table with a
   trees hash equal; an un-hashed git entry makes it conservative (an
   extra snapshot, never a missed change). NULL before V96.
 
-**Content identity vs storage address (V96, tsk423).** `blob_hash` is
+**Content identity vs storage address (V96).** `blob_hash` is
 the **address** (where the bytes live); `content_hash` is the
 **identity** (what the bytes are): the xxh3-128 of the bytes, for every
 class that has bytes. They coincide for `oxplow` rows (capture fills
@@ -931,7 +760,7 @@ Everything that compares content goes through typed trees
 content_hash, … }`, `TreeEntry::identity()`), never through an address:
 `diff_snapshots`, `Trees` (`.context/vcs.md`; it knows each cell's class
 instead of guessing from the string's length), change analysis, diff coverage
-and wiki drift. `stats_for_snapshot` / `list_changes_for_snapshot`
+and knowledge page drift. `stats_for_snapshot` / `list_changes_for_snapshot`
 classify by the same identity, so a row whose bytes equal its
 predecessor's is not a change.
 
@@ -951,11 +780,10 @@ commands (`oxplow.stream.create`,
 runtime. Callers resolve the right service via
 `snapshot_captures.get(&stream_id)` (when the stream is known)
 or `snapshot_captures.primary()` (for project-shared surfaces
-like the wiki page watcher and freshness checks). `EffortService`
-resolves via effort → thread → stream, so lifecycle snapshots
-capture against the effort's actual worktree — an effort on a
-worktree stream never bleeds into the primary's snapshot
-history.
+like the oxwiki file watch and freshness checks). A turn's takes
+resolve via turn → thread → stream, so they capture against the turn's
+actual worktree — a turn on a worktree stream never bleeds into the
+primary's snapshot history.
 
 `unregister` calls `SnapshotCaptureService::shutdown()`, which
 fires a `tokio::sync::Notify` the `spawn_watcher` task selects on
@@ -965,18 +793,35 @@ task-local — dropping the registry's `Arc` alone never wakes the
 task, so without the signal an archived stream's watcher would
 linger until process exit.
 
-**Turns are bracketed by snapshots (V98 P2.3 tsk425, V99 tsk438).**
-`agent_turn.start_snapshot_id` is the stream's current snapshot when the
-turn opened (set in the open transaction); `snapshot_id` is the snapshot
-the worktree was at when it ended — set in the `turn_end` take's
-transaction (`record_take` stamps it whenever the take carries a
-`turn_id`). The turn's changes are start → end, like an effort's. `agent_turn.task_id` is gone (nothing ever set
-it). `agent_turn` open/close log `agent.turn.started@2` /
-`agent.turn.ended@3` in the same transaction as the row change;
-`event_log` has a `turn_id` index. `SqliteAgentTurnStore::
-stream_has_open_turn` answers "is an agent mid-turn on this worktree?".
+**A turn's snapshots are found by time.** V25 dropped
+`agent_turn.start_snapshot_id` and `snapshot_id`: the turn's end is its own
+`turn_end` take (`snapshot_op.turn_id`), and the `turn` and `request`
+change kinds find their two snapshots by time; its files are `turn_file`.
+`agent_turn.task_id` is gone (nothing ever set it). **What opened a turn** (V2): `source` (`person`, `background_job`,
+`subagent`, `peer`, `unknown`; NULL for a turn recorded before, until the
+one-time conversion), `harness_turn_id`, `cause_turn_id` (FK to the turn it
+goes on with), `cause_ref`, `cause_basis` (`reported`, `matched`) and
+`sender`, set in the open transaction (`open_turn_tx` takes a
+`TurnOpening`); `prompt` is the text that opened it, whatever its source.
+V2 also rewrote the logged `agent.turn.started@2` rows to `@3`
+(`source: unknown`). **How it ended** (V4): `outcome` (`completed`,
+`interrupted`, `errored`, `session_ended`, `session_restarted`,
+`session_closed`, `restart`; `unknown` for an old turn whose end left no trace), set in the
+close transaction, with `error` (V9: the harness's words for an
+`errored` end; V9 rewrote logged `agent.turn.ended@4` rows to `@5`); V4 gave ended turns the outcome their event logged
+(an expired payload has none), told the ends logged `interrupted` or not
+at all apart by the text oxplow had written into `answer`, cleared that
+text, and rewrote `agent.turn.ended@3` rows to `@4` (an expired payload
+only its version). The new enum-like columns of V2–V7 carry no CHECK:
+Rust owns their values, and a CHECK could only grow by rebuilding the
+table. **Requests** (V11): `request` (`thread_id`, `first_turn_id`) and `agent_turn.request_id`, set when the turn opens. **Messages between sessions** (V15, `agent_message`: the sending turn, recipient, text hash, the turn it was matched to on receipt, and V27's `notify_when_idle` ask with the `idle_notice_turn_id` of the notice that answered it). **A call's files** (V18, `agent_tool_call_path`: every file a call names, `named`, or its harness reports, `reported`; backfilled from the finishes' payloads), with an index on `file_snapshot(stream_id, captured_at)`. **A turn's files** (V21, `turn_file`: turn, path, stream, first/last change, `timed`, `shared`), written by the `snapshot_op_turn_file` trigger when a take is logged and backfilled once; `v_turn_file` adds the claim and confidence. **A request as a change** (V19 widened `change.kind`). **A commit's requests** (V20, `commit_request`: per (commit, path, request) with its basis and `sole`/`shared` confidence; `file_snapshot.git_oid` is a captured file's git blob id, so a commit's content is matched without reading bytes). **A request's analysis** (V22, `request_analysis` per (request, stream) with its span and input signature, `request_metric_delta`, `request_observation`; collection.md "A request's analysis"). **Pacing per request** (V24: `once_mark.request_id`, `agent_nudge.request_id`). **The question it ended on** (V10, `question`) is set in the close transaction. `agent_turn` open/close log
+`agent.turn.started@3` / `agent.turn.ended@5` in the same transaction as
+the row change; **background jobs** (V7, `agent_job`) are written beside
+them by the hook ingest ([agent-model.md](./agent-model.md) "Background
+jobs");
+`event_log` has a `turn_id` index. A turn's `harness_turn_id` (the harness's own id; V13 indexes it with the thread) is set at the open or, for a harness that names the turn later, when it does. `handoff` and `thread_context_item` have `delivered_turn_id` (V14), the turn a delivery landed in.
 
-**Turns record the model and effort they ran on (V82).** Nullable TEXT
+**Turns record the model and reasoning effort they ran on (V82).** Nullable TEXT
 `agent_turn.model` and `agent_turn.effort`, set by `close_turn_tx` from
 `TurnEnd.model` / `TurnEnd.effort` when the turn ends (they ride the Stop's
 `HookEnvelope.turn_run`) and published on `v_agent_turn`. A turn open, or
@@ -987,7 +832,7 @@ them.
 **Plans an agent proposed are events, not a table.** `agent.plan.proposed@2`
 (`thread`, `turn?`, `text`, `path?`), logged by hook ingest when Claude's
 `ExitPlanMode` is requested or Codex completes a `plan` item, anchored to
-the turn and the open effort; `v_agent_plan` (a model over `event_log`, no
+the turn; `v_agent_plan` (a model over `event_log`, no
 table, no migration) reads it. Whether the person accepted the plan is not
 recorded. See `agent-model.md` "Plans".
 **Turns record how full the context was (V83).** Nullable INTEGER
@@ -1000,17 +845,13 @@ window. Claude Code and opencode give no window, so it is NULL there; a
 turn open, or whose harness said nothing, has NULLs. A compaction is an
 event, `agent.context.compacted@2`, not a column.
 
-**Effort↔snapshot linkage lives on the effort row.** There is no
-`effort_id` or `source` column on `snapshot` / `file_snapshot`
-themselves — the bracket is recorded by `effort.start_snapshot_id`
-and `effort.end_snapshot_id`, each pointing at a `snapshot.id`.
-A closed effort's `end_snapshot_id` is non-null whenever the effort has
-a baseline — capture de-dupes an unchanged tree to the latest existing
-snapshot id rather than writing a near-identical row, and on a no-op
-close the effort-lifecycle consumer (`EffortService::on_effort_closed`) falls back to the effort's
-`start_snapshot_id`. `end_snapshot_id` is null only while the effort is
-open (`end_snapshot_id` null ⇔ effort in progress); there is no
-time-based gap.
+**Snapshots are the worktree's own record.** There is no turn, request or
+`source` column on `snapshot` / `file_snapshot`. A turn's end is its
+`turn_end` take (`snapshot_op.turn_id`); a request's analysis is bracketed by
+`request_analysis.start_snapshot_id` and `end_snapshot_id`; a turn's files
+by `turn_file`, a time join with the stream's snapshot line. Capture
+de-dupes an unchanged tree to the latest existing snapshot id rather than
+writing a near-identical row.
 
 **Change detection.** `latest_stat_per_path(stream)` is per stream
 (another worktree's rows are a different history). The startup sweep
@@ -1021,25 +862,25 @@ unchanged; a prior row in the other space (an xxh3) is compared by
 hashing the file, so committing a file already captured dirty records
 nothing. Incremental capture skips a path whose bytes equal its latest row's
 content — by `content_hash`, or for a git-backed row not hashed yet by
-the bytes' git blob OID against its address (tsk439) — so a touch or a
+the bytes' git blob OID against its address — so a touch or a
 formatter no-op is not a change, an oversize file whose
 size and mtime are unchanged, and a tombstone for a path already
 deleted. The sweep's reverse-deletion pass tombstones oversize files too
 (it used to key on `blob_hash`, which oversize rows lack).
 
-**Takes and the operation log (`snapshot_op`, V97, P2.2 tsk424).** A
+**Takes and the operation log (`snapshot_op`, V97, P2.2).** A
 **take** (`SnapshotCaptureService::request_snapshot(TakeRequest)`) drains
 the dirty set and hands the rows to `SqliteSnapshotStore::record_take`,
 which writes — in **one transaction** — the new `snapshot` row (with
 `branch`, `revision` when the tree is clean, and `tree_hash`), its
 `file_snapshot` rows, one `snapshot_op` row and a `snapshot.taken@3`
-event (anchors: stream, thread, turn, effort, snapshot). It is the only
+event (anchors: stream, thread, turn, snapshot). It is the only
 production write path; `create_snapshot` / `capture` / `capture_batch` /
 `set_snapshot_revision` / `set_snapshot_branch` remain as fixture
 seeders for tests.
 
 - `snapshot_op(seq, stream_id, snapshot_id, parent_snapshot_id, trigger,
-  thread_id, turn_id, effort_id, at, elapsed_ms, budget_ms, over_budget,
+  thread_id, turn_id, at, elapsed_ms, budget_ms, over_budget,
   file_count)` (STRICT). `snapshot_id` is where the worktree is after
   the take; `parent_snapshot_id` where it was before (the stream's
   current snapshot = its latest op's `snapshot_id`). Readable as
@@ -1052,6 +893,14 @@ seeders for tests.
   (NULL for core's capture). The stream's newest op's handle is the
   parent core hands the provider's next mark (`.context/providers.md` "A
   snapshots provider").
+- **Each file row carries when it changed** (V3): `file_snapshot.first_changed_at`
+  / `last_changed_at`, the times the file watcher first and last reported
+  the path changed since the previous take (a dirty-set entry keeps them,
+  and a take that fails puts them back). NULL when the take found the
+  change itself — the startup sweep, a file no watcher event named — which
+  is then known only to lie between the two takes. They are the watcher's
+  clock, so a join to turns by them is best-effort. Read on
+  `v_snapshot_file` (v3).
 - **A snapshot row carries its creating op** (P2.11): the stream listing
   (the `list_snapshots_for_stream` IPC op, `v_snapshot`) joins each snapshot's FIRST op for its
   `parent_snapshot_id`, `trigger` and `over_budget`. The diff view's
@@ -1059,12 +908,19 @@ seeders for tests.
   (the `changes` page's `max(id) < N` on the stream), falling
   back to the next-smaller id only for a snapshot no op created; Local
   History shows the trigger and marks an over-budget take "slow".
-- **Every take records an op**, including one that found nothing new:
-  its op points at the unchanged snapshot (`parent = snapshot`,
-  `file_count = 0`, `snapshot.taken.unchanged = true`) and no new
-  snapshot row is written. Rows whose tree equals the parent's
-  `tree_hash` are dropped in the same transaction (unchanged).
-- `trigger` ∈ `turn_end, quiet, effort_start, effort_end, startup,
+- **An op is a take that captured files.** A request that found nothing
+  waiting (or rows whose tree equals the parent's `tree_hash`, dropped
+  in the same transaction) answers the stream's current snapshot and
+  writes no snapshot row and no op: an empty take is not a fact about the
+  worktree. When the request names a turn or thread (a turn's
+  end) it still logs `snapshot.taken` with
+  `unchanged = true` and `file_count = 0`, since `thread.checkpoint`
+  waits on it, and the turn's `snapshot_id` still points at
+  the current snapshot. A request nobody is anchored to (the quiet,
+  startup and git-refs takes) logs nothing. A snapshot provider's mark
+  keeps its op, changed or not, for the `handle` it names.
+  `TakeOutcome.op_seq` is `None` for a request that logged no op.
+- `trigger` ∈ `turn_end, quiet, startup,
   manual, git_refs, head_moved, run_measured` (`oxplow_domain::snapshot::
   SnapshotTrigger`). The ops backfilled for snapshots taken before the op
   log existed read `manual` (V71). `run_measured`
@@ -1072,12 +928,20 @@ seeders for tests.
   analysis to the code it measured (see [collection.md](./collection.md)).
 - **HEAD moved on a clean tree** is its own op: `record_head_moved`
   re-stamps the snapshot the caller saw the clean tree at — refusing if a
-  take has moved the stream on since (tsk440), and the git-refs path
+  take has moved the stream on since, and the git-refs path
   holds the take lock from its drain through the stamp — with the new
-  `revision` (and flips every
-  exact-pin file ref on it) with a `head_moved` op and `vcs.head.moved@2`,
-  in one transaction. The git-refs listener runs a `git_refs` take first
-  (draining anything dirty), then this.
+  `revision` (and flips every exact-pin file ref on it) with a
+  `head_moved` op, in one transaction.
+- **A HEAD move is its own event**, `vcs.head.moved@3 { stream, from, to,
+  snapshot? }`, logged by the git-refs listener once per move of this
+  worktree's own HEAD, dirty tree or not (`snapshot` only when the tree
+  was clean and the snapshot re-stamped). The listener reads its HEAD at
+  start (starting is not a move), runs a `git_refs` take (draining
+  anything dirty, then the re-stamp) and spends the move only once that
+  take returned a snapshot and the event is logged: a take that fails, or
+  finds no snapshot yet, leaves the move for the next ref event. Collectors
+  that follow commits run on this event; `snapshot.taken` with
+  `unchanged: true` is logged only for a request someone waits on.
 - Takes are **serialized** per stream (`take_lock`) and each caller
   records its own op, so two threads ending turns on one worktree give
   two ops, usually on the same snapshot (§4.3: a snapshot taken for one
@@ -1099,10 +963,9 @@ nothing meaningful to show. `listFileSnapshotsForStream` excludes it
 UI list skips it.
 
 **Rows come with pre-joined labels.** `listSnapshotsForStream` joins
-against `effort` to populate `label` + `label_kind` on each
-`FileSnapshot` (task title + " — start"/" — end"); effort-end wins
-over effort-start when the same snapshot is both. Unlinked snapshots
-get `label: null` and the UI falls back to a generic label.
+against the request of the take's turn to populate `label` + `label_kind`
+on each `FileSnapshot`. Snapshots no request made get `label: null` and
+the UI falls back to a generic label.
 
 **Storage classes (`file_snapshot.storage`, V37).** The explicit
 discriminator for where a row's bytes live; `blob_hash` is read
@@ -1146,13 +1009,13 @@ bytes are gone — we deliberately never copied them. `read_blob` returns
 Uncommitted working-tree content always takes the `oxplow` path and is
 never at this risk.
 
-**Retention: content expires, records don't (tsk105).** Retention's job
+**Retention: content expires, records don't.** Retention's job
 is bounding the ON-DISK blob copies — the megabytes. The
 `snapshot`/`file_snapshot` ROWS are **never deleted**: they are durable
 records other subsystems replay — the per-path metric fold derives each
 capture's restated set from them, and the ancestry anchors ride the
 parent `snapshot` rows' git stamps — and they only weigh bytes. (The
-pre-tsk105 row prune rotted the fold's replay inputs out from under
+earlier row prune rotted the fold's replay inputs out from under
 durable captures; deleting rows to save disk was aiming at the wrong
 mass.) The daily cleanup (`SnapshotCaptureService::run_cleanup`, boot +
 every 24h) GCs `.oxplow/snapshots/objects/` down to
@@ -1210,7 +1073,7 @@ Cleanup runs at runtime startup and again once every 24 hours via
 tree, but a worktree stream holds only the files it touched. So in its sweeps and
 rescans (`with_sparse_history`, set from the stream's kind), a file with no row that
 is clean against HEAD records nothing. It has no history here, and nothing changed.
-A row for each would be its whole tree "added" to an open effort. When git's stat can't vouch for it (every file of a fresh worktree was written in the
+A row for each would be its whole tree "added" to a request's change. When git's stat can't vouch for it (every file of a fresh worktree was written in the
 same second as its index), the bytes are compared with HEAD first. A file with a
 row, an offline edit and a new file record as anywhere else.
 
@@ -1255,21 +1118,14 @@ boot backfill (`symbol_collector::backfill`) refills an empty index from each
 live stream's latest snapshot. Read as `v_symbol` / `v_symbol_capture`; see
 [language-support.md](./language-support.md) "Symbols".
 
-### `wiki_page` — `WikiPageStore` (`crates/oxplow-db/src/wiki_page_store.rs`)
+### Knowledge pages: no table
 
-The per-project wiki's pages. The file is the page: it lives at
-`.oxplow/wiki/<slug>.md` (not committed — a personal knowledge base),
-and the row — written with the file in one run — holds its text and
-what's derived from it: `slug`, `title`,
-`body_path`, `body_excerpt`, `body_size_bytes`, the parsed
-`file_refs_json` / `dir_refs_json` (`[[dir:…]]`) /
-`related_notes_json`, `created_at`, `updated_at`, and `body_hash` (V116:
-the hash of the body it was written from), and `body` (V125, P6.E2:
-the text itself, which `v_knowledge_body` publishes). The one writer is
-`wiki_page_store::upsert_tx` / `delete_tx`, inside
-`oxplow.knowledge.write_page`'s transaction or the watcher's — see
-[knowledge.md](./knowledge.md) for the write path, pins and hand-edit
-convergence.
+Core keeps no table of knowledge pages, their reads or their touches (V35
+dropped `knowledge_page`, `knowledge_page_read` and `knowledge_page_touch`).
+A page is a row of the shared model `oxplow/knowledge_record`
+(`model__oxplow__knowledge_record`), kept by a store; the reads and the
+touches are bundled's own models; the datasets are `v_oxplow_knowledge_*`
+([knowledge.md](./knowledge.md), [models.md](./models.md)).
 
 ### `page_ref` — unified cross-page reference graph (`crates/oxplow-db/src/page_ref_store.rs`, migration `V11__page_ref.sql`)
 
@@ -1300,61 +1156,26 @@ head, via `Vcs::head`);
 that commit. Non-file edges leave all three columns NULL / 0. When a
 revision lands on a snapshot later
 (e.g. the clean-restamp path in `SnapshotCaptureService`), the
-write cascades: both `effort_file` and `page_ref` rows
+write cascades: `page_ref` rows
 pointing at that snapshot get their `closest_vcs_rev` set and
 `vcs_rev_exact` flipped to 1. The capture-time resolver lives
 in `oxplow_app::file_ref_version`; callers don't pass any of these
-fields by hand — the effort claim / observe paths and the wiki sync
-watcher fill them automatically.
+fields by hand — the oxwiki file sync fills them automatically.
 
-**Wiki sync preserves unchanged pins.** `sync_from_disk_with_refs_versioned`
-calls `SqlitePageRefStore::merge_source` (NOT `replace_source`).
-Each edge is matched against the existing row by the PK; existing
-edges keep their `local_snapshot_id` / `closest_vcs_rev` /
-`vcs_rev_exact`. Only newly-added edges get the current
-snapshot pin. Edges removed from the body are deleted. So editing
-unrelated prose doesn't re-stamp every file ref's freshness — the
-pin only advances when the body actively re-adds the ref OR when
-the agent explicitly verifies it (next paragraph). The wiki sync
-also strips `@<version>` literals (`@disk`, `@HEAD`, `@<sha>`,
-etc.) from `[[…]]` and `(file:…@…)` / `(dir:…@…)` body forms
-before parsing, and writes the normalised body back to disk —
-version state lives in the row, not the prose.
-
-**Verification edges under cited dirs survive a write.** One exception
-to "edges not in the body are deleted": a `wiki_file_ref` edge whose
-`target_id` is a file under a directory the body cites
-(`[[dir:…]]`) is re-included (`path_under_any_dir`) so `merge_source`
-preserves it and its pin. These are **verification edges**, made by
-`oxplow.knowledge.write_page`'s `verified_files` when the agent verifies a fact
-against a specific file it references only by directory. They self-clean: once
-the covering `[[dir:…]]` ref leaves the body, the edge is no longer
-re-included and gets pruned.
-
-**`verified_files` / `removed_files`.** `oxplow.knowledge.write_page` takes
-the paths the agent re-read against the new body (`verified_files`: re-
-pinned to the current snapshot; a file under a cited directory is
-materialized as an edge) and the paths it took out (`removed_files`:
-must be gone). Refs left in the body but in NEITHER list keep their
-existing pin — that's how "this content relies on a stale source" stays
-accurate ([knowledge.md](./knowledge.md)).
-Skill prompt at `crates/oxplow-agent-text/assets/skills/oxplow-wiki-capture/SKILL.md`.
-
-**User-facing Freshness view.** `v_knowledge_ref` (read by
-`knowledge.ts`'s `readWikiFreshness`) joins `page_ref` with the latest
-primary-stream `file_snapshot` per target path, a `stale` flag per ref.
-The foundation's `wiki-freshness` page
-(the `wiki-freshness` page, with `slug=<slug>`) shows
-the table with per-ref + per-page "Mark verified" actions, which run
-`oxplow.knowledge.verify_files` (re-writing the page with those refs in
-`verified_files`). The wiki page chrome adds a `Freshness (N stale)` action
-chip that routes to the page.
+**A model row's body keeps its pins.** A shared model's markdown column with
+`pins: true` is projected by `model_store` (`models.md` "Markdown bodies"): the
+row's file and directory refs are `file_pin` / `dir_pin` edges, each pinned to
+the primary stream's latest snapshot when it is first added, and kept as they
+are when the body is rewritten (editing unrelated prose doesn't re-stamp every
+ref). `oxplow.refs.verify { uri, files? }` re-pins the named refs (all when
+none are named); `v_ref_pin` says which are stale. A directory ref's verified
+file edges under it survive a rewrite while the directory is still cited.
 
 Every stored `source_uri` / `target_uri` is a canonical URI (see
 `.context/resources.md`), built by the owner's builder
 (`uri::build`) and never concatenated:
-- `oxplow/wiki` — `?slug=<slug>`
-- `oxplow/work_item` — `?id=<id>&provider=<provider>` (`tsk42` / `oxplow`, `ENG-12` / `issues`)
+- `oxplow/knowledge` — `?id=<id>&store=<store>`
+- `oxplow/task` — `?id=<id>&provider=<provider>` (`tsk42` / `oxplow`, `ENG-12` / `issues`)
 - `oxplow/file` — `?path=<repo-relative path>`
 - `oxplow/dir` — `?path=<repo-relative path>`, no trailing slash
 - `oxplow/commit` — `?sha=<full sha>`
@@ -1369,15 +1190,14 @@ proposals) from URIs to bare ids, at new event versions; see
 as itself; the pages that render it declare `for`), and `v_resource` is
 at v4 without that column.
 `V101__uri_names.sql` then renamed the columns that held a URI under the
-name `ref` (`work_item.uri` / `parent_uri`, `work_item_link.from_uri` /
-`to_uri`, `search_entry.uri`, `claim.evidence`, …) and moved
-`work_item.recorded` to v3 and `knowledge.page.recorded` to v2; see
+name `ref` (`task.uri` / `parent_uri`, `task_link.from_uri` /
+`to_uri`, `search_entry.uri`, …) and moved
+a provider's page event to v2 (since removed); see
 "The rename (V101)" there.
 
 **Writers own slices by `ref_type`.** A single `source_uri`
-can have rows from multiple owners — a work item's body,
-link and comment edges (restated from the work-item interface) and its
-effort edges (from the effort store) all land under
+can have rows from multiple owners — a task's body,
+link and comment edges (restated from the task model) all land under
 the item's one `source_uri` but with distinct `ref_type`s.
 `SqlitePageRefStore::replace_source_for_ref_types` lets each
 writer wipe + re-insert only the rows whose `ref_type` it owns,
@@ -1385,23 +1205,22 @@ so other owners' rows survive.
 
 Writers (one per source kind / slice):
 
-The vocabulary speaks of work items, whichever list they're on (V21
-renamed the `task_…` spellings: a mention is `work_item_mention` /
-`summary_work_item_mention`, a link `work_item_link:<type>`).
+The vocabulary speaks of tasks, whichever list they're on (V21
+renamed the `task_…` spellings: a mention is `task_mention` /
+`summary_task_mention`, a link `task_link:<type>`).
 
 | Owner | Source | Slice (`ref_type`s) |
 |---|---|---|
-| `wiki_pages.rs` (`oxplow-app`) | the wiki page's URI | full source — uses `replace_source` |
-| `work_item_refs::restate_tx` (`oxplow-db`), run by the `page_ref.work_item` consumer on an item's events and by the boot repair — any list's item, from `work_item` / `work_item_link` / `work_item_comment` | the work item's URI, body slice | `work_item_mention`, `wikilink`, `wiki_file_ref`, `wiki_dir_ref`, `finding_mention`, `commit_mention` |
-| (the same) | link slice | `work_item_link:<type>` — every type with the prefix, the list's own (V28 dropped the CHECK naming oxplow's six) |
-| (the same) | comment slice: the comments' mentions, as the item's own edges (V28 dropped the old `task_note` sources) | `comment_file_ref`, `comment_dir_ref`, `comment_wikilink`, `comment_work_item_mention`, `comment_finding_mention`, `comment_commit_mention` |
-| `effort_store::record_file` + `effort_store::finish` + `set_impacts` | the work item's URI, effort slice | `touched_file`, `summary_wikilink`, `summary_file_ref`, `summary_dir_ref`, `summary_work_item_mention`, `summary_finding_mention`, `summary_commit_mention`, `impact` |
+| `model_store::write_tx` (`oxplow-db`), for a model's markdown columns | the row's URI | the body's edges: `file_pin` / `dir_pin` (pinned columns) or `file_mention` / `dir_mention`, `wikilink`, `task_mention`, … |
+| `task_refs::restate_tx` (`oxplow-db`), run by the `page_ref.task` consumer on an item's events and by the boot repair — any list's item, from `task` / `task_link` / `task_comment` | the task's URI, body slice | `task_mention`, `wikilink`, `file_mention`, `dir_mention`, `finding_mention`, `commit_mention` |
+| (the same) | link slice | `task_link:<type>` — every type with the prefix, the list's own (V28 dropped the CHECK naming oxplow's six) |
+| (the same) | comment slice: the comments' mentions, as the item's own edges (V28 dropped the old `oxtask_note` sources) | `comment_file_ref`, `comment_dir_ref`, `comment_wikilink`, `comment_task_mention`, `comment_finding_mention`, `comment_commit_mention` |
 | `analytics_stores::SqliteCodeQualityStore::append_finding` | the finding's URI | full source |
 | `commit_indexer.rs` (`oxplow-app`) | the commit's URI | full source — diff yields `touched_file`, message yields the same body-mention set |
 
 The shared extractor `oxplow_domain::uri::extract(body) ->
 ExtractedRefs` is the single parser used by every writer that
-takes a free-text body, so wiki/task/commit-message ref
+takes a free-text body, so knowledge/task/commit-message ref
 recognition stays in lock-step. Pure projections live in
 `crates/oxplow-db/src/page_ref_projections.rs`.
 
@@ -1413,41 +1232,27 @@ the source store). An agent reads the same edges as the `v_page_ref` model
 (`source_uri`, `target_uri`, `ref_type`) with `oxplow_query_sql`; there is no MCP tool.
 
 Boot-time restate: `oxplow_app::page_ref_backfill::run(...)` re-
-projects every work item (`work_item_refs::all_refs_tx`, deleted ones
-included — restating one clears it), effort, finding and thread note into the table,
+projects every task (`task_refs::all_refs_tx`, deleted ones
+included — restating one clears it), finding and thread note into the table,
 idempotently — the graph's repair path after a migration that resets
 `page_ref` (V92) or a writer's drift. It runs at boot only when the
 schema version or the projection code changed since its last run — a
 hash of the files that decide a source's edges (`PROJECTION_SOURCES`:
-the backfill, `page_ref_projections.rs`, `work_item_refs.rs`,
-`effort_store.rs`), not the build, which every dev rebuild changed
+the backfill, `page_ref_projections.rs`, `task_refs.rs`), not the build, which every dev rebuild changed
 (`needs_repair`; recorded as `asset_state` row `page_ref_repair`):
 between those the writers keep the graph current. A new projection file
-belongs in that list. The effort slice (touched files + summary refs
-+ declared impacts) is the effort store's own (`effort_slice_on`, behind
-`project_effort_slice` and `effort_slices`), read for every work item
-with an effort in one go and written in batches — another provider's
-included (tsk452; a copy of the projection in the backfill used to drop
-declared impacts on every boot). Wiki bodies and recent commits are covered by their
-own initial-scan paths and don't need separate backfill.
-
-The effort slice has three contributors that run independently —
-`record_file` re-projects after each touched-file write, `finish`
-re-projects after `summary` lands, and `set_impacts` re-projects
-after the declared `EffortImpact` list is written. They share the
-same `effort_ref_types()` set, so each call replaces the full
-union and the other contributors' rows survive.
-
-The `impact` ref_type uses a single string regardless of target
-target (the `target_resource` discriminates wiki/task/commit/finding/
-file/directory). The action verb (`created`, `updated`, `deleted`,
-`completed`, `reopened`, `referenced`, `resolved`, …) lives in
-`source_extra` as `{"action": "..."}` so the UI can render
-"created by task #42" without an extra query.
+belongs in that list. The hash is of the text, comments included, so a
+comment edit runs it too; that is cheap, because a run writes only the
+sources whose stored edges differ from their projection
+(`replace_sources` compares first): a run over a current graph is reads,
+with no write and no change event. Knowledge page bodies and recent commits are covered by their
+own initial-scan paths and don't need separate backfill. Efforts were
+removed (2026-11-10), and their slice of the graph (touched files, summary
+refs, declared impacts) went with them.
 
 ### `event_log` + `event_consumer_checkpoint` + `event_dead_letter` + `command_audit` — `SqliteEventLogStore` (`crates/oxplow-db/src/event_log_store.rs`, migration `V93__event_log.sql`)
 
-The event log, built in P1.4 (tsk406). **State tables hold current truth; the log
+The event log, built in P1.4. **State tables hold current truth; the log
 records activity and state changes**, and it is written in the *same
 transaction* as the change — the outbox pattern — so the two never
 disagree. The envelope is `oxplow_domain::events::Envelope`
@@ -1456,12 +1261,12 @@ time), `type` (`namespace.name`, snake_case, validated on append), `v`
 (schema version), `at`, `source` (`agent:thr3`, `human`, a page's URI (`oxplow:oxplow/page?page=<id>`, from
 `uri::build::page_uri`), `system`, or `system:<component>` from `uri::build::system_source` —
 `system:task_service`, `system:hook_ingest`, `system:snapshot_capture`),
-`anchors` (nullable stream / thread / effort / turn / snapshot / agent
+`anchors` (nullable stream / thread / turn / snapshot / agent
 session columns, so per-anchor timelines are indexed range scans; an
 event that names a thread also carries its stream, and agent activity
 carries the agent session it came from — `hook_ingest`'s resolution,
-agent-model.md; V153 adds a partial index on a
-`work_item.recorded`'s item ref, for a provider read's "did this
+agent-model.md; V153 adds a partial index on an
+event's item ref, for a provider read's "did this
 change?" lookup — providers.md), `subject` (JSON array of canonical
 URIs built with `oxplow_domain::uri::build` and validated against the
 resource registry on append, see [resources.md](./resources.md)), `payload` (JSON;
@@ -1477,7 +1282,7 @@ the insert itself rather than a check before it).
 These are the schema's first **STRICT** tables; every later spine table
 is STRICT too.
 
-**Schemas (P1.5, tsk407).** `oxplow_domain::events::schema` has one
+**Schemas (P1.5).** `oxplow_domain::events::schema` has one
 Rust type per `type@v` (`trait EventType { TYPE, V, Payload: JsonSchema,
 upcast }`) and `EventSchemaRegistry`, which holds every type the log
 accepts. It sits with the resources in the running `Vocabulary { events,
@@ -1500,8 +1305,8 @@ type's first schema as its contract and a removed extension's types as
 refuses an unregistered `type@v` or a payload that fails its schema
 (`DomainError::Invalid`, naming the JSON path) before writing. Core
 producers build envelopes with `Envelope::typed::<T>(source, &payload)`
-so the shape is checked by the compiler too. **A payload owns its enums**
-(tsk510): the golden schema is a published contract, so an event uses its
+so the shape is checked by the compiler too. **A payload owns its enums**:
+the golden schema is a published contract, so an event uses its
 own vocabulary type (`ToolDecision`, `LoggedAgentStatus`, `Harness`) with
 public doc comments, converted from the internal type at the producer —
 never an internal enum whose doc comments and variants (a derived-only
@@ -1536,7 +1341,7 @@ Rust doc comment is part of its schema — don't edit it.
 tool input and output, prompts — by the xxh3-128 hex of their bytes (the
 blob store's hash, so refs are uniform): `hash PK, namespace, bytes BLOB,
 size, created_at`, STRICT. A payload carries `ContentRef { hash, size,
-truncated }`. A JSON body is stored by `put_json_tx` (tsk509): serialized
+truncated }`. A JSON body is stored by `put_json_tx`: serialized
 canonically (object keys sorted at every depth, so equal bodies share a
 hash whatever order their keys arrived in) and cut to 256 KiB on a
 character boundary — `size` is the whole body's, `truncated` says only the
@@ -1574,13 +1379,12 @@ restated by the vocabulary reactor, longer than the default refused by
 its rows stay under the window it promised; an extension present without
 a window drops back to the default — unless a declaring extension holds
 the same namespace, which a namesake that declares nothing never speaks
-for, tsk796); core's state namespaces are kept). **A project sets its
+for); core's state namespaces are kept). **A project sets its
 own windows** with the person-only key `eventRetention: { <namespace>:
-{ payloadDays, contentDays } }` (tsk947): each sweep reads it, a core
+{ payloadDays, contentDays } }`: each sweep reads it, a core
 namespace's replaces the default, an extension namespace's is capped at the
 extension's window (`RetentionWindow::at_most`), and core state is refused
-at load (`is_kept_whole`). A window is bounded (`window_problem`,
-tsk985): at least 7 days for a core namespace oxplow reads back (the
+at load (`is_kept_whole`). A window is bounded (`window_problem`,): at least 7 days for a core namespace oxplow reads back (the
 agent policy reads a turn's tool payloads), at least a day for an
 extension's, at most `MAX_DAYS` (36,500 — beyond about 127,000 days the
 cutoff arithmetic used to wrap into the future and wipe the namespace),
@@ -1589,7 +1393,7 @@ and its `contentDays` no longer than its `payloadDays`.
 cutoff to `MAX_DAYS` whatever reaches it. A window naming a namespace
 nothing logs is kept — an extension may be installed later — and reported
 (`SweepReport.unused`, a warning in the log). **An expired event is
-history only** (tsk501): `StoredEvent.payload_expired_at` carries the
+history only**: `StoredEvent.payload_expired_at` carries the
 stamp; the pump checkpoints past it without calling any consumer (a new or
 renamed consumer replaying the log never sees `{}`); `retry_dead_letter`
 refuses one; the sweep marks the pending dead letters of expired events
@@ -1597,11 +1401,15 @@ refuses one; the sweep marks the pending dead letters of expired events
 as "(details expired)" from the field, not from an empty payload.
 
 **Projections of agent events (V102).** `agent_tool_call` gained `turn_id`
-and `event_id` (`UNIQUE WHERE NOT NULL`): a row is the projection of one
-`agent.tool.finished`, written with `tool_call_store::record_tx` (`ON
-CONFLICT DO NOTHING` — a redelivered event writes nothing). `decision` and
-`claim` gained `turn_id`. Every view over these (`v_tool_call`,
-`v_token_usage`, `v_agent_nudge`, `v_decision`, `v_claim`) exposes
+and `event_id` (`UNIQUE WHERE NOT NULL`). Since V6 a row is the
+projection of one call: `tool_call_store::record_request_tx` opens it at
+the `agent.tool.requested` (`request_event_id`, unique; `state` `running` or
+`denied`), `record_finish_tx` closes it at the `agent.tool.finished` its
+request caused (else writes one with no start), and `abandon_running_tx`
+ends the turn's running calls at `agent.turn.ended`; a redelivered event
+writes nothing new. V6 gave the rows already recorded their request (the
+finish's cause), `started_at` and `duration_ms`. Every view over these (`v_tool_call`,
+`v_token_usage`, `v_agent_nudge`) exposes
 `turn_id`.
 
 **The contract is `append_tx(&Connection, &Vocabulary, &Envelope)
@@ -1613,7 +1421,7 @@ activity with no state write (a tool call, a page view). Reads:
 `get_tx(id)`.
 
 **Delivery is at least once** — the `EventPump`
-(`crates/oxplow-app/src/event_pump.rs`, P1.7, tsk409). A consumer is
+(`crates/oxplow-app/src/event_pump.rs`, P1.7). A consumer is
 `trait EventConsumer { name, handles(type), handle(&Connection,
 &StoredEvent) }`; the pump reads each consumer's `seq > checkpoint` in
 batches and, per event, runs the handler under a SAVEPOINT and advances
@@ -1630,7 +1438,7 @@ is spawned by `boot.rs` (catches up on boot, then runs on `wake()` — which
 producers call after their commit — or every 5s). A handler error that is retryable (`DomainError::
 Busy`) is not a poison event: the delivery transaction fails and retries,
 and if the database stays busy the event waits, checkpoint unmoved
-(tsk437 review).
+(review).
 
 **The consumers (after P3).** Every reaction to the log, by checkpoint
 name. "Boot" consumers are registered by `Services::boot` and run wherever
@@ -1640,30 +1448,23 @@ and are registered by `crate::boot` — a test that wants them calls their
 
 | Consumer | Kind | On | Does | Registered |
 |---|---|---|---|---|
-| `page_ref.work_item` | sync | `work_item.created` / `edited` | re-projects a task's body-mention edges | boot |
-| `tool_call.project` | sync | `agent.tool.finished` | the `agent_tool_call` row (one per event) | boot |
-| `wiki.attribution` | sync | `agent.tool.finished` | marks an edited, indexed wiki page touched by the thread | boot |
+| `page_ref.task` | sync | `task.created` / `edited` | re-projects a task's body-mention edges | boot |
+| `tool_call.project` | sync | `agent.tool.requested`, `agent.tool.finished`, `agent.turn.ended` | the `agent_tool_call` row (one per call: opened at the request, closed at the finish, abandoned at its turn's end; V6) | boot |
 | `ui.push` | sync | `snapshot.taken` (that recorded files), `vcs.head.moved` | the renderer's `SnapshotTaken` on the UI bus (P7.B6) | boot |
-| `metrics.entity_states` | async | `work_item.*`, `snapshot.taken`, `collector.synced` | re-captures state entity metrics, throttled per metric (P7.B6) | boot |
+| `metrics.entity_states` | async | `task.*`, `snapshot.taken`, `collector.synced` | re-captures state entity metrics, throttled per metric (P7.B6) | boot |
 | `config.workspace_filter` | async | `config.changed` (`generated`) | the snapshot captures' filter | boot |
-| `effort.lifecycle` | async | `effort.opened` / `closed` | snapshot pins, metrics; logs `effort.finished` | boot |
-| `effort.claim` | async | `agent.tool.finished` | claims an edited file for the effort it was edited in | boot |
 | `thread.checkpoint` | async | `snapshot.taken` (`turn_end`) | logs `thread.checkpoint` (changed since the turn began, writing tool count) | `Services::new` |
-| `effort.policy` | async | `work_item.state_changed`, `effort.linked` / `opened`, `thread.checkpoint` | the default effort policy: opens, links, closes efforts through `effort.*` (`.context/work-tracking.md`) | `Services::new` |
-| `effort.observe` | async (after `effort.policy`) | `thread.checkpoint` | records the turn's changed files as the effort's `observed` files, from the later of the turn's start and the effort's | `Services::new` |
-| `effort.landing` | async | `vcs.commit.indexed` | logs `effort.landed` for each open effort on the stream the commit holds (git-integration.md "Commit indexer") | boot.rs |
 | `collection` | async | `agent.tool.finished` (Bash) | test / analysis / coverage captures, `test.*` events, nudges | boot |
 | `advisories.post_tool` | async | `agent.tool.finished` | post-tool-use advisories, persisted as nudges | boot |
-| `advisories.turn_end` | async (after `effort.observe`) | `thread.checkpoint` | turn-end advisories (hints) for the effort holding the turn's end, persisted as undelivered nudges for the next prompt | `Services::new` |
+| `advisories.turn_end` | async | `thread.checkpoint` | turn-end advisories (hints) for the request holding the turn's end, persisted as undelivered nudges for the next prompt | `Services::new` |
 | `token_usage.turns` | async | `agent.turn.ended` | a turn's token rows (transcript tail or reported counts) | boot |
-| `effort.evidence` / `effort.commits` | async | `effort.finished` | evidence rows, the commits that hold its work linked to its task (`commit_links`, tsk1035) | boot.rs |
 | `search.index` | async | `snapshot.taken` | the search index's file contents (the other kinds are assets, `kind_search.rs`) | boot.rs |
 | `config.extensions` / `config.providers` / `config.metrics` | async | `config.changed` (`extensions`; `extensionInstances`, `activeProviders`; any key) | after the in-memory swap: the extension catalog's change signal; the provider registry reconciles; the metric catalog reseeds (P7.B6) | boot.rs |
 | `extension_datasets.entities` | async | `collector.synced` | the extension models compile again (a new entity may let one) (P7.B6) | boot.rs |
-| `change.analyze` | async | `snapshot.taken` (that recorded files), `vcs.head.moved` | re-analyzes the stream's working change and open efforts' changes, skipping an event a newer one supersedes; dead-letters a failure naming the stream (P7.B4) | boot.rs |
-| `collector.triggers` | async | what enabled collectors' `on:` name (never `collector.synced`) | runs each matching collector for the event, once per event (`collector_run.last_event_id`): an entity collector's rows, or a fact collector through the fact engine (`snapshot.taken`: a delta collector only when the take recorded files, a whole-tree one on every take; `effort.finished` over the effort's end snapshot; anything else over the stream's latest snapshot) — plus `collector_run` and `collector.synced@2` (P7.B3; replaced `effort.gauges` and the metrics bus `SnapshotTaken` arm) | boot.rs |
+| `change.analyze` | async | `snapshot.taken` (that recorded files), `vcs.head.moved` | re-analyzes the stream's working change and the requests' changes, skipping an event a newer one supersedes; dead-letters a failure naming the stream (P7.B4) | boot.rs |
+| `collector.triggers` | async | what enabled collectors' `on:` name (never `collector.synced`) | runs each matching collector for the event, once per event (`collector_run.last_event_id`): an entity collector's rows, or a fact collector through the fact engine (`snapshot.taken`: a delta collector only when the take recorded files, a whole-tree one on every take; anything else over the stream's latest snapshot) — plus `collector_run` and `collector.synced@2` (P7.B3; replaced the metrics bus `SnapshotTaken` arm) | boot.rs |
 
-**Async consumers (P2.6.2, tsk454).** `trait AsyncEventConsumer { name,
+**Async consumers (P2.6.2).** `trait AsyncEventConsumer { name,
 after() -> Vec<String>, handles(type), async handle(&StoredEvent) }`
 (`after` is owned so a consumer can derive it from declarations, as
 `collector.triggers` does; `EventPump::consumer_names` lists what it may
@@ -1680,7 +1481,7 @@ async consumer has its own lock, wake-up and loop (P2.6b), so a slow one —
 a model call — delays only itself: `spawn` starts one loop for the sync
 consumers and one per async consumer, `wake()` wakes them all, and a loop
 that moved its checkpoint wakes the others (its handler may have logged
-what they consume). **Ordering (tsk506):** an async consumer may declare
+what they consume). **Ordering:** an async consumer may declare
 `after()` — consumers whose effect it reads; an event reaches it only once
 each of theirs has checkpointed past it (until then the delivery is
 deferred, checkpoint unmoved, later events behind it), so no reactor reads
@@ -1691,45 +1492,8 @@ events that trigger it, and `after()` still orders consumers in `settle`.
 `EventPump::settle(&[names], timeout)` spawns a catch-up of just the named
 consumers — side by side within a level, a consumer in a level after those
 it runs `after` — and waits for it, for callers whose answer needs their
-effect (`effort_lifecycle::settle`, which `EffortService` calls,
-settles `effort.lifecycle`).
+effect.
 
-The one async consumer so far is **`effort.lifecycle`**
-(`crates/oxplow-app/src/effort_lifecycle.rs`), on `effort.opened` /
-`effort.closed`: `EffortService::on_effort_opened`
-(`crates/oxplow-app/src/effort_service.rs`, the effort's lifecycle
-work, whichever work list its item is on) waits for the startup
-sweep, takes the `effort_start` snapshot and pins it (skipped when already
-pinned). An open delivered after its close — nothing settled in between —
-pins the stream's last snapshot at or before `started_at` instead
-(`latest_snapshot_at_or_before`): a capture then would include the
-effort's own work. `on_effort_closed` takes and pins the
-`effort_end` snapshot (falling back to the start pin), projects the
-lifecycle metrics, then logs
-**`effort.finished@3 { effort, work_item?, end_snapshot? }`**
-(caused by the `effort.closed`, dedupe key `effort.finished:<effort>` so a
-re-delivery's second append is a no-op). `effort` is the bare id
-(`eff12`): every consumer reads it through
-`effort_lifecycle::effort_of`, so no consumer parses it its own way. Re-delivery is safe: pins are stamped only
-while NULL (`set_start_snapshot` / `set_end_snapshot`), the lifecycle
-metrics stop when the effort already has its `effort-lifecycle` capture,
-`effort.finished` is deduped, and
-`retry_dead_letter` runs under the consumer's lock.
-
-**Effort reactors** (`crates/oxplow-app/src/effort_reactors.rs`, P2.6b)
-consume `effort.finished`, each its own async consumer registered at boot:
-`effort.evidence` (rebuild evidence rows) and `effort.commits`. Inferred
-decisions are oxplow-bundled's effects, not a reactor (ai-providers.md
-"Inferred decisions"). (`effort.gauges` is gone:
-`{ on: [effort.finished] }` fact collectors run from `collector.triggers`.)
-They hold `Services` weakly (the pump is part
-of it).
-`oxplow.effort.report` and MCP / IPC
-`run_command` after any write call `settle` on `effort.lifecycle` (up to 10 min; a
-start baseline on a huge repo waits for the startup sweep) so a report
-lands on the effort a close just before it closed and a batch's opens
-pin before its closes; the consumer holds
-`EffortService::without_event_pump()` so there's no reference cycle.
 Letters are `pending | retried | discarded`; the
 person's moves are `oxplow.delivery.retry { id }` (re-runs the consumer now;
 `retried` on success, else `pending` with the new error; refused unless
@@ -1739,10 +1503,10 @@ the list is `v_event_dead_letter`. Also
 `v_event`, `v_event_dead_letter`, `v_event_checkpoint` in the semantic
 layer (V94). Nothing is skipped silently.
 
-**Consumers so far.** `PageRefWorkItemConsumer` (`page_ref.work_item`,
+**Consumers so far.** `PageRefTaskConsumer` (`page_ref.task`,
 `crates/oxplow-app/src/page_ref_consumers.rs`) re-projects a task's
-body-mention `page_ref` edges on core's `work_item.created` /
-`work_item.edited` through the `replace_source_for_ref_types_tx` core,
+body-mention `page_ref` edges on core's `task.created` /
+`task.edited` through the `replace_source_for_ref_types_tx` core,
 checkpointed and dead-lettered like any other consumer. The task
 store's own insert/update (not the commands') still project inline.
 
@@ -1759,34 +1523,9 @@ set `sqlite_sequence` to `max(id)` — any higher high-water mark was lost.
 Harmless while nothing deletes audit rows; a future rebuild that must
 keep it copies the old `sqlite_sequence` row too.
 
-**Status is written only by the status core.** `update_task_tx` writes
-a task's fields, never `status` / `completed_at`; `write_status_tx` is
-their only writer, and a status change reads the committed status inside
-its transaction (`set_status_tx`), so a copy read before a concurrent
-status change can't revert it. `update_with_status_tx` writes fields,
-then moves the status — the core of `oxplow.work_item.update`.
-
-**The task store logs nothing.** A work list's events are core's,
-logged by the `oxplow.work_item.*` commands for every list alike —
-`work_item.created` / `edited` / `state_changed` / `linked` /
-`commented` / `deleted`, caused by the run's `command.executed`
-([work-items.md](./work-items.md)). `TaskService` and the store's own
-async writes (tests, fixtures) log none; a write made for someone runs
-the command. The `page_ref.work_item` pump consumer projects an item's
-body-mention edges on `work_item.created` and re-projects them on
-`work_item.edited`.
-
-**Effort events.** `effort_store::start_tx` and `finish_tx` — the only
-cores that open or close an effort — append
-`effort.opened@3 { effort, work_item?, thread, start_snapshot? }` and
-`effort.closed@3 { effort, work_item?, end_snapshot?, closed_by? }`
-themselves, so every path logs: the `effort.*` commands, `oxplow.thread.close`,
-`oxplow.stream.archive`, and the async `start` / `finish` / `close`. They are
-v2 only (V8 moved logged v1 rows to v2 and stripped the old
-`retroactive` flag). Subject `[<effort URI>, <work item URI>]`; anchors
-stream / thread / effort (+ `snapshot` when pinned at open or close). A
-`finish_tx` on an already-closed effort changes nothing and logs nothing
-(`UPDATE … RETURNING`). Cores take an `EventCtx { schemas, source, cause
+**Event cores.** A store core that logs an event in its own transaction
+(`open_turn_tx` and `close_turn_tx` log `agent.turn.started@3` and
+`agent.turn.ended@5`) takes an `EventCtx { schemas, source, cause
 }` (`event_log_store`): `EventCtx::system(schemas, "task_service")` for a
 system writer; a bus command will pass its actor's source and its
 `command.executed` id as cause. `anchors_for_thread_tx` gives the thread
@@ -1794,29 +1533,6 @@ system writer; a bus command will pass its actor's source and its
 
 V93 also dropped `task_event` (a per-task audit table nothing had written
 since V1) and wiped `page_visit` (its rows carried pre-canonical tab ids).
-
-### `wiki_page_thread_update` — wiki-note thread-update tracking (table in `crates/oxplow-db/migrations/` + helpers in `crates/oxplow-db/src/wiki_page_thread_updates.rs`)
-
-Per-thread attribution side table for wiki page edits. Notes themselves
-are global (one body per slug, shared across all threads/streams), but
-the rail's "Finished" list filters by which thread last touched each
-note — mirrors how task efforts attribute via
-`effort.thread_id`.
-
-Columns: `slug, thread_id, updated_at`. PK `(slug, thread_id)` so
-repeated edits in the same thread upsert in place. Index on
-`(thread_id, updated_at DESC)` drives the rail query.
-
-One writer: the `wiki.attribution` pump consumer
-(`knowledge::WikiAttribution`), from `knowledge.page.written` events
-carrying a thread anchor — a command run by an agent's thread
-([knowledge.md](./knowledge.md)).
-
-A hand edit (the watcher) and a person's save from the editor carry no
-thread, so they mark nothing — guessing would be worse than abstaining.
-Deleting a page drops its attribution rows (`slug` references
-`wiki_page` `ON DELETE CASCADE`), so removed pages don't linger on the
-rail under their last author.
 
 ### `usage_event` — `UsageStore` (`crates/oxplow-db/src/analytics_stores.rs`)
 
@@ -1841,7 +1557,7 @@ Current write hookpoints (all in `apps/desktop/src/App.tsx`, all pass both
 `streamId` and `threadId`):
 
 - `wiki-note` — `handleOpenNote` records a visit when a note becomes
-  the active center tab. Nothing reads it any more: the Wiki page's
+  the active center tab. Nothing reads it any more: the Knowledge page's
   "Recently visited" is the `wiki-visited` page over `v_page_visit`.
 - `editor-file` — `handleOpenFile` records a visit when a file
   becomes the active center tab. Not yet surfaced in UI; collected
@@ -1899,37 +1615,32 @@ complete / fail; `CodeQualityPanel` (`apps/desktop/src/components/CodeQuality/`)
 subscribes via `subscribeCodeQualityEvents(streamId, fn)` and
 refetches.
 
-### `effort_observation` — **RETIRED** (dropped in migration `V39__drop_effort_observation.sql`, tsk215)
+### Per-run observations — **RETIRED** (dropped in migration `V39__drop_effort_observation.sql`)
 
-The `effort_observation` table + `SqliteEffortObservationStore` are **gone**.
+This table and its store are **gone**.
 Coverage / test / static-analysis facts live in the **fact substrate**
 (`fact` rows under `metric_capture`, see `.context/metrics.md`); the rich
 detail that used to live in `payload_json` (test suite/case tree, coverage
 per-file line-sets, analysis payload) rides verbatim in
 `metric_capture.detail_json` (the `{"kind": …, "payload": …}` envelope, T-E1).
-The `effort_evidence` asset rebuilds each effort's rows from its own run
-captures (`metric_capture.effort_id`, trigger `on-report`;
-`CollectionService::effort_observations_from_metrics`) and stores them
-in `effort_observation_row` (V80, read as `v_effort_observation`); the panel and
-an agent (`oxplow_query_sql`) read those. `effort_evidence_state` records the
-signature each effort's rows were computed from — the count and newest id of
-its run captures and its file count (`effort_evidence_store.rs` `SIG`; V7
-restamped stored ones) — so a closed effort whose runs or files move is
-recomputed. `EffortObservation`
-(`effort_evidence_store.rs`) is that row (tsk862). The `provenance`/`source` trust spine and the `observed`/`asserted`
+A request's rows are `request_observation` (V22, read as
+`v_request_observation`), computed from the request's turns' captures
+(`metric_capture.turn_id`) and stored with the signature of their inputs in
+`request_analysis.sig`, so a request whose runs or files move is
+recomputed; the panel and an agent (`oxplow_query_sql`) read those. The `provenance`/`source` trust spine and the `observed`/`asserted`
 distinction carry on every capture (see `.context/metrics.md`).
 
-### `metric_definition`/`metric_run`/`metric_sample`/`metric_finding` (+ `metric_dimension`/`metric_subject`) — **RETIRED** (dropped in `V49__drop_legacy_metric_tables.sql`, T-E3/tsk50)
+### `metric_definition`/`metric_run`/`metric_sample`/`metric_finding` (+ `metric_dimension`/`metric_subject`) — **RETIRED** (dropped in `V49__drop_legacy_metric_tables.sql`, T-E3/)
 
 The V38 metric cluster + `metric_store.rs` are **gone**. The fact substrate
 (`measure`/`dimension`/`metric_spec`/`metric_capture`/`fact`, V43+) is the sole
 metric store: producers write facts on captures, metrics are SPECS aggregated
 at read time by `MetricEngine`, and the run identity for attribution is the
-capture id. See `.context/metrics.md`. A capture names its stream, thread,
-producing effort (`effort_id`) and — V157 — the agent turn it was measured
+capture id. See `.context/metrics.md`. A capture names its stream, thread
+and — V157 — the agent turn it was measured
 in (`turn_id`, FK `agent_turn`, SET NULL; NULL when no turn produced it).
 
-> **Timestamps are fixed-width by construction (tsk243 → tsk387/tsk419).**
+> **Timestamps are fixed-width by construction (→).**
 > Timestamps are RFC 3339 TEXT that SQLite compares lexicographically. The
 > `time` crate's default formatter trims trailing fractional zeros, and `'Z'`
 > sorts after every digit, so a trimmed `…20.5Z` sorted *after* `…20.500001Z`
@@ -1946,7 +1657,7 @@ in (`turn_id`, FK `agent_turn`, SET NULL; NULL when no turn produced it).
 > 3339 text. A new store needs no special handling — there is no other way to
 > turn a `Timestamp` into text.
 
-### `metric_cube` + `metric_live_fact` + `metric_cube_state` — the aggregate cube (`crates/oxplow-db/src/fact_store.rs`, migrations `V62__metric_cube.sql` tsk96 + `V63__branch_aware_cube.sql` tsk97)
+### `metric_cube` + `metric_live_fact` + `metric_cube_state` — the aggregate cube (`crates/oxplow-db/src/fact_store.rs`, migrations `V62__metric_cube.sql` + `V63__branch_aware_cube.sql`)
 
 **Derived tables — the only ones in the schema that hold no source of truth.**
 Every row is 100% reconstructible from `fact`; deleting all three costs speed and
@@ -1962,7 +1673,7 @@ over a few hundred pre-folded rows instead of a replay over every fact (measured
   `(measure, stream, branch, producer, subject_key)` — one partition per branch,
   mirroring the fact fold (V63); a new branch's partition is SEEDED from the
   history visible at its first capture ("visible" = the ancestry rule,
-  tsk102/V65 — see `.context/metrics.md`). `branch` is `''` for a branch-less
+  /V65 — see `.context/metrics.md`). `branch` is `''` for a branch-less
   capture (a WITHOUT ROWID PK can't hold NULL; the `''` mapping lives in the
   store layer only). Sized by live subjects, not history.
 - **`metric_cube_state`** — the watermark, per `(measure, stream, branch)`
@@ -1973,10 +1684,10 @@ over a few hundred pre-folded rows instead of a replay over every fact (measured
 
 **Rules before touching these:** never let a read take *data* from the cube that
 the facts don't have; never aggregate coarser than a capture (it's the floor that
-keeps snapshot/effort tie-back working); `dimension.promoted` defines the grain, so
+keeps the tie-back to snapshots and turns working); `dimension.promoted` defines the grain, so
 promoting a dim is a **rebuild**, not a schema change. **Anything that deletes
 captures or facts must invalidate the affected stream's cube in the same
-transaction** — cube rows are frozen at build time and don't cascade (tsk100;
+transaction** — cube rows are frozen at build time and don't cascade (
 `prune_dominated_tree_captures` is the one such caller today, and it invalidates
 only when it actually dropped something, since it runs on every boot). Written outside the
 fact-insert transaction, which is safe only because whole-capture replay is
@@ -1984,7 +1695,7 @@ idempotent and the watermark advances atomically with the rows. Full rationale +
 the read's eligibility rules: **`.context/metrics.md`**.
 
 
-### `test_case_stat` — each test's summary (`V139__test_case_stat.sql`, tsk733)
+### `test_case_stat` — each test's summary (`V139__test_case_stat.sql`)
 
 One row per `(stream, branch, producer, subject)`, STRICT: last status
 and duration, the last duration written as a fact (`recorded_ms`, what the
@@ -2002,18 +1713,17 @@ agent from the PostToolUse hook (`crates/oxplow-app/src/collection.rs`
 advisories.
 Previously fully ephemeral (returned as `additionalContext`, then
 lost); persisting gives a reviewer/human-facing answer to "what did oxplow
-tell the agent this effort." See `.context/agent-model.md` (Nudge
+tell the agent in this request." See `.context/agent-model.md` (Nudge
 persistence).
 
-Columns: `id, thread_id (NOT NULL, FK threads ON DELETE CASCADE), effort_id
-(NULLABLE, FK effort ON DELETE CASCADE), kind, message, trigger
-(nullable), created_at`. Indexes on `(effort_id, created_at DESC)` and
+Columns: `id, thread_id (NOT NULL, FK threads ON DELETE CASCADE), kind,
+message, trigger (nullable), created_at`, plus `turn_id`, `request_id`
+(V24), `cause`, `delivered_at` and `audience` below. Index on
 `(thread_id, created_at DESC)`.
 
-- **`thread_id` NOT NULL, `effort_id` nullable**: every nudge fires within a
-  thread; today every kind fires against the open effort, but the column is
-  nullable so a future thread-scoped nudge (no open effort) has a home. The
-  effort FK cascades with its `effort` when present.
+- **`thread_id` NOT NULL, `request_id` nullable**: every nudge fires within a
+  thread; the request is the one of the turn it belongs to (V24 filled it
+  from `turn_id`). The FK is `ON DELETE SET NULL`.
 - **`kind`** is open-ended (`report-less-run` | `<namespace>/<advisory>` |
   `configure`, …) — adding a kind needs no migration. Retired kinds keep
   their rows: `commit-hygiene` and `oxplow/coverage-target` no
@@ -2028,9 +1738,8 @@ Columns: `id, thread_id (NOT NULL, FK threads ON DELETE CASCADE), effort_id
   (`evaluated()`); `v_hint_stat` joins it with the nudges and mute marks.
 - **V102** adds `turn_id` (FK agent_turn SET NULL), `cause`
   (the event that fired it) and `delivered_at`. `UNIQUE(cause, kind,
-  coalesce(effort_id, 0)) WHERE cause IS NOT NULL` (V104, tsk510; V102 keyed
-  it without the effort and dropped a second effort's nudge) makes a
-  redelivered event unable to fire the same nudge twice for one effort
+  coalesce(request_id, 0)) WHERE cause IS NOT NULL` (V24) makes a
+  redelivered event unable to fire the same nudge twice for one request
   (`record_tx` → `None`). **Delivery is by thread, not by
   cause:** `take_for_agent(thread, budget)` returns the thread's agent
   nudges with no `delivered_at` (oxplow's own first, oldest first, up to
@@ -2039,56 +1748,55 @@ Columns: `id, thread_id (NOT NULL, FK threads ON DELETE CASCADE), effort_id
   reaches the agent on the thread's next hook instead of being lost. Rows
   from before V102 were stamped delivered.
 - **One-shot marks are durable** (V102; per thread since V9):
-  `once_mark(thread_id FK threads CASCADE, effort_id FK effort CASCADE
-  NULL, mark, fired_at)`, unique on `(thread_id, coalesce(effort_id, 0),
-  mark)` — a mark is kept in an effort, or in the thread when
-  `effort_id` is NULL (`OnceScope`). It holds
+  `once_mark(thread_id FK threads CASCADE, request_id FK request CASCADE
+  NULL, mark, fired_at)`, unique on `(thread_id, coalesce(request_id, 0),
+  mark)` — a mark is kept in a request, or in the thread when
+  `request_id` is NULL (`OnceScope`). It holds
   `report-less-run`, `<namespace>/<advisory>` and
   `<namespace>/<advisory>#<row key>`. `claim_once_tx` is the insert (`true`
   the first time); `has_fired` reads it. It replaces the in-memory sets
-  (`CollectionService::nudged_efforts`, `AdvisoryRunner.fired`), so a
+  (`AdvisoryRunner.fired` and the like), so a
   restart no longer repeats guidance. A mark is separate from the nudge row
   because prompt advisories fire once-per without writing a nudge. No
-  store-side retention prune (nudge volume per effort is tiny).
+  store-side retention prune (nudge volume per request is tiny).
 
 ### `agent_token_usage` + `agent_token_cursor` — `SqliteTokenUsageStore` (`crates/oxplow-db/src/token_usage_store.rs`, migrations `V35__agent_token_usage.sql`, `V36__agent_token_usage_prompt.sql`)
 
-Per-turn agent token accounting parsed from the session transcript
-(tsk104). On Stop the runtime reads `transcript_path` from the hook
+Per-turn agent token accounting parsed from the session transcript.
+On Stop the runtime reads `transcript_path` from the hook
 payload, splits the NEW tail into one row per agent turn, and writes them
 here. See `.context/agent-model.md` (Token usage capture) for the capture
 flow.
 
 `agent_token_usage` columns: `id, stream_id (NOT NULL, FK streams ON
 DELETE CASCADE), thread_id (NOT NULL, FK threads ON DELETE CASCADE),
-effort_id (NULLABLE, FK effort ON DELETE CASCADE), session_id,
+session_id,
 agent_kind, model (nullable), prompt (nullable), input_tokens,
 output_tokens, cache_creation_input_tokens, cache_read_input_tokens,
 message_count, provenance (CHECK `observed`), recorded_at, turn_id, cause`.
-Indexes on `(effort_id, recorded_at DESC)` and `(thread_id, recorded_at
-DESC)`. V102 (P3.2) added `turn_id` (the turn the tokens were spent in) and
+Index on `(thread_id, recorded_at DESC)`; a request's totals read the
+rows through `turn_id` (index `idx_agent_token_usage_turn`). V102 (P3.2) added `turn_id` (the turn the tokens were spent in) and
 `cause` (`UNIQUE WHERE NOT NULL`: the `agent.turn.ended` event whose own
 report carried the counts, so a redelivered event counts once).
 Transcript rows leave `cause` NULL: one transcript chunk can hold several
 turns, and the cursor committing with the rows is what makes their
-redelivery a no-op (tsk498).
+redelivery a no-op.
 `record_batch(rows, cursor)` writes the rows and advances the session's
 cursor in **one transaction**, so the cursor never passes bytes whose rows
 are missing (or vice versa); `insert_tx` / `set_cursor_tx` are the cores.
 
-- **`effort_id` nullable** for the same reason as `agent_nudge`: a Stop
-  can land with no open effort, so the turn is still attributed to the
-  thread. Per-effort totals only count attributed rows; per-thread totals
-  include effort-less turns.
+- **Per-request totals** read through `turn_id` (`v_request` sums them);
+  per-thread totals read `thread_id`, so a row with no turn still counts
+  for its thread.
 - **`provenance` is always `observed`** — oxplow read the transcript
   directly (no agent-asserted path). **`model`** is the actual per-turn
   model (e.g. `claude-opus-4-8`) so $ cost can be layered on later;
   display is tokens-only today.
-- **`prompt` (nullable, tsk143)** is the human-authored user prompt that
+- **`prompt` (nullable)** is the human-authored user prompt that
   OPENED the turn — pure observation read from the transcript, never
   generated or sent (no new input surface). Nullable: a turn can be an
   assistant continuation with no fresh prompt at the head of the chunk.
-  Stored locally like every other effort artifact (same privacy posture
+  Stored locally like every other turn artifact (same privacy posture
   as the token counts).
 - **`agent_kind`** records who ran the turn. Only Claude is parsed today;
   Codex/Opencode rows aren't written yet (their transcript formats
@@ -2099,10 +1807,9 @@ The persisted read offset into each session's transcript so successive
 Stops only sum the new tail — and a daemon restart never re-sums
 already-recorded usage. No FK (the transcript outlives any single row).
 
-Store methods: `record`, `list_for_effort`, `totals_for_effort`,
-`totals_for_thread`, `cursor`/`set_cursor`. There are no IPC reads: the UI
-reads `v_token_usage` through oxplow-bundled pages (`task-tokens`,
-`thread-tokens`, `usage`), which re-run on `DatasetsChanged`.
+Store methods: `record`, `totals_for_thread`, `cursor`/`set_cursor`. There are no IPC reads: the UI
+reads `v_token_usage` through pages (bundled's `task-tokens`,
+foundation's `thread-activity`, the holder's `usage`), which re-run on `DatasetsChanged`.
 
 ### `panel_layout` — `SqlitePanelLayoutStore` (`crates/oxplow-db/src/panel_layout_store.rs`)
 
@@ -2120,7 +1827,7 @@ RPCs `get_panel_layout` / `set_panel_layout`.
 V96. What the person's oxplow remembers for them outside any one tab
 (`.context/pages-and-tabs.md` "Page state"): `(scope, key)` → `value_json`
 (JSON text), `updated_at`. Scopes: `app` (app preferences); a page's URI
-without its params (`oxplow:oxplow/page?page=tasks`, `…?page=acme/pulls`) or
+without its params (`oxplow:oxplow/page?page=work`, `…?page=acme/pulls`) or
 `resource:<namespace>/<name>` (page memory, shared by every tab of the page); a panel's
 URI; `component:<namespace>/<id>` (a custom component's own memory). Anything
 else is refused, as is text that isn't JSON or a value over 64 KB, and a
@@ -2166,7 +1873,7 @@ external provider's `provider` is its **instance
 id** (P9.B1: a provider's default instance has the provider's id, a
 second instance its own — `issues_acme`), the same id its refs and
 `contribution_health.contribution` carry. Published as `v_capability_provider`;
-see [work-items.md](./work-items.md).
+see [providers.md](./providers.md).
 
 ### `asset_state` — the asset runner (`crates/oxplow-app/src/assets.rs`)
 
@@ -2176,8 +1883,8 @@ V130 (P7.B1). Each asset's last recompute: `asset` (the primary key —
 the asset has one), `elapsed_ms`; V143 (P8.B4) adds `mode` (`full` /
 `incremental`), `watermark` and `row_count`; V151 adds `definition` (a
 materialized model's SELECT, hashed — a clocked asset recorded for
-another definition is due at once, tsk780). Written by the runner after
-each recompute; read as `v_asset`. **`asset_failure`** (V152, tsk781):
+another definition is due at once). Written by the runner after
+each recompute; read as `v_asset`. **`asset_failure`** (V152):
 an asset's last recompute failure — `failed_at`, `error` — written when
 one fails and deleted in the transaction of the next success; `v_asset`
 (v3) joins it, so an asset that never succeeded is listed too. See [semantic-layer.md](./semantic-layer.md)
@@ -2216,8 +1923,8 @@ See [extensions-events.md](./extensions-events.md) "Effects".
 V48. One row per finished run of extension code (`oxplow_domain::run`,
 [extensions-permissions.md](./extensions-permissions.md) "The run context"): `run_id` (a
 UUIDv7), `parent_run_id`, `extension`, `contribution`
-(its URI, `oxplow:oxplow/command?command=oxplow.review.accept`, `oxplow:oxplow/job?job=effort_review/review`), `kind`, `version`, `generation`, `actor_kind` /
-`actor`, the anchors (`stream_id`, `thread_id`, `effort_id`, `turn_id`,
+(its URI, `oxplow:oxplow/command?command=oxplow.tasks.clear_finished`, `oxplow:oxplow/job?job=request_review/review`), `kind`, `version`, `generation`, `actor_kind` /
+`actor`, the anchors (`stream_id`, `thread_id`, `turn_id`,
 `agent_session_id`, `snapshot_id`, as integers), `cause_event_id`,
 `mode`, `started_at` / `finished_at`, `outcome` (`ok` / `skipped` /
 `failed` / `denied` / `cancelled` / `stale`), `error`, `wall_ms`,
@@ -2256,7 +1963,7 @@ V135 (P7.C1). Each extension contribution's health on this machine, keyed
 `namespace` (V6: the namespace it is named in, so it keeps its health when it
 moves to a sibling) + `kind` (`provider` | `collector` | `effect`) +
 `contribution` (its provider's, collector's or effect's id) — V140 put `kind` in
-the key, since a provider and a collector may share an id (tsk721):
+the key, since a provider and a collector may share an id:
 `state` (`ok` / `failing` /
 `disabled`), `reason`, `consecutive_failures`, `last_ok_at`,
 `last_error`, `mean_ms` (a moving average), `next_due_at`, `updated_at`.
@@ -2267,14 +1974,14 @@ running instance, its earliest collector): the last run (or now, when it
 runs now) plus the interval plus one scheduler tick
 (`contribution_health::next_due_ms`); `NULL` for one off any schedule (manual,
 `on:`, disabled, `syncMinutes: 0`). A rate-limited instance
-keeps its last plan (tsk722). The policy is `oxplow-app/src/contribution_health.rs`:
+keeps its last plan. The policy is `oxplow-app/src/contribution_health.rs`:
 three failures in a row disable it, the row and `contribution.disabled@1` in
 one transaction; `oxplow.contribution.enable` clears it (`contribution.enabled@1`).
 `v_contribution_health` adds `dead_letters` (pending dead letters of its
 consumer `extension:<namespace>/<contribution>`, or of events whose subject
 is `extension:<extension>`) and `fresh` (0 once `next_due_at` has passed, and 0 for a collector whose
 last run failed: its rows are the last good run's, not current).
-`v_contribution_health` shows `repair_item`: the open work item whose title starts
+`v_contribution_health` shows `repair_item`: the open task whose title starts
 `Repair <extension> <contribution>:`, which the bundled repair effect files (V136
 added `repair_item`/`repair_seq` columns for the old core consumer; V58 drops them).
 
@@ -2285,7 +1992,7 @@ V129 (P7.A3). Where each provider instance's collector left off:
 own opaque `$/state` checkpoint), `status` (`never` / `reading` / `ok` /
 `error`), `error`, `last_read_at`, `records` (what reads have delivered).
 `checkpoint_tx` runs in the same transaction as the
-`work_item.recorded@3` events a checkpoint covers, so a read that fails
+record events a checkpoint covers, so a read that fails
 midway resumes from the last batch that landed; `finish_tx` records the
 outcome. Read by `oxplow.provider.sync` and Settings → Integrations; see
 [providers.md](./providers.md) "Reading: collectors and sync".
@@ -2342,21 +2049,20 @@ Insert publishes `page-visit.changed` for renderer-side invalidation.
 ### The rail's Finished section
 
 The Work panel's "Finished" group is the bundled extension's
-`thread_work` model: the thread's done work items (`v_work_item.closed_at`,
-whichever list is active), the knowledge pages it wrote
-(`v_knowledge_touch`, over `wiki_page_thread_update`) and its closed
-unlinked efforts, newest first. "Clear" runs
-`oxplow.work.clear_finished`, which logs an event the
+`thread_tasks` model: the done tasks a request on the thread worked on
+(`v_oxplow_request_link.thread_id`, `v_oxplow_task.closed_at`, whichever
+store holds the task) and the knowledge pages it wrote (`v_oxplow_knowledge_touch`, over bundled's
+`knowledge_touch_record` model), newest first. "Clear" runs
+`oxplow.tasks.clear_finished`, which logs an event the
 `finished_cleared` model reads, so entries closed before it are hidden
 until something newer lands.
 
 ### `comment` + `comment_message` — `SqliteCommentStore` (`crates/oxplow-db/src/comment_store.rs`, migrations `V22__comments.sql`, `V23__comment_resolved_at.sql`)
 
 Threaded annotations the user anchors to a text selection on any page
-(wiki body, code file lines, task detail). The user collects notes
+(knowledge page body, code file lines, task detail). The user collects notes
 across many points; the agent reviews/responds **only when asked**
-(never force-triggered — no Stop-hook branch, no synthesized work
-items).
+(never force-triggered — no Stop-hook branch, no synthesized tasks).
 
 `comment` is the thread anchor + metadata; `comment_message` holds
 every message in the thread including the first. **Integer PK ids
@@ -2443,7 +2149,7 @@ binary (`apps/desktop/src-tauri/src/main.rs`) runs it at boot and every
 24h with a 14-day window, mirroring the snapshot cleanup loop. Open
 comments are never swept.
 
-Change fan-out: a comment's writes are the `knowledge.*` comment
+Change fan-out: a comment's writes are the `oxplow.comment.*`
 commands (P8.A6); the renderer re-reads the comment models on
 `DatasetsChanged` — there is no comment-specific event.
 
@@ -2456,25 +2162,24 @@ FTS5 virtual table (`tokenize = 'porter unicode61'`, `prefix = '2 3'`) storing
 or removed in place (a `UNIQUE` index over `(kind, uri, COALESCE(stream_id,''))`
 enforces identity, treating global rows' `NULL` stream as `''`).
 
-- `kind` holds a resource (`oxplow/wiki`) that `v_resource` lists as
-  `searchable` (oxplow's `oxplow/work_item`, `oxplow/comment`,
-  `oxplow/wiki`, `oxplow/thread`,
-  `oxplow/agent_session`, `oxplow/turn`, `oxplow/effort`,
-  `oxplow/decision`, `oxplow/commit`, `oxplow/page`; an
+- `kind` holds a resource (`oxplow/knowledge`) that `v_resource` lists as
+  `searchable` (oxplow's `oxplow/task`, `oxplow/comment`,
+  `oxplow/knowledge`, `oxplow/thread`,
+  `oxplow/agent_session`, `oxplow/turn`,
+  `oxplow/commit`, `oxplow/page`; an
   extension's, P9.D3), or
   `oxplow/file`; `uri` is the thing's URI, and a hit is that URI.
   Every resource but `oxplow/file` is derived from a model by an asset per kind
   (`kind_search.rs`: `plan_restate_tx` decides from each entry's `version`
   — the feed's own `version` column, else its title-and-body hash; V77
   renamed V164's `content_hash` — and `apply_restate_tx` writes only
-  entries added, changed or gone; tsk896); core's read `v_search_work_item`
-  (the active work list's items, through the interface) / `_comment` /
-  `_wiki` and the feeds for the other resources named above
+  entries added, changed or gone); bundled's read `v_oxplow_search_task`
+  (every store's tasks) / `v_search_comment` / `v_oxplow_search_knowledge` and the feeds for the other resources named above
   (`models/search_<kind>.sql`; `.context/extensions-events.md` "Resources" says
   how a resource gets one, and the models' docs say
   what each indexes and whether archived work is included). Files are upserted by the `search.index` pump consumer from
   `snapshot.taken` (`indexer.rs`).
-- `stream_id` is `NULL` for project-global rows (wiki, a backlog task) and
+- `stream_id` is `NULL` for project-global rows (knowledge pages, a backlog task) and
   the owning stream otherwise. Search filters `stream_id = ?  OR stream_id
   IS NULL`; BM25 weights title above body (`bm25(search_fts, 5.0, 1.0)`).
 - The store is a **derived cache**, never a source of truth: those two
@@ -2484,43 +2189,27 @@ enforces identity, treating global rows' `NULL` stream as `''`).
   (each token double-quoted + `*` prefix), so junk input can't throw FTS5
   syntax errors. Exposed as the `search` IPC command + MCP `oxplow_search` tool.
 
-## The `sort_index` queue
+## Assignment queues
 
-`tasks.sort_index` orders work in a single numeric space scoped
-per thread. `runtime.reorderThreadQueue(streamId, threadId, entries)`
-rewrites the values in one operation; entries are `{ id }` with
-`sort_index = position`.
-
-**Visual vs persistence order for Done.** Sections in `WorkGroupList`
-render ascending by `sort_index` *except* Done, which renders
-descending (newest-finished items surface on top). The underlying
-`sort_index` space is still a single ascending line — the section is
-only flipped at render time. When a drag-reorder persists a new order,
-`finalizeReorderIds` in `plan-utils.ts` reverses each descending run
-(`done`/`canceled`/`archived`) so the `reorderItems` /
-`reorderThreadQueue` "sort_index = position" rule produces the intended
-visual result. The drag handler passes the *effective* new status of a
-row whose status is changing as part of the drop so the run detector
-sees the new section membership. Dropping any item *into* Done is a
-drop-to-top contract: the drag handler inserts the row at the head of
-the Done bucket in visual order, and `task-store.updateItem`
-bumps `sort_index` to `MAX+1` on every non-Done → Done transition, so
-the two paths agree on "newest-done on top." Any new section with a
-non-ascending display must either do the same reversal dance or get
-its own flat list.
+Each assignee — a thread, the person, nobody — has one queue: the open
+items assigned to it, ascending by the task's `rank` field, then by
+`created_at` for an item with no rank. `oxplow.tasks.assign` and
+`reorder` name a neighbour in the queue (or none: its end); the
+command inserts the item there and renumbers the queue from 0. A task row has no order
+of its own.
 
 ## Status diagrams (text)
 
 ```
-task:    ready ─► in_progress ─► done ─► archived
-                   ╰─────────► blocked ◄─┘
-                   ╰─────────► canceled ─► archived
+task:    backlog ─► ready ─► in_progress ─► done
+                             ╰─────────► blocked
+                             ╰─────────► canceled
 ```
 
 ### Transitions to `in_progress` (server-side guard)
 
 `taskstore.updateItem` rejects any direct jump into `in_progress`
-from `canceled` or `archived` (those are explicit "abandoned" states
+from `canceled` (an explicit "abandoned" state
 the user must re-`ready` first). All other sources are accepted:
 
 - `ready → in_progress` (normal pickup)

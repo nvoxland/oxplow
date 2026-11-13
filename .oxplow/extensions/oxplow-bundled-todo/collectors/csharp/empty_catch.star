@@ -1,10 +1,10 @@
 # oxplow.csharp.empty_catch — count empty `catch { }` blocks (swallowed
 # exceptions — a correctness smell). Queries each catch clause's body block and
 # keeps the ones whose text is just braces + whitespace. Its facts are per-file
-# (subject "file:<path>", nonzero only), so an effort's change attributes
+# (subject "file:<path>", nonzero only), so a request's change attributes
 # through its files. and a per-file
 # `oxplow.ast_hit` FACT (rule="empty_catch") — the metric is the SPEC
-# Sum(oxplow.ast_hit) filtered by that rule (epic tsk12).
+# Sum(oxplow.ast_hit) filtered by that rule.
 def transform(input):
     facts = []
     for f in files("**/*.cs"):

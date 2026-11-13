@@ -211,7 +211,7 @@ mod tests {
     /// the field; an agent can't.
     #[tokio::test]
     async fn a_person_marks_a_failed_operation_seen_and_dismisses_it() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let push = report(svc, "Push to origin").await;
         assert_eq!(state(svc).await, vec![("Push to origin".into(), 0, 0)]);
@@ -276,7 +276,7 @@ mod tests {
     /// failure that captured some; one that captured nothing has none.
     #[tokio::test]
     async fn a_failed_operations_output_is_read_through_its_dataset() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let out = svc
             .commands
@@ -316,7 +316,7 @@ mod tests {
     /// with none left changes nothing.
     #[tokio::test]
     async fn dismiss_all_clears_what_the_person_still_sees() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let first = report(svc, "Merge").await;
         report(svc, "Save").await;

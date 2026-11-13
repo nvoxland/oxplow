@@ -1,4 +1,4 @@
-//! The snapshot capability's shared vocabulary (P2.2, tsk424;
+//! The snapshot capability's shared vocabulary (P2.2;
 //! `.context/data-model.md` "snapshot_op"), and its interface
 //! ([`SnapshotProvider`]): mark the worktree now, what changed between two
 //! points, read a path at a point — the last only an implementation
@@ -13,9 +13,9 @@ use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{EffortId, StreamId, ThreadId};
+use crate::capability::ActiveSource;
+use crate::ids::{StreamId, ThreadId};
 use crate::tree_diff::FileChange;
-use crate::work_items::ActiveSource;
 
 /// Why a snapshot take happened: one row of the operation log each
 /// (`snapshot_op.trigger`) and the `trigger` of `snapshot.taken`.
@@ -28,11 +28,6 @@ pub enum SnapshotTrigger {
     TurnEnd,
     /// The worktree went quiet with no turn open (human edits).
     Quiet,
-    /// An effort opened (its start bracket).
-    EffortStart,
-    /// An effort closed (its end bracket), including a restart closing
-    /// an orphaned effort.
-    EffortEnd,
     /// The boot sweep.
     Startup,
     /// An explicit request (metric baseline rebuild, tests).
@@ -43,7 +38,7 @@ pub enum SnapshotTrigger {
     /// new commit (a re-stamp, no new snapshot).
     HeadMoved,
     /// A run's reports were recorded (coverage, analysis): the code it
-    /// measured, which their captures are pinned to (tsk883).
+    /// measured, which their captures are pinned to.
     RunMeasured,
 }
 
@@ -53,8 +48,6 @@ impl SnapshotTrigger {
         match self {
             SnapshotTrigger::TurnEnd => "turn_end",
             SnapshotTrigger::Quiet => "quiet",
-            SnapshotTrigger::EffortStart => "effort_start",
-            SnapshotTrigger::EffortEnd => "effort_end",
             SnapshotTrigger::Startup => "startup",
             SnapshotTrigger::Manual => "manual",
             SnapshotTrigger::GitRefs => "git_refs",
@@ -67,8 +60,6 @@ impl SnapshotTrigger {
         Some(match s {
             "turn_end" => SnapshotTrigger::TurnEnd,
             "quiet" => SnapshotTrigger::Quiet,
-            "effort_start" => SnapshotTrigger::EffortStart,
-            "effort_end" => SnapshotTrigger::EffortEnd,
             "startup" => SnapshotTrigger::Startup,
             "manual" => SnapshotTrigger::Manual,
             "git_refs" => SnapshotTrigger::GitRefs,
@@ -78,11 +69,9 @@ impl SnapshotTrigger {
         })
     }
 
-    pub const ALL: [SnapshotTrigger; 9] = [
+    pub const ALL: [SnapshotTrigger; 7] = [
         SnapshotTrigger::TurnEnd,
         SnapshotTrigger::Quiet,
-        SnapshotTrigger::EffortStart,
-        SnapshotTrigger::EffortEnd,
         SnapshotTrigger::Startup,
         SnapshotTrigger::Manual,
         SnapshotTrigger::GitRefs,
@@ -101,7 +90,6 @@ pub struct MarkRequest {
     pub thread: Option<ThreadId>,
     /// The `agent_turn` it ends (a turn-end take).
     pub turn: Option<i64>,
-    pub effort: Option<EffortId>,
     /// How long the caller waits; a take is never cut short, its overrun
     /// is recorded.
     pub budget: Option<Duration>,
@@ -115,7 +103,6 @@ impl MarkRequest {
             trigger,
             thread: None,
             turn: None,
-            effort: None,
             budget: None,
         }
     }

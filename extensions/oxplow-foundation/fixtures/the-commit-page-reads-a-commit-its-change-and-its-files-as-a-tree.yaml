@@ -1,6 +1,6 @@
 # A commit page: its document's row makes the commit's change and hands the
-# change and its revisions to the parts; the files come as a tree, folders
-# first, each file with its status and the diff its link opens.
+# change and its revisions to the parts; the files come as paths with their
+# status and the revisions their diff link opens (the tree makes the folders).
 given:
   - observe: { turn: { prompt: base, write: { path: base.txt, body: "x\n" } } }
   - { command: oxplow.vcs.stage, input: { stream: str1, paths: [base.txt] } }
@@ -16,7 +16,5 @@ expect:
     detail: { rows: [{ subject: add things, message: "add things\n\nwith a body", sha: $change.rev, parent: $any, merged: null }] }
     files:
       rows:
-        - { id: src, parent: null, name: src, icon: folder, file: null }
-        - { id: src/deep, parent: src, name: deep, icon: folder, file: null }
-        - { id: src/deep/a.rs, parent: src/deep, name: a.rs, icon: added, file: src/deep/a.rs, head_revision: $any }
-        - { id: top.txt, parent: null, name: top.txt, icon: added }
+        - { path: src/deep/a.rs, status: added, head_revision: $any }
+        - { path: top.txt, status: added }

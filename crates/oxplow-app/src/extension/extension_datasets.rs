@@ -99,14 +99,14 @@ mod tests {
         std::fs::write(p, body).unwrap();
     }
 
-    const MANIFEST: &str = "manifest: 2\nname: late\nintent:\n  purpose: x\n  examples: [{ name: a }]\ndatasets:\n  - name: blocked\n    version: 1\n    description: Blocked work items.\n    fields:\n      - { name: uri, type: TEXT, doc: Work item ref. }\n  - name: broken\n    version: 1\n    description: Broken.\n    fields:\n      - { name: nope, doc: x }\n";
+    const MANIFEST: &str = "manifest: 2\nname: late\nintent:\n  purpose: x\n  examples: [{ name: a }]\ndatasets:\n  - name: blocked\n    version: 1\n    description: Blocked tasks.\n    fields:\n      - { name: uri, type: TEXT, doc: Task ref. }\n  - name: broken\n    version: 1\n    description: Broken.\n    fields:\n      - { name: nope, doc: x }\n";
 
-    /// P4.9 (tsk494): an extension's dataset publishes its view; one that
+    /// P4.9: an extension's dataset publishes its view; one that
     /// doesn't compile is that extension's error in the list, not a boot
     /// failure; turning the extension off takes its views away.
     #[tokio::test]
     async fn extension_datasets_publish_and_report_their_errors() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         // `late` has a good dataset, `shaky` one that doesn't compile: the
@@ -116,7 +116,7 @@ mod tests {
         write(
             &root,
             ".oxplow/extensions/late/datasets/blocked.sql",
-            "SELECT uri FROM ref('work_item') WHERE state = 'blocked'",
+            "SELECT uri FROM ref('thread') WHERE mark = 'red'",
         );
         write(
             &root,
@@ -132,7 +132,7 @@ mod tests {
         write(
             &root,
             ".oxplow/extensions/shaky/datasets/broken.sql",
-            "SELECT nope FROM ref('work_item')",
+            "SELECT nope FROM ref('thread')",
         );
         crate::test_fixtures::activate_with_problems(svc).await;
         svc.sql
@@ -169,7 +169,7 @@ mod tests {
     #[tokio::test]
     async fn a_page_over_an_unpublished_dataset_answers_through_its_overlay() {
         use crate::pages::runner::{PageRunner, RunRequest, RunTarget};
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         // An author's worktree: its extensions aren't the activated
         // project's, so nothing of them is published.
@@ -178,12 +178,12 @@ mod tests {
         write(
             &root,
             ".oxplow/extensions/late/extension.yaml",
-            "manifest: 2\nname: late\nintent:\n  purpose: x\ndatasets:\n  - name: counted\n    version: 1\n    description: The work items.\n    fields:\n      - { name: uri, type: TEXT, doc: Work item ref. }\n",
+            "manifest: 2\nname: late\nintent:\n  purpose: x\ndatasets:\n  - name: counted\n    version: 1\n    description: The tasks.\n    fields:\n      - { name: uri, type: TEXT, doc: Task ref. }\n",
         );
         write(
             &root,
             ".oxplow/extensions/late/datasets/counted.sql",
-            "SELECT uri FROM ref('work_item')",
+            "SELECT uri FROM ref('thread')",
         );
         write(
             &root,
@@ -214,20 +214,20 @@ mod tests {
         assert_eq!(n.result.rows.len(), 1);
     }
 
-    /// P4.9 (tsk494): `oxplow_validate_extension` (what `oxplow extension check`
+    /// P4.9: `oxplow_validate_extension` (what `oxplow extension check`
     /// runs) catches a breaking change at a published version before it
     /// is published, and an extension's `source()` of a core table.
     #[tokio::test]
     async fn validate_catches_a_breaking_change_and_a_foreign_source() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         let manifest = |cols: &str| {
             format!(
-                "manifest: 2\nname: late\nintent:\n  purpose: x\n  examples: [{{ name: a }}]\ndatasets:\n  - name: blocked\n    version: 1\n    description: Blocked work items.\n    fields:\n{cols}"
+                "manifest: 2\nname: late\nintent:\n  purpose: x\n  examples: [{{ name: a }}]\ndatasets:\n  - name: blocked\n    version: 1\n    description: Blocked tasks.\n    fields:\n{cols}"
             )
         };
-        let id = "      - { name: uri, type: TEXT, doc: Work item ref. }\n";
+        let id = "      - { name: uri, type: TEXT, doc: Task ref. }\n";
         let title = "      - { name: title, type: TEXT, doc: Title. }\n";
         write(
             &root,
@@ -237,7 +237,7 @@ mod tests {
         write(
             &root,
             ".oxplow/extensions/late/datasets/blocked.sql",
-            "SELECT uri FROM ref('work_item') WHERE state = 'blocked'",
+            "SELECT uri FROM ref('thread') WHERE mark = 'red'",
         );
         crate::test_fixtures::activate_with_problems(svc).await;
         let validate = || async {
@@ -262,7 +262,7 @@ mod tests {
         write(
             &root,
             ".oxplow/extensions/late/datasets/blocked.sql",
-            "SELECT uri, title FROM ref('work_item') WHERE state = 'blocked'",
+            "SELECT uri, title FROM ref('thread') WHERE mark = 'red'",
         );
         let errors = validate().await;
         assert!(
@@ -272,7 +272,7 @@ mod tests {
         write(
             &root,
             ".oxplow/extensions/late/datasets/blocked.sql",
-            "SELECT uri, title FROM source('work_item')",
+            "SELECT uri, title FROM source('thread')",
         );
         assert!(validate().await.contains("only its own namespace's tables"));
     }

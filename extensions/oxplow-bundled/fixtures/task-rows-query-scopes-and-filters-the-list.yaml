@@ -1,0 +1,77 @@
+# The one statement of which tasks a task page shows: the ones
+# assigned to the thread, its stream, the person, nobody or anyone (a
+# closed item is nobody's: the thread's when its requests worked it); by
+# stage, or by bucket (its first stage); a priority or a search keeps an
+# item that matches and its epic; open items by their queue with an
+# epic's children under it, then the closed ones, done before canceled,
+# the latest first; what each row's actions may do.
+requires: [oxtask]
+given:
+  - { command: oxtask.task.create, input: { title: An epic, stage: ready, priority: low } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Urgent child, stage: ready, parent: tsk1, priority: urgent } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Plain child, stage: ready, parent: tsk1, priority: low } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk3&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Loose item, body: "## Why\n\nIt started here. Then more.", stage: ready, priority: low } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk4&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Backlogged, stage: backlog } }
+  - { command: oxtask.task.create, input: { title: Shipped, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk6&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Dropped, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk7&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  # A closed item is the thread's when a request on the thread worked it.
+  - observe:
+      turn:
+        prompt: Ship one, drop one
+        during:
+          - { command: oxtask.task.move, input: { id: tsk6, stage: in_progress }, as: agent }
+          - { command: oxtask.task.move, input: { id: tsk6, stage: done }, as: agent }
+          - { command: oxtask.task.move, input: { id: tsk7, stage: in_progress }, as: agent }
+          - { command: oxtask.task.move, input: { id: tsk7, stage: canceled }, as: agent }
+  - { command: oxtask.task.move, input: { id: tsk4, stage: in_progress } }
+  - { command: oxtask.task.comment, input: { id: tsk4, body: Started. } }
+when: { query: task-rows, params: { show: thread, state: all, priority: any, q: "", thread_id: 1, stream_id: 1 } }
+expect:
+  rows:
+    - title: An epic
+      stage: ready
+      stage_title: Ready
+      is_open: 1
+      depth: 0
+      assignee_title: Thread
+      add_child: "oxplow:oxplow/page?page=new-task&parent=oxplow:oxplow/task?id%3Dtsk1%26provider%3Doxtask"
+    - { title: Urgent child, depth: 1, parent_title: An epic, prio: urgent, prio_tone: danger, has_parent: 1, can_delete: 1, can_nest: 1, not_here: 0, not_mine: 1, assigned: 1, can_prioritize: 1 }
+    - { title: Plain child, depth: 1 }
+    - { title: Loose item, state: in_progress, stage: in_progress, stage_title: In Progress, depth: 0, comments: 1, summary: It started here., prio_tone: null }
+    - { title: Shipped, state: done, stage: done, done_rank: 1, is_open: 0, assigned: 0, not_mine: 0 }
+    - { title: Dropped, state: canceled, done_rank: 1 }
+steps:
+  - when: { query: task-rows, params: { show: thread, state: all, priority: urgent, q: "", thread_id: 1, stream_id: 1 } }
+    expect: { rows: [{ title: An epic }, { title: Urgent child }] }
+  # A search reads the title or any field, and keeps the epic too.
+  - when: { query: task-rows, params: { show: thread, state: all, priority: any, q: plain, thread_id: 1, stream_id: 1 } }
+    expect: { rows: [{ title: An epic }, { title: Plain child }] }
+  - when: { query: task-rows, params: { show: pool, state: all, priority: any, q: "", thread_id: 1, stream_id: 1 } }
+    expect: { rows: [{ title: Backlogged, state: backlog, assignee_title: Unassigned, not_here: 1, assigned: 0, here: "oxplow:oxplow/thread?id=thr1" }] }
+  - when: { query: task-rows, params: { show: all, state: backlog, priority: any, q: "", thread_id: 1, stream_id: 1 } }
+    expect: { rows: [{ title: Backlogged }] }
+  - when: { query: task-rows, params: { show: me, state: all, priority: any, q: "", thread_id: 1, stream_id: 1 } }
+    expect: { rows: 0 }
+  - when: { query: task-rows, params: { show: all, state: all, priority: any, q: "", thread_id: 1, stream_id: 1 } }
+    expect: { rows: 7 }
+  - when: { query: task-rows, params: { show: stream, state: all, priority: any, q: "", thread_id: 1, stream_id: 1 } }
+    expect: { rows: 6 }
+  - when: { query: task-rows, params: { show: thread, state: open, priority: any, q: "", thread_id: 1, stream_id: 1 } }
+    expect: { rows: [{ title: An epic }, { title: Urgent child }, { title: Plain child }, { title: Loose item }] }
+  - when: { query: task-rows, params: { show: thread, state: in_progress, priority: any, q: "", thread_id: 1, stream_id: 1 } }
+    expect: { rows: [{ title: Loose item, depth: 0 }] }
+  - when: { query: task-rows, params: { show: thread, state: done, priority: any, q: "", thread_id: 1, stream_id: 1 } }
+    expect: { rows: [{ title: Shipped }] }
+  - when: { query: task-rows, params: { show: thread, state: canceled, priority: any, q: "", thread_id: 1, stream_id: 1 } }
+    expect: { rows: [{ title: Dropped }] }
+  - when: { query: task-rows, params: { show: thread, state: todo, priority: any, q: "", thread_id: 1, stream_id: 1 } }
+    expect: { rows: [{ title: An epic }, { title: Urgent child }, { title: Plain child }] }
+  # A stage by its id: the same items, the list's own name for it.
+  - when: { query: task-rows, params: { show: thread, state: ready, priority: any, q: "", thread_id: 1, stream_id: 1 } }
+    expect: { rows: [{ title: An epic }, { title: Urgent child }, { title: Plain child }] }

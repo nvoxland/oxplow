@@ -26,7 +26,7 @@ pub mod session;
 pub use session::SessionProjects;
 
 /// Project-relative state directory holding oxplow's per-project config
-/// and local data (DB, snapshots, wiki, …).
+/// and local data (DB, snapshots, oxwiki, …).
 pub const OXPLOW_STATE_DIR: &str = ".oxplow";
 
 /// Config file name, inside [`OXPLOW_STATE_DIR`]
@@ -142,11 +142,11 @@ fn global_config_dir_from(home: Option<std::ffi::OsString>) -> Option<PathBuf> {
 }
 
 const DEFAULT_SNAPSHOT_RETENTION_DAYS: u32 = 7;
-/// Metric retention defaults to KEEP EVERYTHING (tsk93): per-test history is
+/// Metric retention defaults to KEEP EVERYTHING: per-test history is
 /// what makes the fact substrate worth having, and ~420k facts read fine. The
 /// knob exists so growth can be bounded later without a code change.
 const DEFAULT_METRIC_RETENTION_DAYS: u32 = 0;
-/// Detail COMPACTION, unlike capture pruning, is on by default (tsk211): it
+/// Detail COMPACTION, unlike capture pruning, is on by default: it
 /// drops only the per-run drill-in payload, never a fact, so no metric value or
 /// trend point changes. ~0.5 MB per coverage run made `detail_json` 200 MB of a
 /// 795 MB database in under three weeks of heavy use.
@@ -370,7 +370,7 @@ pub struct ResolvedSpec {
     /// can list it as an unchecked toggle), but `seed_catalog` prunes it from the
     /// `metric_spec` table so all spec-driven reads + producer collection stop.
     pub enabled: bool,
-    /// Set for an entity metric (tsk322); `aggregation` is then one of
+    /// Set for an entity metric; `aggregation` is then one of
     /// [`ENTITY_METRIC_AGGS`].
     pub entity: Option<EntitySpec>,
     /// Guidance for an agent reading the metric.
@@ -508,6 +508,14 @@ pub struct DimensionEntry {
     /// `LEFT JOIN v_thread t ON t.id = e.thread_id`.
     #[serde(default)]
     pub join: Option<String>,
+    /// A fact dimension an extension's dataset answers: the fact's `by` key
+    /// (`request_id`, `thread_id`, `turn_id` or `stream_id`) is looked up in
+    /// the dataset's column of the same name, and the dimension's value is the
+    /// dataset's `value` column of the first row in `order`. Core names no
+    /// dataset: with the extension off the dimension is absent and the fact
+    /// has no value on it.
+    #[serde(default)]
+    pub from: Option<DimensionFrom>,
     /// Guidance for an agent reading the dimension.
     #[serde(default)]
     pub ai_context: Option<AiContext>,
@@ -515,6 +523,26 @@ pub struct DimensionEntry {
     #[serde(default)]
     pub description: Option<String>,
 }
+
+/// Where a `from:` dimension reads its value (see [`DimensionEntry::from`]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DimensionFrom {
+    /// The `v_*` view of the dataset that answers.
+    pub dataset: String,
+    /// The fact key the dataset is looked up by, and its column of the same
+    /// name: `request_id`, `thread_id`, `turn_id` or `stream_id`.
+    pub by: String,
+    /// The dataset column that holds the dimension's value.
+    pub value: String,
+    /// A SQL ordering over the dataset's columns; the first row wins. Without
+    /// it, the dataset's own order.
+    #[serde(default)]
+    pub order: Option<String>,
+}
+
+/// The fact keys a `from:` dimension may be looked up by.
+pub const DIMENSION_FROM_KEYS: &[&str] = &["request_id", "thread_id", "turn_id", "stream_id"];
 
 /// A fully-resolved dimension — the flat form the boot seeder upserts into the
 /// `dimension` catalog. Produced by [`resolve_dimensions`] (project > global).
@@ -530,6 +558,7 @@ pub struct ResolvedDimension {
     pub scope: String,
     pub promote: bool,
     pub entity: Option<EntityDimensionSpec>,
+    pub from: Option<DimensionFrom>,
     pub ai_context: Option<AiContext>,
     pub description: Option<String>,
 }
@@ -544,9 +573,9 @@ pub struct TestingConfig {
     /// The command that runs the project's tests and writes their reports
     /// (counts as a test run; named in the report-less nudge).
     pub command: Option<String>,
-    /// The coverage-free counterpart to `command`, for the red/green loop
-    /// (tsk171). It still writes a test report (JUnit), so the
-    /// progression lands in the effort's Tests panel, but skips coverage
+    /// The coverage-free counterpart to `command`, for the red/green loop.
+    /// It still writes a test report (JUnit), so the
+    /// progression lands in the Tests panel, but skips coverage
     /// and should accept a filter.
     ///
     /// This exists because the alternative is worse. When the only
@@ -627,7 +656,7 @@ pub struct GeneratedConfig {
 /// One row of the project's `zones:` table: the globs that select files
 /// and the zone label they belong to.
 ///
-/// Zones are entirely project-defined (tsk251) — oxplow ships no rule
+/// Zones are entirely project-defined — oxplow ships no rule
 /// table of its own, because a file's architectural role follows from
 /// how *this* project lays out its repo. Order in the table is
 /// load-bearing: [`ZoneRules`](../oxplow_code_deps/zones/struct.ZoneRules.html)
@@ -677,10 +706,9 @@ pub struct OxplowConfig {
     #[serde(rename = "snapshotRetentionDays")]
     pub snapshot_retention_days: u32,
     /// Metric-capture retention window in days: captures older than the
-    /// cutoff are pruned (facts cascade) — EXCEPT effort-stamped ones
-    /// (attribution history), each producer's newest capture, and any capture
+    /// cutoff are pruned (facts cascade) — EXCEPT each producer's newest capture, and any capture
     /// still contributing a current value to the fold. **0 (the default)
-    /// keeps everything** (tsk93); pruning trades away per-test drill-down /
+    /// keeps everything**; pruning trades away per-test drill-down /
     /// flakiness horizon for bounded growth, so it is strictly opt-in.
     #[serde(rename = "metricRetentionDays")]
     pub metric_retention_days: u32,
@@ -690,8 +718,8 @@ pub struct OxplowConfig {
     ///
     /// This is the knob that bounds a BUSY project: the payload is ~0.5 MB per
     /// coverage run, so age alone never catches up with a repo that runs tests
-    /// dozens of times a day (tsk211). Compaction never changes a metric value
-    /// — only the effort Tests/Coverage panel's detail for old runs is lost.
+    /// dozens of times a day. Compaction never changes a metric value
+    /// — only the Tests/Coverage panel's detail for old runs is lost.
     #[serde(rename = "metricDetailMaxPerProducer")]
     pub metric_detail_max_per_producer: u32,
     /// Compact `detail_json` older than this many days. `0` disables it.
@@ -762,7 +790,7 @@ pub struct OxplowConfig {
     #[serde(rename = "extensionInstances")]
     pub extension_instances: std::collections::BTreeMap<String, ExtensionInstanceConfig>,
     /// The project's choice of implementation per choosable capability
-    /// (`activeProviders: { work_items: issues, effort_policy: none }`); a
+    /// (`activeProviders: { snapshots: hashes }`); a
     /// capability absent here keeps its default.
     #[serde(rename = "activeProviders")]
     pub active_providers: std::collections::BTreeMap<String, String>,
@@ -776,7 +804,7 @@ pub struct OxplowConfig {
     #[serde(rename = "personalNewThreadSession")]
     pub personal_new_thread_session: Option<String>,
     /// Whose component shows for a replaceable core sub-component, by
-    /// target (`replacements: { work_item.board: task-views,
+    /// target (`replacements: { task.board: task-views,
     /// vcs.history.graph: oxplow }`): an extension replacing it, or
     /// `oxplow` for oxplow's own. A target not listed shows its default:
     /// the only extension replacing it, or a bound target's provider's.
@@ -878,7 +906,7 @@ pub fn bundled_from_sources(requested: Option<bool>, dev_build: bool) -> bool {
 pub const EXTENSION_SOURCES_DIR: &str = ".oxplow/extensions";
 
 /// The team's list when `.oxplow/project.yaml` has no `extensions` key.
-pub const DEFAULT_EXTENSIONS: &[&str] = &["oxplow-bundled"];
+pub const DEFAULT_EXTENSIONS: &[&str] = &["oxplow-bundled", "oxtask", "oxwiki"];
 
 fn default_extensions() -> Vec<String> {
     DEFAULT_EXTENSIONS.iter().map(|s| s.to_string()).collect()
@@ -1176,10 +1204,10 @@ struct RawConfig {
     /// Instances of extension providers, by `<extension>/<instance id>`: `{ enabled, config, provider? }` (the provider's instance config; `provider` names which of the extension's providers an instance with its own id is). Enabling one runs its program once this machine approved it.
     #[serde(rename = "extensionInstances", default)]
     extension_instances: Option<std::collections::BTreeMap<String, ExtensionInstanceConfig>>,
-    /// Each capability's active provider, by instance id: `{ work_items: issues }` (a provider's default instance has the provider's id). New work items file there; absent, oxplow's own. A provider that isn't running is a failure, never a fallback.
+    /// Each capability's active provider, by instance id: `{ snapshots: hashes }` (a provider's default instance has the provider's id). Absent, the capability's default. A provider that isn't running is a failure, never a fallback.
     #[serde(rename = "activeProviders", default)]
     active_providers: Option<std::collections::BTreeMap<String, String>>,
-    /// Whose component shows for a replaceable core sub-component, by target: `{ work_item.board: task-views, vcs.history.graph: oxplow }` — an extension replacing it, or `oxplow` for oxplow's own. Unlisted, the only extension replacing it shows (several: oxplow's own); a bound target (`work_item.detail.state`) shows its provider's extension's, and may only be set to `oxplow`.
+    /// Whose component shows for a replaceable core sub-component, by target: `{ task.board: task-views, vcs.history.graph: oxplow }` — an extension replacing it, or `oxplow` for oxplow's own. Unlisted, the only extension replacing it shows (several: oxplow's own); a bound target (`task.detail.state`) shows its provider's extension's, and may only be set to `oxplow`.
     #[serde(rename = "replacements", default)]
     replacements: Option<std::collections::BTreeMap<String, String>>,
     /// How long each event namespace's payloads and large content are kept, in days: `{ agent: { payloadDays: 60, contentDays: 14 } }`, over core's defaults (agent 30/14; test, code, collector, effect 90/30). An extension's namespace is kept no longer than its window; core state (snapshot, vcs, effort, …) is kept whole.
@@ -1539,7 +1567,7 @@ pub fn parse_project_config(
 }
 
 /// Write `key` into `.oxplow/project.yaml` as `value`, or remove it when
-/// `None` — editing only that key's lines (tsk1028). Every other line of
+/// `None` — editing only that key's lines. Every other line of
 /// the file is kept byte for byte: the person's formatting, comments, flow
 /// style, and keys that happen to equal their default. A key's block is its
 /// line at column 0 through the line before the next one, with the comment
@@ -1899,7 +1927,7 @@ pub fn config_entries(config: &OxplowConfig, fallback_name: &str) -> Vec<ConfigE
 }
 
 /// Write a **global** metrics manifest (`global_config_dir()/metrics/<name>.yaml`)
-/// — a clean `metrics:` doc holding `entries` (tsk235). Creates parent dirs.
+/// — a clean `metrics:` doc holding `entries`. Creates parent dirs.
 /// Used by the Catalog "New metric" scaffold at global scope; the runner reads
 /// these via [`load_global_metric_entries`].
 pub fn write_global_metrics_file(path: &Path, entries: &[MetricEntry]) -> Result<(), ConfigError> {
@@ -1918,7 +1946,7 @@ pub fn write_global_metrics_file(path: &Path, entries: &[MetricEntry]) -> Result
 /// keys [`load_project_config`] reads) without unset values (null, empty
 /// lists and maps), so a hand-edited block stays minimal across UI-driven
 /// writes. Generic on purpose: the per-field writers it replaced forgot
-/// fields as the structs grew (tsk355 dropped entity metrics' `entity`,
+/// fields as the structs grew (dropped entity metrics' `entity`,
 /// `where`, … and broke loading).
 fn minimal_yaml<T: Serialize>(entry: &T) -> serde_yaml::Value {
     fn prune(v: serde_yaml::Value) -> Option<serde_yaml::Value> {
@@ -2019,7 +2047,7 @@ impl Default for ExtensionInstanceConfig {
 pub const INSTANCES_FILE: &str = "instances.yaml";
 
 /// Beside [`INSTANCES_FILE`]: how many times each global instance's
-/// credentials changed (tsk842). The values are in the keychain, which
+/// credentials changed. The values are in the keychain, which
 /// no oxplow can watch; each bumps the instance's count when it changes
 /// one, and every other restarts the instance when it sees the count
 /// move. Counts only — never a value.
@@ -2105,7 +2133,7 @@ impl GlobalInstances {
     /// every oxplow on the machine takes (`instances.yaml.lock`), `edit`
     /// the file as it is now, then validate and write it atomically — so
     /// two windows or two oxplows never drop each other's change, and a
-    /// reader never sees half a file (tsk837). The outer error is the
+    /// reader never sees half a file. The outer error is the
     /// file's (it couldn't be locked, read, validated or written); the
     /// inner is `edit`'s refusal, which writes nothing.
     pub fn update<E>(
@@ -2711,7 +2739,7 @@ const METRIC_CATEGORIES: &[&str] = &[
 const MEASURE_TEMPORAL_SEMANTICS: &[&str] = &["additive", "semi-additive", "non-additive"];
 /// How a measure's series folds over time (`Fold` in the metric engine).
 pub const MEASURE_FOLDS: &[&str] = &["sum", "last", "first", "avg", "none"];
-/// What ONE capture restates (tsk41). Deliberately NOT mirrored as a DB CHECK —
+/// What ONE capture restates. Deliberately NOT mirrored as a DB CHECK —
 /// `temporal_semantics`' CHECK is exactly why adding a value there needs a
 /// `measure` table rebuild (which would cascade-wipe every fact), so
 /// `capture_scope` is validated here and in `CaptureScope::parse` instead.
@@ -3028,7 +3056,7 @@ pub fn validate_metrics(
 }
 
 /// A dimension key a metric slices or filters by: its one, namespaced name
-/// (tsk945) — `subject`, the raw-subject pseudo-dimension, aside.
+///  — `subject`, the raw-subject pseudo-dimension, aside.
 fn dimension_key(at: &str, key: String) -> Result<String, ConfigError> {
     if key == "subject" || key.contains('.') {
         return Ok(key);
@@ -3133,7 +3161,7 @@ pub fn unknown_uses(
 /// enables a catalog metric, layering its threshold overrides on top (scope = the
 /// definition's scope). A `use:` referencing an unknown key is skipped
 /// silently: this runs on every event, so [`unknown_uses`] reports those
-/// once per load (tsk1076).
+/// once per load.
 pub fn resolve_metrics(
     builtin: &[MetricEntry],
     global: &[MetricEntry],
@@ -3362,7 +3390,7 @@ fn load_global_entries<E>(
 }
 
 // ---------------------------------------------------------------------------
-// Measures + dimensions (the fact-catalog authoring surface — epic tsk12, E)
+// Measures + dimensions (the fact-catalog authoring surface, E)
 // ---------------------------------------------------------------------------
 
 /// Shared key check for the `measures:` / `dimensions:` catalogs: the key must
@@ -3518,6 +3546,47 @@ pub fn validate_dimensions(
             }
             None => {}
         }
+        let from = match e.from {
+            None => None,
+            Some(f) => {
+                if entity.is_some() || e.promote {
+                    return Err(ConfigError::Invalid(format!(
+                        "dimensions[{i}] sets `from` as well as `entity` or `promote`: a `from` \
+                         dimension is resolved from a dataset at read time"
+                    )));
+                }
+                if !is_entity_name(&f.dataset) {
+                    return Err(ConfigError::Invalid(format!(
+                        "dimensions[{i}] from.dataset must name a `v_*` view (got \"{}\")",
+                        f.dataset
+                    )));
+                }
+                if !DIMENSION_FROM_KEYS.contains(&f.by.as_str()) {
+                    return Err(ConfigError::Invalid(format!(
+                        "dimensions[{i}] from.by must be one of {DIMENSION_FROM_KEYS:?} (got \"{}\")",
+                        f.by
+                    )));
+                }
+                let column = f.value.trim();
+                if column.is_empty()
+                    || !column
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+                {
+                    return Err(ConfigError::Invalid(format!(
+                        "dimensions[{i}] from.value must name a column of the dataset (got \"{}\")",
+                        f.value
+                    )));
+                }
+                Some(DimensionFrom {
+                    order: f
+                        .order
+                        .map(|o| o.trim().to_string())
+                        .filter(|o| !o.is_empty()),
+                    ..f
+                })
+            }
+        };
         out.push(DimensionEntry {
             key: Some(key),
             label: opt(e.label),
@@ -3528,6 +3597,7 @@ pub fn validate_dimensions(
             entity,
             expr,
             join,
+            from,
             ai_context: e.ai_context,
             description: opt(e.description),
         });
@@ -3604,6 +3674,7 @@ pub fn resolve_dimensions(
                     expr: e.expr.clone().unwrap_or_default(),
                     join: e.join.clone(),
                 }),
+                from: e.from.clone(),
                 ai_context: e.ai_context.clone(),
                 description: e.description.clone(),
             };
@@ -3864,17 +3935,17 @@ mod tests {
     #[test]
     fn active_providers_name_one_provider_per_capability() {
         let parse = |yaml: &str| parse_project_config(serde_yaml::from_str(yaml).unwrap(), "demo");
-        let config = parse("activeProviders: { work_items: issues }\n").unwrap();
-        assert_eq!(config.active_providers["work_items"], "issues");
+        let config = parse("activeProviders: { snapshots: issues }\n").unwrap();
+        assert_eq!(config.active_providers["snapshots"], "issues");
         let doc = render_project_config(&config, "demo");
         let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(doc)).unwrap();
         assert!(
-            yaml.contains("activeProviders:\n  work_items: issues"),
+            yaml.contains("activeProviders:\n  snapshots: issues"),
             "{yaml}"
         );
         let err = parse("activeProviders: { vcs: jj }\n").unwrap_err();
-        assert!(err.to_string().contains("work_items"), "{err}");
-        let err = parse("activeProviders: { work_items: Issues-App }\n").unwrap_err();
+        assert!(err.to_string().contains("snapshots"), "{err}");
+        let err = parse("activeProviders: { snapshots: Issues-App }\n").unwrap_err();
         assert!(err.to_string().contains("instance id"), "{err}");
         assert!(parse("agents: [claude]\n")
             .unwrap()
@@ -3893,29 +3964,25 @@ mod tests {
         std::fs::create_dir_all(&oxplow).unwrap();
         std::fs::write(
             oxplow.join("project.yaml"),
-            "activeProviders: { work_items: issues }\n",
+            "activeProviders: { snapshots: issues }\n",
         )
         .unwrap();
         std::fs::write(
             oxplow.join("personal.yaml"),
-            "activeProviders: { effort_policy: none }\n",
+            "activeProviders: { snapshots: hashes }\n",
         )
         .unwrap();
         let config = load_project_config(dir.path()).unwrap();
         assert_eq!(
-            config
-                .active_providers
-                .get("work_items")
-                .map(String::as_str),
+            config.active_providers.get("snapshots").map(String::as_str),
             Some("issues")
         );
-        assert_eq!(config.active_providers.get("effort_policy"), None);
         assert_eq!(
             config
                 .personal_active_providers
-                .get("effort_policy")
+                .get("snapshots")
                 .map(String::as_str),
-            Some("none")
+            Some("hashes")
         );
         std::fs::write(oxplow.join("personal.yaml"), "zones: []\n").unwrap();
         let err = load_project_config(dir.path()).unwrap_err().to_string();
@@ -3940,16 +4007,16 @@ mod tests {
         write_personal_key(
             dir.path(),
             "activeProviders",
-            Some(&serde_json::json!({ "effort_policy": "none" })),
+            Some(&serde_json::json!({ "snapshots": "hashes" })),
         )
         .unwrap();
         let config = load_project_config(dir.path()).unwrap();
         assert_eq!(
             config
                 .personal_active_providers
-                .get("effort_policy")
+                .get("snapshots")
                 .map(String::as_str),
-            Some("none")
+            Some("hashes")
         );
         assert!(!config_path(dir.path()).exists(), "project.yaml untouched");
         write_personal_key(dir.path(), "activeProviders", None).unwrap();
@@ -3969,7 +4036,7 @@ mod tests {
         write_personal_key(
             dir.path(),
             "activeProviders",
-            Some(&serde_json::json!({ "effort_policy": "none" })),
+            Some(&serde_json::json!({ "snapshots": "hashes" })),
         )
         .unwrap();
         write_personal_key(
@@ -4009,7 +4076,7 @@ mod tests {
         assert_eq!(config.personal_active_providers.len(), 1);
     }
 
-    /// tsk947: `eventRetention` sets a namespace's windows — a person's key.
+    /// `eventRetention` sets a namespace's windows — a person's key.
     /// Core state (kept whole) and a window under a day are refused.
     #[test]
     fn event_retention_sets_a_namespaces_windows() {
@@ -4037,7 +4104,7 @@ mod tests {
             err.contains("`snapshot`") && err.contains("kept whole"),
             "{err}"
         );
-        // tsk985: windows are bounded — at least a week for a core
+        // windows are bounded — at least a week for a core
         // namespace oxplow reads back, a day for an extension's; at most a
         // hundred years; and a body is never kept longer than its payload.
         for (yaml, says) in [
@@ -4087,27 +4154,24 @@ mod tests {
     fn replacements_chooses_whose_component_shows() {
         let parse = |yaml: &str| parse_project_config(serde_yaml::from_str(yaml).unwrap(), "demo");
         let config = parse(
-            "replacements: { vcs.history.graph: oxplow-bundled, work_item.board: task-views, work_item.detail.state: oxplow }\n",
+            "replacements: { vcs.history.graph: oxplow-bundled, task.board: task-views, task.detail.state: oxplow }\n",
         )
         .unwrap();
         assert_eq!(
-            config
-                .replacements
-                .get("work_item.board")
-                .map(String::as_str),
+            config.replacements.get("task.board").map(String::as_str),
             Some("task-views")
         );
         assert_eq!(
             config
                 .replacements
-                .get("work_item.detail.state")
+                .get("task.detail.state")
                 .map(String::as_str),
             Some("oxplow")
         );
         let doc = render_project_config(&config, "demo");
         let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(doc)).unwrap();
         assert!(yaml.contains("vcs.history.graph: oxplow-bundled"), "{yaml}");
-        let bound = parse("replacements: { work_item.detail.state: beads }\n").unwrap_err();
+        let bound = parse("replacements: { task.detail.state: beads }\n").unwrap_err();
         assert!(
             bound
                 .to_string()
@@ -4115,10 +4179,10 @@ mod tests {
             "{bound}"
         );
         let unknown = parse("replacements: { vcs.conflict.resolver: x }\n").unwrap_err();
-        assert!(unknown.to_string().contains("work_item.list"), "{unknown}");
+        assert!(unknown.to_string().contains("task.list"), "{unknown}");
         assert!(parse("agents: [claude]\n").unwrap().replacements.is_empty());
         assert!(
-            parse("replacementsOff: [work_item.board]\n").is_err(),
+            parse("replacementsOff: [task.board]\n").is_err(),
             "the old key is gone"
         );
     }
@@ -4244,12 +4308,12 @@ mod tests {
         );
     }
 
-    /// tsk840: an instance's id is a provider id's kind of name — its refs'
+    /// an instance's id is a provider id's kind of name — its refs'
     /// segment and its command namespace — so the same names are oxplow's
     /// own: `oxplow`, and a core namespace.
     #[test]
     fn an_instance_id_may_not_be_oxplows_own() {
-        for id in ["oxplow", "code", "config", "work_item"] {
+        for id in ["oxplow", "code", "config", "task"] {
             let mut all = std::collections::BTreeMap::new();
             all.insert(
                 format!("tracker/{id}"),
@@ -4266,7 +4330,7 @@ mod tests {
         }
     }
 
-    /// tsk837: each change to the machine's instances is one
+    /// each change to the machine's instances is one
     /// read-modify-write of the file as it is then, under a lock other
     /// processes take too — so writers at once never drop each other's
     /// entry.
@@ -4335,16 +4399,16 @@ mod tests {
 metrics:
   - key: work.done
     title: Tasks completed
-    entity: v_work_item
+    entity: v_thread
     where: "state = 'done'"
     time: closed_at
   - key: work.median_prio
-    entity: v_work_item
+    entity: v_thread
     aggregation: median
     value: "e.rank"
 dimensions:
   - key: work.prio
-    entity: v_work_item
+    entity: v_thread
     expr: "json_extract(e.native, '$.priority')"
     join: "LEFT JOIN v_thread t ON t.id = e.thread_id"
 "#;
@@ -4360,7 +4424,7 @@ dimensions:
         assert_eq!(
             resolved[0].entity,
             Some(EntitySpec {
-                view: "v_work_item".into(),
+                view: "v_thread".into(),
                 where_: Some("state = 'done'".into()),
                 time: Some("closed_at".into()),
                 value: None,
@@ -4373,7 +4437,7 @@ dimensions:
         assert_eq!(
             rd[0].entity,
             Some(EntityDimensionSpec {
-                view: "v_work_item".into(),
+                view: "v_thread".into(),
                 expr: "json_extract(e.native, '$.priority')".into(),
                 join: Some("LEFT JOIN v_thread t ON t.id = e.thread_id".into()),
             })
@@ -4389,14 +4453,12 @@ dimensions:
                 .to_string()
         };
         assert!(bad("[{key: a.b, entity: tasks}]").contains("v_*"));
+        assert!(bad("[{key: a.b, entity: v_thread, aggregation: sum}]").contains("needs a `value`"));
         assert!(
-            bad("[{key: a.b, entity: v_work_item, aggregation: sum}]").contains("needs a `value`")
-        );
-        assert!(
-            bad("[{key: a.b, entity: v_work_item, aggregation: ratio, value: x}]")
+            bad("[{key: a.b, entity: v_thread, aggregation: ratio, value: x}]")
                 .contains("entity aggregation")
         );
-        assert!(bad("[{key: a.b, entity: v_work_item, measure: m}]").contains("can't also set"));
+        assert!(bad("[{key: a.b, entity: v_thread, measure: m}]").contains("can't also set"));
         assert!(bad("[{key: a.b, measure: m, where: x}]").contains("without `entity`"));
         assert!(bad("[{use: a.b, time: x}]").contains("`use:` entry"));
         let dim = |yaml: &str| {
@@ -4405,10 +4467,10 @@ dimensions:
                 .unwrap_err()
                 .to_string()
         };
-        assert!(dim("[{key: a.b, entity: v_work_item}]").contains("needs an `expr`"));
+        assert!(dim("[{key: a.b, entity: v_thread}]").contains("needs an `expr`"));
         assert!(dim("[{key: a.b, expr: x}]").contains("without `entity`"));
         assert!(
-            dim("[{key: a.b, entity: v_work_item, expr: x, promote: true}]")
+            dim("[{key: a.b, entity: v_thread, expr: x, promote: true}]")
                 .contains("fact dimensions only")
         );
     }
@@ -4417,7 +4479,7 @@ dimensions:
     /// Resolve the project config path under `<dir>/.oxplow/`, creating the
     /// `.oxplow` parent so a subsequent write succeeds. Used by tests that
     /// author a config file directly (simulating a user-edited file).
-    /// tsk1028: a command's write changes only its key. The person's
+    /// a command's write changes only its key. The person's
     /// formatting, comments and default-valued keys (`agents: [claude]`)
     /// stay as written.
     #[test]
@@ -4700,7 +4762,7 @@ lsp:
         );
     }
 
-    /// tsk251: `zones:` is an ORDERED table — first match wins — so the
+    /// `zones:` is an ORDERED table — first match wins — so the
     /// parsed order must be the file's order, and `match` takes either a
     /// single glob or a list of them.
     #[test]
@@ -4795,7 +4857,7 @@ lsp:
 
     #[test]
     fn fast_test_command_round_trips() {
-        // tsk171: the coverage-free counterpart to `testCommand`, used for the
+        // the coverage-free counterpart to `testCommand`, used for the
         // red/green loop so those runs still emit a report instead of being
         // dropped because the full instrumented run is too slow to repeat.
         let dir = tempdir().unwrap();
@@ -4826,7 +4888,7 @@ lsp:
     #[test]
     fn managed_keys_covers_every_block_the_writer_emits() {
         // Every top-level key the renderer emits reads back the same: what
-        // `keys::with_key` validates a command's change through (tsk164).
+        // `keys::with_key` validates a command's change through.
         let dir = tempdir().unwrap();
         std::fs::write(
             cfg_path(dir.path()),
@@ -5286,7 +5348,7 @@ testing:
         assert!(!raw.contains("scripts"), "defaults are not written:\n{raw}");
     }
 
-    /// tsk863: reports are read by collectors (`records:`) now; the old
+    /// reports are read by collectors (`records:`) now; the old
     /// `collection:` block is a key the file doesn't have.
     #[test]
     fn a_collection_block_is_an_unknown_key() {
@@ -5422,7 +5484,7 @@ testing:
         }
     }
 
-    /// tsk945: a dimension key has one name — its namespaced one. A metric
+    /// a dimension key has one name — its namespaced one. A metric
     /// declaring a bare one to slice or filter by is refused, saying what
     /// the key is called.
     #[test]
@@ -5679,7 +5741,7 @@ metrics:
         assert!(resolve_metrics(&[], &[], &[], &project).is_empty());
     }
 
-    /// tsk1076: resolution runs on every event, so it reports nothing; the
+    /// resolution runs on every event, so it reports nothing; the
     /// config's unknown `use:` keys are named once per load by
     /// `unknown_uses`, a disable marker for an extension key aside.
     #[test]
@@ -5916,7 +5978,7 @@ metrics:
         load_project_config(&root).expect("the repo's project.yaml loads");
     }
 
-    /// tsk865: `gauges:` is a key the file doesn't have (they're
+    /// `gauges:` is a key the file doesn't have (they're
     /// `collectors:`); nothing special-cases it.
     #[test]
     fn a_gauges_block_is_an_unknown_key() {
@@ -5996,7 +6058,7 @@ metrics:
         assert!(check("[{title: nokey}]").is_err());
         // Bad temporalSemantics.
         assert!(check("[{key: acme.x, temporalSemantics: sideways}]").is_err());
-        // Bad captureScope (tsk41).
+        // Bad captureScope.
         assert!(check("[{key: acme.x, captureScope: sometimes}]").is_err());
         // `per-path` is the tree-gauge scope and must be accepted.
         let valid = check("[{key: acme.x, captureScope: per-path}]").unwrap();
@@ -6008,7 +6070,7 @@ metrics:
         assert_eq!(resolve_measures(&plain, &[])[0].capture_scope, "complete");
         // Duplicate key.
         assert!(check("[{key: acme.x}, {key: acme.x}]").is_err());
-        // componentRole is gone (tsk865): ratio components ride each fact.
+        // componentRole is gone: ratio components ride each fact.
         assert!(
             serde_yaml::from_str::<Vec<MeasureEntry>>("[{key: acme.x, componentRole: none}]")
                 .is_err()
@@ -6090,6 +6152,48 @@ metrics:
         // Defaults applied.
         assert_eq!(churn.title, "acme.churn");
         assert_eq!(churn.temporal_semantics, "semi-additive");
+    }
+
+    fn from_dimension(by: &str, dataset: &str) -> DimensionEntry {
+        DimensionEntry {
+            key: Some("acme.task".into()),
+            from: Some(DimensionFrom {
+                dataset: dataset.into(),
+                by: by.into(),
+                value: "task".into(),
+                order: Some(" at ".into()),
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_from_dimension_is_resolved_from_a_dataset() {
+        let out = validate_dimensions(
+            Some(vec![from_dimension("request_id", "v_acme_links")]),
+            CatalogLayer::Extension("acme"),
+        )
+        .expect("valid");
+        let resolved = resolve_dimensions(&[], &[("acme".to_string(), out)]);
+        let from = resolved[0].from.as_ref().expect("kept");
+        assert_eq!(from.dataset, "v_acme_links");
+        assert_eq!(from.order.as_deref(), Some("at"));
+    }
+
+    #[test]
+    fn a_from_dimension_with_a_bad_key_or_dataset_is_refused() {
+        for (by, dataset) in [("path", "v_acme_links"), ("request_id", "acme_links")] {
+            let e = validate_dimensions(
+                Some(vec![from_dimension(by, dataset)]),
+                CatalogLayer::Extension("acme"),
+            )
+            .unwrap_err()
+            .to_string();
+            assert!(e.contains("from."), "{e}");
+        }
+        let mut both = from_dimension("request_id", "v_acme_links");
+        both.promote = true;
+        assert!(validate_dimensions(Some(vec![both]), CatalogLayer::Extension("acme")).is_err());
     }
 
     #[test]

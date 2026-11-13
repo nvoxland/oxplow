@@ -1,21 +1,131 @@
-//! Which commands about a ref apply to it (`.context/commands.md` "When a
-//! command is offered"): the commands that say they are about the ref's
-//! kind (`ui.about`) and, for one with an `ui.about_when`, whose condition
-//! holds on the ref's own row — the dataset row its resource resolves
-//! through, read the way a resource page's `content` loader reads it.
+//! Which commands a person is offered where (`.context/commands.md` "When a
+//! command is offered", `.context/extensions-slots.md` "Action points and
+//! the store filter"). The command registry is one list, and a command with
+//! a `ui` is offered under one of two keys:
+//!
+//! - an **item** key (`ui.about`, a resource kind): on a ref of that kind,
+//!   narrowed by `ui.about.accepts.store` (the item URI's `store` param) and
+//!   `ui.about_when` (a column of the ref's own row);
+//! - a **point** key (`ui.at`, an action point's id): at a place a page
+//!   puts that point, run with the point's context as its input.
+//!
 //! The window's menus (a page's ☰, a row's right-click, the Navigator's
-//! thread menu) ask once per ref and run no SQL themselves.
+//! thread menu, a page's action point) ask once per ref or point and run no
+//! SQL themselves.
+
+use std::collections::BTreeMap;
 
 use oxplow_db::SqlCell;
 use oxplow_domain::uri::OxplowUri;
-use oxplow_domain::{Actor, CommandSpec};
+use oxplow_domain::{Actor, CommandSpec, CommandUi};
 
 use crate::pages::content::{resolve_content, ContentOpts};
 use crate::viz_actions::when_holds;
 use crate::Services;
 
+/// The key a command is offered under.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OfferKey {
+    /// On items of a resource kind (`oxplow/agent_session`).
+    Item(String),
+    /// At an action point (`oxplow/task.new`).
+    Point(String),
+}
+
+/// Whether `ui` is offered under `key`: an item key by its `about`, a
+/// point key by its `at` — a command with both is offered under both, as
+/// one action.
+pub fn has_key(ui: &CommandUi, key: &OfferKey) -> bool {
+    match key {
+        OfferKey::Item(resource) => ui.about.as_ref().is_some_and(|a| a.resource() == resource),
+        OfferKey::Point(point) => ui.at.as_ref() == Some(point),
+    }
+}
+
+/// The store filter of `ui` at a point: the `about`'s when it has one (the
+/// one filter a command with both serves), else its own `accepts`.
+pub fn point_accepts(ui: &CommandUi) -> Option<&oxplow_domain::commands::ItemAccepts> {
+    ui.about
+        .as_ref()
+        .and_then(|a| a.accepts())
+        .or(ui.accepts.as_ref())
+}
+
+/// Whether `ui`'s store filter lets an item with `params` through: some
+/// entry of `accepts.store` is the item's store (the param `store_param`
+/// names) exactly, or holds for it
+/// as a renderer's `accepts: { store: <rule> }` does
+/// ([`crate::pages::renderers::takes`]). No filter: every item.
+pub fn store_accepted(
+    ui: &CommandUi,
+    params: &BTreeMap<String, String>,
+    store_param: &str,
+) -> bool {
+    accepts_store(
+        ui.about.as_ref().and_then(|a| a.accepts()),
+        params,
+        store_param,
+    )
+}
+
+/// Whether an item with `params` passes `accepts`' store filter (none: it
+/// does): an item command's (`about.accepts`) or a point command's
+/// (`accepts`).
+pub fn accepts_store(
+    accepts: Option<&oxplow_domain::commands::ItemAccepts>,
+    params: &BTreeMap<String, String>,
+    store_param: &str,
+) -> bool {
+    let Some(filter) = accepts.and_then(|a| a.store.as_ref()) else {
+        return true;
+    };
+    let store = params.get(store_param);
+    filter.rules().into_iter().any(|rule| {
+        store.is_some_and(|s| s == rule)
+            || crate::pages::renderers::takes(
+                &BTreeMap::from([("store".to_string(), rule.to_string())]),
+                params,
+            )
+    })
+}
+
+/// The param that names an item's store: the one its shared model declares
+/// (`store_param`) when a model's resource is `resource`, else `store`.
+pub fn store_param_of(registry: &crate::models::ModelRegistry, resource: &str) -> String {
+    registry
+        .models
+        .values()
+        .find(|m| m.decl.resource == resource)
+        .map(|m| m.decl.store_param.clone())
+        .unwrap_or_else(|| "store".to_string())
+}
+
+/// The commands of `specs` offered under `key`: for an item key, those of
+/// the kind whose store filter lets an item with `params` through (their
+/// `about_when` is tested on the ref's row, not here); for a point key,
+/// those at the point.
+pub fn offered<'a>(
+    specs: &'a [CommandSpec],
+    key: &OfferKey,
+    params: &BTreeMap<String, String>,
+    store_param: &str,
+) -> Vec<&'a CommandSpec> {
+    specs
+        .iter()
+        .filter(|s| {
+            let Some(ui) = &s.ui else { return false };
+            has_key(ui, key)
+                && match key {
+                    OfferKey::Item(_) => store_accepted(ui, params, store_param),
+                    OfferKey::Point(_) => true,
+                }
+        })
+        .collect()
+}
+
 /// The ids of the commands a person is offered about `uri`: those with
-/// `ui.about` its resource, and a `ui.about_when` that holds on its row.
+/// `ui.about` its resource, a `ui.about.accepts.store` its `store` param passes,
+/// and a `ui.about_when` that holds on its row.
 /// A command whose condition can't be tested (no row: the ref is gone, or
 /// no dataset holds it) is not offered; one without a condition always is.
 /// Not an oxplow URI: none.
@@ -23,16 +133,10 @@ pub async fn ref_commands(svc: &Services, uri: &str) -> Result<Vec<String>, Stri
     let Ok(parsed) = OxplowUri::parse(uri.trim()) else {
         return Ok(Vec::new());
     };
-    let kind = parsed.resource().to_string();
-    let about: Vec<CommandSpec> = svc
-        .commands
-        .list(&Actor::Human)
-        .into_iter()
-        .filter(|s| {
-            s.ui.as_ref()
-                .is_some_and(|ui| ui.about.as_deref() == Some(kind.as_str()))
-        })
-        .collect();
+    let key = OfferKey::Item(parsed.resource().to_string());
+    let all = svc.commands.list(&Actor::Human);
+    let store_param = store_param_of(&svc.models.current(), &parsed.resource().to_string());
+    let about = offered(&all, &key, parsed.params(), &store_param);
     // One read of the row, and only when some command's offer depends on it.
     let conditional = about
         .iter()
@@ -66,8 +170,158 @@ pub async fn ref_commands(svc: &Services, uri: &str) -> Result<Vec<String>, Stri
                 (Some(_), None) => false,
             }
         })
-        .map(|s| s.id)
+        .map(|s| s.id.clone())
         .collect();
     ids.sort();
     Ok(ids)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use oxplow_domain::{Access, Atomicity, Confirm, Lifecycle};
+    use serde_json::json;
+
+    fn spec(id: &str, ui: serde_json::Value) -> CommandSpec {
+        CommandSpec {
+            output_schema: None,
+            id: id.into(),
+            summary: "s".into(),
+            input_schema: json!({}),
+            job: false,
+            confirm: Confirm::Never,
+            confirm_says: None,
+            undoable: false,
+            lifecycle: Lifecycle::Stable,
+            atomicity: Atomicity::External,
+            access: Access::Write,
+            needs: vec![],
+            ui: Some(serde_json::from_value(ui).unwrap()),
+            op: None,
+            unrecorded: vec![],
+        }
+    }
+
+    fn ids(found: Vec<&CommandSpec>) -> Vec<&str> {
+        found.into_iter().map(|s| s.id.as_str()).collect()
+    }
+
+    fn params(store: Option<&str>) -> BTreeMap<String, String> {
+        params_named("store", store)
+    }
+
+    fn params_named(name: &str, store: Option<&str>) -> BTreeMap<String, String> {
+        store
+            .map(|s| (name.to_string(), s.to_string()))
+            .into_iter()
+            .collect()
+    }
+
+    /// One list, two kinds of key: an item command is under its kind, a
+    /// point command under its point, and neither shows under the other.
+    #[test]
+    fn item_and_point_commands_are_one_list_under_two_keys() {
+        let specs = vec![
+            spec("a.item", json!({ "label": "A", "about": "x/thing" })),
+            spec("a.point", json!({ "label": "B", "at": "x/thing.new" })),
+            spec("a.search", json!({ "label": "C" })),
+        ];
+        let item = OfferKey::Item("x/thing".into());
+        let point = OfferKey::Point("x/thing.new".into());
+        assert_eq!(
+            ids(offered(&specs, &item, &params(None), "store")),
+            ["a.item"]
+        );
+        assert_eq!(
+            ids(offered(&specs, &point, &params(None), "store")),
+            ["a.point"]
+        );
+        assert_eq!(
+            ids(offered(
+                &specs,
+                &OfferKey::Point("x/other".into()),
+                &params(None),
+                "store"
+            )),
+            Vec::<&str>::new()
+        );
+    }
+
+    /// The store filter is the renderers' `accepts` match on the item's
+    /// `store` param: a store or a list of them, a rule (`present`, an
+    /// anchored pattern); an item with no store passes only no filter or
+    /// `absent`.
+    #[test]
+    fn a_store_filter_matches_the_items_store_param() {
+        let specs = vec![
+            spec("any", json!({ "label": "Any", "about": "x/t" })),
+            spec(
+                "one",
+                json!({ "label": "One", "about": { "resource": "x/t", "accepts": { "store": "oxtask" } } }),
+            ),
+            spec(
+                "list",
+                json!({ "label": "List", "about": { "resource": "x/t", "accepts": { "store": ["gh", "oxtask"] } } }),
+            ),
+            spec(
+                "pat",
+                json!({ "label": "Pat", "about": { "resource": "x/t", "accepts": { "store": "^git-[a-z]+$" } } }),
+            ),
+            spec(
+                "none",
+                json!({ "label": "None", "about": { "resource": "x/t", "accepts": { "store": "absent" } } }),
+            ),
+        ];
+        let key = OfferKey::Item("x/t".into());
+        let at = |store| {
+            let mut found = ids(offered(&specs, &key, &params(store), "store"));
+            found.sort();
+            found
+        };
+        assert_eq!(at(Some("oxtask")), ["any", "list", "one"]);
+        assert_eq!(at(Some("gh")), ["any", "list"]);
+        assert_eq!(at(Some("git-hub")), ["any", "pat"]);
+        assert_eq!(at(Some("other")), ["any"]);
+        assert_eq!(at(None), ["any", "none"]);
+    }
+
+    /// A shared model may name its store by another param (tasks keep
+    /// `provider`): the filter reads that one, and the name comes from the
+    /// model whose resource the item is, else `store`.
+    #[test]
+    fn a_store_filter_reads_the_param_the_model_names_its_store_by() {
+        let specs = vec![spec(
+            "one",
+            json!({ "label": "One", "about": { "resource": "x/t", "accepts": { "store": "oxtask" } } }),
+        )];
+        let key = OfferKey::Item("x/t".into());
+        let by_provider = params_named("provider", Some("oxtask"));
+        assert_eq!(
+            ids(offered(&specs, &key, &by_provider, "provider")),
+            ["one"]
+        );
+        assert!(offered(&specs, &key, &by_provider, "store").is_empty());
+
+        let mut registry = crate::models::ModelRegistry::default();
+        registry.models.insert(
+            "x/t".into(),
+            crate::models::ModelSpec {
+                decl: oxplow_db::model_store::ModelDecl {
+                    extension: "x".into(),
+                    namespace: "x".into(),
+                    name: "t".into(),
+                    resource: "x/t".into(),
+                    key: "id".into(),
+                    store_param: "provider".into(),
+                    search: None,
+                    columns: vec![],
+                    children: vec![],
+                },
+                open: true,
+                change_event: None,
+            },
+        );
+        assert_eq!(store_param_of(&registry, "x/t"), "provider");
+        assert_eq!(store_param_of(&registry, "x/other"), "store");
+    }
 }

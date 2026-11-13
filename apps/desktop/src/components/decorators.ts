@@ -19,7 +19,7 @@ export function decoratorsFor(extensions: Extension[], placement: DecoratorPlace
   return extensions.filter((e) => e.enabled).flatMap((e) => e.ui.decorators.filter((d) => d.placement === placement));
 }
 
-/** The most decorations one extension adds to one ref (tsk934). */
+/** The most decorations one extension adds to one ref. */
 export const MAX_DECORATIONS_PER_REF = 3;
 /** The longest label shown, in characters; a longer one ends in `…`. */
 export const MAX_LABEL = 40;
@@ -43,7 +43,7 @@ export function decorationQueries(decorator: UiDecorator, refs: string[]): Decor
   // same; this is where the SQL is built).
   const names = [decorator.view, decorator.label, ...(decorator.color ? [decorator.color] : [])];
   if (!names.every((n) => IDENTIFIER.test(n))) return [];
-  // `decorator.resource` names the resource (`oxplow/work_item`).
+  // `decorator.resource` names the resource (`oxplow/task`).
   const mine = refs.filter((r) => typeOf(r) === decorator.resource);
   const color = decorator.color ? `, "${decorator.color}" AS color` : "";
   const out: DecorationQuery[] = [];
@@ -63,7 +63,7 @@ const IDENTIFIER = /^[a-z_][a-z0-9_]*$/;
 
 /** `extension`'s decorations from a query's rows: at most
  *  `MAX_DECORATIONS_PER_REF` on one ref, each label at most `MAX_LABEL`
- *  characters (tsk934). */
+ *  characters. */
 export function decorationsFromResult(result: SqlQueryResult, extension: string): Decoration[] {
   const at = (row: SqlCell[], name: string) => {
     const i = result.columns.indexOf(name);

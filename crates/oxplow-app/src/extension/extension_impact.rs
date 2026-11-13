@@ -96,8 +96,7 @@ pub struct DatasetImpact {
 
 /// The most rows a side's diff reads; past it, counts only. It is the
 /// read gateway's own cap: a review reads through the same read-only path
-/// as everything else, and a larger number would be one it never returns
-/// (tsk779).
+/// as everything else, and a larger number would be one it never returns.
 pub const ROW_DIFF_LIMIT: usize = oxplow_db::semantic_layer::MAX_ROW_LIMIT;
 /// The most sample changes a keyed diff keeps.
 pub const ROW_DIFF_SAMPLES: usize = 20;
@@ -334,7 +333,7 @@ pub struct CollectorImpact {
     /// Why it wasn't run: it runs a program or reads a provider, which a
     /// review never does, approved or not.
     pub not_run: Option<String>,
-    /// Its entry's text changed though its declaration didn't (tsk783).
+    /// Its entry's text changed though its declaration didn't.
     pub script_changed: bool,
 }
 
@@ -358,7 +357,7 @@ pub struct EffectImpact {
 pub struct EffectTrigger {
     pub on: Vec<String>,
     /// Its `where`.
-    pub filter: BTreeMap<String, String>,
+    pub filter: oxplow_config::collectors::WhereFilter,
     /// The scopes its script calls.
     pub needs: Vec<String>,
 }
@@ -584,7 +583,10 @@ fn trigger_text(t: &EffectTrigger) -> String {
             " where {}",
             t.filter
                 .iter()
-                .map(|(k, v)| format!("{k} = {v}"))
+                .map(|(k, v)| match v.as_slice() {
+                    [one] => format!("{k} = {one}"),
+                    many => format!("{k} in [{}]", many.join(", ")),
+                })
                 .collect::<Vec<_>>()
                 .join(", ")
         )
@@ -673,7 +675,7 @@ fn ran(run: crate::collector_runner::DryRun) -> Result<Ran, String> {
     }
 }
 
-/// One of a provider's declared commands, or of its pinned MCP tools.
+/// One of a provider's declared commands.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandChange {
@@ -694,8 +696,6 @@ pub struct ProviderImpact {
     pub before: Option<Grants>,
     pub after: Option<Grants>,
     pub commands: Vec<CommandChange>,
-    /// Behind the MCP adapter: each pinned tool of its server.
-    pub tools: Vec<CommandChange>,
     #[specta(type = Option<oxplow_domain::Json>)]
     pub features_before: Option<Value>,
     #[specta(type = Option<oxplow_domain::Json>)]
@@ -800,7 +800,7 @@ pub struct ImpactReport {
     /// the review stops running scripts at its deadline.
     pub out_of_time: Vec<String>,
     /// The report as lines ([`summary`]): what the install review, `extension
-    /// check --impact` and an effort's review say, in one wording.
+    /// check --impact` and a change's review say, in one wording.
     pub lines: Vec<String>,
 }
 
@@ -894,7 +894,7 @@ fn destructive(c: &CommandChange) -> &'static str {
 }
 
 /// A provider's changes as phrases: everything it declares when it's new,
-/// else its grants, commands, MCP tools and features that differ — and,
+/// else its grants, commands and features that differ — and,
 /// when none of those shows a change, where its declarations first differ.
 pub fn provider_phrases(e: &ProviderImpact) -> Vec<String> {
     match e.change {
@@ -904,19 +904,13 @@ pub fn provider_phrases(e: &ProviderImpact) -> Vec<String> {
                 .iter()
                 .map(|c| format!("{}{}", c.name, destructive(c)))
                 .collect();
-            let mut out = vec![
+            vec![
                 format!(
                     "added — {}",
                     e.after.as_ref().map_or("no grants".into(), grants_line)
                 ),
                 format!("commands: {}", listed_or_none(&commands)),
-            ];
-            // Behind oxplow's MCP adapter: the server's tools, as pinned.
-            if !e.tools.is_empty() {
-                let tools: Vec<String> = e.tools.iter().map(|t| t.name.clone()).collect();
-                out.push(format!("MCP tools: {}", listed_or_none(&tools)));
-            }
-            out
+            ]
         }
         Change::Removed => vec!["removed".into()],
         Change::Changed | Change::Unchanged => {
@@ -932,9 +926,6 @@ pub fn provider_phrases(e: &ProviderImpact) -> Vec<String> {
                     c.name,
                     change_word(c.change)
                 ));
-            }
-            for t in e.tools.iter().filter(|t| t.change != Change::Unchanged) {
-                out.push(format!("MCP tool `{}` {}", t.name, change_word(t.change)));
             }
             if e.features_before != e.features_after {
                 let shown = |v: &Option<Value>| v.as_ref().map_or("null".into(), Value::to_string);
@@ -1443,20 +1434,14 @@ async fn collector_outputs(
 fn provider_grants(p: &ProviderSpec) -> Grants {
     let (entry, args) = p.program();
     Grants {
-        // A server by url isn't a program that runs here: what runs is
-        // oxplow's adapter, against it.
-        entry: if p.is_remote() {
-            format!("oxplow's MCP adapter against {entry}")
-        } else {
-            entry
-        },
+        entry,
         runtime: CollectorRuntime::Exec,
         args,
         hosts: p.network.clone(),
         credentials: p.credential_grants(),
         env: p.env.clone(),
         scopes: p.needs.clone(),
-        unenforced: gaps_of(!p.is_remote(), &p.network),
+        unenforced: gaps_of(true, &p.network),
     }
 }
 
@@ -1473,7 +1458,7 @@ fn features_of(p: &DeclaredProvider) -> Option<Value> {
     })
 }
 
-/// Named things before and after (a provider's commands, its tools), by
+/// Named things before and after (a provider's commands), by
 /// name: each added, removed, changed or not.
 fn named_changes(before: Vec<(String, Value)>, after: Vec<(String, Value)>) -> Vec<CommandChange> {
     let names: BTreeSet<&String> = before.iter().chain(after.iter()).map(|(n, _)| n).collect();
@@ -1518,26 +1503,11 @@ pub fn providers_diff(
                     })
                     .unwrap_or_default()
             };
-            let tools = |p: Option<&DeclaredProvider>| -> Vec<(String, Value)> {
-                p.map(|p| {
-                    p.tools
-                        .iter()
-                        .map(|t| {
-                            (
-                                t["name"].as_str().unwrap_or_default().to_string(),
-                                t.clone(),
-                            )
-                        })
-                        .collect()
-                })
-                .unwrap_or_default()
-            };
             let declared = |p: &DeclaredProvider| {
                 json!({
                     "spec": serde_json::to_value(&p.spec).unwrap_or(Value::Null),
                     "declarations": p.declarations.as_ref()
                         .map(|d| serde_json::to_value(d).unwrap_or(Value::Null)),
-                    "tools": p.tools,
                 })
             };
             let (db, da) = (b.map(declared), a.map(declared));
@@ -1556,7 +1526,6 @@ pub fn providers_diff(
                 before: b.map(|p| provider_grants(&p.spec)),
                 after: a.map(|p| provider_grants(&p.spec)),
                 commands: named_changes(commands(b), commands(a)),
-                tools: named_changes(tools(b), tools(a)),
                 features_before: b.and_then(features_of),
                 features_after: a.and_then(features_of),
             }
@@ -1962,21 +1931,20 @@ mod tests {
         .unwrap()
     }
 
-    fn provider(id: &str, network: &[&str], comments: bool, commands: &[&str]) -> DeclaredProvider {
+    fn provider(id: &str, network: &[&str], contents: bool, commands: &[&str]) -> DeclaredProvider {
         let spec: ProviderSpec = serde_json::from_value(json!({
-            "id": id, "capability": "work_items", "entry": "bin/p", "network": network,
+            "id": id, "capability": "snapshots", "entry": "bin/p", "network": network,
             "declarations": "provider.json"
         }))
         .unwrap();
-        let mut declared = oxplow_provider_fake::declarations();
-        declared.capabilities[0].features = json!({ "comments": comments });
+        let mut declared = oxplow_provider_fake::snapshots_declarations(true);
+        declared.capabilities[0].features = json!({ "contents": contents });
         declared
             .commands
             .retain(|c| commands.contains(&c.name.as_str()));
         DeclaredProvider {
             spec,
             declarations: Some(declared),
-            tools: Vec::new(),
         }
     }
 
@@ -2008,120 +1976,6 @@ mod tests {
         );
     }
 
-    /// A server reached by url isn't a program that runs here —
-    /// what runs is oxplow's adapter, against it — and moving it shows.
-    #[test]
-    fn a_url_servers_effects_say_what_runs_here() {
-        let by_url = |url: &str| {
-            let spec: ProviderSpec = serde_json::from_value(json!({
-                "id": "notes", "capability": "work_items", "declarations": "provider.json",
-                "adapter": { "mcp": { "url": url, "auth": "NOTES_TOKEN" },
-                             "mapping": "mcp/x.star", "tools": "mcp/tools.json" },
-                "credentials": ["NOTES_TOKEN"], "network": ["mcp.example.com"]
-            }))
-            .unwrap();
-            DeclaredProvider {
-                spec,
-                declarations: Some(oxplow_provider_fake::declarations()),
-                tools: Vec::new(),
-            }
-        };
-        let added = providers_diff(&[], &[by_url("https://mcp.example.com/mcp")]);
-        assert_eq!(
-            provider_phrases(&added[0])[0],
-            "added — runs oxplow's MCP adapter against https://mcp.example.com/mcp · reaches mcp.example.com · reads NOTES_TOKEN (sent to the server as its bearer token) · not held here: network isn't confined to the granted hosts on this OS"
-        );
-        let moved = providers_diff(
-            &[by_url("https://mcp.example.com/mcp")],
-            &[by_url("https://mcp.example.com/v2")],
-        );
-        assert_eq!(
-            provider_phrases(&moved[0]),
-            vec![
-                "now runs oxplow's MCP adapter against https://mcp.example.com/v2 (was oxplow's MCP adapter against https://mcp.example.com/mcp)"
-            ]
-        );
-    }
-
-    /// tsk834: which credential goes to a server by url as its bearer is
-    /// part of what a person approves, so moving `auth` to another
-    /// declared credential says so — beside any other change.
-    #[test]
-    fn moving_a_url_servers_bearer_shows() {
-        let with = |auth: &str| {
-            let spec: ProviderSpec = serde_json::from_value(json!({
-                "id": "notes", "capability": "work_items", "declarations": "provider.json",
-                "adapter": { "mcp": { "url": "https://mcp.example.com/mcp", "auth": auth },
-                             "mapping": "mcp/x.star", "tools": "mcp/tools.json" },
-                "credentials": ["NOTES_TOKEN", "GITHUB_TOKEN"], "network": ["mcp.example.com"]
-            }))
-            .unwrap();
-            DeclaredProvider {
-                spec,
-                declarations: Some(oxplow_provider_fake::declarations()),
-                tools: Vec::new(),
-            }
-        };
-        let moved = providers_diff(&[with("NOTES_TOKEN")], &[with("GITHUB_TOKEN")]);
-        let phrases = provider_phrases(&moved[0]);
-        assert!(
-            phrases.iter().any(|p| p
-                == "now reads NOTES_TOKEN, GITHUB_TOKEN (sent to the server as its bearer token) \
-                    (was NOTES_TOKEN (sent to the server as its bearer token), GITHUB_TOKEN)"),
-            "{phrases:?}"
-        );
-    }
-
-    /// An adapter provider's approval shows its server and each
-    /// pinned tool added, removed or changed.
-    #[test]
-    fn an_adapter_providers_effects_show_its_server_and_pinned_tools() {
-        let adapter = |tools: Value| {
-            let spec: ProviderSpec = serde_json::from_value(json!({
-                "id": "notes", "capability": "work_items", "declarations": "provider.json",
-                "adapter": { "mcp": { "command": ["bin/server", "--stdio"] },
-                             "mapping": "mcp/x.star", "tools": "mcp/tools.json" }
-            }))
-            .unwrap();
-            DeclaredProvider {
-                spec,
-                declarations: Some(oxplow_provider_fake::declarations()),
-                tools: tools.as_array().unwrap().clone(),
-            }
-        };
-        let tool = |name: &str, description: &str| json!({ "name": name, "description": description, "inputSchema": { "type": "object" } });
-        let impacts = providers_diff(
-            &[adapter(json!([
-                tool("list_items", "List."),
-                tool("drop_all", "Drop.")
-            ]))],
-            &[adapter(json!([
-                tool("list_items", "List them all."),
-                tool("create_item", "Create.")
-            ]))],
-        );
-        let p = &impacts[0];
-        assert_eq!(p.change, Change::Changed);
-        let grants = p.after.as_ref().unwrap();
-        assert_eq!(
-            (grants.entry.as_str(), grants.args.clone()),
-            ("bin/server", vec!["--stdio".to_string()])
-        );
-        let tools: Vec<(&str, Change)> = p
-            .tools
-            .iter()
-            .map(|t| (t.name.as_str(), t.change))
-            .collect();
-        assert_eq!(
-            tools,
-            [
-                ("create_item", Change::Added),
-                ("drop_all", Change::Removed),
-                ("list_items", Change::Changed)
-            ]
-        );
-    }
-
     #[test]
     fn collectors_and_providers_diff_their_grants() {
         let collectors = collectors_diff(
@@ -2144,32 +1998,27 @@ mod tests {
         assert_eq!(by["new"].change, Change::Added);
 
         let providers = providers_diff(
-            &[provider(
-                "fake",
-                &[],
-                false,
-                &["create", "update", "transition"],
-            )],
+            &[provider("fake", &[], false, &["mark", "changed"])],
             &[provider(
                 "fake",
                 &["api.example.com"],
                 true,
-                &["create", "update", "transition", "comment"],
+                &["mark", "changed", "read_at"],
             )],
         );
         let p = &providers[0];
         assert_eq!(p.change, Change::Changed);
         assert_eq!(p.after.as_ref().unwrap().hosts, vec!["api.example.com"]);
-        assert_eq!(p.features_before, Some(json!({ "comments": false })));
-        assert_eq!(p.features_after, Some(json!({ "comments": true })));
-        let comment = p.commands.iter().find(|c| c.name == "comment").unwrap();
-        assert_eq!(comment.change, Change::Added);
+        assert_eq!(p.features_before, Some(json!({ "contents": false })));
+        assert_eq!(p.features_after, Some(json!({ "contents": true })));
+        let read_at = p.commands.iter().find(|c| c.name == "read_at").unwrap();
+        assert_eq!(read_at.change, Change::Added);
         assert!(p
             .commands
             .iter()
-            .filter(|c| c.name != "comment")
+            .filter(|c| c.name != "read_at")
             .all(|c| c.change == Change::Unchanged));
-        let first = providers_diff(&[], &[provider("fake", &[], false, &["create"])]);
+        let first = providers_diff(&[], &[provider("fake", &[], false, &["mark"])]);
         assert_eq!(
             first[0].change,
             Change::Added,
@@ -2181,9 +2030,9 @@ mod tests {
     /// says where its declarations first differ.
     #[test]
     fn a_provider_change_names_its_first_difference() {
-        let before = provider("fake", &[], true, &["create"]);
+        let before = provider("fake", &[], true, &["mark"]);
         let mut after = before.clone();
-        after.declarations.as_mut().unwrap().capabilities[0].capability = "work_items_v2".into();
+        after.declarations.as_mut().unwrap().capabilities[0].capability = "tasks_v2".into();
         let impact = providers_diff(std::slice::from_ref(&before), &[after]).remove(0);
         assert_eq!(impact.change, Change::Changed);
         assert!(impact
@@ -2195,7 +2044,7 @@ mod tests {
             first.contains("/declarations/capabilities/0/capability"),
             "{first}"
         );
-        assert!(first.contains("work_items_v2"), "{first}");
+        assert!(first.contains("tasks_v2"), "{first}");
         let same =
             providers_diff(std::slice::from_ref(&before), std::slice::from_ref(&before)).remove(0);
         assert_eq!(same.first_difference, None);
@@ -2231,7 +2080,7 @@ mod tests {
         (d, ext)
     }
 
-    /// tsk795: a page that fails the same way in both versions didn't
+    /// a page that fails the same way in both versions didn't
     /// change; one whose failure changed did.
     #[tokio::test]
     async fn a_page_failing_the_same_way_on_both_sides_is_unchanged() {
@@ -2352,7 +2201,7 @@ mod tests {
         write(
             d.path(),
             ".oxplow/extensions/x/extension.yaml",
-            "manifest: 2\nname: x\nintent:\n  purpose: p\npermissions: [process.run, network:api.example.com]\nproviders:\n  - id: fake\n    capability: work_items\n    entry: bin/p\n    network: [api.example.com]\n    declarations: provider.json\n",
+            "manifest: 2\nname: x\nintent:\n  purpose: p\npermissions: [process.run, network:api.example.com]\nproviders:\n  - id: fake\n    capability: snapshots\n    entry: bin/p\n    network: [api.example.com]\n    declarations: provider.json\n",
         );
         write(
             d.path(),
@@ -2390,10 +2239,10 @@ mod tests {
 
     #[tokio::test]
     async fn downstream_datasets_come_from_the_lineage() {
-        let fx = crate::test_fixtures::services_with_effort().await;
-        let readers = downstream_of(&fx.svc.sql, "v_knowledge_pin").await;
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let readers = downstream_of(&fx.svc.sql, "v_ref_pin").await;
         assert!(
-            readers.contains(&"v_knowledge_page".to_string()),
+            readers.contains(&"v_oxplow_knowledge_ref".to_string()),
             "{readers:?}"
         );
         assert!(downstream_of(&fx.svc.sql, "v_nothing").await.is_empty());
@@ -2529,7 +2378,7 @@ mod tests {
         assert_eq!((added.before, added.after), (None, Some(2)));
     }
 
-    /// tsk792: samples come in key order — 2 before 10 — not text order.
+    /// samples come in key order — 2 before 10 — not text order.
     #[test]
     fn samples_are_in_key_order() {
         let key = vec!["id".to_string()];
@@ -2585,7 +2434,7 @@ mod tests {
         );
     }
 
-    /// tsk782: a collector's `input:` reads each side's own datasets — the
+    /// a collector's `input:` reads each side's own datasets — the
     /// before side sees its version of a view, the after side its own.
     #[tokio::test]
     async fn a_collectors_input_reads_each_sides_own_datasets() {
@@ -2657,7 +2506,7 @@ mod tests {
         assert_eq!(out[0].after.as_ref().unwrap().counts["thing"], 2, "{out:?}");
     }
 
-    /// tsk783: a collector whose script alone changed — no fixture, event or
+    /// a collector whose script alone changed — no fixture, event or
     /// `input:` to run it on — still says so.
     #[tokio::test]
     async fn a_collector_whose_script_alone_changed_says_so() {
@@ -2719,7 +2568,7 @@ mod tests {
         );
     }
 
-    /// tsk791: a review's dry run gets the command scripts' budget, not a
+    /// a review's dry run gets the command scripts' budget, not a
     /// collector's two minutes, and the review stops running scripts at
     /// its deadline — saying what it didn't run.
     #[tokio::test(flavor = "multi_thread")]
@@ -2780,7 +2629,7 @@ mod tests {
         );
     }
 
-    /// tsk779: a side past the limit reads `limit` rows, truncated, and the
+    /// a side past the limit reads `limit` rows, truncated, and the
     /// limit is what the gateway really returns — the note's number is the
     /// count it reports, not a larger one the gateway never reaches.
     #[tokio::test]
@@ -2821,21 +2670,21 @@ mod tests {
             std::fs::write(
                 dir.join("extension.yaml"),
                 format!(
-                    "manifest: 2\nname: acme\nintent:\n  purpose: p\n  examples:\n    - {{ name: basic, input: x, expect: y }}\neffects:\n  - {{ id: on-done, summary: s, on: [work_item.state_changed]{filter}, entry: e.star }}\n"
+                    "manifest: 2\nname: acme\nintent:\n  purpose: p\n  examples:\n    - {{ name: basic, input: x, expect: y }}\neffects:\n  - {{ id: on-done, summary: s, on: [task.state_changed]{filter}, entry: e.star }}\n"
                 ),
             )
             .unwrap();
             std::fs::write(dir.join("e.star"), script).unwrap();
             std::fs::write(
                 dir.join("fixtures/basic.yaml"),
-                "when: { effect: on-done, event: { type: work_item.state_changed, payload: { work_item: \"work_item:oxplow:tsk1\", to: done } } }\nexpect: { commands: [oxplow.work_item.comment] }\n",
+                "when: { effect: on-done, event: { type: task.state_changed, payload: { task: \"task:oxplow:tsk1\", to: done } } }\nexpect: { commands: [oxplow.task.comment] }\n",
             )
             .unwrap();
         };
         write(
             old.path(),
             "",
-            "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.comment\", \"input\": {}}]}\n",
+            "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.task.comment\", \"input\": {}}]}\n",
         );
         write(
             new.path(),
@@ -2881,8 +2730,8 @@ mod tests {
                 .filter(|l| l.starts_with("Effect"))
                 .collect::<Vec<_>>(),
             vec![
-                "Effect on-done: on work_item.state_changed → on work_item.state_changed where to = done",
-                "Effect on-done on fixture basic: runs [oxplow.work_item.comment] → skips (not today)",
+                "Effect on-done: on task.state_changed → on task.state_changed where to = done",
+                "Effect on-done on fixture basic: runs [oxplow.task.comment] → skips (not today)",
             ]
         );
     }
@@ -3090,12 +2939,11 @@ mod tests {
     fn provider_impact(change: Change) -> ProviderImpact {
         ProviderImpact {
             id: "fake".into(),
-            capability: "work_items".into(),
+            capability: "snapshots".into(),
             change,
             before: Some(grants(&[], &["token"])),
             after: Some(grants(&[], &["token"])),
             commands: vec![],
-            tools: vec![],
             features_before: None,
             features_after: None,
             first_difference: None,
@@ -3169,46 +3017,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn an_mcp_adapter_provider_names_its_pinned_tools_and_each_that_changed() {
-        let tool = |name: &str, change: Change| command(name, change, Some(json!({"name": name})));
-        let added = ProviderImpact {
-            before: None,
-            after: Some(Grants {
-                entry: "bin/server".into(),
-                args: vec!["--stdio".into()],
-                ..grants(&[], &["token"])
-            }),
-            tools: vec![
-                tool("create_item", Change::Added),
-                tool("list_items", Change::Added),
-            ],
-            ..provider_impact(Change::Added)
-        };
-        assert_eq!(
-            provider_phrases(&added),
-            vec![
-                "added — runs bin/server --stdio · reaches none · reads token",
-                "commands: none",
-                "MCP tools: create_item, list_items"
-            ]
-        );
-        let changed = ProviderImpact {
-            tools: vec![
-                tool("list_items", Change::Changed),
-                tool("drop_all", Change::Added),
-                tool("create_item", Change::Unchanged),
-            ],
-            ..provider_impact(Change::Changed)
-        };
-        assert_eq!(
-            provider_phrases(&changed),
-            vec!["MCP tool `list_items` changed", "MCP tool `drop_all` added"]
-        );
-    }
-
     /// The report as lines, grants first — what the install review, the
-    /// CLI and an effort's review all say.
+    /// CLI and a change's review all say.
     #[test]
     fn effects_spell_out_each_change_grants_first() {
         let page = |id: &str, change: Change, error: Option<&str>| PageImpact {
@@ -3311,20 +3121,20 @@ mod tests {
                     id: "on-done".into(),
                     change: Change::Changed,
                     before: Some(EffectTrigger {
-                        on: vec!["work_item.state_changed".into()],
+                        on: vec!["task.state_changed".into()],
                         filter: BTreeMap::new(),
                         needs: Vec::new(),
                     }),
                     after: Some(EffectTrigger {
-                        on: vec!["work_item.state_changed".into()],
-                        filter: [("to".to_string(), "done".to_string())].into(),
+                        on: vec!["task.state_changed".into()],
+                        filter: [("to".to_string(), vec!["done".to_string()])].into(),
                         needs: Vec::new(),
                     }),
                     outputs: vec![EffectOutput {
                         input: "fixture basic".into(),
                         change: Change::Changed,
                         before: Some(Composes {
-                            commands: vec!["oxplow.work_item.comment".into()],
+                            commands: vec!["oxplow.task.comment".into()],
                             skip: None,
                             error: None,
                         }),
@@ -3363,8 +3173,8 @@ mod tests {
             vec![
                 "Collector gh: now reaches api.example.com (was none)",
                 "Provider fake: command `delete` added (destructive)",
-                "Effect on-done: on work_item.state_changed → on work_item.state_changed where to = done",
-                "Effect on-done on fixture basic: runs [oxplow.work_item.comment] → skips (not today)",
+                "Effect on-done: on task.state_changed → on task.state_changed where to = done",
+                "Effect on-done on fixture basic: runs [oxplow.task.comment] → skips (not today)",
                 "Effect ping: added — on vcs.head.moved",
                 "Collector gh on fixture two: 2 thing → fails (boom)",
                 "Dataset v_shared_x: column `y` added; read by v_b_y",
@@ -3470,7 +3280,7 @@ mod tests {
         changed_before.contract_version = Some(1);
         let mut changed_after = changed_before.clone();
         changed_after.contract_version = Some(2);
-        changed_after.needs = vec!["work_items".into()];
+        changed_after.needs = vec!["snapshots".into()];
         changed_after.trigger = RunsOn::Declared;
         changed_after.global = Some("acme.opened".into());
         let before = vec![

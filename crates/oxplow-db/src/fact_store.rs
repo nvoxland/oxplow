@@ -1,15 +1,15 @@
-//! Durable atomic FACT layer (epic tsk12, child tsk13) — the inverted metric
+//! Durable atomic FACT layer — the inverted metric
 //! substrate. Backs `V43__metric_facts.sql`:
 //!   * [`Measure`] — the catalog of fact TYPES (what a collector may emit).
 //!   * [`Dimension`] — the conformed-dimension catalog (cross-metric drill-across).
 //!   * [`MetricCapture`] — the ONE context row (renamed from `metric_run`): all
-//!     when/where/who/effort/trust metadata lives here, once.
+//!     when/where/who/turn/trust metadata lives here, once.
 //!   * [`NewFact`] / [`FactRow`] — the durable atomic measurement (folds the V38
 //!     `metric_sample` + `metric_finding`). A fact holds ONLY the measurement +
 //!     subject + reported finding metadata + dims; its context is reached through
 //!     `capture_id` (NOT NULL). [`FactRow`] is the joined read view.
 //!
-//! Built additively beside `metric_store.rs`; producers (tsk14) and reads (tsk16)
+//! Built additively beside `metric_store.rs`; producers and reads
 //! move onto it, then a cleanup migration drops the old tables. Modeled on
 //! `metric_store.rs` (sync work inside `Database::call`, raw integer ids).
 
@@ -50,8 +50,7 @@ pub struct Measure {
     /// `sum` | `last` | `first` | `avg` | `none` — how the series folds OVER
     /// TIME into one number; `None` is undeclared.
     pub fold: Option<String>,
-    /// `complete` | `per-path` | `per-subject` (V54 tsk41; per-subject V55
-    /// tsk43) — what ONE capture restates. This is a SEPARATE AXIS from
+    /// `complete` | `per-path` | `per-subject` (V54; per-subject V55) — what ONE capture restates. This is a SEPARATE AXIS from
     /// `temporal_semantics`: `complete` means a capture restates the whole
     /// population (a coverage report, an analysis run), so the temporal fold
     /// applies as-is; `per-path` restates only the paths in its snapshot (a
@@ -394,9 +393,37 @@ fn row_to_spec(row: &rusqlite::Row<'_>) -> rusqlite::Result<MetricSpec> {
 // Capture (the context row)
 // ---------------------------------------------------------------------------
 
-/// An effort's captures of one producer and trigger.
+/// Which captures belong to an analysis: the ones a set of turns made (a
+/// request's).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Members {
+    Turns(Vec<i64>),
+}
+
+impl Members {
+    /// The SQL condition on `metric_capture` and its one parameter, as `?N`.
+    fn condition(&self, n: usize) -> (String, rusqlite::types::Value) {
+        match self {
+            Members::Turns(turns) => (
+                format!("turn_id IN (SELECT value FROM json_each(?{n}))"),
+                rusqlite::types::Value::Text(
+                    serde_json::to_string(turns).expect("turn ids serialize"),
+                ),
+            ),
+        }
+    }
+
+    /// Whether `capture` is one of them.
+    pub fn holds(&self, capture: &MetricCapture) -> bool {
+        match self {
+            Members::Turns(turns) => capture.turn_id.is_some_and(|t| turns.contains(&t)),
+        }
+    }
+}
+
+/// An analysis's captures of one producer and trigger.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EffortCaptureGroup {
+pub struct CaptureGroup {
     pub producer: String,
     pub trigger: Option<String>,
     pub count: i64,
@@ -408,8 +435,6 @@ pub struct MetricCapture {
     pub id: i64,
     pub stream_id: i64,
     pub thread_id: Option<i64>,
-    /// The producing effort (provenance), nullable; SET NULL on effort GC.
-    pub effort_id: Option<i64>,
     pub producer: String,
     pub status: String,
     pub error: Option<String>,
@@ -426,15 +451,15 @@ pub struct MetricCapture {
     pub ended_at: Option<Timestamp>,
     /// The verbatim per-run detail payload, as an envelope
     /// `{"kind": "<detail kind>", "payload": {…}}` (test suite/case tree,
-    /// coverage per-file line-sets, analysis findings; T-E1, tsk48).
+    /// coverage per-file line-sets, analysis findings; T-E1).
     pub detail_json: Option<String>,
-    /// Fingerprint of the LOGIC that produced this capture (V56, tsk45) — for a
+    /// Fingerprint of the LOGIC that produced this capture (V56) — for a
     /// gauge, a hash of its script + compute knobs + `emits`. When a gauge's current
     /// fingerprint no longer matches its latest capture's, its facts were computed by
     /// different logic and are stale, so a re-baseline is due. `None` = unversioned
     /// (pre-V56 rows, and producers whose logic isn't script-defined).
     pub producer_version: Option<String>,
-    /// How this capture's SCANNED SET is determined (V58, tsk71):
+    /// How this capture's SCANNED SET is determined (V58):
     /// `delta` — the snapshot's own file rows (incremental rescan);
     /// `full` — the reconstructed tree as-of the snapshot (a baseline);
     /// `asserted` — exactly the paths it emitted facts for (a snapshot, when
@@ -448,7 +473,6 @@ pub struct MetricCapture {
 pub struct NewMetricCapture {
     pub stream_id: i64,
     pub thread_id: Option<i64>,
-    pub effort_id: Option<i64>,
     pub producer: String,
     pub status: String,
     pub error: Option<String>,
@@ -466,12 +490,18 @@ pub struct NewMetricCapture {
     pub ended_at: Option<Timestamp>,
     /// See [`MetricCapture::detail_json`].
     pub detail_json: Option<String>,
-    /// Optional CONTENT IDENTITY for idempotent ingestion (tsk14): a hash of
+    /// Optional CONTENT IDENTITY for idempotent ingestion: a hash of
     /// producer + basis + verbatim payload. When set and a capture with the
     /// same key already exists, [`SqliteFactStore::record_facts`] skips the
     /// whole write (no duplicate capture, no double-counted facts) and returns
     /// the existing id. `None` (the default) always inserts a fresh row.
     pub idempotency_key: Option<String>,
+    /// What this capture's facts are the figures of (a request's URI, say)
+    /// when it takes the place of the producer's earlier captures of it
+    /// (V26): recording it deletes those captures and their facts in the
+    /// same transaction, so the subject counts once, at this capture's
+    /// `captured_at`. `None` (the default) replaces nothing.
+    pub replaces: Option<String>,
     /// See [`MetricCapture::producer_version`].
     pub producer_version: Option<String>,
     /// See [`MetricCapture::scan_kind`]. Defaults to `delta`; the insert
@@ -493,7 +523,6 @@ impl NewMetricCapture {
         Self {
             stream_id,
             thread_id: None,
-            effort_id: None,
             producer: producer.into(),
             status: "done".into(),
             error: None,
@@ -510,6 +539,7 @@ impl NewMetricCapture {
             ended_at: None,
             detail_json: None,
             idempotency_key: None,
+            replaces: None,
             producer_version: None,
             scan_kind: "delta".into(),
             turn_id: None,
@@ -518,39 +548,38 @@ impl NewMetricCapture {
     }
 }
 
-const CAPTURE_COLS: &str = "id, stream_id, thread_id, effort_id, producer, status, error, scope, \
+const CAPTURE_COLS: &str = "id, stream_id, thread_id, producer, status, error, scope, \
      trigger, basis_ref, provenance, source, snapshot_id, closest_vcs_rev, vcs_rev_exact, \
      branch, captured_at, ended_at, detail_json, producer_version, scan_kind, turn_id";
 
 fn row_to_capture(row: &rusqlite::Row<'_>) -> rusqlite::Result<MetricCapture> {
-    let captured_at: String = row.get(16)?;
-    let ended_at: Option<String> = row.get(17)?;
+    let captured_at: String = row.get(15)?;
+    let ended_at: Option<String> = row.get(16)?;
     Ok(MetricCapture {
         id: row.get(0)?,
         stream_id: row.get(1)?,
         thread_id: row.get(2)?,
-        effort_id: row.get(3)?,
-        producer: row.get(4)?,
-        status: row.get(5)?,
-        error: row.get(6)?,
-        scope: row.get(7)?,
-        trigger: row.get(8)?,
-        basis_ref: row.get(9)?,
-        provenance: row.get(10)?,
-        source: row.get(11)?,
-        snapshot_id: row.get(12)?,
-        closest_vcs_rev: row.get(13)?,
-        vcs_rev_exact: row.get::<_, i64>(14)? != 0,
-        branch: row.get(15)?,
+        producer: row.get(3)?,
+        status: row.get(4)?,
+        error: row.get(5)?,
+        scope: row.get(6)?,
+        trigger: row.get(7)?,
+        basis_ref: row.get(8)?,
+        provenance: row.get(9)?,
+        source: row.get(10)?,
+        snapshot_id: row.get(11)?,
+        closest_vcs_rev: row.get(12)?,
+        vcs_rev_exact: row.get::<_, i64>(13)? != 0,
+        branch: row.get(14)?,
         captured_at: string_to_ts(&captured_at).map_err(ts_conv_err)?,
         ended_at: match ended_at {
             Some(s) => Some(string_to_ts(&s).map_err(ts_conv_err)?),
             None => None,
         },
-        detail_json: row.get(18)?,
-        producer_version: row.get(19)?,
-        scan_kind: row.get(20)?,
-        turn_id: row.get(21)?,
+        detail_json: row.get(17)?,
+        producer_version: row.get(18)?,
+        scan_kind: row.get(19)?,
+        turn_id: row.get(20)?,
     })
 }
 
@@ -562,9 +591,9 @@ pub fn upsert_measure_tx(
     // A `capture_scope` change swaps the cube's BUILD RULE (state
     // fold vs per-capture GROUP BY), so rows built under the old
     // rule must not survive to be served — invalidate that
-    // measure's cube in the same transaction (tsk103 review).
+    // measure's cube in the same transaction (review).
     // Change-detected, never unconditional: `seed_catalog`
-    // re-upserts every measure at boot (the tsk100 lesson).
+    // re-upserts every measure at boot (the lesson).
     let prior_scope: Option<String> = tx
         .query_row(
             "SELECT capture_scope FROM measure WHERE key = ?1",
@@ -618,7 +647,7 @@ pub fn upsert_measure_tx(
         ] {
             tx.execute(sql, params![id]).map_err(map_sql_err)?;
         }
-        // Fence any build in flight (tsk103).
+        // Fence any build in flight.
         tx.execute("UPDATE metric_cube_epoch SET epoch = epoch + 1", [])
             .map_err(map_sql_err)?;
     }
@@ -661,7 +690,7 @@ pub fn upsert_dimension_tx(
             "DELETE FROM metric_cube",
             "DELETE FROM metric_live_fact",
             "DELETE FROM metric_cube_state",
-            // Fence any build in flight (tsk103).
+            // Fence any build in flight.
             "UPDATE metric_cube_epoch SET epoch = epoch + 1",
         ] {
             tx.execute(sql, []).map_err(map_sql_err)?;
@@ -766,7 +795,7 @@ pub fn catalog_enabled_tx(
 /// this read is the fast path on the serialized write connection). The
 /// caller commits, then calls [`SqliteFactStore::facts_committed`].
 /// A duration moves enough to be written again when it differs from the last
-/// one written by more than this fraction of it… (tsk733)
+/// one written by more than this fraction of it…
 pub const DURATION_MOVE_RATIO: f64 = 0.5;
 /// …and by at least this many milliseconds (a 5 ms test that takes 12 ms
 /// didn't get slower in any way a person reads).
@@ -848,10 +877,30 @@ pub fn record_facts_tx(
         check_subject(f)?;
         check_dims_tx(conn, f.dims_json.as_deref())?;
     }
+    let replaced = match capture.replaces.as_deref() {
+        Some(key) => replace_captures_tx(conn, &capture.producer, key).map_err(map_sql_err)?,
+        None => Replaced::default(),
+    };
     let capture_id = insert_capture(conn, capture).map_err(map_sql_err)?;
     // A complete-scope measure, and each file a code gauge rescans, stores
     // only what changed (V39 chains, V43 path holds: `fact_chain`).
     crate::fact_chain::write(conn, capture_id, capture, facts).map_err(map_sql_err)?;
+    // A capture placed in the past, or one that took others' place, lands
+    // behind what the cube may have folded already.
+    if capture.captured_at.is_some() || !replaced.ids.is_empty() {
+        let mut measures = replaced.measures;
+        measures.extend(facts.iter().map(|f| f.measure_id));
+        let mut streams = replaced.streams;
+        streams.insert(capture.stream_id);
+        recube_from_tx(
+            conn,
+            &measures,
+            &streams,
+            capture_id,
+            !replaced.ids.is_empty(),
+        )
+        .map_err(map_sql_err)?;
+    }
     if let Some(log) = log {
         let env = (log.build)(capture_id);
         crate::event_log_store::append_unique_tx(conn, &log.vocabulary.current(), &env)?;
@@ -859,7 +908,138 @@ pub fn record_facts_tx(
     Ok(capture_id)
 }
 
-/// A fact's dimension keys have one name each — the namespaced one (tsk945):
+/// The captures a capture took the place of ([`replace_captures_tx`]):
+/// their ids, and the measures and streams their facts were in.
+#[derive(Debug, Default)]
+struct Replaced {
+    ids: Vec<i64>,
+    measures: std::collections::BTreeSet<i64>,
+    streams: std::collections::BTreeSet<i64>,
+}
+
+/// Delete `producer`'s captures recorded under `key` (`replace_key`), and
+/// their facts: a capture recorded with `replaces: key` takes their place.
+/// A fact one of them stored that a kept capture still holds moves up to
+/// it first, as a prune does.
+fn replace_captures_tx(
+    conn: &rusqlite::Connection,
+    producer: &str,
+    key: &str,
+) -> rusqlite::Result<Replaced> {
+    let mut out = Replaced::default();
+    {
+        let mut stmt = conn.prepare_cached(
+            "SELECT id, stream_id FROM metric_capture WHERE producer = ?1 AND replace_key = ?2",
+        )?;
+        for row in stmt.query_map(params![producer, key], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
+        })? {
+            let (id, stream) = row?;
+            out.ids.push(id);
+            out.streams.insert(stream);
+        }
+    }
+    if out.ids.is_empty() {
+        return Ok(out);
+    }
+    let ids = serde_json::to_string(&out.ids).expect("ids serialize");
+    {
+        let mut stmt = conn.prepare_cached(
+            "SELECT DISTINCT measure_id FROM fact
+              WHERE capture_id IN (SELECT value FROM json_each(?1))
+             UNION
+             SELECT measure_id FROM fact_chain
+              WHERE capture_id IN (SELECT value FROM json_each(?1))",
+        )?;
+        for m in stmt.query_map([&ids], |r| r.get::<_, i64>(0))? {
+            out.measures.insert(m?);
+        }
+    }
+    crate::fact_chain::rehome(conn, &out.ids)?;
+    conn.execute(
+        "DELETE FROM metric_capture WHERE id IN (SELECT value FROM json_each(?1))",
+        [&ids],
+    )?;
+    Ok(out)
+}
+
+/// The cube's watermark assumes captures arrive in time order (it folds
+/// what is after it). Capture `capture_id` may land behind it — placed at
+/// a time it was given, or taking replaced captures' place — so each of
+/// `measures` folds it again in `streams`: a complete-scope measure (no
+/// state, each capture its own rows) moves its watermark back to just
+/// before the capture, and the next build re-folds from there; a
+/// partial-scope one (a running state) drops its cube in those streams
+/// when the capture is behind its watermark or `replaced` removed others.
+/// Until a build catches up, its reads use the facts.
+fn recube_from_tx(
+    conn: &rusqlite::Connection,
+    measures: &std::collections::BTreeSet<i64>,
+    streams: &std::collections::BTreeSet<i64>,
+    capture_id: i64,
+    replaced: bool,
+) -> rusqlite::Result<()> {
+    let at: String = conn.query_row(
+        "SELECT captured_at FROM metric_capture WHERE id = ?1",
+        [capture_id],
+        |r| r.get(0),
+    )?;
+    let behind = "measure_id = ?1 AND stream_id = ?2
+                  AND (last_captured_at > ?3 OR (last_captured_at = ?3 AND last_capture_id >= ?4))";
+    let mut moved = false;
+    for &m in measures {
+        let scope: Option<String> = conn
+            .query_row(
+                "SELECT capture_scope FROM measure WHERE id = ?1",
+                [m],
+                |r| r.get(0),
+            )
+            .optional()?;
+        for &s in streams {
+            if scope.as_deref() == Some("complete") {
+                moved |= conn.execute(
+                    &format!(
+                        "UPDATE metric_cube_state SET last_captured_at = ?3, last_capture_id = ?4 - 1
+                          WHERE {behind}"
+                    ),
+                    params![m, s, at, capture_id],
+                )? > 0;
+                continue;
+            }
+            let stale = replaced
+                || conn
+                    .query_row(
+                        &format!("SELECT 1 FROM metric_cube_state WHERE {behind} LIMIT 1"),
+                        params![m, s, at, capture_id],
+                        |_| Ok(()),
+                    )
+                    .optional()?
+                    .is_some();
+            if stale {
+                conn.execute(
+                    "DELETE FROM metric_cube WHERE measure_id = ?1 AND capture_id IN
+                       (SELECT id FROM metric_capture WHERE stream_id = ?2)",
+                    params![m, s],
+                )?;
+                conn.execute(
+                    "DELETE FROM metric_live_fact WHERE measure_id = ?1 AND stream_id = ?2",
+                    params![m, s],
+                )?;
+                moved |= conn.execute(
+                    "DELETE FROM metric_cube_state WHERE measure_id = ?1 AND stream_id = ?2",
+                    params![m, s],
+                )? > 0;
+            }
+        }
+    }
+    if moved {
+        // Fence any build in flight.
+        conn.execute("UPDATE metric_cube_epoch SET epoch = epoch + 1", [])?;
+    }
+    Ok(())
+}
+
+/// A fact's dimension keys have one name each — the namespaced one:
 /// a bare key is refused, naming the conformed `oxplow.<key>` when the
 /// catalog declares it.
 fn check_dims_tx(conn: &rusqlite::Connection, dims_json: Option<&str>) -> Result<(), DomainError> {
@@ -946,15 +1126,14 @@ fn insert_capture(conn: &rusqlite::Connection, c: &NewMetricCapture) -> rusqlite
     };
     conn.execute(
         "INSERT INTO metric_capture
-           (stream_id, thread_id, effort_id, producer, status, error, scope, trigger, basis_ref,
+           (stream_id, thread_id, producer, status, error, scope, trigger, basis_ref,
             provenance, source, snapshot_id, closest_vcs_rev, vcs_rev_exact, branch,
             captured_at, ended_at, detail_json, idempotency_key, producer_version, scan_kind,
-            turn_id)
+            turn_id, replace_key)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
         params![
             c.stream_id,
             c.thread_id,
-            c.effort_id,
             c.producer,
             c.status,
             c.error,
@@ -974,6 +1153,7 @@ fn insert_capture(conn: &rusqlite::Connection, c: &NewMetricCapture) -> rusqlite
             c.producer_version,
             scan_kind,
             c.turn_id,
+            c.replaces,
         ],
     )?;
     let id = conn.last_insert_rowid();
@@ -1034,7 +1214,7 @@ impl NewFact {
     }
 }
 
-/// One `metric_cube` bucket to write (V62, tsk96) — the decomposable aggregate of
+/// One `metric_cube` bucket to write (V62) — the decomposable aggregate of
 /// the facts sharing a `(capture, promoted dims)` grain. Built by
 /// `metric_engine::Cell`, which owns the arithmetic; this is just the wire shape.
 #[derive(Debug, Clone, PartialEq)]
@@ -1051,7 +1231,7 @@ pub struct NewCubeRow {
     pub denominator: f64,
 }
 
-/// One capture's live-partition mutation within a build batch (tsk113) — the
+/// One capture's live-partition mutation within a build batch — the
 /// fold's step (`evict restated, insert own`), precomputed by the builder.
 #[derive(Debug, Clone)]
 pub struct BatchApply {
@@ -1061,7 +1241,7 @@ pub struct BatchApply {
     pub inserted: Vec<(String, i64)>,
 }
 
-/// One capture's cube rows + watermark advance within a build batch (tsk113).
+/// One capture's cube rows + watermark advance within a build batch.
 #[derive(Debug, Clone)]
 pub struct BatchRows {
     pub branch: Option<String>,
@@ -1100,15 +1280,13 @@ pub struct CubeReadRow {
     pub closest_vcs_rev: Option<String>,
 }
 
-/// The joined read view of a fact: its own measurement columns PLUS the spine it
-/// inherits from its capture (`captured_at`, `branch`, version, effort, trust).
-/// One metric's roll-up over a single effort — the wire shape the task/effort
-/// page reads (built by `CollectionService::effort_metric_deltas`). NOT a stored
-/// row: derived per request from the substrate using the right attribution key
-/// per metric family (file-attributed for gauges, thread-scoped for operational,
-/// effort-diff for coverage/tests). See metrics.md.
+/// One metric's roll-up over a window of work (a request's, on one
+/// stream) — what `request_metric_delta` stores (built by
+/// `CollectionService::metric_deltas`). Derived from the substrate using the
+/// right attribution key per metric family (file-attributed for gauges,
+/// window-scoped for operational, a diff for coverage/tests). See metrics.md.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
-pub struct EffortMetricDelta {
+pub struct MetricDelta {
     pub key: String,
     pub title: String,
     pub unit: Option<String>,
@@ -1118,18 +1296,18 @@ pub struct EffortMetricDelta {
     pub kind: String,
     pub category: Option<String>,
     pub language: Option<String>,
-    /// How this delta was computed: `files` (Σ over the effort's claimed files),
+    /// How this delta was computed: `files` (Σ over the window's files),
     /// `sum` (Σ in-window flow, e.g. tokens), or `level` (before→after).
     pub agg: String,
-    /// The value as the effort began (`None` for a `sum`/flow metric).
+    /// The value as the window began (`None` for a `sum`/flow metric).
     pub baseline: Option<f64>,
-    /// The value as of the effort's end (or latest, if open).
+    /// The value as of the window's end (or latest, if open).
     pub current: f64,
     /// `current − baseline` for a level/file metric; the flow total for `sum`.
     pub delta: Option<f64>,
-    /// Whether the value moved across the effort (false ⇒ show the value only).
+    /// Whether the value moved across the window (false ⇒ show the value only).
     pub changed: bool,
-    /// For `files`: how many of the effort's claimed files carry this metric.
+    /// For `files`: how many of the window's files carry this metric.
     pub attributed_files: Option<i64>,
     /// Samples considered (in-window, or per-file for `files`).
     pub sample_count: i64,
@@ -1143,6 +1321,8 @@ pub struct EffortMetricDelta {
     pub latest_capture_id: Option<i64>,
 }
 
+/// The joined read view of a fact: its own measurement columns PLUS the spine it
+/// inherits from its capture (`captured_at`, `branch`, version, turn, trust).
 /// This is what the aggregation engine and reads consume.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct FactRow {
@@ -1171,20 +1351,24 @@ pub struct FactRow {
     pub snapshot_id: Option<i64>,
     pub stream_id: i64,
     pub thread_id: Option<i64>,
-    pub effort_id: Option<i64>,
-    /// The work item `effort_id` is linked to, as a ref (resolved per read
-    /// from `effort`).
-    pub work_item: Option<String>,
+    /// The turn the capture was made in (`metric_capture.turn_id`).
+    pub turn_id: Option<i64>,
+    /// The request of that turn (`agent_turn.request_id`), resolved per read.
+    pub request_id: Option<i64>,
+    /// The values of the `from:` dimensions an extension declared (key →
+    /// value), stamped by the metric engine at read time. Empty when the
+    /// fact is read below the engine.
+    pub derived: std::collections::BTreeMap<String, String>,
     pub provenance: String,
     pub source: String,
     /// The capture's producer (gauge key / ingest kind) — identifies which scan
     /// emitted the fact, so reads can zero-fill a producer's EMPTY captures and
-    /// scope "latest scan" currency per (stream, producer) (tsk44).
+    /// scope "latest scan" currency per (stream, producer).
     pub producer: String,
 }
 
 /// The identity of a fact SLICE: the tuple the zero-splice producer discovery
-/// groups by (`SqliteFactStore::distinct_slice_keys`, tsk239). Every fact in a
+/// groups by (`SqliteFactStore::distinct_slice_keys`). Every fact in a
 /// slice agrees on all four fields, so a predicate reading only these is
 /// decided by the slice alone — no representative row needed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1207,7 +1391,7 @@ macro_rules! fact_row_cols {
              f.path_id, f.line, f.severity, f.rule, ",
             $detail,
             ", f.dims_id, c.captured_at, c.branch, c.closest_vcs_rev, c.vcs_rev_exact, \
-             c.basis_ref, c.snapshot_id, c.stream_id, c.thread_id, c.effort_id, \
+             c.basis_ref, c.snapshot_id, c.stream_id, c.thread_id, c.turn_id, \
              c.provenance, c.source, c.producer"
         )
     };
@@ -1226,14 +1410,13 @@ pub(crate) const FACT_ROW_COLS: &str = fact_row_cols!("f.detail");
 /// something shows are asked for by id ([`SqliteFactStore::fact_details`]).
 pub(crate) const FACT_ROW_COLS_SLIM: &str = fact_row_cols!("NULL");
 
-/// A [`FactRow`] mapper that decodes each capture's `captured_at` **once**
-/// (tsk215).
+/// A [`FactRow`] mapper that decodes each capture's `captured_at` **once**.
 ///
 /// `captured_at` belongs to the fact's CAPTURE, so every fact in a capture
 /// repeats it — ~130 facts per capture here (1.78M facts over 13.4k captures).
 /// Decoding per row meant ~130 `String` allocations plus ~130 RFC3339 parses of
 /// the identical text, which made row decode the top oxplow-owned cost in the
-/// tsk208 profile once `dim_value` was fixed.
+///  profile once `dim_value` was fixed.
 ///
 /// The memo keys on `capture_id`, and `capture_id -> captured_at` is a function,
 /// so a hit is correct **regardless of row order**. Ordering (the queries sort by
@@ -1242,12 +1425,12 @@ pub(crate) const FACT_ROW_COLS_SLIM: &str = fact_row_cols!("NULL");
 pub(crate) fn fact_row_mapper<'c>(
     conn: &'c rusqlite::Connection,
 ) -> rusqlite::Result<impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<FactRow> + 'c> {
-    // Effort → work item, loaded once per read: `effort` is small next to
-    // the facts, and a per-row join would cost a lookup on every fact.
-    let items: std::collections::HashMap<i64, String> = conn
-        .prepare_cached("SELECT id, work_item FROM v_effort WHERE work_item IS NOT NULL")?
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
-        .collect::<rusqlite::Result<_>>()?;
+    // Turn → request, resolved once per turn a read meets: a per-row join
+    // would cost a lookup on every fact, and a read's facts come from a few
+    // turns.
+    let mut turns: std::collections::HashMap<i64, Option<i64>> = std::collections::HashMap::new();
+    let mut request_of =
+        conn.prepare_cached("SELECT t.request_id FROM agent_turn t WHERE t.id = ?1")?;
     let mut last: Option<(i64, Timestamp)> = None;
     let mut text = FactText::new(conn);
     Ok(move |row: &rusqlite::Row<'_>| {
@@ -1270,7 +1453,20 @@ pub(crate) fn fact_row_mapper<'c>(
             }
         };
         let mut fact = row_to_fact_row_with(row, captured_at, &mut text)?;
-        fact.work_item = fact.effort_id.and_then(|e| items.get(&e).cloned());
+        if let Some(turn) = fact.turn_id {
+            let request = match turns.get(&turn) {
+                Some(hit) => *hit,
+                None => {
+                    let found = request_of
+                        .query_row([turn], |r| r.get::<_, Option<i64>>(0))
+                        .optional()?
+                        .flatten();
+                    turns.insert(turn, found);
+                    found
+                }
+            };
+            fact.request_id = request;
+        }
         Ok(fact)
     })
 }
@@ -1307,8 +1503,9 @@ fn row_to_fact_row_with(
         snapshot_id: row.get(18)?,
         stream_id: row.get(19)?,
         thread_id: row.get(20)?,
-        effort_id: row.get(21)?,
-        work_item: None,
+        turn_id: row.get(21)?,
+        request_id: None,
+        derived: std::collections::BTreeMap::new(),
         provenance: row.get(22)?,
         source: row.get(23)?,
         producer: row.get(24)?,
@@ -1482,7 +1679,7 @@ fn interned(
 // Store
 // ---------------------------------------------------------------------------
 
-/// The cube read cache (tsk196): the rows served for one `cube_version`.
+/// The cube read cache: the rows served for one `cube_version`.
 ///
 /// Keyed by `(measure_id, stream)` because `cube_rows_for_measure` filters on
 /// `c.stream_id` — the same measure read for two streams is two answers. The
@@ -1541,7 +1738,7 @@ pub struct SqliteFactStore {
 
 impl SqliteFactStore {
     /// Why the ingest would refuse facts with these dimensions, if it
-    /// would: the first bare key, named with its conformed one (tsk986). A
+    /// would: the first bare key, named with its conformed one. A
     /// producer asks before it records, so a refused run is a failed run
     /// rather than a capture rolled back behind one reported as recorded.
     pub async fn refused_dims(&self, dims: Vec<String>) -> Result<Option<String>, DomainError> {
@@ -1560,7 +1757,7 @@ impl SqliteFactStore {
     }
 
     /// The database this store reads, for reads that go through the
-    /// semantic layer instead (entity metrics, tsk322).
+    /// semantic layer instead (entity metrics).
     pub fn database(&self) -> Database {
         self.db.clone()
     }
@@ -1604,9 +1801,9 @@ impl SqliteFactStore {
     /// every promoted dim), so it invalidates the WHOLE cube in the same
     /// transaction — otherwise a pre-promotion bucket lacks the new key and a
     /// newly-eligible `dim_eq`/`group_by` read serves explicit 0s over real
-    /// history (tsk103 review; V64 states the rule its migration honors by
+    /// history (review; V64 states the rule its migration honors by
     /// hand). Change-detected — `seed_catalog` re-upserts every dim at boot,
-    /// and an unconditional wipe would re-fold the cube every start (tsk100's
+    /// and an unconditional wipe would re-fold the cube every start (the
     /// lesson). A brand-new dim arriving already-promoted also clears: facts
     /// may have carried the key in `dims_json` before the catalog knew it.
     pub async fn upsert_dimension(&self, d: NewDimension) -> Result<(), DomainError> {
@@ -1736,7 +1933,7 @@ impl SqliteFactStore {
         result
     }
 
-    /// Record a test run with per-case results (tsk733): the capture, the
+    /// Record a test run with per-case results: the capture, the
     /// per-case facts that say something new ([`test_case_writes`] against
     /// each test's summary on the capture's branch), and every case's
     /// summary row — one transaction. A replay under the capture's
@@ -1889,43 +2086,20 @@ impl SqliteFactStore {
             .await
     }
 
-    /// The captures produced BY an effort (`effort_id` stamped on the capture) —
-    /// the attribution-by-claim spine for the effort roll-up (epic tsk12, T-D).
-    /// Oldest first.
-    pub async fn captures_for_effort(
-        &self,
-        effort_id: i64,
-    ) -> Result<Vec<MetricCapture>, DomainError> {
-        self.db
-            .call(move |conn| {
-                let sql = format!(
-                    "SELECT {CAPTURE_COLS} FROM metric_capture
-                      WHERE effort_id = ?1
-                      ORDER BY captured_at ASC, id ASC"
-                );
-                let mut stmt = conn.prepare(&sql)?;
-                let rows = stmt.query_map(params![effort_id], row_to_capture)?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()
-            })
-            .await
-    }
-
-    /// What an effort holds, per producer and trigger: how many captures and
-    /// the newest id. An open effort holds thousands (a token report every
+    /// What `members` hold, per producer and trigger: how many captures and
+    /// the newest id. An open analysis holds thousands (a token report every
     /// ~30 s); this is what a recompute asks first, so it reads rows only
     /// for what moved.
-    pub async fn effort_capture_groups(
-        &self,
-        effort_id: i64,
-    ) -> Result<Vec<EffortCaptureGroup>, DomainError> {
+    pub async fn capture_groups(&self, members: Members) -> Result<Vec<CaptureGroup>, DomainError> {
         self.db
             .call(move |conn| {
-                let mut stmt = conn.prepare_cached(
+                let (cond, arg) = members.condition(1);
+                let mut stmt = conn.prepare_cached(&format!(
                     "SELECT producer, trigger, COUNT(*), MAX(id) FROM metric_capture
-                      WHERE effort_id = ?1 GROUP BY producer, trigger",
-                )?;
-                let rows = stmt.query_map(params![effort_id], |r| {
-                    Ok(EffortCaptureGroup {
+                      WHERE {cond} GROUP BY producer, trigger"
+                ))?;
+                let rows = stmt.query_map(params![arg], |r| {
+                    Ok(CaptureGroup {
                         producer: r.get(0)?,
                         trigger: r.get(1)?,
                         count: r.get(2)?,
@@ -1937,11 +2111,11 @@ impl SqliteFactStore {
             .await
     }
 
-    /// The effort's captures by `producers` with an id after `after_id`,
+    /// `members`' captures by `producers` with an id after `after_id`,
     /// oldest first (`after_id` 0: all of them).
-    pub async fn effort_captures_after(
+    pub async fn captures_after(
         &self,
-        effort_id: i64,
+        members: Members,
         producers: Vec<String>,
         after_id: i64,
     ) -> Result<Vec<MetricCapture>, DomainError> {
@@ -1950,38 +2124,39 @@ impl SqliteFactStore {
         }
         self.db
             .call(move |conn| {
+                let (cond, arg) = members.condition(1);
                 let sql = format!(
                     "SELECT {CAPTURE_COLS} FROM metric_capture
-                      WHERE effort_id = ?1 AND id > ?2
+                      WHERE {cond} AND id > ?2
                         AND producer IN (SELECT value FROM json_each(?3))
                       ORDER BY captured_at ASC, id ASC"
                 );
                 let mut stmt = conn.prepare_cached(&sql)?;
                 let producers = serde_json::to_string(&producers).expect("producers serialize");
-                let rows =
-                    stmt.query_map(params![effort_id, after_id, producers], row_to_capture)?;
+                let rows = stmt.query_map(params![arg, after_id, producers], row_to_capture)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
     }
 
-    /// The effort's captures with this `trigger` (a test, coverage or
+    /// `members`' captures with this `trigger` (a test, coverage or
     /// analysis run), oldest first.
-    pub async fn effort_captures_by_trigger(
+    pub async fn captures_by_trigger(
         &self,
-        effort_id: i64,
+        members: Members,
         trigger: &str,
     ) -> Result<Vec<MetricCapture>, DomainError> {
         let trigger = trigger.to_string();
         self.db
             .call(move |conn| {
+                let (cond, arg) = members.condition(1);
                 let sql = format!(
                     "SELECT {CAPTURE_COLS} FROM metric_capture
-                      WHERE effort_id = ?1 AND trigger = ?2
+                      WHERE {cond} AND trigger = ?2
                       ORDER BY captured_at ASC, id ASC"
                 );
                 let mut stmt = conn.prepare_cached(&sql)?;
-                let rows = stmt.query_map(params![effort_id, trigger], row_to_capture)?;
+                let rows = stmt.query_map(params![arg, trigger], row_to_capture)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
@@ -1989,7 +2164,7 @@ impl SqliteFactStore {
 
     /// Captures on a thread in a time window, filtered by `trigger` — the
     /// unified OBSERVE for run attribution now that the capture IS the run
-    /// (T-E1, tsk48). All agent-work runs (tests/coverage/analysis) stamp
+    /// (T-E1). All agent-work runs (tests/coverage/analysis) stamp
     /// `trigger = "on-report"` regardless of their (per-analyzer, varying)
     /// producer, so one filter covers all three. Oldest-first.
     pub async fn captures_in_window_by_trigger(
@@ -2022,7 +2197,7 @@ impl SqliteFactStore {
     /// Every capture recorded by the given producers (gauge keys / ingest
     /// kinds), oldest first — INCLUDING empty captures (a scan that found zero
     /// offenders writes a capture with no facts). The engine zero-fills a
-    /// series from these so a count metric can drop back to zero (tsk44).
+    /// series from these so a count metric can drop back to zero.
     pub async fn captures_for_producers(
         &self,
         producers: Vec<String>,
@@ -2038,7 +2213,7 @@ impl SqliteFactStore {
                     .join(", ");
                 // `status = 'done'` keeps the doc rule "non-done captures are
                 // invisible to every fold" true for the in-memory fold and the
-                // cube build, not just the SQL folds (tsk103 review): a failed
+                // cube build, not just the SQL folds (review): a failed
                 // capture is a recorded event, never a data point — folded in,
                 // it emits a phantom repeat of prior state, and a complete-
                 // scope count/sum would zero-splice it.
@@ -2092,8 +2267,8 @@ impl SqliteFactStore {
             .await
     }
 
-    /// [`Self::facts_for_measure`] bounded to one stream, SQL-side (tsk75).
-    /// The effort delta reads are per-worktree by definition — loading every
+    /// [`Self::facts_for_measure`] bounded to one stream, SQL-side.
+    /// A request's delta reads are per-worktree by definition — loading every
     /// stream's history just to drop it in Rust made each panel refetch pay
     /// for the whole table.
     pub async fn facts_for_measure_in_stream(
@@ -2115,7 +2290,7 @@ impl SqliteFactStore {
             .await
     }
 
-    // --- the aggregate cube (V62, tsk96) --------------------------------
+    // --- the aggregate cube (V62) --------------------------------
     //
     // The cube is an ACCELERATOR and is DISPOSABLE: every row here is derivable
     // from `fact`, and dropping them all costs only speed. Nothing may read data
@@ -2134,8 +2309,8 @@ impl SqliteFactStore {
     /// answer, ~4× cheaper on real data (8ms vs 32ms for `oxplow.test_case`) —
     /// and the builder runs this on every recording, so the constant matters.
     ///
-    /// **Memoized** (tsk130). This was the single biggest backend CPU sink in
-    /// the tsk129 profile — 309 s inclusive, ~46% of all backend CPU — not for
+    /// **Memoized**. This was the single biggest backend CPU sink in
+    /// the profile — 309 s inclusive, ~46% of all backend CPU — not for
     /// want of an index (`idx_fact_measure_capture` covers it) but from call
     /// volume: it runs once per measure inside the cube build, the cube read
     /// fold, and the facts fallback, so every metric read pays it again for an
@@ -2246,7 +2421,7 @@ impl SqliteFactStore {
     /// drops, a dim's promoted flip, a measure's scope change). The builder
     /// reads it before folding and `write_cube_rows` refuses to commit when it
     /// moved, so a wipe landing MID build can't be followed by a stale write
-    /// that re-plants a watermark over rowless captures (tsk103 review).
+    /// that re-plants a watermark over rowless captures (review).
     pub async fn cube_epoch(&self) -> Result<i64, DomainError> {
         self.db
             .call(move |conn| {
@@ -2257,12 +2432,16 @@ impl SqliteFactStore {
     }
 
     /// Compact old per-run drill-in payloads: `NULL` out `detail_json` for
-    /// captures beyond either retention bound. Returns the number compacted.
+    /// captures beyond either retention bound — except a test run's
+    /// (`test-detail`), which keeps its counts and failed cases, marked
+    /// `"compacted": true` (a request's test outcome is read from them, and
+    /// a request recorded again must not lose its old runs). Returns the
+    /// number compacted.
     ///
-    /// **Compaction, not deletion (tsk211).** The capture row and every one of
+    /// **Compaction, not deletion.** The capture row and every one of
     /// its facts survive, so no metric value, trend point, or count changes —
-    /// only the effort Tests/Coverage detail for old runs is
-    /// lost. That is why this is safe to have ON by default, unlike
+    /// only the Tests/Coverage detail for old runs is
+    /// lost (a test run's passing cases). That is why this is safe to have ON by default, unlike
     /// `prune_aged_captures` (which deletes facts and stays opt-in).
     ///
     /// Two bounds, applied together — a capture is compacted if EITHER matches:
@@ -2275,7 +2454,7 @@ impl SqliteFactStore {
     /// `None` disables that bound. Dedup is unaffected: `idempotency_key` is
     /// derived from `detail_json` at WRITE time and stored in its own column,
     /// so a replayed report still matches after the payload is gone.
-    /// Checkpoint the WAL and truncate it back to zero (tsk216).
+    /// Checkpoint the WAL and truncate it back to zero.
     ///
     /// The WAL grows to the high-water mark of the biggest write burst — a
     /// metric rebuild pushed it to 169MB here — and **never shrinks on its own**:
@@ -2313,9 +2492,25 @@ impl SqliteFactStore {
                 // captures newest-first so the count cap is per producer rather
                 // than global — a chatty producer must not evict a quiet one's
                 // detail.
+                // A test run's detail keeps what a request's outcome reads from
+                // it (its counts and its failed cases, `v_test_run` /
+                // `v_test_case`), marked `compacted` so no later pass takes
+                // it again; every other kind's goes.
                 let n = conn.execute(
-                    "UPDATE metric_capture SET detail_json = NULL
+                    "UPDATE metric_capture SET detail_json = CASE
+                       WHEN json_extract(detail_json, '$.kind') = 'test-detail' THEN json_set(
+                         CASE WHEN json_type(detail_json, '$.payload.suites') = 'array'
+                           THEN json_set(detail_json, '$.payload.suites', json((
+                             SELECT json_group_array(json(json_set(s.value, '$.cases', json((
+                                      SELECT json_group_array(json(t.value))
+                                        FROM json_each(s.value, '$.cases') t
+                                       WHERE json_extract(t.value, '$.status') = 'failed')))))
+                               FROM json_each(detail_json, '$.payload.suites') s)))
+                           ELSE detail_json END,
+                         '$.compacted', json('true'))
+                       END
                       WHERE detail_json IS NOT NULL
+                        AND json_extract(detail_json, '$.compacted') IS NULL
                         AND id IN (
                           SELECT id FROM (
                             SELECT id, captured_at,
@@ -2325,6 +2520,7 @@ impl SqliteFactStore {
                                    ) AS rn
                               FROM metric_capture
                              WHERE detail_json IS NOT NULL
+                               AND json_extract(detail_json, '$.compacted') IS NULL
                           )
                           WHERE (?1 IS NOT NULL AND rn > ?1)
                              OR (?2 IS NOT NULL AND captured_at < ?2)
@@ -2337,11 +2533,11 @@ impl SqliteFactStore {
     }
 
     /// `(capture count, newest capture id)` over `producers` — a cheap freshness
-    /// token for a memoized read of those producers' series (tsk205).
+    /// token for a memoized read of those producers' series.
     ///
     /// **Capture-scoped, deliberately not fact-scoped.** A fact-derived token
     /// (`MAX(fact.capture_id)`) is WRONG here: a rescan that finds the file clean
-    /// emits NO fact and supersedes the old count with 0 (tsk41/tsk44), so the
+    /// emits NO fact and supersedes the old count with 0, so the
     /// fact max never moves while the series changes. Counting the producers'
     /// captures sees those empty captures. `COUNT` as well as `MAX` so a delete
     /// that lowers the count still registers.
@@ -2374,7 +2570,7 @@ impl SqliteFactStore {
             .await
     }
 
-    /// The cube's read-cache token (V72, tsk196) — bumped by trigger on EVERY
+    /// The cube's read-cache token (V72) — bumped by trigger on EVERY
     /// `metric_cube` insert/update/delete, cascades included.
     ///
     /// Distinct from [`Self::cube_epoch`], which fences concurrent WRITERS and
@@ -2406,7 +2602,7 @@ impl SqliteFactStore {
         // can't hold NULL). Known, accepted collision: a capture recording
         // `Some("")` would share the partition `None` gets — but git forbids
         // empty branch names and no producer fabricates one, and the fact
-        // fold keys on `Option`, where they'd differ (tsk109 audit note).
+        // fold keys on `Option`, where they'd differ (audit note).
         let branch = branch.unwrap_or_default();
         self.db
             .call(move |conn| {
@@ -2458,7 +2654,7 @@ impl SqliteFactStore {
     /// `scalar_key` — so this is exactly what replaying those captures
     /// oldest-first (evict the keys a capture restates, insert its facts)
     /// leaves standing, computed over the index instead of by loading the
-    /// history (tsk704: ten million per-case test facts took 25 s a seed).
+    /// history (ten million per-case test facts took 25 s a seed).
     pub async fn live_seed_per_subject(
         &self,
         measure_id: i64,
@@ -2633,7 +2829,7 @@ impl SqliteFactStore {
     /// `stream` bounds it to one worktree; `None` reads every stream (each row
     /// still carries its own, so an unscoped read is a UNION, never a merge).
     ///
-    /// Cached on [`Self::cube_version`] (tsk196). The read is a full scan of the
+    /// Cached on [`Self::cube_version`]. The read is a full scan of the
     /// measure's cube rows joined to `metric_capture` with a timestamp parse per
     /// row, and the UI fires it once per mounted tile on every
     /// `metricSamplesChanged` — so N tiles meant N identical scans. The version
@@ -2715,7 +2911,7 @@ impl SqliteFactStore {
     /// scalars (`oxplow.metric.record` with no subject). The per-path read supplements
     /// its tree fold with these (they have no path, so nothing supersedes them
     /// per-path); it used to load the measure's entire history to find the
-    /// usually-zero of them (tsk75).
+    /// usually-zero of them.
     pub async fn pathless_scalar_facts(
         &self,
         measure_id: i64,
@@ -2739,7 +2935,7 @@ impl SqliteFactStore {
             .await
     }
 
-    /// Delete PROJECT-scope metric specs whose key is not in `keep` (tsk61).
+    /// Delete PROJECT-scope metric specs whose key is not in `keep`.
     /// A metric removed from `.oxplow/project.yaml` entirely (not merely
     /// `enabled: false`) used to leave a zombie spec row that rendered as a
     /// forever-blank gauge in the catalog. Built-in/global rows are never
@@ -2817,7 +3013,7 @@ impl SqliteFactStore {
             .await
     }
 
-    /// Delete PROJECT-scope measures whose key is not in `keep` (tsk61) — the
+    /// Delete PROJECT-scope measures whose key is not in `keep` — the
     /// measure-side of the same reconciliation. Facts CASCADE via
     /// `fact.measure_id`: a measure the user removed from config is retired,
     /// history included (the same declared-config-is-truth stance as specs).
@@ -2842,7 +3038,7 @@ impl SqliteFactStore {
             .await
     }
 
-    /// Distinct producers of `done` captures recorded under `source` (tsk62).
+    /// Distinct producers of `done` captures recorded under `source`.
     /// Seeds the zero-fill for measures whose producers are only discoverable
     /// from facts: an analyzer that has been CLEAN since day one has zero
     /// `oxplow.lint_hit` facts, so fact-derived producer discovery finds
@@ -2874,7 +3070,7 @@ impl SqliteFactStore {
     /// this one carries 4 columns through the sorter instead of 26 and skips
     /// the rowid join-back — measured at 0.40s vs 0.78s over a 917k-fact
     /// measure. Prefer it whenever the caller's predicate reads nothing outside
-    /// the slice key (`FactFilter::slice_key_only`, tsk239).
+    /// the slice key (`FactFilter::slice_key_only`).
     pub async fn distinct_slice_keys(
         &self,
         measure_id: i64,
@@ -2923,8 +3119,8 @@ impl SqliteFactStore {
     }
 
     /// One representative fact per distinct `(producer, rule, severity,
-    /// dims_json)` slice of a measure (tsk75) — the whole `MIN(f.id)` row of
-    /// each slice. The zero-splice fallback in the effort delta only needs to
+    /// dims_json)` slice of a measure — the whole `MIN(f.id)` row of
+    /// each slice. The zero-splice fallback in a window's delta only needs to
     /// learn WHICH producers emit a metric's slice; it used to load the
     /// measure's entire history to extract a handful of distinct producer
     /// names. Slice combos are bounded (rules × severities × dim payloads),
@@ -2941,7 +3137,7 @@ impl SqliteFactStore {
     /// away by projecting bare columns under `MIN(f.id)` (a documented SQLite
     /// extension) was measured **slower** — 1.43s vs 0.78s — because it drags
     /// all 26 columns through the group-by sorter instead of 277 rowid lookups
-    /// afterwards. Don't "simplify" it back without re-measuring (tsk239).
+    /// afterwards. Don't "simplify" it back without re-measuring.
     pub async fn representative_facts_by_slice(
         &self,
         measure_id: i64,
@@ -3000,7 +3196,7 @@ impl SqliteFactStore {
     }
 
     /// Facts of a measure belonging to the given captures (the attribution-by-claim
-    /// read — an effort's facts are those of its claimed captures, not a time
+    /// read — a request's facts are those of its turns' captures, not a time
     /// window). Oldest-first. Empty when `capture_ids` is empty.
     pub async fn facts_for_captures(
         &self,
@@ -3022,7 +3218,7 @@ impl SqliteFactStore {
             .await
     }
 
-    /// The CURRENT facts of a `capture_scope = 'per-path'` measure (V54, tsk41):
+    /// The CURRENT facts of a `capture_scope = 'per-path'` measure (V54):
     /// the incremental-tree fold.
     ///
     /// A tree gauge's capture restates only **the paths in its snapshot** (a
@@ -3113,7 +3309,7 @@ impl SqliteFactStore {
                           AND NOT EXISTS (SELECT 1 FROM metric_capture_exclusion x
                                            WHERE x.capture_id = c.id AND x.path = fs.path)
                        UNION
-                       -- A FULL capture (a baseline, tsk71) restates the RECONSTRUCTED
+                       -- A FULL capture (a baseline) restates the RECONSTRUCTED
                        -- tree as-of its snapshot — which lets a baseline anchor to an
                        -- ordinary delta snapshot instead of a fabricated full-tree one.
                        -- Only the LATEST full capture per (stream, producer): an older
@@ -3191,7 +3387,7 @@ impl SqliteFactStore {
 
     /// Whether a producer already has a `done` capture for `snapshot_id` at exactly
     /// `version` (its current fingerprint). The idempotency guard for a whole-tree
-    /// sweep (tsk50): a re-delivered snapshot event — or a direct baseline run *plus*
+    /// sweep: a re-delivered snapshot event — or a direct baseline run *plus*
     /// the event loop reacting to the same snapshot — must not re-scan the tree.
     /// `version = None` always returns `false` (can't confirm the logic matches, so
     /// don't skip).
@@ -3234,7 +3430,7 @@ impl SqliteFactStore {
             .call(move |conn| {
                 conn.query_row(
                     // Kind-scoped: a delta capture for this snapshot must not
-                    // satisfy a pending FULL baseline run over it (tsk71) — the
+                    // satisfy a pending FULL baseline run over it — the
                     // two scans cover different sets.
                     "SELECT EXISTS(
                        SELECT 1 FROM metric_capture
@@ -3250,9 +3446,9 @@ impl SqliteFactStore {
             .await
     }
 
-    /// Drop the tree captures a newer baseline has made dead weight (tsk75).
+    /// Drop the tree captures a newer baseline has made dead weight.
     ///
-    /// By the tsk71 dominance argument, an **effort-less** `delta`/`full`
+    /// By the dominance argument, a **turn-less** `delta`/`full`
     /// capture strictly OLDER than its (stream, producer)'s latest done `full`
     /// capture can never win any per-path fold rank: the baseline restates
     /// every path it ever scanned (live rows AND tombstones), newer. Their
@@ -3262,8 +3458,8 @@ impl SqliteFactStore {
     /// `fact.capture_id ON DELETE CASCADE`.
     ///
     /// Deliberately narrow:
-    /// - **effort-stamped captures survive** — they're attribution history
-    ///   (`captures_for_effort` reads them for closed-effort panels);
+    /// - **turn-stamped captures survive** — they're attribution history
+    ///   (a request's analysis reads its turns' captures, `Members::Turns`);
     /// - captures carrying any fact on a **non-per-path measure** survive —
     ///   complete/per-subject folds read past captures;
     /// - producers with **no full capture** are untouched;
@@ -3271,14 +3467,14 @@ impl SqliteFactStore {
     ///   failure records are gauge-health evidence).
     ///
     /// Trade-off, accepted deliberately: a per-path measure's TREND loses its
-    /// pre-baseline points (the current fold and every effort window at/after
+    /// pre-baseline points (the current fold and every request window at/after
     /// the baseline are unaffected). Runs after each successful baseline
     /// sweep. Only a producer whose facts land on a per-path measure is a
     /// baseline producer: a whole-tree restate of a complete-scope measure
     /// (`oxplow.duplicate_lines`, empty on a clean tree) is history and is
-    /// never dominated (tsk709).
+    /// never dominated.
     ///
-    /// **Invalidates that stream's cube when it drops anything** (tsk100). Deleted
+    /// **Invalidates that stream's cube when it drops anything**. Deleted
     /// captures' facts cascade, and `metric_live_fact` cascades with them — but
     /// `metric_cube` rows are frozen at build time and would keep counting a fact
     /// the facts no longer have. Usually they'd agree anyway (the baseline already
@@ -3286,7 +3482,7 @@ impl SqliteFactStore {
     /// invalidate rather than reason about which prunes are safe. The cube is
     /// disposable; the next build re-folds. A prune that drops NOTHING leaves it
     /// alone — `rebuild_baseline` prunes on every boot, and wiping a healthy
-    /// cube each start would turn tsk96's fix off for nothing.
+    /// cube each start would turn the fix off for nothing.
     pub async fn prune_dominated_tree_captures(&self, stream_id: i64) -> Result<u64, DomainError> {
         // Working out what is dominated is a read, and most boots find
         // nothing: the write lock is taken only to drop captures. A capture
@@ -3325,7 +3521,7 @@ impl SqliteFactStore {
                                 AND pc.producer = lf.producer
                                 AND pm.capture_scope = 'per-path'
                            )
-                           AND c.effort_id IS NULL
+                           AND c.turn_id IS NULL
                            AND c.status = 'done'
                            AND c.scan_kind IN ('delta', 'full')
                            AND (c.captured_at < lf.captured_at
@@ -3387,7 +3583,7 @@ impl SqliteFactStore {
                     ] {
                         tx.execute(sql, params![stream_id]).map_err(map_sql_err)?;
                     }
-                    // Fence any build already in flight (tsk103): its todo-list
+                    // Fence any build already in flight: its todo-list
                     // predates this wipe, so its next write must abandon.
                     tx.execute("UPDATE metric_cube_epoch SET epoch = epoch + 1", [])
                         .map_err(map_sql_err)?;
@@ -3404,7 +3600,7 @@ impl SqliteFactStore {
     }
 
     /// Apply one BUILD BATCH — a chunk of captures' folds — in a single
-    /// transaction (tsk113). Per step, in capture order: evict+insert the
+    /// transaction. Per step, in capture order: evict+insert the
     /// live partition, replace the capture's cube rows, advance its branch's
     /// watermark. ONE epoch check guards the whole chunk; `false` means an
     /// invalidation landed after the builder planned it — nothing is written,
@@ -3519,10 +3715,11 @@ impl SqliteFactStore {
     }
 
     /// Prune metric captures older than `cutoff` — the OPT-IN retention knob
-    /// (`metricRetentionDays`, tsk93; the default 0 means this is never
+    /// (`metricRetentionDays`; the default 0 means this is never
     /// called). Deletes ONLY history no current value stands on; kept
     /// unconditionally:
-    /// - **effort-stamped captures** — attribution history;
+    /// - **turn-stamped captures** — attribution history (a request's
+    ///   analysis reads them);
     /// - each `(stream, producer)`'s **newest capture** — the headline /
     ///   zero-fill anchor;
     /// - any capture owning a **latest-per-partition fact** — latest per
@@ -3535,7 +3732,7 @@ impl SqliteFactStore {
     /// Points older than the cutoff disappear from series and drill-down
     /// (that IS retention — the trade the knob buys into). Facts cascade via
     /// FK; the affected streams' cube is invalidated in the same transaction
-    /// and the epoch fenced (the tsk100 rule: replay inputs changed).
+    /// and the epoch fenced (the rule: replay inputs changed).
     pub async fn prune_aged_captures(&self, cutoff: Timestamp) -> Result<u64, DomainError> {
         let cutoff = ts_to_string(cutoff);
         let n = self
@@ -3560,7 +3757,7 @@ impl SqliteFactStore {
                 };
                 let doomed_where = &format!(
                     "captured_at < ?1
-                       AND effort_id IS NULL
+                       AND turn_id IS NULL
                        AND id NOT IN (
                          SELECT id FROM (
                            SELECT id, ROW_NUMBER() OVER (
@@ -3626,7 +3823,7 @@ impl SqliteFactStore {
                             tx.execute(sql, params![stream_id]).map_err(map_sql_err)?;
                         }
                     }
-                    // Fence any build already in flight (tsk103).
+                    // Fence any build already in flight.
                     tx.execute("UPDATE metric_cube_epoch SET epoch = epoch + 1", [])
                         .map_err(map_sql_err)?;
                 }
@@ -3643,7 +3840,7 @@ impl SqliteFactStore {
 
     /// Whether a producer has EVER completed a `scan_kind = 'full'` baseline
     /// capture in this stream — at `version` when given, at any version when
-    /// `None`. This is the "has this gauge been baselined" question (tsk71):
+    /// `None`. This is the "has this gauge been baselined" question:
     /// a gauge with no full capture at its current fingerprint needs a
     /// full-tree run before its per-path metric is trustworthy.
     pub async fn has_full_capture(
@@ -3673,7 +3870,7 @@ impl SqliteFactStore {
 
     /// The `status` of a producer's LATEST capture (`done` | `failed` | `running`),
     /// or `None` when it has never captured. Lets the runner tell "the gauge found
-    /// nothing" apart from "the gauge blew up" (tsk47/tsk48).
+    /// nothing" apart from "the gauge blew up".
     pub async fn latest_capture_status(
         &self,
         producer: &str,
@@ -3695,7 +3892,7 @@ impl SqliteFactStore {
             .await
     }
 
-    /// The `producer_version` on a producer's LATEST capture (V56, tsk45), and
+    /// The `producer_version` on a producer's LATEST capture (V56), and
     /// whether it has ever captured at all.
     ///
     /// `Ok(None)` — the producer has no captures in this stream (never run).
@@ -3724,7 +3921,7 @@ impl SqliteFactStore {
             .await
     }
 
-    /// The CURRENT facts of a `capture_scope = 'per-subject'` measure (V55, tsk43).
+    /// The CURRENT facts of a `capture_scope = 'per-subject'` measure (V55).
     ///
     /// A capture restates only the **subjects it emitted facts for** — for
     /// `oxplow.test_case`, the test cases the run actually executed. So the value is
@@ -3853,7 +4050,7 @@ mod tests {
     use super::*;
     use crate::fact_chain::MAX_CHAIN_DEPTH;
 
-    /// tsk978: a store write runs in the retried write transaction — the
+    /// a store write runs in the retried write transaction — the
     /// measure seeding that failed a fresh daemon's boot with "database is
     /// locked" lands while another writer holds the lock past the pool's
     /// busy wait, then lets go.
@@ -3882,8 +4079,6 @@ mod tests {
         holder.join().unwrap();
     }
 
-    /// stream(1) + thread(1) + task + effort so capture FKs resolve and the
-    /// effort-GC test has a real effort to delete.
     #[tokio::test]
     async fn extension_scoped_specs_and_measures_round_trip_and_prune() {
         let store = fixture().await;
@@ -3926,7 +4121,7 @@ mod tests {
         assert!(store.get_measure("acme.todo").await.unwrap().is_some());
     }
 
-    /// tsk945: a dimension key has one name — its namespaced one. A fact
+    /// a dimension key has one name — its namespaced one. A fact
     /// carrying a bare key is refused, naming the conformed key when the
     /// catalog has one; nothing of the capture is written.
     #[tokio::test]
@@ -3992,16 +4187,13 @@ mod tests {
                      VALUES (1, 1, 't', ?1, ?1)",
                     [now],
                 )?;
-                conn.execute(
-                    "INSERT INTO task (thread_id, title, status, priority, created_by, created_at, updated_at)
-                     VALUES (1, 't', 'in_progress', 'medium', 'user', ?1, ?1)",
-                    [now],
-                )?;
-                let task_id = conn.last_insert_rowid();
-                conn.execute(
-                    "INSERT INTO effort (id, work_item, thread_id, started_at, ended_at)
-                     VALUES (1, 'oxplow:oxplow/work_item?id=tsk&provider=oxplow' || ?1, 1, '2026-06-30T10:00:00.000000Z', '2026-06-30T11:00:00.000000Z')",
-                    params![task_id],
+                // A turn (1) of a request (1), so a capture made in the turn
+                // resolves to both.
+                conn.execute_batch(
+                    "INSERT INTO agent_turn (id, thread_id, prompt, started_at)
+                       VALUES (1, 1, 'p', '2026-06-30T10:00:00.000000Z');
+                     INSERT INTO request (id, thread_id, first_turn_id) VALUES (1, 1, 1);
+                     UPDATE agent_turn SET request_id = 1 WHERE id = 1;",
                 )?;
                 Ok(())
             })
@@ -4270,7 +4462,7 @@ mod tests {
         assert_eq!(stored(&store, kept).await, 11, "moved up to it");
     }
 
-    // --- per-path fold (V54, tsk41) helpers -------------------------------
+    // --- per-path fold (V54) helpers -------------------------------
 
     /// A snapshot on stream 1 carrying `files` as `(path, storage)` rows —
     /// `storage` is `"oxplow"` (present) or `"deleted"` (a tombstone). This is the
@@ -4333,7 +4525,7 @@ mod tests {
         store.record_facts(capture, rows).await.unwrap()
     }
 
-    /// P4.11 (tsk496): the `v_tree_fact` dataset is the engine's fold — for
+    /// P4.11: the `v_tree_fact` dataset is the engine's fold — for
     /// measure `m` (made per-path, which the model reads) on stream 1, the
     /// same facts `latest_tree_facts` returns.
     async fn dataset_agrees(store: &SqliteFactStore, m: i64) {
@@ -4369,7 +4561,7 @@ mod tests {
         );
     }
 
-    /// P4.11 (tsk496): `v_function` is each function's latest complexity —
+    /// P4.11: `v_function` is each function's latest complexity —
     /// a rescan of its file replaces it, a function removed from the file
     /// goes, and a file not rescanned keeps its functions.
     #[tokio::test]
@@ -4574,7 +4766,7 @@ mod tests {
     }
 
     /// A `scan_kind = 'full'` capture by `producer` anchored to `snap_id` —
-    /// what the baseline sweep records (tsk71): its scanned set is the
+    /// what the baseline sweep records: its scanned set is the
     /// RECONSTRUCTED tree as-of that snapshot, not the snapshot's own rows.
     async fn full_capture(
         store: &SqliteFactStore,
@@ -4972,7 +5164,7 @@ mod tests {
 
     #[tokio::test]
     async fn full_scan_capture_supersedes_the_whole_reconstructed_tree() {
-        // The tsk71 baseline: a full scan anchored to a DELTA snapshot must
+        // The baseline: a full scan anchored to a DELTA snapshot must
         // supersede every path in the reconstructed tree at that snapshot —
         // not just the delta's own rows. b.rs dropped to 0 (no fact emitted);
         // it is NOT in snapshot 2's rows, but it IS in the reconstructed tree,
@@ -5054,7 +5246,7 @@ mod tests {
 
     #[tokio::test]
     async fn asserted_capture_with_snapshot_restates_only_its_emitted_paths() {
-        // tsk72 direction: `oxplow.metric.record` captures now carry a snapshot for
+        //  direction: `oxplow.metric.record` captures now carry a snapshot for
         // PROVENANCE — but their scanned set stays "exactly what I emitted".
         // If the snapshot were treated as a delta scanned set, this assertion
         // over snapshot 1 (which lists b.rs) would wipe b.rs's gauge fact.
@@ -5151,11 +5343,11 @@ mod tests {
 
     #[tokio::test]
     async fn prune_drops_tree_captures_dominated_by_the_latest_full() {
-        // tsk75: every effort-less tree capture strictly OLDER than the latest
+        // every turn-less tree capture strictly OLDER than the latest
         // done `full` capture of its (stream, producer) is dead weight — the
         // baseline restates every path it scanned, newer. Their facts were 69%
         // of a 778k-row fact table. Pruning must keep: the latest full, deltas
-        // NEWER than it, effort-stamped captures (attribution history), other
+        // NEWER than it, turn-stamped captures (attribution history), other
         // producers without a full capture, and any capture carrying facts of
         // a non-per-path measure. The fold value must not move.
         let store = fixture().await;
@@ -5209,11 +5401,11 @@ mod tests {
             &[("a.rs", 10.0)],
         )
         .await;
-        // An old effort-stamped capture — attribution history, never pruned.
+        // An old turn-stamped capture — attribution history, never pruned.
         let mut stamped = NewMetricCapture::done(1, "g", "oxplow:oxplow/metric?metric=g");
         stamped.snapshot_id = Some(1);
         stamped.captured_at = Some(at("2026-06-30T08:30:00.000000Z"));
-        stamped.effort_id = Some(1);
+        stamped.turn_id = Some(1);
         let stamped_id = store.record_facts(stamped, Vec::new()).await.unwrap();
         // A producer with no full capture — untouched.
         let other = gauge_capture(
@@ -5244,13 +5436,13 @@ mod tests {
         assert!(!alive.contains(&old_full), "dominated full pruned");
         assert!(alive.contains(&latest_full));
         assert!(alive.contains(&new_delta));
-        assert!(alive.contains(&stamped_id), "effort-stamped kept");
+        assert!(alive.contains(&stamped_id), "turn-stamped kept");
         assert!(alive.contains(&other), "producer without a baseline kept");
     }
 
     #[tokio::test]
     async fn a_prune_that_drops_captures_invalidates_that_streams_cube() {
-        // tsk100. The prune deletes captures and their facts cascade.
+        // . The prune deletes captures and their facts cascade.
         // `metric_live_fact` cascades with them (FK on `fact_id`), so the live
         // state self-heals — but `metric_cube` rows are FROZEN at build time and
         // do NOT. Leave the watermark standing and the read treats those stale
@@ -5340,7 +5532,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_empty_whole_tree_restate_is_not_a_baseline_that_prunes() {
-        // P7 review (tsk709): a whole-tree collector on a complete-scope
+        // P7 review: a whole-tree collector on a complete-scope
         // measure (`oxplow.duplicate_lines`) restates the tree on every ref
         // move, and a clean tree's restate is an EMPTY full capture. Empty
         // captures carry no fact at all, so the "carries a non-per-path fact"
@@ -5430,7 +5622,7 @@ mod tests {
         );
     }
 
-    /// tsk704: a per-subject partition's seed is the latest visible capture
+    /// a per-subject partition's seed is the latest visible capture
     /// per (producer, subject) — every fact of that capture under that key —
     /// computed in SQL over the visible captures, never by loading history.
     #[tokio::test]
@@ -5548,7 +5740,7 @@ mod tests {
         let _ = c4;
     }
 
-    /// tsk733: a test run records per-case facts only where they say
+    /// a test run records per-case facts only where they say
     /// something new — every failure, and a pass or skip only when the test
     /// is new on the branch, changed status, or moved its duration past the
     /// threshold — and keeps a per-test summary row up to date in the same
@@ -5820,7 +6012,7 @@ mod tests {
         // The other half, and NOT hypothetical: `rebuild_baseline` prunes on
         // EVERY boot (the "nothing to baseline" path). Invalidating unconditionally
         // would wipe a healthy cube each start and force a full re-fold — turning
-        // tsk96's fix back off at boot, for nothing. Only a prune that actually
+        // the fix back off at boot, for nothing. Only a prune that actually
         // deleted something may invalidate.
         let store = fixture().await;
         let m = store
@@ -5960,9 +6152,9 @@ mod tests {
 
     #[tokio::test]
     async fn aged_pruning_keeps_everything_a_current_value_stands_on() {
-        // tsk93. `metricRetentionDays` is OPT-IN (default 0 = this never
+        // . `metricRetentionDays` is OPT-IN (default 0 = this never
         // runs); when enabled it may delete only history no current value
-        // stands on: effort-stamped captures are attribution (kept), each
+        // stands on: turn-stamped captures are attribution (kept), each
         // producer's newest capture anchors the headline/zero-fill (kept),
         // and any capture owning a latest-per-partition fact is LIVE in the
         // fold (kept) — deleting it would move today's number, which
@@ -6000,11 +6192,11 @@ mod tests {
             .record_facts(cap("2026-06-01T12:00:00.000000Z"), vec![subject("A", 3.0)])
             .await
             .unwrap();
-        // c4 OLD, superseded, but EFFORT-STAMPED → attribution → kept.
+        // c4 OLD, superseded, but TURN-STAMPED → attribution → kept.
         let c4 = store
             .record_facts(
                 NewMetricCapture {
-                    effort_id: Some(1),
+                    turn_id: Some(1),
                     ..cap("2026-06-01T09:00:00.000000Z")
                 },
                 vec![subject("A", 0.5)],
@@ -6060,7 +6252,7 @@ mod tests {
             "a still-live subject keeps its capture"
         );
         assert!(alive.contains(&c3), "the superseding capture is live");
-        assert!(alive.contains(&c4), "effort-stamped = attribution, kept");
+        assert!(alive.contains(&c4), "turn-stamped = attribution, kept");
         assert!(alive.contains(&c5), "inside the window, kept");
         assert!(
             store.cube_watermark(m, 1).await.unwrap().is_none(),
@@ -6089,7 +6281,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_stale_epoch_batch_lands_nothing() {
-        // tsk113. The batch's whole point is one transaction per chunk — and
+        // . The batch's whole point is one transaction per chunk — and
         // the fence must hold at that granularity: an invalidation after the
         // builder planned the chunk means NONE of it may land — not the live
         // applies, not the rows, not the watermark.
@@ -6170,7 +6362,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_stale_build_write_is_fenced_after_an_invalidation() {
-        // tsk103 review. The build runs outside the prune's transaction, so a
+        //  review. The build runs outside the prune's transaction, so a
         // wipe can land MID pass: the builder's todo-list predates it, and its
         // next write would re-plant a watermark covering captures whose rows
         // the wipe deleted — "covered but rowless", served as explicit 0s.
@@ -6255,7 +6447,7 @@ mod tests {
         assert!(store.cube_watermark(m, 1).await.unwrap().is_some());
     }
 
-    /// tsk216: the WAL parks at the high-water mark of the biggest write burst
+    /// the WAL parks at the high-water mark of the biggest write burst
     /// and never shrinks on its own, so the daily pass truncates it.
     #[tokio::test]
     async fn checkpoint_wal_truncates_the_write_ahead_log() {
@@ -6439,7 +6631,7 @@ mod tests {
         );
     }
 
-    /// tsk211: compaction must bound `detail_json` growth WITHOUT touching a
+    /// compaction must bound `detail_json` growth WITHOUT touching a
     /// single metric value — that property is what lets it default to ON.
     #[tokio::test]
     async fn compacting_details_keeps_the_newest_per_producer_and_never_drops_a_fact() {
@@ -6507,7 +6699,63 @@ mod tests {
         assert_eq!(store.compact_capture_details(None, None).await.unwrap(), 0);
     }
 
-    /// tsk196. The cube's read cache keys on `cube_version`, so the version
+    /// A test run's detail compacts to what a request's outcome reads from
+    /// it — its counts and its failed cases — not to nothing: a request
+    /// recorded again after its older runs compacted counts them as before.
+    /// Once compacted it is not compacted again.
+    #[tokio::test]
+    async fn compacting_a_test_runs_detail_keeps_its_counts_and_failed_cases() {
+        let store = fixture().await;
+        let mut cap = NewMetricCapture::done(1, "tests", "s");
+        cap.captured_at = Some(at("2026-06-10T10:00:00.000000Z"));
+        cap.detail_json = Some(
+            serde_json::json!({
+                "kind": "test-detail",
+                "payload": {
+                    "command": "cargo test", "passed": 1, "failed": 1, "total": 2,
+                    "suites": [{ "name": "s", "cases": [
+                        { "classname": "t", "name": "a", "status": "failed", "message": "boom" },
+                        { "classname": "t", "name": "b", "status": "passed" },
+                    ]}],
+                },
+            })
+            .to_string(),
+        );
+        let id = store.record_facts(cap, vec![]).await.unwrap();
+        assert_eq!(
+            store.compact_capture_details(None, Some(0)).await.unwrap(),
+            1
+        );
+        let detail: serde_json::Value = serde_json::from_str(
+            &store
+                .get_capture(id)
+                .await
+                .unwrap()
+                .unwrap()
+                .detail_json
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            detail,
+            serde_json::json!({
+                "kind": "test-detail",
+                "compacted": true,
+                "payload": {
+                    "command": "cargo test", "passed": 1, "failed": 1, "total": 2,
+                    "suites": [{ "name": "s", "cases": [
+                        { "classname": "t", "name": "a", "status": "failed", "message": "boom" },
+                    ]}],
+                },
+            })
+        );
+        assert_eq!(
+            store.compact_capture_details(None, Some(0)).await.unwrap(),
+            0
+        );
+    }
+
+    /// . The cube's read cache keys on `cube_version`, so the version
     /// must move on EVERY mutation of `metric_cube` — not just the wipes
     /// `cube_epoch` fences. A fold that left the version parked would let the
     /// cache serve pre-fold rows forever, i.e. metrics that silently stop
@@ -6560,7 +6808,7 @@ mod tests {
         );
     }
 
-    /// tsk196. `metric_cube.capture_id` is `ON DELETE CASCADE`, so deleting a
+    /// . `metric_cube.capture_id` is `ON DELETE CASCADE`, so deleting a
     /// capture (archiving a stream, a prune) removes cube rows with NO Rust
     /// call site involved. The version is maintained by a trigger precisely so
     /// a path nobody remembered still invalidates the cache.
@@ -6615,7 +6863,7 @@ mod tests {
         );
     }
 
-    /// tsk196. The point of the cache: repeated identical reads inside one
+    /// . The point of the cache: repeated identical reads inside one
     /// version agree, but a fold is visible on the very next read. Staleness
     /// is not a permitted trade here — that's why this keys on a version
     /// rather than a TTL.
@@ -6688,14 +6936,14 @@ mod tests {
 
     #[tokio::test]
     async fn flipping_a_dims_promoted_bit_invalidates_the_cube() {
-        // tsk103 review. Promotion changes the cube's GRAIN (`dims_key`), and
+        //  review. Promotion changes the cube's GRAIN (`dims_key`), and
         // V64's rule is that no old-grain row may survive to be served — a
         // pre-promotion bucket lacks the new key and reads as an explicit 0
         // through a dim filter. The migrations honor that by hand; the CONFIG
         // path (`seed_catalog` → upsert_dimension, which runs EVERY boot) must
         // honor it automatically — and only on an actual FLIP, or every boot
-        // wipes a healthy cube and turns tsk96's fix back off (the same
-        // lesson tsk100 learned for the boot prune).
+        // wipes a healthy cube and turns the fix back off (the same
+        // lesson learned for the boot prune).
         let store = fixture().await;
         let m = store
             .upsert_measure(NewMeasure {
@@ -6777,7 +7025,7 @@ mod tests {
 
     #[tokio::test]
     async fn changing_a_measures_capture_scope_invalidates_only_that_measures_cube() {
-        // tsk103 review. `capture_scope` picks the BUILD RULE (state fold vs
+        //  review. `capture_scope` picks the BUILD RULE (state fold vs
         // per-capture GROUP BY); rows built under the old rule must not be
         // served under the new one. Scoped to the one measure — and only on an
         // actual change, since `seed_catalog` re-upserts every measure at boot.
@@ -6859,7 +7107,7 @@ mod tests {
 
     #[tokio::test]
     async fn non_done_captures_stay_out_of_the_fold_inputs() {
-        // tsk103 review. The doc rule "non-done captures are invisible to
+        //  review. The doc rule "non-done captures are invisible to
         // every fold" held for the three SQL folds but NOT for
         // `captures_for_producers`, which feeds the in-memory fold and the
         // cube build: a failed capture emitted a phantom point (repeating the
@@ -6998,7 +7246,7 @@ mod tests {
 
     #[tokio::test]
     async fn per_subject_fold_survives_a_partial_test_run() {
-        // tsk43. A FULL run knows 3 tests (one failing). Then someone runs a SINGLE
+        // . A FULL run knows 3 tests (one failing). Then someone runs a SINGLE
         // test file — a capture holding just that case. Read as `complete` ("the last
         // capture restates every test") the suite would shrink to 1 test and the
         // failure would vanish. Per-subject, the partial run updates only the test it
@@ -7041,7 +7289,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_failed_capture_never_supersedes_good_facts() {
-        // tsk47's footgun. Recording a gauge FAILURE durably (so it stops being an
+        // the footgun. Recording a gauge FAILURE durably (so it stops being an
         // invisible warn) means writing a capture with NO facts. On a FULL-TREE
         // snapshot that capture restates every path — so if the fold counted it, a
         // single timeout would supersede every fact and silently zero the metric,
@@ -7084,7 +7332,7 @@ mod tests {
 
     #[tokio::test]
     async fn per_subject_test_durations_sum_to_a_real_suite_total() {
-        // tsk46. Durations are `per-subject` for the same reason statuses are: a
+        // . Durations are `per-subject` for the same reason statuses are: a
         // partial run must refresh only the timings it measured. Suite = a(100) +
         // b(200) + c(50) = 350ms. Re-run just `b`, now 20ms → the total must be
         // 100 + 20 + 50 = 170, NOT 20 ("the one test I just ran"), and the slowest
@@ -7145,18 +7393,14 @@ mod tests {
         assert_eq!(got.title, "API latency (p95)");
         assert_eq!(got.subject_kind.as_deref(), Some("endpoint"));
         assert_eq!(got.temporal_semantics, "semi-additive");
-        // The migrations seed 24 built-in measures (10 in V43 + oxplow.ast_hit in
-        // V45 + turn/effort/nudge in V46 + oxplow.effort_test_outcome in V53 +
-        // oxplow.test_duration in V57 + cache_tokens/cache_usage/effort_tokens in
-        // V59 + effort_steering/effort_time_to_green in V60 + oxplow.token_waste
-        // in V61 + coverage.branch/coverage.function in V68 + doc_coverage in
-        // V69); this upsert added one more.
-        assert_eq!(store.list_measures().await.unwrap().len(), 26);
+        // The migrations seed 18 built-in measures (V1's 25, less the seven
+        // efforts measured, V25); this upsert added one more.
+        assert_eq!(store.list_measures().await.unwrap().len(), 19);
     }
 
     #[tokio::test]
     async fn coverage_measure_is_semi_additive() {
-        // tsk13 (V50): coverage is a level snapshot — a run replaces the last,
+        //  (V50): coverage is a level snapshot — a run replaces the last,
         // so it collapses to the latest capture, not a history-blended Σn/Σd.
         let store = fixture().await;
         let cov = store
@@ -7410,7 +7654,7 @@ mod tests {
 
     #[tokio::test]
     async fn producers_for_measure_memo_sees_a_write_through_another_store() {
-        // tsk130: `producers_for_measure` is memoized (it was ~46% of backend
+        // `producers_for_measure` is memoized (it was ~46% of backend
         // CPU). The memo lives on `Database`, not on the store, because the app
         // builds SEVERAL stores over one Database — so a write through any of
         // them has to invalidate what the others memoized. This is the test for
@@ -7624,7 +7868,7 @@ mod tests {
 
     #[tokio::test]
     async fn record_facts_is_idempotent_on_key() {
-        // tsk14: a keyed capture re-recorded (a replayed report) is a no-op —
+        // a keyed capture re-recorded (a replayed report) is a no-op —
         // the existing id comes back and no facts double-insert.
         let store = fixture().await;
         let m = measure(&store, "oxplow.complexity").await;
@@ -7681,53 +7925,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn captures_for_effort_returns_only_that_efforts_captures() {
-        // The attribution-by-claim spine (T-D): an effort's captures are those
-        // stamped with its effort_id, oldest first — not a time window.
-        let store = fixture().await;
-        let m = measure(&store, "oxplow.complexity").await;
-        // The fixture seeds effort 1; a `None`-effort capture (operational) must
-        // be excluded, and an effort with no captures returns empty.
-        for (effort, at_ts) in [
-            (Some(1), "2026-06-30T10:00:00Z"),
-            (Some(1), "2026-06-30T11:00:00Z"),
-            (None, "2026-06-30T12:00:00Z"),
-        ] {
-            store
-                .record_facts(
-                    NewMetricCapture {
-                        effort_id: effort,
-                        captured_at: Some(at(at_ts)),
-                        ..NewMetricCapture::done(1, "metrics", "builtin")
-                    },
-                    vec![NewFact::new(m, 1.0)],
-                )
-                .await
-                .unwrap();
-        }
-        let caps = store.captures_for_effort(1).await.unwrap();
-        assert_eq!(
-            caps.len(),
-            2,
-            "only effort 1's captures (the None one excluded)"
-        );
-        assert!(caps.iter().all(|c| c.effort_id == Some(1)));
-        // Oldest first.
-        assert!(caps[0].captured_at <= caps[1].captured_at);
-        // An effort with no captures returns empty (not a time-window match).
-        assert_eq!(store.captures_for_effort(99).await.unwrap().len(), 0);
-    }
-
-    #[tokio::test]
-    async fn effort_gc_nulls_capture_effort_but_keeps_facts() {
-        // The core invariant: facts (and their capture) outlive the effort. GC of
-        // the effort SET-NULLs the capture's effort_id, never deletes a fact.
+    async fn a_fact_reads_its_captures_turn_and_request_and_outlives_the_turn() {
+        // A capture made in a turn: its facts read the turn and the turn's
+        // request. Deleting the turn SET-NULLs the
+        // capture's turn, never deletes a fact.
         let store = fixture().await;
         let m = measure(&store, "oxplow.complexity").await;
         let capture = store
             .record_facts(
                 NewMetricCapture {
-                    effort_id: Some(1),
+                    turn_id: Some(1),
                     captured_at: Some(at("2026-06-30T10:30:00Z")),
                     ..NewMetricCapture::done(1, "metrics", "builtin")
                 },
@@ -7735,24 +7942,21 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(
-            store.get_capture(capture).await.unwrap().unwrap().effort_id,
-            Some(1)
-        );
+        let rows = store.facts_for_measure(m).await.unwrap();
+        assert_eq!((rows[0].turn_id, rows[0].request_id), (Some(1), Some(1)));
+        assert!(rows[0].derived.is_empty(), "the store derives nothing");
 
-        // Delete the effort — the capture and its fact must survive.
         store
             .db
-            .call(|conn| conn.execute("DELETE FROM effort WHERE id = 1", []))
+            .call(|conn| conn.execute("DELETE FROM agent_turn WHERE id = 1", []))
             .await
             .unwrap();
-
         let cap = store.get_capture(capture).await.unwrap().unwrap();
-        assert_eq!(cap.effort_id, None, "effort_id SET NULL on GC");
+        assert_eq!(cap.turn_id, None, "turn_id SET NULL on delete");
         let rows = store.facts_for_measure(m).await.unwrap();
-        assert_eq!(rows.len(), 1, "fact survives effort deletion");
+        assert_eq!(rows.len(), 1, "the fact survives its turn");
         assert_eq!(rows[0].value, 7.0);
-        assert_eq!(rows[0].effort_id, None);
+        assert_eq!((rows[0].turn_id, rows[0].request_id), (None, None));
     }
 
     #[tokio::test]
@@ -7795,7 +7999,7 @@ mod tests {
 
     #[tokio::test]
     async fn representative_facts_by_slice_returns_the_lowest_id_row_of_each_slice() {
-        // tsk239/tsk242: the rows this returns are FULL facts, and the caller
+        // the rows this returns are FULL facts, and the caller
         // runs a `FactFilter` over them — a filter that can read `value`,
         // `path`, `subject_ref`, `subject_kind` and `branch`, none of which are
         // part of the (producer, rule, severity, dims_json) slice key. So the
@@ -7884,7 +8088,7 @@ mod tests {
 
     #[tokio::test]
     async fn distinct_slice_keys_matches_the_representative_scans_slices() {
-        // tsk239/tsk242: the cheap producer-discovery path. It must enumerate
+        // the cheap producer-discovery path. It must enumerate
         // EXACTLY the slices the expensive one does — it's chosen at runtime as
         // a drop-in for it whenever the caller's predicate reads only the slice
         // key, so any divergence is a silent change in which producers zero-fill.
@@ -7994,5 +8198,62 @@ mod tests {
         assert_eq!(cap.provenance, "observed");
         let rows = store.facts_for_measure(m).await.unwrap();
         assert!(rows[0].branch.is_none());
+    }
+
+    /// A capture recorded with `replaces` takes the place of its producer's
+    /// earlier captures under the same key: they and their facts go, in the
+    /// same transaction, and every other capture stays. It is placed at the
+    /// time it's given (`captured_at`), not when it was written.
+    #[tokio::test]
+    async fn a_capture_replaces_its_producers_earlier_capture_with_its_key() {
+        let store = fixture().await;
+        let m = measure(&store, "acme.request_cost").await;
+        let record = |key: &str, at_: &str, value: f64| {
+            let capture = NewMetricCapture {
+                replaces: Some(key.into()),
+                captured_at: Some(at(at_)),
+                ..NewMetricCapture::done(1, "acme.outcome", "acme")
+            };
+            let fact = NewFact {
+                subject: Some(key.into()),
+                ..NewFact::new(m, value)
+            };
+            store.record_facts(capture, vec![fact])
+        };
+        let req1 = "oxplow:oxplow/request?id=req1";
+        let a1 = record(req1, "2026-01-05T00:00:00Z", 10.0).await.unwrap();
+        let b = record(
+            "oxplow:oxplow/request?id=req2",
+            "2026-02-05T00:00:00Z",
+            30.0,
+        )
+        .await
+        .unwrap();
+        let a2 = record(req1, "2026-01-05T00:00:00Z", 20.0).await.unwrap();
+        // Another producer's capture under the same key is its own.
+        let other = store
+            .record_facts(
+                NewMetricCapture {
+                    replaces: Some(req1.into()),
+                    ..NewMetricCapture::done(1, "acme.other", "acme")
+                },
+                vec![NewFact::new(m, 1.0)],
+            )
+            .await
+            .unwrap();
+        assert!(store.get_capture(a1).await.unwrap().is_none(), "replaced");
+        let kept = store.get_capture(a2).await.unwrap().unwrap();
+        assert_eq!(kept.captured_at, at("2026-01-05T00:00:00Z"));
+        assert!(store.get_capture(b).await.unwrap().is_some());
+        assert!(store.get_capture(other).await.unwrap().is_some());
+        let mut values: Vec<(i64, f64)> = store
+            .facts_for_measure(m)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|f| (f.capture_id, f.value))
+            .collect();
+        values.sort_by_key(|v| v.0);
+        assert_eq!(values, vec![(b, 30.0), (a2, 20.0), (other, 1.0)]);
     }
 }

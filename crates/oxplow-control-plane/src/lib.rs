@@ -70,7 +70,7 @@ impl ControlPlane {
         format!("http://{}/mcp", self.bind_addr)
     }
 
-    /// Base URL for the OTLP metrics receiver (epic tsk22). This is the
+    /// Base URL for the OTLP metrics receiver. This is the
     /// **base** the agent's OTEL exporter is pointed at via
     /// `OTEL_EXPORTER_OTLP_ENDPOINT`; the SDK appends the signal path
     /// `/v1/metrics` (which [`handle_otlp_metrics`] serves).
@@ -129,7 +129,7 @@ pub async fn spawn(services: Arc<Services>) -> Result<ControlPlane, ControlPlane
 
     let hook_router = Router::new()
         .route("/hook/{event}", post(handle_hook))
-        // OTLP receiver (epic tsk22). Agent CLIs export token usage here —
+        // OTLP receiver. Agent CLIs export token usage here —
         // Claude as metrics, Codex as logs (its `response.completed` event) —
         // attributed by the bearer like a hook. Both signal paths hit one
         // handler; the ingest path decodes metrics-or-logs.
@@ -193,7 +193,7 @@ async fn handle_dev_ping() -> Response {
         .into_response()
 }
 
-/// OTLP/HTTP metrics receiver (epic tsk22). Claude Code exports token usage
+/// OTLP/HTTP metrics receiver. Claude Code exports token usage
 /// here, attributed to the session whose bearer the
 /// exporter carries. The body is logged as one `agent.tokens.reported`
 /// event (`oxplow_app::otlp_ingest`); the `token_usage.otlp` consumer
@@ -207,7 +207,7 @@ async fn handle_otlp_metrics(
     Extension(principal): Extension<Principal>,
     body: axum::body::Bytes,
 ) -> Response {
-    // Opt-in wire-format diagnostic (tsk25): when `OXPLOW_OTLP_DEBUG` names a
+    // Opt-in wire-format diagnostic: when `OXPLOW_OTLP_DEBUG` names a
     // file, append a human-readable dump of every received export to it — used
     // to discover an agent's real OTEL shape (e.g. Codex) from a live run.
     // Off by default, zero cost when unset.
@@ -225,7 +225,7 @@ async fn handle_otlp_metrics(
 }
 
 /// Append a human-readable dump of an OTLP export to the file named by
-/// `OXPLOW_OTLP_DEBUG` (tsk25). No-op when the env var is unset. Best-effort:
+/// `OXPLOW_OTLP_DEBUG`. No-op when the env var is unset. Best-effort:
 /// a file/IO error is ignored (it's a diagnostic, never load-bearing).
 fn otlp_debug_dump(principal: &Principal, body: &[u8]) {
     let Ok(path) = std::env::var("OXPLOW_OTLP_DEBUG") else {
@@ -256,17 +256,24 @@ fn otlp_debug_dump(principal: &Principal, body: &[u8]) {
 /// before depending on them. No-op when unset; best-effort, like
 /// [`otlp_debug_dump`].
 fn hook_debug_dump(event: &str, thread: Option<&str>, body: &[u8]) {
-    let Ok(path) = std::env::var("OXPLOW_HOOK_DEBUG") else {
+    dump_to(
+        std::env::var("OXPLOW_HOOK_DEBUG").ok().as_deref(),
+        event,
+        thread,
+        body,
+    );
+}
+
+/// Append the entry to `path` when there is one (unset or empty: nothing).
+fn dump_to(path: Option<&str>, event: &str, thread: Option<&str>, body: &[u8]) {
+    let Some(path) = path.filter(|p| !p.is_empty()) else {
         return;
     };
-    if path.is_empty() {
-        return;
-    }
     use std::io::Write;
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(&path)
+        .open(path)
     {
         let _ = f.write_all(hook_debug_entry(event, thread, body).as_bytes());
     }
@@ -307,6 +314,10 @@ fn otlp_ok() -> Response {
 /// the call site anyway.
 const HOOK_HANDLING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// The "event" of an opencode bridge post that is a raw recording line, not
+/// a hook (`assets/opencode-hooks.js`).
+const RAW_OPENCODE: &str = "opencode.raw";
+
 async fn handle_hook(
     State(ctx): State<AppCtx>,
     Extension(principal): Extension<Principal>,
@@ -314,6 +325,18 @@ async fn handle_hook(
     body: axum::body::Bytes,
 ) -> Response {
     let event_name = event.clone();
+    // opencode's raw events and hook inputs, posted by its bridge while
+    // `OXPLOW_HOOK_DEBUG` is set: appended to that file as their own lines
+    // and nothing else. Unset, they are acked and dropped.
+    if event == RAW_OPENCODE {
+        hook_debug_dump(&event, Some(&principal.thread.to_string()), &body);
+        return respond(
+            &ctx.services.harnesses,
+            Some(&principal.harness),
+            &HookAnswer::Ack,
+        )
+        .await;
+    }
     // A timed-out hook gets its harness's ack.
     let ack = respond(
         &ctx.services.harnesses,
@@ -406,6 +429,18 @@ async fn handle_hook_inner(
         )
         .await;
     }
+    // What the body means, as the bearer's harness reads it.
+    let reading = body_value
+        .as_ref()
+        .and_then(|body| {
+            ctx.services
+                .harnesses
+                .get(&principal.harness)
+                .ok()
+                .map(|h| h.reading(body))
+        })
+        .unwrap_or_default();
+
     if matches!(
         event.as_str(),
         "SessionStart"
@@ -416,7 +451,14 @@ async fn handle_hook_inner(
             | "SubagentStop"
             | "PostCompact"
     ) {
-        if event == "SessionStart" {
+        // A fresh start, or a compaction a harness reports only after the
+        // fact (opencode posts PostCompact, never PreCompact): what the
+        // session was told is gone, so the next prompt says it again. An
+        // ended session's records go with it.
+        if matches!(
+            event.as_str(),
+            "SessionStart" | "PostCompact" | "SessionEnd"
+        ) {
             ctx.services
                 .agent_context
                 .reset_session(session_id.as_deref());
@@ -452,6 +494,7 @@ async fn handle_hook_inner(
         let envelope = HookEnvelope {
             session_title: None,
             turn_run: None,
+            reading: reading.clone(),
             kind,
             thread_id,
             stream_id,
@@ -462,7 +505,7 @@ async fn handle_hook_inner(
             decision: None,
             tool,
             subagent,
-            peer: None,
+            harness_turn: None,
         };
         let harness = match ctx.services.hook_ingest.ingest(envelope).await {
             Ok(outcome) => outcome.harness,
@@ -488,22 +531,16 @@ async fn handle_hook_inner(
         }
     };
 
-    // What a prompt hook is, as the bearer's harness reads it: a person's
-    // prompt, or a subagent handing its report back (no prompt; the
-    // subagent).
-    let (prompt, handback, peer) = match (kind, body_value.as_ref()) {
+    // What a prompt hook is, as the bearer's harness reads it (who opened
+    // the turn, and its text), and the harness's own id of that turn.
+    let (prompt, harness_turn) = match (kind, body_value.as_ref()) {
         (HookKind::UserPromptSubmit, Some(body)) => {
             match ctx.services.harnesses.get(&principal.harness) {
-                Ok(h) => match h.prompt(body).await {
-                    Some(Prompt::Person { text }) => (Some(text), None, None),
-                    Some(Prompt::Handback { subagent }) => (None, Some(subagent), None),
-                    Some(Prompt::PeerMessage { from }) => (None, None, Some(from)),
-                    None => (None, None, None),
-                },
-                Err(_) => (None, None, None),
+                Ok(h) => (h.prompt(body).await, h.harness_turn_id(body)),
+                Err(_) => (None, None),
             }
         }
-        _ => (None, None, None),
+        _ => (None, None),
     };
 
     // The name the bearer's harness gives the session's conversation, when
@@ -547,6 +584,7 @@ async fn handle_hook_inner(
             let envelope = HookEnvelope {
                 session_title: None,
                 turn_run: None,
+                reading: reading.clone(),
                 kind,
                 thread_id,
                 stream_id,
@@ -560,7 +598,7 @@ async fn handle_hook_inner(
                 }),
                 tool: tool.clone(),
                 subagent: None,
-                peer: None,
+                harness_turn: None,
             };
             let harness = match ctx.services.hook_ingest.ingest(envelope).await {
                 Ok(outcome) => outcome.harness,
@@ -581,6 +619,7 @@ async fn handle_hook_inner(
     let envelope = HookEnvelope {
         session_title,
         turn_run,
+        reading,
         kind,
         thread_id,
         stream_id,
@@ -593,8 +632,8 @@ async fn handle_hook_inner(
             reason: None,
         }),
         tool: tool.clone(),
-        subagent: handback.clone(),
-        peer,
+        subagent: None,
+        harness_turn,
     };
 
     let envelope_for_resume = envelope.clone();
@@ -609,11 +648,11 @@ async fn handle_hook_inner(
         }
     };
     let harness = harness.as_deref();
-    // Token usage (tsk104) is counted from the Stop's `agent.turn.ended`
+    // Token usage is counted from the Stop's `agent.turn.ended`
     // by the `token_usage.turns` pump reactor (P3.7), not in the hook.
 
-    // PostToolUse: record the call (wiki attribution, effort claim, tool
-    // call, collection — pump reactors on the event the ingest logged) and
+    // PostToolUse: record the call (knowledge attribution, tool call,
+    // collection — pump reactors on the event the ingest logged) and
     // hand back any context for the agent (the thread's undelivered
     // nudges).
     if kind == HookKind::PostToolUse {
@@ -637,9 +676,10 @@ async fn handle_hook_inner(
         }
     }
 
-    // UserPromptSubmit: session context (when it changed), prompt
-    // advisories and the effort's decisions ride additionalContext.
-    if kind == HookKind::UserPromptSubmit && handback.is_none() {
+    // UserPromptSubmit: session context (when it changed) and prompt
+    // advisories ride additionalContext.
+    let handback = matches!(envelope_for_resume.prompt, Some(Prompt::Handback { .. }));
+    if kind == HookKind::UserPromptSubmit && !handback {
         if let Some(thread_id) = envelope_for_resume.thread_id.as_ref() {
             if let Some(combined) = ctx
                 .services
@@ -781,6 +821,43 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(raw.trim_end()).unwrap();
         assert_eq!(v["payload"], "not json");
         assert!(v["thread"].is_null());
+    }
+
+    /// opencode's raw lines land in the recording as their own entries,
+    /// between the translated hooks, in order; without a file nothing is
+    /// written.
+    #[test]
+    fn raw_opencode_lines_are_recorded_only_with_a_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("hooks.jsonl");
+        let path = file.to_str().unwrap();
+        dump_to(
+            Some(path),
+            "UserPromptSubmit",
+            Some("thr3"),
+            br#"{"prompt":"hi"}"#,
+        );
+        dump_to(
+            Some(path),
+            RAW_OPENCODE,
+            Some("thr3"),
+            br#"{"kind":"event","type":"session.idle","event":{"type":"session.idle"}}"#,
+        );
+        dump_to(Some(path), "Stop", Some("thr3"), br#"{"session_id":"s"}"#);
+        let lines: Vec<serde_json::Value> = std::fs::read_to_string(&file)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        let events: Vec<&str> = lines.iter().map(|l| l["event"].as_str().unwrap()).collect();
+        assert_eq!(events, ["UserPromptSubmit", "opencode.raw", "Stop"]);
+        assert_eq!(lines[1]["payload"]["type"], "session.idle");
+
+        let off = dir.path().join("off.jsonl");
+        dump_to(None, RAW_OPENCODE, None, b"{}");
+        dump_to(Some(""), RAW_OPENCODE, None, b"{}");
+        assert!(!off.exists());
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
     }
 
     fn auth(value: &'static str) -> HeaderMap {

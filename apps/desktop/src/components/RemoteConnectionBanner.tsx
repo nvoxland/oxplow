@@ -16,7 +16,7 @@ import {
 /// transport.ts), so `restored` is just a brief non-blocking
 /// confirmation — no reload prompt, and it auto-dismisses. The
 /// daemon-side work (agents, watchers) ran through the gap either
-/// way. `refused` when the daemon refused this window's token (tsk971):
+/// way. `refused` when the daemon refused this window's token:
 /// not a drop, so sticky — only reconnecting with the right token helps.
 export type BannerState = "hidden" | "down" | "restored" | "refused";
 

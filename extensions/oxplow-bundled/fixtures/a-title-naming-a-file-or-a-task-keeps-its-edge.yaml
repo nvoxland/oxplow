@@ -1,0 +1,15 @@
+# A task's title is parsed for references as its body is (core parsed both):
+# a title naming a file or another task has the edge, from the task.
+requires: [oxtask]
+given:
+  - { command: oxtask.task.create, input: { title: Plain } }
+  - { command: oxtask.task.create, input: { title: "Fix [[src/lib.rs]] after [oxplow uri oxplow:oxplow/task?id=tsk1&provider=oxtask]", body: "And [[src/body.rs]]." } }
+when:
+  sql: |
+    SELECT ref_type, target_uri FROM v_page_ref
+     WHERE source_uri = 'oxplow:oxplow/task?id=tsk2&provider=oxtask' ORDER BY target_uri
+expect:
+  rows:
+    - { ref_type: file_mention, target_uri: "oxplow:oxplow/file?path=src/body.rs" }
+    - { ref_type: file_mention, target_uri: "oxplow:oxplow/file?path=src/lib.rs" }
+    - { ref_type: task_mention, target_uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" }

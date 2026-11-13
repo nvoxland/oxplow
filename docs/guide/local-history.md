@@ -22,23 +22,24 @@ uncommitted state must be distinguished from an exact commit match.
 This lets you move between the work observed during development and the
 committed result.
 
-## Effort
+## Turns and requests
 
-Optional effort policies group a thread's development activity. The
-normal policy opens an effort when a turn changes files, can associate
-it with work items, and closes it when its work lands in a commit or its
-work context changes. This is separate from a task's lifecycle: a closed
-effort does not automatically mark a task done.
+A **turn** is one run of an agent, from a prompt to its stop. A
+**request** is the turn that started something, plus every turn that
+followed from it, such as a background job's report or a subagent's
+hand-back. Work recorded against a turn, such as tool calls, tokens and
+test runs, belongs to the request. A request can link to tasks and to
+commits. A finished request does not automatically mark a task done.
 
-Effort files are observed from edits and working-tree changes. Shell
-commands and formatters can contribute changes as well as edit tools.
-The captured start and end states provide the bracket for reviewing an
-effort.
+Each turn's files come from joining the turn with its stream's snapshots.
+Snapshots are the worktree's own record, so shell commands and
+formatters contribute changes as well as edit tools. The captured states
+around a turn provide the bracket for reviewing it.
 
 ## The Local History dashboard
 
 Open **Local History** from the launcher (++cmd+p++) to browse snapshots
-and follow their associated changes and efforts. File pages also offer
+and follow their associated changes and requests. File pages also offer
 history for that path. The available analysis sections depend on the
 extensions enabled in the project; file history and diffs provide the
 underlying evidence.

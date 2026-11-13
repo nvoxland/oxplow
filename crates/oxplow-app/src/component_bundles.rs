@@ -1,4 +1,4 @@
-//! What a custom component's frame runs (tsk984): its bundle, keyed by its
+//! What a custom component's frame runs: its bundle, keyed by its
 //! **version** — a hash over the bundle's files and what it may query and
 //! run ([`bundle_version`]). The daemon
 //! serves the frame at `/components/v/<version>/…` from the bundle's folder
@@ -36,6 +36,8 @@ pub struct BundleSnapshot {
     pub(crate) generation: Option<String>,
     /// The commands it may run, as hashed.
     pub commands: Vec<String>,
+    /// The action points it may run, as hashed.
+    pub points: Vec<String>,
     /// It may run its own read-only SQL (`sql: read`), as hashed.
     pub sql: bool,
     /// The bundle's folder (in its deployment).
@@ -254,6 +256,7 @@ fn build_snapshot(
         component: component.id.clone(),
         generation,
         commands: component.commands.clone(),
+        points: component.action_points.clone(),
         sql: component.sql.is_some(),
         dir: root.join(&folder),
         files,
@@ -285,6 +288,10 @@ pub(crate) fn bundle_version(
     for c in &component.commands {
         h.update([7u8]);
         h.update(c.as_bytes());
+    }
+    for p in &component.action_points {
+        h.update([5u8]);
+        h.update(p.as_bytes());
     }
     if component.sql.is_some() {
         h.update([9u8]);

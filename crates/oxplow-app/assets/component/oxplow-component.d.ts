@@ -85,6 +85,13 @@ export interface OxplowComponent {
    *  `DENIED` when a policy refuses it, or the bundle it was loaded at is
    *  no longer the deployed one). */
   invoke(command: string, input?: unknown): Promise<unknown>;
+  /** Run an action point this component declares in `action_points`, as
+   *  the person looking at it: the command that answers `point` for
+   *  `context` runs with the input the point binds (a store's own command
+   *  needs no entry in `commands`). `command` names which when several
+   *  answer; with none answering it rejects `INVALID` ("nothing answers").
+   *  Rejects as {@link invoke} does. */
+  invokePoint(point: string, context?: unknown, command?: string): Promise<unknown>;
   /** Open one of oxplow's pages, in a new tab with `{ newTab: true }`.
    *  Rejects with an {@link OxplowError}. */
   navigate(ref: string, options?: { newTab?: boolean }): Promise<null>;
@@ -92,6 +99,12 @@ export interface OxplowComponent {
    *  `sql: read` on the component and `permissions.sql: read` on its
    *  extension. Rejects with an {@link OxplowError}. */
   querySql(sql: string, params?: OxplowCell[]): Promise<OxplowRows>;
+  /** Draw markdown into `element`, replacing its children, as oxplow reads
+   *  it (GFM, wikilinks, a link by its page's title); `{ inline: true }`
+   *  keeps one line. A link to an oxplow page opens it (Cmd/Ctrl-click: a
+   *  new tab); a web link is its text with the URL on hover. Adds the kit's
+   *  `ox-md` class (`ox-md-inline` for a line). Resolves once drawn. */
+  renderMarkdown(element: Element, text: string, options?: { inline?: boolean }): Promise<void>;
   /** Open the form of a command this component declares, in oxplow,
    *  starting from `input`: resolves with its result once submitted,
    *  rejects `CANCELLED` when the person closes it. A page only. */

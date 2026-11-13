@@ -89,7 +89,7 @@ test("treemap viz nodes draw a tile per positive item and link through the viz's
   );
   const tiles = container.querySelectorAll('[data-testid="viz-treemap-tile"]');
   expect(tiles.length).toBe(2);
-  // Theme tokens, never inline hex (tsk371).
+  // Theme tokens, never inline hex.
   for (const tile of tiles) {
     for (const el of tile.querySelectorAll("rect, text")) {
       for (const attr of ["fill", "stroke"]) {
@@ -135,8 +135,8 @@ test("a table with `hide_header` draws its rows and no header row", () => {
 });
 
 test("declared whole-viz actions are buttons, row actions aren't", () => {
-  const finish = { id: "finish", label: "Finish", command: "oxplow.work_item.transition", input: {}, row: false };
-  const perRow = { id: "row", label: "Per Row", command: "oxplow.work_item.transition", input: {}, row: true };
+  const finish = { id: "finish", label: "Finish", command: "acme.issue.transition", input: {}, row: false };
+  const perRow = { id: "row", label: "Per Row", command: "acme.issue.transition", input: {}, row: true };
   const { getByTestId, queryByTestId } = render(
     <VizView
       run={run({ viz: "table", actions: [finish, perRow] }, ["id"], [[1]])}

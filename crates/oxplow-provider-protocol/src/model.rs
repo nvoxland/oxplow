@@ -67,7 +67,7 @@ pub struct InitializeParams {
     pub host: Party,
 }
 
-/// A capability the provider implements (`work_items`), with the
+/// A capability the provider implements (`snapshots`), with the
 /// capability's own feature flags and, for a capability whose contract
 /// asks for more (an agent harness's instruction files, environment
 /// markers and settings), what it declares of itself as `data`.
@@ -212,12 +212,12 @@ pub struct InvokeContext {
     /// The run's id in oxplow's records.
     pub run: String,
     /// Who it runs as: `human`, `agent:thr3`, `system`,
-    /// `effect:<extension>/<id>`, `effect:effort_policy:<id>`.
+    /// `effect:<extension>/<id>`.
     pub actor: String,
     /// The id of the event that caused it, when one did.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cause: Option<String>,
-    /// Where it sits — `stream_id`, `thread_id`, `effort_id`, `turn_id`,
+    /// Where it sits — `stream_id`, `thread_id`, `request_id`, `turn_id`,
     /// `agent_session_id`, `snapshot_id` — as the event envelope has them,
     /// `null` where the run has none.
     pub anchors: Value,

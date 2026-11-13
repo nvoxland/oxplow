@@ -1,0 +1,3 @@
+requires: [oxplow-bundled]
+when: { command: oxwiki.page.delete, input: { id: nothing-here }, confirmed: true }
+expect: { ok: false, refused: "no page" }

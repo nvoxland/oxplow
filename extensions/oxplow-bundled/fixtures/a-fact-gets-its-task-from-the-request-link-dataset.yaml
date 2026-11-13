@@ -1,0 +1,21 @@
+# The oxplow.task dimension is bundled's: a fact's task is the one its
+# request worked on, read through the request-link dataset. A request that
+# took no task has no value on it.
+requires: [oxtask]
+given:
+  - { command: oxtask.task.create, input: { title: The fix, stage: ready } }
+  - observe:
+      turn:
+        prompt: Fix the greeting
+        during:
+          - { command: oxtask.task.move, input: { id: tsk1, stage: in_progress }, as: agent }
+        tools: [{ name: Edit, kind: edit, paths: [a.txt], ok: true }]
+  - { command: oxtask.task.move, input: { id: tsk1, stage: done } }
+  - observe:
+      turn:
+        prompt: Tweak the farewell
+        tools: [{ name: Edit, kind: edit, paths: [b.txt], ok: true }]
+when: { sql: "SELECT \"oxplow.task\" AS task, MEASURE('tasks.tracked_requests_pct') AS pct FROM metric_grid('month', 'oxplow.task')" }
+expect:
+  rows:
+    - { task: "oxplow:oxplow/task?id=tsk1&provider=oxtask", pct: 100.0 }

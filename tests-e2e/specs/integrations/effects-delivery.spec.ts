@@ -1,9 +1,9 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { deploy, extensionSource, ipc, run, type Daemon } from "../../support/daemon.js";
+import { deploy, extensionSource, fileTask, ipc, run, type Daemon } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { open } from "../../support/ui.js";
+import { open, taskIdOf } from "../../support/ui.js";
 
 // The test extension's effect comments on each created task; a title with
 // "[fail]" makes it comment on an item that doesn't exist.
@@ -16,7 +16,7 @@ async function sql(daemon: Daemon, query: string): Promise<unknown[][]> {
 
 /** The item titled `title`'s ref. */
 async function refOf(daemon: Daemon, title: string): Promise<string> {
-  const rows = await sql(daemon, `SELECT uri FROM v_work_item WHERE title = '${title}'`);
+  const rows = await sql(daemon, `SELECT uri FROM v_oxplow_task WHERE title = '${title}'`);
   return String(rows[0]?.[0]);
 }
 
@@ -24,7 +24,7 @@ async function refOf(daemon: Daemon, title: string): Promise<string> {
 async function notesOn(daemon: Daemon, title: string): Promise<number> {
   const rows = await sql(
     daemon,
-    `SELECT count(*) FROM v_work_item_comment c JOIN v_work_item w ON w.uri = c.uri
+    `SELECT count(*) FROM v_oxplow_task_comment c JOIN v_oxplow_task w ON w.uri = c.uri
       WHERE w.title = '${title}' AND c.body = 'Noted by the suite''s effect.'`,
   );
   return Number(rows[0]?.[0]);
@@ -32,12 +32,12 @@ async function notesOn(daemon: Daemon, title: string): Promise<number> {
 
 test("a failed reaction is in Delivery, and a person's Retry composes it afresh", async ({ page, daemon }) => {
   await open(page, daemon, "oxplow:oxplow/page?page=settings#area=data");
-  await run(daemon, "oxplow.work_item.create", { title: "Plum [fail]", thread: daemon.thread });
+  await fileTask(daemon, "Plum [fail]");
   const row = page.locator("tr", { hasText: "tsk999999" });
   await expect(row).toBeVisible();
   // The person fixes what made it fail, then retries: the effect reads the
   // item as it is now.
-  await run(daemon, "oxplow.work_item.update", { uri: await refOf(daemon, "Plum [fail]"), title: "Plum" });
+  await run(daemon, "oxtask.task.update", { id: taskIdOf(await refOf(daemon, "Plum [fail]")), title: "Plum" });
   await row.click({ button: "right" });
   await page.getByTestId("menu-item-viz-action-retry").click();
   await page.getByTestId("viz-action-confirm-run").click();
@@ -48,18 +48,18 @@ test("a failed reaction is in Delivery, and a person's Retry composes it afresh"
 test("a person's Backfill reaches what was logged before the effect was deployed", async ({ page, daemon }) => {
   // Logged first; then an extension whose effect comments on created
   // tasks is deployed: it starts after what was already logged.
-  await run(daemon, "oxplow.work_item.create", { title: "Fig", thread: daemon.thread });
+  await fileTask(daemon, "Fig");
   const dir = extensionSource(daemon, "late");
   mkdirSync(join(dir, "effects"), { recursive: true });
   writeFileSync(
     join(dir, "extension.yaml"),
     "manifest: 2\nname: late\nintent:\n  purpose: An effect deployed after the event it backfills.\n" +
-      "permissions: [commands:oxplow.work_item.comment]\n" +
-      "effects:\n  - { id: note, summary: Notes a created task., on: [work_item.created], entry: effects/note.star }\n",
+      "requires: [oxtask]\npermissions: [sql.read, commands:oxtask.task.comment]\n" +
+      "effects:\n  - { id: note, summary: Notes a created task., on: [oxplow.task_record.changed], where: { cause: trigger }, entry: effects/note.star, needs: [sql.read] }\n",
   );
   writeFileSync(
     join(dir, "effects", "note.star"),
-    'def transform(x):\n    return {"commands": [{"name": "oxplow.work_item.comment", "input": {"uri": x["event"]["payload"]["work_item"], "body": "Noted late."}}]}\n',
+    'def transform(x):\n    p = x["event"]["payload"]\n    if "state" not in p.get("changed", []) or "state" in (p.get("before") or {}):\n        return {"skip": "not a filing"}\n    rows = scope("sql.read", {"sql": "SELECT native_id AS id FROM v_oxplow_task WHERE uri = :u", "params": {"u": p["uri"]}})\n    return {"commands": [{"name": "oxtask.task.comment", "input": {"id": rows[0]["id"], "body": "Noted late."}}]}\n',
   );
   await deploy(daemon, "late");
   const late = async () =>
@@ -67,7 +67,7 @@ test("a person's Backfill reaches what was logged before the effect was deployed
       (
         await sql(
           daemon,
-          "SELECT count(*) FROM v_work_item_comment c JOIN v_work_item w ON w.uri = c.uri WHERE w.title = 'Fig' AND c.body = 'Noted late.'",
+          "SELECT count(*) FROM v_oxplow_task_comment c JOIN v_oxplow_task w ON w.uri = c.uri WHERE w.title = 'Fig' AND c.body = 'Noted late.'",
         )
       )[0]?.[0],
     );

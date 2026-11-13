@@ -5,7 +5,7 @@
 //! that follows that worktree: the snapshot capture's dirty set, the
 //! announcements on the `EventBus` (`OxplowEvent::WorkspaceChanged`), and the
 //! refs watch through the VCS (`Vcs::watch_refs`, onto `RefMoves`). What follows
-//! a few paths of the primary worktree (the wiki, the config, version control
+//! a few paths of the primary worktree (oxwiki, the config, version control
 //! appearing) subscribes to its watch ([`StreamWatchRegistry::subscribe_primary`]).
 //!
 //! Dropping a stream's entry ([`StreamWatchRegistry::unregister`]) ends its
@@ -354,7 +354,6 @@ mod tests {
                 blobs: crate::blob_store::BlobStore::new(project.join(".oxplow/snapshots")),
                 max_file_bytes: 1_000_000,
                 generated: Default::default(),
-                open_turn_probe: None,
             },
         );
         let bus = EventBus::new();
@@ -486,8 +485,8 @@ mod tests {
     }
 
     /// What changed in a worktree stream while oxplow was off is in a snapshot
-    /// once it has swept; a clean file isn't; and an effort can't start on that
-    /// stream until then.
+    /// once it has swept; a clean file isn't; and a run's mark on that stream
+    /// waits until then.
     #[tokio::test]
     async fn every_stream_sweeps_once_at_start_and_its_gate_holds_until_then() {
         let rig = rig().await;

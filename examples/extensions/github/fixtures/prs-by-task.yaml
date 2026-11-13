@@ -1,6 +1,7 @@
-# Each PR's number, title and author, with the work item its title names.
+# Each PR's number, title and author, with the task its title names.
+requires: [oxtask]
 given:
-  - { command: oxplow.work_item.create, input: { title: Parse blocks }, bind: item }
+  - { command: oxtask.task.create, input: { title: Parse blocks, stage: ready } }
   - rows:
       pr:
         - { number: 12, title: "tsk1: parse blocks", state: open, author: ann, head_branch: parse, draft: false }

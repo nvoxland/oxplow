@@ -89,7 +89,6 @@ pub enum OxplowEvent {
         thread_id: Option<ThreadId>,
         #[specta(type = Option<oxplow_domain::JsNumber>)]
         turn_id: Option<i64>,
-        effort_id: Option<oxplow_domain::EffortId>,
     },
     /// An Assistant session changed (`assistant/`): its transcript, its
     /// status or its settings. The panel asks `assistant_snapshot { id,
@@ -108,8 +107,8 @@ pub enum OxplowEvent {
     /// fetch (`fetch_page_runs`). Never the rows themselves.
     PageRunChanged(crate::pages::open_runs::RunChange),
     /// One or more metric samples landed in `stream_id` (unified metric
-    /// substrate, tsk213). `measures` names the measure keys the write touched
-    /// so a consumer can skip an event that can't affect it (tsk198); an EMPTY
+    /// substrate). `measures` names the measure keys the write touched
+    /// so a consumer can skip an event that can't affect it; an EMPTY
     /// list is fail-open — "unknown, refresh anyway" — which is what the
     /// low-frequency emit sites still send. See `.context/metrics.md`.
     MetricSamplesChanged {
@@ -123,7 +122,7 @@ pub enum OxplowEvent {
     ConfigChanged,
     /// The extension catalog may have changed: a file under the primary
     /// worktree's `.oxplow/extensions/` did, or the `extensions` config key
-    /// (the catalog's own signal, tsk1030). Every host listing what
+    /// (the catalog's own signal). Every host listing what
     /// extensions contribute — the launcher, pages, panels, slots —
     /// reloads, and a page re-runs its definition.
     ExtensionsChanged,
@@ -175,7 +174,7 @@ pub enum OxplowEvent {
     CredentialChanged {
         instance: String,
         name: String,
-        /// The sign-in this news is about, when it is about one (tsk929):
+        /// The sign-in this news is about, when it is about one:
         /// a row waiting on another sign-in of the same credential
         /// ignores it.
         sign_in: Option<u32>,

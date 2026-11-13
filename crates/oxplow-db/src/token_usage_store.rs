@@ -1,5 +1,5 @@
-//! Agent token-usage store (tsk104): per-turn token accounting parsed from
-//! the agent session transcript, attributed to a `effort` + thread,
+//! Agent token-usage store: per-turn token accounting parsed from
+//! the agent session transcript, attributed to a thread and its turn,
 //! plus a per-session read cursor so successive Stops only sum the new tail
 //! of the transcript.
 //!
@@ -11,7 +11,7 @@ use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use oxplow_domain::{DomainError, EffortId, StreamId, ThreadId, Timestamp};
+use oxplow_domain::{DomainError, StreamId, ThreadId, Timestamp};
 
 use crate::database::Database;
 use crate::database::{string_to_ts, ts_to_string};
@@ -22,14 +22,12 @@ pub struct AgentTokenUsage {
     pub id: i64,
     pub stream_id: String,
     pub thread_id: String,
-    /// Nullable — a Stop can land with no open effort.
-    pub effort_id: Option<String>,
     pub session_id: String,
     /// `claude` | `codex` | `opencode`.
     pub agent_kind: String,
     /// Actual model the turn ran on (e.g. `claude-opus-4-8`), for later cost.
     pub model: Option<String>,
-    /// The human-authored user prompt that OPENED this turn (tsk143).
+    /// The human-authored user prompt that OPENED this turn.
     /// Nullable — a turn can be an assistant continuation with no opening
     /// prompt, or an agent kind whose transcript text we don't parse. Pure
     /// observation: read from the transcript, never generated.
@@ -50,7 +48,6 @@ pub struct AgentTokenUsage {
 pub struct NewAgentTokenUsage {
     pub stream_id: String,
     pub thread_id: String,
-    pub effort_id: Option<String>,
     pub session_id: String,
     pub agent_kind: String,
     pub model: Option<String>,
@@ -67,7 +64,7 @@ pub struct NewAgentTokenUsage {
     pub cause: Option<String>,
 }
 
-/// Aggregated totals across a set of usage rows (per effort or per thread).
+/// Aggregated totals across a set of usage rows (per thread).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Type)]
 pub struct TokenUsageTotals {
     pub input_tokens: i64,
@@ -81,12 +78,12 @@ pub struct TokenUsageTotals {
     pub turns: i64,
 }
 
-const SELECT_COLS: &str = "id, stream_id, thread_id, effort_id, session_id, agent_kind, \
+const SELECT_COLS: &str = "id, stream_id, thread_id, session_id, agent_kind, \
      model, prompt, input_tokens, output_tokens, cache_creation_input_tokens, \
      cache_read_input_tokens, message_count, provenance, recorded_at";
 
 fn row_to_usage(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTokenUsage> {
-    let recorded_at: String = row.get(14)?;
+    let recorded_at: String = row.get(13)?;
     let map_err = |e: DomainError| {
         rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
     };
@@ -94,19 +91,16 @@ fn row_to_usage(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTokenUsage> {
         id: row.get(0)?,
         stream_id: StreamId::new(row.get::<_, i64>(1)?).to_string(),
         thread_id: ThreadId::new(row.get::<_, i64>(2)?).to_string(),
-        effort_id: row
-            .get::<_, Option<i64>>(3)?
-            .map(|v| EffortId::new(v).to_string()),
-        session_id: row.get(4)?,
-        agent_kind: row.get(5)?,
-        model: row.get(6)?,
-        prompt: row.get(7)?,
-        input_tokens: row.get(8)?,
-        output_tokens: row.get(9)?,
-        cache_creation_input_tokens: row.get(10)?,
-        cache_read_input_tokens: row.get(11)?,
-        message_count: row.get(12)?,
-        provenance: row.get(13)?,
+        session_id: row.get(3)?,
+        agent_kind: row.get(4)?,
+        model: row.get(5)?,
+        prompt: row.get(6)?,
+        input_tokens: row.get(7)?,
+        output_tokens: row.get(8)?,
+        cache_creation_input_tokens: row.get(9)?,
+        cache_read_input_tokens: row.get(10)?,
+        message_count: row.get(11)?,
+        provenance: row.get(12)?,
         recorded_at: string_to_ts(&recorded_at).map_err(map_err)?,
     })
 }
@@ -150,48 +144,29 @@ impl SqliteTokenUsageStore {
             .await
     }
 
-    /// Usage rows for an effort, newest-first.
-    pub async fn list_for_effort(
+    /// Usage rows for a thread, newest-first.
+    pub async fn list_for_thread(
         &self,
-        effort_id: &str,
+        thread_id: &str,
     ) -> Result<Vec<AgentTokenUsage>, DomainError> {
-        let effort_val = EffortId::try_from_str(effort_id)
-            .ok_or_else(|| DomainError::Invalid(format!("bad effort id: {effort_id}")))?
+        let thread_val = ThreadId::try_from_str(thread_id)
+            .ok_or_else(|| DomainError::Invalid(format!("bad thread id: {thread_id}")))?
             .value();
         self.db
             .call(move |conn| {
                 let sql = format!(
                     "SELECT {SELECT_COLS} FROM agent_token_usage
-                      WHERE effort_id = ?1
+                      WHERE thread_id = ?1
                       ORDER BY recorded_at DESC, id DESC"
                 );
                 let mut stmt = conn.prepare(&sql)?;
-                let rows = stmt.query_map(params![effort_val], row_to_usage)?;
+                let rows = stmt.query_map(params![thread_val], row_to_usage)?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
     }
 
-    /// Summed totals for one effort.
-    pub async fn totals_for_effort(
-        &self,
-        effort_id: &str,
-    ) -> Result<TokenUsageTotals, DomainError> {
-        let effort_val = EffortId::try_from_str(effort_id)
-            .ok_or_else(|| DomainError::Invalid(format!("bad effort id: {effort_id}")))?
-            .value();
-        self.db
-            .call(move |conn| {
-                conn.query_row(
-                    &totals_sql("effort_id = ?1"),
-                    params![effort_val],
-                    totals_from_row,
-                )
-            })
-            .await
-    }
-
-    /// Summed totals for one thread (all efforts + effort-less turns).
+    /// Summed totals for one thread.
     pub async fn totals_for_thread(
         &self,
         thread_id: &str,
@@ -248,27 +223,18 @@ pub fn insert_tx(
     let thread_val = ThreadId::try_from_str(&usage.thread_id)
         .ok_or_else(|| DomainError::Invalid(format!("bad thread id: {}", usage.thread_id)))?
         .value();
-    let effort_val = match usage.effort_id.as_deref() {
-        Some(e) => Some(
-            EffortId::try_from_str(e)
-                .ok_or_else(|| DomainError::Invalid(format!("bad effort id: {e}")))?
-                .value(),
-        ),
-        None => None,
-    };
     let now = ts_to_string(Timestamp::now());
     conn.query_row(
         "INSERT INTO agent_token_usage
-           (stream_id, thread_id, effort_id, session_id, agent_kind, model, prompt,
+           (stream_id, thread_id, session_id, agent_kind, model, prompt,
             input_tokens, output_tokens, cache_creation_input_tokens,
             cache_read_input_tokens, message_count, provenance, recorded_at, turn_id, cause)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'observed', ?13, ?14, ?15)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'observed', ?12, ?13, ?14)
          ON CONFLICT (cause) WHERE cause IS NOT NULL DO NOTHING
          RETURNING id",
         params![
             stream_val,
             thread_val,
-            effort_val,
             usage.session_id,
             usage.agent_kind,
             usage.model,
@@ -347,9 +313,8 @@ fn totals_at(row: &rusqlite::Row<'_>, base: usize) -> rusqlite::Result<TokenUsag
 mod tests {
     use super::*;
 
-    /// Build a minimal stream → thread → task → effort chain so FK-on
-    /// inserts succeed. Returns `(store, effort_id)`.
-    async fn fixture() -> (SqliteTokenUsageStore, String) {
+    /// Build a minimal stream → thread chain so FK-on inserts succeed.
+    async fn fixture() -> SqliteTokenUsageStore {
         let db = Database::in_memory();
         let db2 = db.clone();
         tokio::task::spawn_blocking(move || {
@@ -365,31 +330,19 @@ mod tests {
                      VALUES (1, 1, 't', ?1, ?1)",
                     [now],
                 )?;
-                conn.execute(
-                    "INSERT INTO task (thread_id, title, status, priority, created_by, created_at, updated_at)
-                     VALUES (1, 't', 'in_progress', 'medium', 'user', ?1, ?1)",
-                    [now],
-                )?;
-                let task_id = conn.last_insert_rowid();
-                conn.execute(
-                    "INSERT INTO effort (work_item, thread_id, started_at)
-                     VALUES ('oxplow:oxplow/work_item?id=tsk&provider=oxplow' || ?1, 1, ?2)",
-                    params![task_id, now],
-                )?;
                 Ok(())
             })
         })
         .await
         .unwrap()
         .unwrap();
-        (SqliteTokenUsageStore::new(db), "eff1".to_string())
+        SqliteTokenUsageStore::new(db)
     }
 
-    fn sample(effort_id: Option<&str>) -> NewAgentTokenUsage {
+    fn sample() -> NewAgentTokenUsage {
         NewAgentTokenUsage {
             stream_id: "str1".into(),
             thread_id: "thr1".into(),
-            effort_id: effort_id.map(str::to_string),
             session_id: "sess-1".into(),
             agent_kind: "claude".into(),
             model: Some("claude-opus-4-8".into()),
@@ -403,23 +356,20 @@ mod tests {
         }
     }
 
-    /// P3.2 (tsk472): the rows and the cursor that consumed their bytes
+    /// P3.2: the rows and the cursor that consumed their bytes
     /// commit together, and a turn's own report counts once.
     #[tokio::test]
     async fn rows_and_cursor_commit_together_and_causes_dedupe() {
-        let (store, effort) = fixture().await;
+        let store = fixture().await;
         let ids = store
-            .record_batch(
-                vec![sample(Some(&effort)), sample(None)],
-                Some(("sess-9".into(), 4096)),
-            )
+            .record_batch(vec![sample(), sample()], Some(("sess-9".into(), 4096)))
             .await
             .unwrap();
         assert_eq!(ids.len(), 2);
         assert_eq!(store.cursor("sess-9").await.unwrap(), Some(4096));
         let caused = NewAgentTokenUsage {
             cause: Some("evt-7".into()),
-            ..sample(Some(&effort))
+            ..sample()
         };
         let first = store
             .record_batch(vec![caused.clone()], None)
@@ -431,17 +381,12 @@ mod tests {
 
     #[tokio::test]
     async fn record_then_list_round_trips_fields() {
-        let (store, effort) = fixture().await;
-        let id = store
-            .record(sample(Some("eff1")))
-            .await
-            .unwrap()
-            .expect("written");
-        let got = store.list_for_effort(&effort).await.unwrap();
+        let store = fixture().await;
+        let id = store.record(sample()).await.unwrap().expect("written");
+        let got = store.list_for_thread("thr1").await.unwrap();
         assert_eq!(got.len(), 1);
         let u = &got[0];
         assert_eq!(u.id, id);
-        assert_eq!(u.effort_id.as_deref(), Some("eff1"));
         assert_eq!(u.thread_id, "thr1");
         assert_eq!(u.agent_kind, "claude");
         assert_eq!(u.model.as_deref(), Some("claude-opus-4-8"));
@@ -456,64 +401,34 @@ mod tests {
 
     #[tokio::test]
     async fn totals_sum_across_rows() {
-        let (store, effort) = fixture().await;
-        store.record(sample(Some("eff1"))).await.unwrap();
-        store.record(sample(Some("eff1"))).await.unwrap();
-
-        let eff = store.totals_for_effort(&effort).await.unwrap();
-        assert_eq!(eff.input_tokens, 200);
-        assert_eq!(eff.output_tokens, 40);
-        assert_eq!(eff.cache_creation_input_tokens, 100);
-        assert_eq!(eff.cache_read_input_tokens, 400);
-        assert_eq!(eff.total_tokens, 200 + 40 + 100 + 400);
-        assert_eq!(eff.message_count, 4);
-        assert_eq!(eff.turns, 2);
+        let store = fixture().await;
+        store.record(sample()).await.unwrap();
+        store.record(sample()).await.unwrap();
 
         let thread = store.totals_for_thread("thr1").await.unwrap();
-        assert_eq!(thread.total_tokens, eff.total_tokens);
-        assert_eq!(thread.turns, 2);
-    }
-
-    #[tokio::test]
-    async fn thread_totals_include_effortless_turns() {
-        let (store, _effort) = fixture().await;
-        store.record(sample(Some("eff1"))).await.unwrap();
-        store.record(sample(None)).await.unwrap(); // Stop with no open effort
-        let thread = store.totals_for_thread("thr1").await.unwrap();
-        assert_eq!(thread.turns, 2);
         assert_eq!(thread.input_tokens, 200);
-        // Effort totals only count the attributed row.
-        let eff = store.totals_for_effort("eff1").await.unwrap();
-        assert_eq!(eff.turns, 1);
+        assert_eq!(thread.output_tokens, 40);
+        assert_eq!(thread.cache_creation_input_tokens, 100);
+        assert_eq!(thread.cache_read_input_tokens, 400);
+        assert_eq!(thread.total_tokens, 200 + 40 + 100 + 400);
+        assert_eq!(thread.message_count, 4);
+        assert_eq!(thread.turns, 2);
     }
 
     #[tokio::test]
     async fn empty_totals_are_zero() {
-        let (store, effort) = fixture().await;
-        let eff = store.totals_for_effort(&effort).await.unwrap();
-        assert_eq!(eff, TokenUsageTotals::default());
+        let store = fixture().await;
+        let thread = store.totals_for_thread("thr1").await.unwrap();
+        assert_eq!(thread, TokenUsageTotals::default());
     }
 
     #[tokio::test]
     async fn cursor_round_trips_and_upserts() {
-        let (store, _effort) = fixture().await;
+        let store = fixture().await;
         assert_eq!(store.cursor("sess-1").await.unwrap(), None);
         store.set_cursor("sess-1", 1234).await.unwrap();
         assert_eq!(store.cursor("sess-1").await.unwrap(), Some(1234));
         store.set_cursor("sess-1", 5678).await.unwrap();
         assert_eq!(store.cursor("sess-1").await.unwrap(), Some(5678));
-    }
-
-    #[tokio::test]
-    async fn deleting_effort_cascades_but_keeps_thread_total() {
-        let (store, effort) = fixture().await;
-        store.record(sample(Some("eff1"))).await.unwrap();
-        store
-            .db
-            .call(|conn| conn.execute("DELETE FROM effort WHERE id = 1", []))
-            .await
-            .unwrap();
-        // The row referenced the effort, so it cascades away entirely.
-        assert!(store.list_for_effort(&effort).await.unwrap().is_empty());
     }
 }

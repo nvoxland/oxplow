@@ -8,7 +8,7 @@
 SELECT f.id, c.id AS capture_id, m.key AS measure_key, f.value, f.numerator,
        f.denominator, s.kind AS subject_kind, s.uri AS subject, p.path, f.line,
        f.severity, f.rule, f.detail, d.json AS dims_json,
-       c.stream_id, c.thread_id, c.effort_id, c.captured_at, c.branch
+       c.stream_id, c.thread_id, c.turn_id, c.captured_at, c.branch
 FROM source('fact') f
 JOIN source('measure') m ON m.id = f.measure_id
 JOIN source('metric_capture') c ON c.id = f.capture_id
@@ -24,7 +24,7 @@ UNION ALL
 SELECT f.id, c.id AS capture_id, m.key AS measure_key, f.value, f.numerator,
        f.denominator, s.kind AS subject_kind, s.uri AS subject, p.path, f.line,
        f.severity, f.rule, f.detail, d.json AS dims_json,
-       c.stream_id, c.thread_id, c.effort_id, c.captured_at, c.branch
+       c.stream_id, c.thread_id, c.turn_id, c.captured_at, c.branch
 FROM source('fact_chain') ch
 -- CROSS JOIN pins the order: from the chain rows, never from every fact.
 CROSS JOIN source('metric_capture') c ON c.id = ch.capture_id
@@ -46,7 +46,7 @@ SELECT f.id, c.id AS capture_id, m.key AS measure_key, f.value, f.numerator,
                        WHERE fl.fact_id = f.id AND fl.capture_id <= ph.capture_id
                        ORDER BY fl.capture_id DESC LIMIT 1), f.line) AS INTEGER) AS line,
        f.severity, f.rule, f.detail, d.json AS dims_json,
-       c.stream_id, c.thread_id, c.effort_id, c.captured_at, c.branch
+       c.stream_id, c.thread_id, c.turn_id, c.captured_at, c.branch
 FROM source('fact_path_hold') ph
 CROSS JOIN source('metric_capture') c ON c.id = ph.capture_id
 CROSS JOIN source('fact') f INDEXED BY idx_fact_measure_path ON f.measure_id = ph.measure_id AND f.path_id = ph.path_id

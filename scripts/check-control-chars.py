@@ -7,7 +7,7 @@ invisible to every codebase search, and the search reports success with zero
 hits rather than an error. In a codebase an agent has to navigate by search,
 "this file is findable" is a correctness property, not a style preference.
 
-This actually happened (tsk168): two literal NULs in a `.tsx` file — written as
+This actually happened: two literal NULs in a `.tsx` file — written as
 raw control characters instead of the `\\u0000` escape in a `join()` sentinel —
 made the whole file unsearchable, and it was only noticed when a grep for a
 symbol that was definitely there came back empty.

@@ -1,9 +1,9 @@
 # oxplow.ts.ts_ignore — count `@ts-ignore` / `@ts-expect-error` suppression
 # directives (type-error escape hatches). Scoped to comment nodes. Its facts are per-file
-# (subject "file:<path>", nonzero only), so an effort's change attributes
+# (subject "file:<path>", nonzero only), so a request's change attributes
 # through its files.
 # A per-file `oxplow.ast_hit` FACT (rule="ts_ignore") — the metric is the
-# SPEC Sum(oxplow.ast_hit) filtered by that rule (epic tsk12).
+# SPEC Sum(oxplow.ast_hit) filtered by that rule.
 def _ts_files():
     out = []
     for f in files("**/*.ts"):

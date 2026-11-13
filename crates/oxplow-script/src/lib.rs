@@ -4,7 +4,7 @@
 //! extension command handlers run Starlark ([`scope`]).
 //!
 //! Collection is cross-language: report parsers defined as scripts
-//! (a bundled set, plus a project's own report collectors' — tsk863)
+//! (a bundled set, plus a project's own report collectors')
 //! instead of hardcoded Rust `match` arms.
 //!
 //! The design is **two-layer** (see `.context/collection.md`):
@@ -72,7 +72,7 @@ pub enum CollectorRuntime {
     Exec,
 }
 
-/// One durable atomic fact a collector records (epic tsk12; P7.B3) — a
+/// One durable atomic fact a collector records (P7.B3) — a
 /// per-subject measurement bound to a **measure**, the grain a metric spec
 /// re-aggregates. `measure` is the (defined) measure key the fact lands on;
 /// a fact on an undefined measure is a declare-to-collect violation the host
@@ -95,7 +95,7 @@ pub struct CollectedFact {
     /// fact with the idiom slug here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rule: Option<String>,
-    /// Ratio components (epic tsk12) — when the measure is a ratio base, a fact
+    /// Ratio components — when the measure is a ratio base, a fact
     /// may carry its own `num`/`den` so a `ratio` metric re-derives Σnum/Σden
     /// exactly (coverage %, pass rate) instead of averaging pre-divided values.
     /// Both or neither; a bare `value` fact leaves them unset.
@@ -107,21 +107,44 @@ pub struct CollectedFact {
     pub dims: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
-/// A fact collector's output — `{"facts": [...]}` — as its facts.
+/// What a fact collector's run says of its capture, beside its facts
+/// (`"capture": { at?, replaces? }`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CollectedCapture {
+    /// When the facts were true (RFC 3339): the capture is placed there,
+    /// in the trend's period of that time, not at when the run ran.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<String>,
+    /// What the facts are the figures of (a request's URI, say): the
+    /// capture takes the place of the collector's earlier captures of it,
+    /// so it counts once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replaces: Option<String>,
+}
+
+/// A fact collector's output: its facts and what it says of its capture.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Collected {
+    #[serde(default)]
+    pub facts: Vec<CollectedFact>,
+    #[serde(default)]
+    pub capture: Option<CollectedCapture>,
+}
+
+/// A fact collector's output — `{"facts": [...], "capture"?: {at?, replaces?}}`.
+pub fn collected_of(value: serde_json::Value) -> Result<Collected, CollectError> {
+    serde_json::from_value::<Collected>(value).map_err(|e| {
+        CollectError::Shape(format!(
+            "a fact collector returns {{\"facts\": [...], \"capture\"?: {{\"at\"?, \"replaces\"?}}}}: {e}"
+        ))
+    })
+}
+
+/// A fact collector's output as its facts alone ([`collected_of`]).
 pub fn facts_of(value: serde_json::Value) -> Result<Vec<CollectedFact>, CollectError> {
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct Output {
-        #[serde(default)]
-        facts: Vec<CollectedFact>,
-    }
-    serde_json::from_value::<Output>(value)
-        .map(|o| o.facts)
-        .map_err(|e| {
-            CollectError::Shape(format!(
-                "a fact collector returns {{\"facts\": [...]}}: {e}"
-            ))
-        })
+    collected_of(value).map(|o| o.facts)
 }
 
 /// The typed result of running a collector. The variant is determined by the
@@ -503,7 +526,7 @@ mod tests {
             .run(content)
     }
 
-    /// tsk863: every bundled parser is a jaq program of what it records,
+    /// every bundled parser is a jaq program of what it records,
     /// reading a format oxplow pre-parses; an unknown name is none.
     #[test]
     fn the_bundled_parsers_are_named() {
@@ -639,7 +662,7 @@ mod tests {
 
     #[test]
     fn nested_junit_counts_each_case_once() {
-        // tsk361: a nested testcase must not be double-counted under both
+        // a nested testcase must not be double-counted under both
         // its file-suite and its describe-suite.
         let out = bundled("junit", JUNIT_NESTED).expect("parses");
         let test = out.as_test().expect("test output");
@@ -718,6 +741,34 @@ mod tests {
         // Anything but `facts` is refused.
         let err = facts_of(serde_json::json!({ "samples": [] })).unwrap_err();
         assert!(err.to_string().contains("facts"), "{err}");
+    }
+
+    /// A fact collector may say what its run's capture is beside its facts:
+    /// the time its facts are placed at and what they are the figures of
+    /// (the capture takes the place of its earlier ones of it).
+    #[test]
+    fn a_fact_collectors_output_may_place_and_name_its_capture() {
+        let out = collected_of(serde_json::json!({
+            "facts": [{ "measure": "acme.cost", "value": 3 }],
+            "capture": { "at": "2026-01-05T09:00:00Z", "replaces": "oxplow:oxplow/request?id=req1" },
+        }))
+        .expect("collected");
+        assert_eq!(out.facts.len(), 1);
+        assert_eq!(
+            out.capture,
+            Some(CollectedCapture {
+                at: Some("2026-01-05T09:00:00Z".into()),
+                replaces: Some("oxplow:oxplow/request?id=req1".into()),
+            })
+        );
+        assert_eq!(
+            collected_of(serde_json::json!({ "facts": [] }))
+                .unwrap()
+                .capture,
+            None
+        );
+        let err = collected_of(serde_json::json!({ "capture": { "when": "x" } })).unwrap_err();
+        assert!(err.to_string().contains("capture"), "{err}");
     }
 
     #[test]
@@ -833,7 +884,7 @@ def transform(input):
 
     #[test]
     fn source_files_skips_generated_artifacts() {
-        // tsk68: codegen output (a `generated/` path segment or a do-not-edit
+        // codegen output (a `generated/` path segment or a do-not-edit
         // header) must not enter the code-shape corpus — a 3k-line bindings
         // file read as one giant "function" dominates every tail metric.
         let script = r#"
@@ -1061,7 +1112,7 @@ def transform(input):
 
     #[test]
     fn lcov_parser_parses_a_whole_workspace_report_without_timing_out() {
-        // tsk88: the real report here is 5.1MB / 196 files / 64k DA lines, and the
+        // the real report here is 5.1MB / 196 files / 64k DA lines, and the
         // lcov parse landed right at the 5s Budget — so it timed out
         // intermittently under load and coverage was silently NEVER ingested for
         // this project. Every overrun also detached a jq worker that kept burning
@@ -1141,7 +1192,7 @@ def transform(input):
         // time, so the minimum estimates the true cost; the hypothesis gap
         // below (linear ~4x vs quadratic ~16x) is untouched.
         //
-        // tsk175: min-of-3 was not enough. Under `cargo llvm-cov nextest` every
+        // min-of-3 was not enough. Under `cargo llvm-cov nextest` every
         // core is saturated by sibling test processes AND the binary is
         // instrumented, so all three samples of a size can be descheduled
         // together — which is how this test failed once in a full run and then

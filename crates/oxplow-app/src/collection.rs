@@ -1,4 +1,4 @@
-//! Collection engine — effort-scoped observations (which tests ran +
+//! Collection engine — turn-scoped observations (which tests ran +
 //! diff coverage on changed lines). See `.context/collection.md`.
 //!
 //! Two ways in:
@@ -24,10 +24,10 @@ use similar::{ChangeTag, TextDiff};
 use oxplow_config::collectors::{CollectorSpec, Records, RunKind, Trigger};
 use oxplow_config::OxplowConfig;
 use oxplow_db::agent_nudge_store::{NewAgentNudge, SqliteAgentNudgeStore};
-use oxplow_db::{Effort, EffortStore, SqliteEffortStore, SqliteSnapshotStore, SqliteThreadStore};
 use oxplow_db::{NewFact, NewMetricCapture, SqliteFactStore};
+use oxplow_db::{SqliteSnapshotStore, SqliteThreadStore};
 use oxplow_domain::stores::ThreadStore;
-use oxplow_domain::{DomainError, EffortId, ThreadId};
+use oxplow_domain::{DomainError, ThreadId};
 use oxplow_script::{Collector, CollectorInput, CollectorKind, CollectorOutput, CollectorRuntime};
 
 use crate::file_ref_version;
@@ -79,7 +79,7 @@ pub fn detect_test_run(command: &str, extra_patterns: &[String]) -> bool {
 }
 
 /// The sub-command of `command` that runs the tests, trimmed — what a test
-/// run shows as its command, not the agent's whole Bash call (tsk1037). A
+/// run shows as its command, not the agent's whole Bash call. A
 /// `--no-run` invocation builds the tests without running any, so it isn't
 /// one.
 pub fn test_run_segment(command: &str, extra_patterns: &[String]) -> Option<String> {
@@ -91,92 +91,6 @@ pub fn test_run_segment(command: &str, extra_patterns: &[String]) -> Option<Stri
 /// [`detect_test_run`], against the analysis patterns + profile extras.
 pub fn detect_analysis_run(command: &str, extra_patterns: &[String]) -> bool {
     matches_any(command, DEFAULT_ANALYSIS_PATTERNS, extra_patterns)
-}
-
-/// Does `command` look like a `git commit`? Token-aware so it catches
-/// `git commit`, `git commit --amend`, and `git -c user.email=x commit …`
-/// (global flags between `git` and the subcommand), while NOT matching
-/// `git add`, `git status`, or `git log --grep commit`. For each `git` token
-/// it reads the first non-option token (skipping `-c <val>` / `--config <val>`
-/// global flags) and checks it is exactly `commit`.
-pub fn detect_git_commit(command: &str) -> bool {
-    let lower = command.to_ascii_lowercase();
-    let toks: Vec<&str> = lower.split_whitespace().collect();
-    for (i, t) in toks.iter().enumerate() {
-        if *t != "git" && !t.ends_with("/git") {
-            continue;
-        }
-        // Read the subcommand for this `git`, skipping global options and
-        // the value of `-c` / `--config`.
-        let mut j = i + 1;
-        while let Some(tok) = toks.get(j) {
-            if *tok == "-c" || *tok == "--config" {
-                j += 2; // skip the flag and its argument
-                continue;
-            }
-            if tok.starts_with('-') {
-                j += 1;
-                continue;
-            }
-            if *tok == "commit" {
-                return true;
-            }
-            break; // a different subcommand → this `git` isn't a commit
-        }
-    }
-    false
-}
-
-/// True when the command runs `git revert` AND lets it commit (tsk77) —
-/// `--no-commit`/`-n` stages the inverse without landing anything, so there
-/// is no revert commit to attribute waste from. Same global-option skipping
-/// as [`detect_git_commit`]; `git revert` never carries the word "commit",
-/// so the waste leg needs its own detector.
-pub fn detect_git_revert(command: &str) -> bool {
-    let lower = command.to_ascii_lowercase();
-    if lower.contains("--no-commit") || lower.split_whitespace().any(|t| t == "-n") {
-        return false;
-    }
-    let toks: Vec<&str> = lower.split_whitespace().collect();
-    for (i, t) in toks.iter().enumerate() {
-        if *t != "git" && !t.ends_with("/git") {
-            continue;
-        }
-        let mut j = i + 1;
-        while let Some(tok) = toks.get(j) {
-            if *tok == "-c" || *tok == "--config" {
-                j += 2;
-                continue;
-            }
-            if tok.starts_with('-') {
-                j += 1;
-                continue;
-            }
-            if *tok == "revert" {
-                return true;
-            }
-            break;
-        }
-    }
-    false
-}
-
-/// Full-length shas from the stock `git revert` trailer lines
-/// (`This reverts commit <sha>.`), in body order. Prose that merely mentions
-/// reverting doesn't match — only the exact trailer shape counts, which is
-/// what both `git revert` and a hand-written faithful trailer produce.
-fn parse_reverted_shas(body: &str) -> Vec<String> {
-    let mut shas = Vec::new();
-    for line in body.lines() {
-        let Some(rest) = line.trim().strip_prefix("This reverts commit ") else {
-            continue;
-        };
-        let sha: String = rest.chars().take_while(|c| c.is_ascii_hexdigit()).collect();
-        if sha.len() == 40 {
-            shas.push(sha);
-        }
-    }
-    shas
 }
 
 /// Executables that only READ. A sub-command leading with one of these can
@@ -304,7 +218,7 @@ fn heredoc_delimiter(line: &str) -> Option<(String, bool)> {
 }
 
 /// The `metric_capture.trigger` every agent-work run (tests, coverage,
-/// analysis) is recorded with: what an effort's runs are read by.
+/// analysis) is recorded with: what a request's runs are read by.
 const RUN_TRIGGER: &str = "on-report";
 
 /// A shell command an agent ran, and its exit code when the harness said.
@@ -419,12 +333,12 @@ pub enum AnalysisIngest {
     },
 }
 
-/// What a `sum` spec's delta folded so far, over an effort's captures of
+/// What a `sum` spec's delta folded so far, over a window's captures of
 /// the spec's producers: how many (and the newest id) it covered, so a
 /// later read can tell its history is untouched and add only what is new.
 #[derive(Debug, Clone)]
 struct SumFold {
-    /// The spec and effort window it was folded for; any change starts over.
+    /// The spec and window it was folded for; any change starts over.
     base: String,
     count: i64,
     max_id: i64,
@@ -454,27 +368,47 @@ struct DeltaInputs {
     producers: Vec<String>,
 }
 
-/// `(effort, spec key)` → (what the delta was computed from, the delta).
+/// `(window, spec key)` → (what the delta was computed from, the delta).
 type DeltaMemo =
-    std::collections::HashMap<(i64, String), (String, Option<oxplow_db::EffortMetricDelta>)>;
+    std::collections::HashMap<(String, String), (String, Option<oxplow_db::MetricDelta>)>;
+
+/// What a stored analysis covers: a span of one stream's work (a request
+/// on one stream), the files it changed and the captures that
+/// are its own. Every delta and observation is computed over one.
+#[derive(Debug, Clone)]
+pub struct Window {
+    /// Its identity in the memo and fold caches: what it covers, by URI (a
+    /// request's, with its stream).
+    pub key: String,
+    pub stream: Option<i64>,
+    pub started_at: oxplow_domain::Timestamp,
+    /// `None` while it's live.
+    pub ended_at: Option<oxplow_domain::Timestamp>,
+    /// The take at its start: what diff coverage measures changes from.
+    pub start_snapshot_id: Option<i64>,
+    pub end_snapshot_id: Option<i64>,
+    /// The files it changed: what a file gauge's delta sums over.
+    pub files: Vec<String>,
+    /// Its own captures: what the run and window families read.
+    pub members: oxplow_db::Members,
+}
 
 #[derive(Clone)]
 pub struct CollectionService {
-    /// Durable fact layer (epic tsk12): coverage/test/analysis producers
+    /// Durable fact layer: coverage/test/analysis producers
     /// write their atomic facts here; the aggregation engine reads them.
     facts: Arc<SqliteFactStore>,
     nudges: Arc<SqliteAgentNudgeStore>,
-    efforts: Arc<SqliteEffortStore>,
     threads: Arc<SqliteThreadStore>,
     snapshots: Arc<SqliteSnapshotStore>,
     /// Each stream's snapshot taker: a run's coverage is pinned to a take
-    /// of the code it measured (tsk883).
+    /// of the code it measured.
     captures: crate::snapshot_capture_registry::SnapshotCaptureRegistry,
     /// The snapshot implementations: a run's measured take is the active
     /// one's mark.
     marks: Option<Arc<oxplow_domain::snapshot::SnapshotRegistry>>,
     /// Each stream's checkout: a thread's reports, report parsers and
-    /// commits are its own worktree's (tsk890).
+    /// commits are its own worktree's.
     worktrees: Arc<crate::worktrees::WorktreeRouter>,
     content: crate::snapshot_content::SnapshotContent,
     vcs: Arc<dyn oxplow_domain::vcs::Vcs>,
@@ -482,10 +416,10 @@ pub struct CollectionService {
     /// The project's extensions: its own declare its report collectors.
     extensions: Arc<crate::extension::extension_catalog::ExtensionCatalog>,
     /// Where a report collector's run is recorded (`collector_run`,
-    /// `collector.synced`) and its health kept (tsk863). Without one (unit
+    /// `collector.synced`) and its health kept. Without one (unit
     /// harnesses) a report is still read, its run unrecorded.
     run_log: Option<crate::collector_runner::RunLog>,
-    /// The metric-ancestry resolver (tsk102) for this service's own
+    /// The metric-ancestry resolver for this service's own
     /// `tree_state_series` call — built in `new` from the stores it already
     /// holds, so the wiring can't be forgotten at a call site. Same rule,
     /// same answers as the engine's resolver (both are pure over the same DB).
@@ -493,15 +427,15 @@ pub struct CollectionService {
     /// resolver (with the ancestry cache) are shared with every other
     /// metric read, never rebuilt per call.
     metric_engine: crate::metric_engine::MetricEngine,
-    /// Per (effort, spec): what its delta was computed from, and the delta.
+    /// Per (window, spec): what its delta was computed from, and the delta.
     /// A recompute whose inputs haven't moved — the usual case, since a
     /// token count lands every few seconds and moves only its own specs —
     /// reuses it.
     delta_memo: Arc<std::sync::Mutex<DeltaMemo>>,
-    /// Per (effort, `sum` spec): the running total of the reports folded so
-    /// far, so a new report adds to it instead of the effort's whole
+    /// Per (window, `sum` spec): the running total of the reports folded so
+    /// far, so a new report adds to it instead of the window's whole
     /// history being read again.
-    sum_folds: Arc<std::sync::Mutex<std::collections::HashMap<(i64, String), SumFold>>>,
+    sum_folds: Arc<std::sync::Mutex<std::collections::HashMap<(String, String), SumFold>>>,
     /// Captures and facts read to compute deltas (tests).
     #[cfg(test)]
     reads: Arc<(
@@ -517,8 +451,8 @@ pub struct CollectionService {
 
 /// The `agent.tool.finished` event a collection reacts to (P3.6): its id
 /// keys every capture and nudge the reaction writes, so a redelivered
-/// event records nothing twice, and its anchors (turn, and the effort open
-/// when the command ran) carry into what it records.
+/// event records nothing twice, and its anchors (the turn the command ran
+/// in) carry into what it records.
 #[derive(Debug, Clone)]
 pub struct RunCause {
     pub event_id: String,
@@ -530,8 +464,7 @@ pub struct RunCause {
     /// judged against, however late the event is delivered.
     pub at: oxplow_domain::Timestamp,
     /// When it started (its `agent.tool.requested`, the finished event's
-    /// cause), when known: a report written before is an earlier run's
-    /// (tsk888).
+    /// cause), when known: a report written before is an earlier run's.
     pub started: Option<oxplow_domain::Timestamp>,
 }
 
@@ -556,14 +489,14 @@ impl<'a> Raised<'a> {
     }
 }
 
-/// Where a run's report came from: an event a reactor saw, or a command
-/// (tsk923). What it records is stamped with what that origin knows, never
+/// Where a run's report came from: an event a reactor saw, or a command.
+/// What it records is stamped with what that origin knows, never
 /// a guess.
 #[derive(Debug, Clone, Copy)]
 pub enum RunOrigin<'a> {
     /// An event a reactor saw: the `agent.tool.finished` the collection
     /// reactor detects a run in, or a `test.run.recorded` whose coverage
-    /// the run-reports reactor reads (tsk1015).
+    /// the run-reports reactor reads.
     Event(&'a RunCause),
     /// A command (`oxplow.collector.sync`, `test.run.record`): `turn` is its
     /// actor's open turn when that actor is the thread's own agent, and
@@ -581,7 +514,7 @@ impl<'a> RunOrigin<'a> {
         }
     }
 
-    /// The agent turn the run was made in (tsk483): its tool event's —
+    /// The agent turn the run was made in: its tool event's —
     /// however late that event is delivered, and none when the event had
     /// none — or its command's.
     pub fn turn(self) -> Option<i64> {
@@ -593,7 +526,7 @@ impl<'a> RunOrigin<'a> {
 }
 
 impl CollectionService {
-    /// The turn a command `actor` ran in on `thread` (tsk923): its open
+    /// The turn a command `actor` ran in on `thread`: its open
     /// turn when it is that thread's own agent; none for anyone else — a
     /// person's sync while the agent is mid-turn isn't the agent's.
     pub async fn command_turn(
@@ -621,7 +554,7 @@ impl CollectionService {
         self.vcs.head(root).await.ok().and_then(|h| h.branch)
     }
 
-    /// The checkout `thread` works in: its stream's worktree (tsk890).
+    /// The checkout `thread` works in: its stream's worktree.
     async fn worktree(&self, thread: &ThreadId) -> PathBuf {
         let stream = self.stream_id_for(thread).await.ok().flatten();
         self.worktrees
@@ -634,7 +567,6 @@ impl CollectionService {
     pub fn new(
         facts: Arc<SqliteFactStore>,
         nudges: Arc<SqliteAgentNudgeStore>,
-        efforts: Arc<SqliteEffortStore>,
         threads: Arc<SqliteThreadStore>,
         snapshots: Arc<SqliteSnapshotStore>,
         captures: crate::snapshot_capture_registry::SnapshotCaptureRegistry,
@@ -647,7 +579,6 @@ impl CollectionService {
         Self {
             facts,
             nudges,
-            efforts,
             threads,
             snapshots,
             captures,
@@ -712,7 +643,7 @@ impl CollectionService {
     /// What counts as a test run besides the built-in patterns: the
     /// project's `runPatterns`, and its own configured commands — running
     /// the way you declared to run tests is a test run, so `fastCommand`
-    /// (tsk171) detects without a built-in pattern in its script name.
+    ///  detects without a built-in pattern in its script name.
     fn test_patterns(&self) -> Vec<String> {
         let cfg = self.testing_cfg();
         let mut patterns = cfg.run_patterns.clone();
@@ -757,7 +688,7 @@ impl CollectionService {
             .any(|r| r.owner == owner && r.spec.id == id)
     }
 
-    /// `rel` under the checkout `root`, after every symlink (tsk927): `None`
+    /// `rel` under the checkout `root`, after every symlink: `None`
     /// when it isn't there, an error when it resolves outside `root` — a
     /// repo can't point a collector at a file of the person's. The config
     /// check is lexical (no `..`, not absolute); this is the one that
@@ -775,7 +706,7 @@ impl CollectionService {
 
     /// The parser a report collector names: a bundled one, or its own jaq /
     /// Starlark script or program — a program only once a person approved
-    /// it on this machine, as it is now (tsk331).
+    /// it on this machine, as it is now.
     fn report_parser(
         &self,
         collector: &ReportCollector,
@@ -840,14 +771,14 @@ impl CollectionService {
         })
     }
 
-    /// Read one report collector's report (tsk863): when `window` is given,
+    /// Read one report collector's report: when `window` is given,
     /// only a report written inside it (the run's own). A disabled
     /// collector, an unapproved program or a report that isn't there runs
     /// nothing; anything that ran is recorded as the collector's run
     /// (`collector_run`, `collector.synced`) and counts toward its health —
     /// the third failure in a row disables it (P7.C2).
     /// Report paths, parser entries and the paths a report names are
-    /// `root`'s: the checkout the run ran in (tsk890).
+    /// `root`'s: the checkout the run ran in.
     async fn read_report(
         &self,
         collector: &ReportCollector,
@@ -985,7 +916,7 @@ impl CollectionService {
         }
     }
 
-    /// What a detected run's report collectors read (tsk863): each
+    /// What a detected run's report collectors read: each
     /// collector whose `on_run` is `run` and whose report this run wrote
     /// (inside `window`), merged by what it records. A collector reads only
     /// after its own kind of run.
@@ -1031,7 +962,7 @@ impl CollectionService {
                     exec,
                     label,
                 } => out.add(output, exec, label),
-                // Why it didn't count, kept for the run's nudge (tsk893); a
+                // Why it didn't count, kept for the run's nudge; a
                 // coverage collector's is the lost coverage's failed capture.
                 ReportRead::Failed(e) | ReportRead::Disabled(e) => {
                     tracing::warn!(collector = %spec.id, "{e}");
@@ -1051,10 +982,10 @@ impl CollectionService {
         out
     }
 
-    /// A run's coverage, read from its `test.run.recorded` (tsk1015): the
+    /// A run's coverage, read from its `test.run.recorded`: the
     /// coverage collectors whose report the run wrote — around the time it
     /// was recorded — recorded as the collection reactor records a detected
-    /// run's, owned by the run's effort (the event's anchors). One routine
+    /// run's, in the run's turn (the event's anchors). One routine
     /// for every way a run is reported: a run logged with a cause is one
     /// the collection reactor detected in a tool call, whose reports it
     /// read inline (its same-call advisories and nudge depend on them), so
@@ -1099,8 +1030,8 @@ impl CollectionService {
         Ok(())
     }
 
-    /// Record a `test-run` observation against the thread's open effort.
-    /// Returns `Ok(None)` when no effort is open (nothing to attribute).
+    /// Record a `test-run` observation on the thread, in `turn`. Returns
+    /// the capture's id, `Ok(None)` when the thread has no stream.
     #[allow(clippy::too_many_arguments)]
     pub async fn record_test_run(
         &self,
@@ -1131,7 +1062,7 @@ impl CollectionService {
 
     /// [`Self::record_test_run`] for a run the collection reactor saw
     /// (`cause`): the capture is keyed by the event, so a redelivery records
-    /// nothing new, and the effort the command ran in owns it. Every run
+    /// nothing new, and the turn the command ran in holds it. Every run
     /// logs `test.run.recorded` in the capture's transaction.
     #[allow(clippy::too_many_arguments)]
     pub async fn record_test_run_caused(
@@ -1146,14 +1077,14 @@ impl CollectionService {
         origin: RunOrigin<'_>,
     ) -> Result<Option<i64>, DomainError> {
         let cause = origin.cause();
-        // OBSERVE: record the run regardless of effort; attribution is separate
-        // (tsk263). We only need the stream to record into the substrate.
+        // OBSERVE: record the run always; attribution is separate.
+        // We only need the stream to record into the substrate.
         let Some(stream_id) = self.stream_id_for(thread).await? else {
             return Ok(None);
         };
         let mut payload = serde_json::Map::new();
         // The sub-command that ran the tests; the whole call beside it
-        // when it was more (tsk1037).
+        // when it was more.
         let shown = test_run_segment(command, &self.test_patterns())
             .unwrap_or_else(|| command.trim().to_string());
         if shown != command.trim() {
@@ -1201,21 +1132,16 @@ impl CollectionService {
         if let Some(s) = skipped {
             payload.insert("skipped".into(), json!(s));
         }
-        // The owning effort stamps the capture (`metric_capture.effort_id`):
-        // the effort the command ran in, else the thread's open one.
-        let owning = self.resolve_owner(thread, anchored_effort(cause)).await;
-        let owning_val = owning.as_ref().map(|e| e.id.value());
-
-        // Write the run CAPTURE into the durable fact layer (epic tsk12): one
+        // Write the run CAPTURE into the durable fact layer: one
         // fact on `oxplow.test_case` per case, the pass/fail/skip status carried
         // as the `oxplow.status` dimension (and the suite as `oxplow.test_suite`)
         // so Count() sliced by status reconstructs the passed/failed/total
-        // headline. The capture IS the run (T-E1, tsk48): it carries the verbatim
+        // headline. The capture IS the run (T-E1): it carries the verbatim
         // payload in `detail_json` and its id is what the ledger claims. Recorded
         // even report-less (observe-always) — but a run that MEASURED nothing
         // (no report, no asserted counts) records under the `test-run` producer,
         // not `tests`: an empty `tests` capture reads as "suite ran, found 0
-        // tests" to the zero-fill/currency logic (tsk44) and would collapse the
+        // tests" to the zero-fill/currency logic and would collapse the
         // semi-additive oxplow.tests.* timeline to 0. Asserted counts (the MCP
         // sub-agent path) synthesize status-sliced facts — no case identity, but
         // the counts are real case-grain measurements the specs must read.
@@ -1226,15 +1152,15 @@ impl CollectionService {
         {
             let dual = async {
                 // A run with per-case results records them change-only
-                // against each test's summary (tsk733, `record_test_run`);
+                // against each test's summary (`record_test_run`);
                 // asserted counts have no case identity and record plainly.
                 let mut facts = Vec::new();
                 let mut cases: Option<(i64, Option<i64>, Vec<oxplow_db::TestCaseResult>)> = None;
-                // Stop-collecting gate (tsk31): only emit `oxplow.test_case` facts
+                // Stop-collecting gate: only emit `oxplow.test_case` facts
                 // when an enabled metric consumes that measure. When every
                 // `oxplow.tests.*` metric is disabled the facts are skipped and the
                 // run falls through to the record-only `test-run` producer below —
-                // so the effort-review run record + detail survive, but no metric
+                // so the run record + detail survive, but no metric
                 // facts are written and the pruned metric stays empty.
                 let tests_active = self
                     .facts
@@ -1247,7 +1173,7 @@ impl CollectionService {
                         else {
                             return Ok::<Option<i64>, DomainError>(None);
                         };
-                        // Per-test DURATION (tsk46), on the same subject as the
+                        // Per-test DURATION, on the same subject as the
                         // status, when its metric is on.
                         let duration = if self
                             .facts
@@ -1319,16 +1245,16 @@ impl CollectionService {
                 // here is a real "found 0"); `test-run` = a run record only,
                 // invisible to the tests metric timeline. A measured run whose
                 // tests metrics are all disabled records as a run record too
-                // (tsk31) — the run is remembered, but nothing feeds a pruned
+                //  — the run is remembered, but nothing feeds a pruned
                 // metric.
                 let producer = if (report.is_some() || counted) && tests_active {
                     "tests"
                 } else {
                     "test-run"
                 };
-                // A test result is about a CODE STATE, not a branch name (tsk95),
+                // A test result is about a CODE STATE, not a branch name,
                 // so stamp the commit the run tested — the fold needs it to be
-                // ancestry-aware (tsk97), and it is NOT backfillable after the
+                // ancestry-aware, and it is NOT backfillable after the
                 // fact. A snapshot carrying its own commit reads exact; otherwise
                 // this falls back to HEAD with `vcs_rev_exact = false`, which
                 // is the normal case: the agent edits, then runs tests, so the
@@ -1349,7 +1275,6 @@ impl CollectionService {
                 capture.snapshot_id = snapshot_id;
                 capture.closest_vcs_rev = version.as_ref().and_then(|v| v.closest_vcs_rev.clone());
                 capture.vcs_rev_exact = version.as_ref().map(|v| v.vcs_rev_exact).unwrap_or(false);
-                capture.effort_id = owning_val;
                 let turn = origin.turn();
                 capture.turn_id = turn;
                 capture.detail_json = Self::capture_detail(
@@ -1360,7 +1285,6 @@ impl CollectionService {
                 let log = self.test_run_event(
                     thread,
                     stream_val,
-                    owning_val,
                     turn,
                     origin,
                     oxplow_domain::events::schema::TestRunRecordedV3 {
@@ -1397,18 +1321,16 @@ impl CollectionService {
             }
         }
         let _ = (stream_id, payload);
-        let _ = owning;
         Ok(capture_id)
     }
 
-    /// The `test.run.recorded` a run capture logs with it: anchored to the
-    /// cause's turn and effort when the reactor saw the command, else to the
-    /// thread, its stream and the owning effort.
+    /// The `test.run.recorded` a run capture logs with it: anchored as the
+    /// cause was when the reactor saw the command, else to the thread, its
+    /// stream and the turn.
     fn test_run_event(
         &self,
         thread: &ThreadId,
         stream_val: i64,
-        owning: Option<i64>,
         turn: Option<i64>,
         origin: RunOrigin<'_>,
         payload: oxplow_domain::events::schema::TestRunRecordedV3,
@@ -1416,14 +1338,10 @@ impl CollectionService {
         let cause = origin.cause();
         use oxplow_domain::events::schema::TestRunRecorded;
         let anchors = match cause {
-            Some(c) => oxplow_domain::Anchors {
-                effort_id: owning.map(EffortId::new).or(c.anchors.effort_id),
-                ..c.anchors.clone()
-            },
+            Some(c) => c.anchors.clone(),
             None => oxplow_domain::Anchors {
                 stream_id: Some(oxplow_domain::StreamId::new(stream_val)),
                 thread_id: Some(*thread),
-                effort_id: owning.map(EffortId::new),
                 turn_id: turn,
                 ..oxplow_domain::Anchors::default()
             },
@@ -1457,46 +1375,7 @@ impl CollectionService {
         }
     }
 
-    /// The effort a just-produced run/capture belongs to, by the SAME
-    /// exact-or-nothing (a named task's open effort) / single-open (unnamed)
-    /// resolution the run auto-claim uses (tsk271). A named task is
-    /// exact-or-nothing — never the single-open thread guess, which could claim a
-    /// DIFFERENT task's effort. Used both to claim the run in the ledger AND to
-    /// stamp `metric_capture.effort_id`, so the fact-attribution read
-    /// (`captures_for_effort`, T-D) attributes the producer's facts (tsk37).
-    /// The effort a run belongs to: the one its event was anchored to (so a
-    /// late delivery keeps the effort it ran in, open or closed since), else
-    /// — a live call with no event — the thread's single open effort.
-    async fn run_effort(
-        &self,
-        thread: &ThreadId,
-        origin: RunOrigin<'_>,
-    ) -> Result<Option<Effort>, DomainError> {
-        let cause = origin.cause();
-        match anchored_effort(cause) {
-            Some(id) => self.efforts.get_effort(&id).await,
-            None if cause.is_some() => Ok(None),
-            None => self.efforts.find_open_for_thread(thread).await,
-        }
-    }
-
-    /// The effort a run belongs to: the one the command ran in (`anchored`,
-    /// the tool event's effort anchor), so a run recorded after the effort
-    /// closed still belongs to it; else the thread's open effort.
-    async fn resolve_owner(&self, thread: &ThreadId, anchored: Option<EffortId>) -> Option<Effort> {
-        if let Some(id) = anchored {
-            if let Ok(Some(e)) = self.efforts.get_effort(&id).await {
-                return Some(e);
-            }
-        }
-        self.efforts
-            .find_open_for_thread(thread)
-            .await
-            .ok()
-            .flatten()
-    }
-
-    /// Run report collector `id` by hand (`oxplow.collector.sync`, tsk863): read
+    /// Run report collector `id` by hand (`oxplow.collector.sync`): read
     /// its report now, whenever it was written, and record what it parsed
     /// in `thread` — a test run, a coverage capture or a static-analysis
     /// capture — like a detected run's, with `oxplow.collector.sync project/<id>`
@@ -1600,7 +1479,7 @@ impl CollectionService {
                     }
                 }
                 // No baseline gate: findings are ABSOLUTE (current-file),
-                // not diff-relative like coverage (tsk86).
+                // not diff-relative like coverage.
                 ReportSync::Analysis(
                     match self
                         .record_static_analysis(
@@ -1609,7 +1488,7 @@ impl CollectionService {
                             Some(report),
                             &reads.analyzers,
                             &source,
-                            None,
+                            turn,
                         )
                         .await
                         .map_err(storage)?
@@ -1629,7 +1508,7 @@ impl CollectionService {
         })
     }
 
-    /// The capture-spine detail envelope (T-E1, tsk48): the verbatim per-run
+    /// The capture-spine detail envelope (T-E1): the verbatim per-run
     /// payload wrapped as `{"kind": <detail kind>, "payload": {…}}`, stored in
     /// `metric_capture.detail_json`. The kind discriminates the three run
     /// producers (test-detail / coverage-detail / analysis-detail) for the
@@ -1638,7 +1517,7 @@ impl CollectionService {
         serde_json::to_string(&json!({ "kind": kind, "payload": payload })).ok()
     }
 
-    /// Content identity for an idempotent report ingest (tsk14): a hash over the
+    /// Content identity for an idempotent report ingest: a hash over the
     /// producer, the basis it was measured against (git version + snapshot), and
     /// the verbatim payload envelope, so a REPLAYED report (a hook that fired
     /// twice, `ingest_coverage`/`ingest_analysis` called again) dedupes to the
@@ -1674,7 +1553,7 @@ impl CollectionService {
         vcs_rev: Option<String>,
         vcs_rev_exact: bool,
         detail: Option<serde_json::Value>,
-        (turn, owning): (Option<i64>, Option<EffortId>),
+        turn: Option<i64>,
     ) -> Result<Option<i64>, DomainError> {
         let Some(stream_val) = oxplow_domain::StreamId::try_from_str(stream_id).map(|s| s.value())
         else {
@@ -1693,12 +1572,12 @@ impl CollectionService {
             .first()
             .cloned()
             .unwrap_or_else(|| "analysis".to_string());
-        // The capture-spine copy of the verbatim payload (T-E1, tsk48).
+        // The capture-spine copy of the verbatim payload (T-E1).
         let capture_detail_json = detail
             .as_ref()
             .and_then(|d| Self::capture_detail("analysis-detail", d));
         let dual = async {
-            // Stop-collecting gate (tsk31): skip the analysis capture entirely when
+            // Stop-collecting gate: skip the analysis capture entirely when
             // no enabled metric consumes `oxplow.lint_hit` (both `oxplow.analysis.*`
             // disabled). The code-quality findings store is written elsewhere and
             // is unaffected.
@@ -1715,7 +1594,7 @@ impl CollectionService {
             };
             // A CLEAN report still writes its (empty) capture — "this
             // analysis ran and found nothing" is what lets the errors/
-            // warnings series drop back to zero (tsk44).
+            // warnings series drop back to zero.
             use oxplow_coverage::Severity::*;
             let mut facts = Vec::with_capacity(report.findings.len());
             for f in &report.findings {
@@ -1735,10 +1614,6 @@ impl CollectionService {
                     ..NewFact::new(measure.id, 1.0)
                 });
             }
-            // Stamp the owning effort — the one the run's ledger claim
-            // names (tsk926) — so `captures_for_effort` attributes these
-            // lint facts (tsk37).
-            let owning_val = owning.map(|e| e.value());
             let mut capture =
                 NewMetricCapture::done(stream_val, analyzer.clone(), source.to_string());
             capture.thread_id = Some(thread.value());
@@ -1747,7 +1622,6 @@ impl CollectionService {
             capture.closest_vcs_rev = vcs_rev.clone();
             capture.vcs_rev_exact = vcs_rev_exact;
             capture.branch = branch.clone();
-            capture.effort_id = owning_val;
             capture.turn_id = turn;
             capture.detail_json = capture_detail_json;
             capture.idempotency_key = Self::ingest_idempotency_key(
@@ -1760,12 +1634,11 @@ impl CollectionService {
             Ok(Some(id))
         }
         .await;
-        // A failed write is the caller's to report (tsk891).
+        // A failed write is the caller's to report.
         dual
     }
 
-    /// The id of a coverage sub-measure (`oxplow.coverage.branch`/`.function`,
-    /// tsk123) IFF an enabled spec consumes it — else `None` (the per-measure
+    /// The id of a coverage sub-measure (`oxplow.coverage.branch`/`.function`,) IFF an enabled spec consumes it — else `None` (the per-measure
     /// stop-collecting gate). Lookup errors read as "not active" so a
     /// branch/function hiccup never sinks the line-coverage capture.
     async fn active_coverage_measure(&self, key: &str) -> Option<i64> {
@@ -1785,14 +1658,13 @@ impl CollectionService {
             .map(|m| m.id)
     }
 
-    /// OBSERVE-ALWAYS coverage (tsk270): record the **absolute** whole-report
+    /// OBSERVE-ALWAYS coverage: record the **absolute** whole-report
     /// coverage — per-file instrumented/covered line-sets, verbatim, in the
     /// capture's `coverage-detail` envelope + an `oxplow.coverage.abs_pct`
-    /// headline — pinned to a take of the code the report measured
-    /// (tsk883), with NO effort baseline. The effort-relative diff-coverage
-    /// is derived from these line-sets with the effort's evidence
-    /// ([`diff_coverage_for_effort`]). Attribution rides the unified `"run"`
-    /// ledger (auto-claimed when unambiguous, else reconciled/claimed).
+    /// headline — pinned to a take of the code the report measured,
+    /// with NO baseline. A request's diff-coverage is derived from
+    /// these line-sets with its analysis ([`Self::diff_coverage`]). The
+    /// capture is the turn's the run was made in.
     async fn observe_coverage(
         &self,
         thread: &ThreadId,
@@ -1801,10 +1673,9 @@ impl CollectionService {
         source: &str,
         origin: RunOrigin<'_>,
     ) -> Result<CoverageIngest, DomainError> {
-        let cause = origin.cause();
-        // Stop-collecting gate (tsk31): with the coverage metric disabled, no
+        // Stop-collecting gate: with the coverage metric disabled, no
         // enabled spec consumes `oxplow.coverage` — record nothing (no capture, no
-        // diff-coverage). Reads/effort-review see it turned off.
+        // diff-coverage). Reads see it turned off.
         if !self
             .facts
             .measure_has_active_spec("oxplow.coverage")
@@ -1817,20 +1688,12 @@ impl CollectionService {
             return Ok(CoverageIngest::NoChangedCoverage);
         };
 
-        // The owning effort stamps the coverage capture AND receives the ledger
-        // claim below — the capture IS the run now (T-E1, tsk48).
-        let attribute_to = self.resolve_owner(thread, anchored_effort(cause)).await;
-        let owning_val = attribute_to.as_ref().map(|e| e.id.value());
+        // The capture IS the run (T-E1), in the turn it was made in.
         let turn = origin.turn();
-        // Pin to a take of the code the report measured (tsk883),
-        // independent of any effort (observe-always).
+        // Pin to a take of the code the report measured,
+        // observe-always.
         let pin = self
-            .measured_snapshot(
-                thread,
-                stream_id,
-                (turn, attribute_to.as_ref().map(|e| e.id)),
-                origin,
-            )
+            .measured_snapshot(thread, stream_id, turn, origin)
             .await;
         let root = self
             .worktrees
@@ -1846,7 +1709,7 @@ impl CollectionService {
             },
         };
 
-        // The run CAPTURE (epic tsk12): one fact on `oxplow.coverage` per file,
+        // The run CAPTURE: one fact on `oxplow.coverage` per file,
         // value = its line-%, numerator/denominator = covered/instrumented
         // counts so the engine re-derives the headline as Σcovered/Σinstrumented
         // (non-additive ratio) instead of averaging pre-rolled percentages; the
@@ -1860,7 +1723,7 @@ impl CollectionService {
                 let Some(measure) = self.facts.get_measure("oxplow.coverage").await? else {
                     return Ok::<Option<i64>, DomainError>(None);
                 };
-                // Branch/function coverage (tsk123) ride the SAME capture as extra
+                // Branch/function coverage ride the SAME capture as extra
                 // per-file facts on their own measures — but only when an enabled
                 // spec consumes them (the stop-collecting gate, per measure), and
                 // only for files whose report actually carried the counts
@@ -1914,7 +1777,6 @@ impl CollectionService {
                 capture.vcs_rev_exact = version.vcs_rev_exact;
                 capture.basis_ref = version.closest_vcs_rev.clone();
                 capture.branch = branch;
-                capture.effort_id = owning_val;
                 capture.turn_id = turn;
                 capture.detail_json = Self::capture_detail("coverage-detail", &payload);
                 capture.idempotency_key = Self::ingest_idempotency_key(
@@ -1923,14 +1785,7 @@ impl CollectionService {
                     snapshot_id,
                     capture.detail_json.as_deref(),
                 );
-                let log = self.coverage_event(
-                    thread,
-                    stream_val,
-                    (owning_val, turn),
-                    origin,
-                    abs_pct,
-                    source,
-                );
+                let log = self.coverage_event(thread, stream_val, turn, origin, abs_pct, source);
                 let id = self
                     .facts
                     .record_facts_logged(capture, facts, Some(log))
@@ -1938,7 +1793,7 @@ impl CollectionService {
                 Ok(Some(id))
             }
             .await;
-            // A failed write is the caller's to retry or record (tsk79).
+            // A failed write is the caller's to retry or record.
             capture_id = dual?;
         }
         // No coverage measure: nothing records it.
@@ -1954,7 +1809,7 @@ impl CollectionService {
         })
     }
 
-    /// The snapshot a run's report measured (tsk883 coverage, tsk937
+    /// The snapshot a run's report measured (coverage
     /// analysis): a take of the
     /// stream's worktree now, as the run's report is recorded. The take is
     /// the code the run measured only while nothing changed after the run
@@ -1965,7 +1820,7 @@ impl CollectionService {
         &self,
         thread: &ThreadId,
         stream_id: &str,
-        (turn, effort): (Option<i64>, Option<EffortId>),
+        turn: Option<i64>,
         origin: RunOrigin<'_>,
     ) -> Option<i64> {
         let cause = origin.cause();
@@ -1977,7 +1832,6 @@ impl CollectionService {
             .mark(&oxplow_domain::snapshot::MarkRequest {
                 thread: Some(*thread),
                 turn,
-                effort,
                 ..oxplow_domain::snapshot::MarkRequest::new(
                     stream,
                     oxplow_domain::snapshot::SnapshotTrigger::RunMeasured,
@@ -2004,28 +1858,28 @@ impl CollectionService {
         Some(id)
     }
 
-    /// Derive the effort-relative **diff-coverage** from a run's stored ABSOLUTE
-    /// per-file line-sets (tsk270): the lines that changed between the effort's
+    /// Derive a window's **diff-coverage** from a run's stored ABSOLUTE
+    /// per-file line-sets: the lines that changed between the window's
     /// start snapshot and `measured`, the snapshot the run's capture is pinned
-    /// to — the code the run measured, never a working tree (tsk862), so it
+    /// to — the code the run measured, never a working tree, so it
     /// holds for a worktree stream and doesn't drift after the run. Computed
-    /// when the evidence is (`effort_evidence`), so a run claimed after the
-    /// effort closed still produces a diff. Returns `(summary_pct,
+    /// when the analysis is (`request_analysis`), so a run read after the
+    /// request finished still produces a diff. Returns `(summary_pct,
     /// diff_payload)`, or `None` when either snapshot is unknown, a side's
     /// bytes are gone, or no changed instrumented lines overlap.
     /// `diff_payload` is the shape the panel renders.
-    async fn diff_coverage_for_effort(
+    async fn diff_coverage(
         &self,
-        effort: &Effort,
+        window: &Window,
         measured: Option<i64>,
         abs_payload: &serde_json::Value,
     ) -> Result<Option<(f64, serde_json::Value)>, DomainError> {
-        let (Some(start), Some(measured)) = (effort.start_snapshot_id, measured) else {
+        let (Some(start), Some(measured)) = (window.start_snapshot_id, measured) else {
             return Ok(None);
         };
         // The changed lines come from both sides' bytes.
         if let Some(reason) = self.captures.no_contents_reason() {
-            tracing::info!(effort = %effort.id, "diff coverage skipped: {reason}");
+            tracing::info!(window = %window.key, "diff coverage skipped: {reason}");
             return Ok(None);
         }
         let start_tree = self.snapshots.tree_at(start).await?;
@@ -2108,7 +1962,7 @@ impl CollectionService {
         &self,
         thread: &ThreadId,
         stream_val: i64,
-        (owning, turn): (Option<i64>, Option<i64>),
+        turn: Option<i64>,
         origin: RunOrigin<'_>,
         lines_pct: f64,
         source: &str,
@@ -2116,23 +1970,14 @@ impl CollectionService {
         let cause = origin.cause();
         use oxplow_domain::events::schema::{TestCoverageRecorded, TestCoverageRecordedV1};
         let anchors = match cause {
-            Some(c) => oxplow_domain::Anchors {
-                effort_id: owning.map(EffortId::new).or(c.anchors.effort_id),
-                ..c.anchors.clone()
-            },
+            Some(c) => c.anchors.clone(),
             None => oxplow_domain::Anchors {
                 stream_id: Some(oxplow_domain::StreamId::new(stream_val)),
                 thread_id: Some(*thread),
-                effort_id: owning.map(EffortId::new),
                 turn_id: turn,
                 ..oxplow_domain::Anchors::default()
             },
         };
-        let subject: Vec<String> = anchors
-            .effort_id
-            .map(oxplow_domain::uri::build::effort_uri)
-            .into_iter()
-            .collect();
         let cause_id = cause.map(|c| oxplow_domain::EventId(c.event_id.clone()));
         let dedupe = cause.map(|c| format!("coverage:{}", c.event_id));
         let source = source.to_string();
@@ -2149,7 +1994,7 @@ impl CollectionService {
                     },
                 )
                 .with_anchors(anchors.clone())
-                .with_subject(subject.clone())
+                .with_subject([oxplow_domain::uri::build::run_uri(capture_id)])
                 .with_dedupe_key_opt(dedupe.clone());
                 match &cause_id {
                     Some(c) => env.with_cause(c.clone()),
@@ -2159,11 +2004,11 @@ impl CollectionService {
         }
     }
 
-    /// The coverage leg with one retry (tsk79). The detached collection task
+    /// The coverage leg with one retry. The detached collection task
     /// runs right after a test command — DB contention or a snapshot-lookup
     /// hiccup is transient, and without a retry one swallowed error means the
-    /// run's coverage simply never exists (fatal when it was the effort's LAST
-    /// run before close). When both attempts lose, the miss is made durable
+    /// run's coverage simply never exists (fatal when it was a request's
+    /// last run). When both attempts lose, the miss is made durable
     /// via [`Self::record_coverage_failure`].
     async fn coverage_ride_along_with_retry(
         &self,
@@ -2191,7 +2036,7 @@ impl CollectionService {
         }
     }
 
-    /// Durable visibility for a dropped coverage leg (tsk79): a facts-empty
+    /// Durable visibility for a dropped coverage leg: a facts-empty
     /// `status = failed` coverage capture carrying the error — the same
     /// convention as gauge failures — so the miss is queryable in the
     /// substrate instead of living only in a tty warn. Best-effort.
@@ -2217,108 +2062,12 @@ impl CollectionService {
         }
     }
 
-    /// The revert/waste signal (tsk77): read HEAD's `This reverts commit
-    /// <sha>` trailers; for each reverted commit that falls inside exactly ONE
-    /// closed effort of this thread's stream (the ambiguity stance — 0 or >1
-    /// candidates → no attribution), emit an `oxplow.token_waste` fact carrying
-    /// the effort's whole token spend as a numerator-only ratio row
-    /// (num = spend, den = 0; the close-side row carried num 0 / den = spend),
-    /// so Σn/Σd across the measure is the wasted share. Idempotent per effort:
-    /// a second revert touching the same effort is the same waste. V1
-    /// granularity is deliberately coarse — one reverted commit flags the
-    /// effort's FULL spend, over-counting multi-commit efforts where only part
-    /// was rolled back.
-    async fn record_token_waste_for_reverts(&self, thread: &ThreadId) -> Result<(), DomainError> {
-        if !self
-            .facts
-            .measure_has_active_spec("oxplow.token_waste")
-            .await
-            .unwrap_or(true)
-        {
-            return Ok(());
-        }
-        let Some(waste_measure) = self.facts.get_measure("oxplow.token_waste").await? else {
-            return Ok(());
-        };
-        let Some(effort_tokens_measure) = self.facts.get_measure("oxplow.effort_tokens").await?
-        else {
-            return Ok(());
-        };
-        // HEAD is the just-landed (revert) commit; its body carries the trailers.
-        let root = self.worktree(thread).await;
-        let Some(head_sha) = self.vcs.head(&root).await.ok().and_then(|h| h.revision) else {
-            return Ok(());
-        };
-        let Ok(Some(head)) = self.vcs.revision(&root, &head_sha).await else {
-            return Ok(());
-        };
-        let shas = parse_reverted_shas(&head.body);
-        if shas.is_empty() {
-            return Ok(());
-        }
-        let Some(thread_row) = self.threads.get(thread).await? else {
-            return Ok(());
-        };
-        let stream_val = thread_row.stream_id.value();
-        for sha in shas {
-            let Ok(Some(reverted)) = self.vcs.revision(&root, &sha).await else {
-                continue;
-            };
-            // git timestamps are SECONDS-granular — the commit happened
-            // somewhere inside [secs, secs+1), so the containment window must
-            // span that whole second or a commit made in the same wall-second
-            // an effort started would truncate to before it.
-            let at_start = oxplow_domain::Timestamp::from_unix_ms(reverted.info.time * 1000);
-            let at_end = oxplow_domain::Timestamp::from_unix_ms(reverted.info.time * 1000 + 999);
-            // Closed efforts whose window contains the reverted commit, scoped
-            // to this stream (commits are per-worktree = per-stream).
-            let mut owners = Vec::new();
-            for e in self.efforts.list_in_window(at_start, at_end).await? {
-                if e.ended_at.is_none() {
-                    continue; // still open — its spend isn't final (and it's us)
-                }
-                match self.threads.get(&e.thread_id).await {
-                    Ok(Some(t)) if t.stream_id.value() == stream_val => owners.push(e),
-                    _ => {}
-                }
-            }
-            let [owner] = owners.as_slice() else {
-                continue; // 0 or ambiguous → no attribution
-            };
-            let owner_ref = oxplow_domain::uri::build::effort_uri(owner.id);
-            let spend: f64 = self
-                .facts
-                .facts_for_measure_in_stream(effort_tokens_measure.id, stream_val)
-                .await?
-                .iter()
-                .filter(|f| f.subject.as_deref() == Some(owner_ref.as_str()))
-                .map(|f| f.value)
-                .sum();
-            if spend <= 0.0 {
-                continue; // unmetered effort — no waste to count
-            }
-            let mut capture = NewMetricCapture::done(stream_val, "revert-detect", "git");
-            capture.thread_id = Some(thread.value());
-            capture.trigger = Some("on-commit".into());
-            capture.basis_ref = Some(head_sha.clone());
-            capture.idempotency_key = Some(format!("token-waste:{}", owner.id.value()));
-            let fact = NewFact {
-                subject: Some(owner_ref),
-                numerator: Some(spend),
-                denominator: Some(0.0),
-                ..NewFact::new(waste_measure.id, spend)
-            };
-            self.facts.record_facts(capture, vec![fact]).await?;
-        }
-        Ok(())
-    }
-
     /// A finished shell call's entry point: detect a test and/or
     /// static-analysis run, record it, and ride along to coverage /
     /// findings. The collection reactor runs it (P3.6) with `cause`, the
     /// `agent.tool.finished` event of a `shell` call — every capture and nudge
-    /// is keyed by it and anchored to its turn, and the effort the command
-    /// ran in owns what it records. The nudge is persisted (the hook
+    /// is keyed by it and anchored to its turn, the turn the command ran in,
+    /// which holds what it records. The nudge is persisted (the hook
     /// response picks it up); the returned text is for callers that want it.
     pub async fn on_shell_run(
         &self,
@@ -2334,43 +2083,19 @@ impl CollectionService {
         let test_patterns = self.test_patterns();
         let is_test = detect_test_run(bash.command, &test_patterns);
         let is_analysis = detect_analysis_run(bash.command, &cfg.analysis_patterns);
-        let is_commit = detect_git_commit(bash.command);
-        let is_revert = detect_git_revert(bash.command);
-        if !is_test && !is_analysis && !is_commit && !is_revert {
+        if !is_test && !is_analysis {
             return Ok(None);
         }
-        // OBSERVE-ALWAYS (tsk269): tests + analysis are recorded regardless of how
-        // many efforts are open — attribution is deferred to the ledger, never a
-        // precondition for recording. The single open effort (if any) is resolved
-        // here only for the effort-RELATIVE advisories (coverage, nudges),
-        // which legitimately no-op when ambiguous.
-        let effort_opt = self.run_effort(thread, origin).await?;
+        // OBSERVE-ALWAYS: tests + analysis are always recorded;
+        // attribution is the turn's, never a precondition for recording.
 
-        // Wasted-token leg (tsk77): any LANDED commit — including `git revert`,
-        // which never says "commit" — may carry "This reverts commit <sha>"
-        // trailers pointing into a closed effort's window. Best-effort, before
-        // the pure-commit early return below.
-        if (is_commit || is_revert) && !matches!(bash.exit_code, Some(c) if c != 0) {
-            if let Err(e) = self.record_token_waste_for_reverts(thread).await {
-                tracing::warn!(error = %e, "token-waste leg failed");
-            }
-        }
-        // A commit gets no advisory of its own (tsk250). Attribution nudges
-        // exist to sort out which changes belong to which effort while several
-        // run concurrently; by commit time one actor has already decided what
-        // to include, and second-guessing that is oxplow getting in the way.
-        //
-        // A pure commit/revert (not also a test/analysis run) is done.
-        if (is_commit || is_revert) && !is_test && !is_analysis {
-            return Ok(None);
-        }
         // Reports this run could have written: judged at the run's own
         // time, so a redelivery (a crash before the checkpoint, a retried
         // dead letter, a pump backlog) sees what the first delivery saw.
         let window = cause.map_or_else(FreshWindow::ending_now, |c| {
             FreshWindow::of_run(c.started, c.at)
         });
-        // The run's reports are its own checkout's (tsk890).
+        // The run's reports are its own checkout's.
         let root = self.worktree(thread).await;
 
         // Static-analysis ride-along (OBSERVE-ALWAYS): when an analyzer ran,
@@ -2386,7 +2111,7 @@ impl CollectionService {
                 None => (None, "analysis-report".to_string()),
             };
             let analyzers = reads.analyzers.clone();
-            // Leg isolation (tsk79): one leg's transient error must not kill
+            // Leg isolation: one leg's transient error must not kill
             // the legs after it — the test-run + coverage recording below is
             // independent of whether this analysis write landed.
             if let Err(e) = self
@@ -2422,7 +2147,7 @@ impl CollectionService {
             Some((r, source)) => (Some(r.clone()), source),
             None => (None, "post-tool-bash".to_string()),
         };
-        // Leg isolation (tsk79): a failed test-run write still lets the
+        // Leg isolation: a failed test-run write still lets the
         // coverage below record — the report on disk is real either way.
         if let Err(e) = self
             .record_test_run_caused(
@@ -2439,12 +2164,11 @@ impl CollectionService {
         {
             tracing::warn!(error = %e, "test-run ride-along failed");
         }
-        // Coverage ride-along (OBSERVE-ALWAYS, tsk270): record the ABSOLUTE
-        // report regardless of effort; the effort-relative diff is derived with
-        // the effort's evidence (it lands in v_effort_observation,
-        // where oxplow-bundled's coverage-target advisory reads it).
+        // Coverage ride-along (OBSERVE-ALWAYS): record the ABSOLUTE
+        // report always; a request's diff is derived with its analysis (it
+        // lands in v_request_observation).
         // A transient error here used to silently drop the run's coverage
-        // (tsk79) — now it retries once and, when both attempts (or the parse
+        //  — now it retries once and, when both attempts (or the parse
         // of a fresh report) lose, records a durable `failed` capture.
         let coverage = reads.coverage();
         if let Some((merged, source)) = &coverage {
@@ -2463,15 +2187,13 @@ impl CollectionService {
         }) {
             return Ok(None);
         }
-        // Nudges below are effort-RELATIVE (key/dedup per effort), so they only
-        // run with a single open effort. The runs above are already recorded.
-        let Some(effort) = effort_opt else {
-            return Ok(None);
-        };
+        // The nudge below is paced per request (its turn's), else per
+        // thread. The runs above are already recorded.
+        let request = self.request_of_turn(origin.turn()).await;
         // Nudge: the agent ran tests but this run regenerated no report
-        // oxplow could parse for the effort (so the effort gets a
-        // command-only test-run and no coverage). Steer it to the
-        // report-emitting command — at most once per effort. This is
+        // oxplow could parse (so the request gets a command-only test-run
+        // and no coverage). Steer it to the
+        // report-emitting command — at most once per request. This is
         // tool-agnostic: it keys only on "test run detected" + "no fresh
         // report", never on which tool ran; the command it names comes
         // from the project's own config.
@@ -2483,7 +2205,7 @@ impl CollectionService {
         let ran_the_runner = reads.unread.is_empty()
             && test_run_segment(bash.command, &test_patterns)
                 .is_some_and(|run| names_configured_runner(&cfg, &run));
-        if !produced_report && !ran_the_runner && self.mark_nudged(&effort).await {
+        if !produced_report && !ran_the_runner && self.mark_nudged(thread, request).await {
             let msg = if reads.unread.is_empty() {
                 let root = self.worktree(thread).await;
                 report_nudge_message(&cfg, !self.report_collectors(&root).is_empty())
@@ -2492,7 +2214,6 @@ impl CollectionService {
             };
             self.persist_nudge(
                 thread,
-                Some(&effort),
                 Raised::agent("report-less-run", &msg, bash.command),
                 origin,
             )
@@ -2510,7 +2231,6 @@ impl CollectionService {
     pub(crate) async fn persist_nudge(
         &self,
         thread: &ThreadId,
-        effort: Option<&Effort>,
         nudge: Raised<'_>,
         origin: RunOrigin<'_>,
     ) {
@@ -2519,7 +2239,6 @@ impl CollectionService {
         let new = NewAgentNudge {
             audience: nudge.audience,
             thread_id: thread.to_string(),
-            effort_id: effort.map(|e| e.id.to_string()),
             kind: kind.to_string(),
             message: nudge.message.to_string(),
             trigger: Some(nudge.trigger.to_string()),
@@ -2530,11 +2249,10 @@ impl CollectionService {
             // Already fired for this cause (a redelivered event).
             Ok(None) => {}
             Ok(Some(_)) => {
-                // Project the fired nudge into the metric substrate (tsk216):
+                // Project the fired nudge into the metric substrate:
                 // `agent.nudges.fired` is an agent-activity signal — the agent
                 // drifted off-task often enough to be corrected.
-                self.project_nudge_metric(thread, effort.map(|e| e.id), kind, origin)
-                    .await;
+                self.project_nudge_metric(thread, kind, origin).await;
             }
             Err(err) => tracing::warn!(?err, "persisting agent nudge failed"),
         }
@@ -2545,21 +2263,14 @@ impl CollectionService {
     /// down which guardrail fired). Event kind → run-less. Best-effort: a
     /// metric write error is logged and never fails the hook. Lower is
     /// better — fewer nudges means the agent stayed on task.
-    async fn project_nudge_metric(
-        &self,
-        thread: &ThreadId,
-        effort: Option<EffortId>,
-        kind: &str,
-        origin: RunOrigin<'_>,
-    ) {
-        let cause = origin.cause();
+    async fn project_nudge_metric(&self, thread: &ThreadId, kind: &str, origin: RunOrigin<'_>) {
         let stream_val = match self.threads.get(thread).await {
             Ok(Some(t)) => t.stream_id.value(),
             _ => return,
         };
         let branch = self.current_branch(&self.worktree(thread).await).await;
         let result = async {
-            // Stop-collecting gate (tsk31): skip when the `agent.nudges.fired`
+            // Stop-collecting gate: skip when the `agent.nudges.fired`
             // metric is disabled (nothing consumes `oxplow.nudge`). The nudge
             // itself still fires + persists — only the analytics fact is skipped.
             if !self
@@ -2571,7 +2282,7 @@ impl CollectionService {
                 return Ok::<(), DomainError>(());
             }
             // One fact on the `oxplow.nudge` event measure (value 1), the nudge
-            // kind as subject so Sum() reconstructs the fired count (epic tsk12).
+            // kind as subject so Sum reconstructs the fired count.
             if let Some(measure) = self.facts.get_measure("oxplow.nudge").await? {
                 let fact = NewFact {
                     subject: Some(oxplow_domain::uri::build::keyed(
@@ -2580,19 +2291,10 @@ impl CollectionService {
                     )),
                     ..NewFact::new(measure.id, 1.0)
                 };
-                // The nudge's effort, else the one its run was anchored to;
-                // only a live call with neither resolves one now.
-                let owning = match effort.or_else(|| anchored_effort(cause)) {
-                    Some(id) => Some(id),
-                    None if cause.is_some() => None,
-                    None => self.resolve_owner(thread, None).await.map(|e| e.id),
-                };
-                let owning_val = owning.map(|e| e.value());
                 let mut capture = NewMetricCapture::done(stream_val, "nudges", "nudges");
                 capture.thread_id = Some(thread.value());
                 capture.trigger = Some("continuous".into());
                 capture.branch = branch;
-                capture.effort_id = owning_val;
                 capture.turn_id = origin.turn();
                 self.facts.record_facts(capture, vec![fact]).await?;
             }
@@ -2604,24 +2306,47 @@ impl CollectionService {
         }
     }
 
-    /// Record that `effort` has been nudged about a report-less run.
-    /// `true` the first time (caller should nudge), `false` afterwards —
-    /// durably (`once_mark`), so a restart doesn't repeat it. A failed
-    /// write reads as "already nudged": don't nag on an error.
-    async fn mark_nudged(&self, effort: &Effort) -> bool {
+    /// The request of turn `turn` (none: no turn, or one recorded before
+    /// requests were).
+    async fn request_of_turn(&self, turn: Option<i64>) -> Option<i64> {
+        let turn = turn?;
         self.nudges
-            .claim_once(
-                oxplow_db::OnceScope::effort(effort.thread_id.value(), effort.id.value()),
-                "report-less-run",
-            )
+            .database()
+            .read(move |c| {
+                use rusqlite::OptionalExtension as _;
+                c.query_row(
+                    "SELECT request_id FROM agent_turn WHERE id = ?1",
+                    [turn],
+                    |r| r.get::<_, Option<i64>>(0),
+                )
+                .optional()
+                .map(Option::flatten)
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .ok()
+            .flatten()
+    }
+
+    /// Record that the request (else the thread) has been nudged about
+    /// a report-less run. `true` the first time (caller should nudge),
+    /// `false` afterwards — durably (`once_mark`), so a restart doesn't
+    /// repeat it; the next request is fresh. A failed write reads as
+    /// "already nudged": don't nag on an error.
+    async fn mark_nudged(&self, thread: &ThreadId, request: Option<i64>) -> bool {
+        let scope = match request {
+            Some(r) => oxplow_db::OnceScope::request(thread.value(), r),
+            None => oxplow_db::OnceScope::thread(thread.value()),
+        };
+        self.nudges
+            .claim_once(scope, "report-less-run")
             .await
             .unwrap_or(false)
     }
 
-    /// Record a `static-analysis` observation. OBSERVE-ALWAYS (tsk269): analysis
-    /// findings are absolute (current-file, not effort-relative), so the run is
-    /// recorded regardless of how many efforts are open and attributed via the
-    /// unified `"run"` ledger. This single kind is both the ran-record (when
+    /// Record a `static-analysis` observation. OBSERVE-ALWAYS: analysis
+    /// findings are absolute (current-file, not window-relative), so the run is
+    /// always recorded, in the turn it was made in. This single kind is both the ran-record (when
     /// `report` is `None` — analyzer ran but regenerated no parseable report) and
     /// the findings (when a report parsed). The headline metric is the
     /// error+warning count (lower = better). Returns the run's capture, or
@@ -2647,8 +2372,8 @@ impl CollectionService {
         .await
     }
 
-    /// [`Self::record_static_analysis`] for a run the reactor saw: the effort
-    /// the command ran in owns it. (A redelivery is already safe: only a
+    /// [`Self::record_static_analysis`] for a run the reactor saw: the turn
+    /// the command ran in holds it. (A redelivery is already safe: only a
     /// parsed report writes a capture, keyed by its content.)
     async fn record_static_analysis_caused(
         &self,
@@ -2659,14 +2384,9 @@ impl CollectionService {
         source: &str,
         origin: RunOrigin<'_>,
     ) -> Result<Option<i64>, DomainError> {
-        let cause = origin.cause();
         let Some(stream_id) = self.stream_id_for(thread).await? else {
             return Ok(None);
         };
-        // Resolve the owning effort ONCE (tsk926) — it stamps the capture,
-        // receives the ledger claim and pins the take, as a test or
-        // coverage run's does.
-        let effort = self.resolve_owner(thread, anchored_effort(cause)).await;
         let mut payload = serde_json::Map::new();
         payload.insert("command".into(), json!(command));
         if !analyzers.is_empty() {
@@ -2695,18 +2415,13 @@ impl CollectionService {
         });
 
         // Pin a parsed report's capture to a take of the code the analyzer
-        // ran on (tsk937, as coverage does — tsk883); a report-less run
+        // ran on (as coverage does); a report-less run
         // records no capture, so takes nothing.
         let pin = match report {
             Some(_) => {
                 let turn = origin.turn();
-                self.measured_snapshot(
-                    thread,
-                    &stream_id,
-                    (turn, effort.as_ref().map(|e| e.id)),
-                    origin,
-                )
-                .await
+                self.measured_snapshot(thread, &stream_id, turn, origin)
+                    .await
             }
             None => None,
         };
@@ -2740,7 +2455,7 @@ impl CollectionService {
                 closest_vcs_rev.clone(),
                 vcs_rev_exact,
                 Some(serde_json::Value::Object(payload.clone())),
-                (origin.turn(), effort.as_ref().map(|e| e.id)),
+                origin.turn(),
             )
             .await?
         } else {
@@ -2757,29 +2472,18 @@ impl CollectionService {
         Ok(run_id)
     }
 
-    /// Reconstruct the effort-review observations for `effort_id` from the
-    /// **metric substrate** (tsk215): the coverage/test/analysis headline
-    /// samples that fall in the effort's time window + their verbatim
-    /// `*-detail` finding payloads, shaped as `EffortObservation` rows so the
-    /// effort panel renders off the model. Computed only for the
-    /// `effort_evidence` asset, which stores the rows
-    /// (`v_effort_observation`); readers read those (tsk862).
-    /// One row per run, oldest first: stored in this order, the highest
-    /// `seq` is the latest (tsk1049). `kind` optionally filters.
-    pub async fn effort_observations_from_metrics(
+    /// The observations of `window` (`v_request_observation`, from the
+    /// metric substrate): one row per run of its own — its
+    /// coverage, test and analysis captures with their verbatim `*-detail`
+    /// payloads — oldest first: stored in this order, the highest `seq` is
+    /// the latest. `kind` optionally filters.
+    pub async fn observations(
         &self,
-        effort_id: &str,
+        window: &Window,
         kind: Option<&str>,
-    ) -> Vec<oxplow_db::EffortObservation> {
-        let Some(eid) = EffortId::try_from_str(effort_id) else {
-            return vec![];
-        };
-        // Coverage derives its effort-relative diff against the effort's start
-        // snapshot, so load the effort once (tsk270).
-        let effort = self.efforts.get_effort(&eid).await.ok().flatten();
-        // Every run kind is the effort's own capture: stamped with the
-        // effort of the tool call that caused it.
-        let mut caps = self.run_captures(eid.value()).await;
+    ) -> Vec<oxplow_db::Observation> {
+        // Every run kind is the window's own capture.
+        let mut caps = self.run_captures(&window.members).await;
         // Oldest first: the order they ran in.
         caps.sort_by(|a, b| a.captured_at.cmp(&b.captured_at).then(a.id.cmp(&b.id)));
         let mut out = Vec::new();
@@ -2805,20 +2509,17 @@ impl CollectionService {
                 .cloned()
                 .unwrap_or(serde_json::Value::Null);
             // Headline numeric + payload per the panel's per-kind convention:
-            // coverage → derive THIS effort's diff from the run's ABSOLUTE
+            // coverage → derive THIS window's diff from the run's ABSOLUTE
             // detail (skip when no overlap/baseline); static-analysis →
             // error+warning count; test-run → none (panel reads the payload;
             // report-less runs — no `total` — stay off the panel, as before).
             let (payload_json, metric_value) = match obs_kind {
                 "diff-coverage" => {
-                    let derived = match effort.as_ref() {
-                        Some(eff) => self
-                            .diff_coverage_for_effort(eff, c.snapshot_id, &payload)
-                            .await
-                            .ok()
-                            .flatten(),
-                        None => None,
-                    };
+                    let derived = self
+                        .diff_coverage(window, c.snapshot_id, &payload)
+                        .await
+                        .ok()
+                        .flatten();
                     match derived {
                         Some((pct, diff_payload)) => (Some(diff_payload.to_string()), Some(pct)),
                         None => continue,
@@ -2836,7 +2537,7 @@ impl CollectionService {
                     (serde_json::to_string(&payload).ok(), None)
                 }
             };
-            out.push(oxplow_db::EffortObservation {
+            out.push(oxplow_db::Observation {
                 kind: obs_kind.to_string(),
                 provenance: c.provenance.clone(),
                 source: c.source.clone(),
@@ -2849,100 +2550,64 @@ impl CollectionService {
         out
     }
 
-    /// Roll every metric up over a single effort for the task/effort page — the
+    /// Roll every metric up over `window` (`v_request_metric_delta`) — the
     /// structured sibling of the oxplow-bundled `metric-deltas` advisory
     /// (which builds the agent-prompt text). Reads the spec catalog and, per
-    /// family, aggregates the effort's own facts (epic tsk12, T-D; see metrics.md):
-    /// - **per-file gauges** (`File`): Σ over the effort's *claimed* files
-    ///   (`effort_file`) of `(current − baseline)` fact value — the slice this
-    ///   effort actually moved, even on a branch shared with another effort. With
-    ///   no claimed files it falls back to the repo-wide before→after.
+    /// family, aggregates the window's own facts (T-D; see metrics.md):
+    /// - **per-file gauges** (`File`): Σ over the window's files of
+    ///   `(current − baseline)` fact value — the slice this work actually
+    ///   moved, even on a branch shared with other work. With no files it
+    ///   falls back to the repo-wide before→after.
     /// - **run + operational** (`Run`/`Window`): before→after (or `sum` flow) over
-    ///   the facts of the effort's OWN captures (`metric_capture.effort_id`,
-    ///   stamped at ingest — tsk37), so overlapping efforts stay disjoint.
-    /// - **coverage** (`Coverage`): effort-relative diff derived from each run's
-    ///   detail payload (line-sets aren't facts — a documented special case).
+    ///   the facts of the window's OWN captures (its turns', `Members::Turns`),
+    ///   so overlapping windows stay disjoint.
+    /// - **coverage** (`Coverage`): a diff derived from each run's detail
+    ///   payload (line-sets aren't facts — a documented special case).
     ///
-    /// Returns only metrics the effort moved/touched, grouped code-health →
+    /// Returns only metrics the window moved/touched, grouped code-health →
     /// coverage → tests → operational, then by title.
-    /// Recompute `effort_id`'s metric deltas and observations and store them
-    /// (`v_effort_metric_delta`, `v_effort_observation`), so pages can read
-    /// what only the engine can compute.
-    pub async fn refresh_effort_evidence(
-        &self,
-        effort_id: &str,
-        store: &oxplow_db::SqliteEffortEvidenceStore,
-    ) -> Result<(), DomainError> {
-        let row_id = EffortId::try_from_str(effort_id)
-            .ok_or_else(|| DomainError::Invalid(format!("not an effort id: {effort_id}")))?
-            .value();
-        // The claims it's computed from, read first: one that lands while
-        // it computes leaves it stale, so it's computed again (tsk889).
-        let sig = store.attribution_sig(row_id).await?;
-        let deltas = self.effort_metric_deltas(effort_id).await;
-        let observations = self.effort_observations_from_metrics(effort_id, None).await;
-        store.replace(row_id, deltas, observations, sig).await
-    }
-
-    pub async fn effort_metric_deltas(&self, effort_id: &str) -> Vec<oxplow_db::EffortMetricDelta> {
-        let Some(eid) = EffortId::try_from_str(effort_id) else {
-            return vec![];
-        };
-        let Ok(Some(effort)) = self.efforts.get_effort(&eid).await else {
-            return vec![];
-        };
+    pub async fn metric_deltas(&self, window: &Window) -> Vec<oxplow_db::MetricDelta> {
         // Every metric is a spec now (built-in ∪ producer ∪ config); each read
-        // aggregates the spec's source measure's facts (epic tsk12, T-D).
+        // aggregates the spec's source measure's facts (T-D).
         let Ok(specs) = self.facts.list_specs().await else {
             return vec![];
         };
-        // The effort's OWN captures (stamped `effort_id` at ingest, tsk37) — the
-        // attribution spine for the run + operational families. File gauges are
-        // snapshot scans (unstamped), so they read by claimed files × time below.
-        // Full rows (not just ids): an EMPTY capture (a clean analysis run) is a
-        // zero record the stamped read fills in (tsk44).
+        // The window's OWN captures — the attribution spine for the run +
+        // operational families. File gauges are snapshot scans (unstamped),
+        // so they read by its files × time below. Full rows (not just ids):
+        // an EMPTY capture (a clean analysis run) is a zero record the
+        // stamped read fills in.
         let groups = self
             .facts
-            .effort_capture_groups(effort.id.value())
+            .capture_groups(window.members.clone())
             .await
             .unwrap_or_default();
-        let claimed: Vec<String> = self
-            .efforts
-            .list_files(&eid)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .map(|f| f.path)
-            .collect();
-        // The effort's stream (via its thread): gauge captures are per-worktree
-        // scans, so the File family must not read another stream's facts (tsk43).
-        let stream = self
-            .threads
-            .get(&effort.thread_id)
-            .await
-            .ok()
-            .flatten()
-            .map(|t| t.stream_id.value());
 
-        use crate::attribution::{classify_effort_attribution, EffortAttributionFamily};
+        use crate::attribution::{classify_window_attribution, AttributionFamily};
         // Per-call memo: several File-family specs share one `source_measure`
         // (e.g. the count-over-threshold specs over `oxplow.complexity`), so
         // each capture list and capture pair is read once per call.
         let mut fact_cache = FileDeltaCache::default();
-        let mut out: Vec<oxplow_db::EffortMetricDelta> = Vec::new();
+        let mut out: Vec<oxplow_db::MetricDelta> = Vec::new();
         for spec in &specs {
-            // Entity metrics (tsk322) measure the project's data, not an
-            // effort's work; they have no effort-scoped delta.
+            // Entity metrics measure the project's data, not a
+            // window's work; they have no window-scoped delta.
             if spec.entity_json.is_some() {
                 continue;
             }
             // One classifier (in `attribution.rs`, beside the write-side
             // `AttributionKind` each family maps to) decides the family; this match
-            // is the only place each family's read computation is named (tsk274).
-            let inputs = self
-                .delta_inputs(spec, &effort, &claimed, stream, &groups)
-                .await;
-            let memo_key = (effort.id.value(), spec.key.clone());
+            // is the only place each family's read computation is named.
+            // A spec whose source measure isn't known (not declared here, or
+            // not yet synced) has nothing to read: computing it anyway would
+            // read every capture of the window as its own.
+            if let Some(source) = spec.source_measure.as_deref() {
+                if !matches!(self.facts.get_measure(source).await, Ok(Some(_))) {
+                    continue;
+                }
+            }
+            let inputs = self.delta_inputs(spec, window, &groups).await;
+            let memo_key = (window.key.clone(), spec.key.clone());
             if let Some(inputs) = &inputs {
                 let memo = self.delta_memo.lock().unwrap_or_else(|e| e.into_inner());
                 if let Some((from, row)) = memo.get(&memo_key) {
@@ -2957,27 +2622,24 @@ impl CollectionService {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .push(spec.key.clone());
-            let row = match classify_effort_attribution(spec) {
-                EffortAttributionFamily::File => {
-                    self.file_delta_from_facts(spec, &effort, &claimed, stream, &mut fact_cache)
+            let row = match classify_window_attribution(spec) {
+                AttributionFamily::File => {
+                    self.file_delta_from_facts(spec, window, &mut fact_cache)
                         .await
                 }
-                // Coverage stays effort-relative, on the capture's detail
+                // Coverage stays window-relative, on the capture's detail
                 // payload (line-sets aren't in facts yet): the diff is derived
-                // from it (tsk270, T-D scope guard).
-                EffortAttributionFamily::Coverage => {
-                    self.coverage_delta_for_spec(spec, &effort).await
-                }
+                // from it (T-D scope guard).
+                AttributionFamily::Coverage => self.coverage_delta_for_spec(spec, window).await,
                 // Run + operational read identically now: before→after / `sum` over
-                // the facts of the effort's own captures (the tsk37 spine).
-                EffortAttributionFamily::Run | EffortAttributionFamily::Window => {
+                // the facts of the window's own captures (the spine).
+                AttributionFamily::Run | AttributionFamily::Window => {
                     let producers = match &inputs {
                         Some(i) => i.producers.clone(),
-                        // A spec with no named source: all the effort's.
+                        // A spec with no named source: all the window's.
                         None => groups.iter().map(|g| g.producer.clone()).collect(),
                     };
-                    self.effort_stamped_delta(spec, &effort, &producers, &groups)
-                        .await
+                    self.stamped_delta(spec, window, &producers, &groups).await
                 }
             };
             if let Some(inputs) = inputs {
@@ -2991,31 +2653,29 @@ impl CollectionService {
             }
         }
         out.sort_by(|a, b| {
-            effort_metric_group_order(a)
-                .cmp(&effort_metric_group_order(b))
+            metric_group_order(a)
+                .cmp(&metric_group_order(b))
                 .then_with(|| a.title.cmp(&b.title))
         });
         out
     }
 
-    /// What `spec`'s delta for `effort` is computed from: the spec itself,
-    /// the effort's span and start/end snapshots, its stream and claimed
-    /// files, the own captures it reads, and the capture token of the
-    /// producers of the spec's source measure. The own captures it reads are
-    /// those of the producers of its source measure (the run and window
-    /// families read their facts; the file family matches the effort's id on
-    /// those producers' captures) — except the coverage family, which reads
-    /// every one of the effort's test-run captures' detail. An agent's
-    /// token report, stamped to the open effort every few seconds, is
-    /// neither, so it recomputes none of them. `None` when that can't be named (a formula
+    /// What `spec`'s delta for `window` is computed from: the spec itself,
+    /// the window's span and start/end snapshots, its stream and files, the
+    /// own captures it reads, and the capture token of the producers of the
+    /// spec's source measure. The own captures it reads are those of the
+    /// producers of its source measure (the run and window families read
+    /// their facts; the file family matches the window's members on those
+    /// producers' captures) — except the coverage family, which reads every
+    /// one of the window's test-run captures' detail. An agent's token
+    /// report, stamped to the running turn every few seconds, is neither, so
+    /// it recomputes none of them. `None` when that can't be named (a formula
     /// spec with no source measure): then it's always computed.
     async fn delta_inputs(
         &self,
         spec: &oxplow_db::MetricSpec,
-        effort: &Effort,
-        claimed: &[String],
-        stream: Option<i64>,
-        groups: &[oxplow_db::EffortCaptureGroup],
+        window: &Window,
+        groups: &[oxplow_db::CaptureGroup],
     ) -> Option<DeltaInputs> {
         let measure = self
             .facts
@@ -3029,12 +2689,12 @@ impl CollectionService {
             .await
             .ok()?;
         let reads_all_runs = matches!(
-            crate::attribution::classify_effort_attribution(spec),
-            crate::attribution::EffortAttributionFamily::Coverage
+            crate::attribution::classify_window_attribution(spec),
+            crate::attribution::AttributionFamily::Coverage
         );
-        // The effort's captures this spec reads, as how many there are and
+        // The window's captures this spec reads, as how many there are and
         // the newest id per producer and trigger: a capture it does not read
-        // changes neither, and the effort's rows are not read to tell.
+        // changes neither, and the window's rows are not read to tell.
         let mut read: Vec<_> = groups
             .iter()
             .filter(|g| {
@@ -3049,11 +2709,13 @@ impl CollectionService {
         read.sort();
         Some(DeltaInputs {
             key: format!(
-                "{spec:?}|{:?}|{:?}|{:?}|{:?}|{stream:?}|{claimed:?}|{read:?}|{token:?}",
-                effort.started_at,
-                effort.ended_at,
-                effort.start_snapshot_id,
-                effort.end_snapshot_id,
+                "{spec:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{read:?}|{token:?}",
+                window.started_at,
+                window.ended_at,
+                window.start_snapshot_id,
+                window.end_snapshot_id,
+                window.stream,
+                window.files,
             ),
             producers,
         })
@@ -3096,25 +2758,23 @@ impl CollectionService {
             .clone()
     }
 
-    /// Per-file attribution for a code gauge, over facts: Σ over the effort's
-    /// claimed files of the file's `(current − baseline)` value, treating a file
+    /// Per-file attribution for a code gauge, over facts: Σ over the window's
+    /// files of the file's `(current − baseline)` value, treating a file
     /// absent from a capture as 0 (sparse emission — how a drop-to-zero is
-    /// detected). Facts are scoped to the effort's `stream` (gauge captures are
-    /// per-worktree scans — another stream's values must not pollute the delta,
-    /// tsk43). Baseline capture = the latest before the effort started; current
-    /// = the latest at/before the effort end (the newest when open; a capture
-    /// STAMPED with this effort — an on-effort-complete gauge landing just after
-    /// the close — also counts). A closed effort with no capture in its window
+    /// detected). Facts are scoped to the window's `stream` (gauge captures are
+    /// per-worktree scans — another stream's values must not pollute the delta,). Baseline capture = the latest before the window started; current
+    /// = the latest at/before the window end (the newest when open; a capture
+    /// one of its turns made — a gauge landing just after the end — also
+    /// counts). A finished window with no capture in its span
     /// yields `None` — never a post-close capture's repo changes. `None` when
     /// the measure is unknown or nothing moved.
     async fn file_delta_from_facts(
         &self,
         spec: &oxplow_db::MetricSpec,
-        effort: &Effort,
-        claimed: &[String],
-        stream: Option<i64>,
+        window: &Window,
         cache: &mut FileDeltaCache,
-    ) -> Option<oxplow_db::EffortMetricDelta> {
+    ) -> Option<oxplow_db::MetricDelta> {
+        let (claimed, stream) = (&window.files, window.stream);
         let measure_key = spec.source_measure.as_deref()?;
         let measure = self.facts.get_measure(measure_key).await.ok().flatten()?;
         let filter = spec_fact_filter(spec).ok()?;
@@ -3134,7 +2794,7 @@ impl CollectionService {
         };
         // The baseline and current captures come from capture metadata —
         // the captures of the producers that emit this spec's slice, in the
-        // effort's stream (EMPTY zero-hit scans included: "scanned, found
+        // window's stream (EMPTY zero-hit scans included: "scanned, found
         // nothing" is a real baseline or current, or a drop-to-zero is
         // invisible). Only those two captures' facts are then loaded: the
         // measure's whole history was the cost (millions of facts per read).
@@ -3159,23 +2819,33 @@ impl CollectionService {
                 loaded
             }
         };
-        // Oldest first, as the store returns them.
+        // Oldest first, as the store returns them. A scan that names its
+        // snapshot is placed by it: the baseline is the latest at or before
+        // the window's start take, the current the latest at or before its
+        // end take (whose scan lands after its last turn ended). One that
+        // names none is placed by its time.
         let baseline_cap = all_caps
             .iter()
             .rev()
-            .find(|c| c.captured_at < effort.started_at)
+            .find(|c| match (c.snapshot_id, window.start_snapshot_id) {
+                (Some(at), Some(start)) => at <= start,
+                _ => c.captured_at < window.started_at,
+            })
             .map(|c| c.id);
         let current_cap = all_caps
             .iter()
             .rev()
-            .find(|c| match effort.ended_at {
-                Some(end) => c.captured_at <= end || c.effort_id == Some(effort.id.value()),
-                None => true,
-            })
+            .find(
+                |c| match (window.ended_at, c.snapshot_id, window.end_snapshot_id) {
+                    (None, _, _) => true,
+                    (Some(_), Some(at), Some(end)) => at <= end,
+                    (Some(end), _, _) => c.captured_at <= end || window.members.holds(c),
+                },
+            )
             .map(|c| c.id);
-        // A closed effort with no capture in (or stamped into) its window has
-        // nothing attributable — never fabricate a drop-to-zero against a
-        // pre-effort baseline, and never read a post-close capture.
+        // A finished window with no capture in (or made by its turns) its
+        // span has nothing attributable — never fabricate a drop-to-zero
+        // against an earlier baseline, and never read a later capture.
         let current_id = current_cap?;
         let wanted: Vec<i64> = baseline_cap.into_iter().chain([current_id]).collect();
         let facts = match cache.facts.get(&(measure.id, wanted.clone())) {
@@ -3253,7 +2923,7 @@ impl CollectionService {
         // (facts with no path) sums 0/0 over the claimed paths and would
         // silently drop the row — its movement is the repo-wide window.
         if claimed.is_empty() || !path_grained {
-            // No claimed files (an early effort) or no per-file grain → the
+            // No files (an early request) or no per-file grain → the
             // repo-wide before→after, so the movement still surfaces.
             let baseline = repo_total(baseline_cap);
             let current = repo_total(current_cap);
@@ -3261,7 +2931,7 @@ impl CollectionService {
                 return None;
             }
             let changed = (current - baseline).abs() > f64::EPSILON;
-            return Some(effort_delta_row_spec(
+            return Some(delta_row_spec(
                 spec,
                 DeltaCalc {
                     agg: "level",
@@ -3289,12 +2959,12 @@ impl CollectionService {
             baseline += b;
             current += c;
         }
-        // The effort's files never carried this metric → nothing to show.
+        // The window's files never carried this metric → nothing to show.
         if baseline == 0.0 && current == 0.0 {
             return None;
         }
         let changed = (current - baseline).abs() > f64::EPSILON;
-        Some(effort_delta_row_spec(
+        Some(delta_row_spec(
             spec,
             DeltaCalc {
                 agg: "files",
@@ -3360,23 +3030,22 @@ impl CollectionService {
     }
 
     /// Before→after (or `sum` flow) for a run/operational metric over the facts of
-    /// the effort's OWN captures (`metric_capture.effort_id`, stamped at ingest —
-    /// tsk37). One series point per capture (within-capture aggregation is the
+    /// the window's OWN captures (its turns', `metric_capture.turn_id`, stamped
+    /// at ingest). One series point per capture (within-capture aggregation is the
     /// spec's); `sum`-aggregation specs (token/turn/nudge flows) are summed across
-    /// captures, everything else is first→last. A count/sum spec's EMPTY effort
-    /// capture (a clean analysis run — tsk44) reads as an explicit 0 point, so
-    /// "3 errors → 0" shows in the panel. `None` when the effort has no
+    /// captures, everything else is first→last. A count/sum spec's EMPTY
+    /// capture (a clean analysis run) reads as an explicit 0 point, so
+    /// "3 errors → 0" shows in the panel. `None` when the window has no
     /// captures carrying (or zero-recording) this metric's facts.
-    async fn effort_stamped_delta(
+    async fn stamped_delta(
         &self,
         spec: &oxplow_db::MetricSpec,
-        effort: &Effort,
+        window: &Window,
         producers: &[String],
-        groups: &[oxplow_db::EffortCaptureGroup],
-    ) -> Option<oxplow_db::EffortMetricDelta> {
-        let effort_id = effort.id.value();
-        // What the effort holds of the producers this spec reads.
-        let held: Vec<&oxplow_db::EffortCaptureGroup> = groups
+        groups: &[oxplow_db::CaptureGroup],
+    ) -> Option<oxplow_db::MetricDelta> {
+        // What the window holds of the producers this spec reads.
+        let held: Vec<&oxplow_db::CaptureGroup> = groups
             .iter()
             .filter(|g| producers.contains(&g.producer))
             .collect();
@@ -3387,11 +3056,11 @@ impl CollectionService {
         let max_id = held.iter().map(|g| g.max_id).max().unwrap_or(0);
         if spec.aggregation == "sum" {
             return self
-                .folded_sum_delta(spec, effort, producers, count, max_id)
+                .folded_sum_delta(spec, window, producers, count, max_id)
                 .await;
         }
-        let effort_caps = self.effort_captures_read(effort_id, producers, 0).await?;
-        let (series, samples) = self.stamped_series(spec, &effort_caps).await?;
+        let own = self.captures_read(&window.members, producers, 0).await?;
+        let (series, samples) = self.stamped_series(spec, &own).await?;
         let (first, last) = (series.first()?, series.last()?);
         let latest = Some(last.capture_id);
         let baseline = first.value;
@@ -3399,7 +3068,7 @@ impl CollectionService {
         let changed = (current - baseline).abs() > f64::EPSILON;
         let crossing = threshold_state(&spec.direction, current, spec.warn_at, spec.fail_at)
             .map(str::to_string);
-        Some(effort_delta_row_spec(
+        Some(delta_row_spec(
             spec,
             DeltaCalc {
                 agg: "level",
@@ -3415,17 +3084,17 @@ impl CollectionService {
         ))
     }
 
-    /// The effort's captures of `producers` after `after_id`, counted for
+    /// The window's captures of `producers` after `after_id`, counted for
     /// the tests' read tally.
-    async fn effort_captures_read(
+    async fn captures_read(
         &self,
-        effort_id: i64,
+        members: &oxplow_db::Members,
         producers: &[String],
         after_id: i64,
     ) -> Option<Vec<oxplow_db::MetricCapture>> {
         let caps = self
             .facts
-            .effort_captures_after(effort_id, producers.to_vec(), after_id)
+            .captures_after(members.clone(), producers.to_vec(), after_id)
             .await
             .ok()?;
         #[cfg(test)]
@@ -3435,25 +3104,25 @@ impl CollectionService {
         Some(caps)
     }
 
-    /// A `sum` spec's delta over an effort's reports: the running total
+    /// A `sum` spec's delta over a window's reports: the running total
     /// folded so far plus the reports since. Its history is untouched when
     /// the reports it covered are all still there (the count before the
     /// newest id is what it was), so only the new ones are read; otherwise
     /// (the first read, a pruned capture, a changed spec or window) it is
-    /// read whole. A token report lands every ~30 s per live agent, so an
-    /// effort open for days holds thousands, and each used to be read again
+    /// read whole. A token report lands every ~30 s per live agent, so a
+    /// request running for days holds thousands, and each used to be read again
     /// by every one that followed.
     async fn folded_sum_delta(
         &self,
         spec: &oxplow_db::MetricSpec,
-        effort: &Effort,
+        window: &Window,
         producers: &[String],
         count: i64,
         max_id: i64,
-    ) -> Option<oxplow_db::EffortMetricDelta> {
-        let effort_id = effort.id.value();
-        let base = format!("{spec:?}|{:?}|{:?}", effort.started_at, effort.ended_at);
-        let fold_key = (effort_id, spec.key.clone());
+    ) -> Option<oxplow_db::MetricDelta> {
+        let members = &window.members;
+        let base = format!("{spec:?}|{:?}|{:?}", window.started_at, window.ended_at);
+        let fold_key = (window.key.clone(), spec.key.clone());
         let prior = self
             .sum_folds
             .lock()
@@ -3463,19 +3132,17 @@ impl CollectionService {
             .cloned();
         let (mut fold, caps) = match prior {
             Some(prior) => {
-                let new = self
-                    .effort_captures_read(effort_id, producers, prior.max_id)
-                    .await?;
+                let new = self.captures_read(members, producers, prior.max_id).await?;
                 if count - new.len() as i64 == prior.count {
                     (prior, new)
                 } else {
                     // A covered capture is gone: start over.
-                    let all = self.effort_captures_read(effort_id, producers, 0).await?;
+                    let all = self.captures_read(members, producers, 0).await?;
                     (SumFold::empty(base), all)
                 }
             }
             None => {
-                let all = self.effort_captures_read(effort_id, producers, 0).await?;
+                let all = self.captures_read(members, producers, 0).await?;
                 (SumFold::empty(base), all)
             }
         };
@@ -3502,7 +3169,7 @@ impl CollectionService {
         }
         let crossing = threshold_state(&spec.direction, fold.total, spec.warn_at, spec.fail_at)
             .map(str::to_string);
-        Some(effort_delta_row_spec(
+        Some(delta_row_spec(
             spec,
             DeltaCalc {
                 agg: "sum",
@@ -3518,24 +3185,24 @@ impl CollectionService {
         ))
     }
 
-    /// One point per capture of `effort_caps` for this spec's measure
-    /// (an effort's EMPTY capture of a count/sum spec's producer is an
+    /// One point per capture of `own_caps` for this spec's measure
+    /// (a window's EMPTY capture of a count/sum spec's producer is an
     /// explicit zero), oldest first, with how many facts of the measure the
     /// captures held. `None` when the measure, aggregation or filter can't
     /// be read.
     async fn stamped_series(
         &self,
         spec: &oxplow_db::MetricSpec,
-        effort_caps: &[oxplow_db::MetricCapture],
+        own_caps: &[oxplow_db::MetricCapture],
     ) -> Option<(Vec<crate::metric_engine::SeriesPoint>, i64)> {
-        if effort_caps.is_empty() {
+        if own_caps.is_empty() {
             return None;
         }
         let measure_key = spec.source_measure.as_deref()?;
         let measure = self.facts.get_measure(measure_key).await.ok().flatten()?;
         let agg = crate::metric_engine::Aggregation::parse(&spec.aggregation)?;
         let filter = spec_fact_filter(spec).ok()?;
-        let cap_ids: Vec<i64> = effort_caps.iter().map(|c| c.id).collect();
+        let cap_ids: Vec<i64> = own_caps.iter().map(|c| c.id).collect();
         let facts = self
             .facts
             .facts_for_captures(measure.id, cap_ids)
@@ -3550,9 +3217,9 @@ impl CollectionService {
             agg,
             crate::metric_engine::Aggregation::Count | crate::metric_engine::Aggregation::Sum
         ) {
-            // Which producers emit this metric's slice — from the effort's own
-            // kept facts, else the measure's global facts (the effort whose only
-            // run was clean). An effort capture from those producers that
+            // Which producers emit this metric's slice — from the window's own
+            // kept facts, else the measure's global facts (a window whose only
+            // run was clean). A window's capture from those producers that
             // aggregated to no point is an explicit zero.
             let mut producers: std::collections::BTreeSet<String> = facts
                 .iter()
@@ -3563,13 +3230,12 @@ impl CollectionService {
                 // Which producers emit this metric's slice, answered as cheaply
                 // as the filter allows. All three branches agree; they differ
                 // only in how much of the measure's history they have to touch,
-                // and on a 900k-fact measure that gap was 38% of backend CPU
-                // (tsk239).
+                // and on a 900k-fact measure that gap was 38% of backend CPU.
                 producers = self.producers_of_slice(measure.id, &filter).await;
             }
             let have: std::collections::HashSet<i64> =
                 series.iter().map(|p| p.capture_id).collect();
-            for c in effort_caps {
+            for c in own_caps {
                 if producers.contains(&c.producer) && !have.contains(&c.id) {
                     series.push(crate::metric_engine::SeriesPoint {
                         capture_id: c.id,
@@ -3594,12 +3260,12 @@ impl CollectionService {
         Some((series, facts.len() as i64))
     }
 
-    /// The effort's run captures (tests, coverage, analysis), oldest first —
-    /// not the thousands of other reports an open effort holds.
-    async fn run_captures(&self, effort_id: i64) -> Vec<oxplow_db::MetricCapture> {
+    /// The window's run captures (tests, coverage, analysis), oldest first —
+    /// not the thousands of other reports a running request holds.
+    async fn run_captures(&self, members: &oxplow_db::Members) -> Vec<oxplow_db::MetricCapture> {
         let caps = self
             .facts
-            .effort_captures_by_trigger(effort_id, RUN_TRIGGER)
+            .captures_by_trigger(members.clone(), RUN_TRIGGER)
             .await
             .unwrap_or_default();
         #[cfg(test)]
@@ -3609,19 +3275,19 @@ impl CollectionService {
         caps
     }
 
-    /// Coverage effort-delta (the `Coverage` family, tsk270): coverage is
-    /// **observe-always** (absolute) AND **effort-relative** (diff vs the
-    /// effort's start snapshot), so neither the time window nor a stored value
-    /// is right. For each coverage run CAPTURE this effort claimed (ledger —
+    /// Coverage delta (the `Coverage` family): coverage is
+    /// **observe-always** (absolute) AND **window-relative** (diff vs the
+    /// window's start snapshot), so neither the time span nor a stored value
+    /// is right. For each coverage run CAPTURE of the window's (its turns' —
     /// the capture is the run, T-E1), derive its diff-coverage from the
     /// capture's ABSOLUTE per-file line-sets (`detail_json`) against the
     /// snapshot it measured, then before→after over the derived sequence.
     async fn coverage_delta_for_spec(
         &self,
         spec: &oxplow_db::MetricSpec,
-        effort: &Effort,
-    ) -> Option<oxplow_db::EffortMetricDelta> {
-        let mut caps = self.run_captures(effort.id.value()).await;
+        window: &Window,
+    ) -> Option<oxplow_db::MetricDelta> {
+        let mut caps = self.run_captures(&window.members).await;
         caps.sort_by(|a, b| a.captured_at.cmp(&b.captured_at).then(a.id.cmp(&b.id)));
         let mut derived: Vec<f64> = Vec::new();
         let mut latest_cap = None;
@@ -3633,10 +3299,7 @@ impl CollectionService {
                 .filter(|env| env["kind"].as_str() == Some("coverage-detail"))
                 .and_then(|env| env.get("payload").cloned());
             if let Some(abs) = payload {
-                if let Ok(Some((pct, _))) = self
-                    .diff_coverage_for_effort(effort, c.snapshot_id, &abs)
-                    .await
-                {
+                if let Ok(Some((pct, _))) = self.diff_coverage(window, c.snapshot_id, &abs).await {
                     derived.push(pct);
                     latest_cap = Some(c.id);
                 }
@@ -3647,7 +3310,7 @@ impl CollectionService {
         let changed = (current - baseline).abs() > f64::EPSILON;
         let crossing = threshold_state(&spec.direction, current, spec.warn_at, spec.fail_at)
             .map(str::to_string);
-        Some(effort_delta_row_spec(
+        Some(delta_row_spec(
             spec,
             DeltaCalc {
                 agg: "level",
@@ -3721,7 +3384,7 @@ fn names_configured_runner(cfg: &oxplow_config::TestingConfig, run: &str) -> boo
 }
 
 /// The PostToolUse nudge shown when a detected test run produced no
-/// report oxplow could parse for the effort. Tool-agnostic: it names only
+/// report oxplow could parse. Tool-agnostic: it names only
 /// the project's own configured command (or routes to oxplow's `configure` command),
 /// so it works for any current/future test tool without the hook knowing
 /// anything tool-specific. It doesn't repeat the agent's command back (the
@@ -3738,8 +3401,8 @@ fn report_nudge_message(cfg: &oxplow_config::TestingConfig, has_report_collector
         configured(cfg.fast_command.as_deref()).or(configured(cfg.command.as_deref()))
     {
         format!(
-            "That test run wrote no report oxplow reads, so it won't show in the effort's \
-             Tests panel. `{runner}` writes one{}; run it in the foreground.",
+            "That test run wrote no report oxplow reads, so its results won't show in \
+             oxplow. `{runner}` writes one{}; run it in the foreground.",
             if cfg.fast_command.is_some() {
                 " and takes a filter"
             } else {
@@ -3752,13 +3415,13 @@ fn report_nudge_message(cfg: &oxplow_config::TestingConfig, has_report_collector
          .oxplow/project.yaml to make it one step."
             .to_string()
     } else {
-        "That test run's results can't reach the effort: this project reads no test \
+        "That test run's results can't reach oxplow: this project reads no test \
          reports. Run oxplow's `configure` slash command to wire this stack's report(s)."
             .to_string()
     }
 }
 
-/// The report-less nudge when the run's collectors didn't count (tsk893):
+/// The report-less nudge when the run's collectors didn't count:
 /// why each didn't. Running the tests again changes none of it.
 fn unread_reports_message(unread: &[String]) -> String {
     format!(
@@ -3768,9 +3431,9 @@ fn unread_reports_message(unread: &[String]) -> String {
     )
 }
 
-/// Effort-panel group ordering: code-health gauges first, then coverage, tests,
-/// static-analysis, operational. Drives the grouped rendering on the task page.
-fn effort_metric_group_order(d: &oxplow_db::EffortMetricDelta) -> u8 {
+/// Delta group ordering: code-health gauges first, then coverage, tests,
+/// static-analysis, operational. Drives the grouped rendering on a page.
+fn metric_group_order(d: &oxplow_db::MetricDelta) -> u8 {
     match d.category.as_deref() {
         Some("coverage") => 1,
         Some("testing") => 2,
@@ -3780,8 +3443,8 @@ fn effort_metric_group_order(d: &oxplow_db::EffortMetricDelta) -> u8 {
     }
 }
 
-/// The computed half of an [`oxplow_db::EffortMetricDelta`] — the per-family
-/// numbers, joined with the spec's metadata by [`effort_delta_row_spec`].
+/// The computed half of an [`oxplow_db::MetricDelta`] — the per-family
+/// numbers, joined with the spec's metadata by [`delta_row_spec`].
 struct DeltaCalc {
     agg: &'static str,
     baseline: Option<f64>,
@@ -3794,13 +3457,10 @@ struct DeltaCalc {
     crossing: Option<String>,
 }
 
-/// Build an effort-metric row from a metric SPEC + the computed `DeltaCalc`.
+/// Build a metric-delta row from a metric SPEC + the computed `DeltaCalc`.
 /// `kind` ← the spec's `display_kind`.
-fn effort_delta_row_spec(
-    spec: &oxplow_db::MetricSpec,
-    c: DeltaCalc,
-) -> oxplow_db::EffortMetricDelta {
-    oxplow_db::EffortMetricDelta {
+fn delta_row_spec(spec: &oxplow_db::MetricSpec, c: DeltaCalc) -> oxplow_db::MetricDelta {
+    oxplow_db::MetricDelta {
         key: spec.key.clone(),
         title: spec.title.clone(),
         unit: spec.unit.clone(),
@@ -3824,9 +3484,9 @@ fn effort_delta_row_spec(
 }
 
 /// A spec's `filter_json` as a [`FactFilter`](crate::metric_engine::FactFilter)
-/// (the empty filter when absent) — the effort-read counterpart of the engine's
+/// (the empty filter when absent) — the delta-read counterpart of the engine's
 /// private `spec_filter`. A malformed predicate is surfaced, never ignored.
-/// What one `effort_metric_deltas` call reads once and every File-family
+/// What one `metric_deltas` call reads once and every File-family
 /// spec sharing it reuses: a producer set's captures, and a measure's facts
 /// in the captures a delta compares. Rebuilt every call — never stale.
 #[derive(Default)]
@@ -3845,22 +3505,21 @@ fn spec_fact_filter(
 }
 
 /// How far back a report's mtime can be and still count as "fresh" for passive
-/// ingestion (tsk269). Replaces the effort-start floor so collection works at
-/// 0/N open efforts (observe-always). A report regenerated by the command that
-/// just ran is seconds old; stale reports from prior runs/other stacks fall
-/// outside the window and are skipped — same router/anti-replay intent as the
-/// old effort-start floor, minus the effort dependency. 10 minutes is generous
+/// ingestion, so collection works whatever the thread is doing
+/// (observe-always). A report regenerated by the command that just ran is
+/// seconds old; stale reports from prior runs/other stacks fall outside the
+/// window and are skipped (router/anti-replay). 10 minutes is generous
 /// for a slow suite that finishes writing well after its command started.
 const REPORT_FRESH_WINDOW_MS: i64 = 10 * 60 * 1000;
 
-/// Pause before the coverage leg's single retry (tsk79) — long enough for a
+/// Pause before the coverage leg's single retry — long enough for a
 /// DB-contention blip to clear, short enough that the detached task still
 /// finishes well within a test run's shadow.
 const COVERAGE_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
 
-/// Build the ABSOLUTE coverage payload from a report (tsk270): whole-report %
+/// Build the ABSOLUTE coverage payload from a report: whole-report %
 /// plus per-file instrumented/covered line-sets, stored verbatim so the
-/// effort-relative diff can be derived with the effort's evidence. Returns
+/// a request's diff can be derived with its analysis. Returns
 /// `(abs_pct, covered, instrumented, payload)`; `None` when nothing is
 /// instrumented.
 fn coverage_abs_payload(
@@ -3893,12 +3552,6 @@ fn coverage_abs_payload(
         total_instr,
         json!({ "absPct": abs_pct, "files": files_payload }),
     ))
-}
-
-/// The effort a tool event was anchored to (the thread's single open effort
-/// when the command ran).
-fn anchored_effort(cause: Option<&RunCause>) -> Option<EffortId> {
-    cause.and_then(|c| c.anchors.effort_id)
 }
 
 /// How far past a run's event a report's mtime may be and still be its
@@ -3967,11 +3620,11 @@ struct RunReports {
     exec_coverage: Vec<String>,
     exec_analysis: Vec<String>,
     /// Coverage reports this run wrote that failed to parse, or whose
-    /// collector didn't run (tsk79: a lost coverage run is recorded, not
+    /// collector didn't run (a lost coverage run is recorded, not
     /// only logged).
     coverage_errors: Vec<String>,
     /// Why each collector that should have read a report didn't count:
-    /// disabled, awaiting approval, or its parse failed (tsk893).
+    /// disabled, awaiting approval, or its parse failed.
     unread: Vec<String>,
 }
 
@@ -4029,7 +3682,7 @@ impl RunReports {
 }
 
 /// A run's `source`: `observed` from oxplow's own parse, or flagged
-/// `exec:<ids>` when a program parser contributed ([[tsk162]]).
+/// `exec:<ids>` when a program parser contributed ([[]]).
 fn trust(observed: &str, exec: &[String]) -> String {
     if exec.is_empty() {
         observed.to_string()
@@ -4047,7 +3700,7 @@ pub(crate) struct FreshWindow {
 }
 
 impl FreshWindow {
-    /// A run's reports: written after it `started` (tsk888) — less a
+    /// A run's reports: written after it `started` — less a
     /// second of mtime granularity — or, its start unknown, in the 10
     /// minutes before it `ended`; and by a minute after it ended.
     fn of_run(started: Option<oxplow_domain::Timestamp>, ended: oxplow_domain::Timestamp) -> Self {
@@ -4103,7 +3756,7 @@ fn diff_new_side_lines(old: &str, new: &str) -> BTreeSet<u32> {
     changed
 }
 
-/// What the collection tests declare (tsk863).
+/// What the collection tests declare.
 #[cfg(test)]
 pub(crate) mod test_support {
     /// A project report collector's manifest entry: `records` (`tests` /
@@ -4288,7 +3941,7 @@ mod tests {
         assert!(!detect_test_run("echo hi", &["".into(), "   ".into()]));
     }
 
-    /// tsk1037: a run shows the sub-command that ran the tests, not the
+    /// a run shows the sub-command that ran the tests, not the
     /// agent's whole Bash call (a heredoc that edited a file, a `cd`).
     #[test]
     fn a_test_run_shows_the_sub_command_that_ran_it() {
@@ -4370,48 +4023,6 @@ mod tests {
     }
 
     #[test]
-    fn detect_git_commit_matches_commit_commands() {
-        assert!(detect_git_commit("git commit -m \"x\""));
-        assert!(detect_git_commit("GIT COMMIT --amend --no-edit"));
-        assert!(detect_git_commit("git -c user.email=t@t commit -m y"));
-        assert!(!detect_git_commit("git add -A"));
-        assert!(!detect_git_commit("git status"));
-        assert!(!detect_git_commit("cargo build"));
-    }
-
-    #[test]
-    fn detect_git_revert_matches_revert_commands() {
-        // tsk77: `git revert` creates its commit without the word "commit"
-        // in the command line, so the waste leg needs its own detector.
-        assert!(detect_git_revert("git revert abc1234"));
-        assert!(detect_git_revert("git -c user.email=t@t revert HEAD~1"));
-        // --no-commit stages the inverse without committing — nothing landed.
-        assert!(!detect_git_revert("git revert --no-commit abc1234"));
-        assert!(!detect_git_revert("git revert -n abc1234"));
-        assert!(!detect_git_revert("git commit -m \"revert the thing\""));
-        assert!(!detect_git_revert("git status"));
-    }
-
-    #[test]
-    fn parse_reverted_shas_reads_the_git_trailer() {
-        // The stock `git revert` body line. Multi-revert bodies carry one
-        // trailer per reverted commit.
-        let body = "This reverts commit 0123456789abcdef0123456789abcdef01234567.\n\
-                    \n\
-                    This reverts commit fedcba9876543210fedcba9876543210fedcba98.";
-        assert_eq!(
-            parse_reverted_shas(body),
-            vec![
-                "0123456789abcdef0123456789abcdef01234567".to_string(),
-                "fedcba9876543210fedcba9876543210fedcba98".to_string(),
-            ]
-        );
-        assert!(parse_reverted_shas("fix: ordinary commit body").is_empty());
-        // Prose mentioning a revert without the trailer shape doesn't count.
-        assert!(parse_reverted_shas("this reverts the earlier approach").is_empty());
-    }
-
-    #[test]
     fn diff_new_side_lines_flags_inserts_and_replacements() {
         // old: a,b,c  new: a,B,c,d  → line 2 replaced, line 4 inserted.
         let old = "a\nb\nc\n";
@@ -4443,7 +4054,7 @@ mod tests {
         assert!(!FreshWindow::around(Timestamp::from_unix_ms(written - hour)).holds(f.path()));
     }
 
-    /// tsk888: a run's own reports are written after it started — one
+    /// a run's own reports are written after it started — one
     /// written before is an earlier run's, however recent. With its start
     /// unknown, the window reaches back 10 minutes.
     #[test]
@@ -4464,17 +4075,13 @@ mod tests {
     }
 
     /// End-to-end exercises of the orchestration: a real in-memory DB +
-    /// tempdir project, with stream/thread/task/effort/snapshot/blob rows
+    /// tempdir project, with stream/thread/task/turn/snapshot/blob rows
     /// built through the public store APIs.
     mod integration {
         use super::*;
         use oxplow_db::{Database, SqliteSnapshotStore, SqliteStreamStore};
         use oxplow_domain::stores::StreamStore;
-        use oxplow_domain::{EffortId, Stream, StreamId, StreamKind, Thread, Timestamp};
-        use oxplow_tasks::SqliteTaskStore;
-        use oxplow_tasks::TaskId;
-        use oxplow_tasks::TaskStore;
-        use oxplow_tasks::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
+        use oxplow_domain::{Stream, StreamId, StreamKind, Thread, Timestamp};
 
         const COBERTURA_50PCT: &str = r#"<?xml version="1.0"?>
 <coverage><packages><package name="p"><classes>
@@ -4485,21 +4092,104 @@ mod tests {
   </lines></class>
 </classes></package></packages></coverage>"#;
 
+        /// The harness's turn (in request 1): the turn a run is made in.
+        const TURN: i64 = 1;
+
         struct Harness {
             service: CollectionService,
             thread: ThreadId,
-            effort_id: String,
-            efforts: Arc<SqliteEffortStore>,
+            /// When the harness's turn (and its window) began.
+            started_at: Timestamp,
+            /// The take at the window's start.
+            start_snapshot: i64,
+            /// The files the window changed: what a file gauge sums over.
+            files: std::sync::Mutex<Vec<String>>,
             nudges: Arc<SqliteAgentNudgeStore>,
             tmp: tempfile::TempDir,
-            /// Shared in-memory db handle — lets a test seed a second task/effort
-            /// (e.g. the overlapping-efforts disentangle case).
+            /// Shared in-memory db handle — lets a test seed a second turn
+            /// (e.g. the overlapping-windows disentangle case).
             db: Database,
+        }
+
+        impl Harness {
+            /// The window of the harness's turn, live.
+            fn window(&self) -> Window {
+                self.window_of(TURN)
+            }
+
+            /// The window of `turn` over the harness's span, live.
+            fn window_of(&self, turn: i64) -> Window {
+                Window {
+                    key: format!("turn:{turn}"),
+                    stream: Some(1),
+                    started_at: self.started_at,
+                    ended_at: None,
+                    start_snapshot_id: Some(self.start_snapshot),
+                    end_snapshot_id: None,
+                    files: self.files.lock().unwrap().clone(),
+                    members: oxplow_db::Members::Turns(vec![turn]),
+                }
+            }
+
+            /// The captures `turn` made, oldest first.
+            async fn turn_captures(&self, turn: i64) -> Vec<oxplow_db::MetricCapture> {
+                let ids: Vec<i64> = self
+                    .db
+                    .read(move |tx| {
+                        tx.prepare(
+                            "SELECT id FROM metric_capture WHERE turn_id = ?1
+                              ORDER BY captured_at, id",
+                        )
+                        .and_then(|mut st| {
+                            st.query_map([turn], |r| r.get(0))?
+                                .collect::<rusqlite::Result<Vec<_>>>()
+                        })
+                        .map_err(oxplow_db::map_sql_err)
+                    })
+                    .await
+                    .unwrap();
+                let facts = oxplow_db::SqliteFactStore::new(self.db.clone());
+                let mut out = Vec::new();
+                for id in ids {
+                    out.extend(facts.get_capture(id).await.unwrap());
+                }
+                out
+            }
+        }
+
+        /// A tool event's anchors: made in the harness's turn.
+        fn in_turn() -> oxplow_domain::Anchors {
+            oxplow_domain::Anchors {
+                turn_id: Some(TURN),
+                ..oxplow_domain::Anchors::default()
+            }
+        }
+
+        /// Seed turn `id` (in request `id`) on thread 1, started at `at`.
+        async fn seed_turn(db: &Database, id: i64, at: Timestamp) {
+            let at = oxplow_db::ts_to_string(at);
+            db.transaction(move |tx| {
+                tx.execute(
+                    "INSERT INTO agent_turn (id, thread_id, prompt, started_at) VALUES (?1, 1, 'p', ?2)",
+                    rusqlite::params![id, at],
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+                tx.execute(
+                    "INSERT INTO request (id, thread_id, first_turn_id) VALUES (?1, 1, ?1)",
+                    [id],
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+                tx.execute("UPDATE agent_turn SET request_id = ?1 WHERE id = ?1", [id])
+                    .map_err(oxplow_db::map_sql_err)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
         }
 
         /// Build the fixture. `report_xml` Some → write it + configure the
         /// `tests.coverage` report collector (cobertura/coverage.xml); None →
-        /// no report collector. The effort's start snapshot holds
+        /// no report collector. The window's start snapshot holds
         /// `src/foo.rs` as `a\nb\nc\n`; the working tree has
         /// `a\nB\nc\nd\n` (lines 2 changed, 4 added), in no snapshot yet:
         /// a coverage run takes the snapshot of what it measured.
@@ -4520,7 +4210,7 @@ mod tests {
                 .read_run_reports(
                     kind,
                     FreshWindow::ending_now(),
-                    crate::collection::RunOrigin::Command { turn: None },
+                    crate::collection::RunOrigin::Command { turn: Some(TURN) },
                     h.tmp.path(),
                 )
                 .await
@@ -4530,7 +4220,7 @@ mod tests {
         async fn sync_coverage(h: &Harness) -> CoverageIngest {
             match h
                 .service
-                .sync_report_collector(&h.thread, "project", "tests.coverage", "human", None)
+                .sync_report_collector(&h.thread, "project", "tests.coverage", "human", Some(TURN))
                 .await
                 .unwrap()
             {
@@ -4589,27 +4279,6 @@ mod tests {
                 .upsert(&thread)
                 .await
                 .unwrap();
-            let task_id = SqliteTaskStore::new(db.clone())
-                .insert(&Task {
-                    id: TaskId::placeholder(),
-                    thread_id: Some(thread.id),
-                    parent_id: None,
-                    title: "x".into(),
-                    description: String::new(),
-                    status: TaskStatus::InProgress,
-                    priority: TaskPriority::Medium,
-                    sort_index: 0,
-                    created_by: TaskActorKind::User,
-                    created_at: now,
-                    updated_at: now,
-                    completed_at: None,
-                    deleted_at: None,
-                    note_count: 0,
-                    author: Some(TaskAuthor::User),
-                })
-                .await
-                .unwrap();
-
             // The stream's snapshot taker, as boot registers one.
             let blobs = BlobStore::new(project_dir.join(".oxplow/snapshots"));
             let snapshots = Arc::new(SqliteSnapshotStore::new(db.clone()));
@@ -4634,34 +4303,26 @@ mod tests {
                     blobs: blobs.clone(),
                     max_file_bytes: 1_000_000,
                     generated: Default::default(),
-                    open_turn_probe: None,
                 },
             );
             captures.insert_for_test(stream.id, capture.clone());
 
-            // The effort's start snapshot: src/foo.rs as `a b c`.
+            // The window's start snapshot: src/foo.rs as `a b c`.
             let foo = project_dir.join("src/foo.rs");
             std::fs::create_dir_all(project_dir.join("src")).unwrap();
             std::fs::write(&foo, "a\nb\nc\n").unwrap();
             capture.mark_dirty(foo.clone(), oxplow_fs_watch::WatchEventKind::Other);
             let snap_id = capture
-                .request_snapshot(oxplow_domain::snapshot::SnapshotTrigger::EffortStart)
+                .request_snapshot(oxplow_domain::snapshot::SnapshotTrigger::TurnEnd)
                 .await
                 .unwrap()
                 .expect("start snapshot");
 
-            let efforts = Arc::new(SqliteEffortStore::new(db.clone()));
-            let effort = efforts
-                .start(
-                    &oxplow_tasks::work_item_ref(task_id),
-                    &thread.id,
-                    Some(snap_id),
-                )
-                .await
-                .unwrap();
+            let started_at = Timestamp::now();
+            seed_turn(&db, TURN, started_at).await;
 
             // The agent's edit, on disk only — line 2 changed, line 4 added.
-            // A coverage run takes the snapshot it measured (tsk883).
+            // A coverage run takes the snapshot it measured.
             std::fs::write(&foo, NEW_FOO).unwrap();
             capture.mark_dirty(foo, oxplow_fs_watch::WatchEventKind::Other);
             // Optional git repo + base commit so HEAD has a parent.
@@ -4689,7 +4350,7 @@ mod tests {
 
             let nudges = Arc::new(SqliteAgentNudgeStore::new(db.clone()));
             // Seed the producer specs the way boot's `seed_catalog` does — the
-            // producers gate their collection on `measure_has_active_spec` (tsk31),
+            // producers gate their collection on `measure_has_active_spec`,
             // so without an active spec over each measure the gate stays closed.
             let facts = Arc::new(oxplow_db::SqliteFactStore::new(db.clone()));
             for spec in crate::test_fixtures::foundation_producer_specs() {
@@ -4699,7 +4360,6 @@ mod tests {
             let service = CollectionService::new(
                 facts,
                 nudges.clone(),
-                efforts.clone(),
                 Arc::new(SqliteThreadStore::new(db.clone())),
                 snapshots,
                 captures,
@@ -4741,8 +4401,9 @@ mod tests {
             Harness {
                 service,
                 thread: thread.id,
-                effort_id: effort.id.to_string(),
-                efforts,
+                started_at,
+                start_snapshot: snap_id,
+                files: std::sync::Mutex::new(Vec::new()),
                 nudges,
                 tmp,
                 db,
@@ -4757,11 +4418,11 @@ mod tests {
             // uncovered.
             // skip_if_stale = false: this test exercises the parse +
             // changed-line intersection deterministically; the mtime guard
-            // is covered by `report_is_stale_compares_mtime_to_effort_start`
-            // (a just-written report's mtime vs. the effort start is
-            // wall-clock/fs-granularity sensitive and would flake here).
-            // tsk270: ingest records ABSOLUTE coverage (instruments {1,2,4},
-            // covers {1,2} → 2/3 ≈ 66.7%); the effort-relative DIFF (changed∩instr
+            // is covered by the freshness-window tests (a just-written
+            // report's mtime vs. the run is wall-clock/fs-granularity
+            // sensitive and would flake here).
+            // ingest records ABSOLUTE coverage (instruments {1,2,4},
+            // covers {1,2} → 2/3 ≈ 66.7%); the window-relative DIFF (changed∩instr
             // = {2,4}, covered {2} → 50%, line 4 uncovered) is derived at READ.
             let outcome = sync_coverage(&h).await;
             match outcome {
@@ -4771,7 +4432,7 @@ mod tests {
                     changed_lines,
                     covered_lines,
                 } => {
-                    // tsk891: `run` is the coverage capture agents claim.
+                    // `run` is the coverage capture agents claim.
                     let capture = h.service.facts.get_capture(run).await.unwrap();
                     assert_eq!(capture.map(|c| c.producer), Some("coverage".to_string()));
                     assert_eq!(changed_lines, 3, "absolute instrumented");
@@ -4780,10 +4441,10 @@ mod tests {
                 }
                 other => panic!("expected Stored, got {other:?}"),
             }
-            // The DIFF is derived at read against the effort's changed lines.
+            // The DIFF is derived at read against the window's changed lines.
             let rows = h
                 .service
-                .effort_observations_from_metrics(&h.effort_id, Some("diff-coverage"))
+                .observations(&h.window(), Some("diff-coverage"))
                 .await;
             assert_eq!(rows.len(), 1);
             assert_eq!(rows[0].provenance, "observed");
@@ -4800,17 +4461,17 @@ mod tests {
         /// The harness's measured `src/foo.rs` (start: `a b c`).
         const NEW_FOO: &str = "a\nB\nc\nd\n";
 
-        /// The derived diff-coverage % of the harness's effort, if any.
+        /// The derived diff-coverage % of the harness's window, if any.
         async fn diff_pct(h: &Harness) -> Option<f64> {
             let rows = h
                 .service
-                .effort_observations_from_metrics(&h.effort_id, Some("diff-coverage"))
+                .observations(&h.window(), Some("diff-coverage"))
                 .await;
             assert!(rows.len() <= 1, "{rows:?}");
             rows.first().and_then(|r| r.metric_value)
         }
 
-        /// tsk862: the diff is of the code the run measured — the snapshot
+        /// the diff is of the code the run measured — the snapshot
         /// its capture is pinned to — so an edit after the run moves nothing.
         #[tokio::test]
         async fn diff_coverage_ignores_edits_after_the_run() {
@@ -4837,7 +4498,7 @@ mod tests {
             assert!(diff_pct(&h).await.is_some());
         }
 
-        /// tsk862: the diff reads snapshots, never a working tree: with the
+        /// the diff reads snapshots, never a working tree: with the
         /// file gone from the checkout it is still computed — so a worktree
         /// stream, whose files aren't under the project directory, gets one
         /// too (its report is read from its own worktree:
@@ -4851,7 +4512,7 @@ mod tests {
             assert!((pct - 50.0).abs() < 1e-6, "got {pct}");
         }
 
-        /// tsk890: a thread in a worktree stream reads its reports from its
+        /// a thread in a worktree stream reads its reports from its
         /// own worktree, never the primary checkout.
         #[tokio::test]
         async fn a_worktree_threads_report_is_read_from_its_worktree() {
@@ -4913,7 +4574,7 @@ mod tests {
                 .unwrap();
             match h
                 .service
-                .sync_report_collector(&thread.id, "project", "tests.coverage", "human", None)
+                .sync_report_collector(&thread.id, "project", "tests.coverage", "human", Some(TURN))
                 .await
             {
                 Ok(ReportSync::Coverage(CoverageIngest::Stored { summary_pct, .. })) => {
@@ -4923,20 +4584,16 @@ mod tests {
             }
         }
 
-        /// tsk883: a run delivered after an edit landed can't know what it
+        /// a run delivered after an edit landed can't know what it
         /// measured — its coverage is recorded, with no snapshot and so no
         /// diff rather than a wrong one.
         #[tokio::test]
         async fn a_run_delivered_after_an_edit_gets_no_diff() {
             let h = build(Some(COBERTURA_50PCT)).await;
-            let eid = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
             let cause = RunCause {
                 event_id: "evt-before-the-edit".into(),
                 seq: 0,
-                anchors: oxplow_domain::Anchors {
-                    effort_id: Some(eid),
-                    ..Default::default()
-                },
+                anchors: in_turn(),
                 // The run ended before the harness's edit landed.
                 at: Timestamp::from_unix_ms(Timestamp::now().unix_ms() - 30_000),
                 started: None,
@@ -4968,9 +4625,9 @@ mod tests {
             assert_eq!(diff_pct(&h).await, None);
         }
 
-        /// tsk935: every capture a tool event's run records carries that
+        /// every capture a tool event's run records carries that
         /// event's turn — coverage, analysis and the nudge alike, not only
-        /// the test run (tsk483).
+        /// the test run.
         #[tokio::test]
         async fn coverage_analysis_and_nudge_captures_carry_the_tools_turn() {
             const ESLINT: &str = r#"[{"filePath":"src/a.ts","messages":[{"ruleId":"r","severity":2,"message":"m","line":1,"column":1}]}]"#;
@@ -5045,7 +4702,6 @@ mod tests {
             h.service
                 .persist_nudge(
                     &h.thread,
-                    None,
                     crate::collection::Raised::agent("report-less-run", "m", "cmd"),
                     crate::collection::RunOrigin::Event(&cause),
                 )
@@ -5073,7 +4729,7 @@ mod tests {
             );
         }
 
-        /// tsk884: `cargo llvm-cov` names files by absolute path. They're
+        /// `cargo llvm-cov` names files by absolute path. They're
         /// read repo-relative, so they diff against the snapshots and their
         /// facts name repo files; a file outside the project is dropped.
         #[tokio::test]
@@ -5108,7 +4764,7 @@ mod tests {
             );
         }
 
-        /// tsk862: a baseline whose bytes are gone (collected) can't be
+        /// a baseline whose bytes are gone (collected) can't be
         /// diffed — no row, not "every line changed".
         #[tokio::test]
         async fn an_expired_baseline_gives_no_diff() {
@@ -5127,7 +4783,7 @@ mod tests {
             let h = build_full(Some(COBERTURA_50PCT), true).await;
             sync_coverage(&h).await;
 
-            // The durable fact layer (epic tsk12; the legacy sample write is
+            // The durable fact layer (the legacy sample write is
             // gone, T-E2): one `oxplow.coverage` fact for the report's single
             // file, carrying the covered/instrumented counts so a module/repo
             // roll-up re-derives Σcovered/Σinstrumented rather than averaging
@@ -5164,7 +4820,7 @@ mod tests {
 
         #[tokio::test]
         async fn a_coverage_report_records_branch_and_function_facts() {
-            // tsk123: a report carrying branch (condition-coverage) + function
+            // a report carrying branch (condition-coverage) + function
             // (methods) data lands per-file facts on oxplow.coverage.branch /
             // .function beside the line facts, num/den = hit/found so the headline
             // reads Σhit/Σfound. Branch 3/4 → 75%, function 1/2 → 50%.
@@ -5220,7 +4876,7 @@ mod tests {
 
         #[tokio::test]
         async fn merged_coverage_reports_keep_branch_and_function_counts() {
-            // tsk160: the passive ride-along is the PRIMARY ingestion path, and
+            // the passive ride-along is the PRIMARY ingestion path, and
             // it merges per-file coverage from every fresh report. It used to
             // copy only the line sets, so branch/function counters arrived as 0
             // and observe_coverage's `*_found > 0` gate meant
@@ -5329,110 +4985,8 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn reverting_a_closed_efforts_commit_records_token_waste() {
-            // tsk77: `git revert` of a commit made inside a CLOSED, token-
-            // metered effort → one `oxplow.token_waste` fact (value/num = the
-            // effort's spend, den = 0 — the numerator side of the wasted
-            // ratio), idempotent per effort.
-            let h = build_full(None, true).await;
-            let dir = h.tmp.path();
-
-            // A commit inside the (still open) effort's window.
-            std::fs::write(dir.join("work.txt"), "v1\n").unwrap();
-            git_in(dir, &["add", "work.txt"]);
-            git_commit(dir, "bad work");
-            let bad_sha = String::from_utf8(
-                std::process::Command::new("git")
-                    .current_dir(dir)
-                    .args(["rev-parse", "HEAD"])
-                    .output()
-                    .unwrap()
-                    .stdout,
-            )
-            .unwrap()
-            .trim()
-            .to_string();
-
-            // Give the effort a token spend, then close it.
-            let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
-            let effort = h
-                .efforts
-                .find_open_for_thread(&h.thread)
-                .await
-                .unwrap()
-                .expect("open effort");
-            let etm = facts
-                .get_measure("oxplow.effort_tokens")
-                .await
-                .unwrap()
-                .unwrap();
-            let mut cap = oxplow_db::NewMetricCapture::done(1, "effort-lifecycle", "test");
-            cap.effort_id = Some(effort.id.value());
-            facts
-                .record_facts(
-                    cap,
-                    vec![oxplow_db::NewFact {
-                        subject: Some(oxplow_domain::uri::build::effort_uri(effort.id)),
-                        ..oxplow_db::NewFact::new(etm.id, 5000.0)
-                    }],
-                )
-                .await
-                .unwrap();
-            h.efforts.finish(&effort.id, None, None).await.unwrap();
-
-            // The revert lands as a fresh commit with the trailer.
-            git_in(
-                dir,
-                &[
-                    "-c",
-                    "user.email=t@t",
-                    "-c",
-                    "user.name=t",
-                    "revert",
-                    "--no-edit",
-                    &bad_sha,
-                ],
-            );
-            h.service
-                .on_shell_run(
-                    &h.thread,
-                    bash_payload(&format!("git revert {bad_sha}"), 0),
-                    crate::collection::RunOrigin::Command { turn: None },
-                )
-                .await
-                .unwrap();
-
-            let waste_measure = facts
-                .get_measure("oxplow.token_waste")
-                .await
-                .unwrap()
-                .expect("token_waste measure seeded by V61");
-            let waste = facts.facts_for_measure(waste_measure.id).await.unwrap();
-            assert_eq!(waste.len(), 1, "one waste fact for the reverted effort");
-            assert_eq!(waste[0].value, 5000.0, "the effort's full spend");
-            assert_eq!(waste[0].numerator, Some(5000.0));
-            assert_eq!(waste[0].denominator, Some(0.0), "numerator-only ratio row");
-            assert_eq!(
-                waste[0].subject.as_deref(),
-                Some(oxplow_domain::uri::build::effort_uri(effort.id).as_str())
-            );
-
-            // Re-firing (same revert seen again) is idempotent per effort.
-            h.service
-                .on_shell_run(
-                    &h.thread,
-                    bash_payload(&format!("git revert {bad_sha}"), 0),
-                    crate::collection::RunOrigin::Command { turn: None },
-                )
-                .await
-                .unwrap();
-            let again = facts.facts_for_measure(waste_measure.id).await.unwrap();
-            assert_eq!(again.len(), 1, "one waste fact per effort, ever");
-        }
-
-        #[tokio::test]
         async fn coverage_parse_failure_records_a_failed_capture() {
-            // tsk79: a FRESH but malformed coverage report used to vanish with
+            // a FRESH but malformed coverage report used to vanish with
             // only a tty warn — the run's coverage just never existed. Now the
             // miss is durable: a facts-empty `status=failed` coverage capture
             // (the gauge-failure convention) lands in the substrate.
@@ -5442,7 +4996,7 @@ mod tests {
                 .on_shell_run(
                     &h.thread,
                     bash_payload("bun test --watch false", 0),
-                    crate::collection::RunOrigin::Command { turn: None },
+                    crate::collection::RunOrigin::Command { turn: Some(TURN) },
                 )
                 .await
                 .unwrap();
@@ -5481,7 +5035,7 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn record_test_run_attributes_to_open_effort() {
+        async fn a_recorded_test_run_is_its_turns() {
             let h = build(None).await;
             let id = h
                 .service
@@ -5496,15 +5050,12 @@ mod tests {
                     "observed",
                     "post-tool-bash",
                     None,
-                    None,
+                    Some(TURN),
                 )
                 .await
                 .unwrap();
             assert!(id.is_some());
-            let rows = h
-                .service
-                .effort_observations_from_metrics(&h.effort_id, Some("test-run"))
-                .await;
+            let rows = h.service.observations(&h.window(), Some("test-run")).await;
             assert_eq!(rows.len(), 1);
             assert!(rows[0]
                 .payload_json
@@ -5523,11 +5074,11 @@ mod tests {
                 .collect()
         }
 
-        /// The coverage captures recorded so far, with their effort.
+        /// The coverage captures recorded so far, with their turn.
         async fn coverage_captures(h: &Harness) -> Vec<Option<i64>> {
             h.db.transaction(|tx| {
                 let mut st = tx
-                    .prepare("SELECT effort_id FROM metric_capture WHERE producer = 'coverage' ORDER BY id")
+                    .prepare("SELECT turn_id FROM metric_capture WHERE producer = 'coverage' ORDER BY id")
                     .map_err(oxplow_db::map_sql_err)?;
                 let rows = st
                     .query_map([], |r| r.get(0))
@@ -5539,10 +5090,10 @@ mod tests {
             .unwrap()
         }
 
-        /// tsk1015: a run reported any way but the agent's own shell command
+        /// a run reported any way but the agent's own shell command
         /// (`oxplow.test.record_run`, a by-hand sync) has its coverage read from its
         /// `test.run.recorded` — the coverage collectors whose report it
-        /// wrote — owned by the run's effort. A run the collection reactor
+        /// wrote — in the run's turn. A run the collection reactor
         /// saw read its reports already: its event reads nothing more.
         #[tokio::test]
         async fn a_recorded_runs_coverage_is_read_from_its_event() {
@@ -5559,21 +5110,20 @@ mod tests {
                     "asserted",
                     "mcp",
                     None,
-                    None,
+                    Some(TURN),
                 )
                 .await
                 .unwrap();
             assert_eq!(coverage_captures(&h).await, Vec::<Option<i64>>::new());
             let [event] = run_events(&h).await.try_into().expect("one run event");
             h.service.on_test_run_recorded(&event).await.unwrap();
-            let effort = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
-            assert_eq!(coverage_captures(&h).await, vec![Some(effort.value())]);
+            assert_eq!(coverage_captures(&h).await, vec![Some(TURN)]);
 
             // A tool run's event: its reports were read with it.
             let cause = RunCause {
                 event_id: "evt-tool".into(),
                 seq: 1,
-                anchors: oxplow_domain::Anchors::default(),
+                anchors: in_turn(),
                 at: Timestamp::now(),
                 started: None,
             };
@@ -5606,7 +5156,7 @@ mod tests {
                     "observed",
                     "post-tool-bash",
                     None,
-                    None,
+                    Some(TURN),
                 )
                 .await
                 .unwrap();
@@ -5625,7 +5175,7 @@ mod tests {
             assert_eq!(caps.len(), 1, "one run capture");
             assert_eq!(caps[0].provenance, "observed");
             // Stamped with the stream's current snapshot (the code state) so the
-            // panel can group runs into exact iterations (tsk259).
+            // panel can group runs into exact iterations.
             assert!(
                 caps[0].snapshot_id.is_some(),
                 "the run capture carries the stream's current snapshot"
@@ -5643,7 +5193,7 @@ mod tests {
             // A report-less, count-less run (a bare `cargo test` the hook saw) is
             // a run RECORD, not a measurement — it must not read as "suite ran,
             // found 0 tests" and zero the semi-additive oxplow.tests.* timeline
-            // via the tsk44 zero-fill.
+            // via the zero-fill.
             use oxplow_coverage::{TestCase, TestReport, TestStatus, TestSuite};
             let h = build(None).await;
             let report = TestReport {
@@ -5670,7 +5220,7 @@ mod tests {
                     "observed",
                     "post-tool-bash",
                     Some(&report),
-                    None,
+                    Some(TURN),
                 )
                 .await
                 .unwrap();
@@ -5686,7 +5236,7 @@ mod tests {
                     "observed",
                     "post-tool-bash",
                     None,
-                    None,
+                    Some(TURN),
                 )
                 .await
                 .unwrap();
@@ -5707,9 +5257,8 @@ mod tests {
                 vec![1.0],
                 "the report-less run must not splice a value-0 point"
             );
-            // The run record itself survives for the ledger/effort panel.
-            let eid = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
-            let caps = facts.captures_for_effort(eid.value()).await.unwrap();
+            // The run record itself survives for the request's analysis.
+            let caps = h.turn_captures(TURN).await;
             let test_caps: Vec<_> = caps
                 .iter()
                 .filter(|c| {
@@ -5739,7 +5288,7 @@ mod tests {
                     "asserted",
                     "agent",
                     None,
-                    None,
+                    Some(TURN),
                 )
                 .await
                 .unwrap();
@@ -5776,9 +5325,9 @@ mod tests {
 
         #[tokio::test]
         async fn test_run_capture_stamps_the_commit_it_tested() {
-            // tsk95: a test result is about a CODE STATE, not a branch name, so
+            // a test result is about a CODE STATE, not a branch name, so
             // the run capture must record which commit it tested. Without it the
-            // per-subject fold can never be ancestry-aware (tsk97) — and it is
+            // per-subject fold can never be ancestry-aware — and it is
             // NOT backfillable: which commit a past run tested is unrecoverable.
             // Gauge captures got this for free via the snapshot-driven
             // `CollectorRunContext`; test runs went unstamped for 125 captures.
@@ -5795,7 +5344,7 @@ mod tests {
                     "observed",
                     "post-tool-bash",
                     None,
-                    None,
+                    Some(TURN),
                 )
                 .await
                 .unwrap();
@@ -5837,16 +5386,12 @@ mod tests {
                     "observed",
                     "post-tool-bash",
                     None,
-                    None,
+                    Some(TURN),
                 )
                 .await
                 .unwrap()
                 .expect("a capture was recorded");
-            let eid = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
-            let caps = oxplow_db::SqliteFactStore::new(h.db.clone())
-                .captures_for_effort(eid.value())
-                .await
-                .unwrap();
+            let caps = h.turn_captures(TURN).await;
             assert!(
                 caps.iter().any(|c| c.id == id),
                 "returned id {id} must be the recorded capture's id ({:?})",
@@ -5856,8 +5401,8 @@ mod tests {
 
         #[tokio::test]
         async fn record_test_run_writes_test_detail_finding_to_substrate() {
-            // tsk215: the suite/case tree is kept verbatim on the substrate as a
-            // `test-detail` finding so the effort panel renders off the model.
+            // the suite/case tree is kept verbatim on the substrate as a
+            // `test-detail` finding so a page renders off the model.
             use oxplow_coverage::{TestCase, TestReport, TestStatus, TestSuite};
             let h = build(None).await;
             let report = TestReport {
@@ -5893,7 +5438,7 @@ mod tests {
                     "observed",
                     "post-tool-bash",
                     Some(&report),
-                    None,
+                    Some(TURN),
                 )
                 .await
                 .unwrap();
@@ -5916,7 +5461,7 @@ mod tests {
             assert_eq!(payload["suites"][0]["name"], "oxplow-app");
             assert_eq!(payload["suites"][0]["cases"][1]["status"], "failed");
 
-            // The durable fact layer (epic tsk12): one `oxplow.test_case` fact
+            // The durable fact layer: one `oxplow.test_case` fact
             // per case, status carried as the `oxplow.status` dim so Count()
             // sliced by status reconstructs the passed/failed headline.
             let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
@@ -5942,7 +5487,7 @@ mod tests {
 
             // Keystone (T-B): the producer test specs re-aggregate these facts to
             // the baked counts through the engine — Count(oxplow.test_case) sliced
-            // by status. The read-flip (tsk26) then serves them from the engine.
+            // by status. The read-flip then serves them from the engine.
             for spec in crate::test_fixtures::foundation_producer_specs() {
                 facts.upsert_spec(spec).await.unwrap();
             }
@@ -6005,7 +5550,7 @@ mod tests {
                         "observed",
                         "post-tool-bash",
                         Some(&r),
-                        None,
+                        Some(TURN),
                     )
                     .await
                     .unwrap();
@@ -6031,11 +5576,10 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn record_test_run_stamps_test_case_capture_with_the_open_effort() {
-            // tsk37: the on-report test producer stamps its fact-capture with the
-            // owning effort (the harness opens one on the thread), so
-            // `captures_for_effort` — the T-D fact-attribution read — attributes the
-            // test facts. Same resolution the run auto-claim uses.
+        async fn record_test_run_stamps_test_case_capture_with_its_turn() {
+            // the on-report test producer stamps its fact-capture with
+            // the turn the run was made in, so the T-D fact-attribution read
+            // (`Members::Turns`) attributes the test facts.
             use oxplow_coverage::{TestCase, TestReport, TestStatus, TestSuite};
             let h = build(None).await;
             let report = TestReport {
@@ -6062,19 +5606,18 @@ mod tests {
                     "observed",
                     "post-tool-bash",
                     Some(&report),
-                    None,
+                    Some(TURN),
                 )
                 .await
                 .unwrap();
 
             let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
-            let eid = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
-            let caps = facts.captures_for_effort(eid.value()).await.unwrap();
+            let caps = h.turn_captures(TURN).await;
             let test_cap = caps
                 .iter()
                 .find(|c| c.producer == "tests")
-                .expect("the test capture is attributed to the open effort");
-            assert_eq!(test_cap.effort_id, Some(eid.value()));
+                .expect("the test capture is attributed to its turn");
+            assert_eq!(test_cap.turn_id, Some(TURN));
             // Its facts are reachable through the fact-attribution read.
             let measure = facts
                 .get_measure("oxplow.test_case")
@@ -6085,17 +5628,13 @@ mod tests {
                 .facts_for_captures(measure.id, vec![test_cap.id])
                 .await
                 .unwrap();
-            assert_eq!(
-                scoped.len(),
-                1,
-                "the one test case, attributed to the effort"
-            );
+            assert_eq!(scoped.len(), 1, "the one test case, attributed to the turn");
         }
 
         #[tokio::test]
-        async fn effort_observations_from_metrics_reconstructs_the_panel_shape() {
-            // tsk215: the effort panel's observation rows are reconstructed from
-            // the substrate (samples in the effort window + their detail payload).
+        async fn observations_reconstruct_the_panel_shape() {
+            // a window's observation rows are reconstructed from the
+            // substrate (its captures + their detail payload).
             use oxplow_coverage::{TestCase, TestReport, TestStatus, TestSuite};
             let h = build(None).await;
             let report = TestReport {
@@ -6122,14 +5661,11 @@ mod tests {
                     "observed",
                     "post-tool-bash",
                     Some(&report),
-                    None,
+                    Some(TURN),
                 )
                 .await
                 .unwrap();
-            let obs = h
-                .service
-                .effort_observations_from_metrics(&h.effort_id, Some("test-run"))
-                .await;
+            let obs = h.service.observations(&h.window(), Some("test-run")).await;
             assert_eq!(obs.len(), 1, "one test-run row reconstructed");
             assert_eq!(obs[0].kind, "test-run");
             assert_eq!(obs[0].provenance, "observed");
@@ -6144,16 +5680,16 @@ mod tests {
             // Filtering by a different kind yields nothing.
             assert!(h
                 .service
-                .effort_observations_from_metrics(&h.effort_id, Some("diff-coverage"))
+                .observations(&h.window(), Some("diff-coverage"))
                 .await
                 .is_empty());
         }
 
-        /// tsk1049: an effort's runs come oldest first, as `seq` numbers them
+        /// a window's runs come oldest first, as `seq` numbers them
         /// and every reader takes the highest `seq` as the latest. A red run
         /// then a green one reads green last.
         #[tokio::test]
-        async fn effort_observations_come_oldest_first() {
+        async fn observations_come_oldest_first() {
             use oxplow_coverage::{TestCase, TestReport, TestStatus, TestSuite};
             let h = build(None).await;
             let report = |status| TestReport {
@@ -6181,14 +5717,14 @@ mod tests {
                         "observed",
                         "post-tool-bash",
                         Some(&report(status)),
-                        None,
+                        Some(TURN),
                     )
                     .await
                     .unwrap();
             }
             let failed: Vec<i64> = h
                 .service
-                .effort_observations_from_metrics(&h.effort_id, Some("test-run"))
+                .observations(&h.window(), Some("test-run"))
                 .await
                 .iter()
                 .map(|o| {
@@ -6200,7 +5736,7 @@ mod tests {
             assert_eq!(failed, vec![1, 0], "the red run, then the green one");
         }
 
-        // ---- effort_metric_deltas (tsk250) -------------------------------
+        // ---- metric_deltas -------------------------------
 
         /// A per-file code-gauge SPEC (category custom → the `File` family) over a
         /// fresh measure, `sum` within a capture (per-file counts total the tree),
@@ -6214,10 +5750,10 @@ mod tests {
         ) -> (i64, oxplow_db::SqliteFactStore) {
             let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
             let measure_key = format!("{key}.m");
-            // Production parity (tsk43): the built-in code gauges seed a
+            // Production parity: the built-in code gauges seed a
             // path-grain measure (`subject_kind: file`) + a `static-quality`
             // spec — the classifier must still route them to the File family
-            // (their snapshot-scan captures are never effort-stamped).
+            // (their snapshot-scan captures are never turn-stamped).
             let mut nm = oxplow_db::NewMeasure::new(&measure_key, key);
             nm.subject_kind = Some("file".into());
             let m = facts.upsert_measure(nm).await.unwrap();
@@ -6233,7 +5769,7 @@ mod tests {
 
         /// Record one gauge CAPTURE at `at` with sparse `oxplow:oxplow/file?path=<path>` facts (a file
         /// absent from a capture reads as 0), mimicking a snapshot scan. Gauge
-        /// captures are NOT effort-stamped — the `File` family reads them by claimed
+        /// captures are NOT turn-stamped — the `File` family reads them by the window's
         /// files × time. Returns the capture id.
         async fn seed_gauge_capture(
             facts: &oxplow_db::SqliteFactStore,
@@ -6245,7 +5781,7 @@ mod tests {
         }
 
         /// [`seed_gauge_capture`] against an explicit stream — the cross-worktree
-        /// pollution fixture (tsk43).
+        /// pollution fixture.
         async fn seed_gauge_capture_in_stream(
             facts: &oxplow_db::SqliteFactStore,
             measure_id: i64,
@@ -6266,49 +5802,25 @@ mod tests {
             facts.record_facts(cap, rows).await.unwrap()
         }
 
-        async fn claim(h: &Harness, effort_id: &str, path: &str) {
-            let eid = oxplow_domain::EffortId::try_from_str(effort_id).unwrap();
-            h.efforts
-                .record_file(
-                    &eid,
-                    path,
-                    oxplow_db::EffortFileChange::Updated,
-                    oxplow_db::FileRefVersion {
-                        local_snapshot_id: 0,
-                        closest_vcs_rev: None,
-                        vcs_rev_exact: false,
-                    },
-                )
-                .await
-                .unwrap();
+        /// The window changed `path`.
+        async fn claim(h: &Harness, path: &str) {
+            h.files.lock().unwrap().push(path.to_string());
         }
 
-        async fn effort_start(h: &Harness, effort_id: &str) -> Timestamp {
-            let eid = oxplow_domain::EffortId::try_from_str(effort_id).unwrap();
-            h.efforts
-                .get_effort(&eid)
-                .await
-                .unwrap()
-                .unwrap()
-                .started_at
-        }
-
-        /// The effort's own captures key a spec's memo only where its producers
+        /// The window's own captures key a spec's memo only where its producers
         /// wrote them: an agent's token report lands every few seconds,
-        /// stamped with the open effort, and must not recompute the specs of
+        /// stamped with the running turn, and must not recompute the specs of
         /// other measures (the File family reloads whole capture histories).
         #[tokio::test]
-        async fn an_effort_stamped_capture_recomputes_only_its_producers_specs() {
+        async fn a_turn_stamped_capture_recomputes_only_its_producers_specs() {
             let h = build(None).await;
-            let effort = oxplow_domain::EffortId::try_from_str(&h.effort_id)
-                .unwrap()
-                .value();
-            let start = effort_start(&h, &h.effort_id).await;
+            let turn = TURN;
+            let start = h.started_at;
             let before = Timestamp::from_unix_ms(start.unix_ms() - 60_000);
             let after = Timestamp::from_unix_ms(start.unix_ms() + 60_000);
             let (m, facts) =
                 seed_file_gauge(&h, "oxplow.rust.unsafe_blocks", "lower-better", Some(0.0)).await;
-            claim(&h, &h.effort_id, "src/a.rs").await;
+            claim(&h, "src/a.rs").await;
             seed_gauge_capture(&facts, m, before, &[("src/a.rs", 2.0)]).await;
             seed_gauge_capture(&facts, m, after, &[("src/a.rs", 3.0)]).await;
             let computed = |svc: &CollectionService| {
@@ -6317,28 +5829,28 @@ mod tests {
                     .filter(|k| *k == "oxplow.rust.unsafe_blocks")
                     .count()
             };
-            h.service.effort_metric_deltas(&h.effort_id).await;
+            h.service.metric_deltas(&h.window()).await;
             assert_eq!(computed(&h.service), 1);
-            // A token report from another producer, stamped to this effort.
+            // A token report from another producer, stamped to this turn.
             let tokens = facts
                 .upsert_measure(oxplow_db::NewMeasure::new("acme.tokens", "tokens"))
                 .await
                 .unwrap();
             let mut report = oxplow_db::NewMetricCapture::done(1, "otel-tokens", "otel");
-            report.effort_id = Some(effort);
+            report.turn_id = Some(turn);
             facts
                 .record_facts(report, vec![oxplow_db::NewFact::new(tokens, 10.0)])
                 .await
                 .unwrap();
-            h.service.effort_metric_deltas(&h.effort_id).await;
+            h.service.metric_deltas(&h.window()).await;
             assert_eq!(
                 computed(&h.service),
                 1,
-                "another producer's capture, though stamped to the effort"
+                "another producer's capture, though stamped to the turn"
             );
             // A capture of the spec's own producer, stamped to it, does.
             let mut own = oxplow_db::NewMetricCapture::done(1, "test.gauge", "test");
-            own.effort_id = Some(effort);
+            own.turn_id = Some(turn);
             own.captured_at = Some(after);
             facts
                 .record_facts(
@@ -6351,7 +5863,7 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            h.service.effort_metric_deltas(&h.effort_id).await;
+            h.service.metric_deltas(&h.window()).await;
             assert_eq!(computed(&h.service), 2, "a capture of its own producer");
         }
 
@@ -6361,12 +5873,12 @@ mod tests {
         #[tokio::test]
         async fn a_spec_delta_is_recomputed_only_when_its_inputs_move() {
             let h = build(None).await;
-            let start = effort_start(&h, &h.effort_id).await;
+            let start = h.started_at;
             let before = Timestamp::from_unix_ms(start.unix_ms() - 60_000);
             let after = Timestamp::from_unix_ms(start.unix_ms() + 60_000);
             let (m, facts) =
                 seed_file_gauge(&h, "oxplow.rust.unsafe_blocks", "lower-better", Some(0.0)).await;
-            claim(&h, &h.effort_id, "src/a.rs").await;
+            claim(&h, "src/a.rs").await;
             seed_gauge_capture(&facts, m, before, &[("src/a.rs", 2.0)]).await;
             seed_gauge_capture(&facts, m, after, &[("src/a.rs", 3.0)]).await;
             let computed = |svc: &CollectionService| {
@@ -6375,9 +5887,9 @@ mod tests {
                     .filter(|k| *k == "oxplow.rust.unsafe_blocks")
                     .count()
             };
-            h.service.effort_metric_deltas(&h.effort_id).await;
+            h.service.metric_deltas(&h.window()).await;
             assert_eq!(computed(&h.service), 1);
-            h.service.effort_metric_deltas(&h.effort_id).await;
+            h.service.metric_deltas(&h.window()).await;
             assert_eq!(computed(&h.service), 1, "nothing moved");
             let tokens = facts
                 .upsert_measure(oxplow_db::NewMeasure::new("acme.tokens", "tokens"))
@@ -6390,10 +5902,10 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            h.service.effort_metric_deltas(&h.effort_id).await;
+            h.service.metric_deltas(&h.window()).await;
             assert_eq!(computed(&h.service), 1, "another producer's capture");
             seed_gauge_capture(&facts, m, after, &[("src/a.rs", 4.0)]).await;
-            let deltas = h.service.effort_metric_deltas(&h.effort_id).await;
+            let deltas = h.service.metric_deltas(&h.window()).await;
             assert_eq!(computed(&h.service), 2, "its own measure's capture");
             let row = deltas
                 .iter()
@@ -6421,16 +5933,16 @@ mod tests {
             (m, facts)
         }
 
-        /// One token report stamped to the effort: two facts, `input + output`.
+        /// One token report stamped to `turn`: two facts, `input + output`.
         async fn token_report(
             facts: &oxplow_db::SqliteFactStore,
             m: i64,
-            effort: i64,
+            turn: i64,
             input: f64,
             output: f64,
         ) {
             let mut report = oxplow_db::NewMetricCapture::done(1, "otel-tokens", "otel");
-            report.effort_id = Some(effort);
+            report.turn_id = Some(turn);
             facts
                 .record_facts(
                     report,
@@ -6443,33 +5955,31 @@ mod tests {
                 .unwrap();
         }
 
-        fn flow_row(deltas: &[oxplow_db::EffortMetricDelta]) -> &oxplow_db::EffortMetricDelta {
+        fn flow_row(deltas: &[oxplow_db::MetricDelta]) -> &oxplow_db::MetricDelta {
             deltas
                 .iter()
                 .find(|d| d.key == "agent.acme.tokens")
                 .unwrap()
         }
 
-        /// A token report folds into the effort's running total: it reads the
-        /// new report's facts, not the effort's whole history (a long-open
-        /// effort holds thousands of reports, one every ~30 s), and the
+        /// A token report folds into the window's running total: it reads the
+        /// new report's facts, not the window's whole history (a long-running
+        /// request holds thousands of reports, one every ~30 s), and the
         /// total is what a full read gives.
         #[tokio::test]
-        async fn a_token_report_folds_into_the_total_without_rereading_the_effort() {
+        async fn a_token_report_folds_into_the_total_without_rereading_the_window() {
             let h = build(None).await;
-            let effort = oxplow_domain::EffortId::try_from_str(&h.effort_id)
-                .unwrap()
-                .value();
+            let turn = TURN;
             let (m, facts) = seed_token_flow(&h).await;
             for i in 0..40 {
-                token_report(&facts, m, effort, 10.0 + f64::from(i), 5.0).await;
+                token_report(&facts, m, turn, 10.0 + f64::from(i), 5.0).await;
             }
-            let first = h.service.effort_metric_deltas(&h.effort_id).await;
+            let first = h.service.metric_deltas(&h.window()).await;
             assert_eq!(flow_row(&first).current, 40.0 * 15.0 + 780.0);
 
             h.service.reset_reads();
-            token_report(&facts, m, effort, 100.0, 50.0).await;
-            let folded = h.service.effort_metric_deltas(&h.effort_id).await;
+            token_report(&facts, m, turn, 100.0, 50.0).await;
+            let folded = h.service.metric_deltas(&h.window()).await;
             let (captures, fact_rows) = h.service.reads();
             assert!(
                 captures <= 1 && fact_rows <= 2,
@@ -6479,33 +5989,31 @@ mod tests {
 
             // The fold equals a read from scratch.
             h.service.forget_deltas();
-            let whole = h.service.effort_metric_deltas(&h.effort_id).await;
+            let whole = h.service.metric_deltas(&h.window()).await;
             assert_eq!(flow_row(&whole), flow_row(&folded));
         }
 
-        /// Measurement for `.context/performance.md`: an effort open for days
+        /// Measurement for `.context/performance.md`: a request running for days
         /// holds thousands of token reports. Prints what reading them all
         /// again costs (what every recompute used to do) next to what a
         /// recompute after one more report costs now.
-        /// `cargo test -p oxplow-app --release a_long_open_effort -- --ignored --nocapture`
+        /// `cargo test -p oxplow-app --release a_long_running_request -- --ignored --nocapture`
         #[tokio::test(flavor = "multi_thread")]
         #[ignore = "a measurement, printed"]
-        async fn a_long_open_effort_recomputes_in_milliseconds() {
+        async fn a_long_running_request_recomputes_in_milliseconds() {
             let h = build(None).await;
-            let effort = oxplow_domain::EffortId::try_from_str(&h.effort_id)
-                .unwrap()
-                .value();
+            let turn = TURN;
             let (m, facts) = seed_token_flow(&h).await;
             for i in 0..13_000 {
-                token_report(&facts, m, effort, 10.0 + f64::from(i % 50), 5.0).await;
+                token_report(&facts, m, turn, 10.0 + f64::from(i % 50), 5.0).await;
             }
-            h.service.effort_metric_deltas(&h.effort_id).await;
-            token_report(&facts, m, effort, 1.0, 1.0).await;
+            h.service.metric_deltas(&h.window()).await;
+            token_report(&facts, m, turn, 1.0, 1.0).await;
             let t = std::time::Instant::now();
-            h.service.effort_metric_deltas(&h.effort_id).await;
+            h.service.metric_deltas(&h.window()).await;
             let folded = t.elapsed();
             let t = std::time::Instant::now();
-            let caps = facts.captures_for_effort(effort).await.unwrap();
+            let caps = h.turn_captures(turn).await;
             let ids: Vec<i64> = caps.iter().map(|c| c.id).collect();
             let rows = facts.facts_for_captures(m, ids).await.unwrap();
             let reread = t.elapsed();
@@ -6517,52 +6025,102 @@ mod tests {
             );
         }
 
-        /// A capture of a producer no spec reads (stamped to the effort, as
+        /// A capture of a producer no spec reads (stamped to the turn, as
         /// everything an agent does is) costs no capture or fact read at all.
         #[tokio::test]
         async fn a_capture_nothing_reads_costs_no_reads() {
             let h = build(None).await;
-            let effort = oxplow_domain::EffortId::try_from_str(&h.effort_id)
-                .unwrap()
-                .value();
+            let turn = TURN;
             let (m, facts) = seed_token_flow(&h).await;
-            token_report(&facts, m, effort, 1.0, 2.0).await;
-            h.service.effort_metric_deltas(&h.effort_id).await;
+            token_report(&facts, m, turn, 1.0, 2.0).await;
+            h.service.metric_deltas(&h.window()).await;
             let other = facts
                 .upsert_measure(oxplow_db::NewMeasure::new("acme.unread", "unread"))
                 .await
                 .unwrap();
             h.service.reset_reads();
             let mut unread = oxplow_db::NewMetricCapture::done(1, "acme-unread", "acme");
-            unread.effort_id = Some(effort);
+            unread.turn_id = Some(turn);
             facts
                 .record_facts(unread, vec![oxplow_db::NewFact::new(other, 3.0)])
                 .await
                 .unwrap();
-            h.service.effort_metric_deltas(&h.effort_id).await;
+            h.service.metric_deltas(&h.window()).await;
             assert_eq!(h.service.reads(), (0, 0));
         }
 
+        /// A finished window's file gauges read the scan of its end take,
+        /// which lands after its last turn ended: baseline and current are
+        /// the captures at or before its start and end snapshots, by
+        /// snapshot when a capture names one.
         #[tokio::test]
-        async fn effort_metric_deltas_attributes_gauge_by_claimed_files() {
+        async fn a_windows_gauges_read_the_scan_of_its_end_take() {
             let h = build(None).await;
-            let start = effort_start(&h, &h.effort_id).await;
+            let (m, facts) =
+                seed_file_gauge(&h, "oxplow.rust.unsafe_blocks", "lower-better", None).await;
+            let t0 = Timestamp::from_unix_ms(1_800_000_000_000);
+            let at = |s: i64| Timestamp::from_unix_ms(t0.unix_ms() + s * 1000);
+            let scan = |when: i64, snapshot: i64, value: f64| {
+                let facts = facts.clone();
+                async move {
+                    let mut cap = oxplow_db::NewMetricCapture::done(1, "test.gauge", "test");
+                    cap.captured_at = Some(at(when));
+                    cap.snapshot_id = Some(snapshot);
+                    facts
+                        .record_facts(
+                            cap,
+                            vec![oxplow_db::NewFact {
+                                subject: Some(oxplow_domain::uri::build::file_uri("src/a.rs")),
+                                path: Some("src/a.rs".into()),
+                                ..oxplow_db::NewFact::new(m, value)
+                            }],
+                        )
+                        .await
+                        .unwrap();
+                }
+            };
+            scan(0, 10, 1.0).await;
+            // Mid-window, and the end take's scan just after the window closed.
+            scan(30, 15, 2.0).await;
+            scan(62, 20, 4.0).await;
+            let window = Window {
+                key: "a window".into(),
+                stream: Some(1),
+                started_at: at(5),
+                ended_at: Some(at(60)),
+                start_snapshot_id: Some(10),
+                end_snapshot_id: Some(20),
+                files: vec!["src/a.rs".into()],
+                members: oxplow_db::Members::Turns(vec![]),
+            };
+            let deltas = h.service.metric_deltas(&window).await;
+            let d = deltas
+                .iter()
+                .find(|d| d.key == "oxplow.rust.unsafe_blocks")
+                .expect("the gauge moved");
+            assert_eq!((d.baseline, d.current), (Some(1.0), 4.0));
+        }
+
+        #[tokio::test]
+        async fn metric_deltas_attribute_a_gauge_by_the_windows_files() {
+            let h = build(None).await;
+            let start = h.started_at;
             let before = Timestamp::from_unix_ms(start.unix_ms() - 60_000);
             let after = Timestamp::from_unix_ms(start.unix_ms() + 60_000);
             let (m, facts) =
                 seed_file_gauge(&h, "oxplow.rust.unsafe_blocks", "lower-better", Some(0.0)).await;
-            // The effort claims a.rs and b.rs. c.rs is changed elsewhere (NOT
-            // claimed) — it must not leak into this effort's delta.
-            claim(&h, &h.effort_id, "src/a.rs").await;
-            claim(&h, &h.effort_id, "src/b.rs").await;
-            // Baseline capture (before the effort): a.rs=2, c.rs=5.
+            // The window changed a.rs and b.rs. c.rs is changed elsewhere —
+            // it must not leak into this window's delta.
+            claim(&h, "src/a.rs").await;
+            claim(&h, "src/b.rs").await;
+            // Baseline capture (before the window): a.rs=2, c.rs=5.
             seed_gauge_capture(&facts, m, before, &[("src/a.rs", 2.0), ("src/c.rs", 5.0)]).await;
-            // Current capture (during the effort): a.rs removed (absent ⇒ 0), b.rs=3
+            // Current capture (during the window): a.rs removed (absent ⇒ 0), b.rs=3
             // added, c.rs still 5.
             seed_gauge_capture(&facts, m, after, &[("src/b.rs", 3.0), ("src/c.rs", 5.0)]).await;
 
-            let deltas = h.service.effort_metric_deltas(&h.effort_id).await;
-            assert_eq!(deltas.len(), 1, "one metric touched the effort's files");
+            let deltas = h.service.metric_deltas(&h.window()).await;
+            assert_eq!(deltas.len(), 1, "one metric touched the window's files");
             let d = &deltas[0];
             assert_eq!(d.agg, "files");
             // a.rs 2→0, b.rs 0→3 ⇒ baseline 2, current 3, Δ +1. c.rs excluded.
@@ -6574,45 +6132,13 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn refreshing_effort_evidence_stores_deltas_for_pages() {
-            let h = build(None).await;
-            let start = effort_start(&h, &h.effort_id).await;
-            let before = Timestamp::from_unix_ms(start.unix_ms() - 60_000);
-            let after = Timestamp::from_unix_ms(start.unix_ms() + 60_000);
-            let (m, facts) =
-                seed_file_gauge(&h, "oxplow.rust.unsafe_blocks", "lower-better", Some(0.0)).await;
-            claim(&h, &h.effort_id, "src/a.rs").await;
-            seed_gauge_capture(&facts, m, before, &[("src/a.rs", 2.0)]).await;
-            seed_gauge_capture(&facts, m, after, &[("src/a.rs", 5.0)]).await;
-
-            let store = oxplow_db::SqliteEffortEvidenceStore::new(h.db.clone());
-            h.service
-                .refresh_effort_evidence(&h.effort_id, &store)
-                .await
-                .unwrap();
-
-            let out = crate::sql_gateway::SqlGateway::new(h.db.clone())
-                .query_sql(
-                    "SELECT key, baseline, current, delta FROM v_effort_metric_delta",
-                    vec![],
-                    None,
-                )
-                .await
-                .unwrap();
-            assert_eq!(
-                serde_json::to_value(&out.rows).unwrap(),
-                serde_json::json!([["oxplow.rust.unsafe_blocks", 2.0, 5.0, 3.0]])
-            );
-        }
-
-        #[tokio::test]
-        async fn effort_metric_deltas_count_spec_counts_offenders_not_value_sum() {
+        async fn metric_deltas_count_spec_counts_offenders_not_value_sum() {
             // A `count` spec (oxplow.high_complexity_fns' shape: count of facts
-            // over a threshold) must COUNT offenders in the effort panel — not
+            // over a threshold) must COUNT offenders in a window's delta — not
             // sum their raw values, which contradicts the Metrics page and feeds
             // a value-sum into the count-calibrated crossing thresholds.
             let h = build(None).await;
-            let start = effort_start(&h, &h.effort_id).await;
+            let start = h.started_at;
             let before = Timestamp::from_unix_ms(start.unix_ms() - 60_000);
             let after = Timestamp::from_unix_ms(start.unix_ms() + 60_000);
             let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
@@ -6628,7 +6154,7 @@ mod tests {
             s.warn_at = Some(3.0);
             s.fail_at = Some(6.0);
             facts.upsert_spec(s).await.unwrap();
-            claim(&h, &h.effort_id, "src/a.rs").await;
+            claim(&h, "src/a.rs").await;
             // Baseline: one offender (complexity 15). Current: two offenders
             // (12, 11) plus one function under the threshold (4).
             seed_gauge_capture(&facts, m, before, &[("src/a.rs", 15.0)]).await;
@@ -6640,7 +6166,7 @@ mod tests {
             )
             .await;
 
-            let deltas = h.service.effort_metric_deltas(&h.effort_id).await;
+            let deltas = h.service.metric_deltas(&h.window()).await;
             assert_eq!(deltas.len(), 1);
             let d = &deltas[0];
             // Offender COUNT 1 → 2 (Δ +1) — not Σ complexity 15 → 23 (Δ +8).
@@ -6653,19 +6179,19 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn effort_metric_deltas_ignores_other_streams_captures() {
-            // tsk43: gauge captures are per-worktree scans. A LATER capture from
+        async fn metric_deltas_ignore_other_streams_captures() {
+            // gauge captures are per-worktree scans. A LATER capture from
             // another stream (same repo-relative path, different worktree content)
-            // must not become this effort's "current" — the effort reads only its
+            // must not become this window's "current" — the window reads only its
             // own stream's timeline.
             let h = build(None).await;
-            let start = effort_start(&h, &h.effort_id).await;
+            let start = h.started_at;
             let before = Timestamp::from_unix_ms(start.unix_ms() - 60_000);
             let after = Timestamp::from_unix_ms(start.unix_ms() + 60_000);
             let later = Timestamp::from_unix_ms(start.unix_ms() + 120_000);
             let (m, facts) =
                 seed_file_gauge(&h, "oxplow.rust.unsafe_blocks", "lower-better", None).await;
-            claim(&h, &h.effort_id, "src/a.rs").await;
+            claim(&h, "src/a.rs").await;
             seed_gauge_capture(&facts, m, before, &[("src/a.rs", 2.0)]).await;
             seed_gauge_capture(&facts, m, after, &[("src/a.rs", 3.0)]).await;
             // A second stream (worktree) whose scan covers the same path.
@@ -6694,7 +6220,7 @@ mod tests {
             // Stream 2's worktree scans the same path — newer, different value.
             seed_gauge_capture_in_stream(&facts, m, 2, later, &[("src/a.rs", 100.0)]).await;
 
-            let deltas = h.service.effort_metric_deltas(&h.effort_id).await;
+            let deltas = h.service.metric_deltas(&h.window()).await;
             assert_eq!(deltas.len(), 1);
             assert_eq!(deltas[0].baseline, Some(2.0));
             assert_eq!(
@@ -6704,77 +6230,44 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn effort_metric_deltas_skips_closed_effort_with_only_post_close_captures() {
-            // tsk43: a CLOSED effort whose window contains no gauge capture gets
-            // no row — never a post-close capture's repo changes (the old
+        async fn metric_deltas_skip_a_finished_window_with_only_later_captures() {
+            // a FINISHED window whose span contains no gauge capture
+            // gets no row — never a later capture's repo changes (the old
             // `.or_else(caps.last())` fallback), and never a fabricated
-            // drop-to-zero against a pre-effort baseline.
+            // drop-to-zero against an earlier baseline.
             let h = build(None).await;
             let (m, facts) =
                 seed_file_gauge(&h, "oxplow.rust.unsafe_blocks", "lower-better", None).await;
-            claim(&h, &h.effort_id, "src/a.rs").await;
-            // The effort closes with no capture at all in its window (e.g. the
-            // gauge was first enabled after the close)…
-            let eid = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
-            h.efforts.finish(&eid, None, None).await.unwrap();
-            let end = h
-                .efforts
-                .get_effort(&eid)
-                .await
-                .unwrap()
-                .unwrap()
-                .ended_at
-                .unwrap();
-            // …and the only later capture lands AFTER the close.
+            claim(&h, "src/a.rs").await;
+            // The window ends with no capture at all in its span (e.g. the
+            // gauge was first enabled after it)…
+            let end = Timestamp::now();
+            let window = Window {
+                ended_at: Some(end),
+                ..h.window()
+            };
+            // …and the only later capture lands AFTER its end.
             let post = Timestamp::from_unix_ms(end.unix_ms() + 60_000);
             seed_gauge_capture(&facts, m, post, &[("src/a.rs", 9.0)]).await;
 
-            let deltas = h.service.effort_metric_deltas(&h.effort_id).await;
+            let deltas = h.service.metric_deltas(&window).await;
             assert!(
                 deltas.is_empty(),
-                "no in-window capture → no row, not a post-close delta: {deltas:?}"
+                "no in-window capture → no row, not a later delta: {deltas:?}"
             );
         }
 
         #[tokio::test]
-        async fn effort_metric_deltas_attributes_analysis_by_own_capture() {
-            // tsk37/T-D: analysis is a run-kind fact attributed by the CAPTURE's
-            // stamped `effort_id` (set at ingest when the owning effort resolves),
-            // NOT a time window and NOT claimed files. Under two overlapping
-            // efforts, a capture stamped to e1 shows on e1 and must NOT pollute the
-            // concurrent e2's analysis delta.
+        async fn metric_deltas_attribute_analysis_by_own_capture() {
+            // /T-D: analysis is a run-kind fact attributed by the CAPTURE's
+            // stamped `turn_id` (set at ingest from the run's tool call), NOT a
+            // time window and NOT files. Under two overlapping windows, a
+            // capture of turn 1 shows on turn 1's and must NOT pollute the
+            // concurrent turn 2's analysis delta.
             let h = build(None).await;
-            let now = Timestamp::now();
-            let task2 = SqliteTaskStore::new(h.db.clone())
-                .insert(&Task {
-                    id: TaskId::placeholder(),
-                    thread_id: Some(h.thread),
-                    parent_id: None,
-                    title: "t2".into(),
-                    description: String::new(),
-                    status: TaskStatus::InProgress,
-                    priority: TaskPriority::Medium,
-                    sort_index: 0,
-                    created_by: TaskActorKind::User,
-                    created_at: now,
-                    updated_at: now,
-                    completed_at: None,
-                    deleted_at: None,
-                    note_count: 0,
-                    author: Some(TaskAuthor::User),
-                })
-                .await
-                .unwrap();
-            let eff2 = h
-                .efforts
-                .start(&oxplow_tasks::work_item_ref(task2), &h.thread, None)
-                .await
-                .unwrap();
-            let eff2_id = eff2.id.to_string();
-            let eid1 = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
-            // A capture time inside BOTH (open) windows — after the later start
-            // (eff2). Using `now` would land before eff2 started and dodge the bug.
-            let at = Timestamp::from_unix_ms(eff2.started_at.unix_ms() + 1000);
+            seed_turn(&h.db, 2, Timestamp::now()).await;
+            // A capture time inside BOTH (open) windows.
+            let at = Timestamp::from_unix_ms(Timestamp::now().unix_ms() + 1000);
 
             // Analysis spec (category static-quality → the Run family), counting
             // `error`-severity facts over the lint-hit measure.
@@ -6795,13 +6288,13 @@ mod tests {
             s.filter_json = Some(r#"{"severity":"error"}"#.into());
             facts.upsert_spec(s).await.unwrap();
 
-            // One analysis capture, stamped to e1 only, with three error facts (and
+            // One analysis capture, of turn 1 only, with three error facts (and
             // one warning, filtered out by the spec's severity predicate).
             let mut cap = oxplow_db::NewMetricCapture::done(1, "analysis", "analysis-report");
             cap.captured_at = Some(at);
             cap.thread_id = Some(h.thread.value());
             cap.trigger = Some("on-report".into());
-            cap.effort_id = Some(eid1.value());
+            cap.turn_id = Some(TURN);
             let lint = |sev: &str| oxplow_db::NewFact {
                 severity: Some(sev.into()),
                 ..oxplow_db::NewFact::new(m, 1.0)
@@ -6814,31 +6307,30 @@ mod tests {
                 .await
                 .unwrap();
 
-            let d1 = h.service.effort_metric_deltas(&h.effort_id).await;
+            let d1 = h.service.metric_deltas(&h.window()).await;
             let analysis = d1
                 .iter()
                 .find(|d| d.category.as_deref() == Some("static-quality"));
             assert!(
                 analysis.is_some(),
-                "the owning effort shows its analysis capture"
+                "its turn's window shows its analysis capture"
             );
             // Three error facts survive the severity filter (the warning is dropped).
             assert_eq!(analysis.unwrap().current, 3.0);
-            let d2 = h.service.effort_metric_deltas(&eff2_id).await;
+            let d2 = h.service.metric_deltas(&h.window_of(2)).await;
             assert!(
                 !d2.iter()
                     .any(|d| d.category.as_deref() == Some("static-quality")),
-                "a capture stamped to another effort must not pollute a concurrent effort"
+                "another turn's capture must not pollute a concurrent window"
             );
         }
 
         #[tokio::test]
-        async fn effort_metric_deltas_shows_analysis_dropping_to_zero() {
-            // tsk44: a CLEAN analysis run writes an EMPTY effort-stamped capture;
+        async fn metric_deltas_show_analysis_dropping_to_zero() {
+            // a CLEAN analysis run writes an EMPTY turn-stamped capture;
             // the stamped read zero-fills it, so the panel shows "3 → 0" instead
             // of a stuck 3 (or no row) after the agent fixes every lint.
             let h = build(None).await;
-            let eid1 = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
             let now = Timestamp::now();
 
             let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
@@ -6858,11 +6350,11 @@ mod tests {
             s.filter_json = Some(r#"{"severity":"error"}"#.into());
             facts.upsert_spec(s).await.unwrap();
 
-            // Run 1 (stamped to the effort): three errors.
+            // Run 1 (of the turn): three errors.
             let mut cap1 = oxplow_db::NewMetricCapture::done(1, "analysis", "analysis-report");
             cap1.captured_at = Some(now);
             cap1.thread_id = Some(h.thread.value());
-            cap1.effort_id = Some(eid1.value());
+            cap1.turn_id = Some(TURN);
             let lint = |sev: &str| oxplow_db::NewFact {
                 severity: Some(sev.into()),
                 ..oxplow_db::NewFact::new(m, 1.0)
@@ -6875,10 +6367,10 @@ mod tests {
             let mut cap2 = oxplow_db::NewMetricCapture::done(1, "analysis", "analysis-report");
             cap2.captured_at = Some(Timestamp::from_unix_ms(now.unix_ms() + 60_000));
             cap2.thread_id = Some(h.thread.value());
-            cap2.effort_id = Some(eid1.value());
+            cap2.turn_id = Some(TURN);
             facts.record_facts(cap2, vec![]).await.unwrap();
 
-            let d1 = h.service.effort_metric_deltas(&h.effort_id).await;
+            let d1 = h.service.metric_deltas(&h.window()).await;
             let analysis = d1
                 .iter()
                 .find(|d| d.category.as_deref() == Some("static-quality"))
@@ -6889,8 +6381,8 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn clean_only_effort_discovers_producers_from_global_history() {
-            // tsk239/tsk242: when the effort's ONLY run was clean, its own
+        async fn a_clean_only_window_discovers_producers_from_global_history() {
+            // when the window's ONLY run was clean, its own
             // captures carry no matching facts, so the producer set that drives
             // the zero-fill has to come from the measure's global history. Two
             // branches serve that now — an unconstrained filter short-circuits
@@ -6900,7 +6392,6 @@ mod tests {
             // the constrained case and zero-filling a metric whose slice this
             // producer never emits.
             let h = build(None).await;
-            let eid = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
             let now = Timestamp::now();
 
             let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
@@ -6937,7 +6428,7 @@ mod tests {
                 .await
                 .unwrap();
 
-            // Global history, NOT stamped to the effort: producer `analysis`
+            // Global history, NOT of the turn: producer `analysis`
             // has only ever emitted WARNINGS.
             let mut past = oxplow_db::NewMetricCapture::done(1, "analysis", "analysis-report");
             past.captured_at = Some(Timestamp::from_unix_ms(now.unix_ms() - 600_000));
@@ -6957,14 +6448,14 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            // The effort's own — and only — run: CLEAN, no facts at all.
+            // The window's own — and only — run: CLEAN, no facts at all.
             let mut clean = oxplow_db::NewMetricCapture::done(1, "analysis", "analysis-report");
             clean.captured_at = Some(now);
             clean.thread_id = Some(h.thread.value());
-            clean.effort_id = Some(eid.value());
+            clean.turn_id = Some(TURN);
             facts.record_facts(clean, vec![]).await.unwrap();
 
-            let rows = h.service.effort_metric_deltas(&h.effort_id).await;
+            let rows = h.service.metric_deltas(&h.window()).await;
             let row = |title: &str| rows.iter().find(|d| d.title == title);
 
             // Unconstrained: every fact counts, so the producer is discovered
@@ -6989,13 +6480,12 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn effort_metric_deltas_sums_operational_flow() {
+        async fn metric_deltas_sum_an_operational_flow() {
             let h = build(None).await;
-            let start = effort_start(&h, &h.effort_id).await;
+            let start = h.started_at;
             let after = Timestamp::from_unix_ms(start.unix_ms() + 60_000);
-            let eid = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
             // An operational `sum` flow (tokens): summed over the facts of the
-            // effort's OWN captures (`metric_capture.effort_id`, tsk37).
+            // window's OWN captures (`metric_capture.turn_id`).
             let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
             let m = facts
                 .upsert_measure({
@@ -7018,7 +6508,7 @@ mod tests {
             let mut cap = oxplow_db::NewMetricCapture::done(1, "tokens", "stop");
             cap.captured_at = Some(after);
             cap.thread_id = Some(1);
-            cap.effort_id = Some(eid.value());
+            cap.turn_id = Some(TURN);
             facts
                 .record_facts(
                     cap,
@@ -7030,7 +6520,7 @@ mod tests {
                 .await
                 .unwrap();
 
-            let deltas = h.service.effort_metric_deltas(&h.effort_id).await;
+            let deltas = h.service.metric_deltas(&h.window()).await;
             assert_eq!(deltas.len(), 1);
             let d = &deltas[0];
             assert_eq!(d.agg, "sum");
@@ -7040,12 +6530,10 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn a_nudge_fact_takes_the_effort_its_run_was_anchored_to() {
-            // A late delivery: the run's event was anchored to the effort;
-            // judged now, no single effort is open (it closed, or others
-            // opened) — the `oxplow.nudge` fact still belongs to it.
+        async fn a_nudge_fact_takes_the_turn_its_run_was_anchored_to() {
+            // A late delivery: the run's event was anchored to a turn; judged
+            // now, the `oxplow.nudge` fact still belongs to that turn.
             let h = build(None).await;
-            let eid = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
             for spec in crate::test_fixtures::foundation_producer_specs() {
                 oxplow_db::SqliteFactStore::new(h.db.clone())
                     .upsert_spec(spec)
@@ -7055,18 +6543,13 @@ mod tests {
             let cause = RunCause {
                 event_id: "evt-anchored".into(),
                 seq: 0,
-                anchors: oxplow_domain::Anchors {
-                    effort_id: Some(eid),
-                    ..Default::default()
-                },
+                anchors: in_turn(),
                 at: Timestamp::now(),
                 started: None,
             };
-            h.efforts.finish(&eid, None, None).await.unwrap();
             h.service
                 .persist_nudge(
                     &h.thread,
-                    None,
                     crate::collection::Raised::agent("report-less-run", "m", "cmd"),
                     crate::collection::RunOrigin::Event(&cause),
                 )
@@ -7074,7 +6557,7 @@ mod tests {
             let owner: Option<i64> =
                 h.db.read(|c| {
                     c.query_row(
-                        "SELECT effort_id FROM metric_capture WHERE producer = 'nudges'",
+                        "SELECT turn_id FROM metric_capture WHERE producer = 'nudges'",
                         [],
                         |r| r.get(0),
                     )
@@ -7082,16 +6565,14 @@ mod tests {
                 })
                 .await
                 .unwrap();
-            assert_eq!(owner, Some(eid.value()));
+            assert_eq!(owner, Some(TURN));
         }
 
         #[tokio::test]
-        async fn record_test_run_observes_with_no_open_effort() {
-            // Observe-always: a run is recorded into the substrate even with
-            // NO open effort, belonging to none.
+        async fn a_test_run_outside_a_turn_is_recorded_and_no_turns() {
+            // Observe-always: a run is recorded into the substrate even when
+            // it was made in no turn (a person's), belonging to none.
             let h = build(None).await;
-            let eid1 = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
-            h.efforts.finish(&eid1, None, None).await.unwrap(); // close the only effort
 
             h.service
                 .record_test_run(
@@ -7120,15 +6601,15 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            assert_eq!(runs.len(), 1, "run recorded despite no open effort");
-            // …but it belongs to no effort.
-            assert_eq!(runs[0].effort_id, None);
+            assert_eq!(runs.len(), 1, "run recorded outside any turn");
+            // …but it belongs to no turn.
+            assert_eq!(runs[0].turn_id, None);
         }
 
         #[tokio::test]
-        async fn record_test_run_auto_attributes_when_single_open_effort() {
-            // A recorded test run is the thread's open effort's: its capture
-            // is stamped with it.
+        async fn a_recorded_test_runs_capture_is_stamped_with_its_turn() {
+            // A recorded test run is its turn's: its capture is stamped with
+            // it.
             let h = build(None).await;
             h.service
                 .record_test_run(
@@ -7142,16 +6623,12 @@ mod tests {
                     "observed",
                     "post-tool-bash",
                     None,
-                    None,
+                    Some(TURN),
                 )
                 .await
                 .unwrap();
-            let eid = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
-            let caps = oxplow_db::SqliteFactStore::new(h.db.clone())
-                .captures_for_effort(eid.value())
-                .await
-                .unwrap();
-            assert_eq!(caps.len(), 1, "the open effort's run");
+            let caps = h.turn_captures(TURN).await;
+            assert_eq!(caps.len(), 1, "the turn's run");
             // The capture IS the run, carrying the verbatim payload in its
             // detail envelope.
             let cap = &caps[0];
@@ -7182,8 +6659,8 @@ mod tests {
             let envelope: serde_json::Value =
                 serde_json::from_str(caps[0].detail_json.as_deref().unwrap()).unwrap();
             assert_eq!(envelope["kind"], "coverage-detail");
-            // tsk270: the stored detail is ABSOLUTE (per-file instrumented/covered
-            // line-sets + whole-report absPct), not the effort-relative diff.
+            // the stored detail is ABSOLUTE (per-file instrumented/covered
+            // line-sets + whole-report absPct), not the window-relative diff.
             let payload = envelope["payload"].clone();
             assert!(payload["files"].is_array(), "per-file line-sets kept");
             let foo = payload["files"]
@@ -7228,14 +6705,11 @@ mod tests {
                     "observed",
                     "post-tool-bash",
                     Some(&junit),
-                    None,
+                    Some(TURN),
                 )
                 .await
                 .unwrap();
-            let rows = h
-                .service
-                .effort_observations_from_metrics(&h.effort_id, Some("test-run"))
-                .await;
+            let rows = h.service.observations(&h.window(), Some("test-run")).await;
             let payload: serde_json::Value =
                 serde_json::from_str(rows[0].payload_json.as_deref().unwrap()).unwrap();
             // Counts derived from the tree (1 pass, 1 fail, 1 skip).
@@ -7246,21 +6720,6 @@ mod tests {
             // The suite/case tree is embedded for the UI.
             assert_eq!(payload["suites"][0]["name"], "oxplow-app");
             assert_eq!(payload["suites"][0]["cases"][1]["status"], "failed");
-        }
-
-        #[tokio::test]
-        async fn a_coverage_report_is_observed_with_no_open_effort() {
-            // Observe-always: coverage is recorded even with no open effort
-            // (absolute), belonging to none.
-            let h = build(Some(COBERTURA_50PCT)).await;
-            h.efforts
-                .finish(&EffortId::try_from_str(&h.effort_id).unwrap(), None, None)
-                .await
-                .unwrap();
-            assert!(matches!(
-                sync_coverage(&h).await,
-                CoverageIngest::Stored { .. }
-            ));
         }
 
         const JUNIT_ONE: &str = r#"<testsuites><testsuite name="s"><testcase classname="c" name="t1"/></testsuite></testsuites>"#;
@@ -7283,7 +6742,7 @@ mod tests {
             .unwrap()
         }
 
-        /// tsk863: a test run reads its `on_run: test` collectors, an
+        /// a test run reads its `on_run: test` collectors, an
         /// analyzer run its `on_run: analysis` ones — never the other's.
         #[tokio::test]
         async fn a_run_reads_only_its_on_run_collectors() {
@@ -7312,7 +6771,7 @@ mod tests {
             assert!(analysis.tests().is_none());
         }
 
-        /// tsk863: what a report collector read is its run: a
+        /// what a report collector read is its run: a
         /// `collector_run` row and a `collector.synced`, like any
         /// collector's — caused by the detected run, once per run.
         #[tokio::test]
@@ -7370,7 +6829,7 @@ mod tests {
             assert_eq!(synced[0]["status"], "ok");
         }
 
-        /// tsk863: a program parser reads the report; its output is
+        /// a program parser reads the report; its output is
         /// lower-trust than a built-in parser's.
         #[cfg(unix)]
         #[tokio::test]
@@ -7406,7 +6865,7 @@ mod tests {
                         .read_run_reports(
                             RunKind::Test,
                             FreshWindow::ending_now(),
-                            crate::collection::RunOrigin::Command { turn: None },
+                            crate::collection::RunOrigin::Command { turn: Some(TURN) },
                             &root,
                         )
                         .await
@@ -7423,7 +6882,7 @@ mod tests {
             assert_eq!(collector_run(&h, "tests.parse").await.unwrap().0, "ok");
         }
 
-        /// tsk863: a report collector is held to the contribution failure policy
+        /// a report collector is held to the contribution failure policy
         /// (P7.C2): its third failed parse in a row disables it, and a
         /// disabled one reads nothing until a person enables it.
         #[tokio::test]
@@ -7460,19 +6919,25 @@ mod tests {
             assert!(run_reads(&h, RunKind::Test).await.tests().is_none());
             assert!(matches!(
                 h.service
-                    .sync_report_collector(&h.thread, "project", "tests.junit", "human", None)
+                    .sync_report_collector(&h.thread, "project", "tests.junit", "human", Some(TURN))
                     .await,
                 Err(crate::collector_runner::RunCollectorError::Disabled(_))
             ));
         }
 
-        /// tsk863: `oxplow.collector.sync` runs a collector the project declares.
+        /// `oxplow.collector.sync` runs a collector the project declares.
         #[tokio::test]
         async fn an_undeclared_report_collector_is_not_found() {
             let h = build(None).await;
             assert!(matches!(
                 h.service
-                    .sync_report_collector(&h.thread, "project", "tests.coverage", "human", None)
+                    .sync_report_collector(
+                        &h.thread,
+                        "project",
+                        "tests.coverage",
+                        "human",
+                        Some(TURN)
+                    )
                     .await,
                 Err(crate::collector_runner::RunCollectorError::NotFound)
             ));
@@ -7487,16 +6952,16 @@ mod tests {
   <class name="Foo" filename="src/foo.rs"><lines><line number="1" hits="3"/></lines></class>
 </classes></package></packages></coverage>"#;
             let h = build(Some(only_line_1)).await;
-            // tsk270: observe records absolute coverage regardless (Stored)…
+            // observe records absolute coverage regardless (Stored)…
             assert!(matches!(
                 sync_coverage(&h).await,
                 CoverageIngest::Stored { .. }
             ));
-            // …but the effort's DERIVED diff is empty (line 1 is unchanged), so no
+            // …but the window's DERIVED diff is empty (line 1 is unchanged), so no
             // diff-coverage observation surfaces for it.
             let rows = h
                 .service
-                .effort_observations_from_metrics(&h.effort_id, Some("diff-coverage"))
+                .observations(&h.window(), Some("diff-coverage"))
                 .await;
             assert!(
                 rows.is_empty(),
@@ -7557,7 +7022,7 @@ mod tests {
                 .on_shell_run(
                     &h.thread,
                     bash_payload("bun test --watch false", 0),
-                    crate::collection::RunOrigin::Command { turn: None },
+                    crate::collection::RunOrigin::Command { turn: Some(TURN) },
                 )
                 .await
                 .unwrap();
@@ -7567,16 +7032,13 @@ mod tests {
                 "nudge should name the configured test command; got: {nudge}"
             );
             // A report-LESS run produces no parseable counts, so the substrate
-            // records no test sample → the effort panel shows no test-run row
-            // for it (tsk215). The report-less *nudge* is what surfaces the run
+            // records no test sample → the window shows no test-run row
+            // for it. The report-less *nudge* is what surfaces the run
             // to the agent; the command-only "ran-record" marker is retired.
-            let obs = h
-                .service
-                .effort_observations_from_metrics(&h.effort_id, Some("test-run"))
-                .await;
+            let obs = h.service.observations(&h.window(), Some("test-run")).await;
             assert!(obs.is_empty(), "no substrate row for a report-less run");
             // The fired nudge also records an `oxplow.nudge` event FACT,
-            // subject = the nudge kind (tsk216; the legacy sample is gone, T-E2).
+            // subject = the nudge kind (the legacy sample is gone, T-E2).
             let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
             let measure = facts
                 .get_measure("oxplow.nudge")
@@ -7595,7 +7057,7 @@ mod tests {
 
         #[tokio::test]
         async fn coverage_def_carries_target_thresholds_from_data() {
-            // tsk220: the 50/80 ramp lives on the definition (data), so the
+            // the 50/80 ramp lives on the definition (data), so the
             // renderer colors red/green from it and the nudge fires below target
             // — no hardcoded UI constant.
             let h = build_full(Some(COBERTURA_50PCT), true).await;
@@ -7621,7 +7083,7 @@ mod tests {
         /// The project's own runner writing no report means it never got
         /// to the tests (a compile error, a timeout, a pipe cut short), so
         /// "run the project's runner" has nothing to add — and the one
-        /// nudge an effort gets stays for a run that needs it.
+        /// nudge a request gets stays for a run that needs it.
         #[tokio::test]
         async fn no_nudge_when_the_configured_runner_wrote_no_report() {
             let h = build(None).await;
@@ -7638,7 +7100,7 @@ mod tests {
                     svc.on_shell_run(
                         &thread,
                         bash_payload(cmd, 101),
-                        crate::collection::RunOrigin::Command { turn: None },
+                        crate::collection::RunOrigin::Command { turn: Some(TURN) },
                     )
                     .await
                     .unwrap()
@@ -7677,17 +7139,14 @@ mod tests {
                 .await
                 .tests()
                 .map(|(r, s)| (r.clone(), s));
-            assert!(
-                report.is_some(),
-                "fresh JUnit report should be merged (effort start = epoch)"
-            );
+            assert!(report.is_some(), "fresh JUnit report should be merged");
             // When produced_report is true, mark_nudged is never called.
             // Directly verify: set the nudge flag manually, confirm it was
             // only set once the test asks for it (i.e. nudge didn't fire).
             let nudged = h
                 .service
                 .nudges
-                .has_fired(oxplow_db::OnceScope::effort(1, 901), "report-less-run")
+                .has_fired(oxplow_db::OnceScope::request(1, 1), "report-less-run")
                 .await
                 .unwrap();
             assert!(
@@ -7702,16 +7161,12 @@ mod tests {
             // letter, a backlog) of a report-less test run judged now would
             // nudge; judged at its own time it can't be judged at all.
             let h = build(None).await;
-            let eid = oxplow_domain::EffortId::try_from_str(&h.effort_id).unwrap();
             let old =
                 Timestamp::from_unix_ms(Timestamp::now().unix_ms() - 2 * REPORT_FRESH_WINDOW_MS);
             let cause = RunCause {
                 event_id: "evt-late".into(),
                 seq: 0,
-                anchors: oxplow_domain::Anchors {
-                    effort_id: Some(eid),
-                    ..Default::default()
-                },
+                anchors: in_turn(),
                 at: old,
                 started: None,
             };
@@ -7729,14 +7184,72 @@ mod tests {
                 .service
                 .nudges
                 .has_fired(
-                    oxplow_db::OnceScope::effort(h.thread.value(), eid.value()),
+                    oxplow_db::OnceScope::request(h.thread.value(), 1),
                     "report-less-run"
                 )
                 .await
                 .unwrap());
         }
 
-        /// tsk893: when the run's reports weren't read because a collector
+        /// The report-less-run nudge is once per request: a second report-less
+        /// run in the same request says nothing, and the next request is
+        /// nudged again.
+        #[tokio::test]
+        async fn the_report_less_run_nudge_fires_once_per_request() {
+            let h = build(None).await;
+            let thread = h.thread.value();
+            h.service
+                .nudges
+                .database()
+                .transaction(move |tx| {
+                    tx.execute_batch(&format!(
+                        "INSERT INTO request (id, thread_id) VALUES (71, {thread}), (72, {thread});
+                         INSERT INTO agent_turn (id, thread_id, prompt, started_at, request_id) VALUES
+                           (701, {thread}, 'p', 'a', 71), (702, {thread}, 'p', 'a', 71),
+                           (703, {thread}, 'p', 'a', 72);"
+                    ))
+                    .map_err(oxplow_db::map_sql_err)
+                })
+                .await
+                .unwrap();
+            let run = |turn: i64| {
+                let h = &h;
+                async move {
+                    h.service
+                        .on_shell_run(
+                            &h.thread,
+                            bash_payload("bun test --watch false", 0),
+                            crate::collection::RunOrigin::Command { turn: Some(turn) },
+                        )
+                        .await
+                        .unwrap()
+                }
+            };
+            assert!(run(701).await.is_some(), "the first run in request 71");
+            assert!(run(702).await.is_none(), "once per request, whichever turn");
+            assert!(run(703).await.is_some(), "the next request is nudged again");
+        }
+
+        /// A report-less run with no request (a turn that belongs to none)
+        /// is nudged once per thread.
+        #[tokio::test]
+        async fn a_report_less_run_with_no_request_is_nudged_once_per_thread() {
+            let h = build(None).await;
+            let run = || async {
+                h.service
+                    .on_shell_run(
+                        &h.thread,
+                        bash_payload("bun test --watch false", 0),
+                        crate::collection::RunOrigin::Command { turn: None },
+                    )
+                    .await
+                    .unwrap()
+            };
+            assert!(run().await.is_some(), "the first run, no request");
+            assert!(run().await.is_none(), "once per thread without a request");
+        }
+
+        /// when the run's reports weren't read because a collector
         /// failed (or is disabled, or awaits approval), the nudge says so —
         /// not "run the tests again", which the agent just did — and a
         /// coverage collector that didn't run leaves a failed capture.
@@ -7763,7 +7276,7 @@ mod tests {
                 .on_shell_run(
                     &h.thread,
                     bash_payload("bun test", 0),
-                    crate::collection::RunOrigin::Command { turn: None },
+                    crate::collection::RunOrigin::Command { turn: Some(TURN) },
                 )
                 .await
                 .unwrap()
@@ -7787,9 +7300,9 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn on_post_tool_use_nudge_fires_once_per_effort() {
-            // The nudge is at most once per effort — second no-report run
-            // returns None.
+        async fn on_post_tool_use_nudge_fires_once_in_a_request() {
+            // The nudge is at most once per request — second no-report run
+            // in the same turn returns None.
             let h = build(None).await;
             {
                 let mut cfg = h.service.config.write().unwrap();
@@ -7801,7 +7314,7 @@ mod tests {
                 .on_shell_run(
                     &h.thread,
                     payload,
-                    crate::collection::RunOrigin::Command { turn: None },
+                    crate::collection::RunOrigin::Command { turn: Some(TURN) },
                 )
                 .await
                 .unwrap();
@@ -7811,13 +7324,13 @@ mod tests {
                 .on_shell_run(
                     &h.thread,
                     payload,
-                    crate::collection::RunOrigin::Command { turn: None },
+                    crate::collection::RunOrigin::Command { turn: Some(TURN) },
                 )
                 .await
                 .unwrap();
             assert!(
                 second.is_none(),
-                "second run in same effort must not nudge again"
+                "second run in same request must not nudge again"
             );
         }
 
@@ -7825,7 +7338,7 @@ mod tests {
         async fn report_less_run_persists_one_nudge_and_dedup_doesnt_double_store() {
             // A report-less run persists exactly one `report-less-run` nudge
             // row tagged with kind + message + trigger; the one-shot dedup
-            // means a second run in the same effort stores nothing more.
+            // means a second run in the same request stores nothing more.
             let h = build(None).await;
             {
                 let mut cfg = h.service.config.write().unwrap();
@@ -7836,19 +7349,19 @@ mod tests {
                 .on_shell_run(
                     &h.thread,
                     payload,
-                    crate::collection::RunOrigin::Command { turn: None },
+                    crate::collection::RunOrigin::Command { turn: Some(TURN) },
                 )
                 .await
                 .unwrap()
                 .expect("first run nudges");
-            let rows = h.nudges.list_for_effort(&h.effort_id).await.unwrap();
+            let rows = h.nudges.list_for_thread("thr1").await.unwrap();
             assert_eq!(rows.len(), 1, "exactly one nudge persisted");
             assert_eq!(rows[0].kind, "report-less-run");
             assert!(rows[0].message.contains("bun run test:collect"));
             assert_eq!(rows[0].trigger.as_deref(), Some("bun test --watch false"));
-            assert_eq!(rows[0].effort_id.as_deref(), Some(h.effort_id.as_str()));
+            assert_eq!(rows[0].request_id.as_deref(), Some("req1"));
 
-            // Dual-written into the durable fact layer (epic tsk12): one fact on
+            // Dual-written into the durable fact layer: one fact on
             // the `oxplow.nudge` event measure so Sum() reconstructs the fired
             // count (the `agent.nudges.fired` spec).
             let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
@@ -7871,12 +7384,12 @@ mod tests {
                 .on_shell_run(
                     &h.thread,
                     payload,
-                    crate::collection::RunOrigin::Command { turn: None },
+                    crate::collection::RunOrigin::Command { turn: Some(TURN) },
                 )
                 .await
                 .unwrap();
             assert!(second.is_none(), "second run deduped");
-            let rows = h.nudges.list_for_effort(&h.effort_id).await.unwrap();
+            let rows = h.nudges.list_for_thread("thr1").await.unwrap();
             assert_eq!(rows.len(), 1, "deduped nudge must not double-store");
         }
 
@@ -7889,15 +7402,12 @@ mod tests {
                 .on_shell_run(
                     &h.thread,
                     bash_payload("cargo build", 0),
-                    crate::collection::RunOrigin::Command { turn: None },
+                    crate::collection::RunOrigin::Command { turn: Some(TURN) },
                 )
                 .await
                 .unwrap();
             assert!(result.is_none());
-            let obs = h
-                .service
-                .effort_observations_from_metrics(&h.effort_id, Some("test-run"))
-                .await;
+            let obs = h.service.observations(&h.window(), Some("test-run")).await;
             assert!(obs.is_empty());
         }
 
@@ -7911,7 +7421,7 @@ mod tests {
                 .on_shell_run(
                     &h.thread,
                     bash_payload("bun test", 0),
-                    crate::collection::RunOrigin::Command { turn: None },
+                    crate::collection::RunOrigin::Command { turn: Some(TURN) },
                 )
                 .await
                 .unwrap();
@@ -7958,7 +7468,7 @@ mod tests {
         const CLIPPY_JSON: &str = "{\"reason\":\"compiler-message\",\"message\":{\"message\":\"unused\",\"code\":{\"code\":\"unused_variables\"},\"level\":\"warning\",\"spans\":[{\"file_name\":\"src/foo.rs\",\"line_start\":3,\"column_start\":9,\"is_primary\":true}]}}\n{\"reason\":\"compiler-message\",\"message\":{\"message\":\"boom\",\"code\":{\"code\":\"E0308\"},\"level\":\"error\",\"spans\":[{\"file_name\":\"src/bar.rs\",\"line_start\":1,\"column_start\":1,\"is_primary\":true}]}}\n";
 
         #[tokio::test]
-        async fn record_static_analysis_attributes_to_open_effort() {
+        async fn a_recorded_static_analysis_is_its_turns() {
             let h = build(None).await;
             let report = oxplow_coverage::AnalysisReport {
                 findings: vec![
@@ -7988,16 +7498,16 @@ mod tests {
                     Some(&report),
                     &["clippy".to_string()],
                     "analysis-report",
-                    None,
+                    Some(TURN),
                 )
                 .await
                 .unwrap();
-            // tsk891: the id is the run's real capture.
+            // the id is the run's real capture.
             let capture = h.service.facts.get_capture(id.unwrap()).await.unwrap();
             assert_eq!(capture.map(|c| c.producer), Some("clippy".to_string()));
             let rows = h
                 .service
-                .effort_observations_from_metrics(&h.effort_id, Some("static-analysis"))
+                .observations(&h.window(), Some("static-analysis"))
                 .await;
             assert_eq!(rows.len(), 1);
             assert_eq!(rows[0].provenance, "observed");
@@ -8041,7 +7551,7 @@ mod tests {
                     Some(&report),
                     &["clippy".to_string()],
                     "analysis-report",
-                    None,
+                    Some(TURN),
                 )
                 .await
                 .unwrap();
@@ -8065,7 +7575,7 @@ mod tests {
             assert_eq!(envelope["payload"]["errorCount"], 1);
             assert_eq!(envelope["payload"]["warningCount"], 1);
 
-            // The durable fact layer (epic tsk12): one
+            // The durable fact layer: one
             // `oxplow.lint_hit` fact per finding, reported severity/rule/detail
             // in the dedicated columns + the file location on the fact.
             let facts = oxplow_db::SqliteFactStore::new(h.db.clone());
@@ -8096,10 +7606,10 @@ mod tests {
 
         #[tokio::test]
         async fn record_static_analysis_command_only_produces_no_substrate_row() {
-            // tsk215: an analyzer that ran but produced no parseable report has
+            // an analyzer that ran but produced no parseable report has
             // no metric to record, so the substrate has no static-analysis row
             // (the legacy "ran-record" marker is retired — a parseable report is
-            // what surfaces analysis on the effort panel now).
+            // what surfaces analysis now).
             let h = build(None).await;
             let recorded = h
                 .service
@@ -8109,15 +7619,15 @@ mod tests {
                     None,
                     &[],
                     "analysis-report",
-                    None,
+                    Some(TURN),
                 )
                 .await
                 .unwrap();
-            // tsk891: nothing was recorded, so there's no run to claim.
+            // nothing was recorded, so there's no run to claim.
             assert_eq!(recorded, None);
             let rows = h
                 .service
-                .effort_observations_from_metrics(&h.effort_id, Some("static-analysis"))
+                .observations(&h.window(), Some("static-analysis"))
                 .await;
             assert!(
                 rows.is_empty(),
@@ -8177,7 +7687,7 @@ mod tests {
             );
             let outcome = match h
                 .service
-                .sync_report_collector(&h.thread, "project", "lint.eslint", "human", None)
+                .sync_report_collector(&h.thread, "project", "lint.eslint", "human", Some(TURN))
                 .await
                 .unwrap()
             {
@@ -8201,11 +7711,11 @@ mod tests {
                 }
                 other => panic!("expected Stored, got {other:?}"),
             }
-            // The observation landed on the open effort with the expected
+            // The observation landed in the turn's window with the expected
             // findings list + counts, provenance observed, analyzer label.
             let rows = h
                 .service
-                .effort_observations_from_metrics(&h.effort_id, Some("static-analysis"))
+                .observations(&h.window(), Some("static-analysis"))
                 .await;
             assert_eq!(rows.len(), 1);
             assert_eq!(rows[0].provenance, "observed");
@@ -8230,24 +7740,14 @@ mod tests {
         #[tokio::test]
         async fn an_analysis_report_stores_with_no_baseline() {
             // Findings are ABSOLUTE (current-file), not diff-relative like
-            // coverage — so an effort with no start snapshot must still store
+            // coverage — so a window with no start snapshot must still store
             // (pin = None), matching the passive ride-along. Regression guard
-            // for the dropped baseline gate (tsk86).
+            // for the dropped baseline gate.
             let h = build(None).await;
-            // Re-open the effort with no start snapshot.
-            let open = h
-                .efforts
-                .find_open_for_thread(&h.thread)
-                .await
-                .unwrap()
-                .unwrap();
-            h.efforts.finish(&open.id, None, None).await.unwrap();
-            let no_base = h
-                .efforts
-                .start(open.work_item.as_deref().unwrap(), &h.thread, None)
-                .await
-                .unwrap();
-            assert!(no_base.start_snapshot_id.is_none());
+            let no_base = Window {
+                start_snapshot_id: None,
+                ..h.window()
+            };
 
             std::fs::write(h.tmp.path().join("eslint.json"), ESLINT_JSON).unwrap();
             declare(
@@ -8262,7 +7762,7 @@ mod tests {
             );
             let outcome = match h
                 .service
-                .sync_report_collector(&h.thread, "project", "lint.eslint", "human", None)
+                .sync_report_collector(&h.thread, "project", "lint.eslint", "human", Some(TURN))
                 .await
                 .unwrap()
             {
@@ -8274,34 +7774,21 @@ mod tests {
                 other => panic!("expected Stored with no baseline, got {other:?}"),
             }
             // The observation landed, pinned to a take of the code the
-            // analyzer ran on — not to the effort's (missing) start
-            // (tsk937).
+            // analyzer ran on — not to the window's (missing) start.
             let rows = h
                 .service
-                .effort_observations_from_metrics(&no_base.id.to_string(), Some("static-analysis"))
+                .observations(&no_base, Some("static-analysis"))
                 .await;
             assert_eq!(rows.len(), 1);
             let pinned = rows[0].local_snapshot_id.expect("pinned");
-            assert_ne!(
-                Some(pinned),
-                open.start_snapshot_id,
-                "not the effort's bracket"
-            );
+            assert_ne!(pinned, h.start_snapshot, "not the window's bracket");
         }
 
-        /// tsk926: an analysis run delivered after its effort closed is
-        /// that effort's — the capture is stamped with the effort the
-        /// ledger claims, one resolution for both.
+        /// an analysis run delivered after its turn ended is that
+        /// turn's — the capture is stamped with the turn its event names.
         #[tokio::test]
-        async fn a_late_analysis_is_stamped_with_the_effort_it_claims() {
+        async fn a_late_analysis_is_stamped_with_its_events_turn() {
             let h = build(None).await;
-            let open = h
-                .efforts
-                .find_open_for_thread(&h.thread)
-                .await
-                .unwrap()
-                .unwrap();
-            h.efforts.finish(&open.id, None, None).await.unwrap();
             let report = oxplow_coverage::AnalysisReport {
                 findings: vec![oxplow_coverage::AnalysisFinding {
                     path: "src/a.rs".into(),
@@ -8315,10 +7802,7 @@ mod tests {
             let cause = RunCause {
                 event_id: "evt-late-lint".into(),
                 seq: 0,
-                anchors: oxplow_domain::Anchors {
-                    effort_id: Some(open.id),
-                    ..Default::default()
-                },
+                anchors: in_turn(),
                 at: Timestamp::now(),
                 started: None,
             };
@@ -8341,7 +7825,7 @@ mod tests {
                 .database()
                 .read(move |c| {
                     c.query_row(
-                        "SELECT effort_id FROM metric_capture WHERE id = ?1",
+                        "SELECT turn_id FROM metric_capture WHERE id = ?1",
                         [run],
                         |r| r.get(0),
                     )
@@ -8349,10 +7833,10 @@ mod tests {
                 })
                 .await
                 .unwrap();
-            assert_eq!(stamped, Some(open.id.value()));
+            assert_eq!(stamped, Some(TURN));
         }
 
-        /// tsk927: a report path or a parser entry that a symlink takes
+        /// a report path or a parser entry that a symlink takes
         /// outside the checkout is refused before anything is read — a
         /// repo can't point a collector at a file of the person's.
         #[cfg(unix)]
@@ -8391,7 +7875,7 @@ mod tests {
             );
             let err = h
                 .service
-                .sync_report_collector(&h.thread, "project", "lint.report", "human", None)
+                .sync_report_collector(&h.thread, "project", "lint.report", "human", Some(TURN))
                 .await
                 .unwrap_err();
             assert!(
@@ -8402,7 +7886,7 @@ mod tests {
             // loaded at all: there is no such collector to run.
             let err = h
                 .service
-                .sync_report_collector(&h.thread, "project", "lint.entry", "human", None)
+                .sync_report_collector(&h.thread, "project", "lint.entry", "human", Some(TURN))
                 .await
                 .unwrap_err();
             assert!(
@@ -8411,7 +7895,7 @@ mod tests {
             );
         }
 
-        /// tsk863: a by-hand run of a collector whose report isn't there
+        /// a by-hand run of a collector whose report isn't there
         /// says so; nothing ran, so nothing is recorded.
         #[tokio::test]
         async fn a_missing_report_is_named() {
@@ -8428,7 +7912,7 @@ mod tests {
             );
             let err = h
                 .service
-                .sync_report_collector(&h.thread, "project", "lint.eslint", "human", None)
+                .sync_report_collector(&h.thread, "project", "lint.eslint", "human", Some(TURN))
                 .await
                 .unwrap_err();
             assert!(
@@ -8440,16 +7924,16 @@ mod tests {
         #[tokio::test]
         async fn on_post_tool_use_handles_a_report_less_analysis_command() {
             // A clippy command with no fresh report: the hook runs cleanly and
-            // (no test patterns) returns no nudge. tsk215: a report-less analyzer
+            // (no test patterns) returns no nudge. a report-less analyzer
             // run records no substrate row (a parseable report is what surfaces
-            // analysis on the effort panel now).
+            // analysis now).
             let h = build(None).await;
             let result = h
                 .service
                 .on_shell_run(
                     &h.thread,
                     bash_payload("cargo clippy --workspace --all-targets", 0),
-                    crate::collection::RunOrigin::Command { turn: None },
+                    crate::collection::RunOrigin::Command { turn: Some(TURN) },
                 )
                 .await
                 .unwrap();
@@ -8457,12 +7941,12 @@ mod tests {
             assert!(result.is_none());
             assert!(h
                 .service
-                .effort_observations_from_metrics(&h.effort_id, Some("static-analysis"))
+                .observations(&h.window(), Some("static-analysis"))
                 .await
                 .is_empty());
             assert!(h
                 .service
-                .effort_observations_from_metrics(&h.effort_id, Some("test-run"))
+                .observations(&h.window(), Some("test-run"))
                 .await
                 .is_empty());
         }

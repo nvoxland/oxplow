@@ -1,4 +1,4 @@
-//! Network allowlist for `exec` sources (tsk324).
+//! Network allowlist for `exec` sources.
 //!
 //! A source declares the hosts it talks to (`network: [api.github.com,
 //! "*.githubusercontent.com"]`); the list is part of what a person approves.
@@ -166,7 +166,7 @@ async fn handle(mut client: TcpStream, allowed: &[String]) -> std::io::Result<()
         return refuse(
             &mut client,
             "403 Forbidden",
-            &format!("{host} isn't in this source's network list"),
+            &format!("{host} isn't in this source's nettask tracker"),
         )
         .await;
     }
@@ -302,7 +302,7 @@ mod tests {
         )
         .await;
         assert!(no.starts_with("HTTP/1.1 403"), "{no}");
-        assert!(no.contains("example.com isn't in this source's network list"));
+        assert!(no.contains("example.com isn't in this source's nettask tracker"));
         let no = roundtrip(
             proxy.port,
             format!("GET http://127.0.0.1:{origin}/ HTTP/1.1\r\n\r\n"),

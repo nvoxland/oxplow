@@ -1,0 +1,25 @@
+# The collapsed Work line: with nothing in progress it is the task the
+# thread finished last; once a task is in progress, that task alone.
+requires: [oxtask]
+given:
+  - { command: oxtask.task.create, input: { title: First, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Second, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Later, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk3&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - observe:
+      turn:
+        prompt: Do the first two
+        during:
+          - { command: oxtask.task.move, input: { id: tsk1, stage: done }, as: agent }
+          - { command: oxtask.task.move, input: { id: tsk2, stage: done }, as: agent }
+when: { part: oxplow/work-line, params: { thread_id: 1 } }
+expect: { loaders: { work_line: { rows: [{ title: Second, active: 0 }] } } }
+steps:
+  - given:
+      - observe:
+          turn:
+            prompt: Start the next one
+            during: [{ command: oxtask.task.move, input: { id: tsk3, stage: in_progress }, as: agent }]
+  - expect: { loaders: { work_line: { rows: [{ title: Later, active: 1 }] } } }

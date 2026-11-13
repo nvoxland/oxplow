@@ -1,5 +1,5 @@
 //! Helpers that scenario tests of an extension's life (deploy, disable,
-//! rollback, the work list switching) share with the tests of one
+//! rollback, the task tracker switching) share with the tests of one
 //! transition: what once sat private in those files.
 
 #![cfg(test)]
@@ -26,15 +26,22 @@ pub(crate) fn fake_bin() -> PathBuf {
     bin
 }
 
-/// A private extension declaring the fake as its work-items provider,
+/// A private extension declaring the fake as its snapshots provider,
 /// its entry a script running the fake with `hooks`.
 #[cfg(unix)]
 pub(crate) fn write_extension(project: &Path, hooks: &str) {
+    write_extension_as(project, hooks, "snapshots");
+}
+
+/// [`write_extension`] with the fake in `capability` mode (`snapshots`, or
+/// `knowledge` for the tests that need a collector to read).
+#[cfg(unix)]
+pub(crate) fn write_extension_as(project: &Path, hooks: &str, capability: &str) {
     let dir = project.join(".oxplow/extensions").join(EXT);
     std::fs::create_dir_all(dir.join("bin")).unwrap();
     std::fs::write(
         dir.join("extension.yaml"),
-        "manifest: 2\nname: tracker\nintent:\n  purpose: the fake tracker\n  examples: [{ name: a }]\ncommands:\n  - name: item.estimate\n    summary: Set a work item's points.\n    provider: fake\n    op: estimate\n    ui: { label: \"Estimate in Fake…\", group: Tracker, about: oxplow/work_item, input: { uri: \"{{uri}}\", points: 3 } }\npermissions: [process.run]\nproviders:\n  - id: fake\n    capability: work_items\n    entry: bin/provider\n    declarations: provider.json\n",
+        "manifest: 2\nname: tracker\nintent:\n  purpose: the fake provider\n  examples: [{ name: a }]\npermissions: [process.run]\nproviders:\n  - id: fake\n    capability: CAPABILITY\n    entry: bin/provider\n    declarations: provider.json\n".replace("CAPABILITY", capability),
     )
     .unwrap();
     let script = dir.join("bin/provider");
@@ -44,7 +51,7 @@ pub(crate) fn write_extension(project: &Path, hooks: &str) {
     std::fs::write(
         &script,
         format!(
-            "#!/bin/sh\nOXPLOW_FAKE_HOOKS='{hooks}' OXPLOW_FAKE_STATE=\"{}/fake-state-$OXPLOW_PROVIDER_ID.json\" exec '{}' \"$@\"\n",
+            "#!/bin/sh\nOXPLOW_FAKE_CAPABILITY={capability} OXPLOW_FAKE_HOOKS='{hooks}' OXPLOW_FAKE_STATE=\"{}/fake-state-$OXPLOW_PROVIDER_ID.json\" exec '{}' \"$@\"\n",
             state.display(),
             fake_bin().display()
         ),
@@ -52,12 +59,7 @@ pub(crate) fn write_extension(project: &Path, hooks: &str) {
     .unwrap();
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-    // `plain-writes` declares no `idempotent_writes`: what is approved.
-    let declared = if hooks.split(',').any(|h| h.trim() == "plain-writes") {
-        oxplow_provider_fake::plain_declarations()
-    } else {
-        oxplow_provider_fake::declarations()
-    };
+    let declared = oxplow_provider_fake::declarations();
     std::fs::write(
         dir.join("provider.json"),
         serde_json::to_string_pretty(&declared).unwrap(),
@@ -101,25 +103,25 @@ pub(crate) async fn page(
     }
 }
 
-/// Log an `effort.claim_verified` for `effort` with `evidence` and return
-/// it as stored: an event an `on:` collector or effect can react to.
-pub(crate) async fn log_claim(
+/// Log a `task.state_changed` moving `task` (an item's id on `issues`) to
+/// done on `thread` and return it as stored: an event an `on:` collector or
+/// effect can react to.
+pub(crate) async fn log_task_done(
     svc: &crate::Services,
-    effort: oxplow_domain::EffortId,
-    evidence: &str,
+    thread: oxplow_domain::ThreadId,
+    task: &str,
 ) -> oxplow_domain::StoredEvent {
     use oxplow_domain::events::Anchors;
     use oxplow_domain::Envelope;
-    let env = Envelope::typed::<oxplow_domain::events::schema::EffortClaimVerified>(
+    let env = Envelope::typed::<oxplow_domain::events::schema::TaskStateChanged>(
         "human",
-        &oxplow_domain::events::schema::EffortClaimVerifiedV2 {
-            claim: 1,
-            effort: None,
-            evidence: Some(evidence.into()),
+        &oxplow_domain::events::schema::TaskStateChangedV1 {
+            task: oxplow_domain::uri::build::task_uri("issues", task),
+            to: oxplow_domain::tasks::Bucket::Done,
         },
     )
     .with_anchors(Anchors {
-        effort_id: Some(effort),
+        thread_id: Some(thread),
         ..Anchors::default()
     });
     let id = env.id.clone();
@@ -140,12 +142,12 @@ pub(crate) const CONFIGURATION_V2: &str = "configuration:
   defaults: { limit: 10 }
 ";
 
-/// `services_with_effort` with the pump's reactors a running oxplow has for
+/// `services_with_thread` with the pump's reactors a running oxplow has for
 /// the life of an extension: its `on:` collectors, its effects and what
 /// follows a changed setting. Boot registers them; in-memory services have
 /// none, so a scenario that logs an event or sets a config key asks for them.
-pub(crate) async fn booted() -> crate::test_fixtures::EffortFixture {
-    let fx = crate::test_fixtures::services_with_effort().await;
+pub(crate) async fn booted() -> crate::test_fixtures::ThreadFixture {
+    let fx = crate::test_fixtures::services_with_thread().await;
     crate::capabilities::register(&fx.svc);
     crate::collector_triggers::register(&fx.svc);
     crate::effect_triggers::register(&fx.svc);

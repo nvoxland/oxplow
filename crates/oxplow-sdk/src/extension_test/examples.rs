@@ -169,7 +169,7 @@ pub(super) async fn start_effects(host: &Host, ext: &Extension) -> Result<(), St
 /// `commands` or `pages` delivers the `contribution.job.completed` the job
 /// logs to the extension's effects, running there too: the
 /// effects that reacted (`[{ id, state? }]`), the commands they ran
-/// (`[names]`) and which of the named wiki pages (`[uri]`) now exist.
+/// (`[names]`) and which of the named knowledge pages (`[uri]`) now exist.
 pub(super) async fn job_example(
     host: &Host,
     ext: &Extension,
@@ -406,7 +406,7 @@ pub(super) async fn job_example(
                 .svc
                 .sql
                 .query_sql(
-                    "SELECT 1 FROM v_knowledge_page WHERE uri = ?1",
+                    "SELECT 1 FROM v_oxplow_knowledge_page WHERE uri = ?1",
                     vec![oxplow_db::SqlCell::Text(page.clone())],
                     None,
                 )
@@ -422,6 +422,66 @@ pub(super) async fn job_example(
     let got = ended;
     if let Some((path, want, got)) = compare(&ex.expect, &got) {
         report.errors.push(error(shown, ex.line("expect"), "fixture.compare", format!("job `{id}` ended {got} at `{path}`, the example expects {want}")).fix("the job's request, or the example's `expect` (`{ state, result?, text?, toolCalls?, output?, effects?, commands?, pages? }`)").mismatch(path, want, got));
+    }
+}
+
+/// Run `when: { undo: <command>, as?, confirmed? }` for real: the undo of
+/// that command's newest run that was not undone yet (the inverse its
+/// audit row kept, run through the bus as a run of its own), checked
+/// against `expect`: `{ ok: true }` or `{ ok: false, refused }`.
+pub(super) async fn undo_run(
+    host: &Host,
+    ex: &Example<'_>,
+    command: &str,
+    report: &mut TestReport,
+) {
+    use oxplow_domain::events::schema::CommandOutcome;
+    let shown = ex.shown;
+    host.current().await;
+    let actor = match step_actor(&ex.when) {
+        Ok(actor) => actor,
+        Err(e) => {
+            return report
+                .errors
+                .push(error(shown, None, "example.failed", e.to_string()))
+        }
+    };
+    let rows = host
+        .svc
+        .commands
+        .audit_store()
+        .list_recent(1000)
+        .await
+        .unwrap_or_default();
+    let Some(row) = rows.iter().find(|r| {
+        r.command == command
+            && r.outcome == CommandOutcome::Ok
+            && r.undone_by.is_none()
+            && r.inverse.is_some()
+    }) else {
+        return report.errors.push(
+            error(
+                shown,
+                ex.line("when"),
+                "example.failed",
+                format!("`{command}` has no run to undo: none ran, all were undone, or its runs keep no inverse"),
+            )
+            .fix("run the command first (`given:` or an earlier step), and have its script return an `inverse`"),
+        );
+    };
+    let confirmed = ex
+        .when
+        .get("confirmed")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let outcome = host.svc.commands.undo(&actor, row.id, confirmed).await;
+    host.settle().await;
+    let got = match outcome {
+        Ok(_) => json!({ "ok": true }),
+        Err(e) => json!({ "ok": false, "refused": e.to_string() }),
+    };
+    if let Some((path, want, at)) = compare(&ex.expect, &got) {
+        report.errors.push(error(shown, ex.line("expect"), "fixture.compare", format!("the undo of `{command}` gave {at} at `{path}`, the example expects {want}")).fix("the steps before it, or the example's `expect` (`{ ok: true }` or `{ ok: false, refused }`)").mismatch(path, want, at));
     }
 }
 
@@ -475,17 +535,25 @@ pub(super) async fn command_run(
     // its own answer, and the commands it ran.
     let mut composed = Vec::new();
     let mut got = match outcome {
-        Ok(out) => match (out.result.get("result"), out.result.get("children")) {
-            (Some(result), Some(Value::Array(children))) => {
-                composed = children
-                    .iter()
-                    .filter_map(|c| c.get("name").and_then(Value::as_str))
-                    .map(str::to_string)
-                    .collect();
-                json!({ "ok": true, "result": result })
+        Ok(out) => {
+            let mut got = match (out.result.get("result"), out.result.get("children")) {
+                (Some(result), Some(Value::Array(children))) => {
+                    composed = children
+                        .iter()
+                        .filter_map(|c| c.get("name").and_then(Value::as_str))
+                        .map(str::to_string)
+                        .collect();
+                    json!({ "ok": true, "result": result })
+                }
+                _ => json!({ "ok": true, "result": out.result }),
+            };
+            // The run's undo, as a dry run shows it (`{ commands: [{ name, input }] }`).
+            if let Some(inverse) = &out.inverse {
+                got["inverse"] =
+                    json!({ "commands": [{ "name": inverse.name, "input": inverse.input }] });
             }
-            _ => json!({ "ok": true, "result": out.result }),
-        },
+            got
+        }
         Err(e) => json!({ "ok": false, "refused": e.to_string() }),
     };
     let mut audited: Vec<(String, Option<i64>)> = host
@@ -515,13 +583,13 @@ pub(super) async fn command_run(
     let ran = composed;
     got["commands"] = json!(ran);
     if let Some((path, want, at)) = compare(&ex.expect, &got) {
-        report.errors.push(error(shown, ex.line("expect"), "fixture.compare", format!("command `{command}` gave {at} at `{path}`, the example expects {want}")).fix("the command's input or the steps before it, or the example's `expect` (`{ ok, result?, commands? }` or `{ ok: false, refused }`)").mismatch(path, want, at));
+        report.errors.push(error(shown, ex.line("expect"), "fixture.compare", format!("command `{command}` gave {at} at `{path}`, the example expects {want}")).fix("the command's input or the steps before it, or the example's `expect` (`{ ok, result?, inverse?, commands? }` or `{ ok: false, refused }`)").mismatch(path, want, at));
     }
 }
 
 /// Run advisory `id` for a thread (`when: { advisory, thread? }`, the
 /// primary thread when none) as the app does on its `on:` — over that
-/// thread's open effort — and check what the agent is told, line by line:
+/// thread — and check what the agent is told, line by line:
 /// `expect: { lines: [..] }` (none: `[]`).
 pub(super) async fn advisory_example(
     host: &Host,
@@ -591,6 +659,193 @@ pub(super) async fn advisory_example(
     }
 }
 
+/// Run agent context `id` for a thread (`when: { context, thread? }`, the
+/// primary thread when none) as the app does on a prompt, and check what
+/// the agent would be told, uncut: `expect: { text: <string> | null }`
+/// (`null`: nothing to say). A text over the per-context budget is a
+/// warning: the agent gets it cut.
+pub(super) async fn context_example(
+    host: &Host,
+    ext: &Extension,
+    ex: &Example<'_>,
+    id: &str,
+    report: &mut TestReport,
+) {
+    let shown = ex.shown;
+    if !ext.contexts.iter().any(|c| c.id == id) {
+        return report.errors.push(
+            error(
+                shown,
+                None,
+                "fixture.unknown",
+                format!("`{id}` isn't one of the extension's agent contexts"),
+            )
+            .fix("the example's `when.context`"),
+        );
+    }
+    let thread = match ex.when.get("thread").and_then(Value::as_str) {
+        None => oxplow_domain::ThreadId::new(1),
+        Some(t) => match oxplow_domain::ThreadId::try_from_str(t) {
+            Some(thread) => thread,
+            None => {
+                return report.errors.push(
+                    error(
+                        shown,
+                        None,
+                        "fixture.unknown",
+                        format!("`when.thread: {t}` isn't a thread"),
+                    )
+                    .fix("`thr1`"),
+                )
+            }
+        },
+    };
+    if let Err(e) = host.svc.streams.ensure_primary().await {
+        return report.errors.push(error(
+            shown,
+            None,
+            "example.thread_failed",
+            format!("its thread: {e}"),
+        ));
+    }
+    host.current().await;
+    let from = format!("{}/{id}", ext.namespace);
+    use oxplow_app::agent_context::Reading;
+    let reading = match oxplow_app::agent_context::extension_contexts(&host.svc, &thread).await {
+        Ok(contexts) => contexts
+            .into_iter()
+            .find(|c| c.from == from)
+            .map_or(Reading::Silent, |c| c.reading),
+        Err(why) => Reading::Failed(why),
+    };
+    let text = match reading {
+        Reading::Says(text) => Some(text),
+        Reading::Silent => None,
+        // A failure is the fixture's error, never "nothing to say".
+        Reading::Failed(why) => {
+            return report.errors.push(error(
+                shown,
+                None,
+                "context.failed",
+                format!("context `{id}` couldn't be read: {why}"),
+            ));
+        }
+    };
+    if let Some(t) = &text {
+        let over = t.chars().count();
+        if over > oxplow_app::agent_context::CONTEXT_BUDGET {
+            report.warnings.push(
+                warning(
+                    shown,
+                    None,
+                    "context.over_budget",
+                    format!(
+                        "context `{id}` says {over} characters: the agent gets the first {}",
+                        oxplow_app::agent_context::CONTEXT_BUDGET
+                    ),
+                )
+                .fix("say less: the facts the agent needs now"),
+            );
+        }
+    }
+    let got = json!({ "text": text });
+    if let Some((path, want, at)) = compare(&ex.expect, &got) {
+        report.errors.push(
+            error(
+                shown,
+                None,
+                "fixture.compare",
+                format!("context `{id}` said {at} at `{path}`, the example expects {want}"),
+            )
+            .fix("its query, or the example's `given` and `expect` (`{ text: <string> | null }`)")
+            .mismatch(path, want, at),
+        );
+    }
+}
+
+/// `when: { action_point: <id>, context? }`: what the named action point
+/// offers for the context among the commands on this oxplow, as the shell
+/// would draw it — `expect: { draws: none | button | menu, commands?: [ids] }`.
+/// A bare name is this extension's own point.
+pub(super) async fn action_point_example(
+    host: &Host,
+    ext: &Extension,
+    ex: &Example<'_>,
+    point: &str,
+    report: &mut TestReport,
+) {
+    let shown = ex.shown;
+    let id = if point.contains('/') {
+        point.to_string()
+    } else {
+        format!("{}/{point}", ext.namespace)
+    };
+    let context = ex.when.get("context").cloned().unwrap_or_else(|| json!({}));
+    host.current().await;
+    let offer = match oxplow_app::commands::action_point_offers::action_point_offer(
+        &host.svc, &id, &context,
+    )
+    .await
+    {
+        Ok(offer) => offer,
+        Err(e) => {
+            return report
+                .errors
+                .push(error(shown, None, "example.failed", e).fix("the example's `when`"))
+        }
+    };
+    let got = json!({
+        "draws": offer.draws,
+        "commands": offer.commands.iter().map(|c| c.id.clone()).collect::<Vec<_>>(),
+    });
+    if let Some((path, want, at)) = compare(&ex.expect, &got) {
+        report.errors.push(
+            error(
+                shown,
+                None,
+                "fixture.compare",
+                format!("action point `{id}` offered {at} at `{path}`, the example expects {want}"),
+            )
+            .fix("the commands' `ui.at`, or the example's `context` and `expect`")
+            .mismatch(path, want, at),
+        );
+    }
+}
+
+/// `when: { item_commands: <uri> }`: the commands a person is offered
+/// about the item `uri` (their `ui.about`, its store filter and
+/// `about_when` applied) — `expect: { commands: [ids] }`.
+pub(super) async fn item_commands_example(
+    host: &Host,
+    ex: &Example<'_>,
+    uri: &str,
+    report: &mut TestReport,
+) {
+    let shown = ex.shown;
+    host.current().await;
+    let ids = match oxplow_app::commands::ref_commands::ref_commands(&host.svc, uri).await {
+        Ok(ids) => ids,
+        Err(e) => {
+            return report
+                .errors
+                .push(error(shown, None, "example.failed", e).fix("the example's `when`"))
+        }
+    };
+    let got = json!({ "commands": ids });
+    if let Some((path, want, at)) = compare(&ex.expect, &got) {
+        report.errors.push(
+            error(
+                shown,
+                None,
+                "fixture.compare",
+                format!("`{uri}` was offered {at} at `{path}`, the example expects {want}"),
+            )
+            .fix("the commands' `ui.about` and `accepts`, or the example's `expect`")
+            .mismatch(path, want, at),
+        );
+    }
+}
+
 /// Read the published datasets with `when: { sql, params? }` as a page's
 /// loader would — a dataset, a decorator's labels, a metric's grid — through
 /// an inline page of one `sql` loader: `expect: { rows, columns? }`,
@@ -644,8 +899,9 @@ pub(super) async fn sql_example(host: &Host, ex: &Example<'_>, sql: &str, report
 /// `input` (and `answers`, standing in for its scope calls' — per
 /// scope, in call order): what it composes, checked against the
 /// throwaway's registry, and what it answers, against `expect` — `{
-/// commands: [names] }` and/or `{ result }` (only the keys it names), or
-/// `{ refused: <part of the reason> }`. Nothing runs.
+/// commands: [names] }`, `{ result }` and/or `{ inverse: { commands: [{
+/// name, input }] } }` (what its script returns to undo the run; only the
+/// keys it names), or `{ refused: <part of the reason> }`. Nothing runs.
 pub(super) async fn command_example(
     host: &Host,
     ex: &Example<'_>,
@@ -674,8 +930,21 @@ pub(super) async fn command_example(
             "composed [{}] but the example expects it to refuse ({want})",
             call_names(&calls).join(", ")
         )),
-        (Ok(Composed::Run { calls, result, .. }), None) => {
-            let got = json!({ "commands": call_names(&calls), "result": result });
+        (
+            Ok(Composed::Run {
+                calls,
+                result,
+                inverse,
+                ..
+            }),
+            None,
+        ) => {
+            let inverse = inverse.map(|calls| json!({ "commands": calls }));
+            let got = json!({
+                "commands": call_names(&calls),
+                "result": result,
+                "inverse": inverse,
+            });
             compare(&ex.expect, &got).map(|(path, want, got)| {
                 let did = if path.starts_with("/result") {
                     "answered"
@@ -806,63 +1075,6 @@ pub(super) fn example_event(
             );
             None
         }
-    }
-}
-
-/// Dry-run the extension's effort policy script `id` on the fixture's
-/// event (`when: { implementation, event: { type, payload, subject?,
-/// anchors? }, answers? }`, the answers standing in for its scope calls'):
-/// what it composes, checked against the throwaway's registry, against
-/// `expect` as an effect's is. A policy emits nothing. Nothing runs.
-pub(super) async fn policy_example(
-    host: &Host,
-    ext: &Extension,
-    ex: &Example<'_>,
-    id: &str,
-    report: &mut TestReport,
-) {
-    use oxplow_app::effects::{run_over, Reaction};
-    let (shown, example) = (ex.shown, ex.name);
-    let Some((decl, script)) = ext
-        .implementations
-        .iter()
-        .filter(|d| d.id == id && d.capability == EFFORT_POLICY)
-        .find_map(|d| d.script.as_deref().map(|s| (d, s)))
-    else {
-        report.errors.push(error(shown, None, "fixture.unknown", format!("example `{example}` names effort policy `{id}`, which `{}` doesn't declare as a script", ext.name)).fix(format!("an `implementations:` entry with `capability: effort_policy`, `id: {id}` and a `.star` entry")));
-        return;
-    };
-    let Some(event) = example_event(host, ex, report) else {
-        return;
-    };
-    let event = event.to_json();
-    let Some(answers) = answers(ex, &format!("effort policy `{id}`"), report) else {
-        return;
-    };
-    let run = oxplow_app::run_context::for_dry_run();
-    let decided = run_over(
-        &host.svc.sql,
-        &run,
-        &decl.needs,
-        script,
-        event,
-        Some(&answers),
-        &oxplow_app::services::Sources::default(),
-    )
-    .await
-    .and_then(|reaction| match &reaction {
-        Reaction::Run { events, .. } if !events.is_empty() => {
-            Err("it appends events, and a policy emits nothing".to_string())
-        }
-        Reaction::Run { calls, .. } => oxplow_app::extension::extension_commands::check_calls(
-            host.svc.commands.as_ref(),
-            calls,
-        )
-        .map(|()| reaction),
-        Reaction::Skip(_) => Ok(reaction),
-    });
-    if let Some(p) = reaction_problem(&ex.expect, decided) {
-        report.errors.push(error(shown, ex.line("expect"), "example.effort_policy", format!("effort policy `{id}` {p}")).fix("its script, or the example's `expect` (`{ commands: [names] }` or `{ skip: <part of the reason> | $any }`)"));
     }
 }
 

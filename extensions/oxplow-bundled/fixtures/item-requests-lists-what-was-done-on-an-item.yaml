@@ -1,0 +1,29 @@
+# What has been done on a task: the requests that worked on it, newest
+# first, each with its prompt, state, turns and the files its turns changed;
+# the task page shows it as its Activity.
+requires: [oxtask]
+given:
+  - { command: oxtask.task.create, input: { title: Fix it, stage: ready } }
+  - { command: oxtask.task.create, input: { title: Other, stage: ready } }
+  - observe:
+      turn:
+        prompt: "Fix it first\nwith detail"
+        during:
+          - { command: oxtask.task.move, input: { id: tsk1, stage: in_progress }, as: agent }
+        tools:
+          - { name: Edit, kind: edit, paths: [a.rs], ok: true }
+  - observe:
+      turn:
+        prompt: Then finish it
+        during:
+          - { command: oxtask.task.move, input: { id: tsk1, stage: done }, as: agent }
+when: { page: item-requests, params: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" } }
+expect:
+  loaders:
+    requests:
+      rows:
+        - { uri: $any, prompt: Then finish it, state: finished, turns: 1, files: 0 }
+        - { uri: $any, prompt: Fix it first, state: finished, turns: 1 }
+steps:
+  - params: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask" }
+    expect: { loaders: { requests: { rows: 0 } } }

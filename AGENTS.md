@@ -28,12 +28,14 @@ or exact mechanics.
 - **`.context/usability.md`** — UI rules (Enter submits, Escape cancels,
   drop-target highlighting, right-click for destructive actions, etc.).
   Read before adding *any* UI.
-- **Tasks while the work list is none.** The work list ships in
-  `oxplow-foundation`, so it runs even with `oxplow-bundled` off. With no list
-  chosen (Settings → Capabilities) or oxplow not running, file and update
+- **Tasks from the command line.** oxtask, oxplow's own task store,
+  ships in `oxplow-bundled` and is a store of the shared task model. With
+  oxtask enabled in the project, or oxplow not running, file and update
   tasks with `cargo run -q -p oxplow-dev -- task …`
-  (`.context/working-in-this-repo.md` "oxplow-dev"). How oxplow tracks work and how to ask the person a
-  question come from oxplow itself, in every session's prompt.
+  (`.context/working-in-this-repo.md` "oxplow-dev"); it works over oxtask's
+  own file and says so when oxtask is off. How oxplow tracks work and how
+  to ask the person a question come from oxplow itself, in every session's
+  prompt.
 - **Which tests and lint to run, and when, is your call** — run what
   the change warrants. Nothing requires a full run before a commit. The
   commands, all in the foreground (a backgrounded run's reports are
@@ -53,7 +55,7 @@ or exact mechanics.
     `-p` of only pure crates like oxplow-config or oxplow-domain skips the
     sidecar build) and
     `bun run test:fast:ts` — quick, write the JUnit reports the
-    effort's Tests panel shows.
+    request's Tests panel shows.
   - `bun run test:collect` — the full suite with coverage, the only run
     that emits lcov for the coverage panel. See `.context/collection.md`.
   - `bun run lint:collect` — clippy with `-D warnings` (JSON to
@@ -111,9 +113,9 @@ or exact mechanics.
 | If you're touching… | Read first |
 |---|---|
 | Language support — the `Language` enum, `LanguageSupport` registry, per-language specs (analysis/merge/LSP/metrics) | `.context/language-support.md` |
-| Tables, stores, work queue, sort_index, migrations | `.context/data-model.md` |
+| Tables, stores, tasks, sort_index, migrations | `.context/data-model.md` |
 | The agent process, Stop hook, MCP tools, write guard, agent prompt config | `.context/agent-model.md` |
-| How oxplow infers the agent's work (efforts, policies, no gates, hints) and the capabilities direction (swappable work list, effort policy, snapshots) | `.context/work-tracking.md` |
+| How oxplow infers the agent's work (turns and requests, no gates, hints) and the capabilities direction (swappable snapshots) | `.context/work-tracking.md` |
 | Adding a new persisted operation (store + IPC + UI), event bus, cross-store updates | `.context/ipc-and-stores.md` |
 | Background colors, tier hierarchy, adding a new color variable | `.context/theming.md` |
 | `.git` watching, blame, branch changes, commit execution | `.context/git-integration.md` |
@@ -125,13 +127,14 @@ or exact mechanics.
 | `TerminalPane`, xterm.js setup, file-path link provider | `.context/terminal.md` |
 | LSP (session manager, document mirror, Mason installer, lsp RPCs/events, server config, MCP lsp tools) | `.context/lsp.md` |
 | Code quality scans (in-process metrics + duplication detector + findings store + Code quality panel) | `.context/code-quality.md` |
-| Effort-scoped collection (test-run + diff-coverage observations, report collectors and their bundled parsers, the `testing:` profile, `/oxplow:configure`) | `.context/collection.md` |
+| Request-scoped collection (test-run + diff-coverage observations, report collectors and their bundled parsers, the `testing:` profile, `/oxplow:configure`) | `.context/collection.md` |
 | Resources and their URIs — building, reading, storing or linking any `<kind>:<id>` string in Rust, SQL, Starlark or TS (builders, readers, `uri` columns, dead links); the grammar and type registry; resource / renderer / view | `.context/resources.md` "Using refs" |
 | Commands — the command bus (spec, actors, validate → policy → confirm → run + audit + `command.executed` in one transaction, undo), adding a command | `.context/commands.md` |
-| Knowledge (the wiki) — `knowledge.write_page` and its sibling commands, pins, hand-edit convergence, the wiki write guard | `.context/knowledge.md` |
-| External providers — the JSON-RPC/NDJSON protocol crate and meta-model, the fake provider, the host (consent, spawn, handshake, `ExternalWorkItems`), instances and health, Settings → Integrations, the conformance kit and `oxplow extension test` | `.context/providers.md` |
-| Work items — `v_work_item`, the `WorkItemsProvider` capability and registry, the oxplow provider, the conformance suite | `.context/work-items.md` |
-| The semantic layer — sources (entities + facts), dimensions, metrics, the `v_*` read contract, `query_sql`, user/extension sources (target design, epic tsk275) | `.context/semantic-layer.md` |
+| Knowledge — pages as rows of the shared knowledge model (several stores at once; oxwiki is oxplow's own extension), bundled's `v_oxplow_knowledge_*` datasets and points, the store write guard | `.context/knowledge.md` |
+| External providers — the JSON-RPC/NDJSON protocol crate and meta-model, the fake provider, the host (consent, spawn, handshake), instances and health, Settings → Integrations, the conformance kit and `oxplow extension test` | `.context/providers.md` |
+| Tasks — the `oxplow/task_record` model, bundled's `v_oxplow_task` datasets and task points, oxtask | `.context/tasks.md` |
+| Shared models (contract, being built) — `models:` / `fills:`, `model.write`, fields, markdown bodies, how tasks and knowledge become observed systems | `.context/models.md` |
+| The semantic layer — sources (entities + facts), dimensions, metrics, the `v_*` read contract, `query_sql`, user/extension sources (target design) | `.context/semantic-layer.md` |
 | Extensions — the terms (extension, contribution, capability, provider, scope, access, effect) and the index of the extensions docs | `.context/extensions.md` |
 | Extensions — `extension.yaml` (manifest v2), contribution descriptors, `configuration:`, private state, the design rules | `.context/extensions-manifest.md` |
 | Extensions — how pages run today: page files, ids, live set, params, checks, IPC/MCP surfaces, panels, desktop UI | `.context/extensions-page-host.md` |
@@ -146,7 +149,7 @@ or exact mechanics.
 | Extensions — extension commands, capability implementations, skills, advisories, the agent MCP surface | `.context/extensions-commands.md` |
 | Extensions — the SDK (`oxplow extension new|check|test`), fixtures, answerability | `.context/extensions-sdk.md` |
 | Extensions — `oxplow-foundation`, `oxplow-bundled`, the review packet, `examples/extensions/` | `.context/extensions-bundled.md` |
-| AI providers & roles — API model access, role→model mapping, keychain, recorded computations (`AiCompute`, `ai_result`), the `ai_*` collector builtins, inferred decisions | `.context/ai-providers.md` |
+| AI providers & roles — API model access, role→model mapping, keychain, recorded computations (`AiCompute`, `ai_result`), the `ai_*` collector builtins | `.context/ai-providers.md` |
 | Fact substrate (measure/dimension/metric_spec/capture/fact, cube, fact collectors, MCP/IPC reads, Metrics page) | `.context/metrics.md` |
 | Profiling (the `cube_equivalence` harness, samply traps), what's already optimized, what measurement ruled out | `.context/performance.md` |
 | Dashboards — pages in `category: Dashboards` (grid of embeds), the Dashboards index, `new_dashboard`, Pin to Dashboard | `.context/dashboards.md` |

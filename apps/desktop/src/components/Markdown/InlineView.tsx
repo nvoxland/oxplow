@@ -73,7 +73,7 @@ function InlineRun({ specYaml, streamId, threadId }: InlineViewProps) {
   if (!state.run) return reading ? <Loading what="view" /> : null;
   return (
     <div data-testid="inline-page" aria-busy={state.stale}>
-      {/* Node ids belong to this run, never the containing wiki's. */}
+      {/* Node ids belong to this run, never the containing page's. */}
       <NodeRegistryContext.Provider value={null}>
         <PageTree
           run={state.run}

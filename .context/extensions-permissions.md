@@ -18,7 +18,7 @@ don't ask a model; `state.read`, `extension_config.read`, `jobs.read`.
 # absent or [] = baseline only. `oxplow_domain::permissions::PERMISSION_IDS`.
 permissions:
   - sql.read                     # ad-hoc read-only SQL (a script's `needs: [sql.read]`)
-  - commands:oxplow.work_item.*  # commands outside its own namespace (`*` one segment, `**` the rest)
+  - commands:oxtask.task.*  # commands outside its own namespace (`*` one segment, `**` the rest)
   - files.read                   # or files.write (includes read): `needs: [tree.read]`
   - ai.compute                   # models, with the person's key
   - network:api.github.com       # hosts its programs reach (`network:*.example.com` covers the names under it)
@@ -176,12 +176,10 @@ its scope trace.
   diverge; the host's own `read` keeps its transaction choice),
   a composer (`Composer` gets a pure child; what it calls becomes the
   run's scopes), effects (`for_effect`: the effect actor on the event's
-  thread and stream, caused by the event), the effort policy
-  (`for_policy`, its composed calls `run_in` it so `command.executed`
-  is caused by the event), entity and fact collectors (a child of the
+  thread and stream, caused by the event), entity and fact collectors (a child of the
   run that ran them, named for the collector), provider invokes (on the
   wire as `InvokeParams.context`; `host/call`s are answered only inside
-  a registered run) and knowledge, snapshot and harness verbs. A page
+  a registered run) and snapshot, filesystem and harness verbs. A page
   acting is `Actor::Page { page_id, on_behalf_of }` (source: the page's
   URI; a node's id is in `actor_id`) and a component acting is
   `Actor::Component` (source: its contribution ref); both act for the
@@ -246,8 +244,8 @@ its scope trace.
   and `event_retention::tests::extension_runs_past_their_window_are_swept`.
 - **Cancel reaches the worker.** Every script a collector, command,
   effect, policy or fact collector runs is passed its run's cancel flag;
-  an exec collector's program is killed when it's set. Upcasts, report
-  parsers and the MCP adapter's mappings still run
+  an exec collector's program is killed when it's set. Upcasts and report
+  parsers still run
   under their own fixed budgets without one.
 
 ## Services
@@ -266,12 +264,27 @@ uses):
 - **Who may declare what** (checked at load): a Starlark collector's
   `needs:` any service (`check_declared`; another runtime has no
   builtins, so `needs` there is an error); a composing script — a
-  command's `entry:`, an effect, an effort policy script — reads only
+  command's `entry:`, or an effect — reads only
   (`scope_calls::check_script_need`: it runs pure, so `ai.compute` is
   refused, naming why). A **command's** script reads the semantic layer
   (metric functions included) and not the tree: it decides what runs,
   and reading a whole tree belongs to an effect or a collector (refused
-  at load, naming them). A provider's
+  at load, naming them). **A capability implementation's** script
+  (`implementations:` with a script `entry`,
+  `scope_calls::check_implementation_need`) reads what a composing script
+  does, and also the **stream's worktree** (`tree.read`, bare or
+  `tree.read:<path>`, giving it `files()` and the other tree builtins: the
+  tree as it is on disk at the call, `providers::worktree_tree`, not a
+  snapshot) and writes **its own extension's private state**
+  (`scope("state.write", { scope, area, expected, schema_version, values })`,
+  see [extensions-manifest.md](./extensions-manifest.md) "Private state host
+  boundary"). Each is decided as any other need is: declared in the
+  implementation's `needs`, within the extension's permissions
+  (`tree.read` needs `files.read` in `permissions:`, checked at load as
+  every `needs` is; `state.write` is baseline, as `state.read` is: the
+  namespace is the extension's own), and by the run's live authority at
+  each call. A command's or an effect's script is refused `state.write`;
+  a command's script is still refused `tree.read`. A provider's
   `needs` stay `scope()` calls (`check_callable`: `host/call` answers
   `sql.read`).
 - **`scope("ai.discover", { role })`** (callable from an effect, a command
@@ -321,7 +334,7 @@ uses):
   every host that runs a Starlark script — entity collectors
   (`collector_runner::given`), fact collectors (`MetricsService::given`),
   commands (`compose_calls`), effects (`effect_triggers::run_script`,
-  `effects::run_over`) and effort policy scripts — calls
+  `effects::run_over`) — calls
   `services::decide` / `prepare` with the run, the script and its needs.
   For each service the script uses it refuses what the run's mode
   excludes (`RunContext::decide_service`: "a pure run can't use
@@ -359,8 +372,8 @@ extension may reach (its `permissions:`, approved when it was deployed —
   env, commands }`, derived from the declaration: an exec collector's
   entry, `network`, `credentials` and `env`; a collector's services
   (`services::collector_needs`: declared ∪ implied, `ai.compute` among
-  them for a model-calling script); a script's (effect, command, effort
-  policy, job, provider `host/call`) scopes from its `needs`.
+  them for a model-calling script); a script's (effect, command,
+  job, provider `host/call`) scopes from its `needs`.
 - **The grant.** `Grant { namespace, permissions }` (`grants::grant_of`):
   the extension's command namespace and its declared permissions. There is
   no approvals store and nothing hashed per program: the deployment is
@@ -369,9 +382,9 @@ extension may reach (its `permissions:`, approved when it was deployed —
 - **The authority** a run carries (`RunContext::authorized`,
   `run::Authority { declared, grant, enforcement }`,
   `grants::authority(ext, declared)`). Every extension run has one: a
-  collector, an effect, a job, a script command, a scripted effort policy,
+  collector, an effect, a job, a script command,
   a provider's `host/call`s. Core's own work has none and is allowed what
-  it does (core's built-in effort policy, core commands).
+  it does (core commands).
 - **Decisions.** `run.decide(Need)` → `Allowed`, `Denied(why)` or
   `Unenforced(why)`, recorded on the run (`v_extension_run.decisions`).
   `grant::decide` refuses what the contribution didn't declare ("not
@@ -396,7 +409,7 @@ extension may reach (its `permissions:`, approved when it was deployed —
   declare doesn't load ("Permissions"). The runtime decisions are for what
   only a run reveals — a script's composed commands, a path or dataset it
   reads.
-- **Bounded reads.** `sql.read:v_work_item` names an exact published
+- **Bounded reads.** `sql.read:v_oxplow_task` names an exact published
   dataset; use multiple needs for multiple datasets. SQLite preparation checks
   the query's datasets and transitive registered `ref` inputs, including
   materialized datasets, before evaluating rows. Bare `sql.read` preserves
@@ -495,3 +508,136 @@ is detached from the settings RPC's lifetime, then requests coordinated
 reconciliation. Keychain mutation failure also invalidates old consumers; it
 does not claim deletion succeeded. Runtime isolation/revocation checks remain
 pending.
+
+## Store services
+
+Part of the shared-models work ([models.md](./models.md)). Built:
+`crates/oxplow-db/src/extension_store.rs` (the file),
+`extension/extension_services.rs` (the services),
+`commands/extension_services.rs` (the write commands),
+`extensions/storage.rs` (the manifest keys).
+
+A script is a pure composer (it runs before policy and confirmation, and
+`check` dry-runs its examples), so a **service only reads**; a **write is a
+command** the script composes, which the host runs after policy and
+confirmation.
+
+**An extension's own SQLite file.** `storage: { sqlite: true }` in the
+manifest makes the host open `.oxplow/extensions-data/<extension name>.sqlite`
+(created when missing; its own pool of two connections, like
+`Database::attach`; never attached to the main connection) and run the
+extension's migration files (`storage/migrations/V<n>__<name>.sql`, in order
+of `n`, each in a transaction with its record in the file's
+`_oxplow_migration` table, so each runs once; a redeploy with changed
+migrations runs the new ones). A file that doesn't match the name, or
+migrations without `storage:`, is a load error.
+
+- **Read: `store.sql`** (`needs: [store.sql]`; commands, effects, collectors):
+  `scope("store.sql", {"sql": "SELECT …", "params": [...]})` answers
+  `{rows}`. One statement; it is prepared under an SQLite authorizer that
+  allows only `SELECT`, reads and read-form `PRAGMA`s, so any write, `ATTACH`,
+  `DETACH` or `VACUUM` is refused. It reaches only that extension's file
+  (the owner comes from the run, never from the request).
+- **Write: `oxplow.extension_store.write { batch: [{sql, params, expect_changes?}] }`**, a
+  core command (scope `store.write`, an External handler: it runs outside the
+  database transaction, is not undoable, and its `batch` is left out of the
+  audit). The statements are one transaction on the file. It answers
+  `{ changes, rows }`: `changes` the rows the statements changed (a `SELECT`
+  counts none), `rows` one list per statement, in order, of that statement's
+  rows as objects (column to value) — what a `RETURNING` clause gives, `[]`
+  for a statement without one — so a store can mint an id inside its write
+  (`INSERT … RETURNING id`). **`expect_changes: n`** on a statement says it
+  must change exactly `n` rows of its own (a trigger's changes don't count):
+  any other count fails the command, rolls the whole batch back and names the
+  statement. A command uses it to say "no such row" (`UPDATE … WHERE id = ?`
+  with `expect_changes: 1`). **A script's own `result` cannot see them**: the
+  script runs once, when the bus routes the run, before any step has run, and
+  nothing binds an earlier step's answer into a later step's input or into the
+  script's `result` (the calls and the `inverse` are fixed at compose time). The
+  rows are in the run's own result, on the write's entry in `children` (`{
+  result, children: [{ name: "oxplow.extension_store.write", result: { changes,
+  rows } }] }`, recorded in the audit row), which is what a caller reads; to
+  return a minted id in the command's `result`, mint it in the script (a
+  random or derived id, passed as a parameter), not in SQL. A mutation that
+  needs a minted id in its `inverse` has the same limit: the script picks the
+  id. It runs as the composing extension and refuses any other
+  caller (a person, an agent, a run with no extension contribution); the
+  script needs `commands:oxplow.extension_store.write` in `permissions:`. A
+  collector cannot write: it only reads.
+
+**The boundary holds in SQLite itself.** Every connection of the store's pool
+sets `SQLITE_LIMIT_ATTACHED` to 0, so nothing can attach another file (the
+main database included) to a pooled connection. The extension's own SQL (a
+migration, a write batch) also runs under an authorizer that refuses `ATTACH`,
+`DETACH` and transaction control (`BEGIN`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`,
+`RELEASE`): the host owns the transaction, so "one transaction" holds. The
+host's own statements (the migration record, the commit) run without it.
+
+**Declared folders (`files:`).** A folder is refused at load, and every path
+is refused at run time (`check_path`), when any part is `.git` (compared
+without case, at any depth), or when it is in `.oxplow` (also without case)
+unless it is a **watched folder**. `.oxplow` holds oxplow's own data (other
+extensions' store files in `extensions-data`, the extensions' sources, the
+database). An extension whose files live there declares
+`{ path: .oxplow/<name>, access: write, watch: true }`: one folder directly
+under `.oxplow/`, never one of oxplow's own (`extensions`, `extensions-data`,
+`runtime`, `logs`, `snapshots`, …). Oxplow then watches it though git ignores
+it (the extension's `files:` trigger hears a change in it) and snapshots it; a
+tree (a diff, the working tree) is still git's view and leaves it out. The host
+publishes the enabled extensions' watched folders with each generation
+(`oxplow_fs_watch::set_declared_watched_folders`); core names no folder of
+its own.
+
+The file is removed with the extension's data (`extension_deploy::remove`),
+never on a disable.
+
+**The link check.** `links.check` (`needs: [links.check]`; it needs no `permissions:` entry, as
+`store.sql` needs none): `scope("links.check", {body, self?})` returns `{warnings: [{target,
+reason}]}` for the `[[…]]` links in `body` that are not a recognized
+reference or name something that isn't there (a file, a commit, a row a
+resource's dataset does not hold), checked as core checks the links it
+writes. A store's write command calls it and refuses when it warns. Files are
+looked for in the run actor's worktree (the primary checkout when it has none),
+`self` is the URI of the page being written, which may link to itself, and a
+resource's row is looked up in its own `resolve:` dataset. A database error is
+an error, never a pass. It reads the project's database and files; it spends
+nothing. `files.read` also takes `lossy: true`: bytes that are not UTF-8 become
+U+FFFD and `{body, lossy}` says whether any did, so a collector skips such a
+file (its `problems` output names what it skipped) instead of failing on it.
+
+**The scoped file service.** `files:` in the manifest names folders the
+extension may use, relative to the project root, each `access: read | write`:
+
+```yaml
+files:
+  - { path: shelf, access: write }
+```
+
+- **Read: `files.read`** (`needs: [files.read]`; needs `permissions:
+  [files.read]` or `[files.write]`): `scope("files.read", {path})` answers
+  `{body}` (at most 16 MiB), `scope("files.list", {path, glob?})` answers
+  `{files: [{path, size, modified_at}]}`, paths relative to the project
+  root, sorted.
+- **Write: `oxplow.extension_files.write { path, body }` and
+  `oxplow.extension_files.delete { path }`**, core commands (scope
+  `files.write`, External handlers; `body` is left out of the audit). They
+  run as the composing extension, only in a declared folder with `access:
+  write`, and need `permissions: [files.write]` and
+  `commands:oxplow.extension_files.*`. A write is whole or not at all (a
+  temporary file is renamed into place).
+- **Path checks** (`extension_services::check_path`): an absolute path, a
+  `..`, `.` or empty part, a path outside every declared folder, or a write
+  to a read-only folder is refused with the path and the declared folders
+  named; a symbolic link on the way is refused. `files:` entries that are
+  absolute, contain `..` or name `.git` are load errors.
+
+oxplow's write guard does not apply to these writes (it goes with the oxwiki
+carve-out). A script's `store.sql` and `files.*` reads need the service in
+its `needs`; the router checks it like `state.read`.
+
+**Not built here** (kept from the design): a tool's own SQLite file (beads'
+`.beads/beads.db`) read with `files.sqlite { path, sql, params }`, read
+only, when `path` is inside a `files:` folder the extension may read; and a
+folder outside the project (a vault): a `files:` entry that is an absolute
+or `~/` path, which the person approves by name at install, like any
+grant. Today an absolute path in `files:` is a load error.

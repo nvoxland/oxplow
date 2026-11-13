@@ -24,11 +24,6 @@ pub async fn run_command(
         .commands
         .run(&Actor::Human, &id, input.0, confirmed)
         .await?;
-    // A write may have opened or closed an effort: let its snapshot pin
-    // land before the UI reads what follows.
-    if outcome.audit_id.is_some() {
-        svc.efforts.settle_lifecycle().await;
-    }
     Ok(outcome)
 }
 
@@ -60,9 +55,17 @@ pub async fn command_open_after(
         .into_iter()
         .find(|s| s.id == id)
         .ok_or_else(|| IpcError::invalid(format!("no command `{id}`")))?;
+    // An extension's command answers `{ result, children }` (the composed
+    // run's shape): the page binds from its own answer.
+    let answer = match &result.0 {
+        serde_json::Value::Object(o) if o.contains_key("children") => {
+            o.get("result").unwrap_or(&result.0)
+        }
+        other => other,
+    };
     spec.ui
         .as_ref()
-        .map_or(Ok(None), |ui| ui.open_after_for(&result.0))
+        .map_or(Ok(None), |ui| ui.open_after_for(answer))
         .map_err(|e| IpcError::invalid(format!("`{id}`: {e}")))
 }
 
@@ -87,6 +90,19 @@ pub async fn list_person_commands(svc: &Services) -> Result<Vec<CommandSpec>, Ip
 /// the page's ☰ and a row's right-click alike.
 pub async fn ref_commands(svc: &Services, uri: String) -> Result<Vec<String>, IpcError> {
     oxplow_app::commands::ref_commands::ref_commands(svc, &uri)
+        .await
+        .map_err(IpcError::invalid)
+}
+
+/// What action point `point` offers for `context`: the commands that
+/// joined it, each with the context as its input, and how to draw them
+/// (`oxplow_app::commands::action_point_offers`).
+pub async fn action_point_commands(
+    svc: &Services,
+    point: String,
+    context: Json,
+) -> Result<oxplow_app::commands::action_point_offers::PointOffer, IpcError> {
+    oxplow_app::commands::action_point_offers::action_point_offer(svc, &point, &context.0)
         .await
         .map_err(IpcError::invalid)
 }
@@ -142,9 +158,6 @@ pub async fn run_command_for_call(
 ) -> Result<CommandOutcome, IpcError> {
     let actor = svc.client_host.caller(&client, &call)?;
     let outcome = svc.commands.run(&actor, &id, input.0, false).await?;
-    if outcome.audit_id.is_some() {
-        svc.efforts.settle_lifecycle().await;
-    }
     Ok(outcome)
 }
 
@@ -167,9 +180,6 @@ pub async fn undo_command(
         .commands
         .undo(&Actor::Human, audit_id.value(), confirmed)
         .await?;
-    if outcome.audit_id.is_some() {
-        svc.efforts.settle_lifecycle().await;
-    }
     Ok(outcome)
 }
 
@@ -192,9 +202,6 @@ pub async fn decide_proposal(
         .commands
         .approve(&Actor::Human, proposal.value())
         .await?;
-    if outcome.audit_id.is_some() {
-        svc.efforts.settle_lifecycle().await;
-    }
     Ok(Some(outcome))
 }
 
@@ -204,7 +211,7 @@ mod tests {
 
     use crate::test_support::services;
 
-    /// P5.A1 (tsk519): the person runs a command over IPC. A human-only
+    /// P5.A1: the person runs a command over IPC. A human-only
     /// key needs their confirmation — refused without it, done with it —
     /// and the run is audited to a human.
     /// What a person can run now and is offered: every command with
@@ -221,8 +228,8 @@ mod tests {
         let err = crate::dispatch(
             "run_command",
             json!({
-                "id": "oxplow.work_item.transition",
-                "input": { "uri": "oxplow:oxplow/work_item?id=tsk999&provider=oxplow", "to": "done" },
+                "id": "oxplow.thread.mark",
+                "input": { "thread": "thr999", "mark": "amber" },
                 "confirmed": true,
             }),
             &svc,
@@ -242,7 +249,7 @@ mod tests {
             })
             .await
             .unwrap();
-        assert_eq!(row.0, "oxplow.work_item.transition");
+        assert_eq!(row.0, "oxplow.thread.mark");
         assert_ne!(row.1, "ok");
         // A run that succeeds, or fails before any run, names none.
         let unknown = crate::dispatch(
@@ -271,6 +278,14 @@ mod tests {
         };
         assert_eq!(
             open(json!({ "page": "my-pages/health" })).await.unwrap(),
+            json!("oxplow:oxplow/page?page=my-pages/health")
+        );
+        // An extension's command answers `{ result, children }`: the page
+        // is bound from its own answer, not the envelope.
+        assert_eq!(
+            open(json!({ "result": { "page": "my-pages/health" }, "children": [] }))
+                .await
+                .unwrap(),
             json!("oxplow:oxplow/page?page=my-pages/health")
         );
         let err = open(json!({})).await.unwrap_err();
@@ -406,20 +421,14 @@ mod tests {
                 .await
             }
         };
-        // A command that asks asks the person over IPC: a work item's delete.
-        let made = crate::dispatch(
-            "run_command",
-            json!({ "id": "oxplow.work_item.create", "input": { "title": "T" }, "confirmed": false }),
-            &svc,
-        )
-        .await
-        .unwrap();
+        // A command that asks asks the person over IPC: a file's delete.
+        std::fs::write(dir.path().join("old.txt"), "old").unwrap();
         let delete = |confirmed: bool| {
-            let (svc, uri) = (svc.clone(), made["result"]["uri"].clone());
+            let svc = svc.clone();
             async move {
                 crate::dispatch(
                     "run_command",
-                    json!({ "id": "oxplow.work_item.delete", "input": { "uri": uri }, "confirmed": confirmed }),
+                    json!({ "id": "oxplow.file.delete", "input": { "stream": "str1", "path": "old.txt" }, "confirmed": confirmed }),
                     &svc,
                 )
                 .await
@@ -427,7 +436,9 @@ mod tests {
         };
         let err = delete(false).await.unwrap_err();
         assert_eq!(err.code, "NEEDS_CONFIRMATION", "{}", err.message);
+        assert!(dir.path().join("old.txt").exists(), "asked, so not deleted");
         delete(true).await.unwrap();
+        assert!(!dir.path().join("old.txt").exists());
         // One that doesn't ask runs at once.
         let out = set(false).await.unwrap();
         assert!(out["audit_id"].is_number(), "{out}");
@@ -461,7 +472,8 @@ mod tests {
     #[tokio::test]
     async fn a_person_decides_an_effects_proposal() {
         use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
-        let (svc, _dir) = services().await;
+        let (svc, dir) = services().await;
+        std::fs::write(dir.path().join("proposed.txt"), "x").unwrap();
         let stream = svc.stream_store.list().await.unwrap().pop().unwrap();
         let thread = svc
             .thread_store
@@ -476,26 +488,15 @@ mod tests {
             thread_id: Some(thread.id),
             stream_id: Some(stream.id),
         };
-        let made = svc
-            .commands
-            .run(
-                &oxplow_domain::Actor::Human,
-                "oxplow.work_item.create",
-                json!({ "title": "Proposed away" }),
-                false,
-            )
-            .await
-            .unwrap();
         let propose = || {
             let (svc, effect) = (svc.clone(), effect.clone());
-            let uri = made.result["uri"].clone();
             async move {
                 let err = svc
                     .commands
                     .run(
                         &effect,
-                        "oxplow.work_item.delete",
-                        json!({ "uri": uri }),
+                        "oxplow.file.delete",
+                        json!({ "stream": "str1", "path": "proposed.txt" }),
                         false,
                     )
                     .await
@@ -517,31 +518,16 @@ mod tests {
                 .await
             }
         };
-        let exists = || {
-            let svc = svc.clone();
-            async move {
-                svc.commands
-                    .run(
-                        &oxplow_domain::Actor::Human,
-                        "oxplow.sql.query",
-                        json!({ "sql": "SELECT count(*) FROM v_work_item WHERE title = 'Proposed away'" }),
-                        false,
-                    )
-                    .await
-                    .unwrap()
-                    .result["rows"][0][0]
-                    .clone()
-            }
-        };
+        let exists = || dir.path().join("proposed.txt").exists();
 
         let declined = propose().await;
         assert_eq!(decide(declined, false).await.unwrap(), json!(null));
-        assert_eq!(exists().await, json!(1), "declined: still there");
+        assert!(exists(), "declined: still there");
 
         let approved = propose().await;
         let out = decide(approved, true).await.unwrap();
         assert!(out["audit_id"].is_number(), "{out}");
-        assert_eq!(exists().await, json!(0), "approved: deleted as the person");
+        assert!(!exists(), "approved: deleted as the person");
         // Decided once.
         let err = decide(approved, false).await.unwrap_err();
         assert_eq!(err.code, "INVALID", "{}", err.message);

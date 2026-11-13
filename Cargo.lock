@@ -4590,7 +4590,6 @@ dependencies = [
  "oxplow-runtime",
  "oxplow-script",
  "oxplow-session",
- "oxplow-tasks",
  "oxplow-workspace-hack",
  "parking_lot",
  "proptest",
@@ -4705,7 +4704,6 @@ dependencies = [
  "oxplow-mcp",
  "oxplow-provider-fake",
  "oxplow-runtime",
- "oxplow-tasks",
  "oxplow-workspace-hack",
  "parking_lot",
  "prost",
@@ -4840,7 +4838,6 @@ dependencies = [
  "oxplow-db",
  "oxplow-domain",
  "oxplow-sdk",
- "oxplow-tasks",
  "oxplow-workspace-hack",
  "rusqlite",
  "serde_json",
@@ -4993,7 +4990,6 @@ dependencies = [
  "oxplow-domain",
  "oxplow-git",
  "oxplow-sdk",
- "oxplow-tasks",
  "oxplow-workspace-hack",
  "rmcp",
  "schemars 1.2.2",
@@ -5021,7 +5017,6 @@ version = "0.8.0"
 dependencies = [
  "axum",
  "base64 0.23.1",
- "oxplow-provider-mcp",
  "oxplow-workspace-hack",
  "parking_lot",
  "reqwest",
@@ -5044,32 +5039,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "xxhash-rust",
-]
-
-[[package]]
-name = "oxplow-provider-mcp"
-version = "0.8.0"
-dependencies = [
- "axum",
- "futures",
- "oxplow-ai",
- "oxplow-app",
- "oxplow-config",
- "oxplow-domain",
- "oxplow-oauth-redirect",
- "oxplow-oauth-sim",
- "oxplow-provider-protocol",
- "oxplow-script",
- "oxplow-sdk",
- "reqwest",
- "rmcp",
- "schemars 1.2.2",
- "serde",
- "serde_json",
- "sse-stream",
- "tempfile",
- "tokio",
- "url",
 ]
 
 [[package]]
@@ -5177,6 +5146,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "windows-sys 0.61.2",
+ "xxhash-rust",
 ]
 
 [[package]]
@@ -5234,22 +5204,6 @@ dependencies = [
  "oxplow-workspace-hack",
  "tauri-specta",
  "tempfile",
- "tokio",
-]
-
-[[package]]
-name = "oxplow-tasks"
-version = "0.8.0"
-dependencies = [
- "async-trait",
- "oxplow-db",
- "oxplow-domain",
- "oxplow-workspace-hack",
- "rusqlite",
- "schemars 1.2.2",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
  "tokio",
 ]
 

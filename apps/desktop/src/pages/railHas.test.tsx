@@ -59,6 +59,11 @@ test("railHas: a page that fills gets no rail for see-also links alone (its ☰ 
   expect(railHas({ ...run(node.viz("items", "items", cols)), seeAlso: [link] }, no)).toBe(true);
 });
 
+test("railHas: a page that fills gets no rail for a selection (its viz draws the picks: a terminal's tabs)", () => {
+  expect(railHas(run(filling(), [selection]), { fills: true, saveOpen: false })).toBe(false);
+  expect(railHas(run(node.viz("items", "items", cols), [selection]), no)).toBe(true);
+});
+
 test("railHas: a view param is never drawn, so it is not something; a resource param neither", () => {
   const plain = node.viz("items", "items", cols);
   expect(railHas(run(plain, [{ name: "lines", role: "view", type: "text" } as PageParam, { name: "uri", role: "resource", type: "text" } as PageParam]), no)).toBe(false);

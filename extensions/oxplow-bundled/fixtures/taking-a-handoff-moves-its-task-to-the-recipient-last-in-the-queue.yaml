@@ -1,0 +1,27 @@
+# Taking a handoff moves its task onto the recipient thread, at the end of its
+# queue, as core's `handoff.resolve` did; declining it, or a task already the
+# recipient's, changes nothing.
+requires: [oxtask]
+given:
+  - { command: oxplow.thread.create, input: { stream: str1, title: Docs } }
+  - { command: oxtask.task.create, input: { title: Already there, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Handed, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", to: "oxplow:oxplow/thread?id=thr2" } }
+  - { command: oxtask.task.create, input: { title: Declined, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk3&provider=oxtask", to: "oxplow:oxplow/thread?id=thr2" } }
+  - { command: oxtask.task.create, input: { title: Already the recipients, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk4&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxplow.handoff.send, input: { from_thread: thr2, to_thread: thr1, task: "oxplow:oxplow/task?id=tsk2&provider=oxtask", body: Take it. } }
+  - { command: oxplow.handoff.send, input: { from_thread: thr2, to_thread: thr1, task: "oxplow:oxplow/task?id=tsk3&provider=oxtask", body: Or not. } }
+  - { command: oxplow.handoff.send, input: { from_thread: thr2, to_thread: thr1, task: "oxplow:oxplow/task?id=tsk4&provider=oxtask", body: Already yours. } }
+  - { command: oxplow.handoff.resolve, input: { handoff: hnd1, outcome: taken }, as: agent }
+  - { command: oxplow.handoff.resolve, input: { handoff: hnd2, outcome: declined }, as: agent }
+  - { command: oxplow.handoff.resolve, input: { handoff: hnd3, outcome: taken }, as: agent }
+when: { sql: "SELECT title, assignee, rank FROM v_oxplow_task ORDER BY title" }
+expect:
+  rows:
+    - { title: Already the recipients, assignee: "oxplow:oxplow/thread?id=thr1", rank: 1 }
+    - { title: Already there, assignee: "oxplow:oxplow/thread?id=thr1", rank: 0 }
+    - { title: Declined, assignee: "oxplow:oxplow/thread?id=thr2", rank: 1 }
+    - { title: Handed, assignee: "oxplow:oxplow/thread?id=thr1", rank: 2 }

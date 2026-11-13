@@ -6,7 +6,7 @@ The SDK behind `oxplow extension new|check|test` and the answerability check. Pa
 
 `crates/oxplow-sdk` (P1.14; target §10.5) is the one
 implementation behind three doors: the `oxplow extension new|check|test`
-CLI, the agent's `oxplow_validate_extension`, and `write_page`. Every
+CLI, the agent's `oxplow_validate_extension`, and `extension.write_page`. Every
 door gives an author the same report, so an agent editing from a terminal
 and one calling MCP read identical `file:line: what — fix` lines.
 
@@ -68,18 +68,18 @@ check already reported is not repeated.
   writes `.oxplow/extensions/<name>/extension.yaml` (v2, an `intent` whose `origin` is the URI passed with `--origin`,
   one example) and, but for a bare extension, that example's fixture
   `fixtures/basic.yaml` — then the kind's starter (P7.C6):
-  - `page` — `pages/<name>.yaml`, open tasks in the viewer's stream, with
-    a Start row action (`oxplow.work_item.transition`, a `uri` column it
+  - `page` — `pages/<name>.yaml`, the viewer's open threads, with
+    a Mark row action (`oxplow.thread.mark`, a `uri` column it
     binds but doesn't show) and an `answers:` entry; its example is
     `{ page: <name>, params: { stream_id: 1 } }`;
-  - `query` — `queries/<name>.yaml`, a rows loader of work-item states as
+  - `query` — `queries/<name>.yaml`, a rows loader of marks as
     `value` / `label`, for a choice's `options_from`; its example is
     `{ query: <name> }` expecting a row;
   - `component` — a `custom_components:` entry (a bundle under
     `components/<name>/`) and a page whose `component` node it feeds;
     `panel` — a `panels:` entry whose `body` is a part (`parts/<name>.yaml`),
     its example `{ panel: <name> }` checking the body's rows;
-  - `collector` — a Starlark collector `items` over `v_work_item` declaring
+  - `collector` — a Starlark collector `items` over `v_thread` declaring
     entity `item`, a dataset `open_items` over `ref('item')` and a page over
     the dataset; its example runs the collector over fixture rows;
   - `metric` — a code metric, built by `oxplow_app::metric_scaffold::
@@ -97,18 +97,11 @@ check already reported is not repeated.
     `path` column links `file` at the `line` column. Its example runs the
     collector over a two-folder fixture corpus and expects the facts;
   - `command` — `commands: [note]` whose `handlers/note.star` composes
-    `oxplow.work_item.comment`, with an example and a `ui` about
-    `work_item`; its intent example dry-runs it;
-  - `effect` (P8.D12) — `effects: [on-done]` on `work_item.state_changed`
-    `where: { to: done }`, whose `effects/on-done.star` composes
-    `oxplow.work_item.comment`; its intent example dry-runs it on a fixture
+    `oxplow.thread.rename`, with an example and a `ui` about
+    `thread`; its intent example dry-runs it;
+  - `effect` (P8.D12) — `effects: [on-done]` on `thread.closed`, whose
+    `effects/on-done.star` composes `oxplow.thread.rename`; its intent example dry-runs it on a fixture
     event;
-  - `policy` — an `implementations:` entry (`capability: effort_policy`,
-    id = the name with `_` for `-`, `needs: [sql.read]`) whose
-    `policies/<name>.star` opens an item's effort when it starts on a
-    thread and closes its open efforts (read through `scope`) when it
-    ends; its example is a checkpoint expecting `{ skip: $any }`, and it
-    passes the effort-policy suite as written;
   - `provider` — below; `extension` — the manifest only.
   It refuses an existing folder, a bad name and an origin that isn't a URI. **What
   it writes passes `check` with no warnings and `extension test` clean**
@@ -116,8 +109,8 @@ check already reported is not repeated.
   `crates/oxplow-sdk/tests/just_works.rs` holds each kind to it, through
   to loading in a real oxplow: the page's row action names a registered
   command, the collector syncs and its dataset publishes, the command runs
-  through the bus; a work list and an effort policy each pass the kit
-  with the fake behind their stub, the policy with its scaffolded example.
+  through the bus; a provider passes the kit
+  with the fake behind its stub.
 - **Recorded fresh-agent runs** (`crates/oxplow-sdk/fixtures/just-works/
   <kind>/`): `scripts/record-just-works.sh <kind>` gives `prompt.md` to
   `claude -p` in an empty git project — `--safe-mode`, so nothing but
@@ -133,8 +126,8 @@ check already reported is not repeated.
   is one contribution of a kind: the manifest entries it adds (per top-level
   list: `collectors`, `datasets`, `commands`, …), the permissions its
   scripts need and its files. `scaffold` builds `new <kind>` from a manifest
-  header plus one (the page, collector, command, effect, component, advisory
-  and skill starters; their output is what it always was), and
+  header plus one (the page, collector, command, effect, component, advisory,
+  agent context and skill starters; their output is what it always was), and
   **`add_contribution(root, kind, id, extension)`** (`extension add <kind>
   <id> [<extension>]`) puts one into an extension that exists: the only
   extension under `.oxplow/extensions/`, else the one named. It refuses an
@@ -168,7 +161,7 @@ check already reported is not repeated.
   (`datasets::EntityStub`: a typed temp table under the entity's view);
   `datasets::check_extensions` returns those views (`CheckedDatasets.views`).
   Every later query of the check — command examples' reads,
-  advisories, pages — reads through them as an **overlay**
+  advisories, agent contexts, pages — reads through them as an **overlay**
   (`SqlGateway::with_overlay`, `SqlQuery::temp_views`: recreated on the
   query's own connection and dropped after), so a fresh collector →
   dataset → page checks clean before its first sync and a page may read
@@ -192,7 +185,7 @@ check already reported is not repeated.
 - **`scaffold(…, Kind::Provider { capability }, …)`** (`extension new
   provider <name> [--capability <cap>]`, P5.D5) adds a `providers:` entry
   (id = the name with `_` for `-`, the capability). `Kind::parse("provider")`
-  is `work_items`; `Kind::provider(cap)` refuses a capability without a
+  is `snapshots`; `Kind::provider(cap)` refuses a capability without a
   provider contract (the CLI exits 2), and `--capability` on another kind
   is a usage error. `provider.json` comes from the capability's
   `ProviderContract`: the verbs it always needs (`confirm: never`,
@@ -201,17 +194,25 @@ check already reported is not repeated.
   its records' entity when it streams records, and an object config
   schema. What the contract doesn't say is the SDK's starter per
   capability (`provider_starter`, `verb_input`): each verb's summary and
-  input schema, the intent example and its fixture — `create` expecting
-  `{ uri: $any }` for a work list; `react` to a checkpoint expecting
-  `{ skip: $any }` for an effort policy, whose manifest also `needs:
-  [sql.read]` (it hears events only, and reads oxplow for what to close);
-  `render` of `{ kind: ack }` expecting `{ body: $any }` for an agent
+  input schema, the intent example and its fixture — `mark` expecting
+  `{ handle: $any, … }` for a snapshots provider; `render` of `{ kind: ack }` expecting `{ body: $any }` for an agent
   harness, whose `launch` / `tool_use` / `render` inputs are the wire's
   (`{ session, endpoints, … }`, `{ body }`, `{ answer }`) and whose
   capability `data` starts as `{ env_markers: [], settings: [] }` (`ProviderStarter.data`; null for a
   contract that asks none). A capability with no starter gets its first verb with `{}` and `$any`.
   Then a stub `bin/provider` that exits 1 and `fixtures/provider-<id>.yaml`
   (`config: {}`).
+- **`scaffold(…, Kind::Implementation { capability }, …)`** (`extension
+  new implementation <name> [--capability <cap>]`) adds an
+  `implementations:` entry whose `entry` is a script,
+  `implementations/<id>.star` (extensions-commands.md "Implementations").
+  `Kind::implementation(cap)` takes the capabilities a provider may
+  implement (a provider contract) and refuses the rest. The verbs it always needs (each its contract's) are stubs that `fail`, so its conformance suite is red
+  until they're written (`just_works.rs`
+  `a_scaffolded_script_implementation_is_red_until_its_verbs_are_written`).
+  `extension test` runs each script implementation's capability suite
+  (`suites::script_suite`, case `implementation <id>`; providers.md "The
+  conformance kit").
 - **`extension_test::test_extension(root, name, bless)`** (`extension
   test <name> [--bless] [--json] [--junit <file>]`, P5.D5, from either
   binary: `oxplow extension …` and `oxplow-daemon extension …` are the one
@@ -230,8 +231,9 @@ check already reported is not repeated.
   that activation held back is the report's first lines (this
   extension's an error, another's a warning). `start_runtime` then starts
   what examples need — the effect and collector triggers (each example
-  delivers its event with `EventPump::settle`) and the job scheduler —
-  and binds every AI role to the **fixture model** (`oxplow_ai::fixture`,
+  delivers its event with `EventPump::settle`), the `request_analysis`
+  asset (so `v_request_observation` and `v_request_metric_delta` fill
+  before a read, as at boot) and the job scheduler — and binds every AI role to the **fixture model** (`oxplow_ai::fixture`,
   a host-registered kind no activation replaces): an example's `dataset: {
   replies }` is what it answers, in turn. No paid call, no provider.
   It runs `check`, then every intent example with a fixture (every
@@ -253,7 +255,7 @@ check already reported is not repeated.
   naming `effects`, `commands` or `pages`
   also delivers the `contribution.job.completed`
   the job logs, asked in a thread: the effects that reacted, the commands
-  they ran and which of the named wiki URIs now exist), a component (`{ component, queries?,
+  they ran and which of the named knowledge page URIs now exist), a component (`{ component, queries?,
   invokes? }`: `load_component`, `run_component_query`,
   `invoke_component_command` as its frame would — `expect: { queries:
   [{ rows }], invokes: [{ ok, refused? }] }`), a form (`{ form: <page>,
@@ -263,7 +265,17 @@ check already reported is not repeated.
   values?, fixed?, fields? }`, the values the fields start from, the
   read-only ones and the shown ones, `null` for all), and the dry runs that
   stay dry (`{ effect, event }`, `{ implementation, event }`, `{ command,
-  input }`, a derived or fact collector, an event type, a wikilink).
+  input, answers }` — its `expect` may name `commands`, `result` and
+  `inverse: { commands: [{ name, input }] }`, the undo its script returns —
+  a derived or fact collector, an event type, a wikilink), and an undo
+  (`{ undo: <command> }`, run for real: the undo of that command's newest
+  run not yet undone, through the bus, `expect: { ok: true }` or
+  `{ ok: false, refused }`; `examples/extensions/shelf-db` removes a book,
+  undoes it and finds the book again).
+  A `{ command, input }` with no `answers` runs for real too (`command_run`):
+  a script's `finish` is called, so `expect.result` is what it returned (a
+  minted id) and `expect.inverse` the run's undo; a dry run (`answers`) calls
+  `transform` only — no step landed, so there is no `finish`.
   **One rule compares every `expect`** (`compare`): an object only on the
   keys it names (a key the result lacks matches only `null`, not even
   `$any`); a list every item, in order; `{ contains: [..] }` the items a
@@ -271,8 +283,7 @@ check already reported is not repeated.
   `{ $exact: v }` the whole value, every key; `refused: <text>` a reason
   that contains the text. **One way to say no**: a command, an invoke or a
   command example that refuses or fails is `refused: <its reason>`. Then, per declared provider, the conformance kit
-  ([providers.md](./providers.md) "The conformance kit"), the effort
-  policy suite for a policy script, `questions.yaml` and incremental
+  ([providers.md](./providers.md) "The conformance kit"), `questions.yaml` and incremental
   datasets. `TestReport { ok, errors, warnings, skipped, root, blessed,
   ran, generation, contributes, unsupported, left }` (diagnostics, with
   `error_lines()` and the like for the rendered lines): `contributes` is the extension's
@@ -312,7 +323,7 @@ exists for. The questions live on the **pages** that answer them: a page's
 is phrased with "this" and offered on pages for that kind of ref). Core has
 no questions files: the pages carry them, including small pages with no
 `category` that exist to hold a question (`collectors`, `zones`,
-`branch-sync`, `work-item-actions`, …), and a question that says "do this"
+`branch-sync`, `task-actions`, …), and a question that says "do this"
 is held by a page with a whole-page action running that command. A part
 and a query carry no answers: a question about what one shows goes on a
 page that hosts it.
@@ -334,7 +345,7 @@ page that hosts it.
   it.
 - **In tree:** `every_page_answer_reaches_what_its_skill_names` runs it over
   oxplow's own extensions (and checks the kinds a person is offered
-  questions about: file, commit, effort, work item);
+  questions about: file, commit, request, task);
   `a_page_answer_must_be_named_by_its_skill_and_run` the mechanism.
   `oxplow extension test` runs the second half for every extension's pages
   (`ran: answers`).
@@ -370,11 +381,11 @@ foundation, the one tested, and what each of those `requires:` or imports
 from, in turn — and a fixture's own `requires: [<ext>…]` (a fixture key,
 same meaning as the manifest's) adds more, on an oxplow of that fixture's
 own (an unknown name is a finding). The default extensions are not on:
-oxplow's own pages run complete without them. Oxplow's own work list,
-effort policy and wiki are foundation's (always on), so a fixture that makes
-work items, efforts or wiki pages needs nothing extra (`requires:
-[oxplow-bundled]` only for what bundled adds: its review pages, verdict and
-replacements), and an effort policy's conformance suite, which files work,
+oxplow's own pages run complete without them. oxtask
+and knowledge (oxwiki) are foundation's (always on), so a fixture that makes
+tasks or knowledge pages needs nothing extra (`requires:
+[oxplow-bundled]` only for what bundled adds: its review pages and
+replacements), and a provider's conformance suite, which files work,
 runs on an oxplow of its own — deployed in that order,
 what one requires before it (`Host::start`). Never the project's list or
 one person's `enableExtensions` / `disableExtensions`, and never a
@@ -507,16 +518,17 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   the calls and the end (the checkpoint counts the turn's writing tools
   from `v_tool_call`) and settled after it (the checkpoint, then what reacts
   to it). The other kinds: `event` (logged and delivered; effects react),
-  `evidence` (`EffortEvidenceStore::replace`), `commit`
+  `evidence` (a request's stored analysis, `SqliteRequestAnalysisStore`), `commit`
   (`SqliteGitStore::upsert_commit`), `change` (a change's files and
   functions, `SqliteChangeStore::store_results`; it never runs a deep
   analysis, and the materialized datasets over the commit index, like
   `co_change_pair`, fill on a recompute the throwaway doesn't start),
   `test_run` (a `tests` capture and its `oxplow.test_case` facts through
   `SqliteFactStore::record_facts`) and `snapshot` (one take in the
-  snapshot log, `SqliteSnapshotStore::record_take`), `diagnostics`
+  snapshot log, `SqliteSnapshotStore::record_take`; `trigger: turn_end` makes
+  it the latest turn's end take, so its files are that turn's), `diagnostics`
   (`SqliteDiagnosticStore::replace_file`), `symbols` (`SqliteSymbolStore::record`
-  at a snapshot taken with the file), `collect` (`run_effort_collectors`) 
+  at a snapshot taken with the file), `collect` (`run_event_collectors`) 
   `run` (`extension_run_store::record_tx`; `days_ago` through
   `RunContext::began_at`), `health` (`disable_tx`), `token_usage`, `hint`
   and `nudge` (their stores), `conversation` (a harness's saved
@@ -529,28 +541,44 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   `.oxplow/project.yaml`, then `reload_config_from_disk`), and a `turn` that
   also takes `thread`, `session`, `conversation` (what the hooks name and the
   session is bound to: default `fixture`, `null` for none), `prompt: null` +
-  `subagent` (a hand-back) and `pre: true` on a tool; none can set the time of a hook (a tool call
+  `subagent` (a hand-back), `peer` (another session's message, `prompt` its
+  text), `job` (a background job's report: the id of the call that started
+  it) and `pre: true` on a tool; none can set the time of a hook (a tool call
   or a turn is as old as the run), only a `run`'s `days_ago`,
   `analyze` (`change_analysis::ensure_change`: a working or commit change
-  analyzed to the end; real files come from `turn.write` and real commits from
+  analyzed to the end, a working one's file list refreshed first
+  (`refresh_files`, as the change reactor does on every move: which files
+  are staged or untracked); real files come from `turn.write` and real commits from
   `oxplow.vcs.stage` / `oxplow.vcs.commit`, a throwaway's forks keep their
   streams in their own folder),
   `refs` (branches, tags and stream heads, `replace_branches` /
   `replace_tags` / `replace_stream_heads`),
   `visit` (a page the person opened, `PageVisitStore::record`),
   `facts` (findings of a declared measure through `record_facts`) and
-  `retention` (`event_retention::sweep`, run `days` ahead). A step's `when: { sql }` reads the result, since a `steps` entry
+  `retention` (`event_retention::sweep`, run `days` ahead) and
+  `detail_compaction` (`compact_capture_details`, keeping each producer's
+  newest `keep` captures' detail whole). A `turn` with `open: true` gets
+  no `Stop`: it is still running. A step's `when: { sql }` reads the result, since a `steps` entry
   of a command, event or sql fixture takes the earlier kind in `KINDS`.
 - `when: { advisory: <id>, thread? }`, `expect: { lines: [..] }` — the
   extension's advisory run for a thread (the primary one when none) as
   the app runs it on its `on:` (`advisories::for_thread`, over the
-  thread's open effort), its text line by line, heading included; on an
+  thread's newest request), its text line by line, heading included; on an
   oxplow of its own, since it records what it said (`once_per`).
+- `when: { context: <id>, thread? }`, `expect: { text: <string> | null }` —
+  the extension's agent context run for a thread (the primary one when
+  none) as a prompt runs it (`agent_context::extension_contexts`): its
+  text uncut, `null` when it has nothing to say. A text over
+  `CONTEXT_BUDGET` is a warning (`context.over_budget`): the agent gets it
+  cut.
 - `when: { query: <slug | ext/slug>[#loader], params? }`, `expect: { rows,
   columns? }` — a query's last loader, or `<page>#<loader>`: one loader of
   any page file, run alone through `options::source_rows` as an option list
   or a form's open runs it (a page's own `options_from: '#x'` loader does
   not run with the page). A bare `query: <page>` of a page is a finding.
+  Its `steps` run as a page example's: `{ given }`, or `{ when, expect }`
+  (the query again with other params, or any page, part or panel;
+  `query_steps`). A query has no actions, so any other step is a finding.
 - `when: { sql, params? }`, `expect: { rows, columns? }` — a read-only query
   over the published datasets, run as a page loader would (an inline page of
   one `sql` loader, `sql_example`) and compared as a loader's: a dataset, a
@@ -592,20 +620,7 @@ fixtures to it.
   extension command's is `when: { command: <id>, input, answers? }`,
   `expect: { commands?, result? }` (each compared on the keys it names:
   a read command's example checks what it answers) or `{ refuses }`;
-  `{ skip: $any }` matches any skip (`reaction_problem`, shared with the
-  policy's);
-- `when: { implementation: <id>, event: { type, payload, subject?,
-  anchors? }, answers? }`, the same `expect` but `reacts` — an
-  **effort policy script** (`implementations:` with `capability:
-  effort_policy`): the event envelope, `effects::run_over` with the answers, the
-  calls checked against the registry; appending events is an error (a
-  policy emits nothing). Naming no policy script of the extension is an
-  error naming the id. For each such script `test` also runs the
-  effort-policy suite (`policy_suite`): on a fork of the test's
-  throwaway (as a provider's suite runs), the
-  script chosen as `activeProviders.effort_policy`, then
-  `effort_policy_conformance::suite`; a finding is an error at the
-  manifest, `ran` shows `effort_policy suite`;
+  `{ skip: $any }` matches any skip (`reaction_problem`);
 - `when: { event_type, v?, payload }`, `expect: { valid: true | false,
   upcast?: <payload> }` — the payload against the extension's declared
   schema (the newest version without `v`), and its upcast;
@@ -625,3 +640,49 @@ dataset's line in `extension.yaml` ("misses n row(s) a full refill holds"
 — a watermark that doesn't grow as rows arrive drops a row below it
 unseen, which nothing at run time can tell); an append that hits the key
 passes (the runtime refills then); no fixture is a warning.
+
+## Fixtures for observers (contract, being built)
+
+New fixture forms for the shared-models work ([models.md](./models.md)):
+
+- `requires: [shelf, shelf-folder]` at a fixture's top: the examples
+  that run together (the existing key).
+- `given: - { files: { "<path>": "<body>" } }` writes project files;
+  `given: - { remove_files: ["<path>"] }` removes them; `given: - {
+  rename_files: [{ from, to }] }` renames (built, `extension_test/observers.rs`;
+  a path is relative to the throwaway's project root, no `..`, not
+  under `.git`; it is a `given` step, so it also runs inside a scenario's
+  `steps: - given: [..]`).
+- `given: - { store_sql: { extension: <name>, sql, params? } }` (built,
+  `observers::given_store_sql`) runs one statement on that extension's own
+  SQLite file from outside, as a person's sqlite3 or `oxplow-dev` would: no
+  command, run or event. The extension must be loaded (the fixture's, or one
+  it `requires:`) with `storage: { sqlite: true }`; when its file isn't made
+  yet its migrations run first, as its first use would. It proves a store
+  sees a write that wasn't its own command's: the next `when: { collector,
+  trigger: sqlite }` states the row (oxtask's fixture does).
+- `when: { collector: <id>, trigger: start | sqlite | { files: [{ path,
+  op }] } }` (built) runs a collector for real, through `run_collector`, as
+  that trigger fires, and applies its output (rows, models, cursor, as a
+  live run does). `expect: { ok?, result?, problems? }`: `ok` defaults to
+  `true`; `result` is the run's counts (entity rows, `<model>.<op>`)
+  compared on the keys named; `problems` are texts the run's problems hold:
+  the failure message (with `ok: false`) or, on an ok run, the rows it
+  quarantined (`CollectorRunReport.problems`, each naming the row and
+  column). `problems: [..]` an ok run with none doesn't match is a finding;
+  `problems: []` says it quarantined nothing. The trigger must be one the collector's `on:`
+  lists and a files change must match its glob, else a finding at the
+  fixture (`fixture.trigger`). Before each fixture every enabled
+  extension's `on: start` collectors run once, as the app runs them at
+  activation (so a store's first observed change is incremental, not a
+  catch-up). Live triggers are off in a fixture, but a
+  store command's own write is observed when the command runs (its
+  observer collectors run before it returns); any other collector runs
+  only when a step says so. Listed in the skill's table
+  (`testing.md`, made from `KINDS`).
+- `when: { action_point: <id>, context: {...} }` → `expect: { draws:
+  none | button | menu, commands: [ids] }`.
+- `when: { item_commands: "<item uri>" }` → `expect: { commands: [ids]
+  }`.
+- `when: { search: "<text>", resource?: <id> }` → `expect: { uris: [...]
+  }`, through the search index (not a `LIKE`).

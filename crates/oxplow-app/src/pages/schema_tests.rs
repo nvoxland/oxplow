@@ -175,6 +175,42 @@ view:
     assert_eq!(config.params.len(), 2);
 }
 
+/// An `action_point` node names a point and binds its context like an
+/// embed's params; a point id that isn't one is refused.
+#[test]
+fn an_action_point_node_names_a_point_and_binds_its_context() {
+    let p = page(
+        r#"
+title: Tasks
+params: [{ name: parent }]
+loaders:
+  a: { sql: "SELECT 1 AS n" }
+view:
+  stack:
+    - { action_point: oxplow/task.new, context: { parent: { param: parent }, n: { from: a.n }, k: 3 } }
+"#,
+    )
+    .unwrap();
+    let NodeKind::Stack { children } = &p.view.kind else {
+        panic!()
+    };
+    let NodeKind::ActionPoint { point, context } = &children[0].kind else {
+        panic!()
+    };
+    assert_eq!(point, "oxplow/task.new");
+    assert_eq!(
+        context.get("parent"),
+        Some(&ArgSource::Param {
+            param: "parent".into()
+        })
+    );
+    assert_eq!(context.len(), 3);
+    assert!(page(
+        "title: T\nloaders:\n  a: { sql: \"SELECT 1 AS n\" }\nview:\n  stack:\n    - { action_point: nope }\n"
+    )
+    .is_err());
+}
+
 /// Later loaders read earlier ones as tables; a stack holds nodes, an
 /// embed and a slot; ids are unique across the tree.
 #[test]
@@ -681,9 +717,10 @@ fn a_replaceable_node_names_a_known_target_once() {
             "title: T\nloaders:\n  q: {{ sql: \"SELECT 1 AS n\" }}\nview:\n  stack:\n    - {{ id: a, title: A, viz: table, from: q, replaceable: {a} }}\n    - {{ id: b, title: B, viz: table, from: q, replaceable: {b} }}\n"
         )
     };
-    assert!(refused(&page_with("nope.thing", "work_item.board"))
-        .contains("isn't a replaceable component"));
-    assert!(refused(&page_with("work_item.board", "work_item.board")).contains("placed once"));
+    assert!(
+        refused(&page_with("nope.thing", "task.board")).contains("isn't a replaceable component")
+    );
+    assert!(refused(&page_with("task.board", "task.board")).contains("placed once"));
 }
 
 /// A page's params are checked though no viz node reads them, and an
@@ -1329,7 +1366,7 @@ fn a_button_may_name_the_fact_it_goes_with() {
     let head = "title: T\nloaders:\n  q: { sql: \"SELECT 1 AS id\" }\n";
     let with = |viz: &str, fact: &str| {
         page(&format!(
-            "{head}view:\n  viz: {viz}\n  from: q\n  columns: [{{ key: id }}]\n  actions:\n    - {{ id: a, label: A, command: oxplow.work_item.create, fact: {fact} }}\n"
+            "{head}view:\n  viz: {viz}\n  from: q\n  columns: [{{ key: id }}]\n  actions:\n    - {{ id: a, label: A, command: oxplow.task.create, fact: {fact} }}\n"
         ))
     };
     assert!(with("detail", "id").is_ok());

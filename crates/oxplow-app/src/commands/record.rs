@@ -344,6 +344,16 @@ pub(super) fn record_tx(
     .with_subject([command_uri(&spec.id)]);
     executed.id = executed_id;
     executed.cause = cause;
+    // An agent's command happened in the turn it has open (a person's, or a
+    // page's, is in no turn).
+    if actor.kind() == oxplow_domain::events::schema::ActorKind::Agent {
+        if let Some(thread) = actor.thread_id() {
+            let turn =
+                oxplow_db::agent_stores::activity_anchors_tx(tx, thread, actor.session_id())?
+                    .turn_id;
+            executed.anchors.turn_id = turn;
+        }
+    }
     append_tx(tx, vocabulary, &executed)?;
     // A handler's own events carry the actor's thread and stream unless
     // it anchored them itself.
@@ -353,7 +363,7 @@ pub(super) fn record_tx(
         event.anchors.thread_id = event.anchors.thread_id.or(fallback.thread_id);
         event.anchors.stream_id = event.anchors.stream_id.or(fallback.stream_id);
         // One already logged under its dedupe key is that same fact (a
-        // re-sent step's answer, tsk912): logged once.
+        // re-sent step's answer): logged once.
         oxplow_db::event_log_store::append_unique_tx(tx, vocabulary, &event)?;
     }
     set_event_id_tx(tx, audit_id, &executed.id)?;

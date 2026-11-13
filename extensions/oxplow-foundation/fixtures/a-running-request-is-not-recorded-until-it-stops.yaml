@@ -1,0 +1,36 @@
+# A request counts once none of its turns is running: a turn of it that
+# ends while another of its turns still runs records nothing, and the
+# request keeps the figures it had when it last stopped. Here req1 stopped
+# after one red run; its background job's report is still running with a
+# second red run when the first turn's end is heard again.
+given:
+  - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude }, bind: ses }
+  - observe:
+      turn:
+        session: $ses.id
+        prompt: Fix the failing tests
+        tools: [{ name: Bash, kind: shell, command: "sleep 9", call_id: c1, ok: true }]
+        runs:
+          - { at: "2026-01-01T00:00:01Z", cases: [{ name: a, status: failed }] }
+  - observe:
+      turn:
+        session: $ses.id
+        job: c1
+        prompt: "<task-notification>c1</task-notification>"
+        open: true
+        runs:
+          - { at: "2026-01-01T00:00:11Z", cases: [{ name: a, status: failed }] }
+  - observe:
+      event:
+        type: agent.turn.ended
+        payload: { turn: trn1, thread: thr1, outcome: completed }
+        anchors: { thread_id: thr1, turn_id: 1 }
+when:
+  sql: |
+    SELECT r.state, f.value AS red_runs
+      FROM v_fact f JOIN v_request r ON r.uri = f.subject
+     WHERE f.measure_key = 'oxplow.request_test_outcome'
+       AND f.dims_json = '{"oxplow.tests_stat":"red_runs"}'
+expect:
+  rows:
+    - { state: running, red_runs: 1.0 }

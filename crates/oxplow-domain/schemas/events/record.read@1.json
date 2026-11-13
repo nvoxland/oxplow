@@ -1,0 +1,37 @@
+{
+  "$defs": {
+    "ReadVia": {
+      "description": "How an agent read a knowledge page.",
+      "oneOf": [
+        {
+          "const": "tool",
+          "description": "Through a tool (`oxplow_read`).",
+          "type": "string"
+        },
+        {
+          "const": "file",
+          "description": "Its own read of the page's file (a store whose pages are files).",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`record.read@1`: an agent read a row of a shared model — through\n`oxplow_read` (`via: tool`), or its own read of the file the row's store\nkeeps it in (`via: file`, caused by the tool call; the store's `files`\ndeclaration in its `fills`). Whatever keeps reads of a model's rows follows\nthis event; a person's opens are their page visits.",
+  "properties": {
+    "record": {
+      "description": "The row (`oxplow:oxplow/knowledge?id=<id>&store=<store>`).",
+      "type": "string"
+    },
+    "via": {
+      "$ref": "#/$defs/ReadVia"
+    }
+  },
+  "required": [
+    "record",
+    "via"
+  ],
+  "title": "RecordReadV1",
+  "type": "object"
+}

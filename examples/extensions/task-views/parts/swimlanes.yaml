@@ -1,29 +1,35 @@
 title: Swimlanes
-description: The work items as a column per state; drag a card to move it, click its title to rename it. It stands in for oxplow's Board.
+description: The tasks as a column per stage of the task stores; drag a card to move it, click its title to rename it. It stands in for oxplow's Board.
 params:
 - name: scope
   role: filter
-  label: Scope (thread / backlog / all)
+  label: Scope (thread / stream / backlog / all)
   default: all
 - name: thread_id
   label: Thread
+- name: stream_id
+  label: Stream
 loaders:
   swimlanes:
     sql: |
-      SELECT w.uri, w.title, w.state, w.rank
-      FROM v_work_item w
+      SELECT w.uri, w.native_id AS id, w.title, w.stage, w.rank
+      FROM v_oxplow_task w
       WHERE :scope = 'all'
-         OR (:scope = 'thread' AND w.thread_id = :thread_id)
-         OR (:scope = 'backlog' AND w.thread_id IS NULL)
-      ORDER BY w.state, w.rank
-  # What the active work-items provider can do (`ordering` lets a card be
-  # dragged within its column). The component reads it beside the cards.
-  features:
+         OR (:scope = 'thread' AND w.assignee = uri('oxplow/thread', 'id', 'thr' || :thread_id))
+         OR (:scope = 'stream' AND w.assignee IN (SELECT t.uri FROM v_thread t WHERE t.stream_id = :stream_id))
+         OR (:scope = 'me' AND w.assignee = uri('oxplow/person'))
+         OR (:scope = 'pool' AND w.assignee IS NULL)
+      ORDER BY w.stage, w.rank
+  stages:
     sql: |
-      SELECT features FROM v_capability_provider WHERE capability = 'work_items' AND active = 1
+      SELECT CAST(s.id AS TEXT) AS value, CAST(s.title AS TEXT) AS label,
+             CAST(s.bucket AS TEXT) AS bucket, CAST(s.position AS INTEGER) AS ord
+      FROM v_model_stage s
+      WHERE s.model = 'oxplow/task_record'
+      ORDER BY ord
 view:
   from: swimlanes
   viz: custom
   custom:
     component: swimlanes
-  empty: No work items.
+  empty: No tasks.

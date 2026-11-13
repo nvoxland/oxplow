@@ -21,7 +21,7 @@ pub const RECORDS_READ: &str = "oxplow.records.read";
 #[serde(deny_unknown_fields)]
 pub struct ReadInput {
     /// What to read, by its URI: `oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-40`,
-    /// `oxplow:oxplow/work_item?id=tsk12&provider=oxplow`, `oxplow:oxplow/commit?sha=<sha>`, `oxplow:oxplow/event?id=<id>#part=output`,
+    /// `oxplow:oxplow/task?id=&provider=oxtask`, `oxplow:oxplow/commit?sha=<sha>`, `oxplow:oxplow/event?id=<id>#part=output`,
     /// `oxplow:oxplow/page?page=<ext>/<slug>`.
     pub uri: String,
     /// The stream whose worktree a `file:` or `page:` ref is read in
@@ -68,6 +68,14 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                     ReadError::Storage(e) => failed(e),
                     other => invalid("/uri", other.to_string()),
                 })?;
+                // An agent reading a row of a shared model is a read of it. A
+                // read runs unrecorded (its events go nowhere), so it logs
+                // this one itself.
+                if matches!(invocation.actor(), Actor::Agent { .. }) {
+                    crate::record_reads::log_read(&svc, invocation.actor(), &out.uri)
+                        .await
+                        .map_err(failed)?;
+                }
                 Ok(HandlerOutput {
                     result: serde_json::to_value(out).map_err(failed)?,
                     ..HandlerOutput::default()
@@ -80,7 +88,7 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_fixtures::services_with_effort;
+    use crate::test_fixtures::services_with_thread;
     use oxplow_domain::CommandError;
     use serde_json::json;
 
@@ -88,7 +96,7 @@ mod tests {
     /// leaving no record; a bad `stream` is refused at its field.
     #[tokio::test]
     async fn a_ref_reads_through_the_bus_for_the_calling_thread() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         std::fs::write(fx._dir.path().join("who.txt"), "mine").unwrap();
         let actor = Actor::Agent {
             session_id: None,

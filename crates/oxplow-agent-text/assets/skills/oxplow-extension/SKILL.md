@@ -1,6 +1,6 @@
 ---
 name: oxplow-extension
-description: Build oxplow pages and extensions on request: views over oxplow's data (tasks, efforts, threads, comments, wiki, snapshots, metrics) that the user sees in the app and can share with their team. Loads when the user asks to "make/build/show me a page/view/report/dashboard/list of X", "a place where I can see X", "track X across threads/efforts", "what's waiting on me", or asks to change an existing page. Teaches the semantic layer (`v_dataset`, `oxplow_query_sql`), the `.oxplow/extensions/<name>/` format, and the fixture, check, test, deploy loop.
+description: Build oxplow pages and extensions on request: views over oxplow's data (tasks, requests, threads, comments, knowledge pages, snapshots, metrics) that the user sees in the app and can share with their team. Loads when the user asks to "make/build/show me a page/view/report/dashboard/list of X", "a place where I can see X", "track X across threads/requests", "what's waiting on me", or asks to change an existing page. Teaches the semantic layer (`v_dataset`, `oxplow_query_sql`), the `.oxplow/extensions/<name>/` format, and the fixture, check, test, deploy loop.
 ---
 
 # Building oxplow pages
@@ -11,7 +11,7 @@ nodes that shows them (`view:`); it updates as the work changes. A **part**
 no tab; a **query** (`queries/`) is rows only, for `options_from` and form
 `choices`. Pages live in **extensions**: plain-file folders at
 `.oxplow/extensions/<name>/` the user can keep and share. Scaffold with
-`$OXPLOW_BIN extension new <kind> <name> --origin <your effort ref>`;
+`$OXPLOW_BIN extension new <kind> <name> --origin <your request ref>`;
 `extension add <kind> <id>` adds one more to an extension that exists.
 Nothing runs a source until `oxplow.extension.deploy { name }`.
 
@@ -54,7 +54,7 @@ shows a draft page over the project's real data: a look, not a test.
 - `references/repair-and-sharing.md`: repair, share.
 - `references/reading-data.md`: before reporting numbers.
 
-Rules in other skills: wikilinks and URIs in prose, `oxplow-wiki-capture`;
+Rules in other skills: wikilinks and URIs in prose, `knowledge`;
 waiting on the person, `oxplow-runtime`; tests in the foreground,
 `oxplow-collection`; metrics, `oxplow-metrics`. A person approves an
 extension's `permissions:` and a new `build:` command at deploy; your

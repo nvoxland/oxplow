@@ -1,0 +1,30 @@
+# A thread's work: the tasks assigned to it, then the ones it finished —
+# a done task is nobody's, so it's the thread's when a request on the
+# thread worked on it — newest first by when they closed, each with the
+# requests that worked on it. Each shows its stage as the list names it.
+requires: [oxtask]
+given:
+  - { command: oxtask.task.create, input: { title: older done, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: newer done, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: still open, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk3&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: closed elsewhere, stage: ready } }
+  - observe:
+      turn:
+        prompt: Do the two
+        during:
+          - { command: oxtask.task.move, input: { id: tsk1, stage: in_progress }, as: agent }
+          - { command: oxtask.task.move, input: { id: tsk1, stage: done }, as: agent }
+          - { command: oxtask.task.move, input: { id: tsk2, stage: in_progress }, as: agent }
+          - { command: oxtask.task.move, input: { id: tsk2, stage: done }, as: agent }
+  - { command: oxtask.task.move, input: { id: tsk4, stage: done } }
+when: { page: oxplow/thread-tasks, params: { thread: thr1 } }
+expect:
+  loaders:
+    thread_tasks:
+      rows:
+        - { title: still open, state: todo, stage: Ready, requests: "" }
+        - { title: newer done, state: done, stage: Done, requests: "oxplow:oxplow/request?id=req1" }
+        - { title: older done, state: done, stage: Done, requests: "oxplow:oxplow/request?id=req1" }

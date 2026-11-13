@@ -3,7 +3,7 @@ description: Set up oxplow collection — wire EVERY test stack in the project t
 ---
 
 Set up oxplow's **collection** so it can track which tests ran (the
-individual tests, as a tree) and the diff coverage on each effort's
+individual tests, as a tree) and the diff coverage on each request's
 changed lines. See the `oxplow-collection` skill for the standing
 rules. Then:
 

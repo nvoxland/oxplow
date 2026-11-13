@@ -2,19 +2,20 @@ manifest: 2
 name: e2e
 intent:
   purpose: >-
-    The browser suite's extension: a fake work-item tracker, an effect, its
+    The browser suite's extension: a fake task tracker, an effect, its
     pages, and a resource, so specs drive each through the UI.
   origin: null
   examples: []
 # Its providers run programs, its effect reads with its own SQL and
-# comments on (or deletes) work items.
-permissions: [process.run, sql.read, commands:oxplow.work_item.comment, commands:oxplow.work_item.delete]
+# comments on (or deletes) tasks.
+requires: [oxplow-bundled, oxtask]
+permissions: [process.run, sql.read, commands:oxtask.task.comment, commands:oxtask.task.delete]
 # `bin/provider` and `bin/scripted` are written when a suite daemon starts:
 # they run the oxplow-provider-fake binary this checkout built, the second in
 # harness mode.
 providers:
   - id: fake
-    capability: work_items
+    capability: snapshots
     entry: bin/provider
     declarations: provider.json
   # The agent every session runs: the fake harness (a scripted terminal
@@ -26,9 +27,10 @@ providers:
 effects:
   - id: note-created
     summary: >-
-      Comments on each created oxplow task; one titled "[fail]" fails, one
+      Comments on each created oxtask task; one titled "[fail]" fails, one
       titled "[delete]" asks to delete it.
-    on: [work_item.created]
+    on: [oxplow.task_record.changed]
+    where: { cause: trigger }
     entry: effects/note.star
     needs: [sql.read]
 # A command that always refuses, a page that runs it and a component that

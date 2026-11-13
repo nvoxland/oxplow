@@ -1,7 +1,7 @@
-# The list reads v_work_item; a fresh project has no items yet.
+# The list reads v_oxplow_task; a fresh project has no items yet.
 when:
   part: compact-list
   params: { scope: all }
 expect:
   loaders:
-    compact_list: { rows: 0, columns: [uri, title, state, updated_at] }
+    compact_list: { rows: 0, columns: [uri, id, title, state, updated_at] }

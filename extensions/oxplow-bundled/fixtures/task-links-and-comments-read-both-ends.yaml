@@ -1,0 +1,19 @@
+# A task's Links and Comments, each a part its page embeds where the
+# list keeps them: a link shows from both ends, and only its own end can
+# unlink it; comments in the order they were written.
+requires: [oxtask]
+given:
+  - { command: oxtask.task.create, input: { title: The item, stage: ready } }
+  - { command: oxtask.task.create, input: { title: Its blocker, stage: ready } }
+  - { command: oxtask.task.link, input: { id: tsk1, to: tsk2, type: blocks } }
+  - { command: oxtask.task.comment, input: { id: tsk1, body: A note. } }
+  - { command: oxtask.task.comment, input: { id: tsk1, body: Another. } }
+when: { part: task-links, params: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" } }
+expect:
+  loaders:
+    links: { rows: [{ item: Its blocker, link_type: blocks, direction: to, outbound: 1 }] }
+steps:
+  - when: { part: task-links, params: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask" } }
+    expect: { loaders: { links: { rows: [{ item: The item, direction: from, outbound: 0, other: "oxplow:oxplow/task?id=tsk1&provider=oxtask" }] } } }
+  - when: { part: task-comments, params: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" } }
+    expect: { loaders: { comments: { rows: [{ body: A note. }, { body: Another. }] } } }

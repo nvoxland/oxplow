@@ -5,13 +5,11 @@
 //! or a refresh token. It models what oxplow's client relies on (RFC 6749
 //! §4.1, §6; RFC 7636), not any service.
 //!
-//! Beside it, at `/mcp`, the notes MCP server
-//! ([`oxplow_provider_mcp::notes`]) takes exactly the access tokens it
-//! issued and still holds live, so a signed-in bearer can be run end to
-//! end. `POST /sim/expire` lapses every access token it issued and `POST
+//! `POST /sim/expire` lapses every access token it issued and `POST
 //! /sim/revoke` revokes the grant (refresh tokens and access tokens
-//! alike), for the in-app walk; the tests reach the same through
-//! [`OAuthSim`]'s methods.
+//! alike), for the in-app walk; [`OAuthSim::accepts`] says whether an access
+//! token is still live; the tests reach the rest through [`OAuthSim`]'s
+//! methods.
 //!
 //! Development only: the tests' dev-dependency and the
 //! `oxplow-oauth-sim` binary, never part of anything that ships.
@@ -97,8 +95,6 @@ type Shared = Arc<Mutex<World>>;
 pub struct OAuthSim {
     pub authorize_url: String,
     pub token_url: String,
-    /// The notes MCP server, behind the access tokens it issues.
-    pub mcp_url: String,
     /// `POST` here lapses every access token it issued.
     pub expire_url: String,
     /// `POST` here revokes the grant.
@@ -134,7 +130,6 @@ impl OAuthSim {
         Ok(OAuthSim {
             authorize_url: format!("{base}/authorize"),
             token_url: format!("{base}/token"),
-            mcp_url: format!("{base}/mcp"),
             expire_url: format!("{base}/sim/expire"),
             revoke_url: format!("{base}/sim/revoke"),
             world,
@@ -198,6 +193,12 @@ impl OAuthSim {
         self.world().rotate = true;
     }
 
+    /// Whether `token` is an access token it issued that hasn't lapsed and
+    /// whose grant isn't revoked.
+    pub fn accepts(&self, token: &str) -> bool {
+        self.world().takes(token)
+    }
+
     /// The `grant_type` of every token request so far.
     pub fn grants(&self) -> Vec<String> {
         self.world().grants.clone()
@@ -210,11 +211,6 @@ impl OAuthSim {
 }
 
 async fn serve(listener: tokio::net::TcpListener, world: Shared) {
-    let takes = world.clone();
-    let notes = oxplow_provider_mcp::notes::http_router(
-        Some(Arc::new(move |token: &str| takes.lock().takes(token))),
-        oxplow_provider_mcp::notes::Refusal::Challenge,
-    );
     let router = axum::Router::new()
         .route("/authorize", get(authorize))
         .route("/token", post(token))
@@ -232,8 +228,7 @@ async fn serve(listener: tokio::net::TcpListener, world: Shared) {
                 StatusCode::NO_CONTENT
             }),
         )
-        .with_state(world)
-        .merge(notes);
+        .with_state(world);
     let _ = axum::serve(listener, router).await;
 }
 

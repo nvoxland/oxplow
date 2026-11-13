@@ -96,7 +96,7 @@ pub async fn component_form(
 }
 
 /// Load the bundle of component `id` (`<extension>/<component id>`) as it
-/// is now, for its frame (tsk984): the version the daemon serves it at
+/// is now, for its frame: the version the daemon serves it at
 /// (`/components/v/<version>/`) and the frame invokes with.
 pub async fn load_component(svc: &Services, id: String) -> Result<String, IpcError> {
     Ok(oxplow_app::viz_actions::load_component_pinned(svc, root(svc), &id).await?)
@@ -121,6 +121,34 @@ pub async fn invoke_component_command(
             component: id,
             command,
             input: input.0,
+            on_behalf_of: oxplow_domain::Actor::Human,
+            confirmed,
+            version,
+        },
+    )
+    .await?)
+}
+
+/// A custom component's frame runs an action point it declares, as the
+/// component acting for the person: whichever command answers the point for
+/// `context` (`command` names one when several do).
+pub async fn invoke_component_point(
+    svc: &Services,
+    id: String,
+    point: String,
+    context: oxplow_domain::Json,
+    command: Option<String>,
+    confirmed: bool,
+    version: String,
+) -> Result<oxplow_domain::CommandOutcome, IpcError> {
+    Ok(oxplow_app::viz_actions::invoke_component_point(
+        svc,
+        root(svc),
+        oxplow_app::viz_actions::ComponentPointInvoke {
+            component: id,
+            point,
+            context: context.0,
+            command,
             on_behalf_of: oxplow_domain::Actor::Human,
             confirmed,
             version,

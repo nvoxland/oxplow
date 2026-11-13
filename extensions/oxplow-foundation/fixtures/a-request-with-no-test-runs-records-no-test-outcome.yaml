@@ -1,0 +1,9 @@
+# A request whose turns ran no tests has no test outcome to count: only its
+# cycle time is recorded.
+given:
+  - observe: { turn: { prompt: What does this do? } }
+when:
+  sql: SELECT measure_key FROM v_fact WHERE measure_key LIKE 'oxplow.request_%' ORDER BY measure_key
+expect:
+  rows:
+    - { measure_key: oxplow.request_cycle_time }

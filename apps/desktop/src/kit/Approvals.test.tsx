@@ -113,7 +113,7 @@ test("a failed approval stays on the card when the list draws it again, recorded
 
 // An effect's step that waits for a person is the extension's, not an agent's.
 test("who asked: the agent's thread, a page acting for it, or an extension's effect", () => {
-  expect(sourceOf(proposal)).toEqual({ kind: "agent", label: "Fix the cart", uri: "oxplow:oxplow/page?page=thread-work&thread=thr3" });
+  expect(sourceOf(proposal)).toEqual({ kind: "agent", label: "Fix the cart", uri: "oxplow:oxplow/page?page=thread-tasks&thread=thr3" });
   expect(sourceOf({ ...proposal, actorKind: "effect", actorId: "e2e/delete-flagged", threadId: null, threadTitle: null })).toEqual({
     kind: "extension",
     label: "e2e",

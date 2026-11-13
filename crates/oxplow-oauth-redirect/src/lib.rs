@@ -8,9 +8,9 @@
 //! daemon. Guard (in the core): `the_core_never_binds_a_socket_for_a_sign_in`.
 //!
 //! [`RedirectListeners`] keeps the shell's listeners, each known by an id
-//! of its own (tsk905) — never by its port, which a newer sign-in may
+//! of its own — never by its port, which a newer sign-in may
 //! reuse. Each stops by itself once its sign-in's time is up, whether or
-//! not anyone is waiting on it (tsk904) — a held redirect is answered, and
+//! not anyone is waiting on it — a held redirect is answered, and
 //! the socket closed, so a declared port is free again.
 
 mod listener;
@@ -177,7 +177,7 @@ mod tests {
         (resp.status().as_u16(), resp.text().await.unwrap())
     }
 
-    /// tsk904: with nobody waiting on it (the window closed, the renderer
+    /// with nobody waiting on it (the window closed, the renderer
     /// reloaded), a listener still stops when its time is up: a held
     /// redirect is answered and the port is free for the next sign-in.
     #[tokio::test]
@@ -213,7 +213,7 @@ mod tests {
         );
     }
 
-    /// tsk904: a stop ends a wait, and when it returns the socket is
+    /// a stop ends a wait, and when it returns the socket is
     /// closed — listening on the same port at once works.
     #[tokio::test]
     async fn a_stop_ends_the_wait_and_frees_the_port() {
@@ -254,7 +254,7 @@ mod tests {
         assert_eq!(listeners.next(id).await, Err(Ended::Unknown));
     }
 
-    /// tsk905: a listener is its id, not its port — a late stop or answer
+    /// a listener is its id, not its port — a late stop or answer
     /// for an old sign-in can't touch a newer one listening on the same
     /// port.
     #[tokio::test]
@@ -273,7 +273,7 @@ mod tests {
         assert_eq!(browser.await.unwrap(), (200, "Signed in.".to_string()));
     }
 
-    /// tsk905: stopping a sign-in tells a browser it was holding.
+    /// stopping a sign-in tells a browser it was holding.
     #[tokio::test]
     async fn a_stop_answers_a_held_redirect() {
         let listeners = RedirectListeners::new(Duration::from_secs(300));

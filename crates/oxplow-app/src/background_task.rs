@@ -27,9 +27,8 @@ pub enum BackgroundTaskKind {
     Vcs,
     CodeQuality,
     Lsp,
-    NotesResync,
     Snapshot,
-    /// Recomputing code metrics over the whole tree (the metric baseline, tsk48).
+    /// Recomputing code metrics over the whole tree (the metric baseline).
     /// Slow and CPU-hungry — it must be visible, or "why is oxplow pegging a core?"
     /// has no answer.
     Metrics,

@@ -242,7 +242,7 @@ fn a_bus_row_runs_its_command_from_the_ipc_adapter() {
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
 
-/// P11 (tsk944): a row whose agent counterpart is a dataset names datasets the
+/// P11: a row whose agent counterpart is a dataset names datasets the
 /// core publishes — an agent reads them with `query_sql`.
 #[test]
 fn every_dataset_counterpart_is_published() {
@@ -283,8 +283,8 @@ const TAURI_ONLY: &[&str] = oxplow_tauri_ipc::SHELL_ONLY_COMMANDS;
 /// registry — unless it is on the explicit `TAURI_ONLY` allowlist. Without this
 /// guard a command can be wired as a `#[tauri::command]` (and get TS bindings)
 /// yet be forgotten in `rpc_dispatch!`, silently 404ing for remote users. (This
-/// is exactly how the metrics effort-band / findings / override / scaffold
-/// commands shipped broken before tsk236.)
+/// is exactly how the metrics band / findings / override / scaffold
+/// commands shipped broken before.)
 #[test]
 fn dispatch_registry_covers_ipc_surface() {
     let ipc = ipc_command_names();

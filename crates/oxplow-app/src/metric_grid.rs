@@ -285,9 +285,9 @@ mod tests {
         assert_eq!(p.bucket, Some(TimeBucket::Week));
         assert_eq!(p.dim.as_deref(), Some("zone"));
         assert_eq!(p.keys, vec!["a.b".to_string(), "c".to_string()]);
-        assert_eq!(plan("SELECT 1 FROM v_work_item").unwrap(), None);
+        assert_eq!(plan("SELECT 1 FROM v_task").unwrap(), None);
         for (sql, says) in [
-            ("SELECT MEASURE('a') FROM v_work_item", "doesn't have"),
+            ("SELECT MEASURE('a') FROM v_task", "doesn't have"),
             (
                 "SELECT MEASURE('a') FROM metric_grid('hour')",
                 "'day', 'week', 'month' or 'capture'",
@@ -402,7 +402,7 @@ mod tests {
         p.captured_at.to_text().chars().take(10).collect()
     }
 
-    /// P4.5 (tsk490): a grid's rows are the engine's own series — for every
+    /// P4.5: a grid's rows are the engine's own series — for every
     /// metric, by bucket and by a dimension — and it runs on the one-
     /// connection database (the series are read before the query takes it).
     #[tokio::test]

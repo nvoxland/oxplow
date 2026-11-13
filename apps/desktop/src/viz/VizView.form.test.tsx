@@ -30,7 +30,7 @@ let openAfterPage: string | null = null;
 let actionExtras: Record<string, unknown> = {};
 
 const UPDATE: CommandSpec = {
-  id: "oxplow.work_item.update",
+  id: "acme.issue.update",
   input_schema: {
     type: "object",
     required: ["uri"],
@@ -39,7 +39,7 @@ const UPDATE: CommandSpec = {
 } as unknown as CommandSpec;
 // The same command with a second editable field.
 const UPDATE_WIDE: CommandSpec = {
-  id: "oxplow.work_item.update",
+  id: "acme.issue.update",
   input_schema: {
     type: "object",
     required: ["uri"],
@@ -48,7 +48,7 @@ const UPDATE_WIDE: CommandSpec = {
 } as unknown as CommandSpec;
 // A command whose one editable field is a choice.
 const DECIDE: CommandSpec = {
-  id: "oxplow.work_item.decide",
+  id: "acme.issue.decide",
   input_schema: {
     type: "object",
     required: ["uri"],
@@ -77,7 +77,7 @@ const formSource: FormSource = {
     formStarts += 1;
     return {
       command: UPDATE,
-      values: fixedStart ?? { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: storedTitle },
+      values: fixedStart ?? { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", title: storedTitle },
       fixed: ["uri"],
       fields: ["title"],
     } as never;
@@ -141,7 +141,7 @@ const viz: VizConfig = {
     {
       id: "retitle",
       label: "Retitle…",
-      command: "oxplow.work_item.update",
+      command: "acme.issue.update",
       input: { uri: "{{row.uri}}", title: "{{row.title}}" },
       row: true,
       group: null,
@@ -155,7 +155,7 @@ const viz: VizConfig = {
 const run: VizRun = {
   config: viz,
   params: {},
-  result: { columns: ["uri", "title"], rows: [["oxplow:oxplow/work_item?id=tsk1&provider=oxplow", "Old"]], truncated: false },
+  result: { columns: ["uri", "title"], rows: [["oxplow:oxplow/task?id=tsk1&provider=oxtask", "Old"]], truncated: false },
 } as unknown as VizRun;
 
 test("a form action opens its form in a slideover and runs what the person filled in", async () => {
@@ -169,14 +169,14 @@ test("a form action opens its form in a slideover and runs what the person fille
   expect(runs).toEqual([]);
   // The fixed uri is the host's: not drawn, not even as text; the title starts from the row.
   expect(view.queryByTestId("viz-action-form-fields-uri-fixed")).toBeNull();
-  expect(slideover.textContent).not.toContain("oxplow:oxplow/work_item?id=tsk1");
+  expect(slideover.textContent).not.toContain("oxplow:oxplow/task?id=tsk1");
   const title = view.getByTestId("viz-action-form-fields-title") as HTMLInputElement;
   expect(title.value).toBe("Old");
   fireEvent.change(title, { target: { value: "New" } });
   fireEvent.submit(view.getByTestId("viz-action-form-fields"));
   await waitFor(() => expect(runs).toHaveLength(1));
-  expect(runs[0].input).toEqual({ uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "New" });
-  expect(runs[0].row).toEqual({ uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "Old" });
+  expect(runs[0].input).toEqual({ uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", title: "New" });
+  expect(runs[0].row).toEqual({ uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", title: "Old" });
   // Success closes it.
   await waitFor(() => expect(view.queryByTestId("viz-action-form")).toBeNull());
 });
@@ -225,7 +225,7 @@ test("a form action whose form is one text field opens a prompt strip, not a sli
   fireEvent.submit(title.form!);
   await waitFor(() => expect(runs).toHaveLength(1));
   expect(runs[0].input).toEqual({ title: "New" });
-  expect(runs[0].row).toEqual({ uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "Old" });
+  expect(runs[0].row).toEqual({ uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", title: "Old" });
   await waitFor(() => expect(view.queryByTestId("viz-action-form")).toBeNull());
 });
 
@@ -260,7 +260,7 @@ test("a form whose one field is a choice still opens the slideover", async () =>
 
 test("a form viz over a loader with no rows draws its empty line instead of its fields", () => {
   const form: VizRun = {
-    config: { ...viz, viz: "form", empty: "Nothing to commit.", form: { command: "oxplow.work_item.update", defaults: null, fixed: ["uri"], fields: ["title"] }, actions: [] },
+    config: { ...viz, viz: "form", empty: "Nothing to commit.", form: { command: "acme.issue.update", defaults: null, fixed: ["uri"], fields: ["title"] }, actions: [] },
     params: {},
     result: { columns: [], rows: [], truncated: false },
   } as unknown as VizRun;
@@ -272,7 +272,7 @@ test("a form viz over a loader with no rows draws its empty line instead of its 
 test("a form viz shows only its fields, keeps its fixed ones, and puts errors under the field", async () => {
   invalidField = "/title";
   const form: VizRun = {
-    config: { ...viz, viz: "form", form: { command: "oxplow.work_item.update", defaults: null, fixed: ["uri"], fields: ["title"] }, actions: [] },
+    config: { ...viz, viz: "form", form: { command: "acme.issue.update", defaults: null, fixed: ["uri"], fields: ["title"] }, actions: [] },
     params: {},
     result: { columns: [], rows: [], truncated: false },
   } as unknown as VizRun;
@@ -282,7 +282,7 @@ test("a form viz shows only its fields, keeps its fixed ones, and puts errors un
   fireEvent.change(title, { target: { value: "" } });
   fireEvent.submit(view.getByTestId("viz-form-fields"));
   // An emptied text field is left out; the fixed ref is always sent.
-  await waitFor(() => expect(submits).toEqual([{ uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" }]));
+  await waitFor(() => expect(submits).toEqual([{ uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" }]));
   const error = await waitFor(() => view.getByTestId("viz-form-fields-title-error"));
   expect(error.textContent).toContain("can't be empty");
 });
@@ -291,7 +291,7 @@ test("a form viz shows only its fields, keeps its fixed ones, and puts errors un
 // again from the datasets, not from the values it first opened with.
 test("a form viz starts again from the current values after it saves", async () => {
   const form: VizRun = {
-    config: { ...viz, viz: "form", form: { command: "oxplow.work_item.update", defaults: null, fixed: ["uri"], fields: ["title"] }, actions: [] },
+    config: { ...viz, viz: "form", form: { command: "acme.issue.update", defaults: null, fixed: ["uri"], fields: ["title"] }, actions: [] },
     params: {},
     result: { columns: [], rows: [], truncated: false },
   } as unknown as VizRun;
@@ -299,7 +299,7 @@ test("a form viz starts again from the current values after it saves", async () 
   const title = await waitFor(() => view.getByTestId("viz-form-fields-title") as HTMLInputElement);
   fireEvent.change(title, { target: { value: "New" } });
   fireEvent.submit(view.getByTestId("viz-form-fields"));
-  await waitFor(() => expect(submits).toEqual([{ uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "New" }]));
+  await waitFor(() => expect(submits).toEqual([{ uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", title: "New" }]));
   await waitFor(() => expect(formStarts).toBe(2));
   await waitFor(() => expect((view.getByTestId("viz-form-fields-title") as HTMLInputElement).value).toBe("New"));
 });
@@ -310,7 +310,7 @@ test("a form viz starts again from the current values after it saves", async () 
 test("a form starts again when its run's rows change", async () => {
   const at = (title: string): VizRun =>
     ({
-      config: { ...viz, viz: "form", form: { command: "oxplow.work_item.update", defaults: null, fixed: ["uri"], fields: ["title"] }, actions: [] },
+      config: { ...viz, viz: "form", form: { command: "acme.issue.update", defaults: null, fixed: ["uri"], fields: ["title"] }, actions: [] },
       params: {},
       result: { columns: ["title"], rows: [[title]], truncated: false },
     }) as unknown as VizRun;
@@ -325,7 +325,7 @@ test("a form starts again when its run's rows change", async () => {
 
 function formViz(then: ActionThen): VizRun {
   return {
-    config: { ...viz, viz: "form", form: { command: "oxplow.work_item.update", defaults: null, fixed: ["uri"], fields: ["title"], then }, actions: [] },
+    config: { ...viz, viz: "form", form: { command: "acme.issue.update", defaults: null, fixed: ["uri"], fields: ["title"], then }, actions: [] },
     params: {},
     result: { columns: [], rows: [], truncated: false },
   } as unknown as VizRun;
@@ -333,7 +333,7 @@ function formViz(then: ActionThen): VizRun {
 
 /** Submit a form viz on a page; what it asked the page to open. */
 async function submitOnPage(then: ActionThen): Promise<Array<[string, unknown]>> {
-  openAfterPage = "oxplow:oxplow/work_item?id=tsk1&provider=oxplow";
+  openAfterPage = "oxplow:oxplow/task?id=tsk1&provider=oxtask";
   const opened: Array<[string, unknown]> = [];
   const nav = { openRef: (ref: string, how: unknown) => opened.push([ref, how]) } as unknown as PageNavigation;
   const view = render(
@@ -350,11 +350,11 @@ async function submitOnPage(then: ActionThen): Promise<Array<[string, unknown]>>
 }
 
 test("a form viz goes where its command says after a submit", async () => {
-  expect(await submitOnPage("open")).toEqual([["oxplow:oxplow/work_item?id=tsk1&provider=oxplow", { replace: false }]]);
+  expect(await submitOnPage("open")).toEqual([["oxplow:oxplow/task?id=tsk1&provider=oxtask", { replace: false }]]);
 });
 
 test("`then: replace` sends the form's page out of history", async () => {
-  expect(await submitOnPage("replace")).toEqual([["oxplow:oxplow/work_item?id=tsk1&provider=oxplow", { replace: true }]]);
+  expect(await submitOnPage("replace")).toEqual([["oxplow:oxplow/task?id=tsk1&provider=oxtask", { replace: true }]]);
 });
 
 test("`then: stay` keeps the form for the next entry", async () => {
@@ -367,7 +367,7 @@ function againViz(keep: string[]): VizRun {
     config: {
       ...viz,
       viz: "form",
-      form: { command: "oxplow.work_item.update", defaults: null, fixed: ["uri"], fields: ["title"], then: "open", again: { label: "Save and Another", keep } },
+      form: { command: "acme.issue.update", defaults: null, fixed: ["uri"], fields: ["title"], then: "open", again: { label: "Save and Another", keep } },
       actions: [],
     },
     params: {},
@@ -379,8 +379,8 @@ function againViz(keep: string[]): VizRun {
 // says), and starts the form again with the `keep` fields' values carried
 // over and the rest from the form's own start.
 test("a form's second submit starts again with the kept fields carried over", async () => {
-  fixedStart = { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "Start" };
-  openAfterPage = "oxplow:oxplow/work_item?id=tsk1&provider=oxplow";
+  fixedStart = { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", title: "Start" };
+  openAfterPage = "oxplow:oxplow/task?id=tsk1&provider=oxtask";
   const opened: unknown[] = [];
   const nav = { openRef: (ref: string) => opened.push(ref) } as unknown as PageNavigation;
   const view = render(
@@ -391,14 +391,14 @@ test("a form's second submit starts again with the kept fields carried over", as
   const title = await waitFor(() => view.getByTestId("viz-form-fields-title") as HTMLInputElement);
   fireEvent.change(title, { target: { value: "One" } });
   fireEvent.click(view.getByTestId("viz-form-fields-again"));
-  await waitFor(() => expect(submits).toEqual([{ uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "One" }]));
+  await waitFor(() => expect(submits).toEqual([{ uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", title: "One" }]));
   await waitFor(() => expect(formStarts).toBe(2));
   await waitFor(() => expect((view.getByTestId("viz-form-fields-title") as HTMLInputElement).value).toBe("One"));
   expect(opened).toEqual([]);
 });
 
 test("a field not kept starts again from the form's own start", async () => {
-  fixedStart = { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "Start" };
+  fixedStart = { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", title: "Start" };
   const view = render(<VizView run={againViz([])} onOpenPage={() => {}} />);
   const title = await waitFor(() => view.getByTestId("viz-form-fields-title") as HTMLInputElement);
   fireEvent.change(title, { target: { value: "One" } });
@@ -426,7 +426,7 @@ function Tab({ state, children }: { state: Record<string, unknown>; children: Re
 test("an edit form keeps its draft in the tab and saves only when changed", async () => {
   const state: Record<string, unknown> = {};
   const edit: VizRun = {
-    config: { ...viz, viz: "form", form: { command: "oxplow.work_item.update", defaults: null, fixed: ["uri"], fields: ["title"], mode: "edit" }, actions: [] },
+    config: { ...viz, viz: "form", form: { command: "acme.issue.update", defaults: null, fixed: ["uri"], fields: ["title"], mode: "edit" }, actions: [] },
     params: {},
     result: { columns: [], rows: [], truncated: false },
   } as unknown as VizRun;
@@ -438,7 +438,7 @@ test("an edit form keeps its draft in the tab and saves only when changed", asyn
   const title = await waitFor(() => view.getByTestId("viz-form-fields-title") as HTMLInputElement);
   expect((view.getByTestId("viz-form-fields-submit") as HTMLButtonElement).disabled).toBe(true);
   fireEvent.change(title, { target: { value: "Half" } });
-  expect(state["form:x/l"]).toEqual({ uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "Half" });
+  expect(state["form:x/l"]).toEqual({ uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", title: "Half" });
   cleanup();
 
   // The page again, from its kept step: the draft is there.
@@ -454,7 +454,7 @@ test("an edit form keeps its draft in the tab and saves only when changed", asyn
   expect(state["form:x/l"]).toBe(null);
   fireEvent.change(kept, { target: { value: "New" } });
   fireEvent.submit(again.getByTestId("viz-form-fields"));
-  await waitFor(() => expect(submits).toEqual([{ uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "New" }]));
+  await waitFor(() => expect(submits).toEqual([{ uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", title: "New" }]));
   await waitFor(() => expect(state["form:x/l"]).toBe(null));
 });
 
@@ -464,7 +464,7 @@ test("an edit form keeps its draft in the tab and saves only when changed", asyn
 // schema description), the choices show their labels, and the submit is a
 // primary button beside a Cancel.
 const AGENT: CommandSpec = {
-  id: "oxplow.work_item.update",
+  id: "acme.issue.update",
   input_schema: {
     type: "object",
     required: ["uri", "title"],

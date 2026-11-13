@@ -36,17 +36,16 @@ export type VizIconSpec =
   | { glyph: string; tone: VizTone | null; label: string }
   | { Icon: LucideIcon; tone: null; label: string };
 
-/** The work-status glyphs, matching the rail's Work rows (and the status
- *  states `v_work_item` uses, so a query can pass its state), and a file's
- *  change status (`v_file.status`). */
+/** The work-status glyphs, one per bucket (`v_oxplow_task.state`, so a
+ *  query passes its state: every stage of a bucket draws its glyph), and a
+ *  file's change status (`v_file.status`). */
 const STATUS: Record<string, { glyph: string; tone: VizTone | null; label: string }> = {
-  ready: { glyph: "☐", tone: null, label: "Ready" },
-  todo: { glyph: "☐", tone: null, label: "Ready" },
+  backlog: { glyph: "◌", tone: "muted", label: "Backlog" },
+  todo: { glyph: "☐", tone: null, label: "To do" },
   in_progress: { glyph: "◐", tone: "accent", label: "In progress" },
   blocked: { glyph: "⚠", tone: "danger", label: "Blocked" },
   done: { glyph: "✓", tone: "success", label: "Done" },
   canceled: { glyph: "✗", tone: "muted", label: "Canceled" },
-  archived: { glyph: "▣", tone: "muted", label: "Archived" },
   // A file's status, lettered as the file trees letter it (`shortStatus`).
   added: { glyph: "A", tone: "success", label: "Added" },
   modified: { glyph: "M", tone: "warning", label: "Modified" },
@@ -59,8 +58,8 @@ const STATUS: Record<string, { glyph: string; tone: VizTone | null; label: strin
 /** Kinds of thing, drawn with the icon their pages use. */
 const KINDS: Record<string, { Icon: LucideIcon | null; label: string }> = {
   epic: { Icon: Layers, label: "Epic" },
-  task: { Icon: pageKindIconComponent("work_item"), label: "Task" },
-  wiki: { Icon: pageKindIconComponent("wiki"), label: "Wiki page" },
+  task: { Icon: pageKindIconComponent("task"), label: "Task" },
+  knowledge: { Icon: pageKindIconComponent("knowledge"), label: "Knowledge page" },
   file: { Icon: pageKindIconComponent("file"), label: "File" },
   folder: { Icon: pageKindIconComponent("dir"), label: "Folder" },
   commit: { Icon: pageKindIconComponent("commit"), label: "Commit" },

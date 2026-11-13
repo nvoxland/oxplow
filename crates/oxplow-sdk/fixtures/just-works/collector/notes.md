@@ -12,7 +12,7 @@ system prompt, and only file tools plus `oxplow extension …` in Bash.
   project).
 - **What it built** (`produced/stale-work/`): a Starlark collector whose
   `input` query computes each open task's last touch (its edit, comment
-  activity, efforts) and whole days idle in SQL; the script keeps those
+  activity) and whole days idle in SQL; the script keeps those
   idle a week or more. A dataset over the entity with `not_null`/`unique`
   tests, and a page over the dataset with an alert and a Sync action.
 - **What the skill carried:** the sandbox has no clock, so the age is
@@ -24,14 +24,18 @@ system prompt, and only file tools plus `oxplow extension …` in Bash.
   To see that, rerun with `--output-format stream-json` and read it.
 
 - **Patched after recording (2026-10-07):** the old UI format dropped the
-  `task` link kind (a work item links as `page`, by its ref), so the
+  `task` link kind (a task links as `page`, by its ref), so the
   title column's `link: { kind: task, from: id }` was removed to keep the
-  recording checking clean. The run predates the work-item interface:
+  recording checking clean. The run predates the task interface:
   it read `v_task`, which is gone, so the collector's `input` was
-  rewritten over `v_work_item` (same output columns; the id is the
-  number in an oxplow ref). Re-record it with the current skill.
+  rewritten over `v_oxplow_task` (same output columns; the id is the
+  number in an oxplow ref) and the extension requires `oxplow-bundled`
+  and `oxtask`. Re-record it with the current skill.
 - **Patched after recording (2026-10-26):** the old UI format became pages, so the
   recorded `lenses/stale-tasks.yaml` was rewritten by hand as
   `pages/stale-tasks.yaml` (its query a `stale_tasks` loader, the same
   columns, alert and Sync action), and the empty-project example reads
   the page's loader. Re-record it with the current skill.
+- **Patched after recording (2026-11-10):** efforts are gone, so the
+  collector's `input` no longer counts an effort as a touch (edit and
+  comment activity only). Re-record it with the current skill.

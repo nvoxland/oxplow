@@ -3,9 +3,9 @@
 //! tools its own way — Claude Code's `Edit` and `Bash`, Codex's
 //! `apply_patch` and `shell`, an ACP agent's tool kinds — and maps each
 //! call onto a [`ToolUse`] (`AgentHarness::tool_use`). Core reads only
-//! the [`ToolKind`] and the fields here: the write guard, the effort's
-//! claimed files, the agent's status, test-run collection and the effort
-//! policy never name a harness's tool.
+//! the [`ToolKind`] and the fields here: the write guard, a turn's
+//! claimed files, the agent's status and test-run collection never name a
+//! harness's tool.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -95,6 +95,20 @@ pub struct Plan {
 /// One tool call, as its harness maps it: the harness's own name for the
 /// tool, and what oxplow reads of it. On the wire, these fields; one left
 /// out is empty.
+/// A message one agent session sends another, as its harness reports the
+/// call that sends it.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+pub struct SentMessage {
+    /// The recipient, in the harness's words (a session's name).
+    pub to: String,
+    /// The message's text.
+    pub text: String,
+    /// Whether the sender asked to be told when the recipient is idle
+    /// (Claude Code's `notify_when_idle`).
+    #[serde(default)]
+    pub notify_when_idle: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct ToolUse {
@@ -112,6 +126,16 @@ pub struct ToolUse {
     pub detail: Option<String>,
     /// The harness's id for this call, the same on its start and finish.
     pub call_id: Option<String>,
+    /// How long it ran, in milliseconds, as the harness timed it (Claude
+    /// Code's PostToolUse `duration_ms`), on a finished call.
+    pub duration_ms: Option<u64>,
+    /// A message the call sends to another agent session (Claude Code's
+    /// `SendMessage`): who to, and its text as the receiver will see it.
+    pub sent: Option<SentMessage>,
+    /// The harness's id of the background job this call started (Claude
+    /// Code's Bash `backgroundTaskId`, on its PostToolUse): the job is
+    /// known from this call on, the id its Stop and its report name.
+    pub started_job: Option<String>,
     /// Whether it succeeded, when the harness said (a finished call).
     pub ok: Option<bool>,
     /// A shell call's exit code, when the harness said.
@@ -120,6 +144,14 @@ pub struct ToolUse {
     pub question: Option<String>,
     /// What a `Plan` call proposes: its text, and the file it was saved in.
     pub plan: Option<Plan>,
+    /// The call's input as the harness gave it, recorded by hash with the
+    /// call (Claude's `tool_input`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: Option<serde_json::Value>,
+    /// What the call returned once it finished, recorded by hash (Claude's
+    /// `tool_response`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<serde_json::Value>,
     /// The subagent that made the call, when it wasn't the session's own
     /// agent (the harness says, or core brackets it by the open subagent
     /// call).

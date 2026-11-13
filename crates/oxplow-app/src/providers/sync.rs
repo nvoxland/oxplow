@@ -1,13 +1,11 @@
 //! Reading a provider's collectors (P7.A3, `.context/providers.md`): how
-//! another tracker's items reach `v_work_item` when oxplow didn't write
-//! them.
+//! an instance's collected records reach the datasets.
 //!
 //! [`Instance::read`] runs one collector's `read`, resuming from the
 //! checkpoint it last stored. What the provider streams about the request
 //! (`Peer::start_streaming`) is checked as it arrives — a `$/record` must
-//! be the collector's entity and, for a work-items provider, a
-//! `WorkItemRecord` of its own item — and kept as `work_item.recorded@1`
-//! envelopes until the next `$/state`, which commits them **with** the
+//! be the collector's entity, one of the instance's own — and kept as
+//! the capability contract's event envelopes until the next `$/state`, which commits them **with** the
 //! checkpoint in one transaction (`provider_collector_state`). So a read
 //! that fails midway keeps exactly what its last checkpoint covered. The
 //! read's result must count what was streamed; a read that sends nothing
@@ -105,7 +103,7 @@ impl Instance {
                         .join(", ")
                 ),
             })?;
-        // One read of a collector at a time (tsk715): two from the same
+        // One read of a collector at a time: two from the same
         // checkpoint would record its items twice and race the cursor.
         let lock = self
             .reading
@@ -127,7 +125,7 @@ impl Instance {
                 .and_then(|s| s.state);
             // When the read began, for "renewed since": taken once it has
             // its process — one this read started began after it, which
-            // isn't a renewal under it (tsk907).
+            // isn't a renewal under it.
             let mut called = Instant::now();
             let outcome = match self.connection().await {
                 Ok((peer, handle)) => {
@@ -385,9 +383,9 @@ impl Instance {
 
     /// Append `batch` and the checkpoint covering it, in one transaction —
     /// each record only when it changes its item: one equal to the item's
-    /// last `work_item.recorded` (a write's, or an earlier read's) restates
+    /// last `task.recorded` (a write's, or an earlier read's) restates
     /// nothing, and logging it would echo a write back to whatever reacted
-    /// to it (an effect writing the item, tsk799). The checkpoint counts
+    /// to it (an effect writing the item). The checkpoint counts
     /// what was read.
     async fn commit(
         &self,
@@ -427,7 +425,7 @@ impl Instance {
 
 /// Whether `record` says what the last event of its type about the same
 /// row (its `<key>.uri`) already said. The path is the contract's literal
-/// (`$.item.uri`), so the lookup is the expression `event_log_work_item_uri`
+/// (`$.item.uri`), so the lookup is the expression `event_log_task_uri`
 /// indexes; a capability that streams another entity indexes its own.
 fn restates(
     tx: &rusqlite::Connection,

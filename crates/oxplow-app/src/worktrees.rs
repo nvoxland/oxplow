@@ -156,12 +156,12 @@ impl WorktreeRouter {
 mod tests {
     use super::*;
 
-    /// P5.B1 (tsk520): a stream routes to its worktree; an unknown or
+    /// P5.B1: a stream routes to its worktree; an unknown or
     /// absent stream reads the primary checkout but a strict resolve
     /// refuses it.
     #[tokio::test]
     async fn streams_route_to_their_worktrees_and_strict_refuses_the_rest() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let router = &f.svc.worktrees;
         let primary = router.project_dir().to_path_buf();
         let stream = f.svc.stream_store.list().await.unwrap().remove(0);

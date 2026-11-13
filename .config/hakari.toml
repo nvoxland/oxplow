@@ -54,7 +54,6 @@ workspace-members = [
     "oxplow-coverage",
     "oxplow-domain",
     "oxplow-provider-fake",
-    "oxplow-provider-mcp",
     "oxplow-provider-protocol",
     "oxplow-script",
 ]

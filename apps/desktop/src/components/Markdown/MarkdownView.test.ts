@@ -1,19 +1,20 @@
 import { expect, test } from "bun:test";
-import { linkRef, parseMarkdownLink, postprocessWikilinks, preprocessWikilinks, refLinkOf, relativeFilePath } from "./MarkdownView.js";
+import { linkRef, parseMarkdownLink, postprocessWikilinks, preprocessWikilinks, refLinkOf, relativeFilePath } from "./markdownLinks.js";
 import {
   directoryRef,
   fileRef,
   gitCommitRef,
-  workItemTabRef,
-  wikiPageRef,
+  taskTabRef,
+  knowledgePageRef,
 } from "../../tabs/pageRefs.js";
 import { WORKING } from "../../revision.js";
-import { commitUri, dirUri, fileLinesUri, fileUri, resourceUri, wikiUri, workItemUri } from "../../uri/uri.js";
+import { setKnowledgeStores } from "../../knowledgeStores.js";
+import { commitUri, dirUri, fileLinesUri, fileUri, resourceUri, knowledgeUri, taskUri } from "../../uri/uri.js";
 
-// parseMarkdownLink is shared by WikiPageTab and TaskDetail. WikiPageTab needs
-// to distinguish wiki-internal links (`./foo`, `bar.md`) from external
+// parseMarkdownLink is shared by the knowledge page viewer and TaskDetail. The viewer needs
+// to distinguish knowledge links (`./foo`, `bar.md`) from external
 // (`https://…`) and anchor (`#section`) links so it can route plain
-// clicks back through the wiki navigation history. TaskDetail just
+// clicks back through the page navigation history. TaskDetail just
 // needs to know "is this an external link" so it can route to the OS
 // browser; internal slug semantics don't apply there but the same parser
 // works.
@@ -33,12 +34,12 @@ test("parseMarkdownLink: external http(s) and mailto", () => {
 });
 
 test("parseMarkdownLink: internal — strips leading ./, .md suffix, query, fragment", () => {
-  expect(parseMarkdownLink("foo")).toEqual({ kind: "internal", slug: "foo" });
-  expect(parseMarkdownLink("./foo")).toEqual({ kind: "internal", slug: "foo" });
-  expect(parseMarkdownLink("/foo")).toEqual({ kind: "internal", slug: "foo" });
-  expect(parseMarkdownLink("foo.md")).toEqual({ kind: "internal", slug: "foo" });
-  expect(parseMarkdownLink("foo.md#sec")).toEqual({ kind: "internal", slug: "foo" });
-  expect(parseMarkdownLink("foo.md?x=1")).toEqual({ kind: "internal", slug: "foo" });
+  expect(parseMarkdownLink("foo")).toEqual({ kind: "knowledge", store: "oxwiki", id: "foo" });
+  expect(parseMarkdownLink("./foo")).toEqual({ kind: "knowledge", store: "oxwiki", id: "foo" });
+  expect(parseMarkdownLink("/foo")).toEqual({ kind: "knowledge", store: "oxwiki", id: "foo" });
+  expect(parseMarkdownLink("foo.md")).toEqual({ kind: "knowledge", store: "oxwiki", id: "foo" });
+  expect(parseMarkdownLink("foo.md#sec")).toEqual({ kind: "knowledge", store: "oxwiki", id: "foo" });
+  expect(parseMarkdownLink("foo.md?x=1")).toEqual({ kind: "knowledge", store: "oxwiki", id: "foo" });
 });
 
 test("parseMarkdownLink: internal that resolves to empty slug", () => {
@@ -114,9 +115,9 @@ test("preprocessWikilinks: |display syntax", () => {
     .toBe(`the [foo helper](${fileUri("src/foo.ts")}) does X`);
 });
 
-test("preprocessWikilinks: bare slug routes to wiki note", () => {
+test("preprocessWikilinks: bare slug routes to an oxwiki page", () => {
   expect(preprocessWikilinks("see [[architecture]] note"))
-    .toBe("see [architecture](oxplow:oxplow/wiki?slug=architecture) note");
+    .toBe("see [architecture](oxplow:oxplow/knowledge?id=architecture&store=oxwiki) note");
 });
 
 test("preprocessWikilinks: leaves wikilinks inside fenced code untouched", () => {
@@ -138,7 +139,7 @@ test("preprocessWikilinks: handles multiple wikilinks on one line", () => {
 
 test("preprocessWikilinks: a target with no extension and no slash is a slug", () => {
   expect(preprocessWikilinks("[[architecture]]"))
-    .toBe("[architecture](oxplow:oxplow/wiki?slug=architecture)");
+    .toBe("[architecture](oxplow:oxplow/knowledge?id=architecture&store=oxwiki)");
 });
 
 test("preprocessWikilinks: nested-looking brackets do not match", () => {
@@ -180,12 +181,12 @@ test("preprocessWikilinks: SHA detection is case-insensitive and normalizes to l
 
 test("preprocessWikilinks: 6-char hex is too short to be a SHA — treated as slug", () => {
   expect(preprocessWikilinks("[[abc123]]"))
-    .toBe("[abc123](oxplow:oxplow/wiki?slug=abc123)");
+    .toBe("[abc123](oxplow:oxplow/knowledge?id=abc123&store=oxwiki)");
 });
 
 test("preprocessWikilinks: hex with non-hex chars is a slug", () => {
   expect(preprocessWikilinks("[[abc-1234]]"))
-    .toBe("[abc-1234](oxplow:oxplow/wiki?slug=abc-1234)");
+    .toBe("[abc-1234](oxplow:oxplow/knowledge?id=abc-1234&store=oxwiki)");
 });
 
 test("parseMarkdownLink: commit: scheme", () => {
@@ -274,7 +275,7 @@ test("postprocessWikilinks: skips fenced code blocks", () => {
 // must defensively normalize that mangled shape back to a bare
 // wikilink, or the on-disk file rots a little more on every save.
 test("postprocessWikilinks: cleans up the editor's escaped-bracket round-trip", () => {
-  // Real-world shape observed after a wiki save round-trip:
+  // Real-world shape observed after a page save round-trip:
   expect(postprocessWikilinks("see \\[[src/foo.ts|src/foo.ts\\]] here"))
     .toBe("see [[src/foo.ts]] here");
 });
@@ -297,60 +298,60 @@ test("postprocessWikilinks ∘ preprocessWikilinks is identity for supported for
     "see [[dir:src/components|the folder]] for buttons",
     "see [[tsk42]] for the work",
     "see [[tsk42|fix the parser]] for the work",
-    `see [[${workItemUri("issues", "ENG-1")}]] for theirs`,
+    `see [[${taskUri("issues", "ENG-1")}]] for theirs`,
   ];
-  const ids = (id: string) => (/^tsk\d+$/.test(id) ? workItemUri("oxplow", id) : null);
+  const ids = (id: string) => (/^tsk\d+$/.test(id) ? taskUri("oxtask", id) : null);
   for (const sample of samples) {
     expect(postprocessWikilinks(preprocessWikilinks(sample, ids))).toBe(sample);
   }
 });
 
-// Work item wikilinks: a bare id of the active list's (`[[tsk42]]` with
-// oxplow's tasks, by its declared id pattern) or a full ref → the item's
-// `oxplow:oxplow/work_item?id=<id>&provider=<provider>` href; the renderer swaps the
+// Task wikilinks: a bare id of the active list's (`[[tsk42]]` with
+// oxtask, by its declared id pattern) or a full ref → the item's
+// `oxplow:oxplow/task?id=<id>&provider=<provider>` href; the renderer swaps the
 // `tsk<id>` token for the task title at display time. The backend ref
 // extractor (refs.rs) already recognizes the same form for backlinks.
 
-const oxplowIds = (id: string) => (/^tsk\d+$/.test(id) ? workItemUri("oxplow", id) : null);
+const oxplowIds = (id: string) => (/^tsk\d+$/.test(id) ? taskUri("oxtask", id) : null);
 
-test("preprocessWikilinks: an id of the active list rewrites to its work_item href", () => {
+test("preprocessWikilinks: an id of the active list rewrites to its task href", () => {
   expect(preprocessWikilinks("see [[tsk42]] for context", oxplowIds))
-    .toBe(`see [tsk42](${workItemUri("oxplow", "tsk42")}) for context`);
+    .toBe(`see [tsk42](${taskUri("oxtask", "tsk42")}) for context`);
 });
 
-test("preprocessWikilinks: a work item with a custom display label", () => {
+test("preprocessWikilinks: a task with a custom display label", () => {
   expect(preprocessWikilinks("[[tsk42|fix the parser]]", oxplowIds))
-    .toBe(`[fix the parser](${workItemUri("oxplow", "tsk42")})`);
+    .toBe(`[fix the parser](${taskUri("oxtask", "tsk42")})`);
 });
 
-test("preprocessWikilinks: a full work item ref links whichever list", () => {
-  const eng1 = workItemUri("issues", "ENG-1");
+test("preprocessWikilinks: a full task ref links whichever list", () => {
+  const eng1 = taskUri("issues", "ENG-1");
   expect(preprocessWikilinks(`[[${eng1}]]`)).toBe(`[${eng1}](${eng1})`);
 });
 
 test("preprocessWikilinks: what isn't the active list's id is a wiki slug", () => {
   // `tsk-notes` doesn't match the list's ids; with no list (none), even
   // `tsk42` is an ordinary slug.
-  expect(preprocessWikilinks("[[tsk-notes]]", oxplowIds)).toBe("[tsk-notes](oxplow:oxplow/wiki?slug=tsk-notes)");
-  expect(preprocessWikilinks("[[tsk42]]")).toBe("[tsk42](oxplow:oxplow/wiki?slug=tsk42)");
+  expect(preprocessWikilinks("[[tsk-notes]]", oxplowIds)).toBe("[tsk-notes](oxplow:oxplow/knowledge?id=tsk-notes&store=oxwiki)");
+  expect(preprocessWikilinks("[[tsk42]]")).toBe("[tsk42](oxplow:oxplow/knowledge?id=tsk42&store=oxwiki)");
 });
 
-test("parseMarkdownLink: work_item: scheme, any list", () => {
-  expect(parseMarkdownLink("oxplow:oxplow/work_item?id=tsk42&provider=oxplow")).toEqual({ kind: "work_item", ref: "oxplow:oxplow/work_item?id=tsk42&provider=oxplow" });
-  expect(parseMarkdownLink("oxplow:oxplow/work_item?id=ENG-1&provider=issues")).toEqual({ kind: "work_item", ref: "oxplow:oxplow/work_item?id=ENG-1&provider=issues" });
+test("parseMarkdownLink: task: scheme, any list", () => {
+  expect(parseMarkdownLink("oxplow:oxplow/task?id=tsk42&provider=oxtask")).toEqual({ kind: "task", ref: "oxplow:oxplow/task?id=tsk42&provider=oxtask" });
+  expect(parseMarkdownLink("oxplow:oxplow/task?id=ENG-1&provider=issues")).toEqual({ kind: "task", ref: "oxplow:oxplow/task?id=ENG-1&provider=issues" });
 });
 
-test("parseMarkdownLink: work_item: with empty target", () => {
-  expect(parseMarkdownLink("oxplow:oxplow/work_item")).toEqual({ kind: "empty" });
+test("parseMarkdownLink: task: with empty target", () => {
+  expect(parseMarkdownLink("oxplow:oxplow/task")).toEqual({ kind: "empty" });
 });
 
 test("postprocessWikilinks: task link with matching label collapses to bare wikilink", () => {
-  expect(postprocessWikilinks(`see [tsk42](${workItemUri("oxplow", "tsk42")}) here`))
+  expect(postprocessWikilinks(`see [tsk42](${taskUri("oxtask", "tsk42")}) here`))
     .toBe("see [[tsk42]] here");
 });
 
 test("postprocessWikilinks: task link with distinct label preserves the label", () => {
-  expect(postprocessWikilinks(`see [fix the parser](${workItemUri("oxplow", "tsk42")}) here`))
+  expect(postprocessWikilinks(`see [fix the parser](${taskUri("oxtask", "tsk42")}) here`))
     .toBe("see [[tsk42|fix the parser]] here");
 });
 
@@ -364,16 +365,18 @@ test("preprocessWikilinks: GitHub-style [[#13]] becomes an oxplow-invalid link",
     .toBe("Follow-up in [#13](oxplow-invalid:%2313).");
 });
 
-test("a wiki page's link goes into the editor as its URI and comes back as [[slug]]", () => {
+test("an oxwiki page's link goes into the editor as its URI and comes back as [[slug]]", () => {
   for (const body of ["See [[architecture]].", "See [[architecture|the design]]."]) {
     expect(postprocessWikilinks(preprocessWikilinks(body))).toBe(body);
   }
 });
 
 test("preprocessWikilinks: valid slugs (incl .md) stay live wiki links", () => {
-  expect(preprocessWikilinks("[[architecture]]")).toBe("[architecture](oxplow:oxplow/wiki?slug=architecture)");
-  expect(preprocessWikilinks("[[some_note-2]]")).toBe("[some_note-2](oxplow:oxplow/wiki?slug=some_note-2)");
-  expect(preprocessWikilinks("[[some-note.md]]")).toBe("[some-note.md](oxplow:oxplow/wiki?slug=some-note)");
+  expect(preprocessWikilinks("[[architecture]]")).toBe("[architecture](oxplow:oxplow/knowledge?id=architecture&store=oxwiki)");
+  expect(preprocessWikilinks("[[some-note-2]]")).toBe("[some-note-2](oxplow:oxplow/knowledge?id=some-note-2&store=oxwiki)");
+  // What no store's id pattern matches is no page (oxwiki's ids are kebab-case).
+  expect(preprocessWikilinks("[[Some_Note]]")).toBe("[Some_Note](oxplow-invalid:Some_Note)");
+  expect(preprocessWikilinks("[[some-note.md]]")).toBe("[some-note.md](oxplow:oxplow/knowledge?id=some-note&store=oxwiki)");
 });
 
 test("parseMarkdownLink: oxplow-invalid decodes the target into a broken link", () => {
@@ -397,16 +400,16 @@ test("postprocessWikilinks: broken link round-trips back to the authored [[#13]]
 
 // Every internal link kind has to resolve to a tab the same way, or
 // "open in a new tab" works on some and silently does nothing on
-// others — which is what tsk265 found: task links honoured the caller's
+// others — which is what found: task links honoured the caller's
 // newTab, file / directory / commit links fell through to legacy
 // single-tab callbacks and dropped it.
 
-test("linkRef: a wiki link targets its page", () => {
-  expect(linkRef({ kind: "internal", slug: "some-page" })).toBe(wikiPageRef("some-page").id);
+test("linkRef: a knowledge link targets its page", () => {
+  expect(linkRef({ kind: "knowledge", store: "oxwiki", id: "some-page" })).toBe(knowledgePageRef("oxwiki", "some-page").id);
 });
 
-test("linkRef: a work item link targets its page", () => {
-  expect(linkRef({ kind: "work_item", ref: "oxplow:oxplow/work_item?id=tsk42&provider=oxplow" })).toBe("oxplow:oxplow/work_item?id=tsk42&provider=oxplow");
+test("linkRef: a task link targets its page", () => {
+  expect(linkRef({ kind: "task", ref: "oxplow:oxplow/task?id=tsk42&provider=oxtask" })).toBe("oxplow:oxplow/task?id=tsk42&provider=oxtask");
 });
 
 test("linkRef: a directory link targets its directory", () => {
@@ -446,13 +449,13 @@ test("refLinkOf: each kind saves as its bare wikilink", () => {
     const { href, text } = refLinkOf(uri, title, mention);
     return postprocessWikilinks(`[${text}](${href})`);
   };
-  expect(saved(wikiUri("local-snapshots"))).toBe("[[local-snapshots]]");
+  expect(saved(knowledgeUri("oxwiki", "local-snapshots"))).toBe("[[local-snapshots]]");
   expect(saved(fileUri("src/a.ts"))).toBe("[[src/a.ts]]");
   expect(saved(fileLinesUri("src/a.ts", 12, 12))).toBe("[[src/a.ts:12]]");
   expect(saved(dirUri("src/components"))).toBe("[[dir:src/components]]");
   const sha = "0123456789abcdef0123456789abcdef01234567";
   expect(saved(commitUri(sha))).toBe(`[[git:${sha}]]`);
-  const item = workItemUri("oxplow", "tsk42");
+  const item = taskUri("oxtask", "tsk42");
   // A bare id when it is the active list's, else the whole URI.
   expect(saved(item, "T", (id) => (id === "tsk42" ? item : null))).toBe("[[tsk42]]");
   expect(saved(item, "T", () => null)).toBe(`[[${item}]]`);
@@ -461,9 +464,9 @@ test("refLinkOf: each kind saves as its bare wikilink", () => {
 
 // A markdown file's relative links and images are its folder's: given the
 // file's URI as `base`, `docs/guide.md` is that file (on the base's
-// filesystem and revision), not a wiki page; `../x.png` climbs; `/top.md`
+// filesystem and revision), not a knowledge page; `../x.png` climbs; `/top.md`
 // is the root's. An anchor, a web link and an oxplow URI read as before,
-// and with no base a relative `.md` link is a wiki slug, as the wiki's are.
+// and with no base a relative `.md` link is an oxwiki id, as oxwiki's are.
 test("parseMarkdownLink: a relative link resolves against the base file's folder", () => {
   const readme = "oxplow:oxplow/file?path=README.md";
   expect(parseMarkdownLink("docs/guide.md", readme)).toEqual({ kind: "file", path: "docs/guide.md", version: null, filesystem: null });
@@ -474,8 +477,8 @@ test("parseMarkdownLink: a relative link resolves against the base file's folder
   expect(parseMarkdownLink("sibling%20file.md", deep)).toEqual({ kind: "file", path: "a/b/sibling file.md", version: "git:abc1234", filesystem: "oxplow:extensions" });
   expect(parseMarkdownLink("#install", readme)).toEqual({ kind: "anchor" });
   expect(parseMarkdownLink("https://a.test/", readme)).toEqual({ kind: "external" });
-  expect(parseMarkdownLink("oxplow:oxplow/wiki?slug=notes", readme)).toEqual({ kind: "internal", slug: "notes" });
-  expect(parseMarkdownLink("docs/guide.md")).toEqual({ kind: "internal", slug: "docs/guide" });
+  expect(parseMarkdownLink("oxplow:oxplow/knowledge?id=notes&store=oxwiki", readme)).toEqual({ kind: "knowledge", store: "oxwiki", id: "notes" });
+  expect(parseMarkdownLink("guide.md")).toEqual({ kind: "knowledge", store: "oxwiki", id: "guide" });
 });
 
 // A document drawn by a chosen page (its base's `#oxplow.renderer=`) links
@@ -495,4 +498,28 @@ test("relativeFilePath: joins and climbs under the base file's folder, never abo
   expect(relativeFilePath("a/b/README.md", "../../../c.md")).toBe("c.md");
   expect(relativeFilePath("README.md", "./img/./logo.png")).toBe("img/logo.png");
   expect(relativeFilePath("a/README.md", "/x/y.md")).toBe("x/y.md");
+});
+
+// `[[store:id]]` names a page of another enabled knowledge store; oxwiki's own
+// is the bare `[[id]]`.
+test("a [[store:id]] link of an enabled store is that store's page, and saves back as it was written", () => {
+  setKnowledgeStores([
+    { store: "oxwiki", extension: "oxwiki", idPattern: "[a-z0-9]+(-[a-z0-9]+)*" },
+    { store: "docs", extension: "docs", idPattern: null },
+  ]);
+  try {
+    const uri = knowledgeUri("docs", "intro");
+    expect(preprocessWikilinks("see [[docs:intro]]")).toBe(`see [docs:intro](${uri})`);
+    expect(postprocessWikilinks(preprocessWikilinks("see [[docs:intro]] and [[docs:intro|the intro]]"))).toBe("see [[docs:intro]] and [[docs:intro|the intro]]");
+    expect(linkRef(parseMarkdownLink(uri))).toBe(uri);
+    expect(refLinkOf(uri, "Intro").text).toBe("docs:intro");
+    // oxwiki's own, written in full, is the same page as the bare form.
+    expect(preprocessWikilinks("[[oxwiki:arch]]")).toBe(`[oxwiki:arch](${knowledgeUri("oxwiki", "arch")})`);
+    expect(postprocessWikilinks(`[arch](${knowledgeUri("oxwiki", "arch")})`)).toBe("[[arch]]");
+    // A prefix that is no enabled store is not a store link.
+    expect(preprocessWikilinks("[[nope:intro]]")).toContain("oxplow-invalid:");
+  } finally {
+    // The test world's own: oxwiki, as the preload sets it.
+    setKnowledgeStores([{ store: "oxwiki", extension: "oxwiki", idPattern: "[a-z0-9]+(-[a-z0-9]+)*" }]);
+  }
 });

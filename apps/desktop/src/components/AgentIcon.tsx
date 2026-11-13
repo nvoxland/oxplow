@@ -5,17 +5,14 @@
  * carries it as an SVG data URI; a harness that declares none gets the
  * generic robot.
  *
- * The declared SVG is an extension's, so it is never injected as markup:
- * it is the mask of an empty element (an image load, where no script in
- * it runs), colored by the text around it. Only an SVG data URI is drawn
- * (anything else falls back), so nothing can leave the CSS `url()`.
+ * The declared SVG is drawn as every extension svg icon is (`iconFor`):
+ * a mask in the text's color, its markup never injected.
  */
 import { Bot } from "lucide-react";
 import type { CSSProperties } from "react";
 
-/** What a declared icon looks like on the wire: base64 only, so the URI
- *  holds no quote or parenthesis. */
-const SVG_DATA_URI = /^data:image\/svg\+xml;base64,[A-Za-z0-9+/=]+$/;
+import { iconFor } from "../icons.js";
+import { isIconName } from "../iconNames.js";
 
 export interface AgentIconProps {
   /** The harness's declared logo (`HarnessListing.icon`). */
@@ -25,29 +22,12 @@ export interface AgentIconProps {
 }
 
 export function AgentIcon({ icon, size = 14, style }: AgentIconProps) {
-  if (icon && SVG_DATA_URI.test(icon)) {
-    const image = `url("${icon}")`;
+  const Declared = icon && !isIconName(icon) ? iconFor(icon) : null;
+  if (Declared) {
     return (
-      <span
-        aria-hidden
-        data-testid="agent-icon"
-        data-icon="declared"
-        style={{
-          display: "inline-block",
-          width: size,
-          height: size,
-          backgroundColor: "currentColor",
-          WebkitMaskImage: image,
-          maskImage: image,
-          WebkitMaskSize: "contain",
-          maskSize: "contain",
-          WebkitMaskRepeat: "no-repeat",
-          maskRepeat: "no-repeat",
-          WebkitMaskPosition: "center",
-          maskPosition: "center",
-          ...style,
-        }}
-      />
+      <span aria-hidden data-testid="agent-icon" data-icon="declared" style={{ display: "inline-flex", ...style }}>
+        <Declared size={size} />
+      </span>
     );
   }
   return (

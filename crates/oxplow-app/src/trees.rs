@@ -618,7 +618,7 @@ fn count_lines(old: Option<&[u8]>, new: Option<&[u8]>) -> (u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_fixtures::{commit_all, services_with_effort, EffortFixture};
+    use crate::test_fixtures::{commit_all, services_with_thread, ThreadFixture};
     use oxplow_db::FileSnapshot;
     use oxplow_domain::stores::StreamStore as _;
 
@@ -631,7 +631,7 @@ mod tests {
 
     /// A snapshot of `files` (path → content; `None` = a deletion), with
     /// the bytes in the blob store.
-    async fn snapshot(f: &EffortFixture, files: &[(&str, Option<&str>)]) -> i64 {
+    async fn snapshot(f: &ThreadFixture, files: &[(&str, Option<&str>)]) -> i64 {
         let svc = &f.svc;
         let stream = svc.stream_store.list().await.unwrap()[0].id;
         let id = svc.snapshot_store.create_snapshot(stream).await.unwrap();
@@ -660,11 +660,11 @@ mod tests {
         id
     }
 
-    /// P5.B2 (tsk521): a snapshot reads through `Trees` — its files, one
+    /// P5.B2: a snapshot reads through `Trees` — its files, one
     /// file's bytes, and its text corpus — whatever the disk holds now.
     #[tokio::test]
     async fn a_snapshot_reads_through_trees() {
-        let f = services_with_effort().await;
+        let f = services_with_thread().await;
         let (trees, ws) = (&f.svc.trees, f.svc.layout.project_dir.clone());
         let snap = snapshot(&f, &[("a.rs", Some("fn a() {}\n")), ("b.txt", Some("b\n"))]).await;
         std::fs::write(ws.join("a.rs"), "changed\n").unwrap();
@@ -689,14 +689,14 @@ mod tests {
         assert!(trees.read_at(&ws, &rev, "../x").await.is_err());
     }
 
-    /// Conformance 7 (P5.B3, tsk522): a snapshot taken on a clean
+    /// Conformance 7 (P5.B3): a snapshot taken on a clean
     /// workspace maps to its head revision and back, and diffs empty
     /// against it; one taken with an edit maps to none.
     #[tokio::test]
     async fn a_clean_snapshot_maps_to_its_revision_and_diffs_empty() {
         use crate::snapshot_capture::{SnapshotCaptureService, TakeRequest};
         use oxplow_domain::snapshot::SnapshotTrigger;
-        let f = services_with_effort().await;
+        let f = services_with_thread().await;
         let (trees, ws) = (&f.svc.trees, f.svc.layout.project_dir.clone());
         std::fs::write(ws.join("a.txt"), "one\n").unwrap();
         let head = commit_all(&ws, "c1");
@@ -719,7 +719,6 @@ mod tests {
                     trigger: SnapshotTrigger::Manual,
                     thread_id: None,
                     turn_id: None,
-                    effort_id: None,
                     budget: None,
                     provider: None,
                 })
@@ -750,7 +749,7 @@ mod tests {
     /// Another VCS's revision is refused, naming this workspace's.
     #[tokio::test]
     async fn another_vcs_revision_is_refused() {
-        let f = services_with_effort().await;
+        let f = services_with_thread().await;
         let ws = f.svc.layout.project_dir.clone();
         let jj = Revision::Vcs {
             kind: "jj".into(),
@@ -768,7 +767,7 @@ mod tests {
 
     #[tokio::test]
     async fn two_snapshots_diff_to_what_changed() {
-        let f = services_with_effort().await;
+        let f = services_with_thread().await;
         let ws = f.svc.layout.project_dir.clone();
         let p1 = snapshot(&f, &[("a.txt", Some("a1\n")), ("b.txt", Some("b\n"))]).await;
         let p2 = snapshot(
@@ -806,7 +805,7 @@ mod tests {
 
     #[tokio::test]
     async fn two_commits_diff_with_line_counts() {
-        let f = services_with_effort().await;
+        let f = services_with_thread().await;
         let ws = f.svc.layout.project_dir.clone();
         std::fs::write(ws.join("keep.txt"), "k\n").unwrap();
         std::fs::write(ws.join("m.txt"), "a\nb\nc\n").unwrap();
@@ -829,7 +828,7 @@ mod tests {
     /// the snapshot side is normalized into VCS ids.
     #[tokio::test]
     async fn a_snapshot_and_a_commit_compare_by_content() {
-        let f = services_with_effort().await;
+        let f = services_with_thread().await;
         let ws = f.svc.layout.project_dir.clone();
         std::fs::write(ws.join("a.txt"), "one\ntwo\n").unwrap();
         let c1 = commit_all(&ws, "c1");
@@ -857,7 +856,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_working_tree_diffs_against_its_head() {
-        let f = services_with_effort().await;
+        let f = services_with_thread().await;
         let ws = f.svc.layout.project_dir.clone();
         std::fs::write(ws.join("tracked.txt"), "t\n").unwrap();
         let head = commit_all(&ws, "c1");
@@ -878,7 +877,7 @@ mod tests {
     /// ignored or an excluded one.
     #[tokio::test]
     async fn a_diff_of_some_paths_is_what_the_whole_diff_says_of_them() {
-        let f = services_with_effort().await;
+        let f = services_with_thread().await;
         let ws = f.svc.layout.project_dir.clone();
         std::fs::write(ws.join(".gitignore"), "ignored.txt\n").unwrap();
         for path in ["edit.txt", "gone.txt", "same.txt", "elsewhere.txt"] {
@@ -926,7 +925,7 @@ mod tests {
     /// touched with the same bytes, a generated one and a binary one.
     #[tokio::test]
     async fn a_diff_from_status_is_what_a_full_diff_says() {
-        let f = services_with_effort().await;
+        let f = services_with_thread().await;
         let ws = f.svc.layout.project_dir.clone();
         let write = |rel: &str, text: &[u8]| {
             let path = ws.join(rel);
@@ -966,7 +965,7 @@ mod tests {
         index.remove_path(Path::new("moved.txt")).unwrap();
         index.write().unwrap();
 
-        let same = |fx: &EffortFixture, rev: Revision| {
+        let same = |fx: &ThreadFixture, rev: Revision| {
             let (trees, vcs, ws) = (fx.svc.trees.clone(), fx.svc.vcs.clone(), ws.clone());
             async move {
                 let full = trees
@@ -1016,7 +1015,7 @@ mod tests {
     /// reading a byte to count lines.
     #[tokio::test]
     async fn changes_names_paths_and_statuses_without_counting() {
-        let f = services_with_effort().await;
+        let f = services_with_thread().await;
         let ws = f.svc.layout.project_dir.clone();
         std::fs::write(ws.join("gone.txt"), "g\n").unwrap();
         std::fs::write(ws.join("m.txt"), "a\n").unwrap();
@@ -1049,11 +1048,11 @@ mod tests {
         );
     }
 
-    /// tsk177: a filtered path is out of scope on both sides — never
+    /// a filtered path is out of scope on both sides — never
     /// "deleted" because the working tree hides it.
     #[tokio::test]
     async fn a_filtered_path_is_not_reported_deleted() {
-        let f = services_with_effort().await;
+        let f = services_with_thread().await;
         let ws = f.svc.layout.project_dir.clone();
         std::fs::create_dir_all(ws.join(".oxplow")).unwrap();
         std::fs::write(
@@ -1077,20 +1076,20 @@ mod tests {
         assert!(deleted.is_empty(), "{deleted:?}");
     }
 
-    /// tsk1083: oxplow watches the wiki though git ignores it, but a tree
-    /// is git's view: the wiki is not uncommitted work.
+    /// oxplow watches oxwiki though git ignores it, but a tree
+    /// is git's view: oxwiki is not uncommitted work.
     #[tokio::test]
-    async fn the_working_tree_leaves_out_the_git_ignored_wiki() {
-        let f = services_with_effort().await;
+    async fn the_working_tree_leaves_out_the_git_ignored_oxwiki() {
+        let f = services_with_thread().await;
         let ws = f.svc.layout.project_dir.clone();
-        std::fs::create_dir_all(ws.join(".oxplow/wiki")).unwrap();
+        std::fs::create_dir_all(ws.join(".oxplow/oxwiki")).unwrap();
         std::fs::write(
             ws.join(".oxplow/.gitignore"),
             "*\n!.gitignore\n!project.yaml\n",
         )
         .unwrap();
         let c1 = commit_all(&ws, "c1");
-        std::fs::write(ws.join(".oxplow/wiki/notes.md"), "# Notes\n").unwrap();
+        std::fs::write(ws.join(".oxplow/oxwiki/notes.md"), "# Notes\n").unwrap();
         std::fs::write(ws.join(".oxplow/project.yaml"), "testing:\n  command: x\n").unwrap();
         let d = f
             .svc
@@ -1099,15 +1098,15 @@ mod tests {
             .await
             .unwrap();
         let d = by_path(&d);
-        assert!(!d.contains_key(".oxplow/wiki/notes.md"), "{d:?}");
+        assert!(!d.contains_key(".oxplow/oxwiki/notes.md"), "{d:?}");
         assert!(d.contains_key(".oxplow/project.yaml"), "{d:?}");
     }
 
-    /// tsk552: a diff between two commits honours the workspace filter
+    /// a diff between two commits honours the workspace filter
     /// like every other pair — an excluded path isn't reported.
     #[tokio::test]
     async fn a_commit_diff_leaves_out_filtered_paths() {
-        let f = services_with_effort().await;
+        let f = services_with_thread().await;
         let ws = f.svc.layout.project_dir.clone();
         f.svc.config.write().unwrap().generated.exclude = vec!["dist".into()];
         std::fs::create_dir_all(ws.join("dist")).unwrap();

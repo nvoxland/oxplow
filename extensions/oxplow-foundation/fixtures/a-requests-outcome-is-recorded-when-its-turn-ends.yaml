@@ -1,0 +1,28 @@
+# When a turn of a request ends, the request's outcome is recorded with the
+# request as its subject: the tokens it spent so far, its cycle time (first
+# prompt to last activity), and how its tests went over the runs its turns
+# made — red at the end, the peak, the distinct failing tests, the red runs —
+# and the time from the first red run to the next green.
+given:
+  - observe:
+      turn:
+        prompt: Fix the failing tests
+        runs:
+          - { at: "2026-01-01T00:00:01Z", cases: [{ name: a, status: failed }, { name: b, status: failed }] }
+          - { at: "2026-01-01T00:00:31.500Z", cases: [{ name: a, status: failed }, { name: b, status: passed }] }
+          - { at: "2026-01-01T00:01:01.250Z", cases: [{ name: a, status: passed }] }
+when:
+  sql: |
+    SELECT measure_key, dims_json, subject, value FROM v_fact
+     WHERE measure_key IN ('oxplow.request_test_outcome', 'oxplow.request_time_to_green')
+     ORDER BY measure_key, dims_json
+expect:
+  rows:
+    - { measure_key: oxplow.request_test_outcome, dims_json: '{"oxplow.tests_stat":"at_close"}', subject: "oxplow:oxplow/request?id=req1", value: 0.0 }
+    - { measure_key: oxplow.request_test_outcome, dims_json: '{"oxplow.tests_stat":"distinct_failed"}', value: 2.0 }
+    - { measure_key: oxplow.request_test_outcome, dims_json: '{"oxplow.tests_stat":"peak"}', value: 2.0 }
+    - { measure_key: oxplow.request_test_outcome, dims_json: '{"oxplow.tests_stat":"red_runs"}', value: 2.0 }
+    - { measure_key: oxplow.request_time_to_green, subject: "oxplow:oxplow/request?id=req1", value: 60250.0 }
+steps:
+  - when: { sql: "SELECT subject, value >= 0 AS timed FROM v_fact WHERE measure_key = 'oxplow.request_cycle_time'" }
+    expect: { rows: [{ subject: "oxplow:oxplow/request?id=req1", timed: 1 }] }

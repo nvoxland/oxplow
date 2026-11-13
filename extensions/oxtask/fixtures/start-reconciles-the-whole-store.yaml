@@ -1,0 +1,22 @@
+# `start` states the whole store whatever the cursor, and a run after the
+# cursor states only what changed (the cursor is the store's change number).
+requires: [oxplow-bundled, oxtask]
+given:
+  - { command: oxtask.task.create, input: { title: A } }
+  - { command: oxtask.task.create, input: { title: B } }
+  - { command: oxtask.task.delete, input: { id: tsk1 }, confirmed: true }
+when: { collector: oxtask/tasks, trigger: start }
+expect: { ok: true }
+steps:
+  - when: { sql: "SELECT id FROM v_oxplow_task_record" }
+    expect: { rows: [{ id: tsk2 }] }
+  - when: { sql: "SELECT cursor_json FROM v_collector_run WHERE owner = 'oxtask' AND id = 'tasks'" }
+    expect: { rows: [{ cursor_json: '{"seq":3}' }] }
+  - when: { command: oxtask.task.move, input: { id: tsk2, stage: blocked } }
+    expect: { ok: true }
+  - when: { collector: oxtask/tasks, trigger: sqlite }
+    expect: { ok: true }
+  - when: { sql: "SELECT cursor_json FROM v_collector_run WHERE owner = 'oxtask' AND id = 'tasks'" }
+    expect: { rows: [{ cursor_json: '{"seq":4}' }] }
+  - when: { sql: "SELECT state FROM v_oxplow_task_record" }
+    expect: { rows: [{ state: blocked }] }

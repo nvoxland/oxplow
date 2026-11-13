@@ -2,7 +2,7 @@ import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import { fireEvent } from "@testing-library/react";
 
-// tsk248: the launcher offers two distinct doors — "New Project…" creates
+// the launcher offers two distinct doors — "New Project…" creates
 // `.oxplow/` in a plain folder, "Open Project…" only opens a folder that is
 // already a project. Neither may do the other's job, so this test drives both
 // buttons and asserts each lands on its own command.

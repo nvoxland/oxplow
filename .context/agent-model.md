@@ -3,7 +3,7 @@
 How oxplow and a coding agent (Claude Code, Codex, opencode) meet: how a session is launched, what every agent is told, the
 tools it calls, what oxplow observes of it, and the rules that keep one
 thread from clobbering another's worktree. How oxplow turns that record
-into efforts is [work-tracking.md](./work-tracking.md); the commands an
+into requests, files and hints is [work-tracking.md](./work-tracking.md); the commands an
 agent runs are [commands.md](./commands.md).
 
 ## Key invariant
@@ -106,13 +106,13 @@ harness only delivers them.
 
 | Piece | What | Where it comes from |
 |---|---|---|
-| Preamble | How to work in oxplow: nothing to file, end with the question, reading the errors a person saw, the references oxplow puts in a prompt (`@<path>`, `[oxplow uri <uri>]`, `[oxplow <work item uri>: …]`, `[oxplow page …]`) | `oxplow_agent_text::WORKING_IN_OXPLOW` (`crates/oxplow-agent-text/assets/working-in-oxplow.md`) |
+| Preamble | How to work in oxplow: turns are observed and tracking work as tasks is the active tracker's skill's business, end with the question, reading the errors a person saw, the references oxplow puts in a prompt (`@<path>`, `[oxplow uri <uri>]`, `[oxplow <task uri>: …]`, `[oxplow page …]`) | `oxplow_agent_text::WORKING_IN_OXPLOW` (`crates/oxplow-agent-text/assets/working-in-oxplow.md`) |
 | Launch prompt | The preamble; the session context only for a harness without `prompt_context`; the thread's and stream's custom prompts; `agentPromptAppend`; the testing hint (`testing.agentHint`); the skill index only for a harness without `runtime_text` | `agent_prompt::assemble_system_prompt(config, stream, thread, around, harness, skills)`, given the session's declared harness (`crates/oxplow-app/src/agent_prompt.rs`) |
-| Skills | Core's (`oxplow-runtime`, `-wiki-capture`, `-mermaid`, `-collection`, `-metrics`, `-extension`, `-codebase`) and the active extensions' | `AgentText` (`oxplow_agent_text::core_text` + `capabilities::agent_text`) |
-| Slash commands | Core's (`review-comments`, `configure`, `new-metric`) and the active extensions' | Same |
+| Skills | Core's (`oxplow-runtime`, `-knowledge`, `-mermaid`, `-collection`, `-metrics`, `-extension`, `-codebase`) and the active extensions' (one with `when:` only while its extension's setting holds it, `extensions-commands.md` "Skills") | `AgentText` (`oxplow_agent_text::core_text` + `capabilities::agent_text`, which reads the settings that offer skills) |
+| Slash commands | Core's (`review-comments`, `configure`, `new-metric`, `note`: keep what was just worked out as a knowledge page) and the active extensions' | Same |
 | Session context | Stream, worktree, branch, thread, the other live agents in the worktree, the count of open handoffs to the thread | Prompt-time context |
+| Extension context | What an enabled extension says the agent should know now (`context:`), each as `<context from="<namespace>/<id>">`, once, then on change; 1,500 characters each, 3,000 in all | Prompt-time context (extensions-commands.md "Agent context") |
 | Handoffs | Work another thread handed this one, once, at the first prompt that takes it ("Handoffs and native messaging") | Prompt-time context |
-| Decisions | The open effort's recorded ones | Prompt-time context |
 | Nudges | Advisory hints, the collection nudge | Prompt- or tool-time context ("Nudge persistence") |
 | Server instructions | What oxplow knows, writes are commands, answer with `oxplow_find_page` / `oxplow_show_page` | MCP `get_info` ("The agent's tools") |
 
@@ -128,7 +128,7 @@ tells an agent goes through them (`the_prompt_carries_no_project_instruction_fil
 writes the references beside `SKILL.md` (`shared::write_skills`); one that
 doesn't gets the index and reads a body with `oxplow_get_skill { name,
 reference? }`. Each rule has one home skill (wikilinks:
-`oxplow-wiki-capture`; waiting on the person: `oxplow-runtime`;
+`oxplow-knowledge`; waiting on the person: `oxplow-runtime`;
 foreground tests: `oxplow-collection`; `v_dataset`/`oxplow_query_sql`:
 `oxplow-extension`); the others point to it by name. No skill text names
 a task id or `.context/` (tests).
@@ -148,12 +148,15 @@ history between turns ("Codex: its TUI on a thread oxplow observes",
 "Context between turns"), since its TUI owns the prompt.
 
 **Once, then on change.** On every prompt, `prompt_context` builds the
-`<session-context>` block and the decisions block and sends each only
+`<session-context>` block and sends it only
 when it differs from what that agent session was last sent (`should_emit`,
-keyed by the harness's session id; the decisions under
-`<session_id>#decisions`, at most `MAX_DECISIONS_IN_CONTEXT` (15),
-recorded ones only — inferred decisions are the reviewer's). The first
-prompt of a session always carries both, which is why the launch prompt
+keyed by the harness's session id). Each extension's agent context
+(`context:`) follows the same rule, per contribution: right after the
+session context, its block goes only when it differs from the one that
+session last got from it (`would_emit_extension_context`, keyed by
+session and `<namespace>/<id>`). It is not a nudge: no ledger row, no
+muting, its own budget (`CONTEXT_BUDGET`, `CONTEXTS_BUDGET`). The first
+prompt of a session always carries it, which is why the launch prompt
 leaves the session context out for a harness with `prompt_context`.
 Between them rides the thread's undelivered nudges, prompt advisories
 included. `injectSessionContext: false` in `.oxplow/project.yaml` turns
@@ -161,8 +164,9 @@ the session-context block off.
 
 **Compaction.** A compaction or a fresh start forgets what was sent
 (`AgentContext::reset_session`): on `PreCompact` (Claude Code's; its HTTP
-`SessionStart` never arrives) and on `SessionStart`, so the next
-prompt carries the session context and the decisions again. The baselines
+`SessionStart` never arrives), on `PostCompact` (opencode's bridge posts
+only that one, after the fact) and on `SessionStart`, so the next
+prompt carries the session context and every extension context again. The baselines
 are in memory: a daemon restart costs at most one repeated block.
 
 A compaction is also logged, by every harness, as `agent.context.compacted@2`
@@ -171,10 +175,10 @@ A compaction is also logged, by every harness, as `agent.context.compacted@2`
 read as `event:<id>#summary`), Codex's finished `contextCompaction` item
 (through the chat host; it names neither), and opencode's
 `session.compacted` (through the bridge; it names neither). The log is all
-that is done for opencode, whose bridge posts no `PreCompact`. Codex's
+that opencode's compaction records besides the reset on its `PostCompact`. Codex's
 compaction also resets the session's baselines (`ChatHost::compacted`),
-and the context is injected again once no turn runs. Thread Activity
-counts a turn's compactions.
+and the context is injected again once no turn runs. Thread activity
+(foundation) counts a turn's compactions. `v_turn_activity.compactions` counts them per turn (a compaction between turns belongs to none), beside the turn's `deliveries` and `person_prompts`.
 
 **Who else is in the worktree.** A stream's threads share its worktree,
 and any number of agents may work there at once — in one thread or
@@ -246,15 +250,15 @@ Every tool foundation declares is named below
 
 | Purpose | Tools |
 |---|---|
-| Read oxplow's data | `oxplow_catalog` (every model with its owner, what it holds and its columns; one model's column docs), `oxplow_query_sql` (one read-only statement over the `v_*` models, live models included — [semantic-layer.md](./semantic-layer.md) "Live models"; its result is also structured content, typed by its output schema), `oxplow_read { uri }`, `oxplow_search` (BM25 over every searchable kind — work items, comments, thread notes, wiki pages, an extension's — and file contents; each hit is a URI) |
+| Read oxplow's data | `oxplow_catalog` (every model with its owner, what it holds and its columns; one model's column docs), `oxplow_query_sql` (one read-only statement over the `v_*` models, live models included — [semantic-layer.md](./semantic-layer.md) "Live models"; its result is also structured content, typed by its output schema), `oxplow_read { uri }`, `oxplow_search` (BM25 over every searchable kind — tasks, comments, thread notes, knowledge pages, an extension's — and file contents; each hit is a URI) |
 | Code and revisions | `oxplow_vcs_log` (a stream's history from any revision, paged, past the index), `oxplow_vcs_status`, `oxplow_vcs_branches`, `oxplow_diff` (versions `working`, `snap:<id>`, `git:<rev>`; `since_fork`), `oxplow_vcs_blame` (through the `Vcs` provider; `working`, `snap:<id>` or `git:<rev>`), `oxplow_code_definition`, `oxplow_code_references`, `oxplow_code_hover`, `oxplow_code_call_hierarchy`, `oxplow_code_symbols` (a file's symbols from its language server, else oxplow's tree-sitter reading of the live file, saying which), `oxplow_code_workspace_symbols` (the editor's language servers, [lsp.md](./lsp.md)), `oxplow_ensure_change` (a change's analysis, then `v_change_*` through `oxplow_query_sql`) |
 | Write | `run_command`, after `list_commands` |
 | Ask a model | `oxplow_ai_decide` (typed questions about some text, on the `decide` role), `oxplow_ai_summarize` (on `summarize`): recorded computations paid with the person's key, as the asking thread ([ai-providers.md](./ai-providers.md)) |
 | Pages | `oxplow_show_page` (shows the person a page beside the conversation — a page with params, or a `spec` of your own, written as a page file on `oxplow:temp` and shown as `oxplow:oxplow/page?page=temp/<id>`; returns its text and whether a window opened it), `oxplow_find_page` (the pages that answer a question, best first, each with its params; `about` a uri keeps the pages that show that kind of thing and binds its uri), `oxplow_run_page` (a page's text, each node under `[node <id>]`, or its loaders' rows; `page` or an inline `spec`), `oxplow_run_page_action` (a page's action as the page acting for you; a row action on one of the node's rows); `oxplow.page.describe { uri, text?, params? }` through `run_command` (what a page file is made of and where each node comes from; `uri` is the page's file on `oxplow:extensions`, `oxplow:temp` or the worktree; a file that is no page gives no rows) — [pages-and-tabs.md](./pages-and-tabs.md) "Page files" |
 | Show the person | `oxplow_navigate` (takes them to any URI's page, switching stream when needed; by default the shown tab goes there, pushed; `replace` rewrites its entry, `new_tab` opens another) |
-| Common questions, typed | foundation pages with `tool:`: `oxplow_thread_work`, `oxplow_work_next`, `oxplow_effort_summary`, `oxplow_catalog` (each runs `oxplow.page.run` on its page, its params the tool's input: `agent_tools::ToolTarget::Page`). Every other page is `oxplow_find_page` → `oxplow_run_page` (`effort-files`, `file-history`, `recent-commits`, `snapshots`, `thread-sessions`, `session-transcript`) |
+| Common questions, typed | foundation pages with `tool:`: `oxplow_thread_tasks`, `oxtask_next_task` (oxtask's page), `oxplow_catalog`, `oxplow_request_summary { request }` (a request at a glance: its facts, tasks, files, tests and coverage, metric changes and commits; foundation's `request-summary`) (each runs `oxplow.page.run` on its page, its params the tool's input: `agent_tools::ToolTarget::Page`). Every other page is `oxplow_find_page` → `oxplow_run_page` (`file-history`, `recent-commits`, `snapshots`, `thread-sessions`, `session-transcript`) |
 | What the person has | `oxplow_list_tabs` (the tabs each of their windows shows, per thread, stream or project: selected, on screen, stale), `oxplow_get_open_page` (the page open in a thread in the window they were in last, the others' beside it, or one listed tab: `page` is its identity, `view` its `#`; the page's run as a tree with their params, and the focused node), `oxplow_list_comments` (their anchored comments, hydrated) |
-| Wiki | `oxplow_wiki_ref_drift` (one stale ref's diff against its pin) |
+| Pinned refs | `oxplow_ref_drift { uri, path }` (one pinned file ref of any model row: its diff against its pin) |
 | Extension authoring | `oxplow_validate_extension`, `oxplow_preview_collector`; its tests run in a process of their own, `$OXPLOW_BIN extension test <name>` (`OXPLOW_BIN`: the daemon's binary, set for every agent session) |
 | oxplow's guidance | `oxplow_get_skill { name, reference? }` |
 
@@ -268,16 +272,16 @@ but `list_commands` and `run_command` is a foundation command over a read
 scope (`oxplow.records.read`, `oxplow.sql.query`, …; [commands.md](./commands.md)
 "Scopes"), so an agent reaches it through `run_command` too; `v_scope`
 lists the scopes. An anonymous connection may call the read-only ones.
-Almost every read is a published model: an agent's thread, efforts,
-work items, commits, snapshots, dashboards, diagnostics and errors are
+Almost every read is a published model: an agent's thread, requests,
+tasks, commits, snapshots, dashboards, diagnostics and errors are
 `v_*` rows. A tool stays a tool only where a model can't be one: file and
 revision content, live language-server answers, site search, a page's
 rendering, a dry run.
 
 **`oxplow_read { uri }`** (`oxplow_app::ref_read`) reads anything a URI names and
 returns `{ uri, resource, row, related, content, truncated }`: the owning
-model's row, `related` lists (a work item's links and comments, a
-commit's or an effort's files), and `content` for the resources whose body no
+model's row, `related` lists (a task's links and comments, a
+commit's or a request's files), and `content` for the resources whose body no
 model holds — a file at a revision (`oxplow:oxplow/file?path=src/a.rs` is the working tree;
 `oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-40`; `rev=snap:<id>` a local-history snapshot),
 an event's stored body (`oxplow:oxplow/event?id=<id>#part=input`, `part=output`, `part=prompt`, `part=summary`; the
@@ -294,7 +298,7 @@ into that row's stream's worktree.
 
 **Commands.** Every write is a command through `run_command { id, input
 }`. `list_commands` with no arguments is an index of `{ id, summary }`;
-with `id` or `prefix` (`oxplow.work_item.`) it gives each command's
+with `id` or `prefix` (`oxtask.task.`) it gives each command's
 `input_schema`, an `example` input, whether a person `confirm`s it and
 whether it's `undoable` ([commands.md](./commands.md) "Exposure to
 agents"). A command's `confirm` asks only a person: an agent's run of
@@ -316,7 +320,7 @@ the caller's stream's draft of the extension), and `oxplow_show_page` shows
 it beside the conversation: an existing page with params, or its own
 `spec`, an inline page (read-only: no commands, forms or actions) written as
 a page file on `oxplow:temp` and shown as a tab `page=temp/<id>` that the person can save to
-the wiki (an `oxplow-page` block) or as a page. It returns the page's text.
+a knowledge page (an `oxplow-page` block) or as a page. It returns the page's text.
 `oxplow_run_page_action` presses a page's declared action as the page acting
 for the caller, under the same rules as running the command directly.
 
@@ -327,8 +331,8 @@ write is a command, and to answer "show me" with `oxplow_find_page` then `oxplow
 repo's docs.
 
 **Tools read the interface.** No tool belongs to one implementation:
-work-item reads (`oxplow_query_sql` over `v_work_item`, `oxplow_read` of a work item's
-URI, the work-next page) go through whichever list is active (empty with
+task reads (`oxplow_query_sql` over `v_oxplow_task`, `oxplow_read` of a task's
+URI, the next-task page) go through whichever list is active (empty with
 none), so the tool list never changes with a switch. What an
 implementation owns is commands, offered only while it's active
 (`capabilities::Active::refusal`).
@@ -341,7 +345,7 @@ implementation owns is commands, offered only while it's active
 page regions it sat inside (innermost first) and the URIs inside the
 selection, each resolved by `oxplow_app::ref_resolver` — so the agent
 gets what the highlighted thing is in one call. Replies and resolution
-are `oxplow.knowledge.reply_comment` / `update_comment` (`comment: "cmt12"`);
+are `oxplow.comment.reply` / `update` (`comment: "cmt12"`);
 a reply is authored by the actor and clears `needs_response`. oxplow
 never prompts for comments: the person runs the `review-comments`
 command.
@@ -351,17 +355,15 @@ package and both fixes: `oxplow.lsp.install_server { package }`
 or an `lsp.servers` entry in `.oxplow/project.yaml`. `v_lsp_server` says
 what's configured, installed and running.
 
-**The wiki and links.** Wiki reads are `oxplow_query_sql` over
-`v_knowledge_page` / `v_knowledge_ref` (stale pins) and `v_page_ref` (the
-backlinks graph, both directions), plus `oxplow_search` with `resources: ["oxplow/wiki"]`;
-`oxplow_wiki_ref_drift({ slug, path })` returns one stale ref's unified diff
+**Knowledge and links.** Knowledge reads are `oxplow_query_sql` over
+`v_oxplow_knowledge_page` / `v_oxplow_knowledge_ref` (stale pins) and `v_page_ref` (the
+backlinks graph, both directions), plus `oxplow_search` with `resources: ["oxplow/knowledge"]`;
+`oxplow_ref_drift({ uri, path })` returns one stale ref's unified diff
 (`status` drifted, unchanged, not_a_ref, no_pin, binary or no_contents).
-Writes are the `knowledge.*` commands ([knowledge.md](./knowledge.md)).
-`oxplow.effort.report` and
-`oxplow.work_item.create` / `update` check the `[[…]]` links in the text
-they keep (`oxplow_app::link_check`) and return `link_warnings`, so the
-agent fixes them in the same turn; `knowledge.write_page` refuses
-instead. What counts as a link is `oxplow_domain::uri::classify_wikilinks`
+Writes are a store's own commands ([knowledge.md](./knowledge.md): oxwiki's
+are `oxwiki.page.write` / `delete`). A store's write checks the `[[…]]` links in
+the text it keeps (`links.check`, `oxplow_app::link_check`) and refuses a page
+whose links don't resolve. What counts as a link is `oxplow_domain::uri::classify_wikilinks`
 ([resources.md](./resources.md)).
 
 **Id checks at the boundary.** A tool taking a thread or stream id calls
@@ -576,9 +578,14 @@ one no longer offered is removed, a person's own stay.
   commands, as skills) go to the worktree's `.agents/skills/`
   (`shared::write_worktree_skills`).
 - **opencode** writes `.oxplow/runtime/opencode-plugin/`
-  (`plugin/oxplow-hooks.js`, `skills/`, `prompts/`) and runs `opencode -m
-  <model> [-s <id>]`, the model from `agentConfig.opencode.model`, else
-  `DEFAULT_MODEL` (`github-copilot/gpt-5-mini`). Hooks, MCP (bearer by
+  (`plugin/oxplow-hooks.js`, `skills/`, `prompts/`) and runs `opencode [-m
+  <model>] [-s <id>]`, the model only from `agentConfig.opencode.model`
+  (blank: no `-m`, opencode's own default). oxplow used to force
+  `github-copilot/gpt-5-mini`; GitHub Copilot stopped offering it and
+  opencode 1.17.4 gave no error: it ran its most recent other model (a
+  local one), which `session.created` / `chat.message` show only as that
+  model's `modelID`, and the Stop's `model` reports. So oxplow names no
+  model of its own. Hooks, MCP (bearer by
   opencode's own `{env:OXPLOW_HOOK_TOKEN}`), the instructions file, skills
   and commands ride `OPENCODE_CONFIG_CONTENT`, inline config opencode
   merges last. The bridge (`crates/oxplow-harnesses/assets/opencode-hooks.js`)
@@ -605,7 +612,8 @@ of where it runs, which nothing trusts (`identity_env` in `terminal.rs`).
 **What an agent inherits.** Every agent and terminal is
 spawned without `agent_path::not_inherited(&harnesses)`: an oxplow
 agent's identity (`agent_path::NOT_INHERITED`: the `OXPLOW_*` above and
-`OXPLOW_HOOK_DEBUG`) and every registered harness's `env_markers()`
+the recordings' `OXPLOW_HOOK_DEBUG`, `OXPLOW_CODEX_DEBUG` and
+`OXPLOW_OPENCODE_RAW`) and every registered harness's `env_markers()`
 (Claude Code's `CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, …). Otherwise
 oxplow run from inside an agent's terminal starts child sessions — Claude
 Code turns transcript saving off, breaking resume and token counts —
@@ -749,8 +757,7 @@ channel (`ChatEvent`). `open_codex` reserves the session's slot under one
 lock before connecting, so concurrent opens start one observer; `close`
 marks the handle closed at once, and a closed session still winding down
 is replaced and marked not current, so it records no Interrupt over its
-successor. Closing a thread (`oxplow.thread.close`) closes its open
-effort and, once committed, stops every open session's process through
+successor. Closing a thread (`oxplow.thread.close`), once committed, stops every open session's process through
 `agent_sessions::SessionProcesses::kill`.
 
 **Host.** `chat/host.rs` `ChatHost` is the seam (tests use a recording
@@ -775,7 +782,7 @@ the only way to make a `HumanPrompt`, and `Connection::prompt` takes
 nothing else. The session calls it only for `Command::Prompt`, which only
 `ChatManager::submit_human_prompt` sends; a second prompt while a turn runs
 is `TurnInFlight`, never queued. The Codex connection refuses a prompt (the person
-types in Codex's own TUI). The session context, advisories, decisions and
+types in Codex's own TUI). The session context, advisories and
 waiting nudges ride the person's prompt as a visible leading block
 (behind a disclosure on the user item). `chat/guard_tests.rs` scans the
 source: no production code starts a Codex turn (`"turn/start"`), context
@@ -881,8 +888,17 @@ thread id appended. The thread's id is the session's resume id.
 **The observer.** The chat session's actor (`chat/session.rs`) over
 Codex's `conn::Connection`, with no view. It:
 
-- persists a new thread before answering (`thread/goal/set` then
-  `thread/goal/clear`), so the TUI can resume it;
+- persists a new thread before answering (`thread/goal/set` with
+  `status: "paused"`, then `thread/goal/clear`), so the TUI can resume it.
+  The goal is paused because an **active** goal makes Codex run a turn
+  with no prompt (it reads skills and asks "What would you like me to work
+  on?", on the person's quota). Recorded on the 0.167.1 daemon, where
+  `turn/started` follows the goal's clear before oxplow's inject is even
+  sent, and reproduced with a goal set and nothing else; a paused goal
+  writes the rollout and starts no turn (pinned by
+  `a_new_thread_is_saved_so_the_tui_can_resume_it`). A turn that starts
+  with no `userMessage` anyway is nobody's prompt: no turn of the person's
+  opens (`a_turn_with_no_prompt_is_not_a_persons_turn`);
 - passes only messages naming its thread (the daemon also sends a
   client what concerns other threads, Codex's title-generation thread
   among them);
@@ -905,6 +921,77 @@ Codex's `conn::Connection`, with no view. It:
 - sends no turn and answers no request: approvals and questions are the
   TUI's (`prompt` refuses; `guard_tests::nothing_starts_a_codex_turn`
   finds no `"turn/start"` in production code).
+
+**Recorded on CLI 0.166.0, daemon 0.166.0 → 0.167.1** (the daemon
+self-updated mid-session; each fixture's header says which it ran on;
+`tests/fixtures/codex/approval.jsonl`, `interrupt.jsonl`, taken on oxplow's
+own Codex home, with no turn before the person's prompt):
+
+- *Approval the TUI answers.* `thread/status/changed` with
+  `waitingOnApproval` comes **before** `item/commandExecution/requestApproval`
+  (which names the command, `reason` and `commandActions`). The wait is said
+  at the status, and said again with the command once the request arrives
+  (`Approve in Codex: <the model's command>`); `serverRequest/resolved`
+  clears it, and the status falling back to `active` says nothing more.
+  oxplow sends no answer. Pinned by
+  `a_recorded_approval_the_tui_answers_is_waited_on_then_cleared`.
+- *Interrupt.* Esc gives `turn/completed` `status: "interrupted"` with
+  `error: null` (an interrupted turn, not a failed one). The command is not
+  killed: it goes on as a background terminal, and `/stop` later gives
+  `item/completed` `commandExecution` `status: "failed"` (`exitCode: -1`)
+  after the turn's end. That late finish is recorded on its call (a
+  `PostToolUse` with `ok` false) and opens or ends no turn. Pinned by
+  `a_recorded_interrupt_ends_the_turn_and_a_late_failed_call_opens_none` and
+  `a_late_failed_call_after_an_interrupted_turn_opens_no_turn`.
+- *Background terminal.* Every Codex command is a `commandExecution` with
+  a `processId` and `source: "unifiedExecStartup"`; one the agent leaves
+  running past its turn is only seen as a call whose `item/completed`
+  (`exitCode: 0`, `aggregatedOutput`, `durationMs`) arrives ~40 s after
+  `turn/completed`. **The exit does not wake the agent**: no `turn/started`
+  follows. oxplow records no job for it: nothing says at the call's start
+  that it is a background one, and a job with no report would read as
+  `running` (a request waiting on it) for ever. The finish is the call's
+  (`agent.tool.finished` with its exit code and duration, anchored to no
+  open turn); no turn opens. Pinned by
+  `a_recorded_background_terminal_finishes_its_call_and_wakes_nothing`.
+
+- *Failed turn* (`failed_turn.jsonl`, an invalid API key; pinned by
+  `a_recorded_failed_turn_ends_once_with_the_final_error` and, through a
+  session, `a_recorded_failed_turn_is_one_errored_turn`). After
+  `turn/started`: ten `error` notifications with `willRetry: true`
+  (`Reconnecting... n/5`, over WebSockets, then HTTPS after a `warning`
+  "Falling back from WebSockets to HTTPS transport"), `thread/status/changed`
+  `systemError`, an `error` with `willRetry: false`, and `turn/completed`
+  `failed` with `turn.error` and no items. Only that last message ends the
+  turn: once, `Errored`, with the final error's class and message. The
+  retries, the warning and `systemError` say nothing (the status is no wait
+  on the person).
+- *Other threads on the daemon.* The daemon sends every connection what
+  concerns every thread. After each user message Codex starts an ephemeral
+  naming thread (`ephemeral: true`, no parent, its own model) that arrives as
+  `thread/started` and closes a minute later; a thread of an earlier session
+  arrives as `notLoaded` and `thread/closed`. A message passes only when it
+  names the session's thread (`threadId`) or one of its children, and a
+  `thread/started` only registers a child that names the session's thread as
+  its parent, so neither opens a thread, session, turn or job (pinned by
+  `another_thread_on_the_daemon_is_not_this_sessions`, which replays all five
+  recordings through a session).
+- *Per-turn bookkeeping.* `turn/moderationMetadata` (Codex's verdict on the
+  prompt and output) is not read; `thread/settings/updated` is, for its
+  `model` and `effort` (`moderation_is_ignored_and_settings_are_read`).
+- *The daemon restarts mid-session.* The daemon self-updates (0.166.0 →
+  0.167.1 in one recording session); the restart killed a background process
+  and its `item/completed` never came
+  (`codex-background-terminal.jsonl.daemon-restart` in the local recordings).
+  The observer's connection closes, so the session ends: the host gets an
+  interrupt, which ends the open turn `interrupted` and abandons the calls
+  it left running (`tool_call.project` does that for any turn end, `Stop`
+  or `Interrupt`), so nothing stays `running` for ever. The observer does not
+  reconnect by itself (the TUI died with the daemon); the next open resumes
+  the thread on the daemon that came back. Pinned by
+  `a_daemon_restart_mid_turn_interrupts_the_turn_and_the_call_in_flight`,
+  `a_restarted_daemon_is_observed_again_on_the_next_open` and
+  `an_interrupted_turn_abandons_the_call_in_flight`.
 
 It stays open when the TUI exits (the PTY's exit ingests the
 `SessionEnd`), so a reopened TUI attaches to a held thread; it closes
@@ -942,7 +1029,7 @@ developer-role message to the thread's history. Checked live on the
 
 The session actor (`chat/session.rs`, `inject_context`) therefore builds
 the context with `AgentContext::build_context` — the same "once, then on
-change" baselines, the `<handoffs>` block, nudges and decisions a prompt
+change" baselines, the `<handoffs>` block and nudges a prompt
 carries — and injects it (`Connection::inject`), only when the connection
 says it can (`Connection::can_inject`: the thread runs no turn, read from
 `turn/started` / `turn/completed`; and the daemon knows the method, else
@@ -953,9 +1040,7 @@ a turn waits for that turn's end), and **on a change**: the
 `agent.context_changes` pump consumer (`context_watch.rs`) bumps
 `Services::context_changes` when the log records a fact the context
 reads — `handoff.sent` / `handoff.settled`, `agent.session.started` /
-`.ended` (who else is in the worktree), `effort.opened` / `.closed` /
-`.finished` / `.linked` / `.retitled` and the decision reviews, and the
-`oxplow.effort.record_decision` command — and each session watching it
+`.ended` (who else is in the worktree) — and each session watching it
 builds again. A build that changes nothing is `None` (the baselines), so
 a no-op event injects nothing; a change during a turn waits for its end.
 No polling. The launch prompt's `developerInstructions` leave the session
@@ -1031,13 +1116,21 @@ session slot, bearer or process of oxplow's:
   `message` as the result), once per child whichever item says it first.
   Recorded 2026-10-16 on 0.162.1: a spawn shows only as a
   `subAgentActivity` (no `spawnAgent` collab item); `wait` is a
-  `collabAgentToolCall` with no receivers.
+  `collabAgentToolCall` with no receivers. Recorded again on CLI 0.166.0 /
+  daemon 0.167.1 (`tests/fixtures/codex/subagent.jsonl`): the same — the spawn is
+  `subAgentActivity` items only, `wait` names no receiver and has empty
+  `agentsStates` although it waited for the child (so it is the parent's
+  own call and starts or finishes no child), and the child's thread has no
+  `thread/started`; the child's `turn/started` carries `rootTurnId` = the
+  parent's `turn.id`, which is the turn the start is attributed to (the
+  parent's running turn when the first `subAgentActivity` shows). Pinned by
+  `a_recorded_subagent_is_attributed_to_the_turn_that_spawned_it`.
 - A `collabAgentToolCall` is also the parent's own tool call, kind
   `subagent`, named by its tool (`wait`, `spawnAgent`, …).
 - A child thread's **finished tool calls** (`item/completed` of a command,
   a file change, an MCP call, …) are recorded in the parent's session as the
   subagent's (`ToolUse.subagent`, `v_tool_call.subagent_id`), so its edits
-  are claimed by the parent's effort. Only those: a child's messages,
+  are the parent's turn's. Only those: a child's messages,
   token counts, status and approval waits are its own thread's and do not
   reach the parent (a child waiting on approval does not park the parent).
   Which threads are children is learned from the parent's items, so a child's
@@ -1078,10 +1171,10 @@ it names (`paths`), a shell call's `command`, a short `detail`, the
   harness's `tool_use` may be a provider's call. A body naming no tool
   records nothing.
 - **What reads it.** The write guard (`edit`, every path), the status
-  derivation (`subagent`, `ask`, `plan`), effort file claims (`edit`), test-run collection (`shell`, its `command`
+  derivation (`subagent`, `ask`, `plan`), file claims (`edit`), test-run collection (`shell`, its `command`
   and `exit_code`), a turn's writing calls (`thread.checkpoint`, by
   `v_tool_call.kind`), the bundled struggle model, `v_context_read`, and
-  `agent.tool.requested@3` / `agent.tool.finished@3`, which carry `tool`,
+  `agent.tool.requested@4` / `agent.tool.finished@4`, which carry `tool`,
   `kind` and `paths`.
 
 ### Caller identity
@@ -1129,17 +1222,67 @@ thread are told apart.
 
 ### Hook ingest and recording
 
+**Recording a session.** Claude Code and opencode: `OXPLOW_HOOK_DEBUG=<file>`
+(the dump below). opencode's lines are what its bridge translated, so
+events the bridge doesn't forward leave no trace. While the variable is
+set, oxplow also launches opencode with `OXPLOW_OPENCODE_RAW=1`
+(`raw_recording_env`; `OXPLOW_HOOK_DEBUG` itself is never in an agent's
+environment) and the bridge first posts every plugin hook input/output and
+every event untouched to `/hook/opencode.raw`; the route appends each as a
+line `{event: "opencode.raw", thread, at, payload: {kind: "hook" | "event",
+…}}`, in order among the translated hooks, and does nothing else with it.
+The replay (`replayed_harnesses.rs`) reads only the hook lines: trim the
+`opencode.raw` lines when a recording becomes a fixture.
+Codex: `OXPLOW_CODEX_DEBUG=<file>` (`AppServer::connect`,
+`crates/oxplow-harnesses/src/codex/app_server.rs`) appends every message
+oxplow's app-server client sends and receives, one JSON line each in the
+fixtures' shape: a header `{recorded, codex, note}` first (`codex` is
+`null`: the version isn't known at connect; fill it in), then `{method,
+params, emittedAtMs}` for a notification (a server request adds `id`),
+`{sent, params}` for what oxplow sent, `{response}` / `{error}` for the
+answer, `{answered: id, result}` for oxplow's answer to a server request.
+Every line but the header also carries `conn` (a number per connection)
+and `purpose` (`observer`: the session's connection, `listing`: a thread
+picker's). Each line is one `write_all` under a process-wide lock, so
+connections writing at once never interleave. The daemon broadcasts
+(`thread/started`, `thread/status/changed`, …) reach every connection;
+only the observer records what it hears unasked, so a broadcast is in the
+file once, and a listing's lines are its own `sent` / `response` ones. Trim it
+to the case, scrub paths and ids like the other fixtures, and read it back
+with `chat::codex::tests::parse_recording`
+(`a_session_recorded_by_the_client_replays_like_the_fixture`).
+
 Each hook POSTs to `/hook/<event>` with the session's bearer. The route
 (`handle_hook_inner`) dumps it when `OXPLOW_HOOK_DEBUG=<file>` is set (one
 JSON line per hook: `event`, `thread`, `at`, `payload` — how to learn a
 harness's real payload shapes before depending on them), maps the prompt
-(`AgentHarness::prompt`: a person's or a subagent's hand-back) and tool
-call with the bearer's harness, runs the policy on a `PreToolUse`, hands
+(`AgentHarness::prompt`, below) and its turn id (`AgentHarness::harness_turn_id`:
+Claude Code's `prompt_id`) and the tool call with the bearer's harness, runs the policy on a `PreToolUse`, hands
 one `HookEnvelope` to `HookIngestService::ingest`
 (`crates/oxplow-app/src/hook_ingest.rs`), and answers: context after a
 `PostToolUse` or a person's `UserPromptSubmit`, a deny, or an ack. An
 event it doesn't know is acked unread; `PreCompact` only resets the
 session's context baselines, and `PostCompact` is logged (`agent.context.compacted`).
+
+**Core reads no harness body keys.** What a body means the adapter says,
+in the envelope; `AgentHarness::reading` (Claude and opencode share
+`shared::claude_shaped_reading`; the chat host fills it for Codex and ACP;
+a harness that says nothing leaves the default) fills
+`HookEnvelope.reading` (`HookReading`):
+
+| Field | Used for | Claude Code's key |
+|---|---|---|
+| `transcript` | the turn's transcript path, the session's start/end bookkeeping | `transcript_path` |
+| `final_message` | a Stop's `answer`, a SubagentStop's result | `last_assistant_message` |
+| `waits_on_person`, `notice` | a Notification that parks the thread on the person, and its text | `notification_type` (`permission_prompt`, `elicitation_dialog`, `agent_needs_input`), `message` |
+| `compaction` | a SessionStart that is a mid-turn compaction, not a new process | `source: compact` |
+| `compact_summary`, `compact_trigger` | a PostCompact's summary and trigger | `compact_summary`, `trigger` |
+| `end_reason`, `clears_conversation` | a SessionEnd's reason; whether it clears the conversation | `reason`, `reason: clear` |
+
+A tool call's content comes the same way: `ToolUse.input` / `.output`
+(Claude's `tool_input` / `tool_response`), stored by hash with the call.
+An external provider harness has no verb for the reading yet, so reads none
+of these.
 
 **Which agent session a hook came from** (`agent_session_store::resolve_tx`,
 shared with OTLP exports), in order: the session the sender is (the
@@ -1152,26 +1295,73 @@ with the thread's anchors only).
 
 **One transaction per envelope** writes the state the hook changes and
 the `agent.*` events that record it, anchored to the thread's stream, the
-session, its open turn and the thread's single open effort
+session and its open turn
 (`activity_anchors_tx`). **Attribution is a best effort, by design:**
 several agents, the person and outside processes can change a worktree at
 once, so no rule ties every change to the right work exactly. The anchor
-stays thread-scoped (the thread's own open effort), because that says
+stays thread-scoped (the thread's own open turn), because that says
 more than the stream would even when it's sometimes wrong.
 
-- **Prompt** → `agent.prompt.submitted` (`reprompt: true` inside an open
-  turn), its text in `event_content` (`oxplow_read` on `event:<id>#prompt`); with
-  no turn open it opens one (`agent.turn.started`). A subagent's hand-back
-  logs no prompt, opens a turn with none if needed and finishes the
-  subagent.
-- **PreToolUse** → `agent.tool.requested` with the policy's `decision`;
-  **PostToolUse** → `agent.tool.finished`. Paths, detail, `ok` and
-  `exit_code` are computed here against the thread's worktree; input and
-  output go to `event_content` by hash. The harness's `tool_use_id` is
-  the dedupe key, so a re-posted hook logs once.
+- **Prompt** → with no turn open, a turn opens (`agent.turn.started@3 {
+  turn, thread, session?, source, cause_turn? }`), recording **what opened
+  it** as the harness read the prompt (`Prompt`, `crates/oxplow-domain/src/agent/observe.rs`):
+  `source` is `person`, `background_job` (a job the agent started in the
+  background reported back: Claude Code's `<task-notification>`, which
+  names the `<tool-use-id>` that started it), `subagent` (a hand-back),
+  `peer` (another session's message) or `unknown` (a prompt hook with no
+  prompt). The turn keeps the text it was opened with, whoever's words
+  they are (`agent_turn.prompt`; only `source = 'person'` is a person's),
+  the harness's turn id, and **what it goes on with**: `cause_turn_id`,
+  the turn whose tool call started the job (found by the tool events'
+  dedupe key, `<session>:<call>:requested`) or in which the subagent
+  started (its `agent.subagent.started`), `cause_basis` `reported`;
+  `cause_ref`, the harness's own name for it (the call id, the subagent
+  id, the sender's socket); `sender` on a peer's turn. Core never reads a
+  harness's tags: the adapter classifies. **Every delivery is logged
+  once** — `agent.prompt.submitted@3 { thread, turn, session, reprompt,
+  source, prompt, sender?, job? }`, whether it opened a turn or landed in
+  the open one (`reprompt: true`; it then opens nothing): its text in
+  `event_content` (`oxplow_read` on `event:<id>#prompt`), the sender of a
+  peer's message, the job a report or hand-back is for. A hand-back also
+  finishes the subagent. A reader that means "a person's prompt" reads
+  `source = person`; status derivation treats every delivery as the agent
+  going to work. V8 rewrote the logged @2 rows (`source: unknown`: they
+  were a person's prompts and background jobs' reports alike) and folded
+  the old `agent.peer_message.received` into it. Pinned by
+  `a_turn_records_what_opened_it_and_the_turn_it_goes_on_with`.
+- **PreToolUse** → `agent.tool.requested@4` with the policy's `decision`;
+  **PostToolUse** → `agent.tool.finished@4`, caused by its request. Both
+  carry the harness's call id (`call`), the finish the harness's own
+  timing (`duration_ms`, Claude Code's PostToolUse field). Paths, detail,
+  `ok` and `exit_code` are computed here against the thread's worktree;
+  input and output go to `event_content` by hash. The harness's
+  `tool_use_id` is the dedupe key, so a re-posted hook logs once. **A
+  call's row follows its whole life** (`tool_call.project`): it opens at
+  the request, `running` (or `denied`, ended at once: it never ran),
+  closes `finished` at the finish its request caused (`duration_ms`: the
+  harness's timing, else since the request), and is `abandoned` when its
+  turn's `agent.turn.ended` (or its session's `agent.session.ended`)
+  comes with it still running, with no duration. A finish with no
+  request seen (a harness that reports only the finish) still gets a row,
+  with no start. Readers that mean "a tool that ran" leave out `denied`
+  (`thread.checkpoint`'s `writing_tools`).
 - **Stop / Interrupt** close the session's open turns
-  (`agent.turn.ended@3`, with Claude's `transcript_path`), then the
-  turn-end snapshot ("Snapshot tracking"). A Stop also sets the turn's
+  (`agent.turn.ended@5`, with Claude's `transcript_path`), then the
+  turn-end snapshot ("Snapshot tracking"). **A turn stores how it ended**
+  (`agent_turn.outcome`, the event's `outcome`): `completed` (a Stop),
+  `interrupted` (the person, or the harness reported an abort),
+  `errored` (the harness ended it with an error: `TurnRun.outcome`, and
+  its words, `name: message`, in `agent_turn.error` /
+  `TurnRun.error`, never in `answer`), `session_ended` (its harness session ended
+  with it open), `session_restarted` (a new harness process started with
+  it open), `session_closed` (oxplow closed the agent session), `restart`
+  (oxplow's recovery). A Stop whose harness names no outcome is `completed`. `answer` is only ever the agent's own words: NULL
+  when it said nothing (an old turn whose end left no trace is
+  `unknown`). A finished turn whose final message ends in a question **stores that question** (`agent_turn.question`, its last line: `ending_question`, the one reading the thread's waiting status uses too). A Stop also reports **what the turn left running**
+  (`TurnRun.left_running`: Claude Code's Stop `background_tasks`, the
+  running ones, `{ id, kind, description }` with the id its report back
+  names), carried on its `agent.turn.ended` and recorded as jobs
+  ("Background jobs"); no column holds it. A Stop also sets the turn's
   `model` and `effort` (`agent_turn`) from `HookEnvelope.turn_run`: the
   route asks the bearer's harness (`AgentHarness::turn_run(body)`: Claude's
   `effort.level` and the newest non-synthetic `message.model` among the
@@ -1201,12 +1391,12 @@ posts under its child's id. Claude Code drops HTTP hooks for
 `SessionStart` ("HTTP hooks are not supported for SessionStart" in
 `claude --debug-file`), so its id is adopted from the first prompt. **A
 `SessionStart` is a process start:** every one except `source: "compact"`
-closes the turns the previous process left open as interrupted, logs
+closes the turns the previous process left open (`session_restarted`), logs
 `agent.session.started` again (`resumed: true` for the resume id) and sets
 Idle, so a turn that died without a Stop reads idle after a restart, not
 stalled. The ACP client posts the same `SessionStart`. **`SessionEnd`**
-closes the turns that session left open as interrupted ("session ended";
-an exit mid-turn sends no Stop), status Stopped, and leaves other
+closes the turns that session left open (`session_ended`; an exit
+mid-turn sends no Stop), status Stopped, and leaves other
 sessions' turns alone; it logs `agent.session.ended`, and `reason: clear`
 of the resume id blanks it (`/clear` starts a fresh session with no HTTP
 hook). A close passes the body's `transcript_path` so an interrupted
@@ -1219,7 +1409,7 @@ for reads, searches, shell, MCP and subagents. The HTTP round trip still
 fires for every tool (Claude's matcher is `"*"`).
 
 **Side-band steps are best-effort by design.** Reactors that decorate a
-call (collection observations, wiki attribution) try and warn: a coverage
+call (collection observations, knowledge attribution) try and warn: a coverage
 parse failure must never fail the hook or block the agent. The durable
 writes they decorate are covered by the transactional invariants in
 [data-model.md](./data-model.md).
@@ -1240,11 +1430,13 @@ The write guard is one policy every transport asks, not logic in the hook
 route. It is isolation only; nothing waits on tracked work
 ([work-tracking.md](./work-tracking.md)).
 
-**The two rules:** no thread may change another stream's worktree, and
-wiki pages are written by command. Everything else is open to every
-thread: its own stream's worktree, files outside every stream, the shared
-wiki (through `oxplow.knowledge.write_page`), and oxplow's own objects —
-work items, efforts, notes, comments. The bus's `WriteGate` asks only that
+**The two rules:** no thread may change another stream's worktree, and a
+store's row files in a worktree are written by the store's command.
+Everything else is open to every thread: its own stream's worktree, files
+outside every stream, the shared knowledge pages (through the store's command:
+`oxwiki.page.write`, or directly in the primary checkout), and oxplow's own
+objects —
+tasks, notes, comments. The bus's `WriteGate` asks only that
 a `Write` command's thread be open; `Record` commands skip it
 ([commands.md](./commands.md) "The pipeline").
 **An agent may open a sibling agent session** in its own stream
@@ -1285,10 +1477,17 @@ or move) is refused in two places, and nowhere else
   every thread (`write_guard::foreign_worktree_reason`, naming the path
   and the tree). Its own stream's worktree, and an absolute path outside
   every stream's (`~/.claude/plans/foo.md`), are allowed.
-- **Wiki pages are written by command.** A direct write to the primary
-  project's `.oxplow/wiki/` is denied for every thread
-  (`write_guard::wiki_page_reason`); pages go through
-  `knowledge.write_page`.
+- **A store's row files in a worktree are written by command.** A thread
+  in the primary checkout may write a file a store keeps its rows in (a
+  fill's `files: { folder, suffix }`, `.oxplow/oxwiki/<slug>.md` for oxwiki):
+  the store's collector converges it, and `record.read` and the touch follow
+  as for any page. A thread in any other worktree is refused a write to
+  `<its worktree>/<folder>/<id><suffix>` of any fill's `files:`
+  (`write_guard::record_file_reason`, from the fills the running generation
+  holds, so any store that declares files is covered): only the primary
+  checkout's folder is watched (`.oxplow` is git-ignored), so the page would
+  be silently lost. The refusal names the store and its extension, whose
+  command writes to the primary checkout from anywhere.
 - **Shell isn't classified.** An agent's shell commands aren't checked.
 - MCP tools are never refused here: their writes are commands, gated on
   the bus.
@@ -1313,16 +1512,91 @@ gates"). The ingest closes the turn, keeps `last_assistant_message` as the
 turn's `answer` (each harness's source in "Per-harness delivery";
 `hook_ingest::LAST_ASSISTANT_MESSAGE`), takes the turn-end snapshot, sets
 the status — `AwaitingUser` when the final message ends in a question,
-keeping an `awaiting_user` the turn set — and acks `{}`. Without
-`oxplow.effort.report`, an effort's summary is its last turn's answer.
+keeping an `awaiting_user` the turn set — and acks `{}`. A request's summary is its last turn's answer.
 
 ### Subagents
+
+**What opencode reports and what oxplow reads** (the bridge,
+`opencode-hooks.js`; `OPENCODE_FACTS` in `opencode.rs` is this table and a
+test keeps the two equal; recorded with 1.17.4: the fixtures under
+`crates/oxplow-harnesses/fixtures/opencode/` are replayed in
+`replayed_harnesses.rs`):
+
+| Fact | opencode reports | oxplow reads |
+|---|---|---|
+| A subagent starts | `session.created` with `info.parentID` | `SubagentStart` for the parent, `agent_id` the child session |
+| A subagent ends | `session.idle` / `session.error` of the child | `SubagentStop` with the child's last message (and the error) |
+| A subagent's result returns | a synthetic `<task id="…" state="…">` part on a new user message | `Prompt::Handback` from the child, not the person |
+| A turn's id | the user message id | `harness_turn_id` (`message_id`) |
+| An aborted turn | `session.error` `MessageAbortedError`, then `session.idle` | `TurnRun.outcome` `interrupted` |
+| An errored turn | `session.error` with another error, then `session.idle` | `TurnRun.outcome` `errored`, `TurnRun.error` `name: message` |
+| What a turn left running | the children not yet idle at the `session.idle` | `TurnRun.left_running` |
+| A call's duration | the gap between `tool.execute.before` and `.after` | `duration_ms` on the PostToolUse |
+
+**Compaction, recorded.** `/compact` posts no `chat.message`, so no
+prompt and no turn of the person's. opencode adds a `compaction` part
+(`auto: false` for `/compact`, `true` when it compacts by itself) in a
+`message.part.updated`, the summary streams as text of an assistant
+message (`mode: compaction`), then `session.compacted` carries only the
+`sessionID`, then `session.idle`. The bridge remembers the part's `auto` per
+session and posts it on the PostCompact as `trigger` (`manual` / `auto`;
+none when no part came first); core records one `agent.context.compacted`
+with it. The `session.idle` after it is a Stop with no open turn whose
+last message is the summary: it changes nothing but re-marks the thread
+idle. (`auto: true` is read from the schema, not recorded.)
+
+**Subagents, recorded.** A foreground `task` call: PreToolUse Task,
+`session.created` of the child (SubagentStart), the child's tools posted
+as the parent's session with the child's `agent_id` (the bridge asks the
+client for the session's `parentID`), the child's idle (SubagentStop),
+then the Task's PostToolUse, then the parent's Stop; the Task call is the
+parent's own and finishes once, after the SubagentStop. A background
+`task` (`OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS`): the Task's
+PostToolUse comes at once (`<task id state="running">`), the parent's Stop
+carries the child in `background_tasks`, and the result comes later as a
+user `chat.message` whose only part is `synthetic: true` text
+`<task id="ses_…" state="completed">…`. The bridge posts it as a
+UserPromptSubmit (`prompt` that text, `message_id`), then the child's
+SubagentStop, then the parent's second Stop; `prompt()` reads it as
+`Prompt::Handback`, so it is a subagent's turn (source `subagent`, going
+on with the turn that started the child), never the person's prompt. Core
+needed no change for either.
+
+**A question is one tool call.** Recorded (`question.jsonl`): the
+`question` tool's `tool.execute.before`, then `question.asked` (with
+`tool.callID`, the same call, and its own `que_…` request id), then, after
+the person answers, `question.replied` and `tool.execute.after`. The
+bridge used to post the call twice (a PreToolUse and PostToolUse named
+`question` from the tool hooks, another pair named `AskUserQuestion`
+from the events, the Post under the request id), which core recorded as two
+finished calls. Now the tool is posted as `AskUserQuestion` and the
+question events post nothing; only `question.rejected` posts a
+PostToolUse for the asking call (its tool throws, so no
+`tool.execute.after` follows; not recorded, read from the source). The
+`question.jsonl` fixture is the recorded hooks with the events' duplicates
+removed and the tool renamed; `its_bridge_reports_an_answered_question_as_one_call`
+feeds the recording's raw inputs to the bridge and gets exactly those
+hooks.
+
+**One abort or error gives two idles.** Recorded (`abort.jsonl`,
+`error.jsonl`): `session.error` comes right before the first
+`session.idle`, so the first Stop carries the error (`MessageAbortedError`
+is `interrupted`; the 401 `APIError` is `errored`, `APIError: Missing
+Authentication header`). Then a second `session.idle` follows (an
+aborted bash call's `tool.execute.after` lands between the two), and the
+bridge posts a second Stop with no error. Core already makes that one
+turn: the first Stop ends it, the late PostToolUse is the call finishing
+(it opens no turn), and a Stop with no open turn changes nothing but
+re-marks the thread idle. An aborted shell call reports `exit: null`, so
+its PostToolUse has no `exit_code`. The bridge's `tool_use_id` for the
+late call is the same `callID` as its PreToolUse.
+
 
 **Who in a session acted.** A subagent (Claude Code's `Agent`/`Task`, an
 opencode child session, a Codex collab agent) is not a session: it has
 no bearer and no process oxplow knows. It is who made a call inside its
 parent's session: `ToolUse.subagent { id, kind? }`, on
-`agent.tool.requested@3` / `agent.tool.finished@3` and
+`agent.tool.requested@4` / `agent.tool.finished@4` and
 `v_tool_call.subagent_id`. The harness fills it when it can (Claude's
 `agent_id` / `agent_type`, `shared::subagent_of`); else the ingest
 **brackets** it: a call landing while the session's open turn has a
@@ -1337,6 +1611,64 @@ session working while a subagent it started runs. A provider harness
 answers both as its `prompt` and `subagent` verbs (feature `subagents`).
 Recorded in `fixtures/claude/subagent.jsonl` and replayed
 (`a_recorded_claude_code_subagent_is_attributed`).
+
+
+**What Codex reports and what oxplow reads** (the chat host,
+`chat/codex.rs`; `CODEX_FACTS` there is this table and a test keeps the
+two equal; written from the app-server protocol and the recordings in
+`tests/fixtures/codex/`; an approval and an interrupted turn are recorded
+(`approval.jsonl`, `interrupt.jsonl`, Codex CLI 0.166.0 / daemon 0.166.0);
+a background terminal (`background_terminal.jsonl`) and a spawned child
+(`subagent.jsonl`) are too, and so is a failed turn (`failed_turn.jsonl`,
+an invalid API key):
+
+| Fact | Codex reports | oxplow reads |
+|---|---|---|
+| How a turn ended | `turn/completed` `turn.status`: `completed`, `interrupted`, `failed` with `error.message` and `codexErrorInfo` | `completed` is a Stop; `interrupted` is `TurnOutcome::Interrupted`; `failed` is `Errored`, `error` `codexErrorInfo: message` |
+| The turn's id | `turn.id` on `turn/started` (and `rootTurnId`) | `agent_turn.harness_turn_id`, set when `turn/started` arrives (also for a prompt oxplow itself sent) |
+| A tool call's life | `item/started`, `item/completed` with the item `id`, `exitCode`, `durationMs` | `agent.tool.requested` at `item/started`, the finish with the same call id, `exit_code` and `duration_ms` |
+| A child agent starts and ends | `collabAgentToolCall` `agentsStates`, `subAgentActivity`, `thread/started` `thread_spawn` | `SubagentStart` / `SubagentStop`, an `agent_job` row |
+| The turn that spawned a child | the parent's `turn.id` (the child's `rootTurnId`) | the job's `started_turn`, basis `reported` |
+| A child's tool calls | `item/completed` on the child's own thread | `ToolUse.subagent` of the child, at the finish |
+| Messages inside an agent tree | `senderThreadId` on a collab item | not read |
+| A background terminal | `processId` and `source` on a `commandExecution`; `thread/backgroundTerminals/list` | nothing of its own: an ordinary shell call, whose `item/completed` may land after the turn's end (recorded on the call, no job, no turn) |
+| Files changed | `fileChange` paths and diffs; `turn/diff/updated` | `fileChange` paths and diffs; `turn/diff/updated` not read |
+| Moderation of a turn | `turn/moderationMetadata` (Codex's verdict on the prompt and output) | not read |
+| The model and effort a thread runs on | `thread/settings/updated` `threadSettings.model` / `effort`, before the turn; the open result's `thread.model` | `TurnRun.model` / `effort` on the turn's end |
+| A thread that is not the session's | `thread/started` (Codex's ephemeral naming thread, no parent), `thread/status/changed` and `thread/closed` for it or for an earlier session's thread (`notLoaded`) | not read: only a message naming the session's thread, or a child it spawned, passes |
+| A turn's retries and failure | `error` notifications (`willRetry`), a `warning`, `thread/status/changed` `systemError`, then `turn/completed` `failed` | only the `turn/completed` ends the turn (once, `Errored`); `error`, `warning` and `systemError` say nothing |
+| Compaction | `contextCompaction` item | `PostCompact`, with no summary or trigger |
+
+**What a shell call reports it changed.** Claude Code's Bash
+`PostToolUse` can carry `tool_response.bashEditDiff { files, changedFiles,
+moreFiles }` (on 2 of 4 Bash calls in `fixtures/claude/hooks.jsonl`);
+`shared::claude_shaped_tool_use` reads `changedFiles` and `files[].filePath`
+into the call's `paths`, so `agent.tool.finished` and the tool-call row
+carry them, and the file-claim consumer claims them with basis
+`reported`. A shell call without the field names no file. Codex, opencode
+and the ACP agents report nothing per shell call.
+
+**Prompt references.** A person's prompt can carry references oxplow
+inserted or the agent's picker wrote: `@<path>`, `[oxplow uri <uri>]`,
+`[oxplow <uri>: "<title>" (<state>)]`, `[oxplow page <id> row: …]`. They
+stay as text in `agent_turn.prompt` and are also **links from the turn**:
+when the delivery is logged (`log_prompt_tx`, a reprompt's too), each
+reference is read by `uri::prompt_refs::parse` — the one definition that
+also spells the Rust writers (`uri_mention`, `item_mention`,
+`page_row_mention`; the context basket uses them) — and stored as a
+`page_ref` edge from `oxplow:oxplow/turn?id=trn<n>` to the target URI with
+ref type `prompt_mention`. A turn fits `page_ref` as a source: an identity
+URI, written once in the delivery's transaction, never restated. The
+desktop's row mention is TypeScript; `tests/fixtures/prompt_refs.json`
+pins its text in both languages. A task's page lists the turns that named
+it (`v_page_ref.target_uri`, `ref_type = 'prompt_mention'`); only a
+person's prompt is read. An `@path` is linked only when the file exists in
+the thread's worktree (`@types/node` is no file). What the prompt's
+**context** carried is linked too: the context basket's pages and sources
+and the handoffs delivered with it (`AgentContext::commit`,
+`thread_context_store::link_delivered_tx`) name the turn that was open when
+the prompt was delivered (`thread_context_item.delivered_turn_id`,
+`handoff.delivered_turn_id`) and are `prompt_mention` links from it.
 
 **`v_subagent`** (`subagent:ses<n>/<id>`, `uri::types::SUBAGENT`; its
 page is its session's tab for now) pairs the two events per `(session,
@@ -1354,7 +1686,7 @@ with their subagents beneath each.
 **A session's transcript** is the foundation page `session-transcript`
 (`oxplow_run_page { page: session-transcript, params: { session, turn?, page? } }`): the session's
 turns from `v_agent_turn` oldest first with the thread's notes where
-they fall, a subagent's hand-back marked (a turn with no prompt), each
+they fall, a subagent's hand-back marked (a turn whose source is `subagent`), each
 row a turn URI. A turn URI opens it at that turn (`v_agent_turn
 .transcript_page`, built with `uri('oxplow/page', …)`). Its action **Resume in a new session**
 runs `oxplow.agent_session.open` with `resume`: a saved conversation of
@@ -1363,17 +1695,105 @@ open in another session. A person's: an agent may open a session but not
 choose its conversation.
 
 Subagent tool calls reach the hooks like any other, so their edits and
-test runs land in the thread's effort with nothing from them: there is
+test runs land in the subagent's starting turn, and so its request, with nothing from them: there is
 no dispatch protocol or subagent skill.
 
-**What to pick up next** is the foundation page `oxplow/work-next`
-(the tool `oxplow_work_next` with `thread: "thr3"`) over `v_work_item`, whichever
-list is active: an epic with its ready descendants, or every ready
+**What to pick up next** is the page `oxtask/next-task`
+(the tool `oxtask_next_task` with `thread: "thr3"`) over
+`v_oxtask_ready_queue`, oxtask's dataset: an epic with its ready descendants, or every ready
 non-epic item, open `blocks` links holding an item back; empty with
-nothing ready or no list. The bundled `work-next` command calls that tool and
-moves the item it picks to `in_progress`, so the effort links to it.
+nothing ready or no list. oxtask's `next-task` command calls that tool and
+moves the item it picks to `in_progress`, which assigns it to the thread.
 Claude Code's `TaskCreate` is a within-turn planner and never mirrors
 oxplow's items.
+
+### Background jobs
+
+**A job is a record from first sight to report** (`agent_job`,
+`oxplow_db::agent_job_store`, `v_agent_job`). A job is work an agent
+started that runs on after the call that started it: a background shell,
+a background subagent. The hook ingest writes it in the transaction of the
+hook that shows it, so a turn opened by its report finds the turn it goes
+on with at once, with no projection lag:
+
+- **Opened by** a `SubagentStart` (kind `subagent`, started in the open
+  turn, `start_basis` `reported`), the call that starts it (a finished
+  tool call that names the job it started, `ToolUse.started_job`: Claude
+  Code's Bash `PostToolUse` `tool_response.backgroundTaskId`; kind
+  `shell`, the call's id as `start_call_id`, the open turn as the start,
+  `reported`), or a Stop's running work
+  (`TurnRun.left_running`, Claude Code's `background_tasks`: started in
+  the turn that Stop closes — oxplow's guess, `matched`). A later sight
+  fills what the row lacks, and a reported start replaces a matched
+  guess. A job seen running again after it reported (a subagent resumed
+  under the same id) is a new row.
+- **Reported by** its notice (`Prompt::BackgroundJob`: Claude's
+  `<task-notification>` gives the job's `<task-id>`, the starting call's
+  `<tool-use-id>`, `<status>` and `<summary>`) or a subagent's hand-back.
+  The report's turn (opened, or the open one it was delivered into) is
+  `report_turn_id`; a second report keeps the first's turn.
+- **The report's turn goes on with the job's start**: the call the notice
+  names gives the turn it was made in (the tool events' dedupe key, built
+  by one `tool_key`), else the job's record does; `cause_turn_id` and
+  `cause_basis` are the job's start and its basis. Its `cause_ref` is the
+  job's id.
+- **A subagent's stop ends its job** (its `SubagentStop`; a background
+  one's hand-back may come after and fills the report's turn). **Its tool
+  calls are the work of the turn that started it** (their turn anchor is
+  the job's started turn), also when they land after that turn ended or
+  while another turn runs.
+- **Lost** (`lost_at`, oxplow's own fact, not the harness's status) when
+  its agent session ends, restarts or is closed before it reported: its
+  process is gone. A tool call still running then is `abandoned` too (by
+  its session, for a call made with no turn open).
+
+Claude Code's ids line up: the notice's `<task-id>`, the Stop's
+`background_tasks[].id`, the Bash call's `backgroundTaskId` and a
+subagent's `agent_id` are one id (`claude/subagent.jsonl`,
+`claude/background_shell.jsonl`). **Every Stop is followed ~1.5 s later by
+a `SubagentStop` with an `agent_id` and `agent_type: ""`** (an internal
+helper; no subagent was asked for): the Claude adapter reads no subagent
+from it (`AgentHarness::subagent` is `None`), so it opens and closes no
+subagent record or job. A job with no report and not lost is
+`running` (`v_agent_job.state`): that is what a request is waiting on.
+Pinned also by `a_jobs_start_basis_resumed_runs_and_lost_jobs`. Pinned by
+`a_background_job_is_a_record_from_start_to_report`,
+`a_background_shell_job_opens_at_its_starting_call` and the recorded
+`claude/background_shell.jsonl`
+(`a_recorded_claude_code_background_shell_is_a_job_from_its_start_to_its_report`).
+
+### Requests
+
+**A request is the turn that started something and every turn that
+followed from it** (`request`, `agent_turn.request_id`, V11): a background
+job's report and a subagent's hand-back go on with the turn their job
+started in, so they join its request. A turn joins its request when it
+opens (`open_turn_tx` → `join_request_tx`): its cause turn's request, else
+a request it starts (`request.first_turn_id`; who started it is that
+turn's `source`). The cause always opened first, so membership is known at
+once and never changes after. Every new turn has one; a re-prompt opens no
+turn and joins nothing. A request's address is
+`oxplow:oxplow/request?id=req<n>` (foundation's `request` resource,
+resolving to `v_request`: who started it, with what, when); a turn's
+`v_agent_turn.request` is that URI. It has no page of its own yet.
+
+**What a request holds and where it stands are read live** (`v_request`):
+its turns, threads, last activity, tool calls, tokens, running jobs, and
+`state` — `waiting_on_person` (an agent session whose latest turn is the
+request's waits on the person, `v_agent_session_status` `awaiting_user`:
+the rail's own reading), else `running` (a turn is open),
+`waiting_on_work` (a job it started has not reported, its session alive),
+`finished`. Its time split sums `v_turn_activity` over its turns; its files
+come with the turns' changes. Pinned by
+`a_requests_state_and_totals_are_read_from_its_turns`.
+
+**Identity and membership are stored; everything that adds up or changes
+is derived.** Work recorded against a turn — tool calls (a subagent's are
+its starting turn's), tokens, test runs, jobs — is its request's through
+`agent_turn.request_id`: no event anchor or other row repeats it. A
+cross-session message joins the sender's request when it is matched to the
+turn that sent it, at the moment it opens a turn; unmatched, it starts its
+own, and membership never changes after. Pinned by `a_turn_joins_its_request_when_it_opens`.
 
 ### Native features: observed, set, left native
 
@@ -1382,7 +1802,7 @@ shows** what it can hear, **sets at launch** what a flag or open request
 takes, and **leaves to the harness** the rest — never answering for the
 person: a prompt or question is answered in the harness's own TUI, which
 is in the tab already ("Key invariant"). The audit behind this table was
-made against Claude Code 2.1.301, Codex 0.163 (daemon) / 0.162.1 (CLI)
+made against Claude Code 2.1.301, Codex CLI 0.166.0 (daemon 0.166.0 → 0.167.1)
 and opencode 1.17.4, from their documentation and protocol schema;
 *italic* is available from the harness but not used yet, — is not
 available from outside.
@@ -1390,12 +1810,12 @@ available from outside.
 | | Claude Code | Codex | opencode |
 |---|---|---|---|
 | Waiting on a permission | `Notification` `permission_prompt` / `agent_needs_input`, and the `PermissionRequest` hook (observed, answered `Ack`) → AwaitingUser | `thread/status/changed` `activeFlags` `waitingOnApproval` → AwaitingUser, the request's command or reason as detail; cleared by the flags or `serverRequest/resolved` | the bridge forwards `permission.asked` (a `Notification`) and `permission.replied` |
-| Asked a question | `AskUserQuestion` PreToolUse → AwaitingUser with its question; a `?`-ending Stop | `waitingOnUserInput` with `requestUserInput`'s first question; a `?`-ending Stop | `question.asked` (an Ask `PreToolUse`); a `?`-ending Stop |
+| Asked a question | `AskUserQuestion` PreToolUse → AwaitingUser with its question; a `?`-ending Stop | `waitingOnUserInput` with `requestUserInput`'s first question; a `?`-ending Stop | the `question` tool, posted as `AskUserQuestion` (its PreToolUse to its PostToolUse); a `?`-ending Stop |
 | Answering from oxplow | — (no interface into an interactive session; a cross-session message can't consent) | — (a request goes to the turn's client) | *HTTP `permission` / `question` reply* — left native |
 | The plan | `ExitPlanMode` PreToolUse `tool_input.plan`, `planFilePath` → `agent.plan.proposed` | the `plan` item's text on `item/completed` → `agent.plan.proposed`; `turn/plan/updated` steps reach only the chat library | — (`plan_exit` carries no text, so none is recorded) |
 | Model / effort | `agent_turn.model` / `effort`: the Stop's `effort.level` and the transcript tail's newest `message.model`; transcript `message.model` → `v_token_usage.model`; *`SessionStart.model`, `PostModelSwitch`* | `agent_turn.model` / `effort`: `Thread.model` / `reasoningEffort` at open, moved by `thread/settings/updated` | `agent_turn.model` / `effort`: the bridge's Stop carries the last assistant message's `modelID` and `variant` |
-| Set at launch | `agentConfig.claude.model` → `--model`, `.effort` → `--effort` | `agentConfig.codex.model` → the open request's `model`, `.effort` → its `config.model_reasoning_effort` | `agentConfig.opencode.model` → `-m` |
-| Context fill, compaction | `agent_turn.context_tokens` (window NULL): the transcript tail's newest assistant usage; `PostCompact` → `agent.context.compacted` (`trigger`, `compact_summary`); `PreCompact` resets the context baselines | `agent_turn.context_tokens` / `context_window`: `thread/tokenUsage/updated` `last.totalTokens` / `modelContextWindow`; the `contextCompaction` item → `agent.context.compacted` (resets nothing: no prompt channel) | `agent_turn.context_tokens` (window NULL): the Stop's `tokens`; `session.compacted` → `agent.context.compacted` |
+| Set at launch | `agentConfig.claude.model` → `--model`, `.effort` → `--effort` | `agentConfig.codex.model` → the open request's `model`, `.effort` → its `config.model_reasoning_effort` | `agentConfig.opencode.model` → `-m` (none when blank) |
+| Context fill, compaction | `agent_turn.context_tokens` (window NULL): the transcript tail's newest assistant usage; `PostCompact` → `agent.context.compacted` (`trigger`, `compact_summary`); `PreCompact` resets the context baselines | `agent_turn.context_tokens` / `context_window`: `thread/tokenUsage/updated` `last.totalTokens` / `modelContextWindow`; the `contextCompaction` item → `agent.context.compacted` (resets nothing: no prompt channel) | `agent_turn.context_tokens` (window NULL): the Stop's `tokens`; `session.compacted` → `agent.context.compacted` (`trigger` `manual` / `auto` from the preceding `compaction` part) |
 | Tokens | OTLP and the transcript tail | `turn/completed` deltas | — (the bridge sends none) |
 | Skills, commands | shipped (`--plugin-dir`; skills reload live) | shipped (`.agents/skills`) | shipped (plugin dir, inline `command`) |
 | Native worktrees | `--worktree`, subagent `isolation: worktree` → `<repo>/.claude/worktrees/<name>`; hook `cwd` follows | none (`cwd`, `runtimeWorkspaceRoots`) | none |
@@ -1469,13 +1889,13 @@ None is cross-thread, visible to the person, and acknowledged.
   kind are the actor's, never an input. **To** an open thread, never a
   session (the thread outlives its processes), any stream's: a handoff
   is knowledge, not a write into that worktree. To the sender's own
-  thread is refused ("a note is for that"). An optional **work item** on
+  thread is refused ("a note is for that"). An optional **task** on
   the active list (a loose id is canonicalised), and a Markdown **body**
   whose `[[…]]` links are `page_ref` edges, checked like a note's
   (`link_warnings`) and restated by the boot repair. Searchable
   (`v_search_handoff`, under the recipient's stream).
 - **Commands**, all `Record` and open to every invoker (scope
-  `handoffs.write`): `oxplow.handoff.send { to_thread, body, work_item?,
+  `handoffs.write`): `oxplow.handoff.send { to_thread, body, task?,
   from_thread? }` logs `handoff.sent@2`, not undoable.
   `oxplow.handoff.settle { handoff, state, note? }` is the record of how
   it ended — `taken` / `declined` by the recipient thread, `withdrawn` by
@@ -1483,13 +1903,10 @@ None is cross-thread, visible to the person, and acknowledged.
   it — logging `handoff.settled@2`, undone by the state it replaced.
   `oxplow.handoff.resolve { handoff, outcome: taken | declined, note? }`
   is how a recipient takes one: a native composite that checks the same
-  rule (`may_settle`) against the run's actor before it composes, so a
-  stranger's run moves nothing, then composes `oxplow.work_item.move`
-  onto the recipient thread (when taking an item not there yet, on a
-  list declaring `lists`) and the settle. Ownership stays the item's
-  thread. A list's verbs run outside the transaction, so a take that
-  moves an item runs as steps and has no undo; the recipient reopens it
-  with `settle { state: open }`. A decline undoes.
+  rule (`may_settle`) against the run's actor before it composes, then
+  composes the settle. Moving a taken handoff's task onto the recipient
+  thread is bundled's (it reacts to `handoff.settled@2`). A decline
+  undoes.
 - **Thread notes stay as they are.** They were the candidate carrier and
   don't fit: a note belongs to its writer's thread, has no recipient,
   state or delivery stamp, and the Explore hand-back relies on that.
@@ -1527,12 +1944,13 @@ agent's `oxplow.handoff.send` still works and there is no menu entry):
   week.
 - The Navigator counts each thread's open inbound handoffs beside its
   title (`useOpenHandoffs`), the newest sender in the tooltip.
-- oxplow-bundled's Waiting on Me lists an open handoff to a thread with
+- foundation's Waiting on you lists an open handoff to a thread with
   no agent session open there: the person's move. Agent status is not
   touched; it stays derived from agent activity.
 
-`tests-e2e/specs/work/handoff.spec.ts` drives it: hand off from the
-thread's menu, see it on the other thread, take it, the item moves.
+foundation's fixture `taking-a-handoff-moves-its-task-to-the-receiving-thread`
+checks it: a handoff with a task is open with the task on the sender's
+thread; taken, the task is on the receiver's.
 
 **Nothing wakes a model.** oxplow never opens an inbox socket, a channel,
 a server prompt or `turn/start` for a handoff: those are Drive on an
@@ -1568,17 +1986,52 @@ open (no hook field was found).
 **Native messaging stays native, and is observed:** Claude Code's inbound
 cross-session message arrives as a prompt wrapped in
 `<cross-session-message from="<socket>" from-name="<session name>" …>`.
-The Claude harness's `prompt` reads it as `Prompt::PeerMessage { from }`
-(the session name, else the socket), not the person's words, as it reads
-a subagent's hand-back. The control plane passes it as
-`HookEnvelope.peer`; the ingest opens a turn with an empty prompt when
-none is open (none if one is), logs `agent.peer_message.received@2
-{ thread, turn, from }` (no `agent.prompt.submitted`) and sets the
-session running. `v_agent_turn.from_peer` names the sender of a turn it
-opened, and Thread Activity titles that turn "Message from …". Pinned by
-`a_peers_message_opens_a_turn_with_no_prompt`, `a_peers_message_is_not_a_persons_prompt`
+The Claude harness's `prompt` reads it as `Prompt::PeerMessage { from,
+socket, text }` (the session name, else the socket), not the person's
+words, as it reads a subagent's hand-back. The control plane passes it as
+`HookEnvelope.prompt`; the ingest opens a turn with source `peer` and the
+message as its text when none is open (none if one is), logs the
+delivery (`agent.prompt.submitted`, `source: peer`, `sender`) and sets the
+session running.
+`v_agent_turn.sender` names the sender of a turn it opened (its socket in
+`cause_ref`), and Thread activity (foundation) titles that turn "Message from …".
+**The receiving turn is matched to the turn that sent it** (V15,
+`agent_message`, `oxplow_db::agent_message_store`): the Claude adapter reads
+a `SendMessage` call's recipient and text (`ToolUse.sent`), recorded with
+its turn when the call is requested; on receipt the adapter gives the
+message without its wrapping (`Prompt::PeerMessage.message`), and the one
+unmatched send of the same text (content hash) in the last ten minutes —
+recorded once per call (with the call's id, V17), only when the policy let it
+run and only with text, and not a send whose tool-call row says it was denied,
+abandoned or failed — is the cause (`cause_basis` `matched`): the receiving turn joins the sender's
+request, across threads. No send, or two of the same text, links nothing,
+and the turn starts its own request. Known limits: a message read by a busy
+session between tool calls opens no turn (no hook was seen to fire for it);
+a held message expires after five minutes unacknowledged, so a send does
+not prove a receipt; a sender outside oxplow is known by its name and
+socket only. Pinned by `a_peers_message_is_matched_to_the_turn_that_sent_it`, `a_message_is_matched_across_threads` and `a_send_that_never_ran_is_not_a_candidate`. Pinned by
+`a_peers_message_opens_a_turn_of_its_own_with_its_text`, `a_peers_message_is_not_a_persons_prompt`
 and the recorded `claude/peer_message.jsonl`
-(`a_recorded_claude_code_peer_message_opens_a_turn_of_its_own`). Codex's
+(`a_recorded_claude_code_peer_message_opens_a_turn_of_its_own`).
+The **idle notice** a `SendMessage` with `notify_when_idle` asks for
+arrives as a prompt starting `[Cross-session idle notice] "<session name>"`
+(not `[idle notice]`): the adapter reads it as a `PeerMessage` from that
+session (no socket, no message), never a person's prompt
+(`an_idle_notice_is_a_peers_and_not_a_persons_prompt`). It has no text
+to match on, so it is linked by who it names: a `SendMessage` with
+`notify_when_idle` says so on its `agent_message` row (V27:
+`notify_when_idle`, and `idle_notice_turn_id` once answered; `recipient` is
+the call's `to`), and the notice joins the turn of the one unanswered ask to
+that session name within an hour (`cause_basis` `matched`; none or two for one name link nothing, and a
+denied or failed call is no candidate). Pinned by
+`an_idle_notice_is_matched_to_the_send_that_asked_for_it` and the recorded
+exchange. A send to a recipient given as a session id, not its name, is not
+linked. Recorded from the
+sender's side in `claude/cross_session.jsonl`
+(`a_recorded_claude_code_cross_session_exchange_is_not_the_persons_prompts`);
+the reply is `<cross-session-message from="uds:/tmp/cc-socks/<pid>.sock"
+from-name=… from-mode="prompting">`. A `[Cross-session delivery notice]`
+(a recipient in another permission mode) has not been recorded. Codex's
 collab agents are subagents ("Collab agents are subagents"). Observe
 only: oxplow never sends a peer message and doesn't read Claude's team
 mailboxes (not a documented interface).
@@ -1589,8 +2042,8 @@ Cross-thread ownership and duplicate work are visibility, not gates
 ### Validated against, and what pins each scenario
 
 The session integration is checked against these versions: **Codex CLI
-0.162.1** (the 0.163 daemon was probed for "Codex: its TUI on a thread
-oxplow observes"), **Claude Code 2.1.301**, **opencode 1.17.4**; the
+0.166.0 / daemon 0.166.0 → 0.167.1** (the approval, interrupt, background-terminal
+and subagent recordings; older fixtures are 0.162.1 / 0.163), **Claude Code 2.1.322**, **opencode 1.17.4**; the
 recorded fixtures (`crates/oxplow-harnesses/fixtures/{claude,opencode}`,
 `crates/oxplow-app/tests/fixtures/codex/app-server.jsonl`) were taken at
 the versions current when recorded. A harness declares what it supports
@@ -1604,6 +2057,10 @@ equivalence between tools.
 | Native title changes | `a_slot_records_its_conversations_and_their_titles` (Claude's `session_title`); Codex's `thread/name/updated` in `a_prompt_in_the_tui_is_a_recorded_turn`, the name on resume in `a_new_thread_is_saved_so_the_tui_can_resume_it`; rename: `a_native_rename_is_a_thread_name_set` |
 | Binding changes (started, switched, forked, chosen) | `a_slots_bindings_are_its_conversations_in_order`, `a_person_resumes_a_chosen_conversation`, `a_fork_opens_a_new_session_and_leaves_the_source_alone`, `a_fork_launch_binds_the_new_session_not_the_source`, `a_child_sessions_tool_hook_leaves_the_resume_pointer` |
 | Child-agent attribution | `its_subagents_are_read_from_their_hooks` (recorded `claude/subagent.jsonl`), `its_bridge_sends_the_call_id_the_exit_code_and_a_childs_parent` (opencode), `a_call_inside_a_subagent_call_is_the_subagents`, `a_background_subagent_hands_back_without_a_prompt` |
+| opencode compaction | recorded `opencode/compaction.jsonl`: `a_recorded_opencode_compaction_is_recorded_and_opens_no_turn`; the bridge: `its_bridge_names_what_triggered_a_compaction` |
+| opencode subagents | recorded `opencode/foreground_subagent.jsonl`, `opencode/background_subagent.jsonl`: `a_recorded_opencode_foreground_subagent_is_attributed`, `a_recorded_opencode_background_subagent_hands_back_without_a_prompt` |
+| opencode question | recorded `opencode/question.jsonl`: `a_recorded_opencode_question_is_one_tool_call_and_one_wait`; the bridge: `its_bridge_reports_an_answered_question_as_one_call`, `its_bridge_reports_a_wait_on_a_permission_or_a_question` |
+| opencode abort and API error | recorded `opencode/abort.jsonl`, `opencode/error.jsonl`: `a_recorded_opencode_abort_ends_one_turn_as_interrupted`, `a_recorded_opencode_api_error_ends_one_turn_as_errored` |
 | Unsupported capability | the conformance test above; `a_harness_without_a_list_says_so`; `a_native_rename_needs_the_feature_a_name_and_a_running_observer` |
 | Live client reconnect | `an_agent_session_is_reattached_not_spawned_again`; the pane's reopen (`terminalSession.test.ts`); Codex: `a_restarted_daemon_is_observed_again_on_the_next_open` |
 | Backend restart | `a_resumed_session_resets_a_turn_that_died_without_a_stop`, `a_restart_close_is_logged_as_recovery`, `a_process_exit_ends_its_session_once`; a Codex session end to end, `a_codex_session_resumes_its_thread_after_a_backend_restart` (a fake `codex` on the search path, the scripted daemon, Services reopened over the same database file: the bound thread is resumed, not replaced, and opens writable) |
@@ -1621,7 +2078,7 @@ Not yet covered: a recorded Claude hook carrying `session_title` (filed).
 ### Plans
 
 A plan the agent puts to the person is an `agent.plan.proposed` event
-(`{ thread, turn?, text, path? }`), anchored to the turn and effort open
+(`{ thread, turn?, text, path? }`), anchored to the turn open
 when it came. The text sits in the payload, capped at 64 KiB, so a model
 reads it. Claude Code's `ExitPlanMode` PreToolUse is mapped by the
 harness (`claude_shaped_tool_use`: `ToolUse.plan` from `tool_input.plan`
@@ -1632,10 +2089,9 @@ text is authoritative) to `Incoming::Plan`, which the chat host ingests as
 a `PlanProposed` hook with `tool.plan`; that waits on no one. opencode's
 `plan_exit` carries no text, so it records none.
 
-`v_agent_plan` (thread, effort, turn, session, `proposed_at`, `text`,
+`v_agent_plan` (thread, turn, session, `proposed_at`, `text`,
 `path`, and `event_id`, the event to read with `oxplow_read event:<id>`)
-reads them; the bundled `effort-plan` (slot `oxplow/changes.sections`) and
-`thread-plan` (slot `thread.plan.header`) pages show a plan, newest
+reads them; the bundled `thread-plan` (slot `thread.plan.header`) pages show a plan, newest
 first.
 
 **Whether the person accepted the plan is not recorded.** No hook or
@@ -1674,8 +2130,9 @@ Codex's observer logs it from `thread/status/changed` active flags
 (`waitingOnApproval`, `waitingOnUserInput`; the detail is the request's
 command, reason or first question) and clears it on the cleared flags or
 `serverRequest/resolved`. opencode's bridge forwards `permission.asked`
-(a `Notification`) and `question.asked` (an Ask `PreToolUse`); the
-`*.replied` events become a tool-less `PostToolUse` that clears the wait.
+(a `Notification`; `permission.replied` becomes a tool-less `PostToolUse`
+that clears the wait). Its `question` tool is posted as `AskUserQuestion`,
+so the wait runs from the call's PreToolUse to its PostToolUse.
 ACP permission cards log it through `set_status`.
 
 **`permission_prompts`** means: oxplow learns when the agent waits on a
@@ -1697,7 +2154,7 @@ documented hooks, not recorded).
   cancel. The terminal pane calls `onUserInterrupt` on a plain Escape and
   the session page records a synthetic `Interrupt` for the session
   (`recordUserInterrupt`, the `ingest_hook_event` RPC): the open turn
-  closes as interrupted and the status is Stopped, which clears open
+  closes `interrupted` and the status is Stopped, which clears open
   tools and subagents. Only while a turn is open: an Escape that closes a
   menu with no turn running changes nothing, so a thread waiting on the
   person still is. One during a turn can't be told from a cancel; the
@@ -1730,7 +2187,7 @@ for the transition out of working; terminal rows are unreliable
 ### Snapshot tracking
 
 oxplow keeps a content-addressed history of each worktree so what changed
-per turn and per effort is known without git. The store and its
+per turn is known without git. The store and its
 guarantees are [data-model.md](./data-model.md) "snapshot +
 file_snapshot"; this is when takes happen. Every take is a mark of the
 active snapshots implementation ([work-tracking.md](./work-tracking.md)
@@ -1744,80 +2201,56 @@ active snapshots implementation ([work-tracking.md](./work-tracking.md)
   (`SnapshotCaptureRegistry`), each watching its own worktree.
 - **Turn end.** When a turn closes (Stop or interrupt, every harness
   through `HookIngestService::ingest`), `turn_snapshots::CaptureTurnSnapshots`
-  runs a `turn_end` take anchored to the turn, its thread and its open
-  effort, and `agent_turn.snapshot_id` records it. **What the turn
-  changed is `agent_turn.start_snapshot_id → snapshot_id`**, the start
-  recorded when the turn opened — not the take's op parent, which other
-  takes during the turn (an effort's close, a commit, another thread's
-  turn end) move. One take per Stop, for the newest turn it closed
+  runs a `turn_end` take anchored to the turn and its thread
+  (`snapshot_op.turn_id`). **What the turn changed is its files**
+  (`turn_file`, a time join with the stream's snapshot line), not the
+  take's op parent, which other takes during the turn (a commit, another
+  thread's turn end) move. One take per Stop, for the newest turn it closed
   (`AgentTurnStore::close` reports whether it closed anything), after the
   status is set so the UI isn't held on running.
 - **The budget.** The Stop waits at most `snapshotTurnBudgetMs` (default
   2000, min 100; an agent may set it). A slower take is never aborted: it
   finishes in the background and its op and `snapshot.taken` record
   `over_budget`. The clock starts before the per-stream take lock.
-- **Turn events.** `agent.turn.started@2` / `agent.turn.ended@3 {
-  outcome: completed | interrupted | restart }`, in the same transaction
-  as the `agent_turn` row.
-- **Quiet period.** Human edits between turns get their own snapshot: a
+- **Turn events.** `agent.turn.started@3 { source, cause_turn? }` /
+  `agent.turn.ended@5 { outcome, left_running?, error? }` (outcome as above), in
+  the same transaction as the `agent_turn` row.
+- **Quiet period.** The worktree's snapshots do not depend on turns: a
   watcher change arms a deadline (`DEFAULT_QUIET_PERIOD`, 3 s, debounced);
-  when it fires with paths dirty and no turn open on any of the stream's
-  threads (`stream_has_open_turn`, the registry's `OpenTurnProbe`), a
-  `quiet` take records them. While a turn is open it yields to the turn's
-  own take.
-- **Effort brackets.** An effort's open takes an `effort_start` snapshot
-  (`effort.start_snapshot_id`), its close an `effort_end` one
-  (`end_snapshot_id`); an unchanged tree records an op on the current
+  when it fires with paths dirty, a `quiet` take records them, whoever
+  changed them and whatever turns are open. A take another request made
+  meanwhile has emptied the set, and the firing does nothing.
+- **No brackets.** An unchanged tree records an op on the current
   snapshot instead of a new row. Agents never flush explicitly.
 - **Boot and HEAD.** The primary stream's startup sweep
   (`enqueue_startup_diff`, then a `startup` take) records what changed
-  while oxplow was down; a git-refs change runs a `git_refs` take, then on
-  a clean tree a `head_moved` re-stamp (`vcs.head.moved@2`).
+  while oxplow was down; a move of this worktree's HEAD (not a ref moving elsewhere in the repository) runs a `git_refs` take, then on
+  a clean tree a `head_moved` re-stamp, and logs `vcs.head.moved@3`.
 
-### Per-effort write log
+### Files a turn changed
 
-An effort's files (`effort_file`, [data-model.md](./data-model.md)) are
-recorded as the work happens, never declared.
+A turn's files are recorded as the work happens, never declared
+([work-tracking.md](./work-tracking.md) "The record").
 
-- **Claimed: edits.** The `effort.claim` reactor
-  (`tool_call_reactors.rs`, on `agent.tool.finished`) claims every file
-  an edit names for the event's **effort anchor**, so a claim landing
-  after that effort closed still goes to it; with no anchor the thread's
-  open effort takes it. Paths are already relative to the thread's
-  worktree; an absolute path (outside it) is never claimed. `record_file`
-  is idempotent on `(effort_id, path)` with `source = 'claimed'` and
-  replaces an observation. The same event feeds `tool_call.project` (the
-  `agent_tool_call` row) and `wiki.attribution` (an edit of an indexed
-  `.oxplow/wiki/<slug>.md` marks the page touched by the thread).
-- **Observed: everything else a turn changed** (shell, codegen,
-  formatters). The `effort.observe` consumer (`effort_observation.rs`,
-  after `effort.policy`, on `thread.checkpoint`) content-diffs the turn's
-  start → end snapshots (`diff_snapshots`, so an edit-then-revert doesn't
-  count) and records each changed path on the effort holding the turn,
-  unless another thread's overlapping effort claimed it
-  (`effort_store::observe_files_tx`). A path two threads changed and
-  neither claimed is observed by both; changes between turns (the
-  person's own) belong to no effort. Nothing is reconciled at close.
-- **Paths the project never snapshots belong to no effort.**
-  `EffortService::claimable_paths` drops what the stream's
-  `WorkspaceFilter` excludes (`generated.exclude` and `.gitignore`).
-- **A run is the effort its causing tool call was in.** Tests, analysis
-  and coverage are recorded whether or not an effort is open; the capture
-  is stamped with `CollectionService::resolve_owner` (the tool event's
-  effort anchor, else the thread's open effort) as
-  `metric_capture.effort_id`, and an effort that adopts a turn restamps
-  its captures. `oxplow.test.record_run` is only for counts oxplow
+- **Claimed: edits.** On `agent.tool.finished` every file an edit names
+  is a path of the tool call (`agent_tool_call_path`, basis `named`; a
+  shell call's `bashEditDiff` files are `reported`). Paths are relative
+  to the thread's worktree; an absolute path (outside it) is never
+  claimed. The same event feeds `tool_call.project` (the
+  `agent_tool_call` row) and `knowledge.attribution` (an edit of an indexed
+  `.oxplow/oxwiki/<slug>.md` marks the page touched by the thread).
+- **Everything else a turn changed** (shell, codegen, formatters) comes
+  from the time join of the turn with the stream's snapshot line
+  (`v_turn_file`): no step records it per turn, and changes between
+  turns (the person's own) belong to no turn. Nothing is reconciled at
+  close.
+- **A run is the turn its causing tool call was in.** Tests, analysis
+  and coverage are recorded whether or not anything else is going on, and
+  are the turn's request's. `oxplow.test.record_run` is only for counts oxplow
   couldn't parse.
 
-Claims and observations carry the agent session where one is known
-([work-tracking.md](./work-tracking.md) "Efforts"). Claims an agent makes
-about its work are a different thing: it states the ones it can back in
-`oxplow.effort.report`'s `claims` (`v_claim.provenance = 'recorded'`),
-and the bundled `infer-reasoning` effect asks a model, when an effort
-finishes, for the decisions the agent made without recording them and the
-claims its answers made (`inferred`; the `reasoning` job, skipped while no
-model serves the `reasoning` profile). Decisions an agent records itself
-are `oxplow.effort.record_decision`.
+Claims carry the agent session where one is known
+([work-tracking.md](./work-tracking.md) "Requests, files and assignment").
 
 ### Token usage capture
 
@@ -1834,7 +2267,7 @@ app-server client"). Details: [metrics.md](./metrics.md)
 
 **Per-turn rows (the transcript).** For a harness with `transcript`
 (Claude Code), the `token_usage.turns` reactor (`TurnTokensConsumer`,
-`crates/oxplow-app/src/token_usage.rs`) reacts to `agent.turn.ended@3`
+`crates/oxplow-app/src/token_usage.rs`) reacts to `agent.turn.ended@5`
 with `TokenUsageService::on_stop`; nothing is parsed in the hook. It reads
 the per-session cursor (`agent_token_cursor`), takes only the complete
 lines past it, and the harness's `turns(tail)` splits them into one
@@ -1842,8 +2275,7 @@ lines past it, and the harness's `turns(tail)` splits them into one
 usage and `model` of the assistant messages answering it (tool-result
 user messages fold into the current turn; a message counts once by its
 id). Each turn becomes one `agent_token_usage` row (provenance
-`observed`) on the effort the oxplow turn ran in (its anchor, else the
-thread's open one), and the cursor advances in the same transaction
+`observed`) on the oxplow turn it ran in (so on its request), and the cursor advances in the same transaction
 (`record_batch`), so a redelivered turn never reads the same bytes twice.
 **Bootstrap:** with no cursor yet (a fresh daemon, or the first Stop on a
 long transcript) it seeds the cursor at the last complete line and
@@ -1856,8 +2288,8 @@ row keyed by the event (`agent_token_usage.cause`).
 transcript the agent wrote — what the person typed into the real CLI.
 There is no second input box and no "send prompt" tool. Everything reads
 the rows through `v_token_usage`: the bundled `task-tokens` page
-(`oxplow/work-item.sections` slot), `thread-tokens` (`thread.plan.header`)
-and the usage pages. Tables: [data-model.md](./data-model.md).
+(`oxplow/task-detail.sections` slot), foundation's Thread activity (per
+turn) and the usage pages. Tables: [data-model.md](./data-model.md).
 
 ### Collection command and skill
 
@@ -1892,10 +2324,10 @@ advisories; at most `NUDGE_BUDGET`, 2000 characters, per hook), and
 answered reaches the agent on the thread's next tool call or prompt.
 Nothing is taken for a session whose harness lacks the hook's channel:
 its nudges stay undelivered rather than being stamped and lost. **One-shot marks
-are durable** (`claim_once`, per effort or per thread): the report-less
-nudge fires once per effort, an advisory once per its `once_per` scope,
+are durable** (`claim_once`, per request or thread): the report-less
+nudge fires once per request, an advisory once per its `once_per` scope,
 across restarts. A person reads what oxplow told the agent in the bundled
-`effort-nudges` page ("Agent Nudges", `oxplow/changes.sections` slot).
+nudges page ("Agent Nudges", `oxplow/changes.sections` slot).
 
 ### Observe conformance
 
@@ -1922,7 +2354,9 @@ No findings passes.
   and opencode, recorded with `OXPLOW_HOOK_DEBUG`, is checked in at
   `crates/oxplow-harnesses/fixtures/<harness>/hooks.jsonl` (`{event,
   payload}` per line; paths scrubbed to `<ROOT>`, `<HOME>`, `<TMP>`;
-  `claude/subagent.jsonl` is a background-subagent session).
+  `claude/subagent.jsonl` is a background-subagent session,
+  `claude/background_shell.jsonl` a background shell, `claude/cross_session.jsonl`
+a cross-session exchange; its ListAgents listing is an invented stub).
   `tests/replayed_harnesses.rs` posts each in order to a live route as a
   session of its harness, its own mapping and answers running, and the
   suite checks the record (tokens aren't replayed). When an agent's hook
@@ -1962,7 +2396,7 @@ revisit if Claude Code adds one.
 
 ## Related
 
-- [work-tracking.md](./work-tracking.md) — efforts, policies and hints
+- [work-tracking.md](./work-tracking.md) — requests, files, assignment and hints
   built on this record.
 - [commands.md](./commands.md) — the command bus every agent write goes
   through.

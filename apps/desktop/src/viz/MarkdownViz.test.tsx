@@ -175,12 +175,12 @@ test("a re-read keeps a draft; a clean editor follows the saved text", async () 
 
 test("on a page that takes comments, the editor's comments are on the page's URI", async () => {
   const view = render(
-    <PageCommentsContext.Provider value={{ target: "oxplow:oxplow/wiki?slug=notes", streamId: "str1", threadId: null }}>
+    <PageCommentsContext.Provider value={{ target: "oxplow:oxplow/knowledge?id=notes&store=oxwiki", streamId: "str1", threadId: null }}>
       <VizView run={runOf("Some text.")} onOpenPage={() => {}} />
     </PageCommentsContext.Provider>,
   );
   await editorOf(view);
-  await waitFor(() => expect(targets).toContain("oxplow:oxplow/wiki?slug=notes"));
+  await waitFor(() => expect(targets).toContain("oxplow:oxplow/knowledge?id=notes&store=oxwiki"));
 });
 
 test("a draft makes its tab dirty, and the tab's Save saves it", async () => {

@@ -127,7 +127,7 @@ absolutely-positioned DOM overlay on the left gutter (the `BlameOverlay`
 sub-component): one `BlameLine` per line — a committed line names its
 revision, author and time; an uncommitted line names no revision and
 renders as the grey "Uncommitted" row. (Attributing lines to oxplow
-efforts was designed but never populated; that dormant branch was removed
+requests was designed but never populated; that dormant branch was removed
 in P5.B4.)
 
 Layout details:
@@ -158,7 +158,7 @@ Layout details:
 
 Refresh rule: the overlay re-fetches when the file is saved
 (`isDirty` transitions true → false). It does **not** refresh on every
-edit because attribution is relative to the last closed effort / HEAD,
+edit because attribution is relative to HEAD,
 not the buffer.
 
 ## Uncommitted-change gutter markers
@@ -258,7 +258,7 @@ Open file navigates in the tab when there is one, else opens a page. A
 page's tree at full size, not an embed's, a rail's, an expanded row's or a
 section of another page) draws no Open file: the file is the page's.
 `PageTree` gives the viz `isPage`; a snippet in a review, a finding or a
-wiki block keeps the button.
+knowledge page block keeps the button.
 A `code` row names its file, optionally its `filesystem` and `revision`
 (none of either: the local working tree). The viz `stat`s the file before
 reading it, so a binary or over-5-MiB file shows a placeholder line, not
@@ -306,7 +306,7 @@ rich-text integration:
   the resolved location so hints/context self-heal and old comments
   upgrade in place; fuzzy matches paint the dashed
   `.oxplow-comment-highlight--approx` variant. Corrected/orphaned anchors
-  persist through `relocateComment` (`oxplow.knowledge.relocate_comment`; an
+  persist through `relocateComment` (`oxplow.comment.relocate`; an
   anchor already where it was records nothing, so the re-read stops).
 - **Relinking.** The `MonacoCommentHandle` exposes `relinkTargets()` +
   `relinkToSelection(id)`; EditorPane's context menu lists "Relink

@@ -11,7 +11,7 @@
 //! stalls the pump, and nothing is skipped silently — a person retries
 //! or discards the letter (`retry_dead_letter` / `discard_dead_letter`).
 //!
-//! **Async consumers** (P2.6.2, tsk454) do work that can't live in a
+//! **Async consumers** (P2.6.2) do work that can't live in a
 //! SQLite transaction — take a snapshot, call a service. The pump runs the
 //! handler outside any transaction and checkpoints only after it returns,
 //! so a crash mid-work re-delivers the event on the next run: an async
@@ -21,8 +21,8 @@
 //! event as a dead letter and moves on, like the sync kind.
 //!
 //! [`EventPump::settle`] runs the pump now and waits (bounded) for it — a
-//! caller whose answer depends on a consumer's effect (the close's
-//! file review needs the effort's end snapshot) settles instead of
+//! caller whose answer depends on a consumer's effect (a turn-end
+//! advisory reads the turn's checkpoint) settles instead of
 //! re-implementing the effect inline. One run at a time: the loop and a
 //! settle never deliver the same event concurrently.
 //!
@@ -61,18 +61,10 @@ pub const CORE_CONSUMERS: &[&str] = &[
     "config.providers",
     "config.scripts",
     "config.workspace_filter",
-    "effort.claim",
-    "effort.commits",
-    "effort.evidence",
-    "effort.landing",
-    "effort.lifecycle",
-    "effort.observe",
-    "effort.policy",
     "extension_datasets.entities",
-    "knowledge.records",
-    "knowledge.switch",
     "metrics.entity_states",
-    "page_ref.work_item",
+    "record.file_reads",
+    "refs.drift",
     "search.index",
     "snapshots.switch",
     "symbols.collect",
@@ -81,8 +73,6 @@ pub const CORE_CONSUMERS: &[&str] = &[
     "token_usage.turns",
     "tool_call.project",
     "ui.push",
-    "wiki.attribution",
-    "work_items.project",
 ];
 
 /// A consumer whose work runs outside the pump's transaction (see the
@@ -101,7 +91,7 @@ pub trait AsyncEventConsumer: Send + Sync {
     }
     /// The consumers an event of `event_type` waits on — a subset of
     /// [`Self::after`] for a consumer whose predecessors depend on what it
-    /// is handling (`collector.triggers`, tsk711). `after` alone orders the
+    /// is handling (`collector.triggers`). `after` alone orders the
     /// consumers when the pump settles.
     fn after_for(&self, event_type: &str) -> Vec<String> {
         let _ = event_type;
@@ -595,7 +585,7 @@ impl EventPump {
             loop {
                 let Some(p) = pump.upgrade() else { return };
                 let ran = p.run_slot(&slot).await;
-                // A handler may have logged events (`effort.finished`) that
+                // A handler may have logged events (`thread.checkpoint`) that
                 // other consumers wait on, and a consumer running `after`
                 // this one waits on its checkpoint.
                 if matches!(&ran, Ok(r) if r.handled + r.skipped + r.dead_lettered > 0) {
@@ -893,7 +883,7 @@ mod tests {
         .unwrap()
     }
 
-    /// An async consumer (P2.6.2, tsk454): work outside the pump's
+    /// An async consumer (P2.6.2): work outside the pump's
     /// transaction, checkpoint after it completes. Scripted outcomes per
     /// call; `Ok` once the script runs out.
     struct AsyncRecorder {
@@ -1202,7 +1192,7 @@ mod tests {
         }
     }
 
-    /// P3.6 (tsk476): the consumers a settle names catch up side by side —
+    /// P3.6: the consumers a settle names catch up side by side —
     /// the hook's wait is the slowest one's, not their sum.
     #[tokio::test]
     async fn settle_runs_the_named_consumers_concurrently() {

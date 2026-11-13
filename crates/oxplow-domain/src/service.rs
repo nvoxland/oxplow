@@ -27,13 +27,34 @@ const ALL: &[Mode] = &[Mode::Pure, Mode::Transactional, Mode::External];
 
 /// Services multiplexed by the `scope` builtin. The SQL service owns the
 /// builtin's metadata; each call checks its actual declared service.
+/// `state.write` is no service (`SERVICES`): only a capability
+/// implementation's script may declare it (`scope_calls::check_implementation_need`).
 pub const CALLABLE: &[&str] = &[
     "sql.read",
     "state.read",
+    "state.write",
     "extension_config.read",
     "jobs.read",
     "ai.discover",
+    "store.sql",
+    "files.read",
+    "links.check",
 ];
+
+/// The service a `scope()` call of `call` needs declared: `files.list`
+/// is `files.read`'s; any other call is its own.
+pub fn need_of_call(call: &str) -> &str {
+    match call {
+        "files.list" => "files.read",
+        other => other,
+    }
+}
+
+/// Whether `call` is a `scope()` call a script may make (`CALLABLE`, and
+/// `files.list`).
+pub fn is_callable(call: &str) -> bool {
+    CALLABLE.contains(&need_scope(need_of_call(call)))
+}
 
 /// Every service, by scope.
 pub const SERVICES: &[ServiceSpec] = &[
@@ -57,6 +78,38 @@ pub const SERVICES: &[ServiceSpec] = &[
         title: "Read private extension state",
         summary: "Read this extension's workflow state or cache: \
                   `scope(\"state.read\", {scope, area})` returns a snapshot or null.",
+        builtins: &[],
+        modes: ALL,
+    },
+    ServiceSpec {
+        scope: "store.sql",
+        title: "Use the extension's own SQLite file",
+        summary: "Read SQL on this extension's own file (`storage: { sqlite: true }`): \
+                  `scope(\"store.sql\", {sql, params?})` runs one statement that changes \
+                  nothing and returns `{rows}`. Writes are the command \
+                  `oxplow.extension_store.write`.",
+        builtins: &[],
+        modes: ALL,
+    },
+    ServiceSpec {
+        scope: "files.read",
+        title: "Read the extension's declared folders",
+        summary: "Read files in the folders `files:` declares: \
+                  `scope(\"files.read\", {path, lossy?})` returns `{body}` (with `lossy: true`, bytes that \
+                  are not UTF-8 become U+FFFD and `{body, lossy}` says whether any did), \
+                  `scope(\"files.list\", {path, glob?})` returns `{files: [{path, size, modified_at}]}`. \
+                  Writes are the commands `oxplow.extension_files.write` and `.delete`.",
+        builtins: &[],
+        modes: ALL,
+    },
+    ServiceSpec {
+        scope: "links.check",
+        title: "Check a body's links",
+        summary: "Check the `[[…]]` links in a body the way oxplow checks the ones it writes: \
+                  `scope(\"links.check\", {body, self?})` returns `{warnings: [{target, reason}]}`, \
+                  empty when every link resolves; files are looked for in the run actor's \
+                  worktree, and `self` is the page's own URI, which it may link to. A store's \
+                  write command refuses on a warning.",
         builtins: &[],
         modes: ALL,
     },

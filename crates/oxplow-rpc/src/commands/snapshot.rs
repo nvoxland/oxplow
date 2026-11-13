@@ -68,24 +68,6 @@ pub async fn get_blob_storage_bytes(svc: &Services) -> Result<ByteSize, IpcError
     Ok(ByteSize::new(total))
 }
 
-/// For each snapshot id in the input list, the wiki slugs whose
-/// body changed in that snapshot. Drives the Local History
-/// dashboard's wiki badges. Cheaper than fetching the full
-/// `file_snapshot` rows per snapshot.
-pub async fn list_wiki_slugs_for_snapshots(
-    svc: &Services,
-    snapshot_ids: Vec<SnapshotId>,
-) -> Result<Vec<(SnapshotId, String)>, IpcError> {
-    let rows = svc
-        .snapshot_store
-        .list_wiki_slugs_for_snapshots(snapshot_ids.into_iter().map(SnapshotId::value).collect())
-        .await?;
-    Ok(rows
-        .into_iter()
-        .map(|(id, slug)| (SnapshotId::new(id), slug))
-        .collect())
-}
-
 /// Every `file_snapshot` row captured under a single parent
 /// snapshot id (i.e. one batch of `request_snapshot()`).
 pub async fn list_files_for_snapshot(

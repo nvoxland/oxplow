@@ -200,16 +200,14 @@ pub async fn find_panel(svc: &crate::Services, id: &str) -> Result<ExtensionPane
     )))
 }
 
-/// The params `part` runs with: the body takes the toggles' values in force;
-/// every part's scope id comes from the view.
-pub fn part_params(part: PanelPart, choices: &[PanelChoice]) -> BTreeMap<String, SqlCell> {
-    match part {
-        PanelPart::Body => choices
-            .iter()
-            .map(|c| (c.name.clone(), SqlCell::Text(c.value.clone())))
-            .collect(),
-        _ => BTreeMap::new(),
-    }
+/// The params a part runs with: the header's toggles in force that its
+/// page declares ([`part_request`] keeps those); every part's scope id comes
+/// from the view.
+pub fn part_params(choices: &[PanelChoice]) -> BTreeMap<String, SqlCell> {
+    choices
+        .iter()
+        .map(|c| (c.name.clone(), SqlCell::Text(c.value.clone())))
+        .collect()
 }
 
 /// The body's toggles for the viewer's `picks`, read from its page.
@@ -238,13 +236,24 @@ pub async fn part_request(
     let Some(page) = page_of(panel, part) else {
         return Ok(None);
     };
+    // The body's toggles, those this part's page declares too: the
+    // collapsed view and the count follow the header as the body does.
     let choices = match part {
         PanelPart::Body => body_choices(svc, panel, picks).await?,
-        _ => Vec::new(),
+        _ => {
+            let declared = svc
+                .extension_catalog
+                .find_page(svc.worktrees.project_dir(), page)?;
+            body_choices(svc, panel, picks)
+                .await?
+                .into_iter()
+                .filter(|c| declared.params.iter().any(|p| p.name == c.name))
+                .collect()
+        }
     };
     Ok(Some(RunRequest {
         target: RunTarget::Page(page.into()),
-        params: part_params(part, &choices),
+        params: part_params(&choices),
         ctx,
         viewer: Actor::Human,
     }))

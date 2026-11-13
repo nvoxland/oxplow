@@ -99,13 +99,13 @@ mod tests {
             .run(
                 &anonymous(),
                 SQL_QUERY,
-                json!({ "sql": "SELECT view FROM v_dataset WHERE view = ?1", "params": ["v_work_item"], "limit": 5 }),
+                json!({ "sql": "SELECT view FROM v_dataset WHERE view = ?1", "params": ["v_thread"], "limit": 5 }),
                 false,
             )
             .await
             .unwrap();
         assert_eq!(out.result["columns"], json!(["view"]));
-        assert_eq!(out.result["rows"], json!([["v_work_item"]]));
+        assert_eq!(out.result["rows"], json!([["v_thread"]]));
         assert!(out.audit_id.is_none(), "a read leaves no record");
 
         let err = svc
@@ -113,7 +113,7 @@ mod tests {
             .run(
                 &anonymous(),
                 SQL_QUERY,
-                json!({ "sql": "DELETE FROM task" }),
+                json!({ "sql": "DELETE FROM threads" }),
                 false,
             )
             .await

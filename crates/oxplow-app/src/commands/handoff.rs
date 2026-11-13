@@ -2,7 +2,7 @@
 //! oxplow keeps — never a message it delivers (`.context/agent-model.md`
 //! "Handoffs and native messaging"). `Tx` over `oxplow_db::handoff_store`.
 //!
-//! - `oxplow.handoff.send { to_thread, body, work_item?, from_thread? }`:
+//! - `oxplow.handoff.send { to_thread, body, task?, from_thread? }`:
 //!   from the actor's thread (an agent's own, an effect's event's, the one
 //!   a person names) to another open thread, any stream's. Logs
 //!   `handoff.sent@1`. The result carries `link_warnings`.
@@ -12,13 +12,9 @@
 //!   `handoff.settled@1`; undoes to the state it replaced.
 //!
 //! - `oxplow.handoff.resolve { handoff, outcome, note? }`: how the
-//!   recipient takes or declines one. A composite: taking a handoff that
-//!   hands over a work item moves the item onto the recipient thread
-//!   (`oxplow.work_item.move`, when the work list keeps per-thread lists)
-//!   and then settles it. Who may is checked before anything is composed,
-//!   so a stranger's run moves nothing. A work list's verbs run outside
-//!   the transaction, so a take that moves an item is steps and has no
-//!   undo; the recipient reopens it with `settle` instead.
+//!   recipient takes or declines one. A composite over settle; who may is
+//!   checked before anything is composed. Moving a taken handoff's task
+//!   onto the recipient is bundled's (it reacts to `handoff.settled`).
 //!
 //! Nothing here reaches an agent. The recipient thread's agent is given
 //! an open handoff at its next prompt (`agent_context`), and the person
@@ -29,7 +25,6 @@ use std::sync::Arc;
 use oxplow_db::handoff_store::{handoff_tx, send_tx, settle_tx, Handoff, HandoffState, NewHandoff};
 use oxplow_domain::run::RunContext;
 use oxplow_domain::uri::build::{handoff_uri, thread_uri};
-use oxplow_domain::work_items::WorkItemsRegistry;
 use oxplow_domain::{Actor, CommandCall, CommandError, HandoffId, ThreadId};
 use rusqlite::OptionalExtension;
 use schemars::JsonSchema;
@@ -41,7 +36,6 @@ use super::compose::{Compose, Composer, Composing, Composition};
 use super::ops::Op;
 use super::thread::acting_thread;
 use super::util::{bare_id, invalid, parse, schema, sql};
-use super::work_item::with_loose_refs;
 use super::{Handler, HandlerOutput, TxCtx};
 use crate::link_check::LinkDeps;
 
@@ -59,10 +53,10 @@ pub struct SendInput {
     /// `[[…]]` links are checked).
     #[schemars(extend("contentMediaType" = "text/markdown"))]
     pub body: String,
-    /// The work item it hands over (`oxplow:oxplow/work_item?id=tsk12&provider=oxplow`, or a loose
+    /// The task it hands over (`oxplow:oxplow/task?id=&provider=oxtask`, or a loose
     /// id): taking the handoff moves it onto the recipient thread.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub work_item: Option<String>,
+    pub task: Option<String>,
     /// The sending thread; an agent's is always its own, so only a person
     /// names one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -114,7 +108,7 @@ pub enum Outcome {
 pub struct ResolveInput {
     /// The handoff to your thread (`hnd3`).
     pub handoff: String,
-    /// `taken` moves its work item onto your thread; `declined` leaves it.
+    /// `taken` moves its task onto your thread; `declined` leaves it.
     pub outcome: Outcome,
     /// Why, for its sender to read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -171,15 +165,41 @@ fn acting_for(actor: &Actor) -> Option<Option<ThreadId>> {
     }
 }
 
-/// `handoff.send { to_thread, body, work_item?, from_thread? }`.
-pub fn send_op(deps: LinkDeps, work_items: WorkItemsRegistry) -> Op {
+/// Whether the task resource's own dataset (its `resolve:` view, whichever
+/// extension declares the resource) holds `item`; no such resource (no
+/// task model) holds nothing.
+fn task_known(ctx: &TxCtx<'_>, item: &str) -> Result<bool, CommandError> {
+    let Some(view) = oxplow_domain::uri::resources::TASK
+        .parse()
+        .ok()
+        .and_then(|r: oxplow_domain::uri::ResourceName| ctx.events.vocabulary.resources.get(&r))
+        .and_then(|decl| decl.resolve.clone())
+    else {
+        return Ok(false);
+    };
+    ctx.conn
+        .query_row(
+            &format!(
+                "SELECT 1 FROM \"{}\" WHERE uri = ?1",
+                view.replace('\"', "")
+            ),
+            [item],
+            |_| Ok(()),
+        )
+        .optional()
+        .map(|row| row.is_some())
+        .map_err(sql)
+}
+
+/// `handoff.send { to_thread, body, task?, from_thread? }`.
+pub fn send_op(deps: LinkDeps) -> Op {
     Op::new(
         "handoffs.write",
         "send",
         schema::<SendInput>(),
         false,
         Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
-            let input: SendInput = parse(with_loose_refs(&work_items, input)?)?;
+            let input: SendInput = parse(input)?;
             let from = sending_thread(ctx, input.from_thread.as_deref())?;
             let to: ThreadId = bare_id(
                 &input.to_thread,
@@ -201,19 +221,11 @@ pub fn send_op(deps: LinkDeps, work_items: WorkItemsRegistry) -> Op {
             if input.body.trim().is_empty() {
                 return Err(invalid("/body", "say what is handed over"));
             }
-            if let Some(item) = &input.work_item {
-                let known = ctx
-                    .conn
-                    .query_row("SELECT 1 FROM v_work_item WHERE uri = ?1", [item], |_| {
-                        Ok(())
-                    })
-                    .optional()
-                    .map_err(sql)?
-                    .is_some();
-                if !known {
+            if let Some(item) = &input.task {
+                if !task_known(ctx, item)? {
                     return Err(invalid(
-                        "/work_item",
-                        format!("`{item}` isn't an item on the active work list"),
+                        "/task",
+                        format!("`{item}` isn't a task the task model holds"),
                     ));
                 }
             }
@@ -225,7 +237,7 @@ pub fn send_op(deps: LinkDeps, work_items: WorkItemsRegistry) -> Op {
                     from_session: ctx.actor().session_id(),
                     from_actor: author_of(ctx.actor()),
                     to_thread: to,
-                    work_item: input.work_item.as_deref(),
+                    task: input.task.as_deref(),
                     body: &input.body,
                 },
             )?;
@@ -324,9 +336,10 @@ pub fn settle_op() -> Op {
     )
 }
 
-/// `handoff.resolve { handoff, outcome, note? }`: the move (when taking
-/// hands over an item that isn't on the recipient thread yet, and the
-/// work list keeps per-thread lists), then the settle.
+/// `handoff.resolve { handoff, outcome, note? }`: the recipient takes or
+/// declines (who may is checked before anything is composed), then the
+/// settle. Moving a taken handoff's task is bundled's, reacting to
+/// `handoff.settled`.
 pub fn resolve_op() -> Op {
     let compose: Arc<Composer> = Arc::new(
         |composing: &Composing<'_>, run: &RunContext, input: &Value| {
@@ -336,29 +349,9 @@ pub fn resolve_op() -> Op {
                 oxplow_domain::uri::resources::HANDOFF,
                 "/handoff",
             )?;
-            let (handoff, item) = composing
+            let handoff = composing
                 .runtime
-                .block_on(composing.db.read(move |tx| {
-                    let Some(h) = handoff_tx(tx, id)? else {
-                        return Ok((None, None));
-                    };
-                    let item = match &h.work_item {
-                        Some(item) => tx
-                            .query_row(
-                                "SELECT w.thread_id,
-                                        EXISTS (SELECT 1 FROM v_capability_provider p
-                                                 WHERE p.capability = 'work_items' AND p.active = 1
-                                                   AND instr(p.features, '\"lists\"') > 0)
-                                   FROM v_work_item w WHERE w.uri = ?1",
-                                [item],
-                                |r| Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, bool>(1)?)),
-                            )
-                            .optional()
-                            .map_err(oxplow_db::map_sql_err)?,
-                        None => None,
-                    };
-                    Ok((Some(h), item))
-                }))
+                .block_on(composing.db.read(move |tx| handoff_tx(tx, id)))
                 .map_err(CommandError::from)?;
             let handoff = handoff
                 .ok_or_else(|| invalid("/handoff", format!("no handoff `{}`", input.handoff)))?;
@@ -368,16 +361,6 @@ pub fn resolve_op() -> Op {
             };
             may_settle(run.actor(), &handoff, to)?;
             let mut calls = Vec::new();
-            if let (HandoffState::Taken, Some(item), Some((thread, true))) =
-                (to, &handoff.work_item, item)
-            {
-                if thread != Some(handoff.to_thread_id.value()) {
-                    calls.push(CommandCall {
-                        name: super::work_item::MOVE.into(),
-                        input: json!({ "uri": item, "to": { "thread": handoff.to_thread_id.to_string() } }),
-                    });
-                }
-            }
             let mut settle = json!({ "handoff": id.to_string(), "state": to.as_str() });
             if let Some(note) = &input.note {
                 settle["note"] = Value::String(note.clone());
@@ -391,9 +374,10 @@ pub fn resolve_op() -> Op {
                 result: Some(json!({
                     "handoff": id.to_string(),
                     "state": to.as_str(),
-                    "work_item": handoff.work_item,
+                    "task": handoff.task,
                 })),
                 events: Vec::new(),
+                inverse: None,
             })
         },
     );
@@ -413,7 +397,7 @@ fn shown(h: &Handoff) -> Value {
         "uri": handoff_uri(h.id),
         "from_thread": h.from_thread_id.to_string(),
         "to_thread": h.to_thread_id.to_string(),
-        "work_item": h.work_item,
+        "task": h.task,
         "state": h.state.as_str(),
         "sent_at": h.sent_at,
         "delivered_at": h.delivered_at,
@@ -421,10 +405,9 @@ fn shown(h: &Handoff) -> Value {
     })
 }
 
-/// The handoff commands, for the bus. A loose id in `work_item` is the
-/// active work list's.
-pub fn ops(deps: LinkDeps, work_items: WorkItemsRegistry) -> Vec<Op> {
-    vec![send_op(deps, work_items), settle_op(), resolve_op()]
+/// The handoff commands, for the bus.
+pub fn ops(deps: LinkDeps) -> Vec<Op> {
+    vec![send_op(deps), settle_op(), resolve_op()]
 }
 
 #[cfg(test)]
@@ -435,9 +418,8 @@ mod tests {
     }
 
     use super::*;
-    use crate::test_fixtures::{new_thread, services_with_effort, services_with_task_effort};
+    use crate::test_fixtures::{new_thread, services_with_thread};
     use oxplow_domain::{StreamId, Thread};
-    use oxplow_tasks::{work_item_ref, TaskStore as _};
 
     fn agent_on(thread: ThreadId) -> Actor {
         Actor::Agent {
@@ -465,7 +447,7 @@ mod tests {
     /// the agent as its sender.
     #[tokio::test]
     async fn an_agent_hands_work_from_its_own_thread() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let to = second_thread(&fx.svc).await;
         let out = run(
             &fx.svc,
@@ -498,10 +480,10 @@ mod tests {
 
     /// What a send refuses: an agent naming another thread as its own, its
     /// own thread as the recipient, a closed thread, an empty body, an item
-    /// the work list doesn't have, and a person who names no sender.
+    /// the task model doesn't hold, and a person who names no sender.
     #[tokio::test]
     async fn a_send_is_refused_for_what_isnt_a_handoff() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let to = second_thread(&fx.svc).await;
         let agent = agent_on(fx.thread);
         let to_ref = to.id.to_string();
@@ -546,12 +528,12 @@ mod tests {
             &fx.svc,
             &agent,
             SEND,
-            json!({ "to_thread": to_ref, "body": "x", "work_item": "oxplow:oxplow/work_item?id=tsk999&provider=oxplow" }),
+            json!({ "to_thread": to_ref, "body": "x", "task": "oxplow:oxplow/task?id=tsk999&provider=oxtask" }),
         )
         .await
         .unwrap_err();
         assert!(
-            matches!(&err, CommandError::Invalid { field: Some(f), .. } if f == "/work_item"),
+            matches!(&err, CommandError::Invalid { field: Some(f), .. } if f == "/task"),
             "{err:?}"
         );
 
@@ -595,7 +577,7 @@ mod tests {
     /// be settled again. Undo opens it again.
     #[tokio::test]
     async fn each_side_settles_only_what_is_its_own() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let to = second_thread(&fx.svc).await;
         let (sender, recipient) = (agent_on(fx.thread), agent_on(to.id));
         let sent = run(
@@ -662,104 +644,5 @@ mod tests {
         .unwrap();
         assert_eq!(withdrawn.result["handoff"]["state"], "withdrawn");
         assert_eq!(withdrawn.result["handoff"]["note"], Value::Null);
-    }
-
-    /// Taking a handoff that hands over a work item moves the item onto
-    /// the recipient's thread in the same run. A work list's verbs run
-    /// outside the bus's transaction, so that run is steps and has no undo;
-    /// the recipient reopens the handoff instead. Declining moves nothing
-    /// and undoes.
-    #[tokio::test]
-    async fn taking_a_handoff_moves_its_work_item() {
-        let fx = services_with_task_effort().await;
-        let to = second_thread(&fx.svc).await;
-        let recipient = agent_on(to.id);
-        let send = |body: &str| {
-            json!({
-                "to_thread": to.id.to_string(),
-                "work_item": work_item_ref(fx.task),
-                "body": body,
-            })
-        };
-        let state = |svc: Arc<crate::Services>, h: String| async move {
-            svc.db
-                .read(move |tx| {
-                    tx.query_row(
-                        "SELECT state FROM v_handoff WHERE uri = uri('oxplow/handoff', 'id', ?1)",
-                        [&h],
-                        |r| r.get::<_, String>(0),
-                    )
-                    .map_err(oxplow_db::map_sql_err)
-                })
-                .await
-                .unwrap()
-        };
-        let first = run(&fx.svc, &agent_on(fx.thread), SEND, send("decline me"))
-            .await
-            .unwrap();
-        let declined = handoff_id(&first.result);
-        let out = run(
-            &fx.svc,
-            &recipient,
-            RESOLVE,
-            json!({ "handoff": declined, "outcome": "declined" }),
-        )
-        .await
-        .unwrap();
-        let task = fx.svc.task_store.get(fx.task).await.unwrap().unwrap();
-        assert_eq!(task.thread_id, Some(fx.thread), "declining moves nothing");
-        fx.svc
-            .commands
-            .undo(&Actor::Human, out.audit_id.unwrap(), false)
-            .await
-            .unwrap();
-        assert_eq!(state(fx.svc.clone(), declined).await, "open");
-
-        let second = run(&fx.svc, &agent_on(fx.thread), SEND, send("take me"))
-            .await
-            .unwrap();
-        let h = handoff_id(&second.result);
-        let err = run(
-            &fx.svc,
-            &agent_on(fx.thread),
-            RESOLVE,
-            json!({ "handoff": h, "outcome": "taken" }),
-        )
-        .await
-        .unwrap_err();
-        assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
-        let task = fx.svc.task_store.get(fx.task).await.unwrap().unwrap();
-        assert_eq!(
-            task.thread_id,
-            Some(fx.thread),
-            "a stranger's resolve moves nothing"
-        );
-
-        let taken = run(
-            &fx.svc,
-            &recipient,
-            RESOLVE,
-            json!({ "handoff": h, "outcome": "taken", "note": "on it" }),
-        )
-        .await
-        .unwrap();
-        let task = fx.svc.task_store.get(fx.task).await.unwrap().unwrap();
-        assert_eq!(task.thread_id, Some(to.id));
-        assert_eq!(state(fx.svc.clone(), h.clone()).await, "taken");
-        assert!(fx
-            .svc
-            .commands
-            .undo(&Actor::Human, taken.audit_id.unwrap(), false)
-            .await
-            .is_err());
-        run(
-            &fx.svc,
-            &recipient,
-            SETTLE,
-            json!({ "handoff": h, "state": "open" }),
-        )
-        .await
-        .unwrap();
-        assert_eq!(state(fx.svc.clone(), h.clone()).await, "open");
     }
 }

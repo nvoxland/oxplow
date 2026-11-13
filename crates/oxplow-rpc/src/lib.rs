@@ -40,7 +40,7 @@ use oxplow_app::Services;
 pub struct PluginRuntime {
     pub hook_base_url: String,
     pub mcp_endpoint_url: String,
-    /// Base URL for the OTLP metrics receiver (epic tsk22) — pointed at via the
+    /// Base URL for the OTLP metrics receiver — pointed at via the
     /// agent's `OTEL_EXPORTER_OTLP_ENDPOINT`; the SDK appends `/v1/metrics`.
     pub otlp_base_url: String,
 }
@@ -208,15 +208,13 @@ macro_rules! oxplow_command_table {
                 select_thread => $crate::commands::threads::select_thread { req: $crate::commands::threads::SelectThreadRequest } -> (),
                 // backlog
                 // tasks
-                // effort
-                list_efforts_in_window => $crate::commands::effort::list_efforts_in_window { window_start: ::oxplow_domain::Timestamp, window_end: ::oxplow_domain::Timestamp } -> Vec<::oxplow_db::Effort>,
-                list_efforts_at_snapshots => $crate::commands::effort::list_efforts_at_snapshots { snapshot_ids: Vec<::oxplow_domain::SnapshotId> } -> Vec<::oxplow_db::EffortAtSnapshot>,
                 // metrics: reads are SQL (`metric_grid()`, `v_metric_catalog`); this
                 // switches them, through the `oxplow.metric.enable` command (P4.7)
                 // the command bus, as the person
                 get_command => $crate::commands::bus::get_command { name: String } -> ::oxplow_domain::CommandSpec,
                 list_person_commands => $crate::commands::bus::list_person_commands {} -> Vec<::oxplow_domain::CommandSpec>,
                 ref_commands => $crate::commands::bus::ref_commands { uri: String } -> Vec<String>,
+                action_point_commands => $crate::commands::bus::action_point_commands { point: String, context: ::oxplow_domain::Json } -> ::oxplow_app::commands::action_point_offers::PointOffer,
                 register_client_host => $crate::commands::bus::register_client_host { client: String, scopes: Vec<String> } -> (),
                 unregister_client_host => $crate::commands::bus::unregister_client_host { client: String } -> (),
                 answer_client_call => $crate::commands::bus::answer_client_call { client: String, id: String, result: Option<::oxplow_domain::Json>, error: Option<String> } -> (),
@@ -229,12 +227,10 @@ macro_rules! oxplow_command_table {
                 ingest_hook_event => $crate::commands::hooks::ingest_hook_event { envelope: ::oxplow_app::HookEnvelope } -> (),
                 read_event_content => $crate::commands::hooks::read_event_content { event_id: String, body: oxplow_app::event_bodies::EventBodyKey } -> Option<oxplow_app::event_bodies::EventBody>,
                 list_agent_statuses => $crate::commands::hooks::list_agent_statuses {} -> Vec<::oxplow_domain::AgentStatus>,
-                // wiki
                 // events (the log's dead-letter queue)
                 // page_refs
                 list_backlinks => $crate::commands::page_refs::list_backlinks { target: String, limit: Option<u32> } -> Vec<$crate::commands::page_refs::BacklinkEdge>,
                 list_outbound => $crate::commands::page_refs::list_outbound { source: String, limit: Option<u32> } -> Vec<$crate::commands::page_refs::BacklinkEdge>,
-                // wiki_freshness
                 // search
                 search => $crate::commands::search::search { query: String, stream_id: Option<String>, resources: Option<Vec<String>>, limit: Option<u32> } -> Vec<::oxplow_db::SearchHit>,
                 query_sql => $crate::commands::semantic::query_sql { sql: String, params: Option<Vec<::oxplow_db::SqlCell>>, limit: Option<u32>, raw: Option<bool> } -> ::oxplow_db::SqlQueryResult,
@@ -245,6 +241,7 @@ macro_rules! oxplow_command_table {
                 list_extensions => $crate::commands::extensions::list_extensions {} -> Vec<::oxplow_app::extension::extensions::Extension>,
                 load_component => $crate::commands::extensions::load_component { id: String } -> String,
                 invoke_component_command => $crate::commands::extensions::invoke_component_command { id: String, command: String, input: ::oxplow_domain::Json, confirmed: bool, version: String } -> ::oxplow_domain::CommandOutcome,
+                invoke_component_point => $crate::commands::extensions::invoke_component_point { id: String, point: String, context: ::oxplow_domain::Json, command: Option<String>, confirmed: bool, version: String } -> ::oxplow_domain::CommandOutcome,
                 run_component_sql => $crate::commands::extensions::run_component_sql { id: String, sql: String, params: Option<Vec<::oxplow_db::SqlCell>>, stream_id: Option<String>, version: String } -> ::oxplow_db::SqlQueryResult,
                 component_form => $crate::commands::extensions::component_form { id: String, command: String, input: Option<::oxplow_domain::Json>, version: String } -> ::oxplow_app::viz_actions::FormStart,
                 list_services => $crate::commands::extensions::list_services {} -> Vec<$crate::commands::extensions::ServiceListing>,
@@ -265,7 +262,7 @@ macro_rules! oxplow_command_table {
                 page_form => $crate::commands::pages::page_form { run_id: String, node: String } -> ::oxplow_app::viz_actions::FormStart,
                 submit_page_form => $crate::commands::pages::submit_page_form { run_id: String, node: String, input: ::oxplow_domain::Json, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
                 page_action_form => $crate::commands::pages::page_action_form { run_id: String, node: Option<String>, action: String, row: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>> } -> ::oxplow_app::viz_actions::FormStart,
-                run_page_action => $crate::commands::pages::run_page_action { run_id: String, node: Option<String>, action: String, row: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, input: Option<::oxplow_domain::Json>, drop: Option<::oxplow_app::viz_actions::Drop>, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
+                run_page_action => $crate::commands::pages::run_page_action { run_id: String, node: Option<String>, action: String, row: Option<::std::collections::BTreeMap<String, ::oxplow_db::SqlCell>>, input: Option<::oxplow_domain::Json>, drop: Option<::oxplow_app::viz_actions::Drop>, option: Option<String>, confirmed: bool } -> ::oxplow_domain::CommandOutcome,
                 // ai (Settings → AI)
                 ai_settings => $crate::commands::ai::ai_settings {} -> ::oxplow_app::ai_service::AiSettings,
                 read_ai_call => $crate::commands::ai::read_ai_call { id: ::oxplow_domain::AiCallId, body: ::oxplow_app::ai_calls::AiCallBody } -> Option<::oxplow_app::event_bodies::EventBody>,
@@ -299,7 +296,7 @@ macro_rules! oxplow_command_table {
                 files_at => $crate::commands::trees::files_at { stream_id: Option<String>, revision: ::oxplow_domain::vcs::Revision } -> Vec<String>,
                 vcs_blame => $crate::commands::vcs::vcs_blame { stream_id: Option<String>, path: String, revision: ::oxplow_domain::vcs::Revision } -> Vec<::oxplow_domain::vcs::BlameLine>,
                 read_workspace_file => $crate::commands::workspace::read_workspace_file { stream_id: Option<String>, relative_path: String } -> ::oxplow_app::workspace_files::WorkspaceFile,
-                // code_quality (duplication only — the metrics scan was retired in tsk229)
+                // code_quality (duplication only — the metrics scan was retired in)
                 // config
                 get_config => $crate::commands::config::get_config {} -> ::oxplow_config::OxplowConfig,
                 get_workspace_context => $crate::commands::config::get_workspace_context {} -> $crate::commands::config::WorkspaceContext,
@@ -319,7 +316,6 @@ macro_rules! oxplow_command_table {
                 list_snapshot_ops => $crate::commands::snapshot::list_snapshot_ops { stream_id: ::oxplow_domain::StreamId, limit: Option<u32> } -> Vec<::oxplow_db::SnapshotOp>,
                 get_snapshot_stats => $crate::commands::snapshot::get_snapshot_stats { snapshot_id: ::oxplow_domain::SnapshotId } -> ::oxplow_db::SnapshotStats,
                 get_blob_storage_bytes => $crate::commands::snapshot::get_blob_storage_bytes {} -> ::oxplow_domain::ByteSize,
-                list_wiki_slugs_for_snapshots => $crate::commands::snapshot::list_wiki_slugs_for_snapshots { snapshot_ids: Vec<::oxplow_domain::SnapshotId> } -> Vec<(::oxplow_domain::SnapshotId, String)>,
                 list_files_for_snapshot => $crate::commands::snapshot::list_files_for_snapshot { snapshot_id: ::oxplow_domain::SnapshotId } -> Vec<::oxplow_db::FileSnapshot>,
                 get_file_snapshot => $crate::commands::snapshot::get_file_snapshot { file_snapshot_id: ::oxplow_domain::FileSnapshotId } -> Option<::oxplow_db::FileSnapshot>,
                 // background
@@ -433,7 +429,7 @@ mod tests {
     }
 
     /// P6.E1b: the UI reads tasks through the datasets and writes them with
-    /// `work_item.*` commands; the typed task RPCs are gone.
+    /// `task.*` commands; the typed task RPCs are gone.
     #[tokio::test]
     async fn the_typed_task_rpcs_are_gone() {
         let (svc, _dir) = services().await;
@@ -448,24 +444,9 @@ mod tests {
             "delete_task",
             "reorder_tasks",
             "move_task",
-            "list_work_item_efforts",
+            "list_task_efforts",
             "list_recently_finished",
             "clear_recently_finished",
-        ] {
-            let err = dispatch(name, json!({}), &svc).await.unwrap_err();
-            assert_eq!(err.code, "NOT_FOUND", "{name}");
-        }
-    }
-
-    /// P6.E2: the UI reads knowledge pages through the datasets.
-    #[tokio::test]
-    async fn the_wiki_read_rpcs_are_gone() {
-        let (svc, _dir) = services().await;
-        for name in [
-            "list_wiki_pages",
-            "search_wiki_titles",
-            "read_wiki_page_body",
-            "list_wiki_freshness",
         ] {
             let err = dispatch(name, json!({}), &svc).await.unwrap_err();
             assert_eq!(err.code, "NOT_FOUND", "{name}");
@@ -484,10 +465,8 @@ mod tests {
     #[tokio::test]
     async fn bad_args_are_rejected_as_invalid() {
         let (svc, _dir) = services().await;
-        // `snapshotIds` is required; an empty object can't deserialize into Args.
-        let err = dispatch("list_efforts_at_snapshots", json!({}), &svc)
-            .await
-            .unwrap_err();
+        // `streamId` is required; an empty object can't deserialize into Args.
+        let err = dispatch("list_threads", json!({}), &svc).await.unwrap_err();
         assert_eq!(err.code, "INVALID");
     }
 }

@@ -18,12 +18,12 @@ Things I keep forgetting. Read this before adding any UI.
 > lives in `.context/pages-and-tabs.md`. Plan:
 > `/Users/nvoxland/.claude/plans/the-ui-is-very-delightful-badger.md`.
 
-## Pages are informational: a wiki, a web of information
+## Pages are informational: a wiki-like web of information
 
 oxplow's pages read like a wiki, not like an admin console or a
 spreadsheet. A page is a document about something: headed sections of
 facts and prose in the reading column, and every thing it names (an
-extension, a page, a commit, a file, a work item, a thread) is a link to
+extension, a page, a commit, a file, a task, a thread) is a link to
 that thing's own page, so a person moves through the project by following
 links. Concretely:
 
@@ -59,7 +59,9 @@ links. Concretely:
   commit → Git History, a collector → Collectors, a contribution → its
   extension). It is the rail's "See also" group after Contents (the rail runs Filters, Contents, See also) and, on
   every page, a "See also ▸" submenu of the ☰ beside About this page; a page
-  that fills (a file, a diff, a terminal) has no rail for it, only the ☰. The
+  that fills (a file, a diff, a terminal) has no rail for it, only the ☰,
+  and none for a selection either: its viz draws the picks (the terminal
+  page's tab strip), so a terminal is the whole body. The
   rail's group also ends with "View as …" links for the other renderers of the same item;
   the shell adds them, a page never declares them. A
   section is the page's own content. A link that belongs to a fact stays a link in
@@ -69,8 +71,8 @@ links. Concretely:
 
 ## Markdown is one component
 
-Wherever markdown is read or written — a wiki page, a work item's body,
-an effort summary, a comment and its composer, a form's markdown field,
+Wherever markdown is read or written — a knowledge page, a task's body,
+a comment and its composer, a form's markdown field,
 a page's `markdown` viz — it is the one `Markdown` component
 (`.context/markdown.md`), so links, mermaid, code blocks with Copy,
 tables and comments behave the same everywhere. A surface never renders
@@ -188,9 +190,8 @@ markdown itself, nor edits it in a `<textarea>`.
   refreshes on the event that says it changed (Data on `extensionsChanged`; Integrations'
   page re-runs when the `v_provider_*` models change). Integrations
   also re-reads when an instance's health is recorded (`v_contribution_health`): Enable's own `configChanged` can be read
-  before the instance has started, and nothing else says it finished
-  (tsk1053).
-- **A re-read never wipes what the person typed** (tsk1054). A host
+  before the instance has started, and nothing else says it finished.
+- **A re-read never wipes what the person typed**. A host
   re-reading its data hands a form fresh copies of the same schema and
   saved value, so a form resets its fields on the *content* changing, not
   the object: `SchemaForm` keys on `JSON.stringify` of both, and a row
@@ -209,14 +210,14 @@ markdown itself, nor edits it in a `<textarea>`.
   click-to-edit) or `InlinePromptStrip` (for new-X flows that need a
   target-path entry) instead. `window.confirm` / `window.alert` block
   the renderer, and `no-blocking-dialogs.test.ts` fails on any call
-  (tsk630: the Git dashboard's push / merge / rebase now ask with
+  (the Git dashboard's push / merge / rebase now ask with
   `InlineConfirm`); use `InlineConfirm` for destructive actions on a
   row/button and `showToast({ message, onUndo })` for fire-and-undo
   destructives that aren't tied to a specific row. A destructive command run
   from a menu (which closes, leaving nowhere to ask inline) goes through
   `personCommands.run`: its `NeedsConfirmation` shows the shared
   `CommandConfirm` (`PersonCommandConfirm`, mounted once in `App`). The
-  task page's and wiki page's rail Delete use `InlineConfirm`; the wiki
+  task page's and knowledge page's rail Delete use `InlineConfirm`; the knowledge page
   pane's right-click Delete uses `personCommands`.
 - **What needs the person isn't in the rail.** The dock's Alerts
   icon (`components/Alerts/AlertsDockPanel.tsx`) counts everything that
@@ -404,8 +405,8 @@ markdown itself, nor edits it in a `<textarea>`.
   field (a select), mounting a moment after the launcher opened; the
   Enter that opens the typed page went to that select and nothing opened
   (`timeline.spec.ts` on a slow machine, "New Session" left as the title).
-- **"Save and Another"** for repetitive-entry flows (see the New Work
-  Item form): a form page declares `again: { label, keep }`, a second
+- **"Save and Another"** for repetitive-entry flows (see the New
+  Task form): a form page declares `again: { label, keep }`, a second
   button that files and restarts the form with the `keep` fields (state,
   thread, parent, the list's own fields) carried over and the rest
   cleared, so a series of similar items isn't re-picked. Enter keeps the
@@ -492,7 +493,12 @@ markdown itself, nor edits it in a `<textarea>`.
   (`setTitle`, `setActions`) and core draws in the bar — never buttons of
   oxplow's look inside the frame for page-level actions. A form it asks
   for (`openForm`) is oxplow's tab modal, with Enter submitting and
-  Escape closing as every form.
+  Escape closing as every form. Its own controls (the Work board's Show,
+  Priority and Search) are the one case a page draws its controls: the
+  component is the page, they are `role: view` params so the rail doesn't
+  draw them twice, and a change still replaces the tab's entry as a
+  filter's does. Its own menu (a card's) closes on Escape, a click outside
+  or a scroll, and ↑/↓ move through it.
 
 ## A replaced component is named on hover, and falls back to oxplow's
 
@@ -520,7 +526,7 @@ markdown itself, nor edits it in a `<textarea>`.
 ## Destructive actions
 
 - **A button that runs a command asks when the command's spec does**
-  (`SpecConfirm`, `apps/desktop/src/components/SpecConfirm.tsx`; tsk898):
+  (`SpecConfirm`, `apps/desktop/src/components/SpecConfirm.tsx`):
   never a second rule in the page — while the spec loads it asks.
 - **Per-row destructives use `InlineConfirm`** at
   `apps/desktop/src/components/InlineConfirm.tsx`. First click on the trigger
@@ -560,7 +566,7 @@ markdown itself, nor edits it in a `<textarea>`.
   falls back to — the harness's own name, shown as the placeholder), with
   an "Also rename it in <harness>" box only where the harness can.
 - **A tab whose page holds unsaved edits says ●** before its label (a
-  file, a wiki page's draft — any page body that calls `useTabEditing`).
+  file, a knowledge page's draft — any page body that calls `useTabEditing`).
   File → Save (Ctrl/Cmd+S, `when: pageDirty`) saves the page shown
   through its own Save, and the tab cap never closes such a tab.
 - **Closing a dirty file tab** is fire-and-undo: the close completes
@@ -606,7 +612,7 @@ click is the confirmation — plus saying what is about to happen.
 
 ## Links open where you ask them to
 
-Any link that resolves to a page — wiki, task, file, directory, commit —
+Any link that resolves to a page — knowledge page, task, file, directory, commit —
 supports the browser conventions: **Cmd/Ctrl-click or middle-click opens
 it in a new tab**, plain click navigates in place. The right-click menu
 carries the same pair (Open / Open in new tab) so the gesture is
@@ -617,7 +623,7 @@ through one `linkRef(parsed)` and one `openRef(ref, { newTab })` call
 (`components/Markdown/links.ts`, `followLink` and `linkMenu`, which the
 markdown viewer and editor both use). Per-kind click branches are
 how it drifted before — task links honoured the modifier while file,
-directory and commit links silently ignored it (tsk265). A new link kind
+directory and commit links silently ignored it. A new link kind
 gets the behaviour by being added to `linkRef`, not by growing
 another branch.
 
@@ -644,14 +650,14 @@ not a pick and isn't in the address.
 > not hand-roll a fourth copy of the timer, the listeners, and the guard.**
 > The terminal strip was hand-written "modeled on the far-left Navigator"
 > and inherited every one of the bugs below, which is why the behavior is
-> now shared code rather than a convention (tsk269, tsk270).
+> now shared code rather than a convention.
 
 - **Hover must never open anything that occludes an adjacent panel.**
   Hover is involuntary — the pointer crosses your component on its way
   somewhere else. So it may reveal information *in place* (a tooltip, a
   highlight, a row's hidden affordance), but expanding a surface over a
   neighbor requires an explicit click. The Navigator learned this the
-  hard way (tsk269): its 280px panel opened on a zero-dwell `mouseEnter`
+  hard way: its 280px panel opened on a zero-dwell `mouseEnter`
   and covered ~92% of the rail HUD immediately to its right, so simply
   drifting left on the way to a rail row buried the row you were aiming
   at. A dwell delay only makes an involuntary action *slower*, not
@@ -793,7 +799,7 @@ mounts the kit's, so a page moving to the kit's viz (`viz: approvals`, params
   Pure state + persistence live in the sibling `sectionCollapse.ts`
   (unit-tested). Adopters: none now the Metrics page is a page (a grouped page list folds its headings itself).
 - **The page places the controls; they are not pinned above the sections
-  (tsk86).** `SectionCollapseControls` reads state off context, so it can render
+  .** `SectionCollapseControls` reads state off context, so it can render
   anywhere under the provider. Recorded Metrics puts it in the **details rail**
   beside the filters — the rail is the page's control panel (a page's
   too: "A page's controls are in its rail"). It **self-hides**
@@ -805,7 +811,7 @@ mounts the kit's, so a page moving to the kit's viz (`viz: approvals`, params
   context follows the render tree, not the creation site). Any wrapper here would
   sit between the tab body and the page chrome's `height: 100%` column and break
   it.
-- **Still NOT a `Page` prop (tsk84).** `Page` is chrome: it renders `children`
+- **Still NOT a `Page` prop.** `Page` is chrome: it renders `children`
   opaquely and has no idea what sections exist, so a page-layout flag couldn't
   draw the controls without the sections registering themselves anyway — the flag
   would only say "the thing I'm already doing is allowed". The page composing
@@ -859,10 +865,10 @@ declaring *what it is* and mounting the generic layer.
 
 - **`data-ref` marks a region as a typed "context node."** Its value is
   the canonical URI of the thing, the same as tab ids and the `page_ref`
-  graph use ([resources.md](./resources.md)): a file, directory, wiki
-  page, work item, commit or finding. Stamp it on the element that *is*
+  graph use ([resources.md](./resources.md)): a file, directory, knowledge page,
+  task, commit or finding. Stamp it on the element that *is*
   that thing (e.g. a task row carries
-  `data-ref="oxplow:oxplow/work_item?id=tsk42&provider=oxplow"`). Nesting is
+  `data-ref="oxplow:oxplow/task?id=tsk42&provider=oxtask"`). Nesting is
   meaningful: a file row inside a commit card yields the chain
   `[file URI, commit URI, …]`, innermost first. Treat
   this as a first-class seam like `data-testid` — spread
@@ -980,7 +986,7 @@ declaring *what it is* and mounting the generic layer.
   group lands there and there's no visible Quit. These items are
   OS-standard and state-free, so they stay out of the snapshot (and out
   of the off-Mac in-window `Menubar`).
-- **The File menu keeps creating and opening apart** (tsk248): `New
+- **The File menu keeps creating and opening apart**: `New
   Project…` (`project.new`) is the only command that initializes a
   folder — it picks a dir, creates `.oxplow/`, and opens it in a new
   window. `Open Project…` / `Open Project in New Window…` / `Open
@@ -1022,20 +1028,20 @@ declaring *what it is* and mounting the generic layer.
   one way to find pages, commands, files, and content: the launcher
   (`QuickOpenOverlay`), opened by **Cmd+P** (its `file.quickOpen` menu
   command) and the rail **Search…** button. That is its **only**
-  shortcut — the old Cmd+K / Cmd+Shift+F aliases were removed (tsk59):
+  shortcut — the old Cmd+K / Cmd+Shift+F aliases were removed:
   one door is clearer, and Cmd+P is the established dev quick-open
   reflex. There is no separate command palette or find-in-files overlay.
   Do **not** add a new modal/overlay for discovery, and don't re-add
   alias shortcuts; extend the launcher. See
   `.context/pages-and-tabs.md` → "One Search".
-- **Launcher search behavior (the tsk52 pass).** The launcher searches
-  the **whole project** for tasks/wiki/notes/comments (cross-stream), but
+- **Launcher search behavior (the pass).** The launcher searches
+  the **whole project** for tasks/knowledge pages/notes/comments (cross-stream), but
   scopes file-body hits to the current stream — another worktree's files
   aren't openable here. Implemented as `searchSite(q, null)` +
   a client-side file-hit stream filter in `buildQuickOpenResults`
   (`quickOpenResults.ts`); filename matches already come from the
   current stream's `v_file` (read once, re-read when what it read changes). An **exact-identity match** — a
-  task id like `tsk30`, or a page/file/wiki name equal to the query —
+  task id like `tsk42`, or a page/file/knowledge page name equal to the query —
   floats to the very top, above the fuzzy pages/commands sections
   (`isExactMatch`). Task ids are searchable because `index_task`
   (`crates/oxplow-app/src/indexer.rs`) folds the id into the FTS body
@@ -1087,7 +1093,7 @@ declaring *what it is* and mounting the generic layer.
     `navigator-strip-thread-<id>` (click to switch; a stream glyph also
     opens the panel, and the selected thread's glyph only opens it;
     `title` carries the full name). To open the panel in a test, click `navigator-expand` —
-    **hover does not open it** (tsk269). `navigator-collapse` closes it,
+    **hover does not open it**. `navigator-collapse` closes it,
     as does a click on the `navigator-overlay` background;
     `navigator-strip-empty` is the strip's dead-space expand target and
     `navigator-new-thread-input` is the inline add-thread field.
@@ -1191,8 +1197,8 @@ declaring *what it is* and mounting the generic layer.
   MIME there rather than overloading an existing one, and rather than
   declaring a `const` next to the component that introduced it: that was
   the old shape, and one task MIME ended up defined twice
-  with a unit test whose only job was asserting the copies hadn't drifted
-  (tsk271). The module is deliberately import-free so decoders, pure
+  with a unit test whose only job was asserting the copies hadn't drifted.
+  The module is deliberately import-free so decoders, pure
   helpers, and components can all reach it.
 - **Tabs in the center pane are drag-reorderable.**
   CenterTabs reorders **every non-pinned tab freely across the whole
@@ -1255,7 +1261,7 @@ declaring *what it is* and mounting the generic layer.
   decimal comma vs point, compact "240.4K" at ≥10k) and unit-aware via the
   spec's `unit` (`%` → one decimal; `ms` → humanized duration). A compacted
   display should carry `formatMetricValueExact(...)` in its hover `title`.
-  Deliberately no user-facing locale setting (tsk114): this module is the
+  Deliberately no user-facing locale setting: this module is the
   single seam, so adding one later is a one-line change here.
 
 ## Empty and error states
@@ -1336,7 +1342,7 @@ caller may bypass the bus to write to the terminal.
   contribution with an open repair item) is the same gesture: it fills
   the input with `Repair the extension described in [oxplow uri <item>]
   — read it first.` (`contributionHealth.ts` → `repairWithAgent`). The brief
-  itself is the work item's body, not the inserted line — a one-line
+  itself is the task's body, not the inserted line — a one-line
   mention is all `insertIntoAgent` can carry.
 - **Don't fire `recordUsage`** for Add to Context — adding to context
   isn't the same as opening the target; the recents list shouldn't
@@ -1352,7 +1358,10 @@ as the branch a history is of, under its root's `title` as a group; bare
 without one), then **Filters** (its filter params) and **Selection** (what
 a row click picked). A fact about the page as a whole goes in the `rail:`
 tree, never in a section of the view: a section is a heading in Contents
-and a block above the body, which a one-line fact is not. **The rail is drawn only when something is in it.** A page has a
+and a block above the body, which a one-line fact is not. A `rail:` tree
+that is a form (Task List's New item) is something to do, not what the
+page is about: it draws last, under Filters, Selection and See also
+(`railTreeLast` in `pages/PageRail.tsx`). **The rail is drawn only when something is in it.** A page has a
 "Details" card when it has a switch, a `filter` param, a `selection`
 param, a `rail:` node, the save-a-view form open, or a Contents of its
 own; with none, no card is drawn (a document page keeps its reading
@@ -1378,15 +1387,18 @@ revision. A viz that is the whole page shows no inline link to its own
 resource (the code viz's Open file); one in a snippet does.
 
 A param is a **row**, drawn by the kit's `ParamRow`
-(`src/kit/ParamControls.tsx`): its label beside its value. At rest the
-value is a button ("Any" when it has none; a dot before the label when it
-isn't the default). The value has a border and a caret, so it reads as a
-control, not a label; a long label wraps, never cut off. Clicking it, or Enter/Space on it, edits:
-- **in place**, the control takes the value's place: text (Enter or blur
-  applies), search (applies after a 250 ms pause, at once on Enter),
-  choice, branch, the id pickers, a date_range's presets. A select applies
-  what is picked and closes. **Escape closes and keeps the value from
-  before the edit** (a search puts it back). Focus returns to the value.
+(`src/kit/ParamControls.tsx`): its label beside its value (a dot before
+the label when it isn't the default); a long label wraps, never cut off.
+- **A value picked from a list** (a choice, a branch, an id picker, a
+  date_range's presets) **is its select, at rest too**: one click opens it.
+  A value button swapped for a select on click only focused it (the first
+  click), and a webview won't open a select from script. Picking applies.
+- **A value you type** (text, search) is a button at rest that reads as a
+  text box: a border and no caret ("Any" when empty; a search "Search…").
+  Clicking it, or Enter/Space on it, edits it in place: text applies on
+  Enter or blur, a search after a 250 ms pause (at once on Enter).
+  **Escape closes and keeps the value from before the edit** (a search puts
+  it back). Focus returns to the value.
 - **in a popover** (`kit/Popover.tsx`) when the control doesn't fit a
   320 px row: a date_range's Custom… opens its two dates over the page,
   beside the row. Escape or a click outside closes it; focus returns.

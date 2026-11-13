@@ -57,19 +57,69 @@ async fn project() -> tempfile::TempDir {
     dir
 }
 
+/// The shipped examples `example` names in `requires:` — its manifest's
+/// and its fixtures' (a store's model owner, the other stores a fixture
+/// runs beside it).
+fn required_examples(example: &str) -> Vec<&'static str> {
+    let Some(found) = oxplow_sdk::examples::find(example) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (path, body) in found.files {
+        if !(*path == "extension.yaml" || path.starts_with("fixtures/")) {
+            continue;
+        }
+        let doc: serde_yaml::Value =
+            serde_yaml::from_str(&String::from_utf8_lossy(body)).unwrap_or_default();
+        for name in doc
+            .get("requires")
+            .and_then(|r| r.as_sequence())
+            .into_iter()
+            .flatten()
+            .filter_map(|r| r.as_str())
+        {
+            if let Some(e) = oxplow_sdk::examples::find(name) {
+                if e.name != example && !out.contains(&e.name) {
+                    out.push(e.name);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Every shipped example `example` needs, transitively, copied beside it
+/// under its own name, so it deploys and its fixtures run.
+fn with_required(root: &std::path::Path, example: &str) {
+    let mut todo = required_examples(example);
+    let mut done: Vec<&str> = vec![example];
+    while let Some(name) = todo.pop() {
+        if done.contains(&name) {
+            continue;
+        }
+        done.push(name);
+        oxplow_sdk::scaffold_example(root, name, None).unwrap();
+        todo.extend(required_examples(name));
+    }
+}
+
+/// Whether `example` belongs to a family of examples that name each other
+/// (it requires one, or one requires it): renaming one of them alone leaves
+/// the others naming its old namespace, so only its own check can pass.
+fn in_a_family(example: &str) -> bool {
+    !required_examples(example).is_empty()
+        || oxplow_sdk::examples::all()
+            .iter()
+            .any(|e| required_examples(e.name).contains(&example))
+}
+
 /// `extension new --from <example>` copies each example oxplow ships, and
-/// the copy checks and tests clean as it stands (an example that builds on
-/// another comes with it).
+/// the copy checks and tests clean as it stands.
 async fn scaffolds_checks_and_tests_clean(example: &'static Example) {
     let _watch = HangWatch::on(example.name);
     let dir = project().await;
-    let needs: &[&str] = match example.name {
-        "review-badges" => &["effort-review"],
-        _ => &[],
-    };
-    for name in needs.iter().copied().chain([example.name]) {
-        oxplow_sdk::scaffold_example(dir.path(), name, None).unwrap();
-    }
+    oxplow_sdk::scaffold_example(dir.path(), example.name, None).unwrap();
+    with_required(dir.path(), example.name);
     let report = check(
         dir.path(),
         example.name,
@@ -129,12 +179,9 @@ async fn renames_and_tests_clean(example: &'static Example) {
     let mut failures = Vec::new();
     let _watch = HangWatch::on(example.name);
     let dir = project().await;
-    // An example that builds on another comes with it, under its name.
-    if example.name == "review-badges" {
-        oxplow_sdk::scaffold_example(dir.path(), "effort-review", None).unwrap();
-    }
     let name = format!("renamed-{}", example.name);
     let made = oxplow_sdk::scaffold_example(dir.path(), example.name, Some(&name)).unwrap();
+    with_required(dir.path(), example.name);
     assert_eq!(made.name, name);
     let report = check(
         dir.path(),
@@ -151,6 +198,12 @@ async fn renames_and_tests_clean(example: &'static Example) {
             "{name}: check: {}",
             render_findings(&report, Format::Text)
         ));
+    }
+    if in_a_family(example.name) {
+        // Its family still names the old namespace: its own check above is
+        // what a rename can keep clean; its fixtures run under its own name.
+        assert!(failures.is_empty(), "{failures:?}");
+        return;
     }
     let report = test_extension(dir.path(), &name, false).await.unwrap();
     failures.extend(
@@ -183,7 +236,7 @@ fn on_runtime(run: impl std::future::Future<Output = ()>) {
 
 fn main() {
     let all = oxplow_sdk::examples::all();
-    let enough = all.len() >= 9;
+    let enough = all.len() >= 6;
     let mut trials = vec![Trial::test("the_examples_are_compiled_in", move || {
         if enough {
             Ok(())

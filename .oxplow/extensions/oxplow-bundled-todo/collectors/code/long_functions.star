@@ -2,7 +2,7 @@
 # language. Language-agnostic: sweeps source_files() and uses the code_metrics()
 # capability.
 #
-# Inverted substrate (epic tsk12): the durable grain is a per-function
+# Inverted substrate: the durable grain is a per-function
 # `oxplow.fn_length` FACT (emitted for EVERY function, so a spec can re-threshold),
 # and the "> 60" count is the metric SPEC `oxplow.long_functions` over those facts.
 # Facts are the only output; the reads aggregate them via the engine (T-C3).

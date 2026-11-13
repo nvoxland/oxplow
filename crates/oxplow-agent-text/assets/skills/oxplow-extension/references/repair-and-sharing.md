@@ -4,18 +4,18 @@
 
 oxplow keeps each provider's, collector's and effect's health on this machine
 in `v_contribution_health` (`extension`, `contribution`, `kind`, `state` = `ok` |
-`failing` | `disabled`, `reason`, `last_error`, `dead_letters`, `fresh`,
-`repair_item`). Each collector's last run is in `v_collector_run`
+`failing` | `disabled`, `reason`, `last_error`, `dead_letters`, `fresh`;
+bundled's `v_oxplow_contribution_repair` has the open `repair_item`). Each collector's last run is in `v_collector_run`
 (`status`, `last_run_at`, `error`).
 
 - **Three failures in a row disable it.** A disabled collector doesn't
   run, `oxplow.collector.sync` refuses naming the reason, and a page over its
   view carries the reason as a warning.
-- **A disable files a repair work item** (`repair_item`). Its body is the
+- **A disable files a repair task** (`repair_item`). Its body is the
   whole repair brief: what the extension is for, the declaration, the
   last errors, the failing fixture and the `check` report. A repeat
   failure comments on the open item. The item is linked `about` the
-  contribution's ref (`v_work_item_link`), which is how the open one is
+  contribution's ref (`v_oxplow_task_link`), which is how the open one is
   found; its title is only for people. When the user asks you to repair an
   extension, read that item first.
 - **Fix it, then prove it.** Change the script or declaration, run

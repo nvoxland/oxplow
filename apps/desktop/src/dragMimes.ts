@@ -13,7 +13,7 @@
  * declared twice — once in the (long-dead) `ThreadRail` component and once
  * in the (equally dead) drag decoder so it could avoid importing the React
  * tree — with a unit test whose entire job was to assert the two copies
- * hadn't drifted apart. One home means there's nothing to drift (tsk271).
+ * hadn't drifted apart. One home means there's nothing to drift.
  *
  * Kept free of imports on purpose, so a decoder, a pure helper, or a React
  * component can all reach a MIME without dragging anything else along.

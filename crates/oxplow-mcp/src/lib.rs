@@ -138,7 +138,7 @@ const ANONYMOUS_WRITE: &str = "this MCP connection carries no thread identity (i
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RunCommandParams {
     /// The command id, as `list_commands` reports it (`oxplow.config.set`,
-    /// `oxplow.work_item.transition`).
+    /// `oxplow.thread.mark`).
     pub id: String,
     /// The command's input, matching its `input_schema`.
     #[serde(default)]
@@ -147,10 +147,10 @@ pub struct RunCommandParams {
 
 #[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
 pub struct ListCommandsParams {
-    /// One command's id (`oxplow.work_item.create`): it alone, in full.
+    /// One command's id (`oxtask.task.create`): it alone, in full.
     #[serde(default)]
     pub id: Option<String>,
-    /// The start of the ids wanted (`oxplow.work_item.`): each, in full.
+    /// The start of the ids wanted (`oxtask.task.`): each, in full.
     #[serde(default)]
     pub prefix: Option<String>,
 }
@@ -263,7 +263,7 @@ impl OxplowMcp {
     #[tool(
         description = "The commands this agent may run through `run_command`. With no \
                        arguments: every command's `id` and one-line `summary`. With `id` (one \
-                       command) or `prefix` (an area, `oxplow.work_item.`): each with its \
+                       command) or `prefix` (an area, `oxtask.task.`): each with its \
                        `input_schema`, an `example` input that fits it, whether a person \
                        `confirm`s it and whether it is `undoable`. Read a command this way \
                        before its first run. Commands are the one write path: every run is \
@@ -357,8 +357,8 @@ impl ServerHandler for OxplowMcp {
         // the default and assign.
         let mut info = ServerConfig::default();
         info.instructions = Some(
-            "Oxplow knows this project's work and code: work items, efforts, \
-             test runs and coverage, commits, metrics and the wiki, readable \
+            "Oxplow knows this project's work and code: tasks, requests, \
+             test runs and coverage, commits, metrics and knowledge pages, readable \
              with `oxplow_query_sql` over the read-only `v_*` datasets (`v_dataset` lists \
              them). Every write is a command (`run_command`).\n\n\
              Answering the person: when they ask to see, list, compare or \
@@ -367,7 +367,7 @@ impl ServerHandler for OxplowMcp {
              (`oxplow_find_page`) and show it with `oxplow_show_page` (that \
              page with params, or your own `spec`: a table, chart or tree). \
              It opens beside the conversation, live; the person can save it \
-             to the wiki. `oxplow_run_page` reads one yourself, and \
+             as a knowledge page. `oxplow_run_page` reads one yourself, and \
              `oxplow_get_open_page` is what they are looking at. Keep the \
              prose around it short, and don't repeat the table as text."
                 .into(),
@@ -495,9 +495,6 @@ impl OxplowMcp {
             }
             Err(err) => return Err(command_error(err)),
         };
-        if outcome.audit_id.is_some() {
-            self.services.efforts.settle_lifecycle().await;
-        }
         match outcome.result {
             serde_json::Value::String(text) => {
                 Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
@@ -544,12 +541,6 @@ impl OxplowMcp {
             }
             Err(err) => return Err(command_error(err)),
         };
-        // A write may have opened or closed an effort (`oxplow.effort.open`,
-        // `oxplow.work_item.transition`): let its snapshot pin land before the
-        // agent's next step.
-        if outcome.audit_id.is_some() {
-            self.services.efforts.settle_lifecycle().await;
-        }
         json_result(&outcome)
     }
 
@@ -706,6 +697,14 @@ mod tests {
         let tree = repo.find_tree(tree_id).unwrap();
         repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
             .unwrap();
+        // These tests run on core's built-in oxwiki, which stands down while
+        // the oxwiki extension is on.
+        std::fs::create_dir_all(project.path().join(".oxplow")).unwrap();
+        std::fs::write(
+            project.path().join(".oxplow/personal.yaml"),
+            "disableExtensions: [oxwiki]\n",
+        )
+        .unwrap();
         let services = Services::in_memory(project.path()).await.unwrap();
         let server = OxplowMcp::new(services.clone());
         (project, services, server)
@@ -730,30 +729,6 @@ mod tests {
         input: serde_json::Value,
     ) -> Result<CallToolResult, McpError> {
         server.call_declared(&caller_of(ext), name, input).await
-    }
-
-    /// A task filed as a person through `oxplow.work_item.create` — on
-    /// `thread`'s list, else the backlog: its id.
-    async fn file_task(
-        services: &Services,
-        thread: Option<oxplow_domain::ThreadId>,
-        title: &str,
-    ) -> oxplow_tasks::TaskId {
-        let mut input = serde_json::json!({ "title": title });
-        if let Some(t) = thread {
-            input["thread"] = serde_json::Value::String(t.to_string());
-        }
-        let out = services
-            .commands
-            .run(
-                &oxplow_domain::Actor::Human,
-                "oxplow.work_item.create",
-                input,
-                false,
-            )
-            .await
-            .unwrap();
-        oxplow_tasks::task_of_work_item_ref(out.result["uri"].as_str().unwrap()).unwrap()
     }
 
     #[tokio::test]
@@ -891,7 +866,7 @@ mod tests {
         );
         w(
             ".oxplow/extensions/demo/pages/review.yaml",
-            "title: Review\nparams:\n  - { name: path }\nloaders:\n  r: { sql: SELECT :path AS effort }\nview: { viz: table, from: r }\n",
+            "title: Review\nparams:\n  - { name: path }\nloaders:\n  r: { sql: SELECT :path AS file }\nview: { viz: table, from: r }\n",
         );
         w(
             ".oxplow/extensions/demo/pages/streams.yaml",
@@ -1039,7 +1014,7 @@ mod tests {
             &server,
             &rmcp::model::Extensions::default(),
             "oxplow_query_sql",
-            serde_json::json!({ "sql": "DELETE FROM task" }),
+            serde_json::json!({ "sql": "DELETE FROM threads" }),
         )
         .await
         .unwrap_err();
@@ -1055,7 +1030,7 @@ mod tests {
                 &rmcp::model::Extensions::default(),
                 "oxplow_query_sql",
                 serde_json::json!({
-                    "sql": "SELECT name FROM v_field WHERE view = 'v_work_item'",
+                    "sql": "SELECT name FROM v_field WHERE view = 'v_thread'",
                 }),
             )
             .await
@@ -1066,7 +1041,7 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .any(|r| r[0] == "state"));
+            .any(|r| r[0] == "mark"));
     }
 
     #[tokio::test]
@@ -1074,22 +1049,38 @@ mod tests {
         let (_proj, services, server) = boot().await;
         let stream = services.streams.list_streams().await.unwrap()[0].id;
 
-        // A task to use as the primary target, and another as a context
-        // ancestor (e.g. an epic the row sat under).
-        let primary_task = file_task(&services, None, "Primary item").await;
-        let parent_task = file_task(&services, None, "Parent epic").await;
+        // A thread to use as the primary target, and another as a context
+        // ancestor.
+        let new_thread = |title: &'static str| {
+            let services = services.clone();
+            async move {
+                let out = services
+                    .commands
+                    .run(
+                        &oxplow_domain::Actor::Human,
+                        "oxplow.thread.create",
+                        serde_json::json!({ "stream": stream.to_string(), "title": title }),
+                        false,
+                    )
+                    .await
+                    .unwrap();
+                out.result["id"].as_str().unwrap().to_string()
+            }
+        };
+        let primary = new_thread("Primary item").await;
+        let parent = new_thread("Parent epic").await;
 
         services
             .commands
             .run(
                 &oxplow_domain::Actor::Human,
-                "oxplow.knowledge.add_comment",
+                "oxplow.comment.add",
                 serde_json::json!({
                     "stream": stream.to_string(),
-                    "target": oxplow_domain::uri::build::work_item_uri("oxplow", &primary_task.to_string()),
+                    "target": format!("oxplow:oxplow/thread?id={primary}"),
                     "quote": "the highlighted text",
                     "selectors_json": "[]",
-                    "context_chain": [oxplow_domain::uri::build::work_item_uri("oxplow", &parent_task.to_string())],
+                    "context_chain": [format!("oxplow:oxplow/thread?id={parent}")],
                     "referenced": [oxplow_domain::uri::build::file_uri("src/app.rs")],
                     "intent": "followup",
                     "body": "what about this?",
@@ -1111,11 +1102,10 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
         let row = &parsed.as_array().unwrap()[0];
 
-        // Primary target resolved to the task title.
-        assert_eq!(row["primary"]["resource"], "oxplow/work_item");
-        assert_eq!(row["primary"]["title"], "Primary item");
+        // Primary target resolved to its resource.
+        assert_eq!(row["primary"]["resource"], "oxplow/thread");
         // Context chain ancestor resolved.
-        assert_eq!(row["context_chain"][0]["title"], "Parent epic");
+        assert_eq!(row["context_chain"][0]["resource"], "oxplow/thread");
         // Referenced file ref present but bare (no first-class label).
         assert_eq!(row["referenced"][0]["resource"], "oxplow/file");
         assert_eq!(
@@ -1209,7 +1199,7 @@ mod tests {
         .unwrap_err();
         assert!(err.message.contains("oxplow-extension"), "{err:?}");
         // A skill's reference files are read by name too.
-        let core = oxplow_app::capabilities::agent_text(&_svc);
+        let core = oxplow_app::capabilities::agent_text(&_svc).await;
         let skill = core
             .skills
             .iter()
@@ -1314,42 +1304,6 @@ mod tests {
             "{v}"
         );
         assert!(svc.collector_store.list_runs().await.unwrap().is_empty());
-    }
-
-    /// `read` reads a work item from the active list, whichever it is: the
-    /// item while oxplow's tasks are the list, nothing with none.
-    #[tokio::test]
-    async fn a_work_item_reads_from_the_active_list() {
-        let (_proj, services, server) = boot().await;
-        let id = file_task(&services, None, "round trip").await;
-        let read = |server: &OxplowMcp| {
-            let server = server.clone();
-            async move {
-                call(
-                    &server,
-                    &rmcp::model::Extensions::new(),
-                    "oxplow_read",
-                    serde_json::json!({ "uri": oxplow_domain::uri::build::work_item_uri("oxplow", &format!("{id}")) }),
-                )
-                .await
-                .map(|r| serde_json::from_str::<serde_json::Value>(&text_payload(r)).unwrap())
-            }
-        };
-        assert_eq!(read(&server).await.unwrap()["row"]["title"], "round trip");
-        services
-            .config
-            .write()
-            .unwrap()
-            .personal_active_providers
-            .insert("work_items".into(), "none".into());
-        let config = oxplow_app::config_service::read_config(&services.config);
-        services
-            .capabilities
-            .publish(&config, &services.db)
-            .await
-            .unwrap();
-        let gone = read(&server).await.unwrap_err();
-        assert!(gone.message.contains("nothing at"), "{gone:?}");
     }
 
     /// A request's parts as the control plane passes them on: the
@@ -1457,7 +1411,7 @@ mod tests {
         for expected in [
             "oxplow.config.set",
             "oxplow.config.list_keys",
-            "oxplow.work_item.transition",
+            "oxplow.thread.rename",
             "oxplow.metric.record",
             "oxplow.collector.sync",
             "oxplow.metric.rebuild",
@@ -1879,42 +1833,31 @@ mod tests {
         assert!(err.message.contains("thread identity"), "{err:?}");
     }
 
-    /// Helper to write a wiki body to disk.
-    async fn seed_wiki(project: &std::path::Path, slug: &str, body: &str) {
-        let wiki_dir = project.join(".oxplow").join("wiki");
-        std::fs::create_dir_all(&wiki_dir).unwrap();
-        std::fs::write(wiki_dir.join(format!("{slug}.md")), body).unwrap();
-    }
-
+    /// `oxplow_ref_drift` reads any model row's file edge, not a knowledge
+    /// page's alone.
     #[tokio::test]
-    async fn wiki_ref_drift_reports_status_per_ref() {
-        let (proj, svc, server) = boot().await;
-        seed_wiki(proj.path(), "intro", "see [[crates/foo.rs]]").await;
-        oxplow_app::wiki_pages::sync_page(&svc.db, &svc.vocabulary, proj.path(), "intro")
+    async fn ref_drift_reads_any_rows_file_edge() {
+        let (_proj, svc, server) = boot().await;
+        let row = "oxplow:oxplow/book?id=dune&store=shelves";
+        svc.page_ref_store
+            .upsert_edge(oxplow_db::PageRefEdge::new(
+                row,
+                oxplow_domain::uri::build::file_uri("crates/foo.rs"),
+                "file_pin",
+            ))
             .await
             .unwrap();
-        // The file IS referenced but has no pin (no snapshot service in tests).
         let r = call(
             &server,
             &rmcp::model::Extensions::new(),
-            "oxplow_wiki_ref_drift",
-            serde_json::json!({ "slug": "intro", "path": "crates/foo.rs" }),
+            "oxplow_ref_drift",
+            serde_json::json!({ "uri": row, "path": "crates/foo.rs" }),
         )
         .await
         .unwrap();
         let body = text_payload(r);
-        assert!(body.contains("\"status\""), "{body}");
         assert!(body.contains("no_pin"), "expected no_pin: {body}");
-        // A path the page doesn't reference at all.
-        let r2 = call(
-            &server,
-            &rmcp::model::Extensions::new(),
-            "oxplow_wiki_ref_drift",
-            serde_json::json!({ "slug": "intro", "path": "crates/zzz.rs" }),
-        )
-        .await
-        .unwrap();
-        assert!(text_payload(r2).contains("not_a_ref"));
+        assert!(body.contains("\"record\""), "{body}");
     }
 
     // ---- Pure helpers: parse_status / parse_priority ----

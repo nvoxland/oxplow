@@ -1,0 +1,16 @@
+# With no task on the thread and no definition of done, oxtask tells the
+# agent nothing (an agent told of a task before hears from core that it no
+# longer holds). A definition of done alone is said with "Nothing is in
+# progress". With the workflow off, nothing.
+requires: [oxplow-bundled, oxtask]
+when: { context: task-state }
+expect: { text: null }
+steps:
+  - given:
+      - { command: oxtask.tasks.set_workflow, input: { definition_of_done: Tests pass. } }
+  - when: { context: task-state }
+    expect: { text: "Nothing is in progress on this thread.\nDone means:\nTests pass." }
+  - given:
+      - { command: oxtask.tasks.set_workflow, input: { workflow: "off" } }
+  - when: { context: task-state }
+    expect: { text: null }

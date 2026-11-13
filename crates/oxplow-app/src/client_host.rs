@@ -220,7 +220,7 @@ impl ClientHost {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TabInput {
-    /// The tab's id: a page's ref (`oxplow:oxplow/file?path=src/a.rs`, `oxplow:oxplow/work_item?id=tsk3&provider=oxplow`,
+    /// The tab's id: a page's ref (`oxplow:oxplow/file?path=src/a.rs`, `oxplow:oxplow/task?id=tsk3&provider=oxtask`,
     /// `oxplow:oxplow/page?page=git-dashboard`).
     pub uri: String,
 }
@@ -260,8 +260,8 @@ pub struct OpenProjectInput {
 #[serde(deny_unknown_fields)]
 pub struct NavigateInput {
     /// What to show: a page's URI (`oxplow:oxplow/file?path=src/a.rs#lines=12`,
-    /// `oxplow:oxplow/work_item?id=tsk3&provider=oxplow`,
-    /// `oxplow:oxplow/wiki?slug=…`, `oxplow:oxplow/page?page=<route>`), or a stream's or a
+    /// `oxplow:oxplow/task?id=tsk3&provider=oxtask`,
+    /// `oxplow:oxplow/knowledge?id=…&store=…`, `oxplow:oxplow/page?page=<route>`), or a stream's or a
     /// thread's URI to select it. Its `#` is the page's view (a line, a
     /// filter): the same page in another view keeps its tab.
     pub uri: String,
@@ -413,7 +413,7 @@ mod tests {
     /// recorded.
     #[tokio::test(flavor = "multi_thread")]
     async fn an_agent_opens_a_tab_in_its_own_thread() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let spec = fx.svc.commands.spec("oxplow.tab.open").unwrap();
         assert_eq!(
             spec.op,
@@ -470,7 +470,7 @@ mod tests {
     /// the stream, when named) as given and its answer is the result.
     #[tokio::test(flavor = "multi_thread")]
     async fn an_agent_takes_the_person_to_a_ref() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let spec = fx.svc.commands.spec("oxplow.window.navigate").unwrap();
         assert_eq!(
             spec.op,

@@ -5,6 +5,7 @@ import type {
   TabReportAnswer,
   HookEnvelope,
   OpOutcome,
+  PointOffer,
   OxplowConfig,
   OxplowEvent,
   Reads,
@@ -238,7 +239,7 @@ export type DesktopBridge = ReturnType<typeof buildBridge>;
 let cachedBridge: DesktopBridge | null = null;
 
 // The wire's own shapes, from the generated bindings: nothing converts a
-// shape at the boundary (P11, tsk963–964).
+// shape at the boundary (P11).
 export type { BackgroundTask, OxplowConfig, OxplowEvent };
 export type { OpOutcome } from "./tauri-bridge/index.js";
 
@@ -254,9 +255,9 @@ export interface ThreadState {
   threads: Thread[];
 }
 
-// Work items are read through the work-item interface by `workItems.ts`,
+// Tasks are read through the task interface by `tasks.ts`,
 // which owns their shape.
-export type { WorkItem } from "./workItems.js";
+export type { Task } from "./tasks.js";
 
 
 /** Why a snapshot take ran (`snapshot_op.trigger`). */
@@ -294,19 +295,6 @@ export interface SnapshotSummary {
   counts: { created: number; updated: number; deleted: number };
 }
 
-
-export interface TaskEffort {
-  id: string;
-  /** The work item worked on (`work_item:oxplow:tsk42`, or another
-   *  provider's `work_item:issues:ENG-12`). */
-  work_item: string;
-  started_at: string;
-  ended_at: string | null;
-  start_snapshot_id: string | null;
-  end_snapshot_id: string | null;
-  /** The effort's summary prose (canonical text). */
-  summary: string | null;
-}
 
 export const BACKLOG_SCOPE = "__backlog__";
 
@@ -379,9 +367,9 @@ export async function listStreams(): Promise<Stream[]> {
 }
 
 /// Site-wide BM25 search. `streamId` scopes file/stream-bound hits to one
-/// worktree (project-global hits like wiki always included); `null` searches
+/// worktree (project-global hits like knowledge pages always included); `null` searches
 /// everything. `resources` optionally restricts to searchable resources
-/// (`v_resource.searchable`: `oxplow/wiki`) or `oxplow/file`.
+/// (`v_resource.searchable`: `oxplow/knowledge`) or `oxplow/file`.
 export async function searchSite(
   query: string,
   streamId: string | null,
@@ -419,7 +407,7 @@ export async function getCommand(name: string): Promise<CommandSpec> {
 }
 
 /** Load component `id`'s bundle (`<extension>/<component id>`) as it is
- *  now, for its frame (tsk984): the version the daemon serves it at and
+ *  now, for its frame: the version the daemon serves it at and
  *  the frame invokes with. */
 export async function loadComponent(id: string): Promise<string> {
   return unwrap(await commands.loadComponent(id));
@@ -436,6 +424,20 @@ export async function invokeComponentCommand(
   version: string,
 ): Promise<CommandOutcome> {
   return unwrap(await commands.invokeComponentCommand(id, command, input as never, confirmed, version));
+}
+
+/** A custom component runs an action point it declares: the command that
+ *  answers `point` for `context` (`command` names one when several do), as
+ *  the component acting for the person. */
+export async function invokeComponentPoint(
+  id: string,
+  point: string,
+  context: unknown,
+  command: string | null,
+  confirmed: boolean,
+  version: string,
+): Promise<CommandOutcome> {
+  return unwrap(await commands.invokeComponentPoint(id, point, context as never, command, confirmed, version));
 }
 
 /** A custom component that declares `sql: read` runs its own read-only SQL
@@ -492,7 +494,7 @@ export async function reportTabs(report: TabReport): Promise<TabReportAnswer> {
   return unwrap(await commands.reportTabs(report));
 }
 
-/// Analyze a change (a commit, an effort, or a stream's working tree) if
+/// Analyze a change (a commit, a request, or a stream's working tree) if
 /// needed and return its `v_change` row. See `.context/semantic-layer.md`.
 
 export { openInSystemBrowser } from "./tauri-bridge/systemBrowser.js";
@@ -670,6 +672,13 @@ export async function listPersonCommands(): Promise<CommandSpec[]> {
  *  (`ref_commands`). */
 export async function refCommands(uri: string): Promise<string[]> {
   return unwrap(await commands.refCommands(uri));
+}
+
+/** What action point `point` offers for `context`: the commands that
+ *  joined it (`ui.at`) with the input each runs with, and how to draw them
+ *  (`action_point_commands`). */
+export async function actionPointCommands(point: string, context: Record<string, unknown>): Promise<PointOffer> {
+  return unwrap(await commands.actionPointCommands(point, context as never));
 }
 
 /** Run command `id` as a background task (its `ui.background`: a slow
@@ -867,31 +876,9 @@ export interface RemoteBranchTarget {
   branch: string;
 }
 
-/** Write a wiki page — the `oxplow.knowledge.write_page` command (P5.C3): the
- *  row, its links and the file, in one audited run. Every `[[link]]` must
- *  resolve (a dangling one is refused, named). `verifiedFiles` are files
- *  re-checked against the page: their freshness pins move to now. */
-export async function writeWikiPage(
-  slug: string,
-  body: string,
-  options?: { verifiedFiles?: string[] },
-): Promise<void> {
-  await runCommand("oxplow.knowledge.write_page", {
-    slug,
-    body,
-    verified_files: options?.verifiedFiles ?? [],
-  });
-}
-
-/** Delete a wiki page (`oxplow.knowledge.delete_page`, destructive): the person
- *  has confirmed. */
-export async function deleteWikiPage(slug: string, confirmed: boolean): Promise<void> {
-  await runCommand("oxplow.knowledge.delete_page", { slug }, confirmed);
-}
-
 // ---- Comments ----
 
-/** A comment, written as the person (`oxplow.knowledge.add_comment`, P8.A6). */
+/** A comment, written as the person (`oxplow.comment.add`, P8.A6). */
 export async function createComment(input: {
   streamId: string;
   threadId: string | null;
@@ -907,7 +894,7 @@ export async function createComment(input: {
   intent: CommentIntent;
   body: string;
 }): Promise<CommentThread> {
-  const outcome = await runCommand("oxplow.knowledge.add_comment", {
+  const outcome = await runCommand("oxplow.comment.add", {
     stream: input.streamId,
     ...(input.threadId ? { thread: input.threadId } : {}),
     target: input.target,
@@ -922,7 +909,7 @@ export async function createComment(input: {
 }
 
 export async function addCommentMessage(commentId: string, body: string): Promise<CommentMessage> {
-  return (await runCommand("oxplow.knowledge.reply_comment", { comment: commentId, body })).result as CommentMessage;
+  return (await runCommand("oxplow.comment.reply", { comment: commentId, body })).result as CommentMessage;
 }
 
 export async function listCommentsForTarget(target: string): Promise<CommentThread[]> {
@@ -934,11 +921,11 @@ export async function listCommentsForStream(streamId: string): Promise<CommentTh
 }
 
 export async function setCommentIntent(commentId: string, intent: CommentIntent): Promise<void> {
-  await runCommand("oxplow.knowledge.update_comment", { comment: commentId, intent });
+  await runCommand("oxplow.comment.update", { comment: commentId, intent });
 }
 
 export async function setCommentStatus(commentId: string, status: CommentStatus): Promise<void> {
-  await runCommand("oxplow.knowledge.update_comment", { comment: commentId, status });
+  await runCommand("oxplow.comment.update", { comment: commentId, status });
 }
 
 /// Store where the renderer re-found a comment's quote (or that it is
@@ -948,7 +935,7 @@ export async function relocateComment(
   selectorsJson: string,
   orphaned: boolean,
 ): Promise<void> {
-  await runCommand("oxplow.knowledge.relocate_comment", { comment: commentId, selectors_json: selectorsJson, orphaned });
+  await runCommand("oxplow.comment.relocate", { comment: commentId, selectors_json: selectorsJson, orphaned });
 }
 
 /// Re-attach an orphaned comment to a freshly-selected span: rewrites
@@ -958,13 +945,13 @@ export async function relinkComment(
   quote: string,
   selectorsJson: string,
 ): Promise<void> {
-  await runCommand("oxplow.knowledge.update_comment", { comment: commentId, quote, selectors_json: selectorsJson });
+  await runCommand("oxplow.comment.update", { comment: commentId, quote, selectors_json: selectorsJson });
 }
 
 /** The popover's delete sits behind an `InlineConfirm`, the person's
- *  confirmation (`oxplow.knowledge.delete_comment` is destructive). */
+ *  confirmation (`oxplow.comment.delete` is destructive). */
 export async function deleteComment(commentId: string): Promise<void> {
-  await runCommand("oxplow.knowledge.delete_comment", { comment: commentId }, true);
+  await runCommand("oxplow.comment.delete", { comment: commentId }, true);
 }
 
 /// Subscribe to comment changes: a commit touched `v_comment` (a comment
@@ -1089,7 +1076,6 @@ export function awaitBackgroundTask(taskId: string): Promise<BackgroundTask | nu
 
 export type { MetricSpec, SeriesPoint } from "./metricsSql.js";
 
-import { effortUri, idOf } from "./uri/uri.js";
 
 /** Rows a metric reader returned, and what the query read — hand `reads` to
  *  `useRerunOnChange` so the view refreshes when (and only when) they change. */
@@ -1135,18 +1121,6 @@ export async function undoCommand(auditId: number, confirmed = false): Promise<C
 export async function decideProposal(id: number, approve: boolean): Promise<CommandOutcome | null> {
   return unwrap(await commands.decideProposal(id, approve));
 }
-
-/** Efforts whose span overlaps `[windowStart, windowEnd]` (RFC-3339) — the
- *  Metrics Explorer's effort-band overlay (tsk233). */
-export async function listEffortsInWindow(
-  windowStart: string,
-  windowEnd: string,
-): Promise<TaskEffort[]> {
-  return unwrap(
-    await commands.listEffortsInWindow(windowStart, windowEnd),
-  ) as unknown as TaskEffort[];
-}
-
 
 /** Snapshot row — one per `request_snapshot()` call that captured
  *  anything. Local History dashboard surfaces this list. */
@@ -1225,77 +1199,10 @@ export async function filesAt(streamId: string, revision: Revision): Promise<str
   return unwrap(await commands.filesAt(streamId || null, revision));
 }
 
-/** One (snapshot, effort) pair. `completedHere` is true when the
- *  effort ended exactly at this snapshot; otherwise the effort was
- *  in flight at this snapshot. Callers group by `snapshotId` and
- *  resolve task titles via `getTaskSummaries` (the IPC only carries
- *  effort columns). */
-export interface EffortAtSnapshot {
-  snapshotId: number;
-  effortId: string;
-  /** The effort's work item ref; `null` while it's unlinked. */
-  workItem: string | null;
-  threadId: string;
-  startSnapshotId: number | null;
-  endSnapshotId: number | null;
-  completedHere: boolean;
-}
-
-/** For each snapshot id in the input list, the wiki slugs whose
- *  body changed in that snapshot. Drives wiki badges on the
- *  Local History dashboard. */
-export async function listWikiSlugsForSnapshots(
-  snapshotIds: number[],
-): Promise<Array<{ snapshotId: number; slug: string }>> {
-  const rows = unwrap(
-    await commands.listWikiSlugsForSnapshots(snapshotIds),
-  ) as unknown as Array<[number, string]>;
-  return rows.map(([snapshotId, slug]) => ({ snapshotId, slug }));
-}
-
-/** Efforts' titles (`v_effort.title`: their own, else their item's, else
- *  their first prompt's first line), by effort id (`eff12`). */
-export async function effortTitles(effortIds: string[]): Promise<Map<string, string>> {
-  if (effortIds.length === 0) return new Map();
-  const res = await querySql(
-    `SELECT uri, title FROM v_effort WHERE uri IN (SELECT value FROM json_each(?1)) AND title IS NOT NULL`,
-    [JSON.stringify(effortIds.map(effortUri))],
-    10_000,
-  );
-  return new Map(res.rows.map((r) => [idOf(String(r[0]), "oxplow/effort") ?? "", String(r[1])] as [string, string]));
-}
-
-export async function listEffortsAtSnapshots(
-  snapshotIds: number[],
-): Promise<EffortAtSnapshot[]> {
-  const rows = unwrap(
-    await commands.listEffortsAtSnapshots(snapshotIds),
-  ) as unknown as Array<{
-    snapshot_id: number;
-    effort: {
-      id: string;
-      work_item: string | null;
-      thread_id: string;
-      start_snapshot_id: number | null;
-      end_snapshot_id: number | null;
-    };
-  }>;
-  return rows.map((r) => ({
-    snapshotId: r.snapshot_id,
-    effortId: r.effort.id,
-    workItem: r.effort.work_item,
-    threadId: r.effort.thread_id,
-    startSnapshotId: r.effort.start_snapshot_id,
-    endSnapshotId: r.effort.end_snapshot_id,
-    completedHere: r.effort.end_snapshot_id === r.snapshot_id,
-  }));
-}
-
 export interface SnapshotTakenEventPayload {
   streamId: string;
   snapshotId: string;
   trigger: SnapshotTrigger;
-  effortId: string | null;
   threadId: string | null;
 }
 
@@ -1313,7 +1220,6 @@ export function subscribeSnapshotEvents(
       streamId: eventStreamId,
       snapshotId: String(event.snapshotId),
       trigger: event.trigger as SnapshotTrigger,
-      effortId: (event.effortId as string | null | undefined) ?? null,
       threadId: (event.threadId as string | null | undefined) ?? null,
     });
   });
@@ -1509,7 +1415,6 @@ export function userInterruptEnvelope(sessionId: string, threadId: string, strea
     agent_session_id: sessionId,
     session_id: null,
     payload_json: JSON.stringify({ source: "user-escape" }),
-    prompt: null,
     decision: null,
   };
 }
@@ -1702,7 +1607,7 @@ export async function probeDaemon(): Promise<boolean> {
     return true;
   } catch (e) {
     // A refused token is the daemon answering: it's there, and the
-    // banner says what's wrong (tsk971).
+    // banner says what's wrong.
     return e instanceof IpcCallError && e.code === "UNAUTHORIZED";
   }
 }

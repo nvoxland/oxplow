@@ -8,6 +8,7 @@
 ///   frame → host  { type: "ready" }
 ///                 { type: "size", height }                   its content's height
 ///                 { id, method: "invoke", command, input }   a declared command
+///                 { id, method: "invokePoint", point, context, command? }   an action point it declares: the command that answers it
 ///                 { id, method: "navigate", uri, newTab, replace }    open a page
 ///                 { id, method: "querySql", sql, params }    its own SQL (`sql: read`)
 ///                 { id, method: "openForm", command, input } a declared command's form, in the host
@@ -45,6 +46,7 @@
 /// the frame. The daemon serves a client library wrapping this
 /// (`/component-lib/oxplow-component.js`, `oxplow.connect()`); it checks
 /// `protocol` against the one it speaks.
+import type { MarkdownNode } from "../components/Markdown/markdownTree.js";
 import { isIconName } from "../iconNames.js";
 import { ipcErrorDetails, needsConfirmation } from "../ipc-error.js";
 import { parseUri } from "../uri/uri.js";
@@ -52,7 +54,7 @@ import type { CommandOutcome, VizRun, PageRun, SqlCell, SqlQueryResult } from ".
 
 /// The protocol above, by number: bumped when a message's shape changes,
 /// with the served library (`crates/oxplow-app/assets/component/`). 2: `init`
-/// lost `kitCss` — the kit is a stylesheet the bundle links (tsk961).
+/// lost `kitCss` — the kit is a stylesheet the bundle links.
 /// 3: `navigate` carries `newTab` (a Cmd-click in a component). 4: a
 /// refused request's error carries the input `field` it names, when it
 /// names one (`INVALID`), so a component's form marks that field.
@@ -78,7 +80,7 @@ import type { CommandOutcome, VizRun, PageRun, SqlCell, SqlQueryResult } from ".
 /// and `update` carry `data` (each loader's rows), `params` and `props`,
 /// `update` the loaders that `changed` — and a page shows an inline page
 /// under it (`showView`, its YAML) where it showed a viz spec.
-export const BRIDGE_PROTOCOL = 12;
+export const BRIDGE_PROTOCOL = 13;
 
 /** One loader's rows as a component reads them (and what `showView`
  *  answers: the inline page's first loader's). */
@@ -163,6 +165,7 @@ export interface ViewInit {
 
 export type BridgeRequest =
   | { id: string; method: "invoke"; command: string; input: unknown }
+  | { id: string; method: "invokePoint"; point: string; context: unknown; command: string | null }
   | { id: string; method: "navigate"; uri: string; newTab: boolean; replace: boolean }
   | { id: string; method: "querySql"; sql: string; params: SqlCell[] }
   | { id: string; method: "openForm"; command: string; input: unknown }
@@ -175,7 +178,8 @@ export type BridgeRequest =
   | { id: string; method: "setHistoryState"; patch: Record<string, unknown> }
   | { id: string; method: "pageMemoryGet"; key: string }
   | { id: string; method: "pageMemorySet"; key: string; value: unknown }
-  | { id: string; method: "showView"; spec: string | null };
+  | { id: string; method: "showView"; spec: string | null }
+  | { id: string; method: "markdown"; text: string; inline: boolean };
 
 export type FrameMessage = { type: "ready" } | { type: "size"; height: number } | { type: "request"; request: BridgeRequest };
 
@@ -195,6 +199,13 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
     case "invoke":
       if (typeof m.command !== "string") return null;
       return { type: "request", request: { id: m.id, method: "invoke", command: m.command, input: m.input ?? {} } };
+    case "invokePoint":
+      if (typeof m.point !== "string") return null;
+      if (m.command !== undefined && m.command !== null && typeof m.command !== "string") return null;
+      return {
+        type: "request",
+        request: { id: m.id, method: "invokePoint", point: m.point, context: m.context ?? {}, command: (m.command as string | null | undefined) ?? null },
+      };
     case "navigate":
       if (typeof m.uri !== "string") return null;
       if (m.newTab !== undefined && typeof m.newTab !== "boolean") return null;
@@ -203,6 +214,9 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
         type: "request",
         request: { id: m.id, method: "navigate", uri: m.uri, newTab: m.newTab === true, replace: m.replace === true },
       };
+    case "markdown":
+      if (typeof m.text !== "string" || (m.inline !== undefined && typeof m.inline !== "boolean")) return null;
+      return { type: "request", request: { id: m.id, method: "markdown", text: m.text, inline: m.inline === true } };
     case "querySql": {
       const params = m.params ?? [];
       if (typeof m.sql !== "string" || !Array.isArray(params) || !params.every(isCell)) return null;
@@ -280,8 +294,8 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
   }
 }
 
-/** Where the daemon serves the bundle its host loaded at `version`
- *  (tsk984): a folder of its own, so the bundle's relative URLs stay in
+/** Where the daemon serves the bundle its host loaded at `version`:
+ * a folder of its own, so the bundle's relative URLs stay in
  *  it. */
 export function componentBundleUrl(base: string, version: string): string {
   return `${base}/components/v/${encodeURIComponent(version)}/`;
@@ -327,6 +341,9 @@ export function initMessage(fed: HostedData, tokens: Record<string, string>, pag
 export interface BridgeDeps {
   /** Run a declared command as the viz for the person. */
   invoke(command: string, input: unknown, confirmed: boolean): Promise<CommandOutcome>;
+  /** Run the command that answers action point `point` for `context`, as
+   *  the viz for the person (`command` names one when several answer). */
+  invokePoint(point: string, context: unknown, command: string | null, confirmed: boolean): Promise<CommandOutcome>;
   /** Open `ref`'s page, in a new tab when asked; false when it isn't one
    *  a component may open (`componentMayOpen`). */
   navigate(ref: string, opts: { newTab: boolean; replace: boolean }): boolean;
@@ -334,6 +351,9 @@ export interface BridgeDeps {
    *  it asks about beyond itself, one line each. */
   confirm(command: string, details: string[]): Promise<boolean>;
   onReady(): void;
+  /** Markdown as the tree the library draws (`markdownTree`): the viewer's
+   *  parse, links and titles, as data — no HTML crosses. */
+  markdown(text: string, inline: boolean): Promise<MarkdownNode[]>;
   /** Run its own read-only SQL (`run_component_sql`). */
   querySql?(sql: string, params: SqlCell[]): Promise<SqlQueryResult>;
   /** Show a declared command's form in the host and run it as submitted:
@@ -440,9 +460,31 @@ export function createBridgeHost(
           }
         }
         return;
+      case "invokePoint":
+        try {
+          reply(r.id, (await deps.invokePoint(r.point, r.context, r.command, false)).result);
+        } catch (e) {
+          if (!needsConfirmation(e)) return failWith(r.id, e);
+          if (!(await deps.confirm(r.command ?? r.point, ipcErrorDetails(e)))) {
+            return fail(r.id, "CANCELLED", `The person didn't confirm \`${r.command ?? r.point}\`.`);
+          }
+          try {
+            reply(r.id, (await deps.invokePoint(r.point, r.context, r.command, true)).result);
+          } catch (again) {
+            failWith(r.id, again);
+          }
+        }
+        return;
       case "navigate":
         if (deps.navigate(r.uri, { newTab: r.newTab, replace: r.replace })) reply(r.id, null);
         else fail(r.id, "INVALID", "A component may open oxplow's pages only.");
+        return;
+      case "markdown":
+        try {
+          reply(r.id, await deps.markdown(r.text, r.inline));
+        } catch (e) {
+          failWith(r.id, e);
+        }
         return;
       case "querySql":
         if (!deps.querySql) return fail(r.id, "INVALID", "This host runs no SQL for a component.");

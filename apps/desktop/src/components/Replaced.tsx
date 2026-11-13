@@ -22,7 +22,7 @@ export function Replaced({
   streamId,
   children,
 }: {
-  /** One of `oxplow_domain::replaceable::REPLACEABLE` (`work_item.board`). */
+  /** One of `oxplow_domain::replaceable::REPLACEABLE` (`task.board`). */
   target: string;
   /** The extension whose page stands in. */
   extension: string;

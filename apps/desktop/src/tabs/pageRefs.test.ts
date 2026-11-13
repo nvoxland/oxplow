@@ -9,7 +9,6 @@ import {
   settingsRef,
   diskFilePath,
   duplicateBlockRef,
-  effortDiffRef,
   endpointDiffRef,
   extPageRef,
   externalUrlRef,
@@ -29,9 +28,9 @@ import {
   streamSettingsRef,
   turnRef,
   threadSettingsRef,
-  wikiFreshnessRef,
-  wikiPageRef,
-  workItemTabRef,
+  knowledgeFreshnessRef,
+  knowledgePageRef,
+  taskTabRef,
   pagePayload,
   resourceParamsOf,
   viewParamsOf,
@@ -39,7 +38,7 @@ import {
   withResourceParams,
 } from "./pageRefs.js";
 import type { TabRef } from "./tabState.js";
-import { idOf, identityOf, typeOf } from "../uri/uri.js";
+import { idOf, identityOf, knowledgeUri, typeOf } from "../uri/uri.js";
 
 describe("pageRefs", () => {
   test("an agent session's tab is its ref, pinned; the picker is a closable page", () => {
@@ -75,11 +74,11 @@ describe("pageRefs", () => {
     expect(settingsRef("agents", "models").id).toBe("oxplow:oxplow/page?page=settings#area=agents&section=models");
   });
 
-  test("wikiPageRef and workItemTabRef encode canonical refs", () => {
-    expect(wikiPageRef("how-x-works").id).toBe("oxplow:oxplow/wiki?slug=how-x-works");
-    // A work item's tab is its ref, whichever list (.context/resources.md).
-    expect(workItemTabRef("oxplow:oxplow/work_item?id=tsk123&provider=oxplow")).toEqual({
-      id: "oxplow:oxplow/work_item?id=tsk123&provider=oxplow",
+  test("knowledgePageRef and taskTabRef encode canonical refs", () => {
+    expect(knowledgePageRef("oxwiki", "how-x-works").id).toBe("oxplow:oxplow/knowledge?id=how-x-works&store=oxwiki");
+    // A task's tab is its ref, whichever list (.context/resources.md).
+    expect(taskTabRef("oxplow:oxplow/task?id=tsk123&provider=oxtask")).toEqual({
+      id: "oxplow:oxplow/task?id=tsk123&provider=oxtask",
     });
     expect(gitCommitRef("abc1234")).toEqual({ id: "oxplow:oxplow/commit?sha=abc1234" });
     expect(metricRef("oxplow.todos")).toEqual({ id: "oxplow:oxplow/metric?metric=oxplow.todos" });
@@ -100,7 +99,7 @@ describe("pageRefs", () => {
 
   test("routes with a subject carry it as query params", () => {
     expect(goToRef().id).toBe("oxplow:oxplow/page?page=go-to");
-    expect(wikiFreshnessRef("data-model").id).toBe("oxplow:oxplow/page?page=wiki-freshness&slug=data-model");
+    expect(knowledgeFreshnessRef(knowledgeUri("oxwiki", "data-model")).id).toBe("oxplow:oxplow/page?id=data-model&page=knowledge-freshness&store=oxwiki");
     expect(streamSettingsRef("str1").id).toBe("oxplow:oxplow/page?page=stream-settings&stream=str1");
     expect(threadSettingsRef("thr1").id).toBe("oxplow:oxplow/page?page=thread-settings&thread=thr1");
     expect(alertsRef().id).toBe("oxplow:oxplow/page?page=alerts");
@@ -117,15 +116,13 @@ describe("pageRefs", () => {
 
   test("a new item's parent is its param", () => {
     expect(newTaskRef().id).toBe("oxplow:oxplow/page?page=new-task");
-    expect(newTaskRef({ parentRef: "work_item:tsk3" }).id).toBe("oxplow:oxplow/page?page=new-task&parent=work_item:tsk3");
+    expect(newTaskRef({ parentRef: "task:tsk3" }).id).toBe("oxplow:oxplow/page?page=new-task&parent=task:tsk3");
   });
 
-  test("an effort, snapshot or turn page is its canonical ref (P2.11)", () => {
-    const effort = effortDiffRef("eff42");
-    expect(effort).toEqual({ id: "oxplow:oxplow/effort?id=eff42" });
+  test("a snapshot or turn page is its canonical ref (P2.11)", () => {
     expect(snapshotRef(112)).toEqual({ id: "oxplow:oxplow/snapshot?id=112" });
     expect(turnRef("trn7")).toEqual({ id: "oxplow:oxplow/turn?id=trn7" });
-    for (const [ref, kind] of [[effort, "oxplow/effort"], [snapshotRef(112), "oxplow/snapshot"], [turnRef("trn7"), "oxplow/turn"]] as const) {
+    for (const [ref, kind] of [[snapshotRef(112), "oxplow/snapshot"], [turnRef("trn7"), "oxplow/turn"]] as const) {
       expect(refFromTabId(ref.id)).toEqual(ref);
       expect(recordedPageKind(ref)).toBe(kind);
     }
@@ -193,9 +190,9 @@ describe("refFromTabId", () => {
   });
 
   test("rebuilds payload-bearing kinds from their id", () => {
-    expect(refFromTabId("oxplow:oxplow/wiki?slug=some-slug")).toEqual(wikiPageRef("some-slug"));
+    expect(refFromTabId("oxplow:oxplow/knowledge?id=some-slug&store=oxwiki")).toEqual(knowledgePageRef("oxwiki", "some-slug"));
     // `:` inside an id is legal; a naive split on the first colon breaks here.
-    expect(refFromTabId("oxplow:oxplow/work_item?id=tsk42&provider=oxplow")).toEqual(workItemTabRef("oxplow:oxplow/work_item?id=tsk42&provider=oxplow"));
+    expect(refFromTabId("oxplow:oxplow/task?id=tsk42&provider=oxtask")).toEqual(taskTabRef("oxplow:oxplow/task?id=tsk42&provider=oxtask"));
     expect(refFromTabId("oxplow:oxplow/commit?sha=abc1234")).toEqual(gitCommitRef("abc1234"));
     expect(refFromTabId("oxplow:oxplow/metric?metric=oxplow.todos")).toEqual(metricRef("oxplow.todos"));
     // Single snapshot is a diff-view ref now (kind "snapshot" is gone).
@@ -225,7 +222,7 @@ describe("refFromTabId", () => {
   });
 
   test("a diff page rebuilds its whole spec from its id", () => {
-    const spec = { path: "src/a.ts", leftVersion: "snap:3", rightVersion: "git:HEAD", baseLabel: "x", labelOverride: "eff9", revealLine: undefined } as const;
+    const spec = { path: "src/a.ts", leftVersion: "snap:3", rightVersion: "git:HEAD", baseLabel: "x", labelOverride: "req9", revealLine: undefined } as const;
     const rebuilt = refFromTabId(diffRef(spec).id)!;
     expect(diffSpecOf(rebuilt)).toEqual(spec);
   });
@@ -240,10 +237,10 @@ describe("refFromTabId", () => {
     expect(diskFilePath("oxplow:oxplow/file?path=oxplow-foundation/extension.yaml&filesystem=oxplow:extensions")).toBeNull();
     expect(diskFilePath("oxplow:oxplow/file?path=src/a.ts&filesystem=oxplow:local")).toBe("src/a.ts");
     expect(diskFilePath("oxplow:oxplow/agent_session?id=ses3")).toBeNull();
-    expect(diskFilePath("oxplow:oxplow/wiki?slug=a")).toBeNull();
+    expect(diskFilePath("oxplow:oxplow/knowledge?id=a&store=oxwiki")).toBeNull();
   });
 
-  // tsk163: a ref that can't be rebuilt from its own id is a dead row — the
+  // a ref that can't be rebuilt from its own id is a dead row — the
   // launcher's Recent, the rail's History, and the Go To page all reopen pages
   // by id. Two constructors had drifted: `oxplow:oxplow/dashboard?id=%3Cvariant%3E` had no case at
   // all (so every variant reopened as Planning), and `dir:` was matched under
@@ -266,9 +263,8 @@ describe("refFromTabId", () => {
       metricRef("oxplow.todos"),
       metricRef("oxplow.todos", { range: "7d", branch: "main" }),
       snapshotRef(112),
-      workItemTabRef("oxplow:oxplow/work_item?id=tsk42&provider=oxplow"),
-      wikiPageRef("some-slug"),
-      effortDiffRef("eff9"),
+      taskTabRef("oxplow:oxplow/task?id=tsk42&provider=oxtask"),
+      knowledgePageRef("oxwiki", "some-slug"),
       pageTabRef("acme/blocked", { stream_id: 2 }),
       pageTabRef("acme/x", { path: "src/a@b.ts", q: "a=b&c" }),
       fileRef("src/a@b.ts"),
@@ -276,7 +272,7 @@ describe("refFromTabId", () => {
       alertsRef(),
       streamSettingsRef("str1"),
       threadSettingsRef("thr1"),
-      wikiFreshnessRef("data-model"),
+      knowledgeFreshnessRef(knowledgeUri("oxwiki", "data-model")),
       uncommittedChangesRef(),
       fileRef("src/a.ts", "git:HEAD"),
       externalUrlRef("https://x.test/p?a=1#frag"),
@@ -302,10 +298,10 @@ describe("refFromTabId", () => {
   });
 
   test("an extension's page carries its resource params in the `?` and its view in the `#`, and round-trips them", () => {
-    const r = pageTabRef("x/effort-tests", { effort_id: 12 }, { label: "a b" });
-    expect(r.id).toBe("oxplow:oxplow/page?effort_id=12&page=x/effort-tests#label=a%20b");
+    const r = pageTabRef("x/request-tests", { request_id: 12 }, { label: "a b" });
+    expect(r.id).toBe("oxplow:oxplow/page?page=x/request-tests&request_id=12#label=a%20b");
     expect(typeOf(r.id)).toBe("oxplow/page");
-    expect(resourceParamsOf(r)).toEqual({ effort_id: 12 });
+    expect(resourceParamsOf(r)).toEqual({ request_id: 12 });
     expect(refFromTabId(r.id)).toEqual(r);
     expect(viewParamsOf(r)).toEqual({ label: "a b" });
   });
@@ -322,12 +318,12 @@ describe("refFromTabId", () => {
   });
 });
 
-// Every list's work item opens the one work item page, by its ref.
-test("a work item ref opens for every provider", () => {
-  const theirs = workItemTabRef("oxplow:oxplow/work_item?id=W-1&provider=fake");
-  expect(theirs).toEqual({ id: "oxplow:oxplow/work_item?id=W-1&provider=fake" });
-  expect(refFromTabId("oxplow:oxplow/work_item?id=W-1&provider=fake")).toEqual(theirs);
-  expect(refFromTabId("oxplow:oxplow/work_item?id=tsk3&provider=oxplow")).toEqual(workItemTabRef("oxplow:oxplow/work_item?id=tsk3&provider=oxplow"));
+// Every list's task opens the one task page, by its ref.
+test("a task ref opens for every provider", () => {
+  const theirs = taskTabRef("oxplow:oxplow/task?id=W-1&provider=fake");
+  expect(theirs).toEqual({ id: "oxplow:oxplow/task?id=W-1&provider=fake" });
+  expect(refFromTabId("oxplow:oxplow/task?id=W-1&provider=fake")).toEqual(theirs);
+  expect(refFromTabId("oxplow:oxplow/task?id=tsk3&provider=oxtask")).toEqual(taskTabRef("oxplow:oxplow/task?id=tsk3&provider=oxtask"));
 });
 
 
@@ -338,7 +334,7 @@ describe("view params", () => {
   test("a page's view reads from its URI's `#`", () => {
     expect(viewParamsOf(pageTabRef("x/y", { stream_id: 2 }, { range: "7d", n: 3 }))).toEqual({ range: "7d", n: 3 });
     expect(viewParamsOf(extPageRef("acme", "pulls", {}, { state: "open" }))).toEqual({ state: "open" });
-    expect(viewParamsOf(wikiPageRef("home"))).toEqual({});
+    expect(viewParamsOf(knowledgePageRef("oxwiki", "home"))).toEqual({});
   });
 
   test("withViewParams writes the view into the same ref, whatever its kind", () => {
@@ -346,7 +342,7 @@ describe("view params", () => {
     expect(withViewParams(extPageRef("acme", "pulls"), { state: "open" }).id).toBe("oxplow:oxplow/page?page=acme/pulls#state=open");
     const own = pageTabRef("settings", {}, { area: "agents", section: "x" });
     expect(withViewParams(own, { area: "data" }).id).toBe("oxplow:oxplow/page?page=settings#area=data");
-    expect(withViewParams(wikiPageRef("home"), { lines: "3-3" })).toEqual({ ...wikiPageRef("home"), id: "oxplow:oxplow/wiki?slug=home#lines=3-3" });
+    expect(withViewParams(knowledgePageRef("oxwiki", "home"), { lines: "3-3" })).toEqual({ ...knowledgePageRef("oxwiki", "home"), id: "oxplow:oxplow/knowledge?id=home&store=oxwiki#lines=3-3" });
   });
 
   test("withResourceParams names another resource of the same page", () => {

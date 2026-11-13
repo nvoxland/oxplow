@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
 
 import { PageNavigationContext, type PageNavigation } from "../../tabs/PageNavigationContext.js";
-import { wikiPageRef } from "../../tabs/pageRefs.js";
+import { knowledgePageRef } from "../../tabs/pageRefs.js";
 import { Markdown } from "./Markdown.js";
 
 // Markdown is one component with one feature set: the viewer and the
@@ -32,7 +32,7 @@ for (const mode of ["view", "edit"] as const) {
     const opened: Array<[string, boolean]> = [];
     const view = render(inPage(<Markdown value={BODY} {...props} />, opened));
     await settle();
-    const href = wikiPageRef("local-snapshots").id;
+    const href = knowledgePageRef("oxwiki", "local-snapshots").id;
     const anchor = view.container.querySelector(`a[href="${href}"]`);
     expect(anchor).not.toBeNull();
     fireEvent.click(anchor!);
@@ -111,7 +111,7 @@ test("Source shows the text as stored; an edit there is the owner's, and the ric
   fireEvent.click(view.getByTestId("markdown-source-toggle"));
   await settle();
   expect(view.queryByTestId("markdown-source")).toBeNull();
-  expect(view.container.querySelector(`a[href="${wikiPageRef("other-page").id}"]`)).not.toBeNull();
+  expect(view.container.querySelector(`a[href="${knowledgePageRef("oxwiki", "other-page").id}"]`)).not.toBeNull();
 });
 
 test("Cmd/Ctrl+Shift+M switches to Source and back; a one-line field has none", async () => {

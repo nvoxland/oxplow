@@ -37,6 +37,8 @@ starlark = { workspace = true }
 # The parse results' content hashes.
 sha2 = { workspace = true }
 hex = { workspace = true }
+# The `xxh3_128` builtin: a blob's identity, as the blob store keys it.
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
 
 [target.'cfg(unix)'.dependencies]
 # The script worker's memory cap and CPU accounting; the tests' process groups.

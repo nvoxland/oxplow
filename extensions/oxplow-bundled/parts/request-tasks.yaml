@@ -1,0 +1,40 @@
+title: Tasks
+description: "The tasks a request worked on and on what evidence: a prompt that named it, then a move or a command the agent made on it, then its assignment. Mounted in the request summary."
+params:
+- name: request
+loaders:
+  request:
+    sql: |
+      SELECT r.id FROM v_request r WHERE r.uri = uri('oxplow/request', 'id', :request)
+  tasks:
+    sql: |
+      -- One row per task, with its strongest evidence: a prompt that named
+      -- it, then a move or a command the agent made on it, then its
+      -- assignment.
+      SELECT rt.task, coalesce(w.title, rt.task) AS title, coalesce(w.stage_title, w.stage) AS stage,
+             CASE min(CASE rt.basis WHEN 'prompt' THEN 0 WHEN 'transition' THEN 1 WHEN 'command' THEN 2 ELSE 3 END)
+               WHEN 0 THEN 'prompt' WHEN 1 THEN 'transition' WHEN 2 THEN 'command' ELSE 'assigned' END AS basis,
+             min(rt.at) AS at
+      FROM v_oxplow_request_link rt
+      LEFT JOIN v_oxplow_task w ON w.uri = rt.task
+      WHERE rt.request_id = :id
+      GROUP BY rt.task
+      ORDER BY min(rt.at), rt.task
+    params:
+      id:
+        from: request.id
+view:
+  id: tasks
+  from: tasks
+  viz: table
+  columns:
+  - key: title
+    label: Task
+    link:
+      kind: page
+      from: task
+  - key: stage
+    label: Stage
+  - key: basis
+    label: Evidence
+  empty: It worked on no task.

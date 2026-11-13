@@ -1,43 +1,42 @@
 manifest: 2
 name: task-views
-description: Another way to see the work list — swimlanes for the Board, a compact list and a plain editor — over whichever work-items provider is active.
+description: Another way to see the task tracker — swimlanes for the Board and a compact list — over whichever task tracker provider is active.
 engine: ">=0.7"
+# Its fixtures file tasks, and oxtask is oxplow-bundled's.
+requires: [oxplow-bundled, oxtask]
 version: 0.1.0
 intent:
   purpose: >-
-    Replace oxplow's Board, Tasks list and task editor with views of my own.
-    They read v_work_item and change items only through the work-item
-    interface commands, so they work with any work list.
+    Replace oxplow's Board and Tasks list with views of my own. They read
+    v_oxplow_task and change items only through the task action points
+    (oxplow/task.move, oxplow/task.edit), so they work with any task store.
   origin: null
   examples:
     - name: compact-list
       input: { part: compact-list, params: { scope: all } }
-      expect: the work items as a table with title, state and updated
+      expect: the tasks as a table with title, state and updated
     - name: swimlanes-reads
       input: { part: swimlanes, params: { scope: all } }
-      expect: the board's page reads its cards and the active provider's features
+      expect: the board's page reads its cards and the active list's stages
     - name: swimlanes-refuses-a-missing-item
       input: { component: swimlanes }
       expect: changing an item that isn't there is refused, with the command's reason
     - name: swimlanes-renames
       input: { component: swimlanes }
       expect: renaming an item through the board goes through
-    - name: edit-item
-      input: { part: edit-item, params: { uri: "oxplow:oxplow/work_item?id=1&provider=oxplow" } }
-      expect: a form for the item's title and body, its uri fixed
     - name: swimlanes-drags-a-card-to-a-lane
       input: { part: swimlanes, params: { scope: all } }
-      expect: five lanes; a drag moves the card's item to the lane's state
+      expect: one lane per stage of the active list; a drag moves the card's item to the lane's stage
     - name: swimlanes-renames-a-card-through-its-title
       input: { part: swimlanes, params: { scope: all } }
       expect: an empty title is refused under the input, Escape puts it back and Enter saves a new one
-permissions: [commands:oxplow.work_item.transition, commands:oxplow.work_item.reorder, commands:oxplow.work_item.update]
+permissions: [commands:oxplow.tasks.reorder]
 custom_components:
   - id: swimlanes
     title: Swimlanes
-    commands: [oxplow.work_item.transition, oxplow.work_item.reorder, oxplow.work_item.update]
+    commands: [oxplow.tasks.reorder]
+    action_points: [oxplow/task.move, oxplow/task.edit]
 ui:
   mounts:
-    - { page: swimlanes, at: work_item.board, version: 1 }
-    - { page: compact-list, at: work_item.list, version: 1 }
-    - { page: edit-item, at: work_item.detail, version: 1 }
+    - { page: swimlanes, at: task.board, version: 2 }
+    - { page: compact-list, at: task.list, version: 2 }

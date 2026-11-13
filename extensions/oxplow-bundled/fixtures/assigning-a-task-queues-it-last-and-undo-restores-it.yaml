@@ -1,0 +1,30 @@
+# Assigning puts a task at the end of the assignee's queue; assigning to
+# nobody takes it out; each is undone to the assignee and place it had.
+requires: [oxtask]
+given:
+  - { command: oxtask.task.create, input: { title: A } }
+  - { command: oxtask.task.create, input: { title: B } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/person" } }
+when:
+  command: oxplow.tasks.assign
+  input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", to: "oxplow:oxplow/person" }
+expect: { ok: true, result: { assignee: "oxplow:oxplow/person", rank: 1 } }
+steps:
+  - when: { sql: "SELECT title, rank FROM v_oxplow_task WHERE assignee = 'oxplow:oxplow/person' ORDER BY rank" }
+    expect: { rows: [{ title: A, rank: 0 }, { title: B, rank: 1 }] }
+  - when: { undo: oxplow.tasks.assign }
+    expect: { ok: true }
+  - when: { sql: "SELECT title, assignee, rank FROM v_oxplow_task ORDER BY title" }
+    expect: { rows: [{ title: A, assignee: "oxplow:oxplow/person", rank: 0 }, { title: B, assignee: null, rank: null }] }
+  - when: { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: null } }
+    expect: { ok: true, result: { assignee: null } }
+  - when: { sql: "SELECT title, assignee FROM v_oxplow_task WHERE assignee IS NOT NULL" }
+    expect: { rows: [] }
+  - when: { undo: oxplow.tasks.assign }
+    expect: { ok: true }
+  - when: { sql: "SELECT title, assignee, rank FROM v_oxplow_task WHERE assignee IS NOT NULL" }
+    expect: { rows: [{ title: A, assignee: "oxplow:oxplow/person", rank: 0 }] }
+  - when: { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk9&provider=oxtask", to: null } }
+    expect: { ok: false, refused: "no task" }
+  - when: { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "thr1" } }
+    expect: { ok: false, refused: "thread's URI" }

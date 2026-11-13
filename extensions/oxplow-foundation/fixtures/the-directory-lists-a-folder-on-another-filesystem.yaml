@@ -9,4 +9,4 @@ expect:
     tree:
       rows:
         contains:
-          - { name: oxplow-foundation, icon: folder, folder_uri: "oxplow:oxplow/dir?filesystem=oxplow:extensions&path=oxplow-foundation" }
+          - { name: oxplow-foundation, is_dir: 1, folder_uri: "oxplow:oxplow/dir?filesystem=oxplow:extensions&path=oxplow-foundation" }

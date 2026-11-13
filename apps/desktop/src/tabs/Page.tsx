@@ -66,7 +66,7 @@ export interface PageChip {
   /** Soft background color override. */
   background?: string;
   title?: string;
-  /** Pressing the chip (a wiki page's freshness opens its report). */
+  /** Pressing the chip (a knowledge page's freshness opens its report). */
   onClick?(): void;
 }
 
@@ -100,7 +100,7 @@ export interface PageProps {
    *  backlinks; same shape. */
   outbound?: { count: number; body: ReactNode };
   /** Optional comment navigator node, rendered in the nav bar before
-   *  Backlinks. Comment-bearing pages (file/wiki/task) pass a
+   *  Backlinks. Comment-bearing pages (file/knowledge/task) pass a
    *  `<CommentNavigator targetKind targetId />`. */
   commentsNav?: ReactNode;
   /** Optional nav-bar config. When supplied, the browser-style nav bar
@@ -462,7 +462,7 @@ function RailBody({ children, width, fill, rightRail, rightRailTitle }: { childr
         style={{
           display: "flex",
           // The title keeps its line; the actions wrap below it when they
-          // don't fit beside it (tsk1043: they overlapped it).
+          // don't fit beside it (they overlapped it).
           flexWrap: "wrap",
           alignItems: "center",
           gap: 8,
@@ -521,7 +521,7 @@ function RailBody({ children, width, fill, rightRail, rightRailTitle }: { childr
 }
 
 /** What kind of thing a tab shows: its URI's resource's label ("Measure",
- *  "Work item"). A page route names none — the page is the thing, and its
+ *  "Task"). A page route names none — the page is the thing, and its
  *  title says it. */
 export function kindOfTab(uri: string | null, resources: ReadonlyMap<string, { label: string }>): string | null {
   const resource = uri ? typeOf(uri) : null;

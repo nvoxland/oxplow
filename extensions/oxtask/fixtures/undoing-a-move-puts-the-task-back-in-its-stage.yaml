@@ -1,0 +1,12 @@
+requires: [oxplow-bundled, oxtask]
+given:
+  - { command: oxtask.task.create, input: { title: Fix it, stage: ready } }
+when: { command: oxtask.task.move, input: { id: tsk1, stage: done } }
+expect: { ok: true }
+steps:
+  - when: { sql: "SELECT stage FROM v_oxplow_task_record" }
+    expect: { rows: [{ stage: done }] }
+  - when: { undo: oxtask.task.move }
+    expect: { ok: true }
+  - when: { sql: "SELECT state, stage FROM v_oxplow_task_record" }
+    expect: { rows: [{ state: todo, stage: ready }] }

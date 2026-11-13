@@ -700,6 +700,7 @@ mod diff_tests {
             embed: None,
             error: None,
             replaced_by: None,
+            action_point: None,
         };
         PageRun {
             inactive: None,
@@ -731,7 +732,7 @@ mod diff_tests {
         let changes: [fn(&mut oxplow_db::SqlQueryResult); 3] = [
             |result| result.truncated = true,
             |result| result.generation = Some("generation-b".into()),
-            |result| result.reads.datasets.push("v_work_item".into()),
+            |result| result.reads.datasets.push("v_task".into()),
         ];
         for change in changes {
             let mut new = old.clone();
@@ -751,6 +752,7 @@ mod diff_tests {
             embed: Some(Box::new(fixture("child"))),
             error: None,
             replaced_by: None,
+            action_point: None,
         });
         let mut new = old.clone();
         new.rail
@@ -778,6 +780,7 @@ mod diff_tests {
             embed: Some(Box::new(fixture("child"))),
             error: None,
             replaced_by: None,
+            action_point: None,
         });
         let mut new = old.clone();
         new.rail.as_mut().unwrap().embed = None;

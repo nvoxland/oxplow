@@ -1,0 +1,28 @@
+# A thread's work is bundled's label after it in Closed Threads (a
+# `row-badge` decorator on thread rows): how many of the tasks its requests
+# worked on are done and how many are open. A thread that worked on none has
+# no label. (Closed Threads itself, foundation's, reads no task.) The label
+# is at most 40 characters, as a decorator's must be.
+requires: [oxtask]
+given:
+  - { command: oxplow.thread.create, input: { stream: str1, title: Old }, bind: old }
+  - { command: oxplow.thread.create, input: { stream: str1, title: Live } }
+  - { command: oxtask.task.create, input: { title: Finished, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Left, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - observe:
+      turn:
+        prompt: Work both
+        during:
+          - { command: oxtask.task.move, input: { id: tsk1, stage: in_progress }, as: agent }
+          - { command: oxtask.task.move, input: { id: tsk1, stage: done }, as: agent }
+          - { command: oxtask.task.move, input: { id: tsk2, stage: in_progress }, as: agent }
+          - { command: oxtask.task.move, input: { id: tsk2, stage: ready }, as: agent }
+  - { command: oxplow.thread.close, input: { thread: $old.id } }
+  - { command: oxplow.thread.close, input: { thread: thr1 } }
+when: { sql: "SELECT uri = 'oxplow:oxplow/thread?id=thr1' AS agent_thread, label FROM v_oxplow_thread_work_badge ORDER BY uri" }
+expect: { rows: [{ agent_thread: 1, label: "1 done · 1 open" }] }
+steps:
+  - when: { sql: "SELECT max(length(label)) <= 40 AS short FROM v_oxplow_thread_work_badge" }
+    expect: { rows: [{ short: 1 }] }

@@ -1,0 +1,22 @@
+# The effect on a task's start and close does what core's did: an agent
+# starting a task puts it at the end of its thread's queue (not at a rank of
+# its own), a person starting one assigns nobody, and closing a task clears
+# both its assignee and its rank.
+requires: [oxtask]
+given:
+  - { command: oxtask.task.create, input: { title: Queued, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Started, stage: ready } }
+  - { command: oxtask.task.create, input: { title: By person, stage: ready } }
+  - { command: oxtask.task.move, input: { id: tsk3, stage: in_progress } }
+  - observe: { turn: { prompt: Start it, during: [{ command: oxtask.task.move, input: { id: tsk2, stage: in_progress }, as: agent }] } }
+when: { sql: "SELECT title, assignee = 'oxplow:oxplow/thread?id=thr1' AS on_thread, rank FROM v_oxplow_task ORDER BY title" }
+expect:
+  rows:
+    - { title: By person, on_thread: null, rank: null }
+    - { title: Queued, on_thread: 1, rank: 0 }
+    - { title: Started, on_thread: 1, rank: 1 }
+steps:
+  - given: [{ command: oxtask.task.move, input: { id: tsk2, stage: done } }]
+  - when: { sql: "SELECT title, assignee, rank FROM v_oxplow_task WHERE title = 'Started'" }
+    expect: { rows: [{ title: Started, assignee: null, rank: null }] }

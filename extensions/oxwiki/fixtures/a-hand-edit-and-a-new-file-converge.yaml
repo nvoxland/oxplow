@@ -1,0 +1,16 @@
+# A page edited by hand (a changed file) and one added by hand converge on
+# the next files trigger: the row follows the file, and the folder is what
+# the store holds.
+requires: [oxplow-bundled]
+given:
+  - files:
+      ".oxplow/oxwiki/kept.md": "# Kept, edited\n"
+      ".oxplow/oxwiki/fresh.md": "# Fresh\n"
+when:
+  collector: pages
+  trigger: { files: [{ path: ".oxplow/oxwiki/kept.md", op: modified }, { path: ".oxplow/oxwiki/fresh.md", op: created }] }
+expect: { ok: true }
+steps:
+  - when: { sql: "SELECT id, title FROM v_oxplow_knowledge_record ORDER BY id" }
+    expect:
+      rows: [{ id: fresh, title: Fresh }, { id: kept, title: "Kept, edited" }]

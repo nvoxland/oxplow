@@ -249,7 +249,7 @@ export async function probeRemoteDaemon(
 /// stay in the shell — and with no Tauri host at all (a plain browser
 /// driving a daemon) a shell command has nowhere to go: no daemon serves
 /// one, so it's refused here as the daemon would refuse it, with no
-/// request made (tsk996).
+/// request made.
 /// Pure; exported for tests.
 export function invokeRoute(
   name: string,
@@ -357,7 +357,7 @@ let reconnectDelayMs = 500;
 
 /// Remote connection lifecycle, for the reconnect banner. "up" fires
 /// on every successful (re)connect; "down" on every drop; "refused" once,
-/// when the daemon refuses this window's token (tsk971) — after which the
+/// when the daemon refuses this window's token — after which the
 /// socket isn't opened or retried, since no retry fixes a wrong token.
 /// Local mode never fires any.
 export type RemoteConnectionState = "up" | "down" | "refused";

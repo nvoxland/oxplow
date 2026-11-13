@@ -1,7 +1,7 @@
 //! Golden tests: the EXACT response bodies the hook route returns to the
 //! agent's harness. The wording steers the agent, so these pin it
 //! byte-for-byte while enforcement and recording move behind the shared
-//! `AgentPolicy` / `AgentContext` services (tsk281). `hook_marshaling.rs`
+//! `AgentPolicy` / `AgentContext` services. `hook_marshaling.rs`
 //! checks shapes; these check every byte.
 //!
 //! Goldens live in `tests/goldens/<name>.json` with the temp project path
@@ -20,12 +20,8 @@ use common::{boot, seed_worktree_stream};
 
 use oxplow_app::Services;
 use oxplow_control_plane::ControlPlane;
-use oxplow_db::EffortStore as _;
 use oxplow_domain::stores::{AgentSessionStore, StreamStore, ThreadStore};
 use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadId, Timestamp};
-use oxplow_tasks::TaskId;
-use oxplow_tasks::TaskStore as _;
-use oxplow_tasks::{Task, TaskActorKind, TaskPriority, TaskStatus};
 
 fn golden(name: &str, body: &serde_json::Value, root: &std::path::Path) {
     let text = serde_json::to_string_pretty(body)
@@ -91,38 +87,6 @@ async fn seed_thread(services: &Services) -> ThreadId {
     thread.id
 }
 
-/// An `in_progress` task on the thread, with its effort open.
-async fn seed_task(services: &Services, thread_id: ThreadId, title: &str) -> TaskId {
-    let now = Timestamp::from_unix_ms(1);
-    let task = services
-        .task_store
-        .insert(&Task {
-            id: TaskId::placeholder(),
-            thread_id: Some(thread_id),
-            parent_id: None,
-            title: title.into(),
-            description: "d".into(),
-            status: TaskStatus::InProgress,
-            priority: TaskPriority::Medium,
-            sort_index: 0,
-            created_by: TaskActorKind::User,
-            created_at: now,
-            updated_at: now,
-            completed_at: None,
-            deleted_at: None,
-            note_count: 0,
-            author: None,
-        })
-        .await
-        .unwrap();
-    services
-        .effort_store
-        .start(&oxplow_tasks::work_item_ref(task), &thread_id, None)
-        .await
-        .unwrap();
-    task
-}
-
 async fn post(
     cp: &ControlPlane,
     svc: &Services,
@@ -173,7 +137,6 @@ async fn allowed_edit_and_post_tool_ack() {
 async fn stop_ack() {
     let (cp, svc, root, _dir) = boot().await;
     let tid = seed_thread(&svc).await;
-    seed_task(&svc, tid, "ship the thing").await;
     post(
         &cp,
         &svc,
@@ -198,7 +161,6 @@ async fn stop_ack() {
 async fn prompt_context_first_then_deduped() {
     let (cp, svc, root, _dir) = boot().await;
     let tid = seed_thread(&svc).await;
-    seed_task(&svc, tid, "ship the thing").await;
     let prompt = || serde_json::json!({ "prompt": "go", "session_id": "s1" });
     let first = post(&cp, &svc, "UserPromptSubmit", tid, prompt()).await;
     golden("prompt_context_first", &first, &root);
@@ -373,6 +335,32 @@ async fn a_compaction_brings_the_context_back_on_the_next_prompt() {
     )
     .await;
     assert_eq!(compact, serde_json::json!({}));
+    let after = post(&cp, &svc, "UserPromptSubmit", tid, prompt()).await;
+    golden("prompt_context_first", &after, &root);
+}
+
+/// A harness that reports a compaction only after the fact (opencode posts
+/// PostCompact, never PreCompact) gets the context again on the next
+/// prompt, as a PreCompact gives it.
+#[tokio::test]
+async fn a_post_compact_brings_the_context_back_on_the_next_prompt() {
+    let (cp, svc, root, _dir) = boot().await;
+    let tid = seed_thread(&svc).await;
+    let prompt = || serde_json::json!({ "prompt": "go", "session_id": "s1" });
+    let first = post(&cp, &svc, "UserPromptSubmit", tid, prompt()).await;
+    golden("prompt_context_first", &first, &root);
+    assert_eq!(
+        post(&cp, &svc, "UserPromptSubmit", tid, prompt()).await,
+        serde_json::json!({})
+    );
+    post(
+        &cp,
+        &svc,
+        "PostCompact",
+        tid,
+        serde_json::json!({ "session_id": "s1", "trigger": "auto" }),
+    )
+    .await;
     let after = post(&cp, &svc, "UserPromptSubmit", tid, prompt()).await;
     golden("prompt_context_first", &after, &root);
 }

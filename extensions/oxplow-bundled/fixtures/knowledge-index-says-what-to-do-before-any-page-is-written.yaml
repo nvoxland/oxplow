@@ -1,0 +1,10 @@
+# With oxwiki on and no page written, the index says so in plain words and
+# offers New page.
+requires: [oxwiki]
+when: { page: knowledge }
+expect:
+  loaders:
+    stores: { rows: [{ store: oxwiki, status: "On", page_count: 0, stale: 0 }] }
+    pages: { rows: 0 }
+  text: { contains: ["No pages yet."] }
+  actions: [new]

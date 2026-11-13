@@ -16,7 +16,7 @@
 //! A resource is `<extension>/<name>`, where the extension segment is the
 //! extension's name, or `oxplow` for the extension whose namespace is
 //! oxplow's (only a bundled one may be). That one resolves to core's
-//! datasets (`resolve: effort` is `v_effort`); any other to its own
+//! datasets (`resolve: request` is `v_request`); any other to its own
 //! (`v_<namespace>_<dataset>`). Collisions across extensions are the
 //! vocabulary's to find.
 
@@ -86,15 +86,16 @@ pub const ICONS: &[&str] = &[
     "zap",
 ];
 
-/// Where an extension keeps the svg a resource's `icon:` may name.
+/// Where an extension keeps the svgs its `icon:`s may name (a resource's,
+/// a page's, a choice option's, an action's).
 const SVG_ICON_DIR: &str = "assets/";
 
 /// The largest svg a resource may bring.
 const MAX_SVG_BYTES: usize = 32 * 1024;
 
 /// Wikilink sugar oxplow-foundation declares (`dir:`,
-/// `finding:`): another extension's `wikilink.prefix` may not take it. A work
-/// list's own ids (`tsk42`) are its id pattern's, not a prefix core keeps.
+/// `finding:`): another extension's `wikilink.prefix` may not take it. A
+/// task tracker's own ids (`tsk42`) are its id pattern's, not a prefix core keeps.
 const RESERVED_PREFIXES: &[&str] = &["dir", "finding"];
 
 /// Why `name` can't name a resource from a manifest (a decorator's
@@ -106,15 +107,51 @@ pub fn resource_problem(name: &str) -> Option<String> {
         Ok(n) => n,
         Err(_) => {
             return Some(
-                "a resource is `<namespace>/<name>` (`oxplow/work_item`, `oxplow/commit`)".into(),
+                "a resource is `<namespace>/<name>` (`oxplow/task`, `oxplow/commit`)".into(),
             )
         }
     };
     (parsed.namespace() == CORE_NAMESPACE
         && oxplow_domain::uri::resources::foundation()
             .get(&parsed)
-            .is_none())
+            .is_none()
+        && !shipped_resources().contains(name))
     .then(|| "oxplow declares no such resource".to_string())
+}
+
+/// The `oxplow/<name>` resources the extensions oxplow ships declare
+/// (`resources:` in their manifests): `oxplow/task` is oxplow-bundled's.
+fn shipped_resources() -> &'static std::collections::BTreeSet<String> {
+    static NAMES: std::sync::OnceLock<std::collections::BTreeSet<String>> =
+        std::sync::OnceLock::new();
+    NAMES.get_or_init(|| {
+        let mut out = std::collections::BTreeSet::new();
+        for shipped in crate::bundled_extensions::BUNDLED {
+            let Some((_, bytes)) = (shipped.files)()
+                .iter()
+                .find(|(rel, _)| *rel == "extension.yaml")
+            else {
+                continue;
+            };
+            let Ok(doc) = serde_yaml::from_slice::<serde_yaml::Value>(bytes) else {
+                continue;
+            };
+            if doc.get("namespace").and_then(|n| n.as_str()) != Some(CORE_NAMESPACE) {
+                continue;
+            }
+            for resource in doc
+                .get("resources")
+                .and_then(|r| r.as_sequence())
+                .into_iter()
+                .flatten()
+            {
+                if let Some(name) = resource.get("name").and_then(|n| n.as_str()) {
+                    out.insert(format!("{CORE_NAMESPACE}/{name}"));
+                }
+            }
+        }
+        out
+    })
 }
 
 /// Why `svg` can't be drawn as an icon: not an svg, too big, or not inert
@@ -154,6 +191,60 @@ fn svg_problem(svg: &str) -> Option<String> {
     None
 }
 
+/// Why `icon` can't be an icon: neither a name oxplow draws nor an svg of
+/// the extension's own (`assets/<name>.svg`, read when it loads).
+pub(crate) fn icon_problem(icon: &str) -> Option<String> {
+    (!icon.starts_with(SVG_ICON_DIR) && !ICONS.contains(&icon)).then(|| {
+        format!(
+            "`icon: {icon}` isn't one oxplow draws; use one of {} (or `assets/<name>.svg`, an svg in the extension)",
+            ICONS.join(", ")
+        )
+    })
+}
+
+/// The icon `icon` names, resolved: an `assets/<name>.svg` read from the
+/// extension and published as a `data:` URI (the desktop draws it as a mask
+/// in the text's color); a name oxplow draws as it is. One that is neither,
+/// or an svg that isn't there, isn't inside the extension, isn't an svg or
+/// isn't inert, is why not.
+pub(crate) fn resolve_icon(
+    icon: &str,
+    files: &dyn crate::extension::extensions::ExtensionFiles,
+) -> Result<String, String> {
+    if let Some(why) = icon_problem(icon) {
+        return Err(why);
+    }
+    if icon.starts_with(SVG_ICON_DIR) {
+        svg_icon(icon, files)
+    } else {
+        Ok(icon.to_string())
+    }
+}
+
+/// The svg at `path` in the extension, as a `data:` URI.
+fn svg_icon(
+    path: &str,
+    files: &dyn crate::extension::extensions::ExtensionFiles,
+) -> Result<String, String> {
+    use base64::Engine as _;
+    if path.contains("..") || !oxplow_domain::service::valid_path(path) {
+        return Err("the icon must be a file inside the extension".to_string());
+    }
+    if !path.ends_with(".svg") {
+        return Err("an icon file is an svg (`assets/<name>.svg`)".to_string());
+    }
+    let svg = files
+        .read(path)
+        .ok_or_else(|| format!("no file `{path}` in the extension"))?;
+    if let Some(why) = svg_problem(&svg) {
+        return Err(format!("`{path}`: {why}"));
+    }
+    Ok(format!(
+        "data:image/svg+xml;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(svg)
+    ))
+}
+
 /// Read the svg each `icon: assets/<x>.svg` names, and publish it in the
 /// resource as a `data:` URI (the desktop draws it as an image). One that
 /// isn't there, isn't inside the extension, isn't an svg or isn't inert is
@@ -163,34 +254,19 @@ pub(crate) fn inline_svg_icons(
     errors: &mut Vec<Diagnostic>,
     files: &dyn crate::extension::extensions::ExtensionFiles,
 ) -> Vec<ExtensionResource> {
-    use base64::Engine as _;
     resources
         .into_iter()
         .filter_map(|mut r| {
             let Some(path) = r.decl.icon.clone().filter(|i| i.starts_with(SVG_ICON_DIR)) else {
                 return Some(r);
             };
-            let why = (|| {
-                if path.contains("..") || !oxplow_domain::service::valid_path(&path) {
-                    return Some("the icon must be a file inside the extension".to_string());
+            let why = match svg_icon(&path, files) {
+                Ok(uri) => {
+                    r.decl.icon = Some(uri);
+                    None
                 }
-                if !path.ends_with(".svg") {
-                    return Some("an icon file is an svg (`assets/<name>.svg`)".to_string());
-                }
-                match files.read(&path) {
-                    None => Some(format!("no file `{path}` in the extension")),
-                    Some(svg) => {
-                        if let Some(why) = svg_problem(&svg) {
-                            return Some(format!("`{path}`: {why}"));
-                        }
-                        r.decl.icon = Some(format!(
-                            "data:image/svg+xml;base64,{}",
-                            base64::engine::general_purpose::STANDARD.encode(svg)
-                        ));
-                        None
-                    }
-                }
-            })();
+                Err(why) => Some(why),
+            };
             match why {
                 None => Some(r),
                 Some(why) => {
@@ -259,7 +335,6 @@ pub fn parse_resources(
     } else {
         Vec::new()
     };
-    let datasets = if core { &core_datasets[..] } else { datasets };
     let lines = item_lines(manifest, "resources");
     let mut out: Vec<ExtensionResource> = Vec::new();
     let mut errors = Vec::new();
@@ -289,7 +364,7 @@ pub fn parse_resources(
             None => file.to_string(),
         };
         let name = f.name.clone();
-        match decl_of(segment, namespace, core, datasets, f) {
+        match decl_of(segment, namespace, core, &core_datasets, datasets, f) {
             Ok(decl) => out.push(ExtensionResource { decl, declared_at }),
             Err(e) => errors.push(at("resource.invalid", rel, line, e).contribution(name)),
         }
@@ -301,6 +376,7 @@ fn decl_of(
     segment: &str,
     namespace: &str,
     core: bool,
+    core_datasets: &[oxplow_db::datasets::DatasetSource],
     datasets: &[oxplow_db::datasets::DatasetSource],
     f: ResourceFile,
 ) -> Result<ResourceDecl, String> {
@@ -331,21 +407,28 @@ fn decl_of(
             },
         );
     }
-    // A dataset with these columns: the extension's own, or core's.
+    // A dataset with these columns: the extension's own, else (for the
+    // shared `oxplow` namespace) core's.
     let view_with = |key: &str, dataset: &str, columns: &[&str], why: &str| {
-        let source = datasets
-            .iter()
-            .find(|m| m.decl.name == dataset)
-            .ok_or_else(|| {
-                named(format!(
-                    "`{key}: {dataset}` isn't one of {} datasets",
-                    if core {
-                        "core's"
-                    } else {
-                        "this extension's (`datasets:`)"
-                    }
-                ))
-            })?;
+        let own = datasets.iter().find(|m| m.decl.name == dataset);
+        let (source, view) = match own {
+            Some(source) => (
+                source,
+                oxplow_db::datasets::extension_view(namespace, dataset),
+            ),
+            None => {
+                let source = core_datasets
+                    .iter()
+                    .find(|m| m.decl.name == dataset)
+                    .ok_or_else(|| {
+                        named(format!(
+                            "`{key}: {dataset}` isn't one of this extension's datasets (`datasets:`){}",
+                            if core { " or core's" } else { "" }
+                        ))
+                    })?;
+                (source, oxplow_db::datasets::core_view(dataset))
+            }
+        };
         if let Some(col) = columns
             .iter()
             .find(|col| !source.decl.fields.iter().any(|c| c.name == **col))
@@ -354,11 +437,7 @@ fn decl_of(
                 "dataset `{dataset}` has no `{col}` column ({why})"
             )));
         }
-        Ok(if core {
-            oxplow_db::datasets::core_view(dataset)
-        } else {
-            oxplow_db::datasets::extension_view(namespace, dataset)
-        })
+        Ok(view)
     };
     let title = f.title.as_deref().unwrap_or("title");
     let resolve = f
@@ -404,11 +483,8 @@ fn decl_of(
     if let Some(icon) = &f.icon {
         // An `assets/<x>.svg` is the extension's own, read when it loads
         // ([`inline_svg_icons`]); any other is a name oxplow draws.
-        if !icon.starts_with(SVG_ICON_DIR) && !ICONS.contains(&icon.as_str()) {
-            return Err(named(format!(
-                "`icon: {icon}` isn't one oxplow draws; use one of {} (or `assets/<name>.svg`, an svg in the extension)",
-                ICONS.join(", ")
-            )));
+        if let Some(why) = icon_problem(icon) {
+            return Err(named(why));
         }
     }
     Ok(ResourceDecl {
@@ -622,12 +698,12 @@ resources:
             .find(|e| e.name == "oxplow-foundation")
             .expect("foundation ships");
         assert!(foundation.errors.is_empty(), "{:?}", foundation.errors);
-        let effort = foundation
+        let request = foundation
             .resources
             .iter()
-            .find(|r| r.decl.name.to_string() == "oxplow/effort")
-            .expect("foundation declares oxplow/effort");
-        assert_eq!(effort.decl.resolve.as_deref(), Some("v_effort"));
+            .find(|r| r.decl.name.to_string() == "oxplow/request")
+            .expect("foundation declares oxplow/request");
+        assert_eq!(request.decl.resolve.as_deref(), Some("v_request"));
     }
 
     /// The desktop draws exactly the icons an extension may name: its

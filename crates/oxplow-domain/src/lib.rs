@@ -15,8 +15,6 @@ pub mod commands;
 pub mod comment;
 pub mod contribution;
 pub mod diagnostic;
-pub mod effort_impact;
-pub mod effort_policy;
 pub mod error;
 pub mod events;
 pub mod extension_job;
@@ -29,7 +27,6 @@ pub mod grant;
 pub mod hook;
 pub mod ids;
 pub mod json;
-pub mod knowledge;
 pub mod language_id;
 pub mod ordering;
 pub mod permissions;
@@ -41,6 +38,7 @@ pub mod service;
 pub mod snapshot;
 pub mod stores;
 pub mod stream;
+pub mod tasks;
 pub mod template;
 pub mod thread;
 pub mod time;
@@ -49,7 +47,6 @@ pub mod uri;
 pub mod vcs;
 pub mod vocabulary;
 pub mod when;
-pub mod work_items;
 
 pub use ai_context::AiContext;
 pub use commands::{
@@ -58,14 +55,13 @@ pub use commands::{
     OXPLOW_NAMESPACE,
 };
 pub use comment::{Comment, CommentIntent, CommentMessage, CommentStatus, CommentThread};
-pub use effort_impact::EffortImpact;
 pub use error::DomainError;
 pub use events::schema::{EventSchemaRegistry, EventType};
 pub use events::{Anchors, Envelope, EventId, StoredEvent};
 pub use hook::{AgentStatus, AgentStatusState, AgentTurn, HookKind};
 pub use ids::{
-    AgentSessionId, AgentTurnId, AnyId, CommentId, CommentMessageId, EffortId, EntityKind,
-    HandoffId, IdParseError, NoteId, PageVisitId, StreamId, TerminalId, ThreadId, UsageEventId,
+    AgentSessionId, AgentTurnId, AnyId, CommentId, CommentMessageId, EntityKind, HandoffId,
+    IdParseError, NoteId, PageVisitId, RequestId, StreamId, TerminalId, ThreadId, UsageEventId,
 };
 pub use json::{JsNumber, Json};
 pub use row_ids::{

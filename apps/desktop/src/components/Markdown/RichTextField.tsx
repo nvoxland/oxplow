@@ -30,7 +30,7 @@ import { SelectionToolbar, selectionToolbarVisible } from "./SelectionToolbar.js
 import { ContextMenu } from "../ContextMenu.js";
 import type { MenuItem } from "../../menu.js";
 import { followLink, linkMenu, type OpenRef } from "./links.js";
-import { refLinkOf, type MentionRef } from "./MarkdownView.js";
+import { refLinkOf, type MentionRef } from "./markdownLinks.js";
 import { pastedLink, type RefLink } from "./refPaste.js";
 import { linkTarget } from "../../uri/uri.js";
 import type { RefSearch } from "./refOptions.js";
@@ -42,7 +42,7 @@ import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 /// contenteditable region is carved out of) and the right-click menu;
 /// "Open comment" stays right-click-only so existing comments don't
 /// fight selection/cursor. `target` (a URI) identifies the
-/// page (wiki slug / task id); `streamId` is the hard scope and
+/// page (knowledge page / task id); `streamId` is the hard scope and
 /// `threadId` the origin thread (null for non-thread-bound surfaces).
 export interface RichTextCommentConfig {
   streamId: string;
@@ -134,14 +134,14 @@ export interface RichTextFieldProps {
   /** `data-testid` on the editable surface. */
   testId?: string;
   placeholder?: string;
-  /** Disable headings/blocks for inline-only fields (e.g. a wiki page
+  /** Disable headings/blocks for inline-only fields (e.g. a knowledge page
    *  title). Default false. */
   inlineOnly?: boolean;
   /** Optional className applied to the wrapper. */
   className?: string;
   style?: CSSProperties;
-  /** When true, no pencil affordance (e.g. effort summaries — but
-   *  those should use MarkdownView, not this field). Default false. */
+  /** When true, no pencil affordance (e.g. a read-only summary — but
+   *  that should use MarkdownView, not this field). Default false. */
   hidePencil?: boolean;
   /** When set, the field becomes comment-enabled (highlights, the
    *  selection affordance, and the thread popover). */
@@ -149,7 +149,7 @@ export interface RichTextFieldProps {
   /** Where `[[` looks (`RefCompletion`); none, and `[[` is plain text.
    *  Read at mount: a field has it or doesn't. */
   refSearch?: RefSearch;
-  /** A work item id that is the active list's: a picked item saves as it. */
+  /** A task id that is the active list's: a picked item saves as it. */
   mentionRef?: MentionRef;
 }
 
@@ -183,7 +183,7 @@ export function RichTextField({
     lastCommittedRef.current = md;
     owner.current.onCommit?.(md);
   };
-  // Re-found comment anchors waiting to be stored (tsk902): written when
+  // Re-found comment anchors waiting to be stored: written when
   // the document settles — on blur, on leaving, or at once when the
   // person isn't typing — never per keystroke pause, since each is a
   // command run on the person's behalf.

@@ -1,0 +1,20 @@
+# An agent's read of a page's file is logged by core as `record.read`; the
+# bundled collector keeps it as a row of the read model, and the page's
+# read counts follow. A person's open of the page is a read of the other
+# kind (a page visit), counted too but not as an agent's.
+requires: [oxwiki]
+given:
+  - { command: oxwiki.page.write, input: { title: Greeting notes, body: "# Greeting notes\n\nHi." } }
+  - observe:
+      turn:
+        prompt: Check the notes
+        tools:
+          - { name: Read, kind: read, paths: [".oxplow/oxwiki/greeting-notes.md"], ok: true }
+when:
+  sql: "SELECT uri, actor, via, thread_id IS NOT NULL AS threaded, turn_id IS NOT NULL AS turned FROM v_oxplow_knowledge_read"
+expect:
+  rows:
+    - { uri: "oxplow:oxplow/knowledge?id=greeting-notes&store=oxwiki", actor: agent, via: file, threaded: 1, turned: 1 }
+steps:
+  - when: { sql: "SELECT read_count, agent_read_count, last_read_at IS NOT NULL AS read FROM v_oxplow_knowledge_page" }
+    expect: { rows: [{ read_count: 1, agent_read_count: 1, read: 1 }] }

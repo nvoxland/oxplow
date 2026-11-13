@@ -23,7 +23,7 @@ describe("nextBannerState", () => {
     expect(nextBannerState("restored", "down")).toBe("down");
   });
 
-  // tsk971: a refused token is its own state — not a drop to wait out —
+  // a refused token is its own state — not a drop to wait out —
   // and nothing the socket does afterwards changes it.
   test("a refused token shows refused, and stays", () => {
     expect(nextBannerState("hidden", "refused")).toBe("refused");

@@ -1,0 +1,25 @@
+# A write names the page (its id and uri), writes the file and so makes the
+# row; with only a title the id is made from it; a page already there is
+# replaced only when the write names its id.
+requires: [oxplow-bundled]
+given:
+  - files: { "src/there.rs": "fn main() {}\n" }
+when:
+  command: oxwiki.page.write
+  input: { title: "Auth flow: the OAuth callback!", body: "# Auth flow\n\nSee [[src/there.rs]].\n" }
+expect:
+  ok: true
+  result: { id: auth-flow-the-oauth-callback, page: "oxplow:oxplow/knowledge?id=auth-flow-the-oauth-callback&store=oxwiki" }
+steps:
+  - when: { sql: "SELECT id, title FROM v_oxplow_knowledge_record" }
+    expect: { rows: [{ id: auth-flow-the-oauth-callback, title: Auth flow }] }
+  - when:
+      command: oxwiki.page.write
+      input: { title: "Auth flow: the OAuth callback!", body: "# Again\n" }
+    expect: { ok: false, refused: "already has a page" }
+  - when:
+      command: oxwiki.page.write
+      input: { id: auth-flow-the-oauth-callback, body: "# Auth flow, revised\n" }
+    expect: { ok: true, result: { id: auth-flow-the-oauth-callback } }
+  - when: { sql: "SELECT title FROM v_oxplow_knowledge_record" }
+    expect: { rows: [{ title: "Auth flow, revised" }] }

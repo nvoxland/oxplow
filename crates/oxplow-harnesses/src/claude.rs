@@ -176,8 +176,37 @@ impl AgentHarness for Claude {
         Ok(())
     }
 
+    /// A call as Claude Code names it; a `SendMessage` also says what it
+    /// sends to whom.
     async fn tool_use(&self, body: &serde_json::Value) -> Option<ToolUse> {
-        claude_shaped_tool_use(body)
+        let mut call = claude_shaped_tool_use(body)?;
+        // A background shell's PostToolUse names the job it started.
+        call.started_job = body
+            .pointer("/tool_response/backgroundTaskId")
+            .and_then(|id| id.as_str())
+            .filter(|id| !id.is_empty())
+            .map(str::to_string);
+        if call.name == "SendMessage" {
+            let input = body.get("tool_input");
+            let field = |k: &str| {
+                input
+                    .and_then(|i| i.get(k))
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+            };
+            let notify = input
+                .and_then(|i| i.get("notify_when_idle"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            call.sent = field("to").zip(field("message")).map(|(to, text)| {
+                oxplow_domain::agent::tool::SentMessage {
+                    to,
+                    text,
+                    notify_when_idle: notify,
+                }
+            });
+        }
+        Some(call)
     }
 
     async fn turns(&self, transcript: &str) -> Vec<Turn> {
@@ -191,22 +220,61 @@ impl AgentHarness for Claude {
         records.iter().flat_map(token_reading).collect()
     }
 
-    /// A background subagent hands its report back as a prompt starting
-    /// `<agent-message from="<agent_id>">`: not a person's words.
+    /// What a prompt is: a background subagent's report (a prompt starting
+    /// `<agent-message from="<agent_id>">`), another session's message
+    /// (`<cross-session-message …>`), a background job's notice
+    /// (`<task-notification>` naming the call that started it), an idle notice
+    /// for a session the agent asked about (`[Cross-session idle notice]`,
+    /// a peer's), else a
+    /// person's words. The text is kept as delivered.
     async fn prompt(&self, body: &serde_json::Value) -> Option<Prompt> {
         let text = body.get("prompt")?.as_str()?;
-        if let Some(from) = peer_message_from(text) {
-            return Some(Prompt::PeerMessage { from: from.into() });
+        if let Some(peer) = peer_message_from(text) {
+            return Some(Prompt::PeerMessage {
+                from: peer.from.into(),
+                socket: peer.socket.map(str::to_string),
+                message: peer.message.map(str::to_string),
+                text: text.into(),
+                idle_notice: false,
+            });
         }
-        Some(match handback_from(text) {
-            Some(id) => Prompt::Handback {
+        if let Some(name) = idle_notice_from(text) {
+            return Some(Prompt::PeerMessage {
+                from: name.into(),
+                socket: None,
+                message: None,
+                text: text.into(),
+                idle_notice: true,
+            });
+        }
+        if let Some(id) = handback_from(text) {
+            return Some(Prompt::Handback {
                 subagent: Subagent {
                     id: id.into(),
                     kind: None,
                 },
-            },
-            None => Prompt::Person { text: text.into() },
-        })
+                text: text.into(),
+            });
+        }
+        if let Some(notice) = task_notification(text) {
+            return Some(Prompt::BackgroundJob {
+                call: notice.tag("tool-use-id"),
+                job: notice.tag("task-id"),
+                status: notice.tag("status"),
+                summary: notice.tag("summary"),
+                text: text.into(),
+            });
+        }
+        Some(Prompt::person(text))
+    }
+
+    /// Claude Code's `prompt_id`: one per prompt, carried by every hook of
+    /// the turn it opens.
+    fn harness_turn_id(&self, body: &serde_json::Value) -> Option<String> {
+        body.get("prompt_id")
+            .and_then(|v| v.as_str())
+            .filter(|id| !id.is_empty())
+            .map(str::to_string)
     }
 
     /// Its transcripts under the effective config dir, for the worktree
@@ -228,6 +296,10 @@ impl AgentHarness for Claude {
             .await
             .map_err(|e| HarnessError::Unavailable(e.to_string()))?
             .map_err(|e| HarnessError::Unavailable(format!("reading its transcripts: {e}")))
+    }
+
+    fn reading(&self, body: &serde_json::Value) -> oxplow_domain::hook::HookReading {
+        super::shared::claude_shaped_reading(body)
     }
 
     /// A prompt hook names the session's custom title, once it has one.
@@ -258,17 +330,24 @@ impl AgentHarness for Claude {
             None => None,
         };
         let (model, context_tokens) = last.unzip();
-        (model.is_some() || effort.is_some()).then_some(TurnRun {
+        let left_running = super::shared::left_running(body);
+        (model.is_some() || effort.is_some() || left_running.is_some()).then_some(TurnRun {
             model,
             effort,
             context_tokens,
             context_window: None,
+            left_running,
+            ..TurnRun::default()
         })
     }
 
     /// `SubagentStart` / `SubagentStop` name it by `agent_id` / `agent_type`.
+    ///
+    /// Every Stop is followed by a SubagentStop with an `agent_id` and an
+    /// empty `agent_type` (Claude Code's internal helper agent; no subagent
+    /// was asked for): that is no subagent of the session's.
     async fn subagent(&self, body: &serde_json::Value) -> Option<Subagent> {
-        super::shared::subagent_of(body)
+        super::shared::subagent_of(body).filter(|s| s.kind.as_deref() != Some(""))
     }
 
     async fn render(&self, answer: &HookAnswer) -> serde_json::Value {
@@ -284,20 +363,70 @@ fn handback_from(text: &str) -> Option<&str> {
         .filter(|id| !id.is_empty())
 }
 
+/// Who sent a cross-session message.
+struct PeerFrom<'a> {
+    /// The sender's session name, else its socket.
+    from: &'a str,
+    /// The address it sent from (`uds:/tmp/cc-socks/<n>.sock`).
+    socket: Option<&'a str>,
+    /// The message inside the wrapping.
+    message: Option<&'a str>,
+}
+
 /// Who sent a cross-session message: the prompt is one wrapped in
 /// `<cross-session-message from="<socket>" from-name="<session name>" …>`.
-/// The sender's session name, else its socket.
-fn peer_message_from(text: &str) -> Option<&str> {
-    let (tag, _) = text
+fn peer_message_from(text: &str) -> Option<PeerFrom<'_>> {
+    let (tag, rest) = text
         .strip_prefix("<cross-session-message")?
         .split_once('>')?;
+    let message = rest
+        .rsplit_once("</cross-session-message>")
+        .map(|(body, _)| body.trim())
+        .filter(|body| !body.is_empty());
     let attr = |name: &str| {
         let (_, rest) = tag.split_once(&format!(" {name}=\""))?;
         rest.split_once('"')
             .map(|(value, _)| value)
             .filter(|value| !value.is_empty())
     };
-    attr("from-name").or_else(|| attr("from"))
+    let socket = attr("from");
+    Some(PeerFrom {
+        from: attr("from-name").or(socket)?,
+        socket,
+        message,
+    })
+}
+
+/// The session an idle notice is about: the prompt is the harness's
+/// `[Cross-session idle notice] "<session name>", which you asked to be
+/// notified about, is idle now …`.
+fn idle_notice_from(text: &str) -> Option<&str> {
+    let rest = text.strip_prefix("[Cross-session idle notice] \"")?;
+    rest.split_once('"')
+        .map(|(name, _)| name)
+        .filter(|name| !name.is_empty())
+}
+
+/// A background job's notice: the prompt is a `<task-notification>`,
+/// whose inner tags name the job (`<task-id>`), the call that started it
+/// (`<tool-use-id>`) and how it ended (`<status>`, `<summary>`).
+struct TaskNotification<'a>(&'a str);
+
+impl TaskNotification<'_> {
+    /// The trimmed text of inner tag `name`, when present and not empty.
+    fn tag(&self, name: &str) -> Option<String> {
+        let (_, rest) = self.0.split_once(&format!("<{name}>"))?;
+        let (value, _) = rest.split_once(&format!("</{name}>"))?;
+        Some(value.trim())
+            .filter(|v| !v.is_empty())
+            .map(str::to_string)
+    }
+}
+
+fn task_notification(text: &str) -> Option<TaskNotification<'_>> {
+    text.trim_start()
+        .strip_prefix("<task-notification>")
+        .map(TaskNotification)
 }
 
 /// Its `claude_code.token.usage` counter (delta temporality): the `type`
@@ -918,7 +1047,11 @@ mod tests {
         assert_eq!(
             crate::test_launch::block(h.prompt(&named)),
             Some(Prompt::PeerMessage {
-                from: "oxplow-main".into()
+                from: "oxplow-main".into(),
+                socket: Some("uds:/tmp/cc-socks/21663.sock".into()),
+                message: Some("hi".into()),
+                text: named["prompt"].as_str().unwrap().into(),
+                idle_notice: false,
             })
         );
         let unnamed = serde_json::json!({
@@ -927,12 +1060,187 @@ mod tests {
         assert_eq!(
             crate::test_launch::block(h.prompt(&unnamed)),
             Some(Prompt::PeerMessage {
-                from: "uds:/tmp/cc-socks/21663.sock".into()
+                from: "uds:/tmp/cc-socks/21663.sock".into(),
+                socket: Some("uds:/tmp/cc-socks/21663.sock".into()),
+                message: Some("hi".into()),
+                text: unnamed["prompt"].as_str().unwrap().into(),
+                idle_notice: false,
             })
         );
         // A person quoting one is still a person.
         let quoted =
             serde_json::json!({ "prompt": "what is a <cross-session-message from=\"x\">?" });
+        assert!(matches!(
+            crate::test_launch::block(h.prompt(&quoted)),
+            Some(Prompt::Person { .. })
+        ));
+    }
+
+    /// A background Bash call's PostToolUse names the job it started
+    /// (`tool_response.backgroundTaskId`, the recorded
+    /// `claude/background_shell.jsonl`): the id its Stop and its report
+    /// name. Its PreToolUse and an ordinary call name none.
+    #[test]
+    fn a_background_shell_call_names_the_job_it_started() {
+        let h = harness("oxplow:claude-code", "claude");
+        let started = crate::test_launch::block(h.tool_use(&serde_json::json!({
+            "hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_use_id": "toolu_bg",
+            "tool_input": {"command": "sleep 45", "run_in_background": true},
+            "tool_response": {"stdout": "", "backgroundTaskId": "bkrmmrzrm"}
+        })))
+        .unwrap();
+        assert_eq!(started.started_job.as_deref(), Some("bkrmmrzrm"));
+        let before = crate::test_launch::block(h.tool_use(&serde_json::json!({
+            "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_use_id": "toolu_bg",
+            "tool_input": {"command": "sleep 45", "run_in_background": true}
+        })))
+        .unwrap();
+        assert_eq!(before.started_job, None);
+        let plain = crate::test_launch::block(h.tool_use(&serde_json::json!({
+            "hook_event_name": "PostToolUse", "tool_name": "Bash",
+            "tool_input": {"command": "ls"}, "tool_response": {"stdout": "x"}
+        })))
+        .unwrap();
+        assert_eq!(plain.started_job, None);
+    }
+
+    /// Every Claude Code Stop is followed by a SubagentStop with an
+    /// `agent_id` and an empty `agent_type` (an internal helper, recorded:
+    /// no subagent was asked for): it is no subagent of the session's.
+    #[test]
+    fn a_helper_agent_with_no_type_is_no_subagent() {
+        let h = harness("oxplow:claude-code", "claude");
+        let helper = serde_json::json!({
+            "hook_event_name": "SubagentStop", "agent_id": "a72d255bb6f97ae75", "agent_type": ""
+        });
+        assert_eq!(crate::test_launch::block(h.subagent(&helper)), None);
+        let real = serde_json::json!({
+            "hook_event_name": "SubagentStop", "agent_id": "afd849d5d475e378d", "agent_type": "general-purpose"
+        });
+        assert!(crate::test_launch::block(h.subagent(&real)).is_some());
+    }
+
+    /// The idle notice a session asked for is an automated notice from
+    /// another session's harness (`[Cross-session idle notice] "<name>" …`,
+    /// recorded in `claude/cross_session.jsonl`): the named session's, not
+    /// a person's words.
+    #[test]
+    fn an_idle_notice_is_a_peers_and_not_a_persons_prompt() {
+        use oxplow_domain::agent::observe::Prompt;
+        let h = harness("oxplow:claude-code", "claude");
+        let text = "[Cross-session idle notice] \"rec-project-f9\", which you asked to be notified about, is idle now \u{2014} it finished a turn at 20:06. This is an automated notice from that session's harness.";
+        let got = crate::test_launch::block(h.prompt(&serde_json::json!({ "prompt": text })));
+        assert_eq!(
+            got,
+            Some(Prompt::PeerMessage {
+                from: "rec-project-f9".into(),
+                socket: None,
+                message: None,
+                text: text.into(),
+                idle_notice: true,
+            })
+        );
+        // A person quoting the marker mid-sentence is still a person.
+        let quoted =
+            serde_json::json!({ "prompt": "what is a [Cross-session idle notice] \"x\"?" });
+        assert!(matches!(
+            crate::test_launch::block(h.prompt(&quoted)),
+            Some(Prompt::Person { .. })
+        ));
+    }
+
+    /// A `SendMessage` call says what it sends to whom, so the turn that
+    /// receives it can be matched to this one.
+    #[test]
+    fn a_send_message_call_says_what_it_sends() {
+        let h = harness("oxplow:claude-code", "claude");
+        let call = crate::test_launch::block(h.tool_use(&serde_json::json!({
+            "tool_name": "SendMessage", "tool_use_id": "t1",
+            "tool_input": {"to": "oxplow-bugfixes", "summary": "s", "message": "merge main first", "notify_when_idle": true}
+        })))
+        .unwrap();
+        assert_eq!(
+            call.sent,
+            Some(oxplow_domain::agent::tool::SentMessage {
+                to: "oxplow-bugfixes".into(),
+                text: "merge main first".into(),
+                notify_when_idle: true,
+            })
+        );
+        let other = crate::test_launch::block(h.tool_use(&serde_json::json!({
+            "tool_name": "Bash", "tool_input": {"command": "ls"}
+        })))
+        .unwrap();
+        assert_eq!(other.sent, None);
+    }
+
+    /// A Stop names the work it left running (`background_tasks`, the
+    /// shape in the recorded `claude/subagent.jsonl`): the running ones,
+    /// by the id their report back names; an empty list is none, a body
+    /// with no list says nothing.
+    #[test]
+    fn a_stop_names_the_work_it_left_running() {
+        let h = harness("oxplow:claude-code", "claude");
+        let body = serde_json::json!({
+            "effort": {"level": "high"},
+            "background_tasks": [
+                {"id": "afd849d5d475e378d", "type": "subagent", "status": "running",
+                 "description": "count lines", "agent_type": "general-purpose"},
+                {"id": "b2", "type": "shell", "status": "completed"}
+            ]
+        });
+        let run = crate::test_launch::block(h.turn_run(&body)).unwrap();
+        assert_eq!(
+            run.left_running,
+            Some(vec![oxplow_domain::hook::RunningWork {
+                id: "afd849d5d475e378d".into(),
+                kind: Some("subagent".into()),
+                description: Some("count lines".into()),
+            }])
+        );
+        let none =
+            crate::test_launch::block(h.turn_run(&serde_json::json!({"background_tasks": []})))
+                .unwrap();
+        assert_eq!(none.left_running, Some(vec![]));
+        let silent =
+            crate::test_launch::block(h.turn_run(&serde_json::json!({"effort": {"level": "low"}})))
+                .unwrap();
+        assert_eq!(silent.left_running, None);
+    }
+
+    /// A background job's notice arrives as a `<task-notification>` prompt
+    /// (the shape Claude Code 2.1 delivers when a background shell or agent
+    /// finishes, taken from a recorded session's prompt): a background job,
+    /// naming the call that started it, not a person's words. Every prompt
+    /// hook carries the turn's `prompt_id`.
+    #[test]
+    fn a_background_jobs_notice_names_the_call_that_started_it() {
+        use oxplow_domain::agent::observe::Prompt;
+        let h = harness("oxplow:claude-code", "claude");
+        let text = "<task-notification>\n<task-id>a105c4271bd72a0cb</task-id>\n<tool-use-id>toolu_01NxscFzyLVJtKmaZxvCm57g</tool-use-id>\n<output-file>/tmp/tasks/a105c4271bd72a0cb.output</output-file>\n<status>completed</status>\n<summary>Agent \"Map desktop\" finished</summary>\n</task-notification>";
+        let body = serde_json::json!({ "prompt": text, "prompt_id": "7d3b8f1e" });
+        assert_eq!(
+            crate::test_launch::block(h.prompt(&body)),
+            Some(Prompt::BackgroundJob {
+                call: Some("toolu_01NxscFzyLVJtKmaZxvCm57g".into()),
+                job: Some("a105c4271bd72a0cb".into()),
+                status: Some("completed".into()),
+                summary: Some("Agent \"Map desktop\" finished".into()),
+                text: text.into(),
+            })
+        );
+        assert_eq!(h.harness_turn_id(&body).as_deref(), Some("7d3b8f1e"));
+        let bare = serde_json::json!({ "prompt": "<task-notification>\n<status>completed</status>\n</task-notification>" });
+        assert!(matches!(
+            crate::test_launch::block(h.prompt(&bare)),
+            Some(Prompt::BackgroundJob { call: None, .. })
+        ));
+        assert_eq!(
+            h.harness_turn_id(&serde_json::json!({"prompt": "hi"})),
+            None
+        );
+        // A person quoting one is still a person.
+        let quoted = serde_json::json!({ "prompt": "what does <task-notification> mean?" });
         assert!(matches!(
             crate::test_launch::block(h.prompt(&quoted)),
             Some(Prompt::Person { .. })
@@ -980,7 +1288,8 @@ mod tests {
                 subagent: Subagent {
                     id: "afd849d5d475e378d".into(),
                     kind: None
-                }
+                },
+                text: handback["prompt"].as_str().unwrap().into(),
             })
         );
         assert_eq!(
@@ -1402,12 +1711,12 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let mut text = oxplow_agent_text::core_text();
         text.skills.push(Text {
-            name: "work-items".into(),
-            body: "---\nname: work-items\ndescription: d\n---\n".into(),
+            name: "tasks".into(),
+            body: "---\nname: tasks\ndescription: d\n---\n".into(),
             ..Default::default()
         });
         text.commands.push(Text {
-            name: "work-next".into(),
+            name: "next-task".into(),
             body: "next".into(),
             ..Default::default()
         });
@@ -1416,15 +1725,15 @@ mod tests {
         let commands = dir.join("commands");
         fs::create_dir_all(skills.join("someone-elses")).unwrap();
         fs::write(skills.join("someone-elses").join("SKILL.md"), "x").unwrap();
-        assert!(skills.join("work-items").join("SKILL.md").exists());
-        assert!(commands.join("work-next.md").exists());
+        assert!(skills.join("tasks").join("SKILL.md").exists());
+        assert!(commands.join("next-task.md").exists());
         let h = harness("oxplow:claude-code", "claude");
         crate::test_launch::block(
             h.refresh_text(&project_only(tmp.path()), &oxplow_agent_text::core_text()),
         )
         .unwrap();
-        assert!(!skills.join("work-items").exists());
-        assert!(!commands.join("work-next.md").exists());
+        assert!(!skills.join("tasks").exists());
+        assert!(!commands.join("next-task.md").exists());
         assert!(skills.join("someone-elses").exists());
         assert!(skills.join("oxplow-runtime").join("SKILL.md").exists());
         assert!(commands.join("configure.md").exists());

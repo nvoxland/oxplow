@@ -10,7 +10,7 @@ loaders:
              uri_param(h.uri, 'id') AS handoff
       FROM v_handoff h
       JOIN v_thread tt ON tt.id = h.to_thread_id
-      LEFT JOIN v_work_item w ON w.uri = h.work_item
+      LEFT JOIN v_oxplow_task w ON w.uri = h.task
       WHERE h.from_thread_id = :thread_id
         AND (h.state = 'open' OR julianday(h.settled_at) >= julianday('now') - 7)
       ORDER BY h.state <> 'open', h.sent_at DESC

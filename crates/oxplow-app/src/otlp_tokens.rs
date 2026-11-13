@@ -1,4 +1,4 @@
-//! OTLP exports → token readings (epic tsk22).
+//! OTLP exports → token readings.
 //!
 //! Agent CLIs export token usage as OpenTelemetry to oxplow's control-plane
 //! OTLP receiver. This module decodes the protobuf body into neutral
@@ -12,7 +12,7 @@
 //! provider harness answers in one call.
 //!
 //! No IO of its own → fully unit-testable. [`summarize_metrics_request`] is the
-//! opt-in wire-format diagnostic (tsk25).
+//! opt-in wire-format diagnostic.
 
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::common::v1::{any_value, KeyValue};
@@ -28,7 +28,7 @@ use oxplow_domain::agent::registry::HarnessRegistry;
 #[derive(Debug, Clone, PartialEq)]
 pub struct TokenExport {
     pub counts: Vec<TokenReading>,
-    /// The earliest its counts cover, when they say (tsk900).
+    /// The earliest its counts cover, when they say.
     pub window_start: Option<oxplow_domain::Timestamp>,
     pub window_end: Option<oxplow_domain::Timestamp>,
 }
@@ -150,7 +150,7 @@ fn number_value(v: &Option<number_data_point::Value>) -> i64 {
     }
 }
 
-/// Diagnostic (tsk25): a human-readable dump of an OTLP metrics export — the
+/// Diagnostic: a human-readable dump of an OTLP metrics export — the
 /// resource attributes plus every metric's name, data type, and each data
 /// point's attributes + value. Used behind the `OXPLOW_OTLP_DEBUG` flag to
 /// discover an agent's real wire format (its token metric name and
@@ -314,7 +314,7 @@ pub(crate) mod tests {
         .encode_to_vec()
     }
 
-    /// [`encoded_claude_export`] with cache points — the tsk73 ingest tests' body.
+    /// [`encoded_claude_export`] with cache points — the ingest tests' body.
     pub(crate) fn encoded_claude_export_with_cache(
         model: &str,
         input: i64,
@@ -504,7 +504,7 @@ pub(crate) mod tests {
         }
     }
 
-    /// tsk860: an export says when it was measured — the latest of its
+    /// an export says when it was measured — the latest of its
     /// points' times — which is what places it in a turn; one that doesn't
     /// say has no window end, and a body with no token counts is none. It
     /// keeps the export's precision: a turn stored to the microsecond that

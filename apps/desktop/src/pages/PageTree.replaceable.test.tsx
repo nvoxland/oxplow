@@ -33,7 +33,7 @@ afterAll(() => {
 /** A page whose `cards` node is replaceable (the Board), its own rows
  *  `own`; the run's tree as `tree` says. */
 function host(tree: Partial<RunNode>): PageRun {
-  const page = fakePage({ ...node.viz("cards", "own"), replaceable: "work_item.board" });
+  const page = fakePage({ ...node.viz("cards", "own"), replaceable: "task.board" });
   const run = fakeRun(page, { loaders: { own: loader(["title"], [["oxplow's own row"]]) } });
   return { ...run, tree: { ...run.tree, ...tree } as RunNode };
 }
@@ -46,7 +46,7 @@ const lanes = fakeRun(fakePage(node.viz("lanes", "rows"), { id: "beta/lanes", ex
 test("a node the run says another extension stands in for draws that run, saying so on hover and not in a chip", () => {
   const { container, getByTestId, queryByTestId } = render(<PageTree run={host({ replacedBy: "beta", embed: lanes })} runId="run-1" />);
   expect(queryByTestId("replacement-badge")).toBeNull();
-  expect(getByTestId("replacement-work_item.board").getAttribute("title")).toContain("beta");
+  expect(getByTestId("replacement-task.board").getAttribute("title")).toContain("beta");
   // Drawn as an embed: its nodes under the replaced node's id.
   expect(container.querySelector('[data-node="cards/lanes"]')!.textContent).toContain("Doing");
   expect(container.textContent).not.toContain("oxplow's own row");

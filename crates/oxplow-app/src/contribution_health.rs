@@ -478,7 +478,7 @@ mod tests {
         );
     }
 
-    /// P7 review (tsk721): a provider and a collector with the same
+    /// P7 review: a provider and a collector with the same
     /// `<extension>/<id>` are two contributions with two health rows.
     #[tokio::test]
     async fn a_provider_and_a_collector_named_alike_have_their_own_health() {
@@ -547,7 +547,7 @@ mod enable_all_tests {
     /// healthy ones alone; an agent may run it too.
     #[tokio::test]
     async fn enable_all_turns_on_every_disabled_contribution_for_a_person() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let health = ContributionHealth::new(fx.svc.db.clone(), VocabularyHandle::core());
         let (a, b, c, ok) = (
             collector("one", "a"),

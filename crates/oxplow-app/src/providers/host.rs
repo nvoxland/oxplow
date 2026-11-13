@@ -177,32 +177,14 @@ pub async fn spawn(launch: &Launch) -> Result<Spawned, HostError> {
         name: launch.name.clone(),
         message,
     };
-    if launch.spec.credentials.iter().any(|credential| {
-        credential.secret_ref.is_some() && !launch.spec.is_host_secret_bearer(credential)
-    }) {
-        return Err(failed(
-            "host secret reference transport is unavailable".into(),
-        ));
-    }
     let (own, _) = launch.spec.program();
-    // A server by url has no program of its own in the folder.
-    if !launch.spec.is_remote() && !launch.ext_dir.join(&own).is_file() {
+    if !launch.ext_dir.join(&own).is_file() {
         return Err(failed(format!(
             "`{own}` doesn't exist in the extension folder"
         )));
     }
-    let adapter = adapter_bin();
-    let (runs, args) = launch.spec.launch(&adapter);
-    let entry = match runs {
-        Some(adapter) if !adapter.is_file() => {
-            return Err(failed(format!(
-                "oxplow's MCP adapter isn't installed beside it ({})",
-                adapter.display()
-            )))
-        }
-        Some(adapter) => adapter,
-        None => launch.ext_dir.join(&own),
-    };
+    let args = launch.spec.args.clone();
+    let entry = launch.ext_dir.join(&own);
     let proxy = if crate::net_sandbox::enforced() {
         Some(
             crate::net_sandbox::EgressProxy::start(launch.spec.network.clone())
@@ -632,26 +614,6 @@ pub fn deployment(
                 message,
             })?;
     Ok(Deployment { ext_dir, declared })
-}
-
-/// oxplow's MCP adapter (`oxplow-provider-mcp`, P7.A6): shipped beside
-/// the running executable (the bundle's sidecar, a dev `target/<profile>`),
-/// or one directory up from a test binary in `target/<profile>/deps`.
-pub fn adapter_bin() -> PathBuf {
-    let name = if cfg!(windows) {
-        "oxplow-provider-mcp.exe"
-    } else {
-        "oxplow-provider-mcp"
-    };
-    let exe = std::env::current_exe().unwrap_or_default();
-    let beside = exe.parent().map(|d| d.join(name));
-    let above = exe.parent().and_then(Path::parent).map(|d| d.join(name));
-    beside
-        .clone()
-        .filter(|p| p.is_file())
-        .or(above.filter(|p| p.is_file()))
-        .or(beside)
-        .unwrap_or_else(|| PathBuf::from(name))
 }
 
 /// The provider's extension folder under `root`.

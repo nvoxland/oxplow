@@ -32,6 +32,7 @@ async fn each_kind_adds_to_an_extension_that_still_checks() {
         ("effect", "on-done"),
         ("component", "board"),
         ("advisory", "heads-up"),
+        ("context", "now"),
         ("skill", "triage-guide"),
     ] {
         let dir = tempfile::tempdir().unwrap();
@@ -94,9 +95,7 @@ async fn comments_survive_and_a_permission_joins_the_existing_line() {
     let after = manifest(root, "base");
     assert!(after.contains("# keep this note\n"), "{after}");
     assert!(
-        after.contains(
-            "permissions: [sql.read, commands:oxplow.work_item.comment] # and this one\n"
-        ),
+        after.contains("permissions: [sql.read, commands:oxplow.thread.rename] # and this one\n"),
         "{after}"
     );
     checked(root, "base").await;

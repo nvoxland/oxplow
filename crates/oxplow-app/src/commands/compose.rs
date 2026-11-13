@@ -8,9 +8,9 @@
 //!   all or nothing, one audit row and `command.executed` with the
 //!   children's events caused by it, undone by the inverses of the
 //!   children that changed something, reversed.
-//! - Any call leaves it (an `External` command, `work_item.*` on another
+//! - Any call leaves it (an `External` command, `task.*` on another
 //!   provider's item): its **steps** run in order (`steps.rs`), each
-//!   landing as it runs, with no undo (P7 review, tsk713).
+//!   landing as it runs, with no undo (P7 review).
 //!
 //! Either way it is composed once, before any transaction, its reads
 //! through the SQL gateway (as an effect's are), and each child's own
@@ -37,6 +37,11 @@ pub struct Composition {
     pub calls: Vec<CommandCall>,
     pub result: Option<Value>,
     pub events: Vec<oxplow_domain::Envelope>,
+    /// The calls that reverse `calls`, when the composer says so (an
+    /// extension script's `inverse`): the run's undo when its calls leave
+    /// oxplow's records (steps, which have none of their own). Refused
+    /// beside calls that all stay inside, which undo themselves.
+    pub inverse: Option<Vec<CommandCall>>,
 }
 
 /// What a composer reads through: the SQL gateway (the published datasets,
@@ -57,16 +62,80 @@ pub type Composer = dyn Fn(&Composing<'_>, &oxplow_domain::run::RunContext, &Val
     + Send
     + Sync;
 
-/// A composite's handler: its composer. The bus composes it, routes the
-/// calls and runs them (`steps.rs`).
+/// What one step of a run answered, as an extension script's `finish`
+/// sees it: the call's name and input and the answer it gave (a store
+/// write's carries `rows`, its `RETURNING` rows).
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct StepAnswer {
+    pub name: String,
+    pub input: Value,
+    pub result: Value,
+}
+
+/// What a composite's `finish` decided once all its steps landed: the
+/// run's `result` and the `inverse` calls that undo it. A part it leaves
+/// out keeps what the composer said.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Finished {
+    pub result: Option<Value>,
+    pub inverse: Option<Vec<CommandCall>>,
+}
+
+/// Say, after every step of a composite landed, what its run answers and
+/// how it is undone: given the input the run was called with and each
+/// step's answer, reading through `Composing` (what the composer reads
+/// through) as part of `run`. Pure: it writes nothing and composes nothing.
+/// `None` for the reads: the run is inside the bus's transaction, which
+/// holds the database, so `finish` can't read (a read would wait for it).
+pub type Finisher = dyn Fn(
+        Option<&Composing<'_>>,
+        &oxplow_domain::run::RunContext,
+        &Value,
+        &[StepAnswer],
+    ) -> Result<Finished, CommandError>
+    + Send
+    + Sync;
+
+/// What a [`Composing`] borrows, owned: the bus keeps one with a routed
+/// composition so a `finish` that runs later, in a transaction or after
+/// the steps, can read as the composer did.
+#[derive(Clone)]
+pub struct Reads {
+    pub sql: crate::sql_gateway::SqlGateway,
+    pub db: oxplow_db::Database,
+    pub runtime: tokio::runtime::Handle,
+}
+
+impl Reads {
+    pub fn composing(&self) -> Composing<'_> {
+        Composing {
+            sql: &self.sql,
+            db: &self.db,
+            runtime: &self.runtime,
+        }
+    }
+}
+
+/// A composite's handler: its composer, and its `finish` when it has
+/// one. The bus composes it, routes the calls and runs them (`steps.rs`).
 pub struct Compose {
     pub compose: Arc<Composer>,
+    /// Called after all its steps landed (an extension script's `finish`).
+    pub finish: Option<Arc<Finisher>>,
 }
 
 impl Compose {
     /// The composite over `compose`.
     pub fn handler(compose: Arc<Composer>) -> Handler {
-        Handler::Compose(Arc::new(Compose { compose }))
+        Handler::Compose(Arc::new(Compose {
+            compose,
+            finish: None,
+        }))
+    }
+
+    /// The composite over `compose`, whose run `finish` answers.
+    pub fn handler_finishing(compose: Arc<Composer>, finish: Option<Arc<Finisher>>) -> Handler {
+        Handler::Compose(Arc::new(Compose { compose, finish }))
     }
 }
 
@@ -88,27 +157,24 @@ pub struct SequenceCall {
     pub input: Value,
 }
 
-/// `SequenceInput`'s schema, with its example input: closing a work item
-/// and reporting the effort, one audited run.
+/// `SequenceInput`'s schema, with its example input: closing a task and
+/// commenting on it, one audited run.
 fn sequence_schema() -> Value {
     let mut schema =
         serde_json::to_value(schemars::schema_for!(SequenceInput)).expect("schema serializes");
-    let item = oxplow_domain::uri::build::work_item_uri("oxplow", "tsk12");
+    let item = oxplow_domain::uri::build::task_uri("oxtask", "tsk12");
     if let Some(object) = schema.as_object_mut() {
         object.insert(
             "examples".into(),
             serde_json::json!([{
                 "calls": [
                     {
-                        "name": "oxplow.work_item.transition",
+                        "name": "oxplow.task.transition",
                         "input": { "uri": item, "to": "done" }
                     },
                     {
-                        "name": "oxplow.effort.report",
-                        "input": {
-                            "summary": "Fixed the login redirect loop.",
-                            "impacts": [{ "kind": "file", "id": "src/auth.rs", "action": "updated" }]
-                        }
+                        "name": "oxplow.task.comment",
+                        "input": { "uri": item, "body": "Fixed the login redirect loop." }
                     }
                 ]
             }]),
@@ -164,6 +230,7 @@ pub fn sequence_command() -> Command {
                 .collect(),
             result: None,
             events: Vec::new(),
+            inverse: None,
         })
     });
     Command::new(spec, Compose::handler(compose)).expect("command.sequence registers")
@@ -172,48 +239,41 @@ pub fn sequence_command() -> Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oxplow_domain::stores::ThreadStore as _;
     use oxplow_domain::Actor;
-    use oxplow_tasks::work_item_ref;
-    use oxplow_tasks::TaskStore as _;
     use serde_json::json;
 
-    /// Two `work_item.*` commands as one run by an agent: a work list's
-    /// verbs run outside the transaction, so the sequence runs them as
-    /// steps — one audit row naming the sequence with the children in its
-    /// result, the children's events caused by that one
-    /// `command.executed`, and no undo of the whole.
+    /// Two thread commands as one run by a person: the sequence runs them
+    /// in one transaction — one audit row naming the sequence with the
+    /// children in its result, one `command.executed`, and one undo that
+    /// reverses both.
     #[tokio::test]
-    async fn a_sequence_of_work_item_commands_is_one_audited_run_of_steps() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
-        let agent = Actor::Agent {
-            session_id: None,
-            thread_id: Some(fx.thread),
-            stream_id: None,
-        };
-        let task = work_item_ref(fx.task);
+    async fn a_sequence_of_commands_is_one_audited_run() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let thread = fx.thread.to_string();
+        let before = fx.svc.thread_store.get(&fx.thread).await.unwrap().unwrap();
         let out = fx
             .svc
             .commands
             .run(
-                &agent,
+                &Actor::Human,
                 SEQUENCE,
                 json!({ "calls": [
-                    { "name": "oxplow.work_item.update", "input": { "uri": task, "title": "Renamed" } },
-                    { "name": "oxplow.work_item.transition", "input": { "uri": task, "to": "done" } },
+                    { "name": "oxplow.thread.rename", "input": { "thread": thread, "title": "First" } },
+                    { "name": "oxplow.thread.rename", "input": { "thread": thread, "title": "Second" } },
                 ] }),
                 false,
             )
             .await
             .unwrap();
-        let after = fx.svc.task_store.get(fx.task).await.unwrap().unwrap();
-        assert_eq!(after.title, "Renamed");
-        assert_eq!(after.status, oxplow_tasks::TaskStatus::Done);
+        let after = fx.svc.thread_store.get(&fx.thread).await.unwrap().unwrap();
+        assert_eq!(after.title, "Second");
         assert_eq!(out.result["children"].as_array().unwrap().len(), 2);
-        assert_eq!(
-            out.result["children"][1]["name"],
-            "oxplow.work_item.transition"
+        assert_eq!(out.result["children"][1]["name"], "oxplow.thread.rename");
+        assert!(
+            out.inverse.is_some(),
+            "a sequence in one transaction undoes"
         );
-        assert!(out.inverse.is_none(), "steps aren't undoable");
 
         let audits = oxplow_db::SqliteCommandAuditStore::new(fx.svc.db.clone())
             .list_recent(20)
@@ -230,18 +290,15 @@ mod tests {
         let executed = events
             .iter()
             .filter(|e| e.envelope.event_type == "command.executed")
-            .collect::<Vec<_>>();
-        assert_eq!(executed.len(), 1);
-        for t in ["work_item.edited", "work_item.state_changed"] {
-            let caused = events
-                .iter()
-                .find(|e| e.envelope.event_type == t)
-                .unwrap_or_else(|| panic!("{t} logged"));
-            assert_eq!(
-                caused.envelope.cause.as_ref(),
-                Some(&executed[0].envelope.id),
-                "{t}"
-            );
-        }
+            .count();
+        assert_eq!(executed, 1);
+
+        fx.svc
+            .commands
+            .undo(&Actor::Human, out.audit_id.unwrap(), false)
+            .await
+            .unwrap();
+        let undone = fx.svc.thread_store.get(&fx.thread).await.unwrap().unwrap();
+        assert_eq!(undone.title, before.title);
     }
 }

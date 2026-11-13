@@ -1,0 +1,12 @@
+title: Fields of the task tracker
+description: The task stores' own fields (priority, labels, ...), one row each, for a form to ask for. Read-only ones are marked.
+needs:
+- model:oxplow/task_record
+loaders:
+  task_fields:
+    sql: |
+      SELECT d.name AS name, d.title AS title, d.kind AS kind, d."values" AS "values",
+             coalesce(d.read_only, 0) AS read_only
+      FROM v_model_field_decl d
+      WHERE d.model = 'oxplow/task_record' AND d.namespace <> 'oxplow'
+      ORDER BY d.name

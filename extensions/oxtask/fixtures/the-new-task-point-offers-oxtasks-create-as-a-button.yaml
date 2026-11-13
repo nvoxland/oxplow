@@ -1,0 +1,6 @@
+# Bundled's New Task point has one contributor with oxtask on: a button.
+requires: [oxplow-bundled, oxtask]
+when: { action_point: oxplow/task.new, context: {} }
+expect:
+  draws: button
+  commands: [oxtask.task.create]

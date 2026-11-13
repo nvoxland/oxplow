@@ -190,7 +190,6 @@ loaders:
            p AS (SELECT * FROM v_capability_provider WHERE choosable = 1)
       SELECT p.capability, p.capability_title AS capability_title, p.provider, p.title,
              CASE
-               WHEN p.capability = 'knowledge' AND p.source = 'builtin' THEN 'pages as Markdown under .oxplow/wiki, pinned to snapshots'
                WHEN p.capability = 'snapshots' AND json_extract(p.features, '$.contents') = 1 THEN 'reads any file at any point; grows the blob store'
                WHEN p.capability = 'snapshots' THEN 'what changed, never what it said; no blob store growth'
              END AS hint,
@@ -212,6 +211,12 @@ loaders:
              'Resets a choice.', NULL, 0, 1
       FROM (SELECT DISTINCT capability, capability_title FROM p) d
       ORDER BY 1, 11 DESC, 4
+  knowledge_stores:
+    sql: |
+      SELECT s.store, s.extension, s.extension AS title
+      FROM v_model_store s
+      WHERE s.model = 'oxplow/knowledge_record'
+      ORDER BY s.store
   replacements:
     sql: |
       SELECT target, label, extension AS whose, extension AS title,
@@ -674,6 +679,21 @@ view:
           input:
             capability: '{{row.capability}}'
             layer: personal
+      # Every knowledge store is an extension's, in use while it is on
+      # (turn it off with its extension).
+      - id: knowledge-stores
+        title: Knowledge stores
+        from: knowledge_stores
+        viz: table
+        columns:
+        - key: store
+          label: Store
+        - key: extension
+          label: From
+        empty: No knowledge store is on. Turn on an extension that keeps pages, such as oxwiki.
+      # Where an extension adds its own settings for the project
+      # (oxtask's Task workflow).
+      - { slot: integrations, id: integrations-mounts }
       - id: replacements
         title: Replaced components
         from: replacements

@@ -22,7 +22,7 @@ mock.module("../api.js", () => ({
     personSpec("tracker.item.estimate", {
       label: "Estimate",
       group: "Tracker",
-      about: "oxplow/work_item",
+      about: "oxplow/task",
     }),
   ],
 }));

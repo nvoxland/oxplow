@@ -84,7 +84,7 @@ pub fn ops(collection: CollectionService) -> Vec<Op> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_fixtures::{services_with_effort, EffortFixture};
+    use crate::test_fixtures::{services_with_thread, ThreadFixture};
     use oxplow_domain::Actor;
     use oxplow_domain::CommandError;
     use serde_json::Value;
@@ -96,12 +96,12 @@ mod tests {
   </lines></class>
 </classes></package></packages></coverage>"#;
 
-    /// tsk863: `oxplow.collector.sync` runs a project report collector by hand —
+    /// `oxplow.collector.sync` runs a project report collector by hand —
     /// the agent's own thread records it, audited to the agent; a person
     /// names the thread, and `thread` is refused for any other collector.
     #[tokio::test]
     async fn collector_sync_reads_a_report_into_the_agents_thread() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         // Coverage is recorded while a metric consumes it.
         std::fs::write(fx._dir.path().join("coverage.xml"), COBERTURA).unwrap();
         crate::collection::test_support::write_project_extension(
@@ -161,7 +161,7 @@ mod tests {
     /// A recorded run is the agent's `asserted` run, on its own thread.
     #[tokio::test]
     async fn a_recorded_run_lands_on_the_agents_thread() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let out = fx
             .svc
             .commands
@@ -186,11 +186,11 @@ mod tests {
         assert_eq!(run.envelope.anchors.thread_id, Some(fx.thread));
     }
 
-    /// tsk923: a run a person reports on a thread whose agent is mid-turn
+    /// a run a person reports on a thread whose agent is mid-turn
     /// isn't the agent's: no turn, on the capture or on its event.
     #[tokio::test]
     async fn a_persons_reported_run_carries_no_turn() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         open_turn(&fx).await;
         fx.svc
             .commands
@@ -218,12 +218,13 @@ mod tests {
     }
 
     /// The agent's turn opened by a prompt on `fx`'s thread.
-    async fn open_turn(fx: &EffortFixture) {
+    async fn open_turn(fx: &ThreadFixture) {
         fx.svc
             .hook_ingest
             .ingest(crate::hook_ingest::HookEnvelope {
                 session_title: None,
                 turn_run: None,
+                reading: Default::default(),
                 kind: oxplow_domain::HookKind::UserPromptSubmit,
                 thread_id: Some(fx.thread),
                 stream_id: None,
@@ -234,14 +235,14 @@ mod tests {
                 decision: None,
                 tool: None,
                 subagent: None,
-                peer: None,
+                harness_turn: None,
             })
             .await
             .unwrap();
     }
 
     /// The open turn, and the turn the run's capture carries.
-    async fn turns(fx: &EffortFixture) -> (Option<i64>, Option<i64>) {
+    async fn turns(fx: &ThreadFixture) -> (Option<i64>, Option<i64>) {
         fx.svc
             .db
             .read(|c| {
@@ -257,16 +258,17 @@ mod tests {
             .unwrap()
     }
 
-    /// tsk483: a run an agent reports by command is in the turn open on
+    /// a run an agent reports by command is in the turn open on
     /// its thread — on the capture and on its event alike.
     #[tokio::test]
     async fn a_reported_run_carries_the_open_turn() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         fx.svc
             .hook_ingest
             .ingest(crate::hook_ingest::HookEnvelope {
                 session_title: None,
                 turn_run: None,
+                reading: Default::default(),
                 kind: oxplow_domain::HookKind::UserPromptSubmit,
                 thread_id: Some(fx.thread),
                 stream_id: None,
@@ -277,7 +279,7 @@ mod tests {
                 decision: None,
                 tool: None,
                 subagent: None,
-                peer: None,
+                harness_turn: None,
             })
             .await
             .unwrap();

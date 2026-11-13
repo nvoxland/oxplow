@@ -53,7 +53,7 @@ export const commands = {
 	 *  Set when the stream was archived via the rail's "Remove…"
 	 *  action. Archived streams are filtered out of `StreamStore::list`
 	 *  so they disappear from the rail; the row stays in the DB so
-	 *  history references (efforts, snapshots, page_visit) don't
+	 *  history references (turns, snapshots, page_visit) don't
 	 *  dangle.
 	 */
 	archived_at: Timestamp | null,
@@ -87,7 +87,7 @@ export const commands = {
 	 *  Set when the stream was archived via the rail's "Remove…"
 	 *  action. Archived streams are filtered out of `StreamStore::list`
 	 *  so they disappear from the rail; the row stays in the DB so
-	 *  history references (efforts, snapshots, page_visit) don't
+	 *  history references (turns, snapshots, page_visit) don't
 	 *  dangle.
 	 */
 	archived_at: Timestamp | null,
@@ -162,6 +162,11 @@ export const commands = {
 	 *  implementation and its docs live on the core.
 	 */
 	invokeComponentCommand: (id: string, command: string, input: unknown, confirmed: boolean, version: string) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("invoke_component_command", { id, command, input, confirmed, version })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	invokeComponentPoint: (id: string, point: string, context: unknown, command: string | null, confirmed: boolean, version: string) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("invoke_component_point", { id, point, context, command, confirmed, version })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -252,7 +257,7 @@ export const commands = {
 	onto?: { [key in string]: SqlCell } | null,
 	group?: SqlCell | null,
 	order?: { [key in string]: SqlCell }[] | null,
-} | null, confirmed: boolean) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("run_page_action", { runId, node, action, row, input, drop, confirmed })),
+} | null, option: string | null, confirmed: boolean) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("run_page_action", { runId, node, action, row, input, drop, option, confirmed })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -416,11 +421,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listWikiSlugsForSnapshots: (snapshotIds: SnapshotId[]) => typedError<([SnapshotId, string])[], IpcError_Serialize>(__TAURI_INVOKE("list_wiki_slugs_for_snapshots", { snapshotIds })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	getFileSnapshot: (fileSnapshotId: FileSnapshotId) => typedError<{
 	id: number,
 	stream_id: StreamId,
@@ -556,16 +556,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listEffortsAtSnapshots: (snapshotIds: SnapshotId[]) => typedError<EffortAtSnapshot[], IpcError_Serialize>(__TAURI_INVOKE("list_efforts_at_snapshots", { snapshotIds })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	listEffortsInWindow: (windowStart: Timestamp, windowEnd: Timestamp) => typedError<Effort[], IpcError_Serialize>(__TAURI_INVOKE("list_efforts_in_window", { windowStart, windowEnd })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	runCommand: (id: string, input: unknown, confirmed: boolean) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("run_command", { id, input, confirmed })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -587,6 +577,11 @@ export const commands = {
 	 *  implementation and its docs live on the core.
 	 */
 	refCommands: (uri: string) => typedError<string[], IpcError_Serialize>(__TAURI_INVOKE("ref_commands", { uri })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	actionPointCommands: (point: string, context: unknown) => typedError<PointOffer, IpcError_Serialize>(__TAURI_INVOKE("action_point_commands", { point, context })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -805,6 +800,17 @@ export const commands = {
 };
 
 /* Types */
+/**
+ *  `ui.about`: the resource kind (the short form, a string) or the object
+ *  form `{ resource, accepts? }` that also filters the items.
+ */
+export type About = string | AboutItem;
+
+export type AboutItem = {
+	resource: string,
+	accepts?: ItemAccepts | null,
+};
+
 export type AcceptedValues = {
 	column: string,
 	values: string[],
@@ -836,6 +842,29 @@ export type Access =
  */
 "write";
 
+/**  An action point an extension declares. */
+export type ActionPointDecl = {
+	/**  `<namespace>/<name>`. */
+	id: string,
+	label: string,
+	doc: string | null,
+	context: ContextKey[],
+	/**
+	 *  The context key (a `uri`) naming the item it acts on: a joined
+	 *  command's `ui.accepts` is checked against that item's store.
+	 */
+	item: string | null,
+};
+
+/**
+ *  An action point a run placed: the point and the context the page gave
+ *  it (`context:` bound from the page's params and loaders).
+ */
+export type ActionPointRun = {
+	point: string,
+	context: { [key in string]: unknown },
+};
+
 /**
  *  What becomes of the page a viz is on after one of its actions (or its
  *  form) ran a command whose `ui.open_after` names a page.
@@ -855,31 +884,17 @@ export type ActionThen =
 "close";
 
 /**
- *  An MCP server as a provider: oxplow's adapter runs `mcp`'s
- *  server and translates through `mapping`, refusing a server whose tools
- *  aren't `tools`.
- */
-export type AdapterSpec = {
-	mcp: McpServer,
-	/**  The Starlark mapping (`transform(x)`), relative to the folder. */
-	mapping: string,
-	/**  The pinned tools (`[{ name, description, inputSchema }]`, JSON). */
-	tools: string,
-};
-
-/**
  *  Guidance an extension gives the coding agent: a query over the semantic
- *  layer, run by core at `on`, with `:thread_id`, `:stream_id`, `:turn_id`
- *  and `:effort_id` bound (`:effort_id` NULL when the thread has no
- *  effort, `:turn_id` NULL at a prompt). Each result row's `message`
- *  column is a line of guidance.
+ *  layer, run by core at `on`, with `:thread_id`, `:stream_id`, `:turn_id`,
+ *  and `:request_id` (the request of the turn the trigger belongs to)
+ *  bound. Each result row's `message` column is a line of guidance.
  */
 export type Advisory = {
 	id: string,
 	on: AdvisoryOn,
 	query: string,
 	oncePer: AdvisoryOncePer,
-	/**  Line put above the messages (e.g. `# Metric deltas (this effort)`). */
+	/**  Line put above the messages (e.g. `# Metric deltas (this request)`). */
 	heading: string | null,
 	audience: AdvisoryAudience,
 	/**
@@ -914,11 +929,15 @@ export type AdvisoryOn =
 
 /**  How often the same advisory may reach the agent. */
 export type AdvisoryOncePer =
-/**  Once per effort, the first time the query returns rows. */
-"effort" |
+/**
+ *  Once per request on the thread, the first time the query returns
+ *  rows (the request of the turn the trigger belongs to): the next
+ *  request is fresh. The default.
+ */
+"request" |
 /**
  *  Once per thread per `key` value: each row's `key` column fires
- *  once (put `:effort_id` in the key for once per effort per row).
+ *  once (put `:request_id` in the key for once per request per row).
  */
 "row" |
 /**  Every time, whenever the query returns rows. */
@@ -929,6 +948,27 @@ export type AdvisoryOncePer =
 "session" |
 /**  Once per thread per day (UTC). */
 "day";
+
+/**
+ *  One agent context as the extension declares it. A new condition on
+ *  when it runs is a field here beside `needs`.
+ */
+export type AgentContextDecl = {
+	id: string,
+	/**
+	 *  What it tells the agent, for a person reading the manifest or the
+	 *  catalog.
+	 */
+	doc: string,
+	/**  What it needs active (`snapshots`); without it, it doesn't run. */
+	needs: string[],
+	/**
+	 *  The extension's own setting that offers it (as a skill's `when:`);
+	 *  `None`: always.
+	 */
+	when: ConfigCondition | null,
+	query: string,
+};
 
 export type AgentSessionId = string;
 
@@ -1115,7 +1155,7 @@ export type AssistantStatus = "idle" | "running";
  *  row and `command.executed`), or outside it, against a system the bus
  *  doesn't own — a VCS, a provider process, a collector's script — and is
  *  audited after it returns (`External`). A `Dispatch` command decides
- *  per input (the `work_item.*` verbs: oxplow's own items in the
+ *  per input (the `task.*` verbs: oxplow's own items in the
  *  transaction, another provider's through its process) and then runs
  *  exactly as one or the other. A test lists the `External` and the
  *  `Dispatch` commands, so each one is a reviewed choice.
@@ -1154,9 +1194,9 @@ export type BackgroundTask = {
 	result_json: string | null,
 };
 
-export type BackgroundTaskKind = "vcs" | "code-quality" | "lsp" | "notes-resync" | "snapshot" |
+export type BackgroundTaskKind = "vcs" | "code-quality" | "lsp" | "snapshot" |
 /**
- *  Recomputing code metrics over the whole tree (the metric baseline, tsk48).
+ *  Recomputing code metrics over the whole tree (the metric baseline).
  *  Slow and CPU-hungry — it must be visible, or "why is oxplow pegging a core?"
  *  has no answer.
  */
@@ -1176,7 +1216,7 @@ export type BacklinkEdge = {
 	source_extra: string | null,
 	/**
 	 *  Human label for the other end (the source of a backlink, the
-	 *  target of an outbound edge): wiki title, task title, commit
+	 *  target of an outbound edge): knowledge page title, task title, commit
 	 *  subject, …. The renderer falls back to the URI when None.
 	 */
 	source_label: string | null,
@@ -1211,6 +1251,15 @@ export type BlameLine = {
 	time: number,
 	summary: string,
 };
+
+/**
+ *  What a task tracker's stage means to core: the bucket each of its declared
+ *  stages ([`StageDecl`]) is in. Core acts on buckets only — `backlog` is
+ *  filed but not ready, `todo` is ready (what an idle thread may pull),
+ *  `in_progress` is started, `blocked` waits on an answer, `done` and
+ *  `canceled` are closed — and the screens draw the list's own stages.
+ */
+export type Bucket = "backlog" | "todo" | "in_progress" | "blocked" | "done" | "canceled";
 
 /**
  *  What a deploy builds before it copies: `run` in the source folder, as
@@ -1282,9 +1331,28 @@ export type Choice = {
 };
 
 /**  One value a choice param takes, and what the viewer sees for it. */
-export type ChoiceOption = {
+export type ChoiceOption = ChoiceOption_Serialize | ChoiceOption_Deserialize;
+
+/**  One value a choice param takes, and what the viewer sees for it. */
+export type ChoiceOption_Deserialize = {
 	value: string,
 	label: string,
+	/**
+	 *  An icon oxplow draws (`ICONS`): where the choice is a panel header's
+	 *  toggle, the option is that icon alone, its label the hover.
+	 */
+	icon?: string | null,
+};
+
+/**  One value a choice param takes, and what the viewer sees for it. */
+export type ChoiceOption_Serialize = {
+	value: string,
+	label: string,
+	/**
+	 *  An icon oxplow draws (`ICONS`): where the choice is a panel header's
+	 *  toggle, the option is that icon alone, its label the hover.
+	 */
+	icon?: string | null,
 };
 
 /**  How a client authenticates to a token endpoint. */
@@ -1312,6 +1380,11 @@ export type CollectorRunReport = {
 	rowCounts: { [key in string]: number },
 	/**  A fact collector's facts recorded. */
 	facts: number,
+	/**
+	 *  What a run skipped and why: shared-model rows it quarantined, each
+	 *  naming the row and column.
+	 */
+	problems?: string[],
 };
 
 /**  What runs a collector. */
@@ -1330,7 +1403,7 @@ export type CollectorRuntime =
 "jaq" |
 /**
  *  A provider instance's collector (`oxplow.provider.sync`): its records
- *  land in the capability's dataset (`v_work_item`).
+ *  land in the capability's dataset (`v_oxplow_task`).
  */
 "read";
 
@@ -1357,7 +1430,7 @@ export type CollectorSpec = {
 	/**
 	 *  A script's input query: read-only SQL over the semantic layer,
 	 *  handed over as `input.rows`. `:stream_id`, `:snapshot_id`,
-	 *  `:effort_id`, `:thread_id` and `:turn_id` bind the triggering
+	 *  `:thread_id` and `:turn_id` bind the triggering
 	 *  event's anchors, `:event_id` its id and `:event_seq` its seq (NULL
 	 *  otherwise).
 	 */
@@ -1429,12 +1502,26 @@ export type ColumnFormat =
 /**  A short value as a pill, in the column's `tone`. */
 "badge" |
 /**
+ *  Inline markdown (a description's `first_sentence`), drawn on its
+ *  line: emphasis, code and links (a wikilink opens its page, by its
+ *  title); a block's marks unwrap. An agent reads it as written.
+ */
+"markdown" |
+/**
  *  A list of items (a JSON array): each element is a string or
  *  `{ "text": …, "hint"?: …, "uri"?: … }`, drawn inline separated by
  *  ` · `; `hint` is the item's hover text, `uri` makes it a link. An
  *  agent reads them joined by ` · `, a hint in parentheses.
  */
 "items" |
+/**
+ *  Short marks (a JSON array): each element is a string or `{ "text":
+ *  …, "tone"?: …, "hint"?: … }`, drawn as small tight letters, each in
+ *  its own `tone` (`accent`, `success`, `warning`, `danger`, `muted`) —
+ *  a file's A/M/D, a change's `+3 −1`. `hint` is the mark's hover. An
+ *  agent reads them joined by spaces, a hint in parentheses.
+ */
+"marks" |
 /**
  *  Who caused it (a JSON object `{ "kind": "agent" | "you" |
  *  "extension" | "page", "label": …, "uri"?: … }`): a small chip with
@@ -1528,7 +1615,7 @@ export type CommandOutcome = {
 export type CommandSpec = {
 	/**
 	 *  The command id: `<namespace>.<area>.<verb>`, snake_case —
-	 *  `oxplow.work_item.transition`, `acme_pr.issue.close`. The namespace
+	 *  `oxplow.thread.mark`, `acme_pr.issue.close`. The namespace
 	 *  is its owner's (`oxplow` for core and oxplow's own extensions, an
 	 *  extension's declared `namespace:` otherwise), so two extensions'
 	 *  areas never collide. (A person reads the command's label, not its
@@ -1566,7 +1653,7 @@ export type CommandSpec = {
 	access: Access,
 	/**
 	 *  The scopes its handler calls (`sql.read`) and the capabilities, or
-	 *  their features (`work_items.comments`), it needs active; unmet, it
+	 *  their features (`snapshots.contents`), it needs active; unmet, it
 	 *  isn't offered and doesn't run (`.context/commands.md`).
 	 */
 	needs: string[],
@@ -1599,10 +1686,10 @@ export type CommandUi = {
 	/**  More words search matches it by. */
 	keywords?: string[],
 	/**
-	 *  The ref kind it acts on (`work_item`, `effort`): offered on that
+	 *  The ref kind it acts on (`task`, `request`): offered on that
 	 *  ref's page and rows. `None`: it needs no ref, and search offers it.
 	 */
-	about?: string | null,
+	about?: About | null,
 	/**
 	 *  A column of `about`'s dataset row (the dataset its resource
 	 *  resolves through) that must be truthy — not null, 0, `""` or false —
@@ -1613,6 +1700,21 @@ export type CommandUi = {
 	 *  extensions load. Absent, every ref of the kind is offered it.
 	 */
 	about_when?: string | null,
+	/**
+	 *  The named action point it joins (`<namespace>/<name>`, declared
+	 *  by an extension's `action_points:`): the point's page places it,
+	 *  and it runs with the point's context as its input. Excludes
+	 *  `about` (an item command). Its `input` binds the context's keys
+	 *  (`{ parent: "{{context.parent}}" }`, a key the page left out stays
+	 *  unset); without one the input is the whole context.
+	 */
+	at?: string | null,
+	/**
+	 *  With `at`, at a point that names its item (`item:`): the stores
+	 *  whose items it acts on (`{ store: <id> | [ids] }`, as `about`'s
+	 *  `accepts`); the point offers it only for an item of one of them.
+	 */
+	accepts?: ItemAccepts | null,
 	/**
 	 *  The input it runs with. A string that is exactly `{{stream}}`,
 	 *  `{{thread}}`, `{{uri}}` or `{{uri.id}}` is bound from where it runs;
@@ -1673,8 +1775,8 @@ export type Comment = {
 	 */
 	thread_id: ThreadId | null,
 	/**
-	 *  What the comment is on: a URI (`oxplow:oxplow/wiki?slug=intro`,
-	 *  a file's, a work item's) — the same the `page_ref` graph and tabs
+	 *  What the comment is on: a URI (`oxplow:oxplow/knowledge?id=intro&store=oxwiki`,
+	 *  a file's, a task's) — the same the `page_ref` graph and tabs
 	 *  use.
 	 */
 	target: string,
@@ -1742,6 +1844,25 @@ export type CommitRefLabel = {
 export type CommitRefLabelKind = "branch" | "tag";
 
 /**
+ *  `when: { config: <pointer>, in: [<values>] }`: a contribution that is
+ *  there only while a setting of its extension's own configuration is one
+ *  of `in`. The one condition type every contribution kind that is offered
+ *  by a setting shares.
+ */
+export type ConfigCondition = {
+	/**
+	 *  A JSON pointer into the extension's own configuration, naming a
+	 *  scalar key of `configuration.schema` (`/tasks/workflow`).
+	 */
+	config: string,
+	/**
+	 *  The values for which it holds: of the key's type, and of its `enum`
+	 *  when it has one.
+	 */
+	in: unknown[],
+};
+
+/**
  *  A versioned declaration of non-secret settings. This is data, not consent
  *  or a credential reference. Stored overrides and host services are separate.
  */
@@ -1763,12 +1884,25 @@ export type Confirm = "never" | "always" |
 /**  Irreversible; presented as destructive and always confirmed. */
 "destructive";
 
+/**  One key of a point's context. */
+export type ContextKey = {
+	name: string,
+	ty: ContextType,
+	/**  Declared `name?`: a page may leave it out. */
+	optional: boolean,
+};
+
+/**  The type of one context key. */
+export type ContextType = "string" |
+/**  A ref (`oxplow:…`): a string. */
+"uri" | "int" | "bool";
+
 /**
  *  A contribution's identity within the catalog: who declared it, what
  *  kind it is, and its id there (for a [`ContributionKind::global_name`]
  *  kind, its global name). Its only public name is its ref
  *  ([`ContributionId::reference`], also its `Display`):
- *  `oxplow:oxplow/job?job=effort_review/review`, `oxplow:oxplow/command?command=oxplow.review.accept`. Storage,
+ *  `oxplow:oxplow/job?job=change_review/review`, `oxplow:oxplow/command?command=oxplow.tasks.clear_finished`. Storage,
  *  events, manifests and the desktop all carry that ref
  *  (`.context/resources.md` "Using refs").
  */
@@ -1784,7 +1918,7 @@ export type ContributionId = {
 };
 
 /**  Every kind of contribution a manifest can declare. */
-export type ContributionKind = "dataset" | "measure" | "metric" | "dimension" | "collector" | "event_type" | "resource" | "command" | "job" | "ai_profile" | "effect" | "advisory" | "skill" | "implementation" | "provider" | "page" | "panel" | "slot" | "decorator" | "replacement" | "custom_component";
+export type ContributionKind = "dataset" | "measure" | "metric" | "dimension" | "collector" | "event_type" | "resource" | "command" | "job" | "ai_profile" | "effect" | "advisory" | "skill" | "agent_context" | "implementation" | "provider" | "page" | "panel" | "slot" | "decorator" | "replacement" | "custom_component";
 
 /**  One credential a provider declares. */
 export type CredentialDecl = {
@@ -1795,7 +1929,7 @@ export type CredentialDecl = {
 	name: string,
 	/**  Obtained by signing in rather than pasted (P9.B3). */
 	oauth: OAuthDecl | null,
-	/**  An inert host-owned secret identity, usable only as a remote MCP bearer. */
+	/**  An inert host-owned secret identity: the value lives in the host's secret store. */
 	secretRef: SecretRef | null,
 };
 
@@ -1821,6 +1955,13 @@ export type CustomComponent_Deserialize = {
 	bundle: string,
 	/**  Commands the component may invoke. */
 	commands: string[],
+	/**
+	 *  Action points it may run (`invokePoint`): whatever command joined
+	 *  the point for the context it gives. The store joining the point is
+	 *  its consent, so no `commands:` permission is needed. Any extension's
+	 *  point.
+	 */
+	actionPoints?: string[],
 	/**
 	 *  It runs its own read-only SQL over the datasets (`querySql`): needs
 	 *  `sql.read` permission.
@@ -1849,6 +1990,13 @@ export type CustomComponent_Serialize = {
 	bundle: string,
 	/**  Commands the component may invoke. */
 	commands: string[],
+	/**
+	 *  Action points it may run (`invokePoint`): whatever command joined
+	 *  the point for the context it gives. The store joining the point is
+	 *  its consent, so no `commands:` permission is needed. Any extension's
+	 *  point.
+	 */
+	actionPoints: string[],
 	/**
 	 *  It runs its own read-only SQL over the datasets (`querySql`): needs
 	 *  `sql.read` permission.
@@ -1932,7 +2080,7 @@ export type DatasetFreshness = {
 /**  A dataset's declaration and its SQL file. */
 export type DatasetSource = {
 	decl: DatasetDecl,
-	/**  Where the SQL came from, for error locations (`datasets/work_item.sql`). */
+	/**  Where the SQL came from, for error locations (`datasets/task.sql`). */
 	file: string,
 	sql: string,
 	/**
@@ -2103,11 +2251,47 @@ export type DimensionEntry = {
 	 *  `LEFT JOIN v_thread t ON t.id = e.thread_id`.
 	 */
 	join?: string | null,
+	/**
+	 *  A fact dimension an extension's dataset answers: the fact's `by` key
+	 *  (`request_id`, `thread_id`, `turn_id` or `stream_id`) is looked up in
+	 *  the dataset's column of the same name, and the dimension's value is the
+	 *  dataset's `value` column of the first row in `order`. Core names no
+	 *  dataset: with the extension off the dimension is absent and the fact
+	 *  has no value on it.
+	 */
+	from?: DimensionFrom | null,
 	/**  Guidance for an agent reading the dimension. */
 	ai_context?: AiContext | null,
 	/**  One sentence saying what the dimension slices by (`v_dimension.description`). */
 	description?: string | null,
 };
+
+/**  Where a `from:` dimension reads its value (see [`DimensionEntry::from`]). */
+export type DimensionFrom = {
+	/**  The `v_*` view of the dataset that answers. */
+	dataset: string,
+	/**
+	 *  The fact key the dataset is looked up by, and its column of the same
+	 *  name: `request_id`, `thread_id`, `turn_id` or `stream_id`.
+	 */
+	by: string,
+	/**  The dataset column that holds the dimension's value. */
+	value: string,
+	/**
+	 *  A SQL ordering over the dataset's columns; the first row wins. Without
+	 *  it, the dataset's own order.
+	 */
+	order?: string | null,
+};
+
+/**  How the shell draws a point. */
+export type Draws =
+/**  No contributor: nothing is drawn. */
+"none" |
+/**  One: a button that runs it. */
+"button" |
+/**  Several: a menu of them. */
+"menu";
 
 /**
  *  Where a dragged row landed: the rows on either side of the drop
@@ -2142,7 +2326,7 @@ export type EffectDecl = {
 	 *  Payload fields that must equal these values (the collectors'
 	 *  `where`).
 	 */
-	filter: { [key in string]: string },
+	filter: { [key in string]: string[] },
 	/**
 	 *  The scopes its script calls (`scope(id, args)`,
 	 *  `.context/commands.md` "Scopes"): `sql.read`.
@@ -2160,42 +2344,6 @@ export type EffectDecl = {
 	/**  `file:line` of the declaration. */
 	declaredAt: string,
 };
-
-export type Effort = {
-	id: EffortId,
-	/**
-	 *  The work item it's linked to, as a canonical `work_item` ref; `None`
-	 *  while unlinked (oxplow opens efforts itself).
-	 */
-	work_item: string | null,
-	/**
-	 *  Its own title, when one was set; `None` means the default
-	 *  (`v_effort.title`).
-	 */
-	title: string | null,
-	/**  What closed it (`commit`, `switch`, `person`, `agent`, `system`). */
-	closed_by: string | null,
-	thread_id: ThreadId,
-	started_at: Timestamp,
-	ended_at: Timestamp | null,
-	start_snapshot_id: number | null,
-	end_snapshot_id: number | null,
-	/**  The effort's summary prose — the canonical text. */
-	summary: string | null,
-};
-
-/**
- *  One (snapshot, effort) pair returned from
- *  `list_efforts_at_snapshots`. The renderer derives
- *  `completed_here` as `effort.end_snapshot_id == Some(snapshot_id)`;
- *  every other row is "in flight at this snapshot."
- */
-export type EffortAtSnapshot = {
-	snapshot_id: number,
-	effort: Effort,
-};
-
-export type EffortId = string;
 
 export type EntityColumn = {
 	name: string,
@@ -2220,7 +2368,7 @@ export type EntityDecl = {
  *  tells agents and page authors how the data connects.
  */
 export type EntityRelation = {
-	/**  The view it joins to, e.g. `v_work_item` or `v_github_review`. */
+	/**  The view it joins to, e.g. `v_oxplow_task` or `v_github_review`. */
 	to: string,
 	/**  The SQL join condition, e.g. `v_github_pr.head_branch = v_stream.branch`. */
 	on: string,
@@ -2513,6 +2661,11 @@ export type Extension_Deserialize = {
 	 */
 	skills: SkillDecl[],
 	/**
+	 *  What it puts in the coding agent's context (`context:`; valid
+	 *  ones — invalid ones are in `errors`).
+	 */
+	contexts: AgentContextDecl[],
+	/**
 	 *  Another extension's event types its effects and collectors react
 	 *  to (P9.D1): each resolves when an enabled extension registers the
 	 *  type (`vocabulary_reactor`).
@@ -2565,6 +2718,8 @@ export type Extension_Deserialize = {
 	jobs: JobDecl[],
 	/**  Named dataset needs this extension declares. */
 	aiProfiles: AiProfileDecl[],
+	/**  Action points it declares (`action_points:`; valid ones). */
+	actionPoints: ActionPointDecl[],
 	/**  Its `version:` (semver), when it declares one; required to share. */
 	version: string | null,
 	/**
@@ -2674,6 +2829,11 @@ export type Extension_Serialize = {
 	 */
 	skills: SkillDecl[],
 	/**
+	 *  What it puts in the coding agent's context (`context:`; valid
+	 *  ones — invalid ones are in `errors`).
+	 */
+	contexts: AgentContextDecl[],
+	/**
 	 *  Another extension's event types its effects and collectors react
 	 *  to (P9.D1): each resolves when an enabled extension registers the
 	 *  type (`vocabulary_reactor`).
@@ -2726,6 +2886,8 @@ export type Extension_Serialize = {
 	jobs: JobDecl[],
 	/**  Named dataset needs this extension declares. */
 	aiProfiles: AiProfileDecl[],
+	/**  Action points it declares (`action_points:`; valid ones). */
+	actionPoints: ActionPointDecl[],
 	/**  Its `version:` (semver), when it declares one; required to share. */
 	version: string | null,
 	/**
@@ -2762,7 +2924,7 @@ export type Extension_Serialize = {
 };
 
 /**
- *  One of a work list's own fields: kept in an item's `native` under
+ *  One of a task tracker's own fields: kept in an item's `native` under
  *  `name`, declared so screens render and edit it without knowing which
  *  list is active.
  */
@@ -2779,7 +2941,7 @@ export type FieldDecl = {
 	values?: string[],
 	/**
 	 *  Set by the list itself (who filed it, when it synced): shown, never
-	 *  edited — a `oxplow.work_item.update` that names it is refused.
+	 *  edited — a `oxtask.task.update` that names it is refused.
 	 */
 	read_only?: boolean,
 };
@@ -3161,12 +3323,6 @@ export type HookEnvelope = {
 	/**  The harness's own session id. */
 	session_id: string | null,
 	payload_json: string,
-	/**
-	 *  UserPromptSubmit: the text the person submitted — stored with its
-	 *  `agent.prompt.submitted` (every prompt, a re-prompt too) and on the
-	 *  turn it opens.
-	 */
-	prompt: string | null,
 	/**  PreToolUse only: the policy's verdict (`None` reads as allowed). */
 	decision?: ToolDecision | null,
 };
@@ -3234,9 +3390,8 @@ export type ImplementationDecl = {
 	/**  How a person names it; the built-in's own title when absent. */
 	title: string | null,
 	/**
-	 *  The built-in it is (`oxplow:tasks`), or the script an effort
-	 *  policy is; its features are core's to say. `None` for an AI
-	 *  provider, which names its kind instead.
+	 *  The built-in it is (`oxplow:snapshot-hashes`); its features are core's to
+	 *  say. `None` for an AI provider, which names its kind instead.
 	 */
 	entry: string | null,
 	/**
@@ -3255,11 +3410,6 @@ export type ImplementationDecl = {
 	 */
 	config: any,
 	/**
-	 *  The scopes a policy script calls (`sql.read`); empty for anything
-	 *  else.
-	 */
-	needs: string[],
-	/**
 	 *  Its logo, as a `data:image/svg+xml;base64,…` URI for an `<img>`
 	 *  (never markup): the SVG `icon:` names inside the extension, checked
 	 *  by [`load_icon`].
@@ -3270,6 +3420,13 @@ export type ImplementationDecl = {
 	 *  (`v_capability_provider.description`).
 	 */
 	description: string | null,
+	/**
+	 *  The scopes a script implementation calls (`sql.read`); empty for
+	 *  anything else.
+	 */
+	needs: string[],
+	/**  The setting that offers it (`when:`); `None`: always offered. */
+	when: ConfigCondition | null,
 };
 
 export type ImportDeclaration = {
@@ -3308,7 +3465,7 @@ export type InstalledLspPackage = {
 export type Intent = {
 	/**  The question it answers, or the job it does. */
 	purpose: string,
-	/**  The thread or effort ref that created it (`oxplow:oxplow/effort?id=eff42`), when known. */
+	/**  The thread or request ref that created it (`oxplow:oxplow/request?id=req42`), when known. */
 	origin?: string | null,
 	examples?: IntentExample[],
 };
@@ -3399,6 +3556,16 @@ export type IpcError_Serialize = {
 	auditId?: number | null,
 };
 
+/**  A `ui.about` command's filter on the item it is offered on. */
+export type ItemAccepts = {
+	/**
+	 *  The store ids of the item URI's `store` param it is offered on:
+	 *  one id or a list; each is an exact id, or a renderer's `accepts`
+	 *  rule (`present`, `absent`, an anchored id pattern).
+	 */
+	store?: StoreFilter | null,
+};
+
 export type ItemBody =
 /**
  *  What the human sent. `context` is the oxplow block attached to it,
@@ -3470,16 +3637,22 @@ export type Lifecycle = "stable" | "experimental";
 export type LinkKind =
 /**  `oxplow:oxplow/file?path=<path>`; the value is a repo-relative path. */
 "file" |
-/**  `oxplow:oxplow/wiki?slug=<slug>`. */
-"wiki" |
-/**  The effort's diff view; the value is an effort id. */
-"effort-diff" |
+/**
+ *  A knowledge page; the value is its URI
+ *  (`oxplow:oxplow/knowledge?id=<id>&store=<store>`).
+ */
+"knowledge" |
 /**  A git commit; the value is a sha. */
 "commit" |
+/**
+ *  A request's Changes page; the value is a request id (`v_request.id`,
+ *  or `req<id>`).
+ */
+"request" |
 /**  A metric's page; the value is a metric key. */
 "metric" |
 /**
- *  Any oxplow page by its tab id (`oxplow:oxplow/work_item?id=<id>&provider=oxplow`,
+ *  Any oxplow page by its tab id (`oxplow:oxplow/task?id=<id>&provider=oxtask`,
  *  `oxplow:oxplow/commit?sha=<sha>`, `oxplow:oxplow/page?page=git-dashboard`, …),
  *  e.g. `v_page_visit.page_id`.
  */
@@ -3639,16 +3812,6 @@ MaterializePolicy |
 export type MaterializePolicy =
 /**  Stored in its table and recomputed, whole, when an input changes. */
 "on_change";
-
-/**  How the adapter reaches the MCP server: exactly one of the two. */
-export type McpServer =
-/**  A program in the folder, spoken to over its stdio. */
-({ command: string[] }) & { auth?: never; url?: never } |
-/**
- *  A server reached over streamable HTTP. `auth` names the
- *  credential whose value is sent as its bearer token.
- */
-({ url: string; auth: string | null }) & { command?: never };
 
 /**
  *  One entry in the top-level `measures:` block — the **measure catalog**
@@ -3854,51 +4017,63 @@ export type NodeKind = NodeKind_Serialize | NodeKind_Deserialize;
 
 export type NodeKind_Deserialize =
 /**  Its children one after another (sections). */
-({ kind: "stack"; children: Node_Deserialize[] }) & { component?: never; config?: never; from?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never } |
+({ kind: "stack"; children: Node_Deserialize[] }) & { component?: never; config?: never; context?: never; from?: never; name?: never; page?: never; param?: never; params?: never; point?: never; props?: never; text?: never } |
 /**  Its children as tiles, each at its `size`. */
-({ kind: "grid"; children: Node_Deserialize[] }) & { component?: never; config?: never; from?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never } |
+({ kind: "grid"; children: Node_Deserialize[] }) & { component?: never; config?: never; context?: never; from?: never; name?: never; page?: never; param?: never; params?: never; point?: never; props?: never; text?: never } |
 /**  The one child whose id is `param`'s value. */
-({ kind: "switch"; param: string; children: Node_Deserialize[] }) & { component?: never; config?: never; from?: never; name?: never; page?: never; params?: never; props?: never; text?: never } |
+({ kind: "switch"; param: string; children: Node_Deserialize[] }) & { component?: never; config?: never; context?: never; from?: never; name?: never; page?: never; params?: never; point?: never; props?: never; text?: never } |
 /**
  *  A loader's rows through a viz. `from` is none only for a viz that
  *  reads no rows (a form, approvals).
  */
-({ kind: "viz"; from: string | null; config: VizConfig_Deserialize }) & { children?: never; component?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never } |
+({ kind: "viz"; from: string | null; config: VizConfig_Deserialize }) & { children?: never; component?: never; context?: never; name?: never; page?: never; param?: never; params?: never; point?: never; props?: never; text?: never } |
 /**
  *  Another page, inline: its params by name from this page's params
  *  and its loaders' first rows, `params` naming any explicitly.
  */
-({ kind: "embed"; page: string; params: { [key in string]: ArgSource } }) & { children?: never; component?: never; config?: never; from?: never; name?: never; param?: never; props?: never; text?: never } |
+({ kind: "embed"; page: string; params: { [key in string]: ArgSource } }) & { children?: never; component?: never; config?: never; context?: never; from?: never; name?: never; param?: never; point?: never; props?: never; text?: never } |
 /**  Where other extensions' pages are mounted (`<page>.<name>`). */
-({ kind: "slot"; name: string }) & { children?: never; component?: never; config?: never; from?: never; page?: never; param?: never; params?: never; props?: never; text?: never } |
+({ kind: "slot"; name: string }) & { children?: never; component?: never; config?: never; context?: never; from?: never; page?: never; param?: never; params?: never; point?: never; props?: never; text?: never } |
 /**  Static markdown. */
-({ kind: "markdown"; text: string }) & { children?: never; component?: never; config?: never; from?: never; name?: never; page?: never; param?: never; params?: never; props?: never } |
+({ kind: "markdown"; text: string }) & { children?: never; component?: never; config?: never; context?: never; from?: never; name?: never; page?: never; param?: never; params?: never; point?: never; props?: never } |
 /**  One of the extension's custom components, given the page's data. */
-({ kind: "component"; component: string; props: unknown | null }) & { children?: never; config?: never; from?: never; name?: never; page?: never; param?: never; params?: never; text?: never };
+({ kind: "component"; component: string; props: unknown | null }) & { children?: never; config?: never; context?: never; from?: never; name?: never; page?: never; param?: never; params?: never; point?: never; text?: never } |
+/**
+ *  A named action point (`action_point: <id>`, `context:`): the
+ *  commands that joined it, drawn by the shell as nothing, a button or
+ *  a menu. `context` is bound as an embed's params are.
+ */
+({ kind: "actionPoint"; point: string; context: { [key in string]: ArgSource } }) & { children?: never; component?: never; config?: never; from?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never };
 
 export type NodeKind_Serialize =
 /**  Its children one after another (sections). */
-({ kind: "stack"; children: Node_Serialize[] }) & { component?: never; config?: never; from?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never } |
+({ kind: "stack"; children: Node_Serialize[] }) & { component?: never; config?: never; context?: never; from?: never; name?: never; page?: never; param?: never; params?: never; point?: never; props?: never; text?: never } |
 /**  Its children as tiles, each at its `size`. */
-({ kind: "grid"; children: Node_Serialize[] }) & { component?: never; config?: never; from?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never } |
+({ kind: "grid"; children: Node_Serialize[] }) & { component?: never; config?: never; context?: never; from?: never; name?: never; page?: never; param?: never; params?: never; point?: never; props?: never; text?: never } |
 /**  The one child whose id is `param`'s value. */
-({ kind: "switch"; param: string; children: Node_Serialize[] }) & { component?: never; config?: never; from?: never; name?: never; page?: never; params?: never; props?: never; text?: never } |
+({ kind: "switch"; param: string; children: Node_Serialize[] }) & { component?: never; config?: never; context?: never; from?: never; name?: never; page?: never; params?: never; point?: never; props?: never; text?: never } |
 /**
  *  A loader's rows through a viz. `from` is none only for a viz that
  *  reads no rows (a form, approvals).
  */
-({ kind: "viz"; from: string | null; config: VizConfig_Serialize }) & { children?: never; component?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never } |
+({ kind: "viz"; from: string | null; config: VizConfig_Serialize }) & { children?: never; component?: never; context?: never; name?: never; page?: never; param?: never; params?: never; point?: never; props?: never; text?: never } |
 /**
  *  Another page, inline: its params by name from this page's params
  *  and its loaders' first rows, `params` naming any explicitly.
  */
-({ kind: "embed"; page: string; params: { [key in string]: ArgSource } }) & { children?: never; component?: never; config?: never; from?: never; name?: never; param?: never; props?: never; text?: never } |
+({ kind: "embed"; page: string; params: { [key in string]: ArgSource } }) & { children?: never; component?: never; config?: never; context?: never; from?: never; name?: never; param?: never; point?: never; props?: never; text?: never } |
 /**  Where other extensions' pages are mounted (`<page>.<name>`). */
-({ kind: "slot"; name: string }) & { children?: never; component?: never; config?: never; from?: never; page?: never; param?: never; params?: never; props?: never; text?: never } |
+({ kind: "slot"; name: string }) & { children?: never; component?: never; config?: never; context?: never; from?: never; page?: never; param?: never; params?: never; point?: never; props?: never; text?: never } |
 /**  Static markdown. */
-({ kind: "markdown"; text: string }) & { children?: never; component?: never; config?: never; from?: never; name?: never; page?: never; param?: never; params?: never; props?: never } |
+({ kind: "markdown"; text: string }) & { children?: never; component?: never; config?: never; context?: never; from?: never; name?: never; page?: never; param?: never; params?: never; point?: never; props?: never } |
 /**  One of the extension's custom components, given the page's data. */
-({ kind: "component"; component: string; props: unknown | null }) & { children?: never; config?: never; from?: never; name?: never; page?: never; param?: never; params?: never; text?: never };
+({ kind: "component"; component: string; props: unknown | null }) & { children?: never; config?: never; context?: never; from?: never; name?: never; page?: never; param?: never; params?: never; point?: never; text?: never } |
+/**
+ *  A named action point (`action_point: <id>`, `context:`): the
+ *  commands that joined it, drawn by the shell as nothing, a button or
+ *  a menu. `context` is bound as an embed's params are.
+ */
+({ kind: "actionPoint"; point: string; context: { [key in string]: ArgSource } }) & { children?: never; component?: never; config?: never; from?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never };
 
 /**  A node of a page's view. */
 export type Node_Deserialize = {
@@ -3936,7 +4111,7 @@ export type Node_Deserialize = {
 	link: string | null,
 	/**
 	 *  A contract another extension's active provider may take its place
-	 *  under (`work_item.board`).
+	 *  under (`task.board`).
 	 */
 	replaceable: string | null,
 	/**  A grid child's size. */
@@ -3979,7 +4154,7 @@ export type Node_Serialize = {
 	link: string | null,
 	/**
 	 *  A contract another extension's active provider may take its place
-	 *  under (`work_item.board`).
+	 *  under (`task.board`).
 	 */
 	replaceable: string | null,
 	/**  A grid child's size. */
@@ -4019,12 +4194,30 @@ export type OAuthDecl = {
 
 /**
  *  A redirect listener: its id — what waits on it, answers it and stops
- *  it (tsk905), never its port — and the port to sign in on.
+ *  it, never its port — and the port to sign in on.
  */
 export type OAuthListener = {
 	id: number,
 	port: number,
 };
+
+/**
+ *  An observer's trigger in an `on:` list, beside event types
+ *  (`.context/extensions-jobs.md` "Triggers for observers").
+ */
+export type ObserverSource =
+/**  Once when the extension starts (boot, enable, a deploy that changes it). */
+{ kind: "start" } |
+/**
+ *  Files of the primary worktree matching `glob` (relative to the
+ *  project root) were created, changed or removed.
+ */
+{ kind: "files"; glob: string } |
+/**
+ *  A SQLite file's `PRAGMA data_version` moved: the extension's own file
+ *  (`path` absent) or a tool's database in a `files:` folder it may read.
+ */
+{ kind: "sqlite"; path: string | null };
 
 /**
  *  What a mutation did. `log` is the provider's own account (a CLI's
@@ -4062,7 +4255,7 @@ export type OpenedRun_Deserialize = {
 	 *  A panel's part: what this run gives the panel (its snapshots say it
 	 *  again as it re-runs); none for a page.
 	 */
-	panel: PartView | null,
+	panel: PartView_Deserialize | null,
 };
 
 /**
@@ -4076,7 +4269,7 @@ export type OpenedRun_Serialize = {
 	 *  A panel's part: what this run gives the panel (its snapshots say it
 	 *  again as it re-runs); none for a page.
 	 */
-	panel: PartView | null,
+	panel: PartView_Serialize | null,
 };
 
 /**  Who contributed it. */
@@ -4109,10 +4302,9 @@ export type OxplowConfig = {
 	snapshotRetentionDays: number,
 	/**
 	 *  Metric-capture retention window in days: captures older than the
-	 *  cutoff are pruned (facts cascade) — EXCEPT effort-stamped ones
-	 *  (attribution history), each producer's newest capture, and any capture
+	 *  cutoff are pruned (facts cascade) — EXCEPT each producer's newest capture, and any capture
 	 *  still contributing a current value to the fold. **0 (the default)
-	 *  keeps everything** (tsk93); pruning trades away per-test drill-down /
+	 *  keeps everything**; pruning trades away per-test drill-down /
 	 *  flakiness horizon for bounded growth, so it is strictly opt-in.
 	 */
 	metricRetentionDays: number,
@@ -4123,8 +4315,8 @@ export type OxplowConfig = {
 	 *
 	 *  This is the knob that bounds a BUSY project: the payload is ~0.5 MB per
 	 *  coverage run, so age alone never catches up with a repo that runs tests
-	 *  dozens of times a day (tsk211). Compaction never changes a metric value
-	 *  — only the effort Tests/Coverage panel's detail for old runs is lost.
+	 *  dozens of times a day. Compaction never changes a metric value
+	 *  — only the Tests/Coverage panel's detail for old runs is lost.
 	 */
 	metricDetailMaxPerProducer: number,
 	/**
@@ -4203,7 +4395,7 @@ export type OxplowConfig = {
 	extensionInstances: { [key in string]: ExtensionInstanceConfig },
 	/**
 	 *  The project's choice of implementation per choosable capability
-	 *  (`activeProviders: { work_items: issues, effort_policy: none }`); a
+	 *  (`activeProviders: { snapshots: hashes }`); a
 	 *  capability absent here keeps its default.
 	 */
 	activeProviders: { [key in string]: string },
@@ -4220,7 +4412,7 @@ export type OxplowConfig = {
 	personalNewThreadSession: string | null,
 	/**
 	 *  Whose component shows for a replaceable core sub-component, by
-	 *  target (`replacements: { work_item.board: task-views,
+	 *  target (`replacements: { task.board: task-views,
 	 *  vcs.history.graph: oxplow }`): an extension replacing it, or
 	 *  `oxplow` for oxplow's own. A target not listed shows its default:
 	 *  the only extension replacing it, or a bound target's provider's.
@@ -4286,12 +4478,12 @@ export type OxplowConfig = {
  */
 export type OxplowEvent =
 /**  Background task progress. */
-({ kind: "backgroundTasksChanged" }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "backgroundTasksChanged" }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  The set of known language servers changed (Mason package
  *  installed or removed). Renderer refetches `list_lsp_servers`.
  */
-({ kind: "lspServersChanged" }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "lspServersChanged" }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  Per-thread per-pane agent status changed. `state` carries the
  *  derived status so the renderer can update without a refetch
@@ -4317,7 +4509,7 @@ agentSessionId: AgentSessionId | null; state: AgentStatusState;
  *  asked) when `state` is `AwaitingUser`, so the rail dot's tooltip
  *  can show it — `None` for every other transition.
  */
-detail: string | null }) & { actor?: never; client?: never; datasets?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+detail: string | null }) & { actor?: never; client?: never; datasets?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  A snapshot take recorded something new: a new snapshot (its
  *  `file_count` rows), or — `trigger: HeadMoved`, 0 files — the
@@ -4327,19 +4519,19 @@ detail: string | null }) & { actor?: never; client?: never; datasets?: never; ef
  *  `snapshot_op` row and the `snapshot.taken` / `vcs.head.moved`
  *  event in the log; this is the UI / reactor wake-up.
  */
-({ kind: "snapshotTaken"; streamId: StreamId; snapshotId: number; fileCount: number; trigger: SnapshotTrigger; threadId: ThreadId | null; turnId: number | null; effortId: EffortId | null }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; state?: never; title?: never; vcsEnabled?: never } |
+({ kind: "snapshotTaken"; streamId: StreamId; snapshotId: number; fileCount: number; trigger: SnapshotTrigger; threadId: ThreadId | null; turnId: number | null }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; state?: never; title?: never; vcsEnabled?: never } |
 /**
  *  An Assistant session changed (`assistant/`): its transcript, its
  *  status or its settings. The panel asks `assistant_snapshot { id,
  *  since }` for what changed. In memory only: no dataset holds it.
  */
-({ kind: "assistantChanged"; id: string; seq: number }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "assistantChanged"; id: string; seq: number }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  Published datasets (views) changed: a commit touched a table one of
  *  them reads, directly or through other datasets (P4.6). A page re-runs
  *  when a dataset it read is listed.
  */
-({ kind: "datasetsChanged"; datasets: string[] }) & { actor?: never; agentSessionId?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "datasetsChanged"; datasets: string[] }) & { actor?: never; agentSessionId?: never; client?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  An open page run re-ran (a dataset one of its loaders read changed):
  *  the loaders whose rows differ, for the window that opened it to
@@ -4350,26 +4542,26 @@ detail: string | null }) & { actor?: never; client?: never; datasets?: never; ef
 } & RunChange |
 /**
  *  One or more metric samples landed in `stream_id` (unified metric
- *  substrate, tsk213). `measures` names the measure keys the write touched
- *  so a consumer can skip an event that can't affect it (tsk198); an EMPTY
+ *  substrate). `measures` names the measure keys the write touched
+ *  so a consumer can skip an event that can't affect it; an EMPTY
  *  list is fail-open — "unknown, refresh anyway" — which is what the
  *  low-frequency emit sites still send. See `.context/metrics.md`.
  */
-({ kind: "metricSamplesChanged"; streamId: StreamId; measures?: string[] }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "metricSamplesChanged"; streamId: StreamId; measures?: string[] }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  `.oxplow/project.yaml` was reloaded from disk (external edit, e.g. the agent
  *  running `/oxplow:configure`). The in-memory config has been swapped;
  *  the renderer refetches `get_config`.
  */
-({ kind: "configChanged" }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "configChanged" }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  The extension catalog may have changed: a file under the primary
  *  worktree's `.oxplow/extensions/` did, or the `extensions` config key
- *  (the catalog's own signal, tsk1030). Every host listing what
+ *  (the catalog's own signal). Every host listing what
  *  extensions contribute — the launcher, pages, panels, slots —
  *  reloads, and a page re-runs its definition.
  */
-({ kind: "extensionsChanged" }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "extensionsChanged" }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  A command running on the daemon calls a scope the window
  *  hosts (`client_host.rs`): the window does `scope`'s `op` with
@@ -4383,13 +4575,13 @@ detail: string | null }) & { actor?: never; client?: never; datasets?: never; ef
  */
 client: string; threadId: ThreadId | null;
 /**  Who ran the command (`agent:thr3`, `human`). */
-actor: string; scope: string; op: string; input: unknown }) & { agentSessionId?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; instance?: never; measures?: never; name?: never; overflow?: never; paths?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+actor: string; scope: string; op: string; input: unknown }) & { agentSessionId?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; instance?: never; measures?: never; name?: never; overflow?: never; paths?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  `.git` directory appeared/disappeared at the project root —
  *  "is this a git workspace" flipped. Renderer hides/restores the
  *  git-aware UI on receipt.
  */
-({ kind: "workspaceContextChanged"; vcsEnabled: boolean }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never } |
+({ kind: "workspaceContextChanged"; vcsEnabled: boolean }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never } |
 /**
  *  A stream's worktree changed on disk: one event for a burst. The live
  *  datasets over its files refresh in response, and an open editor reads
@@ -4397,12 +4589,12 @@ actor: string; scope: string; op: string; input: unknown }) & { agentSessionId?:
  *  own), or everything it holds when `overflow` says the list is not
  *  whole.
  */
-({ kind: "workspaceChanged"; streamId: StreamId; paths: string[]; overflow: boolean }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "workspaceChanged"; streamId: StreamId; paths: string[]; overflow: boolean }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  A ref under `.git/refs/` changed. Drives history, branch list,
  *  and ahead/behind refreshes. Coarse per stream.
  */
-({ kind: "vcsRefsChanged"; streamId: StreamId }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "vcsRefsChanged"; streamId: StreamId }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  A non-primary stream's backing worktree was deleted out from
  *  under us (externally `rm -rf`'d, `git worktree remove`'d, etc.).
@@ -4411,7 +4603,7 @@ actor: string; scope: string; op: string; input: unknown }) & { agentSessionId?:
  *  rail row vanished. `title` carries the archived stream's display
  *  name.
  */
-({ kind: "streamOrphaned"; streamId: StreamId; title: string }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "streamOrphaned"; streamId: StreamId; title: string }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  A sign-in for provider instance `instance`'s credential `name`
  *  finished (P9.B3): its token is in the keychain and the instance
@@ -4421,11 +4613,11 @@ actor: string; scope: string; op: string; input: unknown }) & { agentSessionId?:
  */
 ({ kind: "credentialChanged"; instance: string; name: string;
 /**
- *  The sign-in this news is about, when it is about one (tsk929):
+ *  The sign-in this news is about, when it is about one:
  *  a row waiting on another sign-in of the same credential
  *  ignores it.
  */
-signIn: number | null; error: string | null }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; effortId?: never; fileCount?: never; id?: never; input?: never; measures?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never };
+signIn: number | null; error: string | null }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; fileCount?: never; id?: never; input?: never; measures?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never };
 
 /**
  *  When an `on:` collector runs after a triggering event. Empty,
@@ -4439,7 +4631,7 @@ signIn: number | null; error: string | null }) & { actor?: never; agentSessionId
  *    agent event) for that long.
  *
  *  An event type in `force` runs at once, past them all: a moment that
- *  needs the result fresh (an effort finishing, a commit).
+ *  needs the result fresh (a commit).
  */
 export type Pacing = {
 	settleSecs: number | null,
@@ -4474,10 +4666,17 @@ export type PageAction_Deserialize = {
 	id: string,
 	label: string,
 	/**
-	 *  The command it runs (`oxplow.work_item.transition`). None for an
-	 *  `open` action, which runs none.
+	 *  The command it runs (`oxplow.thread.mark`). None for an
+	 *  `open` action, which runs none. With a `point`, which of the
+	 *  commands that answer the point to run (none: the only one).
 	 */
 	command?: string | null,
+	/**
+	 *  Instead of a command: an action point (`oxplow/task.move`) whose
+	 *  answering command runs, for the context `input` binds. The store
+	 *  that joined the point answers, so the page names no store's command.
+	 */
+	point?: string | null,
 	/**
 	 *  An `open` action: the column of the row it is offered on that holds
 	 *  the URI it opens. It runs no command (no bus run, no audit): the
@@ -4623,6 +4822,19 @@ export type PageAction_Deserialize = {
 	 *  never on a row, group, drag or edit action.
 	 */
 	all?: boolean,
+	/**
+	 *  A row action that is one entry per option: each a row of this page's
+	 *  loader of that name (`value`, `label`, an optional `group`), the
+	 *  one pressed bound as `{{option.value}}` / `{{option.label}}` (a Mark
+	 *  ▸ menu of a list's stages, an Assign to ▸ of the open threads). The
+	 *  server checks the pressed value is one of them.
+	 */
+	optionsFrom?: string | null,
+	/**
+	 *  With `options_from`: the row's column holding the option it is in
+	 *  now, drawn checked and not offered.
+	 */
+	current?: string | null,
 };
 
 /**
@@ -4638,10 +4850,17 @@ export type PageAction_Serialize = {
 	id: string,
 	label: string,
 	/**
-	 *  The command it runs (`oxplow.work_item.transition`). None for an
-	 *  `open` action, which runs none.
+	 *  The command it runs (`oxplow.thread.mark`). None for an
+	 *  `open` action, which runs none. With a `point`, which of the
+	 *  commands that answer the point to run (none: the only one).
 	 */
 	command: string | null,
+	/**
+	 *  Instead of a command: an action point (`oxplow/task.move`) whose
+	 *  answering command runs, for the context `input` binds. The store
+	 *  that joined the point answers, so the page names no store's command.
+	 */
+	point?: string | null,
 	/**
 	 *  An `open` action: the column of the row it is offered on that holds
 	 *  the URI it opens. It runs no command (no bus run, no audit): the
@@ -4787,6 +5006,19 @@ export type PageAction_Serialize = {
 	 *  never on a row, group, drag or edit action.
 	 */
 	all: boolean,
+	/**
+	 *  A row action that is one entry per option: each a row of this page's
+	 *  loader of that name (`value`, `label`, an optional `group`), the
+	 *  one pressed bound as `{{option.value}}` / `{{option.label}}` (a Mark
+	 *  ▸ menu of a list's stages, an Assign to ▸ of the open threads). The
+	 *  server checks the pressed value is one of them.
+	 */
+	optionsFrom?: string | null,
+	/**
+	 *  With `options_from`: the row's column holding the option it is in
+	 *  now, drawn checked and not offered.
+	 */
+	current?: string | null,
 };
 
 /**
@@ -4833,7 +5065,7 @@ export type PageColumn = {
 	unit?: string | null,
 	/**
 	 *  A column of the same row naming an icon drawn before the cell
-	 *  (`done`, `in_progress`, `epic`, `wiki`, …; the UI's fixed
+	 *  (`done`, `in_progress`, `epic`, `knowledge`, …; the UI's fixed
 	 *  vocabulary, `viz/vizIcons.tsx` — an unknown name draws none).
 	 */
 	icon?: string | null,
@@ -4876,7 +5108,7 @@ export type PageColumn = {
 
 /**  A page that didn't run for want of a capability. */
 export type PageInactive = {
-	/**  The needs that aren't met (`work_items`, `knowledge`). */
+	/**  The needs that aren't met (`snapshots`, `knowledge`). */
 	needs: string[],
 	/**  What a person reads. */
 	message: string,
@@ -4909,7 +5141,13 @@ export type PageKind =
  *  A value the viewer (or an agent) can set when running the viz,
  *  bound into the query as `:name`.
  */
-export type PageParam = {
+export type PageParam = PageParam_Serialize | PageParam_Deserialize;
+
+/**
+ *  A value the viewer (or an agent) can set when running the viz,
+ *  bound into the query as `:name`.
+ */
+export type PageParam_Deserialize = {
 	name: string,
 	label?: string | null,
 	/**  Used when the caller doesn't supply the param. */
@@ -4919,7 +5157,7 @@ export type PageParam = {
 	 *  them as a toggle in its header, a viz page as a select. Its
 	 *  `default` must be one; a run supplying another is refused.
 	 */
-	options?: ChoiceOption[],
+	options?: ChoiceOption_Deserialize[],
 	/**
 	 *  A viz whose rows are the values it takes, when it's a choice
 	 *  whose options aren't fixed (`value`, `label`, optional `group` —
@@ -4951,6 +5189,54 @@ export type PageParam = {
 	 *  default is `1d 7d 30d all`.
 	 */
 	presets?: string[],
+};
+
+/**
+ *  A value the viewer (or an agent) can set when running the viz,
+ *  bound into the query as `:name`.
+ */
+export type PageParam_Serialize = {
+	name: string,
+	label: string | null,
+	/**  Used when the caller doesn't supply the param. */
+	default: SqlCell | null,
+	/**
+	 *  The values it takes, when it's a choice: a panel shows
+	 *  them as a toggle in its header, a viz page as a select. Its
+	 *  `default` must be one; a run supplying another is refused.
+	 */
+	options: ChoiceOption_Serialize[],
+	/**
+	 *  A viz whose rows are the values it takes, when it's a choice
+	 *  whose options aren't fixed (`value`, `label`, optional `group` —
+	 *  the form `choices` contract): a slug of this extension, or
+	 *  `<extension>/<slug>`; a loaded viz has the whole id. The page runs
+	 *  it with the params it declares of the page's, so an `end` picker's
+	 *  viz can leave out what `start` is. Its options aren't known at
+	 *  load, so no `default` is needed and any text is taken. Exclusive
+	 *  with `options`.
+	 */
+	options_from: string | null,
+	/**
+	 *  What it holds, and so how a page draws it. Left out, it is a
+	 *  `choice` when it has `options` or `options_from`, else `text`; a
+	 *  loaded viz always says.
+	 */
+	type: ParamType | null,
+	/**
+	 *  What it is to the page, and so where it rides in the page's URI:
+	 *  a `resource` (the default) names what the page shows, in the URI's
+	 *  `?`; `filter` narrows how it shows it, in the URI's `#` view. A
+	 *  `selection` follows from the columns and is never written: a param
+	 *  a column of the viz (or of a part of the page) selects, in the
+	 *  view too. A loaded viz always says.
+	 */
+	role: ParamRole | null,
+	/**
+	 *  A `date_range`'s quick picks, of `1d 2d 3d 7d 30d 90d all`; the
+	 *  default is `1d 7d 30d all`.
+	 */
+	presets: string[],
 };
 
 /**
@@ -5098,7 +5384,7 @@ export type Page_Deserialize = {
 	 *  Its params, typed, each with its role (`resource` names what it
 	 *  shows, in its URI's `?`; `filter` and `selection` ride in the `#`).
 	 */
-	params: PageParam[],
+	params: PageParam_Deserialize[],
 	/**  The resources it renders (`oxplow/commit`); empty: a route. */
 	for: string[],
 	/**
@@ -5164,7 +5450,7 @@ export type Page_Serialize = {
 	 *  Its params, typed, each with its role (`resource` names what it
 	 *  shows, in its URI's `?`; `filter` and `selection` ride in the `#`).
 	 */
-	params: PageParam[],
+	params: PageParam_Serialize[],
 	/**  The resources it renders (`oxplow/commit`); empty: a route. */
 	for: string[],
 	/**
@@ -5206,10 +5492,27 @@ export type Page_Serialize = {
  *  A choice param of the body, as the panel's header toggle offers it: its
  *  options and the value in force.
  */
-export type PanelChoice = {
+export type PanelChoice = PanelChoice_Serialize | PanelChoice_Deserialize;
+
+/**
+ *  A choice param of the body, as the panel's header toggle offers it: its
+ *  options and the value in force.
+ */
+export type PanelChoice_Deserialize = {
 	name: string,
 	label: string,
-	options: ChoiceOption[],
+	options: ChoiceOption_Deserialize[],
+	value: string,
+};
+
+/**
+ *  A choice param of the body, as the panel's header toggle offers it: its
+ *  options and the value in force.
+ */
+export type PanelChoice_Serialize = {
+	name: string,
+	label: string,
+	options: ChoiceOption_Serialize[],
 	value: string,
 };
 
@@ -5294,13 +5597,26 @@ export type ParseFormat =
 "yaml";
 
 /**  What one part's run gives its panel, as the window shows it. */
-export type PartView = {
+export type PartView = PartView_Serialize | PartView_Deserialize;
+
+/**  What one part's run gives its panel, as the window shows it. */
+export type PartView_Deserialize = {
 	/**  The header counts by this part ([`counting_part`]). */
 	counts: boolean,
 	/**  The header's count while it `counts`; none shows no count. */
 	count: number | null,
 	/**  The body's toggles, each with the value it ran with ([`choices`]). */
-	choices: PanelChoice[],
+	choices: PanelChoice_Deserialize[],
+};
+
+/**  What one part's run gives its panel, as the window shows it. */
+export type PartView_Serialize = {
+	/**  The header counts by this part ([`counting_part`]). */
+	counts: boolean,
+	/**  The header's count while it `counts`; none shows no count. */
+	count: number | null,
+	/**  The body's toggles, each with the value it ran with ([`choices`]). */
+	choices: PanelChoice_Serialize[],
 };
 
 /**  How a permission request was answered. */
@@ -5336,6 +5652,27 @@ export type PlanEntry = {
 
 export type PlanStatus = "pending" | "in_progress" | "completed";
 
+/**  One command at a point, and what it runs with. */
+export type PointCommand = {
+	id: string,
+	label: string,
+	/**  What it runs with: its `ui.input` bound from the point's context. */
+	input: unknown,
+};
+
+/**  What a point offers for a context. */
+export type PointOffer = {
+	point: string,
+	/**
+	 *  The point's label, which names its button or menu when a command's
+	 *  own label doesn't.
+	 */
+	label: string,
+	draws: Draws,
+	/**  By extension, then command id. */
+	commands: PointCommand[],
+};
+
 /**  A `command_proposal` row: an agent's run waiting on a person. */
 export type ProposalId = number;
 
@@ -5363,16 +5700,14 @@ export type ProviderSpec = {
 	/**
 	 *  The provider's id: its program's approval (`<extension>/<id>`) and
 	 *  the id of its default instance — an instance's id is its refs'
-	 *  segment (`oxplow:oxplow/work_item?id=…&provider=<id>`) and its commands' namespace
+	 *  segment (`oxplow:oxplow/task?id=…&provider=<id>`) and its commands' namespace
 	 *  (`<id>.estimate`).
 	 */
 	id: string,
 	capability: string,
-	/**  The program, relative to the extension folder — or `adapter`. */
+	/**  The program, relative to the extension folder. */
 	entry?: string | null,
 	args?: string[],
-	/**  An MCP server run through oxplow's adapter, instead of an `entry`. */
-	adapter?: AdapterSpec | null,
 	/**  Host environment variables passed through by name. */
 	env?: string[],
 	/**
@@ -5385,18 +5720,6 @@ export type ProviderSpec = {
 	network?: string[],
 	/**  The checked-in `InitializeResult` (JSON), relative to the folder. */
 	declarations: string,
-	/**
-	 *  What a work list's own ids look like (a regex matched whole:
-	 *  `[A-Z]+-\d+`), so a loose id resolves to its item while it's the
-	 *  active work list.
-	 */
-	idPattern?: string | null,
-	/**
-	 *  A work list's own fields (kept in an item's `native`), so screens
-	 *  render and edit them: `[{ name, title, kind: enum|text|number,
-	 *  values? }]`.
-	 */
-	fields?: FieldDecl[],
 	/**
 	 *  The scopes it calls over the protocol (`host/call`,
 	 *  `sql.read` or `state.read`): part of what its approval covers, and the only ones it
@@ -5533,11 +5856,11 @@ export type ReportInput = {
 /**  One tab, as its window shows it. */
 export type ReportedTab = {
 	/**
-	 *  Its tab id: a canonical ref (`oxplow:oxplow/work_item?id=tsk3&provider=oxplow`,
+	 *  Its tab id: a canonical ref (`oxplow:oxplow/task?id=tsk3&provider=oxtask`,
 	 *  `oxplow:oxplow/page?page=settings`, `oxplow:oxplow/agent_session?id=ses2`).
 	 */
 	id: string,
-	/**  Its page kind (`work_item`, `page`, `agent_session`). */
+	/**  Its page kind (`task`, `page`, `agent_session`). */
 	kind: string,
 	/**  The title on the tab. */
 	title: string,
@@ -5660,6 +5983,8 @@ export type RunNode_Deserialize = {
 	 *  extension, its run the `embed`.
 	 */
 	replacedBy: string | null,
+	/**  An action point node's point and its context, bound. */
+	actionPoint: ActionPointRun | null,
 };
 
 /**  A node of a run's tree: the page's node by id, and what it resolved to. */
@@ -5679,6 +6004,8 @@ export type RunNode_Serialize = {
 	 *  extension, its run the `embed`.
 	 */
 	replacedBy: string | null,
+	/**  An action point node's point and its context, bound. */
+	actionPoint: ActionPointRun | null,
 };
 
 /**  A run and the sequence of that exact snapshot, captured under one lock. */
@@ -5692,7 +6019,7 @@ export type RunSnapshot_Deserialize = {
 	 *  A left-nav panel's part: what this run gives the panel
 	 *  (`panels::part_view`); none for a page run.
 	 */
-	panel: PartView | null,
+	panel: PartView_Deserialize | null,
 };
 
 /**  A run and the sequence of that exact snapshot, captured under one lock. */
@@ -5703,7 +6030,7 @@ export type RunSnapshot_Serialize = {
 	 *  A left-nav panel's part: what this run gives the panel
 	 *  (`panels::part_view`); none for a page run.
 	 */
-	panel: PartView | null,
+	panel: PartView_Serialize | null,
 };
 
 /**  How a contribution comes to run. */
@@ -5745,9 +6072,9 @@ export type ScriptsConfig = {
 
 /**
  *  One ranked search result: the URI it found
- *  (`oxplow:oxplow/work_item?id=tsk7&provider=oxplow`), which the caller
+ *  (`oxplow:oxplow/task?id=tsk7&provider=oxtask`), which the caller
  *  opens the way it opens any URI, and its resource. `stream_id` is `None`
- *  for project-global entities (wiki pages); `score` is the BM25 score
+ *  for project-global entities (knowledge pages); `score` is the BM25 score
  *  (lower = better match).
  */
 export type SearchHit = {
@@ -5835,13 +6162,18 @@ export type SkillDecl = {
 	kind: SkillKind,
 	/**  Its markdown, inside the extension. */
 	file: string,
-	/**  What it needs active (`work_items`, `work_items.comments`). */
+	/**  What it needs active (`snapshots`). */
 	needs: string[],
 	/**
 	 *  The `description:` of its frontmatter: when the agent loads a skill,
 	 *  what a command does.
 	 */
 	description: string,
+	/**
+	 *  The setting of the extension's own configuration it's offered by:
+	 *  offered only while it holds.
+	 */
+	when: ConfigCondition | null,
 };
 
 /**  What the agent's runtime makes of it. */
@@ -5874,7 +6206,6 @@ export type SnapshotOp = {
 	trigger: SnapshotTrigger,
 	thread_id: ThreadId | null,
 	turn_id: number | null,
-	effort_id: EffortId | null,
 	at: Timestamp,
 	elapsed_ms: number,
 	budget_ms: number | null,
@@ -5932,13 +6263,6 @@ export type SnapshotTrigger =
 "turn_end" |
 /**  The worktree went quiet with no turn open (human edits). */
 "quiet" |
-/**  An effort opened (its start bracket). */
-"effort_start" |
-/**
- *  An effort closed (its end bracket), including a restart closing
- *  an orphaned effort.
- */
-"effort_end" |
 /**  The boot sweep. */
 "startup" |
 /**  An explicit request (metric baseline rebuild, tests). */
@@ -5952,7 +6276,7 @@ export type SnapshotTrigger =
 "head_moved" |
 /**
  *  A run's reports were recorded (coverage, analysis): the code it
- *  measured, which their captures are pinned to (tsk883).
+ *  measured, which their captures are pinned to.
  */
 "run_measured";
 
@@ -6013,6 +6337,23 @@ export type SqlQueryResult = {
 	coverage?: SourceCoverage[],
 };
 
+/**
+ *  One of a task tracker's stages, as it declares them in order: its id (what
+ *  a record and an input name), how a person names it, and its bucket. The
+ *  first stage of a bucket is that bucket's default — where an input
+ *  naming the bucket (`to: done`) lands.
+ */
+export type StageDecl = {
+	/**  snake_case, unique in the list (`in_review`). */
+	id: string,
+	/**  How a person names it (`In Review`). */
+	title: string,
+	bucket: Bucket,
+};
+
+/**  One store id or a list of them. */
+export type StoreFilter = string | string[];
+
 export type Stream = {
 	id: StreamId,
 	kind: StreamKind,
@@ -6038,7 +6379,7 @@ export type Stream = {
 	 *  Set when the stream was archived via the rail's "Remove…"
 	 *  action. Archived streams are filtered out of `StreamStore::list`
 	 *  so they disappear from the rail; the row stays in the DB so
-	 *  history references (efforts, snapshots, page_visit) don't
+	 *  history references (turns, snapshots, page_visit) don't
 	 *  dangle.
 	 */
 	archived_at: Timestamp | null,
@@ -6132,9 +6473,9 @@ export type TestingConfig = {
 	 */
 	command: string | null,
 	/**
-	 *  The coverage-free counterpart to `command`, for the red/green loop
-	 *  (tsk171). It still writes a test report (JUnit), so the
-	 *  progression lands in the effort's Tests panel, but skips coverage
+	 *  The coverage-free counterpart to `command`, for the red/green loop.
+	 *  It still writes a test report (JUnit), so the
+	 *  progression lands in the Tests panel, but skips coverage
 	 *  and should accept a filter.
 	 *
 	 *  This exists because the alternative is worse. When the only
@@ -6292,15 +6633,20 @@ export type Trigger =
 { kind: "every"; minutes: number } |
 /**
  *  When an event of one of these types is logged and its payload has
- *  each `filter` field equal to its value — after the consumers in
+ *  each `filter` field equal to one of its values — after the consumers in
  *  the collector's `after` have handled the event.
  */
-{ kind: "on"; events: string[]; filter: { [key in string]: string };
+{ kind: "on"; events: string[]; filter: { [key in string]: string[] };
 /**
  *  When the run happens after a triggering event: at
  *  once by default.
  */
-pacing?: Pacing } |
+pacing?: Pacing;
+/**
+ *  What else in the same `on:` list sets it off: `start`, a file
+ *  glob, a SQLite file (an observer's triggers).
+ */
+sources?: ObserverSource[] } |
 /**
  *  A report collector's: when the agent runs the project's tests or an
  *  analyzer (the `collection` reactor detects the run), if its report
@@ -6322,7 +6668,7 @@ export type UiDecorator = {
 	extension: string,
 	/**  The dataset's view (`v_<namespace>_<dataset>`), which has a `ref` column. */
 	view: string,
-	/**  The resource it decorates (`oxplow/work_item`). */
+	/**  The resource it decorates (`oxplow/thread`). */
 	resource: string,
 	placement: DecoratorPlacement,
 	/**  The view's column holding the text shown. */
@@ -6364,10 +6710,15 @@ export type UiReplacement = {
 	/**  `<extension>/<target>`. */
 	id: string,
 	extension: string,
-	/**  The core sub-component it replaces (`work_item.board`). */
+	/**  The core sub-component it replaces (`task.board`). */
 	target: string,
-	/**  The capability the target belongs to. */
+	/**  The capability the target belongs to; empty for a model's target. */
 	capability: string,
+	/**
+	 *  The shared model the target shows items of (`oxplow/task_record`),
+	 *  for a target of a model rather than a capability.
+	 */
+	model: string | null,
 	/**
 	 *  Only while this extension's provider is the deciding one does it
 	 *  render; otherwise the person's choice among candidates decides.
@@ -6412,6 +6763,13 @@ export type Viz =
  *  is the headline, the rest are secondary.
  */
 "list" |
+/**
+ *  Each row as its icon alone, side by side: the first `columns`
+ *  entry's `icon`, its value the hover and accessible name, its `link`
+ *  what a click opens. A small view of a list (a rail panel's collapsed
+ *  view); an agent reads it as the list.
+ */
+"icons" |
 /**  A single value: the first column of the first row. */
 "number" |
 /**  The first row's text (`markdown: { text }`, else its first column), rendered as markdown; with an `edit` action, edited. */
@@ -6578,7 +6936,7 @@ export type VizConfig_Deserialize = {
 	slug: string,
 	title: string,
 	viz: Viz,
-	params: PageParam[],
+	params: PageParam_Deserialize[],
 	columns: PageColumn[],
 	empty: string | null,
 	/**  A table leaves out its header row: its columns explain themselves. */
@@ -6621,6 +6979,12 @@ export type VizConfig_Deserialize = {
 	/**  For `list` / `table`: a column whose integer value indents the row. */
 	depth: string | null,
 	/**
+	 *  For `list` / `table`: a column whose value is a tone (`danger`,
+	 *  `warning`, …) drawn as a coloured bar down the row's left edge; a row
+	 *  with none has an invisible one, so every row lines up.
+	 */
+	edge: string | null,
+	/**
 	 *  It takes its page's whole height: its viz does
 	 *  ([`Viz::fills`]), or it is a document whose last section's viz
 	 *  fills, so that section takes the height left (set once the catalog
@@ -6644,7 +7008,7 @@ export type VizConfig_Serialize = {
 	slug: string,
 	title: string,
 	viz: Viz,
-	params: PageParam[],
+	params: PageParam_Serialize[],
 	columns: PageColumn[],
 	empty: string | null,
 	/**  A table leaves out its header row: its columns explain themselves. */
@@ -6686,6 +7050,12 @@ export type VizConfig_Serialize = {
 	emphasis: string | null,
 	/**  For `list` / `table`: a column whose integer value indents the row. */
 	depth: string | null,
+	/**
+	 *  For `list` / `table`: a column whose value is a tone (`danger`,
+	 *  `warning`, …) drawn as a coloured bar down the row's left edge; a row
+	 *  with none has an invisible one, so every row lines up.
+	 */
+	edge: string | null,
 	/**
 	 *  It takes its page's whole height: its viz does
 	 *  ([`Viz::fills`]), or it is a document whose last section's viz
@@ -6778,6 +7148,18 @@ export type VizGroup = {
 	 *  progress`. A value with none shows as it is.
 	 */
 	labels?: { [key in string]: string },
+	/**
+	 *  A list drawn compact (a rail panel): the rows a group shows, by
+	 *  value (`Ready: 2`), then "+N more" after it, which grows the panel
+	 *  (as the list's own "+N more" does). A group not named shows every
+	 *  row, and the list isn't cut at the panel's row cap.
+	 */
+	compact?: { [key in string]: number },
+	/**
+	 *  The same, for a panel grown to the whole rail: there "+N more"
+	 *  opens the page the panel's header opens. A page shows every row.
+	 */
+	grown?: { [key in string]: number },
 };
 
 /**  `hunks` viz: the file and the two revisions each row diffs. */
@@ -6903,6 +7285,20 @@ export type VizTree = {
 	parent: string | null,
 	label: string | null,
 	/**
+	 *  A tree over paths, in place of `id`/`parent`/`label`: each row a
+	 *  file (or a folder), its folders made from its path, a folder that
+	 *  holds one folder and nothing else joined with it (`a/b`). A lazy
+	 *  one reads id, parent and label from it alone (`pages/path_tree.rs`).
+	 */
+	path?: string | null,
+	/**
+	 *  A column of core's change statuses (`added`, `modified`, `deleted`,
+	 *  `renamed`, `untracked`, `conflicted`), each row's drawn as a
+	 *  coloured letter at its end (A M D R U C); a made folder shows the
+	 *  marks of what is under it.
+	 */
+	status?: string | null,
+	/**
 	 *  The column a row's value reads from, beside its label: one line, the
 	 *  whole of it on hover.
 	 */
@@ -6938,33 +7334,6 @@ export type Withheld = {
 	imports: string[],
 };
 
-/**  What a provider supports beyond create, update and transition. */
-export type WorkItemsFeatures = {
-	/**  Items nest (a parent ref). */
-	hierarchy: boolean,
-	comments: boolean,
-	links: boolean,
-	/**  Items can be deleted (`oxplow.work_item.delete`). */
-	delete?: boolean,
-	/**
-	 *  A write sent twice with one idempotency key is done once, the
-	 *  second answered as the first (the protocol's
-	 *  `InvokeParams.idempotency_key`): the host may send a write again
-	 *  when its reply was lost.
-	 */
-	idempotent_writes?: boolean,
-	/**
-	 *  Items have an order on their list (`oxplow.work_item.reorder`; read as
-	 *  `v_work_item.rank`).
-	 */
-	ordering?: boolean,
-	/**
-	 *  Items are on a thread's list or the backlog, and move between them
-	 *  (`oxplow.work_item.move`; read as `v_work_item.thread_id`).
-	 */
-	lists?: boolean,
-};
-
 export type WorkspaceContext = {
 	project_dir: string,
 	default_branch: string | null,
@@ -6980,7 +7349,7 @@ export type WorkspaceFile = {
  *  One row of the project's `zones:` table: the globs that select files
  *  and the zone label they belong to.
  *
- *  Zones are entirely project-defined (tsk251) — oxplow ships no rule
+ *  Zones are entirely project-defined — oxplow ships no rule
  *  table of its own, because a file's architectural role follows from
  *  how *this* project lays out its repo. Order in the table is
  *  load-bearing: [`ZoneRules`](../oxplow_code_deps/zones/struct.ZoneRules.html)

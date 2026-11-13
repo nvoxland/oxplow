@@ -311,7 +311,10 @@ pub fn for_each_ref(page: &mut Page, mut f: impl FnMut(&RefSite, &mut String)) {
                 }
                 actions(&id, &mut config.actions, f);
             }
-            NodeKind::Slot { .. } | NodeKind::Markdown { .. } | NodeKind::Component { .. } => {}
+            NodeKind::Slot { .. }
+            | NodeKind::Markdown { .. }
+            | NodeKind::Component { .. }
+            | NodeKind::ActionPoint { .. } => {}
         }
     }
     params(&mut page.params, &mut f);
@@ -331,6 +334,60 @@ pub fn for_each_ref(page: &mut Page, mut f: impl FnMut(&RefSite, &mut String)) {
         }
     }
     actions("page", &mut page.actions, &mut f);
+    walk(&mut page.view, &mut f);
+    if let Some(rail) = &mut page.rail {
+        walk(rail, &mut f);
+    }
+}
+
+/// Every icon `page` names, by where it is: its own, its params' and its
+/// vizzes' params' options', its sections', and its and its vizzes'
+/// actions'. Loading resolves the svg ones (`assets/<name>.svg`) here.
+pub fn for_each_icon(page: &mut Page, mut f: impl FnMut(&str, &mut String)) {
+    fn params(params: &mut [PageParam], f: &mut impl FnMut(&str, &mut String)) {
+        for p in params {
+            for o in &mut p.options {
+                if let Some(icon) = &mut o.icon {
+                    f(&format!("param `{}` option `{}`", p.name, o.value), icon);
+                }
+            }
+        }
+    }
+    fn actions(actions: &mut [PageAction], f: &mut impl FnMut(&str, &mut String)) {
+        for a in actions {
+            if let Some(icon) = &mut a.icon {
+                f(&format!("action `{}`", a.id), icon);
+            }
+        }
+    }
+    fn walk(node: &mut Node, f: &mut impl FnMut(&str, &mut String)) {
+        if let Some(icon) = &mut node.icon {
+            f(&format!("section `{}`", node.id), icon);
+        }
+        match &mut node.kind {
+            NodeKind::Stack { children }
+            | NodeKind::Grid { children }
+            | NodeKind::Switch { children, .. } => {
+                for c in children {
+                    walk(c, f);
+                }
+            }
+            NodeKind::Viz { config, .. } => {
+                params(&mut config.params, f);
+                actions(&mut config.actions, f);
+            }
+            NodeKind::Embed { .. }
+            | NodeKind::Slot { .. }
+            | NodeKind::Markdown { .. }
+            | NodeKind::Component { .. }
+            | NodeKind::ActionPoint { .. } => {}
+        }
+    }
+    if let Some(icon) = &mut page.icon {
+        f("page", icon);
+    }
+    params(&mut page.params, &mut f);
+    actions(&mut page.actions, &mut f);
     walk(&mut page.view, &mut f);
     if let Some(rail) = &mut page.rail {
         walk(rail, &mut f);

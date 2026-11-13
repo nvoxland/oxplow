@@ -10,6 +10,7 @@ pub mod open_runs;
 pub mod options;
 pub mod panels;
 pub mod parse;
+pub mod path_tree;
 pub mod refs;
 pub mod renderers;
 pub mod runner;

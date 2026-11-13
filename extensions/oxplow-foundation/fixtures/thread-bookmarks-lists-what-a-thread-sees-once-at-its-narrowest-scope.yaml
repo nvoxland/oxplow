@@ -14,10 +14,10 @@ expect:
     - { title: Git, page_kind: git-dashboard, uri: "oxplow:oxplow/page?page=git-dashboard", scope: stream, thread: thr1 }
     - { title: Alerts, page_kind: alerts, uri: "oxplow:oxplow/page?page=alerts", scope: project, thread: thr1 }
 steps:
-  # Another thread of the stream: not thr1's own, so a.rs is the project's.
+  # Another thread of the stream: starring a.rs for thr1 alone moved it
+  # there from the project, so thr2 sees the stream's and the project's.
   - when: { query: 'thread-bookmarks', params: { thread_id: 2 } }
     expect:
       rows:
-        - { title: a.rs, scope: project, thread: thr2 }
         - { title: Git, scope: stream, thread: thr2 }
         - { title: Alerts, scope: project, thread: thr2 }

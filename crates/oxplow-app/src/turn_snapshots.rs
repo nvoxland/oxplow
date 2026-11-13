@@ -1,13 +1,13 @@
-//! The turn-end snapshot (P2.3, tsk425; `.context/agent-model.md`
+//! The turn-end snapshot (P2.3; `.context/agent-model.md`
 //! "Snapshot tracking").
 //!
 //! When a turn ends (Stop, or an interrupt — every harness reaches this
 //! through `HookIngestService::ingest`), the worktree is snapshotted with a
-//! `turn_end` take anchored to the turn, its thread and the thread's open
-//! effort, and `agent_turn.snapshot_id` points at it. "What changed this
-//! turn" is `agent_turn.start_snapshot_id` (recorded when the turn opened)
-//! → `snapshot_id` — NOT the take's op parent, which other takes during
-//! the turn (an effort closing, a commit, another thread's turn) move.
+//! `turn_end` take anchored to the turn and its thread. "What changed this
+//! turn" is found by time on the stream's snapshot line (the `turn` change
+//! kind, `change_analysis::end_take`; its files are `v_turn_file`) — NOT the
+//! take's op parent, which other takes during the turn (a commit, another
+//! thread's turn) move.
 //!
 //! **The budget.** The Stop hook is on the agent's critical path, so it
 //! waits at most `snapshotTurnBudgetMs` (default 2000). A take that runs
@@ -21,8 +21,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use oxplow_config::OxplowConfig;
-use oxplow_db::effort_store::EffortStore;
-use oxplow_db::{SqliteEffortStore, SqliteThreadStore};
+use oxplow_db::SqliteThreadStore;
 use oxplow_domain::snapshot::SnapshotTrigger;
 use oxplow_domain::stores::ThreadStore;
 use oxplow_domain::{AgentTurnId, ThreadId};
@@ -41,7 +40,6 @@ pub struct CaptureTurnSnapshots {
     /// The snapshot implementations: the take is the active one's mark.
     pub snapshots: Arc<oxplow_domain::snapshot::SnapshotRegistry>,
     pub threads: Arc<SqliteThreadStore>,
-    pub efforts: Arc<SqliteEffortStore>,
     pub config: Arc<RwLock<OxplowConfig>>,
 }
 
@@ -59,13 +57,6 @@ impl TurnSnapshots for CaptureTurnSnapshots {
         let Some(snapshots) = self.snapshots.active() else {
             return;
         };
-        let effort = self
-            .efforts
-            .find_open_for_thread(&thread)
-            .await
-            .ok()
-            .flatten()
-            .map(|e| e.id);
         let budget = Duration::from_millis(
             self.config
                 .read()
@@ -75,7 +66,6 @@ impl TurnSnapshots for CaptureTurnSnapshots {
         let req = oxplow_domain::snapshot::MarkRequest {
             thread: Some(thread),
             turn: Some(turn.value()),
-            effort,
             budget: Some(budget),
             ..oxplow_domain::snapshot::MarkRequest::new(stream, SnapshotTrigger::TurnEnd)
         };
@@ -102,12 +92,13 @@ mod tests {
     use oxplow_domain::stores::AgentTurnStore;
 
     use crate::hook_ingest::HookEnvelope;
-    use crate::test_fixtures::services_with_effort;
+    use crate::test_fixtures::services_with_thread;
 
     fn envelope(kind: HookKind, thread: ThreadId) -> HookEnvelope {
         HookEnvelope {
             session_title: None,
             turn_run: None,
+            reading: Default::default(),
             kind,
             thread_id: Some(thread),
             stream_id: None,
@@ -118,15 +109,15 @@ mod tests {
             decision: None,
             tool: None,
             subagent: None,
-            peer: None,
+            harness_turn: None,
         }
     }
 
-    /// tsk935: a turn a session end closes (an exit mid-turn, tsk449) ends
+    /// a turn a session end closes (an exit mid-turn) ends
     /// at a snapshot too, as one a Stop closes does.
     #[tokio::test]
     async fn a_turn_a_session_end_closes_ends_at_a_snapshot() {
-        let f = services_with_effort().await;
+        let f = services_with_thread().await;
         let svc = &f.svc;
         let stream = svc.streams.list_streams().await.unwrap()[0].id;
         let capture = svc.snapshot_captures.get(&stream).unwrap();
@@ -147,16 +138,33 @@ mod tests {
             })
             .await
             .unwrap();
+        // Nothing changed in the turn: its end take answered the stream's
+        // current snapshot and logged no operation, only its event.
         let ops = svc.snapshot_store.list_ops(stream, 5).await.unwrap();
-        assert_eq!(ops[0].trigger, SnapshotTrigger::TurnEnd);
-        assert_eq!(ops[0].turn_id, Some(turn.value()));
-        let ended = svc.agent_turn_store.get(&turn).await.unwrap().unwrap();
-        assert_eq!(ended.snapshot_id, Some(ops[0].snapshot_id));
+        assert!(ops.iter().all(|o| o.trigger != SnapshotTrigger::TurnEnd));
+        let takes = turn_end_events(svc, turn.value()).await;
+        assert_eq!(takes.len(), 1);
+        assert_eq!(takes[0].envelope.payload["unchanged"], true);
+        assert_eq!(takes[0].envelope.payload["snapshot"], ops[0].snapshot_id);
+    }
+
+    /// The `snapshot.taken` events a turn's end take logged.
+    async fn turn_end_events(svc: &crate::Services, turn: i64) -> Vec<oxplow_domain::StoredEvent> {
+        svc.event_log_store
+            .read_after(0, 10_000)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|e| {
+                e.envelope.event_type == "snapshot.taken"
+                    && e.envelope.anchors.turn_id == Some(turn)
+            })
+            .collect()
     }
 
     #[tokio::test]
     async fn a_turn_ends_at_a_snapshot_and_its_diff_runs_from_where_it_started() {
-        let f = services_with_effort().await;
+        let f = services_with_thread().await;
         let svc = &f.svc;
         let stream = svc.streams.list_streams().await.unwrap()[0].id;
         let capture = svc.snapshot_captures.get(&stream).unwrap();
@@ -173,16 +181,13 @@ mod tests {
             .await
             .unwrap();
         let turn = svc.agent_turn_store.list_open(&f.thread).await.unwrap()[0].id;
-        let opened = svc.agent_turn_store.get(&turn).await.unwrap().unwrap();
-        assert_eq!(opened.start_snapshot_id, Some(baseline));
 
-        // The agent edits a file, then closes its effort (complete_task's
-        // effort_end take captures the edit) before the turn ends — the
-        // usual flow, which used to make the turn look empty.
+        // The agent edits a file, and another take captures the edit before
+        // the turn ends — which used to make the turn look empty.
         std::fs::write(svc.layout.project_dir.join("made.txt"), "by the agent").unwrap();
         capture.enqueue_startup_diff().await.unwrap();
         capture
-            .request_snapshot(SnapshotTrigger::EffortEnd)
+            .request_snapshot(SnapshotTrigger::Manual)
             .await
             .unwrap();
         svc.hook_ingest
@@ -190,24 +195,22 @@ mod tests {
             .await
             .unwrap();
 
+        // The other take captured the edit; Stop found nothing new, so
+        // the turn's end take logged an event but no operation.
         let ops = svc.snapshot_store.list_ops(stream, 5).await.unwrap();
         let op = &ops[0];
-        assert_eq!(op.trigger, SnapshotTrigger::TurnEnd);
-        assert_eq!(op.turn_id, Some(turn.value()));
-        assert_eq!(op.thread_id, Some(f.thread));
-        assert_eq!(op.effort_id, Some(f.effort));
-        assert_eq!(op.budget_ms, Some(2000));
-        assert_eq!(
-            op.parent_snapshot_id,
-            Some(op.snapshot_id),
-            "nothing new at Stop"
-        );
-        let ended = svc.agent_turn_store.get(&turn).await.unwrap().unwrap();
-        assert_eq!(ended.snapshot_id, Some(op.snapshot_id));
-        // The turn's diff is start → end, and it has the edit.
+        assert_eq!(op.trigger, SnapshotTrigger::Manual);
+        let takes = turn_end_events(svc, turn.value()).await;
+        assert_eq!(takes.len(), 1);
+        let take = &takes[0].envelope;
+        assert_eq!(take.payload["unchanged"], true);
+        assert_eq!(take.payload["snapshot"], op.snapshot_id);
+        assert_eq!(take.payload["budget_ms"], 2000);
+        assert_eq!(take.anchors.thread_id, Some(f.thread));
+        // From the baseline to where the turn ended, the edit is there.
         let changed = svc
             .snapshot_store
-            .diff_snapshots(ended.start_snapshot_id, op.snapshot_id)
+            .diff_snapshots(Some(baseline), op.snapshot_id)
             .await
             .unwrap();
         assert!(changed.iter().any(|c| c.path == "made.txt"), "{changed:?}");
@@ -218,14 +221,7 @@ mod tests {
             .ingest(envelope(HookKind::Stop, f.thread))
             .await
             .unwrap();
-        let after = svc.snapshot_store.list_ops(stream, 10).await.unwrap();
-        assert_eq!(
-            after
-                .iter()
-                .filter(|o| o.turn_id == Some(turn.value()))
-                .count(),
-            1
-        );
+        assert_eq!(turn_end_events(svc, turn.value()).await.len(), 1);
 
         // The turn's own events carry the anchor too — the status its
         // prompt set (running) and the one its Stop set (idle).
@@ -254,7 +250,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_slow_take_does_not_hold_the_hook_past_its_budget() {
-        let f = services_with_effort().await;
+        let f = services_with_thread().await;
         let svc = &f.svc;
         let stream = svc.streams.list_streams().await.unwrap()[0].id;
         svc.config.write().unwrap().snapshot_turn_budget_ms = 100;

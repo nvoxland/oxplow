@@ -345,7 +345,7 @@ mod tests {
     use oxplow_code_deps::{ZONE_EXTERNAL, ZONE_OTHER};
 
     /// A project zone table for the import tests — the same shape a
-    /// project writes into `.oxplow/project.yaml` (tsk251). Oxplow has no
+    /// project writes into `.oxplow/project.yaml`. Oxplow has no
     /// built-in table, so every zone assertion below is against THESE
     /// rules, not oxplow's opinion of the repo.
     fn zones() -> ZoneRules {

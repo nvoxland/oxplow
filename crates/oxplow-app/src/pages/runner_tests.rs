@@ -191,7 +191,7 @@ async fn a_page_whose_needs_are_unmet_says_so_and_runs_nothing() {
     };
     let r = run_with(Some(crate::capabilities::Active::default())).await;
     let inactive = r.inactive.expect("unmet");
-    assert_eq!(inactive.needs, ["work_items"]);
+    assert_eq!(inactive.needs, ["snapshots"]);
     assert!(!inactive.message.is_empty());
     assert!(r.loaders.is_empty());
     // Where nothing says what's active (a check), it runs.
@@ -279,6 +279,24 @@ async fn a_change_dirties_what_reads_it_and_what_follows() {
         dirty_loaders(&r.page, &r, &["v_dataset".to_string()], &none),
         ["q"]
     );
+}
+
+/// A page loader reads what its loader's chain on the other page read: a
+/// borrowed loader over a temp table still follows the dataset behind it,
+/// so an open run re-runs it (a worktree's Branch part borrows
+/// `branch-status`'s `facts`, which reads `v_branch_divergence` through
+/// `status` and `marks`).
+#[tokio::test]
+async fn a_page_loader_follows_what_its_borrowed_chain_read() {
+    let (_dir, svc) = fixture().await;
+    let r = run(&svc, "acme/borrows-after", &[]).await;
+    assert_eq!(r.loaders["borrowed"].error, None);
+    let none: [String; 0] = [];
+    assert_eq!(
+        dirty_loaders(&r.page, &r, &["v_dataset".to_string()], &none),
+        ["borrowed"]
+    );
+    assert!(unreached(&r, &["v_dataset".to_string()], &none).is_empty());
 }
 
 #[tokio::test]
@@ -479,11 +497,11 @@ async fn a_replaceable_node_runs_the_replacement_that_stands_in_for_it() {
     );
     write(
         ".oxplow/extensions/acme/pages/board.yaml",
-        "title: Board\nparams: [{ name: scope, default: all }, { name: thread_id }]\nloaders:\n  own: { sql: \"SELECT 1 AS n\" }\nview: { id: cards, viz: table, from: own, replaceable: work_item.board }\n",
+        "title: Board\nparams: [{ name: scope, default: all }, { name: thread_id }]\nloaders:\n  own: { sql: \"SELECT 1 AS n\" }\nview: { id: cards, viz: table, from: own, replaceable: task.board }\n",
     );
     write(
         ".oxplow/extensions/beta/extension.yaml",
-        "manifest: 2\nname: beta\nintent:\n  purpose: test\nui:\n  mounts:\n    - { page: lanes, at: work_item.board }\n",
+        "manifest: 2\nname: beta\nintent:\n  purpose: test\nui:\n  mounts:\n    - { page: lanes, at: task.board }\n",
     );
     write(
         ".oxplow/extensions/beta/pages/lanes.yaml",
@@ -508,10 +526,97 @@ async fn a_replaceable_node_runs_the_replacement_that_stands_in_for_it() {
         .write()
         .unwrap()
         .replacements
-        .insert("work_item.board".into(), "oxplow".into());
+        .insert("task.board".into(), "oxplow".into());
     let own = run(&svc, "acme/board", &[]).await;
     assert_eq!(own.tree.replaced_by, None);
     assert!(own.tree.embed.is_none(), "{:?}", own.tree);
+}
+
+/// A replaceable target of a shared model's items, bound to the item's store
+/// (`task.detail.state`): the extension that fills the model as the store the
+/// item's `provider` names replaces it, and no other store's item takes it.
+#[tokio::test]
+async fn a_model_bound_target_is_replaced_by_the_items_own_store() {
+    let dir = tempfile::tempdir().unwrap();
+    crate::test_fixtures::init_git_repo(dir.path());
+    let write = |rel: &str, body: &str| {
+        let p = dir.path().join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, body).unwrap();
+    };
+    write(
+        ".oxplow/extensions/acme/extension.yaml",
+        "manifest: 2\nname: acme\nintent:\n  purpose: test\n",
+    );
+    write(
+        ".oxplow/extensions/acme/pages/host.yaml",
+        "title: Host\nparams: [{ name: uri }]\nloaders:\n  own: { sql: \"SELECT 1 AS n\" }\nview: { id: state, viz: table, from: own, replaceable: task.detail.state }\n",
+    );
+    // A second store of the task model, replacing the state control.
+    write(
+        ".oxplow/extensions/beta/extension.yaml",
+        "manifest: 2\nname: beta\nrequires: [oxplow-bundled]\nintent:\n  purpose: test\nfills:\n  - model: oxplow/task_record\n    stores: [beta]\n    stages:\n      - { id: open, title: Open, bucket: todo }\n      - { id: doing, title: Doing, bucket: in_progress }\n      - { id: shut, title: Shut, bucket: done }\nui:\n  mounts:\n    - { page: state, at: task.detail.state }\n",
+    );
+    write(
+        ".oxplow/extensions/beta/pages/state.yaml",
+        "title: State\nparams: [{ name: uri }]\nloaders:\n  echo: { sql: \"SELECT :uri AS uri\" }\nview: { viz: table, from: echo }\n",
+    );
+    let svc = crate::Services::in_memory(dir.path()).await.unwrap();
+    let problems = crate::test_fixtures::activate_with_problems(&svc).await;
+    assert!(problems.is_empty(), "{problems:?}");
+
+    let beta = "oxplow:oxplow/task?id=b1&provider=beta";
+    let r = run(&svc, "acme/host", &[("uri", SqlCell::Text(beta.into()))]).await;
+    assert_eq!(r.tree.replaced_by.as_deref(), Some("beta"));
+
+    let oxtask = "oxplow:oxplow/task?id=tsk1&provider=oxtask";
+    let r = run(&svc, "acme/host", &[("uri", SqlCell::Text(oxtask.into()))]).await;
+    assert_eq!(r.tree.replaced_by, None, "oxtask's items keep oxplow's own");
+}
+
+/// A knowledge page's body (`knowledge.detail.body`) is bound to the page's
+/// store, which its URI names as `store` (a task's names `provider`): the
+/// extension that fills the knowledge model as that store replaces it, and
+/// another store's page keeps oxplow's own.
+#[tokio::test]
+async fn a_knowledge_body_is_replaced_by_the_pages_own_store() {
+    let dir = tempfile::tempdir().unwrap();
+    crate::test_fixtures::init_git_repo(dir.path());
+    let write = |rel: &str, body: &str| {
+        let p = dir.path().join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, body).unwrap();
+    };
+    write(
+        ".oxplow/extensions/acme/extension.yaml",
+        "manifest: 2\nname: acme\nintent:\n  purpose: test\n",
+    );
+    write(
+        ".oxplow/extensions/acme/pages/host.yaml",
+        "title: Host\nparams: [{ name: uri }]\nloaders:\n  own: { sql: \"SELECT 1 AS n\" }\nview: { id: body, viz: table, from: own, replaceable: knowledge.detail.body }\n",
+    );
+    write(
+        ".oxplow/extensions/beta/extension.yaml",
+        "manifest: 2\nname: beta\nrequires: [oxplow-bundled]\nintent:\n  purpose: test\nfills:\n  - model: oxplow/knowledge_record\n    stores: [beta]\nui:\n  mounts:\n    - { page: body, at: knowledge.detail.body }\n",
+    );
+    write(
+        ".oxplow/extensions/beta/pages/body.yaml",
+        "title: Body\nparams: [{ name: uri }]\nloaders:\n  echo: { sql: \"SELECT :uri AS uri\" }\nview: { viz: table, from: echo }\n",
+    );
+    let svc = crate::Services::in_memory(dir.path()).await.unwrap();
+    let problems = crate::test_fixtures::activate_with_problems(&svc).await;
+    assert!(problems.is_empty(), "{problems:?}");
+
+    let beta = "oxplow:oxplow/knowledge?id=p1&store=beta";
+    let r = run(&svc, "acme/host", &[("uri", SqlCell::Text(beta.into()))]).await;
+    assert_eq!(r.tree.replaced_by.as_deref(), Some("beta"));
+
+    let other = "oxplow:oxplow/knowledge?id=p1&store=elsewhere";
+    let r = run(&svc, "acme/host", &[("uri", SqlCell::Text(other.into()))]).await;
+    assert_eq!(
+        r.tree.replaced_by, None,
+        "another store's page keeps oxplow's own"
+    );
 }
 
 /// A loader with no columns (nothing came back, or it failed) is not a

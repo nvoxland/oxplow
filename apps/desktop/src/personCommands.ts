@@ -40,7 +40,7 @@ export function createPersonCommands(deps: PersonCommandDeps) {
   };
   /** The run's outcome — `null` when it failed, or waits for the
    *  person's confirmation (truthy exactly when it ran). */
-  // Taking a toast's Undo: the run undone, as the person (tsk975).
+  // Taking a toast's Undo: the run undone, as the person.
   const undo = async (label: string, auditId: number, result?: unknown) => {
     const ran = await deps.run(`Undo ${label}`, () => deps.undo(auditId));
     if (ran.ok) deps.toast(undoneMessage(label, result));

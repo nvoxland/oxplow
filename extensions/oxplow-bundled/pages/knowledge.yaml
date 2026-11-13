@@ -1,0 +1,200 @@
+title: Knowledge
+description: The project's knowledge pages across every store that is on, newest change first, the stale ones, and what was read and written lately.
+icon: book-open
+category: Knowledge
+keywords: knowledge wiki notes pages oxwiki memory instructions
+needs:
+- model:oxplow/knowledge_record
+params:
+- name: filter
+  role: filter
+  label: Search titles + bodies
+  default: ''
+# Which pages cite a file: for an agent that asks (the page itself needs none).
+- name: path
+  default: ''
+answers:
+- {"question":"Which knowledge pages are there, and which store keeps each?","params":{},"skill":"knowledge"}
+- {"question":"Which knowledge pages cite files that changed since they were written?","params":{},"skill":"knowledge"}
+- {"question":"Which knowledge pages talk about this file?","about":"oxplow/file","params":{"path":"src/lib.rs"},"skill":"knowledge"}
+loaders:
+  # The form a new page is written in; none while no store that oxplow
+  # writes is on.
+  row:
+    sql: |
+      SELECT uri('oxplow/page', 'page', 'new-knowledge-page') AS new_page
+  # Every store of the knowledge model, with its pages.
+  stores:
+    sql: |
+      SELECT s.store AS store, 'On' AS status, 'note' AS kinds,
+             (SELECT count(*) FROM v_oxplow_knowledge_page p WHERE p.store = s.store) AS page_count,
+             (SELECT count(*) FROM v_oxplow_knowledge_page p WHERE p.store = s.store AND p.stale_ref_count > 0) AS stale,
+             CAST(NULL AS TEXT) AS notice
+      FROM v_model_store s
+      WHERE s.model = 'oxplow/knowledge_record'
+      ORDER BY s.store
+  # Whether a row's store lets oxplow write it: Delete is offered then.
+  pages:
+    sql: |
+      SELECT p.uri, p.store, p.id, p.kind, p.title, p.read_count, p.updated_at, p.stale_ref_count,
+             CASE WHEN :filter = '' THEN p.excerpt
+                  WHEN instr(lower(p.body), lower(:filter)) = 0 THEN p.excerpt
+                  ELSE replace(substr(p.body, max(1, instr(lower(p.body), lower(:filter)) - 40), 120), char(10), ' ') END AS snippet,
+             1 AS can_edit
+      FROM v_oxplow_knowledge_page p
+      WHERE :filter = ''
+         OR instr(lower(p.title), lower(:filter)) > 0
+         OR instr(lower(p.body), lower(:filter)) > 0
+      ORDER BY p.updated_at DESC, p.title
+  stale_pages:
+    sql: |
+      SELECT p.uri, p.store, p.id, p.title, p.stale_ref_count,
+             uri('oxplow/page', 'page', 'knowledge-freshness', 'store', p.store, 'id', p.id) AS freshness_uri
+      FROM v_oxplow_knowledge_page p
+      WHERE p.stale_ref_count > 0
+      ORDER BY p.stale_ref_count DESC, p.title
+  # The last twenty things that happened to a page: it was written, or an
+  # agent or a person read it.
+  activity:
+    sql: |
+      SELECT * FROM (
+        SELECT p.uri, p.id, p.title, 'Written' AS what, p.updated_at AS at,
+               coalesce(p.author, '') AS who
+        FROM v_oxplow_knowledge_page p
+        UNION ALL
+        SELECT p.uri, p.id, p.title, 'Read', r.at, r.actor || ' (' || r.via || ')'
+        FROM v_oxplow_knowledge_read r JOIN v_oxplow_knowledge_page p ON p.uri = r.uri)
+      ORDER BY at DESC LIMIT 20
+  about_file:
+    sql: |
+      SELECT p.uri, p.title, p.store,
+             CASE WHEN r.stale THEN 'changed since the page was written' ELSE 'current' END AS stale
+      FROM v_oxplow_knowledge_ref r JOIN v_oxplow_knowledge_page p ON p.uri = r.page
+      WHERE :path <> '' AND r.path = :path
+      ORDER BY p.title
+actions:
+- { id: new, label: New page…, open: new_page, when: new_page, prominent: true, icon: plus }
+view:
+  stack:
+  - id: stores
+    title: Stores
+    description: Where pages are kept. Several stores can be on at once; every page is recorded and tracked the same way whichever store keeps it.
+    from: stores
+    viz: table
+    lead: notice
+    columns:
+    - key: store
+      label: Store
+    - key: status
+      label: State
+      width: 70
+    - key: kinds
+      label: Kinds of page
+    - key: page_count
+      label: Pages
+      format: integer
+      width: 80
+    - key: stale
+      label: Stale
+      format: integer
+      width: 80
+    empty: No knowledge store is declared.
+  - id: pages
+    title: Pages
+    from: pages
+    viz: table
+    columns:
+    - key: store
+      label: Store
+      width: 90
+    - key: kind
+      label: Kind
+      width: 90
+    - key: title
+      label: Page
+      link:
+        kind: page
+        from: uri
+      highlight: filter
+    - key: snippet
+      label: Text
+      highlight: filter
+    - key: read_count
+      label: Reads
+      format: integer
+      width: 70
+    - key: updated_at
+      label: Modified
+      format: relative
+      width: 120
+    empty: No pages yet. Add one with New page, or ask the agent to write down what it learns.
+    actions:
+    # A destructive action sits in the row's right-click menu, and the
+    # command asks first.
+    - id: delete
+      label: Delete
+      point: oxplow/knowledge.delete
+      row: true
+      context:
+        uri: '{{row.uri}}'
+  - id: stale_pages
+    title: Stale pages
+    description: Pages that cite a file which changed after the page was written or last verified.
+    from: stale_pages
+    viz: table
+    columns:
+    - key: title
+      label: Page
+      link:
+        kind: page
+        from: uri
+    - key: store
+      label: Store
+      width: 90
+    - key: stale_ref_count
+      label: Changed files
+      format: integer
+      width: 110
+    - key: freshness_uri
+      label: Files
+      link:
+        kind: page
+        from: freshness_uri
+    empty: No page cites a file that has changed.
+  - id: activity
+    title: Recent reads and writes
+    from: activity
+    viz: table
+    columns:
+    - key: title
+      label: Page
+      link:
+        kind: page
+        from: uri
+    - key: what
+      label: What
+      width: 80
+    - key: who
+      label: By
+    - key: at
+      label: When
+      format: relative
+      width: 120
+    empty: Nothing has been read or written yet.
+  - id: about_file
+    title: Pages that cite the file
+    from: about_file
+    viz: table
+    columns:
+    - key: title
+      label: Page
+      link:
+        kind: page
+        from: uri
+    - key: store
+      label: Store
+      width: 90
+    - key: stale
+      label: Changed since
+      width: 110
+    empty: Name a file in the path filter to see the pages that cite it.

@@ -7,7 +7,7 @@
 //! - `list_outbound(source)` — what this page points to. Drives the
 //!   Outbound dropdown.
 //!
-//! The reader joins labels (wiki title, task title, commit subject) at
+//! The reader joins labels (knowledge page title, task title, commit subject) at
 //! read time so the renderer doesn't need a second round-trip per row.
 //! Labels are best-effort — when the other end is gone (e.g. a deleted
 //! task) the label is `None` and the renderer falls back to its URI.
@@ -30,7 +30,7 @@ pub struct BacklinkEdge {
     pub ref_type: String,
     pub source_extra: Option<String>,
     /// Human label for the other end (the source of a backlink, the
-    /// target of an outbound edge): wiki title, task title, commit
+    /// target of an outbound edge): knowledge page title, task title, commit
     /// subject, …. The renderer falls back to the URI when None.
     pub source_label: Option<String>,
     /// Whether anything resolves the row the label belongs to. A link to
@@ -95,7 +95,7 @@ mod tests {
         let (svc, _dir) = crate::test_support::services().await;
         let out = crate::dispatch(
             "list_backlinks",
-            serde_json::json!({ "target": "oxplow:oxplow/wiki?slug=some-slug" }),
+            serde_json::json!({ "target": "oxplow:oxplow/knowledge?id=some-slug&store=oxwiki" }),
             &svc,
         )
         .await
@@ -108,7 +108,7 @@ mod tests {
         let (svc, _dir) = crate::test_support::services().await;
         let out = crate::dispatch(
             "list_outbound",
-            serde_json::json!({ "source": "oxplow:oxplow/wiki?slug=some-slug", "limit": 5 }),
+            serde_json::json!({ "source": "oxplow:oxplow/knowledge?id=some-slug&store=oxwiki", "limit": 5 }),
             &svc,
         )
         .await
@@ -120,30 +120,21 @@ mod tests {
     /// names: a link to a collector nothing installed defines comes back
     /// unresolved with no label, never an error.
     #[tokio::test]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a test seeds an edge no command writes"
+    )]
     async fn an_outbound_edge_says_whether_its_target_resolves() {
         let (svc, _dir) = crate::test_support::services().await;
-        let stream = svc.streams.ensure_primary().await.unwrap();
-        let thread = svc
-            .threads
-            .selected_or_first(&stream.id)
-            .await
-            .unwrap()
-            .expect("the primary stream has a thread");
-        let made = svc
-            .commands
-            .run(
-                &oxplow_domain::Actor::Human,
-                "oxplow.work_item.create",
-                serde_json::json!({
-                    "title": "Fix it",
-                    "thread": thread.to_string(),
-                    "links": [{ "target": "oxplow:oxplow/collector?collector=ghost/none", "link_type": "about" }],
-                }),
-                false,
-            )
+        let item = "oxplow:oxplow/knowledge?id=fix-it&store=oxwiki".to_string();
+        svc.page_ref_store
+            .upsert_edge(oxplow_db::PageRefEdge::new(
+                item.clone(),
+                "oxplow:oxplow/collector?collector=ghost/none",
+                "mention",
+            ))
             .await
             .unwrap();
-        let item = made.result["uri"].as_str().unwrap().to_string();
         let out = crate::dispatch("list_outbound", serde_json::json!({ "source": item }), &svc)
             .await
             .unwrap();

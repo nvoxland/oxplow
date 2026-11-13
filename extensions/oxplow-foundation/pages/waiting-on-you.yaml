@@ -1,0 +1,48 @@
+title: Waiting on you
+description: "What only you can move: a question an agent is waiting on, work handed to a thread with no agent, and your open notes. Tasks assigned to you are on Assigned to you."
+icon: bell
+category: Work
+loaders:
+  waiting_on_me:
+    sql: |
+      SELECT * FROM (
+      SELECT 'Waiting for your answer' AS what, coalesce(a.detail, 'Waiting on you') AS title,
+             t.uri AS uri, t.title AS thread, a.since AS since
+      FROM v_agent_status a
+      JOIN v_thread t ON t.id = a.thread_id
+      WHERE a.state = 'awaiting_user' AND t.closed_at IS NULL
+      UNION ALL
+      SELECT 'Handed to a thread with no agent', substr(h.body, 1, 120), h.to_thread_uri, t.title, h.sent_at
+      FROM v_handoff h
+      JOIN v_thread t ON t.id = h.to_thread_id
+      WHERE h.state = 'open' AND t.closed_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM v_agent_session s
+                         WHERE s.thread_id = h.to_thread_id AND s.closed_at IS NULL)
+      UNION ALL
+      SELECT 'Open note', coalesce(c.body, c.quote), c.uri, t.title, c.last_activity_at
+      FROM v_comment c
+      LEFT JOIN v_thread t ON t.id = c.thread_id
+      WHERE c.status = 'open' AND c.intent = 'note'
+      )
+      ORDER BY what = 'Waiting for your answer' DESC, since DESC
+  open_count:
+    sql: SELECT count(*) AS waiting FROM waiting_on_me
+view:
+  from: waiting_on_me
+  viz: table
+  columns:
+  - key: what
+    label: What
+  - key: title
+    label: Item
+    link:
+      kind: page
+      from: uri
+  - key: thread
+    label: Thread
+  - key: since
+    label: Since
+  empty: Nothing is waiting on you.
+alert:
+  min_rows: 1
+  label: Waiting on you

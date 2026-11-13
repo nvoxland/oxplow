@@ -1,9 +1,9 @@
 # An implementation page says which capability it implements, whether it is in use and what it can do.
-when: { page: oxplow/implementation, params: { uri: "oxplow:oxplow/implementation?implementation=oxplow/work_items.oxplow" } }
+when: { page: oxplow/implementation, params: { uri: "oxplow:oxplow/implementation?implementation=oxplow/agent_harness.claude" } }
 expect:
-  label: oxplow's tasks
+  label: Claude
   loaders:
     about:
-      rows: [{ name: "oxplow's tasks", extension: oxplow-foundation }]
+      rows: [{ name: Claude, extension: oxplow-foundation }]
     facts:
-      rows: [{ capability: Work list, in_use: "Yes, this one is in use" }]
+      rows: [{ capability: Agent harness, in_use: "Yes, this one is in use" }]

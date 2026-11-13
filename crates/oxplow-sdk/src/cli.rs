@@ -14,25 +14,29 @@ use oxplow_app::extension::extensions::EXTENSIONS_DIR;
 
 const USAGE: &str = "\
 usage:
-  oxplow extension new <page|extension|provider|collector|metric|command|effect|component|policy|advisory|skill|panel|job|query> <name> [--origin <ref>] [--capability <cap>] [--language <lang>] [--glob <glob>] [--root <dir>]
+  oxplow extension new <page|extension|provider|implementation|collector|metric|command|effect|component|advisory|context|skill|panel|job|query> <name> [--origin <ref>] [--capability <cap>] [--language <lang>] [--glob <glob>] [--root <dir>]
       scaffold .oxplow/extensions/<name>/ with a v2 manifest, an intent
-      (--origin = the effort/thread ref that asked for it), one example
+      (--origin = the request/thread ref that asked for it), one example
       and its fixture, and the kind's starter: a page with a row action; a
-      provider of --capability (work_items, the default, effort_policy,
-      agent_harness, snapshots, knowledge or filesystem)
-      with its contract's declarations, a stub program and test config; a Starlark
+      provider of --capability (snapshots, the default,
+      agent_harness or filesystem)
+      with its contract's declarations, a stub program and test config; a
+      script implementation of --capability: its
+      `implementations:` entry and one Starlark function per verb (stubs to
+      write); a Starlark
       collector with a dataset and a page over it; a code metric (--language,
       default rust, over --glob, default the language's files): a per-path
       measure, a collector counting each file's functions over a complexity
       limit, its area dimension, the metric and a page linking to the file
       and line; a command composing core
       commands; an effect reacting to an event; a custom component with
-      its page and bundle; an effort policy script; an advisory; a skill;
+      its page and bundle; an advisory; an agent context; a skill;
       a panel over a page; a job (a cancellable model call, with its
       commands, page and an effect that publishes the reply); a query (rows
       other pages read, as a choice's options). Each checks clean
       and passes `test` as written
-      (a provider once a real program replaces its stub)
+      (a provider once a real program replaces its stub, another
+      capability's script once its verbs are written)
   oxplow extension new --from <example> [<name>] [--root <dir>]
   oxplow extension new --list-examples
       copy an example extension oxplow ships (a working one: its pages,
@@ -40,14 +44,14 @@ usage:
       With a <name> every reference to the example's own name (its datasets,
       pages, commands, the manifest's name) is rewritten to it; without one
       it keeps the example's name. --list-examples names them
-  oxplow extension add <page|collector|command|effect|component|advisory|skill> <id> [<extension>] [--root <dir>]
+  oxplow extension add <page|collector|command|effect|component|advisory|context|skill> <id> [<extension>] [--root <dir>]
       add one contribution to an extension that exists (the only one under
       .oxplow/extensions/, or <extension>): the kind's starter files, and its
       entry appended to the manifest's list, with the manifest's comments
       kept. An id the list already has, or a file that exists, is refused
   oxplow extension check <name|path> [--impact] [--against <rev>] [--services] [--json] [--root <dir>]
       load the extension and report every problem with file:line, dry-running
-      its datasets, commands, pages and advisories on a throwaway oxplow —
+      its datasets, commands, pages, advisories and agent contexts on a throwaway oxplow —
       this build's schema, no data, what the extension declares turned on
       (never the project's database); command names against the same.
       --impact also says what the working tree's version changes against
@@ -110,7 +114,8 @@ impl From<crate::SdkError> for Failure {
 struct Parsed {
     positional: Vec<String>,
     origin: Option<String>,
-    /// `new provider --capability`: the capability it implements.
+    /// `new provider --capability`, `new implementation --capability`: the
+    /// capability it implements.
     capability: Option<String>,
     /// `new --from <example>`: the example to copy.
     from: Option<String>,
@@ -276,8 +281,12 @@ fn run_inner(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Resul
                     (Kind::Provider { .. }, Some(capability)) => {
                         Kind::provider(capability).map_err(|e| Failure::Usage(e.to_string()))?
                     }
+                    (Kind::Implementation { .. }, Some(capability)) => {
+                        Kind::implementation(capability)
+                            .map_err(|e| Failure::Usage(e.to_string()))?
+                    }
                     (_, Some(_)) => return Err(Failure::Usage(
-                        "--capability is a provider's: `new provider <name> --capability <cap>`"
+                        "--capability is a provider's or an implementation's: `new provider <name> --capability <cap>`"
                             .into(),
                     )),
                     (kind, None) => kind,
@@ -553,7 +562,7 @@ mod tests {
             "page",
             "demo",
             "--origin",
-            "oxplow:oxplow/effort?id=eff1",
+            "oxplow:oxplow/request?id=req1",
             "--root",
             root,
         ]);
@@ -585,7 +594,7 @@ mod tests {
             "page",
             "demo",
             "--origin",
-            "oxplow:oxplow/effort?id=eff1",
+            "oxplow:oxplow/request?id=req1",
             "--root",
             root,
         ]);
@@ -669,7 +678,7 @@ mod tests {
         assert_eq!(v["services"][0]["services"][1]["declared"], "declared");
     }
 
-    /// tsk865: there is no `migrate`: a manifest is v2 or doesn't load.
+    /// there is no `migrate`: a manifest is v2 or doesn't load.
     #[test]
     fn usage_errors_exit_two() {
         let dir = tempfile::tempdir().unwrap();
@@ -698,7 +707,7 @@ mod tests {
         let (code, out, err) = cli(&["new", "--list-examples"]);
         assert_eq!(code, 0, "{err}");
         assert!(
-            out.contains("triage") && out.contains("effort-review"),
+            out.contains("triage") && out.contains("schema-review"),
             "{out}"
         );
         let (code, _, err) = cli(&["new", "--from", "nope", "--root", root]);
@@ -743,7 +752,7 @@ mod tests {
             "provider",
             "steward",
             "--capability",
-            "effort_policy",
+            "agent_harness",
             "--root",
             root,
         ]);
@@ -752,7 +761,7 @@ mod tests {
             std::fs::read_to_string(dir.path().join(".oxplow/extensions/steward/extension.yaml"))
                 .unwrap();
         assert!(
-            manifest.contains("capability: effort_policy\n"),
+            manifest.contains("capability: agent_harness\n"),
             "{manifest}"
         );
         let (code, _, err) = cli(&[
@@ -771,12 +780,53 @@ mod tests {
             "page",
             "demo",
             "--capability",
-            "effort_policy",
+            "agent_harness",
             "--root",
             root,
         ]);
         assert_eq!(code, 2, "{err}");
         assert!(err.contains("--capability"), "{err}");
+    }
+
+    /// `new implementation --capability` scaffolds a script implementation of
+    /// that capability: its entry is the script; one without verbs is
+    /// refused.
+    #[test]
+    fn new_implementation_takes_a_capability() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_str().unwrap();
+        let (code, _, err) = cli(&[
+            "new",
+            "implementation",
+            "shelf",
+            "--capability",
+            "filesystem",
+            "--root",
+            root,
+        ]);
+        assert_eq!(code, 0, "{err}");
+        let ext = dir.path().join(".oxplow/extensions/shelf");
+        let manifest = std::fs::read_to_string(ext.join("extension.yaml")).unwrap();
+        assert!(manifest.contains("capability: filesystem\n"), "{manifest}");
+        assert!(
+            manifest.contains("entry: implementations/shelf.star\n"),
+            "{manifest}"
+        );
+        let script = std::fs::read_to_string(ext.join("implementations/shelf.star")).unwrap();
+        for verb in ["stat", "read", "list"] {
+            assert!(script.contains(&format!("def {verb}(x):")), "{script}");
+        }
+        let (code, _, err) = cli(&[
+            "new",
+            "implementation",
+            "git",
+            "--capability",
+            "vcs",
+            "--root",
+            root,
+        ]);
+        assert_eq!(code, 2, "{err}");
+        assert!(err.contains("`vcs`"), "{err}");
     }
 
     /// `new metric` takes the language and files it scans; the flags are a
@@ -881,73 +931,6 @@ mod tests {
         cli(args)
     }
 
-    /// `extension test` on a provider that is an effort policy: the kit
-    /// runs the effort-policy suite against it, made the project's policy
-    /// in a throwaway host — the fake in policy mode passes once blessed.
-    #[cfg(unix)]
-    #[test]
-    fn extension_test_runs_the_effort_policy_suite_against_a_policy_provider() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().to_str().unwrap();
-        let ext = dir.path().join(".oxplow/extensions/steward");
-        std::fs::create_dir_all(ext.join("bin")).unwrap();
-        std::fs::create_dir_all(ext.join("fixtures")).unwrap();
-        std::fs::write(
-            ext.join("extension.yaml"),
-            "manifest: 2\nname: steward\ndescription: An effort policy.\n\
-             intent:\n  purpose: Open and close efforts as items start and finish.\n  examples:\n\
-             \x20   - name: basic\n      input: { command: react, input: { event: { id: e1, type: thread.checkpoint, v: 1, seq: 1, source: system, subject: [], payload: {}, anchors: {} } } }\n\
-             \x20     expect: nothing to do\n\
-             permissions: [sql.read, process.run, commands:oxplow.effort.*]\n\
-             providers:\n  - id: steward\n    capability: effort_policy\n    entry: bin/provider\n    declarations: provider.json\n    needs: [sql.read]\n",
-        )
-        .unwrap();
-        std::fs::write(
-            ext.join("fixtures/basic.yaml"),
-            "when: { command: react, input: { event: { id: e1, type: thread.checkpoint, v: 1, seq: 1, source: system, subject: [], payload: {}, anchors: {} } } }\nexpect: { skip: $any }\n",
-        )
-        .unwrap();
-        std::fs::write(
-            ext.join("fixtures/provider-steward.yaml"),
-            "config: { team: core }\n",
-        )
-        .unwrap();
-        std::fs::write(
-            ext.join("provider.json"),
-            serde_json::to_string_pretty(&oxplow_provider_fake::policy_declarations()).unwrap(),
-        )
-        .unwrap();
-        std::fs::write(
-            ext.join("bin/provider"),
-            format!(
-                "#!/bin/sh\nOXPLOW_FAKE_CAPABILITY=effort_policy OXPLOW_FAKE_STATE=\"{}/fake-state-$OXPLOW_PROVIDER_ID.json\" exec '{}' \"$@\"\n",
-                dir.path().join(".oxplow").display(),
-                fake_bin().display()
-            ),
-        )
-        .unwrap();
-        {
-            use std::os::unix::fs::PermissionsExt as _;
-            std::fs::set_permissions(
-                ext.join("bin/provider"),
-                std::fs::Permissions::from_mode(0o755),
-            )
-            .unwrap();
-        }
-        let (code, out, err) = cli(&["check", "steward", "--root", root]);
-        assert_eq!(code, 0, "{out}{err}");
-        let (code, out, err) =
-            test_on_a_fresh_service(dir.path(), &["test", "steward", "--bless", "--root", root]);
-        assert_eq!(code, 0, "{out}{err}");
-        assert!(
-            out.contains("ran check, provider steward, effort_policy suite"),
-            "{out}"
-        );
-        let (code, out, _) =
-            test_on_a_fresh_service(dir.path(), &["test", "steward", "--root", root]);
-        assert_eq!(code, 0, "a blessed transcript matches: {out}");
-    }
-
     /// P5.D5's red: `extension test` on a scaffolded provider — the stub
     /// fails, the fake behind it passes once blessed, and a changed
     /// golden transcript fails naming the file and line.
@@ -1018,7 +1001,7 @@ mod tests {
             "{out}"
         );
         assert!(
-            out.contains("ran check, provider fake, discover, read work_items, work_items suite"),
+            out.contains("ran check, provider fake, snapshots suite"),
             "{out}"
         );
         let (code, out, _) = test_on_a_fresh_service(dir.path(), &["test", "fake", "--root", root]);
@@ -1027,32 +1010,30 @@ mod tests {
         // Its own questions: the skill file must name what they reach.
         std::fs::write(
             ext.join("questions.yaml"),
-            "- question: File a ticket.\n  skill: README.md\n  reaches: { command: fake.create, input: { title: Hello } }\n",
+            "- question: Mark a tree.\n  skill: README.md\n  reaches: { command: fake.mark, input: { stream: s1, worktree: ., trigger: manual, parent: null } }\n",
         )
         .unwrap();
-        std::fs::write(ext.join("README.md"), "# Fake tracker\n").unwrap();
+        std::fs::write(ext.join("README.md"), "# Fake snapshots\n").unwrap();
         let (code, out, _) = test_on_a_fresh_service(dir.path(), &["test", "fake", "--root", root]);
         assert_eq!(code, 1, "{out}");
-        assert!(out.contains(".oxplow/extensions/fake/questions.yaml: question 1 (\"File a ticket.\"): skill `README.md` never names `fake.create`"), "{out}");
+        assert!(out.contains(".oxplow/extensions/fake/questions.yaml: question 1 (\"Mark a tree.\"): skill `README.md` never names `fake.mark`"), "{out}");
         std::fs::write(
             ext.join("README.md"),
-            "# Fake tracker\n\nFile one with `fake.create`.\n",
+            "# Fake snapshots\n\nMark one with `fake.mark`.\n",
         )
         .unwrap();
         let (code, out, _) = test_on_a_fresh_service(dir.path(), &["test", "fake", "--root", root]);
         assert_eq!(code, 0, "{out}");
         assert!(
-            out.contains(
-                "ran check, provider fake, discover, read work_items, work_items suite, questions"
-            ),
+            out.contains("ran check, provider fake, snapshots suite, questions"),
             "{out}"
         );
 
         // A changed golden is a diff at its line.
         let golden = ext.join("fixtures/transcripts/fake.jsonl");
         let text = std::fs::read_to_string(&golden).unwrap();
-        let line = text.lines().position(|l| l.contains("\"First\"")).unwrap() + 1;
-        std::fs::write(&golden, text.replace("\"First\"", "\"Second\"")).unwrap();
+        let line = text.lines().position(|l| l.contains("\"str1\"")).unwrap() + 1;
+        std::fs::write(&golden, text.replace("\"str1\"", "\"str2\"")).unwrap();
         let (code, out, _) =
             test_on_a_fresh_service(dir.path(), &["test", "fake", "--json", "--root", root]);
         assert_eq!(code, 1, "{out}");
@@ -1067,11 +1048,11 @@ mod tests {
             e["message"]
                 .as_str()
                 .unwrap()
-                .starts_with("the transcript differs at `/message/params/input/title`"),
+                .starts_with("the transcript differs at `/message/params/input/stream`"),
             "{e}"
         );
         assert_eq!(
-            e["mismatch"]["pointer"], "/message/params/input/title",
+            e["mismatch"]["pointer"], "/message/params/input/stream",
             "{e}"
         );
         assert_eq!(report["root"], ".oxplow/extensions/fake", "{report}");

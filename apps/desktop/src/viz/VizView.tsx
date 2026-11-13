@@ -6,6 +6,7 @@ import { commandOpenAfter, undoCommand, type VizRun, type SqlCell } from "../api
 import { FormSourceContext, useFormSource, type FormSource } from "./formSource.js";
 import { useVizPages } from "./vizPages.js";
 import { VizActionRunnerContext, useVizActionRunner, type VizActionRunner } from "./vizActionRunner.js";
+import type { ActionOption, ActionOptions } from "./vizModel.js";
 import { TabModal } from "../components/TabModal.js";
 import { InlinePromptStrip } from "../components/InlinePromptStrip.js";
 import type { FormStart } from "../tauri-bridge/generated/bindings.js";
@@ -16,6 +17,7 @@ import { Sparkline } from "../components/Sparkline.js";
 import { squarify } from "../components/charts/squarify.js";
 import { formatFullDateTime, formatMetricValue, formatMetricValueExact } from "../components/format.js";
 import { MarkdownViz } from "./MarkdownViz.js";
+import { Markdown } from "../components/Markdown/Markdown.js";
 import { DiffPane } from "../components/Diff/DiffPane.js";
 import { CommandConfirm } from "../components/CommandConfirm.js";
 import { ResultCompleteness } from "./ResultCompleteness.js";
@@ -48,15 +50,20 @@ import {
   rowAssistantContext,
   rowContext,
   rowDepth,
+  rowEdge,
+  nestRows,
+  type RowNest,
   foldedAway,
   rowEmphasized,
   rowGroups,
+  capGroups,
   rowRef,
   sparklineValues,
   stepItems,
   timelineEntries,
   treeNodes,
   lazyTreeNodes,
+  markList,
   lazyTreeProblem,
   drawnTreeRows,
   treemapItems,
@@ -90,6 +97,7 @@ import { DataTable, type DataColumn, type RowProps } from "../kit/DataTable.js";
 import { Facts } from "../kit/Facts.js";
 import { DelayedLoading } from "../kit/useDelayed.js";
 import { ItemsCell } from "./ItemsCell.js";
+import { MarksCell } from "./MarksCell.js";
 import { SourceChip } from "../kit/SourceChip.js";
 import { DisclosureGlyph } from "../kit/Disclosure.js";
 import { OpenPageLink } from "../kit/OpenPageLink.js";
@@ -97,7 +105,7 @@ import { SectionsViz } from "./SectionsViz.js";
 import { Stat } from "../kit/Stat.js";
 import { recordOpError } from "../opErrors.js";
 import { showToast } from "../components/toastStore.js";
-import { actionAnchor, actionDoes, actionEnabled, actionOffered, offeredWholePage, openAfterAction, performVizAction, promptField, rowRecord, truthyCell, type ActionTarget } from "./vizActions.js";
+import { skipSummary, actionAnchor, actionDoes, actionEnabled, actionOffered, offeredWholePage, openAfterAction, performVizAction, promptField, rowRecord, truthyCell, type ActionTarget } from "./vizActions.js";
 import { useActionAnchor, useRunner } from "../commands/RunnerContext.js";
 import { InlineError } from "../kit/InlineError.js";
 import { useHistoryState } from "../tabs/useHistoryState.js";
@@ -119,7 +127,9 @@ import { VIZ_ROW_DRAG_MIME } from "../dragMimes.js";
 import { VizIcon, vizIcon, toneColor } from "./vizIcons.js";
 import { useExtensions } from "../extensionsStore.js";
 
-type CellRenderer = (row: SqlCell[], col: DisplayColumn) => ReactNode;
+/** A cell; `display` is the text it shows in place of its value (a path
+ *  tree's name for the path, which the link still reads). */
+type CellRenderer = (row: SqlCell[], col: DisplayColumn, display?: string) => ReactNode;
 
 /**
  * Renders a viz run's result in the viz's viz. Shared by the viz page,
@@ -225,7 +235,7 @@ function VizViewBody(props: VizViewProps & { lazyOpen: CollapsedSet | null; bran
     <>
       {confirm}
       {form}
-      {!compact ? <MarksBar run={shown} actions={actions} marks={marks} /> : null}
+      {!compact ? <MarksBar run={shown} actions={actions} marks={marks} options={props.actionOptions ?? NO_OPTIONS} /> : null}
       <VizBody {...props} run={shown} tree={tree} actions={actions} marks={marks} />
       {props.partButtons ? <PartButtons run={shown} actions={actions} /> : null}
     </>
@@ -261,6 +271,34 @@ function markedRecords(run: VizRun, marks: Marks): Record<string, SqlCell>[] {
   return run.result.rows.filter((r) => set.has(rowKey(r))).map((r) => rowRecord(run.result.columns, r));
 }
 
+const NO_OPTIONS: ActionOptions = {};
+
+/** A row's menu entry for `action`: one that runs it, or — for an action
+ *  with options — a submenu of them, the one the row is in (`current`)
+ *  checked and not offered. */
+function actionMenuItem(
+  action: DeclaredPageAction,
+  record: Record<string, SqlCell>,
+  options: ActionOption[] | null,
+  actions: VizActionsState | undefined,
+): MenuItem {
+  const id = `viz-action-${action.id}`;
+  if (!options) return { id, label: action.label, enabled: actions !== undefined, run: () => actions?.run(action, record) };
+  const current = action.current ? record[action.current] : null;
+  return {
+    id,
+    label: action.label,
+    enabled: actions !== undefined && options.length > 0,
+    submenu: options.map((o) => ({
+      id: `${id}-${o.value}`,
+      label: o.label,
+      checked: o.value === current,
+      enabled: actions !== undefined && o.value !== current,
+      run: () => actions?.run(action, record, o.value),
+    })),
+  };
+}
+
 /** The bulk actions (`bulk: true`) the marked rows are offered: an action
  *  any of them is offered (`when`), run on those. */
 function bulkOffers(run: VizRun, marked: Record<string, SqlCell>[]): { action: DeclaredPageAction; rows: Record<string, SqlCell>[] }[] {
@@ -272,7 +310,7 @@ function bulkOffers(run: VizRun, marked: Record<string, SqlCell>[]): { action: D
 
 /** While rows are marked: how many, the bulk actions, and Clear — in place
  *  of the viz's own buttons. */
-function MarksBar({ run, actions, marks }: { run: VizRun; actions: VizActionsState; marks: Marks }) {
+function MarksBar({ run, actions, marks, options }: { run: VizRun; actions: VizActionsState; marks: Marks; options: ActionOptions }) {
   const marked = markedRecords(run, marks);
   if (marked.length === 0) return null;
   return (
@@ -281,7 +319,7 @@ function MarksBar({ run, actions, marks }: { run: VizRun; actions: VizActionsSta
         {marked.length} selected
       </span>
       {bulkOffers(run, marked).map(({ action, rows }) => (
-        <BulkButton key={action.id} run={run} action={action} rows={rows} actions={actions} />
+        <BulkButton key={action.id} run={run} action={action} rows={rows} actions={actions} options={options[action.id] ?? null} />
       ))}
       <button type="button" data-testid="viz-marks-clear" onClick={() => marks.set([], null)}>
         Clear
@@ -295,6 +333,9 @@ interface VizViewProps {
   /** Where links go; without it they navigate through the route context. */
   onOpenPage?(ref: TabRef, opts?: { newTab?: boolean }): void;
   maxRows?: number;
+  /** Asks for the rows past `maxRows`: a compact viz's "+N more" calls it
+   *  (a rail panel grows to show them); without it, the row says how many. */
+  onMore?(): void;
   streamId?: string | null;
   /** Small inline rendering for strips (a number as plain text). */
   compact?: boolean;
@@ -320,6 +361,9 @@ interface VizViewProps {
    *  another page, an embed or a row): what it shows is the page's resource,
    *  so it offers no link to open that resource. */
   isPage?: boolean;
+  /** The options of each of its actions with `options_from`, by action id:
+   *  the rows of the page loader it names (`actionOptionsOf`). */
+  actionOptions?: ActionOptions;
 }
 
 /** Where a command's `ui.open_after` page opens from a viz: in the page
@@ -342,6 +386,8 @@ function useOpenAfter() {
 interface Press {
   row: Record<string, SqlCell> | null;
   drop: Drop | null;
+  /** The `value` of the option pressed, for an action with options. */
+  option?: string | null;
 }
 
 /** `runner`: what the actions run through, when not the one the context
@@ -365,7 +411,8 @@ export function useVizActions(run: ActionTarget, streamId: string | null, runner
       stream: string | null,
       confirmed: boolean,
       drop?: Drop | null,
-    ) => pressOnRun(id, action, params, row, stream, confirmed, null, drop ?? null),
+      option?: string | null,
+    ) => pressOnRun(id, action, params, row, stream, confirmed, null, drop ?? null, option ?? null),
     toast: (message: string, undo?: () => void, open?: () => void) =>
       showToast({ message, onUndo: undo, ...(open ? { link: { label: "Open", onClick: open } } : {}) }),
     // The person's click on Undo is their confirmation of it.
@@ -377,19 +424,22 @@ export function useVizActions(run: ActionTarget, streamId: string | null, runner
   const press = async (action: DeclaredPageAction, presses: Press[], confirmed: boolean) => {
     setBusy(action.id);
     try {
+      const skipped: string[] = [];
       for (let i = 0; i < presses.length; i++) {
         const p = presses[i]!;
         // A failure shows beside the action's button on this page (a row's
         // action has none there: it is the toast's).
         const anchored = { ...deps, anchor: actionAnchor(run.config.id, action.id) };
         const quiet = i < presses.length - 1 ? { ...anchored, toast: () => {} } : anchored;
-        const outcome = await performVizAction(action, run, p.row, streamId, confirmed, quiet, p.drop);
-        if (typeof outcome === "object") {
+        const outcome = await performVizAction(action, run, p.row, streamId, confirmed, quiet, p.drop, p.option ?? null);
+        if (typeof outcome === "object" && "skipped" in outcome) skipped.push(outcome.skipped);
+        else if (typeof outcome === "object") {
           setPending({ action, presses: presses.slice(i), details: outcome.confirm });
           return;
         }
         if (outcome === "failed") break;
       }
+      if (skipped.length > 0) showToast({ message: skipSummary(action.label, skipped, presses.length) });
       setPending(null);
     } finally {
       setBusy(null);
@@ -400,12 +450,14 @@ export function useVizActions(run: ActionTarget, streamId: string | null, runner
     pending,
     form,
     closeForm: () => setForm(null),
-    run: (action: DeclaredPageAction, row: Record<string, SqlCell> | null) => {
+    /** `option`: the `value` of the option pressed, for an action with options. */
+    run: (action: DeclaredPageAction, row: Record<string, SqlCell> | null, option: string | null = null) => {
       if (action.form) setForm({ action, row });
-      else void press(action, [{ row, drop: null }], false);
+      else void press(action, [{ row, drop: null, option }], false);
     },
     /** A bulk action on the marked rows, once each, in order. */
-    runMany: (action: DeclaredPageAction, rows: Record<string, SqlCell>[]) => void press(action, rows.map((row) => ({ row, drop: null })), false),
+    runMany: (action: DeclaredPageAction, rows: Record<string, SqlCell>[], option: string | null = null) =>
+      void press(action, rows.map((row) => ({ row, drop: null, option })), false),
     /** A drag action for each dropped row, with where it landed. */
     runDrops: (action: DeclaredPageAction, presses: Press[]) => void press(action, presses, false),
     confirm: () => {
@@ -442,13 +494,35 @@ function PartButton({ action: a, run, actions }: { action: VizRun["config"]["act
 }
 
 /** A bulk action's button while rows are marked; its failure beside it. */
-function BulkButton({ run, action, rows, actions }: { run: VizRun; action: DeclaredPageAction; rows: Record<string, SqlCell>[]; actions: VizActionsState }) {
+function BulkButton({ run, action, rows, actions, options }: { run: VizRun; action: DeclaredPageAction; rows: Record<string, SqlCell>[]; actions: VizActionsState; options: ActionOption[] | null }) {
   const failure = useActionAnchor(actionAnchor(run.config.id, action.id));
   return (
     <>
-      <button type="button" data-testid={`viz-bulk-${action.id}`} disabled={actions.busy !== null} title={actionDoes(action)} onClick={() => actions.runMany(action, rows)}>
-        {actions.busy === action.id ? `${action.label}…` : action.label}
-      </button>
+      {options ? (
+        // One of its options, picked: each marked row moves to it.
+        <select
+          className="ox-select"
+          data-testid={`viz-bulk-${action.id}`}
+          aria-label={action.label}
+          disabled={actions.busy !== null}
+          title={actionDoes(action)}
+          value=""
+          onChange={(e) => {
+            if (e.target.value) actions.runMany(action, rows, e.target.value);
+          }}
+        >
+          <option value="">{actions.busy === action.id ? `${action.label}…` : `${action.label}…`}</option>
+          {options.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <button type="button" data-testid={`viz-bulk-${action.id}`} disabled={actions.busy !== null} title={actionDoes(action)} onClick={() => actions.runMany(action, rows)}>
+          {actions.busy === action.id ? `${action.label}…` : action.label}
+        </button>
+      )}
       {failure ? <InlineError failure={failure} testId={`viz-action-error-${action.id}`} /> : null}
     </>
   );
@@ -491,9 +565,19 @@ function RowsBody({
   tree = null,
   isPage = false,
   partButtons = false,
+  onMore,
+  actionOptions = NO_OPTIONS,
 }: VizViewProps & { actions?: VizActionsState; marks?: Marks; tree?: LazyTree | null }) {
   const viz = run.config;
-  const limited = limitRows(run.result, maxRows);
+  // A list may cap each group instead (`group.compact` in a panel,
+  // `group.grown` in a panel grown to the rail; a page caps nothing): its
+  // groups end in "+N more", and the list itself isn't cut.
+  const groupCaps = viz.viz === "list" && compact ? ((maxRows !== undefined ? viz.group?.compact : viz.group?.grown) ?? {}) : {};
+  const capsGroups = Object.keys(groupCaps).length > 0;
+  // A tree caps the rows it shows, not the rows it has: folding frees rows.
+  const capsShown = viz.viz === "tree" || capsGroups;
+  const limited = capsShown ? run.result : limitRows(run.result, maxRows);
+  const past = run.result.rows.length - limited.rows.length;
   // The rows under a parent folded away (a `depth` viz: an epic's
   // children), kept in this step's history state like the groups'.
   const rowsClosed = useCollapsedSet("viz-rows.closed");
@@ -559,17 +643,41 @@ function RowsBody({
     const action = rowActions0.find((a) => actionOffered(a, record));
     if (action) actions?.run(action, record);
   };
-  const cell: CellRenderer = (row, c) => {
+  // `viz: icons`: a row as its first column's icon alone, its value the
+  // hover and the name, its link what a click opens.
+  const iconCell: CellRenderer = (row, c) => {
     const raw = row[c.index] ?? null;
-    const formatted = formatCell(raw, c.unitIndex === null ? undefined : (row[c.unitIndex] ?? null), c.format);
+    const label = String(formatCell(raw, undefined, c.format) || "");
+    const spec = c.iconIndex === null ? null : vizIcon(row[c.iconIndex] ?? null, extensions);
+    const Glyph = spec && "Icon" in spec ? spec.Icon : null;
+    const face = Glyph ? <Glyph size={14} aria-hidden /> : <span aria-hidden>{spec && "glyph" in spec ? spec.glyph : "•"}</span>;
+    const ref = c.link && raw !== null ? cellLinkRef(c.link, c.key, row, result.columns) : null;
+    return ref ? (
+      <RouteLink to={ref} onNavigate={tabNavigate(ref, onOpenPage)} origin={origins.get(c.key)?.(row)} testId="viz-icon-item" title={label} ariaLabel={label} className="ox-icon-item">
+        {face}
+      </RouteLink>
+    ) : (
+      <span data-testid="viz-icon-item" title={label} aria-label={label} role="img" className="ox-icon-item">
+        {face}
+      </span>
+    );
+  };
+  const cell: CellRenderer = (row, c, display) => {
+    const raw = row[c.index] ?? null;
+    const formatted = display ?? formatCell(raw, c.unitIndex === null ? undefined : (row[c.unitIndex] ?? null), c.format);
     // A timestamp keeps its full local time a hover away.
     // A highlighted column marks its param's current value in the text.
     const needle = c.highlight === null ? "" : String(run.params[c.highlight] ?? "");
     const series = c.format === "sparkline" ? sparklineValues(raw) : null;
     const itemsList = c.format === "items" ? itemList(raw) : null;
     const source = c.format === "source" ? sourceValue(raw) : null;
+    const marksList = c.format === "marks" ? markList(raw) : null;
     const text = source ? (
       <SourceChip source={source} />
+    ) : c.format === "markdown" && typeof raw === "string" && raw !== "" ? (
+      <Markdown value={raw} inline testId="viz-markdown" />
+    ) : marksList ? (
+      <MarksCell marks={marksList} />
     ) : itemsList ? (
       <ItemsCell items={itemsList} linkStyle={linkStyle} />
     ) : series ? (
@@ -667,12 +775,7 @@ function RowsBody({
     },
     ...rowActions
       .filter((a) => actionOffered(a, rowRecord(result.columns, row)))
-      .map((a) => ({
-      id: `viz-action-${a.id}`,
-      label: a.label,
-      enabled: actions !== undefined,
-      run: () => actions?.run(a, rowRecord(result.columns, row)),
-    })),
+      .map((a) => actionMenuItem(a, rowRecord(result.columns, row), actionOptions[a.id] ?? null, actions)),
   ];
   // Every row of every row component: focusable, with its menu from a
   // right-click or the keyboard (Menu key / Shift+F10).
@@ -728,7 +831,8 @@ function RowsBody({
     ...(picks ? { "aria-selected": picks.selected(row) } : {}),
   });
   // A grouped list or table: its headings, each with its group's actions.
-  const groups = rowGroups(viz, result);
+  const allGroups = rowGroups(viz, result);
+  const groups = allGroups && capsGroups ? capGroups(allGroups, groupCaps) : allGroups;
   // A tree draws its rows in nesting order (a lazy tree's spliced rows too).
   const treeNodesDrawn = viz.viz === "tree" ? (tree?.nodes ?? treeNodes(viz, result)) : null;
   drawn = groups ? groups.filter((g) => !folded.has(g.key)).flatMap((g) => g.rows) : treeNodesDrawn ? drawnTreeRows(treeNodesDrawn) : result.rows;
@@ -847,6 +951,7 @@ function RowsBody({
       },
       emphasized,
       indent: rowDepth(viz, result.columns, row) * DEPTH_INDENT,
+      edge: rowEdge(viz, result.columns, row),
       fold: folding.parents.has(row) ? { open: !rowsClosed.has(rowId(row)), toggle: () => rowsClosed.toggle(rowId(row)) } : null,
       picks: picks !== null,
       selected: picks?.selected(row) ?? false,
@@ -856,8 +961,8 @@ function RowsBody({
     <div {...groupDrop(g)}>
     <GroupHeading
       group={g}
-      open={!folded.has(g.key)}
-      onToggle={() => folded.toggle(g.key)}
+      open={compact || !folded.has(g.key)}
+      onToggle={compact ? null : () => folded.toggle(g.key)}
       actions={viz.actions.filter((a) => a.group === g.key)}
       busy={actions?.busy ?? null}
       onAction={(a) => actions?.run(a, null)}
@@ -880,6 +985,7 @@ function RowsBody({
   };
   const rowsView: RowsView = {
     groups,
+    onMore,
     folded: (g) => folded.has(g.key),
     detail,
     heading,
@@ -932,7 +1038,10 @@ function RowsBody({
           const own = viz.actions.filter((a) => a.fact === key && offeredWholePage(a, result));
           return own.length > 0 ? own.map((a) => <PartButton key={a.id} action={a} run={run} actions={actions} />) : null;
         }}
-        {...{ run, result, viz, cols, cell, first, compact, streamId, onOpenPage, rowMenu, rowsView, onCustomFailure, onCustomReady, componentView, fitCustom, onSetParam, isPage }} tree={treeNodesDrawn ? { nodes: treeNodesDrawn, open: tree?.open ?? null } : null} />
+        {...{ run, result, viz, cols, cell, iconCell, first, compact, streamId, onOpenPage, rowMenu, rowsView, onCustomFailure, onCustomReady, componentView, fitCustom, onSetParam, isPage }}
+        tree={treeNodesDrawn ? { nodes: treeNodesDrawn, open: tree?.open ?? null, cap: compact ? (maxRows ?? null) : null, onMore } : null}
+      />
+      {compact && past > 0 ? <MoreRow count={past} onMore={onMore} /> : null}
       {ctxMenu.menu}
     </>
   );
@@ -946,6 +1055,8 @@ interface RowLookOut {
   emphasized: boolean;
   /** Extra left padding, px. */
   indent: number;
+  /** Its left edge's colour (`edge`), or none. */
+  edge: string | null;
   /** A parent row folds its children away. */
   fold: { open: boolean; toggle(): void } | null;
   /** Clicking it sets a param; `selected`: it holds that param's value. */
@@ -980,6 +1091,8 @@ interface RowsView {
   /** What a row opens under itself (its `expand` viz nodes), if anything. */
   detail(row: SqlCell[], index: number): ReactNode;
   heading(g: RowGroup): ReactNode;
+  /** What a capped group's "+N more" asks for: the next size up. */
+  onMore?: (() => void) | undefined;
   /** A drop target for a whole group (a board column). */
   groupDrop(g: RowGroup): Record<string, unknown>;
   rowLook: RowLook;
@@ -993,7 +1106,8 @@ interface RowsView {
 
 /** A group's heading, styled as the rail's sub-headings: its value
  *  (an arrow after it opens its page when the group's `link` resolves,
- *  never the text itself) and its group actions. */
+ *  never the text itself) and its group actions. `onToggle` folds it; none
+ *  (a compact view, which what holds it folds whole): no fold. */
 function GroupHeading({
   group,
   open,
@@ -1005,7 +1119,7 @@ function GroupHeading({
 }: {
   group: RowGroup;
   open: boolean;
-  onToggle(): void;
+  onToggle: (() => void) | null;
   actions: DeclaredPageAction[];
   busy: string | null;
   onAction(a: DeclaredPageAction): void;
@@ -1014,19 +1128,21 @@ function GroupHeading({
   const ref = group.ref;
   return (
     <div data-testid="viz-group-heading" data-group={group.key} style={groupHeadingStyle}>
-      <button
-        type="button"
-        aria-expanded={open}
-        aria-label={`${open ? "Collapse" : "Expand"} ${group.label}`}
-        onClick={onToggle}
-        style={disclosureStyle}
-      >
-        <DisclosureGlyph open={open} />
-      </button>
+      {onToggle ? (
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-label={`${open ? "Collapse" : "Expand"} ${group.label}`}
+          onClick={onToggle}
+          style={disclosureStyle}
+        >
+          <DisclosureGlyph open={open} />
+        </button>
+      ) : null}
       <span>{group.label}</span>
       {ref ? <OpenPageLink to={ref} name={group.label} onNavigate={tabNavigate(ref, onOpenPage)} /> : null}
       <span data-testid="viz-group-count" style={{ fontWeight: "normal", color: "var(--text-muted)" }}>
-        {group.rows.length}
+        {group.total}
       </span>
       {actions.length > 0 ? (
         <span style={{ marginLeft: "auto", display: "inline-flex", gap: 4 }}>
@@ -1065,6 +1181,7 @@ function Viz({
   viz,
   cols,
   cell,
+  iconCell,
   first,
   compact,
   streamId,
@@ -1089,12 +1206,15 @@ function Viz({
   onSetParam?(name: string, value: SqlCell, row?: PickedRow): void;
   cols: DisplayColumn[];
   cell: CellRenderer;
+  /** A row as its icon alone (`viz: icons`). */
+  iconCell: CellRenderer;
   first: SqlCell | null;
   compact: boolean;
   streamId: string | null;
   onOpenPage?(ref: TabRef): void;
-  /** A tree's nodes, and the open set a lazy tree's branches toggle. */
-  tree: { nodes: TreeNode[]; open: CollapsedSet | null } | null;
+  /** A tree's nodes, the open set a lazy tree's branches toggle, and how
+   *  many visible rows it shows (compact) and who to ask for the rest. */
+  tree: { nodes: TreeNode[]; open: CollapsedSet | null; cap: number | null; onMore?: (() => void) | undefined } | null;
   rowMenu: RowMenu;
   rowsView: RowsView;
   onCustomFailure?(reason: string): void;
@@ -1125,6 +1245,8 @@ function Viz({
         <TreeViz
           nodes={tree!.nodes}
           lazyOpen={tree!.open}
+          cap={tree!.cap}
+          onMore={tree!.onMore}
           problem={lazyTreeProblem(viz, result)}
           label={treeLabelColumn(viz, cols, result.columns)}
           columns={treeValueColumns(viz, result.columns)}
@@ -1176,7 +1298,13 @@ function Viz({
     case "embed":
       return <EmbedViz url={embedRow(viz, result)?.url ?? null} />;
     case "list":
-      return <ListViz rows={result.rows} cols={cols} cell={cell} rowMenu={rowMenu} view={rowsView} />;
+      return <ListViz rows={result.rows} cols={cols} cell={cell} rowMenu={rowMenu} view={rowsView} dense={compact} />;
+    case "icons":
+      return (
+        <div data-testid="viz-icons" style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+          {cols[0] ? result.rows.map((row, i) => <Fragment key={i}>{iconCell(row, cols[0]!)}</Fragment>) : null}
+        </div>
+      );
     case "board":
       return <BoardViz rows={result.rows} cols={cols} cell={cell} rowMenu={rowMenu} view={rowsView} />;
     case "custom":
@@ -1508,7 +1636,8 @@ export function FormModal({
 /** The column a tree's labels are drawn as: its declared column (so its
  *  link, icon and tone apply), else the plain `tree.label` column. */
 function treeLabelColumn(viz: VizRun["config"], cols: DisplayColumn[], resultColumns: string[]): DisplayColumn | null {
-  const key = viz.tree?.label;
+  // A path tree's label is its path's column, drawn by its name.
+  const key = viz.tree?.label ?? viz.tree?.path;
   if (!key) return null;
   const declared = cols.find((c) => c.key === key);
   if (declared) return declared;
@@ -1536,9 +1665,35 @@ interface TreeVizProps {
 /** `tree`: nested rows, each branch collapsible. A branch the result
  *  nests is open by default (the closed ones, by index path, are this
  *  step's history state); a lazy branch (`tree.lazy`) is closed by default
- *  and opens by its id (`lazyOpen`), its row's click or Enter toggling it. */
-function TreeViz({ nodes, lazyOpen, problem, ...rest }: TreeVizProps & { nodes: TreeNode[]; lazyOpen: CollapsedSet | null; problem: string | null }) {
+ *  and opens by its id (`lazyOpen`), its row's click or Enter toggling it.
+ *  With a `cap` (compact) it draws that many visible rows, in order, and
+ *  says how many more: folding a branch frees rows. */
+function TreeViz({
+  nodes,
+  lazyOpen,
+  problem,
+  cap = null,
+  onMore,
+  ...rest
+}: TreeVizProps & { nodes: TreeNode[]; lazyOpen: CollapsedSet | null; problem: string | null; cap?: number | null; onMore?: (() => void) | undefined }) {
   const closed = useCollapsedSet("viz-tree.closed");
+  const isOpen = (n: TreeNode, path: string) => treeNodeOpen(n, path, closed, lazyOpen);
+  // The visible rows' paths, in order, each with how many of the result's
+  // rows it stands for: its own (a made folder has none) and, folded, all
+  // under it. "+N more" counts those past the cap, so it counts files, not
+  // the folder rows made from their paths.
+  const visible: { path: string; rows: number }[] = [];
+  const rowsIn = (list: readonly TreeNode[]): number => list.reduce((sum, n) => sum + (n.made ? 0 : 1) + rowsIn(n.children), 0);
+  const walk = (list: readonly TreeNode[], prefix: string) =>
+    list.forEach((n, i) => {
+      const path = prefix === "" ? String(i) : `${prefix}.${i}`;
+      const open = isOpen(n, path);
+      visible.push({ path, rows: (n.made ? 0 : 1) + (open ? 0 : rowsIn(n.children)) });
+      if (open) walk(n.children, path);
+    });
+  walk(nodes, "");
+  const shown = cap === null ? null : new Set(visible.slice(0, cap).map((v) => v.path));
+  const past = cap === null ? 0 : visible.slice(cap).reduce((sum, v) => sum + v.rows, 0);
   return (
     <>
       {problem ? (
@@ -1548,44 +1703,80 @@ function TreeViz({ nodes, lazyOpen, problem, ...rest }: TreeVizProps & { nodes: 
       ) : null}
       <ul data-testid="viz-tree" style={treeListStyle}>
         {nodes.map((n, i) => (
-          <TreeItem key={n.id ?? i} node={n} path={String(i)} closed={closed} lazyOpen={lazyOpen} {...rest} />
+          <TreeItem key={n.id ?? i} node={n} path={String(i)} closed={closed} lazyOpen={lazyOpen} shown={shown} {...rest} />
         ))}
       </ul>
+      {past > 0 ? <MoreRow count={past} onMore={onMore} /> : null}
     </>
   );
 }
 
-function TreeItem({ node, path, closed, lazyOpen, ...rest }: TreeVizProps & { node: TreeNode; path: string; closed: CollapsedSet; lazyOpen: CollapsedSet | null }) {
+/** Whether tree node `n` (at index path `path`) is open: a lazy branch by
+ *  its id in `lazyOpen`, any other branch unless `closed` holds it. */
+function treeNodeOpen(n: TreeNode, path: string, closed: CollapsedSet, lazyOpen: CollapsedSet | null): boolean {
+  const lazy = n.lazy && lazyOpen !== null && n.id !== null;
+  return lazy ? lazyOpen.has(n.id!) : n.branch && !closed.has(path);
+}
+
+/** The row after a compact viz's last: how many rows it doesn't show, a
+ *  button asking for them when someone can show them. */
+function MoreRow({ count, onMore, testId = "viz-more" }: { count: number; onMore?: (() => void) | undefined; testId?: string }) {
+  const text = `+${count} more`;
+  return (
+    <div data-testid={testId} style={{ padding: "2px 0 0 20px", fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
+      {onMore ? (
+        <button type="button" onClick={onMore} title="Show them all" style={linkStyle}>
+          {text}
+        </button>
+      ) : (
+        text
+      )}
+    </div>
+  );
+}
+
+/** A row that is no row of the result (a path tree's made folder): it
+ *  looks plain and offers nothing. */
+const NO_LOOK: RowLookOut = { props: {}, emphasized: false, indent: 0, edge: null, fold: null, picks: false, selected: false };
+
+function TreeItem({ node, path, closed, lazyOpen, shown, ...rest }: TreeVizProps & { node: TreeNode; path: string; closed: CollapsedSet; lazyOpen: CollapsedSet | null; shown: ReadonlySet<string> | null }) {
   const { label, cell, rowMenu, rowLook } = rest;
+  if (shown && !shown.has(path)) return null;
   const lazy = node.lazy && lazyOpen !== null && node.id !== null;
-  const open = lazy ? lazyOpen.has(node.id!) : node.branch && !closed.has(path);
-  const toggle = () => (lazy ? lazyOpen.toggle(node.id!) : closed.toggle(path));
-  const look = rowLook(node.row);
-  const menu = rowMenu(node.row);
+  const open = treeNodeOpen(node, path, closed, lazyOpen);
+  const toggle = () => (lazy ? lazyOpen!.toggle(node.id!) : closed.toggle(path));
+  const look = node.made ? NO_LOOK : rowLook(node.row);
+  // A made folder opens and closes on a click; it is nothing to act on.
+  const menu = node.made ? { onClick: toggle } : rowMenu(node.row);
   // A lazy branch's row opens on a plain click or Enter; a control or link
   // in it, and a marking click, keep their meaning.
-  const props = lazy
-    ? {
-        ...menu,
-        onClick: (e: React.MouseEvent) => {
-          if (e.metaKey || e.ctrlKey || e.shiftKey || (e.target as Element).closest("a, button, input, select, textarea")) return menu.onClick?.(e);
-          toggle();
-        },
-        onKeyDown: (e: React.KeyboardEvent) => {
-          if (e.key === "Enter" && e.target === e.currentTarget) {
-            e.preventDefault();
+  const props =
+    lazy && !node.made
+      ? {
+          ...menu,
+          onClick: (e: React.MouseEvent) => {
+            if (e.metaKey || e.ctrlKey || e.shiftKey || (e.target as Element).closest("a, button, input, select, textarea")) return menu.onClick?.(e);
             toggle();
-            return;
-          }
-          menu.onKeyDown(e);
-        },
-      }
-    : menu;
+          },
+          onKeyDown: (e: React.KeyboardEvent) => {
+            if (e.key === "Enter" && e.target === e.currentTarget) {
+              e.preventDefault();
+              toggle();
+              return;
+            }
+            (menu as ReturnType<RowMenu>).onKeyDown(e);
+          },
+        }
+      : menu;
+  // A path tree's row reads as its name (a made folder's as its joined
+  // names); its own column, when declared, still links it.
+  const text = node.made ? node.label : label ? cell(node.row, label, node.path !== undefined ? node.label : undefined) : node.label;
+  const children = node.children.map((c, i) => [c, `${path}.${i}`] as const).filter(([, p]) => !shown || shown.has(p));
   return (
     <li data-testid="viz-tree-node">
       <div
         data-testid="viz-tree-row"
-        className={[look.picks || lazy ? "ox-clickable" : "", look.selected ? "ox-selected" : ""].filter(Boolean).join(" ") || undefined}
+        className={[look.picks || lazy || node.made ? "ox-clickable" : "", look.selected ? "ox-selected" : ""].filter(Boolean).join(" ") || undefined}
         style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 0", ...(look.emphasized || look.selected ? emphasisStyle : {}) }}
         {...props}
         {...look.props}
@@ -1595,16 +1786,24 @@ function TreeItem({ node, path, closed, lazyOpen, ...rest }: TreeVizProps & { no
             type="button"
             aria-expanded={open}
             aria-label={open ? "Collapse" : "Expand"}
-            onClick={toggle}
+            onClick={(e) => {
+              e.stopPropagation();
+              toggle();
+            }}
             style={disclosureStyle}
           >
             <DisclosureGlyph open={open} />
           </button>
         ) : (
-          <span style={{ display: "inline-block", width: 16 }} />
+          <span style={{ display: "inline-block", width: 16, flexShrink: 0 }} />
         )}
-        <span style={{ flexShrink: 0 }}>{label ? cell(node.row, label) : node.label}</span>
+        <span data-testid="viz-tree-label" title={node.path} style={treeLabelStyle}>
+          {text}
+        </span>
         <TreeRowValue node={node} columns={rest.columns} />
+        {node.marks && node.marks.length > 0 ? (
+          <MarksCell marks={node.marks.map((m) => ({ text: m.letter, tone: m.tone, hint: m.status }))} style={{ marginLeft: "auto", paddingLeft: 6 }} />
+        ) : null}
       </div>
       {open && node.state === "loading" ? (
         <DelayedLoading>
@@ -1618,16 +1817,20 @@ function TreeItem({ node, path, closed, lazyOpen, ...rest }: TreeVizProps & { no
           {node.state.error}
         </div>
       ) : null}
-      {node.children.length > 0 && open ? (
+      {children.length > 0 && open ? (
         <ul style={{ ...treeListStyle, paddingLeft: 16 }}>
           {node.children.map((c, i) => (
-            <TreeItem key={c.id ?? i} node={c} path={`${path}.${i}`} closed={closed} lazyOpen={lazyOpen} {...rest} />
+            <TreeItem key={c.id ?? i} node={c} path={`${path}.${i}`} closed={closed} lazyOpen={lazyOpen} shown={shown} {...rest} />
           ))}
         </ul>
       ) : null}
     </li>
   );
 }
+
+/** A tree row's label: it gives way first, cut with "…" (its path, when
+ *  it has one, on hover). */
+const treeLabelStyle: CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" };
 
 /** A tree row's `value` (its first line, the whole on hover) and `count`,
  *  beside its label. */
@@ -1922,63 +2125,95 @@ function sections(rows: SqlCell[][], view: RowsView | undefined): { group: RowGr
   return groups.map((g) => ({ group: g, rows: view.folded(g) ? [] : g.rows.map((r) => [r, index.get(r) ?? 0]) }));
 }
 
-const noLook: RowLookOut = { props: {}, emphasized: false, indent: 0, fold: null, picks: false, selected: false };
+const noLook: RowLookOut = { props: {}, emphasized: false, indent: 0, edge: null, fold: null, picks: false, selected: false };
 
-function ListViz({ rows, cols, cell, rowMenu, view }: RowsVizProps) {
+/** `dense` (a compact view, a rail panel): each row one tight line, its
+ *  other columns small beside the headline, no divider. */
+function ListViz({ rows, cols, cell, rowMenu, view, dense = false }: RowsVizProps & { dense?: boolean }) {
   const [head, ...rest] = cols;
+  // One row; `nested` (inside its parent's panel): the panel insets it, so
+  // it isn't indented too; `last` in a panel: no rule under it.
+  const rowEl = (row: SqlCell[], i: number, nested = false, last = false) => {
+    const look = view?.rowLook(row) ?? noLook;
+    const indent = nested ? 0 : look.indent;
+    return (
+      <li
+        key={i}
+        data-testid={`viz-row-${i}`}
+        data-dense={dense ? "true" : undefined}
+        data-cursor={view?.cursor.isCursor(row) ? "true" : undefined}
+        className={look.picks ? "ox-clickable" : undefined}
+        onMouseEnter={() => view?.cursor.point(row)}
+        style={{
+          ...(dense ? denseRowStyle : listRowStyle),
+          ...(last ? { borderBottom: "none" } : {}),
+          ...(look.emphasized || look.selected ? emphasisStyle : {}),
+          ...(indent ? { paddingLeft: indent } : {}),
+          ...(look.edge ? { borderLeft: `3px solid ${look.edge}`, paddingLeft: Math.max(indent, 8) } : {}),
+        }}
+        {...rowMenu(row)}
+        {...look.props}
+      >
+        <div style={dense ? denseHeadStyle : undefined}>
+          {look.fold ? (
+            <button
+              type="button"
+              data-testid={`viz-row-fold-${i}`}
+              aria-expanded={look.fold.open}
+              aria-label={look.fold.open ? "Fold its children away" : "Show its children"}
+              className="ox-link"
+              style={foldStyle}
+              onClick={look.fold.toggle}
+            >
+              <DisclosureGlyph open={look.fold.open} />
+            </button>
+          ) : null}
+          {head ? cell(row, head) : null}
+        </div>
+        {/* A cell with no value is left out, not drawn as "—". */}
+        {rest.some((c) => row[c.index] !== null && row[c.index] !== undefined) ? (
+          <div style={dense ? denseRestStyle : { color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
+            {rest.filter((c) => row[c.index] !== null && row[c.index] !== undefined).map((c, j) => (
+              <span key={c.key}>
+                {j > 0 ? " · " : null}
+                {cell(row, c)}
+              </span>
+            ))}
+          </div>
+        ) : null}
+        {view?.detail(row, i)}
+      </li>
+    );
+  };
+  // A full-width `depth` list draws a parent and its children as one panel
+  // (the kit's `ox-nest`; panels nest); a folded parent is its panel's top
+  // line alone. A compact list (a rail panel) indents instead.
+  const nests = !dense && rows.some((r) => (view?.rowLook(r) ?? noLook).indent > 0 || (view?.rowLook(r) ?? noLook).fold);
+  const nodeEl = (n: RowNest, nested: boolean, last: boolean): React.ReactElement => {
+    const parent = n.kids.length > 0 || !!(view?.rowLook(n.row) ?? noLook).fold;
+    if (!parent) return rowEl(n.row, n.i, nested, last);
+    return (
+      <li key={`nest-${n.i}`} data-testid={`viz-nest-${n.i}`} className="ox-nest">
+        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+          {rowEl(n.row, n.i, true, n.kids.length === 0)}
+          {n.kids.map((k, j) => nodeEl(k, true, j === n.kids.length - 1))}
+        </ul>
+      </li>
+    );
+  };
+  const depthOf = (r: SqlCell[]) => Math.round((view?.rowLook(r) ?? noLook).indent / DEPTH_INDENT);
   return (
     <>
       <ul data-testid="viz-list" style={{ listStyle: "none", padding: 0, margin: 0 }} {...(view?.cursor.listProps as React.HTMLAttributes<HTMLUListElement>)}>
         {sections(rows, view).map(({ group, rows: inGroup }) => (
           <Fragment key={group?.key ?? ""}>
             {group && view ? <li style={{ listStyle: "none" }}>{view.heading(group)}</li> : null}
-            {inGroup.map(([row, i]) => {
-              const look = view?.rowLook(row) ?? noLook;
-              return (
-                <li
-                  key={i}
-                  data-testid={`viz-row-${i}`}
-                  data-cursor={view?.cursor.isCursor(row) ? "true" : undefined}
-                  className={look.picks ? "ox-clickable" : undefined}
-                  onMouseEnter={() => view?.cursor.point(row)}
-                  style={{
-                    ...listRowStyle,
-                    ...(look.emphasized || look.selected ? emphasisStyle : {}),
-                    ...(look.indent ? { paddingLeft: look.indent } : {}),
-                  }}
-                  {...rowMenu(row)}
-                  {...look.props}
-                >
-                  <div>
-                    {look.fold ? (
-                      <button
-                        type="button"
-                        data-testid={`viz-row-fold-${i}`}
-                        aria-expanded={look.fold.open}
-                        aria-label={look.fold.open ? "Fold its children away" : "Show its children"}
-                        className="ox-link"
-                        onClick={look.fold.toggle}
-                      >
-                        <DisclosureGlyph open={look.fold.open} />
-                      </button>
-                    ) : null}
-                    {head ? cell(row, head) : null}
-                  </div>
-                  {/* A cell with no value is left out, not drawn as "—". */}
-                  {rest.some((c) => row[c.index] !== null && row[c.index] !== undefined) ? (
-                    <div style={{ color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
-                      {rest.filter((c) => row[c.index] !== null && row[c.index] !== undefined).map((c, j) => (
-                        <span key={c.key}>
-                          {j > 0 ? " · " : null}
-                          {cell(row, c)}
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
-                  {view?.detail(row, i)}
-                </li>
-              );
-            })}
+            {nests ? nestRows(inGroup, depthOf).map((n) => nodeEl(n, false, false)) : inGroup.map(([row, i]) => rowEl(row, i))}
+            {group && !view?.folded(group) && group.total > group.rows.length ? (
+              <li>
+                <MoreRow count={group.total - group.rows.length} onMore={view?.onMore} testId={`viz-group-more-${group.key}`} />
+              </li>
+            ) : null}
           </Fragment>
         ))}
       </ul>
@@ -2076,8 +2311,12 @@ function TableViz({ rows, cols, cell, rowMenu, view, header }: RowsVizProps) {
         };
       }}
       cellStyle={([row], _c, j) => {
-        const indent = j === 0 ? (view?.rowLook(row) ?? noLook).indent : 0;
-        return indent ? { paddingLeft: `calc(var(--space-2) + ${indent}px)` } : undefined;
+        const look = j === 0 ? (view?.rowLook(row) ?? noLook) : noLook;
+        const style = {
+          ...(look.indent ? { paddingLeft: `calc(var(--space-2) + ${look.indent}px)` } : {}),
+          ...(look.edge ? { borderLeft: `3px solid ${look.edge}` } : {}),
+        };
+        return Object.keys(style).length > 0 ? style : undefined;
       }}
     />
   );
@@ -2099,7 +2338,13 @@ const disclosureStyle: CSSProperties = {
 };
 /** A list's rows stand apart: room above and below each, and a rule between
  *  them, so two long rows never read as one block. */
+/** A parent row's fold: a bare arrow before its title, not a button. */
+const foldStyle: CSSProperties = { background: "transparent", border: "none", padding: 0, marginRight: 6, color: "var(--text-secondary)", cursor: "pointer", font: "inherit" };
 const listRowStyle: CSSProperties = { padding: "12px 0", borderBottom: "1px solid var(--border-subtle)" };
+/** A compact list's row: one line, headline left, the rest right. */
+const denseRowStyle: CSSProperties = { display: "flex", alignItems: "center", gap: 8, padding: "3px 0", minHeight: 22 };
+const denseHeadStyle: CSSProperties = { flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+const denseRestStyle: CSSProperties = { color: "var(--text-muted)", fontSize: "var(--text-xs)", whiteSpace: "nowrap", flexShrink: 0 };
 /** An `emphasis` row: the soft accent wash an active row gets. */
 const emphasisStyle: CSSProperties = { background: "var(--accent-soft-bg)", fontWeight: 500 };
 /** A group's heading: the rail's sub-heading look. */

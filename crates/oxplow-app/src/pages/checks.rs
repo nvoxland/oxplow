@@ -185,7 +185,10 @@ pub fn layout_warnings(page: &Page) -> Vec<String> {
     // params as its props.
     let passes_on = nodes.iter().any(|n| n.replaceable.is_some())
         || nodes.iter().any(|n| match &n.kind {
-            NodeKind::Embed { .. } | NodeKind::Slot { .. } | NodeKind::Component { .. } => true,
+            NodeKind::Embed { .. }
+            | NodeKind::Slot { .. }
+            | NodeKind::Component { .. }
+            | NodeKind::ActionPoint { .. } => true,
             // A custom viz is a component too: it is given the page's params.
             NodeKind::Viz { config, .. } => config.viz == crate::pages::spec::Viz::Custom,
             _ => false,

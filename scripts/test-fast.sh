@@ -15,7 +15,7 @@ PURE=" oxplow-agent-text oxplow-ai oxplow-ai-fake oxplow-ai-rig oxplow-code-deps
 oxplow-code-dup oxplow-code-metrics oxplow-config oxplow-coverage oxplow-db oxplow-domain \
 oxplow-fs-watch oxplow-git oxplow-harness-fake oxplow-harnesses oxplow-lsp \
 oxplow-lsp-installer oxplow-oauth-redirect oxplow-provider-protocol oxplow-pty \
-oxplow-runtime oxplow-session oxplow-tasks "
+oxplow-runtime oxplow-session "
 
 # Whether every crate the args select is in PURE (no `-p` selects them all).
 pure() {

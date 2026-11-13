@@ -2,10 +2,8 @@
 # Build the sidecars and stage them where Tauri's `externalBin` expects
 # them, i.e. `binaries/<name>-<target-triple>`:
 #
-# - `oxplow-daemon` (tsk256): the packaged shell spawns one per open
+# - `oxplow-daemon`: the packaged shell spawns one per open
 #   project;
-# - `oxplow-provider-mcp` (P7.A6): oxplow's MCP adapter, which the daemon
-#   runs for a provider declared with `adapter:`;
 # - `oxplow-script-worker`: the process every Starlark and jaq script runs
 #   in, so a runaway one can be killed (`oxplow_script::workers`).
 #
@@ -15,7 +13,7 @@
 # **This is not only a packaging step.** `externalBin` makes tauri-build
 # validate the sidecar from oxplow-desktop's *build script*, so `cargo
 # test`, `cargo clippy --all-targets` and a bare `cargo build -p
-# oxplow-desktop` all fail without it (tsk266). Anything that compiles
+# oxplow-desktop` all fail without it. Anything that compiles
 # the desktop crate needs this to have run once.
 #
 #   ./stage-sidecars.sh          # release — what a bundle ships
@@ -34,9 +32,9 @@
 #
 # Locates everything from its own path, so it doesn't care where it's
 # invoked from. It is invoked from `beforeBuildCommand`, whose cwd is the
-# **app dir** (`apps/desktop`) — not `src-tauri`, which cost tsk263 a
+# **app dir** (`apps/desktop`) — not `src-tauri`, which cost a
 # packaged build with no daemon in it.
-sidecars=(oxplow-daemon oxplow-provider-mcp oxplow-script-worker)
+sidecars=(oxplow-daemon oxplow-script-worker)
 set -euo pipefail
 
 profile="${1:-release}"
@@ -71,7 +69,7 @@ if [ "$profile" = stub ]; then
 fi
 
 # shellcheck disable=SC2086 # profile_flag is intentionally word-split (empty for debug)
-cargo build $profile_flag -p oxplow-daemon -p oxplow-provider-mcp -p oxplow-script --bins --manifest-path "$repo_root/Cargo.toml"
+cargo build $profile_flag -p oxplow-daemon -p oxplow-script --bins --manifest-path "$repo_root/Cargo.toml"
 
 # Copied only when it changed: tauri-build reruns oxplow-desktop's build
 # script when a staged file is touched, so an unconditional copy would

@@ -1,218 +1,149 @@
-# Knowledge (the wiki)
+# Knowledge
 
-Pages of durable understanding — agent-written writeups, diagrams and
-explanations — kept in the project's chosen **store** (oxplow's wiki,
-pages at `.oxplow/wiki/<slug>.md`; a provider's documentation system;
-or none), and **recorded by core** the same way whatever keeps them: the
-row in `wiki_page`, the links in `page_ref`, their pins, freshness and
-the events (P5.C3). The store keeps the page; the record is derived from
-what it kept.
+Pages of durable understanding — notes, walkthroughs, diagrams, what an
+agent keeps for itself — kept in one or more **stores** at once. Core has
+no knowledge capability and no table of pages: a page is a row of the shared
+model `oxplow/knowledge_record` (`models.md`), kept by a store (an
+extension's fill), and oxplow observes every store the same way, so the UI,
+metrics and tracking are common to all of them. The store keeps the page;
+the row, its links (`page_ref`), its pins and the `oxplow.knowledge_record.changed`
+events are derived from what it kept.
 
-## One write path: `oxplow.knowledge.write_page`
+## The model and its resource
 
-`oxplow.knowledge.write_page { slug, title?, body, verified_files?, removed_files? }`
-(`crates/oxplow-app/src/knowledge.rs`, an `External` command: the store
-keeps the page) is how a page is written — by an agent (`run_command`),
-by the desktop editor (the `Markdown` editor; a page's `markdown` viz saves through its `edit: true` action over this command), and by "Mark verified" on the Freshness page (`oxplow.knowledge.verify_files`, which writes through it). It:
+- **`oxplow/knowledge_record`** is declared by oxplow-bundled (`models:`):
+  columns `id`, `title`, `body` (markdown, `pins: true`: its file and
+  directory refs are pinned to the primary stream's latest snapshot), `kind`,
+  `url`, `author`, `updated_at`. A store fills it with `fills:` (its `stores:`
+  ids, an `id_pattern` for a bare `[[id]]` in text, and `files:` when it
+  keeps a row as a file).
+- **The `oxplow/knowledge` resource** is bundled's too (as the task resource
+  is): a page's URI is `oxplow:oxplow/knowledge?id=<id>&store=<store>`
+  (`uri::build::knowledge_uri`). `resolve: knowledge_page`, `searchable:
+  search_knowledge`. With bundled off the resource is undeclared and a `[[link]]`
+  to a page is unrecognized, as a task's is.
+- **Wikilinks.** `[[<store>:<id>]]` names a page of a knowledge store; a bare
+  `[[id]]` names the first store whose fill's `id_pattern` matches it whole
+  (`ResourceRegistry::with_knowledge_store`, fed from the model registry's
+  fills by `vocabulary_reactor`, as `tsk42` is for tasks).
 
-1. validates the slug (kebab-case) and **every `[[link]]` the write
-   adds** — a task, page, file, directory, finding or commit that doesn't
-   exist is refused, each named. A link the page's recorded body already has isn't
-   re-checked: a cited file or task that has since gone (or a hand edit's
-   bad link) mustn't block verifying, rewriting or linking the page
-   (tsk564) (`link_check::check_links_in`, synchronous: the database,
-   the project's files and `Vcs::revision_graph` for commits; a page may
-   link to itself);
-2. checks the file declarations (`refs_borne_out`): `removed_files` must be
-   gone from the body; `verified_files` must be cited, or be a file under a
-   `[[dir:…]]` the body cites — both before anything reaches the store;
-3. hands the page to the **active store** (`KnowledgeProvider::
-   write_page`): the wiki writes the file (if it differs; a temp file
-   renamed into place, so a file that can't be written fails the run and
-   nothing is recorded), a provider's service keeps it, none keeps
-   nothing and the command answers `{ page, tracked: false }`;
-4. in its own transaction (`write_page_tx`), from the body the store
-   kept, restates the `wiki_page` row (title from the first `# `, excerpt,
-   `body_hash`) and merges its `page_ref` edges (`wiki_edges` +
-   `merge_source_tx`): edges already stored keep their pins, new file
-   refs take the **pin** — the primary stream's latest snapshot, plus
-   that snapshot's own revision when it has one — and each verified ref
-   is re-pinned (a file verified under a cited directory becomes an edge
-   of its own, kept while the directory stays cited);
-5. answers `knowledge.page.written@2 { page: "<slug>", outbound,
-   snapshot }` (with the actor's anchors, after any events the store
-   reported of its own) for the bus to log after `command.executed`,
-   caused by the run. Were the record to fail after the store kept the
-   page, the wiki's file is ahead of the row and the watcher converges
-   them. The search index reads the body from the row (`wiki_page.body`),
-   so it is the recorded one when its asset recomputes;
+## Reading
 
-(the UI re-reads on the `datasetsChanged` the row write produces; there is
-no wiki event of its own). `@version` literals in links are stripped from the
-body: a version is the edge's pin, not the prose's. `title` sets the
-body's `# ` heading.
+All through bundled's datasets (SQL, `oxplow_query_sql`) and `oxplow_read`:
 
-Beside it, dispatched the same way: `oxplow.knowledge.delete_page {
-slug }` (Destructive; refused for a page core doesn't record unless the
-store is a sink; the store deletes it — the wiki its file, a failure
-failing the run — then core drops the row and edges and answers
-`knowledge.page.deleted@2`), `oxplow.knowledge.link { page, target }`
-(`target` a wikilink's inside; refused when the recorded page already
-links it, or when it doesn't resolve; the store adds `- [[target]]` at
-the end of the page's `## Related` section — the wiki before any section
-after it, or a new one at the end, with `@version` literals stripped;
-tsk572 — and core records the body it kept), and
-`oxplow.knowledge.resync { slug }` (the wiki's: restate from the file, a
-`Tx` command; the repair when a row and its file disagree), and
-`oxplow.knowledge.verify_files { slug, files? }` (re-pin the named files, or
-every file the page cites, to now: it rewrites the recorded body through
-`write_page` with them as `verified_files`, so every store pins the same way;
-the Wiki Freshness page's "Mark verified" actions). All are `Record`: any thread captures
-what it explored. `oxplow.knowledge.write_page` replaced MCP
-`record_wiki_page_update`, `resync_wiki_page` and `delete_wiki_page`, and
-RPCs `write_wiki_page_body`, `upsert_wiki_page`, `delete_wiki_page`,
-`mark_wiki_ref_verified` and `mark_all_wiki_refs_verified`.
+- **`v_oxplow_knowledge_page`** — one row per page of every store: `uri`,
+  `store`, `id`, `kind`, `title`, `url`, `author`, `excerpt`, `body`,
+  `body_size`, `outbound_uris` (JSON array of the URIs it links),
+  `stale_ref_count`, `read_count` (agents' and people's), `agent_read_count`,
+  `last_read_at`, `updated_at`. It is what the resource resolves through:
+  `oxplow_read` answers its row (the `body` column is the content) and the
+  ref resolver reads it by `resolve_view`.
+- **`v_oxplow_search_knowledge`** — what site search indexes (title, body).
+- **`v_oxplow_knowledge_ref`** — `v_ref_pin` of the pages: the files and
+  directories each page pins and whether each changed since (`stale`).
+- **`v_oxplow_knowledge_read`** — every read: an agent's (the model
+  `oxplow/knowledge_read_record`, written by bundled's collector
+  `oxplow.knowledge_read` from `record.read`, via `tool` or the page's `file`)
+  and a person's (`page_visit`, core's).
+- **`v_oxplow_knowledge_touch`** — which thread last wrote which page (the
+  model `oxplow/knowledge_touch_record`, written by `oxplow.knowledge_touch`
+  from the change event's thread anchor, so a person's edit of a file touches
+  nothing). The Work panel's Finished list reads it.
+- `v_model_store` (`model = 'oxplow/knowledge_record'`) lists the stores;
+  `v_page_ref` has the backlinks.
 
-**Agents never write the file.** The write guard (hook and
-`decide_tool`) refuses an agent's Write/Edit into `.oxplow/wiki/` for
-every thread, pointing at the command (`write_guard::wiki_page_reason`).
+A bundled dataset that reads a view that reads views, in a compound select,
+trips the lineage check (`reads … without ref()`): read a model view directly
+or use CTEs.
 
-## Thread notes were removed
+Agents read through bundled's `knowledge` skill (find before you create; read
+with `oxplow_read`; the link rules). The metrics (`knowledge.pages`,
+`knowledge.stale_pages`, `knowledge.read_requests`) are bundled's collectors
+over these datasets, sliced by `oxplow.knowledge_store` and
+`oxplow.knowledge_kind`.
 
-Thread notes are no longer a separate knowledge store or agent tool. V112
-removes `thread_note` and its search rows and page-ref edges; the
-`oxplow.knowledge.add_note` / `update_note` commands, `v_thread_note`, and
-the thread-notes page are gone. Durable understanding belongs in wiki pages;
-what an agent did remains in its turns, efforts, decisions and handoffs.
-The `session-history` example mounts earlier prompts from `v_agent_turn` on
-New Session without introducing another writable record.
+## Writing
 
-## Hand edits converge
+A store writes its own pages; core has no write command for them. A store is
+an extension that fills the model: its commands write its pages, a collector
+states the pages it holds (a snapshot or upserts), and `models.md` says what
+core does with the rows (events, edges, pins, search). `links.check` (a
+service) lets a store refuse a body whose `[[links]]` don't resolve. Bundled
+declares two action points a store's commands join: `oxplow/knowledge.new`
+(title?, body?) and `oxplow/knowledge.delete` (uri). The knowledge page's text (its `body` node)
+is the replaceable target `knowledge.detail.body`, bound to the page's own
+store (the URI's `store`): with no replacement it is oxplow's read-only
+markdown, and the extension that fills the model as that store may draw an
+editor in its place (`ui.mounts: { page: …, at: knowledge.detail.body }`; the
+page takes `uri`). oxwiki does, so an oxwiki page shows one body, editable
+with Save on `oxwiki.page.write`, and another store's page stays read-only.
+The page keeps its `sections` slot (`oxplow/knowledge-page.sections`) for any
+extension's extra part.
 
-A person editing the file (or anything else changing it) converges
-through the same core: `wiki_pages::sync_page` restates the page from
-disk, logged as `system:wiki_watch` — without the link refusal (whatever
-is on disk is recorded). The watcher (`wiki_pages_watch`) runs it per
-changed file and `scan_and_sync_all` at boot. A body whose hash matches
-the row's is a no-op, so a page the command just wrote doesn't sync (or
-log) twice; a missing file deletes the page; an unreadable one is an
-error, never a delete. **One slug rule** (`knowledge::valid_slug`,
-kebab-case): a file whose name isn't a slug is not a page — syncing it
-records nothing, and removes a row it left (tsk572) — so every row is
-one the commands can write and delete. `updated_at` follows the file's mtime on this
-path, so a boot scan doesn't reset recency.
+`oxplow.refs.verify { uri, files? }` re-pins a page's cited files to now (any
+model row's pinned refs); `oxplow_ref_drift { uri, path }` shows one pinned
+ref's diff against its pin.
 
-## Attribution
+### The write guard
 
-`WikiAttribution` (pump consumer `wiki.attribution`) marks a page touched
-by the thread whose command wrote it (`wiki_page_thread_update`, the
-rail's "Finished" list) from `knowledge.page.written`'s thread anchor.
+A tool's write of a row file is refused where it would be lost: a thread in a
+worktree may not write `<its worktree>/<folder>/<id><suffix>` of any fill's
+`files:` (only the primary checkout's folder is watched; `.oxplow` is
+git-ignored). The refusal names the store's extension, whose command writes to
+the primary checkout from anywhere. In the primary checkout a direct write is
+allowed: the store's collector converges it. `write_guard::record_file_reason`,
+from the running generation's fills; `agent-model.md` "Isolation".
 
-## Reads are SQL (P5.C4)
+## oxwiki
 
-- **`v_knowledge_page`** — one row per page: `uri` (`oxplow:oxplow/wiki?slug=<slug>`),
-  `provider`, `slug`, `title`, `excerpt`, `body_size`, `outbound_uris`
-  (JSON array of every URI it links to), `stale_ref_count`, `updated_at`.
-- **`v_knowledge_ref`** — each page's file refs: `page`, `path`,
-  `pinned_snapshot_id`, `pinned_vcs_rev`, `pinned_vcs_rev_exact`,
-  `latest_snapshot_id`, `stale`.
+oxwiki is an extension (`extensions/oxwiki`, on by default, requires
+oxplow-bundled), oxplow's own knowledge store: one markdown file per page,
+`.oxplow/oxwiki/<slug>.md`, filling `oxplow/knowledge_record` as the store
+`oxwiki`.
 
-A ref is **stale** when its file has a **primary-stream** snapshot newer
-than the one it was pinned to, or was captured there but never pinned.
-The primary is the stream a pin comes from (`pin_tx`), so another
-stream's newer snapshot of the file neither makes a page stale nor keeps
-a verified one stale (tsk563). `v_knowledge_ref` is the **one
-definition**: `v_knowledge_page.stale_ref_count` counts its rows,
-`KnowledgeProvider::freshness` reads it, and so do the wiki page's
-freshness chip and the Freshness page.
-- **`v_knowledge_body`** (P6.E2) — `uri`, `body`: each page's markdown,
-  apart from `v_knowledge_page` so listing pages never reads bodies.
-- **`v_knowledge_touch`** — which threads wrote which pages (the rail's
-  Finished section).
+- **Files.** `files: [{ path: .oxplow/oxwiki, access: write, watch: true }]`:
+  the folder is watched and snapshotted though git ignores it
+  (`extensions-permissions.md` "Declared folders"), and the fill's `files: {
+  folder, suffix: .md }` makes an agent's read of a page's file a read of the
+  row (`record.read`).
+- **Commands.** `oxwiki.page.write { id?, title?, body }` and
+  `oxwiki.page.delete { id }` write and delete `.oxplow/oxwiki/<slug>.md`
+  through `oxplow.extension_files.write`/`delete`; the files service resolves
+  against the project root, so a write from any worktree lands in the primary
+  checkout's folder. Slugs are kebab-case; a title makes one; a title naming an
+  existing page is refused. `oxwiki.page.restore` is their undo. A write joins
+  `oxplow/knowledge.new`, a delete `oxplow/knowledge.delete`.
+- **The collector** `pages` (`on: [start, { files: ".oxplow/oxwiki/*.md" }]`)
+  states every page file as a snapshot of the store's rows (`id`, `title` from
+  the first heading outside a code fence, `body`, `kind: note`, `updated_at`
+  from the file's mtime), so a hand edit, a new file and a deleted one
+  converge. Only files directly in the folder are pages; one bigger than 1 MiB
+  or not UTF-8 is skipped (named in the run's `problems`).
+- **Editing** in the app: the `edit-page` part, mounted on the knowledge
+  page's `sections` slot.
+- **Skills.** `oxwiki` (writing) and the `/note` command, gated on the model.
+- **Off.** Turn it off with its extension; there is no setting of its own.
+  Its pages are hidden and its files left alone; on again, the collector
+  rescans.
+- Fixtures: `extensions/oxwiki/fixtures`.
 
-**The body is in the row** (`wiki_page.body`, V125). `.oxplow/.gitignore`
-is `*`, so the workspace filter hides `.oxplow/wiki/*.md` — the file
-can't be the UI's read path. `write_page_tx` writes the body with the
-row, so the command, `link`, `resync` and the watcher's `sync_page_tx`
-all keep it; V125 cleared `body_hash` so the first boot's scan restated
-every page from its file. The file is still the page (and still written
-inside the run); the row now carries its text as well as its hash.
+## A provider or script store
 
-`oxplow_wiki_ref_drift` (MCP) shows one stale ref's diff; a pin taken by "Track changes only" (no `contents`) holds an identity and no text, so its status is `no_contents`, not an error. Bodies are searched
-with the site `oxplow_search` tool: the `wiki` search kind is an asset over
-`v_search_wiki` (tsk864), restated when `wiki_page` commits — a page
-written by command or by hand alike — reading the body from the row. The old excerpt-only
-`wiki_page_fts` mirror is gone (V125).
+A store may be any extension that fills the model — a script collector reading
+a vault, a docs server. It states its rows through a collector's `models:`
+output (`models.md`); the shared screens and the datasets above work for it
+unchanged.
 
-**The desktop** (`apps/desktop/src/knowledge.ts`) reads the index, a
-page and its freshness from these datasets and finds pages with the site
-search (`resources: ["oxplow/wiki"]`, matches marked `«…»`); every read returns what
-it read (`reads`) and every wiki surface re-reads it through
-`useRerunOnChange` (the title cache through `readsChanged`) when one of
-those datasets changes — a drifting ref re-reads the freshness rows without
-reopening the page (the Freshness page re-runs the loaders whose reads changed). The RPCs
-`list_wiki_pages`, `read_wiki_page_body`, `search_wiki_titles` and
-`list_wiki_freshness` are gone.
+## Pages
 
-## The capability
+The screens are `oxplow-bundled`'s (`.context/extensions-bundled.md` "The
+knowledge pages"):
 
-Knowledge is a **choosable, optional** capability: a project keeps its
-pages in oxplow's wiki (`oxplow:wiki`, which `oxplow-foundation` declares
-under the id `oxplow`; the wiki's pages and forms are `oxplow-bundled`'s), in a documentation system an extension's provider
-speaks to (an Obsidian vault, a Confluence or MediaWiki server), or
-nowhere. `Services.knowledge` is an `oxplow_domain::knowledge::
-KnowledgeRegistry`; `active()` is the project's choice
-(`activeProviders.knowledge`, personal over project over the default).
-`knowledge::register_built_ins` registers the wiki under each id
-declared and core's **none**, `NoneKnowledge`: a sink, as the work
-list's none is — a write lands nowhere and answers its page ref, a
-delete and a link succeed, freshness is empty — so nothing that writes
-pages is refused while no store is active, and the record reads empty.
-Bundled disabled, knowledge is none. The wiki pages list and a page's
-freshness page say "No knowledge store — choose one in Settings →
-Capabilities" when the active row is `none` (`useKnowledgeIsNone`); the
-Settings row for the wiki reads "oxplow's wiki — pages as Markdown under
-.oxplow/wiki, pinned to snapshots".
+- **Knowledge** (`knowledge`): the stores, the pages, the stale ones and
+  recent reads and writes; New page and Delete (both action points).
+- **Knowledge Page** (`for: oxplow/knowledge`): one page by its URI; the body,
+  its store, kind, freshness and cited files, Mark verified
+  (`oxplow.refs.verify`), the Edit part a store mounts.
+- **Knowledge Freshness** (`store`, `id`): the files a page cites.
 
-`oxplow_domain::knowledge::KnowledgeProvider` is a **store**: `id()`,
-`sink()` (none's `true`: it takes any page), and `write_page(call,
-draft)` / `link(call, slug, target)` → `Option<Kept { body, events }>`
-(the body as it now stands there, and events of its own — a provider's
-`knowledge.page.recorded`), `delete_page(call, slug)` →
-`Option<events>`; `None` is "kept nothing". A store never sees pins or
-snapshots: the record, links and **freshness are core's**
-(`knowledge::freshness(db, page)` over `v_knowledge_ref`, the one
-definition of staleness), the same for every store. `WikiKnowledge` is
-the wiki: it keeps `.oxplow/wiki/<slug>.md`. A provider's store is
-`providers::knowledge::ExternalKnowledge` (`.context/providers.md` "A
-knowledge provider"): its write verbs answer the page's
-`knowledge.page.recorded@2`, whose `uris` (oxplow's grammar) core links
-and pins from (`PageWrite.stated`, `page_ref_projections::stated_edges`)
-instead of parsing a body written in the store's own grammar; its
-collector's records of pages edited outside oxplow are restated by
-`providers::knowledge::KnowledgeRecords` while it is the active store.
-
-**The record is the active store's pages.** Page URIs are bare
-(`oxplow:oxplow/wiki?slug=<slug>`, no `provider` param; `.context/resources.md`), so one record can't hold two
-stores' pages: `wiki_page`, its `page_ref` slices and the touches are
-whichever store is active. `v_knowledge_page.provider` is that store
-(the active `capability_provider` row). On `capability.switched` for
-knowledge, `knowledge::KnowledgeSwitch` empties the record
-(`clear_record`; nothing in any store is touched, and the switch is the
-event) and, when the wiki is now the store, restates it from its files
-(`wiki_pages::scan_and_sync_all`); pins restart unverified, as after a
-hand edit. `knowledge::WikiFollow` (`Services.wiki`) says whether the
-wiki is the active store — by the ids `register_built_ins` registered it
-under, never by an id's name: the wiki's file watcher syncs only then
-(at boot it empties a record left from another store instead of
-scanning), and `oxplow.knowledge.resync` is refused otherwise.
-
-`knowledge_conformance::suite(svc, actor)` is what a store must do,
-checked through the commands and core's record: a write lands the page,
-its recorded body and its event; a pinned ref is fresh, goes stale when
-its file drifts, stays stale through an unverified rewrite (which still
-moves `updated_at`) and is fresh again once verified; a dangling link is
-refused, named; a link lands in the body; a delete takes the page and
-logs it. It moves the world by recording a snapshot of a file it
-changes. oxplow's wiki passes it (`the_oxplow_wiki_is_a_conforming_store`,
-as a person).
+Never a slug: a page is its `store` and `id`.

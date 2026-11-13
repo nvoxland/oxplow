@@ -12,7 +12,7 @@ import {
   vcsRevOf,
 } from "./revision.js";
 
-// P5.B2 (tsk521): a revision is the wire string Rust's `Revision` reads —
+// P5.B2: a revision is the wire string Rust's `Revision` reads —
 // `working`, `snap:<id>`, `<vcs>:<rev>` — with the ref grammar's `@rev`
 // slot (working = omitted) as its other spelling.
 

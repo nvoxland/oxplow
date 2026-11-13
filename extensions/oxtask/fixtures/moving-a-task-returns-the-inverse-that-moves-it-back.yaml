@@ -1,0 +1,15 @@
+# A dry run: the store is answered from the example.
+requires: [oxplow-bundled, oxtask]
+when:
+  command: oxtask.task.move
+  input: { id: tsk1, stage: done }
+  answers:
+    store.sql:
+      - rows: [{ stage: in_progress }]
+expect:
+  commands: [oxplow.extension_store.write]
+  result: { id: tsk1, stage: done }
+  inverse:
+    commands:
+      - name: oxtask.task.move
+        input: { id: tsk1, stage: in_progress }

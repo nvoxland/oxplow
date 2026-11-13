@@ -153,39 +153,6 @@ pub fn for_effect(
     )
 }
 
-/// The effort policy `id` reacting to `event`: as the policy's effect
-/// actor, for the event's thread and stream. `ext` is the extension that
-/// implements it, when one does (core's built-in has none).
-pub fn for_policy(
-    catalog: &ExtensionCatalog,
-    root: &Path,
-    id: &str,
-    ext: Option<&Extension>,
-    event: &StoredEvent,
-) -> RunContext {
-    let anchors = &event.envelope.anchors;
-    let actor = Actor::Effect {
-        effect: format!("effort_policy:{id}"),
-        thread_id: anchors.thread_id,
-        stream_id: anchors.stream_id,
-    };
-    let run = match ext {
-        Some(ext) => RunContext::contribution(
-            contribution(
-                catalog,
-                root,
-                ext,
-                ContributionKind::Implementation,
-                &oxplow_domain::contribution::implementation_local("effort_policy", id),
-            ),
-            actor,
-            Mode::External,
-        ),
-        None => RunContext::core(actor, Mode::External),
-    };
-    reacting(run, event)
-}
-
 /// A dry run — `extension test`, a review — of something that would run
 /// as the system: pure, nothing behind it to cause or anchor it.
 pub fn for_dry_run() -> RunContext {

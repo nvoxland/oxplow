@@ -41,7 +41,7 @@ import { TitleBar } from "./components/TitleBar.js";
 import { showToast } from "./components/toastStore.js";
 import { awaitGitOp, opErrorOf } from "./git-op.js";
 import { UndoToastStack } from "./components/UndoToast.js";
-import { identityOf, keyOf, pageUri, paramOf, parseUri, typeOf } from "./uri/uri.js";
+import { identityOf, keyOf, knowledgeUri, pageUri, paramOf, parseUri, typeOf } from "./uri/uri.js";
 import { nextMode, openWithOf, shellView, tabHint, tabLabel } from "./pages/renderers.js";
 import { chooseRenderer, chooseRoute } from "./pages/pageFiles.js";
 import { drawnByRenderer, renderersCache, useRenderers } from "./pages/useRenderers.js";
@@ -68,7 +68,7 @@ import type { PageAction } from "./kit/actions.js";
 import { LiveOriginResolver, liveItemsOf, resolvedOrigin } from "./tabs/liveOrigin.js";
 import { bookmarkedElsewhere, moveBookmark, removeBookmark, setBookmark, useBookmarks } from "./tabs/bookmarks.js";
 import type { BookmarkScope } from "./tabs/bookmarks.js";
-import { reconcileSessionTabs } from "./tabs/sessionTabs.js";
+import { reconcileSessionTabs, storedSessionIsStale } from "./tabs/sessionTabs.js";
 import { newThreadOpening } from "./newThreadSession.js";
 import { sessionLabel } from "./agentKinds.js";
 import { useAgentHarnesses } from "./useAgentHarnesses.js";
@@ -86,7 +86,7 @@ import { PanelRunsProvider } from "./components/Panels/PanelRunsContext.js";
 import { useAlerts } from "./components/Alerts/useAlerts.js";
 import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
 import { DomCommentLayer } from "./components/Comments/DomCommentLayer.js";
-import { agentSessionRef, diskFilePath, fileOf, refFromTabId, directoryRef, externalUrlRef, fileRef, gitCommitRef, pagePayload, recordedPageKind, isPage, diffRef, newSessionRef, newStreamRef, alertsRef, wikiPageRef, streamSettingsRef, threadSettingsRef, viewParamsOf, withViewParams, fileRefAt } from "./tabs/pageRefs.js";
+import { agentSessionRef, diskFilePath, fileOf, refFromTabId, directoryRef, externalUrlRef, fileRef, gitCommitRef, pagePayload, recordedPageKind, isPage, diffRef, newSessionRef, newStreamRef, alertsRef, knowledgePageRef, streamSettingsRef, threadSettingsRef, viewParamsOf, withViewParams, fileRefAt } from "./tabs/pageRefs.js";
 import { requestNewThread } from "./new-thread-bus.js";
 import { setAssistantScope } from "./components/Assistant/assistantSession.js";
 import { setSelectedThread } from "./contextBasket.js";
@@ -143,6 +143,7 @@ import { openRef as openRefAt, setWindowRefOpener } from "./tabs/openRef.js";
 import { usePersonCommands } from "./personCommandsStore.js";
 import { personCommands, setPersonCommandsOpener } from "./personCommands.js";
 import { getUiClientId, logUi, setUiLogContext } from "./logger.js";
+import { startKnowledgeStores } from "./knowledgeStores.js";
 
 /// Prompt for a folder and open it as an **existing** project.
 /// `newWindow=false` replaces the current window (this process exits
@@ -252,7 +253,7 @@ export function App() {
   // (`tabs/session.ts`), restored on start and stored on every change.
   // The strip, the bodies, history, origins and the active tab all come
   // from it (`.context/pages-and-tabs.md` "Navigation model").
-  const { sessions, update: updateSession } = useTabSessions();
+  const { sessions, update: updateSession, forget: forgetSession } = useTabSessions();
   // Per-tab page titles, keyed by tab id. Pages register their title via
   // PageNavigationContext.setTitle (the usePageTitle helper). Drives both
   // the tab strip label and the shared chrome header so the title lives in
@@ -313,6 +314,11 @@ export function App() {
     return set;
   }, []);
   const [error, setError] = useState<string | null>(null);
+  // Markdown reads `[[<store>:<id>]]` for the enabled knowledge stores:
+  // know them from the start.
+  useEffect(() => {
+    startKnowledgeStores();
+  }, []);
   // The error banner auto-dismisses; it's transient feedback (e.g. a
   // mistargeted file link), not a persistent state the user must clear.
   useEffect(() => {
@@ -863,7 +869,7 @@ export function App() {
   // The launcher (QuickOpen) is the single discovery surface — pages,
   // files, commands, and body search in one box — and has exactly one
   // shortcut: Cmd/Ctrl+P (`oxplow.window.quick_open`'s). The old
-  // Cmd+K / Cmd+Shift+F aliases were removed (tsk59): one door is
+  // Cmd+K / Cmd+Shift+F aliases were removed: one door is
   // clearer, and Cmd+P is the established dev quick-open reflex. Monaco
   // doesn't bind Cmd+P, so no capture-phase interception is needed — the
   // menu accelerator opens the launcher even when the editor is focused.
@@ -1100,15 +1106,15 @@ export function App() {
   const closeDiffTab = (id: string) => closePageTab(id);
 
 
-  const handleOpenWiki = useCallback((slug: string) => {
+  const handleOpenKnowledge = useCallback((store: string, id: string) => {
     const tid = selectedThread?.id ?? null;
     if (!tid) return;
-    openTab(wikiPageRef(slug));
+    openTab(knowledgePageRef(store, id));
     const sid = stream?.id ?? null;
     if (sid) {
       void recordUsage({
-        kind: "wiki",
-        key: slug,
+        kind: "knowledge",
+        key: knowledgeUri(store, id),
         event: "open",
         streamId: sid,
         threadId: tid,
@@ -1159,8 +1165,21 @@ export function App() {
   // The thread whose first tabs are still being opened: the window isn't
   // ready for a navigate until they are, or they would push it aside.
   const [openingThread, setOpeningThread] = useState<string | null>(null);
+  // The threads whose stored tabs were checked against their open sessions.
+  const checkedStored = useRef(new Set<string>());
   useEffect(() => {
     if (!selectedThreadId || selectedThreadSessions === null) return;
+    // Tabs the browser kept from before a project reset can name sessions the
+    // thread never had (a new thread gets an old one's id): forget them once,
+    // when the thread is first seen, and open it as a new thread.
+    const stored = sessions[selectedThreadId];
+    if (!checkedStored.current.has(selectedThreadId)) {
+      checkedStored.current.add(selectedThreadId);
+      if (stored !== undefined && storedSessionIsStale(stored, selectedThreadSessions)) {
+        forgetSession(selectedThreadId);
+        return;
+      }
+    }
     if (sessions[selectedThreadId] === undefined && selectedThreadSessions.length === 0) {
       const threadId = selectedThreadId;
       updateSession(threadId, (session) => session);
@@ -1169,7 +1188,7 @@ export function App() {
       return;
     }
     updateSession(selectedThreadId, (session) => setStrip(session, reconcileSessionTabs(refsOf(session), selectedThreadSessions)));
-  }, [selectedThreadId, selectedThreadSessions, sessions, updateSession]);
+  }, [selectedThreadId, selectedThreadSessions, sessions, updateSession, forgetSession]);
 
   async function openNewThread(threadId: string) {
     try {
@@ -1246,7 +1265,7 @@ export function App() {
     // tab already showing it, in that view.
     (openHandlerFor(handlers, typeOf(ref.id)) ?? openAsPageTab)(ref);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [handleOpenFile, handleOpenWiki, openTab, selectedThreadId, selectedThreadSessions, setCenterActive, stream?.id]);
+  }, [handleOpenFile, handleOpenKnowledge, openTab, selectedThreadId, selectedThreadSessions, setCenterActive, stream?.id]);
 
   /**
    * Open the ref `ref` (of any kind) where its kind's page says
@@ -1464,7 +1483,7 @@ export function App() {
           const tab = typeof id === "string" ? id : shown;
           const path = tab ? diskFilePath(tab) : null;
           // The page shown that isn't a file saves through its own Save
-          // (`useTabEditing`): a wiki page's draft, say.
+          // (`useTabEditing`): a knowledge page's draft, say.
           const ownSave = typeof id !== "string" && thread === selectedThreadId && tab ? tabSavesRef.current[tab] : undefined;
           if (path === null && ownSave) {
             ownSave();
@@ -1915,7 +1934,7 @@ export function App() {
     openTerminalPath,
     effectiveCenterActive,
     stream,
-    handleOpenWiki,
+    handleOpenKnowledge,
     handleOpenCommit,
     handleOpenExternalUrl,
     selectedThreadId,

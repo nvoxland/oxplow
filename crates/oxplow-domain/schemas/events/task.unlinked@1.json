@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`task.unlinked@1`: an item's link was removed\n(`oxtask.task.unlink`, or undoing a link).",
+  "properties": {
+    "link_type": {
+      "type": "string"
+    },
+    "target": {
+      "description": "What it linked to.",
+      "type": "string"
+    },
+    "task": {
+      "description": "The item linked from (`oxplow:oxplow/task?id=<id>&provider=<list>`).",
+      "type": "string"
+    }
+  },
+  "required": [
+    "task",
+    "target",
+    "link_type"
+  ],
+  "title": "TaskUnlinkedV1",
+  "type": "object"
+}

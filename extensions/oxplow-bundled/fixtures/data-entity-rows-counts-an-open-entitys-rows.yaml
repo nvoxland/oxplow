@@ -1,0 +1,9 @@
+# Open, a dataset counts its rows; the entity list itself holds it.
+requires: [oxtask]
+given:
+  - { command: oxtask.task.create, input: { title: One, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+when: { part: data-entity-rows, params: { name: v_oxplow_task } }
+expect:
+  loaders:
+    data_entity_rows: { rows: [{ rows: 1 rows }] }

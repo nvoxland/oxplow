@@ -1,7 +1,7 @@
 //! Source-scan guards over the workspace's production code (P7.B6,
 //! P8.A1, `.context/ipc-and-stores.md`): who may push which UI event, and
 //! the thin callers' generated clippy configs, which deny them every
-//! database write by type (tsk903).
+//! database write by type.
 
 mod db_writes;
 
@@ -170,7 +170,7 @@ const EMITTERS: &[(&str, &str)] = &[
     ("ConfigChanged", "crates/oxplow-app/src/lib.rs"),
     ("CredentialChanged", "crates/oxplow-app/src/commands/credentials.rs"),
     ("CredentialChanged", "crates/oxplow-app/src/providers/registry.rs"),
-    // The extension catalog's own signal (tsk1030): what extensions
+    // The extension catalog's own signal: what extensions
     // contribute isn't a dataset to re-read, and a file path was a guess.
     ("ExtensionsChanged", "crates/oxplow-app/src/boot.rs"),
     ("LspServersChanged", "crates/oxplow-app/src/commands/lsp.rs"),
@@ -241,7 +241,7 @@ fn thin_caller_clippy_toml() -> String {
          # (`thin_caller_clippy_configs_are_current`); rewrite it with\n\
          # OXPLOW_BLESS=1. The root clippy.toml's settings, then every\n\
          # database write, consent and credential call this crate may not\n\
-         # make (tsk903, .context/ipc-and-stores.md).\n\n",
+         # make (.context/ipc-and-stores.md).\n\n",
     );
     out.push_str(&base);
     out.push_str("\ndisallowed-methods = [\n");
@@ -254,7 +254,7 @@ fn thin_caller_clippy_toml() -> String {
     out
 }
 
-/// tsk903: each thin caller's clippy denies, by type, what it may not
+/// each thin caller's clippy denies, by type, what it may not
 /// call — an alias, a store built in place, a trait path or a turbofish
 /// is the same call to the compiler. The list is generated; a change to a
 /// store regenerates it.
@@ -277,7 +277,7 @@ fn thin_caller_clippy_configs_are_current() {
     );
 }
 
-/// tsk903: a write is told by what its body does, not by its name — a
+/// a write is told by what its body does, not by its name — a
 /// `get_or_create` writes, a trait's write is denied through the trait,
 /// and a read through `Database::read` (always rolled back) is a read.
 #[test]
@@ -309,7 +309,7 @@ fn the_write_classifier_tells_writes_from_reads() {
 /// the doc's table (`ipc-and-stores.md` "What stays off the bus").
 const OFF_BUS: &str = "#[expect(clippy::disallowed_methods, reason = \"off the bus: ";
 
-/// tsk785, tsk903: a thin caller's write through a store is listed off
+/// a thin caller's write through a store is listed off
 /// the bus where it is made — `#[expect]`, so it fails once it no longer
 /// writes — with a reason the doc's table gives; nothing else lifts the
 /// denial.
@@ -407,7 +407,7 @@ fn every_ui_event_has_a_listener() {
     assert_eq!(unheard, Vec::<String>::new());
 }
 
-/// tsk789: every UI event has a pinned emitter — a variant the renderer
+/// every UI event has a pinned emitter — a variant the renderer
 /// listens for that nothing sends leaves its view stale.
 #[test]
 fn every_ui_event_has_an_emitter() {
@@ -460,7 +460,7 @@ fn a_test_only_module_is_not_production() {
     assert!(!has("crates/oxplow-app/src/test_fixtures.rs"));
 }
 
-/// What marks code kept for an old shape (tsk865, tsk920): a general
+/// What marks code kept for an old shape: a general
 /// word, matched case-insensitively, and the names of shims already
 /// removed, so neither comes back under any name.
 const LEGACY_MARKERS: &[&str] = &[
@@ -521,7 +521,7 @@ fn desktop_sources() -> Vec<(String, String)> {
     out
 }
 
-/// tsk865, tsk920: no production source keeps a shim, alias or migrator
+/// no production source keeps a shim, alias or migrator
 /// for an old shape — a manifest without `manifest: 2`, a `gauges:`
 /// block, an old slot name, an old impact kind are errors, not
 /// conversions. Any line naming one (`LEGACY_MARKERS`) is either gone or
@@ -570,7 +570,7 @@ fn is_test_double(name: &str) -> bool {
     name.ends_with("-fake") || name.ends_with("-sim")
 }
 
-/// tsk930: a test double (the stand-in OAuth server signs anyone in; the
+/// a test double (the stand-in OAuth server signs anyone in; the
 /// fakes answer whatever a test scripts) is a dev-dependency only — no
 /// workspace crate reaches one through a normal or build edge of the
 /// **resolved** graph (`cargo metadata`), however its manifest spells
@@ -633,7 +633,7 @@ fn no_test_double_is_a_production_dependency() {
         "oxplow-oauth-sim",
         "oxplow-ai-fake",
         "oxplow-provider-fake",
-        // The browser suite's daemon: secrets in memory (tsk948).
+        // The browser suite's daemon: secrets in memory.
         "oxplow-daemon-sim",
     ] {
         assert!(
@@ -691,7 +691,7 @@ fn the_core_never_binds_a_socket_for_a_sign_in() {
     assert!(offenders.is_empty(), "{offenders:#?}");
 }
 
-/// tsk1018: there is no tmux in the app — agents and shells run as
+/// there is no tmux in the app — agents and shells run as
 /// direct PTYs. No tracked source, manifest, script or CI file names it.
 /// Prose (`docs/`, `.context/`, `DEV.md`) may say it's gone or suggest
 /// a person's own multiplexer; `.oxplow/` is this repo's config, not the
@@ -733,9 +733,7 @@ fn no_tmux_in_the_app() {
 /// it. Each `(file, pattern)` still here says why.
 #[rustfmt::skip]
 const SPECIAL_CASES: &[(&str, &str, &str)] = &[
-    // Reserving the name, so no provider takes oxplow's refs: no decision
-    // about how to call one.
-    ("crates/oxplow-domain/src/capability.rs", "== OXPLOW", "the reserved provider id"),
+    ("crates/oxplow-domain/src/capability.rs", "== \"oxplow\"", "the reserved provider id"),
     // The same reservation for filesystems: no extension's filesystem id
     // falls in `oxplow:`, the namespace of oxplow's own.
     ("crates/oxplow-app/src/providers/filesystems.rs", "== \"oxplow\"", "the reserved filesystem namespace"),
@@ -755,8 +753,8 @@ fn special_cases() -> BTreeSet<(String, String)> {
         "\"oxplow-bundled/",
         "\"oxplow-foundation\"",
         "\"oxplow-foundation/",
-        "== OXPLOW",
-        "!= OXPLOW",
+        "== OXTASK",
+        "!= OXTASK",
         "== \"oxplow\"",
         "!= \"oxplow\"",
         "\"oxplow\" ==",
@@ -822,8 +820,6 @@ const WORKTREE_PATH_USERS: &[(&str, &str)] = &[
     ("crates/oxplow-app/src/collection.rs", "test runs and their reports are in the worktree"),
     // The ratchet: callers that reach the filesystem themselves.
     ("crates/oxplow-app/src/change_analysis.rs", "reads a change's files directly"),
-    ("crates/oxplow-app/src/commit_links.rs", "asks git whether a commit holds an effort"),
-    ("crates/oxplow-app/src/effort_landing.rs", "asks git where an effort landed"),
     ("crates/oxplow-app/src/ref_read.rs", "`oxplow_read` reads a file at a revision and a page in the caller's worktree"),
     ("crates/oxplow-app/src/commands/agent_reads/collectors.rs", "previews a collector from the caller's worktree"),
     ("crates/oxplow-app/src/commands/agent_reads/extensions.rs", "checks an extension in the caller's worktree"),
@@ -997,44 +993,30 @@ fn a_handoff_reaches_an_agent_only_at_its_prompt() {
     assert_eq!(offenders, Vec::<String>::new());
 }
 
-/// Where oxplow's own task list — one implementation of the work-item
-/// interface (`.context/work-items.md`) — may be named in production
-/// code: its crate (`crates/oxplow-tasks`, all of it) and the files listed
-/// here. Everything else reads the interface (`v_work_item` and its views)
-/// and writes through the `work_item.*` commands,
-/// whichever list is active. Each file still here says why.
+/// Where core's old task tables may still be named in production code:
+/// the files listed here. Tasks are the task model's (`.context/tasks.md`) and
+/// core's old task tables are dropped, so nothing is listed.
 #[rustfmt::skip]
-const TASK_IMPLEMENTATION: &[(&str, &str)] = &[
-    ("crates/oxplow-app/src/work_items.rs", "the built-in factory: `oxplow:tasks` is oxplow_tasks's verbs"),
-    ("crates/oxplow-app/src/lib.rs", "wires the task stores into Services"),
-    ("crates/oxplow-dev/src/main.rs", "oxplow's own task CLI, over its tables"),
-];
-
-/// The implementation's own crate.
-const TASK_CRATE: &str = "crates/oxplow-tasks/";
+const TASK_IMPLEMENTATION: &[(&str, &str)] = &[];
 
 /// Production files outside the task crate that name oxplow's task list
 /// (comments left out).
 fn task_implementation_readers() -> BTreeSet<String> {
     const PATTERNS: &[&str] = &[
-        "oxplow_tasks",
-        "TaskId",
-        "task_of_work_item_ref",
-        "FROM task",
-        "JOIN task",
-        "task_note",
-        "task_link",
-        "v_task",
-        "SqliteTaskStore",
+        "oxplow_oxtask",
+        "OxtaskId",
+        "oxtask_of_task_ref",
+        "FROM oxtask",
+        "JOIN oxtask",
+        "oxtask_note",
+        "oxtask_link",
+        "SqliteOxtaskStore",
         "TaskService",
         "task_store",
-        "SqliteTaskNoteStore",
+        "SqliteOxtaskNoteStore",
     ];
     let mut out = BTreeSet::new();
     for (path, text) in production_sources() {
-        if path.starts_with(TASK_CRATE) {
-            continue;
-        }
         let named = text
             .lines()
             .filter(|l| !l.trim_start().starts_with("//"))
@@ -1058,7 +1040,7 @@ fn only_oxplows_implementation_names_its_task_list() {
     let gone: Vec<_> = pinned.difference(&found).collect();
     assert!(
         unlisted.is_empty() && gone.is_empty(),
-        "who names oxplow's task list changed.\nunlisted (read the work-item interface instead): {unlisted:#?}\nno longer there (drop from TASK_IMPLEMENTATION): {gone:#?}"
+        "who names oxplow's task list changed.\nunlisted (read the task interface instead): {unlisted:#?}\nno longer there (drop from TASK_IMPLEMENTATION): {gone:#?}"
     );
 }
 
@@ -1085,7 +1067,7 @@ fn hand_made_refs() -> Vec<String> {
         .collect();
     let alternation = kinds.join("|");
     // A string literal that begins with `<kind>:` and goes on (`"file:{p}"`,
-    // `"effort:"`, `strip_prefix("wiki:")`) — a prefix being written or
+    // `"request:"`, `strip_prefix("wiki:")`) — a prefix being written or
     // matched; `"file: {}"` (a message) has a space after the colon.
     let literal = Regex::new(&format!(r#"["'](?:{alternation}):[^\s]"#)).expect("a fixed pattern");
     // A ref-named value split at its colon.
@@ -1095,12 +1077,12 @@ fn hand_made_refs() -> Vec<String> {
     .expect("a fixed pattern");
     let mut out = Vec::new();
     for (path, text) in production_sources() {
-        // A work list builds its own items' refs; the grammar module is the
+        // A task tracker builds its own items' refs; the grammar module is the
         // one place a prefix is written, and a preference scope's `resource:` and
         // `component:` prefixes name a scope, not a URI.
         if path.starts_with("crates/oxplow-domain/src/uri/")
             || path == "crates/oxplow-db/src/ui_preference_store.rs"
-            || path == "crates/oxplow-tasks/src/refs.rs"
+            || path == "crates/oxplow-oxtask/src/refs.rs"
         {
             continue;
         }
@@ -1116,7 +1098,7 @@ fn hand_made_refs() -> Vec<String> {
 /// A ref's owner spells it and everyone else carries it: production code
 /// builds a ref with `oxplow_domain::uri::build` and reads one with
 /// `parse_as` / `id_of` / `parse_kind` / `Uri::parse`, never with
-/// `format!("oxplow:oxplow/effort?id=…")`, `strip_prefix("wiki:")` or a split at the colon
+/// `format!("oxplow:oxplow/request?id=…")`, `strip_prefix("wiki:")` or a split at the colon
 /// (`.context/resources.md`, "Using refs"). The kept list is empty.
 #[test]
 fn refs_are_built_and_parsed_through_the_grammar() {
@@ -1185,11 +1167,11 @@ fn hand_made_script_refs() -> Vec<String> {
         .collect();
     let alt = kinds.join("|");
     let patterns = [
-        // `"file:" + path`, `'oxplow:oxplow/effort?id=eff' || id`, `"oxplow:oxplow/page?a=&page=x" || ref`.
+        // `"file:" + path`, `'oxplow:oxplow/request?id=req' || id`, `"oxplow:oxplow/page?a=&page=x" || ref`.
         format!(r#"["'](?:{alt}):[^"'\s]*["']\s*(?:\+|\|\|)"#),
         // `x + "file:"`, `x || 'wiki:'`.
         format!(r#"(?:\+|\|\|)\s*["'](?:{alt}):"#),
-        // `startswith("oxplow:oxplow/effort?id=eff")`, `len("oxplow:oxplow/effort?id=eff")`, `length('work_item:' || …)`.
+        // `startswith("oxplow:oxplow/request?id=req")`, `len("oxplow:oxplow/request?id=req")`, `length('task:' || …)`.
         format!(r#"(?i)(?:startswith|endswith|len|length)\(\s*["'](?:{alt}):"#),
     ]
     .map(|p| Regex::new(&p).expect("a fixed pattern"));
@@ -1221,7 +1203,7 @@ fn hand_made_script_refs() -> Vec<String> {
 /// A URI's owner spells it and everyone else carries it: scripts build a
 /// URI with `uri.build` and read one with `uri.id` / `uri.parse`, and SQL
 /// selects or joins on the owning dataset's `uri` column — never
-/// `"file:" + path`, `'oxplow:oxplow/effort?id=eff' || id`, `startswith("oxplow:oxplow/effort?id=eff")`
+/// `"file:" + path`, `'oxplow:oxplow/request?id=req' || id`, `startswith("oxplow:oxplow/request?id=req")`
 /// (`.context/resources.md`, "Using refs"). The kept list is empty.
 #[test]
 fn scripts_and_sql_carry_refs_rather_than_spelling_them() {
@@ -1442,7 +1424,7 @@ fn pages_take_spec_types_from_the_spec_module() {
 /// and re-export nothing, or put it under a facade such as `extension/`.
 #[test]
 fn the_crate_root_exposes_no_more_modules() {
-    const PUB_MODS: usize = 147;
+    const PUB_MODS: usize = 130;
     let lib = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"))
         .expect("lib.rs");
     let count = lib.lines().filter(|l| l.starts_with("pub mod ")).count();

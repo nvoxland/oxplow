@@ -66,7 +66,7 @@ async fn decided(svc: &Services, contribution: &str) -> Value {
 /// is anchored to; one that uses it without declaring it doesn't load.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_collector_reads_the_tree_it_declares() {
-    let fx = crate::test_fixtures::services_with_task_effort().await;
+    let fx = crate::test_fixtures::services_with_thread().await;
     let svc = &fx.svc;
     let root = svc.layout.project_dir.clone();
     write(
@@ -122,7 +122,7 @@ async fn a_collector_reads_the_tree_it_declares() {
 /// got through: `services::tests::a_pure_run_cant_ask_a_model`.)
 #[tokio::test(flavor = "multi_thread")]
 async fn a_commands_script_cant_ask_a_model_or_read_the_tree() {
-    let fx = crate::test_fixtures::services_with_task_effort().await;
+    let fx = crate::test_fixtures::services_with_thread().await;
     let svc = &fx.svc;
     let root = svc.layout.project_dir.clone();
     let errors_with = |needs: &str, body: &str| {
@@ -163,7 +163,7 @@ async fn a_commands_script_cant_ask_a_model_or_read_the_tree() {
 /// inside its script; a pure run can't ask a model.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_fact_collector_reads_the_layer_it_declares() {
-    let fx = crate::test_fixtures::services_with_task_effort().await;
+    let fx = crate::test_fixtures::services_with_thread().await;
     let svc = &fx.svc;
     let root = svc.layout.project_dir.clone();
     write(
@@ -178,7 +178,7 @@ async fn a_fact_collector_reads_the_layer_it_declares() {
     write(
         &root,
         ".oxplow/extensions/acme/items.star",
-        "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT count(*) AS n FROM v_work_item\"})\n    return {\"facts\": [{\"measure\": \"acme.items\", \"value\": rows[0][\"n\"] + len(files(\"**\"))}]}\n",
+        "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT count(*) AS n FROM v_thread\"})\n    return {\"facts\": [{\"measure\": \"acme.items\", \"value\": rows[0][\"n\"] + len(files(\"**\"))}]}\n",
     );
     write(
         &root,
@@ -200,7 +200,7 @@ async fn a_fact_collector_reads_the_layer_it_declares() {
         .preview_fact_collector("acme", &spec("items"), files, json!({}), Mode::Pure)
         .await
         .unwrap();
-    // The task fixture's one item, and the one file it was given.
+    // The fixture's one thread, and the one file it was given.
     assert_eq!(facts[0]["value"], 2, "{facts:?}");
 
     let err = svc

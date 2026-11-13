@@ -1,0 +1,372 @@
+manifest: 2
+name: oxtask
+namespace: oxtask
+description: oxplow's own task tracker, as an extension. Tasks live in its own SQLite file and fill bundled's task_record model; its commands write the file.
+engine: ">=0.7"
+requires: [oxplow-bundled]
+intent:
+  purpose: >-
+    Hold oxplow's own task tracker as an ordinary extension with its own
+    store, so tasks stop being special to core. The tasks, their links and
+    comments are rows of the extension's SQLite file (triggers number every
+    write). A collector follows the file and fills bundled's task_record
+    model; commands write the file by composing
+    oxplow.extension_store.write and return the inverse that undoes them.
+  origin: null
+  examples:
+    - name: creating-a-task-puts-a-row-in-the-model-with-its-bucket-and-priority
+      input: { command: oxtask.task.create }
+      expect: a row with the stage, its bucket as state and the priority field
+    - name: moving-a-task-changes-its-bucket-and-closing-sets-closed-at
+      input: { command: oxtask.task.move }
+      expect: the row's state follows the stage
+    - name: updating-a-task-changes-its-fields-and-undo-restores-them
+      input: { command: oxtask.task.update }
+      expect: the fields change, and undo puts the old ones back
+    - name: linking-and-unlinking-restate-the-links-of-the-task
+      input: { command: oxtask.task.link }
+      expect: the task's links child rows follow
+    - name: commenting-adds-a-comment-to-the-task
+      input: { command: oxtask.task.comment }
+      expect: the comment is a row of the comments child
+    - name: deleting-a-task-removes-its-row-and-undo-brings-it-back
+      input: { command: oxtask.task.delete }
+      expect: the row goes, and undo returns it with its children
+    - name: setting-the-task-workflow-keeps-the-definition-of-done
+      input: { command: oxtask.tasks.set_workflow }
+      expect: the project's workflow and definition of done are written, each alone or together
+    - name: next-task-offers-the-ready-items-or-the-first-epic-with-its-children
+      input: { page: next-task }
+      expect: the thread's ready items in its queue's order, else the pool
+    - name: a-request-that-changes-files-with-no-task-in-progress-is-reminded-once
+      input: { advisory: untracked-work }
+      expect: the agent is reminded once per request, in the agent_tracks workflow only
+    - name: task-state-tells-the-agent-its-task-whats-next-and-what-done-means
+      input: { context: task-state }
+      expect: the thread's task in progress, the next three and the definition of done
+permissions: ['commands:oxplow.extension_store.write', sql.read, agent.write]
+storage: { sqlite: true }
+datasets:
+  - name: ready_queue
+    version: 1
+    description: "What to pick up next, as `next-task` picks it. Ready means `todo` with no open blocker. Per thread: its assigned ready items in its queue's order; when the first is an epic, it and its ready descendants as one unit (`role` `epic`, `child`), else every ready one that isn't an epic (`ready`). The pool (`thread_id` NULL, `role` `pool`): ready items assigned to nobody that aren't epics, the most pressing first."
+    fields:
+      - { name: thread_id, type: INTEGER, doc: "The thread whose queue it is in (v_thread.id); NULL for the pool." }
+      - { name: uri, type: TEXT, doc: "The task." }
+      - { name: title, type: TEXT, doc: "Its title." }
+      - { name: native_id, type: TEXT, doc: "Its tracker's own id (`tsk42`)." }
+      - { name: role, type: TEXT, doc: "`epic`, `child`, `ready` or `pool`." }
+      - { name: ord, type: NUM, doc: "Its place: 1 is next." }
+  - name: task_workflow
+    version: 1
+    description: "How this project's agents use tasks (oxtask's setting, one row): `workflow` is `agent_tracks` (the agent tracks everything), `person_files` (the person files, the agent works them), `custom` (the project's own extension says) or `off`; `definition_of_done` is the project's text, empty for none. Set with `oxtask.tasks.set_workflow`."
+    fields:
+      - { name: workflow, type: TEXT, doc: "`agent_tracks`, `person_files`, `custom` or `off`." }
+      - { name: definition_of_done, type: TEXT, doc: "What done means here, one item per line; empty for none." }
+configuration:
+  version: 1
+  schema:
+    type: object
+    additionalProperties: false
+    properties:
+      tasks:
+        type: object
+        additionalProperties: false
+        description: How this project's agents use oxtask's tasks.
+        properties:
+          workflow:
+            type: string
+            enum: [off, person_files, agent_tracks, custom]
+            description: "off: oxtask tells agents nothing about tasks (the tracker's own commands stay); person_files: the agent works the tasks people file and assign; agent_tracks: the agent takes or files a task for each piece of work; custom: the project's own extension says how."
+          definitionOfDone:
+            type: string
+            maxLength: 1000
+            description: "What done means here, one item per line (tests pass, committed, …); the agent checks it before closing a task. Empty for none."
+  defaults:
+    tasks: { workflow: agent_tracks, definitionOfDone: "" }
+fills:
+  - model: oxplow/task_record
+    stores: [oxtask]
+    id_pattern: "tsk[0-9]+"
+    stages:
+      - { id: backlog, title: Backlog, bucket: backlog }
+      - { id: ready, title: Ready, bucket: todo }
+      - { id: in_progress, title: In Progress, bucket: in_progress }
+      - { id: blocked, title: Blocked, bucket: blocked }
+      - { id: done, title: Done, bucket: done }
+      - { id: canceled, title: Canceled, bucket: canceled }
+    fields:
+      - { name: priority, title: Priority, kind: enum, values: [urgent, high, medium, low] }
+      - { name: author, title: Author, kind: text, read_only: true }
+      - { name: author_kind, title: Author kind, kind: enum, values: [person, agent, system], read_only: true }
+effects:
+  - id: repair-disabled
+    summary: When an extension's contribution is disabled after repeated failures, file one repair task for it (comment on it while it is open). A person or an agent they ask repairs it; oxplow never sends it.
+    on: [contribution.disabled]
+    entry: effects/repair_disabled.star
+    needs: [sql.read]
+collectors:
+  - id: tasks
+    doc: Reads the task tables of this extension's file and states the tasks of the oxtask store, each with its links and comments.
+    runtime: starlark
+    entry: collectors/tasks.star
+    needs: [store.sql]
+    on: [start, { sqlite: own }]
+commands:
+  # oxtask's settings (`configuration:` above): read with their stamps,
+  # written as a compare-and-swap on them.
+  - name: settings.read
+    summary: The effective settings of oxtask (the task workflow and the definition of done), where each came from, and the stamps a write needs.
+    scope: extension_config.read
+    op: snapshot
+    example: {}
+  - name: settings.write
+    summary: Set the project or personal settings of oxtask (a compare-and-swap on the stamps `oxtask.settings.read` returns).
+    scope: extension_config.write
+    op: compare_exchange
+    example: {"schema_version": 1, "project": {"expected": {"schema_version": 1, "revision": 0}, "values": {"tasks": {"workflow": "person_files"}}}, "personal": null}
+  - name: tasks.set_workflow
+    summary: "Choose how this project's agents use tasks (off, person files and the agent works them, the agent tracks everything, or the project's own way) and what \"done\" means here, for the project. The task state and the reminder follow at the next prompt; the skills offered change for agent sessions started after it. A person's own setting of the workflow, when there is one, still wins for them (the result says so)."
+    input_schema:
+      type: object
+      properties:
+        workflow: { type: string, enum: [off, person_files, agent_tracks, custom], description: "The workflow preset." }
+        definition_of_done: { type: string, contentMediaType: text/markdown, maxLength: 1000, description: "What done means here, one item per line; empty for none." }
+      minProperties: 1
+      additionalProperties: false
+    example: {"workflow": "person_files", "definition_of_done": "Tests pass.\nCommitted."}
+    entry: handlers/set_workflow.star
+    needs: [extension_config.read]
+    access: write
+  - name: task.create
+    summary: File a task. The result names its id (tsk and a number); undo deletes it. Its author is who runs the command.
+    input_schema:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string, minLength: 1 }
+        body: { type: string }
+        stage: { type: string, enum: [backlog, ready, in_progress, blocked, done, canceled] }
+        parent: { type: string, pattern: "^tsk[0-9]+$" }
+        priority: { type: string, enum: [urgent, high, medium, low] }
+        links:
+          type: array
+          items:
+            type: object
+            required: [to, type]
+            properties:
+              to: { type: string }
+              type: { type: string, enum: [blocks, discovered_from, relates_to, duplicates, supersedes, replies_to, about] }
+            additionalProperties: false
+      additionalProperties: false
+    entry: handlers/create.star
+    needs: [store.sql]
+    access: write
+    ui: { label: New Task, group: Tasks, at: oxplow/task.new, form: "oxplow:oxplow/page?page=oxtask/new-task", open_after: "oxplow:oxplow/task?id={{result.id}}&provider=oxtask" }
+    example: { title: Fix the greeting, stage: ready, priority: high }
+  - name: task.update
+    summary: Change a task's title, body, priority or parent (null clears the last three). Undo puts the old values back.
+    input_schema:
+      type: object
+      required: [id]
+      properties:
+        id: { type: string, pattern: "^tsk[0-9]+$" }
+        title: { type: string, minLength: 1 }
+        body: { type: [string, "null"] }
+        priority: { type: [string, "null"], enum: [urgent, high, medium, low, null] }
+        parent: { type: [string, "null"], pattern: "^tsk[0-9]+$" }
+      additionalProperties: false
+    entry: handlers/update.star
+    needs: [store.sql]
+    access: write
+    ui:
+      label: Edit Task
+      group: Tasks
+      at: oxplow/task.edit
+      accepts: { store: oxtask }
+      input:
+        id: "{{uri.id}}"
+        title: "{{context.title}}"
+        body: "{{context.body}}"
+        parent: "{{context.parent.id}}"
+    example: { id: tsk1, title: A clearer title }
+  - name: task.unparent
+    summary: Make a task top-level (it leaves its epic). Undo puts it back under it.
+    input_schema:
+      type: object
+      required: [id]
+      properties:
+        id: { type: string, pattern: "^tsk[0-9]+$" }
+      additionalProperties: false
+    entry: handlers/unparent.star
+    needs: [store.sql]
+    access: write
+    ui: { label: Make Top-level, group: Tasks, at: oxplow/task.unparent, accepts: { store: oxtask }, input: { id: "{{uri.id}}" } }
+    example: { id: tsk2 }
+  - name: task.move
+    summary: Put a task in a stage. done and canceled close it. Undo moves it back.
+    input_schema:
+      type: object
+      required: [id, stage]
+      properties:
+        id: { type: string, pattern: "^tsk[0-9]+$" }
+        stage: { type: string, enum: [backlog, ready, in_progress, blocked, done, canceled] }
+      additionalProperties: false
+    entry: handlers/move.star
+    needs: [store.sql]
+    access: write
+    ui: { label: Move, group: Tasks, at: oxplow/task.move, accepts: { store: oxtask }, input: { id: "{{uri.id}}", stage: "{{context.stage}}" } }
+    example: { id: tsk1, stage: in_progress }
+  - name: task.link
+    summary: Link a task to another task (its id) or any URI, with a type. Undo removes the link.
+    input_schema:
+      type: object
+      required: [id, to, type]
+      properties:
+        id: { type: string, pattern: "^tsk[0-9]+$" }
+        to: { type: string, minLength: 1 }
+        type: { type: string, enum: [blocks, discovered_from, relates_to, duplicates, supersedes, replies_to, about] }
+      additionalProperties: false
+    entry: handlers/link.star
+    needs: [store.sql]
+    access: write
+    ui: { label: Link…, group: Tasks, at: oxplow/task.link, about: { resource: oxplow/task, accepts: { store: oxtask } }, form: "oxplow:oxplow/page?page=oxtask/link-task" }
+    example: { id: tsk1, to: tsk2, type: blocks }
+  - name: task.unlink
+    summary: Remove a link from a task. Undo links it again.
+    input_schema:
+      type: object
+      required: [id, to, type]
+      properties:
+        id: { type: string, pattern: "^tsk[0-9]+$" }
+        to: { type: string, minLength: 1 }
+        type: { type: string, enum: [blocks, discovered_from, relates_to, duplicates, supersedes, replies_to, about] }
+      additionalProperties: false
+    entry: handlers/unlink.star
+    needs: [store.sql]
+    access: write
+    ui: { label: Unlink, group: Tasks, at: oxplow/task.unlink, accepts: { store: oxtask }, input: { id: "{{uri.id}}", to: "{{context.to}}", type: "{{context.type}}" } }
+    example: { id: tsk1, to: tsk2, type: blocks }
+  - name: task.comment
+    summary: Add a comment to a task. The result names the comment's id (cmt and a number); undo removes it. Its author is who runs the command.
+    input_schema:
+      type: object
+      required: [id, body]
+      properties:
+        id: { type: string, pattern: "^tsk[0-9]+$" }
+        body: { type: string, minLength: 1 }
+      additionalProperties: false
+    entry: handlers/comment.star
+    needs: [store.sql]
+    access: write
+    ui: { label: Comment…, group: Tasks, at: oxplow/task.comment, about: { resource: oxplow/task, accepts: { store: oxtask } }, form: "oxplow:oxplow/page?page=oxtask/comment-on-task" }
+    example: { id: tsk1, body: Reproduced on main. }
+  - name: task.uncomment
+    summary: Remove a comment from its task. It is the undo of task.comment.
+    input_schema:
+      type: object
+      required: [comment]
+      properties:
+        comment: { type: string, pattern: "^cmt[0-9]+$" }
+      additionalProperties: false
+    entry: handlers/uncomment.star
+    access: write
+    example: { comment: cmt1 }
+  - name: task.delete
+    summary: Delete a task (it can be restored). Undo restores it.
+    input_schema:
+      type: object
+      required: [id]
+      properties:
+        id: { type: string, pattern: "^tsk[0-9]+$" }
+      additionalProperties: false
+    entry: handlers/delete.star
+    needs: [store.sql]
+    access: write
+    confirm: destructive
+    ui: { label: Delete Task, group: Tasks, at: oxplow/task.delete, about: { resource: oxplow/task, accepts: { store: oxtask } }, input: { id: "{{uri.id}}" } }
+    example: { id: tsk1 }
+  - name: task.restore
+    summary: Bring a deleted task back. It is the undo of task.delete.
+    input_schema:
+      type: object
+      required: [id]
+      properties:
+        id: { type: string, pattern: "^tsk[0-9]+$" }
+      additionalProperties: false
+    entry: handlers/restore.star
+    needs: [store.sql]
+    access: write
+    example: { id: tsk1 }
+ui:
+  mounts:
+    # Edit an oxtask task in place on the shared task page (empty on another
+    # store's task).
+    - { page: edit-task, at: oxplow/task-detail.sections, position: { before: links }, title: Edit }
+    # Settings → Integrations: how this project's agents use tasks.
+    - { page: task-workflow-settings, at: oxplow/settings.integrations }
+# How an agent uses tasks is the project's task workflow (`tasks.workflow`):
+# `off` offers none of these; `custom` only the queue, the project's own
+# skill saying the rest. The `oxtask` skill teaches the commands; it is
+# offered while the model has a live store.
+skills:
+  - { name: oxtask, file: skills/oxtask/SKILL.md, needs: [model:oxplow/task_record] }
+  - { name: next-task, kind: command, file: commands/next-task.md, needs: [model:oxplow/task_record], when: { config: /tasks/workflow, in: [person_files, agent_tracks, custom] } }
+  # The agent tracks what it works on as tasks (the default).
+  - { name: track-work, file: skills/track-work/SKILL.md, needs: [model:oxplow/task_record], when: { config: /tasks/workflow, in: [agent_tracks] } }
+  # The person files the tasks; the agent works them.
+  - { name: work-tasks, file: skills/work-tasks/SKILL.md, needs: [model:oxplow/task_record], when: { config: /tasks/workflow, in: [person_files] } }
+# What the agent should know now, while the project's workflow uses tasks:
+# the thread's task in progress, the next three in its queue, and the
+# project's definition of done; nothing when there is none of them (core
+# tells an agent that was told before that it no longer holds). Sent once,
+# then on change, and again after a compaction.
+context:
+  - id: task-state
+    doc: "The thread's task in progress, the next three in its queue, and the project's definition of done."
+    needs: [model:oxplow/task_record]
+    when: { config: /tasks/workflow, in: [person_files, agent_tracks, custom] }
+    query: |
+      WITH here AS (SELECT uri('oxplow/thread', 'id', 'thr' || :thread_id) AS uri),
+      mine AS (
+        SELECT w.title, w.native_id, w.state, w.rank, w.created_at
+        FROM v_oxplow_task w, here WHERE w.assignee = here.uri
+      ),
+      active AS (
+        SELECT group_concat('"' || title || '" (' || native_id || ')', ', ') AS s
+        FROM (SELECT * FROM mine WHERE state = 'in_progress' ORDER BY rank IS NULL, rank, created_at)
+      ),
+      up_next AS (
+        SELECT group_concat('"' || title || '" (' || native_id || ')', ', ') AS s
+        FROM (SELECT title, native_id FROM v_oxtask_ready_queue
+              WHERE thread_id = :thread_id ORDER BY ord LIMIT 3)
+      ),
+      done_means AS (SELECT trim(definition_of_done) AS d FROM v_oxtask_task_workflow)
+      SELECT coalesce('In progress on this thread: ' || active.s || '.', 'Nothing is in progress on this thread.')
+             || coalesce(char(10) || 'Up next: ' || up_next.s || '.', '')
+             || CASE WHEN done_means.d <> '' THEN char(10) || 'Done means:' || char(10) || done_means.d ELSE '' END AS text
+      FROM active, up_next, done_means
+      WHERE (active.s IS NOT NULL OR up_next.s IS NOT NULL OR done_means.d <> '')
+advisories:
+  # The `track-work` skill's opinion: an agent tracks what it works on as
+  # tasks. At the first edit of a request (a file an edit call named or the
+  # harness reported a shell call changed), while the thread has no task in
+  # progress and the request has no task linked (an agent that took a task,
+  # edited and moved it to done did everything right), the agent is
+  # reminded once per request, in the same turn.
+  - id: untracked-work
+    on: post-tool-use
+    once_per: request
+    query: |
+      SELECT 'This request changed files, and no task is in progress on this thread. If it is '
+             || 'work the person will want to see on the Work panel, take or file its task and '
+             || 'move it to in progress (the `track-work` skill); a small fix needs none.' AS message
+      WHERE :request_id IS NOT NULL
+        -- Only in the workflow where the agent tracks everything.
+        AND config('/tasks/workflow') = 'agent_tracks'
+        AND EXISTS (SELECT 1 FROM v_model_stage WHERE model = 'oxplow/task_record')
+        AND EXISTS (SELECT 1 FROM v_tool_call_path p JOIN v_agent_turn t ON t.id = p.turn_id
+                     WHERE t.request_id = :request_id)
+        AND NOT EXISTS (SELECT 1 FROM v_oxplow_request_link rt WHERE rt.request_id = :request_id)
+        AND NOT EXISTS (SELECT 1 FROM v_oxplow_task w JOIN v_thread th ON th.uri = w.assignee
+                         WHERE th.id = :thread_id AND w.state = 'in_progress')

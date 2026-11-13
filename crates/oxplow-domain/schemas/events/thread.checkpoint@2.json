@@ -13,7 +13,7 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`thread.checkpoint@2`: a point in a thread's work oxplow observed, with\nwhat changed since the turn began — what an effort policy reacts to\nwithout reading snapshots or harness tool names\n(`.context/work-tracking.md`). Logged by the `thread.checkpoint`\nconsumer once a turn's end take lands.",
+  "description": "`thread.checkpoint@2`: a point in a thread's work oxplow observed, with\nwhat changed since the turn began — what a reactor reacts to without\nreading snapshots or harness tool names\n(`.context/work-tracking.md`). Logged by the `thread.checkpoint`\nconsumer once a turn's end take lands.",
   "properties": {
     "changed": {
       "description": "The worktree differs from where the turn began.",

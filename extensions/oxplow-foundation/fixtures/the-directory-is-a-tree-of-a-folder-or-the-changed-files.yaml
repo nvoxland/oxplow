@@ -15,9 +15,13 @@ steps:
   # Another filesystem has no changes to show: only all files.
   - when: { query: oxplow/files-scopes, params: { stream_id: 1, filesystem: "oxplow:extensions" } }
     expect: { rows: [{ value: all }] }
-  # The working tree scope names a working change.
+  # The working tree scope reads the working change (`target` ''): its
+  # changed files, untracked ones too.
   - when: { page: oxplow/directory, params: { stream_id: 1, scope: uncommitted } }
-    expect: { loaders: { row: { rows: [{ change_kind: working, is_local: 1 }] } } }
+    expect:
+      loaders:
+        row: { rows: [{ is_local: 1, show: changed_untracked }] }
+        range: { rows: [{ change_target: '' }] }
   # All files, a folder at a time; only all-files folders open lazily.
   - when: { page: oxplow/directory, params: { stream_id: 1, scope: all, path: "" } }
     expect:
@@ -33,7 +37,7 @@ steps:
       loaders:
         tree:
           rows:
-            - { name: new.rs, parent: src, target: "oxplow:oxplow/file?path=src/new.rs" }
+            - { path: src/new.rs, name: new.rs, target: "oxplow:oxplow/file?path=src/new.rs" }
   # Compare with a branch: files open a diff against it.
   - when: { page: oxplow/directory, params: { stream_id: 1, scope: all, compare: main, folder: src } }
     expect:
@@ -41,15 +45,15 @@ steps:
         tree:
           rows:
             - { name: new.rs, target: "oxplow:oxplow/page?label=main..working&left=git:main&page=diff&path=src/new.rs&right=working" }
-  # Only the changed files: nested, each opening a diff.
+  # Only the changed files, as paths (the tree makes their folders), each
+  # opening a diff.
   - when: { page: oxplow/directory, params: { stream_id: 1, scope: uncommitted, path: "" } }
     expect:
       loaders:
         tree:
           rows:
             contains:
-              - { id: src }
-              - { id: src/new.rs, parent: src, target: $any }
+              - { path: src/new.rs, status: untracked, target: $any }
   # The launcher's Files page is this page at the worktree's root.
   - when: { page: oxplow/files, params: { stream_id: 1, scope: all } }
     expect:

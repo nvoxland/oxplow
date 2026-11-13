@@ -1,7 +1,9 @@
 # A card's title is its own form: Enter saves, an empty one is refused
 # under the input, Escape puts the title back.
+requires: [oxtask]
 given:
-  - { command: oxplow.work_item.create, input: { title: Card one, thread: thr1 } }
+  - { command: oxtask.task.create, input: { title: Card one, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
 when: { part: swimlanes, params: { scope: all } }
 steps:
   - ui:
@@ -10,7 +12,7 @@ steps:
       - key: { on: "input.ox-input", key: Enter }
       - expect:
           visible: [".ox-error"]
-          invoked: [{ command: oxplow.work_item.update, ok: false }]
+          invoked: [{ point: oxplow/task.edit, ok: false }]
       - key: { on: "input.ox-input", key: Escape }
       - expect: { text: { ".card .title": Card one } }
       - click: ".card .title"
@@ -18,4 +20,4 @@ steps:
       - key: { on: "input.ox-input", key: Enter }
       - expect:
           text: { ".card .title": Card renamed }
-          invoked: [{ command: oxplow.work_item.update, ok: false }, { command: oxplow.work_item.update, ok: true }]
+          invoked: [{ point: oxplow/task.edit, ok: false }, { point: oxplow/task.edit, ok: true }]

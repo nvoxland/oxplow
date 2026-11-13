@@ -1,0 +1,14 @@
+# The knowledge page's body is a replaceable target bound to the page's own
+# store (`knowledge.detail.body`): for an oxwiki page oxwiki's edit part runs
+# in its place, so the one body saves the text; another store's page keeps
+# oxplow's read-only text and runs no editor.
+requires: [oxwiki]
+given:
+  - { command: oxwiki.page.write, input: { title: Gerbils, body: "# Gerbils\n\nThey dig.\n" } }
+when: { page: knowledge-page, params: { uri: "oxplow:oxplow/knowledge?id=gerbils&store=oxwiki", store: oxwiki, id: gerbils } }
+expect:
+  loaders:
+    body/body: { rows: [{ id: gerbils, title: Gerbils }] }
+steps:
+  - params: { uri: "oxplow:oxplow/knowledge?id=gerbils&store=elsewhere", store: elsewhere, id: gerbils }
+    expect: { loaders: { body: { rows: 0 } } }

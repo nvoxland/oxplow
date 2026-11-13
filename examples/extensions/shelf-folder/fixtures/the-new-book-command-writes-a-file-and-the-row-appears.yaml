@@ -1,0 +1,8 @@
+# The command's own write is observed at once: the row is in the model as
+# soon as the command returns.
+requires: [shelf, shelf-folder]
+when: { command: shelf_folder.book.new, input: { title: "Dune Messiah", body: "Next." } }
+expect: { ok: true, result: { path: "shelf/dune-messiah.md" } }
+steps:
+  - when: { sql: "SELECT id, title, store FROM v_shelf_book" }
+    expect: { rows: [{ id: dune-messiah, title: Dune Messiah, store: shelf-folder }] }

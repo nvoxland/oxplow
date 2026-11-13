@@ -1,0 +1,18 @@
+requires: [oxplow-bundled, oxtask]
+given:
+  - { command: oxtask.task.create, input: { title: A } }
+  - { command: oxtask.task.comment, input: { id: tsk1, body: Kept } }
+when: { command: oxtask.task.delete, input: { id: tsk1 }, confirmed: true }
+expect: { ok: true }
+steps:
+  - when: { sql: "SELECT count(*) AS n FROM v_oxplow_task_record" }
+    expect: { rows: [{ n: 0 }] }
+  - when:
+      sql: "SELECT json_extract(payload, '$.op') AS op FROM v_event WHERE type = 'oxplow.task_record.changed' ORDER BY seq DESC LIMIT 1"
+    expect: { rows: [{ op: removed }] }
+  - when: { undo: oxtask.task.delete }
+    expect: { ok: true }
+  - when: { sql: "SELECT id, title FROM v_oxplow_task_record" }
+    expect: { rows: [{ id: tsk1, title: A }] }
+  - when: { sql: "SELECT body FROM v_oxplow_task_record_comments" }
+    expect: { rows: [{ body: Kept }] }

@@ -15,16 +15,19 @@ use super::oxplow_uri::{OxplowUri, ResourceName};
 pub const PROJECT: &str = "oxplow/project";
 pub const STREAM: &str = "oxplow/stream";
 pub const THREAD: &str = "oxplow/thread";
-pub const EFFORT: &str = "oxplow/effort";
+pub const PERSON: &str = "oxplow/person";
 pub const TURN: &str = "oxplow/turn";
+pub const REQUEST: &str = "oxplow/request";
 pub const SNAPSHOT: &str = "oxplow/snapshot";
 pub const COMMIT: &str = "oxplow/commit";
 pub const BRANCH: &str = "oxplow/branch";
 pub const FILE: &str = "oxplow/file";
 pub const DIR: &str = "oxplow/dir";
 pub const SYMBOL: &str = "oxplow/symbol";
-pub const WORK_ITEM: &str = "oxplow/work_item";
-pub const WIKI: &str = "oxplow/wiki";
+pub const TASK: &str = "oxplow/task";
+/// A knowledge store's page: `store` (the store's id) and `id` (the
+/// store's own page id).
+pub const KNOWLEDGE: &str = "oxplow/knowledge";
 pub const COMMENT: &str = "oxplow/comment";
 pub const EVENT: &str = "oxplow/event";
 pub const PAGE: &str = "oxplow/page";
@@ -41,8 +44,6 @@ pub const TERMINAL: &str = "oxplow/terminal";
 pub const SUBAGENT: &str = "oxplow/subagent";
 pub const RUN: &str = "oxplow/run";
 pub const PROPOSAL: &str = "oxplow/proposal";
-pub const CLAIM: &str = "oxplow/claim";
-pub const DECISION: &str = "oxplow/decision";
 pub const COLLECTOR: &str = "oxplow/collector";
 pub const JOB_RUN: &str = "oxplow/job_run";
 pub const AI_CALL: &str = "oxplow/ai_call";
@@ -232,65 +233,116 @@ struct Entry {
 pub struct ResourceRegistry {
     resources: BTreeMap<ResourceName, Entry>,
     wikilinks: BTreeMap<String, ResourceName>,
-    /// The active work list's own ids, when it declares them: what makes a
-    /// loose `tsk42` (or `ENG-12`) in text one of its items.
-    work_item_ids: Option<WorkItemIds>,
+    /// The task stores' own ids, as each declares them: what makes a loose
+    /// `tsk42` (or `ENG-12`) in text one of a store's items. The first told
+    /// of wins an id two would match.
+    task_ids: Vec<TaskIds>,
+    /// The knowledge stores (the stores of the knowledge model), each with
+    /// how its page ids look when it says: what makes `[[<store>:<id>]]`, and
+    /// a bare `[[slug]]` its pattern matches, one of its pages. The first
+    /// told of wins a bare id two would match.
+    knowledge_ids: Vec<KnowledgeIds>,
 }
 
-/// A work list's ids, as it declares them (`WorkItemsProvider::id_pattern`).
+/// A knowledge store and how its page ids look, as its fill declares them.
 #[derive(Debug, Clone)]
-struct WorkItemIds {
+struct KnowledgeIds {
+    store: String,
+    /// The pattern, matched whole; none: only `[[<store>:<id>]]` names its pages.
+    whole: Option<Regex>,
+}
+
+/// A task tracker's ids, as it declares them (`TaskTracker::id_pattern`).
+#[derive(Debug, Clone)]
+struct TaskIds {
     provider: String,
     /// The pattern, matched whole.
     whole: Regex,
 }
 
 impl ResourceRegistry {
-    /// This registry recognizing `provider`'s ids (`pattern`, a regex
-    /// matched whole): the active work list's, set by the app.
-    pub fn with_work_item_ids(
-        mut self,
-        provider: &str,
-        pattern: &str,
-    ) -> Result<Self, ResourceError> {
+    /// This registry also recognizing `provider`'s ids (`pattern`, a regex
+    /// matched whole), after those it already does: set by the app.
+    pub fn with_task_ids(mut self, provider: &str, pattern: &str) -> Result<Self, ResourceError> {
         let whole =
             Regex::new(&format!("^(?:{pattern})$")).map_err(|e| ResourceError::BadPattern {
-                resource: WORK_ITEM.into(),
+                resource: TASK.into(),
                 param: "id".into(),
                 error: e.to_string(),
             })?;
-        self.work_item_ids = Some(WorkItemIds {
+        self.task_ids.push(TaskIds {
             provider: provider.into(),
             whole,
         });
         Ok(self)
     }
 
-    /// This registry recognizing no work list's ids (none is active, or the
-    /// active one declares none).
-    pub fn without_work_item_ids(mut self) -> Self {
-        self.work_item_ids = None;
+    /// This registry recognizing no task store's ids.
+    pub fn without_task_ids(mut self) -> Self {
+        self.task_ids.clear();
         self
     }
 
-    /// `text`, whole, as one of the active work list's ids: that item's URI.
-    pub fn work_item_uri_of(&self, text: &str) -> Option<String> {
-        let ids = self.work_item_ids.as_ref()?;
-        ids.whole
-            .is_match(text)
-            .then(|| super::build::work_item_uri(&ids.provider, text))
+    /// This registry also recognizing `store`'s pages: `[[<store>:<id>]]`,
+    /// and a bare `[[id]]` when `pattern` (a regex matched whole) says it is
+    /// one of its ids. Set by the app from the knowledge model's fills.
+    pub fn with_knowledge_store(
+        mut self,
+        store: &str,
+        pattern: Option<&str>,
+    ) -> Result<Self, ResourceError> {
+        let whole = pattern
+            .map(|p| Regex::new(&format!("^(?:{p})$")))
+            .transpose()
+            .map_err(|e| ResourceError::BadPattern {
+                resource: KNOWLEDGE.into(),
+                param: "id".into(),
+                error: e.to_string(),
+            })?;
+        self.knowledge_ids.push(KnowledgeIds {
+            store: store.into(),
+            whole,
+        });
+        Ok(self)
     }
 
-    /// Every token of `text` that is one of the active work list's ids — a
+    /// This registry recognizing no knowledge store.
+    pub fn without_knowledge_stores(mut self) -> Self {
+        self.knowledge_ids.clear();
+        self
+    }
+
+    /// Whether `id` is one of the knowledge stores this registry recognizes.
+    pub fn is_knowledge_store(&self, id: &str) -> bool {
+        self.knowledge_ids.iter().any(|k| k.store == id)
+    }
+
+    /// `text`, whole, as one of a knowledge store's page ids: that page's URI.
+    pub fn knowledge_uri_of(&self, text: &str) -> Option<String> {
+        self.knowledge_ids
+            .iter()
+            .find(|k| k.whole.as_ref().is_some_and(|w| w.is_match(text)))
+            .map(|k| super::build::knowledge_uri(&k.store, text))
+    }
+
+    /// `text`, whole, as one of a task store's ids: that item's URI.
+    pub fn task_uri_of(&self, text: &str) -> Option<String> {
+        self.task_ids
+            .iter()
+            .find(|ids| ids.whole.is_match(text))
+            .map(|ids| super::build::task_uri(&ids.provider, text))
+    }
+
+    /// Every token of `text` that is one of the active task tracker's ids — a
     /// token being a run of letters, digits, `_` and `-` — as its item's
     /// URI, in order, each once.
-    pub fn find_work_item_uris(&self, text: &str) -> Vec<String> {
-        if self.work_item_ids.is_none() {
+    pub fn find_task_uris(&self, text: &str) -> Vec<String> {
+        if self.task_ids.is_empty() {
             return Vec::new();
         }
         let mut out: Vec<String> = Vec::new();
         for token in text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '-')) {
-            if let Some(uri) = self.work_item_uri_of(token) {
+            if let Some(uri) = self.task_uri_of(token) {
                 if !out.contains(&uri) {
                     out.push(uri);
                 }
@@ -422,6 +474,26 @@ pub fn foundation() -> &'static ResourceRegistry {
     &REGISTRY
 }
 
+/// `registry` with the `oxplow/knowledge` resource, which oxplow-bundled
+/// declares: for a test of core code that boots no extension and still
+/// names a knowledge page.
+#[doc(hidden)]
+pub fn with_bundled_knowledge(mut registry: ResourceRegistry) -> ResourceRegistry {
+    let manifest: serde_yaml::Value = serde_yaml::from_str(include_str!(
+        "../../../../extensions/oxplow-bundled/extension.yaml"
+    ))
+    .expect("oxplow-bundled's manifest is YAML");
+    let entry = manifest["resources"]
+        .as_sequence()
+        .and_then(|all| all.iter().find(|e| e["name"] == "knowledge"))
+        .expect("oxplow-bundled declares the knowledge resource");
+    let entry: ResourceEntry = serde_yaml::from_value(entry.clone()).expect("a resources: entry");
+    registry
+        .register(entry.into_decl("oxplow").expect("a resource name"))
+        .expect("the knowledge resource registers");
+    registry
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -454,7 +526,7 @@ mod tests {
 
     fn registry() -> ResourceRegistry {
         let mut r = ResourceRegistry::default();
-        r.register(decl("oxplow/effort", &[("id", true, Some(r"^eff\d+$"))]))
+        r.register(decl("oxplow/request", &[("id", true, Some(r"^req\d+$"))]))
             .unwrap();
         r.register(decl(
             "oxplow/file",
@@ -478,7 +550,7 @@ mod tests {
 
     #[test]
     fn a_uri_names_a_declared_resource_with_the_params_it_takes() {
-        assert_eq!(check("oxplow:oxplow/effort?id=eff12"), Ok(()));
+        assert_eq!(check("oxplow:oxplow/request?id=req12"), Ok(()));
         assert_eq!(
             check("oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=1-2"),
             Ok(())
@@ -490,15 +562,15 @@ mod tests {
             Err(ResourceError::Undeclared(_))
         ));
         assert!(matches!(
-            check("oxplow:oxplow/effort"),
+            check("oxplow:oxplow/request"),
             Err(ResourceError::MissingParam { .. })
         ));
         assert!(matches!(
-            check("oxplow:oxplow/effort?id=12"),
+            check("oxplow:oxplow/request?id=12"),
             Err(ResourceError::BadValue { .. })
         ));
         assert!(matches!(
-            check("oxplow:oxplow/effort?id=eff1&x=1"),
+            check("oxplow:oxplow/request?id=req1&x=1"),
             Err(ResourceError::UnknownParam { .. })
         ));
         assert!(matches!(
@@ -511,8 +583,8 @@ mod tests {
     fn a_resource_is_declared_once_and_its_sugar_is_its_own() {
         let mut r = registry();
         assert_eq!(
-            r.register(decl("oxplow/effort", &[])),
-            Err(ResourceError::Collision("oxplow/effort".into()))
+            r.register(decl("oxplow/request", &[])),
+            Err(ResourceError::Collision("oxplow/request".into()))
         );
         let with_link = |name: &str, prefix: &str, param: &str| ResourceDecl {
             wikilink: Some(WikilinkDecl {

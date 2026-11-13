@@ -193,7 +193,7 @@ pub(super) async fn publish_rows(
 
 /// The example's `setup: [{ command, input?, as? }]`: oxplow's own
 /// commands, run in order before the example, to make the data its
-/// contribution reads (a work item, an effort, a test run). Each runs as a
+/// contribution reads (a task, a request, a test run). Each runs as a
 /// person, or with `as: agent` as the agent of `oxplow:oxplow/thread?id=thr1`. `false`,
 /// with the error reported, when one fails.
 pub(super) async fn run_setup(

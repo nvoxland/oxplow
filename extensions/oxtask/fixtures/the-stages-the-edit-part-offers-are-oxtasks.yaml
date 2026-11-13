@@ -1,0 +1,11 @@
+# The stages the Edit part's Move to form offers: oxtask's, in order.
+requires: [oxplow-bundled]
+when: { query: 'edit-task#stages' }
+expect:
+  rows:
+    - { value: backlog, label: Backlog }
+    - { value: ready, label: Ready }
+    - { value: in_progress, label: In Progress }
+    - { value: blocked, label: Blocked }
+    - { value: done, label: Done }
+    - { value: canceled, label: Canceled }

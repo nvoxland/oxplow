@@ -1,9 +1,0 @@
-# The editor's form: the item's title and body, its uri fixed.
-when:
-  form: edit-item
-  node: edit_item
-  params: { uri: "oxplow:oxplow/work_item?id=1&provider=oxplow" }
-expect:
-  values: { uri: "oxplow:oxplow/work_item?id=1&provider=oxplow" }
-  fixed: [uri]
-  fields: [title, body]

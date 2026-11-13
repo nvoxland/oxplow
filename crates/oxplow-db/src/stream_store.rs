@@ -326,7 +326,7 @@ mod tests {
         assert_eq!(default, "local");
     }
 
-    /// tsk573: recording the branch a stream checked out writes only the
+    /// recording the branch a stream checked out writes only the
     /// branch — a concurrent rename (read before, written after) stays.
     #[tokio::test]
     async fn set_branch_writes_only_the_branch() {

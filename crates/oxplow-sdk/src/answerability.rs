@@ -61,7 +61,7 @@ pub struct Reaches {
     pub sql: Option<String>,
     #[serde(default)]
     pub command: Option<String>,
-    /// An agent tool by its offered name (`oxplow_effort_files`).
+    /// An agent tool by its offered name (`oxplow_turn_files`).
     #[serde(default)]
     pub tool: Option<String>,
     #[serde(default)]
@@ -203,7 +203,7 @@ fn sql_tokens(sql: &str) -> Vec<SqlToken> {
 
 /// Whether `text` names `name` (a dataset or a command) as a whole word,
 /// in any case: `v_commit_file` doesn't name `v_commit`, and a sentence's
-/// full stop after `oxplow.work_item.link` doesn't hide it.
+/// full stop after `oxplow.thread.rename` doesn't hide it.
 pub fn names(text: &str, name: &str) -> bool {
     let (text, name) = (text.to_lowercase(), name.to_lowercase());
     let word = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');
@@ -290,7 +290,12 @@ pub async fn check(file: &str, questions: &[Question], c: &Checker<'_>) -> Check
         };
         if let Some(about) = &q.about {
             if let Some(why) = oxplow_app::extension::extension_resources::resource_problem(about) {
-                out.errors.push(at.error("answer.about_unknown", format!("`about: {about}`: {why}")).fix("`oxplow/file`, `oxplow/commit`, `oxplow/effort`, `oxplow/work_item`, …"));
+                out.errors.push(
+                    at.error("answer.about_unknown", format!("`about: {about}`: {why}"))
+                        .fix(
+                            "`oxplow/file`, `oxplow/commit`, `oxplow/request`, `oxplow/thread`, …",
+                        ),
+                );
             }
         }
         let Some(text) = (c.skill_text)(&q.skill) else {
@@ -568,7 +573,15 @@ pub async fn check_pages(
                             .fix("name a registered one"),
                         ),
                         Some(spec) => {
-                            let valid = InputValidator::compile(&spec.input_schema)
+                            // A form's person fills in the rest: what it
+                            // gives must fit, nothing it leaves is missing.
+                            let mut schema = spec.input_schema.clone();
+                            if action.form {
+                                if let Some(o) = schema.as_object_mut() {
+                                    o.remove("required");
+                                }
+                            }
+                            let valid = InputValidator::compile(&schema)
                                 .map_err(|e| e.to_string())
                                 .and_then(|v| v.check(&action.input).map_err(|e| e.to_string()));
                             if let Err(e) = valid {
@@ -674,22 +687,22 @@ pub async fn live_pages(
 mod tests {
     use super::*;
 
-    /// tsk570: a dataset is a table a query reads — not a `v_*` word in a
+    /// a dataset is a table a query reads — not a `v_*` word in a
     /// string, a comment or an alias — whatever its case.
     #[test]
     fn datasets_are_the_tables_a_query_reads() {
         assert_eq!(
             datasets_in(
-                "WITH x AS (SELECT 1 FROM V_Work_Item) \
+                "WITH x AS (SELECT 1 FROM V_Thread) \
                  SELECT a.n AS v_total, 'v_quoted' -- v_comment\n\
                  FROM v_commit a, v_branch b /* v_block */ \
                  JOIN (SELECT * FROM v_tag) t ON 1 LEFT JOIN json_each(a.parents) p"
             ),
-            vec!["v_work_item", "v_commit", "v_branch", "v_tag"]
+            vec!["v_thread", "v_commit", "v_branch", "v_tag"]
         );
     }
 
-    /// tsk570: a skill names a dataset or command as a whole word, in any
+    /// a skill names a dataset or command as a whole word, in any
     /// case — `v_commit_file` doesn't name `v_commit`.
     #[test]
     fn a_skill_names_a_thing_as_a_whole_word() {
@@ -697,15 +710,12 @@ mod tests {
         assert!(names("Read V_COMMIT.", "v_commit"));
         assert!(!names("read v_commit_file", "v_commit"));
         assert!(!names("read xv_commit", "v_commit"));
-        assert!(names("run oxplow.work_item.link.", "oxplow.work_item.link"));
+        assert!(names("run oxplow.thread.rename.", "oxplow.thread.rename"));
         assert!(!names(
-            "run oxplow.work_item.link_all",
-            "oxplow.work_item.link"
+            "run oxplow.thread.rename_all",
+            "oxplow.thread.rename"
         ));
-        assert!(!names(
-            "run oxplow.work_item.links",
-            "oxplow.work_item.link"
-        ));
+        assert!(!names("run oxplow.thread.renames", "oxplow.thread.rename"));
     }
 
     #[test]
@@ -728,14 +738,7 @@ mod tests {
             .await
             .unwrap();
         let svc = oxplow_app::Services::in_memory(tmp.path()).await.unwrap();
-        let text = oxplow_app::capabilities::agent_text(&svc);
-        let skill = |name: &str| {
-            text.skill_full_text(name).or_else(|| {
-                oxplow_app::bundled_extensions::BUNDLED
-                    .iter()
-                    .find_map(|b| b.file(name).map(str::to_string))
-            })
-        };
+        let text = oxplow_app::capabilities::agent_text(&svc).await;
         let shipped: Vec<_> = svc
             .extension_catalog
             .snapshot(tmp.path())
@@ -744,6 +747,27 @@ mod tests {
             .filter(|e| oxplow_app::bundled_extensions::is_reserved(&e.name))
             .cloned()
             .collect();
+        // A skill the agent is offered now, or one a shipped extension
+        // declares whether or not it is offered (bundled's task skills
+        // wait for a live task store).
+        let skill = |name: &str| {
+            text.skill_full_text(name).or_else(|| {
+                shipped
+                    .iter()
+                    .find_map(|e| {
+                        let decl = e.skills.iter().find(|s| s.name == name)?;
+                        oxplow_app::bundled_extensions::BUNDLED
+                            .iter()
+                            .find(|b| b.name == e.name)
+                            .and_then(|b| b.file(&decl.file).map(str::to_string))
+                    })
+                    .or_else(|| {
+                        oxplow_app::bundled_extensions::BUNDLED
+                            .iter()
+                            .find_map(|b| b.file(name).map(str::to_string))
+                    })
+            })
+        };
         let checked = check_pages(&shipped, &skill, Some(&svc)).await;
         let mut errors = checked.error_lines();
         if std::env::var("OXPLOW_LIVE_ANSWERABILITY").as_deref() == Ok("1") {
@@ -761,7 +785,7 @@ mod tests {
             .flat_map(|e| e.page_files.iter().flat_map(|p| p.answers.iter()))
             .collect();
         assert!(answers.len() >= 40, "{}", answers.len());
-        for kind in ["oxplow/file", "oxplow/commit", "oxplow/effort"] {
+        for kind in ["oxplow/file", "oxplow/commit", "oxplow/thread"] {
             assert!(
                 answers.iter().any(|a| a.about.as_deref() == Some(kind)),
                 "no answer about `{kind}`"
@@ -797,10 +821,9 @@ mod tests {
             .unwrap();
             oxplow_app::extension::extensions::load_extension_at(&dir, "acme")
         };
-        let skill = |name: &str| {
-            (name == "acme-skill").then(|| "Use v_work_item to list work.".to_string())
-        };
-        let list = "SELECT title FROM v_work_item WHERE state = :state";
+        let skill =
+            |name: &str| (name == "acme-skill").then(|| "Use v_thread to list work.".to_string());
+        let list = "SELECT title FROM v_thread WHERE mark = :state";
 
         let ok = extension("params: { state: open }, skill: acme-skill", list);
         let checked = check_pages(&[ok], &skill, Some(&svc)).await;
@@ -808,21 +831,21 @@ mod tests {
 
         let unnamed = extension(
             "params: { state: open }, skill: acme-skill",
-            "SELECT uri FROM v_effort",
+            "SELECT uri FROM v_agent_turn",
         );
         let checked = check_pages(&[unnamed], &skill, Some(&svc)).await;
         assert!(
             checked
                 .error_lines()
                 .iter()
-                .any(|e| e.contains("never names `v_effort`")),
+                .any(|e| e.contains("never names `v_agent_turn`")),
             "{:?}",
             checked.errors
         );
 
         let broken = extension(
             "params: { state: open }",
-            "SELECT title FROM v_work_item WHERE nope = :state",
+            "SELECT title FROM v_thread WHERE nope = :state",
         );
         let checked = check_pages(&[broken], &skill, Some(&svc)).await;
         assert!(
@@ -894,14 +917,14 @@ mod tests {
     /// the input fits its schema.
     #[tokio::test]
     async fn a_question_can_reach_a_tool() {
-        let skill = |_: &str| Some("Use oxplow_effort_files for an effort's files.".to_string());
+        let skill = |_: &str| Some("Use oxplow_turn_files for a turn's files.".to_string());
         let command = |_: &str| None;
         let schema = serde_json::json!({
             "type": "object",
-            "properties": { "effort": { "type": "string" } },
+            "properties": { "turn": { "type": "string" } },
             "additionalProperties": false
         });
-        let tool = |name: &str| (name == "oxplow_effort_files").then(|| schema.clone());
+        let tool = |name: &str| (name == "oxplow_turn_files").then(|| schema.clone());
         let checker = Checker {
             skill_text: &skill,
             sql: None,
@@ -910,15 +933,15 @@ mod tests {
         };
         let ask = |tool: &str, input: &str| {
             parse(&format!(
-                "- question: Which files did this effort touch?\n  skill: s\n  reaches: {{ tool: {tool}, input: {input} }}\n"
+                "- question: Which files did this turn touch?\n  skill: s\n  reaches: {{ tool: {tool}, input: {input} }}\n"
             ))
             .unwrap()
         };
         let ok = check(
             "q.yaml",
             &ask(
-                "oxplow_effort_files",
-                "{ effort: 'oxplow:oxplow/effort?id=eff1' }",
+                "oxplow_turn_files",
+                "{ turn: 'oxplow:oxplow/turn?id=trn1' }",
             ),
             &checker,
         )
@@ -941,12 +964,7 @@ mod tests {
             "{:?}",
             unknown.errors
         );
-        let bad = check(
-            "q.yaml",
-            &ask("oxplow_effort_files", "{ nope: 1 }"),
-            &checker,
-        )
-        .await;
+        let bad = check("q.yaml", &ask("oxplow_turn_files", "{ nope: 1 }"), &checker).await;
         assert!(
             bad.error_lines().iter().any(|e| e.contains("doesn't fit")),
             "{:?}",

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`thread.closed@1`: a thread was closed (`oxplow.thread.close`): its\nsessions ended with it, and what it was working on goes back to nobody\n(bundled releases its tasks).",
+  "properties": {
+    "thread": {
+      "description": "The thread (`thr3`).",
+      "type": "string"
+    }
+  },
+  "required": [
+    "thread"
+  ],
+  "title": "ThreadClosedV1",
+  "type": "object"
+}

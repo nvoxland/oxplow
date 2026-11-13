@@ -10,13 +10,13 @@ import { componentBundleUrl, componentMayOpen, createBridgeHost, initMessage, vi
 
 test("frame messages parse into their requests and ready; anything else is refused", () => {
   expect(parseFrameMessage({ type: "ready" })).toEqual({ type: "ready" });
-  expect(parseFrameMessage({ id: "2", method: "invoke", command: "oxplow.work_item.transition", input: { to: "done" } })).toEqual({
+  expect(parseFrameMessage({ id: "2", method: "invoke", command: "acme.issue.transition", input: { to: "done" } })).toEqual({
     type: "request",
-    request: { id: "2", method: "invoke", command: "oxplow.work_item.transition", input: { to: "done" } },
+    request: { id: "2", method: "invoke", command: "acme.issue.transition", input: { to: "done" } },
   });
-  expect(parseFrameMessage({ id: "3", method: "navigate", uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" })).toEqual({
+  expect(parseFrameMessage({ id: "3", method: "navigate", uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" })).toEqual({
     type: "request",
-    request: { id: "3", method: "navigate", uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", newTab: false, replace: false },
+    request: { id: "3", method: "navigate", uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", newTab: false, replace: false },
   });
   expect(parseFrameMessage({ id: "4", method: "navigate", uri: "oxplow:oxplow/commit?sha=abc", newTab: true })).toEqual({
     type: "request",
@@ -31,7 +31,7 @@ test("frame messages parse into their requests and ready; anything else is refus
     "invoke",
     { method: "invoke", command: "a" },
     { id: "1", method: "exec", command: "x" },
-    // The frame's `query` is gone: protocol 12 has no such request.
+    // The frame's `query` is gone: protocol 13 has no such request.
     { id: "1", method: "query", asset: "a", params: {} },
     { id: "1", method: "invoke", input: {} },
   ]) {
@@ -39,7 +39,7 @@ test("frame messages parse into their requests and ready; anything else is refus
   }
 });
 
-// tsk984: a frame is served the bundle snapshot its host loaded, by its
+// a frame is served the bundle snapshot its host loaded, by its
 // version — a folder of its own, so the bundle's relative URLs stay in it.
 test("the bundle URL is the loaded version's folder", () => {
   expect(componentBundleUrl("http://127.0.0.1:7420", "ab12")).toBe("http://127.0.0.1:7420/components/v/ab12/");
@@ -74,11 +74,11 @@ test("theme tokens carry the root's color-scheme, so the frame paints no opaque 
 // 12: `init` and `update` carry the page's data — each loader's rows by
 // name, its params and props — and `update` says which loaders changed; a
 // page shows an inline page under it (`showView`) in place of a viz spec.
-test("init carries the run, the data, params, props and tokens, at protocol 12", () => {
+test("init carries the run, the data, params, props and tokens, at protocol 13", () => {
   const r = { config: { id: "x/b", custom: { component: "b", props: { a: 1 } } }, params: { n: 2 }, result: { columns: ["k"], rows: [[1]], truncated: false } } as unknown as VizRun;
   expect(initMessage(vizData(r), { "--accent": "#08f" })).toEqual({
     type: "init",
-    protocol: 12,
+    protocol: 13,
     run: r,
     data: { rows: { columns: ["k"], rows: [[1]], truncated: false } },
     params: { n: 2 },
@@ -95,7 +95,7 @@ test("a component shown as a page gets its page, its view and the page's data, a
   const data: HostedData = { run: null, data: { items: { columns: ["id"], rows: [["a"]], truncated: false } }, params: { from: null }, props: { size: 3 } };
   expect(initMessage(data, {}, page, view)).toEqual({
     type: "init",
-    protocol: 12,
+    protocol: 13,
     run: null,
     data: data.data,
     params: { from: null },
@@ -175,12 +175,18 @@ function harness(deps: Partial<Parameters<typeof createBridgeHost>[1]> = {}) {
       if (!confirmed) throw new IpcCallError("needs confirmation", "NEEDS_CONFIRMATION", null, ["process — runs programs"]);
       return { result: null, audit_id: 1, event_id: null, inverse: null };
     },
+    invokePoint: async (point, context, command, confirmed) => {
+      calls.push(["invokePoint", point, context, command, confirmed]);
+      if (!confirmed) throw new IpcCallError("needs confirmation", "NEEDS_CONFIRMATION", null, []);
+      return { result: { moved: true }, audit_id: 1, event_id: null, inverse: null };
+    },
     navigate: (ref, opts) => {
       calls.push(["navigate", ref, opts]);
       return true;
     },
     confirm: async () => true,
     onReady: () => calls.push(["ready"]),
+    markdown: async () => [],
     ...deps,
   }, sent);
   const send = (data: unknown) => channel.port2.postMessage(data);
@@ -191,31 +197,49 @@ function harness(deps: Partial<Parameters<typeof createBridgeHost>[1]> = {}) {
 test("an invoke that asks is confirmed in the host, with what it asks about, then runs confirmed; declined, it's CANCELLED", async () => {
   const asked: [string, string[]][] = [];
   const yes = harness({ confirm: async (command, details) => (asked.push([command, details]), true) });
-  yes.send({ id: "i1", method: "invoke", command: "oxplow.work_item.transition", input: { to: "done" } });
+  yes.send({ id: "i1", method: "invoke", command: "acme.issue.transition", input: { to: "done" } });
   await yes.settle();
   expect(yes.calls).toEqual([
-    ["invoke", "oxplow.work_item.transition", { to: "done" }, false],
-    ["invoke", "oxplow.work_item.transition", { to: "done" }, true],
+    ["invoke", "acme.issue.transition", { to: "done" }, false],
+    ["invoke", "acme.issue.transition", { to: "done" }, true],
   ]);
   expect(yes.received).toEqual([{ id: "i1", ok: true, result: null }]);
-  expect(asked).toEqual([["oxplow.work_item.transition", ["process — runs programs"]]]);
+  expect(asked).toEqual([["acme.issue.transition", ["process — runs programs"]]]);
   yes.channel.port1.close();
 
   const no = harness({ confirm: async () => false });
-  no.send({ id: "i2", method: "invoke", command: "oxplow.work_item.transition", input: {} });
+  no.send({ id: "i2", method: "invoke", command: "acme.issue.transition", input: {} });
   await no.settle();
-  expect(no.received).toEqual([{ id: "i2", ok: false, error: { code: "CANCELLED", message: "The person didn't confirm `oxplow.work_item.transition`." } }]);
+  expect(no.received).toEqual([{ id: "i2", ok: false, error: { code: "CANCELLED", message: "The person didn't confirm `acme.issue.transition`." } }]);
   no.channel.port1.close();
+});
+
+test("invokePoint parses; it is confirmed in the host like an invoke, and carries the named command", async () => {
+  expect(parseFrameMessage({ id: "p0", method: "invokePoint", point: "oxplow/task.move", context: { uri: "u" } })).toEqual({
+    type: "request",
+    request: { id: "p0", method: "invokePoint", point: "oxplow/task.move", context: { uri: "u" }, command: null },
+  });
+  expect(parseFrameMessage({ id: "p0", method: "invokePoint", context: {} })).toBeNull();
+  expect(parseFrameMessage({ id: "p0", method: "invokePoint", point: "a/b", command: 3 })).toBeNull();
+  const h = harness();
+  h.send({ id: "p1", method: "invokePoint", point: "oxplow/task.move", context: { uri: "u", stage: "done" }, command: "oxtask.task.move" });
+  await h.settle();
+  expect(h.calls).toEqual([
+    ["invokePoint", "oxplow/task.move", { uri: "u", stage: "done" }, "oxtask.task.move", false],
+    ["invokePoint", "oxplow/task.move", { uri: "u", stage: "done" }, "oxtask.task.move", true],
+  ]);
+  expect(h.received).toEqual([{ id: "p1", ok: true, result: { moved: true } }]);
+  h.channel.port1.close();
 });
 
 test("navigate opens the ref; a malformed request is answered with an error when it has an id", async () => {
   const h = harness();
-  h.send({ id: "n1", method: "navigate", uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" });
+  h.send({ id: "n1", method: "navigate", uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" });
   h.send({ id: "n2", method: "navigate", uri: "oxplow:oxplow/commit?sha=abc", newTab: true });
   h.send({ id: "b1", method: "exec" });
   await h.settle();
   expect(h.calls).toEqual([
-    ["navigate", "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", { newTab: false, replace: false }],
+    ["navigate", "oxplow:oxplow/task?id=tsk1&provider=oxtask", { newTab: false, replace: false }],
     ["navigate", "oxplow:oxplow/commit?sha=abc", { newTab: true, replace: false }],
   ]);
   expect(h.received).toEqual([
@@ -260,7 +284,7 @@ test("ready is heard once; an update posts only what the frame hasn't seen, nami
 });
 
 test("a component navigates to app pages only", async () => {
-  expect(componentMayOpen("oxplow:oxplow/work_item?id=tsk1&provider=oxplow")).toBe(true);
+  expect(componentMayOpen("oxplow:oxplow/task?id=tsk1&provider=oxtask")).toBe(true);
   expect(componentMayOpen("oxplow:oxplow/handoff?id=hnd1")).toBe(true);
   expect(componentMayOpen("https://evil.example/?d=1")).toBe(false);
   expect(componentMayOpen("not a ref")).toBe(false);
@@ -273,7 +297,7 @@ test("a component navigates to app pages only", async () => {
   h.channel.port1.close();
 });
 
-// tsk960: a refused invoke — a component that is not allowed, or a policy saying
+// a refused invoke — a component that is not allowed, or a policy saying
 // no — is shown by the host, beside the frame, whatever the component's
 // own code does with the reply; any other failure is the frame's to show.
 test("a page's title and actions reach the host, and a press reaches the frame", async () => {
@@ -421,6 +445,30 @@ test("querySql and openForm answer with the host's result; a closed form is CANC
     { id: "f", ok: true, result: { made: 1 } },
     { id: "g", ok: false, error: { code: "CANCELLED", message: "The person closed the form for `acme.closed`." } },
   ]);
+  h.channel.port1.close();
+});
+
+// A frame's markdown is the host's to read (protocol 13): the tree comes
+// back as data, never HTML.
+test("markdown parses and answers the host's tree", async () => {
+  expect(parseFrameMessage({ id: "1", method: "markdown", text: "**a**", inline: true })).toEqual({
+    type: "request",
+    request: { id: "1", method: "markdown", text: "**a**", inline: true },
+  });
+  expect(parseFrameMessage({ id: "2", method: "markdown", text: "a" })).toEqual({ type: "request", request: { id: "2", method: "markdown", text: "a", inline: false } });
+  expect(parseFrameMessage({ id: "3", method: "markdown", text: 1 })).toBeNull();
+  expect(parseFrameMessage({ id: "4", method: "markdown", text: "a", inline: "yes" })).toBeNull();
+  const asked: [string, boolean][] = [];
+  const h = harness({
+    markdown: async (text, inline) => {
+      asked.push([text, inline]);
+      return [{ tag: "strong", children: [text] }];
+    },
+  });
+  h.send({ id: "m", method: "markdown", text: "a", inline: true });
+  await h.settle();
+  expect(asked).toEqual([["a", true]]);
+  expect(h.received).toEqual([{ id: "m", ok: true, result: [{ tag: "strong", children: ["a"] }] }]);
   h.channel.port1.close();
 });
 

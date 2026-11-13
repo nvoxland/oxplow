@@ -1,0 +1,44 @@
+title: Task actions
+description: "One task's moves, for an agent: Mark done, or Record a block on another item."
+needs:
+- model:oxplow/task_record
+params:
+- name: uri
+  label: Task
+answers:
+- {"question":"Mark a task done.","about":"oxplow/task","params":{"uri":"oxplow:oxplow/task?id=tsk1&provider=oxtask"},"skill":"tasks"}
+- {"question":"Record that one task blocks another.","about":"oxplow/task","params":{"uri":"oxplow:oxplow/task?id=tsk1&provider=oxtask"},"skill":"tasks"}
+loaders:
+  item:
+    sql: |
+      SELECT w.uri, w.native_id AS id, w.title, coalesce(w.stage_title, w.stage) AS stage_title, w.state AS icon
+      FROM v_oxplow_task w WHERE w.uri = :uri
+actions:
+- id: done
+  label: Mark done
+  point: oxplow/task.move
+  context:
+    uri: '{{row.uri}}'
+    stage: done
+view:
+  stack:
+  - id: item
+    title: Task
+    hide_title: true
+    from: item
+    viz: detail
+    columns:
+    - key: title
+      label: Task
+      link:
+        kind: page
+        from: uri
+    - key: stage_title
+      label: Stage
+      icon: icon
+    empty: This task isn't on the active task tracker.
+  # Record a block… is the store's own link form, starting as a block.
+  - action_point: oxplow/task.link
+    context:
+      uri: { param: uri }
+      type: blocks

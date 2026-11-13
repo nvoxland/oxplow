@@ -546,6 +546,33 @@ mod tests {
         assert!(some.conflicted.is_empty() && some.renamed.is_empty());
     }
 
+    /// A file a `.gitignore` in its own folder ignores (`*`, as oxplow's
+    /// installed skills have) is named neither by the whole scan nor when
+    /// asked about by its path: git doesn't list it, so it isn't a change.
+    #[test]
+    fn a_file_its_folders_gitignore_ignores_is_never_named() {
+        let dir = varied_repo();
+        let skill = dir.path().join(".agents/skills/x");
+        std::fs::create_dir_all(&skill).unwrap();
+        std::fs::write(skill.join(".gitignore"), "*\n").unwrap();
+        std::fs::write(skill.join(".oxplow"), "").unwrap();
+        std::fs::write(skill.join("SKILL.md"), "s").unwrap();
+        let ignored = [
+            ".agents/skills/x/.oxplow",
+            ".agents/skills/x/SKILL.md",
+            ".agents/skills/x/.gitignore",
+        ];
+        let all = worktree_status(dir.path());
+        let asked: Vec<String> = ignored.map(String::from).to_vec();
+        let some = worktree_status_of(dir.path(), &asked);
+        let folder = worktree_status_of(dir.path(), &[".agents".to_string()]);
+        for path in ignored {
+            assert!(!all.statuses.contains_key(path), "whole scan: {path}");
+            assert!(!some.statuses.contains_key(path), "by path: {path}");
+            assert!(!folder.statuses.contains_key(path), "by folder: {path}");
+        }
+    }
+
     /// No paths, no answer; a repository that isn't one, no answer; and a
     /// folder named as a path brings what changed under it, as in git.
     #[test]

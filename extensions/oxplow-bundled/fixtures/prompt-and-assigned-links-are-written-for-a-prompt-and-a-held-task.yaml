@@ -1,0 +1,19 @@
+# A request links the task a person's prompt names (`prompt`) and, when a turn
+# ends, the task its thread holds in progress (`assigned`): the request, task
+# and basis, with the thread, the turn and the time.
+requires: [oxtask]
+given:
+  - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude }, bind: ses }
+  - { command: oxtask.task.create, input: { title: Named, stage: ready } }
+  - { command: oxtask.task.create, input: { title: Held, stage: in_progress } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - observe: { turn: { session: $ses.id, prompt: "see [oxplow uri oxplow:oxplow/task?id=tsk1&provider=oxtask] please", answer: done } }
+when:
+  sql: |
+    SELECT basis, task, thread = (SELECT uri FROM v_thread LIMIT 1) AS thread,
+           turn_id = (SELECT id FROM v_agent_turn LIMIT 1) AS turn, at IS NOT NULL AS timed
+      FROM v_oxplow_request_task WHERE basis IN ('prompt', 'assigned') ORDER BY basis
+expect:
+  rows:
+    - { basis: assigned, task: "oxplow:oxplow/task?id=tsk2&provider=oxtask", thread: 1, turn: 1, timed: 1 }
+    - { basis: prompt, task: "oxplow:oxplow/task?id=tsk1&provider=oxtask", thread: 1, turn: 1, timed: 1 }

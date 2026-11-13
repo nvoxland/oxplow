@@ -1,5 +1,5 @@
 import { previewPort } from "../../support/port.js";
-// The suite's own helpers (tsk995): a harness that hides a failure, hangs
+// The suite's own helpers: a harness that hides a failure, hangs
 // or leaks makes every spec built on it lie.
 import { createServer } from "node:http";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync, chmodSync } from "node:fs";

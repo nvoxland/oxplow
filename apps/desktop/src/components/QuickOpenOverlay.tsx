@@ -53,7 +53,7 @@ interface Props {
   onClose(): void;
   onOpenFile(path: string): void;
   onOpenPage(ref: TabRef): void;
-  /** Open a body-search hit (wiki/task/comment/file content match). */
+  /** Open a body-search hit (knowledge page/task/comment/file content match). */
   onOpenSearchHit(hit: SearchHit): void;
 }
 
@@ -196,9 +196,9 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
   }, [loadFiles]);
   useRerunOnChange(open ? fileReads : NO_READS, loadFiles);
 
-  // Body search (unified BM25 index: wiki/task/comment/note/file
+  // Body search (unified BM25 index: knowledge/task/comment/note/file
   // contents), debounced. This is what makes a multi-word phrase like
-  // "workspace isolation" surface the wiki page it appears in — the
+  // "workspace isolation" surface the knowledge page it appears in — the
   // filename fuzzy-match alone can never see bodies.
   useEffect(() => {
     if (!open || !stream) return;
@@ -212,7 +212,7 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
     let cancelled = false;
     const timer = setTimeout(() => {
       // Project-wide (null): the launcher is the single discovery surface,
-      // so cross-stream tasks/wiki/notes/comments are findable. File hits
+      // so cross-stream tasks/knowledge pages/notes/comments are findable. File hits
       // are re-scoped to the current stream client-side in
       // buildQuickOpenResults (another worktree's files aren't openable here).
       searchSite(q, null, null, BODY_SEARCH_LIMIT)
@@ -362,7 +362,7 @@ export function QuickOpenOverlay({ open, initialQuery, stream, threadId, selecte
         }}
         // While it is open the launcher is where typing goes. After a reload
         // the window settles under it — a restored tab or terminal mounts and
-        // takes focus — and the keys that follow reached neither (tsk1055).
+        // takes focus — and the keys that follow reached neither.
         // Focus leaving for somewhere outside it, with the launcher still
         // showing, comes back; a click outside closes it first (the
         // backdrop), and focus inside it is left alone.

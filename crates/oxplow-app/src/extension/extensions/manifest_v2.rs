@@ -41,7 +41,7 @@ pub struct IntentExample {
 pub struct Intent {
     /// The question it answers, or the job it does.
     pub purpose: String,
-    /// The thread or effort ref that created it (`oxplow:oxplow/effort?id=eff42`), when known.
+    /// The thread or request ref that created it (`oxplow:oxplow/request?id=req42`), when known.
     #[serde(default)]
     pub origin: Option<String>,
     #[serde(default)]
@@ -71,7 +71,7 @@ pub struct Mount {
     /// The page it places: a slug of this extension.
     pub page: String,
     /// Where: a page's slot (`oxplow/commit.sections`) or a
-    /// replaceable core component (`work_item.board`).
+    /// replaceable core component (`task.board`).
     pub at: String,
     /// At a parts slot: where among the page's parts — `start`, `end`,
     /// `{ after: <id> }`, `{ before: <id> }`. Default `end`.
@@ -187,6 +187,14 @@ pub struct ManifestV2 {
     )]
     pub permissions: oxplow_domain::permissions::Permissions,
 
+    /// Its own SQLite file, reached with the `store.sql` service.
+    #[serde(default)]
+    pub storage: Option<super::storage::StorageFile>,
+    /// Project folders it may read or write, reached with the `files.*`
+    /// services.
+    #[serde(default)]
+    pub files: Vec<super::storage::FolderFile>,
+
     // ---- kinds ----
     /// Datasets: each with its SQL in `datasets/<name>.sql`, published as
     /// `v_<namespace>_<name>`, named by `namespace:`.
@@ -224,6 +232,24 @@ pub struct ManifestV2 {
     #[serde(default)]
     #[schemars(with = "Option<Vec<super::ai_profiles::AiProfileFile>>")]
     pub ai_profiles: Option<Value>,
+    /// Named places where several extensions offer the same kind of
+    /// action; a command joins one with `ui: { at: <id> }`.
+    #[serde(default)]
+    #[schemars(with = "Option<Vec<super::action_points::ActionPointFile>>")]
+    pub action_points: Option<Value>,
+    /// Shared models it declares: tables other extensions may fill through
+    /// their collectors' `models` output.
+    #[serde(default)]
+    #[schemars(with = "Option<Vec<super::shared_models::ModelFile>>")]
+    pub models: Option<Value>,
+    /// Shared models it fills as a store, with its stores and fields.
+    #[serde(default)]
+    #[schemars(with = "Option<Vec<super::shared_models::FillFile>>")]
+    pub fills: Option<Value>,
+    /// Fields it adds to another extension's model's items.
+    #[serde(default)]
+    #[schemars(with = "Option<Vec<super::shared_models::FieldsFile>>")]
+    pub fields: Option<Value>,
     /// Left-nav panels, each showing its pages compact.
     #[serde(default)]
     #[schemars(with = "Option<Vec<super::PanelFile>>")]
@@ -252,6 +278,11 @@ pub struct ManifestV2 {
     #[serde(default)]
     #[schemars(with = "Option<Vec<super::skills::SkillFile>>")]
     pub skills: Option<Value>,
+    /// Text for the coding agent's context: a query whose `text` the
+    /// agent is sent on a prompt once, then when it changes.
+    #[serde(default)]
+    #[schemars(with = "Option<Vec<super::agent_contexts::AgentContextFile>>")]
+    pub context: Option<Value>,
     /// External providers: programs implementing a capability, whose
     /// operations its `commands:` declare.
     #[serde(default)]
@@ -762,7 +793,7 @@ pub fn check(m: &ManifestV2, file: &str, text: &str) -> Vec<Diagnostic> {
                 Some(1),
                 "`intent` is required",
             )
-            .fix("add `intent: { purpose: <what it is for>, origin: <thread or effort ref>, examples: [...] }`"),
+            .fix("add `intent: { purpose: <what it is for>, origin: <thread or request ref>, examples: [...] }`"),
         ),
         Some(intent) => {
             if intent.purpose.trim().is_empty() {
@@ -777,7 +808,7 @@ pub fn check(m: &ManifestV2, file: &str, text: &str) -> Vec<Diagnostic> {
                             key_line(text, "intent"),
                             format!("`intent.origin` `{origin}` is not an oxplow URI"),
                         )
-                        .fix("use `oxplow:oxplow/effort?id=eff42` or `oxplow:oxplow/thread?id=thr3`"),
+                        .fix("use `oxplow:oxplow/request?id=req42` or `oxplow:oxplow/thread?id=thr3`"),
                     );
                 }
             }

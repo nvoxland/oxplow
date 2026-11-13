@@ -89,32 +89,32 @@ mod tests {
     #[tokio::test]
     async fn query_sql_rejects_writes_as_invalid() {
         let (svc, _dir) = crate::test_support::services().await;
-        let err = crate::dispatch("query_sql", json!({ "sql": "DELETE FROM task" }), &svc)
+        let err = crate::dispatch("query_sql", json!({ "sql": "DELETE FROM threads" }), &svc)
             .await
             .unwrap_err();
         assert_eq!(err.code, "INVALID");
     }
 
-    /// P4.3 (tsk488): a physical table is refused unless the person's
+    /// P4.3: a physical table is refused unless the person's
     /// explorer asks for a raw read.
     #[tokio::test]
     async fn query_sql_reads_tables_only_when_raw() {
         let (svc, _dir) = crate::test_support::services().await;
         let err = crate::dispatch(
             "query_sql",
-            json!({ "sql": "SELECT count(*) FROM work_item" }),
+            json!({ "sql": "SELECT count(*) FROM threads" }),
             &svc,
         )
         .await
         .unwrap_err();
-        assert!(err.message.contains("v_work_item"), "{}", err.message);
+        assert!(err.message.contains("v_thread"), "{}", err.message);
         let out = crate::dispatch(
             "query_sql",
-            json!({ "sql": "SELECT count(*) FROM work_item", "raw": true }),
+            json!({ "sql": "SELECT count(*) FROM threads", "raw": true }),
             &svc,
         )
         .await
         .unwrap();
-        assert_eq!(out["reads"]["tables"], json!(["work_item"]));
+        assert_eq!(out["reads"]["tables"], json!(["threads"]));
     }
 }

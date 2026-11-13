@@ -10,6 +10,8 @@ categories:
 
 <!-- more -->
 
+> Efforts were removed on 2026-11-10. This post is kept as written; where it says "effort", read the requests and turns that replaced them.
+
 ## Metrics
 
 The metric system was rebuilt. Instead of a fixed set of numbers data knows how to collect, it's a pluggable system feeding into a common storage.

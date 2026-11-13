@@ -1,0 +1,24 @@
+# Bundled's task points are answered by oxtask for its own tasks, and by
+# nobody for another store's.
+requires: [oxplow-bundled, oxtask]
+when: { action_point: oxplow/task.move, context: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", stage: done } }
+expect:
+  draws: button
+  commands: [oxtask.task.move]
+steps:
+  - when: { action_point: oxplow/task.move, context: { uri: "oxplow:oxplow/task?id=ENG-1&provider=elsewhere", stage: done } }
+    expect: { draws: none, commands: [] }
+  - when: { action_point: oxplow/task.edit, context: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", title: Clearer } }
+    expect: { draws: button, commands: [oxtask.task.update] }
+  - when: { action_point: oxplow/task.edit, context: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", parent: "oxplow:oxplow/task?id=tsk2&provider=oxtask" } }
+    expect: { draws: button, commands: [oxtask.task.update] }
+  - when: { action_point: oxplow/task.unparent, context: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" } }
+    expect: { draws: button, commands: [oxtask.task.unparent] }
+  - when: { action_point: oxplow/task.delete, context: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" } }
+    expect: { draws: button, commands: [oxtask.task.delete] }
+  - when: { action_point: oxplow/task.comment, context: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" } }
+    expect: { draws: button, commands: [oxtask.task.comment] }
+  - when: { action_point: oxplow/task.link, context: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" } }
+    expect: { draws: button, commands: [oxtask.task.link] }
+  - when: { action_point: oxplow/task.unlink, context: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: tsk2, type: blocks } }
+    expect: { draws: button, commands: [oxtask.task.unlink] }

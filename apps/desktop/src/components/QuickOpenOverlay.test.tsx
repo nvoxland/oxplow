@@ -97,8 +97,8 @@ test("the launcher focuses when its stream arrives and keeps what was typed", ()
 });
 
 // After a reload, the window settles under an open launcher: a restored tab
-// or terminal mounting takes focus, and the keys that follow went to neither
-// (tsk1055). The launcher keeps focus while it is open.
+// or terminal mounting takes focus, and the keys that follow went to neither.
+// The launcher keeps focus while it is open.
 test("something else taking focus doesn't cost the launcher its keystrokes", async () => {
   const view = renderOverlay();
   const input = view.getByPlaceholderText(/Search everything/) as HTMLInputElement;

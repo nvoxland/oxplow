@@ -25,15 +25,35 @@
 ///                          `model` / `variant` / `tokens`)
 ///   event session.compacted
 ///                       -> PostCompact  (the session's context was
-///                          summarized)
-///   event permission.asked / question.asked
-///                       -> Notification (a permission prompt, naming it) /
-///                          PreToolUse of an `AskUserQuestion` call (the
-///                          first question): the agent waits on the person.
-///   event permission.replied / question.replied|rejected
-///                       -> PostToolUse  (names no tool, or the Ask call:
-///                          the wait is over). Only forwarded: the person
-///                          answers in opencode's own UI, never here.
+///                          summarized; `trigger` `manual` / `auto`, from
+///                          the `compaction` part that began it)
+///   event session.created (a child, `info.parentID`)
+///                       -> SubagentStart (the parent's, `agent_id` the child)
+///   event session.idle / session.error of a child
+///                       -> SubagentStop (carries the child's last message,
+///                          and the error when it ended in one)
+///   event session.error of a session -> kept for its Stop: an abort
+///                          (`MessageAbortedError`) or an error, and the
+///                          children still running at the Stop ride it as
+///                          `background_tasks`
+///   tool `question`    -> posted as `AskUserQuestion`: the agent waits on
+///                          the person from its PreToolUse to its PostToolUse.
+///                          The question events post nothing, but a rejected
+///                          question (its tool throws, so no `.after`)
+///                          ends the call with a PostToolUse.
+///   event permission.asked
+///                       -> Notification (a permission prompt, naming it):
+///                          the agent waits on the person.
+///   event permission.replied
+///                       -> PostToolUse  (names no tool: the wait is over).
+///                          Only forwarded: the person answers in
+///                          opencode's own UI, never here.
+///
+/// Recording (`OXPLOW_OPENCODE_RAW`, set by oxplow on the launch only while
+/// `OXPLOW_HOOK_DEBUG` is set): every plugin hook input/output and every
+/// event is first posted as it came, unfiltered and untranslated, to
+/// `<base>/opencode.raw`, which oxplow appends to the hook recording as
+/// its own line. Then the translation above runs as usual.
 ///
 /// Everything is best-effort: a hook POST failure must never break the
 /// agent, matching oxplow's side-band hook policy.
@@ -61,6 +81,10 @@ export const OxplowHooks = async ({ client }) => {
     }
   }
 
+  // The raw recording, on only when oxplow asked for it.
+  const recording = !!env.OXPLOW_OPENCODE_RAW;
+  const raw = (kind, payload) => (recording ? post("opencode.raw", { kind, ...payload }) : null);
+
   // opencode tool names are lowercase; the control plane's write guard
   // matches Claude's names (Edit/Write/Bash/...).
   const TOOL_NAMES = {
@@ -76,6 +100,9 @@ export const OxplowHooks = async ({ client }) => {
     todowrite: "TodoWrite",
     todoread: "TodoRead",
     webfetch: "WebFetch",
+    // The agent asks the person: Claude's name for it, so the call is an
+    // ask and waits from its start to its end.
+    question: "AskUserQuestion",
   };
   const toolName = (tool) => TOOL_NAMES[tool] || tool;
 
@@ -119,6 +146,45 @@ export const OxplowHooks = async ({ client }) => {
       : { session_id: sessionID };
   }
 
+  // Tool calls timed from their two hooks (opencode's carry no duration),
+  // the children a session started that have not stopped, and the last
+  // error each session reported (kept for its next Stop).
+  const toolStarts = new Map();
+  const children = new Map();
+  const errors = new Map();
+  // The tool call each pending question (by its request id) was asked by.
+  const askedCalls = new Map();
+  // What started the compaction a session is in ("manual" | "auto").
+  const compactions = new Map();
+
+  // A child session ended: its parent's SubagentStop, once.
+  async function stopChild(childID, error) {
+    const child = children.get(childID);
+    if (!child) return;
+    children.delete(childID);
+    const last = await lastAssistant(childID);
+    await post("SubagentStop", {
+      session_id: child.parent,
+      agent_id: childID,
+      agent_type: "task",
+      last_assistant_message: textOf(last),
+      ...(error ? { error: errorOf(error) } : {}),
+    });
+  }
+
+  // The text parts of an assistant message, in order.
+  const textOf = (message) =>
+    (message?.parts || [])
+      .filter((p) => p && p.type === "text" && typeof p.text === "string")
+      .map((p) => p.text)
+      .join("\n");
+
+  // An error as oxplow reads it: its name, and its message when it has one.
+  const errorOf = (error) => ({
+    name: typeof error?.name === "string" ? error.name : "UnknownError",
+    ...(typeof error?.data?.message === "string" ? { message: error.data.message } : {}),
+  });
+
   // What oxplow asks the model to read with an answer, if anything.
   const contextOf = (res) => {
     const text = res?.hookSpecificOutput?.additionalContext;
@@ -146,13 +212,22 @@ export const OxplowHooks = async ({ client }) => {
 
   return {
     "chat.message": async (input, output) => {
+      await raw("hook", { name: "chat.message", input, output });
       const sessionID = input.sessionID || output.message?.sessionID;
       if (await isChildSession(sessionID)) return;
       const text = (output.parts || [])
         .filter((p) => p && p.type === "text" && typeof p.text === "string")
         .map((p) => p.text)
         .join("\n");
-      const context = contextOf(await post("UserPromptSubmit", { session_id: sessionID, prompt: text }));
+      errors.delete(sessionID);
+      const context = contextOf(
+        await post("UserPromptSubmit", {
+          session_id: sessionID,
+          prompt: text,
+          // The turn's id in opencode: the user message it opens.
+          message_id: output.message?.id ?? input.messageID,
+        }),
+      );
       if (context) {
         output.parts.push({
           id: partId(),
@@ -166,6 +241,8 @@ export const OxplowHooks = async ({ client }) => {
     },
 
     "tool.execute.before": async (input, output) => {
+      await raw("hook", { name: "tool.execute.before", input, output });
+      if (input.callID) toolStarts.set(input.callID, Date.now());
       const res = await post("PreToolUse", {
         ...(await whose(input.sessionID)),
         tool_use_id: input.callID,
@@ -181,14 +258,18 @@ export const OxplowHooks = async ({ client }) => {
     },
 
     "tool.execute.after": async (input, output) => {
+      await raw("hook", { name: "tool.execute.after", input, output });
       // Its bash tool reports the command's exit code as `metadata.exit`;
       // other tools have none, and send none.
       const exit = output?.metadata?.exit;
+      const startedAt = toolStarts.get(input.callID);
+      toolStarts.delete(input.callID);
       const res = await post("PostToolUse", {
         ...(await whose(input.sessionID)),
         tool_use_id: input.callID,
         tool_name: toolName(input.tool),
         tool_input: toolInput(input.args),
+        ...(startedAt !== undefined ? { duration_ms: Date.now() - startedAt } : {}),
         tool_response: {
           title: output?.title,
           output: output?.output,
@@ -201,6 +282,7 @@ export const OxplowHooks = async ({ client }) => {
 
     event: async ({ event }) => {
       if (!event) return;
+      await raw("event", { type: event.type, event });
       const props = event.properties || {};
       // The agent waits on the person (or no longer does): reported, never
       // answered. A child session's wait is its parent's.
@@ -213,48 +295,110 @@ export const OxplowHooks = async ({ client }) => {
         });
         return;
       }
+      // A question is its tool call: the tool hooks carry its start, its
+      // wait and its answer, so the question events add nothing to them
+      // (both reported it, and it counted twice). They only name the
+      // call a rejection ends: a rejected question's tool throws, so its
+      // `tool.execute.after` never comes.
       if (event.type === "question.asked") {
-        await post("PreToolUse", {
-          ...(await whose(props.sessionID)),
-          // The tool call that asked, when it names one, so the two pair.
-          tool_use_id: props.tool?.callID || props.id,
-          tool_name: "AskUserQuestion",
-          tool_input: { questions: props.questions || [] },
-        });
+        if (props.id && props.tool?.callID) {
+          askedCalls.set(props.id, { sessionID: props.sessionID, callID: props.tool.callID });
+        }
         return;
       }
       if (event.type === "permission.replied") {
         await post("PostToolUse", await whose(props.sessionID));
         return;
       }
-      if (event.type === "question.replied" || event.type === "question.rejected") {
-        await post("PostToolUse", {
-          ...(await whose(props.sessionID)),
-          tool_use_id: props.requestID,
-          tool_name: "AskUserQuestion",
-          tool_input: {},
-          tool_response: {},
-        });
+      if (event.type === "question.replied") {
+        askedCalls.delete(props.requestID);
+        return;
+      }
+      if (event.type === "question.rejected") {
+        const asked = askedCalls.get(props.requestID);
+        askedCalls.delete(props.requestID);
+        if (asked) {
+          toolStarts.delete(asked.callID);
+          await post("PostToolUse", {
+            ...(await whose(asked.sessionID)),
+            tool_use_id: asked.callID,
+            tool_name: "AskUserQuestion",
+            tool_input: {},
+            tool_response: { rejected: true },
+          });
+        }
+        return;
+      }
+      if (event.type === "session.created") {
+        const info = props.info;
+        if (info?.id && info.parentID) {
+          parentCache.set(info.id, info.parentID);
+          children.set(info.id, { parent: info.parentID, description: info.title });
+          await post("SubagentStart", {
+            session_id: info.parentID,
+            agent_id: info.id,
+            agent_type: "task",
+          });
+        }
+        return;
+      }
+      if (event.type === "session.error") {
+        const sessionID = props.sessionID;
+        if (!sessionID) return;
+        if (children.has(sessionID)) {
+          await stopChild(sessionID, props.error);
+          return;
+        }
+        if (props.error) errors.set(sessionID, props.error);
+        return;
+      }
+      // `session.compacted` names only the session; what started the
+      // compaction is the `compaction` part opencode adds just before
+      // (`auto: false` for the person's /compact).
+      if (event.type === "message.part.updated") {
+        const part = props.part;
+        if (part?.type === "compaction" && props.sessionID) {
+          compactions.set(props.sessionID, part.auto ? "auto" : "manual");
+        }
         return;
       }
       if (event.type === "session.compacted") {
-        await post("PostCompact", await whose(props.sessionID));
+        const trigger = compactions.get(props.sessionID);
+        compactions.delete(props.sessionID);
+        await post("PostCompact", {
+          ...(await whose(props.sessionID)),
+          ...(trigger ? { trigger } : {}),
+        });
         return;
       }
       if (event.type !== "session.idle") return;
       const sessionID = props.sessionID;
-      if (await isChildSession(sessionID)) return;
+      if (await isChildSession(sessionID)) {
+        await stopChild(sessionID, null);
+        return;
+      }
       const last = await lastAssistant(sessionID);
-      // Its text parts, in order; the model, variant and tokens it ran on.
+      const error = errors.get(sessionID);
+      errors.delete(sessionID);
+      // The children still running: the work this turn left behind.
+      const running = [...children.entries()]
+        .filter(([, child]) => child.parent === sessionID)
+        .map(([id, child]) => ({
+          id,
+          type: "subagent",
+          status: "running",
+          ...(child.description ? { description: child.description } : {}),
+        }));
+      // Its text parts, in order; the model, variant and tokens it ran on;
+      // how it ended when it did not simply finish (an abort or an error).
       await post("Stop", {
         session_id: sessionID,
-        last_assistant_message: (last?.parts || [])
-          .filter((p) => p && p.type === "text" && typeof p.text === "string")
-          .map((p) => p.text)
-          .join("\n"),
+        last_assistant_message: textOf(last),
         model: last?.info?.modelID,
         variant: last?.info?.variant,
         tokens: last?.info?.tokens,
+        background_tasks: running,
+        ...(error ? { error: errorOf(error) } : {}),
       });
     },
   };

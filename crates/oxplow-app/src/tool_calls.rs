@@ -59,7 +59,7 @@ mod tests {
         }
     }
 
-    /// The worktree root itself reads as `.`, not an empty path (tsk371).
+    /// The worktree root itself reads as `.`, not an empty path.
     #[test]
     fn the_worktree_root_is_dot() {
         let r = recorded(&call(&["/repo"], None), Path::new("/repo"));

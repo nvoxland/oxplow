@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`task.assigned@1`: who is going to work on an item, or its place\nin their queue, changed (`oxtask.task.assign`, `.reorder`; a\nclosed item or a closed thread's releases it). Core's record, for every\nprovider; the `tasks.project` consumer keeps `v_oxplow_task.assignee`\nand `rank` from it.",
+  "properties": {
+    "after": {
+      "description": "Placed just after this item of `to`'s queue (neither: at its end).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "before": {
+      "description": "Placed just before this item of `to`'s queue.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "from": {
+      "description": "Who it was assigned to: a thread's URI, the person's; absent, nobody.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "task": {
+      "description": "`oxplow:oxplow/task?id=<id>&provider=<list>`.",
+      "type": "string"
+    },
+    "to": {
+      "description": "Who it's assigned to now; absent, nobody.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "task"
+  ],
+  "title": "TaskAssignedV1",
+  "type": "object"
+}

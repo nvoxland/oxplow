@@ -2,8 +2,8 @@
 
 How oxplow knows what the agent is doing and has done, and the direction
 it is moving in. This is the target design; each section says what is
-built. Read it before touching efforts, the edit guard, the Stop hook,
-hints (advisories), work-item providers or snapshots.
+built. Read it before touching requests, turns, the edit guard, the Stop hook,
+hints (advisories), task trackers or snapshots.
 
 ## Why
 
@@ -27,14 +27,49 @@ keeps firing is a sign oxplow should infer the thing itself.
 ## The record
 
 The **turn** (prompt to stop) is the unit of record; each **tool call** is
-the evidence inside it. Per turn oxplow keeps the prompt, the agent's
-final message, the start and end snapshots, the tool calls with their
-time windows, test runs and tokens. Nothing here depends on how many
-threads or agents share a stream.
+the evidence inside it. Per turn oxplow keeps what opened it (`source`: a
+person's prompt, a background job reporting back, a subagent's hand-back,
+another session's message, or unknown) with the text it was opened with,
+the turn it goes on with when the harness named one (`cause_turn_id`: the
+turn whose tool call started the job, or in which the subagent started),
+the harness's own turn id, the agent's final message, the start and end
+snapshots, the tool calls with their time windows, test runs and tokens
+([agent-model.md](./agent-model.md) "Hook ingest and recording"). Only a
+person's prompt is a person's words: since 2026-10-28, 41% of turns were
+opened by one, 41% by a background job's report, 13% by another session.
+A **request** is the turn that started something and every turn that
+followed from it, joined by those cause links when each turn opens
+([agent-model.md](./agent-model.md) "Requests").
+
+**A turn's file changes are a join by time** (`v_turn_file`), not
+snapshots the turn owns: snapshots are the worktree's own record, and
+several writers (agents, the person, outside tools) can change one
+worktree at once. The join is stored (`turn_file`, V21), written by a
+trigger when a take is logged (`snapshot_op`, after its file rows): a
+take that changed nothing logs none. A file is the turn's when the take
+captured it after the turn began, while it ran or within a minute after
+it ended, and the watcher saw it change inside the turn's window; a
+capture with no change time (the startup sweep's) counts only while the
+turn ran or in the turn's own end take. A file the watcher saw change
+before the prompt is not the turn's, even when the turn's end take
+captured it. `shared` for a capture with no change time also looks at the
+minute before it (another turn's end take lands up to a minute after that
+turn closed). Computed per
+read, the join over every turn and file took tens of seconds whenever a
+query named turns by anything but a constant id; over the table a filter
+on a turn, a request's turns or a stream and path reaches an index. Each file says how sure it is:
+`claimed` (a call of the turn named it, or its harness reported a shell
+call changed it: `agent_tool_call_path`), `shared` (another turn ran on
+the stream while it changed), `sole`. `thread.checkpoint`'s `changed` is
+whether the turn has any; the `turn` and `request` change kinds find their
+two snapshots by time (the end is the turn's own `turn_end` take, else the
+last take at or before it ended). Nothing here depends on how many threads or agents share a stream.
 
 `OXPLOW_HOOK_DEBUG=<file>` appends every hook payload, as the agent sent
 it, to that file, one JSON line each (`event`, `thread`, `at`, `payload`).
 Use it to learn a harness's real payload shapes before depending on them.
+(`OXPLOW_CODEX_DEBUG` records Codex, and opencode's raw events join this
+file while it is set: `.context/agent-model.md` "Hook ingest and recording".)
 Besides the hooks oxplow acts on, the Claude Code plugin registers events it
 only observes — `TaskCreated`, `TaskCompleted`, `PreCompact` — which are
 acked unread until something needs them
@@ -42,160 +77,78 @@ acked unread until something needs them
 and `SubagentStop` are read: see "Who in a session acted" in
 [agent-model.md](./agent-model.md).
 
-## Efforts: a core bucket, a pluggable policy
+## Requests, files and assignment
 
-An **effort** is a span of one thread's work, the bucket files, runs,
-tokens, the review packet and commit links hang off. It is finer than a
-commit and needs no task.
+oxplow groups work by **request**, not by a bucket the agent or a policy
+opens: a request is the turn that started something and every turn that
+followed from it ([agent-model.md](./agent-model.md) "Requests"). Work
+recorded against a turn — tool calls, tokens, test runs, jobs — is the
+request's through the turn. Its state (`running`, `waiting_on_person`,
+`waiting_on_work`, `finished`) is read live, so nothing opens or closes it.
+There is no policy to choose and nothing to link by hand.
 
-**Core owns** the entity and its invariants: spans on one thread never
-overlap and at most one is open per thread; the work-item link is
-optional and can be attached later; a title (default: the linked item's
-title, else the first prompt line); how it closed (`commit`, `switch`,
-`person`, `agent`). Core's commands carry the boundary, not the call time,
-so a policy may react late: opening adopts the thread's activity back to
-its previous effort's end, and closing can cut the span at a past point.
+**Attribution is core's, from observation.** Files are the turn's by the
+time join above (`v_turn_file`), and a file is `claimed` when an edit tool
+named it (`claim_basis` `named`) or the harness said a shell call changed
+it (`reported`: Claude Code's `bashEditDiff`, never taking a named file; its
+absence says nothing). The rest are `sole` or `shared`, which covers shell
+edits — the large majority. A claimed file and a tool call carry the agent
+session that made them (`agent_session_id`), so two sessions on one thread
+are told apart past the door. Runs go to the turn of the tool call that
+caused them. Nothing is declared or reconciled at close.
 
-**Attribution is core's, from observation:** files are *claimed* (an edit
-tool named them) or *observed* (they changed during one of the thread's
-turns and no other thread's overlapping effort claimed them), which covers
-shell edits — the large majority. The `effort.observe` consumer records
-them per turn from the turn's snapshot bracket, after the policy has
-reacted to the turn's `thread.checkpoint`; a file two threads changed at
-once and neither claimed is observed by both, and changes between turns
-(the person's own) belong to no effort. Runs go to the effort of the tool
-call that caused them (`metric_capture.effort_id`). Nothing is declared or
-reconciled at close. A claimed file and a tool call
-carry the agent session that made them (`agent_session_id`), so two sessions on one thread are told
-apart past the door. An observed file
-carries the session when exactly one session had a turn running in the
-turn's window, and is `shared` (no session) when more than one did or a
-second session observes the same path; it is never assigned by overlap
-luck, and a claimed row is never touched. A commit is linked to the efforts whose changes it
-holds, by content.
+A commit is linked to the requests whose changes it holds, per path, by
+content (`commit_request`: basis named/reported/observed, confidence
+sole/shared; [git-integration.md](./git-integration.md) "Linked to the
+requests that made it"). A task is linked to the requests that worked on it
+(`request_task`, `.context/tasks.md` "A task's requests"): each link has
+its basis (`prompt`, `command`, `transition`, `assigned`) and is written
+when its evidence is recorded. The task → commit edge derives through the
+task's requests.
 
-**A policy decides** when to open, close and link, reacting to core's
-events (a checkpoint after a turn's snapshot, a commit indexed, an effort
-landed by a commit, a work item changing state). The default:
+**Assignment is bundled's** (the `assignee` and `rank` fields of the task model,
+[tasks.md](./tasks.md)). An agent that starts a task (its store's move to in
+progress), or files one straight into progress, takes it: bundled's
+`assign-on-start` effect assigns it to the agent's thread, whoever had it. There is no effort policy and no
+`oxplow.effort.*` command. Nothing in oxplow marks a task done, or moves
+one, because of a request.
 
-1. An item started on a thread links that thread's effort, opening one if
-   none is open. A descendant refines the link (epic, then child), an
-   ancestor leaves it; an unrelated item closes the effort and opens the next; the
-   linked item going done or canceled closes it.
-2. A turn that changed the worktree, and ran at least one tool that isn't
-   a read, opens an effort if none is open. A question-only turn never
-   gets one; a person's own edits never open one.
-3. A commit that lands all of an effort's changes closes it. A partial
-   commit links it and leaves it open; a reset or branch switch never
-   closes one.
-
-oxplow moves a `todo` item to in progress when work is linked to it, and
-**never marks anything done**. The person can rename, link or close an
-effort afterwards. A policy may be **none**: no efforts, and the record is
-per turn.
-
-**The effort policy is an interface** (`oxplow_domain::effort_policy`):
-`EffortPolicy { id, react(EventView) → Vec<CommandCall> }`. A policy
-only composes; core runs. It gets the event envelope
-([extensions-events.md](./extensions-events.md) "The event envelope"), whose `anchors`
-say the mover's thread, a checkpoint's turn, a landing's effort; it is
-offered each of `EVENTS`: `work_item.state_changed` (core's, logged for
-every provider), `effort.linked`, `effort.opened`, `thread.checkpoint`,
-`effort.landed`. `EffortPolicyRegistry` (`Services.effort_policies`) holds
-the policies by id: the declared built-ins, which each activation
-generation restates (`effort_policy::prepare_built_ins`, published with
-`set_declared`), and running provider instances, which register
-themselves and a reload never touches.
-
-`crate::effort_policy::EffortPolicyConsumer` (`effort.policy`) is the
-**dispatcher**: it resolves the active id
-(`activeProviders.effort_policy`: `oxplow` — the default, unset — `none`,
-or a provider instance; all rows in `v_capability_provider`), and for any
-but `none` offers the event to that policy only, checks what it composed
-(`extension_commands::check_calls`: a call that isn't a command, or whose
-input doesn't fit, runs nothing) and runs the calls in order inside the
-policy's run (`run_context::for_policy`): as the effect
-`effort_policy:<id>` (source `effect:effort_policy:<id>`) on the event's
-thread and stream, each `command.executed` caused by the event, stopping
-at the first that fails — the pump dead-letters it. It never offers an
-event a policy's own run caused (a source starting
-`effect:effort_policy:`), nor one the effects' loop guard refuses
-(`event_lineage::lineage`). A
-`capability.switched` of the effort policy closes every open effort
-(`switch`), as the system — core's rule, whichever policy is active after.
-
-**A script may be the policy** (`implementations:` with `capability:
-effort_policy` and a `.star` entry, its `needs:` the scopes it reads —
-[extensions-commands.md](./extensions-commands.md) "Implementations"). It's an effect's
-shape: `transform({event})` gets the event envelope and answers `{
-commands: [{ name, input }] }` or `{ skip }` (events are refused).
-`effort_policy::prepare_built_ins` registers it as an
-`effort_policy_script::ScriptedPolicy`, which `effects::run_over` runs
-under the effects' sandbox, its `scope("sql.read", …)` limited to its
-`needs`. It runs under its extension's permissions (a declared
-`sql.read` need requires `sql.read`; the loader refuses the extension
-otherwise), as deployed: a failed event is dead-lettered by the pump —
-nothing falls back. Its reads are counted on a
-pure child of the policy's run. `examples/extensions/prompt-efforts` is one:
-an effort per prompt that changes files (checked by `oxplow extension
-test` and run over real turns in `effort_policy_script`'s tests).
-
-**A provider process may be the policy** (`providers:` with `capability:
-effort_policy`, [providers.md](./providers.md) "What a provider may
-implement"). While it runs, `providers::effort_policy::EffortPolicyHost`
-registers it as an `ExternalEffortPolicy`, offered as an implementation
-like any. Each event is one `react` invoke, `{ event }` (the
-event envelope, idempotency key `react:<event id>`), answered as an
-effect's script answers — `{ commands: [{ name, input }] }` or `{ skip }`;
-events are refused. It reads oxplow through `host/call` (`needs:
-[sql.read]`), counted on the policy's run; `react` is told that run on
-the wire (`InvokeParams.context`). What it composes runs, audited, as
-`effect:effort_policy:<instance>`.
-A stopped instance leaves the registry, and the choice falls back to
-none.
-
-`CommitOrSwitch` (`oxplow:commit-or-switch`) is the built-in, the rules
-above composed as calls (it reads first, then composes). Rule 1: the
-thread is the event's (the agent that moved the item), else the item's
-(`v_work_item.thread_id`); a person moving a backlog item opens nothing. A
-descendant of the linked item refines the link; an ancestor leaves it. A
-task's status no longer opens or closes an effort anywhere else.
-
-Rule 2 reads **`thread.checkpoint@2 { thread, turn, reason, snapshot,
-changed, writing_tools }`**, logged by the `thread.checkpoint` consumer
-(`crate::thread_checkpoint`) once a turn's end take lands. `changed`
-compares the turn's start snapshot with the take's (content-addressed:
-the same id means the same tree); `writing_tools` counts the turn's calls
-that can change the worktree, by their kind in oxplow's vocabulary
-(`v_tool_call.kind`: `edit`, `shell`, `subagent`; `ToolKind::changes_worktree`)
-plus oxplow's own `run_command`, whatever each harness calls its tools —
-so no policy reads a tool's name. The policy opens an unlinked effort with
-`adopt_since` the turn's start when `changed` and `writing_tools > 0` and
-the thread has none open; a later item start links it (rule 1).
+Evidence is anchored to requests too: metric deltas and observations
+(`v_request_metric_delta`, `v_request_observation`), a request's outcome,
+and per request tokens, cycle time, time to green and test outcome.
+Efforts were removed (2026-11-10); steering and token waste went with
+them.
 
 ## Cross-thread ownership
 
-A work item is owned by the thread it is on (`work_item.thread_id`;
-`oxplow.work_item.move`); there is no second owner. Two threads may
+Who is going to work on an item is its assignee — a thread, the person or
+nobody (`v_oxplow_task.assignee`; `oxplow.tasks.assign`, bundled's for
+every store, [tasks.md](./tasks.md) "Assignment") — and there is
+no second one. Who worked on it is its requests (`v_oxplow_request_link`, below). A done item is nobody's,
+and a closed thread's items go back to nobody. Two threads may
 still work on the same thing, and nothing refuses it (below, "No
 gates"). It is made visible, all of it bundled over existing datasets
 (oxplow-bundled):
 
-- The **Shared work** page (`shared-work` in the launcher under Work;
-  `thread-shared-work` on the thread page, slot `thread.plan.header`;
-  `item-shared-work` on a work item, slot `oxplow/work-item.sections`): items
-  with open efforts on two threads, files changed by two threads' efforts
-  (open, or closed in the last day, from `v_effort_file`), and epics whose
-  open children sit on different threads.
+- The **Shared work** page (`shared-work` in the launcher under Work,
+  a `thread_id` param to keep one thread's; `item-shared-work` on a
+  task, slot `oxplow/task-detail.sections`), both over the one query
+  `shared-work-rows` (`thread_id`, `task`): items
+  that requests on two threads worked on (`v_oxplow_request_link`; requests
+  running, or finished in the last day), files two threads' turns changed
+  (`v_turn_file` over those requests' turns, only a `claimed` or `sole`
+  file: one two concurrent turns could each have changed is no evidence),
+  and epics whose open children sit on different threads.
 - The advisory **`shared-files`** (turn end, to the person, once per pair
-  of threads): two open efforts on different threads edited the same file
-  (`v_tool_call`, kind `edit`) within `sharedFiles.windowMinutes`
+  of threads): requests on different threads, running or lately finished,
+  changed the same file (`v_turn_file` of their turns, `claimed` or
+  `sole`) within `sharedFiles.windowMinutes`
   (default 60). It names both threads and the files. Either thread's turn
   end can raise it; an Alert already raised for the pair (its text opens
   with the pair, `v_agent_nudge`) silences the other, so a long overlap
   alerts once.
 - The advisory **`shared-files-agent`** (turn end, to the agent, once per
-  thread): another thread's open effort also changed the files, with a
+  thread): another thread's request also changed the files, with a
   pointer to the handoffs to or
   from that thread (`v_handoff`; `oxplow.handoff.send` hands the overlap over).
 
@@ -206,13 +159,11 @@ native messaging"): taking one moves its item.
 ## No gates
 
 - The edit guard keeps only isolation: another
-  stream's worktree (the primary checkout included), wiki pages (written through `oxplow.knowledge.write_page`).
+  stream's worktree (the primary checkout included), a store's row files in a worktree (written through the store's command).
   It never asks for tracked work.
 - The Stop hook never refuses a stop.
-- Nothing the agent must call to close work. `oxplow.effort.report {thread?,
-  summary?, impacts?, claims?}` is optional and only annotates the thread's open
-  (else latest) effort (claims it states land in `v_claim` as `recorded`); `v_effort.summary` defaults to the effort's last
-  turn's final message.
+- Nothing the agent must call to close work. A request ends when its
+  turns do; its last turn's final message is the summary.
 - "Waiting on you" is derived (a pending question or plan approval, the
   Notification hook's permission prompt, a final message ending in a
   question), not declared; the next prompt clears it. It's the thread's
@@ -234,19 +185,24 @@ datasets, a trigger, pacing, and an audience.
   cost.
 - Trigger on outcomes the person feels (work too large to review, work
   landed while its item still says in progress), never on tracker usage
-  ("fewer tasks filed"), which invites filing to satisfy a number.
+  ("fewer tasks filed"), which invites filing to satisfy a number. What a
+  task tracker wants of its agent (oxtask's `untracked-work` reminder to
+  take a task before editing) is that tracker's opinion and lives in the
+  tracker's extension (`oxtask`), not in core's hints; it fires
+  once per request, after the first edit, only while no task is in
+  progress on the thread and none is linked to the request.
 
 ## Review: evidence in core, policy in extensions
 
 Core collects and analyzes; whether the result is good enough is a
 review policy's, and a policy is an extension. Core owns the evidence
 (test runs and cases with their provenance, coverage and diff coverage,
-the change analysis, metric facts, claims and what they cite), its
-attribution to efforts, its freshness, schema validation and the safe
+the change analysis, metric facts), its
+attribution to turns and requests, its freshness, schema validation and the safe
 operations that write it. A policy reads that evidence through the `v_*`
 datasets, adds facts of its own (collectors, measures, dimensions), and
 says what it concluded through public contributions: a dataset, a page, a
-decorator, the `effort.verdict` replacement, commands.
+decorator, commands.
 
 oxplow-bundled and oxplow-foundation are the default policy. Another
 replaces them piece by piece: `examples/extensions/schema-review` is a
@@ -254,14 +210,11 @@ whole alternative review built that way.
 
 | Judgement | Where it lives | Knob |
 |---|---|---|
-| An effort's verdict (tests, diff coverage, claims, decisions) | oxplow-bundled `effort-verdict`, the `effort.verdict` replacement; core shows none | `oxplow.coverage.abs_pct` `warnAt`; replace the target |
-| A claim is backed (a person verified it, it cites evidence, or a latest green run backs `tests pass`); a dismissed claim counts for nothing | oxplow-bundled `claim_status`; core `v_claim` keeps only what it cites and its `review` (NULL, `verified`, `dismissed`) | fork the model |
 | Struggle (a file edited 5+ times, 3+ failed shell commands) | oxplow-bundled `struggle` | `struggle.repeatedEdits`, `struggle.failedCommands` |
-| Per-effort test outcome and time to green | oxplow-foundation collector `oxplow.effort_test_outcome` | metric specs over its facts |
+| Per-request test outcome and time to green | oxplow-foundation's test-outcome collector | metric specs over its facts |
 | Look here first, co-change surprise, deviation, tests weakened | oxplow-bundled datasets and pages | `changeInterest.*`, `coChange.*`; the rest fork |
 | Metric thresholds (coverage 80/50, complexity > 10, length > 60) | oxplow-foundation metric specs | `metrics: [{ use: …, target, warnAt, failAt }]` |
 | Advisories (15-file uncommitted, threshold crossed, landed in progress, two threads on one file) | oxplow-bundled advisories | `largeUncommitted.files`, `sharedFiles.windowMinutes`; the rest fork |
-| Accept / request changes and their verdict events | oxplow-bundled commands | another extension's commands |
 
 **What stays in core, and why.** These are collection's own mechanics
 or operational limits, not a view of what good work is:
@@ -276,32 +229,30 @@ or operational limits, not a view of what good work is:
 - Function metrics, clone detection and its `min_lines` / `min_nodes`
   floors, diff-coverage math, zone matching, `threshold_state`.
 - Advisory muting after three deliveries, stall detection (15 / 5
-  minutes), contribution disabling after three failures, steering and
-  token-waste attribution.
+  minutes), contribution disabling after three failures.
 
 **Knobs.** An extension's SQL reads its own configuration
 (`config('/pointer')`, `.context/extensions-manifest.md` "Configuration in SQL"),
 so the constants are settings, not forks. oxplow-bundled has `changeInterest.*`
 (weights and the long-function cut-off), `coChange.*` (pair threshold,
 window, per-commit file cap, dormant days) and `struggle.*`, set with
-`oxplow.review_policy.write`. The holder (`extensions-bundled.md`) has
+`oxplow.settings.write` (foundation's, over the `oxplow` namespace's one
+configuration). The holder (`extensions-bundled.md`) has
 `largeUncommitted.files` and `sharedFiles.windowMinutes`, set with
 `oxplow.advisory_policy.write`. All default to today's values. A metric's `target` / `warnAt` / `failAt` stay
 tunable from `project.yaml`.
 
-**Gaps.** The complexity and length cut-offs of the metric specs, the
-"look here first" reason threshold (a factor of 1.2) and the verdict's
-rules are still fixed in the extension; the verdict is replaced by another
-extension, not tuned.
+**Gaps.** The complexity and length cut-offs of the metric specs and the
+"look here first" reason threshold (a factor of 1.2) are still fixed in the extension.
 
 ## Capabilities
 
 The direction for most of oxplow: a base interface in core, a standard
 implementation shipped in `oxplow-bundled`, and users free to write their
-own — heavier ones included (beads as a work list).
+own — heavier ones included (beads as a task tracker).
 
 - **A capability** is defined by its interface, whether it may be
-  **none** (then a core no-op stands in — for the work list a sink that
+  **none** (then a core no-op stands in — for the task tracker a sink that
   takes every verb and keeps nothing, so everything written against the
   interface just finds nothing — and anything that declares it needs the
   capability itself says so), its
@@ -311,12 +262,14 @@ own — heavier ones included (beads as a work list).
   other, and a choice is a project default with a personal override.
   Core declares the capabilities (`oxplow_domain::capability`:
   `CapabilitySpec` — choosable, optional, default, the features an
-  implementation may declare): the work list, the effort policy and
-  knowledge may be none, snapshots may not, and `vcs` isn't chosen. A
+  implementation may declare): the task tracker
+  may be none, snapshots may not, `vcs` isn't chosen, and knowledge is
+  not chosen either: it is a "many" capability, every declared store is
+  active (`choosable = 0`, no `none`, no `capability.switched`). A
   person's override is `activeProviders` in `.oxplow/personal.yaml`
   (`oxplow.config.set { layer: personal }`).
 - **One active, or many at once.** Most capabilities have one active
-  implementation, chosen (the work list, the effort policy, snapshots) or
+  implementation, chosen (the task tracker, snapshots) or
   fixed (`vcs`). A **many-capability** (`CapabilitySpec.many`:
   `agent_harness`, `ai_provider`) is served by every
   implementation declared — the way collectors are — never chosen,
@@ -333,14 +286,14 @@ own — heavier ones included (beads as a work list).
   *called*. Our defaults are named built-ins that `oxplow-bundled`
   declares (the pattern collectors use, `entry: oxplow:junit`), use only
   public commands and events, and pass the same conformance suite.
-  Core's own records (turns, efforts, the event log) stay transactional
+  Core's own records (turns, requests, the event log) stay transactional
   in core.
   `source_guards::core_never_special_cases_its_own_implementations` fails on a
   literal `"oxplow-bundled"` or `"oxplow-foundation"` outside
   `bundled_extensions.rs` or a provider id compared with oxplow's; what's
-  left is pinned with its reason. oxplow's tasks sit behind the interface
-  like any list (`crates/oxplow-tasks`, registered by declaration, their
-  verbs called outside the transaction — [work-items.md](./work-items.md)).
+  left is pinned with its reason. oxtask sits behind the interface
+  like any tracker (`crates/oxplow-oxtask`, registered by declaration, its
+  verbs called outside the transaction — [tasks.md](./tasks.md)).
   The agent harnesses likewise: `only_harness_implementations_name_a_harness`
   fails on production code outside `crates/oxplow-harnesses` and
   `crates/oxplow-harness-fake` that names a harness's own pieces
@@ -363,42 +316,30 @@ own — heavier ones included (beads as a work list).
   it logs `capability.switched@1 { capability, from, to, chosen_by }` in
   the same transaction: once per change, across restarts too, and never
   for the first statement. A chosen external instance that hasn't started
-  yet is a real switch to none and back. Switching the effort policy
-  closes every open effort (`switch`), whichever policy is active after;
-  nothing is deleted.
+  yet is a real switch to none and back. Nothing is deleted.
 
-The four in progress:
+The three in progress:
 
 | Capability | May be none | Default | Notes |
 |---|---|---|---|
-| Work list | yes | oxplow's tasks | Task screens stay core components, written against the interface; moving them into the extension is later work |
-| Effort policy | yes | the three rules above (`CommitOrSwitch`) | An `EffortPolicy`: it composes commands for an event, the dispatcher runs them as `effect:effort_policy:<id>`. A provider process may implement it (`react`) |
-| Snapshots | no | keeps everything (core's `oxplow`) | `SnapshotProvider` (`oxplow_domain::snapshot`): mark now, what changed between two points, read a path at a point (bytes only with `contents`). `Services.snapshots` (a `SnapshotRegistry`) answers the active one; every core take (an effort's brackets, a turn's end, a measured run, an archive) is its mark. Both built-ins are `snapshots::CoreSnapshots`, one capture pipeline under a content policy: `oxplow` keeps every version, `hashes` (bundled, "Track changes only") records identities and keeps no bytes. The captures follow the active one's policy (`SnapshotSwitch` on `capability.switched`, and every reload); a switch changes what's kept from then on, nothing taken before. A provider process implements it too (`providers::snapshots::SnapshotsHost`, `.context/providers.md` "A snapshots provider"): it marks, core records what it reports in the same ledger, and the capture pipeline idles while it's active |
-| Knowledge | yes | oxplow's wiki (bundled, `oxplow:wiki`) | `KnowledgeProvider` (`oxplow_domain::knowledge`): write, delete and link pages, and how current each page's pinned refs are. `Services.knowledge` (a `KnowledgeRegistry`) answers the active one. None is a sink, as the work list's is (`knowledge::NoneKnowledge`, core's, always registered): a write lands nowhere and succeeds, so nothing that writes pages is refused. An extension's provider may keep pages elsewhere (an Obsidian vault, a Confluence or MediaWiki server; `.context/knowledge.md` "The capability") |
+| Task tracker | yes | oxtask | Task screens stay core components, written against the interface; moving them into the extension is later work |
+| Snapshots | no | keeps everything (core's `oxplow`) | `SnapshotProvider` (`oxplow_domain::snapshot`): mark now, what changed between two points, read a path at a point (bytes only with `contents`). `Services.snapshots` (a `SnapshotRegistry`) answers the active one; every core take (a turn's end, a measured run, an archive) is its mark. Both built-ins are `snapshots::CoreSnapshots`, one capture pipeline under a content policy: `oxplow` keeps every version, `hashes` (bundled, "Track changes only") records identities and keeps no bytes. The captures follow the active one's policy (`SnapshotSwitch` on `capability.switched`, and every reload); a switch changes what's kept from then on, nothing taken before. A provider process implements it too (`providers::snapshots::SnapshotsHost`, `.context/providers.md` "A snapshots provider"): it marks, core records what it reports in the same ledger, and the capture pipeline idles while it's active |
 
 ## Status
 
 - Built: the hook payload dump and the observed hook events; the Stop
-  hook never refuses; the edit guard is isolation only; efforts need no
-  work item, one is open per thread, and the seam (open with adoption,
-  close as of a point, link, retitle — `commands/effort.rs`); the
-  effort-policy choice with "none"; rules 1, 2 (`thread.checkpoint`) and
-  3 (`vcs.commit.indexed` → `effort.landed`); observed files and runs by
-  their causing tool call. An effort's start pin is where its span began:
-  the predecessor's end snapshot when it starts at that close, else the
-  stream's last snapshot before it when it adopted work already taken.
-  Efforts close with their thread (`oxplow.thread.close`) and stream
-  (`oxplow.stream.archive`, end snapshot first); `oxplow.effort.report` is optional and
-  never creates an effort, and the summary defaults to the last turn's
-  final message. "Waiting on you" is derived; `await_user` is gone.
-  The Work panel shows the thread's open effort even when unlinked (In
-  progress) and its closed ones (Finished, which opens Thread activity);
-  the Thread activity page lists the thread's turns under the effort each
-  fell in, with question-only turns "Between efforts"; an effort's page
-  header renames, links, unlinks and closes it.
+  hook never refuses; the edit guard is isolation only; requests, with
+  their state read live; files per turn by a time join with the snapshot
+  line (`v_turn_file`); runs by their causing tool call; assignment taken
+  by the agent that starts a task. "Waiting on you" is derived;
+  `await_user` is gone. (Today the Work panel shows tasks: In progress
+  with what the thread's latest request is doing, Up next, and Finished —
+  the done tasks the thread was working, `v_oxplow_request_link` basis assigned
+  or transition.) Efforts were removed (2026-11-10).
   Hints, first cut: advisories gain a `turn-end` trigger, every param
-  (`:thread_id`, `:stream_id`, `:turn_id`, nullable `:effort_id`),
-  `once_per: thread`, and one delivery path — every hit is a nudge the
+  (`:thread_id`, `:stream_id`, `:turn_id`, nullable `:request_id`),
+  `once_per: thread` (since then `request`, the default, pacing per
+  request), and one delivery path — every hit is a nudge the
   next prompt or tool call takes and stamps; bundled `large-uncommitted`.
   Second cut: `audience: person` (Alerts, `oxplow.hint.dismiss`), `once_per:
   session | day`, a per-hook character budget, evaluation counts
@@ -420,18 +361,18 @@ The four in progress:
   Settings → Capabilities, generated from `v_capability_provider` (v4 carries
   each capability's title and whether it's choosable and optional),
   chooses for the project and just for me, and replaces Integrations'
-  work-items radio. A switch is logged (`capability.switched@1`) and
-  closes open efforts when it's the policy's; a source guard pins core's
+  task tracker radio. A switch is logged (`capability.switched@1`), and
+  a source guard pins core's
   remaining special cases.
   The agent's surface follows the active implementation: commands
   declare `needs:`, built-ins declare the commands and tools only they
   offer, an instance owns its namespace, and the bus and MCP offer and run
   only what's active. Skills and slash commands come from extensions
-  too (`skills:`), offered the same way; the work-item guidance and
-  `/work-next` moved from core into `oxplow-bundled`. A work list
-  declares its id pattern, and a loose id in a command (`tsk12`) is the
+  too (`skills:`), offered the same way; the task guidance and
+  `/next-task` moved from core into the task store's extension (`oxtask`). A task tracker
+  declares its id pattern, and a loose id in a command (`tsk42`) is the
   active list's item.
-  The app's test fixture opens an effort with no task; only tests about
-  tasks make one (which found a claim on an unlinked effort failing).
-- Next: "none" as a work list end to end, then the other three
-  capabilities in the table (the effort policy, snapshots, knowledge).
+  The app's test fixtures (`services_with_thread`, `services_with_task`)
+  make a thread, and a task only for tests about tasks.
+- Next: "none" as a task tracker end to end, then the other two
+  capabilities in the table (snapshots, knowledge).

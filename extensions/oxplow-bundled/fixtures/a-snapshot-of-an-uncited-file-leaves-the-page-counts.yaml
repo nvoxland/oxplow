@@ -1,0 +1,19 @@
+# The page counts follow what can move them: a page written, recorded or
+# deleted, or a snapshot that changed a file a page cites
+# (`knowledge.page.drifted`). A snapshot of a file no page cites restates
+# nothing.
+requires: [oxwiki]
+given:
+  - observe: { turn: { prompt: Make the files, write: { path: a.txt, body: one } } }
+  - observe: { snapshot: { files: [{ path: a.txt, hash: h1 }, { path: b.txt, hash: h1 }] } }
+  - { command: oxwiki.page.write, input: { title: Cites, body: "# Cites\n\nSee [[file:a.txt]]." } }
+  - observe: { snapshot: { files: [{ path: b.txt, hash: h2 }] } }
+when:
+  sql: |
+    SELECT count(*) AS runs FROM v_event
+    WHERE type = 'collector.synced' AND json_extract(payload, '$.collector') LIKE '%knowledge_pages%'
+expect: { rows: [{ runs: 1 }] }
+steps:
+  - given:
+      - observe: { snapshot: { files: [{ path: a.txt, hash: h3 }] } }
+  - expect: { rows: [{ runs: 2 }] }

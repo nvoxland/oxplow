@@ -107,7 +107,7 @@ test("evaluateStall: a hidden window never counts as a stall (timer throttling)"
   expect(r.blockedMs).toBe(59_000);
 });
 
-// tsk1423: macOS throttles a covered or background window's timers to one
+// macOS throttles a covered or background window's timers to one
 // per ~2 s and still calls its document visible, so every tick looked like
 // a ~1000 ms stall (thousands of WARNs a day). A window that is drawing no
 // frames isn't blocked, it isn't running; a real block in a window that was

@@ -641,7 +641,7 @@ mod tests {
         }
     }
 
-    /// tsk1032: a variable named in `env_remove` doesn't reach the child,
+    /// a variable named in `env_remove` doesn't reach the child,
     /// though the parent (this test process) has it.
     #[tokio::test]
     async fn a_removed_variable_does_not_reach_the_child() {

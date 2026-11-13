@@ -1,15 +1,15 @@
-# Collection — effort-scoped observations
+# Collection — request-scoped observations
 
 What this doc covers: oxplow's **collection** subsystem — structured,
-provenance-tagged facts attached to a task effort (which tests ran, diff
-coverage on the effort's changed lines, and static-analysis findings from
+provenance-tagged facts attached to a request (which tests ran, diff
+coverage on the request's changed lines, and static-analysis findings from
 linters/analyzers). The same plumbing is meant to grow to perf deltas,
 structure maps, etc.
 
 ## Why it exists
 
 Everything else oxplow knows is either **computed by oxplow** (snapshots,
-blame, code-quality scans) or **free text the agent wrote** (wiki). Test
+blame, code-quality scans) or **free text the agent wrote** (knowledge pages). Test
 results, coverage, and static-analysis findings are neither: they're
 *structured* but language/framework/tool-specific, so oxplow can't compute
 them generically. The bet is to split at the **standard-format seam** — the
@@ -22,33 +22,31 @@ Every observation records whether oxplow **observed** it directly or the
 agent **asserted** it. Developers reject self-reported agent numbers, so the
 UI must never let an `asserted` figure pass for a measured one. Concretely:
 oxplow parses coverage reports itself (→ `observed`); the agent never types
-coverage numbers. See [data-model.md](./data-model.md)'s `effort_observation`
+coverage numbers. See [data-model.md](./data-model.md)'s observation
 section for the column.
 
-> **Storage retired (tsk215).** The `effort_observation` table + its store were
-> **dropped** — the **metric substrate** ([metrics.md](./metrics.md)) is now the
+> **Storage.** The **metric substrate** ([metrics.md](./metrics.md)) is the
 > sole store for coverage/test/analysis facts. The hook ride-along records into
 > `metric_sample` + `metric_finding` (the rich detail — test suite/case tree,
 > coverage per-file uncovered lines, analysis payload — lives in verbatim
-> `*-detail` findings). The `effort_evidence` asset computes each effort's
-> observation rows from there (`CollectionService::effort_observations_from_metrics`)
-> and stores them (`effort_observation_row`, read as `v_effort_observation`);
-> the panel and an agent (`oxplow_query_sql` over `v_effort_observation`) read those
-> stored rows (`SqliteEffortEvidenceStore::list_observations`) — the evidence is
-> computed once. `EffortObservation` is that row. Everything below about the **report collectors**, the
-> **hybrid ingestion** seam, and the **nudges** is unchanged — only the storage
-> moved. (One micro-change: a *report-less* run — analyzer/tests ran but produced
-> no parseable report — no longer leaves a "ran-record" row; the report-less
+> `*-detail` findings). The `request_analysis` asset computes each request's
+> observation rows from there and stores them (`request_observation`, read as
+> `v_request_observation`); the panel and an agent (`oxplow_query_sql` over
+> `v_request_observation`) read those stored rows — the evidence is computed
+> once. Everything below about the **report collectors**, the
+> **hybrid ingestion** seam, and the **nudges** does not depend on where the
+> rows are kept. (A *report-less* run — analyzer/tests ran but produced
+> no parseable report — leaves no "ran-record" row; the report-less
 > nudge is what surfaces it.)
 
 ## Components
 
-- **Effort-review rows** are reconstructed from the metric substrate
-  (`effort_observations_from_metrics`), not a dedicated table. The
-  `EffortObservation` wire type (`kind` ∈ `test-run`/`diff-coverage`/
+- **Request-review rows** are computed from the metric substrate
+  (the `request_analysis` asset), not a dedicated table. The
+  observation wire type (`kind` ∈ `test-run`/`diff-coverage`/
   `static-analysis`, `metric_value`, `payload_json`, freshness pin) is the
   read/IPC shape only — see [metrics.md](./metrics.md) for the substrate.
-- **Report collectors** (tsk863) — reading a report is a **collector**:
+- **Report collectors** — reading a report is a **collector**:
   a `collectors:` entry in the project's own extension
   (`.oxplow/extensions/project/extension.yaml`; never `.oxplow/project.yaml`,
   which refuses `collectors:`) with `records: tests |
@@ -62,7 +60,7 @@ section for the column.
   a bundled extension's is refused);
   no `input`, `env`, `credentials`, `network`, `after` or `sync`; the
   trigger is `on_run` or `manual`, and an `on_run` matches what it records
-  — `tests` / `coverage` on `test`, `analysis` on `analysis` (tsk892: each
+  — `tests` / `coverage` on `test`, `analysis` on `analysis` (each
   run's leg reads only its kinds, so another pairing would be parsed and
   dropped); a `records:` collector writes no facts or entities. Example:
 
@@ -94,7 +92,7 @@ section for the column.
   typed shapes live in `oxplow-coverage`. `entry: "oxplow:<name>"` names a
   **bundled** parser: `junit`, `lcov`, `cobertura`, `jacoco`, `clippy`,
   `eslint`. **One table** holds them (`oxplow_config::collectors::
-  BUNDLED_PARSERS`, tsk935): each one's name, what it records, how its
+  BUNDLED_PARSERS`): each one's name, what it records, how its
   report is pre-parsed and its jq program (`oxplow-config/src/parsers/
   *.jq`). The config check and the runtime (`Collector::bundled`, which
   reads it) can't disagree. `lcov` is the exception in *how* it runs: its jq
@@ -107,9 +105,9 @@ section for the column.
   paths as the report has them (`cargo llvm-cov` and eslint write absolute
   ones); `read_report` maps every coverage file and finding path to
   repo-relative against the checkout the report came from
-  (`CollectorOutput::relative_to`, `oxplow_coverage::repo_relative`; tsk884)
+  (`CollectorOutput::relative_to`, `oxplow_coverage::repo_relative`)
   and drops files outside it, so diffs and facts always name repo files.
-  That checkout is the **thread's own worktree** (`WorktreeRouter`, tsk890):
+  That checkout is the **thread's own worktree** (`WorktreeRouter`):
   a worktree stream's report paths, parser entries,
   branch and commits are read there, never in the primary
   checkout.
@@ -126,7 +124,7 @@ section for the column.
   `collection:` block is gone: the file
   rejects it as an unknown key (`a_collection_block_is_an_unknown_key`).
 
-  **`fastCommand` (tsk171)** is the coverage-free counterpart to
+  **`fastCommand` ** is the coverage-free counterpart to
   `command`, for the red/green loop. It must still emit a test report, but
   skips instrumentation and should accept a filter. It exists because
   `command` in a coverage-instrumented repo is far too slow to run every
@@ -161,7 +159,7 @@ hook + MCP wiring):
   patterns + `testing.runPatterns` + the two commands) and/or a
   static-analysis run (built-in patterns + `testing.analysisPatterns`, via
   `detect_analysis_run`) and records the matching observation(s) against
-  the open effort. It then runs **every** report collector whose `on_run`
+  the turn the tool call ran in, so its request. It then runs **every** report collector whose `on_run`
   is that kind of run and whose report the run wrote (its mtime inside the
   run's freshness window) — `read_run_reports` in `collection.rs`, each
   through `read_report`: a disabled collector or a
@@ -177,32 +175,30 @@ hook + MCP wiring):
   `junit.jq` parser takes each `<testcase>` from its IMMEDIATE parent
   `<testsuite>`'s direct children (NOT a recursive descent), so a NESTED
   testsuite (bun emits file-suite → describe-suite → testcase) doesn't
-  double-count a case under both levels (tsk361); coverage
+  double-count a case under both levels; coverage
   reports into one coverage capture (line sets union, branch/function
-  counters sum, tsk160) — the effort's diff coverage is derived from it (it reads both sides' snapshot bytes, so it is skipped, logged at info, when the active snapshot implementation keeps no `contents`: "Track changes only"; the metric file maps and the per-snapshot collectors skip the same way);
+  counters sum) — the request's diff coverage is derived from it (it reads both sides' snapshot bytes, so it is skipped, logged at info, when the active snapshot implementation keeps no `contents`: "Track changes only"; the metric file maps and the per-snapshot collectors skip the same way);
   analysis reports into one `static-analysis` observation (findings +
   per-severity counts). All `observed`, no agent step.
-  **Attribution:** a run is the effort its causing tool call was in — the
-  `agent.tool.finished` event's effort anchor, else the thread's open
-  effort (`CollectionService::resolve_owner`) — stamped as
-  `metric_capture.effort_id`. With no effort open the run is still
-  recorded, belonging to none; an effort that later adopts the turn
-  restamps it. Nothing is declared or claimed
+  **Attribution:** a run is the turn its causing tool call was in — the
+  `agent.tool.finished` event's turn anchor — stamped as
+  `metric_capture.turn_id`, so it is the turn's request's. A run outside
+  any turn is still recorded, belonging to none. Nothing is declared or claimed
   ([work-tracking.md](./work-tracking.md)).
-  **Detection is run-aware (tsk347):** `detect_test_run`/`detect_analysis_run`
+  **Detection is run-aware:** `detect_test_run`/`detect_analysis_run`
   split the command on shell operators (`&&`/`||`/`;`/`|`) and ignore
   sub-commands whose leading executable only *reads* (grep/echo/cat/sed/…), so a
   command that merely MENTIONS a pattern (`grep test:collect .oxplow/project.yaml`) is no
   longer a phantom run (and fires no report-less nudge); leading `VAR=val` env
   assignments are skipped so a `RUST_LOG=debug` prefix doesn't mask the real
   exec. The sub-command that matched is what the run records as its
-  `command` (`test_run_segment`, tsk1037) — the whole Bash call, when it was
+  `command` (`test_run_segment`) — the whole Bash call, when it was
   more (a heredoc that edited a file, a `cd`), rides beside it as
-  `shellCommand` — so the effort's Test Runs show `bun test --coverage`, not
+  `shellCommand` — so the request's Test Runs show `bun test --coverage`, not
   a wall of script. **Background caveat:** the PostToolUse hook fires when the Bash call
   *returns*; a **backgrounded** `test:collect` returns at launch (before its
   reports regenerate), so nothing fresh is ingested — run it in the FOREGROUND.
-  **The recording is a pump reactor, not part of the hook (P3.6, tsk476).**
+  **The recording is a pump reactor, not part of the hook.**
   The ingest logs `agent.tool.finished` (for a `shell` call, its whole
   `command` and `exit_code`, the output in `event_content`); the
   `collection` async consumer (`crates/oxplow-app/src/post_tool_reactors.rs`)
@@ -213,11 +209,10 @@ hook + MCP wiring):
   `idempotency_key` is `test-run:<event id>` (coverage and analysis captures
   were already keyed by their report's content, a coverage failure by
   `coverage-failure:<event id>`), and nudges are unique by `(cause, kind)`.
-  **The effort the command ran in owns the run** — the event's effort
-  anchor ranks before the thread's open effort (`resolve_owner`) — so a run
-  the reactor records after the effort closed still lands on it. A test,
-  coverage or analysis run resolves its owner **once**: the same effort
-  stamps its capture and pins its take. Each run capture logs
+  **The turn the command ran in owns the run** — the event's turn
+  anchor — so a run the reactor records after the turn closed still lands
+  on it. A test, coverage or analysis run resolves its owner **once**: the
+  same turn stamps its capture and pins its take. Each run capture logs
   `test.run.recorded` (subject `run:<capture>`, anchored to the tool's turn,
   caused by the tool event) and each coverage capture `test.coverage.recorded`
   in the capture's transaction (`SqliteFactStore::record_facts_logged`); the
@@ -227,16 +222,11 @@ hook + MCP wiring):
   events aren't caused by the run's `command.executed`). The hook waits ≤2.5 s for the `collection` and
   `advisories.post_tool` consumers (`EventPump::settle`; the advisories
   consumer declares `after: [collection]`, so it sees a run only once
-  collection has recorded it — an advisory reading `v_effort_observation`
-  judges the run's own coverage, tsk506) and then returns the thread's
+  collection has recorded it — an advisory reading `v_request_observation`
+  judges the run's own coverage) and then returns the thread's
   **undelivered** nudges; one that
   lands later goes out on the thread's next tool call.
-  **Landed commits also feed the wasted-token leg (tsk77):** any detected
-  commit — including `git revert`, which needs its own `detect_git_revert`
-  since the command never says "commit" — has HEAD's `This reverts commit`
-  trailers read; a reverted commit attributable to exactly one CLOSED effort
-  emits that effort's spend onto `oxplow.token_waste` (see metrics.md).
-  **The legs are isolated and coverage retries (tsk79):** the analysis,
+  **The legs are isolated and coverage retries:** the analysis,
   test-run, and coverage legs each catch their own error (one leg's transient
   failure can't kill the legs after it), and the coverage leg retries once
   after `COVERAGE_RETRY_DELAY` — right after a test run, DB contention or a
@@ -254,9 +244,9 @@ hook + MCP wiring):
   **Freshness is the router:** a run only regenerates its own stack's/tool's
   report(s), so the mtime window (`FreshWindow::of_run`: written after the
   run's own start, less a second of mtime granularity, and by a minute
-  after it ended — tsk888) naturally excludes the other stacks' reports — a `bun test` run
+  after it ended) naturally excludes the other stacks' reports — a `bun test` run
   picks up the frontend reports, a `cargo cov` run the Rust ones, a
-  `cargo clippy` run the clippy findings, and all accrue within one effort.
+  `cargo clippy` run the clippy findings, and all accrue within one request.
   The UI builds a tech-natural tree by splitting each case's
   `classname`+`name` on `::`/`.`. A `static-analysis` observation doubles as
   the analyzer-ran record: when an analyzer is detected but regenerated no
@@ -264,7 +254,7 @@ hook + MCP wiring):
   same way a `test-run` records command-only when no JUnit report is fresh.
 - **Active (commands)** — `oxplow.collector.sync { collector: "project/<id>",
   thread? }` runs a report collector by hand
-  (`CollectionService::sync_report_collector`, tsk863): it reads the
+  (`CollectionService::sync_report_collector`): it reads the
   report as it is now, whenever it was written, records what it parsed in
   the thread (an agent's own; a person names one) like a detected run's —
   a test run, a coverage capture or a static-analysis capture, with
@@ -277,24 +267,24 @@ hook + MCP wiring):
   error, never `stored`. The run is the collector's (`on: manual`). It
   replaced `test.ingest_coverage` / `test.ingest_analysis` (P8.A8). **No
   baseline gate** for analysis: findings are *absolute* (current-file),
-  so they store even when the effort has no start snapshot (tsk86).
+  so they store even when the request has no start snapshot.
   `oxplow.test.record_run` is the one `asserted` writer, for richer
   pass/fail counts the exit code alone can't give; its counts also become
   status-sliced `oxplow.test_case` facts (no case identity) so the
   `oxplow.tests.*` specs read them, and it returns the capture id. A report-less, count-less run records its
   capture under the `test-run` producer so it never reads as "found 0 tests"
   (see [metrics.md](./metrics.md)). The run capture also stamps
-  **`closest_vcs_rev`/`vcs_rev_exact`** (tsk95) — the commit it tested,
+  **`closest_vcs_rev`/`vcs_rev_exact`** — the commit it tested,
   resolved via `file_ref_version::resolve` off the stream's latest snapshot,
   falling back to HEAD with `exact = false` when the tree is dirty (the normal
   case). This is the fold's only ancestry material and is **not backfillable**;
   see the stamping note in [metrics.md](./metrics.md).
-  **A run reported any other way has its coverage read from its event**
-  (tsk1015): the `collection.run_reports` pump consumer reacts to
+  **A run reported any other way has its coverage read from its event**:
+  the `collection.run_reports` pump consumer reacts to
   `test.run.recorded` and runs `CollectionService::on_test_run_recorded`
   — the project's `on_run: test` **coverage** collectors whose report was
   written around the run's time (`FreshWindow::around`), recorded as a
-  detected run's coverage is, owned by the run's effort (the event's
+  detected run's coverage is, owned by the run's turn (the event's
   anchors; `RunOrigin::Event` over the run event, which also dedupes the
   collector's run per reported run). One routine for every way a run is
   reported: a run logged **with a cause** is one the collection reactor
@@ -305,14 +295,11 @@ hook + MCP wiring):
   read from the event: it *is* the run, and reading it after the run was
   recorded would split one run across two rows (`v_test_run`'s grain).
 
-**Observe-always (tsk269/tsk270).** Tests, analysis, **and coverage** are recorded
-**whether or not an effort is open** — attribution is the capture's
-`effort_id`, never a precondition for recording. `on_shell_run`
-resolves a single open effort only for the effort-RELATIVE *advisories*
-(the report-less nudge and post-tool-use advisories), which legitimately
-no-op under 0/N efforts; every OBSERVE call runs unconditionally. Report freshness
+**Observe-always.** Tests, analysis, **and coverage** are recorded
+**whether or not anything else is going on** — attribution is the capture's
+`turn_id`, never a precondition for recording. Report freshness
 is a **window around the run** (`FreshWindow::of_run`): a report counts when its
-mtime is after the run **started** and at most a minute after it ended (tsk888)
+mtime is after the run **started** and at most a minute after it ended
 — a report written before the run began is an earlier run's, however recent.
 The start is the call's `agent.tool.requested`, which hook ingest makes the
 `agent.tool.finished` event's `cause` (one tool use id); `RunCause.started`
@@ -321,22 +308,21 @@ carries its time. With no start known (no tool use id), the window reaches
 judged at the event's own time (`RunCause.at`), not at delivery, so a redelivery
 (a crash before the checkpoint, a retried dead letter, a pump backlog) sees what
 the first delivery saw; a run delivered more than 10 minutes late is recorded
-but gets no nudges (tsk505). A by-hand `oxplow.collector.sync` reads the report
-whenever it was written. Neither needs an open effort. **A run's effort is the one its event was anchored
-to** (`run_effort`, tsk507) — for the effort-relative advisories, the
+but gets no nudges. A by-hand `oxplow.collector.sync` reads the report
+whenever it was written. **A run's turn is the one its event was anchored
+to** — for the request-relative advisories, the
 static-analysis snapshot pin and the `oxplow.nudge` fact — so a late delivery
-keeps the effort it ran in; only a live call with no event resolves the
-thread's single open effort now. **Coverage** is
-effort-relative (diff vs the effort's start snapshot), so it can't store the diff
+keeps the turn it ran in. **Coverage** is
+request-relative (diff vs the request's start snapshot), so it can't store the diff
 at record: `observe_coverage` stores the **absolute** whole-report coverage
 (per-file coverage facts + the instrumented/covered line-sets in the capture's
-`coverage-detail` detail envelope — `metric_capture.detail_json`, T-E1), and the
-effort-relative diff is DERIVED with the effort's evidence
-(`diff_coverage_for_effort`) — so a coverage run claimed *after* the effort closed
-still produces a diff. The diff is between two **snapshots**, never a working
-tree (tsk862): the effort's start snapshot and the one the coverage capture is
+`coverage-detail` detail envelope — `metric_capture.detail_json`), and the
+request-relative diff is DERIVED with the request's analysis
+("A request's analysis" below) — so a coverage run recorded *after* the
+request ended still produces a diff. The diff is between two **snapshots**, never a working
+tree: the request's start take and the one the coverage capture is
 pinned to (`metric_capture.snapshot_id`). Recording a run's coverage takes that
-snapshot (`measured_snapshot`, trigger `run_measured`; tsk883 — an analysis run's capture is pinned the same way, tsk937): the stream's
+snapshot (`measured_snapshot`, trigger `run_measured`; an analysis run's capture is pinned the same way): the stream's
 worktree as the report is read — the code the run measured, even when the
 agent edited and ran in one turn, which no other take sees (turn-end and quiet
 takes never run mid-turn). A run delivered after an edit landed (a file in the
@@ -344,9 +330,7 @@ take written after the run's event time) is recorded with **no pin**, so no
 diff rather than one against code it never ran. So it holds for a worktree
 stream, and an edit after the run moves nothing. A path new since the start counts all its
 lines as changed; a side whose bytes were collected (blob GC) gives **no row**,
-not "every line changed"; an oversize file (no bytes kept) contributes nothing. The earlier `find_single_open_for_thread` *drop-gates* on
-the producers are gone — the helper stays only as the Class-A auto-attribute
-optimization.
+not "every line changed"; an oversize file (no bytes kept) contributes nothing.
 
 **Sub-agent runs.** A subagent's tool calls reach the hooks like the
 parent's, anchored to the same thread, so its runs are recorded and
@@ -363,27 +347,40 @@ lower-trust. The `provenance` column stays `observed` vs `asserted`.
 The `static-analysis` payload is `{ command?, analyzer?, findings:[…],
 errorCount, warningCount, infoCount, noteCount }`; its `metric_value` is the
 error+warning count (**lower is better**, unlike coverage where higher is
-better). The effort review shows the latest run's findings in the
-oxplow-bundled *Static Analysis* section (a node of its `effort-tests` page,
-mounted in the `oxplow/changes.sections` slot), each row opening the file at the line.
+better). A request's review shows the latest run's findings in a
+*Static Analysis* section of the oxplow-bundled change pages, each row opening the file at the line.
 The analysis ride-along has **no nudge** — the report-less nudge is
 test-specific.
 
-**The task-page effort section never shows Coverage & tests.** On the task
-page's Activity timeline (`TaskDetail.tsx` → `ActivityTimeline`):
-- An **in-progress** effort (`ended_at`/`end_snapshot_id` null) renders a
-  minimal `ActiveEffortSection` — just an "In progress" header band
-  (`tasks-effort-in-progress` testid), no changed-files tree, no summary, no
-  fetches.
-- A **completed** effort (`ActivityEffortSection`) shows the summary, the
-  **Modified Files** tree (token usage is the task-level `task-tokens`
-  page in the `oxplow/work-item.sections` slot) — but
-  **not** coverage, test runs or static analysis. Those live only on the
-  effort **diff view** (`DiffViewPage`, the effort-review surface), as the
-  oxplow-bundled `effort-tests` page in its `oxplow/diff-view.sections` slot:
-  diff coverage, most-untested files, test runs, tests that failed (with
-  their latest status, so a red→green loop reads plainly) and analyzer
-  findings, all SQL over `v_effort_observation`'s payloads.
+**The task page never shows Coverage & tests.** Token usage is the task-level
+`task-tokens` page in the `oxplow/task-detail.sections` slot. Coverage, test
+runs and static analysis live only on a request's change view: diff
+coverage, most-untested files, test runs, tests that failed (with
+their latest status, so a red→green loop reads plainly) and analyzer
+findings, all SQL over `v_request_observation`'s payloads.
+
+## A request's analysis
+
+What the metric engine computes over a span of work is computed over a
+**window** (`collection::Window`): a stream, a start and an end (times and
+points on the snapshot line), the files it changed, and its own captures
+(`oxplow_db::Members`: the captures a set of turns made).
+`metric_deltas(&window)` and `observations(&window)`
+are the families a request's evidence has — file gauges summed over
+its files between the capture before its start and the last at its end,
+run and window measures over its own captures, diff coverage from its
+start snapshot to the snapshot each run measured, static analysis counts.
+
+A request's window on one stream (`request_analysis::window`): the span of
+its turns there (`change_analysis::request_span`: the take before the
+first began, the turn's own end take or the last take at or before the
+last ended), its files (`v_turn_file`, claimed or sole), and the captures
+its turns made (`metric_capture.turn_id`). It is stored per (request,
+stream) — `request_analysis` with its span and a signature of what it read
+(its turns' runs, their files, its end), `request_metric_delta`,
+`request_observation` (V22; `v_request_metric_delta`,
+`v_request_observation`) — by the `request_analysis` asset over the cube,
+`turn_file`, `metric_spec` and `agent_turn`. Due: of the requests with a turn running or ended in the last day, one with none stored or whose stored signature differs from its inputs now (a run reported late, a file captured after the turn closed, its end take landing); older requests keep what they have and are analyzed when asked for. A finished request's file gauges are read at its snapshots: a scan that names its snapshot is placed by it (the baseline at or before the start take, the current at or before the end take, whose scan lands after the last turn ended).
 
 ## Report-less-run nudge (PostToolUse)
 
@@ -404,7 +401,7 @@ scripts made that kilobytes).
 When a collector **should** have read a report but didn't count — its
 parse failed, or it is disabled — the nudge
 says that instead, collector by collector (`RunReports::unread`,
-`unread_reports_message`; tsk893): running the tests again wouldn't help,
+`unread_reports_message`): running the tests again wouldn't help,
 and the reasons name what a person must do. A coverage collector that
 didn't count also leaves the lost coverage's `failed` capture.
 
@@ -425,38 +422,36 @@ fire the nudge.
 **The runner itself wrote no report.** When the run was the project's
 own `command` or `fastCommand` and still no report appeared, it never got
 to the tests (a compile error, a timeout, a pipe cut short); naming the
-runner again adds nothing, so no nudge fires and the effort's one nudge
+runner again adds nothing, so no nudge fires and the request's one nudge
 stays for a run that needs it.
 
-**Anti-nag:** the nudge fires at most once per effort — a durable one-shot
-mark (`once_mark`, `claim_once`), so a daemon restart doesn't re-arm
+**Anti-nag:** the nudge fires at most once per request — a durable one-shot
+mark (`once_mark`, `claim_once`; the next request is fresh), so a daemon restart doesn't re-arm
 it. The *fired* nudge itself is persisted for review and delivery — see
 Nudge persistence below.
 
 ## Commits get no nudge of their own
 
-`on_shell_run` detects a `git commit` (`detect_git_commit` — token-aware,
-so `git -c user.email=… commit` and `git commit --amend` match, `git add` /
-`git log --grep commit` don't) only to drive the revert/token-waste leg and to
-return early. There is **no commit-hygiene guard** (removed in tsk250): a
-post-commit "these files aren't part of this effort's changed set" advisory
+`on_shell_run` looks only for test and analysis runs: a `git commit` is
+neither, so it returns at once (the revert/token-waste leg was removed, 2026-11-10). There is **no commit-hygiene guard**: a
+post-commit "these files aren't part of this request's changed set" advisory
 used to fire here.
 
 The reasoning for removing it, worth keeping: attribution nudges earn their
-keep by disentangling **concurrent** efforts — which changes belong to which
+keep by disentangling **concurrent** work — which changes belong to which
 piece of work while several are in flight. A commit has one actor that has
 already decided what to include, so there is nothing left to disentangle and
 the nudge is just oxplow getting in the way. It also carried a hardcoded
 `docs/` check that warned about *this* repo's `.github/workflows/docs.yml`
 auto-deploy — the kind of assumption about a project's layout that a
-general-purpose tool must not make (see also [[tsk251]]).
+general-purpose tool must not make.
 
 ## Nudge persistence
 
 PostToolUse nudges (report-less-run, and post-tool-use advisories) are
 **persisted**
 as well as returned to the agent, so a reviewer can see "what oxplow told the
-agent this effort" after the fact, and the persisted row is what delivers it
+agent in this request" after the fact, and the persisted row is what delivers it
 (the next tool-hook response takes the thread's undelivered nudges). When `on_shell_run` decides to
 return a nudge, it also calls `persist_nudge` (best-effort — a write error is
 logged via `tracing::warn!` and swallowed, never failing the hook), which
@@ -466,7 +461,7 @@ bash command); a view of `v_agent_nudge` re-runs on `DatasetsChanged`. Persisten
 durable dedup gate (`mark_nudged`), so a deduped/non-fired nudge is never
 stored. The store
 (`SqliteAgentNudgeStore`), IPC (`list_nudges_for_thread`), the
-`v_agent_nudge` view and the oxplow-bundled `effort-nudges` page are
+`v_agent_nudge` view and the oxplow-bundled nudges page are
 covered in [data-model.md](./data-model.md),
 [ipc-and-stores.md](./ipc-and-stores.md), and
 [agent-model.md](./agent-model.md) (Nudge persistence).
@@ -477,9 +472,9 @@ covered in [data-model.md](./data-model.md),
    agent — opaque to Rust, so no migration to enrich it).
 2. Record the run as a capture whose `detail_json` envelope carries that
    kind, with the right `provenance` and a snapshot pin, and map the envelope
-   kind in `CollectionService::effort_observations_from_metrics` — the
-   `effort_evidence` asset then stores it with the effort's other rows.
-3. Surface it on the effort-review UI (it reads `v_effort_observation`).
+   kind where the `request_analysis` asset builds observations — the asset
+   then stores it with the request's other rows.
+3. Surface it on the request-review UI (it reads `v_request_observation`).
 
 Prefer `observed` over `asserted` wherever oxplow can compute or parse the
 fact itself — that's the difference between an understanding surface and a
@@ -518,8 +513,8 @@ this machine (see architecture.md → "A repo's config never runs a program
 without a deployed permission").
 
 **Containing scripts.** Every Starlark and jaq run — a report parser, an
-entity or fact collector, a command or effect script, an effort policy,
-an event upcast, the MCP adapter's mappings — runs
+entity or fact collector, a command or effect script,
+an event upcast — runs
 in its own **script worker process** (`oxplow-script-worker`, a sidecar
 beside the oxplow executable; `oxplow_script::worker` and `::workers`),
 never on a thread of the host. The host (`ScriptWorkers::run`, one per
@@ -554,7 +549,7 @@ the built-in metrics' and report parsers' unit tests call them directly.
 (`CollectError::WorkerDied`), never an in-process fallback;
 `scripts/test-prereqs.sh` builds it before every test run.
 
-**`exec` is the one tier whose budget actually STOPS the work** (tsk161): a
+**`exec` is the one tier whose budget actually STOPS the work**: a
 child process can be killed, so `run_exec` enforces the deadline with
 `try_wait` + `kill` rather than detaching. It also drains stdout and stderr on
 their own threads while writing stdin from a third. Doing that in sequence —
@@ -563,7 +558,7 @@ filter the moment a pipe buffer (~64 KB) fills: the child blocks writing
 stdout, so it stops reading stdin, so the parent blocks writing. Reproduced
 with multiple MB through `cat`, and it had no budget to break out of it.
 
-> ### History: budgets that only bounded the caller's wait (tsk88)
+> ### History: budgets that only bounded the caller's wait
 >
 > Until the script worker, `run_sandboxed` ran a script on a thread and
 > `recv_timeout`'d; Rust can't kill a thread, so an overrun was **detached and
@@ -575,12 +570,12 @@ with multiple MB through `cat`, and it had no budget to break out of it.
 > **This same shape of bug has now bitten three times** — a fixed timeout sized
 > for a small input silently killing whole-workspace work, and reporting it as
 > nothing rather than as a failure:
-> 1. **tsk47** — tree scans (then "gauges") timed out at 5s on every full-tree scan and wrote nothing
+> 1. tree scans (then "gauges") timed out at 5s on every full-tree scan and wrote nothing
 >    (`oxplow.ts.console_calls` read 0 against 137 real calls).
-> 2. **tsk62** — the 5s *hook response* budget cancelled the coverage step after
+> 2. the 5s *hook response* budget cancelled the coverage step after
 >    the junit ingest on EVERY run, naming "a multi-MB lcov parse" as the cause.
 >    Fixed by detaching the recording from the hook response…
-> 3. **tsk88** — …at which point the same multi-MB lcov parse died at the 5s
+> 3. …at which point the same multi-MB lcov parse died at the 5s
 >    *sandbox* budget instead: one layer down, and **intermittent** rather than
 >    total. The real parse takes ~2.8s against a 5s budget, so it failed only
 >    under load — `metric_capture` showed **11 `done` (196 facts each) against 7
@@ -593,8 +588,8 @@ with multiple MB through `cat`, and it had no budget to break out of it.
 > DEBUG build** (the interpreter runs ~6x slower there, and that's what developers
 > actually run): an honest script that trips a budget now loses its run.
 >
-> **And a lesson about reading the evidence:** tsk88 was first written up as
-> "coverage never got a fact", borrowing tsk62's wording. One `GROUP BY status`
+> **And a lesson about reading the evidence:** was first written up as
+> "coverage never got a fact", borrowing the wording. One `GROUP BY status`
 > over `metric_capture` disproved it. *Intermittent* was the stronger clue anyway
 > — a marginal budget fails under load, which is exactly what a 60/40 split looks
 > like, whereas "never" would have pointed somewhere else entirely. When a
@@ -612,7 +607,7 @@ can call the layer-1 helpers directly as globals —
 `parse_xml`/`parse_json`/`lcov_records`/`lines`/`regex_find`/`xpath` — so it can
 self-parse raw text (set `input: text` and parse inside `transform`).
 `md_text(value, limit = 300)` goes the other way: text someone else wrote
-(an agent's claim, a decision) as one line of markdown that renders as
+(an agent's answer) as one line of markdown that renders as
 itself — whitespace runs one space, markdown's punctuation escaped, cut
 with an ellipsis at `limit` characters — for splicing into a comment or
 checklist an effect or command handler writes. These are
@@ -642,11 +637,11 @@ it):
   fact collector's `report:` is pre-parsed by `parse_report`.
 - `code_metrics(text, language, path)` → per-function `[{name, id, uri,
   container, kind, complexity, length, parameter_count, start_line, end_line, visibility, has_doc}]` via
-  `oxplow-code-metrics`. `has_doc` (tsk125) is per-language doc detection
+  `oxplow-code-metrics`. `has_doc` is per-language doc detection
   (`LanguageSpec::doc`): a doc comment immediately preceding the item —
   `///`/`/**`/… by prefix, NOT a plain `//` (except Go, where any preceding
   comment is the doc) — or a Python/Clojure docstring. Backs `oxplow.doc_coverage`.
-- **The language-agnostic layer** (tsk314) — for metrics that are the
+- **The language-agnostic layer** — for metrics that are the
   *same concept across languages* (TODOs, complexity, …), a metric shouldn't
   name a language. Two globals make that possible:
   - `source_files()` → `[{path, text, language}]` — every **recognized** source
@@ -660,10 +655,10 @@ it):
   `metrics/code/*.star` set in `oxplow-script`). Adding a language → no metric changes.
 
 **Output schemas** the transform must produce:
-- coverage: `{ "files": { "<path>": { "instrumented": [<line>…], "covered": [<line>…], "branchesFound"?: <n>, "branchesHit"?: <n>, "functionsFound"?: <n>, "functionsHit"?: <n> } } }` — branch/function are optional **counts** (a line holds several branches; functions are named), default 0 = "no such data for this file" (tsk123). lcov emits them from `BRF`/`BRH`/`FNF`/`FNH`; jacoco from the sourcefile `<counter type="BRANCH"/"METHOD">`; cobertura branch from per-line `condition-coverage="H% (a/b)"` (direct `<lines>` only, so method `<lines>` don't double-count) and function from `<method>` `line-rate`.
-- test: `{ "suites": [ { "name", "cases": [ { "classname", "name", "status": "passed|failed|skipped", "timeMs"?, "message"? } ] } ] }`. `message` is a **failed** case's only: what its report said went wrong (junit: the `<failure>`/`<error>` `message` attribute, then its body, which is the assertion and where it happened), kept in the capture's `detail_json` and read as `v_test_case.message` so a flake can be diagnosed after the report file is overwritten. It is bounded: each message is cut at 4,096 bytes (`MAX_MESSAGE_BYTES`, on a character boundary, ending in `…`), and a run keeps 64 KB of them in all (`MAX_MESSAGE_BYTES_PER_RUN`): later failures keep their status and no message. The host applies the caps (`runtime::TestReport`'s conversion), so a project's own parser is bounded too
+- coverage: `{ "files": { "<path>": { "instrumented": [<line>…], "covered": [<line>…], "branchesFound"?: <n>, "branchesHit"?: <n>, "functionsFound"?: <n>, "functionsHit"?: <n> } } }` — branch/function are optional **counts** (a line holds several branches; functions are named), default 0 = "no such data for this file". lcov emits them from `BRF`/`BRH`/`FNF`/`FNH`; jacoco from the sourcefile `<counter type="BRANCH"/"METHOD">`; cobertura branch from per-line `condition-coverage="H% (a/b)"` (direct `<lines>` only, so method `<lines>` don't double-count) and function from `<method>` `line-rate`.
+- test: `{ "suites": [ { "name", "cases": [ { "classname", "name", "status": "passed|failed|skipped", "timeMs"?, "message"? } ] } ] }`. Once old enough for detail compaction (metrics.md, the compaction box) a run keeps its counts and only its **failed** cases, and its envelope says `"compacted": true`: an old run's passing cases are gone from `v_test_case`, its failures and `v_test_run` row stay (the request outcome reads them). `message` is a **failed** case's only: what its report said went wrong (junit: the `<failure>`/`<error>` `message` attribute, then its body, which is the assertion and where it happened), kept in the capture's `detail_json` and read as `v_test_case.message` so a flake can be diagnosed after the report file is overwritten. It is bounded: each message is cut at 4,096 bytes (`MAX_MESSAGE_BYTES`, on a character boundary, ending in `…`), and a run keeps 64 KB of them in all (`MAX_MESSAGE_BYTES_PER_RUN`): later failures keep their status and no message. The host applies the caps (`runtime::TestReport`'s conversion), so a project's own parser is bounded too
 - analysis: `{ "findings": [ { "path", "line"?, "column"?, "severity": "error|warning|info|note", "rule"?, "message" } ] }`
-- fact collector: `{ "facts": [ { "measure", "value", "subject"?, "path"?, "line"?, "rule"?, "num"?, "den"?, "dims"? } ] }` and nothing else — `facts_of` refuses any other output (the old `samples`/`findings` channels are gone, P7.B3). See [metrics.md](./metrics.md). Facts are the durable atomic grain of the inverted substrate (epic tsk12): each is bound to a defined `measure` (which must be in the collector's `facts:` allow-list) and re-aggregated by a metric *spec* at read time. `num`/`den` are optional ratio components (a `ratio` spec re-derives Σnum/Σden). `rule` populates the fact's `rule` column (the `oxplow.rule` dimension — the per-language idiom collectors tag each `oxplow.ast_hit` fact with the idiom slug there). A fact on an **undefined** measure — or one outside the collector's `facts:` — is a declare-to-collect violation: the run **fails**, naming the measure, and writes nothing (tsk1029; it used to drop the fact behind a run reported "ok"). A measure not yet in the catalog makes the run reseed it once first, so an extension added while oxplow runs is never failed by its collector winning the race with the catalog's reseed.
+- fact collector: `{ "facts": [ { "measure", "value", "subject"?, "path"?, "line"?, "rule"?, "num"?, "den"?, "dims"? } ] }` and nothing else — `facts_of` refuses any other output (the old `samples`/`findings` channels are gone, P7.B3). See [metrics.md](./metrics.md). Facts are the durable atomic grain of the inverted substrate: each is bound to a defined `measure` (which must be in the collector's `facts:` allow-list) and re-aggregated by a metric *spec* at read time. `num`/`den` are optional ratio components (a `ratio` spec re-derives Σnum/Σden). `rule` populates the fact's `rule` column (the `oxplow.rule` dimension — the per-language idiom collectors tag each `oxplow.ast_hit` fact with the idiom slug there). A fact on an **undefined** measure — or one outside the collector's `facts:` — is a declare-to-collect violation: the run **fails**, naming the measure, and writes nothing (it used to drop the fact behind a run reported "ok"). A measure not yet in the catalog makes the run reseed it once first, so an extension added while oxplow runs is never failed by its collector winning the race with the catalog's reseed.
 
 The two bundled analysis parsers are the canonical templates: `clippy.jq`
 (`input: lines`; `fromjson?` per line tolerates non-JSON lines, keeps
@@ -677,7 +672,7 @@ Declare a report collector with its own `entry` — no recompile. The
 **script lives in its own file** (relative to the extension folder, e.g.
 `collectors/clover.jq`; absolute paths and `..` are rejected), not inline in the yaml. The entry and the report `path` are
 also resolved through every symlink before anything is read, and one that
-lands outside the checkout is refused (`in_checkout`, tsk927): a repo can't
+lands outside the checkout is refused (`in_checkout`): a repo can't
 point a collector at a file of the person's. Example: a Clover (XML) coverage
 parser in jaq:
 
@@ -721,7 +716,7 @@ A tool that emits a whole-project **ratio** (not line-sets/findings) — e.g. TS
 (`records:` reads only the `tests`/`coverage`/`analysis` kinds).
 The fact engine reads the report, parses it per `format` (`parse_report`) and
 hands it to the jaq/starlark script as `input.report`; the script returns a
-`{facts:[{measure, value, num, den}]}` ratio fact. tsk126 dogfoods this as
+`{facts:[{measure, value, num, den}]}` ratio fact. dogfoods this as
 the `repo.scan_type_coverage` collector → `repo.type_coverage`
 (`.oxplow/extensions/project/collectors/type_coverage.jq`, `format: text` +
 `[… | try fromjson catch null][0]` so a missing report yields no facts rather

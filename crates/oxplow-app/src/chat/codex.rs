@@ -42,7 +42,10 @@ pub struct CodexOpen {
 
 /// What a new thread's goal is set to, and cleared from, to write its
 /// rollout: a thread nothing has persisted can't be resumed, and Codex's
-/// TUI attaches by resuming.
+/// TUI attaches by resuming. The goal is set `paused`: an active goal makes
+/// Codex run a turn with no prompt (recorded on the 0.167.1 daemon, and
+/// reproduced with a goal set and nothing else), which spends quota and is
+/// nobody's turn; a paused one writes the rollout and starts none.
 const PERSIST_GOAL: &str = "oxplow opened this thread";
 
 #[derive(Default)]
@@ -61,6 +64,8 @@ struct State {
     asked: Option<String>,
     /// The thread is waiting on the person (the status was reported).
     waiting: bool,
+    /// The wait was said before any request named what it is for.
+    wait_unnamed: bool,
     /// The child agents this thread drives (Codex's collab agents), by
     /// their own thread's id: what passes of what their threads send.
     children: std::collections::HashMap<String, Child>,
@@ -72,6 +77,8 @@ struct State {
     running: bool,
     /// The daemon doesn't know `thread/inject_items`.
     inject_unsupported: bool,
+    /// Codex's id for the turn running now (`turn.id`).
+    turn_id: Option<String>,
 }
 
 /// One child agent, as far as it has been seen.
@@ -181,7 +188,7 @@ impl CodexConnection {
     /// it leaves none behind.
     async fn persist(&self, thread: &str) -> Result<(), String> {
         let persist = |params| self.server.request("thread/goal/set", params);
-        persist(json!({"threadId": thread, "objective": PERSIST_GOAL}))
+        persist(json!({"threadId": thread, "objective": PERSIST_GOAL, "status": "paused"}))
             .await
             .map_err(|e| format!("saving the new thread: {e}"))?;
         self.server
@@ -331,10 +338,7 @@ fn on_message(message: &ServerMessage, state: &mut State) -> Vec<Incoming> {
             ServerMessage::Notification { method, params } => {
                 on_notification(method, params, state)
             }
-            ServerMessage::Request { method, params, .. } => {
-                note_request(method, params, state);
-                Vec::new()
-            }
+            ServerMessage::Request { method, params, .. } => note_request(method, params, state),
         };
     }
     if let ServerMessage::Notification { method, params } = message {
@@ -410,6 +414,7 @@ fn child_changes(
     status: &str,
     said: Option<String>,
 ) -> Vec<Incoming> {
+    let spawned_in = state.turn_id.clone();
     let child = state.children.entry(id.to_string()).or_default();
     child.kind = child.kind.take().or(kind);
     let mut out = Vec::new();
@@ -423,6 +428,8 @@ fn child_changes(
             change: SubagentChange::Started,
             id: id.to_string(),
             kind: child.kind.clone(),
+            // The turn running when the child showed: its `rootTurnId`.
+            spawned_in: spawned_in.clone(),
         });
     }
     if ended && !child.finished {
@@ -434,6 +441,7 @@ fn child_changes(
             ),
             id: id.to_string(),
             kind: child.kind.clone(),
+            spawned_in: None,
         });
     }
     out
@@ -490,23 +498,45 @@ fn collab_lifecycle(item: &Value, state: &mut State) -> Vec<Incoming> {
 }
 
 /// Remember what an approval or question request asks, to say it when the
-/// thread's status reports the wait.
-fn note_request(method: &str, p: &Value, state: &mut State) {
+/// thread's status reports the wait. Codex reports the wait first and sends
+/// the request after it (recorded on 0.167.1), so a wait already said
+/// without its question is said again with it.
+fn note_request(method: &str, p: &Value, state: &mut State) -> Vec<Incoming> {
     let text = |pointer: &str| {
         p.pointer(pointer)
             .and_then(Value::as_str)
             .filter(|t| !t.is_empty())
     };
-    state.asked = match method {
+    // The command as the model wrote it, not its shell wrapper.
+    let command = || {
+        let actions: Vec<&str> = p
+            .get("commandActions")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|a| a.get("command")?.as_str())
+            .collect();
+        (!actions.is_empty())
+            .then(|| actions.join(" && "))
+            .or_else(|| text("/command").map(str::to_string))
+    };
+    let asked = match method {
         "item/commandExecution/requestApproval" => {
-            text("/command").map(|c| format!("Approve in Codex: {c}"))
+            command().map(|c| format!("Approve in Codex: {c}"))
         }
         "item/fileChange/requestApproval" | "item/permissions/requestApproval" => {
             text("/reason").map(|r| format!("Approve in Codex: {r}"))
         }
         "item/tool/requestUserInput" => text("/questions/0/question").map(str::to_string),
-        _ => return,
+        _ => return Vec::new(),
     };
+    if std::mem::take(&mut state.wait_unnamed) {
+        if let Some(said) = asked {
+            return vec![Incoming::Waiting(Some(said))];
+        }
+    }
+    state.asked = asked;
+    Vec::new()
 }
 
 fn on_notification(method: &str, p: &Value, state: &mut State) -> Vec<Incoming> {
@@ -526,6 +556,7 @@ fn on_notification(method: &str, p: &Value, state: &mut State) -> Vec<Incoming> 
                     return Vec::new();
                 }
                 state.waiting = true;
+                state.wait_unnamed = state.asked.is_none();
                 let said = state.asked.take().unwrap_or_else(|| {
                     if on_input {
                         "Waiting on your answer in Codex".to_string()
@@ -536,6 +567,7 @@ fn on_notification(method: &str, p: &Value, state: &mut State) -> Vec<Incoming> 
                 vec![Incoming::Waiting(Some(said))]
             } else {
                 state.asked = None;
+                state.wait_unnamed = false;
                 if std::mem::take(&mut state.waiting) {
                     vec![Incoming::Waiting(None)]
                 } else {
@@ -546,6 +578,7 @@ fn on_notification(method: &str, p: &Value, state: &mut State) -> Vec<Incoming> 
         // Answered, one way or another.
         "serverRequest/resolved" => {
             state.asked = None;
+            state.wait_unnamed = false;
             if std::mem::take(&mut state.waiting) {
                 vec![Incoming::Waiting(None)]
             } else {
@@ -622,10 +655,20 @@ fn on_notification(method: &str, p: &Value, state: &mut State) -> Vec<Incoming> 
         }
         "turn/started" => {
             state.running = true;
-            Vec::new()
+            state.turn_id = p
+                .pointer("/turn/id")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            state
+                .turn_id
+                .clone()
+                .map(Incoming::TurnStarted)
+                .into_iter()
+                .collect()
         }
         "turn/completed" => {
             state.running = false;
+            state.turn_id = None;
             let tokens = match (state.tokens_now, state.tokens_at_turn_start) {
                 (Some(now), Some(start)) => Some(now.since(start).tokens()),
                 _ => None,
@@ -636,11 +679,23 @@ fn on_notification(method: &str, p: &Value, state: &mut State) -> Vec<Incoming> 
                 .and_then(Value::as_str)
                 .unwrap_or("completed");
             let done = match status {
-                "failed" => Err(p
-                    .pointer("/turn/error/message")
-                    .and_then(Value::as_str)
-                    .unwrap_or("the turn failed")
-                    .to_string()),
+                "failed" => {
+                    let said = p
+                        .pointer("/turn/error/message")
+                        .and_then(Value::as_str)
+                        .unwrap_or("the turn failed");
+                    // Codex's own class for it (`codexErrorInfo`: a string, or
+                    // an object keyed by it), ahead of its message.
+                    let info = p.pointer("/turn/error/codexErrorInfo").and_then(|i| {
+                        i.as_str()
+                            .map(str::to_string)
+                            .or_else(|| i.as_object()?.keys().next().cloned())
+                    });
+                    Err(match info {
+                        Some(info) => format!("{info}: {said}"),
+                        None => said.to_string(),
+                    })
+                }
                 _ => Ok(TurnEnd {
                     stop_reason: status.to_string(),
                     usage: tokens,
@@ -901,6 +956,18 @@ fn tool_call(item: &Value, id: String, done: bool) -> Option<ToolCall> {
             call.raw_input = Some(cap_value(item.clone()));
         }
     }
+    // Codex's own timing of a finished call.
+    if status != ToolStatus::InProgress {
+        if let Some(ms) = item.get("durationMs").and_then(Value::as_u64) {
+            let mut out = match call.raw_output.take() {
+                Some(Value::Object(m)) => m,
+                Some(other) => serde_json::Map::from_iter([("result".to_string(), other)]),
+                None => serde_json::Map::new(),
+            };
+            out.insert("duration_ms".into(), json!(ms));
+            call.raw_output = Some(Value::Object(out));
+        }
+    }
     Some(call)
 }
 
@@ -912,8 +979,14 @@ mod tests {
     /// 0.163.0): a person's "say hi", then a shell command appending to
     /// `notes.txt`, then a direct edit of it, then a rename.
     fn recorded() -> Vec<ServerMessage> {
-        include_str!("../../tests/fixtures/codex/app-server.jsonl")
-            .lines()
+        parse_recording(include_str!("../../tests/fixtures/codex/app-server.jsonl"))
+    }
+
+    /// The server's messages in a recording (a fixture, or a file
+    /// `OXPLOW_CODEX_DEBUG` wrote): the lines with a `method`; the header
+    /// and the `sent` / `response` lines are skipped.
+    fn parse_recording(text: &str) -> Vec<ServerMessage> {
+        text.lines()
             .skip(1)
             .filter_map(|l| serde_json::from_str::<Value>(l).ok())
             .filter_map(|v| {
@@ -949,6 +1022,66 @@ mod tests {
                 ServerMessage::Request { .. } => Vec::new(),
             })
             .collect()
+    }
+
+    /// A session recorded with `OXPLOW_CODEX_DEBUG` replays like a
+    /// fixture: the recorded thread, pushed through a real connection that
+    /// records to a file, comes back out of the file as the same messages
+    /// and maps to the same updates.
+    #[tokio::test]
+    async fn a_session_recorded_by_the_client_replays_like_the_fixture() {
+        use oxplow_harnesses::codex_app_server::fake::FakeAppServer;
+        let home = tempfile::Builder::new().tempdir_in("/tmp").unwrap();
+        let fake = FakeAppServer::start(home.path(), |_, _| Ok(json!({})));
+        let file = home.path().join("recorded.jsonl");
+        let (_server, mut messages) = AppServer::connect_recording(
+            &fake.socket,
+            None,
+            Some(&file),
+            oxplow_harnesses::codex_app_server::OBSERVER,
+        )
+        .await
+        .unwrap();
+        let original = recorded();
+        for m in &original {
+            if let ServerMessage::Notification { method, params } = m {
+                fake.push(json!({"method": method, "params": params}));
+            }
+        }
+        let notifications = original
+            .iter()
+            .filter(|m| matches!(m, ServerMessage::Notification { .. }))
+            .count();
+        for _ in 0..notifications {
+            messages.recv().await.unwrap();
+        }
+        let replayed = parse_recording(&std::fs::read_to_string(&file).unwrap());
+        let key = |m: &ServerMessage| match m {
+            ServerMessage::Notification { method, params } => (method.clone(), params.clone()),
+            ServerMessage::Request { method, params, .. } => (method.clone(), params.clone()),
+        };
+        assert_eq!(
+            replayed.iter().map(key).collect::<Vec<_>>(),
+            original.iter().map(key).collect::<Vec<_>>()
+        );
+        let map = |messages: Vec<ServerMessage>| {
+            let mut state = State {
+                thread: Some(THREAD.into()),
+                ..State::default()
+            };
+            messages
+                .into_iter()
+                .filter(|m| m.thread_id() == Some(THREAD))
+                .flat_map(|m| match m {
+                    ServerMessage::Notification { method, params } => {
+                        on_notification(&method, &params, &mut state)
+                    }
+                    ServerMessage::Request { .. } => Vec::new(),
+                })
+                .count()
+        };
+        assert_eq!(map(replayed), map(original));
+        assert!(map(recorded()) > 0, "the recorded thread maps to updates");
     }
 
     fn waits(method: &str, params: Value, state: &mut State) -> Vec<Option<String>> {
@@ -987,6 +1120,333 @@ mod tests {
         assert_eq!(plans(item("item/completed", "1. a\n2. b")), ["1. a\n2. b"]);
     }
 
+    /// What a recorded Codex 0.166 session (a `tests/fixtures/codex/*.jsonl`
+    /// file recorded by the client: `sent` / `response` lines among the
+    /// daemon's messages) makes of the thread, in order, one short line per
+    /// thing the session would act on. The thread is the one the recording
+    /// opened; a `sent` line shows as `sent <method>`.
+    fn replay(text: &str) -> Vec<String> {
+        let mut state = State::default();
+        let mut log = Vec::new();
+        for line in text.lines().skip(1) {
+            let v: Value = serde_json::from_str(line).unwrap();
+            if let Some(sent) = v.get("sent").and_then(Value::as_str) {
+                log.push(format!("sent {sent}"));
+                continue;
+            }
+            if let Some(id) = v.pointer("/response/thread/id").and_then(Value::as_str) {
+                state.thread = Some(id.to_string());
+            }
+            let Some(method) = v.get("method").and_then(Value::as_str) else {
+                continue;
+            };
+            let params = v.get("params").cloned().unwrap_or(Value::Null);
+            let message = match v.get("id") {
+                Some(id) => ServerMessage::Request {
+                    id: id.clone(),
+                    method: method.into(),
+                    params,
+                },
+                None => ServerMessage::Notification {
+                    method: method.into(),
+                    params,
+                },
+            };
+            for incoming in on_message(&message, &mut state) {
+                log.push(match incoming {
+                    Incoming::TurnStarted(_) => "turn started".to_string(),
+                    Incoming::PromptDone(Ok(end)) => format!("turn ended {}", end.stop_reason),
+                    Incoming::PromptDone(Err(e)) => format!("turn failed {e}"),
+                    Incoming::Waiting(Some(q)) => format!("waiting {q}"),
+                    Incoming::Waiting(None) => "waiting cleared".to_string(),
+                    Incoming::Subagent { change, id, .. } => match change {
+                        SubagentChange::Started => format!("subagent started {id}"),
+                        SubagentChange::Finished(_) => format!("subagent finished {id}"),
+                    },
+                    Incoming::ChildCall { child, call } => {
+                        format!("child {} {:?} {:?}", child.id, call.kind, call.status)
+                    }
+                    Incoming::Update(u) => match *u {
+                        ChatUpdate::UserChunk(_) => "user message".to_string(),
+                        ChatUpdate::ToolCall(t) if t.kind == ToolKind::Subagent => {
+                            format!("collab {} {:?}", t.name.unwrap_or_default(), t.status)
+                        }
+                        ChatUpdate::ToolCall(t) => {
+                            format!("call {:?} {:?} {}", t.kind, t.status, t.title)
+                        }
+                        _ => continue,
+                    },
+                    _ => continue,
+                });
+            }
+        }
+        log
+    }
+
+    /// The recorded approval (`tests/fixtures/codex/approval.jsonl`, Codex CLI
+    /// 0.166.0 on a 0.167.1 daemon): the thread's status reports the wait
+    /// first, then the request names the command, then the TUI's answer
+    /// resolves it. oxplow sends nothing back, and the wait is cleared once,
+    /// by `serverRequest/resolved`, with the turn going on.
+    #[test]
+    fn a_recorded_approval_the_tui_answers_is_waited_on_then_cleared() {
+        let log = replay(include_str!("../../tests/fixtures/codex/approval.jsonl"));
+        let waits: Vec<&str> = log
+            .iter()
+            .filter(|l| l.starts_with("waiting"))
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            waits,
+            [
+                "waiting Waiting on an approval in Codex",
+                "waiting Approve in Codex: printf '\\n\\ndef div(a, b):\\n    return a / b\\n' >> calc.py",
+                "waiting cleared",
+            ],
+            "the status comes before the request: the command is said once the request names it"
+        );
+        let at = |what: &str| log.iter().position(|l| l.starts_with(what)).unwrap();
+        assert!(at("waiting cleared") < at("call Execute Completed printf"));
+        assert!(
+            !log.iter()
+                .any(|l| l.starts_with("sent") && l.contains("answer")),
+            "the TUI answered, not oxplow"
+        );
+        assert_eq!(log.last().unwrap(), "turn ended completed");
+        assert_eq!(
+            log.iter().filter(|l| *l == "turn started").count(),
+            1,
+            "the person's prompt opens the first turn: none starts before it"
+        );
+        let first_turn = log.iter().position(|l| l == "turn started").unwrap();
+        let first_prompt = log.iter().position(|l| l == "user message").unwrap();
+        assert!(first_turn < first_prompt, "the turn opens with the prompt");
+        assert!(
+            log[..first_turn].iter().all(|l| l.starts_with("sent")),
+            "nothing but oxplow's own requests happens before the prompt"
+        );
+    }
+
+    /// The recorded interrupt (`interrupt.jsonl`): Esc during a foreground
+    /// `sleep 120` ends the turn `interrupted` (no error); the command went
+    /// on as a background terminal, and `/stop` later fails its call. That
+    /// failure is the call's, after the turn ended: no turn starts or ends
+    /// for it.
+    #[test]
+    fn a_recorded_interrupt_ends_the_turn_and_a_late_failed_call_opens_none() {
+        let log = replay(include_str!("../../tests/fixtures/codex/interrupt.jsonl"));
+        assert_eq!(
+            log[log.len() - 4..],
+            [
+                "user message",
+                "call Execute InProgress sleep 120",
+                "turn ended interrupted",
+                "call Execute Failed sleep 120",
+            ]
+        );
+        assert_eq!(log.iter().filter(|l| *l == "turn started").count(), 1);
+        assert_eq!(
+            log.iter().filter(|l| l.starts_with("turn ended")).count(),
+            1,
+            "the late failure ends no turn"
+        );
+        assert!(!log.iter().any(|l| l.starts_with("turn failed")));
+    }
+
+    /// The recorded background terminal (`background_terminal.jsonl`): the
+    /// turn ends at once with the command still running; its
+    /// `item/completed` (exit 0) comes ~40 s later and wakes nothing. It
+    /// finishes the call; no turn starts after the last one's end.
+    #[test]
+    fn a_recorded_background_terminal_finishes_its_call_and_wakes_nothing() {
+        let log = replay(include_str!(
+            "../../tests/fixtures/codex/background_terminal.jsonl"
+        ));
+        assert_eq!(
+            log[log.len() - 3..],
+            [
+                "call Execute InProgress sleep 40 && echo bg-finished",
+                "turn ended completed",
+                "call Execute Completed sleep 40 && echo bg-finished",
+            ]
+        );
+        let last_start = log.iter().rposition(|l| l == "turn started").unwrap();
+        let last_end = log
+            .iter()
+            .rposition(|l| l.starts_with("turn ended"))
+            .unwrap();
+        assert!(last_start < last_end, "the exit starts no turn");
+    }
+
+    /// Every Codex turn has `turn/moderationMetadata` notifications (Codex's
+    /// own moderation verdict on the prompt and output: nothing oxplow acts on,
+    /// so they are ignored) and a `thread/settings/updated` before it (read
+    /// deliberately: its `model` and `effort` are what the turn ends on).
+    #[test]
+    fn moderation_is_ignored_and_settings_are_read() {
+        let text = include_str!("../../tests/fixtures/codex/approval.jsonl");
+        let mut state = State::default();
+        let (mut moderation, mut settings, mut ended_on) = (0, 0, None);
+        for line in text.lines().skip(1) {
+            let v: Value = serde_json::from_str(line).unwrap();
+            if let Some(id) = v.pointer("/response/thread/id").and_then(Value::as_str) {
+                state.thread = Some(id.to_string());
+            }
+            let (Some(method), None) = (v.get("method").and_then(Value::as_str), v.get("id"))
+            else {
+                continue;
+            };
+            let params = v.get("params").cloned().unwrap_or(Value::Null);
+            let out = on_message(
+                &ServerMessage::Notification {
+                    method: method.into(),
+                    params,
+                },
+                &mut state,
+            );
+            match method {
+                "turn/moderationMetadata" => {
+                    moderation += 1;
+                    assert!(out.is_empty(), "moderation says nothing");
+                }
+                "thread/settings/updated" => {
+                    settings += 1;
+                    assert!(out.is_empty(), "settings say nothing by themselves");
+                }
+                _ => {}
+            }
+            for incoming in out {
+                if let Incoming::PromptDone(Ok(end)) = incoming {
+                    ended_on = end.run;
+                }
+            }
+        }
+        assert!(moderation > 0 && settings > 0, "the recording has both");
+        let run = ended_on.expect("the turn ends with the model it ran on");
+        assert_eq!(run.model.as_deref(), Some("gpt-6.1-sol"));
+    }
+
+    /// The recorded failed turn (`failed_turn.jsonl`, an invalid API key): ten
+    /// `error` notifications with `willRetry: true` ("Reconnecting... n/5",
+    /// over WebSockets and then HTTPS), a `warning`, the thread's status
+    /// `systemError`, a last `error` with `willRetry: false`, and
+    /// `turn/completed` `failed` with `turn.error` and no items. The turn ends
+    /// once, as failed, with the final error's words; a retry ends nothing; the
+    /// `systemError` status is no wait on the person.
+    #[test]
+    fn a_recorded_failed_turn_ends_once_with_the_final_error() {
+        let log = replay(include_str!("../../tests/fixtures/codex/failed_turn.jsonl"));
+        let ends: Vec<&String> = log
+            .iter()
+            .filter(|l| l.starts_with("turn ended") || l.starts_with("turn failed"))
+            .collect();
+        assert_eq!(ends.len(), 1, "one end, not one per retry: {log:?}");
+        assert!(
+            ends[0].starts_with("turn failed httpConnectionFailed: unexpected status 401"),
+            "the final error's class and message: {}",
+            ends[0]
+        );
+        assert!(!ends[0].contains("Reconnecting"), "a retry is not the end");
+        assert_eq!(log.iter().filter(|l| *l == "turn started").count(), 1);
+        assert_eq!(log.last().unwrap(), ends[0], "it ends the recording's turn");
+        assert!(
+            !log.iter().any(|l| l.starts_with("waiting")),
+            "systemError is not waiting on the person"
+        );
+    }
+
+    /// An `error` notification is a retry (`willRetry`) or the turn's last word;
+    /// either way the turn's end is `turn/completed`, so neither ends it.
+    #[test]
+    fn an_error_notification_ends_no_turn() {
+        let mut state = State {
+            thread: Some("t".into()),
+            running: true,
+            ..State::default()
+        };
+        for will_retry in [true, false] {
+            let out = on_message(
+                &ServerMessage::Notification {
+                    method: "error".into(),
+                    params: json!({"threadId": "t", "turnId": "u", "willRetry": will_retry,
+                        "error": {"message": "Reconnecting... 2/5"}}),
+                },
+                &mut state,
+            );
+            assert!(out.is_empty());
+        }
+        let out = on_message(
+            &ServerMessage::Notification {
+                method: "thread/status/changed".into(),
+                params: json!({"threadId": "t", "status": {"type": "systemError"}}),
+            },
+            &mut state,
+        );
+        assert!(out.is_empty());
+        assert!(state.running, "only turn/completed ends the turn");
+    }
+
+    /// The recorded subagent (`subagent.jsonl`): the spawn is only
+    /// `subAgentActivity` items (no spawn collab call), the `wait` names no
+    /// agent, and the child's thread has no `thread/started`. The child is
+    /// attributed once, to the parent's turn (its `rootTurnId`); its two
+    /// calls are the child's; its end finishes it before the wait does.
+    #[test]
+    fn a_recorded_subagent_is_attributed_to_the_turn_that_spawned_it() {
+        const PARENT: &str = "01a1c8a7-8117-7732-80ba-10a4beb4a18d";
+        const KID: &str = "01a1c8a7-f010-7c82-854b-788ad3cd9ac7";
+        let text = include_str!("../../tests/fixtures/codex/subagent.jsonl");
+        let log = replay(text);
+        let from = log
+            .iter()
+            .position(|l| l.starts_with("subagent started"))
+            .unwrap();
+        assert_eq!(
+            log[from..],
+            [
+                format!("subagent started {KID}"),
+                "collab wait InProgress".to_string(),
+                format!("child {KID} Search Completed"),
+                format!("child {KID} Read Completed"),
+                format!("subagent finished {KID}"),
+                "collab wait Completed".to_string(),
+                "turn ended completed".to_string(),
+            ]
+        );
+        // The turn it is attributed to is the parent's turn that ran when
+        // the spawn showed, and the child's own `rootTurnId` says the same.
+        let mut parent_turn = None;
+        let mut state = State {
+            thread: Some(PARENT.into()),
+            ..State::default()
+        };
+        let mut spawned_in = Vec::new();
+        for m in parse_recording(text) {
+            if let ServerMessage::Notification { method, params } = &m {
+                if method == "turn/started" && params["threadId"] == PARENT {
+                    parent_turn = params["turn"]["id"].as_str().map(str::to_string);
+                }
+                if method == "turn/started" && params["threadId"] == KID {
+                    assert_eq!(
+                        params["turn"]["rootTurnId"].as_str(),
+                        parent_turn.as_deref()
+                    );
+                }
+            }
+            for incoming in on_message(&m, &mut state) {
+                if let Incoming::Subagent {
+                    change: SubagentChange::Started,
+                    spawned_in: turn,
+                    ..
+                } = incoming
+                {
+                    spawned_in.push(turn);
+                }
+            }
+        }
+        assert_eq!(spawned_in, [parent_turn], "once, in the parent's turn");
+    }
+
     const CHILD: &str = "01a14232-aaaa-7d40-8466-1ec0e927ef99";
 
     /// The recorded collab thread (`tests/fixtures/codex/collab.jsonl`, Codex
@@ -1016,7 +1476,13 @@ mod tests {
                         change: SubagentChange::Started,
                         id,
                         kind,
+                        spawned_in,
                     } => {
+                        assert_eq!(
+                            spawned_in.as_deref(),
+                            Some("01a1479e-92ac-7fb0-9de0-3fbf7914c12a"),
+                            "the turn that spawned it, as Codex's `rootTurnId` names it"
+                        );
                         format!("started {id} {}", kind.unwrap_or_default())
                     }
                     Incoming::Subagent {
@@ -1391,7 +1857,10 @@ mod tests {
             (shell.kind, shell.status),
             (ToolKind::Execute, ToolStatus::Completed)
         );
-        assert_eq!(shell.raw_output, Some(json!({"exit_code": 0})));
+        assert_eq!(
+            shell.raw_output,
+            Some(json!({"exit_code": 0, "duration_ms": 0}))
+        );
         let read = tools.iter().rfind(|t| t.title == "cat notes.txt").unwrap();
         assert_eq!(read.kind, ToolKind::Read);
         assert_eq!(read.locations, ["/w/notes.txt"]);
@@ -1544,7 +2013,7 @@ mod tests {
         );
         assert!(matches!(&done[0], Incoming::PromptDone(Err(e)) if e == "quota"));
         let call = tool_call(
-            &json!({"type": "mcpToolCall", "id": "m1", "server": "oxplow", "tool": "oxplow_read", "status": "completed", "arguments": {"uri": "oxplow:oxplow/wiki?slug=x"}, "result": {"content": []}}),
+            &json!({"type": "mcpToolCall", "id": "m1", "server": "oxplow", "tool": "oxplow_read", "status": "completed", "arguments": {"uri": "oxplow:oxplow/knowledge?id=x&store=oxwiki"}, "result": {"content": []}}),
             "m1".into(),
             true,
         )
@@ -1552,5 +2021,149 @@ mod tests {
         let used = super::super::mapping::tool_use(&call).unwrap();
         assert_eq!(used.kind, oxplow_domain::agent::tool::ToolKind::Mcp);
         assert_eq!(used.name, "mcp__oxplow__oxplow_read");
+    }
+
+    /// The table in `.context/agent-model.md` ("Subagents"), kept equal by
+    /// `the_documented_fact_table_is_the_adapters`.
+    const CODEX_FACTS: &[(&str, &str, &str)] = &[
+        (
+            r#"How a turn ended"#,
+            r#"`turn/completed` `turn.status`: `completed`, `interrupted`, `failed` with `error.message` and `codexErrorInfo`"#,
+            r#"`completed` is a Stop; `interrupted` is `TurnOutcome::Interrupted`; `failed` is `Errored`, `error` `codexErrorInfo: message`"#,
+        ),
+        (
+            r#"The turn's id"#,
+            r#"`turn.id` on `turn/started` (and `rootTurnId`)"#,
+            r#"`agent_turn.harness_turn_id`, set when `turn/started` arrives (also for a prompt oxplow itself sent)"#,
+        ),
+        (
+            r#"A tool call's life"#,
+            r#"`item/started`, `item/completed` with the item `id`, `exitCode`, `durationMs`"#,
+            r#"`agent.tool.requested` at `item/started`, the finish with the same call id, `exit_code` and `duration_ms`"#,
+        ),
+        (
+            r#"A child agent starts and ends"#,
+            r#"`collabAgentToolCall` `agentsStates`, `subAgentActivity`, `thread/started` `thread_spawn`"#,
+            r#"`SubagentStart` / `SubagentStop`, an `agent_job` row"#,
+        ),
+        (
+            r#"The turn that spawned a child"#,
+            r#"the parent's `turn.id` (the child's `rootTurnId`)"#,
+            r#"the job's `started_turn`, basis `reported`"#,
+        ),
+        (
+            r#"A child's tool calls"#,
+            r#"`item/completed` on the child's own thread"#,
+            r#"`ToolUse.subagent` of the child, at the finish"#,
+        ),
+        (
+            r#"Messages inside an agent tree"#,
+            r#"`senderThreadId` on a collab item"#,
+            r#"not read"#,
+        ),
+        (
+            r#"A background terminal"#,
+            r#"`processId` and `source` on a `commandExecution`; `thread/backgroundTerminals/list`"#,
+            r#"nothing of its own: an ordinary shell call, whose `item/completed` may land after the turn's end (recorded on the call, no job, no turn)"#,
+        ),
+        (
+            r#"Files changed"#,
+            r#"`fileChange` paths and diffs; `turn/diff/updated`"#,
+            r#"`fileChange` paths and diffs; `turn/diff/updated` not read"#,
+        ),
+        (
+            r#"Moderation of a turn"#,
+            r#"`turn/moderationMetadata` (Codex's verdict on the prompt and output)"#,
+            r#"not read"#,
+        ),
+        (
+            r#"The model and effort a thread runs on"#,
+            r#"`thread/settings/updated` `threadSettings.model` / `effort`, before the turn; the open result's `thread.model`"#,
+            r#"`TurnRun.model` / `effort` on the turn's end"#,
+        ),
+        (
+            r#"A thread that is not the session's"#,
+            r#"`thread/started` (Codex's ephemeral naming thread, no parent), `thread/status/changed` and `thread/closed` for it or for an earlier session's thread (`notLoaded`)"#,
+            r#"not read: only a message naming the session's thread, or a child it spawned, passes"#,
+        ),
+        (
+            r#"A turn's retries and failure"#,
+            r#"`error` notifications (`willRetry`), a `warning`, `thread/status/changed` `systemError`, then `turn/completed` `failed`"#,
+            r#"only the `turn/completed` ends the turn (once, `Errored`); `error`, `warning` and `systemError` say nothing"#,
+        ),
+        (
+            r#"Compaction"#,
+            r#"`contextCompaction` item"#,
+            r#"`PostCompact`, with no summary or trigger"#,
+        ),
+    ];
+
+    #[test]
+    fn the_documented_fact_table_is_the_adapters() {
+        let doc = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.context/agent-model.md"),
+        )
+        .unwrap();
+        for (fact, reports, reads) in CODEX_FACTS {
+            let row = format!("| {fact} | {reports} | {reads} |");
+            assert!(doc.contains(&row), "agent-model.md lacks the row {row}");
+        }
+    }
+
+    /// `turn/started` names Codex's own id for the turn; a failed turn's
+    /// class (`codexErrorInfo`) leads its words; an interrupted one ends
+    /// with the status `interrupted` (the session reads it as such).
+    #[test]
+    fn a_turn_has_codexs_id_and_a_failure_names_its_class() {
+        let mut state = State {
+            thread: Some("t".into()),
+            ..State::default()
+        };
+        let started = on_notification(
+            "turn/started",
+            &json!({"threadId": "t", "turn": {"id": "u1", "rootTurnId": "u1", "status": "inProgress"}}),
+            &mut state,
+        );
+        assert!(matches!(&started[..], [Incoming::TurnStarted(id)] if id == "u1"));
+        let failed = on_notification(
+            "turn/completed",
+            &json!({"threadId": "t", "turn": {"id": "u1", "status": "failed",
+                "error": {"message": "quota", "codexErrorInfo": "usageLimitExceeded"}}}),
+            &mut state,
+        );
+        assert!(
+            matches!(&failed[0], Incoming::PromptDone(Err(e)) if e == "usageLimitExceeded: quota")
+        );
+        let cut = on_notification(
+            "turn/completed",
+            &json!({"threadId": "t", "turn": {"id": "u2", "status": "interrupted"}}),
+            &mut state,
+        );
+        assert!(
+            matches!(&cut[0], Incoming::PromptDone(Ok(end)) if end.stop_reason == "interrupted")
+        );
+    }
+
+    /// A call is open from `item/started` and Codex's `durationMs` rides
+    /// its finish.
+    #[test]
+    fn a_finished_call_carries_codexs_duration() {
+        let item = json!({"type": "commandExecution", "id": "c1", "status": "completed",
+            "command": "ls", "cwd": "/w", "exitCode": 0, "durationMs": 42});
+        let call = tool_call(&item, "c1".into(), true).unwrap();
+        let used = super::super::mapping::tool_use(&call).unwrap();
+        assert_eq!((used.duration_ms, used.exit_code), (Some(42), Some(0)));
+        let running = tool_call(
+            &json!({"type": "commandExecution", "id": "c1", "status": "inProgress", "command": "ls"}),
+            "c1".into(),
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            super::super::mapping::tool_use(&running)
+                .unwrap()
+                .duration_ms,
+            None
+        );
     }
 }

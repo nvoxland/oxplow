@@ -1,0 +1,72 @@
+{
+  "$defs": {
+    "TurnSource": {
+      "description": "What opened a turn (`agent_turn.source`), as its harness read the\nprompt hook. Only `person` is a person's words; the others are what the\nharness delivered to the agent on its own.",
+      "oneOf": [
+        {
+          "const": "person",
+          "description": "A person's prompt.",
+          "type": "string"
+        },
+        {
+          "const": "background_job",
+          "description": "A job the agent started in the background reported back (Claude\nCode's task notification: a background shell or subagent finished).",
+          "type": "string"
+        },
+        {
+          "const": "subagent",
+          "description": "A subagent handed its report back to its session.",
+          "type": "string"
+        },
+        {
+          "const": "peer",
+          "description": "Another agent session's message.",
+          "type": "string"
+        },
+        {
+          "const": "unknown",
+          "description": "The harness opened a turn and said nothing of why.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`agent.turn.started@3`: a turn opened — by a person's prompt, a\nbackground job reporting back, a subagent's hand-back or another\nsession's message (`source`).",
+  "properties": {
+    "cause_turn": {
+      "description": "The turn whose work this one goes on with, when the harness named\nit: the one whose tool call started the background job, or in\nwhich the subagent started (`trn11`).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "session": {
+      "description": "The harness session id, when it reported one.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source": {
+      "$ref": "#/$defs/TurnSource",
+      "description": "What opened it. Turns logged before sources were read `unknown`."
+    },
+    "thread": {
+      "description": "The thread (`thr3`).",
+      "type": "string"
+    },
+    "turn": {
+      "description": "The turn (`trn12`).",
+      "type": "string"
+    }
+  },
+  "required": [
+    "turn",
+    "thread",
+    "source"
+  ],
+  "title": "AgentTurnStartedV3",
+  "type": "object"
+}

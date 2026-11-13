@@ -1,0 +1,25 @@
+title: Task
+description: "The task a request's changes were made for: the first task its request worked on. Mounted in the Changes page (a request's, not a turn's or a range's)."
+params:
+- name: uri
+- name: end
+loaders:
+  change_task:
+    sql: |
+      SELECT w.title AS item, w.uri AS item_ref
+      FROM v_oxplow_task w
+      WHERE coalesce(:end, '') = '' AND uri_resource(:uri) = 'oxplow/request'
+        AND w.uri = (SELECT x.task FROM v_oxplow_request_link x
+                      WHERE x.request_id = CAST(substr(uri_param(:uri, 'id'), 4) AS INTEGER)
+                      ORDER BY x.at, x.task LIMIT 1)
+view:
+  id: change-task
+  from: change_task
+  viz: table
+  columns:
+  - key: item
+    label: Task
+    link:
+      kind: page
+      from: item_ref
+  empty: No task.

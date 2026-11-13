@@ -14,12 +14,12 @@ import type { CommandSpec, FormStart } from "../tauri-bridge/generated/bindings.
 afterEach(cleanup);
 
 const UPDATE = {
-  id: "oxplow.work_item.update",
+  id: "acme.issue.update",
   input_schema: { type: "object", required: ["uri"], properties: { uri: { type: "string" }, title: { type: "string" } } },
 } as unknown as CommandSpec;
 
 const start = (values: Record<string, unknown>): FormStart =>
-  ({ command: UPDATE, values, fixed: ["uri"], fields: ["title"], choices: {}, reads: { datasets: [], tables: [] } }) as unknown as FormStart;
+  ({ command: UPDATE, values, fixed: ["uri"], fields: ["title"], choices: {}, reads: { datasets: [], tables: [], measures: [] } }) as unknown as FormStart;
 
 function fakes() {
   const calls: unknown[][] = [];
@@ -117,6 +117,7 @@ test("a node's form action opens from page_action_form and submits through run_p
     "retitle",
     { id: "a", title: "Alpha" },
     { title: "Renamed" },
+    null,
     null,
     false,
   ]);

@@ -1,0 +1,26 @@
+title: Shared work
+description: "Where two threads hold the same thing: a task requests on both worked on, a file both changed in the last day, an epic whose children sit on different threads."
+icon: git-merge
+category: Work
+params:
+- name: thread_id
+  label: Thread
+loaders:
+  shared_work:
+    page: oxplow/shared-work-rows
+    loader: shared_work
+    params: { thread_id: { param: thread_id } }
+view:
+  from: shared_work
+  viz: list
+  group:
+    by: section
+  columns:
+  - key: what
+    label: What
+    link:
+      kind: page
+      from: uri
+  - key: threads
+    label: Threads
+  empty: Nothing is shared across threads.

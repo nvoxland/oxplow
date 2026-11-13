@@ -226,17 +226,14 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
         std::fs::write(
             dir.path().join(".oxplow/personal.yaml"),
-            "activeProviders: { effort_policy: none }\n",
+            "activeProviders: { snapshots: hashes }\n",
         )
         .unwrap();
         let config = oxplow_config::load_project_config(dir.path()).unwrap();
         let all = effective_config(&config, dir.path(), None, None, &[]);
         let personal = find(&all, "personal.activeProviders");
         assert_eq!(personal.origin, ConfigOrigin::Personal);
-        assert_eq!(
-            personal.value,
-            serde_json::json!({ "effort_policy": "none" })
-        );
+        assert_eq!(personal.value, serde_json::json!({ "snapshots": "hashes" }));
         assert_eq!(find(&all, "activeProviders").origin, ConfigOrigin::Default);
     }
 

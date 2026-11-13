@@ -4,7 +4,7 @@
 # BOTH node kinds: `#[allow(...)]` is an `attribute_item`, `#![allow(...)]` is an
 # `inner_attribute_item`. Naming only the first undercounts crate/module-level
 # suppressions — the ones that matter most, since an inner attribute mutes a lint
-# for a whole file (tsk44). Node names pinned by a test in oxplow-code-metrics.
+# for a whole file. Node names pinned by a test in oxplow-code-metrics.
 def transform(input):
     facts = []
     q = "(attribute_item (attribute (identifier) @a)) " + \

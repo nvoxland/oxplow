@@ -13,7 +13,7 @@
 use oxplow_domain::{StoredEvent, ThreadId};
 use serde_json::Value;
 
-pub use crate::work_items_conformance::Finding;
+pub use crate::conformance::Finding;
 
 /// What the session did, which the events must show.
 #[derive(Debug, Clone)]

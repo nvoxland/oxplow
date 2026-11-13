@@ -1,0 +1,40 @@
+# The rail's Work panel body: the thread's tasks — the ones in progress
+# and assigned to it, the ones assigned to it next, and the done ones a
+# request on the thread worked on — under headings; clearing hides what
+# finished before it. A task done with no request here isn't the thread's
+# work, and an in-progress task no request runs is idle.
+requires: [oxtask]
+given:
+  - { command: oxtask.task.create, input: { title: Shipped, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Doing it, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Done elsewhere, stage: done } }
+  - { command: oxtask.task.create, input: { title: Next up, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk4&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - observe:
+      turn:
+        prompt: Ship it, then start the next one
+        during:
+          - { command: oxtask.task.move, input: { id: tsk1, stage: in_progress }, as: agent }
+          - { command: oxtask.task.move, input: { id: tsk1, stage: done }, as: agent }
+          - { command: oxtask.task.move, input: { id: tsk2, stage: in_progress }, as: agent }
+when: { part: oxplow/work-panel, params: { thread_id: 1 } }
+expect:
+  loaders:
+    work:
+      rows:
+        - { grp: In progress, title: Doing it, now: "" }
+        - { grp: Up next, title: Next up }
+        - { grp: Finished, title: Shipped }
+steps:
+  - given: [{ command: oxplow.tasks.clear_finished, input: { thread_id: 1 } }]
+  - expect:
+      loaders: { work: { rows: [{ grp: In progress, title: Doing it }, { grp: Up next, title: Next up }] } }
+  - given:
+      - observe:
+          turn:
+            prompt: Finish it
+            during: [{ command: oxtask.task.move, input: { id: tsk2, stage: done }, as: agent }]
+  - expect:
+      loaders: { work: { rows: [{ grp: Up next, title: Next up }, { grp: Finished, title: Doing it }] } }

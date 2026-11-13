@@ -91,6 +91,50 @@ impl StateSource {
     }
 }
 
+impl StateSource {
+    /// A capability implementation's script writes its extension's own
+    /// namespace, in a transaction of its own: the same checks as
+    /// [`StateHost::compare_exchange`] (the run declared `state.write`, is
+    /// allowed it and live, the owner is the current deployment — before the
+    /// write and again before it commits, which a refusal rolls back), but not
+    /// inside a command's audited transaction: a verb is called by core, with
+    /// no command around it. The run's trace counts the call.
+    pub async fn write(
+        &self,
+        run: RunContext,
+        input: WriteInput,
+    ) -> Result<Snapshot, StateHostError> {
+        let host = self.host.clone();
+        self.db
+            .transaction_or(move |tx| {
+                let namespace = host
+                    .authorize(&run, "state.write", input.scope, input.area)
+                    .map_err(oxplow_db::TxError::Aborted)?;
+                let snapshot = oxplow_db::extension_state_store::compare_exchange_tx(
+                    tx,
+                    &namespace,
+                    input.expected,
+                    input.schema_version,
+                    &input.values,
+                )
+                .map_err(|error| match error {
+                    StateError::Storage(storage) => oxplow_db::TxError::Storage(storage),
+                    other => oxplow_db::TxError::Aborted(StateHostError::State(other)),
+                })?;
+                host.authorize(&run, "state.write", input.scope, input.area)
+                    .map_err(oxplow_db::TxError::Aborted)?;
+                Ok(snapshot)
+            })
+            .await
+            .map_err(|error| match error {
+                oxplow_db::TxError::Storage(storage) => {
+                    StateHostError::State(StateError::Storage(storage))
+                }
+                oxplow_db::TxError::Aborted(other) => other,
+            })
+    }
+}
+
 impl StateHost {
     pub fn new(catalog: Arc<ExtensionCatalog>, project: PathBuf) -> Self {
         let project = catalog.project_of(&project).to_path_buf();
@@ -190,18 +234,51 @@ impl StateHost {
         service: &str,
         read: impl FnOnce(&crate::extension::extensions::Extension) -> T,
     ) -> Result<T, StateHostError> {
-        let owner = run
-            .contribution_ref()
-            .filter(|owner| owner.id.problem().is_none())
-            .ok_or(StateHostError::Denied(
-                "a valid contribution owner is required",
-            ))?;
         if !run.declares_scope(service) {
             return Err(StateHostError::Denied("the service was not declared"));
         }
         if !matches!(run.decide(Need::Scope(service.into())), Decision::Allowed) {
             return Err(StateHostError::Denied("live run authority refused access"));
         }
+        self.with_contribution_owner(run, read)
+    }
+
+    /// The extension a run's contribution belongs to, when it is live and
+    /// enabled; no service need be declared. A core command a script composes
+    /// runs as that contribution, so this names the composing extension.
+    pub(crate) fn with_contribution_owner<T>(
+        &self,
+        run: &RunContext,
+        read: impl FnOnce(&crate::extension::extensions::Extension) -> T,
+    ) -> Result<T, StateHostError> {
+        let owner = run
+            .contribution_ref()
+            .filter(|owner| owner.id.problem().is_none())
+            .ok_or(StateHostError::Denied(
+                "a valid contribution owner is required",
+            ))?;
+        self.with_owner_ref(owner, read)
+    }
+
+    /// [`Self::with_contribution_owner`] for the contribution whose script
+    /// composed `run`'s command; none when the command was run directly.
+    pub(crate) fn with_composer<T>(
+        &self,
+        run: &RunContext,
+        read: impl FnOnce(&crate::extension::extensions::Extension) -> T,
+    ) -> Result<T, StateHostError> {
+        let owner = run
+            .composed_by()
+            .filter(|owner| owner.id.problem().is_none())
+            .ok_or(StateHostError::Denied("no extension composed this"))?;
+        self.with_owner_ref(owner, read)
+    }
+
+    fn with_owner_ref<T>(
+        &self,
+        owner: &oxplow_domain::run::ContributionRef,
+        read: impl FnOnce(&crate::extension::extensions::Extension) -> T,
+    ) -> Result<T, StateHostError> {
         let snapshot = self.catalog.live_snapshot(&self.project);
         // A run that holds no generation (a collector's, an effect's, a
         // job's) is decided by the checks below: its extension's version,

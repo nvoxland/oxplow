@@ -63,7 +63,7 @@ export function formatDateOnly(input: string): string {
   return d.toLocaleDateString();
 }
 
-// --- Metric value formatting (tsk114) --------------------------------------
+// --- Metric value formatting --------------------------------------
 //
 // ONE formatter for every metric value the UI shows, built on
 // `Intl.NumberFormat` with the OS locale (`undefined` = system): grouping

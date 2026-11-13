@@ -1,0 +1,41 @@
+title: Requests on a task
+description: "What has been done on a task: the requests that worked on it, newest first, each with its prompt, state, turns and the files its turns changed."
+params:
+- name: uri
+  label: Task
+answers:
+- {"question":"What has been done on this task so far?","about":"oxplow/task","params":{"uri":"oxplow:oxplow/task?id=tsk1&provider=oxtask"},"skill":"tasks"}
+loaders:
+  requests:
+    sql: |
+      SELECT r.uri,
+             substr(r.prompt, 1, CASE WHEN instr(r.prompt, char(10)) > 0 THEN instr(r.prompt, char(10)) - 1 ELSE length(r.prompt) END) AS prompt,
+             r.state, r.turns, r.started_at, r.last_activity_at,
+             (SELECT count(DISTINCT f.path) FROM v_agent_turn t JOIN v_turn_file f ON f.turn_id = t.id
+               WHERE t.request_id = r.id AND f.confidence IN ('claimed', 'sole')) AS files
+      FROM v_request r
+      WHERE r.id IN (SELECT rt.request_id FROM v_oxplow_request_link rt WHERE rt.task = :uri)
+      ORDER BY r.started_at DESC, r.id DESC
+view:
+  id: requests
+  from: requests
+  viz: list
+  columns:
+  - key: prompt
+    label: Request
+    link:
+      kind: page
+      from: uri
+  - key: state
+    label: State
+  - key: turns
+    label: Turns
+  - key: started_at
+    label: Started
+    format: relative
+  - key: last_activity_at
+    label: Last active
+    format: relative
+  - key: files
+    label: Files
+  empty: No request has worked on it yet.

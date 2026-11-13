@@ -83,7 +83,7 @@ test("a group separator is one the shell draws: numbered, unique in its menu", (
   }
 });
 
-// tsk963: the native menu is sent as the generated `MenuGroupSnapshot` the
+// the native menu is sent as the generated `MenuGroupSnapshot` the
 // shell deserializes — every item names its shortcut and check state (null
 // when it has none), and carries nothing the shell doesn't read.
 test("the native menu is the shell's own snapshot shape, with Open Recent", () => {

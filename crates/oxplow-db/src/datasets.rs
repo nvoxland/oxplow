@@ -296,7 +296,7 @@ pub struct Relationship {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct DatasetSource {
     pub decl: DatasetDecl,
-    /// Where the SQL came from, for error locations (`datasets/work_item.sql`).
+    /// Where the SQL came from, for error locations (`datasets/task.sql`).
     pub file: String,
     pub sql: String,
     /// For a kept earlier version (named `<name>_v<version>`): what it's a
@@ -340,20 +340,22 @@ pub fn core_sources() -> Result<Vec<DatasetSource>, DomainError> {
 pub fn contract_drift(golden: &serde_json::Value, decls: &[DatasetDecl]) -> Vec<String> {
     let mut out = Vec::new();
     for d in decls {
-        let now = contract_json(d);
         match golden
             .get(&d.name)
             .and_then(|m| m.get(d.version.to_string()))
         {
-            Some(pinned) if *pinned == now => {}
             Some(pinned) => {
-                let was: Contract = serde_json::from_value(pinned.clone()).unwrap_or_default();
-                out.push(format!(
-                    "{} v{}'s contract changed ({}); bump its version",
-                    d.name,
-                    d.version,
-                    was.change_to(&d.fields, &d.key)
-                ));
+                let was: Result<Contract, _> = serde_json::from_value(pinned.clone());
+                let change = match was {
+                    Ok(was) => was.change_to(&d.fields, &d.key),
+                    Err(e) => Some(format!("the pin no longer reads ({e})")),
+                };
+                if let Some(change) = change {
+                    out.push(format!(
+                        "{} v{}'s contract changed ({change}); bump its `version` in datasets.yaml",
+                        d.name, d.version
+                    ));
+                }
             }
             None => out.push(format!(
                 "{} v{} isn't pinned yet; bless the golden with OXPLOW_BLESS=1",
@@ -394,14 +396,54 @@ pub struct Contract {
 
 impl Contract {
     /// The first difference from this contract to `columns` / `key`, in
-    /// words.
-    pub fn change_to(&self, columns: &[DatasetField], key: &[String]) -> String {
+    /// words; `None` when they are the same promise. The one comparison
+    /// of a published contract with a declared one: startup
+    /// (`check_contract`), the golden test (`contract_drift`) and the
+    /// published-pin guard (`rewritten_pins`) all use it, so none of them
+    /// can accept what another refuses.
+    pub fn change_to(&self, columns: &[DatasetField], key: &[String]) -> Option<String> {
         if self.columns != columns {
-            contract_change(&self.columns, columns)
+            Some(contract_change(&self.columns, columns))
+        } else if self.key != key {
+            Some(format!("its key became [{}]", key.join(", ")))
         } else {
-            format!("its key became [{}]", key.join(", "))
+            None
         }
     }
+}
+
+/// The pinned contracts of `published` (the golden as last committed) that
+/// `golden` rewrote or dropped. A pinned version is published: databases
+/// recorded it and refuse to open when it changes, so the only way to
+/// change a contract is a new `version`. One line per version.
+pub fn rewritten_pins(published: &serde_json::Value, golden: &serde_json::Value) -> Vec<String> {
+    let mut out = Vec::new();
+    let Some(names) = published.as_object() else {
+        return out;
+    };
+    for (name, versions) in names {
+        let Some(versions) = versions.as_object() else {
+            continue;
+        };
+        for (version, was) in versions {
+            let was: Contract = serde_json::from_value(was.clone()).unwrap_or_default();
+            let now = golden.get(name).and_then(|m| m.get(version));
+            let change = match now {
+                None => Some("it was removed".to_string()),
+                Some(now) => match serde_json::from_value::<Contract>(now.clone()) {
+                    Ok(now) => was.change_to(&now.columns, &now.key),
+                    Err(e) => Some(format!("it no longer reads ({e})")),
+                },
+            };
+            if let Some(change) = change {
+                out.push(format!(
+                    "{name} v{version} is already published and its pinned contract changed ({change}); \
+                     restore it and bump `version` in datasets.yaml instead"
+                ));
+            }
+        }
+    }
+    out
 }
 
 fn contract_json(d: &DatasetDecl) -> serde_json::Value {
@@ -426,7 +468,7 @@ fn decl_lines(text: &str) -> HashMap<&str, usize> {
 /// watermark is its key — one INTEGER column, unique per row (a row id, a
 /// seq). Appending takes the rows past the table's highest watermark, so a
 /// value two rows shared would let the second slip under it unseen; a
-/// unique one can't (tsk777).
+/// unique one can't.
 fn check_materialize(decl: &DatasetDecl, at: &str) -> Result<(), DomainError> {
     match &decl.materialize {
         Some(m @ Materialize::Every { every }) if m.every().is_none() => Err(invalid(format!(
@@ -468,7 +510,7 @@ fn check_materialize(decl: &DatasetDecl, at: &str) -> Result<(), DomainError> {
 /// rewrites one — a filter and projection over inner joins of append-only
 /// inputs: no grouping, de-duplication, window, cap, set operation, outer
 /// join, subquery (`EXISTS`, `IN (SELECT …)`, a scalar one — a row already
-/// appended would change when a later row lands on another input, tsk778),
+/// appended would change when a later row lands on another input),
 /// randomness or reading of the clock (`file:line` of the first, pointing
 /// at `on_change`).
 fn check_incremental_sql(decl: &DatasetDecl, sql: &str, file: &str) -> Result<(), DomainError> {
@@ -792,7 +834,7 @@ fn only_name(
     match call.args.as_slice() {
         [arg] => string_literal(arg).ok_or_else(|| {
             invalid(format!(
-                "{}: {what}() takes one quoted name, e.g. {what}('work_item')",
+                "{}: {what}() takes one quoted name, e.g. {what}('task')",
                 at(src, call.start)
             ))
         }),
@@ -1449,16 +1491,13 @@ fn check_contract(
             .map_err(map_sql_err)?;
             Ok(())
         }
-        Some(before) if before.columns != decl.fields || before.key != decl.key => {
-            Err(invalid(format!(
-                "{}: {} v{}'s contract changed ({}); bump its version",
-                m.source.file,
-                decl.name,
-                decl.version,
-                before.change_to(&decl.fields, &decl.key)
-            )))
-        }
-        Some(_) => Ok(()),
+        Some(before) => match before.change_to(&decl.fields, &decl.key) {
+            Some(change) => Err(invalid(format!(
+                "{}: {} v{}'s contract changed ({change}); bump its version",
+                m.source.file, decl.name, decl.version
+            ))),
+            None => Ok(()),
+        },
     }
 }
 
@@ -1601,7 +1640,7 @@ pub fn incremental_matches_full(
         [mark],
     );
     if let Err(e) = appended {
-        // With the watermark the key (tsk777), only SQL that emits one key
+        // With the watermark the key, only SQL that emits one key
         // twice hits it — and at run time that's a failure every time.
         return Ok(Some(format!(
             "fails to append the rows past `{watermark}`: {e} — its SQL emits one key more than once"
@@ -1840,8 +1879,7 @@ fn ref_target(
 /// datasets compiled. A dataset that fails — and every dataset reading it —
 /// is left out and reported; the others are published. In `tx`, which
 /// takes the write lock up front (`Database::transaction`): a pass that
-/// read first and wrote after another connection's commit failed
-/// (tsk977).
+/// read first and wrote after another connection's commit failed.
 pub fn compile_extensions(
     tx: &rusqlite::Transaction<'_>,
     extensions: &[ExtensionDatasets],
@@ -2327,7 +2365,7 @@ mod tests {
         format!("v_t_{name}")
     }
 
-    /// P4.2 (tsk487): a core dataset compiles to its view with its documented
+    /// P4.2: a core dataset compiles to its view with its documented
     /// columns, and the registry records it and its input.
     #[test]
     fn the_core_datasets_compile_and_are_recorded() {
@@ -2644,7 +2682,7 @@ mod tests {
     }
 
     /// A reworded column doc at the same version is a changed contract
-    /// (tsk731: P7 did that to `ai_result`, `claim` and `decision`, and
+    /// (P7 did that to `ai_result`, `claim` and `decision`, and
     /// only a database that had recorded the version noticed).
     #[test]
     fn a_contract_changed_at_a_pinned_version_drifts() {
@@ -2662,7 +2700,8 @@ mod tests {
         assert_eq!(
             contract_drift(&golden, std::slice::from_ref(&reworded)),
             vec![
-                "a v1's contract changed (column `id`'s doc changed); bump its version".to_string()
+                "a v1's contract changed (column `id`'s doc changed); bump its `version` in datasets.yaml"
+                    .to_string()
             ]
         );
         let mut bumped = reworded;
@@ -2711,7 +2750,10 @@ mod tests {
         keyed.key = vec!["id".into()];
         assert_eq!(
             contract_drift(&golden, std::slice::from_ref(&keyed)),
-            vec!["a v1's contract changed (its key became [id]); bump its version".to_string()]
+            vec![
+                "a v1's contract changed (its key became [id]); bump its `version` in datasets.yaml"
+                    .to_string()
+            ]
         );
 
         let mut conn = fresh();
@@ -2804,7 +2846,7 @@ mod tests {
             "watermark type"
         );
         // The watermark is the key: a value two rows share would let the
-        // second slip under `>` unseen (tsk777).
+        // second slip under `>` unseen.
         let yaml = decl("  key: [id]\n")
             .replace("incremental: id", "incremental: n")
             .replace(
@@ -2837,7 +2879,7 @@ mod tests {
                 "datetime(",
             ),
             // A row already appended can change when a later row lands on
-            // another input (tsk778).
+            // another input.
             (
                 "SELECT s.id, t.v FROM source('streams') s\nLEFT JOIN source('threads') t ON t.id = s.id",
                 "LEFT JOIN",
@@ -2884,18 +2926,18 @@ mod tests {
                 || vec!["a".into()],
             )
         };
-        load(&decl("{ from: id, to: work_item.id }")).unwrap();
-        let err = load(&decl("{ from: nope, to: work_item.id }")).unwrap_err();
+        load(&decl("{ from: id, to: task.id }")).unwrap();
+        let err = load(&decl("{ from: nope, to: task.id }")).unwrap_err();
         assert!(
             err.to_string().contains(
                 "datasets/datasets.yaml:1: `a`'s relationship from `nope` names no field it declares"
             ),
             "{err}"
         );
-        let err = load(&decl("{ from: id, to: work_item }")).unwrap_err();
+        let err = load(&decl("{ from: id, to: task }")).unwrap_err();
         assert!(
             err.to_string().contains(
-                "datasets/datasets.yaml:1: `a`'s relationship to `work_item` isn't `<dataset>.<field>`"
+                "datasets/datasets.yaml:1: `a`'s relationship to `task` isn't `<dataset>.<field>`"
             ),
             "{err}"
         );
@@ -2982,7 +3024,7 @@ mod tests {
 
     #[test]
     fn dataset_docs_carry_no_plan_labels() {
-        // tsk1044: a dataset's description is read by people (Catalog,
+        // a dataset's description is read by people (Catalog,
         // Explore Data) and agents; a plan code ("(P5.E1)") means nothing
         // to either.
         let yaml = include_str!("../datasets/datasets.yaml");
@@ -2996,6 +3038,47 @@ mod tests {
             .map(|i| yaml[i..].chars().take(8).collect())
             .collect();
         assert_eq!(found, Vec::<String>::new());
+    }
+
+    /// A pinned version is published. Rewriting it in the golden (by hand,
+    /// or by a bless) makes the golden agree with a changed datasets.yaml
+    /// and hides the change; only a comparison with the golden as it was
+    /// published refuses it.
+    #[test]
+    fn rewriting_a_published_pin_is_refused_and_a_new_version_is_not() {
+        let decl: DatasetDecl = serde_yaml::from_str(
+            "name: a\nversion: 1\ndescription: d\nfields:\n  - { name: id, type: INTEGER, doc: \"Row id.\" }\n",
+        )
+        .unwrap();
+        let published = pin_contracts(&serde_json::json!({}), std::slice::from_ref(&decl));
+        // The doc is edited in datasets.yaml and in the golden's v1.
+        let mut reworded = decl.clone();
+        reworded.fields[0].doc = "The row's id.".into();
+        let mut rewritten = published.clone();
+        rewritten["a"]["1"] = contract_json(&reworded);
+        assert_eq!(
+            contract_drift(&rewritten, std::slice::from_ref(&reworded)),
+            Vec::<String>::new(),
+            "the golden and datasets.yaml agree, so only the published copy can tell"
+        );
+        let refused = rewritten_pins(&published, &rewritten);
+        assert_eq!(refused.len(), 1, "{refused:?}");
+        assert!(refused[0].starts_with("a v1 "), "{refused:?}");
+        assert!(
+            refused[0].contains("column `id`'s doc changed"),
+            "{refused:?}"
+        );
+        assert!(
+            refused[0].contains("bump `version` in datasets.yaml"),
+            "{refused:?}"
+        );
+        // A dropped pin is refused too.
+        assert_eq!(rewritten_pins(&published, &serde_json::json!({})).len(), 1);
+        // A new version beside the published one is fine.
+        let mut bumped = reworded;
+        bumped.version = 2;
+        let added = pin_contracts(&published, std::slice::from_ref(&bumped));
+        assert_eq!(rewritten_pins(&published, &added), Vec::<String>::new());
     }
 
     #[test]
@@ -3021,8 +3104,27 @@ mod tests {
         } else {
             golden
         };
-        let drift = contract_drift(&golden, &decls);
+        let mut drift = contract_drift(&golden, &decls);
+        // The golden as last committed holds what was published: the
+        // working file may add versions, never change one. (Without git
+        // there is nothing to compare with.)
+        if let Some(published) = committed_golden() {
+            drift.extend(rewritten_pins(&published, &golden));
+        }
         assert!(drift.is_empty(), "{}", drift.join("\n"));
+    }
+
+    /// `fixtures/dataset_contracts.json` as `HEAD` has it.
+    fn committed_golden() -> Option<serde_json::Value> {
+        let out = std::process::Command::new("git")
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .args(["show", "HEAD:./fixtures/dataset_contracts.json"])
+            .output()
+            .ok()?;
+        out.status
+            .success()
+            .then(|| serde_json::from_slice(&out.stdout).ok())
+            .flatten()
     }
 
     #[test]
@@ -3152,7 +3254,7 @@ mod tests {
         let mut conn = fresh();
         let busy = on_change(source(
             "busy",
-            "SELECT uri, title FROM source('work_item') WHERE state = 'blocked'",
+            "SELECT CAST(id AS TEXT) AS uri, title FROM source('threads') WHERE mark = 'red'",
             &["uri TEXT", "title TEXT"],
         ));
         compile(&mut conn, "t", std::slice::from_ref(&busy), &view).unwrap();
@@ -3181,11 +3283,11 @@ mod tests {
             .unwrap();
         assert_eq!(
             (materialize.as_deref(), input.as_str()),
-            (Some("on_change"), "work_item")
+            (Some("on_change"), "threads")
         );
 
         conn.execute(
-            "INSERT INTO m_v_t_busy VALUES ('oxplow:oxplow/work_item?id=a&provider=oxplow', 'kept')",
+            "INSERT INTO m_v_t_busy VALUES ('oxplow:oxplow/thread?id=thr1', 'kept')",
             [],
         )
         .unwrap();
@@ -3205,7 +3307,7 @@ mod tests {
 
         let mut changed = on_change(source(
             "busy",
-            "SELECT uri FROM source('work_item') WHERE state = 'blocked'",
+            "SELECT CAST(id AS TEXT) AS uri FROM source('threads') WHERE mark = 'red'",
             &["uri TEXT"],
         ));
         changed.decl.version = 2;
@@ -3226,7 +3328,7 @@ mod tests {
             "t",
             &[on_change(source(
                 "busy",
-                "SELECT uri FROM source('work_item')",
+                "SELECT CAST(id AS TEXT) AS uri FROM source('threads')",
                 &["uri TEXT"],
             ))],
             &view,
@@ -3247,7 +3349,7 @@ mod tests {
         assert!(err.contains("may not read itself"), "{err}");
     }
 
-    /// tsk977: the extensions' pass publishes even when another connection
+    /// the extensions' pass publishes even when another connection
     /// is mid-write as it starts and commits while it waits — a pass that
     /// read first and wrote second failed then (`SQLITE_BUSY_SNAPSHOT`,
     /// which no wait fixes), and a fresh project's boot pass never
@@ -3277,7 +3379,7 @@ mod tests {
                 "acme",
                 vec![source(
                     "busy",
-                    "SELECT uri FROM ref('work_item')",
+                    "SELECT uri FROM ref('thread')",
                     &["uri TEXT"],
                 )],
             )])
@@ -3297,7 +3399,7 @@ mod tests {
             "acme",
             vec![on_change(source(
                 "busy",
-                "SELECT uri FROM ref('work_item')",
+                "SELECT uri FROM ref('thread')",
                 &["uri TEXT"],
             ))],
         )];
@@ -3323,7 +3425,7 @@ mod tests {
         let verdict = || {
             source(
                 "verdict",
-                "SELECT uri, title FROM ref('work_item')",
+                "SELECT uri, title FROM ref('thread')",
                 &["uri TEXT", "title TEXT"],
             )
         };
@@ -3371,13 +3473,13 @@ mod tests {
                 (
                     "v_acme_verdict".into(),
                     "acme-reviews".into(),
-                    "v_work_item".into()
+                    "v_thread".into()
                 ),
             ]
         );
     }
 
-    /// P4.9 (tsk494): an extension's dataset reads core datasets through
+    /// P4.9: an extension's dataset reads core datasets through
     /// `ref()`, its own by bare name and another extension's as
     /// `ref('<namespace>/<name>')`; each publishes `v_<namespace>_<name>` in the
     /// registry. A recompile replaces the set.
@@ -3392,7 +3494,7 @@ mod tests {
                     vec![
                         source(
                             "late",
-                            "SELECT uri, title FROM ref('work_item') WHERE state = 'blocked'",
+                            "SELECT uri, title FROM ref('thread') WHERE mark = 'red'",
                             &["uri TEXT", "title TEXT"],
                         ),
                         source(
@@ -3425,7 +3527,7 @@ mod tests {
                 (
                     "v_late_work_late".into(),
                     "late-work".into(),
-                    "v_work_item".into()
+                    "v_thread".into()
                 ),
                 (
                     "v_late_work_late_count".into(),
@@ -3445,7 +3547,7 @@ mod tests {
                 "late-work",
                 vec![source(
                     "late",
-                    "SELECT uri, title FROM ref('work_item') WHERE state = 'blocked'",
+                    "SELECT uri, title FROM ref('thread') WHERE mark = 'red'",
                     &["uri TEXT", "title TEXT"],
                 )],
             )],
@@ -3456,7 +3558,7 @@ mod tests {
             vec![(
                 "v_late_work_late".into(),
                 "late-work".into(),
-                "v_work_item".into()
+                "v_thread".into()
             )]
         );
         assert!(conn.prepare("SELECT * FROM v_digest_late_titles").is_err());
@@ -3474,16 +3576,16 @@ mod tests {
                     "raw",
                     vec![source(
                         "items",
-                        "SELECT uri FROM\n  source('work_item')",
+                        "SELECT uri FROM\n  source('threads')",
                         &["uri TEXT"],
                     )],
                 ),
                 ext(
                     "shaky",
                     vec![
-                        source("bad", "SELECT nope FROM ref('work_item')", &["nope"]),
+                        source("bad", "SELECT nope FROM ref('thread')", &["nope"]),
                         source("on_bad", "SELECT * FROM ref('bad')", &["nope"]),
-                        source("fine", "SELECT uri FROM ref('work_item')", &["uri TEXT"]),
+                        source("fine", "SELECT uri FROM ref('thread')", &["uri TEXT"]),
                         source("lost", "SELECT * FROM ref('missing')", &["x"]),
                     ],
                 ),
@@ -3513,7 +3615,7 @@ mod tests {
         assert!(errors["loop"].join("\n").contains("cycle"), "{errors:?}");
         assert_eq!(
             published(&conn),
-            vec![("v_shaky_fine".into(), "shaky".into(), "v_work_item".into())]
+            vec![("v_shaky_fine".into(), "shaky".into(), "v_thread".into())]
         );
     }
 
@@ -3530,10 +3632,10 @@ mod tests {
         };
         let mut late = source(
             "late",
-            "SELECT uri, title FROM ref('work_item')",
+            "SELECT uri, title FROM ref('thread')",
             &["uri TEXT", "title TEXT"],
         );
-        late.decl.relationships = vec![rel("uri", "work_item.uri")];
+        late.decl.relationships = vec![rel("uri", "thread.uri")];
         let mut digest = source(
             "titles",
             "SELECT uri FROM ref('late-work/late')",
@@ -3541,7 +3643,7 @@ mod tests {
         );
         digest.decl.relationships = vec![
             rel("uri", "late-work/late.uri"),
-            rel("uri", "work_item.nope"),
+            rel("uri", "thread.nope"),
             rel("uri", "missing.uri"),
         ];
         let errors = publish(
@@ -3553,7 +3655,7 @@ mod tests {
         let digest_errors = errors["digest"].join("\n");
         assert!(
             digest_errors.contains(
-                "`titles`'s relationship to `work_item.nope`: `v_work_item` has no field `nope`"
+                "`titles`'s relationship to `thread.nope`: `v_thread` has no field `nope`"
             ),
             "{digest_errors}"
         );
@@ -3574,7 +3676,7 @@ mod tests {
         assert_eq!(
             published("v_late_work_late"),
             Some(serde_json::json!([
-                { "from": "uri", "to": "work_item.uri", "to_view": "v_work_item", "to_field": "uri" }
+                { "from": "uri", "to": "thread.uri", "to_view": "v_thread", "to_field": "uri" }
             ]))
         );
         assert_eq!(
@@ -3583,28 +3685,28 @@ mod tests {
                 { "from": "uri", "to": "late-work/late.uri", "to_view": "v_late_work_late", "to_field": "uri" }
             ]))
         );
-        assert_eq!(published("v_work_item"), None);
+        assert_eq!(published("v_thread"), None);
     }
 
     /// A check (on temp views, recording nothing) reports a bad target too.
     #[test]
     fn a_check_reports_a_relationship_to_no_field() {
         let conn = fresh();
-        let mut m = source("late", "SELECT uri FROM ref('work_item')", &["uri TEXT"]);
+        let mut m = source("late", "SELECT uri FROM ref('thread')", &["uri TEXT"]);
         m.decl.relationships = vec![RelationshipDecl {
             from: "uri".into(),
-            to: "work_item.nope".into(),
+            to: "thread.nope".into(),
         }];
         let checked = check_extensions(&conn, &[ext("late-work", vec![m])], &[]).unwrap();
         assert!(
             checked.errors["late-work"]
                 .join("\n")
-                .contains("`v_work_item` has no field `nope`"),
+                .contains("`v_thread` has no field `nope`"),
             "{checked:?}"
         );
     }
 
-    /// P4.9 (tsk494): an extension dataset's declared tests run after it
+    /// P4.9: an extension dataset's declared tests run after it
     /// publishes; a failure is in `dataset_test` and the extension's errors,
     /// and the view stays published.
     #[test]
@@ -3654,20 +3756,20 @@ mod tests {
         .unwrap();
     }
 
-    /// P4.9 (tsk494): a breaking change ships a new version with the old
+    /// P4.9: a breaking change ships a new version with the old
     /// one kept under `deprecated` — its own view, `…_v1`, held to the
     /// contract v1 published, until its date. A twin without a published
     /// contract, or past its date, isn't kept, and the extension hears why.
     #[test]
     fn a_deprecated_version_is_kept_beside_the_new_one_until_its_date() {
         let mut conn = fresh();
-        let v1 = source("late", "SELECT uri FROM ref('work_item')", &["uri TEXT"]);
+        let v1 = source("late", "SELECT uri FROM ref('thread')", &["uri TEXT"]);
         publish(&mut conn, &[ext("late-work", vec![v1])]).unwrap();
 
         let twin = |until: &str, sql: &str| {
             let mut v2 = source(
                 "late",
-                "SELECT uri, title FROM ref('work_item')",
+                "SELECT uri, title FROM ref('thread')",
                 &["uri TEXT", "title TEXT"],
             );
             v2.decl.version = 2;
@@ -3695,7 +3797,7 @@ mod tests {
         };
         let errors = publish(
             &mut conn,
-            &[twin("2999-01-01", "SELECT uri FROM ref('work_item')")],
+            &[twin("2999-01-01", "SELECT uri FROM ref('thread')")],
         )
         .unwrap();
         assert!(errors["late-work"].is_empty(), "{errors:?}");
@@ -3708,7 +3810,7 @@ mod tests {
         // Its SQL must still keep v1's promise.
         let errors = publish(
             &mut conn,
-            &[twin("2999-01-01", "SELECT title FROM ref('work_item')")],
+            &[twin("2999-01-01", "SELECT title FROM ref('thread')")],
         )
         .unwrap();
         assert!(
@@ -3718,7 +3820,7 @@ mod tests {
         // Past its date: gone, and said so.
         let errors = publish(
             &mut conn,
-            &[twin("2020-01-01", "SELECT uri FROM ref('work_item')")],
+            &[twin("2020-01-01", "SELECT uri FROM ref('thread')")],
         )
         .unwrap();
         assert!(
@@ -3729,7 +3831,7 @@ mod tests {
         );
         assert!(conn.prepare("SELECT * FROM v_late_work_late_v1").is_err());
         // A version that never published has no promise to keep.
-        let mut never = source("fresh", "SELECT uri FROM ref('work_item')", &["uri TEXT"]);
+        let mut never = source("fresh", "SELECT uri FROM ref('thread')", &["uri TEXT"]);
         never.decl.version = 3;
         never.decl.deprecated = vec![Deprecated {
             version: 2,
@@ -3758,7 +3860,7 @@ mod tests {
         );
     }
 
-    /// P4.9 (tsk494): the check `oxplow extension check` runs works on a
+    /// P4.9: the check `oxplow extension check` runs works on a
     /// read-only database and writes nothing: a good dataset passes, and a
     /// changed contract at a published version fails naming the column.
     #[tokio::test]
@@ -3769,7 +3871,7 @@ mod tests {
         {
             let db = crate::Database::open(&path).unwrap();
             db.compile_extension_datasets(vec![late(
-                "SELECT uri FROM ref('work_item')",
+                "SELECT uri FROM ref('thread')",
                 &["uri TEXT"],
             )])
             .await
@@ -3779,7 +3881,7 @@ mod tests {
         let errors = ro
             .check_extension_datasets(
                 vec![late(
-                    "SELECT uri FROM ref('work_item') WHERE state = 'done'",
+                    "SELECT uri FROM ref('thread') WHERE mark = 'green'",
                     &["uri TEXT"],
                 )],
                 vec![],
@@ -3791,7 +3893,7 @@ mod tests {
         let errors = ro
             .check_extension_datasets(
                 vec![late(
-                    "SELECT uri, title FROM ref('work_item')",
+                    "SELECT uri, title FROM ref('thread')",
                     &["uri TEXT", "title TEXT"],
                 )],
                 vec![],

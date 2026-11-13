@@ -1,11 +1,11 @@
-//! The metric aggregate cube's BUILDER (tsk96) — the write side of the
+//! The metric aggregate cube's BUILDER — the write side of the
 //! materialized fold.
 //!
 //! A `per-path` / `per-subject` measure's series is a stateful replay:
 //! `state[N] = state[N-1] − restated(N) + facts(N)`, `point[N] = agg(state[N])`,
 //! with one state per `(stream, branch)` — a capture folds only into its own
 //! worktree's, own branch's partition, and a new branch SEEDS from the history
-//! visible at its first capture (tsk97, 50fd1760).
+//! visible at its first capture (50fd1760).
 //! [`metric_engine::tree_state_series`] does that in memory on every read, which
 //! is why one sparkline over `oxplow.test_case` decodes 240k facts. This module
 //! runs the SAME fold once at WRITE time and stores its output, so a read becomes
@@ -43,7 +43,7 @@ use crate::metric_engine::{
 #[derive(Clone)]
 pub struct MetricCubeBuilder {
     facts: SqliteFactStore,
-    /// The SAME ancestry resolver the engine's fact fold uses (tsk102) — the
+    /// The SAME ancestry resolver the engine's fact fold uses — the
     /// seed must compute the exact visibility `tree_state_series` computes, or
     /// the cube diverges from the facts. `None` ⇒ blind, matching an
     /// unresolved engine.
@@ -60,14 +60,14 @@ pub struct MetricCubeBuilder {
 /// and the cube epoch.
 type BuiltAt = ((i64, Option<i64>), i64, String);
 
-/// Captures folded per build transaction (tsk113). Large enough to amortize
+/// Captures folded per build transaction. Large enough to amortize
 /// the WAL page rewrites the profile flagged; small enough to bound the
 /// transaction and the in-memory step list.
 const BUILD_CHUNK: usize = 256;
 
 /// One branch partition's in-memory live state during a batched build:
 /// `(producer, subject_key)` → that key's live facts — the durable
-/// `metric_live_fact` shape, held in Rust for the chunk (tsk113).
+/// `metric_live_fact` shape, held in Rust for the chunk.
 type LivePartition = HashMap<(String, String), Vec<FactRow>>;
 
 /// A value threshold a spec of the measure filters on — `min_value` or
@@ -143,7 +143,7 @@ fn stored_bound_keys(dims_key: &str) -> BTreeSet<String> {
 /// PRIMARY KEY, so an unstable field order would write the same logical bucket
 /// under two keys and double-count it on merge.
 fn dims_key(f: &FactRow, grain: &Grain) -> String {
-    // ONE `dims_json` parse for the whole promoted set (tsk214). Most promoted
+    // ONE `dims_json` parse for the whole promoted set. Most promoted
     // dims are JSON-backed, so a cache per dim meant re-parsing the same string
     // once per dim, per fact, per capture — the bulk of `dim_value`'s 11.5%.
     let mut dims = DimsCache::default();
@@ -199,7 +199,7 @@ impl MetricCubeBuilder {
     /// Build (incrementally) the cube for one measure, across every stream.
     /// Returns the number of captures folded.
     ///
-    /// Two build rules, on purpose (tsk99):
+    /// Two build rules, on purpose:
     /// - **partial** (`per-path`/`per-subject`) — replay the fold, cube the LIVE
     ///   STATE at each capture ([`Self::build_stream`]);
     /// - **complete** — every capture restates the whole population, so the row is
@@ -299,7 +299,7 @@ impl MetricCubeBuilder {
         let captures = self.facts.captures_for_producers(producers).await?;
 
         // One fold per stream — a stream is a WORKTREE and the fold reconstructs
-        // one worktree's state (tsk98).
+        // one worktree's state.
         let mut by_stream: BTreeMap<i64, Vec<MetricCapture>> = BTreeMap::new();
         for c in captures {
             by_stream.entry(c.stream_id).or_default().push(c);
@@ -330,7 +330,7 @@ impl MetricCubeBuilder {
     ///
     /// An empty capture ("scanned, found nothing") legitimately writes ZERO rows.
     /// It still advances the watermark, and the read splices its 0 point back via
-    /// `splice_zero_points` — the same rule the fact path uses (tsk44).
+    /// `splice_zero_points` — the same rule the fact path uses.
     async fn build_stream_complete(
         &self,
         measure: &Measure,
@@ -387,11 +387,14 @@ impl MetricCubeBuilder {
     /// watermark, on the same `(captured_at, id)` key the capture list is ordered
     /// by.
     ///
-    /// Assumes captures arrive in time order within a (measure, stream) — true
-    /// because `captured_at` defaults to now() at record time and NO production
-    /// caller overrides it. A backwards clock jump would leave a capture un-folded
-    /// and silently absent from a cube-served series; the escape hatch is a
-    /// rebuild, and the cube is disposable by design.
+    /// Assumes captures arrive in time order within a (measure, stream) —
+    /// `captured_at` defaults to now() at record time. A capture recorded at a
+    /// time it was given (a request's outcome, placed at the request's start)
+    /// or replacing others moves the watermark back in the same transaction
+    /// (`fact_store::recube_from_tx`), so it is folded again from there. A
+    /// backwards clock jump would still leave a capture un-folded and silently
+    /// absent from a cube-served series; the escape hatch is a rebuild, and
+    /// the cube is disposable by design.
     async fn uncubed<'a>(
         &self,
         measure: &Measure,
@@ -435,13 +438,13 @@ impl MetricCubeBuilder {
     /// Fold one stream's un-cubed captures. `caps` is that stream's captures
     /// oldest-first (as `captures_for_producers` returns them).
     ///
-    /// BATCHED (tsk113): captures fold in chunks — each touched branch
+    /// BATCHED: captures fold in chunks — each touched branch
     /// partition is loaded ONCE, the fold's evict/insert runs in memory
     /// (the same step the SQL apply performed, and the same shapes
     /// [`Self::seed_rows`] already replays), each capture's cube rows are
     /// bucketed from that in-memory state, and one [`SqliteFactStore::
     /// apply_build_batch`] transaction flushes the chunk with a single epoch
-    /// check. The profile (tsk111) showed ~10k per-capture transactions
+    /// check. The profile showed ~10k per-capture transactions
     /// rewriting the same hot B-tree pages into the WAL every backfill; the
     /// chunk transaction writes them once. Crash story unchanged-or-better:
     /// a torn chunk lands NOTHING and replays idempotently.
@@ -468,7 +471,7 @@ impl MetricCubeBuilder {
             // Seeds first — rare, and transactional replaces on their own. A
             // branch's FIRST capture seeds its partition with the history
             // visible to it (50fd1760); visibility comes from the SAME
-            // resolver the fact fold uses (tsk102), whose as-of-R rule is
+            // resolver the fact fold uses, whose as-of-R rule is
             // what lets a frozen seed never diverge from a fresh fact read.
             for c in chunk {
                 if seeded.contains(&c.branch) {
@@ -604,8 +607,8 @@ impl MetricCubeBuilder {
         let ids: Vec<i64> = earlier.iter().map(|e| e.id).collect();
         // Per-subject's replay has a closed form — a capture restates exactly
         // the keys of its own facts, so the latest visible capture per
-        // (producer, key) wins — and the store computes it over the index
-        // (tsk704). Per-path's eviction set is the capture's scanned paths,
+        // (producer, key) wins — and the store computes it over the index.
+        // Per-path's eviction set is the capture's scanned paths,
         // not its facts, so it is replayed below.
         if scope == CaptureScope::PerSubject {
             return self
@@ -628,7 +631,7 @@ impl MetricCubeBuilder {
                     scanned.entry(cap).or_default().push(path);
                 }
             }
-            // Listed, not wildcarded — a fourth scope must decide (tsk103).
+            // Listed, not wildcarded — a fourth scope must decide.
             CaptureScope::PerSubject | CaptureScope::Complete => {}
         }
         let mut tree: HashMap<(String, String), Vec<i64>> = HashMap::new();
@@ -689,9 +692,9 @@ fn restated_keys(scope: CaptureScope, own: &[&FactRow], scanned: Vec<String>) ->
         // deletion IS a scan result.
         CaptureScope::PerPath => scanned,
         // A test run restates exactly the cases it executed — keyed by the
-        // scope's FOLD KEY, which the insertion side shares (tsk109).
+        // scope's FOLD KEY, which the insertion side shares.
         // (Complete is unreachable — dispatched to its own build rule — but
-        // listed so a fourth scope is a compile error, not a misfold; tsk103.)
+        // listed so a fourth scope is a compile error, not a misfold.)
         CaptureScope::PerSubject | CaptureScope::Complete => own
             .iter()
             .filter_map(|f| fold_key(scope, f).map(str::to_string))
@@ -805,7 +808,7 @@ pub async fn cube_series(
     let producers = facts.producers_for_measure(measure.id).await?;
     if producers.is_empty() {
         // Leave the empty-producer case to the facts: `oxplow.lint_hit` seeds its
-        // producers from `analysis-report` captures there (tsk62), and this path
+        // producers from `analysis-report` captures there, and this path
         // must never be the reason a metric reads blank.
         return Ok(None);
     }
@@ -916,7 +919,7 @@ pub async fn cube_series(
     }
 
     // The captures this read plots — the narrowed producers', in capture order,
-    // and within the requested window (tsk202). Windowing here rather than after
+    // and within the requested window. Windowing here rather than after
     // is safe: each cube row already carries its capture's fully-folded state, so
     // dropping out-of-window captures never changes an in-window point — and the
     // per-capture zero-fill below then only fills in-window captures, matching the
@@ -986,7 +989,7 @@ pub async fn cube_series(
         }
     }
     // COMPLETE only: splice back the zero-hit "scanned, found nothing" captures
-    // (tsk44) — the SAME function the fact path calls, never a reimplementation.
+    //  — the SAME function the fact path calls, never a reimplementation.
     // The partial fold deliberately skips this: an empty partial capture restated
     // nothing, so it means "nothing changed", not "the repo is zero", and filling
     // it would yank the headline to 0.
@@ -1216,7 +1219,7 @@ mod tests {
     #[tokio::test]
     async fn a_windowed_cube_read_keeps_pre_window_folded_state(
     ) -> Result<(), oxplow_domain::DomainError> {
-        // tsk202: windowing a PARTIAL cube read must drop out-of-window captures
+        // windowing a PARTIAL cube read must drop out-of-window captures
         // WITHOUT losing the state they contributed — each cube row already holds
         // the fully-folded live state at its capture, so an in-window point still
         // reflects subjects last restated before the window. This is what makes
@@ -1681,7 +1684,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_cube_serves_a_complete_scope_series_including_its_zero_fill() {
-        // tsk99. A `complete` capture restates the WHOLE population, so its cube
+        // . A `complete` capture restates the WHOLE population, so its cube
         // row is a GROUP BY over that capture's own facts — no live state, no
         // replay. Deliberately a SECOND build rule, not a reuse of the partial
         // one: a state fold would evict per producer and leave another producer's
@@ -1691,7 +1694,7 @@ mod tests {
         // The zero-fill is the part that makes this more than a rename. An empty
         // "scanned, found nothing" capture emits no facts and therefore no cube
         // rows, and must still read as an explicit 0 — the same splice the fact
-        // path applies (tsk44). Getting this wrong drops the point entirely and
+        // path applies. Getting this wrong drops the point entirely and
         // the metric looks like it stopped rather than went to zero.
         let (engine, facts, builder) = fixture().await;
         // `NewMeasure::new` defaults to complete scope.
@@ -1736,7 +1739,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_complete_scope_capture_never_inherits_an_earlier_captures_facts() {
-        // The distinction that kept complete scope OUT of tsk96's mechanism. Under
+        // The distinction that kept complete scope OUT of the mechanism. Under
         // the partial fold, capture 2 would reach back and keep capture 1's facts
         // live (→ 4). Under complete-scope rules each capture restates everything,
         // so capture 2 is exactly its own 1 fact. If the two build rules ever get
@@ -1778,7 +1781,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_cube_keeps_each_branchs_state_separate_and_a_new_branch_inherits() {
-        // tsk97, flipped from the decline-guard it used to be (0865a39a): the
+        // , flipped from the decline-guard it used to be (0865a39a): the
         // build's live state is now keyed by branch, so the cube must ANSWER a
         // multi-branch read and land exactly on the branch-aware fact fold.
         //
@@ -1886,7 +1889,7 @@ mod tests {
         assert_cube_answers(&engine, &facts, "acme.test_case", &spec, &oracle).await;
     }
 
-    /// tsk704: a new branch's per-subject seed (one SQL over the visible
+    /// a new branch's per-subject seed (one SQL over the visible
     /// captures) lands on the fact fold's numbers, with the fold key's
     /// fallbacks in play — a path-only fact and a scalar fact beside the
     /// subjects, and a subject restated twice.
@@ -1939,7 +1942,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_cube_seed_and_the_fact_fold_resolve_ancestry_identically() {
-        // tsk102, end-to-end: with the resolver attached to BOTH sides, a
+        // , end-to-end: with the resolver attached to BOTH sides, a
         // sibling branch's absorbed work stays out of a new branch's seed — in
         // the facts AND in the cube, landing on the same numbers.
         //
@@ -2041,7 +2044,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_severity_filtered_spec_is_cube_served_once_severity_is_promoted() {
-        // tsk101. `oxplow.analysis.errors` / `.warnings` filter on `severity`,
+        // . `oxplow.analysis.errors` / `.warnings` filter on `severity`,
         // which lives in a fact COLUMN, not `dims_json` — `dims_key` must pick it
         // up through the same `dim_value` the read uses, and the read's severity
         // filter must select cube buckets exactly as the fact path selects facts.
@@ -2090,7 +2093,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_dim_eq_spec_on_a_promoted_dim_is_cube_served() {
-        // tsk101. The 10 idiom specs filter `dim_eq` on `oxplow.rule` and the 8
+        // . The 10 idiom specs filter `dim_eq` on `oxplow.rule` and the 8
         // token/tests specs on `dims_json` keys — all resolve through
         // `dim_value`, so one column-backed case pins the class: the filter must
         // select buckets (and narrow the producer set) exactly as the fact path
@@ -2140,7 +2143,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_cube_serves_a_per_path_fold_evicting_a_scanned_but_silent_file() {
-        // tsk103 review: the per-path build rule was covered only by the
+        //  review: the per-path build rule was covered only by the
         // manual harness. The property that distinguishes per-path from
         // per-subject is pinned here: eviction comes from the SNAPSHOT's
         // scanned set, not the emitted facts — a file whose count dropped to
@@ -2304,7 +2307,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_fact_carrying_both_identities_still_evicts_by_its_scopes_key() {
-        // tsk109. A per-subject fact may legally carry BOTH `subject` and
+        // . A per-subject fact may legally carry BOTH `subject` and
         // `path` (MCP-asserted facts; a test with a file location). Eviction
         // keys on the scope's identity (`subject`), so insertion must too —
         // the old path-first insert key filed the fact where no per-subject
@@ -2338,7 +2341,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_ratio_over_a_zero_denominator_emits_no_point_on_either_path() {
-        // tsk109. A coverage capture over zero instrumented lines is NO DATA,
+        // . A coverage capture over zero instrumented lines is NO DATA,
         // not 0% (the worst possible reading) — matching the substrate's
         // stance elsewhere (a ratio over nothing has no value). Both
         // paths must skip the point identically, and the headline collapse
@@ -2376,7 +2379,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_superseded_repo_scalar_reads_zero_through_a_filter_on_both_paths() {
-        // tsk103 review. "Latest assertion per producer wins" must be
+        //  review. "Latest assertion per producer wins" must be
         // FILTER-INDEPENDENT: a newer path-less assertion supersedes the older
         // one no matter which spec's page you read through. The fact fold used
         // to decide the scalar eviction from the FILTERED fact list, so a
@@ -2429,7 +2432,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_grouped_read_keeps_captures_whose_producer_carries_no_group_dim() {
-        // tsk103 review. The fact path derives its capture list from producers
+        //  review. The fact path derives its capture list from producers
         // with FILTER-matching facts — group_by plays no part. The cube's
         // grouped arm used to derive `narrowed` AFTER dropping buckets that
         // lack the group dim, so a producer whose facts carry no group dim
@@ -2520,7 +2523,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_breakdowns_state_matches_the_branch_aware_headline() {
-        // tsk106. The breakdown must describe THE SAME state as the headline —
+        // . The breakdown must describe THE SAME state as the headline —
         // the newest capture's (stream, branch) partition, visibility-seeded.
         // Before this, `scoped_facts` read the branch-BLIND SQL fold: after
         // feature-x's run, the drill-in showed A=0 (the branch's failure)
@@ -2563,7 +2566,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_cube_keeps_each_streams_state_separate() {
-        // The cube-side of tsk98. Two worktrees run the same gauge over the same
+        // The cube-side of. Two worktrees run the same gauge over the same
         // subjects, so they share `(producer, subject)` keys — a stream-blind live
         // state lets worktree 2's run evict worktree 1's subjects, and the point
         // describes a repo state that never existed. `metric_live_fact` keys by
@@ -2593,5 +2596,92 @@ mod tests {
         );
         builder.build_measure("acme.test_case").await.unwrap();
         assert_cube_answers(&engine, &facts, "acme.test_case", &spec, &oracle).await;
+    }
+
+    /// A per-request mean (non-additive, `avg`) whose captures each replace
+    /// the request's earlier one and are placed at the request's start: a
+    /// period's point is the mean of the requests that started in it, and
+    /// a request recorded again keeps its period with its new figures —
+    /// its old ones leave. The capture lands behind the cube's watermark;
+    /// the cube folds it again rather than serve a period without it.
+    #[tokio::test]
+    async fn a_per_request_mean_is_each_periods_own_and_a_rerecorded_request_keeps_its_period() {
+        use crate::metric_bucket::TimeBucket;
+        use crate::metric_engine::SeriesRead;
+        let (engine, facts, builder) = fixture().await;
+        let m = facts
+            .upsert_measure(oxplow_db::NewMeasure {
+                temporal_semantics: "non-additive".into(),
+                fold: Some("sum".into()),
+                capture_scope: "complete".into(),
+                ..oxplow_db::NewMeasure::new("acme.request_cost", "Request cost")
+            })
+            .await
+            .unwrap();
+        let spec = spec(&facts, "acme.cost", "acme.request_cost", "avg").await;
+        let record = |request: &'static str, started: &'static str, value: f64| {
+            let facts = facts.clone();
+            async move {
+                let subject = format!("oxplow:oxplow/request?id={request}");
+                facts
+                    .record_facts(
+                        NewMetricCapture {
+                            replaces: Some(subject.clone()),
+                            captured_at: Some(ts(started)),
+                            ..NewMetricCapture::done(1, "acme.outcome", "acme")
+                        },
+                        vec![NewFact {
+                            subject: Some(subject),
+                            numerator: Some(value),
+                            denominator: Some(1.0),
+                            ..NewFact::new(m, value)
+                        }],
+                    )
+                    .await
+                    .unwrap();
+            }
+        };
+        let monthly = |engine: MetricEngine, spec: MetricSpec| async move {
+            engine
+                .series_for_spec_read(
+                    &spec,
+                    &SeriesRead {
+                        bucket: Some(TimeBucket::Month),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|p| (p.captured_at.to_string()[..7].to_string(), p.value))
+                .collect::<Vec<_>>()
+        };
+        record("req1", "2026-01-05T09:00:00Z", 10.0).await;
+        record("req2", "2026-01-20T09:00:00Z", 30.0).await;
+        record("req3", "2026-02-03T09:00:00Z", 50.0).await;
+        assert_eq!(
+            monthly(engine.clone(), spec.clone()).await,
+            vec![("2026-01".to_string(), 20.0), ("2026-02".to_string(), 50.0)]
+        );
+        builder.build_measure("acme.request_cost").await.unwrap();
+
+        // A later turn of req1 records it again: it stays in January.
+        record("req1", "2026-01-05T09:00:00Z", 40.0).await;
+        let oracle = oracle(&engine, &spec).await;
+        assert_eq!(
+            oracle.iter().map(|p| p.value).collect::<Vec<_>>(),
+            vec![40.0, 30.0, 50.0],
+            "one point per request, in start order"
+        );
+        assert_eq!(
+            monthly(engine.clone(), spec.clone()).await,
+            vec![("2026-01".to_string(), 35.0), ("2026-02".to_string(), 50.0)]
+        );
+        builder.build_measure("acme.request_cost").await.unwrap();
+        assert_cube_answers(&engine, &facts, "acme.request_cost", &spec, &oracle).await;
+        assert_eq!(
+            monthly(engine.clone(), spec.clone()).await,
+            vec![("2026-01".to_string(), 35.0), ("2026-02".to_string(), 50.0)]
+        );
     }
 }

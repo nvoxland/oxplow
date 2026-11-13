@@ -1,5 +1,5 @@
 title: Hand Off Work
-description: Hand work to another open thread, any stream's. Its agent gets it at the start of its next prompt, and nothing wakes it. Taking it moves the work item there.
+description: Hand work to another open thread, any stream's. Its agent gets it at the start of its next prompt, and nothing wakes it. Taking it moves the task there.
 params:
 - name: uri
   label: From thread
@@ -15,9 +15,8 @@ loaders:
   handoff_items:
     sql: |
       SELECT w.uri AS value, w.title AS label
-      FROM v_work_item w
-      JOIN v_thread t ON t.id = w.thread_id
-      WHERE t.uri = :uri AND w.state NOT IN ('done', 'canceled')
+      FROM v_oxplow_task w
+      WHERE w.assignee = :uri AND w.state NOT IN ('done', 'canceled')
       ORDER BY w.rank, w.uri
 view:
   viz: form
@@ -30,8 +29,8 @@ view:
     fields:
     - from_thread
     - to_thread
-    - work_item
+    - task
     - body
     choices:
       to_thread: oxplow/hand-off#handoff_recipients
-      work_item: oxplow/hand-off#handoff_items
+      task: oxplow/hand-off#handoff_items

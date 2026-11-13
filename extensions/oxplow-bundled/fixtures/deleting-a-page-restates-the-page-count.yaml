@@ -1,0 +1,8 @@
+# A delete restates the count: one of two pages is left.
+requires: [oxwiki]
+given:
+  - { command: oxwiki.page.write, input: { title: First, body: "# First\n\nOne." } }
+  - { command: oxwiki.page.write, input: { title: Second, body: "# Second\n\nTwo." } }
+  - { command: oxwiki.page.delete, input: { id: second }, confirmed: true }
+when: { sql: "SELECT MEASURE('knowledge.pages') AS pages FROM metric_grid('month')" }
+expect: { rows: [{ pages: 1.0 }] }

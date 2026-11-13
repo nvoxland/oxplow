@@ -35,9 +35,8 @@ limits documented in the [extension reference](docs/reference/extensions.md).
 ## What it provides today
 
 - **Connected evidence.** Turns, tool calls, changes, snapshots, test
-  runs, metrics, claims, decisions, and knowledge can be read through
-  published SQL models. Observations, claims, and AI inference retain
-  their provenance.
+  runs, metrics, and knowledge can be read through published SQL
+  models. Observations and AI inference retain their provenance.
 - **Collectors, metrics, and dimensions.** Collect raw data, derive new
   entities and facts, aggregate measures, and compare them across the
   dimensions relevant to your system and development process.
@@ -51,8 +50,8 @@ limits documented in the [extension reference](docs/reference/extensions.md).
   own tabs and context. It can have no agent session or several, using
   terminal harnesses.
 - **Work tracking and history.** Activity is recorded without requiring
-  task bookkeeping. Optional effort policies group work and link it to
-  work items. Snapshots preserve working-tree history alongside git.
+  task bookkeeping. Oxplow groups work into requests and links
+  them to tasks. Snapshots preserve working-tree history alongside git.
 - **Code drill-down.** File, diff, history, and language-server views let
   you check the implementation behind an explanation.
 - **Shared actions.** Commands validate inputs and apply permissions,

@@ -5,10 +5,10 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
 ## What works today: Bundled extensions and the review packet
 
 - **Bundled extensions.** There are two (see "The `oxplow-bundled` extension" for the split). `oxplow-foundation` is required: oxplow's own
-  commands, AI providers and harness implementations, the default work list,
-  effort policy, snapshots and wiki, and the
-  measures, dimensions and metrics oxplow records itself (tokens, efforts, tests,
-  coverage, analysis, work items: its `measures:` / `dimensions:` / `metrics:`,
+  commands, AI providers and harness implementations, the default
+  snapshots and knowledge, and the
+  measures, dimensions and metrics oxplow records itself (tokens, requests, tests,
+  coverage, analysis, tasks: its `measures:` / `dimensions:` / `metrics:`,
   scope `extension:oxplow-foundation`; the producers' Rust only records the facts).
   `oxplow-bundled` holds the
   review packet, the analytics pages and the agent's advisories in one
@@ -34,94 +34,111 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
       `oxplow.extension.write_page`) refuses to write into a bundled
       extension.
 
-- **The review packet** (in `oxplow-bundled`). Its pages, mounted in
+- **The four shipped extensions.** Two more ship beside the two above, as
+  plumbing only, so later work has a place to land. They are in `BUNDLED`
+  and `build.rs`'s list like the others, are not in `DEFAULT_EXTENSIONS`
+  (off by default; turn one on in `extensions:`), and each is a minimal
+  manifest (`manifest: 2`, name, namespace, `intent`, README) with
+  `requires: [oxplow-bundled]`. `requires:` is by extension name, so it
+  crosses namespaces (`oxtask` and `oxwiki` are not in `oxplow`'s). With
+  `oxplow-bundled` off they are held (listed with why), never a boot
+  failure. Their sources are in this repo's `extensionSources`.
+  - `oxplow-foundation` (`oxplow`, required): oxplow's own commands, providers and harnesses.
+  - `oxplow-bundled` (`oxplow`): the review packet, analytics pages and advisories.
+  - `oxtask` (`oxtask`): the tasks store, oxplow's own task tracker: it fills `oxplow/task_record` (store `oxtask`) from its own SQLite file and holds the commands `oxtask.task.*`.
+    It holds the opinion about how its tasks are worked, so bundled names none
+    of its commands:
+    - **The task workflow**: the setting `tasks.workflow` (`off`,
+      `person_files`, `agent_tracks` the default, `custom`) with
+      `tasks.definitionOfDone` (free text), in oxtask's own `configuration:`
+      (namespace `oxtask`, not `oxplow`'s). `oxtask.tasks.set_workflow
+      { workflow?, definition_of_done? }` (a script: it merges into the
+      project layer) writes it through oxtask's `oxtask.settings.write`
+      (`oxtask.settings.read` reads it with the stamps). Dataset
+      `v_oxtask_task_workflow` (one row: `workflow`, `definition_of_done`);
+      Settings → Integrations shows it as **Task workflow** (the part
+      `task-workflow-settings`, mounted at `oxplow/settings.integrations`):
+      the four workflows, the current one marked, Use This to choose one, and
+      a form for what done means.
+    - **Skills, offered by the workflow** (`when:` on each, and only while the
+      task model has a live store): `oxtask` (the commands; always offered
+      then), `track-work` (`agent_tracks`: take or file a task for new work,
+      in progress before editing, done when fully done), `work-tasks`
+      (`person_files`: work what is assigned or queued; file only follow-ups)
+      and the slash command `/next-task` (every preset but `off`). Both
+      working skills say: the harness's own plan list is for steps inside a
+      task, discovered work is a backlog task linked `discovered_from`, and
+      done includes the definition of done. The Rust test
+      `the_task_skills_follow_the_task_workflow` checks the offer per preset.
+    - **The ready queue**: dataset `v_oxtask_ready_queue` (`todo` with no open
+      blocker; per thread, its assigned ready items in queue order, an epic
+      with its ready children as one unit; `thread_id` NULL is the pool),
+      read by the page `next-task` (the agent tool `oxtask_next_task`, with
+      `thread: "thr3"`) and by the context below.
+    - **The agent context `task-state`**: the thread's task in progress, the
+      next three in its ready queue and the definition of done (nothing when
+      there is none of them; core's `CONTEXT_CLEARED` tells an agent told
+      before): once, then on change, and again after a compaction
+      (extensions-commands.md "agent contexts"). Offered in every preset but
+      `off`.
+    - **The advisory `untracked-work`** (`agent_tracks` only): a request that
+      changed files (a claimed or sole `v_turn_file`) while the thread had no
+      task in progress and no task linked is reminded once per request.
+    Fixtures are oxtask's: `task-state-*`, `task-workflow-settings-*`,
+    `the-task-workflow-dataset-reads-the-setting-as-it-changes`,
+    `setting-the-task-workflow-keeps-the-definition-of-done`,
+    `the-reminder-is-only-for-the-agent-tracks-workflow`, `next-task-*`.
+  - `oxwiki` (`oxwiki`): the knowledge store as an extension (on by default): `.oxplow/oxwiki/<slug>.md` pages, `oxwiki.page.write` / `delete` / `restore`, a collector filling bundled's `knowledge_record` model, the `oxwiki` skill and `/note`. `knowledge.md` "The oxwiki extension". Fixtures are its own.
+
+- **The knowledge metrics** (in `oxplow-bundled`). The `oxplow.knowledge_pages` collector restates the page counts (`knowledge.pages`, `knowledge.stale_pages`, sliced by `oxplow.knowledge_store` and `oxplow.knowledge_kind`) when a page of the model changes (`oxplow.knowledge_record.changed`) and when a snapshot changes a file a page cites (`snapshot.ref_drifted`); the `oxplow.request_read_knowledge` collector records, per stopped request that changed files, whether an agent read a page (`knowledge.read_requests`). Metrics: `knowledge.pages`, `knowledge.stale_pct`, `knowledge.read_requests_pct`. See `metrics.md` (knowledge pages, request read knowledge).
+- **The tracking metric** (in `oxplow-bundled`). The `oxplow.request_tracked` collector records, per stopped request that changed files, whether it has a task linked; the `tasks.tracked_requests_pct` metric is the share. See `metrics.md` (request tracked).
+- **The review packet**. Its pages, mounted in
   the `sections` slots of `oxplow/diff-view` (the Changes
-  page), `commit` and `uncommitted-changes`:
-  - Decisions Made (`v_decision`, `provenance = 'recorded'`)
-  - Decisions Oxplow Noticed (`v_decision`, `provenance = 'inferred'`)
-  - Unverified Claims (`v_claim` whose `v_oxplow_claim_status`
-    says `verified = 0`: it cites nothing and no person verified it, and
-    for a `tests_pass` claim its effort's latest test run didn't pass
-    with at least one test — the bundled policy's rule; core keeps only
-    what a claim cites and its `review`; a dataset reads the claims from
-    the agent's answers, nothing records them), plus the dismissed ones
-    (which count for nothing, shown so they can be reopened), each row
-    with its review state and **Mark Verified**
-    (`oxplow.effort.verify_claim`), **Dismiss**
-    (`oxplow.effort.dismiss_claim`) and **Reopen**
-    (`oxplow.effort.reopen_claim`)
-  - Decisions Oxplow Noticed's rows carry **Confirm** / **Dismiss**
-    (`oxplow.effort.confirm_decision` / `oxplow.effort.dismiss_decision`)
-  - What Deviated (its own dataset `v_oxplow_deviation`: each
-    effort's files against its work item's title and body — a file is in
+  page), `commit` and `uncommitted-changes`. What deviated and Struggled
+  here are `oxplow-bundled`'s parts (`what-deviated`, `struggled`, on the
+  Changes page only; they take its `uri` and show a request's rows, none
+  for a snapshot's or a turn's); Tests Weakened is still the holder's:
+  - What deviated (its own dataset `v_oxplow_deviation`: each
+    request's files (its turns' `v_turn_file` rows, claimed or sole)
+    against its tasks' titles and bodies — a file is in
     the area when the text names it or one of its directories at least
     two levels deep; none when the item names no area. Live, not
-    materialized: 0.2 s over all 5.5k effort files of this repo's
-    database)
+    materialized)
   - Tests Weakened (deleted test functions from `v_change_function`,
     fewer assertions and new skip markers from `v_change_test_file`;
     also mounted in the `oxplow/commit.sections` and `oxplow/uncommitted.sections` slots)
-  - Struggled Here (`v_oxplow_struggle`, the bundled dataset: a file edited 5+ times or 3+ failed shell commands per effort)
-  - Review Prompt (a copyable markdown prompt for reviewing the effort
-    with a second harness: the task, the agent's summary, the files it
-    changed, its claims and recorded decisions, and what to report; an
-    effort's item comes from the active work list (`v_work_item`), and an
-    effort on no item names itself instead.
-    What Deviated stays silent there: with no task text, no area is
-    stated)
+  - Struggled here (`v_oxplow_struggle`, the bundled dataset: a file edited 5+ times or 3+ failed shell commands per request, read through each tool call's turn)
   - Context Read (`v_context_read`)
-  - Verify a Claim With Evidence (no category, `viz: form` over
-    `oxplow.effort.verify_claim`, `claim` a param)
 
-  **Its verdicts (P7.C5, the first bundled `commands:`)**, on an
-  effort's page under **Commands** (their `ui.about: effort`, offered while the effort has a work item,
-  `about_when: work_item`):
-  `oxplow.review.accept { effort, force? }` comments the review on the
-  effort's work item then transitions it to `done`, refusing (`{ refuse }`)
-  while a claim is unverified (a dismissed one doesn't count) or an
-  inferred decision unreviewed unless
-  `force` (then it lists them in the comment);
-  `oxplow.review.request_changes { effort, note? }` comments a checklist —
-  each unverified claim, inferred decision, file outside the area, and
-  the note — then transitions to `todo`. A claim, decision or path is
-  spliced in through `md_text` (one inert line: an agent's claim can't
-  add headings, links or items to the reviewer's comment); the note is
-  the reviewer's own markdown. Both read one `input` query
-  (`v_effort` + `json_group_array`s over `v_claim` and its
-  `v_oxplow_claim_status`, `v_decision`,
-  `v_oxplow_deviation`), compose `oxplow.work_item.comment` and
-  `oxplow.work_item.transition` — as steps, every list's verbs running
-  outside the transaction (not undoable; [commands.md](./commands.md) →
-  "Composition") — refuse an
-  effort without a work item by name, are `confirm: always`, and are a person's or
-  a page's — never an agent's. `questions.yaml` + `README.md` (its skill)
+  `questions.yaml` + `README.md` (its skill)
   say what an agent can read of the packet; a bundled extension's
   questions are checked against a running registry by
   `the_bundled_extensions_answer_their_questions` (oxplow-sdk).
 
-  It also has a Waiting on Me page, reachable from the launcher:
-  what your agents are waiting on you for (`v_agent_status` with
-  `awaiting_user`: a question or plan they put to you, a permission
-  prompt, a final message ending in a question), blocked tasks, and open
-  notes. Each empty state says what's *good*, e.g.
-  "Every claim for this effort is backed by evidence."
 
-  The slot pages above need `effort_id` / `change_id`, so they're
+  The slot pages above need a `change_id`, so they're
   parts, not in the launcher (opened there they'd show NULL-param empty
-  states). The launcher gets stream-level starters instead, under Work:
-  **Recent Decisions** and **Unbacked Claims**, scoped by the implicit
-  `stream_id`.
+  states).
 
 ## The rule: data in foundation, person-facing screens here
 
-oxplow-foundation holds the data of the work list and the wiki: their
-datasets, the `work_item` and `wiki` resources, the `oxplow:tasks` and
-`oxplow:wiki` implementations, the bus commands (with no `ui:`), skills,
-metrics and the agent's tool pages (`work-next`, `thread-work`). It has
-no page that a person uses to read or edit them.
+oxplow-foundation holds the data of core's built-in knowledge (until it goes): its
+datasets, the bus commands (with no `ui:`), skills and metrics. oxplow's own
+extensions share the namespace `oxplow`, so they share one configuration
+(at one `version`) and one pair of commands over it, foundation's
+`oxplow.settings.read` / `.write`. It has
+no page that a person uses to read or edit them. Core and foundation have
+no tasks: the task model `oxplow/task_record`, its datasets (`v_oxplow_task`
+…), the `task` resource, the store-agnostic `tasks` skill (`needs:
+['model:oxplow/task_record']`: how to read the model, buckets, link types,
+assigning; it names no store's command) and the agent's tool page
+`thread-tasks` are **oxplow-bundled's**, and the shipped store is the
+`oxtask` extension, which holds the opinion about how its tasks are worked
+(the next-task queue, the workflow setting and its skills; below). With only foundation running there is no
+task tracker ([tasks.md](./tasks.md)).
 
 oxplow-bundled holds that UI: the pages above and the menu commands.
-With oxplow-bundled off, a work item or wiki link opens core's generic
+With oxplow-bundled off, a task or knowledge page link opens core's generic
 resource page. That is intended. Foundation must never link to a bundled
 page, because it cannot name oxplow-bundled. The Rust test
 `foundation_has_no_task_or_wiki_ui` and
@@ -142,14 +159,26 @@ Each loads clean (`documented_examples_load_without_errors`):
   from `v_agent_turn`, mounted at `new-session.sections` after `start`.
   `the_session_history_example_adds_a_section_to_the_new_session_page`
   checks the example and proves the mounted loader reads a recorded prompt.
-- **`schema-review`** — a review policy of its own: a fact collector
-  counting DDL per migration file (its own measure and dimension), a
-  dataset joining those facts with core's evidence (`v_effort_file`,
-  `v_test_run` and its provenance, `v_effort_observation`'s diff
-  coverage, `v_change_function`) into a verdict, and a page
-  (`effort-verdict`) replacing `effort.verdict` with it — no core change.
+- **`schema-review`** — a fact collector counting DDL per migration
+  file (its own measure and dimension), and a slot page (Schema Changes)
+  joining those facts with core's `v_turn_file` to list the migration
+  files a request changed — no core change.
   `the_schema_review_example_joins_its_facts_with_core_evidence` runs it
-  over a real effort.
+  over a real request.
+
+- **`shelf`, `shelf-folder`, `shelf-db`, `shelf-score`** — the shared-models
+  example set ([models.md](./models.md)). `shelf` owns the open model `book`
+  (change event, search, a pinned markdown body), the action point
+  `shelf/book.new` and a read-only page. `shelf-folder` fills it from
+  `shelf/*.md` (a `start` snapshot, `files` upserts and deletes);
+  `shelf-db` fills it from its own SQLite file (a `sqlite` trigger, a
+  cursor, a `rating` field); both write their tool by composing
+  `oxplow.extension_files.write` / `oxplow.extension_store.write`.
+  `shelf-score` adds a `score` field to any store's book through
+  `oxplow.model.set_fields`. The test
+  `the_shelf_examples_pass_their_own_fixtures` copies the four into one
+  project and runs every fixture. A fixture names a collector as
+  `<namespace>/<id>` and may name a required extension's collector.
 
 ## The `oxplow-bundled` extension
 
@@ -157,7 +186,7 @@ Each loads clean (`documented_examples_load_without_errors`):
 `oxplow-foundation` (required) and `oxplow-bundled` (optional, on by default), both
 in the `oxplow` namespace so a contribution can move between them without a rename.
 Foundation is kept as small as it can be while still useful: the host's pages, the
-default capability implementations (work items, effort policy, snapshots, knowledge)
+default capability implementations (snapshots, knowledge)
 and the measures core's change analysis records. `oxplow-bundled` is what has been
 reviewed and kept.
 
@@ -217,33 +246,31 @@ screens and the holder's add the review and analysis:
   definitions (the Extension page's tables, the definition pages' links to
   each other, the data catalog) links the same way, pinning the definition
   renderer, because the bare URI opens the data view.
-- **Dashboards and review.** `planning`, `review`, `quality` and `usage`;
+- **Dashboards and review.** `review`, `quality` and `usage`;
   the code-quality `findings`; the `change-review` page (treemap,
   look-here-first, functions, co-change, zones) mounted in the
   `oxplow/diff-view.sections`, `commit.sections` and
   `uncommitted-changes.sections` slots. The duplicate scan runs in core's
   change analysis; the compare page is foundation's `duplicate-block`.
-- **Effort blocks.** `effort-tests` (coverage, untested files, test runs,
-  failed tests, analysis findings), `effort-metric-deltas`, `effort-nudges`
-  and `effort-plan`, mounted at `oxplow/diff-view.sections`.
-  `task-tokens` mounts at `oxplow/work-item.sections`;
-  `thread-tokens` at `oxplow/tasks.sections`.
+- **Request blocks.** Blocks for a request's tests (coverage, untested
+  files, test runs, failed tests, analysis findings), its metric deltas, its
+  nudges and its plan, mounted at `oxplow/diff-view.sections`.
+  `thread-plan` and the two handoff strips mounted
+  on the old Tasks page; its board has no slot, so they mount nowhere
+  until they move.
 - **Metric nudges.** The `threshold-crossed` advisory (with
   `metric-deltas`).
 - **Git History's commit graph.** The `history-graph` component, replacing
   core's plain commit list (`vcs.history.graph`, a `ui.mounts`
   entry).
-- **The work list and wiki screens.** oxplow-bundled's `tasks`, `backlog`,
-  `board`, `done-work`, `work-item` (and its helper pages), `new-task`,
-  `wiki-index`, `wiki-page`, `wiki-freshness`, `hand-off` and the
-  handoff strips on Tasks. Their menu entries are bundled's commands:
-  `work_item.new`, `knowledge.new_page`, `handoff.offer` and
-  `effort.link_to_task`. Each runs the same operation as a foundation
-  command and adds the label, shortcut and form a person uses.
+- **The hand-off screen.** `hand-off`. Its menu entry is the command
+  `handoff.offer`. It runs the same operation as a foundation command and
+  adds the label, shortcut and form a person uses. (The wiki screens have
+  moved to `oxplow-bundled`: see "The knowledge pages" below.)
 - **Explore Data.** The `explore-data` page and its component (source in
   `src/explore-data/`, built into `dist/` by `package.json`; the manifest's
   `build:` runs it). Foundation's dataset pages do not link to it.
-- **Timeline.** The `timeline` page and its component (efforts, sessions,
+- **Timeline.** The `timeline` page and its component (requests, sessions,
   threads and commits on a zoomable axis; source in `src/timeline/`, built
   with the npm dependency `vis-timeline` by bundled's `package.json`). It
   moved with the rest of the person-facing screens. Foundation has no build
@@ -263,28 +290,159 @@ screens and the holder's add the review and analysis:
 - **Zones.** The `zones` page (no category) holds the questions about the zone
   rules (`v_zone`, `v_zone_unmatched`); nothing links to it.
 - **The app's screens.** foundation's `alerts`,
-  `catalog`, `changes-effort`, `comments`, `commit`,
+  `catalog`, `comments`, `commit`,
   `diff`, `directory`, `file-viewer`, `markdown` (a `.md` file drawn), `media` (an image or a PDF shown), `csv` and `tsv` (a CSV or TSV file as a table), `data-file` (a JSON or YAML file as a tree of its values), `diagram` (a mermaid file drawn), `files` (the launcher's way into `directory`), `git-dashboard`,
   `settings` (an `area` param: overview, agents, lsp, extensions, data,
   integrations, ai), `uncommitted-changes`, and more. Metrics in [metrics.md](./metrics.md).
 - **Rail panels.** A panel lives in the extension that has its page:
-  foundation's `panels:` has Go To (`go-to-panel`, collapsed
-  `go-to-bookmarks`; its header opens the `go-to` page beside them). Both
-  parts read foundation's `thread-bookmarks` query, the one statement of
-  which bookmarks a thread sees, which the Go To page reads too. Its
-  fixture is a `panel:` one: the panel run whole, as the rail shows it. Still
-  in the holder: Waiting on You (`waiting-on-me`, a badge), Comments
-  (`comments-panel`), Uncommitted (`uncommitted`, collapsed
-  `uncommitted-line`, count `uncommitted-count`) and Work (`work`, collapsed
-  `work-line`, count `work-count`). Each moves the same way: its parts, a
+  foundation's `panels:` has Go To (`go-to-panel`, collapsed `go-to-icons`;
+  its header opens the `go-to` page beside them). Both parts read
+  foundation's `thread-go-to` query (recent and most visited: `limit`
+  rows, 20 for the body, 6 for the icons), which reads the `thread-bookmarks`
+  query, the one statement of which bookmarks a thread sees; the Go To page
+  reads it too. Git (`git`, collapsed `git-line`, count `git-count`) is
+  foundation's too; its header opens Git Status (`git-dashboard`).
+  Waiting on you (`waiting-on-you`, count `waiting-count`, project
+  scope) is foundation's: what only the person can move — a question an
+  agent waits on (`v_agent_status` `awaiting_user`, linked to its thread),
+  an open handoff to a thread with no agent session, an open note. Its
+  alert fires while anything waits. Tasks assigned to the person are
+  bundled's Assigned to you, never repeated here. Fixtures:
+  `waiting-on-you-*`. Its
+  files parts, the `uncommitted-changes` page and Directory read foundation's `worktree-files` query, the one statement of
+  which files a stream shows: `show` is `changed`, `changed_untracked` or
+  `all` (one folder), `target` the change (`''`: the working tree). Its rows
+  are paths with their status, drawn by a path tree (`tree: { path, status
+  }`). Where a branch stands is foundation's `branch-status` query, the
+  one statement of it: `status` (the row and which buttons apply) and
+  `facts` / `marks` / `line` (↑ ahead, ↓ behind its upstream and, on a worktree, the
+  default branch, as coloured marks). Its `facts` (`status` with each
+  comparison's marks) are drawn, one line each with its buttons, by the
+  `git-branch` part, which Git Status and the panel's
+  Overview both embed (the panel with `with_branch: '0'`). The panel's
+  header toggle (`show`: uncommitted with untracked files, without, or
+  `overview`) is declared by all three parts, so the body and the line
+  (each a `switch` on it) and the count (the uncommitted files; the
+  Overview counts the untracked ones) agree. The body draws its buttons;
+  the collapsed line has none. A fixture's `expect.nodes` sees only the
+  host page's own nodes' actions, not an embedded page's, so the part's
+  buttons are tested on the part. Each has a `panel:` fixture:
+  the panel run whole, as the rail shows it. Work (`work-panel`, collapsed
+  `work-line`, no count; its header opens the Work board) is the
+  thread's tasks, a project-manager view (never turns or requests): In
+  progress is the tasks in progress assigned to it (under their epic),
+  each with what the thread's latest request is doing now (the Now
+  column: the panel's loader reads `v_request.state` for its own thread;
+  `v_oxplow_thread_tasks` reads no request, because a request changes on
+  every tool call and the list, rebuilt for every thread, would re-run
+  with it, and the collapsed line shows no Now); Up next the ready and blocked tasks
+  assigned to the thread in its queue's order; Finished the done tasks a
+  request on the thread worked on (each once) and knowledge pages touched.
+  **Assigned to you** (`assigned`; parts `assigned-panel`, `assigned-line`,
+  `assigned-count`; page `assigned-to-you`, whose loaders `lines`, `line`
+  and `open_count` the parts read) is the same view for the person: the
+  open tasks with `assignee = oxplow:oxplow/person` (`v_oxplow_task`) - In
+  progress, then Up next (todo and blocked) in the person's queue order
+  (`rank IS NULL, rank, created_at`) - each with its stage, under its
+  epic. A project-scoped panel (`scope: project`): the same in every
+  thread, with no thread param. The header count is the open ones. It has **no Finished
+  group**: a done task is unassigned and no record says who held it
+  (`request_task` links threads' requests, a person's command is in no
+  turn), so showing one would be a guess. Fixtures:
+  `assigned-to-you-*`.
+  Bundled holds `oxplow.tasks.assign { uri, to? }` and
+  `oxplow.tasks.reorder { uri, before?|after? }` (scripts over the shared
+  task model's `assignee` and `rank` fields, undone with their run).
+  `assign` puts the task last in the new
+  assignee's queue; `reorder` ranks it between its neighbours, numbering
+  the whole queue first when a neighbour has no rank. Bundled names no
+  store's command: how an agent uses tasks is oxtask's opinion (below).
+  The Work panel is `oxplow-bundled`'s, beside its
+  `thread_tasks` dataset and `tasks.clear_finished` command, with a `panel:`
+  fixture. Still in the holder: Comments (`comments-panel`). Each moves the same way: its parts, a
   `panel:` fixture, and any rule it repeats with a foundation page made one
   query. Only the UI moved: stores, commands and views stay core. Each
   panel's `body` is a part.
-- **Effort reasoning.** The AI profile `reasoning` (fallback `main`), the
-  job `reasoning`, the command `oxplow.effort.infer_reasoning` and the
-  effects `infer-reasoning` / `store-reasoning`, writing through core's
-  `oxplow.effort.replace_inferred_decisions` and
-  `oxplow.effort.replace_inferred_claims`.
+- **The task page** (`task`, the renderer of `oxplow/task`;
+  tasks.md "One page for every item"): About, Stage and Details in its
+  rail, the description, the items under it, Activity (the `item-requests`
+  page: the requests that worked on it), Comments and Links (the `task-comments` and
+  `task-links` parts) and its sections slot, where bundled mounts
+  `task-tokens` and `item-shared-work`. With it, `task-actions` (an
+  agent's Mark done / Record a block… on one item).
+- **The task screens.** Two pages over one query, `task-rows` (the items
+  a page shows by `show` — assigned to this thread, its stream, you,
+  nobody or anyone; a closed item, nobody's, by the requests that worked
+  it — `state` (a stage of the list, or a bucket for its first stage,
+  `open` or `all`), `priority` and `q`, each row's bucket, stage and stage
+  title, the gates a row's actions read and the order to draw them in),
+  the active list's stages (`task-stages`: `value`, `label`,
+  `bucket`, `ord`, `is_default`, and `filter`, a bucket's first stage
+  named by its bucket, so a static `todo` default fits any list), and New
+  Item (`new-task`, with its `task-fields` query and the `task.new` command: New Task…,
+  Cmd/Ctrl+Shift+N). **Work** (`work`) is the board, a custom page: the
+  `board` component (`src/board/`, built into `dist/` by bundled's
+  `package.json`; the manifest's `build:` runs it) draws its own toolbar,
+  columns and card menu with the kit's classes and runs the task
+  commands it declares; core draws its nav bar (New Task…), confirms a
+  delete and records what fails. Its filters are `role: view` params, so the
+  page has no rail and the board has the whole width. A card is its title and
+  its description's first sentence, two lines each at most (an urgent or
+  high priority a coloured edge, the rest on hover), a column per stage of
+  the list but its backlog and canceled ones (the page's `stages` loader,
+  bundled's `task-stages` query); a to-do stage is grouped under
+  foldable epic headings, each epic the kit's nesting panel (`ox-nest`, as Task List's epics) (folds in page memory); Done is the last three
+  days, twenty at most (the `board` loader), then "All N in Task List";
+  each column scrolls on its own. It is the
+  `task.board` replaceable, its filters shared with a stand-in.
+  The board has no backlog column: the backlog is the Task List's. A
+  card's menu assigns it (the stream's open threads, You, Nobody; the
+  page's `assignees` loader).
+  **Task List** (`task-list`, each row its title over its description's
+  first sentence, an urgent or high item's coloured `edge`, who it's
+  assigned to when anyone) is the list's items in one stage, whoever
+  they're for — it lists tasks; assignment is the board's and the Work
+  panel's (`State`, its options the stages, `todo` — the first to-do stage
+  — unless asked; Done's link asks for done), its filters in the rail
+  (State, Priority, Search), with a quick add at the rail's bottom (a
+  title, in the stage it shows — the first to-do stage for a started or
+  closed one — for nobody), with the drag and
+  bulk actions (Mark ▸ the stages and Assign to ▸ the stream's threads and
+  You, each one action with `options_from`; Unassign), and the agents' answers about what is in
+  progress, in the backlog, ready or finished. The pure half of the
+  board (`src/board/model.ts`; a card's description is the query's
+  `summary`, `first_sentence(body)`) is tested from the desktop suite
+  (`viz/boardModel.test.ts`); the frame by a `ui:` fixture.
+
+**The knowledge pages** (written for URIs and stores, not slugs). They are
+bundled's, so with `oxplow-bundled` off a knowledge page link opens core's
+generic resource page; bundled also declares the `oxplow/knowledge` resource
+(`resolve: knowledge_page`, `searchable: search_knowledge`) and the dataset
+`knowledge_page` (`v_oxplow_knowledge_page`, the pages of every store of the
+shared model with their `body`). `.context/knowledge.md` "The oxwiki
+extension" has the read contract.
+
+- `knowledge` (the Knowledge index, launcher section Knowledge): Stores
+  (every store of `oxplow/knowledge_record`, from `v_model_store`, with page
+  and stale counts), Pages (newest change first; a filter over title and
+  body; Delete in the row's right-click menu, confirmed, through the
+  `oxplow/knowledge.delete` point), Stale pages, and Recent reads and writes
+  (`v_oxplow_knowledge_read`). New page opens `new-knowledge-page`. It also
+  answers which pages cite a file (its `path` param).
+- Bundled's own models `knowledge_read_record` (written by the `oxplow.knowledge_read` collector from `record.read`) and `knowledge_touch_record` (by `oxplow.knowledge_touch`, from the change event's thread) back `v_oxplow_knowledge_read` / `_touch`; `v_oxplow_knowledge_ref` is `v_ref_pin` of the pages. Its `knowledge` skill reads and finds pages (gated on the knowledge model).
+- `knowledge-page` (`for: oxplow/knowledge`, default): the tab is the
+  page's title. The body is the markdown (read-only: a store's own page
+  would replace it to edit). The rail has About (store, kind, author, last
+  edited, freshness, reads) and Open in its store (when the page has a
+  `url`). Referenced files has Mark verified (`oxplow.refs.verify`). See
+  also: the index, the page's freshness, and what links to it.
+- `knowledge-freshness` (params `store`, `id`): the page's files, stale
+  ones first, Mark verified per file and for all (`oxplow.refs.verify`).
+- `new-knowledge-page`: the `oxplow/knowledge.new` point as a button (several
+  stores, a menu); each store's own command and form answer it (oxwiki:
+  `oxwiki.page.write`, form `oxwiki/new-page`).
+- Fixtures: `knowledge-*`, `the-knowledge-page-*`, `deleting-a-knowledge-page-*`
+  run on oxwiki (`requires: [oxwiki]`).
 
 **Owns what reads tables (P7.B5).** Derived data computed only from
 core's rows is the extension's, as SQL: the "look here first" score is
@@ -296,11 +454,7 @@ its dataset `change_interest` (`v_oxplow_change_interest`, over
 `change_co_change`, which `change-review` reads — and the
 `file-co-change` page ("Usually Changes With", mounted at the diff
 page's `file-header` slot, `oxplow/diff.file-header`) reads `co_change_pair` for the file a diff
-shows; an
-effort's churn is its fact collector `oxplow.effort_churn`
-(`on: [effort.finished]`, `after: [change.analyze]`, reading the
-effort's change files) recording `oxplow.effort_churn_lines`.
-Full-tree duplicated lines read the tree, not tables, so they
+shows. Full-tree duplicated lines read the tree, not tables, so they
 are oxplow-foundation's collector, `oxplow.duplicate_lines`, over the
 public `duplicate_blocks(min_lines)` builtin — what any extension could
 write. What needs two revisions' trees — files, functions, imports, test
@@ -323,22 +477,66 @@ collection ingest, attribution, token ingest, page visits (the rail and
 launcher use them), the fact store and engine, the Go To page and
 bookmarks (`v_bookmark`; the rail's Go To panel is foundation's, beside its page).
 
-New in the extension: the **effort review packet**, all live exception
+New in the extension: the **request review packet**, all live exception
 pages:
 
 - Waiting on me
 - What deviated (files outside the task's stated area)
-- Unverified claims
-- Decisions made
 - Tests weakened (deleted/skipped tests, removed assertions)
 - Missing co-change (files that historically change with these but didn't)
 - Read this first (risk-ranked hunks with evidence badges)
 - Struggled here
-- Copy review prompt (for reviewing with a second harness; the human
-  pastes it)
 
 **Done when** core boots and is usable with `oxplow-bundled` disabled,
 and enabling it restores the review and analysis pages.
+
+## Task readers moved out of foundation (flip-order step 6, in part)
+
+Foundation must load and work with bundled off, and only
+bundled reads tasks. Both extensions have the namespace `oxplow`, so a
+moved page, metric or dimension keeps its id.
+
+- **Moved to bundled:** the metrics `task.open` and `task.completed` and the
+  dimension `work.priority` (all read `v_oxplow_task`). A metric's key and its
+  facts' measure keys carry no extension (`metric_spec.key` is unique and
+  `extension` only records the owner), so history keeps its keys. The
+  metric page's "See also" now links them to `oxplow-bundled`; the fixture
+  moved with them.
+- **Nothing task-shaped stays in foundation:** the `tasks` skill, the
+  `task` resource and its descriptors moved to bundled, and core's
+  `oxplow.task.*` commands are gone (the shipped store's are oxtask's
+  `oxtask.task.*`).
+- **Pages:** none of `closed-threads`, `diff-view`, `local-history`,
+  `request-summary` and `thread-sessions` is a task page; each showed tasks
+  in part. Foundation's versions now read no task, and bundled adds the
+  task facts back through the existing extension points:
+  - `request-summary`: its Tasks section is bundled's part `request-tasks`,
+    mounted at `oxplow/request-summary.sections` after About (same look).
+  - `diff-view` (Changes): the hidden `task` column, the Task row of the
+    header and the Description section are gone; bundled's parts
+    `change-task` and `change-task-description` are mounted at
+    `oxplow/diff-view.sections` after the header (a request's, not a turn's
+    or a range's, as before).
+  - `closed-threads`: the Tasks column is gone, the thread title links to
+    the thread's URI, and bundled's decorator on `oxplow/thread` rows
+    (dataset `thread_work_badge`) puts "3 done · 1 open" after it.
+  - `thread-sessions`: the Tasks column is gone, the session name links to
+    the session's URI, a subagent's tool-call count has its own Activity
+    column, and a decorator on `oxplow/agent_session` rows (dataset
+    `session_task_badge`) puts one badge per task (its title) after it.
+  - `local-history`: a snapshot's subject names the turn that took it
+    ("completed: turn 2", "in flight: turn 3") and bundled's decorator on
+    `oxplow/snapshot` rows (dataset `snapshot_work_badge`) adds "completed: X"
+    / "in flight: X" badges per task. A small look change.
+  The decorators' limits hold: a label is at most 40 characters and an
+  extension puts at most 3 on one URI.
+
+## Task reactions to thread, stream and handoff events
+
+Three bundled effects keep the task model right when a thread closes, a
+stream archives or a handoff is taken (`effects/release_on_close.star`,
+`effects/take_handoff_task.star`). They read `v_oxplow_task` and `v_handoff` through `sql.read` and write
+oxplow's two fields.
 
 ## Added for extraction
 
@@ -347,8 +545,8 @@ available to every extension:
 
 - `bar`, `line`, `treemap` and `grid` viz, with `chart` and `children`.
 - `commit` and `metric` link kinds; `file` links with `line`. (A `task`
-  kind came and went: a work item links as `page`, by its URI.)
-- the Work Item and Tasks pages' section slots, with slot params checked at load.
+  kind came and went: a task links as `page`, by its URI.)
+- the Task page's section slot, with slot params checked at load.
 - Page `category`.
 - Page `actions:` as commands.
 - Disabling extensions per project.

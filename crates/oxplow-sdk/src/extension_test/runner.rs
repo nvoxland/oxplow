@@ -26,6 +26,16 @@ pub(super) async fn run_example(
                 report.finish_case(format!("example {}", ex.name), mark);
                 return;
             }
+            if let Err(e) = Box::pin(start_observers(host)).await {
+                report.errors.push(error(
+                    shown,
+                    None,
+                    "collector.failed",
+                    format!("starting the observers as the app does: {e}"),
+                ));
+                report.finish_case(format!("example {}", ex.name), mark);
+                return;
+            }
             // A page file's example (a page, a part or a query) runs its own
             // scenario: the steps re-run it with params, press and submit.
             if ["page", "part", "query"]
@@ -208,22 +218,32 @@ pub(super) async fn dispatch(
         component_example(host, ext, ex, id, report).await;
     } else if ex.when.get("event").is_some()
         && ex.when.get("effect").is_none()
-        && ex.when.get("implementation").is_none()
         && ex.when.get("collector").is_none()
     {
         event_example(host, ext, ex, report).await;
     } else if let Some(id) = ex.when.get("effect").and_then(Value::as_str) {
         effect_example(host, ext, ex, id, report).await;
-    } else if let Some(id) = ex.when.get("implementation").and_then(Value::as_str) {
-        policy_example(host, ext, ex, id, report).await;
     } else if let Some(t) = ex.when.get("event_type").and_then(Value::as_str) {
         event_type_example(ext, ex, t, report);
     } else if let Some(id) = ex.when.get("advisory").and_then(Value::as_str) {
         advisory_example(host, ext, ex, id, report).await;
+    } else if let Some(point) = ex.when.get("action_point").and_then(Value::as_str) {
+        action_point_example(host, ext, ex, point, report).await;
+    } else if let Some(uri) = ex.when.get("item_commands").and_then(Value::as_str) {
+        item_commands_example(host, ex, uri, report).await;
+    } else if let Some(id) = ex.when.get("context").and_then(Value::as_str) {
+        context_example(host, ext, ex, id, report).await;
     } else if let Some(sql) = ex.when.get("sql").and_then(Value::as_str) {
         sql_example(host, ex, sql, report).await;
     } else if let Some(link) = ex.when.get("wikilink").and_then(Value::as_str) {
         wikilink_example(ext, ex, link, report);
+    } else if let Some(id) = ex
+        .when
+        .get("collector")
+        .and_then(Value::as_str)
+        .filter(|_| ex.when.get("trigger").is_some())
+    {
+        observer_example(host, ext, ex, id, report).await;
     } else if let Some(id) = ex.when.get("collector").and_then(Value::as_str) {
         collector_example(host, ext, ex, id, report).await;
     } else if let Some(cmd) = ex
@@ -234,6 +254,8 @@ pub(super) async fn dispatch(
         .filter(|_| ex.when.get("answers").is_some())
     {
         command_example(host, ex, cmd, report).await;
+    } else if let Some(command) = ex.when.get("undo").and_then(Value::as_str) {
+        undo_run(host, ex, command, report).await;
     } else if let Some(command) = ex.when.get("command").and_then(Value::as_str) {
         command_run(host, ex, command, report).await;
     } else if ex.when.get("command").is_none() || ext.providers.is_empty() {
@@ -295,7 +317,7 @@ pub(super) const KINDS: &[Kind] = &[
     },
     Kind {
         key: "component",
-        when: "{ component: <id>, items?, invokes?: [{ command, input? }] }",
+        when: "{ component: <id>, invokes?: [{ command, input? } | { point, context?, command? }] }",
         expect: "{ invokes: [{ ok, result? } | { ok: false, refused }] }",
     },
     Kind {
@@ -309,11 +331,6 @@ pub(super) const KINDS: &[Kind] = &[
         expect: "{ commands } | { skip } | { reacts: false }",
     },
     Kind {
-        key: "implementation",
-        when: "{ implementation: <id>, event, answers? } (a dry run)",
-        expect: "{ commands } | { skip }",
-    },
-    Kind {
         key: "event_type",
         when: "{ event_type, v?, payload }",
         expect: "{ valid, upcast? }",
@@ -322,6 +339,21 @@ pub(super) const KINDS: &[Kind] = &[
         key: "advisory",
         when: "{ advisory: <id>, thread? }",
         expect: "{ lines: [text] }",
+    },
+    Kind {
+        key: "action_point",
+        when: "{ action_point: <id | name>, context? } (what a named action point offers)",
+        expect: "{ draws: none | button | menu, commands?: [ids] }",
+    },
+    Kind {
+        key: "item_commands",
+        when: "{ item_commands: <uri> } (the commands about an item, its store filter applied)",
+        expect: "{ commands: [ids] }",
+    },
+    Kind {
+        key: "context",
+        when: "{ context: <id>, thread? }",
+        expect: "{ text: <string> | null }",
     },
     Kind {
         key: "sql",
@@ -335,13 +367,18 @@ pub(super) const KINDS: &[Kind] = &[
     },
     Kind {
         key: "collector",
-        when: "{ collector: <id>, rows?, event? } | { collector: <id>, files }",
-        expect: "{ entities?, events? } | { facts }",
+        when: "{ collector: <id>, rows?, event? } | { collector: <id>, files } | { collector: <id>, trigger: start | sqlite | { files: [{ path, op }] } } (run for real, as that trigger fires; `given: - { store_sql: { extension, sql, params? } }` writes an extension's own SQLite file first)",
+        expect: "{ entities?, events? } | { facts } | { ok?, result?, problems? } (`problems` also checks the rows an ok run quarantined; `[]` says none)",
     },
     Kind {
         key: "command",
         when: "{ command, input?, as?, confirmed? } (with answers: the extension's own, a dry run)",
-        expect: "{ ok, result?, commands? } | { ok: false, refused }",
+        expect: "{ ok, result?, inverse?, commands? } | { ok: false, refused }",
+    },
+    Kind {
+        key: "undo",
+        when: "{ undo: <command>, as?, confirmed? } (runs the undo of that command's newest run not yet undone)",
+        expect: "{ ok: true } | { ok: false, refused }",
     },
 ];
 
@@ -372,8 +409,7 @@ pub(super) fn kinds_table() -> String {
 }
 
 /// Whether example `ex` changes its oxplow's data (and what reacts to
-/// that): it has steps or rows, or runs a job, logs an event or files a
-/// component's items. A dry run (a command's, an effect's, a policy's) or a
+/// that): it has steps or rows, or runs a job or logs an event. A dry run (a command's, an effect's) or a
 /// collector run that stores nothing doesn't.
 pub(super) fn makes_data(ex: &Example<'_>) -> bool {
     let input = &ex.when;
@@ -382,10 +418,13 @@ pub(super) fn makes_data(ex: &Example<'_>) -> bool {
         || ex.steps.is_some()
         || has("rows")
         || has("setup")
+        || has("trigger")
+        || has("undo")
         || has("job")
         || has("component")
         || has("advisory")
-        || (has("event") && !has("effect") && !has("implementation") && !has("collector"))
+        || has("context")
+        || (has("event") && !has("effect") && !has("collector"))
 }
 
 /// Why an example's target isn't here: the page, form, job, component,
@@ -486,4 +525,36 @@ pub(super) fn unsupported(ext: &Extension) -> Vec<String> {
     note(ext.ui.replacements.len(), "replacement(s)");
     note(ext.skills.len(), "skill(s)");
     out
+}
+
+/// Run every enabled extension's `on: start` collectors once, as the app
+/// does when it activates them, so a fixture's changes are observed as
+/// what happens after start (a store's first incremental run isn't a
+/// catch-up).
+pub(super) async fn start_observers(host: &Host) -> Result<(), String> {
+    use oxplow_config::collectors::ObserverSource;
+    let catalog = host.svc.extension_catalog.get(&host.root);
+    let ctx = oxplow_app::collector_runner::Collectors::of(&host.svc, &host.root);
+    let parent = oxplow_domain::run::RunContext::core(
+        oxplow_domain::Actor::System,
+        oxplow_domain::run::Mode::External,
+    );
+    for ext in catalog.iter().filter(|e| e.errors.is_empty()) {
+        for spec in &ext.collectors {
+            if !spec.trigger.sources().contains(&ObserverSource::Start) {
+                continue;
+            }
+            oxplow_app::collector_runner::run_collector(
+                &ctx,
+                &parent,
+                &ext.namespace,
+                &spec.id,
+                oxplow_app::collector_runner::RunTrigger::Start,
+            )
+            .await
+            .map_err(|e| format!("`{}/{}`: {e:?}", ext.namespace, spec.id))?;
+        }
+    }
+    host.settle().await;
+    Ok(())
 }

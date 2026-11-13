@@ -48,8 +48,8 @@ pub enum SdkError {
 /// program stands behind its stub.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
-    /// One starter page (open tasks in the viewer's stream) with a row
-    /// action that starts one, in the launcher.
+    /// One starter page (open threads in the viewer's stream) with a row
+    /// action that marks one, in the launcher.
     Page,
     /// A v2 manifest only.
     Extension,
@@ -57,6 +57,10 @@ pub enum Kind {
     /// declarations from the capability's contract, a stub program to
     /// replace, and the fixtures `extension test` runs.
     Provider { capability: &'static str },
+    /// A script implementation of `capability` (one whose interface is a
+    /// set of verbs): an `implementations:` entry and its Starlark file,
+    /// one function per verb. The verbs are stubs to replace.
+    Implementation { capability: &'static str },
     /// A derived (Starlark) collector of an entity, a dataset over it and a
     /// page over the dataset.
     Collector,
@@ -64,7 +68,7 @@ pub enum Kind {
     /// snapshot's files, the dimension its facts carry, the headline metric
     /// and a page whose rows link to the file and line.
     Metric,
-    /// A command whose script composes core commands, on a work item's
+    /// A command whose script composes core commands, on a thread's
     /// Commands menu.
     Command,
     /// An effect: a script reacting to a logged
@@ -74,13 +78,12 @@ pub enum Kind {
     /// sandboxed frame, fed the page's loaders through the served client
     /// library.
     Component,
-    /// An effort policy written as a script: an `implementations:` entry
-    /// whose script opens an item's effort when it starts on a thread and
-    /// closes it when it ends, run under the extension's permissions.
-    Policy,
     /// Guidance for the coding agent: a query run at a moment, whose rows
     /// reach the agent.
     Advisory,
+    /// Text for the coding agent's context: a query whose `text` reaches the
+    /// agent on a prompt once, then when it changes.
+    Context,
     /// A skill the coding agent loads when it's relevant (`SKILL.md`).
     Skill,
     /// A left-nav panel showing one page compact.
@@ -94,21 +97,24 @@ pub enum Kind {
 }
 
 impl Kind {
-    pub const NAMES: &'static str = "`page`, `extension`, `provider`, `collector`, `metric`, `command`, `effect`, `component`, `policy`, `advisory`, `skill`, `panel`, `job` or `query`";
+    pub const NAMES: &'static str = "`page`, `extension`, `provider`, `implementation`, `collector`, `metric`, `command`, `effect`, `component`, `advisory`, `context`, `skill`, `panel`, `job` or `query`";
 
     pub fn parse(s: &str) -> Option<Kind> {
         match s {
             "extension" => Some(Kind::Extension),
             "provider" => Some(Kind::Provider {
-                capability: "work_items",
+                capability: "snapshots",
+            }),
+            "implementation" => Some(Kind::Implementation {
+                capability: "agent_harness",
             }),
             "collector" => Some(Kind::Collector),
             "metric" => Some(Kind::Metric),
             "command" => Some(Kind::Command),
             "effect" => Some(Kind::Effect),
             "component" => Some(Kind::Component),
-            "policy" => Some(Kind::Policy),
             "advisory" => Some(Kind::Advisory),
+            "context" => Some(Kind::Context),
             "skill" => Some(Kind::Skill),
             "page" => Some(Kind::Page),
             "panel" => Some(Kind::Panel),
@@ -121,18 +127,37 @@ impl Kind {
     /// A provider of `capability`; refused unless a process may implement
     /// it (its spec carries a provider contract).
     pub fn provider(capability: &str) -> Result<Kind, SdkError> {
-        match oxplow_domain::capability::spec(capability).filter(|c| c.provider.is_some()) {
-            Some(spec) => Ok(Kind::Provider {
-                capability: spec.id,
-            }),
+        Self::with_contract(capability, "a provider", |_| true)
+            .map(|capability| Kind::Provider { capability })
+    }
+
+    /// A script implementation of `capability`; refused unless its
+    /// interface is a set of verbs (its spec carries a provider contract),
+    /// the same capabilities a provider may implement.
+    pub fn implementation(capability: &str) -> Result<Kind, SdkError> {
+        // A capability with no verbs core calls has nothing for a script to
+        // implement.
+        Self::with_contract(capability, "a script", |p| !p.verbs.is_empty())
+            .map(|capability| Kind::Implementation { capability })
+    }
+
+    /// The core id of `capability` when its provider contract passes `ok`.
+    fn with_contract(
+        capability: &str,
+        who: &str,
+        ok: fn(&oxplow_domain::capability::ProviderContract) -> bool,
+    ) -> Result<&'static str, SdkError> {
+        let fits = |c: &oxplow_domain::capability::CapabilitySpec| c.provider.is_some_and(ok);
+        match oxplow_domain::capability::spec(capability).filter(|c| fits(c)) {
+            Some(spec) => Ok(spec.id),
             None => {
                 let may: Vec<String> = oxplow_domain::capability::CAPABILITIES
                     .iter()
-                    .filter(|c| c.provider.is_some())
+                    .filter(|c| fits(c))
                     .map(|c| format!("`{}`", c.id))
                     .collect();
                 Err(SdkError::Invalid(format!(
-                    "`{capability}` isn't a capability a provider can implement; one of {}",
+                    "`{capability}` isn't a capability {who} can implement; one of {}",
                     may.join(", ")
                 )))
             }
@@ -151,7 +176,7 @@ pub struct Scaffolded {
 }
 
 /// Create `.oxplow/extensions/<name>/` with a v2 manifest carrying an
-/// `intent` (its `origin` = the thread/effort ref that asked for it), one
+/// `intent` (its `origin` = the thread/request ref that asked for it), one
 /// example and a matching fixture, and — for a page — one starter page the
 /// example names. Refuses an existing folder, a bad name, or a non-ref
 /// origin; `check` passes on what it writes.
@@ -246,7 +271,7 @@ pub fn scaffold_with(
     if let Some(o) = origin {
         oxplow_domain::uri::OxplowUri::parse(o).map_err(|e| {
             SdkError::Invalid(format!(
-                "--origin `{o}` is not a canonical ref (`oxplow:oxplow/effort?id=eff42`, `oxplow:oxplow/thread?id=thr3`): {}",
+                "--origin `{o}` is not a canonical ref (`oxplow:oxplow/request?id=req42`, `oxplow:oxplow/thread?id=thr3`): {}",
                 e.reason()
             ))
         })?;
@@ -291,59 +316,59 @@ pub fn scaffold_with(
     let provider_id = oxplow_domain::contribution::extension_namespace(name);
     // The intent example, and its fixture (what `extension test` runs).
     // The URIs the examples name, built like every other.
-    use oxplow_domain::uri::build::work_item_uri;
-    let work_item = work_item_uri("oxplow", "tsk1");
+    use oxplow_domain::uri::build::thread_uri;
+    let thread = "thr1";
     let (example_input, example_expect, fixture_expect) = match kind {
         Kind::Component | Kind::Page => (
             format!("{{ page: {name}, params: {{ stream_id: 1 }} }}"),
-            "one row per open task in the stream, newest first",
+            "one row per open thread in the stream, in their order",
             Some("{ loaders: { items: { rows: $any } } }".to_string()),
         ),
         Kind::Query => (
             format!("{{ query: {name} }}"),
-            "one row per state a work item can be in, as value and label",
-            Some("{ rows: { contains: [{ value: todo, label: To do }] } }".to_string()),
+            "one row per thread mark, as value and label",
+            Some("{ rows: { contains: [{ value: amber, label: Amber }] } }".to_string()),
         ),
         Kind::Panel => (
             format!("{{ panel: {name} }}"),
-            "one row per open task in the stream, newest first",
+            "one row per open thread in the stream, in their order",
             Some("{ body: { loaders: { items: { rows: $any } } } }".to_string()),
         ),
-        Kind::Extension | Kind::Advisory | Kind::Skill => {
+        Kind::Extension | Kind::Advisory | Kind::Context | Kind::Skill => {
             ("{}".to_string(), "TODO: what a run should show", None)
         }
-        Kind::Policy => (
-            format!(
-                "{{ implementation: {provider_id}, event: {{ type: thread.checkpoint, payload: {{ thread: thr1, turn: trn1, reason: turn_end, snapshot: 1, changed: false, writing_tools: 0 }}, anchors: {{ thread_id: thr1, turn_id: 1 }} }} }}"
-            ),
-            "nothing to do: a checkpoint opens or closes no effort",
-            Some("{ skip: $any }".to_string()),
-        ),
         Kind::Provider { capability } => {
             let starter = provider_starter(capability);
             (starter.input, starter.expect, Some(starter.fixture))
         }
+        // A capability's verbs are stubs, run by its conformance
+        // suite, so its example has no fixture of its own yet.
+        Kind::Implementation { .. } => (
+            "{}".to_string(),
+            "TODO: what its verbs answer (`extension test` runs its capability's conformance suite)",
+            None,
+        ),
         Kind::Collector => (
             format!(
-                "{{ collector: items, rows: [{{ uri: \"{}\", title: First, state: todo }}, {{ uri: \"{}\", title: Second, state: done }}] }}",
-                work_item_uri("demo", "1"),
-                work_item_uri("demo", "2"),
+                "{{ collector: items, rows: [{{ uri: \"{}\", title: First, closed_at: null }}, {{ uri: \"{}\", title: Second, closed_at: \"2026-01-01T00:00:00.000000Z\" }}] }}",
+                thread_uri(oxplow_domain::ThreadId::new(1)),
+                thread_uri(oxplow_domain::ThreadId::new(2)),
             ),
-            "one item per work item that isn't done",
+            "one item per thread that isn't closed",
             Some("{ entities: { item: 1 } }".to_string()),
         ),
         Kind::Metric => unreachable!("a metric is written from its template above"),
         Kind::Command => (
-            format!("{{ command: {ns}.notes.add, input: {{ uri: \"{work_item}\" }} }}"),
-            "a comment on the work item",
-            Some("{ ok: true, commands: [oxplow.work_item.comment] }".to_string()),
+            format!("{{ command: {ns}.notes.add, input: {{ thread: \"{thread}\" }} }}"),
+            "the thread renamed",
+            Some("{ ok: true, commands: [oxplow.thread.rename] }".to_string()),
         ),
         Kind::Effect => (
             format!(
-                "{{ effect: on-done, event: {{ type: work_item.state_changed, payload: {{ work_item: \"{work_item}\", to: done }} }} }}"
+                "{{ effect: on-done, event: {{ type: thread.closed, payload: {{ thread: \"{thread}\" }} }} }}"
             ),
-            "a comment on the finished work item",
-            Some("{ commands: [oxplow.work_item.comment] }".to_string()),
+            "the closed thread renamed",
+            Some("{ commands: [oxplow.thread.rename] }".to_string()),
         ),
         // Its fixtures carry a model, so they are written with the job below.
         Kind::Job => (
@@ -371,7 +396,7 @@ pub fn scaffold_with(
             Some(("handlers/note.star", "Add Note")),
         )?),
         Kind::Effect => Some(contribution::build(kind, name, "on-done", None)?),
-        Kind::Page | Kind::Component | Kind::Advisory | Kind::Skill => {
+        Kind::Page | Kind::Component | Kind::Advisory | Kind::Context | Kind::Skill => {
             Some(contribution::build(kind, name, name, None)?)
         }
         _ => None,
@@ -390,10 +415,6 @@ pub fn scaffold_with(
             {
                 manifest.push_str(", sql.read");
             }
-            if capability == "effort_policy" {
-                // The efforts it opens, closes and links are core commands.
-                manifest.push_str(", commands:oxplow.effort.*");
-            }
             manifest.push_str("]\n");
             manifest.push_str(&format!(
                 "providers:\n  - id: {provider_id}\n    capability: {capability}\n    entry: bin/provider\n    declarations: provider.json\n"
@@ -402,20 +423,27 @@ pub fn scaffold_with(
                 manifest.push_str(needs);
             }
         }
+        Kind::Implementation { capability } => {
+            manifest.push_str(&implementation_manifest(capability, &provider_id, name));
+        }
         Kind::Collector
         | Kind::Command
         | Kind::Effect
         | Kind::Component
         | Kind::Advisory
+        | Kind::Context
         | Kind::Skill => {
             // The permissions line (and what says why) opens the kinds whose
             // scripts or text need one; then the kind's own lists.
             manifest.push_str(match kind {
                 Kind::Command | Kind::Effect => {
-                    "# Its script runs core commands as the caller.\npermissions: [commands:oxplow.work_item.comment]\n"
+                    "# Its script runs core commands as the caller.\npermissions: [commands:oxplow.thread.rename]\n"
                 }
                 Kind::Advisory => {
                     "# What an advisory says reaches the agent.\npermissions: [agent.write]\n"
+                }
+                Kind::Context => {
+                    "# What a context says reaches the agent.\npermissions: [agent.write]\n"
                 }
                 Kind::Skill => "# A skill is text the agent reads.\npermissions: [agent.write]\n",
                 _ => "",
@@ -424,22 +452,6 @@ pub fn scaffold_with(
                 manifest.push_str(&format!("{block}:\n{entry}"));
             }
         }
-        Kind::Policy => manifest.push_str(&format!(
-            "# Its script reads oxplow with its own SQL (`needs: [sql.read]`) and\n\
-             # runs the core commands that open and close efforts.\n\
-             permissions: [sql.read, commands:oxplow.effort.*]\n\
-             implementations:\n\
-             \x20 # The project's effort policy, once chosen in Settings → Capabilities: its\n\
-             \x20 # script hears core's events and composes the commands that open, close\n\
-             \x20 # and link efforts. It runs under this extension's permissions, and\n\
-             \x20 # reads oxplow only through the scopes it `needs`.\n\
-             \x20 - capability: effort_policy\n\
-             \x20   id: {provider_id}\n\
-             \x20   title: {title}\n\
-             \x20   entry: policies/{name}.star\n\
-             \x20   needs: [sql.read]\n",
-            title = title_case(name)
-        )),
         Kind::Panel => manifest.push_str(&format!(
             "panels:\n\
              \x20 # A {panel} in the left nav: its `body` page, compact. `scope` says what it\n\
@@ -450,13 +462,13 @@ pub fn scaffold_with(
         )),
         Kind::Job => {
             manifest.push_str(
-                "    - name: published\n      input: { job: run }\n      expect: the finished job's reply is commented on the work item\n",
+                "    - name: published\n      input: { job: run }\n      expect: the finished job's reply is the thread's new title\n",
             );
             manifest.push_str(&format!(
                 "# The model: a person binds `{ns}/{ns}` in Settings → AI; until then it\n\
                  # uses their Summarize model. The job's script runs core commands as\n\
                  # the caller. Deploying approves the permissions below.\n\
-                 permissions: [ai.compute, commands:oxplow.work_item.comment]\n\
+                 permissions: [ai.compute, commands:oxplow.thread.rename]\n\
                  ai_profiles:\n\
                  \x20 - id: {ns}\n\
                  \x20   description: \"TODO: what the model is asked to do.\"\n\
@@ -465,7 +477,7 @@ pub fn scaffold_with(
                  \x20 # One model conversation per intent key; `job.ask` starts it, `job.cancel`\n\
                  \x20 # stops it (what it had written is kept).\n\
                  \x20 - id: run\n\
-                 \x20   description: \"TODO: what the job does. Here: write a short note about a work item.\"\n\
+                 \x20   description: \"TODO: what the job does. Here: write a short title for a thread.\"\n\
                  \x20   version: 1\n\
                  \x20   operation: ai.complete_typed\n\
                  \x20   needs: [ai.compute]\n\
@@ -487,18 +499,18 @@ pub fn scaffold_with(
                  \x20   op: cancel\n\
                  \x20 # Builds the job's request (the prompt lives here) and composes `job.ask`.\n\
                  \x20 - name: note.ask\n\
-                 \x20   summary: \"TODO: what asking does. Here: ask a model for a note on a work item.\"\n\
+                 \x20   summary: \"TODO: what asking does. Here: ask a model for a title for a thread.\"\n\
                  \x20   entry: commands/ask.star\n\
                  \x20   access: record\n\
                  \x20   input_schema:\n\
                  \x20     type: object\n\
-                 \x20     required: [uri]\n\
+                 \x20     required: [thread]\n\
                  \x20     additionalProperties: false\n\
                  \x20     properties:\n\
-                 \x20       uri: {{ type: string, description: \"The work item (oxplow:oxplow/work_item?id=<id>&provider=<provider>).\" }}\n\
+                 \x20       thread: {{ type: string, description: \"The thread (oxplow:oxplow/thread?id=<id>).\" }}\n\
                  effects:\n\
                  \x20 - id: publish\n\
-                 \x20   summary: When the job ends, comment its reply on the work item.\n\
+                 \x20   summary: When the job ends, rename the thread to its reply.\n\
                  \x20   on: [contribution.job.completed]\n\
                  \x20   where: {{ job: \"{ns}/run\" }}\n\
                  \x20   entry: effects/publish.star\n\
@@ -509,14 +521,15 @@ pub fn scaffold_with(
     }
     write(&format!("{rel_dir}/extension.yaml"), manifest)?;
     if let Some(expect) = fixture_expect {
-        // A command runs for real on the test's oxplow: the item it notes
-        // is made first.
+        // A command runs for real on the test's oxplow: the thread it
+        // renames is made first.
         let (given, when) = match kind {
             Kind::Command => (
-                "given: [{ command: oxplow.work_item.create, input: { title: First }, bind: item }]\n",
-                format!("{{ command: {ns}.notes.add, input: {{ uri: $item.uri }} }}"),
+                "given: [{ command: oxplow.thread.create, input: { stream: str1, title: First }, bind: item }]\n"
+                    .to_string(),
+                format!("{{ command: {ns}.notes.add, input: {{ thread: $item.id }} }}"),
             ),
-            _ => ("", example_input.clone()),
+            _ => (String::new(), example_input.clone()),
         };
         write(
             &format!("{rel_dir}/fixtures/basic.yaml"),
@@ -563,6 +576,10 @@ pub fn scaffold_with(
                 )?;
             }
         }
+        Kind::Implementation { capability } => write(
+            &format!("{rel_dir}/implementations/{provider_id}.star"),
+            implementation_script(capability),
+        )?,
         Kind::Collector => {
             write(
                 &format!("{rel_dir}/pages/{name}.yaml"),
@@ -586,17 +603,17 @@ pub fn scaffold_with(
             )?;
         }
         Kind::Job => {
-            let task = "Write a one-line note about this work item.";
+            let instruction = "Write a short title for this thread.";
             write(
                 &format!("{rel_dir}/commands/ask.star"),
                 format!(
                     "# Builds the job's request and composes the job's `ask`. The intent key\n\
-                     # names the work item, so asking again for it returns the same job.\n\
+                     # names the thread, so asking again for it returns the same job.\n\
                      \n\
-                     SYSTEM = \"{task} Answer in one sentence.\"\n\
+                     SYSTEM = \"{instruction} Answer in one sentence.\"\n\
                      \n\
                      def transform(x):\n\
-                     \x20   uri = x[\"input\"][\"uri\"]\n\
+                     \x20   uri = x[\"input\"][\"thread\"]\n\
                      \x20   return {{\"commands\": [{{\n\
                      \x20       \"name\": \"{ns}.job.ask\",\n\
                      \x20       \"input\": {{\n\
@@ -607,7 +624,7 @@ pub fn scaffold_with(
                      \x20               \"role\": \"{ns}\",\n\
                      \x20               \"messages\": [\n\
                      \x20                   {{\"role\": \"system\", \"parts\": [{{\"type\": \"text\", \"text\": SYSTEM}}]}},\n\
-                     \x20                   {{\"role\": \"user\", \"parts\": [{{\"type\": \"text\", \"text\": \"Work item: \" + uri}}]}},\n\
+                     \x20                   {{\"role\": \"user\", \"parts\": [{{\"type\": \"text\", \"text\": \"Thread: \" + uri}}]}},\n\
                      \x20               ],\n\
                      \x20           }},\n\
                      \x20       }},\n\
@@ -616,7 +633,7 @@ pub fn scaffold_with(
             )?;
             write(
                 &format!("{rel_dir}/effects/publish.star"),
-                "# The finished job's reply, commented on the work item its intent key names.\n\
+                "# The finished job's reply, set as the title of the thread its intent key names.\n\
                  # The event says only which run ended (`where:` keeps it to this job).\n\
                  \n\
                  PREFIX = \"note:\"\n\
@@ -634,8 +651,8 @@ pub fn scaffold_with(
                  \x20   if not text:\n\
                  \x20       return {\"skip\": \"the model wrote nothing\"}\n\
                  \x20   return {\"commands\": [{\n\
-                 \x20       \"name\": \"oxplow.work_item.comment\",\n\
-                 \x20       \"input\": {\"uri\": key[len(PREFIX):], \"body\": text},\n\
+                 \x20       \"name\": \"oxplow.thread.rename\",\n\
+                 \x20       \"input\": {\"thread\": key[len(PREFIX):], \"title\": text},\n\
                  \x20   }]}\n"
                     .to_string(),
             )?;
@@ -663,7 +680,7 @@ pub fn scaffold_with(
                      \x20   - {{ key: intent_key, label: About }}\n\
                      \x20   - {{ key: state }}\n\
                      \x20   - {{ key: output, label: Reply }}\n\
-                     \x20 empty: Nothing asked yet — run {ns}.note.ask on a work item.\n",
+                     \x20 empty: Nothing asked yet — run {ns}.note.ask on a thread.\n",
                     title = title_case(name)
                 ),
             )?;
@@ -689,12 +706,12 @@ pub fn scaffold_with(
             write(
                 &format!("{rel_dir}/fixtures/published.yaml"),
                 format!(
-                    "# The finished job reaches `publish`, which comments the reply on the work\n\
-                     # item its intent key names.\n\
-                     given: [{{ command: oxplow.work_item.create, input: {{ title: First }} }}]\n\
+                    "# The finished job reaches `publish`, which sets the reply as the title of the\n\
+                     # thread its intent key names.\n\
+                     given: [{{ command: oxplow.thread.create, input: {{ stream: str1, title: First }} }}]\n\
                      when:\n\
                      \x20 job: run\n\
-                     \x20 intentKey: \"note:{work_item}\"\n\
+                     \x20 intentKey: \"note:{thread}\"\n\
                      \x20 request:\n\
                      \x20   schemaVersion: 1\n\
                      \x20   role: summarize\n\
@@ -704,7 +721,7 @@ pub fn scaffold_with(
                      \x20 state: succeeded\n\
                      \x20 effects:\n\
                      \x20   - {{ id: {ns}/publish, state: ok }}\n\
-                     \x20 commands: {{ contains: [oxplow.work_item.comment] }}\n\
+                     \x20 commands: {{ contains: [oxplow.thread.rename] }}\n\
                      model:\n\
                      \x20 replies: [\"A fine start.\"]\n"
                 ),
@@ -716,11 +733,11 @@ pub fn scaffold_with(
                 "title: {title}\n\
                  description: \"TODO: what these rows are for (a choice's options: value, label, optional group).\"\n\
                  loaders:\n\
-                 \x20 states:\n\
+                 \x20 marks:\n\
                  \x20   rows:\n\
-                 \x20     - {{ value: todo, label: To do }}\n\
-                 \x20     - {{ value: in_progress, label: In progress }}\n\
-                 \x20     - {{ value: done, label: Done }}\n",
+                 \x20     - {{ value: amber, label: Amber }}\n\
+                 \x20     - {{ value: red, label: Red }}\n\
+                 \x20     - {{ value: green, label: Green }}\n",
                 title = title_case(name)
             ),
         )?,
@@ -735,56 +752,80 @@ pub fn scaffold_with(
                  loaders:\n\
                  \x20 items:\n\
                  \x20   sql: |\n\
-                 \x20     SELECT w.uri, w.title, w.state\n\
-                 \x20     FROM v_work_item w JOIN v_thread t ON t.id = w.thread_id\n\
-                 \x20     WHERE t.stream_id = :stream_id AND w.state IN ('todo', 'in_progress', 'blocked')\n\
-                 \x20     ORDER BY w.updated_at DESC\n\
+                 \x20     SELECT t.uri, t.title, t.mark\n\
+                 \x20     FROM v_thread t\n\
+                 \x20     WHERE t.stream_id = :stream_id AND t.closed_at IS NULL\n\
+                 \x20     ORDER BY t.sort_index\n\
                  view:\n\
                  \x20 viz: table\n\
                  \x20 from: items\n\
                  \x20 columns:\n\
                  \x20   - {{ key: title, label: Item, link: {{ kind: page, from: uri }} }}\n\
-                 \x20   - {{ key: state }}\n\
-                 \x20 empty: No open work items in this stream.\n",
+                 \x20   - {{ key: mark }}\n\
+                 \x20 empty: No open threads in this stream.\n",
                 title = title_case(name)
             ),
         )?,
-        Kind::Policy => write(
-            &format!("{rel_dir}/policies/{name}.star"),
-            r#"# Gets {"event": {id, type, v, seq, at, source, subject, anchors, payload, cause}}
-# — the event envelope of one of core's events a policy hears — and returns
-# the commands to run, as the policy, or {"skip": "why"}. No I/O but its
-# `needs` (`scope("sql.read", …)`).
-def transform(x):
-    e = x["event"]
-    if e["type"] != "work_item.state_changed":
-        return {"skip": "not an item's move"}
-    item = e["payload"]["work_item"]
-    to = e["payload"]["to"]
-    # The thread an agent moved it on, when one did.
-    thread = e["anchors"].get("thread_id")
-    if to == "in_progress" and thread != None:
-        return {"commands": [{"name": "oxplow.effort.open",
-                              "input": {"thread": thread, "work_item": item}}]}
-    if to == "done" or to == "canceled":
-        rows = scope("sql.read", {"sql": "SELECT id FROM v_effort WHERE work_item = :w AND ended_at IS NULL",
-                                  "params": {"w": item}})
-        return {"commands": [{"name": "oxplow.effort.close",
-                              "input": {"effort": "eff" + str(r["id"]), "reason": "switch"}}
-                             for r in rows]}
-    return {"skip": "a move that changes no effort"}
-"#
-            .to_string(),
-        )?,
         Kind::Extension | Kind::Metric => {}
         // Their files are the starter's, written above.
-        Kind::Page | Kind::Command | Kind::Effect | Kind::Component | Kind::Advisory | Kind::Skill => {}
+        Kind::Page
+        | Kind::Command
+        | Kind::Effect
+        | Kind::Component
+        | Kind::Advisory
+        | Kind::Context
+        | Kind::Skill => {}
     }
     Ok(Scaffolded {
         name: name.to_string(),
         dir: rel_dir,
         files,
     })
+}
+
+/// The manifest lines of a scaffolded script implementation `id` of
+/// `capability`: its `implementations:` entry and what it declares — an
+/// agent harness its `data`.
+fn implementation_manifest(capability: &str, id: &str, name: &str) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "implementations:\n\
+         \x20 - capability: {capability}\n\
+         \x20   id: {id}\n\
+         \x20   title: {title}\n\
+         \x20   description: \"TODO: one sentence on what this implementation is.\"\n\
+         \x20   # One function per verb: core calls it as it calls a provider's.\n\
+         \x20   entry: implementations/{id}.star\n",
+        title = title_case(name)
+    ));
+    if capability == "agent_harness" {
+        out.push_str("    data: { env_markers: [], settings: [] }\n");
+    }
+    out
+}
+
+/// A scaffolded script implementation of `capability`: its verbs are
+/// stubs that fail until written.
+fn implementation_script(capability: &str) -> String {
+    const HEAD: &str = "# One function per verb. Each gets one dict, `x`:\n\
+        #   x[\"input\"]   the verb's input, as the capability's contract gives it\n\
+        #   x[\"config\"]  the implementation's `config:` from extension.yaml\n\
+        #   x[\"id\"]      the implementation's id\n\
+        #   x[\"key\"]     the call's idempotency key\n\
+        # and answers { result, events?, inverse? }, as a provider's verb does.\n";
+    let mut out = HEAD.to_string();
+    for verb in oxplow_domain::capability::contract(capability)
+        .map(|c| c.verbs)
+        .unwrap_or_default()
+        .iter()
+        .filter(|v| v.needs == oxplow_domain::capability::Need::Always)
+    {
+        out.push_str(&format!(
+            "\ndef {name}(x):\n    fail(\"TODO: `{name}` — answer {{\\\"result\\\": ...}} for x[\\\"input\\\"]\")\n",
+            name = verb.name
+        ));
+    }
+    out
 }
 
 /// What a scaffolded provider of `capability` starts with beyond its
@@ -797,30 +838,13 @@ struct ProviderStarter {
     fixture: String,
     needs: Option<&'static str>,
     data: serde_json::Value,
+    /// The features it starts with on (a knowledge store's `edit`: one
+    /// whose pages can't be written isn't a starting point).
+    on: &'static [&'static str],
 }
 
 fn provider_starter(capability: &str) -> ProviderStarter {
     match capability {
-        "work_items" => ProviderStarter {
-            input: "{ command: create, input: { title: First } }".to_string(),
-            expect: "the new item's URI",
-            fixture: "{ uri: $any }".to_string(),
-            needs: None,
-            data: serde_json::Value::Null,
-        },
-        "effort_policy" => ProviderStarter {
-            input: "{ command: react, input: { event: { id: e1, type: thread.checkpoint, v: 1, seq: 1, source: system, subject: [], payload: {}, anchors: {} } } }"
-                .to_string(),
-            expect: "nothing to do: a checkpoint opens or closes no effort here",
-            fixture: "{ skip: $any }".to_string(),
-            // It hears events only: what it closes, it reads of oxplow.
-            needs: Some(
-                "    # A policy hears events only; it reads oxplow (`host/call`) for the rest,\n\
-                 \x20   # such as the open efforts of an item that finished.\n\
-                 \x20   needs: [sql.read]\n",
-            ),
-            data: serde_json::Value::Null,
-        },
         "agent_harness" => ProviderStarter {
             input: "{ command: render, input: { answer: { kind: ack } } }".to_string(),
             expect: "its hooks' acknowledgement",
@@ -833,15 +857,17 @@ fn provider_starter(capability: &str) -> ProviderStarter {
                 "env_markers": [],
                 "settings": [],
             }),
+            on: &[],
         },
         "snapshots" => ProviderStarter {
             // A small tree beside the fixtures (`fixtures/tree`) stands in for a worktree.
-            input: "{ command: mark, input: { stream: str1, worktree: fixtures/tree, on: manual, parent: null } }"
+            input: "{ command: mark, input: { stream: str1, worktree: fixtures/tree, trigger: manual, parent: null } }"
                 .to_string(),
             expect: "a handle for the marked state",
             fixture: "{ handle: $any, unchanged: false, file_count: 1 }".to_string(),
             needs: None,
             data: serde_json::Value::Null,
+            on: &[],
         },
         "filesystem" => ProviderStarter {
             input: "{ command: list, input: { parent: '' } }".to_string(),
@@ -849,14 +875,7 @@ fn provider_starter(capability: &str) -> ProviderStarter {
             fixture: "{ entries: $any }".to_string(),
             needs: None,
             data: serde_json::Value::Null,
-        },
-        "knowledge" => ProviderStarter {
-            input: "{ command: write_page, input: { slug: example, body: '# Example', verified_files: [], removed_files: [] } }"
-                .to_string(),
-            expect: "the page's slug",
-            fixture: "{ page: example }".to_string(),
-            needs: None,
-            data: serde_json::Value::Null,
+            on: &[],
         },
         _ => {
             let verb = oxplow_domain::capability::contract(capability)
@@ -868,6 +887,7 @@ fn provider_starter(capability: &str) -> ProviderStarter {
                 fixture: "$any".to_string(),
                 needs: None,
                 data: serde_json::Value::Null,
+                on: &[],
             }
         }
     }
@@ -878,26 +898,7 @@ fn provider_starter(capability: &str) -> ProviderStarter {
 fn verb_input(capability: &str, verb: &str) -> (String, serde_json::Value) {
     use serde_json::json;
     let str_prop = json!({ "type": "string" });
-    let state = json!({ "type": "string",
-                        "enum": ["todo", "in_progress", "blocked", "done", "canceled"] });
     match (capability, verb) {
-        ("work_items", "create") => (
-            "Create a work item.".into(),
-            json!({ "type": "object", "required": ["title"], "additionalProperties": false,
-                    "properties": { "title": str_prop, "body": str_prop,
-                                    "state": state, "native_state": str_prop } }),
-        ),
-        ("work_items", "update") => (
-            "Change a work item's title, body or state.".into(),
-            json!({ "type": "object", "required": ["uri"], "additionalProperties": false,
-                    "properties": { "uri": str_prop, "title": str_prop, "body": str_prop,
-                                    "state": state, "native_state": str_prop } }),
-        ),
-        ("work_items", "transition") => (
-            "Move a work item to a canonical state, optionally naming a native one.".into(),
-            json!({ "type": "object", "required": ["uri", "to"], "additionalProperties": false,
-                    "properties": { "uri": str_prop, "to": state, "native_state": str_prop } }),
-        ),
         ("agent_harness", "launch") => (
             "How a session of it starts: the launch's input in, { spec: { kind: pty, command, env } } out — \
              the session's bearer in `env`, never in `command`."
@@ -916,7 +917,8 @@ fn verb_input(capability: &str, verb: &str) -> (String, serde_json::Value) {
         ),
         ("agent_harness", "prompt") => (
             "What a prompt hook's body is (feature `subagents`): { prompt: { kind: person, text } | \
-             { kind: handback, subagent: { id, kind? } } | { kind: peer_message, from } } — null for a body with no prompt."
+             { kind: handback, subagent: { id, kind? } } | { kind: peer_message, from } | \
+             { kind: background_job, call?, job?, status?, summary?, text } } — null for a body with no prompt."
                 .into(),
             json!({ "type": "object", "required": ["body"],
                     "properties": { "body": { "type": "object" } } }),
@@ -936,7 +938,7 @@ fn verb_input(capability: &str, verb: &str) -> (String, serde_json::Value) {
                     "additionalProperties": false,
                     "properties": { "stream": str_prop, "worktree": str_prop, "trigger": str_prop,
                                     "thread": str_prop, "turn": { "type": "integer" },
-                                    "effort": str_prop, "budget_ms": { "type": "integer" },
+                                    "budget_ms": { "type": "integer" },
                                     "parent": { "type": ["string", "null"] } } }),
         ),
         ("snapshots", "changed") => (
@@ -983,32 +985,6 @@ fn verb_input(capability: &str, verb: &str) -> (String, serde_json::Value) {
                     "additionalProperties": false,
                     "properties": { "path": str_prop, "content": str_prop } }),
         ),
-        ("knowledge", "write_page") => (
-            "Write a page, creating it or replacing its body: { page } (the slug), and answer its \
-             `knowledge.page.recorded` event with its `refs` (`oxplow:oxplow/file?path=…` / `oxplow:oxplow/wiki?slug=…`)."
-                .into(),
-            json!({ "type": "object", "required": ["slug", "body", "verified_files", "removed_files"],
-                    "additionalProperties": false,
-                    "properties": { "slug": str_prop, "title": str_prop, "body": str_prop,
-                                    "verified_files": { "type": "array", "items": str_prop },
-                                    "removed_files": { "type": "array", "items": str_prop } } }),
-        ),
-        ("knowledge", "delete_page") => (
-            "Delete a page: {}, answering its record with `deleted: true`.".into(),
-            json!({ "type": "object", "required": ["slug"], "additionalProperties": false,
-                    "properties": { "slug": str_prop } }),
-        ),
-        ("knowledge", "link") => (
-            "Link a page to a target (a wikilink's interior, such as `other-page` or `src/lib.rs`): {}.".into(),
-            json!({ "type": "object", "required": ["page", "target"],
-                    "additionalProperties": false,
-                    "properties": { "page": str_prop, "target": str_prop } }),
-        ),
-        ("effort_policy", "react") => (
-            "Compose the commands an event calls for: { commands } to run, or { skip }.".into(),
-            json!({ "type": "object", "required": ["event"],
-                    "properties": { "event": { "type": "object" } } }),
-        ),
         _ => (
             format!("TODO: what `{verb}` does."),
             json!({ "type": "object" }),
@@ -1019,7 +995,8 @@ fn verb_input(capability: &str, verb: &str) -> (String, serde_json::Value) {
 /// A provider's starting declarations, from `capability`'s contract
 /// (`.context/providers.md` "What a provider may implement"): the verbs it
 /// always needs (`record` access, no confirmation; declare the others with
-/// their features), every feature off, the events it may emit with core's
+/// their features), every feature off but those its starter turns on (a
+/// knowledge store's `edit`), the events it may emit with core's
 /// schemas, a collector of what it records, and an empty config schema.
 fn provider_declarations(
     name: &str,
@@ -1033,7 +1010,10 @@ fn provider_declarations(
     let features: serde_json::Map<String, serde_json::Value> = spec
         .features
         .iter()
-        .map(|f| (f.to_string(), serde_json::Value::Bool(false)))
+        .map(|f| {
+            let on = provider_starter(capability).on.contains(f);
+            (f.to_string(), serde_json::Value::Bool(on))
+        })
         .collect();
     let vocabulary = oxplow_domain::vocabulary::Vocabulary::core();
     InitializeResult {
@@ -1254,7 +1234,7 @@ pub async fn check(
 
 /// What going from git revision `against` (`HEAD`, a branch, a sha) to the
 /// working tree changes for extension `name` — the review an
-/// install or an effort shows, on the CLI: pages, datasets and their rows,
+/// install or a request shows, on the CLI: pages, datasets and their rows,
 /// collectors and their outputs, providers, config. It reads through
 /// `layer` and writes nothing: each side's datasets are temp views.
 async fn impact_against(
@@ -1558,19 +1538,20 @@ mod tests {
             jsonschema::validator_for(&schema::manifest_schema()).expect("compiles");
         for kind in [
             Kind::Extension,
-            Kind::provider("work_items").unwrap(),
-            Kind::provider("effort_policy").unwrap(),
             Kind::provider("agent_harness").unwrap(),
             Kind::provider("snapshots").unwrap(),
-            Kind::provider("knowledge").unwrap(),
             Kind::provider("filesystem").unwrap(),
+            Kind::implementation("agent_harness").unwrap(),
+            Kind::implementation("snapshots").unwrap(),
+            Kind::implementation("filesystem").unwrap(),
+            Kind::implementation("filesystem").unwrap(),
             Kind::Collector,
             Kind::Metric,
             Kind::Command,
             Kind::Effect,
             Kind::Component,
-            Kind::Policy,
             Kind::Advisory,
+            Kind::Context,
             Kind::Skill,
             Kind::Page,
             Kind::Panel,
@@ -1636,87 +1617,38 @@ mod tests {
     async fn a_provider_scaffolds_any_capability_by_its_contract() {
         assert_eq!(
             Kind::parse("provider"),
-            Some(Kind::provider("work_items").unwrap())
+            Some(Kind::provider("snapshots").unwrap())
         );
         for no_contract in ["vcs", "nope"] {
             let err = Kind::provider(no_contract).unwrap_err().to_string();
             assert!(
                 err.contains(&format!("`{no_contract}`"))
-                    && err.contains("work_items")
-                    && err.contains("effort_policy"),
+                    && err.contains("snapshots")
+                    && err.contains("agent_harness"),
                 "{err}"
             );
         }
-
         let dir = tempfile::tempdir().unwrap();
         scaffold(
             dir.path(),
-            Kind::provider("work_items").unwrap(),
+            Kind::provider("snapshots").unwrap(),
             "tracker",
             None,
         )
         .unwrap();
         let d = declarations(dir.path(), "tracker");
-        assert_eq!(d["capabilities"][0]["capability"], "work_items");
+        assert_eq!(d["capabilities"][0]["capability"], "snapshots");
         let verbs: Vec<&str> = d["commands"]
             .as_array()
             .unwrap()
             .iter()
             .map(|c| c["name"].as_str().unwrap())
             .collect();
-        assert_eq!(verbs, ["create", "update", "transition"]);
-        let vocabulary = oxplow_domain::vocabulary::Vocabulary::core();
-        assert_eq!(d["event_types"][0]["type"], "work_item.recorded");
-        assert_eq!(d["event_types"][0]["v"], 3);
-        assert_eq!(
-            Some(&d["event_types"][0]["schema"]),
-            vocabulary.schema("work_item.recorded", 3)
-        );
-        assert_eq!(d["collectors"][0]["entity"], "work_item");
-
-        let dir = tempfile::tempdir().unwrap();
-        let made = scaffold(
-            dir.path(),
-            Kind::provider("effort_policy").unwrap(),
-            "steward",
-            None,
-        )
-        .unwrap();
-        let manifest =
-            std::fs::read_to_string(dir.path().join(format!("{}/extension.yaml", made.dir)))
-                .unwrap();
-        assert!(
-            manifest.contains("capability: effort_policy\n"),
-            "{manifest}"
-        );
-        let d = declarations(dir.path(), "steward");
-        assert_eq!(d["capabilities"][0]["capability"], "effort_policy");
-        assert_eq!(d["commands"].as_array().unwrap().len(), 1);
-        assert_eq!(d["commands"][0]["name"], "react");
-        assert_eq!(d["commands"][0]["confirm"], "never");
-        assert_eq!(d["commands"][0]["access"], "record");
-        assert_eq!(d["event_types"], serde_json::json!([]));
-        assert_eq!(d["collectors"], serde_json::json!([]));
-        let fixture =
-            std::fs::read_to_string(dir.path().join(format!("{}/fixtures/basic.yaml", made.dir)))
-                .unwrap();
-        assert!(
-            fixture.contains("command: react") && fixture.contains("expect: { skip: $any }"),
-            "{fixture}"
-        );
-        let report = check(
-            dir.path(),
-            "steward",
-            &ExtensionCatalog::new(),
-            None,
-            None,
-            None,
-        )
-        .await
-        .unwrap();
-        assert!(report.ok, "{}", render_findings(&report, Format::Text));
-        assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+        assert_eq!(verbs, ["mark", "changed"]);
+        assert_eq!(d["event_types"].as_array().map(Vec::len), Some(0));
+        assert_eq!(d["collectors"].as_array().map(Vec::len), Some(0));
     }
+
     /// The feature-gated harness verbs have real descriptions to declare
     /// them with, not a TODO.
     #[test]
@@ -1804,7 +1736,7 @@ mod tests {
             dir.path(),
             Kind::Page,
             "demo",
-            Some("oxplow:oxplow/effort?id=eff42"),
+            Some("oxplow:oxplow/request?id=req42"),
         )
         .unwrap();
         assert_eq!(made.dir, ".oxplow/extensions/demo");
@@ -1831,7 +1763,7 @@ mod tests {
         assert_eq!(report.extension.manifest_version, 2);
         assert_eq!(
             report.extension.intent.as_ref().unwrap().origin.as_deref(),
-            Some("oxplow:oxplow/effort?id=eff42")
+            Some("oxplow:oxplow/request?id=req42")
         );
         assert_eq!(report.extension.page_files.len(), 1);
         assert_eq!(report.extension.page_files[0].title, "Demo");
@@ -1840,11 +1772,7 @@ mod tests {
         assert!(text.contains("dry-run on an empty database"), "{text}");
         let page = dir.path().join(".oxplow/extensions/demo/pages/demo.yaml");
         let body = std::fs::read_to_string(&page).unwrap();
-        std::fs::write(
-            &page,
-            body.replace("FROM v_work_item", "FROM v_no_such_view"),
-        )
-        .unwrap();
+        std::fs::write(&page, body.replace("FROM v_thread", "FROM v_no_such_view")).unwrap();
         // `check` doesn't run a page's loaders; `extension test` opens the page
         // with each answer's params, so a loader that fails is a finding.
         let tested = crate::extension_test::test_extension(dir.path(), "demo", false)
@@ -1961,7 +1889,7 @@ mod tests {
         write(
             dir.path(),
             ".oxplow/extensions/ord/extension.yaml",
-            "manifest: 2\nname: ord\nintent:\n  purpose: x\n  examples: [{ name: a }]\neffects:\n  - { id: first, summary: s, on: [work_item.state_changed], entry: e.star }\n  - { id: second, summary: s, on: [work_item.state_changed], entry: e.star, after: [first, change.analyze] }\n",
+            "manifest: 2\nname: ord\nintent:\n  purpose: x\n  examples: [{ name: a }]\neffects:\n  - { id: first, summary: s, on: [thread.closed], entry: e.star }\n  - { id: second, summary: s, on: [thread.closed], entry: e.star, after: [first, change.analyze] }\n",
         );
         write(
             dir.path(),

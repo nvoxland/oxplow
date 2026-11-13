@@ -25,11 +25,11 @@ export type * from "./generated/bindings";
 /// list to forget (the old "camelcase trap").
 export type OxplowEventKind = OxplowEvent["kind"];
 
-// `subscribeOxplowEvents` lives in `api.ts` — deliberately ONE implementation
-// (tsk221). A second copy used to sit here and differed in two ways that matter:
+// `subscribeOxplowEvents` lives in `api.ts` — deliberately ONE implementation.
+// A second copy used to sit here and differed in two ways that matter:
 // it had no `stopped` guard, so a caller that didn't await its async teardown
 // could still be delivered an event after unmount; and it typed the payload as
 // `{ kind } & Record<string, unknown>`, discarding the discriminated union that
-// lets consumers narrow on `kind` (tsk198 had to hand-narrow to read `measures`
+// lets consumers narrow on `kind` (had to hand-narrow to read `measures`
 // because of exactly that). Both are gone — add new bus helpers next to the
 // `api.ts` one, per `.context/ipc-and-stores.md`.

@@ -1,1 +1,1 @@
-//! Unified metric substrate read commands (epic tsk213).
+//! Unified metric substrate read commands.

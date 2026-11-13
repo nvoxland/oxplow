@@ -1,0 +1,27 @@
+# In progress puts each epic's header right before its children, then the
+# stand-alone tasks, whatever their place in the queue; a sibling in
+# progress on another thread is shown but is not this thread's active task
+# and says nothing of what it is doing.
+requires: [oxtask]
+given:
+  - { command: oxplow.thread.create, input: { stream: str1, title: Beta }, bind: beta }
+  - { command: oxtask.task.create, input: { title: Standalone first, stage: in_progress } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: The epic, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Mine, stage: in_progress, parent: tsk2 } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk3&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Theirs, stage: in_progress, parent: tsk2 } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk4&provider=oxtask", to: "oxplow:oxplow/thread?id=thr2" } }
+  - { command: oxtask.task.create, input: { title: Standalone last, stage: in_progress } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk5&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+when: { part: oxplow/work-panel, params: { thread_id: 1 } }
+expect:
+  loaders:
+    work:
+      rows:
+        - { grp: In progress, title: The epic, icon: epic, depth: 0, active: 0 }
+        - { grp: In progress, title: Mine, depth: 1, active: 1 }
+        - { grp: In progress, title: Theirs, depth: 1, active: 0, now: "" }
+        - { grp: In progress, title: Standalone first, depth: 0, active: 1 }
+        - { grp: In progress, title: Standalone last, depth: 0, active: 1 }

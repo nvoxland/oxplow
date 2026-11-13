@@ -42,7 +42,7 @@ impl RetentionWindow {
 }
 
 /// Core's expiring namespaces and their default windows. A core
-/// namespace not listed is state (`snapshot`, `vcs`, `effort`, …): its
+/// namespace not listed is state (`snapshot`, `vcs`, `task`, …): its
 /// events are kept whole.
 pub const CORE_WINDOWS: &[(&str, RetentionWindow)] = &[
     ("agent", RetentionWindow::new(30, 14)),
@@ -61,12 +61,12 @@ pub const CORE_WINDOWS: &[(&str, RetentionWindow)] = &[
 /// one (`event_types.retention`, P8.D5).
 pub const EXTENSION_DEFAULT: RetentionWindow = RetentionWindow::new(30, 14);
 
-/// The longest window a project may set: a hundred years (tsk985).
+/// The longest window a project may set: a hundred years.
 pub const MAX_DAYS: i64 = 36_500;
 
 /// The shortest window a project may set for one of core's expiring
 /// namespaces: oxplow reads them back (the agent policy reads a turn's
-/// tool payloads, evidence reads a run's), so a week (tsk985). An extension's
+/// tool payloads, evidence reads a run's), so a week. An extension's
 /// namespace may be kept for as little as a day.
 pub const MIN_CORE_DAYS: i64 = 7;
 
@@ -125,7 +125,7 @@ pub fn core_window(namespace: &str) -> Option<RetentionWindow> {
 mod tests {
     use super::*;
 
-    /// tsk1072: an operation the person saw fail is kept a month, its
+    /// an operation the person saw fail is kept a month, its
     /// captured output two weeks, and a project can't keep it under the
     /// core floor.
     #[test]

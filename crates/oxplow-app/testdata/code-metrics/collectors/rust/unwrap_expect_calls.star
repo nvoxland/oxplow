@@ -1,10 +1,10 @@
 # code_metrics.rust.unwrap_expect_calls — count `.unwrap()` / `.expect()` method
 # calls (a panic-risk signal). Matches method-call field identifiers via the
 # AST and keeps the two panic-prone names. Its facts are per-file
-# (subject "file:<path>", nonzero only), so an effort's change attributes
+# (subject "file:<path>", nonzero only), so a request's change attributes
 # through its files. and a
 # per-file `code_metrics.ast_hit` FACT (rule="unwrap_expect") — the metric is the SPEC
-# Sum(code_metrics.ast_hit) filtered by that rule (epic tsk12).
+# Sum(code_metrics.ast_hit) filtered by that rule.
 def transform(input):
     facts = []
     q = "(call_expression function: (field_expression field: (field_identifier) @m))"

@@ -16,15 +16,11 @@
 mod common;
 
 use common::boot;
-use oxplow_tasks::work_item_ref;
 
 use oxplow_app::Services;
 use oxplow_control_plane::ControlPlane;
 use oxplow_domain::stores::{AgentSessionStore, StreamStore, ThreadStore};
 use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadId, Timestamp};
-use oxplow_tasks::TaskId;
-use oxplow_tasks::TaskStore;
-use oxplow_tasks::{Task, TaskActorKind, TaskPriority, TaskStatus};
 
 /// Seed a stream + thread; returns the thread id
 /// string used in the X-Oxplow-Thread header.
@@ -73,28 +69,6 @@ async fn seed_thread(services: &Services) -> ThreadId {
         .await
         .unwrap();
     thread.id
-}
-
-async fn seed_in_progress_task(services: &Services, thread_id: ThreadId) {
-    let now = Timestamp::from_unix_ms(1);
-    let task = Task {
-        id: TaskId::placeholder(),
-        thread_id: Some(thread_id),
-        parent_id: None,
-        title: "ship the thing".into(),
-        description: "d".into(),
-        status: TaskStatus::InProgress,
-        priority: TaskPriority::Medium,
-        sort_index: 0,
-        created_by: TaskActorKind::User,
-        created_at: now,
-        updated_at: now,
-        completed_at: None,
-        deleted_at: None,
-        note_count: 0,
-        author: None,
-    };
-    services.task_store.insert(&task).await.unwrap();
 }
 
 fn hook_url(cp: &ControlPlane, event: &str) -> String {
@@ -195,7 +169,7 @@ async fn pre_tool_use_into_another_streams_worktree_denies_with_write_guard_shap
     );
 }
 
-/// An agent edits its worktree with nothing tracked: no task, no effort.
+/// An agent edits its worktree with nothing tracked: no task.
 /// oxplow never asks for tracked work before an edit (inferred work
 /// tracking).
 #[tokio::test]
@@ -223,7 +197,6 @@ async fn an_agent_edits_without_any_tracked_work() {
 async fn a_stop_is_never_refused_and_keeps_the_final_message() {
     let (cp, svc, root, _dir) = boot().await;
     let tid = seed_thread(&svc).await;
-    seed_in_progress_task(&svc, tid).await;
     post_hook(
         &cp,
         &svc,
@@ -642,7 +615,6 @@ async fn post_tool_use_edit_acks_200_empty() {
     // every single edit.
     let (cp, svc, root, _dir) = boot().await;
     let tid = seed_thread(&svc).await;
-    seed_in_progress_task(&svc, tid).await;
     let target = root.join("src/x.rs");
     let resp = post_hook(
         &cp,
@@ -659,66 +631,6 @@ async fn post_tool_use_edit_acks_200_empty() {
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body, serde_json::json!({}));
-}
-
-#[tokio::test]
-async fn post_tool_use_edit_auto_claims_file_on_open_effort() {
-    // Child 1 of the claim-first attribution epic: a structured Edit's
-    // PostToolUse auto-claims the file onto the thread's OPEN effort in
-    // real time, so the agent's touched_files at completion merely
-    // confirms/amends rather than enumerating from scratch.
-    use oxplow_app::EffortStore as _;
-    let (cp, svc, root, _dir) = boot().await;
-    let tid = seed_thread(&svc).await;
-    // Insert a task and open an effort on the thread.
-    let now = Timestamp::from_unix_ms(1);
-    let task_id = svc
-        .task_store
-        .insert(&Task {
-            id: TaskId::placeholder(),
-            thread_id: Some(tid),
-            parent_id: None,
-            title: "ship".into(),
-            description: "d".into(),
-            status: TaskStatus::InProgress,
-            priority: TaskPriority::Medium,
-            sort_index: 0,
-            created_by: TaskActorKind::User,
-            created_at: now,
-            updated_at: now,
-            completed_at: None,
-            deleted_at: None,
-            note_count: 0,
-            author: None,
-        })
-        .await
-        .unwrap();
-    let effort = svc
-        .effort_store
-        .start(&work_item_ref(task_id), &tid, None)
-        .await
-        .unwrap();
-
-    let target = root.join("src/x.rs");
-    let resp = post_hook(
-        &cp,
-        &svc,
-        "PostToolUse",
-        tid,
-        serde_json::json!({
-            "tool_name": "Edit",
-            "tool_input": { "file_path": target.to_string_lossy() },
-            "session_id": "s1",
-        }),
-    )
-    .await;
-    assert_eq!(resp.status(), 200);
-    // The row and the claim are pump reactors on `agent.tool.finished`.
-    svc.event_pump.run_once().await.unwrap();
-
-    let files = svc.effort_store.list_files(&effort.id).await.unwrap();
-    assert_eq!(files.len(), 1, "the edit should auto-claim one file");
-    assert_eq!(files[0].path, "src/x.rs");
 }
 
 #[tokio::test]
@@ -752,102 +664,6 @@ async fn post_tool_use_is_persisted_as_a_tool_call() {
 }
 
 #[tokio::test]
-async fn prompts_carry_the_efforts_decisions_once_per_session() {
-    use oxplow_app::EffortStore as _;
-    let (cp, svc, _root, _dir) = boot().await;
-    let tid = seed_thread(&svc).await;
-    let now = Timestamp::from_unix_ms(1);
-    let task_id = svc
-        .task_store
-        .insert(&Task {
-            id: TaskId::placeholder(),
-            thread_id: Some(tid),
-            parent_id: None,
-            title: "decide things".into(),
-            description: "d".into(),
-            status: TaskStatus::InProgress,
-            priority: TaskPriority::Medium,
-            sort_index: 0,
-            created_by: TaskActorKind::User,
-            created_at: now,
-            updated_at: now,
-            completed_at: None,
-            deleted_at: None,
-            note_count: 0,
-            author: None,
-        })
-        .await
-        .unwrap();
-    let effort = svc
-        .effort_store
-        .start(&work_item_ref(task_id), &tid, None)
-        .await
-        .unwrap();
-    svc.db
-        .transaction(move |tx| {
-            oxplow_db::record_decision_tx(
-                tx,
-                &oxplow_db::NewDecision {
-                    thread_id: tid.value(),
-                    work_item: Some(oxplow_tasks::work_item_ref(task_id)),
-                    effort_id: Some(effort.id.value()),
-                    question: "Storage?".into(),
-                    choice: "main DB".into(),
-                    alternatives: vec!["attached DB".into()],
-                    confidence: "high".into(),
-                    why: "cache".into(),
-                },
-            )
-        })
-        .await
-        .unwrap();
-
-    let context = |body: serde_json::Value| {
-        body["hookSpecificOutput"]["additionalContext"]
-            .as_str()
-            .unwrap_or("")
-            .to_string()
-    };
-    let prompt = || serde_json::json!({ "prompt": "go", "session_id": "s1" });
-    let first = post_hook(&cp, &svc, "UserPromptSubmit", tid, prompt())
-        .await
-        .json()
-        .await
-        .unwrap();
-    assert!(
-        context(first).contains("Storage? → main DB"),
-        "first prompt of a session carries decisions"
-    );
-    let second = post_hook(&cp, &svc, "UserPromptSubmit", tid, prompt())
-        .await
-        .json()
-        .await
-        .unwrap();
-    assert!(
-        !context(second).contains("Storage?"),
-        "not repeated while unchanged"
-    );
-    // A compaction / resume starts a new context: decisions come back.
-    post_hook(
-        &cp,
-        &svc,
-        "SessionStart",
-        tid,
-        serde_json::json!({ "session_id": "s1", "source": "compact" }),
-    )
-    .await;
-    let third = post_hook(&cp, &svc, "UserPromptSubmit", tid, prompt())
-        .await
-        .json()
-        .await
-        .unwrap();
-    assert!(
-        context(third).contains("Storage? → main DB"),
-        "re-sent after SessionStart"
-    );
-}
-
-#[tokio::test]
 async fn ingest_failure_still_acks_200() {
     // An unknown thread id makes agent_turn's thread FK fail inside
     // ingest. The agent can't do anything useful with a 500 — it just
@@ -872,7 +688,7 @@ async fn ingest_failure_still_acks_200() {
     assert_eq!(body, serde_json::json!({}));
 }
 
-// ── OTLP metrics receiver (epic tsk22) ──────────────────────────────────────
+// ── OTLP metrics receiver ──────────────────────────────────────
 
 /// Build an encoded (protobuf) Claude-shaped OTLP metrics export body with one
 /// `input` + one `output` `claude_code.token.usage` data point.

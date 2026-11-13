@@ -25,7 +25,7 @@ A diff alone rarely supplies all that context.
 |---|---|
 | Understand the software | Descriptions, connected references, knowledge, and custom pages |
 | See what changed | Observed activity, snapshots, analysis, and diffs |
-| Preserve scope and rationale | Optional work-list and knowledge providers |
+| Preserve scope and rationale | Optional task-tracker and knowledge providers |
 | Develop in parallel | Separate stream worktrees and a writer thread per stream |
 | Ask and investigate | Agent sessions in research and review threads |
 | Compare evidence | Collected facts, metrics, and dimensions |
@@ -41,7 +41,7 @@ led to them. Collected activity and test evidence make more of that
 process available for analysis. Developers can add their own collectors
 and metrics to ask whether a workflow is improving.
 
-A metric such as time to a passing test or effort spent on rework needs
+A metric such as time to a passing test or tokens spent on rework needs
 an explicit definition and suitable collected evidence. These are
 questions the extensible data model can support, rather than a promise
 that every such metric ships configured. See [Metrics](../guide/metrics.md).
@@ -51,7 +51,7 @@ that every such metric ships configured. See [Metrics](../guide/metrics.md).
 Oxplow aims to make work understandable while it is happening. An agent
 can explain a decision, a page can surface a concerning trend, and a
 reference can lead from that description to the relevant change.
-Work items and knowledge help when enabled, without becoming mandatory
+Tasks and knowledge help when enabled, without becoming mandatory
 bookkeeping before an edit or the end of a turn.
 
 This approach gives developers room to invent their own ways of

@@ -1,5 +1,4 @@
-//! The per-language support registry — one cohesive bundle per language
-//! (tsk322, epic tsk320).
+//! The per-language support registry — one cohesive bundle per language.
 //!
 //! `LanguageSupport` is the single place that answers *"what does oxplow know
 //! about language X?"*: its identity, file extensions, the curated LSP server
@@ -15,7 +14,7 @@
 //! scripts stay in `oxplow-script` (they need the Starlark runtime) —
 //! both key off this same `Language` enum, so identity stays unified.
 //!
-//! **Compiled-in.** Language support ships with oxplow (decision tsk323): no
+//! **Compiled-in.** Language support ships with oxplow (decision): no
 //! dynamic grammar loading. Adding a language is a single, well-isolated
 //! change — one entry in this registry plus its `spec.rs` node tables (and,
 //! if it should merge, an `oxplow-git` `MergeSpec`). See
@@ -25,7 +24,7 @@ use crate::spec::{language_from_lsp_id, Language, LanguageSpec};
 
 /// A kind of code "unit" a language exposes, beyond the always-present
 /// function — for the list-units navigation surface and the `metric_subject`
-/// roll-up hierarchy (exercised in tsk325). Declared per language here; the
+/// roll-up hierarchy (exercised in). Declared per language here; the
 /// extraction wiring consumes it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnitKind {
@@ -249,7 +248,7 @@ pub fn mason_suggestion(language_id: &str) -> Option<&'static str> {
 mod tests {
     use super::*;
 
-    /// tsk556: the files an LSP language id covers — from the registry for
+    /// the files an LSP language id covers — from the registry for
     /// an analysis language, from the LSP-only table otherwise.
     #[test]
     fn lsp_ids_know_their_extensions() {

@@ -1,0 +1,13 @@
+title: New Knowledge Page
+description: "Write a knowledge page: each knowledge store offers its own form, here as one button (several stores, a menu)."
+icon: plus
+needs:
+- model:oxplow/knowledge_record
+params:
+- name: title
+- name: body
+view:
+  action_point: oxplow/knowledge.new
+  context:
+    title: { param: title }
+    body: { param: body }

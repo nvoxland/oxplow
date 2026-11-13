@@ -1,9 +1,9 @@
-//! The metric runner (epic tsk213, P3; P7.B3): ties config-declared
+//! The metric runner (P3; P7.B3): ties config-declared
 //! `metrics:` entries to the substrate, and runs the **fact collectors** —
 //! the collectors that record facts (`collectors:` with `facts:`, the
 //! project's, an extension's, or a built-in one a `metrics: - use:`
 //! enables). The `collector.triggers` pump consumer hands it the ones an
-//! event triggers (`snapshot.taken`, `effort.finished`, …); `oxplow.collector.sync`
+//! event triggers (`snapshot.taken`, `vcs.head.moved`, …); `oxplow.collector.sync`
 //! runs one by hand; `oxplow.metric.rebuild` baselines them.
 //!
 //! A fact collector's Starlark script runs with a [`TreeHost`] exposing the
@@ -33,12 +33,10 @@ use oxplow_config::{
     DimensionEntry, MeasureEntry, MetricEntry, OxplowConfig, ResolvedSpec,
 };
 use oxplow_db::{
-    EffortStore, NewDimension, NewMeasure, NewMetricSpec, SnapshotStorage, SqliteEffortStore,
-    SqliteFactStore, SqliteSnapshotStore, SqliteThreadStore,
+    NewDimension, NewMeasure, NewMetricSpec, SnapshotStorage, SqliteFactStore, SqliteSnapshotStore,
 };
 use oxplow_domain::run::Budget;
-use oxplow_domain::stores::ThreadStore;
-use oxplow_domain::{Actor, DomainError, EffortId, StreamId, ThreadId};
+use oxplow_domain::{Actor, DomainError, StreamId};
 use oxplow_script::CollectedFact;
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -47,7 +45,7 @@ use crate::snapshot_content::SnapshotContent;
 
 const DEFAULT_MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
 
-/// Wall-clock ceiling for ONE collector run (tsk47).
+/// Wall-clock ceiling for ONE collector run.
 ///
 /// The `Budget` default is 5s, which suits a report parser reading a single
 /// file. A tree collector is a different animal: it tree-sitter-parses the WHOLE tree
@@ -61,14 +59,14 @@ const FACT_COLLECTOR_TIMEOUT: std::time::Duration = std::time::Duration::from_se
 
 /// A collector sweep over at least this many files is a WHOLE-TREE sweep (the baseline)
 /// rather than an ordinary per-commit delta, so it gets tracked as a visible
-/// background task (tsk48). A delta is a handful of files and finishes in
+/// background task. A delta is a handful of files and finishes in
 /// milliseconds; tracking those would just be noise.
 const TREE_SWEEP_FILE_THRESHOLD: usize = 100;
 
 /// What a collector sweep did — how many collectors actually ran (after the idempotency
 /// skip) and which failed. Returned so [`MetricsService::rebuild_baseline`]
 /// can report the outcome to an MCP caller or a test instead of it vanishing into a
-/// background-task label (tsk50).
+/// background-task label.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SweepReport {
     pub ran: usize,
@@ -232,7 +230,13 @@ fn trigger_label(trigger: &Trigger) -> String {
         Trigger::Every { minutes } => format!("every {minutes}m"),
         Trigger::OnRun { run } => format!("on {run:?} run").to_lowercase(),
         Trigger::On { events, filter, .. } => {
-            let filter: Vec<String> = filter.iter().map(|(k, v)| format!("{k}: {v}")).collect();
+            let filter: Vec<String> = filter
+                .iter()
+                .map(|(k, v)| match v.as_slice() {
+                    [one] => format!("{k}: {one}"),
+                    many => format!("{k}: [{}]", many.join(", ")),
+                })
+                .collect();
             match filter.is_empty() {
                 true => format!("on {}", events.join(", ")),
                 false => format!("on {} where {}", events.join(", "), filter.join(", ")),
@@ -243,8 +247,9 @@ fn trigger_label(trigger: &Trigger) -> String {
 
 /// The event that runs snapshot-triggered fact collectors.
 const SNAPSHOT_TAKEN: &str = "snapshot.taken";
-/// The event that runs effort-triggered fact collectors.
-const EFFORT_FINISHED: &str = "effort.finished";
+/// A stream's HEAD moved: what a whole-tree collector that follows commits
+/// runs on.
+const HEAD_MOVED: &str = "vcs.head.moved";
 
 /// How one fact collector's run went.
 #[derive(Debug, Clone, PartialEq)]
@@ -262,7 +267,7 @@ pub enum FactRun {
 /// The global-scope catalog blocks parsed from `<global_dir>/{metrics,
 /// measures,dimensions}/*.yaml`. Cached so the hot read paths
 /// (`resolved_specs`, run on every snapshot event) don't
-/// re-read + re-parse these files each time (tsk17). Project config stays read
+/// re-read + re-parse these files each time. Project config stays read
 /// fresh from the in-memory `RwLock` — only the *disk* loads are cached.
 #[derive(Clone, Default)]
 struct GlobalCatalog {
@@ -279,23 +284,21 @@ struct PublishedMetricInputs {
 #[derive(Clone)]
 pub struct MetricsService {
     snapshot_store: Arc<SqliteSnapshotStore>,
-    thread_store: Arc<SqliteThreadStore>,
-    effort_store: Arc<SqliteEffortStore>,
     content: SnapshotContent,
     vcs: Arc<dyn oxplow_domain::vcs::Vcs>,
     config: Arc<RwLock<OxplowConfig>>,
     project_dir: PathBuf,
     /// The fact substrate, for seeding config-declared `measures:`/`dimensions:`
-    /// into the catalog (epic tsk12, E). `None` in test fixtures that don't
+    /// into the catalog (E). `None` in test fixtures that don't
     /// exercise catalog seeding; wired at boot via [`Self::with_fact_store`].
     fact_store: Option<Arc<SqliteFactStore>>,
     /// Wired at boot via [`Self::with_snapshot_captures`]; `None` in tests
     /// that never rebuild a baseline.
     snapshot_captures: Option<crate::snapshot_capture_registry::SnapshotCaptureRegistry>,
-    /// Background-task store, so a whole-tree collector sweep is VISIBLE while it runs
-    /// (tsk48). `None` in tests. Wired at boot via [`Self::with_background_tasks`].
+    /// Background-task store, so a whole-tree collector sweep is VISIBLE while it runs.
+    /// `None` in tests. Wired at boot via [`Self::with_background_tasks`].
     background_tasks: Option<crate::background_task::BackgroundTaskStore>,
-    /// Lazily-loaded cache of the global-scope catalog files (tsk17). Cleared on
+    /// Lazily-loaded cache of the global-scope catalog files. Cleared on
     /// every in-app `ConfigChanged` emit, so an in-app scaffold/toggle reflects
     /// immediately; an *external* edit to a global YAML needs any in-app config
     /// op to refresh (global files aren't watched — the same semantics as
@@ -306,8 +309,8 @@ pub struct MetricsService {
     /// The loaded-extensions cache shared with `Services`; a fresh one
     /// for a bare `MetricsService` in tests.
     extensions_cache: Arc<crate::extension::extension_catalog::ExtensionCatalog>,
-    /// Per state entity metric: when it was last captured and the value
-    /// (tsk322), for the throttle and the unchanged-value skip.
+    /// Per state entity metric: when it was last captured and the value,
+    /// for the throttle and the unchanged-value skip.
     entity_captures: Arc<std::sync::Mutex<HashMap<String, (std::time::Instant, f64)>>>,
     /// The last tree a script was given (`tree.read`, [`crate::services::TreeSource`]),
     /// by snapshot: the runs one event triggers share it.
@@ -369,7 +372,7 @@ impl crate::services::TreeSource for MetricsService {
 }
 
 /// One row in the **available** metric catalog (built-in ∪ global ∪ project) for
-/// the Catalog UI (tsk219, P4): what the metric is + whether the project has it
+/// the Catalog UI (P4): what the metric is + whether the project has it
 /// enabled. Distinct from `MetricDefinition` (the seeded substrate row) — a
 /// built-in appears here even before it's enabled/seeded.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
@@ -390,7 +393,7 @@ pub struct MetricCatalogEntry {
     /// `metrics:` entries; `false` for always-on producers (tokens, tests,
     /// coverage, analysis, lifecycle, nudges) and extension-seeded definitions —
     /// those are free side-bands, not opt-in compute. The real axis is
-    /// always-on vs toggleable; "built-in vs hardcoded" was an artifact (tsk284).
+    /// always-on vs toggleable; "built-in vs hardcoded" was an artifact.
     pub toggleable: bool,
     /// `operational` | `testing` | `static-quality` | `custom` — drives the
     /// Catalog page's grouping.
@@ -406,12 +409,11 @@ struct CollectorRunContext {
     closest_vcs_rev: Option<String>,
     vcs_rev_exact: bool,
     branch: Option<String>,
-    /// The producing effort, when the trigger knows it unambiguously (the
-    /// `on-effort-complete` ride-along) — stamped onto the capture so the
-    /// effort-attribution read (`captures_for_effort`) sees the run (tsk43).
-    /// Snapshot/manual scans are effort-less (`None`).
-    effort_id: Option<i64>,
-    /// The capture's scanned-set semantics (tsk71): `delta` for the ordinary
+    /// The turn the run's trigger event was anchored to, stamped onto the
+    /// capture so the turn's request reads the run (`Members::Turns`).
+    /// Snapshot/manual scans have none.
+    turn_id: Option<i64>,
+    /// The capture's scanned-set semantics: `delta` for the ordinary
     /// incremental rescan over the snapshot's own rows; `full` for a baseline
     /// over the RECONSTRUCTED tree as-of the snapshot. Stamped verbatim onto
     /// the capture — the per-path fold branches on it.
@@ -452,8 +454,6 @@ impl MetricsService {
 
     pub fn new(
         snapshot_store: Arc<SqliteSnapshotStore>,
-        thread_store: Arc<SqliteThreadStore>,
-        effort_store: Arc<SqliteEffortStore>,
         content: SnapshotContent,
         vcs: Arc<dyn oxplow_domain::vcs::Vcs>,
         config: Arc<RwLock<OxplowConfig>>,
@@ -464,8 +464,6 @@ impl MetricsService {
         );
         Self {
             snapshot_store,
-            thread_store,
-            effort_store,
             content,
             vcs,
             config,
@@ -531,7 +529,7 @@ impl MetricsService {
     }
 
     /// Run `f` against the cached global catalog, loading it from disk once on
-    /// first use (tsk17). The hot read paths call this instead of re-reading the
+    /// first use. The hot read paths call this instead of re-reading the
     /// four global YAML dirs every time.
     fn with_global_catalog<R>(&self, f: impl FnOnce(&GlobalCatalog) -> R) -> R {
         let published = self.published_inputs.lock().clone();
@@ -718,7 +716,7 @@ impl MetricsService {
 
     fn catalog_with_specs(&self, specs: Vec<oxplow_db::MetricSpec>) -> Vec<MetricCatalogEntry> {
         let resolved = self.resolved_specs();
-        // Per-key config enabled state (tsk31): `None` = no entry, `Some(_)` = an
+        // Per-key config enabled state: `None` = no entry, `Some(_)` = an
         // explicit flag. Producers and extension metrics are default-ON (a disable
         // marker turns them off) unless an extension says `default: off`.
         let cfg_metrics = self.read_metric_config().metrics;
@@ -810,7 +808,7 @@ impl MetricsService {
 
     /// Apply one enable/disable to a `metrics:` list in place (no I/O) — the
     /// shared core of [`Self::set_metric_enabled`] and the batch variant so both
-    /// stay consistent (tsk31). Default-OFF metrics toggle by `use:` presence;
+    /// stay consistent. Default-OFF metrics toggle by `use:` presence;
     /// default-ON metrics and config `key:` definitions toggle by the `enabled`
     /// marker (never deleting a `key:` definition on disable).
     pub(crate) fn apply_metric_enabled(
@@ -903,7 +901,7 @@ impl MetricsService {
         if let Some(origin) = origin.as_deref() {
             oxplow_domain::uri::OxplowUri::parse(origin).map_err(|e| {
                 format!(
-                    "origin `{origin}` is not a canonical ref (`oxplow:oxplow/effort?id=eff42`, `oxplow:oxplow/thread?id=thr3`): {}",
+                    "origin `{origin}` is not a canonical ref (`oxplow:oxplow/request?id=req42`, `oxplow:oxplow/thread?id=thr3`): {}",
                     e.reason()
                 )
             })?;
@@ -926,11 +924,11 @@ impl MetricsService {
     /// Enabled on-snapshot collectors that have not been baselined at their CURRENT logic —
     /// i.e. that need a full-tree run before their metric is trustworthy.
     ///
-    /// The question is per COLLECTOR, not per measure (tsk49): `oxplow.ast_hit` is one
+    /// The question is per COLLECTOR, not per measure: `oxplow.ast_hit` is one
     /// measure shared by 10 idiom collectors, so "does the measure have facts" tells you
     /// nothing about one collector — a delta-only collector looks done because a sibling filled
     /// the measure. A collector is un-baselined when it has no completed
-    /// `scan_kind = 'full'` capture at its current fingerprint (tsk71): that one
+    /// `scan_kind = 'full'` capture at its current fingerprint: that one
     /// check covers both "never scanned the whole tree" and "script changed since
     /// the last baseline" (the old `collector_is_stale` criterion — a full capture at
     /// stale logic carries the old fingerprint and doesn't match).
@@ -938,7 +936,7 @@ impl MetricsService {
     /// This set is the pending-baseline QUEUE: the on-snapshot sweep drains it by
     /// running these collectors `full` over the next snapshot that lands, so a newly
     /// added or edited collector baselines on the next ordinary snapshot — no
-    /// fabricated full-tree snapshot (which used to pollute effort attribution).
+    /// fabricated full-tree snapshot (which used to pollute run attribution).
     pub async fn collectors_needing_baseline(&self, stream_id: i64) -> Vec<String> {
         let Some(facts) = self.fact_store.as_ref() else {
             return Vec::new();
@@ -1039,10 +1037,10 @@ impl MetricsService {
         }
     }
 
-    /// Bring every `per-path` metric up to date over the WHOLE tree (tsk50).
+    /// Bring every `per-path` metric up to date over the WHOLE tree.
     ///
-    /// A baseline no longer fabricates a full-tree snapshot (tsk71 — that
-    /// snapshot polluted effort file-attribution). Instead it drains any
+    /// A baseline no longer fabricates a full-tree snapshot (that
+    /// snapshot polluted file attribution). Instead it drains any
     /// pending edits into an ORDINARY snapshot (authored work, correctly
     /// attributed), anchors on the latest snapshot, and runs the un-baselined
     /// collectors `scan_kind = 'full'` over the RECONSTRUCTED tree as-of it — the
@@ -1053,7 +1051,7 @@ impl MetricsService {
     /// This is deliberately callable, not buried in boot: it's the one entry point
     /// boot, the `oxplow.metric.rebuild` command, and the end-to-end test all share, so
     /// the boot baseline path is finally exercisable without a process restart —
-    /// four metrics bugs in a row (tsk47/48/49) were caught only by restarting.
+    /// four metrics bugs in a row were caught only by restarting.
     ///
     /// `force` treats every collector as needing a baseline (the command's escape hatch).
     /// The kind-scoped idempotency guard in the sweep means a repeat over the
@@ -1074,7 +1072,7 @@ impl MetricsService {
             let pending = self.collectors_needing_baseline(stream_val).await;
             if pending.is_empty() {
                 // Nothing to baseline — but still sweep out captures an
-                // EARLIER baseline made dead weight (tsk75): the post-sweep
+                // EARLIER baseline made dead weight: the post-sweep
                 // prune only fires when a full phase runs, so history from
                 // before the prune existed is collected here, once per boot.
                 // Idempotent and cheap when there's nothing to drop.
@@ -1135,7 +1133,7 @@ impl MetricsService {
     }
 
     /// Capture each state entity metric's current value as a fact on its
-    /// synthesized measure (producer `entity-metric`, tsk322), so it has
+    /// synthesized measure (producer `entity-metric`), so it has
     /// history. At most once per [`ENTITY_CAPTURE_EVERY`] per metric unless
     /// `force`d, and never when the value hasn't moved since the last capture
     /// (a level carries forward). Recorded against the primary stream.
@@ -1217,9 +1215,9 @@ impl MetricsService {
 
     /// Run every enabled `on-snapshot` collector against the just-captured snapshot.
     /// `pub(crate)` so [`MetricsService::rebuild_baseline`] can drive it
-    /// directly (and thus test the boot path end to end, tsk50).
+    /// directly (and thus test the boot path end to end).
     ///
-    /// Two-phase (tsk71): collectors already baselined run a `delta` scan over the
+    /// Two-phase: collectors already baselined run a `delta` scan over the
     /// snapshot's own file rows (the cheap incremental rescan); collectors in the
     /// pending-baseline queue ([`Self::collectors_needing_baseline`]) run a `full`
     /// scan over the RECONSTRUCTED tree as-of this snapshot and record
@@ -1243,10 +1241,14 @@ impl MetricsService {
         // no delta: only the whole-tree collectors have the moved revision
         // to restate.
         let recorded = event.as_ref().is_none_or(|e| take_recorded(e));
+        let event_type = event
+            .as_ref()
+            .map_or(SNAPSHOT_TAKEN, |e| e.envelope.event_type.as_str())
+            .to_string();
         let collectors: Vec<FactCollector> = self
             .fact_collectors()
             .into_iter()
-            .filter(|g| g.runs_on(SNAPSHOT_TAKEN))
+            .filter(|g| g.runs_on(&event_type))
             .filter(|g| select(g))
             .filter(|g| recorded || g.whole_tree)
             .filter(|g| {
@@ -1315,7 +1317,7 @@ impl MetricsService {
             ctx.scan_kind = "full";
             ctx.event = event.clone();
             // Whole-tree collectors restate the tree on every qualifying
-            // take; only the `needing` ones are baselines (tsk709).
+            // take; only the `needing` ones are baselines.
             let baselined = full_collectors.iter().any(|g| needing.contains(&g.key));
             let r = self
                 .run_collector_sweep(&full_collectors, &ctx, files)
@@ -1323,8 +1325,8 @@ impl MetricsService {
             let full_ok = r.failed.is_empty();
             report.ran += r.ran;
             report.failed.extend(r.failed);
-            // A fresh baseline makes every older effort-less tree capture dead
-            // weight (tsk75 — their facts were ~69% of the table and every
+            // A fresh baseline makes every older turn-less tree capture dead
+            // weight (their facts were ~69% of the table and every
             // full-history read paid for them). Prune only on a clean baseline
             // sweep: a failed collector wrote no baseline, so its history must
             // survive, and a whole-tree restate alone baselines nothing.
@@ -1358,7 +1360,7 @@ impl MetricsService {
         files: Arc<HashMap<String, String>>,
     ) -> SweepReport {
         // Idempotency: skip a collector that already has a `done` capture for THIS
-        // snapshot at its current fingerprint (tsk50). Otherwise a re-delivered
+        // snapshot at its current fingerprint. Otherwise a re-delivered
         // snapshot event — or the direct baseline run PLUS the event loop reacting to
         // the same snapshot — would tree-sitter-parse the whole tree twice (minutes of
         // CPU). The manual `oxplow.collector.sync` path doesn't come through here, so an explicit
@@ -1385,7 +1387,7 @@ impl MetricsService {
 
         // A WHOLE-TREE sweep (the baseline) tree-sitter-parses every file for every
         // collector — minutes of CPU. Track it as a background task so the user can see
-        // what oxplow is doing and why a core is pinned (tsk48). An ordinary delta
+        // what oxplow is doing and why a core is pinned. An ordinary delta
         // (a handful of changed files) finishes in milliseconds and would only be
         // noise, so it stays untracked. `run()` processes snapshot events serially,
         // so two sweeps can never overlap.
@@ -1431,7 +1433,7 @@ impl MetricsService {
                 );
             } else {
                 // Do NOT silently succeed. A failed collector leaves its metric reading
-                // stale or empty, and that going unnoticed is exactly the bug (tsk47).
+                // stale or empty, and that going unnoticed is exactly the bug.
                 bts.fail(
                     &t.id,
                     format!(
@@ -1451,69 +1453,17 @@ impl MetricsService {
         }
     }
 
-    /// Run the fact collectors an `effort.finished` triggers, over the
-    /// effort's end snapshot (the worktree as it stood at close), stamped
-    /// with the effort.
-    pub async fn run_effort_collectors(
-        &self,
-        thread_id: &ThreadId,
-        effort_id: &EffortId,
-        event: Option<Arc<oxplow_domain::StoredEvent>>,
-        select: &(dyn Fn(&FactCollector) -> bool + Sync),
-    ) {
-        let collectors: Vec<FactCollector> = self
-            .fact_collectors()
-            .into_iter()
-            .filter(|g| g.runs_on(EFFORT_FINISHED))
-            .filter(|g| select(g))
-            .filter(|g| {
-                event
-                    .as_ref()
-                    .is_none_or(|e| g.trigger.where_fits(&e.envelope.payload))
-            })
-            .collect();
-        let collectors = self.runnable(collectors, event.as_deref()).await;
-        if collectors.is_empty() || self.skips_without_contents("effort collectors") {
-            return;
-        }
-        let stream_val = match self.thread_store.get(thread_id).await {
-            Ok(Some(t)) => t.stream_id.value(),
-            _ => return,
-        };
-        let snapshot_id = match self.effort_store.get_effort(effort_id).await {
-            Ok(Some(e)) => e.end_snapshot_id,
-            _ => None,
-        };
-        let files = self.snapshot_files(snapshot_id, "effort collectors").await;
-        let mut ctx = self
-            .snapshot_context(
-                stream_val,
-                Some(thread_id.value()),
-                EFFORT_FINISHED,
-                snapshot_id.unwrap_or(0),
-            )
-            .await;
-        ctx.event = event;
-        // This trigger KNOWS the producing effort — stamp it so the capture is
-        // attributable via `captures_for_effort` (tsk43; the pre-arc effort
-        // subject default was removed without a replacement).
-        ctx.effort_id = Some(effort_id.value());
-        for g in &collectors {
-            self.run_one_collector(g, &ctx, files.clone()).await;
-        }
-    }
-
     /// Run fact collector `key` (of `owner`), deferred by its pacing, for
     /// `event`. A snapshot collector runs over the stream's latest
     /// snapshot with every file recorded since it last finished — what it
     /// would have scanned running on each snapshot between — so skipped
-    /// snapshots lose nothing; an effort's or another event's runs as the
-    /// event would have had it.
+    /// snapshots lose nothing; another event's runs as the event would have
+    /// had it.
     pub async fn run_paced(&self, owner: &str, key: &str, event: Arc<oxplow_domain::StoredEvent>) {
         let only = |c: &FactCollector| c.owner == owner && c.key == key;
         let anchors = event.envelope.anchors.clone();
         match event.envelope.event_type.as_str() {
-            SNAPSHOT_TAKEN => {
+            SNAPSHOT_TAKEN | HEAD_MOVED => {
                 let Some(stream) = anchors.stream_id else {
                     return;
                 };
@@ -1533,16 +1483,6 @@ impl MetricsService {
                     None => None,
                 };
                 self.run_snapshot_collectors(stream, latest, false, Some(event), &only, since)
-                    .await;
-            }
-            EFFORT_FINISHED => {
-                let (Ok(effort), Some(thread)) = (
-                    crate::effort_lifecycle::effort_of(&event),
-                    anchors.thread_id,
-                ) else {
-                    return;
-                };
-                self.run_effort_collectors(&thread, &effort, Some(event), &only)
                     .await;
             }
             _ => self.run_event_collectors(event, &only).await,
@@ -1581,7 +1521,7 @@ impl MetricsService {
             .snapshot_context(stream_val, None, "on", snapshot_id.unwrap_or(0))
             .await;
         ctx.thread_id = event.envelope.anchors.thread_id.map(|t| t.value());
-        ctx.effort_id = event.envelope.anchors.effort_id.map(|e| e.value());
+        ctx.turn_id = event.envelope.anchors.turn_id;
         ctx.event = Some(event);
         for c in &collectors {
             self.run_one_collector(c, &ctx, files.clone()).await;
@@ -1729,7 +1669,7 @@ impl MetricsService {
 
     /// Build the RECONSTRUCTED whole-tree file map as-of `snapshot_id` (the
     /// latest row per path ≤ the snapshot, tombstones excluded) — the baseline
-    /// corpus (tsk71). Same content pipeline as [`Self::build_file_map`]; only
+    /// corpus. Same content pipeline as [`Self::build_file_map`]; only
     /// the listing differs.
     async fn build_span_file_map(&self, after: i64, to: i64) -> Corpus {
         let files = self
@@ -1820,7 +1760,7 @@ impl MetricsService {
             closest_vcs_rev: version.as_ref().and_then(|v| v.closest_vcs_rev.clone()),
             vcs_rev_exact: version.as_ref().map(|v| v.vcs_rev_exact).unwrap_or(false),
             branch: self.current_branch().await,
-            effort_id: None,
+            turn_id: None,
             scan_kind: "delta",
             event: None,
             run: RunContext::core(Actor::System, Mode::External),
@@ -1917,7 +1857,7 @@ impl MetricsService {
 
     /// Run `owner`'s fact collector `spec` over `files` (path → content)
     /// with `input` — an example's fixture — recording nothing: what `oxplow
-    /// extension test` runs for a fact collector's example (tsk1047). The facts
+    /// extension test` runs for a fact collector's example. The facts
     /// as JSON, a whole-number value as an integer. `mode` is what the run
     /// may do: `Pure` refuses a model call, `External` lets an approved one
     /// through (the SDK's throwaway answers it from the fixture model).
@@ -2033,6 +1973,7 @@ impl MetricsService {
             .await
             .map_err(|e| format!("task failed: {e}"))??;
         Ok(facts
+            .facts
             .into_iter()
             .map(|f| {
                 let mut v = serde_json::to_value(&f).unwrap_or_default();
@@ -2164,7 +2105,7 @@ impl MetricsService {
                     // A tree collector scans the WHOLE tree (hundreds of files,
                     // tree-sitter each): the 5 s default sized for report parsers
                     // silently timed out the broad-query ones on every full-tree
-                    // run (tsk47). They run detached under `spawn_blocking`, so a
+                    // run. They run detached under `spawn_blocking`, so a
                     // generous ceiling costs nothing and still catches a runaway.
                     match run {
                         Ok(run) => {
@@ -2189,25 +2130,25 @@ impl MetricsService {
                 this_run.check_authority()?;
                 Ok(facts)
             });
-            // Facts the ingest would refuse fail the run here, with why (tsk986).
+            // Facts the ingest would refuse fail the run here, with why,
+            // and so does a capture time that isn't one.
             let outcome = match outcome {
-                Ok(collector_facts) => {
-                    match self.refused_facts(collector, &collector_facts).await {
-                        Some(why) => Err(why),
-                        None => Ok(collector_facts),
-                    }
-                }
-                failed => failed,
+                Ok(collected) => match self.refused_facts(collector, &collected.facts).await {
+                    Some(why) => Err(why),
+                    None => CapturePlace::of(collected.capture.as_ref())
+                        .map(|place| (collected.facts, place)),
+                },
+                Err(failed) => Err(failed),
             };
             let (run, capture) = match outcome {
-                Ok(collector_facts) => {
+                Ok((collector_facts, place)) => {
                     tracing::debug!(
                         key = %collector.key,
                         elapsed_ms = started.elapsed().as_millis() as u64,
                         "fact collector: complete",
                     );
                     match self
-                        .collector_capture(collector, ctx, &source, &collector_facts)
+                        .collector_capture(collector, ctx, &source, &collector_facts, place)
                         .await
                     {
                         Some((capture, rows)) => {
@@ -2312,8 +2253,8 @@ impl MetricsService {
                 crate::collector_runner::Anchored {
                     stream_id: Some(ctx.stream_val),
                     snapshot_id: ctx.snapshot_id,
-                    effort_id: ctx.effort_id,
                     thread_id: ctx.thread_id,
+                    turn_id: ctx.turn_id,
                 },
             );
             crate::collector_runner::input_rows_for_run(&log.layer, &c.key, sql, params, run)
@@ -2328,7 +2269,7 @@ impl MetricsService {
 
     /// Record a fact collector's run: its `capture` (and facts), its
     /// `collector_run` row and `collector.synced@1` in one transaction
-    /// (tsk712) — a run never lands without its record, and a redelivered
+    ///  — a run never lands without its record, and a redelivered
     /// event writes nothing. Without a run log (tests) the capture alone is
     /// written. A failure to record is logged.
     async fn log_run(
@@ -2412,7 +2353,7 @@ impl MetricsService {
         }
     }
 
-    /// A FAILED collector run as a `status = 'failed'` capture (tsk47), recorded
+    /// A FAILED collector run as a `status = 'failed'` capture, recorded
     /// with the run ([`Self::log_run`]).
     ///
     /// Two reasons this must be durable rather than a log line:
@@ -2442,7 +2383,7 @@ impl MetricsService {
         capture.status = "failed".into();
         capture.error = Some(error.to_string());
         capture.thread_id = ctx.thread_id;
-        capture.effort_id = ctx.effort_id;
+        capture.turn_id = ctx.turn_id;
         capture.scope = Some(collector.scope());
         capture.trigger = Some(ctx.trigger.into());
         capture.snapshot_id = ctx.snapshot_id;
@@ -2454,7 +2395,7 @@ impl MetricsService {
         capture
     }
 
-    /// A collector's per-item `facts` (epic tsk12) as `fact` rows under one
+    /// A collector's per-item `facts` as `fact` rows under one
     /// `metric_capture`, resolving each fact's measure key to a defined measure.
     /// Enforces **declare-to-collect** (decision #4): a fact is dropped (surfaced
     /// via `tracing::warn!`, never silently written) if its measure is undefined
@@ -2464,13 +2405,13 @@ impl MetricsService {
     /// A ZERO-fact run still writes its (empty) capture — "this scan ran and
     /// found nothing" is the record that lets a count metric drop back to zero
     /// after the last offender is fixed; the engine zero-fills the series from
-    /// the producer's captures (tsk44). Builds the capture and its facts;
+    /// the producer's captures. Builds the capture and its facts;
     /// [`Self::log_run`] writes them with the run's record.
     /// Why `collector_facts` can't be recorded, if they can't — a failed run
     /// that says so, never facts dropped behind a run reported as recorded:
-    /// a measure outside the collector's `facts:`, a measure no one defines
-    /// (tsk1029), or a bare dimension key, which would roll the whole
-    /// capture back (tsk986). A measure not yet in the catalog reseeds it
+    /// a measure outside the collector's `facts:`, a measure no one defines,
+    /// or a bare dimension key, which would roll the whole
+    /// capture back. A measure not yet in the catalog reseeds it
     /// once first: an extension added while oxplow runs can trigger its
     /// collector before the catalog's reseed has registered its measures.
     async fn refused_facts(
@@ -2536,6 +2477,7 @@ impl MetricsService {
         ctx: &CollectorRunContext,
         source: &str,
         collector_facts: &[CollectedFact],
+        place: CapturePlace,
     ) -> Option<(oxplow_db::NewMetricCapture, Vec<oxplow_db::NewFact>)> {
         let facts = self.fact_store.as_ref()?;
         // Resolve the measure catalog once (one query), then map each fact's key.
@@ -2579,7 +2521,7 @@ impl MetricsService {
         // No `rows.is_empty()` bail: the empty capture IS the zero record.
         let capture = oxplow_db::NewMetricCapture {
             thread_id: ctx.thread_id,
-            effort_id: ctx.effort_id,
+            turn_id: ctx.turn_id,
             scope: Some(collector.scope()),
             trigger: Some(ctx.trigger.into()),
             basis_ref: ctx.closest_vcs_rev.clone(),
@@ -2588,7 +2530,7 @@ impl MetricsService {
             vcs_rev_exact: ctx.vcs_rev_exact,
             branch: ctx.branch.clone(),
             // Record WHICH LOGIC produced these facts, so a later script change is
-            // detectable and can re-baseline instead of silently no-opping (tsk45).
+            // detectable and can re-baseline instead of silently no-opping.
             producer_version: collector_fingerprint(collector, &self.project_dir),
             scan_kind: ctx.scan_kind.into(),
             excluded: ctx
@@ -2596,6 +2538,10 @@ impl MetricsService {
                 .iter()
                 .map(|e| (e.path.clone(), e.reason.as_str().to_string()))
                 .collect(),
+            // When its facts were true, and what they are the figures of,
+            // when the collector said (`"capture": {at, replaces}`).
+            captured_at: place.at,
+            replaces: place.replaces,
             ..oxplow_db::NewMetricCapture::done(
                 ctx.stream_val,
                 collector.key.clone(),
@@ -2638,14 +2584,14 @@ pub(crate) fn spec_to_new_spec(s: &ResolvedSpec) -> NewMetricSpec {
     }
 }
 
-/// Make `spec` an entity metric over `entity` (tsk322). An event metric (with
+/// Make `spec` an entity metric over `entity`. An event metric (with
 /// `time`) has no source measure: it's computed live. A state metric reads a
 /// synthesized measure of its own key, which the `entity-metric` producer
 /// feeds. The entity's own aggregation lives in `entity_json`; the stored
 /// `aggregation` says how the series' points combine, which is what the fact
 /// path and a range total read: `last` for a state metric (one fact per
 /// capture, a level), `sum` for an event metric whose buckets add up
-/// (count / sum; not count_distinct, tsk367), else `avg`.
+/// (count / sum; not count_distinct), else `avg`.
 fn as_entity_spec(mut spec: NewMetricSpec, entity: &oxplow_config::EntitySpec) -> NewMetricSpec {
     spec.source_measure = entity.time.is_none().then(|| spec.key.clone());
     spec.aggregation = if entity.time.is_none() {
@@ -2733,6 +2679,39 @@ pub struct MetricScaffold {
     pub files: Vec<crate::metric_scaffold::ScaffoldFile>,
 }
 
+/// Where a fact collector's run said its capture goes: the time its facts
+/// are placed at (`None`: when it ran) and what they are the figures of,
+/// whose earlier captures it replaces.
+#[derive(Debug, Default, Clone, PartialEq)]
+struct CapturePlace {
+    at: Option<oxplow_domain::Timestamp>,
+    replaces: Option<String>,
+}
+
+impl CapturePlace {
+    /// The run's `"capture"`, checked: a time that isn't RFC 3339 fails the
+    /// run, saying so.
+    fn of(capture: Option<&oxplow_script::CollectedCapture>) -> Result<Self, String> {
+        let Some(c) = capture else {
+            return Ok(Self::default());
+        };
+        let at =
+            c.at.as_deref()
+                .map(|at| {
+                    oxplow_domain::Timestamp::parse(at).map_err(|e| {
+                        format!(
+                        "`capture.at` is a time (RFC 3339, like 2026-01-05T09:00:00Z): `{at}`: {e}"
+                    )
+                    })
+                })
+                .transpose()?;
+        Ok(Self {
+            at,
+            replaces: c.replaces.clone(),
+        })
+    }
+}
+
 /// What runs a fact collector.
 enum FactRunner {
     Starlark(String),
@@ -2748,16 +2727,16 @@ enum FactRunner {
 impl FactRunner {
     /// Run over `input` under the fact-collector budget, with the
     /// services it was `given` (its `sql.read` calls read through
-    /// `layer`), and read its `{"facts": [...]}`. Blocking: call it from
-    /// `spawn_blocking`, inside the runtime.
+    /// `layer`), and read its `{"facts": [...], "capture"?: {..}}`.
+    /// Blocking: call it from `spawn_blocking`, inside the runtime.
     fn run(
         self,
         input: &serde_json::Value,
         given: crate::services::Given,
         layer: Option<crate::sql_gateway::SqlGateway>,
         run: &RunContext,
-    ) -> Result<Vec<CollectedFact>, String> {
-        use oxplow_script::facts_of;
+    ) -> Result<oxplow_script::Collected, String> {
+        use oxplow_script::collected_of;
         use oxplow_script::runtime::run_exec_authorized_at;
         use oxplow_script::workers::{shared, ScriptRun};
         run.check_authority()?;
@@ -2800,7 +2779,7 @@ impl FactRunner {
         .map_err(|e| e.to_string())
         .and_then(|value| {
             run.check_authority()?;
-            facts_of(value).map_err(|e| e.to_string())
+            collected_of(value).map_err(|e| e.to_string())
         })
     }
 }
@@ -2812,14 +2791,14 @@ fn collector_script_text(collector: &FactCollector, root: &Path) -> Option<Strin
     crate::extension::extensions::read_extension_file(root, &collector.path, entry)
 }
 
-/// A fingerprint of the LOGIC that produces a collector's facts (tsk45): its script
+/// A fingerprint of the LOGIC that produces a collector's facts: its script
 /// text plus the compute knobs and the `emits` allow-list.
 ///
 /// This is what makes a collector fix actually land. A collector's facts are only as good as
 /// the code that computed them, so when the script changes they are stale — but
 /// nothing recomputes them, because the baseline only fires on an EMPTY fold. The
 /// result is that you fix a query, the number doesn't move, and nothing tells you
-/// why (tsk44: adding inner `#![allow]` to `repo_allow.star` silently no-opped).
+/// why (adding inner `#![allow]` to `repo_allow.star` silently no-opped).
 /// Stamping this on every capture lets boot spot the drift and re-baseline.
 ///
 /// `None` when the script can't be read — better to skip the check than to
@@ -2867,7 +2846,7 @@ fn collector_source(collector: &FactCollector) -> String {
 }
 
 /// What [`MetricsService::rebuild_baseline`] did — observable so a command caller or a
-/// test can assert on it instead of reading tracing logs (tsk50).
+/// test can assert on it instead of reading tracing logs.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, specta::Type)]
 pub struct BaselineReport {
     /// False when no collector needed a baseline (a warm, up-to-date repo).
@@ -2883,7 +2862,7 @@ pub struct BaselineReport {
 }
 
 /// `metrics.entity_states` (P7.B6): re-capture state entity metrics when
-/// their rows may have moved — a work item written, a snapshot taken, a
+/// their rows may have moved — a task written, a snapshot taken, a
 /// collector run — throttled per metric (`capture_entity_states`).
 pub const ENTITY_STATES: &str = "metrics.entity_states";
 
@@ -2898,7 +2877,7 @@ impl crate::event_pump::AsyncEventConsumer for EntityStates {
     }
 
     fn handles(&self, event_type: &str) -> bool {
-        event_type.starts_with("work_item.")
+        event_type.starts_with("task.")
             || event_type == "snapshot.taken"
             || event_type == "collector.synced"
     }
@@ -2931,7 +2910,7 @@ mod tests {
         crate::test_fixtures::activate_with_problems(svc).await;
     }
 
-    /// P4.1 (tsk486): every built-in entity metric and dimension reads only
+    /// P4.1: every built-in entity metric and dimension reads only
     /// published views — nothing its SQL names is a physical table.
     #[tokio::test]
     async fn builtin_entity_metrics_read_only_views() {
@@ -2972,17 +2951,16 @@ mod tests {
         }
     }
     use super::*;
-    use oxplow_tasks::work_item_ref;
 
     /// A distinct count's buckets don't add up, so its points aren't
-    /// stored as a `sum` (the detail page would total them) (tsk367).
+    /// stored as a `sum` (the detail page would total them).
     #[test]
     fn a_distinct_event_metric_is_not_summed_across_buckets() {
         let entity = |aggregation: &str| oxplow_config::EntitySpec {
-            view: "v_work_item".into(),
+            view: "v_thread".into(),
             where_: None,
             time: Some("closed_at".into()),
-            value: Some("json_extract(e.native, '$.priority')".into()),
+            value: Some("e.mark".into()),
             aggregation: aggregation.into(),
         };
         let stored = |aggregation: &str| {
@@ -3014,7 +2992,7 @@ mod tests {
     ///
     /// In production `build_file_map` derives the collector's file map FROM these rows,
     /// so the two are the same set by construction. A `per-path` measure's fold
-    /// (tsk41) anchors on them to know which paths a capture restated, so a test
+    ///  anchors on them to know which paths a capture restated, so a test
     /// that hands `run_one_collector` a map must create the matching snapshot — otherwise
     /// the capture restates nothing and its facts never surface.
     async fn snapshot_with_files(
@@ -3317,6 +3295,27 @@ mod tests {
         snap
     }
 
+    /// Log a `vcs.head.moved` for stream 1 at `snap`.
+    async fn log_head_move(svc: &crate::Services, snap: i64) -> oxplow_domain::StoredEvent {
+        let env = oxplow_domain::Envelope::typed::<oxplow_domain::events::schema::VcsHeadMoved>(
+            "system",
+            &oxplow_domain::events::schema::VcsHeadMovedV3 {
+                stream: "str1".into(),
+                snapshot: Some(snap),
+                from: None,
+                to: Some("abc".into()),
+            },
+        )
+        .with_anchors(oxplow_domain::events::Anchors {
+            stream_id: Some(StreamId::new(1)),
+            snapshot_id: Some(snap),
+            ..Default::default()
+        });
+        let id = env.id.clone();
+        svc.event_log_store.append(env).await.unwrap();
+        svc.event_log_store.get(id).await.unwrap().unwrap()
+    }
+
     /// A burst of ref moves (a commit, a rebase, a restart's catch-up of
     /// missed ones) scans the tree once, over the latest snapshot, after
     /// the moves settle: never once per move.
@@ -3335,7 +3334,7 @@ mod tests {
             let snap =
                 snapshot_with_content(&svc, &[(path, Some(&*format!("fn f{i}() {{}}\n")))]).await;
             consumer
-                .handle(&log_take(&svc, snap, SnapshotTrigger::GitRefs, false, 1).await)
+                .handle(&log_head_move(&svc, snap).await)
                 .await
                 .unwrap();
             snaps.push(snap);
@@ -3455,7 +3454,7 @@ mod tests {
 
         // A ref move on the unchanged tree reads all of it, not the
         // second take's one file.
-        let moved = log_take(&svc, second, SnapshotTrigger::GitRefs, true, 0).await;
+        let moved = log_head_move(&svc, second).await;
         consumer.handle(&moved).await.unwrap();
         settle().await;
         let both = current().await;
@@ -3478,7 +3477,7 @@ mod tests {
             .unwrap();
         assert_eq!(current().await.len(), 2, "a save doesn't restate it");
         consumer
-            .handle(&log_take(&svc, third, SnapshotTrigger::GitRefs, true, 0).await)
+            .handle(&log_head_move(&svc, third).await)
             .await
             .unwrap();
         settle().await;
@@ -3504,7 +3503,7 @@ mod tests {
         let fourth =
             snapshot_with_content(&svc, &[("src/other.rs", Some("fn other() {}\n"))]).await;
         consumer
-            .handle(&log_take(&svc, fourth, SnapshotTrigger::GitRefs, true, 0).await)
+            .handle(&log_head_move(&svc, fourth).await)
             .await
             .unwrap();
         settle().await;
@@ -3524,7 +3523,7 @@ mod tests {
         assert_eq!(cube_states, 1, "the stream's cube survives a clean restate");
     }
 
-    /// P7 review (tsk712): a fact collector's capture, its `collector_run`
+    /// P7 review: a fact collector's capture, its `collector_run`
     /// row and its `collector.synced@1` commit together — when the run
     /// record can't be written, no capture lands either, so a redelivered
     /// event can't record the run twice.
@@ -3595,7 +3594,7 @@ mod tests {
         );
     }
 
-    /// tsk986: a collector whose facts the ingest refuses (a bare
+    /// a collector whose facts the ingest refuses (a bare
     /// dimension key) is a failed run, said where a person looks — its run
     /// record and a failed capture name the conformed key — not a capture
     /// rolled back behind a run reported as recorded.
@@ -3706,7 +3705,7 @@ mod tests {
             .unwrap()
     }
 
-    /// tsk1029: a fact for a measure nobody defined failed silently — the
+    /// a fact for a measure nobody defined failed silently — the
     /// run said "ok" and recorded nothing. It is a failed run naming the
     /// measure.
     #[tokio::test]
@@ -3724,7 +3723,7 @@ mod tests {
         assert_eq!(facts, 0);
     }
 
-    /// tsk1029: a measure declared after the catalog was seeded (an
+    /// a measure declared after the catalog was seeded (an
     /// extension added while oxplow runs, its collector triggered before the
     /// reseed reached the catalog) is found: the run seeds the catalog
     /// before it calls a measure undefined.
@@ -3749,7 +3748,7 @@ mod tests {
         assert_eq!(facts, 1);
     }
 
-    /// tsk1034: a new project has function data — the code collectors behind
+    /// a new project has function data — the code collectors behind
     /// `v_function` and the TODO count run without a `use:` entry; an
     /// `enabled: false` marker still turns one off.
     #[tokio::test]
@@ -3813,6 +3812,7 @@ mod tests {
                 events: vec![SNAPSHOT_TAKEN.into()],
                 filter: Default::default(),
                 pacing: Default::default(),
+                sources: Vec::new(),
             },
             facts,
             runtime: CollectorRuntime::Starlark,
@@ -3864,7 +3864,7 @@ def transform(input):
             closest_vcs_rev: Some("abc1234".into()),
             vcs_rev_exact: true,
             branch: Some("metrics-substrate".into()),
-            effort_id: None,
+            turn_id: None,
             scan_kind: "delta",
             event: None,
             run: RunContext::core(Actor::System, Mode::External),
@@ -3910,8 +3910,8 @@ def transform(input):
 
     #[tokio::test]
     async fn rescanning_a_fixed_file_supersedes_its_facts_and_drops_the_metric_to_zero() {
-        // tsk44's promise ("fixing the last offender must show") under per-path
-        // capture scope (tsk41). "Fixed" is expressed by RESCANNING the file with
+        // the promise ("fixing the last offender must show") under per-path
+        // capture scope. "Fixed" is expressed by RESCANNING the file with
         // clean content: the path is in the new snapshot, so the new capture
         // restates it, and — emitting no fact — supersedes the stale count with 0.
         // Note the collector still skips the zero (`if c > 0:`); the scanned set comes
@@ -3929,7 +3929,7 @@ def transform(input):
             closest_vcs_rev: None,
             vcs_rev_exact: false,
             branch: None,
-            effort_id: None,
+            turn_id: None,
             scan_kind: "delta",
             event: None,
             run: RunContext::core(Actor::System, Mode::External),
@@ -3991,7 +3991,7 @@ def transform(input):
             closest_vcs_rev: None,
             vcs_rev_exact: false,
             branch: None,
-            effort_id: None,
+            turn_id: None,
             scan_kind: "delta",
             event: None,
             run: RunContext::core(Actor::System, Mode::External),
@@ -4000,10 +4000,10 @@ def transform(input):
 
     #[tokio::test]
     async fn rebuild_baseline_reads_the_whole_repo_end_to_end() {
-        // THE test that would have caught all four metrics bugs (tsk47/48/49) without a
+        // THE test that would have caught all four metrics bugs without a
         // restart: real files on disk → full-tree snapshot → every collector → fold →
         // repo-wide headline, driven through the same `rebuild_baseline` boot
-        // uses. It runs TWO collectors sharing `code_metrics.ast_hit` — the exact shape tsk49
+        // uses. It runs TWO collectors sharing `code_metrics.ast_hit` — the exact shape
         // hid in — so a single-collector unit test could not have found it.
         let (svc, dir) = fixture().await;
         enable(
@@ -4124,10 +4124,10 @@ def transform(input):
 
     #[tokio::test]
     async fn rebuild_does_not_fabricate_a_snapshot_on_a_clean_tree() {
-        // tsk71: the old rebuild enqueued EVERY path as dirty and captured a
-        // full-tree snapshot, which polluted effort file-attribution (edits
-        // from other efforts first landed in a snapshot inside whatever effort
-        // window was open). The baseline now anchors to the latest existing
+        // the old rebuild enqueued EVERY path as dirty and captured a
+        // full-tree snapshot, which polluted file attribution (edits
+        // from other work first landed in a snapshot inside whatever window
+        // was open). The baseline now anchors to the latest existing
         // snapshot and scans the RECONSTRUCTED tree — so a rebuild over an
         // unchanged tree must not create any snapshot at all.
         let (svc, dir) = fixture().await;
@@ -4162,7 +4162,7 @@ def transform(input):
 
     #[tokio::test]
     async fn a_delta_only_collector_needs_a_baseline_even_if_a_sibling_filled_the_shared_measure() {
-        // tsk49, the exact live bug. `code_metrics.ast_hit` is ONE measure shared by 10 idiom
+        // , the exact live bug. `code_metrics.ast_hit` is ONE measure shared by 10 idiom
         // collectors. `unsafe_blocks` (cheap) completed its full-tree scan, so the measure
         // has facts — but `console_calls` (heavy, timed out under the old budget) only
         // ever ran on small deltas. A measure-level "is it empty" check says "done" and
@@ -4188,15 +4188,14 @@ def transform(input):
             closest_vcs_rev: None,
             vcs_rev_exact: false,
             branch: None,
-            effort_id: None,
+            turn_id: None,
             scan_kind: "delta",
             event: None,
             run: RunContext::core(Actor::System, Mode::External),
         };
         let src = "pub fn f() {\n    unsafe { g(); }\n    console.log(x);\n}\n".to_string();
 
-        // unsafe_blocks completes its BASELINE (a `scan_kind = 'full'` capture,
-        // tsk71). It shares code_metrics.ast_hit with console_calls.
+        // unsafe_blocks completes its BASELINE (a `scan_kind = 'full'` capture,). It shares code_metrics.ast_hit with console_calls.
         let big = snapshot_with_files(
             &svc,
             &(0..150)
@@ -4283,7 +4282,7 @@ def transform(input):
 
     #[tokio::test]
     async fn a_whole_tree_sweep_is_visible_as_a_background_task() {
-        // tsk48. The baseline pegs a core for minutes and used to report NOTHING —
+        // . The baseline pegs a core for minutes and used to report NOTHING —
         // "why is oxplow eating CPU?" had no answer, and when it went wrong I could
         // only find out by reading SQL by hand.
         let (svc, _dir) = fixture().await;
@@ -4327,7 +4326,7 @@ def transform(input):
 
     #[tokio::test]
     async fn a_sweep_with_a_failing_collector_fails_the_task_rather_than_quietly_succeeding() {
-        // The whole point of tsk47/tsk48: a collector that blows up leaves its metric
+        // The whole point of a collector that blows up leaves its metric
         // reading stale or empty. Reporting the sweep as "done" would hide exactly the
         // failure that let two built-in metrics read empty for weeks.
         let (svc, dir) = fixture().await;
@@ -4368,9 +4367,9 @@ def transform(input):
 
     #[tokio::test]
     async fn changing_a_collector_script_marks_it_stale_so_the_fix_actually_lands() {
-        // tsk45. The trap this closes: you fix a collector's query, the metric doesn't
+        // . The trap this closes: you fix a collector's query, the metric doesn't
         // move, and nothing tells you why — because its old facts aren't EMPTY, just
-        // WRONG, and the baseline only fires on an empty fold. (Real case, tsk44:
+        // WRONG, and the baseline only fires on an empty fold. (Real case:
         // teaching repo_allow.star to also match inner `#![allow]` silently no-opped.)
         let (svc, dir) = fixture().await;
 
@@ -4398,7 +4397,7 @@ def transform(input):
             closest_vcs_rev: None,
             vcs_rev_exact: false,
             branch: None,
-            effort_id: None,
+            turn_id: None,
             scan_kind: "delta",
             event: None,
             run: RunContext::core(Actor::System, Mode::External),
@@ -4428,7 +4427,7 @@ def transform(input):
 
     #[tokio::test]
     async fn a_delta_rescan_updates_the_repo_wide_total_incrementally() {
-        // THE bug, end to end (tsk41). Baseline the whole tree, then rescan only the
+        // THE bug, end to end. Baseline the whole tree, then rescan only the
         // ONE file a commit changed. The metric must report the REPO-WIDE total — not
         // the delta — with the untouched files' facts carried forward from the
         // baseline, and the rescanned file's stale facts superseded.
@@ -4447,7 +4446,7 @@ def transform(input):
             closest_vcs_rev: None,
             vcs_rev_exact: false,
             branch: None,
-            effort_id: None,
+            turn_id: None,
             scan_kind: "delta",
             event: None,
             run: RunContext::core(Actor::System, Mode::External),
@@ -4507,7 +4506,7 @@ def transform(input):
 
     #[tokio::test]
     async fn a_collector_run_that_scanned_nothing_supersedes_nothing() {
-        // The other half of per-path (tsk41), and the exact bug we fixed: a delta
+        // The other half of per-path, and the exact bug we fixed: a delta
         // capture that restated NO paths must leave the metric alone. Under the old
         // semi-additive reading, this empty capture zero-filled the series and the
         // headline read 0 — which is how `code_metrics.rust.unsafe_blocks` reported 0 while
@@ -4524,7 +4523,7 @@ def transform(input):
             closest_vcs_rev: None,
             vcs_rev_exact: false,
             branch: None,
-            effort_id: None,
+            turn_id: None,
             scan_kind: "delta",
             event: None,
             run: RunContext::core(Actor::System, Mode::External),
@@ -4561,42 +4560,21 @@ def transform(input):
     }
 
     #[tokio::test]
-    async fn effort_complete_collector_capture_is_effort_stamped() {
-        // tsk43: the on-effort-complete trigger KNOWS its producing effort —
-        // `record_collector_facts` stamps the capture's `effort_id` so the T-D
-        // attribution spine (`captures_for_effort`) sees the run. Snapshot scans
-        // (the other fixtures, `effort_id: None`) stay unstamped.
-        use oxplow_tasks::TaskId;
-        use oxplow_tasks::TaskStore as _;
-        use oxplow_tasks::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
+    async fn an_event_collectors_capture_is_stamped_with_the_events_turn() {
+        // A run for an event anchored to a turn records its capture in that
+        // turn, so the turn's request reads it (`Members::Turns`). Snapshot
+        // scans (the other fixtures, `turn_id: None`) stay unstamped.
         let (svc, dir) = fixture().await;
-        // A real effort row (the capture's effort_id is a foreign key).
-        let now = oxplow_domain::Timestamp::now();
-        let thread = ThreadId::new(1);
-        let task = svc
-            .task_store
-            .insert(&Task {
-                id: TaskId::placeholder(),
-                thread_id: Some(thread),
-                parent_id: None,
-                title: "t".into(),
-                description: String::new(),
-                status: TaskStatus::InProgress,
-                priority: TaskPriority::Medium,
-                sort_index: 0,
-                created_by: TaskActorKind::User,
-                created_at: now,
-                updated_at: now,
-                completed_at: None,
-                deleted_at: None,
-                note_count: 0,
-                author: Some(TaskAuthor::User),
+        svc.db
+            .transaction(|tx| {
+                tx.execute(
+                    "INSERT INTO agent_turn (id, thread_id, prompt, started_at)
+                     VALUES (5, 1, 'p', '2026-01-01T00:00:00Z')",
+                    [],
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+                Ok(())
             })
-            .await
-            .unwrap();
-        let effort = svc
-            .effort_store
-            .start(&work_item_ref(task), &thread, None)
             .await
             .unwrap();
 
@@ -4617,12 +4595,12 @@ def transform(input):
             excluded: Arc::default(),
             stream_val: 1,
             thread_id: Some(1),
-            trigger: "on-effort-complete",
+            trigger: "on",
             snapshot_id: None,
             closest_vcs_rev: None,
             vcs_rev_exact: false,
             branch: None,
-            effort_id: Some(effort.id.value()),
+            turn_id: Some(5),
             scan_kind: "delta",
             event: None,
             run: RunContext::core(Actor::System, Mode::External),
@@ -4632,79 +4610,21 @@ def transform(input):
             .run_one_collector(&metric, &ctx, Arc::new(HashMap::new()))
             .await;
         assert_eq!(count, FactRun::Recorded(1));
-        let caps = svc
-            .fact_store
-            .captures_for_effort(effort.id.value())
-            .await
-            .unwrap();
-        assert_eq!(caps.len(), 1, "the capture is stamped with the effort");
-        assert_eq!(caps[0].producer, "acme.effcollector");
-    }
-
-    #[tokio::test]
-    async fn effort_finished_runs_on_effort_complete_collectors() {
-        // Effort-triggered collectors run from the `collector.triggers` pump
-        // consumer on `effort.finished` (P7.B3).
-        use oxplow_tasks::TaskId;
-        use oxplow_tasks::TaskStore as _;
-        use oxplow_tasks::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
-        let (svc, dir) = fixture().await;
-        let now = oxplow_domain::Timestamp::now();
-        let thread = ThreadId::new(1);
-        let task = svc
-            .task_store
-            .insert(&Task {
-                id: TaskId::placeholder(),
-                thread_id: Some(thread),
-                parent_id: None,
-                title: "t".into(),
-                description: String::new(),
-                status: TaskStatus::InProgress,
-                priority: TaskPriority::Medium,
-                sort_index: 0,
-                created_by: TaskActorKind::User,
-                created_at: now,
-                updated_at: now,
-                completed_at: None,
-                deleted_at: None,
-                note_count: 0,
-                author: Some(TaskAuthor::User),
+        let turns: Vec<Option<i64>> = svc
+            .db
+            .read(|tx| {
+                tx.prepare(
+                    "SELECT turn_id FROM metric_capture WHERE producer = 'acme.effcollector'",
+                )
+                .and_then(|mut st| {
+                    st.query_map([], |r| r.get(0))?
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                })
+                .map_err(oxplow_db::map_sql_err)
             })
             .await
             .unwrap();
-        let effort = svc
-            .effort_store
-            .start(&work_item_ref(task), &thread, None)
-            .await
-            .unwrap();
-        crate::collector_triggers::register(&svc);
-        std::fs::write(
-            project_ext_file(dir.path(), "metrics/eff.star"),
-            "def transform(input):\n    return {\"facts\": [{\"measure\": \"code_metrics.ast_hit\", \"value\": 1, \"rule\": \"eff\", \"subject\": \"oxplow:oxplow/dir?path=.\"}]}\n",
-        )
-        .unwrap();
-        declare_project_collectors(
-                dir.path(),
-                "- { id: acme.effcollector, runtime: starlark, entry: metrics/eff.star, on: [effort.finished], facts: [code_metrics.ast_hit] }",
-            );
-        crate::test_fixtures::activate_with_problems(&svc).await;
-        svc.effort_store
-            .finish(&effort.id, None, None)
-            .await
-            .unwrap();
-        svc.event_pump.run_once().await.unwrap();
-        for _ in 0..100 {
-            let caps = svc
-                .fact_store
-                .captures_for_effort(effort.id.value())
-                .await
-                .unwrap();
-            if caps.iter().any(|c| c.producer == "acme.effcollector") {
-                return;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        }
-        panic!("the on-effort-complete collector didn't run after effort.finished");
+        assert_eq!(turns, vec![Some(5)], "the capture is the turn's");
     }
 
     #[tokio::test]
@@ -4744,7 +4664,7 @@ def transform(input):
             closest_vcs_rev: None,
             vcs_rev_exact: false,
             branch: None,
-            effort_id: None,
+            turn_id: None,
             scan_kind: "delta",
             event: None,
             run: RunContext::core(Actor::System, Mode::External),
@@ -4841,7 +4761,7 @@ def transform(input):
 
     #[tokio::test]
     async fn code_collector_facts_reaggregate_to_the_expected_headline() {
-        // The keystone proof of the inversion (epic tsk12): a metric SPEC computed
+        // The keystone proof of the inversion: a metric SPEC computed
         // over the per-item FACTS the collector emitted == the expected collector total,
         // for every bundled code metric. This is what let the reads flip to the
         // engine (T-C3) and the baked sample be removed (T-C3b).
@@ -4858,7 +4778,7 @@ def transform(input):
             closest_vcs_rev: Some("abc1234".into()),
             vcs_rev_exact: true,
             branch: Some("main".into()),
-            effort_id: None,
+            turn_id: None,
             scan_kind: "delta",
             event: None,
             run: RunContext::core(Actor::System, Mode::External),
@@ -4899,7 +4819,7 @@ def transform(input):
     #[tokio::test]
     async fn a_fact_on_an_undefined_measure_fails_the_whole_run() {
         // Declare-to-collect (decision #4): a collector may only emit DEFINED
-        // measures. A fact on an undefined one fails the run (tsk1029: it was
+        // measures. A fact on an undefined one fails the run (it was
         // dropped behind an "ok"), so nothing of that run is written.
         let (svc, dir) = fixture().await;
         std::fs::write(
@@ -4927,7 +4847,7 @@ def transform(input):
             closest_vcs_rev: None,
             vcs_rev_exact: false,
             branch: None,
-            effort_id: None,
+            turn_id: None,
             scan_kind: "delta",
             event: None,
             run: RunContext::core(Actor::System, Mode::External),
@@ -4963,7 +4883,7 @@ def transform(input):
     async fn a_fact_outside_the_facts_list_fails_the_whole_run() {
         // A collector's `facts:` is its contract: even a fact on a DEFINED
         // catalog measure fails the run if the collector didn't declare it
-        // (tsk1029: it was dropped behind an "ok"). Here it declares only
+        // (it was dropped behind an "ok"). Here it declares only
         // `oxplow.complexity` and emits `oxplow.fn_length` too.
         let (svc, dir) = fixture().await;
         std::fs::write(
@@ -4991,7 +4911,7 @@ def transform(input):
             closest_vcs_rev: None,
             vcs_rev_exact: false,
             branch: None,
-            effort_id: None,
+            turn_id: None,
             scan_kind: "delta",
             event: None,
             run: RunContext::core(Actor::System, Mode::External),
@@ -5063,7 +4983,7 @@ def transform(input):
             closest_vcs_rev: None,
             vcs_rev_exact: false,
             branch: None,
-            effort_id: None,
+            turn_id: None,
             scan_kind: "delta",
             event: None,
             run: RunContext::core(Actor::System, Mode::External),
@@ -5086,7 +5006,7 @@ def transform(input):
 
     #[tokio::test]
     async fn per_language_collector_facts_reaggregate_through_the_spec() {
-        // tsk30: the per-language idiom collectors emit per-file `code_metrics.ast_hit`
+        // the per-language idiom collectors emit per-file `code_metrics.ast_hit`
         // facts (rule-tagged); each metric is a Sum(code_metrics.ast_hit) spec filtered
         // by rule. Prove every emitted-fact stream re-aggregates through its spec
         // to a positive headline (the exact per-idiom counts are pinned by the
@@ -5132,7 +5052,7 @@ def transform(input):
             closest_vcs_rev: Some("def5678".into()),
             vcs_rev_exact: true,
             branch: Some("main".into()),
-            effort_id: None,
+            turn_id: None,
             scan_kind: "delta",
             event: None,
             run: RunContext::core(Actor::System, Mode::External),
@@ -5181,8 +5101,8 @@ def transform(input):
     async fn collector_facts_slice_by_the_conformed_language_dimension() {
         // The conformed catalog declares `oxplow.language` (V43) and
         // list_dimensions advertises it — the bundled collectors' facts must be
-        // sliceable by it (group_by / dim_eq). It is the key's one name
-        // (tsk945): a bare `language` request is no alias.
+        // sliceable by it (group_by / dim_eq). It is the key's one name:
+        // a bare `language` request is no alias.
         let (svc, _dir) = fixture().await;
         seed_with_every_builtin_on(&svc).await;
         let mut corpus = HashMap::new();
@@ -5191,7 +5111,7 @@ def transform(input):
             "pub fn f() {\n    unsafe { std::ptr::read(std::ptr::null::<u8>()); }\n}\n".to_string(),
         );
         let files = Arc::new(corpus);
-        // The snapshot IS the collector's scanned set (tsk41) — create it to match the map.
+        // The snapshot IS the collector's scanned set — create it to match the map.
         let snap =
             snapshot_with_files(&svc, &[("src/lib.rs", oxplow_db::SnapshotStorage::Oxplow)]).await;
         let ctx = CollectorRunContext {
@@ -5203,7 +5123,7 @@ def transform(input):
             closest_vcs_rev: None,
             vcs_rev_exact: false,
             branch: Some("main".into()),
-            effort_id: None,
+            turn_id: None,
             scan_kind: "delta",
             event: None,
             run: RunContext::core(Actor::System, Mode::External),
@@ -5245,7 +5165,7 @@ def transform(input):
             "one language group, got {by_language:?}"
         );
         assert_eq!(by_language[0].0.as_deref(), Some("rust"));
-        // tsk989: a bare key isn't an empty slice — it's refused, naming
+        // a bare key isn't an empty slice — it's refused, naming
         // the key it means.
         let err = groups("language").await.unwrap_err().to_string();
         assert!(err.contains("`oxplow.language`"), "{err}");
@@ -5265,7 +5185,7 @@ def transform(input):
         assert_eq!(spec.source_measure.as_deref(), Some("oxplow.coverage"));
         assert_eq!(spec.aggregation, "ratio");
         // The new V46 measures exist for the producers with no prior home.
-        for key in ["oxplow.turn", "oxplow.work_item_effort", "oxplow.nudge"] {
+        for key in ["oxplow.turn", "oxplow.nudge"] {
             assert!(
                 svc.fact_store.get_measure(key).await.unwrap().is_some(),
                 "{key} measure seeded by V46"
@@ -5275,7 +5195,7 @@ def transform(input):
 
     #[tokio::test]
     async fn a_use_of_a_producer_metric_sets_its_target() {
-        // tsk1071: `use:` resolved only against the collector definitions, so a
+        // `use:` resolved only against the collector definitions, so a
         // producer metric's `use:` was skipped with a warning and its target
         // never reached the spec.
         let (svc, _dir) = fixture().await;
@@ -5310,7 +5230,7 @@ def transform(input):
 
     #[tokio::test]
     async fn builtin_ast_specs_carry_the_language_their_collector_declares() {
-        // tsk81: the idiom specs are seeded with the SAME language slug their
+        // the idiom specs are seeded with the SAME language slug their
         // built-in collector declares, so the two metric surfaces can't disagree
         // about what language a metric is — Metric Settings sections by the
         // collector's `language`, Recorded Metrics by the spec's. A spec left at the
@@ -5363,100 +5283,18 @@ def transform(input):
         assert_eq!(spec.direction, "lower-better");
     }
 
+    /// A project entity metric with a typo'd column never reaches the
+    /// catalog. (Bundled's task metrics read the task model; their numbers
+    /// are tested by bundled's own fixtures.)
     #[tokio::test]
-    async fn entity_metrics_seed_read_live_and_capture_state() {
+    async fn an_entity_metric_with_a_typod_column_never_reaches_the_catalog() {
         let (svc, dir) = fixture().await;
-        svc.db
-            .transaction(|c| {
-                c.execute_batch(
-                    // The active list's items, as the interface holds them.
-                    "INSERT INTO work_item (uri, provider, title, state, native_state, native, thread_id, created_at, updated_at, closed_at) VALUES
-                       ('oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 'oxplow', 'a', 'done', 'done', '{\"priority\":\"high\"}', (SELECT min(id) FROM threads), '2026-09-01', '2026-09-01', '2026-09-21T09:00:00Z'),
-                       ('oxplow:oxplow/work_item?id=tsk2&provider=oxplow', 'oxplow', 'b', 'done', 'done', '{\"priority\":\"low\"}', (SELECT min(id) FROM threads), '2026-09-01', '2026-09-01', '2026-09-23T09:00:00Z'),
-                       ('oxplow:oxplow/work_item?id=tsk3&provider=oxplow', 'oxplow', 'c', 'todo', 'ready', '{\"priority\":\"high\"}', (SELECT min(id) FROM threads), '2026-09-01', '2026-09-01', NULL),
-                       ('oxplow:oxplow/work_item?id=tsk4&provider=oxplow', 'oxplow', 'd', 'blocked', 'blocked', '{\"priority\":\"low\"}', (SELECT min(id) FROM threads), '2026-09-01', '2026-09-01', NULL),
-                       ('oxplow:oxplow/work_item?id=tsk5&provider=oxplow', 'oxplow', 'e', 'todo', 'ready', '{\"priority\":\"high\"}', (SELECT min(id) FROM threads), '2026-09-01', '2026-09-01', NULL);",
-                )
-                .map_err(|e| oxplow_domain::DomainError::Invalid(e.to_string()))
-            })
-            .await
-            .unwrap();
-        // A project entity metric with a typo'd column never reaches the catalog.
         write_project_extension(
             dir.path(),
-            "metrics:\n  - key: repo.bad\n    entity: v_work_item\n    where: \"no_such_col = 1\"\n",
+            "metrics:\n  - key: repo.bad\n    entity: v_thread\n    where: \"no_such_col = 1\"\n",
         );
         crate::test_fixtures::activate_with_problems(&svc).await;
-        let f = &svc.fact_store;
-        assert!(f.get_spec("repo.bad").await.unwrap().is_none());
-
-        // An event metric: computed live, daily, sliceable by its entity dims.
-        let done = f.get_spec("work.tasks_completed").await.unwrap().unwrap();
-        assert_eq!(done.source_measure, None);
-        assert_eq!(done.display_kind, "event");
-        assert_eq!(
-            done.sliceable_dims_json.as_deref(),
-            Some(r#"["work.priority"]"#)
-        );
-        let e = &svc.metric_engine;
-        let series = e
-            .series_for_spec_in_stream(&done, None, None, None)
-            .await
-            .unwrap();
-        assert_eq!(
-            series.iter().map(|p| p.value).collect::<Vec<_>>(),
-            vec![1.0, 0.0, 1.0]
-        );
-        assert_eq!(
-            e.headline_from_series(&done, &series).await.unwrap(),
-            Some(2.0)
-        );
-        let by_prio = e
-            .series_for_spec_in_stream(&done, Some("work.priority"), None, None)
-            .await
-            .unwrap();
-        assert_eq!(by_prio.len(), 2);
-        assert!(e
-            .series_for_spec_in_stream(&done, Some("oxplow.package"), None, None)
-            .await
-            .is_err());
-
-        // A state metric: captured as a fact, so its series is its history.
-        let open = f.get_spec("work.open_tasks").await.unwrap().unwrap();
-        assert_eq!(open.source_measure.as_deref(), Some("work.open_tasks"));
-        assert_eq!(svc.metrics.capture_entity_states(true).await, 1);
-        // Unchanged since the last capture: nothing new is written — not even
-        // by a fresh process, which reads the last stored value.
-        assert_eq!(svc.metrics.capture_entity_states(true).await, 0);
-        svc.metrics.entity_captures.lock().unwrap().clear();
-        assert_eq!(svc.metrics.capture_entity_states(true).await, 0);
-        let hist = e
-            .series_for_spec_in_stream(&open, None, None, None)
-            .await
-            .unwrap();
-        assert_eq!(hist.iter().map(|p| p.value).collect::<Vec<_>>(), vec![3.0]);
-        assert_eq!(e.headline_for_spec(&open).await.unwrap(), Some(3.0));
-        // Grouped reads are live.
-        let mut rows: Vec<(Option<String>, f64)> = e
-            .series_for_spec_in_stream(&open, Some("work.priority"), None, None)
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|p| (p.group, p.value))
-            .collect();
-        rows.sort_by(|a, b| a.0.cmp(&b.0));
-        assert_eq!(
-            rows,
-            vec![
-                (Some("high".to_string()), 2.0),
-                (Some("low".to_string()), 1.0)
-            ]
-        );
-        // Entity metrics are in the catalog like any other.
-        let catalog = svc.metrics.catalog().await;
-        assert!(catalog
-            .iter()
-            .any(|c| c.key == "work.open_tasks" && c.enabled));
+        assert!(svc.fact_store.get_spec("repo.bad").await.unwrap().is_none());
     }
 
     #[tokio::test]
@@ -5543,7 +5381,7 @@ def transform(input):
 
     #[tokio::test]
     async fn a_generation_prunes_project_rows_removed_from_config() {
-        // tsk61: a project metric deleted from its extension entirely
+        // a project metric deleted from its extension entirely
         // (not merely `enabled: false`) must not linger as a zombie catalog
         // row — four forever-blank collectors did exactly that for a week.
         let (svc, dir) = fixture().await;
@@ -5613,7 +5451,7 @@ def transform(input):
 
     #[tokio::test]
     async fn an_unimplemented_aggregation_cannot_reach_the_catalog() {
-        // tsk108. `p95`/`count_distinct` are reserved in the V44 CHECK's
+        // . `p95`/`count_distinct` are reserved in the V44 CHECK's
         // vocabulary but the engine can't compute them, and a spec that seeds
         // anyway opens the COLLECTION gate (`measure_has_active_spec`) for a
         // metric that can never render. Two fences keep that impossible:
@@ -5973,8 +5811,8 @@ def transform(input):
             .find(|c| c.key == "code_metrics.duplicate_lines")
             .expect("used, so it runs");
         assert!(dup.whole_tree, "a slice of the tree can't restate it");
-        assert!(matches!(&dup.trigger, Trigger::On { filter, .. }
-            if filter.get("trigger").map(String::as_str) == Some("git_refs")));
+        assert!(matches!(&dup.trigger, Trigger::On { events, .. }
+            if events == &["vcs.head.moved".to_string()]));
         let spec = svc
             .fact_store
             .get_spec("code_metrics.duplicate_lines")
@@ -6050,8 +5888,8 @@ def transform(input):
         std::fs::write(
             ext.join("extension.yaml"),
             "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [files.read]\n\
-             dimensions:\n  - { key: acme.status, label: Status, entity: v_work_item, expr: e.state }\n\
-             metrics:\n  - { key: acme.tasks, title: Tasks, entity: v_work_item }\n",
+             dimensions:\n  - { key: acme.status, label: Status, entity: v_thread, expr: e.mark }\n\
+             metrics:\n  - { key: acme.tasks, title: Tasks, entity: v_thread }\n",
         )
         .unwrap();
         crate::test_fixtures::activate(&svc).await;
@@ -6140,7 +5978,7 @@ def transform(input):
         assert!(!entry.enabled, "not enabled before use:");
         assert!(entry.toggleable, "code collectors are toggleable");
         // Matches the seeded spec's category (builtin_ast_specs), so the Catalog
-        // agrees with the spec catalog it toggles (tsk46).
+        // agrees with the spec catalog it toggles.
         assert_eq!(entry.category.as_deref(), Some("static-quality"));
 
         // Enable end-to-end: writes a `use:` into .oxplow/project.yaml + seeds the def.
@@ -6185,7 +6023,7 @@ def transform(input):
     #[tokio::test]
     async fn catalog_lists_all_producer_metrics_before_any_data() {
         // The Catalog is a registry: every always-on producer metric must be
-        // visible even on a brand-new project with zero recorded samples (tsk286).
+        // visible even on a brand-new project with zero recorded samples.
         let (svc, _dir) = fixture().await;
         let cat = svc.metrics.catalog().await;
         let by_key: std::collections::HashMap<&str, &MetricCatalogEntry> =
@@ -6197,14 +6035,14 @@ def transform(input):
             ("oxplow.analysis.errors", "gauge", "static-quality"),
             ("agent.tokens.total", "gauge", "operational"),
             ("agent.nudges.fired", "event", "operational"),
-            ("effort.cycle_time_ms", "gauge", "operational"),
+            ("request.cycle_time_ms", "gauge", "operational"),
         ] {
             let e = by_key
                 .get(key)
                 .unwrap_or_else(|| panic!("{key} listed in catalog with no data"));
             assert_eq!(e.kind, kind, "{key} kind");
             assert_eq!(e.category.as_deref(), Some(category), "{key} category");
-            // tsk31: every metric is toggleable now (no "always on" class), and
+            // every metric is toggleable now (no "always on" class), and
             // producers are enabled by default.
             assert!(e.toggleable, "{key} is toggleable");
             assert!(e.enabled, "{key} enabled by default");
@@ -6240,7 +6078,7 @@ def transform(input):
             .iter()
             .find(|e| e.key == "agent.tokens.total")
             .expect("producer-seeded metric is in the catalog");
-        // tsk31: producers are toggleable now, enabled by default.
+        // producers are toggleable now, enabled by default.
         assert!(entry.toggleable, "producers are toggleable");
         assert!(entry.enabled, "producers read as enabled by default");
         assert_eq!(entry.category.as_deref(), Some("operational"));

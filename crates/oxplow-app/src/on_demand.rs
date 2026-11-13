@@ -123,7 +123,7 @@ impl OnDemand {
 }
 
 /// The change a `v_change` request names, run for `stream`: a `commit` by
-/// its sha, the `working` tree (target `''`), an `effort` or a `turn` by
+/// its sha, the `working` tree (target `''`), a `turn` by
 /// its row id, a `range` by its two sides (`<base>..<head>`, the base
 /// empty for "from nothing"). Anything else names none.
 fn change_target(
@@ -140,9 +140,6 @@ fn change_target(
         },
         "working" if target.is_empty() => ChangeTarget::Working {
             stream_id: stream_id?,
-        },
-        "effort" => ChangeTarget::Effort {
-            effort_id: oxplow_domain::EffortId::new(target.parse().ok()?).to_string(),
         },
         "turn" => ChangeTarget::Turn {
             turn_id: oxplow_domain::AgentTurnId::new(target.parse().ok()?).to_string(),
@@ -253,7 +250,7 @@ mod tests {
     }
 
     /// `v_change`'s keys name a change: a commit by sha, the working tree
-    /// of the run's stream, an effort or a turn by row id.
+    /// of the run's stream, a turn by row id.
     #[test]
     fn a_changes_keys_name_its_target() {
         use crate::change_analysis::ChangeTarget;
@@ -278,11 +275,11 @@ mod tests {
         );
         assert_eq!(
             change_target(
-                &request("change", &[("kind", "effort"), ("target", "7")]),
+                &request("change", &[("kind", "turn"), ("target", "7")]),
                 None
             ),
-            Some(ChangeTarget::Effort {
-                effort_id: "eff7".into()
+            Some(ChangeTarget::Turn {
+                turn_id: "trn7".into()
             })
         );
         // A range: `<base>..<head>`, the base empty for "from nothing".
@@ -315,7 +312,8 @@ mod tests {
             ("working", "", None),
             ("working", "x", Some(1)),
             ("commit", "", Some(1)),
-            ("effort", "x", None),
+            ("turn", "x", None),
+            ("effort", "7", None),
             ("other", "1", Some(1)),
             ("range", "snap:1..", Some(1)),
             ("range", "snap:1", Some(1)),

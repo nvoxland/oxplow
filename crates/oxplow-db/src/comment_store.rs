@@ -80,8 +80,8 @@ fn refs_from_quote(
     let mut out = Vec::new();
     out.extend(r.files.iter().map(|f| build::file_uri(f)));
     out.extend(r.dirs.iter().map(|d| build::dir_uri(d)));
-    out.extend(r.wikis.iter().map(|w| build::wiki_uri(w)));
-    out.extend(r.work_items);
+    out.extend(r.knowledge.iter().cloned());
+    out.extend(r.tasks);
     out.extend(r.findings.iter().map(|f| build::finding_uri(f)));
     out.extend(r.commits.iter().map(|c| build::commit_uri(c)));
     out
@@ -189,26 +189,25 @@ pub struct SqliteCommentStore {
 /// What a comment's event is logged as.
 const SOURCE: &str = "system:comments";
 
-/// `knowledge.comment.written` / `deleted` for comment `id` on `target`
+/// `comment.written` / `deleted` for comment `id` on `target`
 /// (how the search index hears of it).
 fn comment_event(id: i64, target: &str, deleted: bool) -> Envelope {
     use oxplow_domain::events::schema::{
-        KnowledgeCommentDeleted, KnowledgeCommentDeletedV3, KnowledgeCommentWritten,
-        KnowledgeCommentWrittenV3,
+        CommentDeleted, CommentDeletedV1, CommentWritten, CommentWrittenV1,
     };
     let comment = oxplow_domain::uri::build::comment_uri(CommentId::new(id));
     let env = if deleted {
-        Envelope::typed::<KnowledgeCommentDeleted>(
+        Envelope::typed::<CommentDeleted>(
             SOURCE,
-            &KnowledgeCommentDeletedV3 {
+            &CommentDeletedV1 {
                 comment: CommentId::new(id).to_string(),
                 target: target.into(),
             },
         )
     } else {
-        Envelope::typed::<KnowledgeCommentWritten>(
+        Envelope::typed::<CommentWritten>(
             SOURCE,
-            &KnowledgeCommentWrittenV3 {
+            &CommentWrittenV1 {
                 comment: CommentId::new(id).to_string(),
                 target: target.into(),
             },
@@ -247,7 +246,7 @@ fn written(conn: &rusqlite::Connection, id: i64) -> rusqlite::Result<Vec<Envelop
         .collect())
 }
 
-/// What a new comment is (`oxplow.knowledge.add_comment`, P8.A6).
+/// What a new comment is (`oxplow.comment.add`, P8.A6).
 #[derive(Debug, Clone)]
 pub struct NewComment {
     pub stream: StreamId,
@@ -281,7 +280,7 @@ pub fn get_tx(
 /// Create a comment with its first message, on `conn` — a command's
 /// transaction. The inline refs its quote mentions join the provided
 /// ones, so typed context survives a surface that didn't link them.
-/// Returns it and the `knowledge.comment.written` to log.
+/// Returns it and the `comment.written` to log.
 pub fn create_tx(
     conn: &rusqlite::Connection,
     kinds: &oxplow_domain::uri::resources::ResourceRegistry,
@@ -630,12 +629,12 @@ impl SqliteCommentStore {
 mod tests {
     use super::*;
 
-    use oxplow_domain::uri::build::{commit_uri, file_uri, page_uri, wiki_uri, work_item_uri};
+    use oxplow_domain::uri::build::{commit_uri, file_uri, knowledge_uri, page_uri, task_uri};
 
-    /// Foundation's vocabulary with oxplow's tasks as the work list (`tsk<n>`).
+    /// Foundation's vocabulary with oxtask as the task tracker (`tsk<n>`).
     fn tasks_vocabulary() -> oxplow_domain::vocabulary::VocabularyHandle {
         let mut v = oxplow_domain::vocabulary::Vocabulary::core();
-        v.resources = v.resources.with_work_item_ids("oxplow", r"tsk\d+").unwrap();
+        v.resources = v.resources.with_task_ids("oxtask", r"tsk\d+").unwrap();
         oxplow_domain::vocabulary::VocabularyHandle::new(v)
     }
     use crate::stream_store::SqliteStreamStore;
@@ -699,7 +698,7 @@ mod tests {
     }
 
     fn target() -> String {
-        wiki_uri("some-page")
+        knowledge_uri("oxwiki", "some-page")
     }
 
     #[tokio::test]
@@ -775,7 +774,7 @@ mod tests {
         let store = SqliteCommentStore::new(db, tasks_vocabulary());
         // The frontend captured one DOM-link ref; the quote *also* names
         // `tsk42` and `src/app.rs` inline (not rendered as links).
-        let provided = vec![wiki_uri("architecture")];
+        let provided = vec![knowledge_uri("oxwiki", "architecture")];
         let created = store
             .create(
                 &stream,
@@ -794,12 +793,13 @@ mod tests {
         let refs = &created.comment.referenced;
         // FE-provided ref is preserved…
         assert!(
-            refs.iter().any(|r| *r == wiki_uri("architecture")),
+            refs.iter()
+                .any(|r| *r == knowledge_uri("oxwiki", "architecture")),
             "provided ref dropped: {refs:?}",
         );
         // …and the quote's inline mentions are unioned in as typed refs.
         assert!(
-            refs.iter().any(|r| *r == work_item_uri("oxplow", "tsk42")),
+            refs.iter().any(|r| *r == task_uri("oxtask", "tsk42")),
             "task ref not extracted: {refs:?}",
         );
         assert!(
@@ -817,7 +817,7 @@ mod tests {
         let store = SqliteCommentStore::new(db, tasks_vocabulary());
         // FE already supplied tsk42; the quote names it again. It must
         // appear exactly once.
-        let provided = vec![work_item_uri("oxplow", "tsk42")];
+        let provided = vec![task_uri("oxtask", "tsk42")];
         let created = store
             .create(
                 &stream,
@@ -837,7 +837,7 @@ mod tests {
             .comment
             .referenced
             .iter()
-            .filter(|r| **r == work_item_uri("oxplow", "tsk42"))
+            .filter(|r| **r == task_uri("oxtask", "tsk42"))
             .count();
         assert_eq!(n, 1, "tsk42 duplicated: {:?}", created.comment.referenced);
     }

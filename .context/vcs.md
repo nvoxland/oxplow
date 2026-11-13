@@ -16,8 +16,7 @@ provider stays testable against a tempdir.
   `revisions_between`, `file_history`.
 - **Trees:** `files_at(rev)` (path → `ObjectId`), `object_at(rev,
   path)` (one path lookup — git's `tree.get_path` — what `Trees::read_at`
-  uses, so reading one file at a revision never walks the whole tree;
-  tsk553),
+  uses, so reading one file at a revision never walks the whole tree;),
   `object_store(ws)` — a synchronous `ObjectStore` (`read(id)`,
   `id_of(bytes)`: the id without writing it) — and
   `clean_baseline(ws)`, a synchronous `CleanBaseline` that vouches, by
@@ -47,7 +46,7 @@ provider stays testable against a tempdir.
   listener that falls behind hears `Moved::Missed` — any stream may have
   moved — and does its idempotent work as if its stream(s) did (the
   git-refs take takes, the reconciler reconciles every stream, the commit
-  indexer refreshes; tsk724). `revision_graph(ws)` is a
+  indexer refreshes). `revision_graph(ws)` is a
   synchronous `RevisionGraph` (ancestry, a revision's time, whether a file
   is at a revision — the link check's `has_file`) that metric
   visibility caches over. Ancestry is asked in bulk — `ancestry(revisions)`
@@ -151,10 +150,10 @@ Snapshots read their blobs from the blob store and VCS-backed rows
 through the object store; the working tree reuses the head's object id
 for a file `status` calls clean and hashes the rest (`ObjectStore::id_of`). Every side honours the workspace filter
 (`generated:` plus `.gitignore` and git's excludes, as `ignore_in_trees`:
-git's view, so the watched-but-ignored wiki is out, tsk1083) — the working-tree corpus no longer has
+git's view, so the watched-but-ignored wiki is out) — the working-tree corpus no longer has
 its own skip list. Two VCS revisions diff like any other pair — their
 filtered `files_at` trees through `diff_trees` (a provider-side diff
-used to skip the filter, tsk552); two snapshots settle un-hashed rows
+used to skip the filter); two snapshots settle un-hashed rows
 first (`resolve_for_compare`); a mixed pair normalizes the snapshot side
 into VCS ids.
 
@@ -167,11 +166,11 @@ workspace events should not start a diff per event (a page re-runs once per
 change). The MCP VCS
 reads (`oxplow_diff`, `oxplow_vcs_blame` and `oxplow_read` of a file at a revision) default
 a missing `stream_id` to the caller's own stream — its header, else its
-thread's — and to the primary only for an anonymous caller (tsk555; the
-extension, page and change tools do the same, tsk574); they replaced
+thread's — and to the primary only for an anonymous caller (the
+extension, page and change tools do the same); they replaced
 `read_file`, `read_file_at_ref` and `diff_endpoints`. Change analysis
-and the duplicate scan read through `Trees`, so a closed effort's
-snapshot head is scanned too. (The wiki's old `@<rev>` link syntax went
+and the duplicate scan read through `Trees`, so a finished turn's
+end snapshot is scanned too. (The wiki's old `@<rev>` link syntax went
 in P5.C3: a link names a file; its version is the edge's pin —
 [knowledge.md](./knowledge.md).)
 
@@ -225,7 +224,7 @@ a stream's history is a recursive CTE over `json_each(parents)` from its
 head (`streamHead`: `v_stream.head_sha`), re-run on `datasetsChanged` (`useRerunOnChange`), and
 put in `topoOrder` — every child before its parents, else newest first:
 commit times are whole seconds and clocks skew, so a time order can list
-a rebase's parent before its child and break the graph's lanes (tsk565;
+a rebase's parent before its child and break the graph's lanes (
 the dashboard finds the head commit by sha, not as the first row). Git
 History's own view is that plain list (`CommitList`); the lane graph is
 oxplow-bundled's `history-graph` component, replacing it through
@@ -236,9 +235,9 @@ branch picker, compare list and new-stream form read `v_branch` /
 branch checked out, read from that workspace's head at each refresh —
 not the stream row, which the branch reconciler updates after (it
 writes only `branch`/`branch_ref`, `StreamStore::set_branch`, so a
-rename in between stays; tsk573). A `v_branch.name` is the branch's local name for both kinds
+rename in between stays). A `v_branch.name` is the branch's local name for both kinds
 (a remote-tracking branch's remote is its own column), so the picker
-checks out and shows `name` as is (`pickedBranch`, tsk567). What is computed stays live, as live datasets (`.context/semantic-layer.md` "Live datasets"): `v_branch_divergence` (any pair of revisions — `ahead`, `behind`, `merge_base`, `overlapping_files`, `readiness` from `Vcs::divergence`: a stream against the default branch, a remote branch against HEAD; a branch against its own upstream is `v_branch.ahead` / `behind`) and `v_commit_between` (`Vcs::revisions_between`, 100 per pair), both narrowed to the pair the query pins (`base`, `head`; one side pinned, the other ranges over `Vcs::branches`; neither, each local branch against the default) and announced on `VcsRefsChanged` and with `v_branch`. The Git Dashboard's `streams`, `readiness` and `between` pages read them. `vcs_file_history` (the index keeps 500
+checks out and shows `name` as is (`pickedBranch`). What is computed stays live, as live datasets (`.context/semantic-layer.md` "Live datasets"): `v_branch_divergence` (any pair of revisions — `ahead`, `behind`, `merge_base`, `overlapping_files`, `readiness` from `Vcs::divergence`: a stream against the default branch, a remote branch against HEAD; a branch against its own upstream is `v_branch.ahead` / `behind`) and `v_commit_between` (`Vcs::revisions_between`, 100 per pair), both narrowed to the pair the query pins (`base`, `head`; one side pinned, the other ranges over `Vcs::branches`; neither, each local branch against the default) and announced on `VcsRefsChanged` and with `v_branch`. The Git Dashboard's `streams`, `readiness` and `between` pages read them. `vcs_file_history` (the index keeps 500
 commits per head; a file's full history can be older) stays an IPC, and agents read `v_commit`,
 `v_commit_file`, `v_branch` and the two live datasets through `oxplow_query_sql`. Git-native reads keep `git_` names:
 `git_resolve_commit_ref_labels`,
@@ -291,12 +290,12 @@ A snapshot taken on a clean workspace *is* its head revision:
 string (`git:<sha>`), and `snapshot.branch` (was `git_branch`) the
 branch. `SnapshotCaptureService::clean_head` reads `Vcs::head`,
 `Vcs::status`, then `Vcs::head` again, and stamps only when the tree is
-clean and both head reads agree (`clean_revision`, tsk554) — a commit
+clean and both head reads agree (`clean_revision`) — a commit
 in between leaves the snapshot unstamped rather than paired with the
 wrong head. The git-refs listener re-stamps the latest snapshot's
 revision when the head moves onto an unchanged tree (`vcs.head.moved`).
 `Trees::revision_of(snapshot)` maps a snapshot to its revision (the
-reverse lookup, `snapshots_at`, had no caller and went; tsk573).
+reverse lookup, `snapshots_at`, had no caller and went).
 
 Capture reads git only through the capability: the sweep's clean files
 come from `Vcs::clean_baseline` and are stored by object id (storage
@@ -314,7 +313,7 @@ oxplow-foundation on, Git History, the commit page and Uncommitted changes
 show their own content and nothing another extension adds
 (`tests-e2e/specs/pages/plain.spec.ts`; the page-run half is every
 foundation fixture's, which runs with only foundation on —
-[work-items.md](./work-items.md), "Conformance"). The commit and
+[tasks.md](./tasks.md), "Conformance"). The commit and
 Uncommitted pages are foundation documents (their mounts are
 `oxplow/commit.sections` and
 `oxplow/uncommitted-changes.sections`; Git Status embeds the
@@ -341,15 +340,14 @@ provider runs the same list:
 8. a merged branch deletes; an unmerged one (its head reachable from
    neither HEAD nor its upstream) is refused as "not fully merged"
    unless forced — libgit2 never refuses, so `oxplow_git::delete_branch`
-   checks, and the branch picker's second confirmation is that refusal
-   (tsk566).
+   checks, and the branch picker's second confirmation is that refusal.
 
 7 (a snapshot taken on a clean workspace maps to its head revision
 and back, and diffs empty against it) needs the snapshot store, so it
 runs in `trees.rs`. Still to come: branch listing and divergence, and
 isolated workspaces sharing history.
 
-**Names never become options** (tsk550): `Revision::from_str` refuses
+**Names never become options**: `Revision::from_str` refuses
 a revision starting with `-`, and the git provider refuses any rev,
 branch or remote name starting with `-` (`not_an_option`) before it
 reaches git's command line — `oxplow_vcs_blame { rev: "git:--contents=…" }`
@@ -369,9 +367,9 @@ was deleted with its tests.
 **Watching, end to end** is one Rust test, `real_watch_tests.rs` in
 `oxplow-app`: services booted as the daemon boots them over a real temp git
 project and its real watcher. A file edit, a folder made after the watch
-started, a 3,000-file burst, a hand-written wiki page, a `generated.exclude`
+started, a 3,000-file burst, a `generated.exclude`
 edit of `project.yaml`, and a stream made later (its own ignore rules, its
-commits) each reach `v_change_file`, `v_snapshot_file`, `v_knowledge_page`,
+commits) each reach `v_change_file`, `v_snapshot_file`,
 `v_file` or `v_commit`. No browser is involved, so it is not an e2e spec.
 
 ## The last callers (P5.B7)
@@ -382,16 +380,13 @@ commits) each reach `v_change_file`, `v_snapshot_file`, `v_knowledge_page`,
   worktrees with `create_workspace` / `remove_workspace` — the raw `git
   worktree remove/prune` shell-outs went. Its tests need a real
   provider, so they live in `oxplow-app` (`stream_service_tests.rs`).
-- **Branch stamps** on facts and captures (collection, metrics, the
-  effort-lifecycle metrics) read `Vcs::head`.
-- **Revert detection** (token waste) reads the head and the reverted
-  commits with `Vcs::head` / `Vcs::revision`.
+- **Branch stamps** on facts and captures (collection, metrics) read `Vcs::head`.
 - **Workspace context** asks `detect` and the default branch from
   `branches()`.
 - **Text search** is `WorkspaceFiles::search_text`, no longer `git grep`.
   It and `list_files` take the project's `generated:` lists and build
   the filter from the stream's own workspace (`filter_for`), so a
-  worktree stream honours its own `.gitignore`s (tsk573).
+  worktree stream honours its own `.gitignore`s.
 - **Co-change** reads the commit index (`crate::co_change`,
   [git-integration.md](./git-integration.md) "Commit indexer").
 - **Metric visibility** asks `revision_graph` (it had opened libgit2
@@ -399,11 +394,11 @@ commits) each reach `v_change_file`, `v_snapshot_file`, `v_knowledge_page`,
 - `GitService` is gone: its git-native reads are `GitProvider` methods,
   and `Services.git` is the provider.
 
-The last git-named surfaces went in their own change (tsk542): the
-version columns on `metric_capture`, `page_ref` and `effort_file` are
+The last git-named surfaces went in their own change: the
+version columns on `metric_capture` and `page_ref` are
 `closest_vcs_rev` / `vcs_rev_exact` (V119 — the VCS's own revision id,
 `Revision::vcs_rev`; pinned dashboard tiles rewritten; `v_capture`,
-`v_effort_file`, `v_test_run` at v2), the metric dimension is
+`v_test_run` at v2), the metric dimension is
 `oxplow.vcs_rev`, the event is `VcsRefsChanged`, the workspace context
 says `vcs_enabled` (the desktop's `vcsEnabled`), the background task
 kind is `vcs`, and the project-root watcher asks `Vcs::detect` instead

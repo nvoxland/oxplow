@@ -23,7 +23,7 @@ function api(): { api: StreamThreadsApi; handlers: Handler[]; listThreads: Retur
   };
 }
 
-// tsk790: a stream's threads load once, and re-read when `v_thread` changes —
+// a stream's threads load once, and re-read when `v_thread` changes —
 // a thread created, renamed or closed shows in the picker without a remount.
 test("a loaded stream's threads re-read on a v_thread change, and only then", async () => {
   const { api: injected, handlers, listThreads } = api();

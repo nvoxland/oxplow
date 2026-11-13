@@ -1,11 +1,11 @@
 //! Comment commands (P8.A6, `.context/ipc-and-stores.md` "Comments"):
 //! threaded annotations anchored to a span of any page, written through
 //! the bus by a person, an agent or a page. Each is `Tx` over
-//! `oxplow_db::comment_store::*_tx`, logging `knowledge.comment.*` caused
+//! `oxplow_db::comment_store::*_tx`, logging `comment.*` caused
 //! by the run. The author is the actor — a person `user`, an agent
 //! `agent` — never something a caller names. An agent comments on its own
 //! stream, its comments in its own thread. The renderer re-locating a
-//! comment's anchor is `oxplow.knowledge.relocate_comment`: recorded when the
+//! comment's anchor is `oxplow.comment.relocate`: recorded when the
 //! anchor moved, nothing when it is where it was.
 
 use crate::commands::ops::Op;
@@ -28,11 +28,11 @@ use super::thread::agent_scope;
 use super::util::{bare_id, invalid, parse, schema};
 use super::{Handler, HandlerOutput, TxCtx};
 
-pub const ADD: &str = "oxplow.knowledge.add_comment";
-pub const REPLY: &str = "oxplow.knowledge.reply_comment";
-pub const UPDATE: &str = "oxplow.knowledge.update_comment";
-pub const DELETE: &str = "oxplow.knowledge.delete_comment";
-pub const RELOCATE: &str = "oxplow.knowledge.relocate_comment";
+pub const ADD: &str = "oxplow.comment.add";
+pub const REPLY: &str = "oxplow.comment.reply";
+pub const UPDATE: &str = "oxplow.comment.update";
+pub const DELETE: &str = "oxplow.comment.delete";
+pub const RELOCATE: &str = "oxplow.comment.relocate";
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -43,7 +43,7 @@ pub struct AddInput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
     /// What it's anchored to: a page's URI
-    /// (`oxplow:oxplow/wiki?slug=some-page`, `oxplow:oxplow/file?path=src/a.rs`).
+    /// (`oxplow:oxplow/knowledge?id=some-page&store=oxwiki`, `oxplow:oxplow/file?path=src/a.rs`).
     pub target: String,
     /// The text it's about.
     #[serde(default)]
@@ -147,11 +147,11 @@ fn on_own_stream(ctx: &TxCtx<'_>, stream: StreamId) -> Result<(), CommandError> 
     }
 }
 
-/// `oxplow.knowledge.add_comment`: a comment with its first message.
+/// `oxplow.comment.add`: a comment with its first message.
 pub fn add_op() -> Op {
     Op::new(
-        "knowledge.write",
-        "add_comment",
+        "comment.write",
+        "add",
         schema::<AddInput>(),
         false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
@@ -226,11 +226,11 @@ pub fn add_op() -> Op {
     )
 }
 
-/// `knowledge.reply_comment { comment, body }`.
+/// `oxplow.comment.reply { comment, body }`.
 pub fn reply_op() -> Op {
     Op::new(
-        "knowledge.write",
-        "reply_comment",
+        "comment.write",
+        "reply",
         schema::<ReplyInput>(),
         false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
@@ -252,13 +252,13 @@ pub fn reply_op() -> Op {
     )
 }
 
-/// `knowledge.update_comment { comment, intent?, status?, quote? +
+/// `oxplow.comment.update { comment, intent?, status?, quote? +
 /// selectors_json? }`: its intent, open/resolved, or a relink to a new
 /// span. Undone by what each was.
 pub fn update_op() -> Op {
     Op::new(
-        "knowledge.write",
-        "update_comment",
+        "comment.write",
+        "update",
         schema::<UpdateInput>(),
         true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
@@ -319,12 +319,12 @@ pub fn update_op() -> Op {
     )
 }
 
-/// `knowledge.delete_comment { comment }`: it and its messages. A
+/// `oxplow.comment.delete { comment }`: it and its messages. A
 /// person's, confirmed; not undoable.
 pub fn delete_op() -> Op {
     Op::new(
-        "knowledge.write",
-        "delete_comment",
+        "comment.write",
+        "delete",
         schema::<CommentInput>(),
         false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
@@ -346,15 +346,15 @@ pub fn delete_op() -> Op {
     .confirm_at_least(Confirm::Destructive)
 }
 
-/// `knowledge.relocate_comment { comment, selectors_json, orphaned }`:
+/// `oxplow.comment.relocate { comment, selectors_json, orphaned }`:
 /// the renderer, having found a comment's quote in the content as it is
 /// now (or not), stores where. Not a relink — that is a person choosing a
-/// new span (`update_comment`). An anchor already where it was changes
+/// new span (`update`). An anchor already where it was changes
 /// nothing and leaves no record (`HandlerOutput::unchanged`).
 pub fn relocate_op() -> Op {
     Op::new(
-        "knowledge.write",
-        "relocate_comment",
+        "comment.write",
+        "relocate",
         schema::<RelocateInput>(),
         false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
@@ -401,10 +401,10 @@ mod tests {
     }
 
     use super::*;
-    use crate::test_fixtures::{services_with_effort, EffortFixture};
+    use crate::test_fixtures::{services_with_thread, ThreadFixture};
     use oxplow_domain::stores::CommentStore as _;
 
-    fn agent(fx: &EffortFixture) -> Actor {
+    fn agent(fx: &ThreadFixture) -> Actor {
         Actor::Agent {
             session_id: None,
             thread_id: Some(fx.thread),
@@ -412,7 +412,7 @@ mod tests {
         }
     }
 
-    async fn add(fx: &EffortFixture, actor: &Actor, input: Value) -> Result<Value, CommandError> {
+    async fn add(fx: &ThreadFixture, actor: &Actor, input: Value) -> Result<Value, CommandError> {
         fx.svc
             .commands
             .run(actor, ADD, input, false)
@@ -421,7 +421,7 @@ mod tests {
     }
 
     fn comment_on(stream: &str, thread: Option<&str>) -> Value {
-        let mut v = json!({ "stream": stream, "target": oxplow_domain::uri::build::wiki_uri("a-page"),
+        let mut v = json!({ "stream": stream, "target": oxplow_domain::uri::build::knowledge_uri("oxwiki", "a-page"),
                             "quote": "the words", "body": "what about this?" });
         if let Some(t) = thread {
             v["thread"] = json!(t);
@@ -434,7 +434,7 @@ mod tests {
     /// the run.
     #[tokio::test]
     async fn the_author_is_the_actor_and_an_agent_comments_in_its_own_thread() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let stream = StreamId::new(1).to_string();
         let mine = add(&fx, &agent(&fx), comment_on(&stream, None))
             .await
@@ -463,7 +463,7 @@ mod tests {
             .unwrap();
         let events = fx.svc.event_log_store.read_after(0, 500).await.unwrap();
         assert!(events.iter().any(|e| {
-            e.envelope.event_type == "knowledge.comment.written"
+            e.envelope.event_type == "comment.written"
                 && e.envelope.cause.as_ref() == out.event_id.as_ref()
         }));
     }
@@ -473,7 +473,7 @@ mod tests {
     /// join on `v_comment`.
     #[tokio::test]
     async fn a_threads_messages_are_read_in_order() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let stream = StreamId::new(1).to_string();
         let c = add(&fx, &agent(&fx), comment_on(&stream, None))
             .await
@@ -508,7 +508,7 @@ mod tests {
         );
     }
 
-    /// tsk861: a moved anchor is stored and recorded; one already where
+    /// a moved anchor is stored and recorded; one already where
     /// it was writes nothing — no audit row, no event — and an agent can't
     /// relocate (it is the renderer's).
     /// Re-attaching an orphaned comment anchors it again; undoing that
@@ -516,7 +516,7 @@ mod tests {
     /// was.
     #[tokio::test]
     async fn undoing_a_relink_of_an_orphaned_comment_orphans_it_again() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let c = add(
             &fx,
             &Actor::Human,
@@ -585,7 +585,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_unchanged_anchor_writes_nothing() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let c = add(
             &fx,
             &Actor::Human,
@@ -676,7 +676,7 @@ mod tests {
     /// delete runs without asking.
     #[tokio::test]
     async fn resolve_undoes_and_delete_asks_a_person() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let c = add(
             &fx,
             &Actor::Human,
@@ -697,7 +697,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let status = |fx: &EffortFixture| {
+        let status = |fx: &ThreadFixture| {
             let store = fx.svc.comment_store.clone();
             async move { store.get(cid).await.unwrap().unwrap().comment.status }
         };

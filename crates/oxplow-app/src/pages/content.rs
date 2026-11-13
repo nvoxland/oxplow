@@ -9,7 +9,7 @@
 //!   big file costs no more than a small one; a binary file has `NULL`
 //!   text. No such file: no row.
 //! - a resource a **dataset** resolves (its declaration's `resolve:`; a
-//!   commit, a work item, a metric): that dataset's row, every column.
+//!   commit, a task, a metric): that dataset's row, every column.
 //! - any other URI (a folder, a web page): the one row `{ uri }`.
 //!
 //! See `.context/pages-and-tabs.md` "Resource pages and standalone pages".

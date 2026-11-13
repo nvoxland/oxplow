@@ -173,7 +173,7 @@ export function identityOf(text: string): string | null {
   return u ? formatUri({ ...u, view: {} }) : null;
 }
 
-/** `<extension>/<name>` of `text` (`oxplow/wiki`), or null when it isn't
+/** `<extension>/<name>` of `text` (`oxplow/knowledge`), or null when it isn't
  *  one of oxplow's URIs. */
 export function typeOf(text: string): string | null {
   const u = parseUri(text);
@@ -201,7 +201,6 @@ export function viewOf(text: string, key: string): string | null {
  *  keeps its name in `id`. */
 const KEY_PARAM: Record<string, string> = {
   commit: "sha",
-  wiki: "slug",
   file: "path",
   dir: "path",
   branch: "name",
@@ -222,6 +221,7 @@ const KEY_PARAM: Record<string, string> = {
   ai_profile: "ai_profile",
   effect: "effect",
   advisory: "advisory",
+  agent_context: "agent_context",
   skill: "skill",
   implementation: "implementation",
   provider: "provider",
@@ -229,14 +229,14 @@ const KEY_PARAM: Record<string, string> = {
   panel: "panel",
 };
 
-/** The param that names `resource` (`oxplow/wiki` → `slug`). */
+/** The param that names `resource` (`oxplow/commit` → `sha`). */
 export function keyParamOf(resource: string): string {
   const [extension, name] = resource.split("/");
   return (extension === "oxplow" && name !== undefined ? KEY_PARAM[name] : undefined) ?? "id";
 }
 
 /** `text` with only its key param: the page it names whatever it
- *  shows and however (`oxplow/page?page=tasks`) — page memory's scope. Null
+ *  shows and however (`oxplow/page?page=work`) — page memory's scope. Null
  *  when `text` isn't a URI. */
 export function keyIdentityOf(text: string): string | null {
   const u = parseUri(text);
@@ -253,16 +253,24 @@ export function idOf(text: string, resource: string): string | null {
   return u.params[keyParamOf(resource)] ?? null;
 }
 
-/** A work item's list and its id in that list; null for anything else. */
-export function workItemOf(text: string): { provider: string; id: string } | null {
+/** A task's list and its id in that list; null for anything else. */
+export function taskOf(text: string): { provider: string; id: string } | null {
   const u = parseUri(text);
-  if (!u || typeOf(text) !== "oxplow/work_item") return null;
+  if (!u || typeOf(text) !== "oxplow/task") return null;
   const { provider, id } = u.params;
   return provider && id ? { provider, id } : null;
 }
 
-/** `text`'s key param, whatever its resource (`thr3` of a thread, the slug
- *  of a wiki page); null when it isn't a URI or lacks it. */
+/** A knowledge page's store and its id in that store; null for anything else. */
+export function knowledgeOf(text: string): { store: string; id: string } | null {
+  const u = parseUri(text);
+  if (!u || typeOf(text) !== "oxplow/knowledge") return null;
+  const { store, id } = u.params;
+  return store && id ? { store, id } : null;
+}
+
+/** `text`'s key param, whatever its resource (`thr3` of a thread, the id
+ *  of a task); null when it isn't a URI or lacks it. */
 export function keyOf(text: string): string | null {
   const resource = typeOf(text);
   return resource === null ? null : idOf(text, resource);
@@ -311,14 +319,12 @@ export function isExternal(text: string): boolean {
 export const threadUri = (id: string): string => resourceUri("oxplow/thread", { id });
 /** A stream (`str1`). */
 export const streamUri = (id: string): string => resourceUri("oxplow/stream", { id });
-/** An effort (`eff12`). */
-export const effortUri = (id: string): string => resourceUri("oxplow/effort", { id });
-/** A wiki comment (`cmt12`). */
+/** A comment (`cmt12`). */
 export const commentUri = (id: string): string => resourceUri("oxplow/comment", { id });
 /** An agent session (`ses3`). */
 export const agentSessionUri = (id: string): string => resourceUri("oxplow/agent_session", { id });
-/** A wiki page (`architecture`). */
-export const wikiUri = (slug: string): string => resourceUri("oxplow/wiki", { slug });
+/** A knowledge page: its store (`oxwiki`) and its id in that store (`architecture`). */
+export const knowledgeUri = (store: string, id: string): string => resourceUri("oxplow/knowledge", { store, id });
 /** A logged event, by its id. */
 export const eventUri = (id: string): string => resourceUri("oxplow/event", { id });
 /** A command proposal (`command_proposal.id`). */
@@ -331,10 +337,13 @@ export const extensionUri = (name: string): string => resourceUri("oxplow/extens
 export const snapshotUri = (id: string | number): string => resourceUri("oxplow/snapshot", { id });
 /** An agent turn, by its id. */
 export const turnUri = (id: string | number): string => resourceUri("oxplow/turn", { id });
+/** A request, by its id: `req7`, or the bare number (`v_request.id`). */
+export const requestUri = (id: string | number): string =>
+  resourceUri("oxplow/request", { id: /^\d+$/.test(String(id)) ? `req${id}` : id });
 /** A commit, by its sha. */
 export const commitUri = (sha: string): string => resourceUri("oxplow/commit", { sha });
-/** A work item, whichever list holds it. */
-export const workItemUri = (provider: string, id: string): string => resourceUri("oxplow/work_item", { provider, id });
+/** A task, whichever list holds it. */
+export const taskUri = (provider: string, id: string): string => resourceUri("oxplow/task", { provider, id });
 /** A command, by its bus id. */
 export const commandUri = (id: string): string => resourceUri("oxplow/command", { command: id });
 /** A panel the rail or a view remembers things about. */
@@ -402,7 +411,7 @@ export function collectorUri(owner: string, id: string): string {
  *  (null for a globally named kind) and its id; null for anything else. */
 const CONTRIBUTIONS = new Set([
   "dataset", "measure", "metric", "dimension", "collector", "event_type", "ref_kind", "command", "job",
-  "ai_profile", "effect", "advisory", "skill", "implementation", "provider", "page", "panel",
+  "ai_profile", "effect", "advisory", "agent_context", "skill", "implementation", "provider", "page", "panel",
 ]);
 const GLOBAL_CONTRIBUTIONS = new Set(["command", "measure", "metric", "dimension", "event_type", "ref_kind"]);
 

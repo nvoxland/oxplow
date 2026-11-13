@@ -484,7 +484,7 @@ pub struct Node {
     /// bare slug is this extension's).
     pub link: Option<String>,
     /// A contract another extension's active provider may take its place
-    /// under (`work_item.board`).
+    /// under (`task.board`).
     pub replaceable: Option<String>,
     /// A grid child's size.
     pub size: Option<TileSize>,
@@ -570,6 +570,13 @@ pub enum NodeKind {
         component: String,
         #[specta(type = Option<oxplow_domain::Json>)]
         props: Option<serde_json::Value>,
+    },
+    /// A named action point (`action_point: <id>`, `context:`): the
+    /// commands that joined it, drawn by the shell as nothing, a button or
+    /// a menu. `context` is bound as an embed's params are.
+    ActionPoint {
+        point: String,
+        context: BTreeMap<String, ArgSource>,
     },
 }
 
@@ -731,6 +738,8 @@ struct VizFile {
     #[serde(default)]
     depth: Option<String>,
     #[serde(default)]
+    edge: Option<String>,
+    #[serde(default)]
     actions: Vec<serde_yaml::Value>,
 }
 
@@ -758,6 +767,17 @@ struct ComponentFile {
 }
 
 /// The vizes a node shows no rows through.
+/// The first action of `cfg` whose `options_from` names no loader of
+/// `page`: `(action, loader)`.
+fn options_loader_missing<'a>(page: &Page, cfg: &'a VizConfig) -> Option<(&'a str, &'a str)> {
+    cfg.actions.iter().find_map(|a| {
+        let loader = a.options_from.as_deref()?;
+        page.loader(loader)
+            .is_none()
+            .then_some((a.id.as_str(), loader))
+    })
+}
+
 fn reads_no_rows(viz: Viz) -> bool {
     matches!(viz, Viz::Form | Viz::Approvals)
 }
@@ -1179,6 +1199,7 @@ fn inline_problem(page: &Page) -> Option<String> {
         let why = match &node.kind {
             NodeKind::Component { .. } => Some("a component"),
             NodeKind::Slot { .. } => Some("a slot"),
+            NodeKind::ActionPoint { .. } => Some("an action point"),
             NodeKind::Viz { config: cfg, .. } if !cfg.actions.is_empty() => Some("actions"),
             NodeKind::Viz { config: cfg, .. } => match cfg.viz {
                 Viz::Form => Some("a form"),
@@ -1572,7 +1593,7 @@ struct NodeCtx<'a> {
 }
 
 const NODE_KINDS: &str =
-    "`stack`, `grid`, `switch`, `viz`, `embed`, `slot`, `markdown` or `component`";
+    "`stack`, `grid`, `switch`, `viz`, `embed`, `slot`, `markdown`, `component` or `action_point`";
 
 fn parse_node(value: &serde_yaml::Value, ctx: &mut NodeCtx<'_>) -> Result<Node, String> {
     let mut map = value
@@ -1606,11 +1627,8 @@ fn parse_node(value: &serde_yaml::Value, ctx: &mut NodeCtx<'_>) -> Result<Node, 
         if !callout {
             return Err("`icon` is for a section with `callout: true`".to_string());
         }
-        if !crate::extension::extension_resources::ICONS.contains(&icon.as_str()) {
-            return Err(format!(
-                "`icon: {icon}` isn't one oxplow draws; use one of {}",
-                crate::extension::extension_resources::ICONS.join(", ")
-            ));
+        if let Some(why) = crate::extension::extension_resources::icon_problem(icon) {
+            return Err(why);
         }
     }
     let collapsible = flag(&mut map, "collapsible")?;
@@ -1711,6 +1729,23 @@ fn parse_node(value: &serde_yaml::Value, ctx: &mut NodeCtx<'_>) -> Result<Node, 
         only(&map, "markdown")?;
         let text = take_str(&mut map, "markdown")?.unwrap_or_default();
         (ctx.ids.layout("markdown"), NodeKind::Markdown { text })
+    } else if map.contains_key("action_point") {
+        let context = match map.remove("context") {
+            None => BTreeMap::new(),
+            Some(v) => serde_yaml::from_value::<BTreeMap<String, ArgSource>>(v)
+                .map_err(|e| format!("`context`: {e}"))?,
+        };
+        only(&map, "action_point")?;
+        let point = take_str(&mut map, "action_point")?.unwrap_or_default();
+        if !oxplow_domain::commands::is_action_point_id(&point) {
+            return Err(format!(
+                "`action_point: {point}` isn't an action point (`<extension>/<name>`, as `oxplow/task.new`)"
+            ));
+        }
+        (
+            ctx.ids.layout("action_point"),
+            NodeKind::ActionPoint { point, context },
+        )
     } else if map.contains_key("component") {
         only(&map, "component")?;
         let c: ComponentFile = serde_yaml::from_value(map.remove("component").unwrap_or_default())
@@ -1795,6 +1830,7 @@ fn leaf_viz(
         group: f.group,
         emphasis: f.emphasis,
         depth: f.depth,
+        edge: f.edge,
         fills: f.viz.fills(),
         actions,
         origin: ctx.origin.clone(),
@@ -1814,7 +1850,12 @@ fn leaf_viz(
 fn check_titles(node: &Node) -> Result<(), String> {
     for child in node.children() {
         let titled = child.title.as_deref().is_some_and(|t| !t.trim().is_empty());
-        if !titled && !matches!(child.kind, NodeKind::Slot { .. } | NodeKind::Embed { .. }) {
+        if !titled
+            && !matches!(
+                child.kind,
+                NodeKind::Slot { .. } | NodeKind::Embed { .. } | NodeKind::ActionPoint { .. }
+            )
+        {
             return Err(format!(
                 "node `{}` is a section and needs a `title`: give it one, and add \
                  `hide_title: true` if its heading shouldn't show (Contents and agents \
@@ -1863,21 +1904,29 @@ fn check_page(page: &Page) -> Result<(), String> {
         }
         seen.push(&node.id);
         match &node.kind {
-            NodeKind::Viz { from, config: cfg } => match from {
-                Some(from) if page.loader(from).is_none() => {
+            NodeKind::Viz { from, config: cfg } => {
+                if let Some((action, loader)) = options_loader_missing(page, cfg) {
                     return Err(format!(
-                        "node `{}` shows `{from}`, but there is no loader `{from}` in `loaders:`",
+                        "node `{}`: action `{action}` takes its options from `{loader}`, but there is no loader `{loader}` in `loaders:`",
                         node.id
                     ));
                 }
-                None if !reads_no_rows(cfg.viz) => {
-                    return Err(format!(
-                        "node `{}` needs `from`: the loader whose rows it shows",
-                        node.id
-                    ));
+                match from {
+                    Some(from) if page.loader(from).is_none() => {
+                        return Err(format!(
+                            "node `{}` shows `{from}`, but there is no loader `{from}` in `loaders:`",
+                            node.id
+                        ));
+                    }
+                    None if !reads_no_rows(cfg.viz) => {
+                        return Err(format!(
+                            "node `{}` needs `from`: the loader whose rows it shows",
+                            node.id
+                        ));
+                    }
+                    _ => {}
                 }
-                _ => {}
-            },
+            }
             NodeKind::Switch { param, .. } => {
                 let declared = page.params.iter().find(|p| &p.name == param);
                 if declared.is_none_or(|p| p.role != Some(ParamRole::Filter)) {

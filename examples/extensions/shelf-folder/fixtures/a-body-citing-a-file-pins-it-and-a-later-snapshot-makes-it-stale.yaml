@@ -1,0 +1,19 @@
+requires: [shelf, shelf-folder]
+given:
+  - observe: { snapshot: { files: [{ path: src/a.rs, hash: h1 }] } }
+  - { files: { "shelf/dune.md": "# Dune\n\nSee [[file:src/a.rs]]." } }
+when: { collector: shelf_folder/books, trigger: start }
+expect: { ok: true }
+steps:
+  - when:
+      sql: |
+        SELECT path, stale FROM v_ref_pin
+        WHERE source_resource = 'shelf/book'
+    expect: { rows: [{ path: src/a.rs, stale: 0 }] }
+  - given:
+      - observe: { snapshot: { files: [{ path: src/a.rs, hash: h2 }] } }
+  - when:
+      sql: |
+        SELECT path, stale FROM v_ref_pin
+        WHERE source_resource = 'shelf/book'
+    expect: { rows: [{ path: src/a.rs, stale: 1 }] }

@@ -22,6 +22,30 @@
   background: transparent;
 }
 
+/* A parent and its children (a `depth` list's rows, the Tasks board's
+   epics): one raised panel, the parent its top line, its bottom edge where
+   the children end. Panels nest. */
+.ox-nest {
+  list-style: none;
+  margin: var(--space-2) 0;
+  padding: 0 var(--space-3);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+}
+
+/* Scrollbars: thin and quiet, as the app's own (index.html), from the
+   theme's tokens, so a frame that scrolls doesn't draw WebKit's bar. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--border-subtle);
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--border-strong); background-clip: padding-box; }
+
 /* Text */
 .ox-muted { color: var(--text-secondary); }
 .ox-faint { color: var(--text-muted); }
@@ -38,6 +62,24 @@
 .ox-link { color: var(--accent); cursor: pointer; text-decoration: none; }
 .ox-link:hover { color: var(--accent-hover); text-decoration: underline; }
 
+/* Markdown a component draws (`renderMarkdown`): oxplow's reading look. */
+.ox-md { line-height: 1.5; overflow-wrap: anywhere; }
+.ox-md > :first-child { margin-top: 0; }
+.ox-md > :last-child { margin-bottom: 0; }
+.ox-md p, .ox-md ul, .ox-md ol, .ox-md blockquote, .ox-md pre { margin: 0 0 8px; }
+.ox-md ul, .ox-md ol { padding-left: 20px; }
+.ox-md h1, .ox-md h2, .ox-md h3, .ox-md h4, .ox-md h5, .ox-md h6 { margin: 12px 0 6px; font-size: var(--text-md); font-weight: 600; }
+.ox-md blockquote { padding-left: 10px; border-left: 3px solid var(--border-strong); color: var(--text-secondary); }
+.ox-md code { font-family: var(--font-mono); font-size: 0.92em; padding: 0 3px; border-radius: 3px; background: var(--bg-2); }
+.ox-md pre { padding: 8px; border-radius: 4px; background: var(--bg-2); overflow-x: auto; }
+.ox-md pre code { padding: 0; background: none; }
+.ox-md hr { border: none; border-top: 1px solid var(--border-subtle); }
+/* A line flows in its element, whatever that element's own display. */
+.ox-md-inline * { display: inline; }
+.ox-md-inline br { display: initial; }
+.ox-md-weblink { text-decoration: underline dotted; }
+.ox-broken { color: var(--text-muted); text-decoration: line-through; cursor: help; }
+
 /* Surfaces */
 .ox-card {
   background: var(--surface-card);
@@ -53,6 +95,18 @@
   color: var(--text-secondary);
   font-size: var(--text-xs);
 }
+
+/* A rail panel's part (`.ox-compact`, `RailHud`) is narrow: its sections
+   sit close (`:not(#ox-none)` outranks the frame rules above whatever the
+   nesting), a detail's facts are short lines with no rules, and a fact's
+   buttons wrap under its value, small, their labels whole. */
+.ox-compact .ox-section:not(#ox-none) { margin-top: var(--space-2); }
+.ox-compact [data-node]:first-child > .ox-section:not(#ox-none) { margin-top: 0; }
+.ox-compact .ox-facts { column-gap: var(--space-3); font-size: inherit; }
+.ox-compact .ox-fact dt, .ox-compact .ox-fact dd { padding: 2px 0; border-bottom: 0; }
+.ox-compact .ox-fact dd { display: flex; flex-wrap: wrap; align-items: center; gap: 4px var(--space-3); overflow-wrap: normal; font-weight: normal; }
+.ox-compact .ox-fact-actions { margin-left: 0; }
+.ox-compact .ox-fact-actions .ox-button { padding: 0 6px; font-size: inherit; white-space: nowrap; }
 
 /* Buttons: one primary per region, the rest plain. */
 .ox-button {
@@ -147,7 +201,7 @@
 .ox-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Document pages: a title, an intro, then sections. A section is a
-   heading over a rule, no box (wiki style); sections stack apart. */
+   heading over a rule, no box (document style); sections stack apart. */
 .ox-title { margin: 0; font-size: var(--text-2xl); font-weight: var(--weight-bold); line-height: var(--leading-tight); color: var(--text-primary); }
 .ox-intro { margin: var(--space-2) 0 0; color: var(--text-secondary); }
 .ox-section { margin-top: var(--space-6); }
@@ -308,6 +362,9 @@
   color: var(--text-secondary);
   font-size: var(--text-xs);
 }
+/* A value you type (text, search) is a text box at rest: no caret. */
+.ox-param-value.ox-param-typed { cursor: text; padding-right: var(--space-2); }
+.ox-param-value.ox-param-typed::after { content: none; }
 .ox-param-value:hover,
 .ox-param-value:focus-visible { background: var(--surface-app); border-color: var(--border-strong); outline: none; }
 .ox-param-edit { display: flex; min-width: 0; }
@@ -315,6 +372,38 @@
 .ox-param-edit .ox-select { width: 100%; min-width: 0; }
 .ox-param-check { justify-self: start; margin: 0 var(--space-2); }
 .ox-params-more { align-self: start; background: none; border: none; padding: var(--space-1) 0; font: inherit; font-size: var(--text-xs); }
+/* A menu a component draws itself (the Tasks board's card menu): a raised
+   list over the page at the pointer, its items full-width buttons, a rule
+   between groups, a delete in the danger colour. Escape closes it; the
+   component owns that. */
+.ox-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 180px;
+  padding: var(--space-1);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+}
+.ox-menu-item {
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  cursor: pointer;
+}
+.ox-menu-item:hover, .ox-menu-item:focus-visible { background: var(--accent-soft-bg); outline: none; }
+.ox-menu-item.ox-danger { color: var(--severity-critical); }
+.ox-menu-separator { border-top: 1px solid var(--border-subtle); margin: var(--space-1) 0; }
+.ox-menu-heading { font-size: var(--text-xs); color: var(--text-secondary); padding: var(--space-1) var(--space-2) 0; }
+
 .ox-popover {
   position: fixed;
   z-index: 1000;
@@ -420,3 +509,8 @@
 .ox-contents-item[data-level="3"] { padding-left: 20px; }
 .ox-contents-item[data-level="4"] { padding-left: 32px; }
 .ox-contents-item[data-active="true"] { color: var(--text-primary); border-left-color: var(--accent); font-weight: 600; }
+
+/* `viz: icons`: a row as its icon alone, side by side (a rail panel's
+   collapsed view). Its value is the hover. */
+.ox-icon-item { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border-radius: 4px; background: var(--surface-elevated); border: 1px solid var(--border-subtle); color: var(--text-secondary); cursor: pointer; }
+.ox-icon-item:hover { color: var(--text-primary); border-color: var(--border-strong); }

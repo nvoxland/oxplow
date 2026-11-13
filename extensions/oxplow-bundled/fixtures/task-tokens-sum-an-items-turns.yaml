@@ -1,0 +1,27 @@
+# Agent Tokens, a section of a task's page: the turns of the requests that
+# worked on it listed, their total the line above them; a turn of a request
+# that did not work on it isn't counted.
+requires: [oxtask]
+given:
+  - { command: oxtask.task.create, input: { title: Fix it, stage: ready } }
+  - observe: { turn: { prompt: chat } }
+  - observe:
+      turn:
+        prompt: fix it
+        during:
+          - { command: oxtask.task.move, input: { id: tsk1, stage: in_progress }, as: agent }
+  - observe:
+      turn:
+        prompt: again
+        during:
+          - { command: oxtask.task.comment, input: { id: tsk1, body: "more" }, as: agent }
+  - observe: { token_usage: { turn: 2, prompt: fix it, input_tokens: 1999, output_tokens: 1 } }
+  - observe: { token_usage: { turn: 3, prompt: again, input_tokens: 99, output_tokens: 1 } }
+  - observe: { token_usage: { turn: 1, prompt: chat, input_tokens: 9, output_tokens: 1 } }
+when: { part: task-tokens, params: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" } }
+expect:
+  loaders:
+    task_turns:
+      rows:
+        - { prompt: again, tokens: 100, summary: "2,100 tokens over 2 turns: in 2,098, out 2, cache-write 0, cache-read 0." }
+        - { prompt: fix it, tokens: 2000 }

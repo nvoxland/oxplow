@@ -1,0 +1,29 @@
+# The page of what the person holds: open tasks assigned to them, a
+# started one under In progress, the others (to do, blocked) under Up next
+# in the person's queue order, a task of an epic under its epic. A thread's
+# task, nobody's and a closed one are not shown. Finished is left out:
+# a closed task is unassigned and nothing records who held it.
+requires: [oxtask]
+given:
+  - { command: oxtask.task.create, input: { title: Later, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/person" } }
+  - { command: oxtask.task.create, input: { title: Sooner, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", to: "oxplow:oxplow/person" } }
+  - { command: oxtask.task.create, input: { title: Going, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk3&provider=oxtask", to: "oxplow:oxplow/person" } }
+  - { command: oxtask.task.create, input: { title: Closing, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk4&provider=oxtask", to: "oxplow:oxplow/person" } }
+  - { command: oxtask.task.create, input: { title: A thread's, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk5&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Nobody's, stage: todo, stage: ready } }
+  - { command: oxplow.tasks.reorder, input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", before: "oxplow:oxplow/task?id=tsk1&provider=oxtask" } }
+  - { command: oxtask.task.move, input: { id: tsk3, stage: in_progress } }
+  - { command: oxtask.task.move, input: { id: tsk4, stage: done } }
+when: { page: oxplow/assigned-to-you }
+expect:
+  loaders:
+    lines:
+      rows:
+        - { grp: In progress, title: Going }
+        - { grp: Up next, title: Sooner }
+        - { grp: Up next, title: Later }

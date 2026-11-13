@@ -94,7 +94,7 @@ pub struct ScaffoldInput {
     /// language's files).
     #[serde(default)]
     pub glob: Option<String>,
-    /// The thread or effort ref that asked for it, recorded as the
+    /// The thread or request ref that asked for it, recorded as the
     /// extension's `intent.origin`.
     #[serde(default)]
     pub origin: Option<String>,
@@ -216,14 +216,14 @@ fn record_tx(
     let mut capture = NewMetricCapture::done(stream.value(), input.key.clone(), "agent-reported");
     capture.provenance = "asserted".into();
     // The assertion restates only what it emits, but it is anchored to
-    // the stream's latest snapshot so the value has a tree state
-    // (tsk71/tsk72); `scan_kind` keeps that from reading as a scanned set.
+    // the stream's latest snapshot so the value has a tree state;
+    // `scan_kind` keeps that from reading as a scanned set.
     capture.scan_kind = "asserted".into();
     capture.snapshot_id =
         oxplow_db::analytics_stores::latest_snapshot_id_for_stream_tx(ctx.conn, stream)
             .map_err(sql)?;
-    // An agent's assertion is its thread's, made in its open turn
-    // (tsk923); anyone else's is no turn's.
+    // An agent's assertion is its thread's, made in its open turn;
+    // anyone else's is no turn's.
     if let Actor::Agent {
         thread_id: Some(thread),
         ..
@@ -405,7 +405,7 @@ mod tests {
         svc.metric_engine.headline_for_spec(&spec).await.unwrap()
     }
 
-    /// P4.8 (tsk493): an asserted fact lands on the metric's measure with
+    /// P4.8: an asserted fact lands on the metric's measure with
     /// its subject, in the same transaction as the run's audit row.
     #[tokio::test]
     async fn record_stores_an_asserted_fact_and_audits_the_run() {
@@ -456,11 +456,11 @@ mod tests {
         assert_eq!(audited, 1);
     }
 
-    /// tsk923: an agent's assertion is its thread's, made in its open
+    /// an agent's assertion is its thread's, made in its open
     /// turn — the capture carries both; a person's carries neither.
     #[tokio::test]
     async fn an_agents_assertion_carries_its_thread_and_turn() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         fx.svc
             .fact_store
             .upsert_spec(oxplow_db::NewMetricSpec::base(
@@ -476,6 +476,7 @@ mod tests {
             .ingest(crate::hook_ingest::HookEnvelope {
                 session_title: None,
                 turn_run: None,
+                reading: Default::default(),
                 kind: oxplow_domain::HookKind::UserPromptSubmit,
                 thread_id: Some(fx.thread),
                 stream_id: None,
@@ -486,7 +487,7 @@ mod tests {
                 decision: None,
                 tool: None,
                 subagent: None,
-                peer: None,
+                harness_turn: None,
             })
             .await
             .unwrap();

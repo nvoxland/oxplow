@@ -1,12 +1,12 @@
 # Triage: TODOs sorted by a model
 
 Every TODO comment in your code, classified as a bug, cleanup or a
-feature, next to the number of open work items. It's one fact collector
+feature, next to the number of open tasks. It's one fact collector
 (`collectors/todos.star`) that uses all three host services:
 
 - **`tree.read`**: `source_files()` and `markers()` find the TODOs in the
   snapshot. A fact collector reads its tree without declaring it.
-- **`sql.read`**: `scope("sql.read", …)` counts the open work items.
+- **`sql.read`**: `scope("sql.read", …)` counts the open tasks.
 - **`ai.compute`**: `ai_classify()` sorts each TODO. It spends your AI
   provider's key, so the extension declares `permissions.ai` and the
   collector runs once it is deployed with that approved. Each
@@ -38,7 +38,7 @@ collector `todos` (collectors/todos.star):
   the TODOs outside any transaction. Its reply streams into `v_job_run_output`
   as it comes; its model may call `triage.todos.in_file` (a read-only
   command that admits a job) or `query_sql` before answering; when it
-  ends, the `publish-summary` effect writes the answer to the wiki.
+  ends, the `publish-summary` effect writes the answer as a knowledge page.
   `triage.summary.cancel` stops it, keeping what it had written.
 - **Decisions in private state.** Each TODO can be marked keep, fix now
   or won't fix. The decisions live in the extension's own state
@@ -80,7 +80,7 @@ metric (`metric_findings('triage.todos')`).
 
 ## What it can't do
 
-A command's, an effect's or an effort policy's script composes commands
+A command's or an effect's script composes commands
 and may run more than once, so it never asks a model. Move the
 `ai_classify` call into one of those and the extension doesn't load:
 `check` names the call and why.

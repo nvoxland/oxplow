@@ -8,7 +8,7 @@
 //! collector (`when: { collector, rows? }`, `expect: { entities: { <name>:
 //! n }, events?: [{ type, payload? }] }`; one that calls a model runs against the fixture model in the throwaway; an exec collector's isn't run — it is a program under the extension's `process.run` permission),
 //! a fact collector (`when: { collector, files: { <path>: <text> } }`,
-//! `expect: { facts: [{ measure, value?, path?, … }] }`, tsk1047),
+//! `expect: { facts: [{ measure, value?, path?, … }] }`),
 //! or one of its own commands (`when: { command, input, rows? }`,
 //! `expect: { commands: [names] }` and/or `{ result }` — only the keys it
 //! names — or `{ refused }`, dry-run),
@@ -53,6 +53,7 @@ mod collectors;
 mod examples;
 mod fixture;
 mod observe;
+mod observers;
 mod page;
 mod panel;
 mod report;
@@ -67,6 +68,7 @@ use collectors::*;
 use examples::*;
 use fixture::*;
 use observe::*;
+use observers::*;
 use page::*;
 use panel::*;
 use report::*;
@@ -74,9 +76,6 @@ pub use report::{render, CaseOutcome, TestCase, TestReport};
 use runner::*;
 use steps::*;
 use suites::*;
-
-/// The capability a policy script implements.
-const EFFORT_POLICY: &str = providers::effort_policy::EffortPolicyHost::CAPABILITY;
 
 /// Run every test of extension `name` under `root`. `bless` writes the
 /// golden transcripts instead of comparing them. A provider's credentials
@@ -242,14 +241,14 @@ async fn run(
             test_provider(&host, root, &ext, spec, bless, &env, &mut report).await;
             report.finish_case(format!("provider {}", spec.id), mark);
         }
-        for decl in ext
-            .implementations
-            .iter()
-            .filter(|d| d.capability == EFFORT_POLICY && d.script.is_some())
-        {
+        // A script implementation runs its capability's suite, as a
+        // provider's program does.
+        for decl in ext.implementations.iter().filter(|d| d.script.is_some()) {
             let mark = report.mark();
-            policy_suite(&host, &ext, decl, &mut report).await;
-            report.finish_case(format!("policy {}", decl.id), mark);
+            let case = format!("implementation {}", decl.id);
+            report.ran.push(case.clone());
+            suites::script_suite(&host, decl, &env, &mut report).await;
+            report.finish_case(case, mark);
         }
         page_answers(&host, &ext, &mut report).await;
         let mark = report.mark();

@@ -15,8 +15,8 @@ editing a file.
       project.yaml        # shared project config — commit this
       .gitignore          # written by oxplow on first run
       local.sqlite        # tasks, threads, snapshots, settings
-      wiki/               # wiki pages (markdown)
-      snapshots/          # per-effort file snapshots (Local History)
+      oxwiki/             # oxwiki's knowledge pages (markdown)
+      snapshots/          # file snapshots (Local History)
       runtime/            # generated agent runtime files
       lsp/                # installed LSP server binaries (appears after
                           #   an explicit install)
@@ -33,11 +33,11 @@ editing a file.
     ```
 
     so `project.yaml` is committable and shared with the team while
-    the database, snapshots, wiki, and runtime files stay local to
+    the database, snapshots, oxwiki, and runtime files stay local to
     your machine. An existing `.gitignore` is left untouched.
     Ignoring the whole directory defeats that split.
 
-    Note the wiki is *not* excepted — `.oxplow/wiki/` is local-only
+    Note oxwiki is *not* excepted — `.oxplow/oxwiki/` is local-only
     by default.
 
 - **Per-user** — the Tauri app's data dir under your OS config
@@ -126,7 +126,7 @@ Settings → Capabilities chooses how snapshots are kept:
   no file contents: what changed, never what it said, and no blob store
   growth. Anything that needs a file's text from a past snapshot (diff
   coverage, the search index, code-quality scans and metrics over
-  snapshots, wiki drift, change analysis) is skipped with a note in the
+  snapshots, knowledge page drift, change analysis) is skipped with a note in the
   log, and a read of such a file says the snapshot kept no contents. It
   applies from the next snapshot on; nothing already kept is deleted.
   It is offered by the bundled extension, so it appears once that is
@@ -190,7 +190,7 @@ everything and you opt in.
 
 `metricDetailMaxPerProducer` / `metricDetailRetentionDays` only
 **compact**: they null out a run's `detail_json` — the verbatim payload
-behind the effort Tests/Coverage panel — while the capture and every one
+behind the request Tests/Coverage panel — while the capture and every one
 of its facts stay. No metric value, trend point, or count ever changes,
 which is why compaction is on by default. All you lose is the ability to
 drill into an *old* run's per-file/per-test detail.
@@ -239,11 +239,11 @@ Entries in either list take one of two forms:
 Precedence, highest first:
 
 1. `.git/` is always ignored, and so is oxplow's own state under
-   `.oxplow/` — with two exceptions. `.oxplow/wiki/` is always watched
-   (your wiki pages get Local History even though they aren't
+   `.oxplow/` — with two exceptions. `.oxplow/oxwiki/` is always watched
+   (your knowledge pages get Local History even though they aren't
    committed), and anything `.oxplow/.gitignore` un-ignores with a `!`
    is watched too. That last one is why `project.yaml` shows up in
-   history and effort attribution: oxplow writes `!project.yaml` there
+   history and request attribution: oxplow writes `!project.yaml` there
    so the config is shareable. Negate another file yourself and it
    becomes visible the same way.
 2. An `include` match is **kept**, overriding both `exclude` and
@@ -264,7 +264,7 @@ out of the UI immediately — no rescan, no purge.
 ### Testing (tests & coverage)
 
 The `testing` block says how your tests run; **report collectors**
-read what a run writes and attach it to each effort: the individual
+read what a run writes and attach it to each request: the individual
 tests, diff coverage and analyzer findings. Point a collector at a
 report file your test run already emits; after each test run oxplow
 sees, it reads the reports that run wrote, so a polyglot repo lights
@@ -370,7 +370,7 @@ Off. Always. There is no telemetry to configure.
 
 None. The MCP surface deliberately does not expose product
 settings — the agent operates on intent, files, tasks, and
-wiki pages. Configuration is the human's job.
+knowledge pages. Configuration is the human's job.
 
 ## Resetting
 

@@ -89,19 +89,6 @@ async fn what_changes_on_disk_reaches_what_follows_it_with_no_restart() {
         count(&svc, &burst).await
     );
 
-    // The wiki's row follows its file.
-    std::fs::create_dir_all(project.join(".oxplow/wiki")).unwrap();
-    std::fs::write(
-        project.join(".oxplow/wiki/by-hand.md"),
-        "# By hand\n\nbody\n",
-    )
-    .unwrap();
-    let page = "SELECT count(*) FROM v_knowledge_page WHERE slug = 'by-hand'";
-    assert!(
-        until(WAIT, || async { count(&svc, page).await == 1 }).await,
-        "the wiki page's row never appeared"
-    );
-
     // A hand edit of the config goes live, and a `generated` change applies:
     // what it excludes leaves the file list, and goes out of the next snapshot.
     let left_out = "SELECT count(*) FROM v_file WHERE path = 'left-out/before.txt'";

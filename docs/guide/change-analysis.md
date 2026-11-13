@@ -5,8 +5,8 @@ first, and why?" It shows up on three pages:
 
 - a **commit** page (the commit vs. its first parent),
 - **Uncommitted Changes** (the working tree vs. `HEAD`),
-- an **effort's diff** (what an agent effort changed, start snapshot to
-  end, or to the working tree while it's still open).
+- a **request's diff** (what an agent request changed, start snapshot to
+  end, or to the working tree while it's still running).
 
 Each of those pages shows the change's files. Below that sits the
 **Change Analysis** section, a grid of pages from
@@ -48,8 +48,8 @@ sides.
 oxplow analyzes the change once and stores the result: tree-sitter
 metrics on both sides of every changed file, line churn per function,
 import changes, co-change history from `git log`, and a duplicate-block
-scan. Commits and closed efforts are computed once. The working tree
-and open efforts recompute when files change.
+scan. Commits and finished requests are computed once. The working tree
+and running requests recompute when files change.
 
 The results live in the `v_change*` views, so you and your agent can
 query them directly (`oxplow_ensure_change`, then `oxplow_query_sql`), or build your
@@ -61,5 +61,5 @@ own page on them.
   own diff.
 - **Before a code review.** Open the commit, read the top three files,
   then read the rest with that ranking in mind.
-- **After an agent effort.** The effort's diff shows whether the
+- **After an agent request.** The request's diff shows whether the
   touched surface matches what the task asked for.

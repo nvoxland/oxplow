@@ -1,0 +1,21 @@
+requires: [oxplow-bundled, oxtask]
+given:
+  - { command: oxtask.task.create, input: { title: Fix it } }
+when: { command: oxtask.task.move, input: { id: tsk1, stage: in_progress } }
+expect: { ok: true }
+steps:
+  - when: { sql: "SELECT state, stage, stage_title, closed_at IS NULL AS open FROM v_oxplow_task_record" }
+    expect:
+      rows: [{ state: in_progress, stage: in_progress, stage_title: In Progress, open: 1 }]
+  - when: { command: oxtask.task.move, input: { id: tsk1, stage: done } }
+    expect: { ok: true }
+  - when: { sql: "SELECT state, stage, closed_at IS NULL AS open FROM v_oxplow_task_record" }
+    expect:
+      rows: [{ state: done, stage: done, open: 0 }]
+  - when:
+      sql: |
+        SELECT json_extract(payload, '$.op') AS op, json_extract(payload, '$.changed') AS changed
+        FROM v_event WHERE type = 'oxplow.task_record.changed'
+        ORDER BY seq DESC LIMIT 1
+    expect:
+      rows: [{ op: upserted, changed: '["closed_at","stage","stage_title","state","updated_at"]' }]

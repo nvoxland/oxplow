@@ -1,6 +1,6 @@
 /**
  * Markdown, the one component every surface draws or edits markdown with
- * (`.context/markdown.md`): a wiki page, a work item's body, an effort's
+ * (`.context/markdown.md`): a knowledge page, a task's body, a request's
  * summary, a comment, a form's markdown field, a page's `markdown` viz.
  * Given `onChange` or `onCommit` it is the editor, else the viewer; both
  * have the one feature set — wikilinks and ref links that open through
@@ -24,9 +24,10 @@ import { searchSite } from "../../api.js";
 import { useVizStream } from "../../viz/VizStream.js";
 import { useResources } from "../../resources.js";
 import { readWorkspaceIndex } from "../../workspaceFiles.js";
-import { useWorkListProfile } from "../../useWorkListProfile.js";
-import { workItemRefOfMention } from "../../workItems.js";
-import { MarkdownView, postprocessWikilinks, preprocessWikilinks } from "./MarkdownView.js";
+import { useTaskTrackerProfiles } from "../../useTaskTrackerProfiles.js";
+import { taskRefOfMention } from "../../tasks.js";
+import { MarkdownView } from "./MarkdownView.js";
+import { postprocessWikilinks, preprocessWikilinks } from "./markdownLinks.js";
 import { RichTextField, type RichTextCommentConfig } from "./RichTextField.js";
 import { fileOptions, mergeRefOptions, type RefSearch } from "./refOptions.js";
 
@@ -64,6 +65,9 @@ export interface MarkdownProps {
   /** View: the URI of the file the markdown came from (a `.md` drawn as a
    *  page): its relative links and images are that file's folder's. */
   base?: string | null;
+  /** View: one line of inline marks and links, blocks unwrapped (a list
+   *  row's excerpt). */
+  inline?: boolean;
   /** View: a height past which it scrolls. */
   maxHeight?: number | string;
   className?: string;
@@ -72,6 +76,7 @@ export interface MarkdownProps {
 
 export function Markdown(props: MarkdownProps) {
   if (props.onChange || props.onCommit) return <MarkdownEditor {...props} />;
+  if (props.inline) return <MarkdownView body={props.value} base={props.base} className={props.className} style={props.style} inline testId={props.testId} />;
   const view = <MarkdownView body={props.value} base={props.base} maxHeight={props.maxHeight} className={props.className} style={props.style} />;
   return props.testId ? <div data-testid={props.testId}>{view}</div> : view;
 }
@@ -93,9 +98,9 @@ function MarkdownEditor({
   style,
 }: MarkdownProps) {
   const refKinds = useResources();
-  const profile = useWorkListProfile();
+  const profile = useTaskTrackerProfiles();
   const refSearch = useRefSearch();
-  const mentionRef = useCallback((id: string) => workItemRefOfMention(profile, id), [profile]);
+  const mentionRef = useCallback((id: string) => taskRefOfMention(profile, id), [profile]);
   // The last text handed out, as stored and as the editor spelled it: the
   // owner's echo of it is the editor's own text, not a change to apply. A
   // value from outside (not that echo) replaces it.
@@ -105,7 +110,7 @@ function MarkdownEditor({
     seenValue.current = value;
     if (lastOut.current && value !== lastOut.current.stored) lastOut.current = null;
   }
-  const preprocess = useCallback((md: string) => preprocessWikilinks(md, (id) => workItemRefOfMention(profile, id)), [profile]);
+  const preprocess = useCallback((md: string) => preprocessWikilinks(md, (id) => taskRefOfMention(profile, id)), [profile]);
   // The Source view: the stored text in a plain box (not in a one-line field).
   const [sourceView, setSourceView] = useState(false);
   const shown = useMemo(

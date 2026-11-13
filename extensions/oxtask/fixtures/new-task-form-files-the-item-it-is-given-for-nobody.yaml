@@ -1,0 +1,17 @@
+# Submitting the New Task form files an item with the title, description
+# and starting stage it was given, assigned to nobody; Save and Another
+# keeps the list's own fields (a priority) for the next one.
+requires: [oxplow-bundled]
+when: { page: new-task, params: { thread_id: 1 } }
+expect:
+  loaders: { new_task: { rows: [{ stage: ready }] } }
+steps:
+  - submit: { node: new_task, input: { title: Made in the form, body: Why it matters., stage: ready, priority: high } }
+    expect: { ok: true }
+  - submit: { node: new_task, input: { title: Second of two, stage: ready, priority: high } }
+    expect: { ok: true }
+  - when: { sql: "SELECT title, body, stage, assignee, json_extract(native, '$.priority') AS priority FROM v_oxplow_task ORDER BY title" }
+    expect:
+      rows:
+        - { title: Made in the form, body: Why it matters., stage: ready, assignee: null, priority: high }
+        - { title: Second of two, stage: ready, assignee: null, priority: high }

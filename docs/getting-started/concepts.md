@@ -37,7 +37,7 @@ accessing other directories.
 ## Page
 
 A **page** is anything addressable inside a tab: a description, dashboard,
-page, wiki page, task, file, diff, settings panel, or agent session.
+page, knowledge page, task, file, diff, settings panel, or agent session.
 References and backlinks connect these surfaces so you can move from a
 summary to its supporting evidence.
 
@@ -46,7 +46,7 @@ summary to its supporting evidence.
 Collectors bring information into oxplow's shared data model. Extensions
 can add their own entities and facts, then join them to existing data.
 **Measures** describe collected numbers; **metrics** aggregate them;
-**dimensions** let you compare them by project, stream, effort, or other
+**dimensions** let you compare them by project, stream, request, or other
 relevant categories. See [Metrics](../guide/metrics.md).
 
 A **page** queries that data and presents it as tables, charts and forms,
@@ -56,43 +56,45 @@ own questions and share its extension files with your team. See
 
 ## Task
 
-A **task** is an optional durable work item. The common states are
-`todo`, `in_progress`, `blocked`, `done`, and `canceled`; a provider can
-have additional native states. Tasks can form epics and dependency
+A **task** is an optional durable record of work. Each task store declares its
+own stages, and puts each one in a bucket oxplow understands: `backlog`,
+`todo`, `in_progress`, `blocked`, `done`, or `canceled`. The screens show
+the list's stages; oxplow acts on the buckets. Tasks can form epics and dependency
 links. Creating or closing a task is not a prerequisite for editing or
 ending an agent turn.
 
-The active work-list provider supplies tasks. A project can use oxplow's
-implementation, another provider, or none. See
-[Work queue](../guide/work-queue.md).
+A task store supplies tasks. A project can use oxtask,
+another task store, or none. See
+[Tasks](../guide/tasks.md).
 
-## Wiki page
+## Knowledge page
 
-An optional knowledge provider stores durable explanations and rationale.
-The built-in wiki uses markdown under `.oxplow/wiki/`, indexed in SQLite.
+Knowledge stores keep durable explanations and rationale.
+Oxplow's own store, oxwiki, uses markdown under `.oxplow/oxwiki/`, indexed in SQLite.
 `[[wikilinks]]` connect pages to other pages, repo files, commits, and
 other references.
 
-When a knowledge store is active, agent guidance encourages capturing
-useful understanding there. With no store selected, a question can be
-answered without creating a page. See [Wiki pages](../guide/wiki.md).
+When a knowledge store is enabled, agent guidance encourages capturing
+useful understanding there. With no store enabled, a question can be
+answered without creating a page. See [Knowledge pages](../guide/wiki.md).
 
 ## Change Analysis
 
-A **change** can be a commit, uncommitted work, or the work within an
-effort. Built-in analysis and bundled pages help explain what changed
+A **change** can be a commit, uncommitted work, or the work of a
+request. Built-in analysis and bundled pages help explain what changed
 and where to look, with links to files and diffs. The presentation is
 customizable; see [Change Analysis](../guide/change-analysis.md).
 
-## Effort and snapshot
+## Request and snapshot
 
 **Snapshots** record observed working-tree state, including changes made
 outside an explicit task. Agent turn boundaries and background capture
 provide evidence of what changed.
 
-Optional effort policies group activity into an **effort** and can link
-it to tasks. An effort is not simply a task's open-and-close cycle, and
-committing its work does not automatically mark the task done. See
+A **request** is the turn that started something plus every turn that
+followed from it. It can link to tasks and commits. A request is not
+simply a task's open-and-close cycle, and committing its work does not
+automatically mark the task done. See
 [Local History](../guide/local-history.md).
 
 ## Backlinks

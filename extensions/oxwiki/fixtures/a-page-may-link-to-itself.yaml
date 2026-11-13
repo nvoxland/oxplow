@@ -1,0 +1,7 @@
+# A page's own link isn't dangling before its row exists: the write names
+# the page it checks for (`links.check`'s `self`).
+requires: [oxplow-bundled]
+when:
+  command: oxwiki.page.write
+  input: { id: loop, body: "# Loop\n\nSee [[loop]].\n" }
+expect: { ok: true, result: { id: loop } }

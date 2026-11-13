@@ -63,7 +63,7 @@ jobs:
       # A NUL byte makes git and every grep-family tool treat a source file as
       # binary, so nothing in it is searchable — while it still compiles and its
       # tests still pass. In a codebase navigated by search that is a
-      # correctness property (tsk173).
+      # correctness property.
       - name: Sources are searchable (no NUL bytes)
         run: bun run lint:searchable
 
@@ -81,7 +81,7 @@ jobs:
       # `bundle.externalBin` makes tauri-build validate the daemon sidecar
       # from oxplow-desktop's *build script*, so anything that compiles
       # that crate — cargo test, clippy --all-targets — needs it staged,
-      # not just `tauri build` (tsk266). Debug profile: it shares the
+      # not just `tauri build`. Debug profile: it shares the
       # dependency build with the test run below, so it costs almost
       # nothing here.
       - name: Stage the daemon sidecar
@@ -129,7 +129,7 @@ jobs:
       # One feature set per third-party crate for every build (the
       # `oxplow-workspace-hack` crate, managed by cargo-hakari): without it a
       # `-p` build, a test build and the app build each resolved different
-      # features, rebuilt the graph and kept every copy (tsk881). A changed
+      # features, rebuilt the graph and kept every copy. A changed
       # dependency must regenerate it.
       - name: Install cargo-hakari
         uses: taiki-e/install-action@v2
@@ -142,7 +142,7 @@ jobs:
           cargo hakari manage-deps --dry-run
 
       # The daemon and the providers never build Tauri, WebKit or AppKit,
-      # through the hack or otherwise (tsk885).
+      # through the hack or otherwise.
       - name: The headless binaries stay headless
         run: scripts/check-headless-graph.sh
 
@@ -348,7 +348,7 @@ jobs:
       # Same reason as the test job: `externalBin` makes tauri-build
       # validate the sidecar from oxplow-desktop's build script, so
       # every job that COMPILES the workspace needs it staged first —
-      # not just the ones that bundle (tsk266).
+      # not just the ones that bundle.
       - name: Stage the daemon sidecar
         run: bash apps/desktop/src-tauri/scripts/stage-sidecars.sh debug
 

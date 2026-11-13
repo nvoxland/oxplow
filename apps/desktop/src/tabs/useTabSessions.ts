@@ -5,7 +5,7 @@ import { shellStorage } from "../shellStorage.js";
 import { emptySession, parseSession, serializeSession, type Session } from "./session.js";
 
 /** Every thread's center tabs (`tabs/session.ts`), in one key. */
-export const SESSIONS_STORAGE_KEY = "oxplow.layout.v7.sessions";
+export const SESSIONS_STORAGE_KEY = "oxplow.layout.v8.sessions";
 
 /** The stored sessions; nothing for text that isn't them. */
 export function readPersistedSessions(): Record<string, Session> {
@@ -51,5 +51,13 @@ export function useTabSessions() {
       return next === now && prev[thread] ? prev : { ...prev, [thread]: next };
     });
   }, []);
-  return { sessions, update };
+  /** Forget a thread's stored tabs: it opens as a new thread. */
+  const forget = useCallback((thread: string) => {
+    setSessions((prev) => {
+      if (!(thread in prev)) return prev;
+      const { [thread]: _, ...rest } = prev;
+      return rest;
+    });
+  }, []);
+  return { sessions, update, forget };
 }

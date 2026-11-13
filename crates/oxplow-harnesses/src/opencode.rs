@@ -12,10 +12,10 @@ use oxplow_domain::agent::harness::{
     AgentHarness, ConversationQuery, HarnessError, HarnessSetting, Launch, LaunchInput, LaunchSpec,
     NativeConversation, RuntimeRoots,
 };
-use oxplow_domain::agent::observe::HookAnswer;
+use oxplow_domain::agent::observe::{HookAnswer, Prompt};
 use oxplow_domain::agent::text::AgentText;
-use oxplow_domain::agent::tool::{ToolKind, ToolUse};
-use oxplow_domain::hook::TurnRun;
+use oxplow_domain::agent::tool::{Subagent, ToolKind, ToolUse};
+use oxplow_domain::hook::{TurnOutcome, TurnRun};
 
 use super::shared::{
     claude_shaped_tool_use, in_shell, program_and_guard, resume_or_fresh, runtime, shell_escape,
@@ -25,10 +25,14 @@ use super::Named;
 
 pub(super) struct Opencode(pub(super) Named);
 
-/// The model opencode launches with (`-m provider/model`) when its config
-/// names none (`{ model }`). Assumes GitHub Copilot auth in opencode's own
-/// auth store.
-pub const DEFAULT_MODEL: &str = "github-copilot/gpt-5-mini";
+/// What tells the bridge to post opencode's raw events and hook inputs for
+/// the hook recording (`OXPLOW_HOOK_DEBUG`, which an agent's environment
+/// never holds): set on the launch only while a recording is on.
+fn raw_recording_env(hook_debug: Option<std::ffi::OsString>) -> Option<(String, String)> {
+    hook_debug
+        .filter(|path| !path.is_empty())
+        .map(|_| ("OXPLOW_OPENCODE_RAW".into(), "1".into()))
+}
 
 #[async_trait::async_trait]
 impl AgentHarness for Opencode {
@@ -63,11 +67,11 @@ impl AgentHarness for Opencode {
                 &input.text,
             ),
         ));
-        let model = input
-            .config
-            .get("model")
-            .and_then(|m| m.as_str())
-            .unwrap_or(DEFAULT_MODEL);
+        env.extend(raw_recording_env(std::env::var_os("OXPLOW_HOOK_DEBUG")));
+        // Only a model the person set: opencode runs its own default
+        // otherwise (a model oxplow named itself once vanished from the
+        // provider's list, and opencode quietly ran another).
+        let model = super::shared::setting(&input.config, "model");
         let program = input.resolve_program("opencode");
         Ok(Launch {
             spec: LaunchSpec::Pty {
@@ -87,8 +91,8 @@ impl AgentHarness for Opencode {
         vec![HarnessSetting {
             key: "model".into(),
             title: "Model".into(),
-            hint: "The model OpenCode launches with (`provider/model`). Blank uses its default; applies to sessions started after Save.".into(),
-            placeholder: DEFAULT_MODEL.into(),
+            hint: "The model OpenCode launches with (`provider/model`, as `opencode models` lists them). Blank uses your own OpenCode default; applies to sessions started after Save. OpenCode gives no error for a model it doesn't have, and runs another.".into(),
+            placeholder: "provider/model".into(),
         }]
     }
 
@@ -116,9 +120,13 @@ impl AgentHarness for Opencode {
         let program = query.resolve_program("opencode").ok_or_else(|| {
             HarnessError::Unavailable("`opencode` isn't installed where oxplow looks".into())
         })?;
+        // Its list is of the project the program runs in, so it runs in the
+        // worktree (a directory outside any git checkout is opencode's
+        // `global` project).
         let listed = super::shared::program_output(
             &program,
             &["session", "list", "--format", "json", "-n", LIST_SCAN],
+            Some(&query.cwd),
         )
         .await?;
         sessions_in(&listed, &query.cwd.to_string_lossy(), query.limit)
@@ -152,17 +160,130 @@ impl AgentHarness for Opencode {
         let context_tokens = count("input").map(|input| {
             input + count("cache/read").unwrap_or(0) + count("cache/write").unwrap_or(0)
         });
-        (model.is_some() || effort.is_some() || context_tokens.is_some()).then_some(TurnRun {
+        let left_running = super::shared::left_running(body);
+        // How the harness says it ended: the bridge names an error (an
+        // abort is `MessageAbortedError`); none means it finished.
+        let failure = body.get("error").filter(|e| e.is_object());
+        let name = failure.and_then(|e| e["name"].as_str());
+        let (outcome, error) = match name {
+            Some("MessageAbortedError") => (Some(TurnOutcome::Interrupted), None),
+            Some(name) => {
+                let message = failure.and_then(|e| e["message"].as_str());
+                let said = match message.filter(|m| !m.is_empty()) {
+                    Some(m) => format!("{name}: {m}"),
+                    None => name.to_string(),
+                };
+                (Some(TurnOutcome::Errored), Some(said))
+            }
+            None => (None, None),
+        };
+        (model.is_some()
+            || effort.is_some()
+            || context_tokens.is_some()
+            || left_running.is_some()
+            || outcome.is_some())
+        .then_some(TurnRun {
+            left_running,
             model,
             effort,
             context_tokens,
             context_window: None,
+            outcome,
+            error,
         })
+    }
+
+    fn reading(&self, body: &serde_json::Value) -> oxplow_domain::hook::HookReading {
+        super::shared::claude_shaped_reading(body)
+    }
+
+    /// A background subagent's result arrives as a synthetic user part,
+    /// `<task id="<child session>" state="completed|error">`: it opens a
+    /// turn from that subagent, not from the person.
+    async fn prompt(&self, body: &serde_json::Value) -> Option<Prompt> {
+        let text = body.get("prompt")?.as_str()?;
+        let Some(id) = task_result_from(text) else {
+            return Some(Prompt::person(text));
+        };
+        Some(Prompt::Handback {
+            subagent: Subagent {
+                id: id.into(),
+                kind: Some("task".into()),
+            },
+            text: text.into(),
+        })
+    }
+
+    /// The user message the turn opens, which the bridge names.
+    fn harness_turn_id(&self, body: &serde_json::Value) -> Option<String> {
+        body.get("message_id")
+            .and_then(|v| v.as_str())
+            .filter(|id| !id.is_empty())
+            .map(str::to_string)
+    }
+
+    /// The bridge posts the child session as `agent_id` / `agent_type`.
+    async fn subagent(&self, body: &serde_json::Value) -> Option<Subagent> {
+        super::shared::subagent_of(body)
     }
 
     async fn render(&self, answer: &HookAnswer) -> serde_json::Value {
         super::shared::render(answer)
     }
+}
+
+/// What opencode reports for each fact and what oxplow reads from it: the
+/// table in `.context/agent-model.md` ("Subagents"), kept equal by a test.
+#[cfg(test)]
+const OPENCODE_FACTS: &[(&str, &str, &str)] = &[
+    (
+        r#"A subagent starts"#,
+        r#"`session.created` with `info.parentID`"#,
+        r#"`SubagentStart` for the parent, `agent_id` the child session"#,
+    ),
+    (
+        r#"A subagent ends"#,
+        r#"`session.idle` / `session.error` of the child"#,
+        r#"`SubagentStop` with the child's last message (and the error)"#,
+    ),
+    (
+        r#"A subagent's result returns"#,
+        r#"a synthetic `<task id="…" state="…">` part on a new user message"#,
+        r#"`Prompt::Handback` from the child, not the person"#,
+    ),
+    (
+        r#"A turn's id"#,
+        r#"the user message id"#,
+        r#"`harness_turn_id` (`message_id`)"#,
+    ),
+    (
+        r#"An aborted turn"#,
+        r#"`session.error` `MessageAbortedError`, then `session.idle`"#,
+        r#"`TurnRun.outcome` `interrupted`"#,
+    ),
+    (
+        r#"An errored turn"#,
+        r#"`session.error` with another error, then `session.idle`"#,
+        r#"`TurnRun.outcome` `errored`, `TurnRun.error` `name: message`"#,
+    ),
+    (
+        r#"What a turn left running"#,
+        r#"the children not yet idle at the `session.idle`"#,
+        r#"`TurnRun.left_running`"#,
+    ),
+    (
+        r#"A call's duration"#,
+        r#"the gap between `tool.execute.before` and `.after`"#,
+        r#"`duration_ms` on the PostToolUse"#,
+    ),
+];
+
+/// The child session id a `<task id="…" state="…">` result part names.
+fn task_result_from(text: &str) -> Option<&str> {
+    let rest = text.trim_start().strip_prefix("<task id=\"")?;
+    rest.split_once('"')
+        .map(|(id, _)| id)
+        .filter(|id| !id.is_empty())
 }
 
 const RUNTIME_DIR_REL: &str = ".oxplow/runtime/opencode-plugin";
@@ -238,15 +359,18 @@ fn split_frontmatter_description(asset: &str) -> (Option<String>, String) {
     (description, body.trim().to_string())
 }
 
-/// `opencode -m <model>`, resuming `resume`.
+/// `opencode [-m <model>]`, resuming `resume`.
 fn command(
     cwd: &str,
     resume: Option<super::shared::Saved<'_>>,
     program: Option<&str>,
-    model: &str,
+    model: Option<&str>,
 ) -> String {
     let (prog, guard) = program_and_guard(program, "opencode");
-    let base = format!("{prog} -m {}", shell_escape(model));
+    let base = match model {
+        Some(model) => format!("{prog} -m {}", shell_escape(model)),
+        None => prog,
+    };
     let resume = match resume {
         None => Resume::Fresh,
         Some(saved) => Resume::Saved(format!(
@@ -268,7 +392,12 @@ fn sessions_in(
     cwd: &str,
     limit: usize,
 ) -> Result<Vec<NativeConversation>, HarnessError> {
-    let rows: Vec<serde_json::Value> = serde_json::from_str(listed.trim())
+    // A project with no sessions prints nothing (not `[]`) and succeeds.
+    let listed = listed.trim();
+    if listed.is_empty() {
+        return Ok(Vec::new());
+    }
+    let rows: Vec<serde_json::Value> = serde_json::from_str(listed)
         .map_err(|e| HarnessError::Unavailable(format!("reading its session list: {e}")))?;
     let at = |r: &serde_json::Value, key: &str| {
         r.get(key)
@@ -334,7 +463,7 @@ mod tests {
 
     /// Its edit tool is `apply_patch`, the patch as `patchText` (a
     /// recorded OpenCode 2026-10 body): an edit of every file it names,
-    /// which the write guard and the effort's claims read.
+    /// which the write guard and the turn's reported files read.
     #[test]
     fn its_apply_patch_is_an_edit_of_the_files_it_names() {
         let h = harness("oxplow:opencode", "opencode");
@@ -563,6 +692,39 @@ console.log(JSON.stringify(posts));
         assert_eq!(posts[0]["payload"]["session_id"], "ses1");
     }
 
+    /// `session.compacted` names only the session; what started the
+    /// compaction is the `compaction` part opencode adds to the session
+    /// just before (`auto: false` for `/compact`). The bridge puts it on the
+    /// PostCompact as `trigger`, once; a compaction with no such part names
+    /// none.
+    #[test]
+    fn its_bridge_names_what_triggered_a_compaction() {
+        let part = |auto: bool| {
+            format!(
+                r#"await ev("message.part.updated", {{ sessionID: "ses1", part: {{ id: "prt_1", sessionID: "ses1", messageID: "msg_1", type: "compaction", auto: {auto} }}, time: 1 }});"#
+            )
+        };
+        let run = bridge_run(&format!(
+            r#"
+{manual}
+await ev("session.compacted", {{ sessionID: "ses1" }});
+{auto}
+await ev("session.compacted", {{ sessionID: "ses1" }});
+await ev("session.compacted", {{ sessionID: "ses1" }});
+"#,
+            manual = part(false),
+            auto = part(true),
+        ));
+        let triggers: Vec<_> = run
+            .iter()
+            .map(|p| {
+                assert_eq!(p["event"], "PostCompact");
+                p["payload"].get("trigger").cloned()
+            })
+            .collect();
+        assert_eq!(triggers, [Some("manual".into()), Some("auto".into()), None]);
+    }
+
     /// A Stop's model and variant are the turn's model and effort, and its
     /// message's tokens (input, cache reads and writes) the context fill.
     /// The bridge cannot say the window.
@@ -581,6 +743,7 @@ console.log(JSON.stringify(posts));
                 effort: Some("high".into()),
                 context_tokens: Some(4150),
                 context_window: None,
+                ..TurnRun::default()
             })
         );
         // A message with neither (the bridge couldn't read it) says nothing.
@@ -590,13 +753,225 @@ console.log(JSON.stringify(posts));
         );
     }
 
+    /// A Stop that names an error ends the turn as that error, an abort as
+    /// interrupted; the children left running ride along.
+    #[test]
+    fn a_stop_reports_how_the_turn_ended_and_what_it_left_running() {
+        let h = harness("oxplow:opencode", "opencode");
+        let run = |body: serde_json::Value| crate::test_launch::block(h.turn_run(&body));
+        let aborted = run(serde_json::json!({"error": {"name": "MessageAbortedError"}})).unwrap();
+        assert_eq!(aborted.outcome, Some(TurnOutcome::Interrupted));
+        assert_eq!(aborted.error, None);
+        let errored = run(serde_json::json!({
+            "error": {"name": "APIError", "message": "overloaded"},
+            "background_tasks": [{"id": "ses_c", "type": "subagent", "status": "running", "description": "dig"}]
+        }))
+        .unwrap();
+        assert_eq!(errored.outcome, Some(TurnOutcome::Errored));
+        assert_eq!(errored.error.as_deref(), Some("APIError: overloaded"));
+        assert_eq!(errored.left_running.as_ref().map(Vec::len), Some(1));
+        // A plain finish names no outcome (the ingest reads it as completed).
+        assert_eq!(
+            run(serde_json::json!({"model": "m"})).unwrap().outcome,
+            None
+        );
+    }
+
+    /// A background subagent's result part opens a hand-back turn from that
+    /// child; the user message id is the harness's turn id.
+    #[test]
+    fn a_background_result_is_a_handback_from_the_child() {
+        let h = harness("oxplow:opencode", "opencode");
+        let body = serde_json::json!({
+            "prompt": "<task id=\"ses_child\" state=\"completed\">\n<summary>x</summary>",
+            "message_id": "msg_9"
+        });
+        match crate::test_launch::block(h.prompt(&body)) {
+            Some(Prompt::Handback { subagent, .. }) => {
+                assert_eq!(subagent.id, "ses_child");
+                assert_eq!(subagent.kind.as_deref(), Some("task"));
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(h.harness_turn_id(&body).as_deref(), Some("msg_9"));
+        let typed = serde_json::json!({"prompt": "fix the bug"});
+        assert_eq!(
+            crate::test_launch::block(h.prompt(&typed)),
+            Some(Prompt::person("fix the bug"))
+        );
+    }
+
+    /// A child session starts and stops as its parent's subagent, an abort
+    /// or error rides the parent's Stop, and a child still running at the
+    /// Stop is in its `background_tasks`. Run under bun.
+    #[test]
+    fn its_bridge_reports_subagents_aborts_and_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let driver = dir.path().join("drive.mjs");
+        let bridge =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/opencode-hooks.js");
+        std::fs::write(
+            &driver,
+            format!(
+                r#"import {{ OxplowHooks }} from {bridge};
+const posts = [];
+globalThis.fetch = async (url, init) => {{
+  posts.push({{ event: url.split("/").pop(), payload: JSON.parse(init.body) }});
+  return {{ json: async () => ({{}}) }};
+}};
+process.env.OXPLOW_HOOK_BASE_URL = "http://hook.invalid";
+const hooks = await OxplowHooks({{ client: {{ session: {{
+  get: async () => ({{ data: {{}} }}),
+  messages: async () => ({{ data: [{{ info: {{ role: "assistant" }}, parts: [{{ type: "text", text: "done" }}] }}] }}),
+}} }} }});
+const ev = (type, properties) => hooks.event({{ event: {{ type, properties }} }});
+await ev("session.created", {{ info: {{ id: "ses_a", parentID: "ses1", title: "dig" }} }});
+await ev("session.created", {{ info: {{ id: "ses_b", parentID: "ses1", title: "other" }} }});
+await ev("session.idle", {{ sessionID: "ses_a" }});
+await ev("session.error", {{ sessionID: "ses1", error: {{ name: "MessageAbortedError", data: {{ message: "aborted" }} }} }});
+await ev("session.idle", {{ sessionID: "ses1" }});
+console.log(JSON.stringify(posts));
+"#,
+                bridge = serde_json::to_string(&format!("file://{}", bridge.display())).unwrap()
+            ),
+        )
+        .unwrap();
+        let out = std::process::Command::new("bun")
+            .arg(&driver)
+            .output()
+            .expect("bun runs the bridge (the repo's JS runtime)");
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let posts: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout).unwrap();
+        let events: Vec<&str> = posts.iter().map(|p| p["event"].as_str().unwrap()).collect();
+        assert_eq!(
+            events,
+            ["SubagentStart", "SubagentStart", "SubagentStop", "Stop"]
+        );
+        let h = harness("oxplow:opencode", "opencode");
+        let sub = |i: usize| crate::test_launch::block(h.subagent(&posts[i]["payload"])).unwrap();
+        assert_eq!(sub(0).id, "ses_a");
+        assert_eq!(sub(2).id, "ses_a");
+        assert_eq!(posts[2]["payload"]["session_id"], "ses1");
+        assert_eq!(posts[2]["payload"]["last_assistant_message"], "done");
+        let run = crate::test_launch::block(h.turn_run(&posts[3]["payload"])).unwrap();
+        assert_eq!(run.outcome, Some(TurnOutcome::Interrupted));
+        let left = run.left_running.unwrap();
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].id, "ses_b");
+    }
+
+    /// The fact table in agent-model.md says what the bridge reports and
+    /// oxplow reads, row for row as the code's.
+    #[test]
+    fn the_documented_fact_table_is_the_adapters() {
+        let doc = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.context/agent-model.md"),
+        )
+        .unwrap();
+        for (fact, reports, reads) in OPENCODE_FACTS {
+            let row = format!("| {fact} | {reports} | {reads} |");
+            assert!(doc.contains(&row), "agent-model.md lacks the row {row}");
+        }
+    }
+
     /// What opencode 1.17.4 emits when it waits on the person: a permission
-    /// asked (a Notification of a permission prompt naming it), a question
-    /// asked (a PreToolUse of an Ask call with its first question), and
-    /// either answered (a PostToolUse that clears the wait). Only
-    /// forwarded: the bridge answers nothing. Run under bun.
+    /// asked (a Notification of a permission prompt naming it) and answered
+    /// (a PostToolUse naming no tool, which clears the wait). Only
+    /// forwarded: the bridge answers nothing. A question is its tool call:
+    /// the question events post nothing (the tool hooks already carry the
+    /// wait), except a rejected question, which ends the call (its tool
+    /// throws, so no `tool.execute.after` follows). Run under bun.
     #[test]
     fn its_bridge_reports_a_wait_on_a_permission_or_a_question() {
+        let run = bridge_run(
+            r#"
+await ev("permission.asked", { id: "per_1", sessionID: "ses1", permission: "bash", patterns: ["rm -rf build"], metadata: {}, always: [] });
+await ev("permission.replied", { sessionID: "ses1", requestID: "per_1", reply: "once" });
+await hooks["tool.execute.before"]({ tool: "question", sessionID: "ses1", callID: "call_q" }, { args: { questions: [{ question: "Which branch?", header: "Branch", options: [] }] } });
+await ev("question.asked", { id: "que_1", sessionID: "ses1", questions: [{ question: "Which branch?", header: "Branch", options: [] }], tool: { messageID: "msg_1", callID: "call_q" } });
+await ev("question.rejected", { sessionID: "ses1", requestID: "que_1" });
+"#,
+        );
+        let events: Vec<&str> = run.iter().map(|p| p["event"].as_str().unwrap()).collect();
+        assert_eq!(
+            events,
+            ["Notification", "PostToolUse", "PreToolUse", "PostToolUse"]
+        );
+        assert_eq!(run[0]["payload"]["notification_type"], "permission_prompt");
+        assert_eq!(run[0]["payload"]["message"], "bash: rm -rf build");
+        assert_eq!(run[0]["payload"]["session_id"], "ses1");
+        // The permission's answer names no tool: it only clears the wait.
+        assert!(run[1]["payload"].get("tool_name").is_none());
+        // The question is one call, asked and ended under the tool's id.
+        assert_eq!(run[2]["payload"]["tool_name"], "AskUserQuestion");
+        assert_eq!(run[2]["payload"]["tool_use_id"], "call_q");
+        assert_eq!(
+            run[2]["payload"]["tool_input"]["questions"][0]["question"],
+            "Which branch?"
+        );
+        assert_eq!(run[3]["payload"]["tool_name"], "AskUserQuestion");
+        assert_eq!(run[3]["payload"]["tool_use_id"], "call_q");
+    }
+
+    /// The recorded question (`fixtures/opencode/question.jsonl`): opencode's
+    /// question tool hooks and its `question.asked` / `question.replied`
+    /// events all report the one call. Fed the recording's raw inputs, the
+    /// bridge posts the fixture's two tool hooks and nothing for the
+    /// events.
+    #[test]
+    fn its_bridge_reports_an_answered_question_as_one_call() {
+        let questions = serde_json::json!([{"question": "Which function would you like to add to calc.py?", "header": "Choose a function", "options": [{"label": "div", "description": "Division function"}, {"label": "pow", "description": "Power/exponentiation function"}]}]);
+        let session = "ses_e378b4fb3ffe9OTzA7zAg24TOq";
+        let call = "toolu_01QjZXqw5gT9YXLhcvCgjNyu";
+        let asked = serde_json::json!({"id": "que_1c874b8af001qgLmdF79Z6rcQ8", "sessionID": session, "questions": questions, "tool": {"messageID": "msg_1c874b074001uEH1Axhii7AQQz", "callID": call}});
+        let replied = serde_json::json!({"sessionID": session, "requestID": "que_1c874b8af001qgLmdF79Z6rcQ8", "answers": [["pow"]]});
+        let before_input =
+            serde_json::json!({"tool": "question", "sessionID": session, "callID": call});
+        let before_output = serde_json::json!({"args": {"questions": questions}});
+        let after_input = serde_json::json!({"tool": "question", "sessionID": session, "callID": call, "args": {"questions": questions}});
+        let after_output = serde_json::json!({"title": "Asked 1 question", "output": "User has answered your questions: \"Which function would you like to add to calc.py?\"=\"pow\". You can now continue with the user's answers in mind.", "metadata": {"answers": [["pow"]], "truncated": false}});
+        let run = bridge_run(&format!(
+            r#"
+await hooks["tool.execute.before"]({before_input}, {before_output});
+await ev("question.asked", {asked});
+await ev("question.replied", {replied});
+await hooks["tool.execute.after"]({after_input}, {after_output});
+"#
+        ));
+        let fixture = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("fixtures/opencode/question.jsonl"),
+        )
+        .unwrap();
+        let recorded: Vec<serde_json::Value> = fixture
+            .lines()
+            .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap())
+            .filter(|l| l["event"] == "PreToolUse" || l["event"] == "PostToolUse")
+            .collect();
+        // The bridge times the call itself; the recording's duration is
+        // the person's thinking time.
+        let without_duration = |mut v: serde_json::Value| {
+            v["payload"].as_object_mut().unwrap().remove("duration_ms");
+            v
+        };
+        assert_eq!(
+            run.into_iter().map(without_duration).collect::<Vec<_>>(),
+            recorded
+                .into_iter()
+                .map(without_duration)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// Run the bridge under bun with `fetch` caught and a stub client: the
+    /// `steps` (JS; `hooks` the plugin's hooks, `ev(type, properties)` an
+    /// event) run in order, and what the bridge posted comes back as
+    /// `{event, payload}` pairs, its raw recording excluded.
+    fn bridge_run(steps: &str) -> Vec<serde_json::Value> {
         let dir = tempfile::tempdir().unwrap();
         let driver = dir.path().join("drive.mjs");
         let bridge =
@@ -613,11 +988,8 @@ globalThis.fetch = async (url, init) => {{
 process.env.OXPLOW_HOOK_BASE_URL = "http://hook.invalid";
 const hooks = await OxplowHooks({{ client: {{ session: {{ get: async () => ({{ data: {{}} }}), messages: async () => ({{ data: [] }}) }} }} }});
 const ev = (type, properties) => hooks.event({{ event: {{ type, properties }} }});
-await ev("permission.asked", {{ id: "per_1", sessionID: "ses1", permission: "bash", patterns: ["rm -rf build"], metadata: {{}}, always: [] }});
-await ev("permission.replied", {{ sessionID: "ses1", requestID: "per_1", reply: "once" }});
-await ev("question.asked", {{ id: "que_1", sessionID: "ses1", questions: [{{ question: "Which branch?", header: "Branch", options: [] }}] }});
-await ev("question.rejected", {{ sessionID: "ses1", requestID: "que_1" }});
-console.log(JSON.stringify({{ posts }}));
+{steps}
+console.log(JSON.stringify(posts));
 "#,
                 bridge = serde_json::to_string(&format!("file://{}", bridge.display())).unwrap()
             ),
@@ -632,28 +1004,7 @@ console.log(JSON.stringify({{ posts }}));
             "{}",
             String::from_utf8_lossy(&out.stderr)
         );
-        let run: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-        let posts = run["posts"].as_array().unwrap();
-        let events: Vec<&str> = posts.iter().map(|p| p["event"].as_str().unwrap()).collect();
-        assert_eq!(
-            events,
-            ["Notification", "PostToolUse", "PreToolUse", "PostToolUse"]
-        );
-        assert_eq!(
-            posts[0]["payload"]["notification_type"],
-            "permission_prompt"
-        );
-        assert_eq!(posts[0]["payload"]["message"], "bash: rm -rf build");
-        assert_eq!(posts[0]["payload"]["session_id"], "ses1");
-        // The permission's answer names no tool: it only clears the wait.
-        assert!(posts[1]["payload"].get("tool_name").is_none());
-        assert_eq!(posts[2]["payload"]["tool_name"], "AskUserQuestion");
-        assert_eq!(
-            posts[2]["payload"]["tool_input"]["questions"][0]["question"],
-            "Which branch?"
-        );
-        assert_eq!(posts[3]["payload"]["tool_name"], "AskUserQuestion");
-        assert_eq!(posts[3]["payload"]["tool_use_id"], "que_1");
+        serde_json::from_slice(&out.stdout).unwrap()
     }
 
     use super::*;
@@ -684,22 +1035,72 @@ console.log(JSON.stringify({{ posts }}));
         assert!(sessions_in("not json", "/repo/wt", 1).is_err());
     }
 
+    /// A project with no sessions makes `session list --format json` print
+    /// nothing at all, exit code 0 (not `[]`; recorded with 1.17.4): that is
+    /// an empty list, not an error.
+    #[test]
+    fn a_blank_session_list_is_no_sessions() {
+        for blank in ["", "\n", "  \r\n "] {
+            assert!(sessions_in(blank, "/repo/wt", 10).unwrap().is_empty());
+        }
+        assert!(sessions_in("[]", "/repo/wt", 10).unwrap().is_empty());
+        // A cut-off list is still an error.
+        assert!(sessions_in("[{\"id\":\"ses_a\"", "/repo/wt", 10).is_err());
+    }
+
+    /// It lists the sessions of the project the program runs in, and the
+    /// project is the worktree's: the CLI runs there, and a program that
+    /// prints nothing lists none.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn its_session_list_runs_in_the_worktree_and_may_be_empty() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = TempDir::new().unwrap();
+        let wt = tmp.path().join("wt");
+        fs::create_dir(&wt).unwrap();
+        let wt = wt.canonicalize().unwrap();
+        let bin = tmp.path().join("opencode");
+        // It lists a session of the directory it runs in.
+        fs::write(
+            &bin,
+            "#!/bin/sh\nprintf '[{\"id\":\"ses_here\",\"title\":\"H\",\"updated\":1,\"created\":1,\"directory\":\"%s\"}]' \"$(pwd -P)\"\n",
+        )
+        .unwrap();
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+        let h = harness("oxplow:opencode", "opencode");
+        let query = oxplow_domain::agent::harness::ConversationQuery {
+            cwd: wt.clone(),
+            home: None,
+            search_path: vec![tmp.path().to_path_buf()],
+            limit: 10,
+        };
+        let found = h.conversations(&query).await.unwrap();
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].id, "ses_here");
+        // A project with no sessions: it prints nothing and succeeds.
+        fs::write(&bin, "#!/bin/sh\nexit 0\n").unwrap();
+        assert!(h.conversations(&query).await.unwrap().is_empty());
+    }
+
     /// Through its CLI: a program that prints the list.
     #[cfg(unix)]
     #[tokio::test]
     async fn its_conversations_come_from_its_cli() {
         use std::os::unix::fs::PermissionsExt;
         let tmp = TempDir::new().unwrap();
+        let wt = tmp.path().join("wt");
+        fs::create_dir(&wt).unwrap();
+        let wt = wt.canonicalize().unwrap();
         let bin = tmp.path().join("opencode");
         fs::write(
             &bin,
-            "#!/bin/sh\n[ \"$1 $2 $3 $4\" = 'session list --format json' ] || exit 2\necho '[{\"id\":\"ses_a\",\"title\":\"A\",\"updated\":1,\"created\":1,\"directory\":\"/repo/wt\"}]'\n",
+            "#!/bin/sh\n[ \"$1 $2 $3 $4\" = 'session list --format json' ] || exit 2\nprintf '[{\"id\":\"ses_a\",\"title\":\"A\",\"updated\":1,\"created\":1,\"directory\":\"%s\"}]' \"$(pwd -P)\"\n",
         )
         .unwrap();
         fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
         let h = harness("oxplow:opencode", "opencode");
         let query = oxplow_domain::agent::harness::ConversationQuery {
-            cwd: "/repo/wt".into(),
+            cwd: wt,
             home: None,
             search_path: vec![tmp.path().to_path_buf()],
             limit: 10,
@@ -726,6 +1127,19 @@ console.log(JSON.stringify({{ posts }}));
             command.contains(" -s ") && command.contains("sess-w") && command.contains(" --fork"),
             "{command}"
         );
+    }
+
+    /// The bridge records raw only while a hook recording is on.
+    #[test]
+    fn the_bridge_records_raw_only_while_a_hook_recording_is_on() {
+        assert_eq!(
+            raw_recording_env(Some("/tmp/hooks.jsonl".into())),
+            Some(("OXPLOW_OPENCODE_RAW".into(), "1".into()))
+        );
+        assert_eq!(raw_recording_env(Some("".into())), None);
+        assert_eq!(raw_recording_env(None), None);
+        let js = include_str!("../assets/opencode-hooks.js");
+        assert!(js.contains("OXPLOW_OPENCODE_RAW") && js.contains("opencode.raw"));
     }
 
     #[test]
@@ -768,11 +1182,21 @@ console.log(JSON.stringify({{ posts }}));
         assert!(!l.workspace.join(".opencode").exists());
     }
 
+    /// opencode picks the model itself unless the person set one: oxplow
+    /// forces none (a model it named once vanished from the provider's
+    /// list, and opencode then ran a different one with no error).
     #[test]
-    fn with_no_model_configured_it_runs_the_default() {
-        let cmd = command("/repo", None, None, DEFAULT_MODEL);
-        assert!(cmd.contains("exec opencode") && cmd.contains(DEFAULT_MODEL));
-        assert!(!cmd.contains(" -s "));
+    fn with_no_model_configured_it_passes_none() {
+        let h = harness("oxplow:opencode", "opencode");
+        for config in [serde_json::json!({}), serde_json::json!({ "model": "  " })] {
+            let l = launch_in(h.as_ref(), None, None, &config);
+            let (command, _) = crate::test_launch::pty(&l.launch);
+            assert!(command.contains("exec "), "{command}");
+            assert!(!command.contains(" -m "), "{command}");
+            assert!(!command.contains(" -s "), "{command}");
+        }
+        assert_eq!(h.settings()[0].placeholder, "provider/model");
+        assert!(h.settings()[0].hint.contains("Blank uses"));
     }
 
     #[test]

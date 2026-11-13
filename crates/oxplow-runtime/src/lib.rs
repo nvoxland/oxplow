@@ -11,3 +11,4 @@ pub mod policy;
 pub mod write_guard;
 
 pub use policy::{decide_tool, DenyLayer, IntentKind, PolicyDecision, PolicyFacts, ToolIntent};
+pub use write_guard::RecordFolder;

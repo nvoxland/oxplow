@@ -1,15 +1,17 @@
-# The board is a lane per state. Dragging a card to a lane moves the item.
+# The board is a lane per stage of the active list (oxplow's has six). Dragging a card to a lane moves the item.
 # (Renaming through the title's form needs Enter to submit it; a `ui` key
 # step only sends the key event, so that is still the app spec's.)
+requires: [oxtask]
 given:
-  - { command: oxplow.work_item.create, input: { title: Card one, thread: thr1 } }
+  - { command: oxtask.task.create, input: { title: Card one, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
 when: { part: swimlanes, params: { scope: all } }
 steps:
   - ui:
-      - expect: { count: { ".card": 1, ".lane": 5 }, text: { ".card .title": Card one } }
-      - drag: { from: ".card", to: '.lane[data-state="done"]' }
+      - expect: { count: { ".card": 1, ".lane": 6 }, text: { ".card .title": Card one } }
+      - drag: { from: ".card", to: '.lane[data-stage="done"]' }
       - expect:
-          count: { '.lane[data-state="done"] .card': 1 }
-          invoked: [{ command: oxplow.work_item.transition, ok: true }]
-  - when: { sql: "SELECT state FROM v_work_item WHERE title = 'Card one'" }
-    expect: { rows: [{ state: done }] }
+          count: { '.lane[data-stage="done"] .card': 1 }
+          invoked: [{ point: oxplow/task.move, ok: true }]
+  - when: { sql: "SELECT stage FROM v_oxplow_task WHERE title = 'Card one'" }
+    expect: { rows: [{ stage: done }] }

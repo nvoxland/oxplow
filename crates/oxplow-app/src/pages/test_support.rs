@@ -238,12 +238,12 @@ params: [{ name: t, default: from-page }]
 loaders:
   names: { sql: "SELECT 'alpha' AS name UNION ALL SELECT 'beta'" }
 actions:
-  - { id: add, label: Add, command: oxplow.work_item.create, input: { title: "{{param.t}}" } }
+  - { id: add, label: Add, command: oxplow.thread.create, input: { stream: str1, title: "{{param.t}}" } }
 view:
   viz: list
   from: names
   actions:
-    - { id: add-row, label: Add this, command: oxplow.work_item.create, input: { title: "{{row.name}}" }, row: true }
+    - { id: add-row, label: Add this, command: oxplow.thread.create, input: { stream: str1, title: "{{row.name}}" }, row: true }
 "#,
     ),
     (
@@ -277,7 +277,7 @@ view: { viz: table, from: shown }
         "needy",
         r#"
 title: Needy
-needs: [work_items]
+needs: [snapshots]
 loaders:
   q: { sql: "SELECT 1 AS n" }
 view: { viz: table, from: q }
@@ -301,7 +301,7 @@ title: Rename
 loaders:
   row: { sql: "SELECT 'sess-1' AS session" }
 actions:
-  - { id: rename, label: Rename…, command: oxplow.work_item.create, input: { title: "{{row.session}}" }, form: true }
+  - { id: rename, label: Rename…, command: oxplow.thread.create, input: { stream: str1, title: "{{row.session}}" }, form: true }
 view: { viz: detail, from: row }
 "#,
     ),
@@ -323,7 +323,7 @@ loaders:
   row: { sql: "SELECT 'sess-1' AS session, 1 AS running" }
   other: { sql: "SELECT 1 AS n UNION ALL SELECT 2" }
 actions:
-  - { id: stop, label: Stop, command: oxplow.work_item.create, input: { title: "stop {{row.session}}" }, when: running }
+  - { id: stop, label: Stop, command: oxplow.thread.create, input: { stream: str1, title: "stop {{row.session}}" }, when: running }
 view: { viz: table, from: other }
 "#,
     ),
@@ -350,9 +350,9 @@ loaders:
 view:
   viz: form
   form:
-    command: oxplow.work_item.create
-    defaults: { title: "{{param.t}}" }
-    choices: { state: acme/new-item#states }
+    command: oxplow.thread.create
+    defaults: { stream: str1, title: "{{param.t}}" }
+    choices: { from: acme/new-item#states }
 "#,
     ),
     (
@@ -391,6 +391,15 @@ view:
   stack:
     - { title: Steady, viz: number, from: steady }
     - { title: After, viz: table, from: after }
+"#,
+    ),
+    (
+        "borrows-after",
+        r#"
+title: Borrows after
+loaders:
+  borrowed: { page: acme/mixed, loader: after }
+view: { viz: table, from: borrowed }
 "#,
     ),
     (
@@ -435,8 +444,8 @@ view:
 title: Writes
 loaders:
   w:
-    command: oxplow.work_item.create
-    args: { title: nope }
+    command: oxplow.thread.create
+    args: { stream: str1, title: nope }
     refresh: manual
 view: { viz: table, from: w }
 "#,

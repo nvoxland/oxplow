@@ -1,5 +1,5 @@
 {
-  "capability": "effort_policy",
+  "capability": "task_tracker",
   "from": "oxplow",
   "to": "none",
   "chosen_by": "project"

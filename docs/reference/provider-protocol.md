@@ -1,17 +1,15 @@
 # Provider protocol
 
 A provider is a program that implements one of oxplow's capabilities
-for it. Today that's the work list: a provider can make oxplow's tasks
-live in another tracker. oxplow starts the program, talks to it over
+for it (snapshots, an agent harness or a filesystem). oxplow starts the program, talks to it over
 stdin/stdout, and reads and writes through it.
 
 ```sh
-oxplow extension new provider my-tracker   # declarations, a stub program, a test config
-oxplow extension new provider my-policy --capability effort_policy
+oxplow extension new provider my-snapshots   # declarations, a stub program, a test config
 oxplow extension new provider my-agent --capability agent_harness
-oxplow extension new provider my-shutter --capability snapshots
-oxplow extension new provider my-shelf --capability knowledge
-oxplow extension test my-tracker           # handshake, examples, conformance suite
+oxplow extension new provider my-fs --capability filesystem
+oxplow extension new provider my-shelf --capability filesystem
+oxplow extension test my-snapshots           # handshake, examples, conformance suite
 ```
 
 An agent harness that can tell its subagents apart declares the
@@ -29,7 +27,7 @@ declares the `snapshots` capability with a `contents` feature. It answers
 three verbs, each `confirm: never`, `access: record`, over inputs that
 refuse unknown keys (`read_at` only with `contents`):
 
-- `mark { stream, worktree, trigger, thread?, turn?, effort?, budget_ms?,
+- `mark { stream, worktree, trigger, thread?, turn?, budget_ms?,
   parent? }` → `{ handle, unchanged, file_count, branch?, revision? }`:
   it names the worktree's state with its own `handle`. `parent` is the
   handle of the last state it marked (`null` when there is none, and the
@@ -42,24 +40,13 @@ refuse unknown keys (`read_at` only with `contents`):
 - `read_at { handle, path }` → `{ bytes }`, base64: a file's bytes at a
   marked state. An unknown handle or path is `InvalidInput`.
 
-A knowledge provider keeps the project's pages in its own store and
-declares the `knowledge` capability. It answers `write_page { slug, title?,
-body, verified_files, removed_files }` → `{ page }`, `delete_page { slug }`
-and `link { page, target }` → `{}`, and emits `knowledge.page.recorded@2`
-with `{ page: { uri: "oxplow:oxplow/wiki?slug=<slug>", title, body, uris, updated_at,
-deleted? } }` for every page it writes or deletes (each verb answers it,
-and a `knowledge_pages` collector over the entity `knowledge_page`
-streams them all). `uris` states the page's outbound references in
-oxplow's URIs (`oxplow:oxplow/file?path=<path>`, `oxplow:oxplow/wiki?slug=<slug>`); oxplow never parses a
-foreign body.
-
 ## Declaring one
 
 ```yaml
-# .oxplow/extensions/my-tracker/extension.yaml
+# .oxplow/extensions/my-snapshots/extension.yaml
 providers:
-  - id: tracker
-    capability: work_items
+  - id: snaps
+    capability: snapshots
     entry: bin/provider            # the program, inside the folder
     declarations: provider.json    # what `initialize` answers, checked in
     env: [HOME]                    # environment variables it may read
@@ -72,7 +59,7 @@ providers:
   a scrubbed environment: `PATH`, `HOME`, the `env` names, its
   credentials, `OXPLOW_EXTENSION_DIR` and `OXPLOW_PROVIDER_ID` (the
   instance it runs as, which is the `provider` param of its URIs:
-  `oxplow:oxplow/work_item?id=…&provider=<id>`).
+  `oxplow:oxplow/task?id=…&provider=<id>`).
 - It runs only from a deployment of its extension, and only if the
   extension declares the permissions it needs (`process`, plus `network`
   and `secrets` for the hosts and credentials above). A person approves
@@ -82,10 +69,6 @@ providers:
   your authority.
 - `declarations` is the provider's answer to `initialize`, checked in.
   If the running program says anything else, it doesn't start.
-- A server that speaks MCP can be a provider through oxplow's adapter
-  instead of an `entry`: `adapter: { mcp: { command: [bin/server] } }`,
-  or `{ mcp: { url: … } }` for one already running. A mapping file says
-  which of its tools are the capability's verbs.
 
 ## The wire
 
@@ -151,8 +134,8 @@ The standard JSON-RPC codes, plus:
 - **Exits are noticed.** A process that exits on its own is restarted
   after a backoff. Three failures in a row (calls, starts or exits)
   disable the instance until a person turns it back on.
-- **You emit only your capability's events.** A work list's are
-  `work_item.recorded`, for its own items.
+- **You emit only your capability's events.** No capability's contract has
+  any today.
 
 ## Testing
 
@@ -160,6 +143,4 @@ The standard JSON-RPC codes, plus:
 config (`fixtures/provider-<id>.yaml`): the handshake against
 `declarations`, every intent example, every message against the
 schemas, a golden transcript (`--bless` writes it) and the
-capability's conformance suite. The work-items suite creates, updates,
-transitions, links, comments on and deletes an item through you, and
-reads each back.
+capability's conformance suite. Each capability's suite calls its verbs through you and checks the answers.

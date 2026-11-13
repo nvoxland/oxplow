@@ -296,7 +296,7 @@ export const MonacoCommentLayer = forwardRef<
     // No explicit context_chain/referenced: a file editor has no
     // typed ancestors above the file itself, and the backend already
     // unions any refs it can parse out of the quoted code (paths,
-    // work items, …) into `referenced` at create time — so we don't
+    // tasks, …) into `referenced` at create time — so we don't
     // reimplement ref parsing here.
     await createComment({
       streamId,

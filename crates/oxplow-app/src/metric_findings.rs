@@ -212,7 +212,7 @@ mod tests {
             .collect()
     }
 
-    /// P4.8 (tsk516): the current state only — `a.rs` was fixed — each
+    /// P4.8: the current state only — `a.rs` was fixed — each
     /// with its threshold severity; the filter drops `c.rs`'s 1 (first
     /// scan) but keeps its 6; the query reports the measure it read.
     #[tokio::test]

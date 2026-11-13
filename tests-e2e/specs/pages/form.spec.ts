@@ -6,7 +6,7 @@ const spec = `title: Form Numbat
 category: Data
 loaders:
   filed:
-    sql: SELECT title FROM v_work_item WHERE title LIKE 'Form numbat %' ORDER BY title
+    sql: SELECT title FROM v_oxplow_task WHERE title LIKE 'Form numbat %' ORDER BY title
 view:
   id: filed
   viz: table
@@ -16,7 +16,7 @@ view:
 actions:
 - id: file
   label: File a numbat
-  command: oxplow.work_item.create
+  command: oxtask.task.create
   prominent: true
   form: true
   input:
@@ -25,7 +25,7 @@ actions:
 
 test("a page's form action submits, and the page shows the result", async ({ page, daemon }) => {
   await installExtension(daemon, "e2e-form", {
-    manifest: "permissions: [commands:oxplow.work_item.create]\n",
+    manifest: "requires: [oxplow-bundled, oxtask]\npermissions: [commands:oxtask.task.create]\n",
     files: { "pages/numbat.yaml": spec },
   });
   await open(page, daemon, "oxplow:oxplow/page?page=e2e_form/numbat");

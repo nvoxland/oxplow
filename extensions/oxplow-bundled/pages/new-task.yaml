@@ -1,0 +1,13 @@
+title: New Task
+description: "File a task: each task store offers its own form, here as one button (several stores, a menu)."
+icon: plus
+needs:
+- model:oxplow/task_record
+params:
+- name: thread_id
+- name: parent
+view:
+  action_point: oxplow/task.new
+  context:
+    parent: { param: parent }
+    thread_id: { param: thread_id }

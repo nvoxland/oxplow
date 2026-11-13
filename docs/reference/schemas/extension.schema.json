@@ -51,7 +51,7 @@
           "type": "string"
         },
         "origin": {
-          "description": "The thread or effort ref that created it (`oxplow:oxplow/effort?id=eff42`), when known.",
+          "description": "The thread or request ref that created it (`oxplow:oxplow/request?id=req42`), when known.",
           "type": [
             "string",
             "null"
@@ -128,6 +128,24 @@
           "$ref": "#/definitions/Permissions"
         }
       ]
+    },
+    "storage": {
+      "description": "Its own SQLite file, reached with the `store.sql` service.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/StorageFile"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "files": {
+      "description": "Project folders it may read or write, reached with the `files.*`\nservices.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/FolderFile"
+      }
     },
     "datasets": {
       "description": "Datasets: each with its SQL in `datasets/<name>.sql`, published as\n`v_<namespace>_<name>`, named by `namespace:`.",
@@ -217,6 +235,50 @@
       },
       "default": null
     },
+    "action_points": {
+      "description": "Named places where several extensions offer the same kind of\naction; a command joins one with `ui: { at: <id> }`.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/ActionPointFile"
+      },
+      "default": null
+    },
+    "models": {
+      "description": "Shared models it declares: tables other extensions may fill through\ntheir collectors' `models` output.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/ModelFile"
+      },
+      "default": null
+    },
+    "fills": {
+      "description": "Shared models it fills as a store, with its stores and fields.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/FillFile"
+      },
+      "default": null
+    },
+    "fields": {
+      "description": "Fields it adds to another extension's model's items.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/FieldsFile"
+      },
+      "default": null
+    },
     "panels": {
       "description": "Left-nav panels, each showing its pages compact.",
       "type": [
@@ -286,6 +348,17 @@
       ],
       "items": {
         "$ref": "#/definitions/SkillFile"
+      },
+      "default": null
+    },
+    "context": {
+      "description": "Text for the coding agent's context: a query whose `text` the\nagent is sent on a prompt once, then when it changes.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/AgentContextFile"
       },
       "default": null
     },
@@ -499,6 +572,54 @@
           }
         ]
       }
+    },
+    "StorageFile": {
+      "description": "`storage:` as written.",
+      "type": "object",
+      "properties": {
+        "sqlite": {
+          "description": "Give the extension an SQLite file of its own,\n`.oxplow/extensions-data/<name>.sqlite`, migrated by\n`storage/migrations/V<n>__<name>.sql` and reached with the\n`store.sql` service (`needs: [store.sql]`).",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "FolderFile": {
+      "description": "A `files:` entry as written.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "A folder relative to the project root, without `..`.",
+          "type": "string"
+        },
+        "access": {
+          "description": "`read` for `files.read`; `write` also allows `files.write`.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/FolderAccess"
+            }
+          ]
+        },
+        "watch": {
+          "description": "A folder directly under `.oxplow/` that oxplow watches (the\nextension's `files` trigger hears it) and snapshots, though git\nignores it: the extension's own store of files, as oxwiki's pages are.\nOnly a folder under `.oxplow/` may say so, and it may not be one of\noxplow's own.",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "access"
+      ]
+    },
+    "FolderAccess": {
+      "description": "What a folder of `files:` allows.",
+      "type": "string",
+      "enum": [
+        "read",
+        "write"
+      ]
     },
     "DatasetDecl": {
       "description": "One dataset as its owner declares it (an entry of `datasets.yaml`, or\nof an extension's `datasets:`).",
@@ -1181,6 +1302,18 @@
           ],
           "default": null
         },
+        "from": {
+          "description": "A fact dimension an extension's dataset answers: the fact's `by` key\n(`request_id`, `thread_id`, `turn_id` or `stream_id`) is looked up in\nthe dataset's column of the same name, and the dimension's value is the\ndataset's `value` column of the first row in `order`. Core names no\ndataset: with the extension off the dimension is absent and the fact\nhas no value on it.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DimensionFrom"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "ai_context": {
           "description": "Guidance for an agent reading the dimension.",
           "anyOf": [
@@ -1203,6 +1336,38 @@
         }
       },
       "additionalProperties": false
+    },
+    "DimensionFrom": {
+      "description": "Where a `from:` dimension reads its value (see [`DimensionEntry::from`]).",
+      "type": "object",
+      "properties": {
+        "dataset": {
+          "description": "The `v_*` view of the dataset that answers.",
+          "type": "string"
+        },
+        "by": {
+          "description": "The fact key the dataset is looked up by, and its column of the same\nname: `request_id`, `thread_id`, `turn_id` or `stream_id`.",
+          "type": "string"
+        },
+        "value": {
+          "description": "The dataset column that holds the dimension's value.",
+          "type": "string"
+        },
+        "order": {
+          "description": "A SQL ordering over the dataset's columns; the first row wins. Without\nit, the dataset's own order.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "dataset",
+        "by",
+        "value"
+      ]
     },
     "RawCollector": {
       "description": "A `collectors:` entry as written (an extension's manifest, or\n`.oxplow/project.yaml`); `validate` makes it a `CollectorSpec`.",
@@ -1267,7 +1432,7 @@
             "null"
           ],
           "additionalProperties": {
-            "$ref": "#/definitions/PayloadScalar"
+            "$ref": "#/definitions/PayloadValue"
           },
           "default": null
         },
@@ -1450,6 +1615,16 @@
           "$ref": "#/definitions/EventTypeList"
         },
         {
+          "description": "Event types mixed with `start`, `{ files: <glob> }` and\n`{ sqlite: own | <path> }`.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/OnItem"
+          }
+        },
+        {
+          "$ref": "#/definitions/ObserverFile"
+        },
+        {
           "$ref": "#/definitions/EveryFile"
         },
         {
@@ -1476,6 +1651,55 @@
             "type": "string"
           }
         }
+      ]
+    },
+    "OnItem": {
+      "description": "An item of an `on:` list: an event type, or an observer's trigger.",
+      "anyOf": [
+        {
+          "description": "An event type, or `start`.",
+          "type": "string"
+        },
+        {
+          "$ref": "#/definitions/ObserverFile"
+        }
+      ]
+    },
+    "ObserverFile": {
+      "description": "`{ files: <glob> }` or `{ sqlite: own | <path> }`.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/FilesFile"
+        },
+        {
+          "$ref": "#/definitions/SqliteFile"
+        }
+      ]
+    },
+    "FilesFile": {
+      "description": "`{ files: shelf/*.md }`: files of the project matching the glob (from\nthe project root) were created, changed or removed.",
+      "type": "object",
+      "properties": {
+        "files": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "files"
+      ]
+    },
+    "SqliteFile": {
+      "description": "`{ sqlite: own }` or `{ sqlite: .beads/beads.db }`: a SQLite file\nchanged (the extension's own, or one in a `files:` folder it may read).",
+      "type": "object",
+      "properties": {
+        "sqlite": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sqlite"
       ]
     },
     "EveryFile": {
@@ -1511,6 +1735,20 @@
       "enum": [
         "test",
         "analysis"
+      ]
+    },
+    "PayloadValue": {
+      "description": "One scalar, or a non-empty list of them (the payload value equals any).",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/PayloadScalar"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PayloadScalar"
+          }
+        }
       ]
     },
     "PayloadScalar": {
@@ -1676,7 +1914,7 @@
       "type": "object",
       "properties": {
         "to": {
-          "description": "The view it joins to, e.g. `v_work_item` or `v_github_review`.",
+          "description": "The view it joins to, e.g. `v_oxplow_task` or `v_github_review`.",
           "type": "string"
         },
         "on": {
@@ -1861,10 +2099,14 @@
           "default": []
         },
         "about": {
-          "description": "The ref kind it acts on (`work_item`, `effort`): offered on that\nref's page and rows. `None`: it needs no ref, and search offers it.",
-          "type": [
-            "string",
-            "null"
+          "description": "The ref kind it acts on (`task`, `request`): offered on that\nref's page and rows. `None`: it needs no ref, and search offers it.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/About"
+            },
+            {
+              "type": "null"
+            }
           ],
           "default": null
         },
@@ -1873,6 +2115,26 @@
           "type": [
             "string",
             "null"
+          ],
+          "default": null
+        },
+        "at": {
+          "description": "The named action point it joins (`<namespace>/<name>`, declared\nby an extension's `action_points:`): the point's page places it,\nand it runs with the point's context as its input. Excludes\n`about` (an item command). Its `input` binds the context's keys\n(`{ parent: \"{{context.parent}}\" }`, a key the page left out stays\nunset); without one the input is the whole context.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "accepts": {
+          "description": "With `at`, at a point that names its item (`item:`): the stores\nwhose items it acts on (`{ store: <id> | [ids] }`, as `about`'s\n`accepts`); the point offers it only for an item of one of them.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ItemAccepts"
+            },
+            {
+              "type": "null"
+            }
           ],
           "default": null
         },
@@ -1938,6 +2200,73 @@
       "additionalProperties": false,
       "required": [
         "label"
+      ]
+    },
+    "About": {
+      "description": "`ui.about`: the resource kind (the short form, a string) or the object\nform `{ resource, accepts? }` that also filters the items.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/definitions/AboutItem"
+        }
+      ]
+    },
+    "AboutItem": {
+      "type": "object",
+      "properties": {
+        "resource": {
+          "type": "string"
+        },
+        "accepts": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ItemAccepts"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "resource"
+      ]
+    },
+    "ItemAccepts": {
+      "description": "A `ui.about` command's filter on the item it is offered on.",
+      "type": "object",
+      "properties": {
+        "store": {
+          "description": "The store ids of the item URI's `store` param it is offered on:\none id or a list; each is an exact id, or a renderer's `accepts`\nrule (`present`, `absent`, an anchored id pattern).",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/StoreFilter"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "StoreFilter": {
+      "description": "One store id or a list of them.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       ]
     },
     "MenuPlace": {
@@ -2149,6 +2478,365 @@
         "image"
       ]
     },
+    "ActionPointFile": {
+      "description": "The on-disk shape.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "doc": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "context": {
+          "description": "`{ <key>: <type> }`; a key written `name?` is optional.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/ContextType"
+          },
+          "default": {}
+        },
+        "item": {
+          "description": "The context key naming the item it acts on (a required `uri`).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "label"
+      ]
+    },
+    "ContextType": {
+      "description": "The type of one context key.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "string",
+            "int",
+            "bool"
+          ]
+        },
+        {
+          "description": "A ref (`oxplow:…`): a string.",
+          "type": "string",
+          "const": "uri"
+        }
+      ]
+    },
+    "ModelFile": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "resource": {
+          "type": "string"
+        },
+        "open": {
+          "type": "boolean",
+          "default": false
+        },
+        "key": {
+          "type": "string"
+        },
+        "store_param": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "change_event": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "columns": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "search": {
+          "description": "The text columns search indexes as an item's title and body; the\nresource is searchable through a generated view unless it names its\nown `searchable:`.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SearchFile"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "children": {
+          "description": "Rows that belong to one row of the model, by name.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/ChildFile"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "resource",
+        "key",
+        "columns"
+      ]
+    },
+    "SearchFile": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "body"
+      ]
+    },
+    "ChildFile": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "columns": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "edge": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ChildEdgeFile"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "columns"
+      ]
+    },
+    "ChildEdgeFile": {
+      "type": "object",
+      "properties": {
+        "to": {
+          "type": "string"
+        },
+        "type_from": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "ref_type": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "prefix": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "to"
+      ]
+    },
+    "FillFile": {
+      "type": "object",
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "stores": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "default": null
+        },
+        "id_pattern": {
+          "description": "How its ids look in text, a regex matched whole: a loose id that\nmatches is its store's item (a task model's stores).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "stages": {
+          "description": "Its store's workflow, in order: `[{ id, title, bucket }]`, checked\nas a task tracker's stages are.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/StageDecl"
+          },
+          "default": []
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/FieldFile"
+          }
+        },
+        "files": {
+          "description": "Where its store keeps its rows as files: a file at\n`<folder>/<id><suffix>` is the row of that id (in the fill's first\nstore), so an agent's read of the file is a read of the row.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FillFilesFile"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "model"
+      ]
+    },
+    "StageDecl": {
+      "description": "One of a task tracker's stages, as it declares them in order: its id (what\na record and an input name), how a person names it, and its bucket. The\nfirst stage of a bucket is that bucket's default — where an input\nnaming the bucket (`to: done`) lands.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "snake_case, unique in the list (`in_review`).",
+          "type": "string"
+        },
+        "title": {
+          "description": "How a person names it (`In Review`).",
+          "type": "string"
+        },
+        "bucket": {
+          "$ref": "#/definitions/Bucket"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "bucket"
+      ]
+    },
+    "Bucket": {
+      "description": "What a task tracker's stage means to core: the bucket each of its declared\nstages ([`StageDecl`]) is in. Core acts on buckets only — `backlog` is\nfiled but not ready, `todo` is ready (what an idle thread may pull),\n`in_progress` is started, `blocked` waits on an answer, `done` and\n`canceled` are closed — and the screens draw the list's own stages.",
+      "type": "string",
+      "enum": [
+        "backlog",
+        "todo",
+        "in_progress",
+        "blocked",
+        "done",
+        "canceled"
+      ]
+    },
+    "FieldFile": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "values": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "default": null
+        },
+        "read_only": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "title",
+        "kind"
+      ]
+    },
+    "FillFilesFile": {
+      "type": "object",
+      "properties": {
+        "folder": {
+          "description": "A folder relative to the project root (`.oxplow/oxwiki`).",
+          "type": "string"
+        },
+        "suffix": {
+          "description": "What follows the row's id in the file's name (`.md`).",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "folder",
+        "suffix"
+      ]
+    },
+    "FieldsFile": {
+      "type": "object",
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/FieldFile"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "model",
+        "fields"
+      ]
+    },
     "PanelFile": {
       "description": "A `panels:` entry as the manifest holds it.",
       "type": "object",
@@ -2258,7 +2946,7 @@
           "type": "string"
         },
         "at": {
-          "description": "Where: a page's slot (`oxplow/commit.sections`) or a\nreplaceable core component (`work_item.board`).",
+          "description": "Where: a page's slot (`oxplow/commit.sections`) or a\nreplaceable core component (`task.board`).",
           "type": "string"
         },
         "position": {
@@ -2419,7 +3107,7 @@
           "type": "string"
         },
         "once_per": {
-          "default": "effort",
+          "default": "request",
           "allOf": [
             {
               "$ref": "#/definitions/AdvisoryOncePer"
@@ -2480,12 +3168,12 @@
       "description": "How often the same advisory may reach the agent.",
       "oneOf": [
         {
-          "description": "Once per effort, the first time the query returns rows.",
+          "description": "Once per request on the thread, the first time the query returns\nrows (the request of the turn the trigger belongs to): the next\nrequest is fresh. The default.",
           "type": "string",
-          "const": "effort"
+          "const": "request"
         },
         {
-          "description": "Once per thread per `key` value: each row's `key` column fires\nonce (put `:effort_id` in the key for once per effort per row).",
+          "description": "Once per thread per `key` value: each row's `key` column fires\nonce (put `:request_id` in the key for once per request per row).",
           "type": "string",
           "const": "row"
         },
@@ -2734,7 +3422,7 @@
           "default": null
         },
         "entry": {
-          "description": "The built-in it is (`oxplow:tasks`), or an effort policy's script.",
+          "description": "The built-in it is (`oxplow:snapshot-hashes`), or a script in the extension\nthat implements the capability's verbs.",
           "type": [
             "string",
             "null"
@@ -2760,14 +3448,6 @@
           "description": "What it configures, checked against the built-in's schema.",
           "default": null
         },
-        "needs": {
-          "description": "The scopes a policy script calls (`sql.read`): only what a script\ncan (`scope_calls::CALLABLE`).",
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "default": []
-        },
         "icon": {
           "description": "A path to an SVG in the extension (`icons/claude.svg`): its logo,\nshown wherever the implementation is (a session's tab). Any\ncapability may declare one.",
           "type": [
@@ -2783,12 +3463,60 @@
             "null"
           ],
           "default": null
+        },
+        "needs": {
+          "description": "The scopes a script implementation calls (`sql.read`): what a\ncomposing script can, and the tree (`tree.read`) and its own private\nstate (`state.write`) too (`scope_calls::check_implementation_need`).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "features": {
+          "description": "A script implementation's features (`{ links: true }`): the\ncapability's, each true or false.",
+          "default": null
+        },
+        "data": {
+          "description": "What a script implementation declares of itself beyond its features:\nits capability's `data` (an agent harness's environment markers and\nsettings).",
+          "default": null
+        },
+        "when": {
+          "description": "Offered only while a setting of the extension's own configuration\nis one of `in` (`{ config: /store, in: [true] }`); otherwise it is\ndeclared but off.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConfigCondition"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "additionalProperties": false,
       "required": [
         "capability",
         "id"
+      ]
+    },
+    "ConfigCondition": {
+      "description": "`when: { config: <pointer>, in: [<values>] }`: a contribution that is\nthere only while a setting of its extension's own configuration is one\nof `in`. The one condition type every contribution kind that is offered\nby a setting shares.",
+      "type": "object",
+      "properties": {
+        "config": {
+          "description": "A JSON pointer into the extension's own configuration, naming a\nscalar key of `configuration.schema` (`/tasks/workflow`).",
+          "type": "string"
+        },
+        "in": {
+          "description": "The values for which it holds: of the key's type, and of its `enum`\nwhen it has one.",
+          "type": "array",
+          "items": true
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "config",
+        "in"
       ]
     },
     "SkillFile": {
@@ -2815,6 +3543,18 @@
             "type": "string"
           },
           "default": []
+        },
+        "when": {
+          "description": "Offered only while a setting of the extension's own configuration is\none of the listed values: `{ config: /tasks/workflow, in: [agent_tracks] }`.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConfigCondition"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "additionalProperties": false,
@@ -2838,19 +3578,63 @@
         }
       ]
     },
+    "AgentContextFile": {
+      "description": "A `context:` entry as the manifest holds it.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Lowercase letters, digits and dashes; the agent sees it as\n`<context from=\"<namespace>/<id>\">`.",
+          "type": "string"
+        },
+        "doc": {
+          "description": "What it tells the agent, in a line.",
+          "type": "string"
+        },
+        "needs": {
+          "description": "Capabilities or features it needs active.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "when": {
+          "description": "Sent only while a setting of the extension's own holds (`{ config:\n/tasks/workflow, in: [agent_tracks] }`), as a skill's `when:`.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConfigCondition"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "query": {
+          "description": "SQL returning a `text` column, at most one row; `:thread_id`,\n`:stream_id`, `:request_id` bound (NULL when unknown).",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "doc",
+        "query"
+      ]
+    },
     "ProviderSpec": {
       "description": "One declared provider.",
       "type": "object",
       "properties": {
         "id": {
-          "description": "The provider's id: its program's approval (`<extension>/<id>`) and\nthe id of its default instance — an instance's id is its refs'\nsegment (`oxplow:oxplow/work_item?id=…&provider=<id>`) and its commands' namespace\n(`<id>.estimate`).",
+          "description": "The provider's id: its program's approval (`<extension>/<id>`) and\nthe id of its default instance — an instance's id is its refs'\nsegment (`oxplow:oxplow/task?id=…&provider=<id>`) and its commands' namespace\n(`<id>.estimate`).",
           "type": "string"
         },
         "capability": {
           "type": "string"
         },
         "entry": {
-          "description": "The program, relative to the extension folder — or `adapter`.",
+          "description": "The program, relative to the extension folder.",
           "type": [
             "string",
             "null"
@@ -2863,18 +3647,6 @@
             "type": "string"
           },
           "default": []
-        },
-        "adapter": {
-          "description": "An MCP server run through oxplow's adapter, instead of an `entry`.",
-          "anyOf": [
-            {
-              "$ref": "#/definitions/AdapterSpec"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
         },
         "env": {
           "description": "Host environment variables passed through by name.",
@@ -2904,22 +3676,6 @@
           "description": "The checked-in `InitializeResult` (JSON), relative to the folder.",
           "type": "string"
         },
-        "idPattern": {
-          "description": "What a work list's own ids look like (a regex matched whole:\n`[A-Z]+-\\d+`), so a loose id resolves to its item while it's the\nactive work list.",
-          "type": [
-            "string",
-            "null"
-          ],
-          "default": null
-        },
-        "fields": {
-          "description": "A work list's own fields (kept in an item's `native`), so screens\nrender and edit them: `[{ name, title, kind: enum|text|number,\nvalues? }]`.",
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/FieldDecl"
-          },
-          "default": []
-        },
         "needs": {
           "description": "The scopes it calls over the protocol (`host/call`,\n`sql.read` or `state.read`): part of what its approval covers, and the only ones it\nmay call.",
           "type": "array",
@@ -2934,69 +3690,6 @@
         "id",
         "capability",
         "declarations"
-      ]
-    },
-    "AdapterSpec": {
-      "description": "An MCP server as a provider: oxplow's adapter runs `mcp`'s\nserver and translates through `mapping`, refusing a server whose tools\naren't `tools`.",
-      "type": "object",
-      "properties": {
-        "mcp": {
-          "$ref": "#/definitions/McpServer"
-        },
-        "mapping": {
-          "description": "The Starlark mapping (`transform(x)`), relative to the folder.",
-          "type": "string"
-        },
-        "tools": {
-          "description": "The pinned tools (`[{ name, description, inputSchema }]`, JSON).",
-          "type": "string"
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "mcp",
-        "mapping",
-        "tools"
-      ]
-    },
-    "McpServer": {
-      "description": "How the adapter reaches the MCP server: exactly one of the two.",
-      "anyOf": [
-        {
-          "description": "A program in the folder, spoken to over its stdio.",
-          "type": "object",
-          "properties": {
-            "command": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            }
-          },
-          "additionalProperties": false,
-          "required": [
-            "command"
-          ]
-        },
-        {
-          "description": "A server reached over streamable HTTP. `auth` names the\ncredential whose value is sent as its bearer token.",
-          "type": "object",
-          "properties": {
-            "url": {
-              "type": "string"
-            },
-            "auth": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          "additionalProperties": false,
-          "required": [
-            "url"
-          ]
-        }
       ]
     },
     "CredentialDecl": {
@@ -3136,59 +3829,6 @@
         "id"
       ]
     },
-    "FieldDecl": {
-      "description": "One of a work list's own fields: kept in an item's `native` under\n`name`, declared so screens render and edit it without knowing which\nlist is active.",
-      "type": "object",
-      "properties": {
-        "name": {
-          "description": "Its key in `native` (snake_case).",
-          "type": "string"
-        },
-        "title": {
-          "description": "How a person names it.",
-          "type": "string"
-        },
-        "kind": {
-          "$ref": "#/definitions/FieldKind"
-        },
-        "values": {
-          "description": "An `enum`'s values, in the order they're offered (empty for any\nother kind).",
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "default": []
-        },
-        "read_only": {
-          "description": "Set by the list itself (who filed it, when it synced): shown, never\nedited — a `oxplow.work_item.update` that names it is refused.",
-          "type": "boolean",
-          "default": false
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "name",
-        "title",
-        "kind"
-      ]
-    },
-    "FieldKind": {
-      "description": "What kind of value a declared field holds.",
-      "oneOf": [
-        {
-          "type": "string",
-          "enum": [
-            "text",
-            "number"
-          ]
-        },
-        {
-          "description": "One of `values`.",
-          "type": "string",
-          "const": "enum"
-        }
-      ]
-    },
     "EffectFile": {
       "description": "An `effects:` entry as the manifest holds it; `on` and `where` are read\nby the one trigger grammar (`collectors::parse_trigger`), as a\ncollector's are.",
       "type": "object",
@@ -3214,7 +3854,7 @@
             "null"
           ],
           "additionalProperties": {
-            "$ref": "#/definitions/PayloadScalar"
+            "$ref": "#/definitions/PayloadValue"
           },
           "default": null
         },
@@ -3266,6 +3906,14 @@
           "default": null
         },
         "commands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "action_points": {
+          "description": "Action points it may run (`invokePoint`), by id (`oxplow/task.move`).",
           "type": "array",
           "items": {
             "type": "string"

@@ -34,7 +34,7 @@ params:
   role: filter
   label: Equals
 answers:
-- {"question":"What rows does this dataset hold?","about":"oxplow/dataset","params":{"uri":"oxplow:oxplow/dataset?dataset=work_item"},"skill":"oxplow-extension"}
+- {"question":"What rows does this dataset hold?","about":"oxplow/dataset","params":{"uri":"oxplow:oxplow/dataset?dataset=task"},"skill":"oxplow-extension"}
 loaders:
   about:
     sql: |

@@ -1,0 +1,12 @@
+# `record.read` is logged for the row of any shared model: only a knowledge
+# page's makes a knowledge read.
+requires: [oxwiki, oxtask]
+given:
+  - { command: oxtask.task.create, input: { title: A task, stage: ready } }
+  - observe:
+      turn:
+        prompt: Read the task
+        tools:
+          - { name: Read, kind: read, paths: ["src/a.rs"], ok: true }
+when: { sql: "SELECT count(*) AS n FROM v_oxplow_knowledge_read" }
+expect: { rows: [{ n: 0 }] }

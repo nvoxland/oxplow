@@ -7,7 +7,6 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
-oxplow-tasks = { workspace = true }
 time = { workspace = true }
 url = { workspace = true }
 # The OAuth token endpoint calls (providers/oauth.rs): two form POSTs.
@@ -78,7 +77,7 @@ git2 = { workspace = true }
 oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
 
 [dev-dependencies]
-# `#[tokio::test(start_paused = true)]` in wiki_pages.rs needs the paused
+# `#[tokio::test(start_paused = true)]` in the knowledge tests needs the paused
 # clock, which lives behind `test-util` — NOT part of tokio's `full`. This
 # compiled for a while only because a transitive dependency happened to
 # enable the feature and cargo unified it in; a routine `cargo update`
@@ -94,7 +93,7 @@ oxplow-oauth-sim = { workspace = true }
 # P8.B4: incremental materialization equals a full refill over random
 # write sequences.
 proptest = "1"
-# tsk903: the store-write guard reads oxplow-db's functions to tell which
+# the store-write guard reads oxplow-db's functions to tell which
 # write.
 syn = { version = "2", features = ["full", "visit"] }
 

@@ -1,0 +1,29 @@
+# Reordering puts a task before or after another in the same queue; the
+# queue the next-task page reads follows; undo restores the rank.
+requires: [oxtask]
+given:
+  - { command: oxtask.task.create, input: { title: A } }
+  - { command: oxtask.task.create, input: { title: B } }
+  - { command: oxtask.task.create, input: { title: C } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/person" } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", to: "oxplow:oxplow/person" } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk3&provider=oxtask", to: "oxplow:oxplow/person" } }
+when:
+  command: oxplow.tasks.reorder
+  input: { uri: "oxplow:oxplow/task?id=tsk3&provider=oxtask", before: "oxplow:oxplow/task?id=tsk2&provider=oxtask" }
+expect: { ok: true, result: { rank: 0.5 } }
+steps:
+  - when: { sql: "SELECT group_concat(title, '') AS order_ FROM (SELECT title FROM v_oxplow_task WHERE assignee IS NOT NULL ORDER BY rank)" }
+    expect: { rows: [{ order_: ACB }] }
+  - when: { undo: oxplow.tasks.reorder }
+    expect: { ok: true }
+  - when: { sql: "SELECT group_concat(title, '') AS order_ FROM (SELECT title FROM v_oxplow_task WHERE assignee IS NOT NULL ORDER BY rank)" }
+    expect: { rows: [{ order_: ABC }] }
+  - when: { command: oxplow.tasks.reorder, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", after: "oxplow:oxplow/task?id=tsk3&provider=oxtask" } }
+    expect: { ok: true, result: { rank: 3 } }
+  - when: { sql: "SELECT group_concat(title, '') AS order_ FROM (SELECT title FROM v_oxplow_task WHERE assignee IS NOT NULL ORDER BY rank)" }
+    expect: { rows: [{ order_: BCA }] }
+  - when: { command: oxplow.tasks.reorder, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", before: "oxplow:oxplow/task?id=tsk1&provider=oxtask" } }
+    expect: { ok: false, refused: "isn't in that queue" }
+  - when: { command: oxplow.tasks.reorder, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" } }
+    expect: { ok: false, refused: "before" }

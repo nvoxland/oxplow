@@ -15,7 +15,7 @@
 //! Single-user by design: bind to `127.0.0.1` on the remote box and
 //! reach it through `ssh -L <localPort>:127.0.0.1:<port>`.
 //!
-//! **Only the person's UI may call it** (tsk345). `/ipc` and `/events`
+//! **Only the person's UI may call it**. `/ipc` and `/events`
 //! require the per-launch UI token ([`DaemonState::token`]); `/health`
 //! doesn't. Loopback alone isn't a boundary: the agents this daemon runs,
 //! the sources it sandboxes, and any web page the person visits can all
@@ -149,8 +149,8 @@ async fn health() -> &'static str {
 /// socket (`{"channel":"terminal","uri":…,"message":…}`), so keystrokes
 /// reach the PTY in the order they were typed.
 ///
-/// The channels are subscribed here, before the upgrade is answered
-/// (tsk995): the upgrade's callback runs only after the client has its
+/// The channels are subscribed here, before the upgrade is answered:
+/// the upgrade's callback runs only after the client has its
 /// `101`, so a client that writes once its socket opens could otherwise
 /// cause an event no forwarder was there to see.
 #[derive(serde::Deserialize)]
@@ -531,7 +531,7 @@ mod tests {
             .unwrap();
         assert_eq!(folder.status(), 308);
         assert_eq!(folder.headers()["location"], folder_url.as_str());
-        // tsk984: what's served is the snapshot — the disk changing after
+        // what's served is the snapshot — the disk changing after
         // the load isn't what the frame gets.
         std::fs::write(
             ext.join("components/c/index.html"),
@@ -613,7 +613,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(types.status(), 200);
-        // tsk961: the kit's stylesheet, as CSS.
+        // the kit's stylesheet, as CSS.
         let kit = bare
             .get(format!("{base}/component-lib/oxplow-kit.css"))
             .send()
@@ -839,7 +839,7 @@ mod tests {
         let daemon = run_server("127.0.0.1:0".parse().unwrap(), daemon_state(svc))
             .await
             .unwrap();
-        let url = format!("http://{}/ipc/list_efforts_at_snapshots", daemon.bind_addr);
+        let url = format!("http://{}/ipc/list_threads", daemon.bind_addr);
         let resp: serde_json::Value = client()
             .post(&url)
             .json(&serde_json::json!({}))
@@ -853,7 +853,7 @@ mod tests {
         assert_eq!(resp["error"]["code"], "INVALID");
     }
 
-    /// tsk995: the socket listens before it opens — an event emitted the
+    /// the socket listens before it opens — an event emitted the
     /// moment a client sees the upgrade reaches it, so a client can open
     /// the socket, then write, and never miss what its write caused.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

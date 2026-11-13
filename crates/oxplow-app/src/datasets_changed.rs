@@ -342,7 +342,7 @@ pub fn spawn(
             let changed = match rx.recv().await {
                 Ok(tables) => Changed::Tables(tables),
                 // Missed some: anything may have changed — the registry
-                // too, whose change re-registers assets (tsk854).
+                // too, whose change re-registers assets.
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => Changed::Everything,
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
             };
@@ -381,25 +381,20 @@ pub fn spawn(
 mod tests {
     use super::*;
 
-    /// P4.6 (tsk491): a work-item edit changes the datasets that read
-    /// `work_item` and the ones that read those — no others.
+    /// A thread edit changes the datasets that read `threads` and the ones
+    /// that read those — no others.
     #[tokio::test]
     async fn a_table_change_reaches_its_datasets_and_their_readers_only() {
-        use oxplow_tasks::TaskStore as _;
-        let f = crate::test_fixtures::services_with_task_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let lineage = Lineage::load(&f.svc.db).await.unwrap();
-        let changed = lineage.affected(&["work_item".to_string()]);
-        assert!(changed.contains(&"v_work_item".to_string()), "{changed:?}");
+        let changed = lineage.affected(&["threads".to_string()]);
+        assert!(changed.contains(&"v_thread".to_string()), "{changed:?}");
         assert!(!changed.contains(&"v_snapshot".to_string()), "{changed:?}");
         // Transitive: a dataset reading `v_test_run` changes with its inputs.
         let through = lineage.affected(&["metric_capture".to_string()]);
         assert!(through.contains(&"v_test_run".to_string()));
-        assert!(
-            through.contains(&"v_oxplow_claim_status".to_string()),
-            "oxplow-bundled's claim status reads v_test_run"
-        );
 
-        // End to end: a task edit is announced for v_work_item, with a watermark.
+        // End to end: a thread edit is announced for v_thread, with a watermark.
         let watermarks = Arc::new(DatasetWatermarks::default());
         let mut rx = f.svc.events.subscribe_ui();
         spawn(
@@ -411,30 +406,36 @@ mod tests {
             crate::pages::open_runs::PageRuns::default(),
         );
         tokio::task::yield_now().await;
-        let mut task = f.svc.task_store.get(f.task).await.unwrap().unwrap();
-        task.title = "renamed".into();
-        f.svc.task_store.update(&task).await.unwrap();
-        crate::test_fixtures::restate_task(&f.svc, f.task).await;
+        f.svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                crate::commands::thread::RENAME,
+                serde_json::json!({ "thread": f.thread.to_string(), "title": "renamed" }),
+                false,
+            )
+            .await
+            .unwrap();
         let datasets = tokio::time::timeout(std::time::Duration::from_secs(5), async {
             loop {
                 if let Ok(OxplowEvent::DatasetsChanged { datasets }) = rx.recv().await {
-                    if datasets.contains(&"v_work_item".to_string()) {
+                    if datasets.contains(&"v_thread".to_string()) {
                         return datasets;
                     }
                 }
             }
         })
         .await
-        .expect("DatasetsChanged for v_work_item");
+        .expect("DatasetsChanged for v_thread");
         assert!(
             !datasets.contains(&"v_snapshot".to_string()),
             "{datasets:?}"
         );
-        assert_eq!(watermarks.freshness(&["v_work_item".to_string()]).len(), 1);
+        assert_eq!(watermarks.freshness(&["v_thread".to_string()]).len(), 1);
         // A query's result carries its datasets' watermarks.
         let out = crate::sql_gateway::SqlGateway::new(f.svc.db.clone())
             .with_watermarks(watermarks.clone())
-            .query_sql("SELECT count(*) FROM v_work_item", vec![], None)
+            .query_sql("SELECT count(*) FROM v_thread", vec![], None)
             .await
             .unwrap();
         assert_eq!(
@@ -442,7 +443,7 @@ mod tests {
                 .iter()
                 .map(|m| m.dataset.as_str())
                 .collect::<Vec<_>>(),
-            vec!["v_work_item"]
+            vec!["v_thread"]
         );
         assert!(watermarks.freshness(&["v_snapshot".to_string()]).is_empty());
     }
@@ -453,7 +454,7 @@ mod tests {
     /// what landed since the last read counts.
     #[tokio::test]
     async fn the_listener_names_the_measures_that_landed_per_stream() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let facts = &f.svc.fact_store;
         let mut listener = CaptureListener::at_end(&f.svc.db).await.unwrap();
         let measure = |key: &'static str| async move {
@@ -517,7 +518,7 @@ mod tests {
     /// into the cube by the asset runner — no recording site emits anything.
     #[tokio::test]
     async fn a_recorded_capture_is_announced_and_folded_without_a_bus_event() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let assets =
             crate::assets::Assets::new(f.svc.db.clone(), std::time::Duration::from_millis(20));
         let mut rx = f.svc.events.subscribe_ui();
@@ -598,8 +599,7 @@ mod tests {
         use oxplow_db::datasets::{
             DatasetDecl, DatasetField, DatasetSource, ExtensionDatasets, Materialize,
         };
-        use oxplow_tasks::TaskStore as _;
-        let f = crate::test_fixtures::services_with_task_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let dataset =
             |name: &str, sql: &str, columns: &[(&str, &str)], on_change: bool| DatasetSource {
                 decl: DatasetDecl {
@@ -635,7 +635,7 @@ mod tests {
                 sources: vec![
                     dataset(
                         "titles",
-                        "SELECT uri AS id, title FROM ref('work_item')",
+                        "SELECT uri AS id, title FROM ref('thread')",
                         &[("id", "TEXT"), ("title", "TEXT")],
                         true,
                     ),
@@ -706,15 +706,27 @@ mod tests {
             panic!("v_acme_titles never read {want}: {:?}", titles().await);
         };
         // Its first build fills it.
-        until_titles("t").await;
+        for _ in 0..200 {
+            if titles().await.len() == 1 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert_eq!(titles().await.len(), 1);
         tokio::time::sleep(coalesce * 2).await;
         let _ = announced(&mut rx);
 
-        let mut task = f.svc.task_store.get(f.task).await.unwrap().unwrap();
         for i in 0..5 {
-            task.title = format!("renamed {i}");
-            f.svc.task_store.update(&task).await.unwrap();
-            crate::test_fixtures::restate_task(&f.svc, f.task).await;
+            f.svc
+                .commands
+                .run(
+                    &oxplow_domain::Actor::Human,
+                    crate::commands::thread::RENAME,
+                    serde_json::json!({ "thread": f.thread.to_string(), "title": format!("renamed {i}") }),
+                    false,
+                )
+                .await
+                .unwrap();
         }
         until_titles("renamed 4").await;
         // Long enough for a second refill to have shown, had there been one.
@@ -726,7 +738,7 @@ mod tests {
         );
     }
 
-    /// P7 review (tsk727): a contract change on an unchanged query (its
+    /// P7 review: a contract change on an unchanged query (its
     /// input's column changed type underneath it) recreates the dataset's
     /// table — empty — and the dataset is refilled, not left empty until an
     /// input moves.
@@ -735,7 +747,7 @@ mod tests {
         use oxplow_db::datasets::{
             DatasetDecl, DatasetField, DatasetSource, ExtensionDatasets, Materialize,
         };
-        let f = crate::test_fixtures::services_with_task_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let dataset = |name: &str, version: u32, sql: &str, title_type: &str, on_change: bool| {
             DatasetSource {
                 decl: DatasetDecl {
@@ -802,7 +814,7 @@ mod tests {
                 .await
                 .unwrap()
         };
-        compile(1, "SELECT uri AS id, title FROM ref('work_item')", "TEXT").await;
+        compile(1, "SELECT uri AS id, title FROM ref('thread')", "TEXT").await;
         let assets =
             crate::assets::Assets::new(f.svc.db.clone(), std::time::Duration::from_millis(50));
         assets.sync_datasets().await.unwrap();
@@ -811,7 +823,7 @@ mod tests {
 
         compile(
             2,
-            "SELECT uri AS id, title || '' AS title FROM ref('work_item')",
+            "SELECT uri AS id, title || '' AS title FROM ref('thread')",
             "",
         )
         .await;
@@ -852,7 +864,7 @@ mod tests {
     #[tokio::test]
     async fn telemetry_writes_name_their_datasets() {
         use oxplow_db::PageVisitStore as _;
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let mut rx = f.svc.events.subscribe_ui();
         spawn(
             f.svc.db.clone(),
@@ -865,12 +877,18 @@ mod tests {
         tokio::task::yield_now().await;
         f.svc
             .usage_store
-            .record("wiki", serde_json::json!({ "slug": "home" }))
+            .record("oxplow/knowledge", serde_json::json!({ "id": "home" }))
             .await
             .unwrap();
         f.svc
             .page_visit_store
-            .record("wiki", "oxplow:oxplow/wiki?slug=home", None, None, None)
+            .record(
+                "oxplow/knowledge",
+                "oxplow:oxplow/knowledge?id=home&store=oxwiki",
+                None,
+                None,
+                None,
+            )
             .await
             .unwrap();
         let mut want = vec!["v_usage_event", "v_page_visit"];

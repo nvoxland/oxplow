@@ -7,7 +7,7 @@ params:
 - name: uri
   label: Skill
 answers:
-- {"question":"What does this skill teach an agent?","about":"oxplow/skill","params":{"uri":"oxplow:oxplow/skill?skill=oxplow/work-items"},"skill":"oxplow-extension"}
+- {"question":"What does this skill teach an agent?","about":"oxplow/skill","params":{"uri":"oxplow:oxplow/skill?skill=oxplow/tasks"},"skill":"oxplow-extension"}
 loaders:
   about:
     sql: |

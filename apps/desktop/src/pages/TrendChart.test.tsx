@@ -16,7 +16,7 @@ function axisLabels(container: HTMLElement): string[] {
 }
 
 /**
- * Regression guard for tsk144: a local range-adaptive **y**-tick formatter was
+ * Regression guard for a local range-adaptive **y**-tick formatter was
  * named `fmtTick`, shadowing the module-level **time** formatter of the same
  * name, so the x axis rendered raw epoch milliseconds ("1752...") instead of a
  * date. Pure-helper tests couldn't see it — the bug was which function the JSX

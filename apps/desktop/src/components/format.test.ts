@@ -47,7 +47,7 @@ describe("formatTimeOnly", () => {
   });
 });
 
-describe("formatMetricValue (tsk114)", () => {
+describe("formatMetricValue", () => {
   // Expectations are computed through the SAME Intl configs the formatter
   // uses, so assertions hold under any OS locale the test host runs with —
   // what's under test is the ROUTING (unit branches, compact threshold),

@@ -1,0 +1,21 @@
+# Where the agent had trouble in a request: a file edited the configured
+# number of times (5), or failed shell commands (3).
+given:
+  - observe:
+      turn:
+        prompt: Fiddle
+        tools:
+          - { name: Edit, kind: edit, paths: [a.rs], ok: true }
+          - { name: Edit, kind: edit, paths: [a.rs], ok: true }
+          - { name: Edit, kind: edit, paths: [a.rs], ok: true }
+          - { name: Edit, kind: edit, paths: [a.rs], ok: true }
+          - { name: Edit, kind: edit, paths: [a.rs], ok: true }
+          - { name: Edit, kind: edit, paths: [b.rs], ok: true }
+          - { name: Bash, kind: shell, ok: false }
+          - { name: Bash, kind: shell, ok: false }
+          - { name: Bash, kind: shell, ok: false }
+when: { sql: "SELECT request_id, kind, subject, count FROM v_oxplow_struggle ORDER BY kind" }
+expect:
+  rows:
+    - { request_id: 1, kind: failed_commands, subject: shell, count: 3 }
+    - { request_id: 1, kind: repeated_edits, subject: a.rs, count: 5 }

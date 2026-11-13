@@ -1,0 +1,23 @@
+requires: [oxplow-bundled, oxtask]
+given:
+  - { command: oxtask.task.create, input: { title: A } }
+  - { command: oxtask.task.create, input: { title: B } }
+when: { command: oxtask.task.link, input: { id: tsk1, to: tsk2, type: blocks } }
+expect: { ok: true }
+steps:
+  - when: { sql: "SELECT parent, \"to\", type FROM v_oxplow_task_record_links" }
+    expect:
+      rows: [{ parent: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/task?id=tsk2&provider=oxtask", type: blocks }]
+  - when:
+      sql: |
+        SELECT json_extract(payload, '$.id') AS id, json_extract(payload, '$.changed') AS changed
+        FROM v_event WHERE type = 'oxplow.task_record.changed' ORDER BY seq DESC LIMIT 1
+    expect: { rows: [{ id: tsk1, changed: '["links"]' }] }
+  - when: { command: oxtask.task.unlink, input: { id: tsk1, to: tsk2, type: blocks } }
+    expect: { ok: true }
+  - when: { sql: "SELECT count(*) AS n FROM v_oxplow_task_record_links" }
+    expect: { rows: [{ n: 0 }] }
+  - when: { undo: oxtask.task.unlink }
+    expect: { ok: true }
+  - when: { sql: "SELECT type FROM v_oxplow_task_record_links" }
+    expect: { rows: [{ type: blocks }] }

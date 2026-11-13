@@ -273,13 +273,13 @@ async fn a_dataset_that_does_not_compile_holds_back_only_its_extension() {
         dir.path(),
         "late",
         1,
-        "datasets:\n  - name: blocked\n    version: 1\n    description: Blocked work items.\n    fields:\n      - { name: uri, type: TEXT, doc: Work item ref. }\n",
+        "datasets:\n  - name: blocked\n    version: 1\n    description: Blocked tasks.\n    fields:\n      - { name: uri, type: TEXT, doc: Task ref. }\n",
     );
     std::fs::create_dir_all(dir.path().join(".oxplow/extensions/late/datasets")).unwrap();
     std::fs::write(
         dir.path()
             .join(".oxplow/extensions/late/datasets/blocked.sql"),
-        "SELECT no_such_column AS uri FROM ref('work_item')",
+        "SELECT no_such_column AS uri FROM ref('thread')",
     )
     .unwrap();
     write_ext(dir.path(), "alpha", 2, "");
@@ -295,6 +295,14 @@ async fn a_dataset_that_does_not_compile_holds_back_only_its_extension() {
 async fn the_documented_examples_activate() {
     let dir = tempfile::tempdir().unwrap();
     crate::test_fixtures::init_git_repo(dir.path());
+    // Some examples build on oxplow-bundled's models and oxtask, which are
+    // off until a project turns them on.
+    std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
+    std::fs::write(
+        dir.path().join(".oxplow/project.yaml"),
+        "extensions: [oxplow-bundled, oxtask]\n",
+    )
+    .unwrap();
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions");
     // Each example is a folder; the folder's README isn't one.
     for entry in std::fs::read_dir(&examples).unwrap() {
@@ -323,7 +331,7 @@ async fn the_documented_examples_activate() {
     let active = svc
         .extension_catalog
         .unpinned(dir.path(), "a test reads declarations");
-    for name in ["github", "triage", "prompt-efforts"] {
+    for name in ["github", "triage", "session-history"] {
         assert!(
             active.iter().any(|e| e.name == name && e.enabled),
             "{name} is active"

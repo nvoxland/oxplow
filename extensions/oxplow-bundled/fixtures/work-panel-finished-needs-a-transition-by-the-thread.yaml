@@ -1,0 +1,21 @@
+# A task a thread only filed, commented on or was prompted with is not its
+# finished work when someone else closes it; one its agent moved is.
+requires: [oxtask]
+given:
+  - { command: oxtask.task.create, input: { title: Only commented, stage: ready } }
+  - { command: oxtask.task.create, input: { title: Moved by it, stage: ready } }
+  - observe:
+      turn:
+        prompt: Look at both
+        during:
+          - { command: oxtask.task.comment, input: { id: tsk1, body: "looked" }, as: agent }
+          - { command: oxtask.task.move, input: { id: tsk2, stage: in_progress }, as: agent }
+  # The person closes both.
+  - { command: oxtask.task.move, input: { id: tsk1, stage: done } }
+  - { command: oxtask.task.move, input: { id: tsk2, stage: done } }
+when: { part: oxplow/work-panel, params: { thread_id: 1 } }
+expect:
+  loaders:
+    work:
+      rows:
+        - { grp: Finished, title: Moved by it }

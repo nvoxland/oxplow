@@ -40,7 +40,6 @@ oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
 
 [dev-dependencies]
 oxplow-config = { workspace = true }
-oxplow-tasks = { workspace = true }
 oxplow-harness-fake = { workspace = true }
 oxplow-provider-fake = { workspace = true }
 tempfile = { workspace = true }

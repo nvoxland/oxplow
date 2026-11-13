@@ -77,8 +77,7 @@ macro_rules! skill {
 /// (`SKILL_BODY_LIMIT`): loading one costs the whole file, so the detail
 /// lives in references the agent opens when it needs them.
 const OXPLOW_SKILLS: &[SkillFiles] = &[
-    skill!("oxplow-runtime", ["efforts", "commands"]),
-    skill!("oxplow-wiki-capture", ["search-existing", "write-page"]),
+    skill!("oxplow-runtime", ["commands"]),
     skill!("oxplow-mermaid", ["syntax"]),
     skill!("oxplow-collection", ["custom-parsers"]),
     skill!(
@@ -147,8 +146,8 @@ mod tests {
         assert!(description.contains("v_op_error"), "{description}");
     }
 
-    /// Agents that can't discover skill files get an index instead
-    /// (tsk376): every skill, with its frontmatter description.
+    /// Agents that can't discover skill files get an index instead:
+    /// every skill, with its frontmatter description.
     #[test]
     fn the_skill_index_names_every_skill_with_its_description() {
         let text = core_text();

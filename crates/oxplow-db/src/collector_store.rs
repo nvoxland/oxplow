@@ -712,7 +712,7 @@ mod tests {
         .unwrap()
     }
 
-    /// P4.9 (tsk494): an entity view is a dataset its extension owns — in the
+    /// P4.9: an entity view is a dataset its extension owns — in the
     /// registry with its table as input, so lineage and subscriptions see
     /// it; kept across the open that recompiles the SQL datasets; gone with
     /// its extension. Another extension, or a core view, can't take the name.
@@ -755,10 +755,10 @@ mod tests {
         assert!(err.to_string().contains("belongs to `my-gh`"), "{err}");
         // A core dataset's view.
         let core = EntityTable {
-            extension: "effort".into(),
-            namespace: "effort".into(),
+            extension: "turn".into(),
+            namespace: "turn".into(),
             entity: "file".into(),
-            view: "v_effort_file".into(),
+            view: "v_turn_file".into(),
             key: "path".into(),
             description: String::new(),
             columns: vec![EntityColumn {
@@ -992,7 +992,7 @@ mod tests {
     async fn rejects_unsafe_identifiers() {
         let store = SqliteCollectorStore::new(Database::in_memory());
         let mut t = pr_table(&[("number", StoredType::Integer)]);
-        t.columns[0].name = "x); DROP TABLE task; --".into();
+        t.columns[0].name = "x); DROP TABLE oxtask; --".into();
         assert!(matches!(
             store.replace_rows(vec![(t, vec![])]).await,
             Err(DomainError::Invalid(_))
@@ -1069,7 +1069,7 @@ mod tests {
     }
 
     /// `_` is a LIKE wildcard: dropping `gh` must leave `gh-extra`'s view
-    /// (`ext__gh_extra__…`) alone (tsk368).
+    /// (`ext__gh_extra__…`) alone.
     #[tokio::test]
     async fn dropping_an_extension_leaves_similar_names_alone() {
         let db = Database::in_memory();
@@ -1155,13 +1155,13 @@ mod tests {
     async fn never_replaces_a_core_view() {
         let db = Database::in_memory();
         let store = SqliteCollectorStore::new(db.clone());
-        // extension `work-item` + entity `comment` would be
-        // `v_work_item_comment`, a core view.
+        // extension `agent` + entity `turn` would be
+        // `v_agent_turn`, a core view.
         let t = EntityTable {
-            extension: "work-item".into(),
-            namespace: "work_item".into(),
-            entity: "comment".into(),
-            view: "v_work_item_comment".into(),
+            extension: "agent".into(),
+            namespace: "agent".into(),
+            entity: "turn".into(),
+            view: "v_agent_turn".into(),
             key: "id".into(),
             description: String::new(),
             columns: vec![EntityColumn {
@@ -1177,7 +1177,7 @@ mod tests {
         );
         // The core view still works.
         SemanticLayer::new(db)
-            .query_sql("SELECT body FROM v_work_item_comment", vec![], None)
+            .query_sql("SELECT prompt FROM v_agent_turn", vec![], None)
             .await
             .unwrap();
     }

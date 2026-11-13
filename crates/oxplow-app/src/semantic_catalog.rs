@@ -3,8 +3,8 @@
 //! `v_field`, P4.2/P4.9) — read through SQL like everything else;
 //! this adds what SQL can't say: an entity an extension declares that
 //! hasn't synced yet. Row counts aren't here: one `count(*)` over a big
-//! dataset can outrun the query timeout, so the UI counts each row itself
-//! (tsk1065). See `.context/semantic-layer.md`.
+//! dataset can outrun the query timeout, so the UI counts each row itself.
+//! See `.context/semantic-layer.md`.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -16,7 +16,7 @@ use oxplow_domain::DomainError;
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DataEntity {
-    /// The view to query (`v_work_item`, `v_my_gh_pr`).
+    /// The view to query (`v_thread`, `v_my_gh_pr`).
     pub name: String,
     /// `core`, or the extension that provides it.
     pub owner: String,
@@ -90,7 +90,7 @@ mod tests {
     use super::*;
     use oxplow_db::{Database, EntityColumn, EntityTable, SqliteCollectorStore, StoredType};
 
-    /// tsk517: Settings → Data lists every published dataset
+    /// Settings → Data lists every published dataset
     /// — a synced entity once, from the registry, with its doc — and a
     /// declared entity that hasn't synced as `declared`.
     #[tokio::test]
@@ -114,9 +114,9 @@ mod tests {
                 .cloned()
                 .collect::<Vec<_>>()
         };
-        let task = get(&all, "v_work_item");
+        let thread = get(&all, "v_thread");
         assert_eq!(
-            (task[0].owner.as_str(), task[0].kind.as_str()),
+            (thread[0].owner.as_str(), thread[0].kind.as_str()),
             ("core", "sql")
         );
         let pr = get(&all, "v_my_gh_pr");

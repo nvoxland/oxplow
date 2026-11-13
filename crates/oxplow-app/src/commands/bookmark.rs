@@ -186,10 +186,10 @@ pub fn ops() -> Vec<Op> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_fixtures::services_with_effort;
+    use crate::test_fixtures::services_with_thread;
     use oxplow_domain::Actor;
 
-    async fn scope_of(fx: &crate::test_fixtures::EffortFixture, page_ref: &str) -> Option<String> {
+    async fn scope_of(fx: &crate::test_fixtures::ThreadFixture, page_ref: &str) -> Option<String> {
         let page_ref = page_ref.to_string();
         fx.svc
             .db
@@ -210,7 +210,7 @@ mod tests {
     /// walks it back: to the thread, then off.
     #[tokio::test]
     async fn set_moves_and_undo_walks_it_back() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let thread = fx.thread.to_string();
         let set = |scope: &str| {
             json!({ "uri": "oxplow:oxplow/page?page=git-dashboard", "page_kind": "git-dashboard",
@@ -259,7 +259,7 @@ mod tests {
     /// An agent's bookmark runs.
     #[tokio::test]
     async fn an_agent_may_bookmark() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let thread = fx.thread.to_string();
         let input = json!({ "uri": "oxplow:oxplow/file?path=src/b.rs", "page_kind": "file", "scope": "stream", "thread": thread });
         let agent = Actor::Agent {
@@ -277,7 +277,7 @@ mod tests {
     /// Removing undoes to where it was.
     #[tokio::test]
     async fn remove_undoes() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let thread = fx.thread.to_string();
         let input = json!({ "uri": "oxplow:oxplow/file?path=src/a.rs", "page_kind": "file", "scope": "stream", "thread": thread });
         fx.svc

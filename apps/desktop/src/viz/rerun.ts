@@ -5,7 +5,7 @@
 /// the socket was down). A run's `result.reads` says what it read. Every viz
 /// host — a viz page, a slot, a dashboard tile, the rail's alerts — uses
 /// `useRerunOnChange`, so there is one rule.
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { onRemoteReconnect, subscribeOxplowEvents } from "../api.js";
 import type { Reads } from "../tauri-bridge/generated/bindings.js";
@@ -18,7 +18,7 @@ export function readsOf(...datasets: string[]): Reads {
   return { datasets, tables: [], measures: [] };
 }
 
-/** The extension catalog changed — the daemon's own signal (tsk1030),
+/** The extension catalog changed — the daemon's own signal,
  *  sent when an extension was deployed, rolled back, turned on or off, or
  *  removed: a viz's definition may have. */
 export function pageDefinitionChanged(event: Readonly<Record<string, unknown>>): boolean {
@@ -91,9 +91,56 @@ export function coalesce(run: () => void): { schedule(): void; cancel(): void } 
  *  run in flight to say what it read. */
 const MISSED_MS = 30_000;
 
+/** The changes a host heard that matched nothing it read yet, by what
+ *  changed: each dataset's and measure's latest time, and the latest samples
+ *  event that named no measure (any metric read). Bounded by how many names
+ *  change, never by how many events said so — every host hears every event,
+ *  and a boot sends a burst of them (kept as a list copied on each event, it
+ *  once spun the window's thread for most of an hour). Matches as
+ *  {@link readsChanged} does. */
+export class MissedChanges {
+  private datasets = new Map<string, number>();
+  private measures = new Map<string, number>();
+  private anyMeasureAt: number | null = null;
+
+  /** Remember what `event` changed, at `at`; a kind no read follows is
+   *  nothing to remember. */
+  note(event: Readonly<Record<string, unknown>>, at: number): void {
+    if (event.kind === "datasetsChanged" && Array.isArray(event.datasets)) {
+      for (const d of event.datasets) this.datasets.set(d as string, at);
+    } else if (event.kind === "metricSamplesChanged") {
+      const measures = Array.isArray(event.measures) ? (event.measures as string[]) : [];
+      if (measures.length === 0) this.anyMeasureAt = at;
+      for (const m of measures) this.measures.set(m, at);
+    }
+  }
+
+  /** Forget what changed before `at`: a run started then read it. */
+  forgetBefore(at: number): void {
+    for (const map of [this.datasets, this.measures]) {
+      for (const [name, seen] of map) if (seen < at) map.delete(name);
+    }
+    if (this.anyMeasureAt !== null && this.anyMeasureAt < at) this.anyMeasureAt = null;
+  }
+
+  /** Whether a change remembered within the window, at `now`, is one
+   *  `reads` read. */
+  matches(reads: Reads, now: number): boolean {
+    const recent = (at: number | null | undefined) => at != null && now - at < MISSED_MS;
+    if (reads.datasets.some((d) => recent(this.datasets.get(d)))) return true;
+    if (reads.measures.length === 0) return false;
+    return recent(this.anyMeasureAt) || reads.measures.some((m) => recent(this.measures.get(m)));
+  }
+
+  /** How many names (and the any-measure mark) are remembered. */
+  get size(): number {
+    return this.datasets.size + this.measures.size + (this.anyMeasureAt === null ? 0 : 1);
+  }
+}
+
 /** Re-run `refresh` when an event changes what the last run read, a viz
  *  definition changed, or the daemon is reached again — the events sent
- *  while it was unreachable never arrive (tsk1050). `reads` and `refresh`
+ *  while it was unreachable never arrive. `reads` and `refresh`
  *  may change every render.
  *
  *  A run in flight hasn't said what it read, and a change announced meanwhile
@@ -106,12 +153,11 @@ export function useRerunOnChange(reads: Reads, refresh: () => void): void {
   readsRef.current = reads;
   const refreshRef = useRef(refresh);
   refreshRef.current = refresh;
-  const seen = useRef<{ event: Record<string, unknown>; at: number }[]>([]);
+  const [missed] = useState(() => new MissedChanges());
   const schedule = useRef<() => void>(() => {});
   useEffect(() => {
     const rerun = coalesce(() => {
-      const startedAt = Date.now();
-      seen.current = seen.current.filter((s) => s.at >= startedAt);
+      missed.forgetBefore(Date.now());
       refreshRef.current();
     });
     schedule.current = rerun.schedule;
@@ -120,8 +166,7 @@ export function useRerunOnChange(reads: Reads, refresh: () => void): void {
         rerun.schedule();
         return;
       }
-      const now = Date.now();
-      seen.current = [...seen.current.filter((s) => now - s.at < MISSED_MS), { event, at: now }];
+      missed.note(event, Date.now());
     });
     const offReconnect = onRemoteReconnect(rerun.schedule);
     return () => {
@@ -131,6 +176,6 @@ export function useRerunOnChange(reads: Reads, refresh: () => void): void {
     };
   }, []);
   useEffect(() => {
-    if (seen.current.some((s) => readsChanged(s.event, reads))) schedule.current();
+    if (missed.matches(reads, Date.now())) schedule.current();
   }, [reads]);
 }

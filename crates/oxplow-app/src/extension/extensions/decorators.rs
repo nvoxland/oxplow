@@ -1,4 +1,4 @@
-//! `ui.decorators` (P6b.C5; stable since P10, on oxplow-bundled's verdict):
+//! `ui.decorators` (P6b.C5; stable since P10):
 //! labels from one of the extension's datasets shown on core refs — a chip
 //! on a page whose ref the dataset lists (`ref-chip`), a badge after a page
 //! cell that links to one (`row-badge`). Additive: a page is complete
@@ -7,7 +7,7 @@
 //! ```yaml
 //! ui:
 //!   decorators:
-//!     - { dataset: flags, resource: oxplow/work_item, placement: ref-chip, label: label, color: color }
+//!     - { dataset: flags, resource: oxplow/thread, placement: ref-chip, label: label, color: color }
 //! ```
 //!
 //! The dataset is `v_<namespace>_<dataset>`; it must declare a `ref` column
@@ -39,7 +39,7 @@ pub struct UiDecorator {
     pub extension: String,
     /// The dataset's view (`v_<namespace>_<dataset>`), which has a `ref` column.
     pub view: String,
-    /// The resource it decorates (`oxplow/work_item`).
+    /// The resource it decorates (`oxplow/thread`).
     pub resource: String,
     pub placement: DecoratorPlacement,
     /// The view's column holding the text shown.
@@ -206,7 +206,7 @@ mod tests {
         write(
             d.path(),
             ".oxplow/extensions/flags/datasets/flags.sql",
-            "SELECT 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' AS uri, 'urgent' AS label, '#f00' AS color\n",
+            "SELECT 'oxplow:oxplow/thread?id=thr1' AS uri, 'urgent' AS label, '#f00' AS color\n",
         );
         load_extensions(d.path())
             .into_iter()
@@ -216,7 +216,7 @@ mod tests {
 
     #[test]
     fn a_decorator_names_one_of_its_datasets_columns() {
-        let ext = load("    - { dataset: flags, resource: oxplow/work_item, placement: ref-chip, label: label, color: color }\n",
+        let ext = load("    - { dataset: flags, resource: oxplow/thread, placement: ref-chip, label: label, color: color }\n",
         );
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         let d = &ext.ui.decorators[0];
@@ -225,7 +225,7 @@ mod tests {
         assert_eq!(d.color.as_deref(), Some("color"));
         for (entry, says) in [
             (
-                "{ dataset: nope, resource: oxplow/work_item, placement: ref-chip, label: label }",
+                "{ dataset: nope, resource: oxplow/thread, placement: ref-chip, label: label }",
                 "isn't one of this extension's datasets",
             ),
             (
@@ -233,15 +233,15 @@ mod tests {
                 "oxplow declares no such resource",
             ),
             (
-                "{ dataset: flags, resource: oxplow/work_item, placement: ref-chip, label: title }",
+                "{ dataset: flags, resource: oxplow/thread, placement: ref-chip, label: title }",
                 "has no `title` column",
             ),
             (
-                "{ dataset: flags, resource: oxplow/work_item, placement: ref-chip, label: \"x; DROP\" }",
+                "{ dataset: flags, resource: oxplow/thread, placement: ref-chip, label: \"x; DROP\" }",
                 "isn't a column name",
             ),
             (
-                "{ dataset: flags, resource: oxplow/work_item, placement: sidebar, label: label }",
+                "{ dataset: flags, resource: oxplow/thread, placement: sidebar, label: label }",
                 "unknown variant",
             ),
         ] {
@@ -258,7 +258,9 @@ mod tests {
     /// A decorator's old `model:` key says what to write.
     #[test]
     fn an_old_model_key_says_to_write_dataset() {
-        let ext = load("    - { model: flags, resource: oxplow/work_item, placement: ref-chip, label: label }\n");
+        let ext = load(
+            "    - { model: flags, resource: oxplow/thread, placement: ref-chip, label: label }\n",
+        );
         let errs = ext
             .errors
             .iter()
@@ -281,8 +283,9 @@ mod tests {
     /// private one's.
     #[test]
     fn a_shared_extension_may_declare_decorators() {
-        let ext =
-            load("    - { dataset: flags, resource: oxplow/work_item, placement: ref-chip, label: label }\n");
+        let ext = load(
+            "    - { dataset: flags, resource: oxplow/thread, placement: ref-chip, label: label }\n",
+        );
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         assert_eq!(ext.ui.decorators.len(), 1);
     }

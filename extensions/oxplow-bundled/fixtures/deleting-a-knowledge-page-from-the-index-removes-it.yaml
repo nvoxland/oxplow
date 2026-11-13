@@ -1,0 +1,16 @@
+# Delete is a row action of the index, confirmed because it destroys the
+# page. Pressing it removes that page and the index no longer lists it.
+requires: [oxwiki]
+given:
+  - { command: oxwiki.page.write, input: { title: First, body: "# First\n\nOne.\n" } }
+  - { command: oxwiki.page.write, input: { title: Second, body: "# Second\n\nTwo.\n" } }
+when: { page: knowledge }
+expect:
+  loaders: { pages: { rows: 2 } }
+steps:
+  - press: { action: delete, node: pages, row: { id: second } }
+    expect: { ok: true }
+  - expect:
+      loaders:
+        stores: { rows: [{ store: oxwiki, page_count: 1 }] }
+        pages: { rows: [{ id: first }] }

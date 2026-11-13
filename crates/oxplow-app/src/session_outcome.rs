@@ -161,7 +161,7 @@ mod tests {
     /// orderings.
     #[tokio::test]
     async fn a_turn_counts_only_from_the_launch_on() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let (session, thread) = (fx.session, fx.thread);
         let at = |ms: i64| Timestamp::from_unix_ms(1_700_000_000_000 + ms);
         let launched = at(10_000);

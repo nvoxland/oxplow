@@ -96,7 +96,7 @@ pub struct SeeAlso {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PageInactive {
-    /// The needs that aren't met (`work_items`, `knowledge`).
+    /// The needs that aren't met (`snapshots`, `knowledge`).
     pub needs: Vec<String>,
     /// What a person reads.
     pub message: String,
@@ -129,6 +129,18 @@ pub struct RunNode {
     /// A `replaceable:` node another extension's page stands in for: that
     /// extension, its run the `embed`.
     pub replaced_by: Option<String>,
+    /// An action point node's point and its context, bound.
+    pub action_point: Option<ActionPointRun>,
+}
+
+/// An action point a run placed: the point and the context the page gave
+/// it (`context:` bound from the page's params and loaders).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionPointRun {
+    pub point: String,
+    #[specta(type = std::collections::BTreeMap<String, oxplow_domain::Json>)]
+    pub context: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 /// A loader that takes this long is named in the log: which part of a page
@@ -309,6 +321,7 @@ impl<'a> PageRunner<'a> {
                     embed: None,
                     error: None,
                     replaced_by: None,
+                    action_point: None,
                 };
                 return Ok(PageRun {
                     page,
@@ -602,7 +615,11 @@ impl<'a> PageRunner<'a> {
                                 .get(loader)
                                 .map(|r| match &r.error {
                                     Some(e) => Err(e.clone()),
-                                    None => Ok(r.result.clone()),
+                                    None => {
+                                        let mut result = r.result.clone();
+                                        result.reads = chain_reads(&run, loader);
+                                        Ok(result)
+                                    }
                                 })
                                 .unwrap_or_else(|| {
                                     Err(format!("page `{target}`'s loader `{loader}` didn't run"))
@@ -775,6 +792,7 @@ impl<'a> PageRunner<'a> {
                 embed: None,
                 error: None,
                 replaced_by: None,
+                action_point: None,
             };
             match &node.kind {
                 NodeKind::Stack { children } | NodeKind::Grid { children } => {
@@ -798,6 +816,7 @@ impl<'a> PageRunner<'a> {
                             embed: None,
                             error: None,
                             replaced_by: None,
+                            action_point: None,
                         };
                         for mount in self.mounts(&page.id, name) {
                             let r = self
@@ -878,6 +897,12 @@ impl<'a> PageRunner<'a> {
                         }
                     }
                 },
+                NodeKind::ActionPoint { point, context } => {
+                    out.action_point = Some(ActionPointRun {
+                        point: point.clone(),
+                        context: bind_args(context, params, loaders),
+                    });
+                }
                 NodeKind::Viz { .. } | NodeKind::Markdown { .. } | NodeKind::Component { .. } => {}
             }
             out
@@ -1035,14 +1060,32 @@ impl PageRunner<'_> {
         let first = candidates.first()?;
         let provider_extension = match (first.bound_to_provider, params.get("uri")) {
             (true, Some(SqlCell::Text(uri))) => {
+                // The URI param naming the item's own store: a task's
+                // `provider`, a knowledge page's `store` (the table's).
+                let param = oxplow_domain::replaceable::replaceable(target)
+                    .map_or("provider", |r| r.provider_param);
                 let provider = oxplow_domain::uri::OxplowUri::parse(uri)
                     .ok()?
-                    .param("provider")?
+                    .param(param)?
                     .to_string();
-                self.capabilities
-                    .as_ref()?
-                    .get(&first.capability, &provider)?
-                    .extension
+                match &first.model {
+                    // A model's item: the extension that fills the model as
+                    // the item's own store.
+                    Some(model) => self
+                        .svc
+                        .models
+                        .current()
+                        .fills
+                        .iter()
+                        .find(|f| &f.model == model && f.stores.contains(&provider))
+                        .map(|f| f.extension.clone()),
+                    None => {
+                        self.capabilities
+                            .as_ref()?
+                            .get(&first.capability, &provider)?
+                            .extension
+                    }
+                }
             }
             _ => None,
         };
@@ -1106,6 +1149,7 @@ impl PageRunner<'_> {
             embed: None,
             error: None,
             replaced_by: None,
+            action_point: None,
         };
         match self.find(id) {
             Err(e) => out.error = Some(e.to_string()),
@@ -1151,6 +1195,27 @@ pub(super) enum Unreadable {
     Failed(String),
     /// One has no columns (it yielded nothing, with no shape).
     NoColumns,
+}
+
+/// What a page loader borrowing `run`'s `loader` read: everything its
+/// chain on that page read (the loaders it reads as temp tables, theirs,
+/// and their declared `reads`). Its own result read only the temp tables,
+/// so without the chain a change to the dataset behind them wouldn't reach
+/// the borrower, and an open run would keep its old rows.
+fn chain_reads(run: &PageRun, loader: &str) -> oxplow_db::Reads {
+    let page = &run.page;
+    let chain = page.loader_chain(loader);
+    let mut all: Vec<oxplow_db::Reads> = Vec::new();
+    for decl in page.loaders.iter().filter(|d| chain.contains(&d.name)) {
+        if let Some(r) = run.loaders.get(&decl.name) {
+            all.push(r.result.reads.clone());
+        }
+        all.push(oxplow_db::Reads {
+            datasets: decl.reads.clone(),
+            ..Default::default()
+        });
+    }
+    oxplow_db::Reads::union(&all)
 }
 
 /// The loaders `names` as the temp tables a query reads them from.
@@ -1387,8 +1452,10 @@ fn on_demand_loaders(page: &Page, shown: &[String]) -> Vec<String> {
     use super::refs::{refs, split, RefSite};
     use super::schema::SeeAlsoDecl;
     fn embed_columns(node: &Node, out: &mut Vec<String>) {
-        if let NodeKind::Embed { params, .. } = &node.kind {
-            for arg in params.values() {
+        if let NodeKind::Embed { params: args, .. } | NodeKind::ActionPoint { context: args, .. } =
+            &node.kind
+        {
+            for arg in args.values() {
                 if let ArgSource::Column { from } = arg {
                     out.push(from.split('.').next().unwrap_or(from).to_string());
                 }

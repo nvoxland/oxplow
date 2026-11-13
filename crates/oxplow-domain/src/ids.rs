@@ -1,7 +1,7 @@
 //! Newtype IDs.
 //!
 //! Every entity id has the same shape: a fixed 3-letter type prefix plus
-//! a SQLite-allocated autoincrement integer, e.g. `tsk38`, `thr21`, `str5`.
+//! a SQLite-allocated autoincrement integer, e.g. `tsk42`, `thr21`, `str5`.
 //! The prefix makes an id self-typing — an agent (or a human) can tell a
 //! thread id from a stream id at a glance, and the MCP boundary can reject
 //! "you passed a thread id where a stream id was expected".
@@ -26,8 +26,8 @@ pub enum EntityKind {
     Stream,
     Thread,
     Note,
-    Effort,
     AgentTurn,
+    Request,
     Comment,
     CommentMessage,
     PageVisit,
@@ -43,8 +43,8 @@ impl EntityKind {
         EntityKind::Stream,
         EntityKind::Thread,
         EntityKind::Note,
-        EntityKind::Effort,
         EntityKind::AgentTurn,
+        EntityKind::Request,
         EntityKind::Comment,
         EntityKind::CommentMessage,
         EntityKind::PageVisit,
@@ -60,8 +60,8 @@ impl EntityKind {
             EntityKind::Stream => "str",
             EntityKind::Thread => "thr",
             EntityKind::Note => "not",
-            EntityKind::Effort => "eff",
             EntityKind::AgentTurn => "trn",
+            EntityKind::Request => "req",
             EntityKind::Comment => "cmt",
             EntityKind::CommentMessage => "cmg",
             EntityKind::PageVisit => "pgv",
@@ -79,8 +79,8 @@ impl EntityKind {
             EntityKind::Stream => "stream id (str…)",
             EntityKind::Thread => "thread id (thr…)",
             EntityKind::Note => "note id (not…)",
-            EntityKind::Effort => "effort id (eff…)",
             EntityKind::AgentTurn => "agent-turn id (trn…)",
+            EntityKind::Request => "request id (req…)",
             EntityKind::Comment => "comment id (cmt…)",
             EntityKind::CommentMessage => "comment-message id (cmg…)",
             EntityKind::PageVisit => "page-visit id (pgv…)",
@@ -292,8 +292,8 @@ macro_rules! id_type {
 id_type!(StreamId, Stream);
 id_type!(ThreadId, Thread);
 id_type!(NoteId, Note);
-id_type!(EffortId, Effort);
 id_type!(AgentTurnId, AgentTurn);
+id_type!(RequestId, Request);
 id_type!(CommentId, Comment);
 id_type!(CommentMessageId, CommentMessage);
 id_type!(PageVisitId, PageVisit);
@@ -310,15 +310,15 @@ mod tests {
     fn display_uses_prefix_and_int() {
         assert_eq!(StreamId::new(5).to_string(), "str5");
         assert_eq!(ThreadId::new(21).to_string(), "thr21");
-        assert_eq!(EffortId::new(38).to_string(), "eff38");
+        assert_eq!(RequestId::new(38).to_string(), "req38");
     }
 
     #[test]
     fn serializes_as_prefixed_string() {
-        let json = serde_json::to_string(&EffortId::new(42)).unwrap();
-        assert_eq!(json, "\"eff42\"");
-        let back: EffortId = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, EffortId::new(42));
+        let json = serde_json::to_string(&RequestId::new(42)).unwrap();
+        assert_eq!(json, "\"req42\"");
+        let back: RequestId = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, RequestId::new(42));
     }
 
     #[test]
@@ -331,35 +331,35 @@ mod tests {
 
     #[test]
     fn try_from_str_requires_matching_prefix() {
-        assert_eq!(EffortId::try_from_str("eff42"), Some(EffortId::new(42)));
-        // A thread id is not an effort id.
-        assert_eq!(EffortId::try_from_str("thr42"), None);
-        assert_eq!(EffortId::try_from_str(""), None);
-        assert_eq!(EffortId::try_from_str("eff"), None);
-        assert_eq!(EffortId::try_from_str("eff4a"), None);
-        assert_eq!(EffortId::try_from_str("42"), None);
+        assert_eq!(RequestId::try_from_str("req42"), Some(RequestId::new(42)));
+        // A thread id is not a request id.
+        assert_eq!(RequestId::try_from_str("thr42"), None);
+        assert_eq!(RequestId::try_from_str(""), None);
+        assert_eq!(RequestId::try_from_str("req"), None);
+        assert_eq!(RequestId::try_from_str("req4a"), None);
+        assert_eq!(RequestId::try_from_str("42"), None);
     }
 
     #[test]
     fn deserialize_rejects_wrong_kind() {
-        let err = serde_json::from_str::<EffortId>("\"thr1\"");
+        let err = serde_json::from_str::<RequestId>("\"thr1\"");
         assert!(err.is_err());
     }
 
     #[test]
     fn placeholder_round_trips_through_predicate() {
-        assert!(EffortId::placeholder().is_placeholder());
-        assert!(!EffortId::new(1).is_placeholder());
+        assert!(RequestId::placeholder().is_placeholder());
+        assert!(!RequestId::new(1).is_placeholder());
     }
 
     #[test]
     fn any_id_parses_and_routes_by_prefix() {
-        let any: AnyId = "eff9".parse().unwrap();
-        assert_eq!(any.kind, EntityKind::Effort);
+        let any: AnyId = "req9".parse().unwrap();
+        assert_eq!(any.kind, EntityKind::Request);
         assert_eq!(any.value, 9);
-        assert_eq!(any.to_string(), "eff9");
+        assert_eq!(any.to_string(), "req9");
         // Downcast to the matching newtype succeeds; mismatched fails.
-        assert_eq!(EffortId::try_from(any), Ok(EffortId::new(9)));
+        assert_eq!(RequestId::try_from(any), Ok(RequestId::new(9)));
         assert!(StreamId::try_from(any).is_err());
     }
 

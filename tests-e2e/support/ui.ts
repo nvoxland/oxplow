@@ -105,9 +105,9 @@ export function newSessionPage(page: Page) {
   return page.locator('[data-testid^="center-tab-body-oxplow:oxplow/page?"][data-testid*="page=new-session"]:visible');
 }
 
-/** The id of a work item's URI (`tsk42` of `oxplow:oxplow/work_item?id=tsk42&provider=oxplow`). */
-export function workItemIdOf(ref: string): string {
+/** The id of a task's URI (`tsk42` of `oxplow:oxplow/task?id=tsk42&provider=oxtask`). */
+export function taskIdOf(ref: string): string {
   const id = /[?&]id=([^&#]+)/.exec(ref)?.[1];
-  if (!id) throw new Error(`\`${ref}\` names no work item`);
+  if (!id) throw new Error(`\`${ref}\` names no task`);
   return decodeURIComponent(id);
 }

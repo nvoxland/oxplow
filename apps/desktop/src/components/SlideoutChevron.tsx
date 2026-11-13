@@ -6,8 +6,7 @@ import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
  * {@link ../components/useSlideoutStrip.ts}). Pinned to the BOTTOM of the
  * strip, and mirrored at the bottom of the open panel.
  *
- * Two non-obvious requirements it exists to enforce, both learned in
- * tsk269 / tsk270:
+ * Two non-obvious requirements it exists to enforce, both learned in:
  *
  * - **Pinned outside the scroll container.** Clicking the strip's dead
  *   space also expands, but that can't be the only route: a list long

@@ -127,7 +127,8 @@ pub fn turn_summaries_tx(
         .prepare(&format!(
             "SELECT t.agent_session_id, count(*),
                     (SELECT p.prompt FROM agent_turn p
-                      WHERE p.agent_session_id = t.agent_session_id AND p.prompt <> ''
+                      WHERE p.agent_session_id = t.agent_session_id AND p.source = 'person'
+                        AND p.prompt <> ''
                       ORDER BY p.id DESC LIMIT 1)
                FROM agent_turn t
               WHERE t.agent_session_id IN ({list})
@@ -396,6 +397,18 @@ pub fn set_fork_next_tx(
     Ok(())
 }
 
+/// The newest conversation binding's id (0 with none): it moves whenever a
+/// slot is bound to a conversation (started, resumed, forked or chosen),
+/// so a kept list of the harnesses' conversations knows to read again.
+pub fn newest_binding_tx(conn: &Connection) -> Result<i64, DomainError> {
+    conn.query_row(
+        "SELECT coalesce(max(id), 0) FROM agent_session_binding",
+        [],
+        |r| r.get(0),
+    )
+    .map_err(map_sql_err)
+}
+
 /// The open slot, other than `except`, bound to `native_id` on `host`
 /// (`None` = local): one conversation can't run in two slots.
 pub fn bound_elsewhere_tx(
@@ -606,16 +619,22 @@ mod tests {
             at(3),
         )
         .unwrap();
-        for (session, prompt) in [
-            (a.id, "first"),
-            (a.id, "second"),
-            (a.id, ""),
-            (b.id, "only"),
+        // A hand-back's text is no person's prompt: the last one is a's
+        // second.
+        for (session, prompt, source) in [
+            (a.id, "first", "person"),
+            (a.id, "second", "person"),
+            (
+                a.id,
+                "<agent-message from=\"x\">done</agent-message>",
+                "subagent",
+            ),
+            (b.id, "only", "person"),
         ] {
             conn.execute(
-                "INSERT INTO agent_turn (thread_id, agent_session_id, prompt, started_at)
-                 VALUES (1, ?1, ?2, '2026-10-10T10:00:00Z')",
-                params![session.value(), prompt],
+                "INSERT INTO agent_turn (thread_id, agent_session_id, prompt, started_at, source)
+                 VALUES (1, ?1, ?2, '2026-10-10T10:00:00Z', ?3)",
+                params![session.value(), prompt, source],
             )
             .unwrap();
         }

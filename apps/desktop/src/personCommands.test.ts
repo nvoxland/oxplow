@@ -30,17 +30,17 @@ test("a command that asks waits for the person, then runs confirmed; Cancel drop
     toast: (m) => toasts.push(m),
     run: recording(),
   });
-  await store.run("New Bug", "oxplow.work_item.create", { title: "Bug" });
-  expect(store.pending()).toEqual({ label: "New Bug", command: "oxplow.work_item.create", input: { title: "Bug" }, details: [] });
+  await store.run("New Bug", "acme.issue.create", { title: "Bug" });
+  expect(store.pending()).toEqual({ label: "New Bug", command: "acme.issue.create", input: { title: "Bug" }, details: [] });
   await store.confirm();
   expect(calls).toEqual([
-    ["oxplow.work_item.create", { title: "Bug" }, false],
-    ["oxplow.work_item.create", { title: "Bug" }, true],
+    ["acme.issue.create", { title: "Bug" }, false],
+    ["acme.issue.create", { title: "Bug" }, true],
   ]);
   expect(store.pending()).toBeNull();
   expect(toasts).toEqual(["✓ New Bug"]);
 
-  await store.run("New Bug", "oxplow.work_item.create", { title: "Bug" });
+  await store.run("New Bug", "acme.issue.create", { title: "Bug" });
   store.cancel();
   expect(store.pending()).toBeNull();
   expect(calls.length).toBe(3);
@@ -56,12 +56,12 @@ test("a failure is recorded, not thrown", async () => {
     toast: () => {},
     run: recording(errors),
   });
-  await store.run("New Bug", "oxplow.work_item.create", {});
+  await store.run("New Bug", "acme.issue.create", {});
   expect(errors).toEqual(["New Bug: bad input"]);
   expect(store.pending()).toBeNull();
 });
 
-// tsk975: a command that came back undoable offers Undo on its toast;
+// a command that came back undoable offers Undo on its toast;
 // taking it undoes that run, as the person. One that isn't offers none.
 test("an undoable command's toast offers Undo, which undoes that run", async () => {
   const toasts: Array<[string, (() => void) | undefined]> = [];
@@ -70,9 +70,9 @@ test("an undoable command's toast offers Undo, which undoes that run", async () 
     runCommand: async (name) =>
       ({
         result: null,
-        audit_id: name === "oxplow.work_item.transition" ? 7 : 8,
+        audit_id: name === "acme.issue.transition" ? 7 : 8,
         event_id: null,
-        inverse: name === "oxplow.work_item.transition" ? { name: "oxplow.work_item.transition", input: {} } : null,
+        inverse: name === "acme.issue.transition" ? { name: "acme.issue.transition", input: {} } : null,
       }) satisfies CommandOutcome,
     undo: async (auditId) => {
       undone.push(auditId);
@@ -80,8 +80,8 @@ test("an undoable command's toast offers Undo, which undoes that run", async () 
     toast: (m, undo) => toasts.push([m, undo]),
     run: recording(),
   });
-  await store.run("Move to Done", "oxplow.work_item.transition", { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", to: "done" });
-  await store.run("Comment", "oxplow.work_item.comment", {});
+  await store.run("Move to Done", "acme.issue.transition", { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "done" });
+  await store.run("Comment", "acme.issue.comment", {});
   expect(toasts.map(([m, u]) => [m, u !== undefined])).toEqual([
     ["✓ Move to Done", true],
     ["✓ Comment", false],

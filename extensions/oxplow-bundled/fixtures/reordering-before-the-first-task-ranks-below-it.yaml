@@ -1,0 +1,26 @@
+# An agent starting tasks puts each last in its thread's queue (ranks 0, 1,
+# 2); moving the last before the first ranks it just below, and undo puts
+# its rank back.
+requires: [oxtask]
+given:
+  - observe:
+      turn:
+        prompt: Do three things
+        during:
+          - { command: oxtask.task.create, input: { title: A, stage: ready }, as: agent }
+          - { command: oxtask.task.create, input: { title: B, stage: ready }, as: agent }
+          - { command: oxtask.task.create, input: { title: C, stage: ready }, as: agent }
+          - { command: oxtask.task.move, input: { id: tsk1, stage: in_progress }, as: agent }
+          - { command: oxtask.task.move, input: { id: tsk2, stage: in_progress }, as: agent }
+          - { command: oxtask.task.move, input: { id: tsk3, stage: in_progress }, as: agent }
+when:
+  command: oxplow.tasks.reorder
+  input: { uri: "oxplow:oxplow/task?id=tsk3&provider=oxtask", before: "oxplow:oxplow/task?id=tsk1&provider=oxtask" }
+expect: { ok: true, result: { rank: -1 } }
+steps:
+  - when: { sql: "SELECT title, rank FROM v_oxplow_task ORDER BY rank" }
+    expect: { rows: [{ title: C, rank: -1 }, { title: A, rank: 0 }, { title: B, rank: 1 }] }
+  - when: { undo: oxplow.tasks.reorder }
+    expect: { ok: true }
+  - when: { sql: "SELECT title, rank FROM v_oxplow_task ORDER BY title" }
+    expect: { rows: [{ title: A, rank: 0 }, { title: B, rank: 1 }, { title: C, rank: 2 }] }

@@ -4,12 +4,12 @@
 
 use serde_json::{json, Value};
 
-use crate::test_fixtures::{services_with_effort, EffortFixture};
+use crate::test_fixtures::{services_with_thread, ThreadFixture};
 
 const MANIFEST: &str =
     "manifest: 2\nname: acme\nversion: 2.1.0\nintent:\n  purpose: Count things.\n";
 
-async fn rows(fx: &EffortFixture, sql: &str) -> Vec<Vec<Value>> {
+async fn rows(fx: &ThreadFixture, sql: &str) -> Vec<Vec<Value>> {
     let out = fx.svc.sql.query_sql(sql, vec![], None).await.unwrap();
     serde_json::to_value(&out.rows)
         .unwrap()
@@ -30,7 +30,7 @@ fn write(root: &std::path::Path, rel: &str, body: &str) {
 /// it away when it's deleted (its pages: `pages_are_datasets_that_follow_the_catalog`).
 #[tokio::test]
 async fn extensions_are_datasets_that_follow_the_catalog() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let root = fx.svc.layout.project_dir.clone();
     write(&root, "extension.yaml", MANIFEST);
     crate::test_fixtures::activate(&fx.svc).await;
@@ -76,7 +76,7 @@ const PAGE: &str = "title: Acme PR\ndescription: One acme PR.\nparams:\n  - { na
 /// a disabled extension lists none.
 #[tokio::test]
 async fn pages_are_datasets_that_follow_the_catalog() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let root = fx.svc.layout.project_dir.clone();
     write(&root, "extension.yaml", MANIFEST);
     write(&root, "pages/pr.yaml", PAGE);
@@ -166,7 +166,7 @@ async fn pages_are_datasets_that_follow_the_catalog() {
 /// its source has none.
 #[tokio::test]
 async fn a_page_names_the_copy_that_runs() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let root = fx.svc.layout.project_dir.clone();
     write(&root, "extension.yaml", MANIFEST);
     write(&root, "pages/pr.yaml", PAGE);
@@ -214,7 +214,7 @@ async fn a_page_names_the_copy_that_runs() {
 /// says why).
 #[tokio::test]
 async fn an_extensions_warnings_are_on_its_row() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let root = fx.svc.layout.project_dir.clone();
     write(&root, "extension.yaml", MANIFEST);
     crate::test_fixtures::activate(&fx.svc).await;
@@ -258,7 +258,7 @@ async fn waiting_permissions_are_a_problem_only_for_an_extension_that_is_on() {
         ("enableExtensions: [acme]\n", 1),
         ("disableExtensions: [acme]\n", 0),
     ] {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let root = fx.svc.layout.project_dir.clone();
         write(
             &root,
@@ -293,16 +293,16 @@ async fn waiting_permissions_are_a_problem_only_for_an_extension_that_is_on() {
 /// `v_page_ref` is the edge list the backlinks tools returned, both ways.
 #[tokio::test]
 async fn page_ref_edges_are_a_dataset_in_both_directions() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     fx.svc
         .db
         .transaction(|tx| {
             tx.execute(
                 "INSERT INTO page_ref (source_uri, target_uri, source_resource, target_resource, ref_type)
-                 VALUES (uri('oxplow/wiki', 'slug', 'intro'), uri('oxplow/file', 'path', 'src/app.rs'),
-                         'oxplow/wiki', 'oxplow/file', 'mention'),
-                        (uri('oxplow/wiki', 'slug', 'intro'), uri('oxplow/wiki', 'slug', 'other'),
-                         'oxplow/wiki', 'oxplow/wiki', 'link'),
+                 VALUES ('oxplow:oxplow/knowledge?id=intro&store=oxwiki', uri('oxplow/file', 'path', 'src/app.rs'),
+                         'oxplow/knowledge', 'oxplow/file', 'mention'),
+                        ('oxplow:oxplow/knowledge?id=intro&store=oxwiki', 'oxplow:oxplow/knowledge?id=other&store=oxwiki',
+                         'oxplow/knowledge', 'oxplow/knowledge', 'link'),
                         (uri('oxplow/commit', 'sha', 'abc1234'), uri('oxplow/file', 'path', 'src/app.rs'),
                          'oxplow/commit', 'oxplow/file', 'touches')",
                 [],
@@ -321,17 +321,17 @@ async fn page_ref_edges_are_a_dataset_in_both_directions() {
         .await,
         vec![
             vec![json!("oxplow:oxplow/commit?sha=abc1234"), json!("touches")],
-            vec![json!("oxplow:oxplow/wiki?slug=intro"), json!("mention")],
+            vec![json!("oxplow:oxplow/knowledge?id=intro&store=oxwiki"), json!("mention")],
         ]
     );
     // What a page points at.
     assert_eq!(
         rows(
             &fx,
-            "SELECT target_uri FROM v_page_ref WHERE source_uri = 'oxplow:oxplow/wiki?slug=intro' ORDER BY target_uri"
+            "SELECT target_uri FROM v_page_ref WHERE source_uri = 'oxplow:oxplow/knowledge?id=intro&store=oxwiki' ORDER BY target_uri"
         )
         .await,
-        vec![vec![json!("oxplow:oxplow/file?path=src/app.rs")], vec![json!("oxplow:oxplow/wiki?slug=other")]]
+        vec![vec![json!("oxplow:oxplow/file?path=src/app.rs")], vec![json!("oxplow:oxplow/knowledge?id=other&store=oxwiki")]]
     );
 }
 
@@ -340,7 +340,7 @@ async fn page_ref_edges_are_a_dataset_in_both_directions() {
 /// project.yaml's keys in `v_config_key`.
 #[tokio::test]
 async fn questions_and_config_keys_are_datasets() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let root = fx.svc.layout.project_dir.clone();
     write(
         &root,
@@ -397,4 +397,30 @@ async fn questions_and_config_keys_are_datasets() {
     )
     .await
     .is_empty());
+}
+
+/// A request is something the semantic layer can group by: a turn's and a
+/// request-task link's `request` point at `v_request.uri`.
+#[tokio::test]
+async fn a_turn_declares_how_it_points_at_its_request() {
+    let fx = services_with_thread().await;
+    for (dataset, from) in [("agent_turn", "request")] {
+        let found = rows(
+            &fx,
+            &format!("SELECT relationships FROM v_dataset WHERE name = '{dataset}'"),
+        )
+        .await;
+        let relationships: Value =
+            serde_json::from_str(found[0][0].as_str().expect("declared")).unwrap();
+        assert!(
+            relationships
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|r| r["from"] == from
+                    && r["to_view"] == "v_request"
+                    && r["to_field"] == "uri"),
+            "{dataset}: {relationships}"
+        );
+    }
 }

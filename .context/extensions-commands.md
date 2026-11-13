@@ -19,7 +19,7 @@ it declares in `needs` ([commands.md](./commands.md) "Scopes") — `scope("sql.r
 A script's scope needs are the scopes a script can call
 (`scope_calls::CALLABLE`, `check_callable`): one it can't is refused at
 load, the one rule a command's `entry:`, an effect and a provider's
-`host/call` meet. A capability need (`work_items.comments`) gates the
+`host/call` meet. A capability need (`snapshots.contents`) gates the
 command instead.
 
 `sql.read` returns complete row lists only: more than 1000 result rows
@@ -28,7 +28,7 @@ set. Exactly 1000 is allowed. A script that means to walk a large result
 asks for a `page: { limit, offset }` and gets `{ rows, more,
 next_offset? }` ([commands.md](./commands.md) "Scopes"). Aggregate in SQL when all matching data
 must contribute, or explicitly filter/limit a query when a subset is
-intended. Commands, effects, effort policies, provider host calls and
+intended. Commands, effects, provider host calls and
 dry runs share this check. A complete query result does not establish
 collection coverage or freshness; the row-only scope carries neither.
 
@@ -41,18 +41,27 @@ commands:
     confirm: never                     # never (default) | always | destructive; children only add
     access: write                      # write (default) | record | read (composes nothing, returns a result)
     job: false                         # true: a durable job's model may call it (needs entry:, never over a scope's operation)
-    needs: [sql.read, work_items.comments]   # scopes it calls; capabilities / features it needs active
+    needs: [sql.read, model:oxplow/task_record]   # scopes it calls; capabilities / features it needs active
     ui:                                # how a person meets it (`.context/commands.md` "Offering a command")
       label: Finish Review
       group: Review
-      about: oxplow/work_item          # resource-bound; absent: search offers it
+      about: oxplow/task          # resource-bound; absent: search offers it
       # about_when: closed             # only where this column of the resource's dataset row is truthy
       input: { uri: "{{uri}}" }
     examples:
-      - { name: happy, input: { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" }, expect_commands: [oxplow.work_item.transition] }
-      - { name: gone, input: { uri: "oxplow:oxplow/work_item?id=tsk9&provider=oxplow" }, answers: { sql.read: [[]] }, refused: no such }
-    example: { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" }   # the input an agent is shown; a script's defaults to its first example that runs
+      - { name: happy, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" }, expect_commands: [oxtask.task.move] }
+      - { name: gone, input: { uri: "oxplow:oxplow/task?id=tsk9&provider=oxtask" }, answers: { sql.read: [[]] }, refused: no such }
+    example: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" }   # the input an agent is shown; a script's defaults to its first example that runs
 ```
+
+**A need** (`needs:` on a command, skill, agent context, page or job;
+`capability::check_need`) is a scope it calls (`sql.read`), a capability
+(`snapshots`) or one of its features (`snapshots.contents`) that
+must be active, or a shared model with a live store
+(`model:oxplow/task_record`): met while some enabled extension or running
+provider instance fills it (`CapabilityRegistry` keeps each publication's
+live models; `Active::unmet`). Task guidance gates on the task model this
+way once tasks are a model's.
 
 `example:` is the command's example input, for any handler (script,
 scope operation, provider op): it registers as JSON Schema's `examples`
@@ -64,9 +73,8 @@ expecting a refusal). Every command an agent is offered has one that
 fits (`every_command_an_agent_is_offered_has_an_example_that_fits`).
 
 A command may be **backed by an operation of one of the extension's
-providers**: `provider: fake` + `op: estimate`, the operation one its
-checked-in declarations list (not a capability verb — those run as
-`oxplow.work_item.<verb>`). Its input schema (plus an optional
+providers**: `provider: fake` + `op: mark`, the operation one its
+checked-in declarations list (not a capability verb — core calls those). Its input schema (plus an optional
 `instance`), access and undo are the declaration's, its `confirm` the
 stronger of the manifest's and the declaration's; it runs on the
 instance its input names ([providers.md](./providers.md) "The host").
@@ -94,8 +102,7 @@ error) — and may expect a refusal with `refused: <part of the reason>` instead
 **namespace** is the manifest's `namespace:`, else the extension's name with
 `-` → `_` (`command_namespace`; `check_namespace`: one snake_case segment,
 and `oxplow` only for an extension that ships with oxplow — the bundled one
-declares it, so its commands are `oxplow.review.accept`,
-`oxplow.review.request_changes`, `oxplow.work.clear_finished`). Its event
+declares it, so its commands include `oxplow.tasks.clear_finished`). Its event
 types are declared by full name and unaffected. Who holds a namespace is the
 bus's to say (`CommandBus::namespace_owner`: `oxplow`, or the one source —
 `extension:<name>` / `provider:<instance>` — holding it) — there is no
@@ -112,7 +119,7 @@ checked at load, its error at its line (`entry_line`: the line whose
 and datasets find their lines the same way): the name, `access`, `confirm`,
 the schema compiles, each `needs` entry is a scope or a
 capability / feature, and the entry is a file in the
-extension that parses and defines `transform` (`check_starlark`), and
+extension that parses and defines `transform` (`check_starlark`; a `finish` is optional and called by name, and its answer is checked when it runs), and
 it declares at most `MAX_EXAMPLES` (10) examples. The
 script's text is kept on the `ExtensionCommand` (not serialized).
 `check_extension` (the Extensions page, `oxplow extension check`) runs
@@ -133,6 +140,54 @@ calls served on the calling thread (`run_command_script` with
 retries the run), then the
 `{ commands, result? }` shape (`composed`; any other key is `Invalid`).
 
+**`x["actor"]`** (`script_actor`): `transform` and `finish` get who runs the
+command, `{ kind: agent | person | system, thread?: <thread uri>, uri: <the
+actor's uri> }`, so a store can record its author reliably (oxtask's `author` is
+`x["actor"]["uri"]`). The mapping: a `Human` is a `person`
+(`oxplow:oxplow/person`); an `Agent` is an `agent` whose `thread` and `uri` are
+its thread's URI (no thread, a session: an `agent` at the session's URI; neither:
+`system`); a `Page` or `Component` is the actor it acts for, at any depth; an
+`Effect` or `Job` that carries a thread is that thread's `agent`; `System`,
+and an `Effect` / `Job` with no thread, is `system` (an effect's `uri` is its
+extension's; oxplow itself has a null `uri`: core names none of its own
+extensions). The URIs come from `oxplow_domain::uri::build`. The actor of an
+undo is the one who undoes.
+
+**`finish(x)`** (a script command's second, optional function; decided
+2026-11-12, `.context/models.md` "A script that composes a store's write"): a
+script runs once, before its steps, so its `result` and `inverse` can't use what
+the steps answered (a minted id). A script that also defines `def finish(x):`
+has it called after **all** its steps landed — a steps run and an
+in-transaction composition both — with `x["input"]`, `x["actor"]` and
+`x["steps"]`, `[{ name, input, result }]`, each child's answer (a store write's
+carries `rows`, the `RETURNING` rows). It returns `{ result?, inverse?: {
+commands: [...] } }` (`finished`): a part it returns replaces the run's
+`result` / undo; a part it leaves out (or sets to `None`) keeps what `transform`
+said. Anything else is `Invalid` with a message (`commands`, `calls`, `events`
+and `refuse` say that finish runs after the steps, so it composes nothing; an
+unknown key is named). It is pure like `transform`: same sandbox and
+`COMMAND_SCRIPT_BUDGET`, no writes, no composed commands; the `scope(...)`
+reads its `needs` declare work **in a steps run** (they see the landed steps).
+A run that stops partway (a step failed) calls no finish.
+
+- **Steps run.** `finish`'s `inverse` is checked as `transform`'s is
+  (`route_inverse`: a known command that writes, `commands:` permission, needs,
+  input validator, not the host's own-script-only writes), but **after** finish
+  returns, so a bad one fails the run — and the steps **stay landed**: the run is
+  audited as an error naming the steps and says "they stand, and the run can't
+  be undone". Nothing is undone for the person. A finish that throws is the
+  same.
+- **In-transaction run.** The composition undoes itself (the reversed
+  children), so a finish `inverse` is a contradiction, as a `transform` one is.
+  `finish` runs **inside the transaction**, so the run is refused — the error
+  names the command and says "Nothing ran" — and everything the children did
+  rolls back. Finish may set `result` (its answer replaces the script's). Its
+  `scope(...)` reads are refused there ("the transaction holds the database";
+  they would wait on it): read in `transform`, or let the step answer it.
+- **Examples** (`dry_run`) run `transform` only: no step landed, so there is
+  no finish to call. A fixture (`when: { command }`) runs the real bus path, so
+  `expect.result` is finish's result and `expect.inverse` the run's undo.
+
 **Running** (`extension_command`): each is a composite
 (`Handler::Compose`, atomicity `Dispatch`) `<namespace>.<name>`
 (summary "… (extension `x`)", the declared confirm / access,
@@ -148,10 +203,27 @@ The bus runs what it composes ([commands.md](./commands.md) →
 in one transaction (`steps::run_composed`; the script runs once, when the bus routes the run) — each child's policy and
 confirmation apply (a person's run whose child asks is asked first; an agent's run asks nothing), one audit row with `{ result,
 children }`, the children's events caused by the run, the reversed
-children as its undo; when one leaves it (`work_item.*` on another
-provider's item), as **steps** — all checked first, then run in
+children as its undo; when one leaves it (`task.*` on another
+provider's item, `oxplow.extension_store.write`, `oxplow.extension_files.write`,
+a provider call), as **steps** — all checked first, then run in
 order, each landing as it runs, stopping at the first failure, one audit
-row, no undo. A script can't do I/O of its own: `files()` sees
+row, no undo of their own. **`inverse`:** a script may return `"inverse":
+{ "commands": [{ name, input }, …] }` beside `commands`; for a steps run
+the bus keeps it as the run's undo (the audit row's inverse, the same Undo
+as a built-in command's), and the undo runs it through the bus with its own
+policy, confirmation and audit. It names *commands*: to take back a store
+write, name the extension's own command that makes the opposite write
+(`shelf_db.book.add` for `shelf_db.book.remove`), not
+`oxplow.extension_store.write`, which runs only for the composing script. A
+steps run whose script returns none has no undo. A composition that stays in
+oxplow's records undoes itself, so `inverse` beside it is **refused when the
+run is routed** (before anything runs), naming the command; `composed`
+checks the shape (`inverse` is `{ commands: [{ name, input }] }`, at least
+one call, each input an object), routing checks the rest (known command,
+permission, input fits, writes, not an own-script-only write); the `check`
+dry run shows `inverse` to an example's `expect` (`expect: { inverse: {
+commands: [...] } }`) but cannot know the routing, so a contradiction is
+found when the command runs. A script can't do I/O of its own: `files()` sees
 nothing, `ai_*` is refused without a host, and `scope` reaches only
 what it `needs`. **Registration**
 (`ExtensionCommands`, `Services.extension_commands`): the enabled
@@ -180,7 +252,7 @@ An extension declares capability implementations (stable,
 
 ```yaml
 implementations:
-  - { capability: work_items, id: oxplow, entry: "oxplow:tasks" }
+  - { capability: snapshots, id: hashes, entry: "oxplow:snapshot-hashes" }
 ```
 
 - `capability` is a choosable one, or one many implementations serve
@@ -204,20 +276,129 @@ implementations:
   (`BuiltIn.config_schema`, `capability::check_config`; a built-in with
   none refuses any config); no built-in takes one now.
 - `entry` names a built-in in core's standard library
-  (`capabilities::BUILT_INS`: `oxplow:tasks`, `oxplow:commit-or-switch`,
-  `oxplow:snapshots`, `oxplow:snapshot-hashes`, `oxplow:wiki`), the way a collector names
+  (`capabilities::BUILT_INS`: `oxplow:oxtask`, `oxplow:commit-or-switch`,
+  `oxplow:snapshots`, `oxplow:snapshot-hashes`, `oxplow:oxwiki`), the way a collector names
   `oxplow:junit`. A
   built-in's features are core's table's — it's core's code — never the
   manifest's. A built-in whose items' URIs carry a provider id
-  (`BuiltIn.provider`: `oxplow:tasks` is `oxplow`) is declared under that
+  (`BuiltIn.provider`: `oxplow:oxtask` is `oxplow`) is declared under that
   id and no other.
 - **A process implements a capability through `providers:`**, not
-  here: a capability whose spec carries a provider contract (the work
-  list, the effort policy, an agent harness) may be an external
-  provider's instance — the work list and the effort policy chosen by
+  here: a capability whose spec carries a provider contract (snapshots, an agent harness, knowledge, a filesystem) may be an external
+  provider's instance — snapshots chosen by
   `activeProviders` like a built-in, a harness registered beside the
   built-ins under its instance id, as many as run
   ([providers.md](./providers.md) "What a provider may implement").
+- **A script implements a capability with verbs here**: an `entry:`
+  that isn't `oxplow:<name>` is a Starlark file of the extension
+  (`implementations::script_decl`, `Source::Script`, `v_capability_provider.source
+  = 'script'`), for any capability whose spec carries a provider
+  contract — the same verb tables a provider implements
+  (`oxplow_domain::capability::ProviderContract`), so a capability added
+  that way takes a script with no change here. Example:
+  `oxplow extension new implementation <name> [--capability <cap>]`
+  scaffolds one.
+
+  ```yaml
+  implementations:
+    - capability: snapshots
+      id: treehash
+      entry: snapshots/treehash.star
+      needs: [state.write, tree.read]   # the scopes it calls
+      config: { prefix: n }       # any map: every verb gets it
+      features: { contents: false }     # the capability's; one left out is off
+  ```
+
+  It declares what a provider declares of itself — `features:`,
+  `data:` (an agent harness's) — and the load checks it with the provider rules
+  (`spec::items_problem`, `spec::check_declarations` over the
+  declarations the script stands for). **The ABI**: the script defines one
+  function per verb (`def create(x):`; other functions are helpers),
+  called with `x = { input, config, id, key }` — the verb's input as
+  core's dispatch gives it, the entry's config, the implementation's id
+  (its refs' `provider`), the call's idempotency key (the caller's, or a
+  fresh `call:<uuid>`) — and answers what a provider's `invoke` answers,
+  `{ result, events?, inverse? }` (`InvokeResult`; `inverse` is `{
+  command: <verb>, input }`). **How it runs** (`providers::script`): its
+  capability's host adapts it as it adapts an instance — both are a
+  `providers::endpoint::Endpoint` (`CapabilityHost::prepare`), so the
+  snapshots' is an `ExternalSnapshots` that core's takes call like any
+  provider's — and each call runs the verb
+  in the command scripts' sandbox (no I/O of its own; its host calls are
+  its scopes), as the implementation's own
+  contribution (kind `implementation`, `<capability>.<id>`), on a child of
+  the caller's run whose authority declares only its `needs`, within the
+  extension's permissions (`permissions:` must grant them), guarded by its
+  extension staying live. Its answer is checked as a provider's: only its
+  contract's event types, only its own items' records and subjects
+  (`endpoint::envelope_of`), an inverse naming one of the capability's
+  verbs; a shape that isn't `InvokeResult` fails the call. What it keeps
+  between calls it reads back through its scopes (`sql.read`) or in its **extension's private state**: it may
+  declare `state.write` (and `state.read`) and keep what it needs there
+  ([extensions-manifest.md](./extensions-manifest.md) "Private state host
+  boundary": whole-namespace compare-exchange, 1 MiB and 256 keys, `project`
+  or `personal`, `state` or `cache`; its own namespace only), and `tree.read`
+  (bare or a path prefix; needs `files.read` in `permissions:`) to read the
+  stream's worktree as it is on disk now, anchored to the stream the call is
+  for (a filesystem call's `FsCx.stream`, a snapshots mark's stream; else the
+  primary stream). Each verb has the command scripts' 5 s budget; a script
+  holds text, not bytes (the tree is text files only: a binary, non-UTF-8 or
+  oversize file isn't in it), `len(text)` counts characters, and two
+  builtins give what a file's bytes are: `xxh3_128(text)` (the blob store's
+  identity of the text's UTF-8 bytes) and `utf8_len(text)` (their count). Its adapter is prepared and published with the
+  generation's other runtime adapters (`PreparedRuntimeAdapters`,
+  `ProviderRegistry::prepare_scripts` / `publish_scripts`); one a host
+  refuses holds the extension back (`activation.script_implementation`).
+  **Refused at load**, each its own code: `implementation.script_no_verbs`
+  (a capability with no contract), `script_id` (an id its refs can't
+  carry, `capability::instance_id_problem`), `script_outside`,
+  `script_config` (not a map), `script_need` (not what an implementation's
+  script may call: `scope_calls::check_implementation_need` — a composing
+  script's, plus `tree.read` and `state.write`),
+  `script_missing`, `script_invalid` (doesn't parse, or calls a scope it
+  doesn't need), `script_items` (stages/fields/id pattern),
+  `script_missing_verb` (a verb the contract requires for the declared
+  features), `script_declares` (a feature or `data` the capability
+  doesn't have). A built-in refuses the script-only keys
+  (`implementation.built_in_needs`, `built_in_declares`), and an AI
+  provider too (`provider_needs`, `provider_declares`).
+  `oxplow extension test` runs the capability's conformance suite against
+  it on a throwaway oxplow, chosen there, as it does a provider's program
+  ([extensions-sdk.md](./extensions-sdk.md)).
+
+  **Which capabilities a script can implement** (each is held by a test in `providers/script_capabilities.rs`, a small
+  extension against the capability's conformance suite):
+  - `agent_harness` works for a terminal harness: `launch` answers a
+    `pty` spec (the identity env passed on, never on the command line),
+    `tool_use` and `render` map hooks. It is registered by id beside the
+    built-ins and passes `harness_conformance::suite`. **What a script
+    can't do is find the harness's program** on `search_path`: that is the
+    machine's `PATH`, and `tree.read` is the stream's worktree (what oxplow
+    tracks of the project), not the machine's files; no other read of its
+    scopes gives a file's presence on disk. It names the command and lets
+    the shell find it. Looking for it needs raw filesystem access, which a
+    script doesn't have by design; an agent harness that must check for its
+    program is a provider (`providers:`), a process.
+  - `filesystem` works for a tree the script knows (a fixed one, or one it
+    computes, or the stream's worktree with `tree.read`): `stat`, `read`
+    (base64: the script encodes), `list`; and it may be **writable**
+    (`features: { writable: true }`, a `write` verb): the writes are kept in
+    its extension's private state (`state.write`), and the read verbs look
+    there first. It passes the filesystem checks, the write ones among
+    them (`script_capabilities.rs`). The sandbox has no bytes type or
+    base64 builtin, so a script holds bytes as lists of ints (or keeps the
+    base64 text it was given). A path that leaves the filesystem is refused
+    by core before the call.
+  - `snapshots` works (`features: { contents: true }` to keep bytes): `mark`
+    reads the worktree (`tree.read`), names each file (`xxh3_128`, `utf8_len`) and keeps
+    the mark's listing and each new file's text in private state; `changed`
+    compares two kept listings; `read_at` answers a kept file's text
+    (base64). It passes `snapshot_conformance::suite`. **Size:** a big tree
+    in extension state is slow (each mark reads and rewrites the whole
+    namespace) and the namespace is capped at 1 MiB, so a script like this
+    suits a small project, or one that keeps hashes only (no `contents`); a
+    larger one is a provider (`providers:`). Nothing here blocks a big tree:
+    the write is refused at the cap.
 - **An `ai_provider` names its Rust kind** with `provider:` instead of
   `entry:` (`implementations::provider_decl`, `Source::ProviderKind`):
   one of `oxplow_ai_rig::KINDS` (`anthropic`, `openai`,
@@ -228,17 +409,6 @@ implementations:
   points a person's key at that URL. Its `decide_native` feature is the
   kind's. The kinds and why they're Rust over Rig are
   [ai-providers.md](./ai-providers.md) "Rust kinds over Rig".
-- **An `effort_policy` may be a script** instead: an `entry` that isn't
-  `oxplow:<name>` names a `.star` file of the extension
-  (`implementations::script_decl`, `Source::Script`). Nothing else is a
-  script.
-  - An effort policy's is effects-shaped — `transform({event})` →
-    `{ commands: [{ name, input }] } | { skip: "why" }` — takes no config,
-    and names the scopes it calls in the entry's `needs:` (only what a
-    script can, `scope_calls::CALLABLE`; checked at load, with the script
-    defining `transform`). `needs` is refused anywhere else. It runs
-    under its extension's permissions, as an effect's does; what runs is
-    what was deployed.
 - `oxplow-foundation` declares the agent harnesses (`oxplow:claude-code`,
   `oxplow:codex-cli`, `oxplow:opencode`) and the AI
   providers, one per Rust kind under the kind's name, each at its API's
@@ -249,8 +419,8 @@ implementations:
 - A required capability's default is core's own: `CapabilityRegistry::new`
   registers it (snapshots' `oxplow`, `oxplow:snapshots`), so it's there
   whatever is disabled, and a manifest declaring that id is an error.
-- `oxplow-foundation` declares the default implementations (the work list,
-  the effort policy and knowledge's wiki, `oxplow:wiki`), so they run with
+- `oxplow-foundation` declares the default implementation (knowledge's
+  oxwiki, `oxplow:oxwiki`), so they run with
   `oxplow-bundled` off; turning the list off is choosing another provider
   (or none) in Settings → Capabilities, not disabling an extension
   (`capabilities::CapabilityRegistry::resolve`, `.context/work-tracking.md`).
@@ -259,26 +429,26 @@ implementations:
   chosen `hashes` with bundled disabled falls back to core's `oxplow`.
 
 **Declared needs.** A page or an advisory may declare `needs:
-[work_items, snapshots.contents]` — capabilities, or one of a
+[knowledge, snapshots.contents]` — capabilities, or one of a
 capability's features (`oxplow_domain::capability::check_need`; an
 unknown one is a load error). A page run checks them against what's
 active (`ViewContext.active`, a `capabilities::Active` snapshot that
 `view_context` fills): unmet, it runs no loader and `PageRun.inactive`
-is set (`PageInactive { needs, message }`: "Needs: Work list (choose one
+is set (`PageInactive { needs, message }`: "Needs: <capability title> (choose one
 in Settings → Capabilities)."). The page view shows that instead of its
 empty state. An advisory whose
 needs aren't met doesn't run. A context built without `Services` (param
 checks) checks nothing. A capability's none declares every feature (it
 takes everything, keeping nothing), so a feature need is met by none and
-only a need of the capability itself (`work_items`) isn't. `oxplow-foundation`
-declares no `work_items` need: with no list chosen its task pages, hint and
-skill just find nothing.
+only a need of the capability itself (`knowledge`) isn't. Task guidance
+needs the task model instead (`model:oxplow/task_record`): its pages, hint
+and skill are hidden while no store fills it.
 
 **What an implementation owns.** A provider instance owns its command
 namespace (`<id>.*`), offered and run only while it's active
 (`capabilities::Active::refusal`, `.context/commands.md` step 0). The
-built-ins own nothing of the agent's surface: the work-item tools read
-whichever list is active.
+built-ins own nothing of the agent's surface: the task tools read the
+task model.
 
 ## Skills
 
@@ -287,10 +457,8 @@ An extension gives the coding agent skills and slash commands (stable,
 
 ```yaml
 skills:
-  - { name: work-items, file: skills/work-items/SKILL.md, needs: [work_items] }
-  - { name: work-next, kind: command, file: commands/work-next.md }
-implementations:
-  - { capability: work_items, id: oxplow, entry: "oxplow:tasks", skills: [work-next] }
+  - { name: tasks, file: skills/tasks/SKILL.md, needs: ['model:oxplow/task_record'] }
+  - { name: next-task, kind: command, file: commands/next-task.md }
 ```
 
 - `name` is lowercase letters, digits and `-`, not one of core's own
@@ -302,14 +470,35 @@ implementations:
   extensions (one with skills declares `agent`), when its `needs:` are met and, if an implementation lists
   it in its `skills:`, while that implementation is the active one. A name
   another extension already took is left out (logged).
+- **Offered by a setting** (`when:`): `{ name: track-work, file: …, when:
+  { config: /tasks/workflow, in: [agent_tracks] } }` is offered only while
+  the extension's effective configuration (defaults < project < personal,
+  `extension_configuration::effective_values`) has one of `in` at that JSON
+  pointer. The load refuses a `when` that can never hold:
+  `when.undeclared` (no `configuration:`), `when.unknown_key` (the pointer
+  names no key of `configuration.schema`), `when.not_scalar` (an object or
+  array key), `when.empty` (no values), `when.wrong_type` (a value not of
+  the key's `type`), `when.not_in_enum` (a value outside the key's `enum`).
+  Settings that can't be read (a layer at an old schema version) fail
+  closed: the skills they offer aren't. The condition is one shared type,
+  `config_schema::ConfigCondition`, for any contribution kind a setting
+  offers.
+- **A settings write rewrites the skills.** A skill with `when:` is a
+  configuration reader (`extension_generation::configuration_readers`, the
+  one list of them; a dataset's `config()` is the other): a write of the
+  extension's settings changes `ConfigSignature`, so
+  `request_config_refresh` (on `command.executed`) republishes, and the
+  publication runs `refresh_agent_text`. A running session keeps the skill
+  list it started with (harness behavior); a new one gets the new set.
 - **Installed.** Each spawn writes what's offered into the runtime
   (each harness's `launch`, `crates/oxplow-harnesses`); boot, an
   extension change and a `capability.switched` rewrite the runtimes
   already on disk (`refresh_agent_text` → each harness's `refresh_text`). A skill folder oxplow wrote
   carries a `.oxplow` marker, so one no longer offered is removed and a
   person's own stay; the Claude `commands/` folder is oxplow's whole.
-- `oxplow-foundation` gives the `work-items` skill (any work list) and the
-  `work-next` command (oxplow's tasks' ready queue).
+- `oxplow-bundled` gives the store-agnostic `tasks` skill; `oxtask` gives
+  its own `oxtask` skill, `track-work`, `work-tasks` and the `next-task`
+  command (the ready queue), each gated on the task model and the workflow.
 
 ## Advisories
 
@@ -321,30 +510,32 @@ mechanism; what to say, and when, is SQL in the extension.
 advisories:
   - id: low-coverage
     on: post-tool-use        # or prompt, or turn-end
-    once_per: effort         # effort (default) | thread | session | day | row (needs a `key` column) | turn
+    once_per: request        # request (default) | thread | session | day | row (needs a `key` column) | turn
     audience: agent          # agent (default) | person
     heading: "# Optional heading line"
-    query: |                 # :thread_id, :stream_id, :turn_id, :effort_id
-      SELECT '...' AS message FROM v_effort_observation WHERE effort_id = :effort_id ...
+    query: |                 # :thread_id, :stream_id, :turn_id, :request_id
+      SELECT '...' AS message FROM v_request_metric_delta WHERE request_id = :request_id ...
 ```
 
 - **Triggers.** `post-tool-use` runs on each `agent.tool.finished`
   (`advisories.post_tool`), `prompt` on each prompt the person sends, and
-  `turn-end` on each `thread.checkpoint` (`advisories.turn_end`, after
-  `effort.observe`): evaluated when the turn ends, heard when the agent
+  `turn-end` on each `thread.checkpoint` (`advisories.turn_end`): evaluated when the turn ends, heard when the agent
   next hears from oxplow. A turn's end is the one point every harness
   reaches, blocked or not.
 - **Params.** Every query may use `:thread_id`, `:stream_id`, `:turn_id`
-  (NULL at a prompt) and `:effort_id` (NULL when the thread has no effort
-  — for an event, the effort it was anchored to; at a turn's end, the one
-  holding the turn's end; at a prompt, the open one).
-- **Repeat rules.** `once_per: effort` fires once per effort and doesn't
-  run without one; `thread` once per thread; `session` once per agent
+  (NULL at a prompt), `:request_id` (the request of the turn the trigger
+  belongs to: a tool call's turn, the ending turn, at a prompt the turn it
+  opened or went into; the thread's newest when none is named).
+- **Repeat rules.** `once_per: request` (the default) fires once per
+  request on the thread and doesn't run without one: the next request is
+  fresh, and the mute rule (a hint still firing after three deliveries is
+  muted and raised to the person) counts deliveries within the request;
+  `thread` once per thread; `session` once per agent
   session on the thread (the latest turn's harness session; doesn't run
   without one); `day` once per thread per UTC day; `row` once per `key`
-  on the thread (a query wanting once per effort per row puts
-  `:effort_id` in its key, as `threshold-crossed` does); `turn` whenever
-  it has rows. Marks live in `once_mark`, per effort or thread.
+  on the thread (a query wanting once per request per row puts
+  `:request_id` in its key); `turn` whenever
+  it has rows. Marks live in `once_mark`, per request or thread.
 - **Audience.** `agent` hints go to the coding agent; `person` hints are
   raised in Alerts ("Notices", `apps/desktop/src/hints.ts`) until
   the person dismisses one (`oxplow.hint.dismiss`, the row's right-click)
@@ -361,9 +552,9 @@ advisories:
 - **Effectiveness.** Each evaluation is counted (`hint_stat`), and
   `v_hint_stat` puts the counts together per hint and thread: evaluated,
   fired, delivered, held, muted. An agent hint that still fires after
-  reaching the agent `MUTE_AFTER` (3) times in its effort (or its thread,
+  reaching the agent `MUTE_AFTER` (3) times in its request (or its thread,
   with none) is muted there — not evaluated again — and the person is
-  told once (a `hint-muted` nudge with what it said). A new effort starts
+  told once (a `hint-muted` nudge with what it said). A new request starts
   it fresh.
 - `crates/oxplow-app/src/advisories.rs`: `AdvisoryRunner` runs the enabled
   extensions' advisories for one trigger and scope and applies
@@ -379,36 +570,104 @@ advisories:
   binding the thread's stream into the scope.
 - `oxplow_validate_extension` dry-runs each advisory with every param NULL and
   checks it returns `message` (and `key` for `once_per: row`).
-- oxplow-bundled ships hints on outcomes: `large-uncommitted` (turn-end,
-  once per effort: an open effort holding 15 or more files — a commit
-  landing its work would have closed it) and `landed-in-progress`
-  (turn-end, to the person, once per item: an item still in progress
-  though a commit landed its work and nothing is open on it); the two
-  shared-files hints (turn-end: two open efforts on different threads
-  changed one file within `sharedFiles.windowMinutes`; the Alert to the
-  person once per pair, and a note to each agent, once per thread; see
-  work-tracking.md "Cross-thread ownership"); and two
-  metric ones, `metric-deltas` and `threshold-crossed` (see
-  [metrics.md](./metrics.md)). **Bundled advisories set no coding
+- oxtask ships one hint: `untracked-work` (post-tool-use,
+  `once_per: request`, while the task model has a live store: the request has
+  a recorded edit and no linked task, and the thread has no task in
+  progress; the `track-work` skill says what to do). The earlier
+  outcome hints (`large-uncommitted`, `landed-in-progress`, the two
+  shared-files hints (requests on different threads changed one file
+  within `sharedFiles.windowMinutes`; see work-tracking.md "Cross-thread
+  ownership"), `metric-deltas`, `threshold-crossed`) are in the
+  parked `oxplow-bundled-todo` project extension (see
+  [metrics.md](./metrics.md) for the metric ones). **Bundled advisories set no coding
   requirements** (decided 2026-10-07): they say what oxplow observed, never
   how a project should code — no coverage target, no "add tests" — and
   a project that wants one writes its own advisory (the `coverage-target`
   nudge was removed for this).
-  Each bundled hint has a fixture in `advisories.rs` that makes it fire
-  and cases that keep it quiet (`every_bundled_hint_has_a_fixture_that_fires_it`
-  fails when a hint ships without one). A count of `fired = 0` in
+  Each bundled hint has an extension fixture that makes it fire and one
+  that keeps it quiet (`when: { advisory: <id> }`). A count of `fired = 0` in
   `v_hint_stat` is therefore the project's state, not a broken query:
-  `threshold-crossed` needs a metric with a `warnAt`/`failAt` that an effort
-  moves past (only the coverage metric ships thresholds, and efforts
-  rarely fall under them), `landed-in-progress` needs a commit-closed effort
-  whose item is still in progress, and nothing is evaluated while
-  oxplow-bundled is disabled, since its policy and hints are the
+  a hint fires only when its query finds rows, and nothing is evaluated
+  while oxplow-bundled is disabled, since its hints are the
   extension's. A `coverage-target` row in `v_hint_stat` is residue from
   before that hint was removed. Advisories read
-  stored views (`v_effort_metric_delta`, `v_effort_observation`), never the
+  stored views (`v_request_metric_delta`, `v_request_observation`), never the
   engine directly.
 - The report-less-run nudge stays in core: it's about collection hygiene,
   not an instrument.
+
+## Agent context
+
+An extension tells the coding agent what it should know **now** — the
+task in progress, what is next — with **agent contexts** (`context:` in
+`extension.yaml`; `extensions/agent_contexts.rs`). Where an advisory says
+"something happened" once, a context states the current facts, and the
+agent gets them again whenever they change.
+
+```yaml
+permissions: [agent.write]
+context:
+  - id: task-state
+    doc: What the thread works on now.     # for people: the catalog, the manifest
+    needs: ['model:oxplow/task_record']    # optional; without it, it doesn't run
+    query: |                               # :thread_id, :stream_id, :request_id (each may be NULL)
+      SELECT 'In progress: ' || title AS text FROM v_oxplow_task WHERE state = 'in_progress' ...
+```
+
+- **`when: { config: <pointer>, in: [..] }`** sends it only while a
+  setting of the extension's own holds, checked at load and at delivery
+  as a skill's `when:` (settings that can't be read are a failed reading:
+  nothing is sent and nothing taken back). Read at each delivery, so a
+  settings write needs no republish: a context is not a configuration
+  reader.
+- **The query** is the extension's SQL (`config('/ptr')` reads its own
+  settings). Its first row's `text`, trimmed, is what the agent is told;
+  no row, a NULL or an empty text says nothing. `:request_id` is the
+  request of the thread's newest turn.
+- **Delivery** (`AgentContext::build_context`, `agent_context.rs`): on
+  every prompt, after the `<session-context>` block, each enabled
+  extension's contexts whose `needs` are met run for the thread, by
+  namespace and then as declared. Each is wrapped
+  `<context from="<namespace>/<id>">…</context>` and sent only when it
+  differs from what that agent session last received from it: **once,
+  then on change**, the session context's rule (agent-model.md). A
+  compaction or a fresh start (`reset_session`) forgets what was sent,
+  so the next prompt carries every context again. A context the session
+  was sent that is silent now (no row, an empty text, its `needs` or
+  `when:` not met, its extension gone) tells it so once
+  (`CONTEXT_CLEARED`: what it said no longer holds; an agent told of a
+  task in progress learns it closed), recorded as sent, so the same text
+  coming back is sent again. A session never sent it hears nothing. A
+  reading that **failed** (its query, its settings, the generation)
+  sends nothing and takes nothing back (`agent_context::Reading`). The
+  records are in memory, like the session context's: a daemon restart
+  costs one repeat, and a retraction that was due across it is lost.
+- **A harness with no prompt hook** (Codex) is given its context between
+  turns, when `context_changes` bumps (`context_watch.rs`). While an
+  enabled extension declares a context, every `command.executed` bumps
+  it (a context's query may read what any command changed); an unchanged
+  build injects nothing.
+- **Budget**: `CONTEXT_BUDGET` (1,500 characters) per context, then
+  `CONTEXTS_BUDGET` (3,000) for all that a prompt carries; a cut text
+  ends with the `CONTEXT_CUT` line. Only changed contexts count, so one
+  that didn't fit at all goes on a later prompt, when the others don't
+  repeat. Separate from `NUDGE_BUDGET`.
+- **Not a nudge**: no `agent_nudge` row, no muting, no `hint_stat`; it
+  repeats nothing the agent already has.
+- **Channels**: it rides `prompt_context`. A harness without it gets
+  nothing (and nothing is recorded as sent); Codex gets it in the items
+  injected between turns, the same build.
+- **Permission**: it speaks into the agent's context, so the manifest
+  declares `agent.write` (the loader refuses it otherwise), like an
+  advisory.
+- **Checks**: `id` is lowercase letters, digits and dashes, once per
+  extension; `doc` is required; each need is a capability or feature.
+  `oxplow_validate_extension` (and `oxplow extension check`) dry-runs the
+  query with every param NULL: it must run and return a `text` column.
+  A fixture `when: { context: <id> }` checks its text
+  (extensions-sdk.md), and warns when it is over the budget.
+- A new condition on when a context runs (a setting, say) is a field
+  beside `needs` on `AgentContextDecl`.
 
 ## Agents: the MCP surface
 
@@ -461,11 +720,10 @@ tool: open_work              # offered as <namespace>_open_work
   share `oxplow`) — are refused at load, on each.
 - **Typed page tools.** `oxplow-foundation/pages/` holds the pages an
   agent asks for most, each with no `category` and a `tool:`: `catalog
-  { dataset? }` (every dataset with its columns), `thread_work { thread }` (the
-  thread's items by state, with their efforts), `work_next { thread }` (what
-  to pick up next; the bundled `/work-next` command calls it) and
-  `effort_summary { effort }` (title and summary, item, files, test runs,
-  claims, decisions as sections). Params take bare ids (`thr3`, `eff9`).
+  { dataset? }` (every dataset with its columns), `thread_tasks { thread }` (the
+  thread's items by state, with their requests), `next_task { thread }` (what
+  to pick up next; oxtask's `/next-task` command calls it). Params take
+  bare ids (`thr3`).
   Each reads published `v_*` datasets only, so it works with the bundled
   extension off. For history, `oxplow_vcs_log` and `oxplow_diff` are
   commands, not pages.
@@ -535,7 +793,7 @@ tool: open_work              # offered as <namespace>_open_work
   what `oxplow_run_page`, `oxplow_get_open_page` and `copy` return, so an
   agent reads a page the way the person sees it.
 - `oxplow_get_open_page(thread_id)`: what the human has open in that
-  thread, for any page kind (a work item's, file's or a custom page's
+  thread, for any page kind (a task's, file's or a custom page's
   URI): `pageId` is its identity (the URI without its `#`) and the view
   the `#`, decoded. For a page it adds `pageRun`, the window's own run of
   it as text, with `focus`, the node the person is on. `others` lists the

@@ -400,7 +400,7 @@ fn invalid(e: rusqlite::Error) -> DomainError {
 }
 
 /// A query that didn't prepare. An unknown table names the published dataset
-/// it most likely meant (tsk1039: `v_tree_facts` → `v_tree_fact`); an
+/// it most likely meant (`v_tree_facts` → `v_tree_fact`); an
 /// unknown column names the columns of the datasets `sql` reads, and the
 /// nearest one — so the next query can be right without a discovery query.
 fn prepare_failed(conn: &rusqlite::Connection, sql: &str, e: rusqlite::Error) -> DomainError {
@@ -549,7 +549,7 @@ fn view_names(
 
 /// Table → the datasets whose view reads it (`dataset_input`, sources; a
 /// materialized dataset's own table → that dataset), the table's own dataset
-/// (`v_<table>`) first, then by name (tsk922). Empty before the registry
+/// (`v_<table>`) first, then by name. Empty before the registry
 /// exists.
 fn source_readers(
     conn: &rusqlite::Connection,
@@ -764,7 +764,7 @@ impl<'c> ReadSession<'c> {
 
     /// Why a statement didn't prepare: the authorizer's refusal, or the
     /// error itself — read once the session has ended, so naming the dataset
-    /// it most likely meant can read the schema (tsk1039).
+    /// it most likely meant can read the schema.
     fn failed(self, conn: &rusqlite::Connection, sql: &str, e: rusqlite::Error) -> DomainError {
         let refused = self.refusal();
         drop(self);
@@ -1250,11 +1250,8 @@ mod tests {
                    VALUES (1, 'primary', 'oxplow', 'main', 'refs/heads/main', 'local', '/tmp/x', '2026-01-01', '2026-01-01');
                  INSERT INTO threads (id, stream_id, title, created_at, updated_at)
                    VALUES (1, 1, 'Thread', '2026-01-01', '2026-01-01');
-                 INSERT INTO capability_provider (capability, provider) VALUES ('work_items', 'oxplow');
-                 INSERT INTO work_item (uri, provider, title, body, state, native_state, thread_id, created_at, updated_at)
-                   VALUES ('oxplow:oxplow/work_item?id=a&provider=oxplow', 'oxplow', 'Live item', '', 'in_progress', 'in_progress', 1, '2026-01-01', '2026-01-01');
-                 INSERT INTO work_item (uri, provider, title, body, state, native_state, thread_id, created_at, updated_at, deleted_at)
-                   VALUES ('oxplow:oxplow/work_item?id=b&provider=oxplow', 'oxplow', 'Deleted item', '', 'todo', 'ready', 1, '2026-01-01', '2026-01-01', '2026-01-02');",
+                 INSERT INTO threads (id, stream_id, title, mark, created_at, updated_at)
+                   VALUES (2, 1, 'Live item', 'amber', '2026-01-01', '2026-01-01');",
             )
         })
         .await
@@ -1282,13 +1279,13 @@ mod tests {
         .to_string();
         db.call(move |c| {
             c.execute_batch(
-                "INSERT INTO effort (id, work_item, thread_id, started_at, ended_at) VALUES (7, 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 1, '2026-01-01', '2026-01-02');
-                 INSERT INTO effort (id, work_item, thread_id, started_at) VALUES (8, 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 1, '2026-01-01');
-                 INSERT INTO metric_capture (id, stream_id, effort_id, producer, provenance, source, captured_at)
+                "INSERT INTO agent_turn (id, thread_id, prompt, started_at) VALUES
+                   (7, 1, 'p', '2026-01-01'), (8, 1, 'q', '2026-01-01');
+                 INSERT INTO metric_capture (id, stream_id, turn_id, producer, provenance, source, captured_at)
                    VALUES (40, 1, 7, 'coverage', 'observed', 'hook', '2026-01-01T00:00:00Z');",
             )?;
             c.execute(
-                "INSERT INTO metric_capture (id, stream_id, thread_id, effort_id, producer, provenance, source, captured_at, detail_json)
+                "INSERT INTO metric_capture (id, stream_id, thread_id, turn_id, producer, provenance, source, captured_at, detail_json)
                  VALUES (41, 1, 1, 7, 'tests', 'observed', 'hook', '2026-01-02T00:00:00Z', ?1),
                         (42, 1, 1, 8, 'test-run', 'asserted', 'mcp', '2026-01-03T00:00:00Z', ?2)",
                 [&payload, &counts_only],
@@ -1304,7 +1301,7 @@ mod tests {
             }
         };
         assert_eq!(
-            rows("SELECT id, stream_id, thread_id, effort_id, command, exit_code, passed, failed, skipped, total, duration_ms, provenance FROM v_test_run ORDER BY id").await,
+            rows("SELECT id, stream_id, thread_id, turn_id, command, exit_code, passed, failed, skipped, total, duration_ms, provenance FROM v_test_run ORDER BY id").await,
             json!([
                 [41, 1, 1, 7, "bun run test:collect", 1, 1, 1, 1, 3, 4200, "observed"],
                 [42, 1, 1, 8, "cargo test", null, 5, 0, null, 5, null, "asserted"]
@@ -1323,22 +1320,22 @@ mod tests {
     #[tokio::test]
     async fn check_sql_compiles_without_running_and_refuses_writes() {
         let (_db, sl) = seeded().await;
-        sl.check("SELECT count(*) FROM v_work_item e WHERE e.state = 'done'")
+        sl.check("SELECT count(*) FROM v_thread e WHERE e.mark = 'red'")
             .await
             .unwrap();
         let err = |sql: &'static str| {
             let sl = sl.clone();
             async move { sl.check(sql).await.unwrap_err().to_string() }
         };
-        let unknown = err("SELECT nope FROM v_work_item").await;
+        let unknown = err("SELECT nope FROM v_thread").await;
         assert!(unknown.contains("no such column"), "{unknown}");
         // It names the dataset's columns, so the next query can be right.
-        assert!(unknown.contains("v_work_item has: "), "{unknown}");
+        assert!(unknown.contains("v_thread has: "), "{unknown}");
         assert!(unknown.contains("title"), "{unknown}");
         // And the nearest one, when a column is close to one it has.
-        let close = err("SELECT e.titel FROM v_work_item e").await;
+        let close = err("SELECT e.titel FROM v_thread e").await;
         assert!(close.contains("did you mean `title`?"), "{close}");
-        assert!(err("DELETE FROM work_item").await.contains("SELECT"));
+        assert!(err("DELETE FROM threads").await.contains("SELECT"));
     }
 
     #[test]
@@ -1370,10 +1367,10 @@ mod tests {
         let out = sl
             .run(
                 SqlQuery::new(
-                    "SELECT title FROM v_work_item WHERE state = :state AND created_at >= :since",
+                    "SELECT title FROM v_thread WHERE mark = :mark AND created_at >= :since",
                 )
                 .named(vec![
-                    ("state".into(), SqlCell::Text("in_progress".into())),
+                    ("mark".into(), SqlCell::Text("amber".into())),
                     ("since".into(), SqlCell::Text("2026-01-01".into())),
                     ("unused".into(), SqlCell::Int(9)),
                 ]),
@@ -1386,7 +1383,7 @@ mod tests {
         );
         // A name the query uses must be given; a positional count must match.
         let err = sl
-            .run(SqlQuery::new("SELECT title FROM v_work_item WHERE uri = :uri").named(vec![]))
+            .run(SqlQuery::new("SELECT title FROM v_thread WHERE uri = :uri").named(vec![]))
             .await
             .unwrap_err();
         assert!(err.to_string().contains("no value for :uri"), "{err}");
@@ -1400,7 +1397,7 @@ mod tests {
         );
     }
 
-    /// P4.1 (tsk486): a query says what it read — the views, through other
+    /// P4.1: a query says what it read — the views, through other
     /// views too, and any table its own SQL read (not one a view read).
     #[tokio::test]
     async fn a_query_reports_what_it_read() {
@@ -1410,29 +1407,27 @@ mod tests {
             let sl = sl.clone();
             async move { sl.run(SqlQuery::new(sql).raw(true)).await.unwrap().reads }
         };
-        let r = reads("SELECT count(*) FROM v_work_item").await;
+        let r = reads("SELECT count(*) FROM v_thread").await;
         assert_eq!(
             (r.datasets, r.tables),
-            (vec!["v_work_item".to_string()], vec![])
+            (vec!["v_thread".to_string()], vec![])
         );
-        let r =
-            reads("WITH t AS (SELECT uri FROM v_work_item) SELECT * FROM t JOIN v_thread th ON 1")
-                .await;
+        let r = reads("WITH t AS (SELECT uri FROM v_stream) SELECT * FROM t JOIN v_thread th ON 1")
+            .await;
         assert_eq!(
             r.datasets,
-            vec!["v_thread".to_string(), "v_work_item".to_string()]
+            vec!["v_stream".to_string(), "v_thread".to_string()]
         );
         assert!(r.tables.is_empty(), "{:?}", r.tables);
-        let r =
-            reads("SELECT t.title FROM work_item t JOIN v_thread th ON th.id = t.thread_id").await;
-        assert_eq!(r.tables, vec!["work_item".to_string()]);
-        let r = reads("WITH c AS (SELECT title FROM work_item) SELECT * FROM c").await;
+        let r = reads("SELECT t.title FROM threads t JOIN v_thread th ON th.id = t.id").await;
+        assert_eq!(r.tables, vec!["threads".to_string()]);
+        let r = reads("WITH c AS (SELECT title FROM threads) SELECT * FROM c").await;
         assert_eq!(
             r.tables,
-            vec!["work_item".to_string()],
+            vec!["threads".to_string()],
             "a CTE body is the query's own SQL"
         );
-        let r = reads("SELECT j.value FROM v_work_item t, json_each('[1,2]') j").await;
+        let r = reads("SELECT j.value FROM v_thread t, json_each('[1,2]') j").await;
         assert!(
             r.tables.is_empty(),
             "a table-valued function isn't a table: {:?}",
@@ -1441,24 +1436,24 @@ mod tests {
         let r = reads("SELECT name FROM sqlite_master").await;
         assert_eq!(r.tables, vec!["sqlite_master".to_string()]);
         let checked = sl
-            .check("SELECT uri FROM v_work_item WHERE uri = :uri")
+            .check("SELECT uri FROM v_thread WHERE uri = :uri")
             .await
             .unwrap();
-        assert_eq!(checked.datasets, vec!["v_work_item".to_string()]);
+        assert_eq!(checked.datasets, vec!["v_thread".to_string()]);
     }
 
-    /// tsk1039: a misspelled dataset names the one it most likely meant —
+    /// a misspelled dataset names the one it most likely meant —
     /// an agent's page query and `extension check` read the same error.
     #[tokio::test]
     async fn an_unknown_dataset_suggests_the_nearest_one() {
         let (_db, sl) = seeded().await;
         let err = sl
-            .query_sql("SELECT * FROM v_work_items", vec![], None)
+            .query_sql("SELECT * FROM v_threads", vec![], None)
             .await
             .unwrap_err()
             .to_string();
-        assert!(err.contains("no such table: v_work_items"), "{err}");
-        assert!(err.contains("did you mean `v_work_item`?"), "{err}");
+        assert!(err.contains("no such table: v_threads"), "{err}");
+        assert!(err.contains("did you mean `v_thread`?"), "{err}");
         let err = sl
             .query_sql("SELECT * FROM v_zzzzzzzzz", vec![], None)
             .await
@@ -1467,7 +1462,7 @@ mod tests {
         assert!(!err.contains("did you mean"), "nothing near it: {err}");
     }
 
-    /// P4.3 (tsk488): the read contract is enforced — a query's own SQL
+    /// P4.3: the read contract is enforced — a query's own SQL
     /// reads only datasets, and a refused table points at the datasets over
     /// it; the explorer's raw mode reads anything, still recorded.
     #[tokio::test]
@@ -1482,31 +1477,29 @@ mod tests {
                     .to_string()
             }
         };
-        let msg = refused("SELECT * FROM work_item").await;
-        // The table's own dataset comes first, before the others that read
-        // it (an index feed, v_search_work_item).
+        let msg = refused("SELECT * FROM threads").await;
+        // It names the datasets over the table.
         assert!(
-            msg.contains(
-                "`work_item` is a physical table, not a published dataset; read v_work_item"
-            ),
+            msg.contains("`threads` is a physical table, not a published dataset; read ")
+                && msg.contains("v_thread"),
             "{msg}"
         );
         assert!(!msg.contains("no such table"), "{msg}");
         assert!(
-            refused("WITH c AS (SELECT title FROM work_item) SELECT * FROM c")
+            refused("WITH c AS (SELECT title FROM threads) SELECT * FROM c")
                 .await
-                .contains("`work_item` is a physical table")
+                .contains("`threads` is a physical table")
         );
         assert!(refused("SELECT name FROM sqlite_master")
             .await
             .contains("`sqlite_master` is a physical table"));
-        assert!(sl.check("SELECT uri FROM work_item").await.is_err());
+        assert!(sl.check("SELECT uri FROM threads").await.is_err());
         // Datasets, counts over them, table-valued functions and temp tables
         // are all fine.
         for ok in [
-            "SELECT count(*) FROM v_work_item",
-            "SELECT t.uri FROM v_work_item t JOIN v_thread th ON th.id = t.thread_id",
-            "SELECT j.value FROM v_work_item t, json_each('[1]') j",
+            "SELECT count(*) FROM v_thread",
+            "SELECT t.uri FROM v_thread t JOIN v_stream s ON s.id = t.stream_id",
+            "SELECT j.value FROM v_thread t, json_each('[1]') j",
         ] {
             sl.query_sql(ok, vec![], None)
                 .await
@@ -1524,7 +1517,7 @@ mod tests {
         // view, as the accessor of the reads inside it (P4.11).
         db.call(|c| {
             c.execute_batch(
-                "CREATE VIEW v_cte_probe AS WITH live AS (SELECT title FROM work_item) SELECT title FROM live",
+                "CREATE VIEW v_cte_probe AS WITH live AS (SELECT title FROM threads) SELECT title FROM live",
             )
         })
         .await
@@ -1538,22 +1531,17 @@ mod tests {
         assert!(out.reads.tables.is_empty(), "{:?}", out.reads.tables);
         // Raw reads the table, and says so.
         let out = sl
-            .run(SqlQuery::new("SELECT count(*) FROM work_item").raw(true))
+            .run(SqlQuery::new("SELECT count(*) FROM threads").raw(true))
             .await
             .unwrap();
-        assert_eq!(out.reads.tables, vec!["work_item".to_string()]);
+        assert_eq!(out.reads.tables, vec!["threads".to_string()]);
         // A refusal leaves the connection writable.
-        db.call(|c| {
-            c.execute(
-                "UPDATE work_item SET title = 'x' WHERE uri = 'oxplow:oxplow/work_item?id=a&provider=oxplow'",
-                [],
-            )
-        })
-        .await
-        .unwrap();
+        db.call(|c| c.execute("UPDATE threads SET title = 'x' WHERE id = 2", []))
+            .await
+            .unwrap();
     }
 
-    /// P4.5a (tsk490): a query's temp tables exist for it alone — created
+    /// P4.5a: a query's temp tables exist for it alone — created
     /// and filled on its connection, read like a dataset, gone afterwards
     /// even when the query fails.
     #[tokio::test]
@@ -1589,14 +1577,9 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(left, 0);
-        db.call(|c| {
-            c.execute(
-                "UPDATE work_item SET title = 'w' WHERE uri = 'oxplow:oxplow/work_item?id=a&provider=oxplow'",
-                [],
-            )
-        })
-        .await
-        .unwrap();
+        db.call(|c| c.execute("UPDATE threads SET title = 'w' WHERE id = 2", []))
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -1604,21 +1587,16 @@ mod tests {
         let (_db, sl) = seeded().await;
         let out = sl
             .query_sql(
-                "SELECT uri, title, state, thread_id FROM v_work_item ORDER BY uri",
+                "SELECT id, title, mark FROM v_thread WHERE mark IS NOT NULL ORDER BY id",
                 vec![],
                 None,
             )
             .await
             .unwrap();
-        assert_eq!(out.columns, vec!["uri", "title", "state", "thread_id"]);
+        assert_eq!(out.columns, vec!["id", "title", "mark"]);
         assert_eq!(
             serde_json::to_value(&out.rows).unwrap(),
-            json!([[
-                "oxplow:oxplow/work_item?id=a&provider=oxplow",
-                "Live item",
-                "in_progress",
-                1
-            ]])
+            json!([[2, "Live item", "amber"]])
         );
         assert!(!out.truncated);
     }
@@ -1628,8 +1606,8 @@ mod tests {
         let (_db, sl) = seeded().await;
         let out = sl
             .query_sql(
-                "SELECT title FROM v_work_item WHERE state = ?1",
-                vec![json!("in_progress").into()],
+                "SELECT title FROM v_thread WHERE mark = ?1",
+                vec![json!("amber").into()],
                 None,
             )
             .await
@@ -1644,14 +1622,14 @@ mod tests {
     async fn rejects_anything_but_a_single_read() {
         let (_db, sl) = seeded().await;
         for sql in [
-            "DELETE FROM work_item",
-            "INSERT INTO work_item (title) VALUES ('x')",
-            "UPDATE work_item SET title = 'x'",
-            "DROP VIEW v_work_item",
+            "DELETE FROM threads",
+            "INSERT INTO threads (title) VALUES ('x')",
+            "UPDATE threads SET title = 'x'",
+            "DROP VIEW v_thread",
             "PRAGMA query_only = 0",
             "ATTACH DATABASE '/tmp/evil.sqlite' AS evil",
-            "SELECT 1; DELETE FROM work_item",
-            "WITH x AS (SELECT 1) DELETE FROM work_item",
+            "SELECT 1; DELETE FROM threads",
+            "WITH x AS (SELECT 1) DELETE FROM threads",
             "",
         ] {
             let err = sl.query_sql(sql, vec![], None).await.unwrap_err();
@@ -1662,7 +1640,7 @@ mod tests {
         }
         // Nothing was deleted.
         let out = sl
-            .run(SqlQuery::new("SELECT count(*) FROM work_item").raw(true))
+            .run(SqlQuery::new("SELECT count(*) FROM threads").raw(true))
             .await
             .unwrap();
         assert_eq!(serde_json::to_value(&out.rows).unwrap(), json!([[2]]));
@@ -1695,11 +1673,11 @@ mod tests {
     async fn leaves_the_pooled_connection_writable() {
         let (db, sl) = seeded().await;
         sl.query_sql("SELECT 1", vec![], None).await.unwrap();
-        let _ = sl.query_sql("DELETE FROM work_item", vec![], None).await;
+        let _ = sl.query_sql("DELETE FROM threads", vec![], None).await;
         // A failure after the authorizer is installed, and one after
         // `query_only` is on, leave nothing behind either.
         let _ = sl
-            .query_sql("SELECT nope FROM v_work_item", vec![], None)
+            .query_sql("SELECT nope FROM v_thread", vec![], None)
             .await;
         let _ = sl.query_sql("SELECT ?1", vec![], None).await;
         let _ = sl
@@ -1710,13 +1688,8 @@ mod tests {
             .await;
         // in_memory() has a single pooled connection, so this proves
         // query_only was reset.
-        db.call(|c| {
-            c.execute(
-                "UPDATE work_item SET title = 'renamed' WHERE uri = 'oxplow:oxplow/work_item?id=a&provider=oxplow'",
-                [],
-            )
-        })
-        .await
-        .unwrap();
+        db.call(|c| c.execute("UPDATE threads SET title = 'renamed' WHERE id = 2", []))
+            .await
+            .unwrap();
     }
 }

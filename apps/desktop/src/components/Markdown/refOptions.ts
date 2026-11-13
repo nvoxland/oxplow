@@ -1,6 +1,6 @@
 /**
  * What `[[` lists in the editor (`RefCompletion.tsx`): the site search's
- * hits (a wiki page, a work item, a commit, an extension's resource — the
+ * hits (a knowledge page, a task, a commit, an extension's resource — the
  * quick open's `searchSite`) and the stream's files by name (its
  * workspace index). A file's content match isn't a name, so the search's
  * file hits are left out. Pure; the editor's owner fetches.

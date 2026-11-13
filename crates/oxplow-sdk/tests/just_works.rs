@@ -27,7 +27,7 @@ async fn project() -> tempfile::TempDir {
 /// Scaffold `kind` as `name`; `check` is clean with no warnings.
 async fn scaffolded(root: &Path, kind: &str, name: &str) {
     let kind = Kind::parse(kind).unwrap_or_else(|| panic!("`extension new {kind}`"));
-    scaffold(root, kind, name, Some("oxplow:oxplow/effort?id=eff1")).unwrap();
+    scaffold(root, kind, name, Some("oxplow:oxplow/request?id=req1")).unwrap();
     let report = check(root, name, &ExtensionCatalog::new(), None, None, None)
         .await
         .unwrap();
@@ -208,29 +208,30 @@ async fn a_scaffolded_command_checks_tests_and_runs_through_the_bus() {
     let svc = booted(dir.path()).await;
     let ext = loaded(&svc, dir.path(), "add-note");
     let human = oxplow_domain::Actor::Human;
-    let task = svc
+    svc.streams.ensure_primary().await.unwrap();
+    let made = svc
         .commands
         .run(
             &human,
-            "oxplow.work_item.create",
-            serde_json::json!({ "title": "Look" }),
+            "oxplow.thread.create",
+            serde_json::json!({ "stream": "str1", "title": "Look" }),
             true,
         )
         .await
         .unwrap();
-    let item = task.result["uri"].as_str().unwrap().to_string();
+    let item = made.result["id"].as_str().unwrap().to_string();
     let ran = svc
         .commands
         .run(
             &human,
             &ext.commands[0].name,
-            serde_json::json!({ "uri": item }),
+            serde_json::json!({ "thread": item }),
             true,
         )
         .await
         .unwrap();
     assert_eq!(
-        ran.result["children"][0]["name"], "oxplow.work_item.comment",
+        ran.result["children"][0]["name"], "oxplow.thread.rename",
         "{}",
         ran.result
     );
@@ -238,7 +239,7 @@ async fn a_scaffolded_command_checks_tests_and_runs_through_the_bus() {
 
 /// `extension new job` checks clean, and its fixtures run the job on the
 /// fixture model: the reply is the job's text, and the finished job reaches
-/// `publish`, which comments it on the work item.
+/// `publish`, which sets it as the thread's title.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_scaffolded_job_checks_tests_and_answers_with_the_fixture_model() {
     let dir = project().await;
@@ -277,22 +278,22 @@ async fn a_scaffolded_effect_checks_tests_and_once_started_reacts() {
     svc.streams.ensure_primary().await.unwrap();
     let thread = oxplow_domain::ThreadId::new(1);
     let human = oxplow_domain::Actor::Human;
-    let task = svc
+    let made = svc
         .commands
         .run(
             &human,
-            "oxplow.work_item.create",
-            serde_json::json!({ "title": "Look" }),
+            "oxplow.thread.create",
+            serde_json::json!({ "stream": "str1", "title": "Look" }),
             true,
         )
         .await
         .unwrap();
-    let item = task.result["uri"].as_str().unwrap().to_string();
+    let item = made.result["id"].as_str().unwrap().to_string();
     svc.commands
         .run(
             &human,
-            "oxplow.work_item.transition",
-            serde_json::json!({ "uri": item, "to": "done" }),
+            "oxplow.thread.close",
+            serde_json::json!({ "thread": item }),
             true,
         )
         .await
@@ -308,13 +309,17 @@ async fn a_scaffolded_effect_checks_tests_and_once_started_reacts() {
     }
     let runs = svc
         .sql
-        .query_sql("SELECT state FROM v_effect_run", vec![], None)
+        .query_sql(
+            "SELECT state FROM v_effect_run WHERE state = 'ok'",
+            vec![],
+            None,
+        )
         .await
         .unwrap();
     assert_eq!(
         runs.rows,
         vec![vec![oxplow_db::SqlCell::Text("ok".into())]],
-        "the effect commented on the finished item"
+        "the effect renamed the closed thread"
     );
 }
 
@@ -429,131 +434,15 @@ async fn a_scaffolded_provider_is_red_until_a_program_speaks_for_it() {
         "config: { team: core }\n",
     )
     .unwrap();
-    std::fs::write(
-        ext.join("fixtures/basic.yaml"),
-        "when: { command: create, input: { title: First } }\nexpect: { uri: $any }\n",
-    )
-    .unwrap();
     let blessed = kit_on_a_fresh_service(dir.path(), true).await;
     assert_eq!(blessed.error_lines(), Vec::<String>::new());
     let report = kit_on_a_fresh_service(dir.path(), false).await;
     assert_eq!(report.error_lines(), Vec::<String>::new());
-    for ran in ["work_items suite", "read work_items", "discover"] {
-        assert!(
-            report.ran.iter().any(|r| r == ran),
-            "{ran}: {:?}",
-            report.ran
-        );
-    }
-
-    // P7.A7: a cursor that doesn't advance — a second read from its last
-    // checkpoint streams everything again — fails the kit.
-    std::fs::write(
-        ext.join("bin/provider"),
-        fake_script(dir.path(), "stuck-cursor"),
-    )
-    .unwrap();
-    let report = kit_on_a_fresh_service(dir.path(), false).await;
     assert!(
-        report
-            .error_lines()
-            .iter()
-            .any(|e| e.contains("collector `work_items`") && e.contains("doesn't advance")),
+        report.ran.iter().any(|r| r == "snapshots suite"),
         "{:?}",
-        report.errors
+        report.ran
     );
-}
-
-/// A scaffolded effort policy is red until a program speaks for it; the
-/// fake in policy mode behind it passes the kit with the scaffold's own
-/// example (a checkpoint it skips).
-#[tokio::test(flavor = "multi_thread")]
-async fn a_scaffolded_effort_policy_is_red_until_a_program_speaks_for_it() {
-    let dir = project().await;
-    scaffold(
-        dir.path(),
-        Kind::provider("effort_policy").unwrap(),
-        "fake",
-        Some("oxplow:oxplow/effort?id=eff1"),
-    )
-    .unwrap();
-    let report = test_extension(dir.path(), "fake", false).await.unwrap();
-    assert!(
-        report
-            .error_lines()
-            .join("\n")
-            .contains("initialize failed"),
-        "{:?}",
-        report.errors
-    );
-    let ext = dir.path().join(".oxplow/extensions/fake");
-    std::fs::write(
-        ext.join("bin/provider"),
-        fake_script(dir.path(), "").replace(
-            "#!/bin/sh\n",
-            "#!/bin/sh\nexport OXPLOW_FAKE_CAPABILITY=effort_policy\n",
-        ),
-    )
-    .unwrap();
-    std::fs::write(
-        ext.join("provider.json"),
-        serde_json::to_string_pretty(&oxplow_provider_fake::policy_declarations()).unwrap(),
-    )
-    .unwrap();
-    std::fs::write(
-        ext.join("fixtures/provider-fake.yaml"),
-        "config: { team: core }\n",
-    )
-    .unwrap();
-    let blessed = kit_on_a_fresh_service(dir.path(), true).await;
-    assert_eq!(blessed.error_lines(), Vec::<String>::new());
-    let report = kit_on_a_fresh_service(dir.path(), false).await;
-    assert_eq!(report.error_lines(), Vec::<String>::new());
-    for ran in ["provider fake", "effort_policy suite"] {
-        assert!(
-            report.ran.iter().any(|r| r == ran),
-            "{ran}: {:?}",
-            report.ran
-        );
-    }
-    // The scaffold's example ran: one expecting commands for that
-    // checkpoint fails, naming its fixture.
-    let fixture = ext.join("fixtures/basic.yaml");
-    let text = std::fs::read_to_string(&fixture).unwrap();
-    std::fs::write(
-        &fixture,
-        text.replace("expect: { skip: $any }", "expect: { commands: $any }"),
-    )
-    .unwrap();
-    let report = kit_on_a_fresh_service(dir.path(), false).await;
-    assert!(
-        report
-            .error_lines()
-            .iter()
-            .any(|e| e.contains("fixtures/basic.yaml")),
-        "{:?}",
-        report.errors
-    );
-}
-
-/// A scaffolded effort policy script checks, its example dry-runs, and it
-/// passes the effort-policy suite as written.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_scaffolded_policy_checks_tests_and_passes_the_suite() {
-    let dir = project().await;
-    scaffolded(dir.path(), "policy", "tidy-up").await;
-    let ran = tested(dir.path(), "tidy-up").await;
-    for want in ["example basic", "effort_policy suite"] {
-        assert!(ran.iter().any(|r| r == want), "{want}: {ran:?}");
-    }
-    let svc = booted(dir.path()).await;
-    let ext = loaded(&svc, dir.path(), "tidy-up");
-    let decl = &ext.implementations[0];
-    assert_eq!(
-        (decl.capability.as_str(), decl.id.as_str()),
-        ("effort_policy", "tidy_up")
-    );
-    assert_eq!(decl.needs, ["sql.read"]);
 }
 
 /// A scaffolded harness provider is red until a program speaks for it; the
@@ -566,7 +455,7 @@ async fn a_scaffolded_harness_provider_is_red_until_a_program_speaks_for_it() {
         dir.path(),
         Kind::provider("agent_harness").unwrap(),
         "relay",
-        Some("oxplow:oxplow/effort?id=eff1"),
+        Some("oxplow:oxplow/request?id=req1"),
     )
     .unwrap();
     let env = harness_env();
@@ -699,64 +588,6 @@ async fn extension_test_runs_the_harness_suite_over_a_harness_provider() {
     );
 }
 
-/// `extension test` runs the knowledge suite over a knowledge provider —
-/// here the fake in knowledge mode — made the throwaway project's knowledge
-/// store; `ran` shows it.
-#[cfg(unix)]
-#[tokio::test(flavor = "multi_thread")]
-async fn extension_test_runs_the_knowledge_suite_over_a_knowledge_provider() {
-    let dir = project().await;
-    let ext = dir.path().join(".oxplow/extensions/shelf");
-    std::fs::create_dir_all(ext.join("bin")).unwrap();
-    std::fs::create_dir_all(ext.join("fixtures")).unwrap();
-    let write = "{ command: write_page, input: { slug: example, body: '# Example', verified_files: [], removed_files: [] } }";
-    std::fs::write(
-        ext.join("extension.yaml"),
-        format!("manifest: 2\nname: shelf\nintent:\n  purpose: Knowledge over the protocol.\n  examples:\n    - {{ name: basic, input: {write}, expect: the page }}\npermissions: [process.run]\nproviders:\n  - id: shelf\n    capability: knowledge\n    entry: bin/provider\n    declarations: provider.json\n"),
-    )
-    .unwrap();
-    std::fs::write(
-        ext.join("fixtures/basic.yaml"),
-        format!("when: {write}\nexpect: {{ page: example }}\n"),
-    )
-    .unwrap();
-    std::fs::write(
-        ext.join("fixtures/provider-shelf.yaml"),
-        "config: { team: core }\n",
-    )
-    .unwrap();
-    std::fs::write(
-        ext.join("provider.json"),
-        serde_json::to_string_pretty(&oxplow_provider_fake::knowledge_declarations()).unwrap(),
-    )
-    .unwrap();
-    std::fs::write(
-        ext.join("bin/provider"),
-        format!(
-            "#!/bin/sh\nOXPLOW_FAKE_CAPABILITY=knowledge exec '{}' \"$@\"\n",
-            fake_bin().display()
-        ),
-    )
-    .unwrap();
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        std::fs::set_permissions(
-            ext.join("bin/provider"),
-            std::fs::Permissions::from_mode(0o755),
-        )
-        .unwrap();
-    }
-    let blessed = test_extension(dir.path(), "shelf", true).await.unwrap();
-    assert_eq!(blessed.error_lines(), Vec::<String>::new());
-    let report = test_extension(dir.path(), "shelf", false).await.unwrap();
-    assert_eq!(report.error_lines(), Vec::<String>::new());
-    assert!(
-        report.ran.iter().any(|r| r == "knowledge suite"),
-        "{:?}",
-        report.ran
-    );
-}
-
 /// `extension test` runs the snapshot suite over a snapshots provider —
 /// here the fake in snapshots mode, keeping contents — made the throwaway
 /// project's snapshots; `ran` shows it.
@@ -831,7 +662,7 @@ async fn a_scaffolded_snapshots_provider_is_red_until_a_program_speaks_for_it() 
         dir.path(),
         Kind::provider("snapshots").unwrap(),
         "shutter",
-        Some("oxplow:oxplow/effort?id=eff1"),
+        Some("oxplow:oxplow/request?id=req1"),
     )
     .unwrap();
     let report = test_extension(dir.path(), "shutter", false).await.unwrap();
@@ -873,56 +704,45 @@ async fn a_scaffolded_snapshots_provider_is_red_until_a_program_speaks_for_it() 
     );
 }
 
-/// A scaffolded knowledge provider is red until a program speaks for it; the
-/// fake in knowledge mode behind it passes the kit — its scaffolded example
-/// (a page written) and the knowledge suite.
+/// A scaffolded script implementation checks clean,
+/// and is red until its verbs are written: its stubs fail the capability's
+/// conformance suite.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_scaffolded_knowledge_provider_is_red_until_a_program_speaks_for_it() {
+async fn a_scaffolded_script_implementation_is_red_until_its_verbs_are_written() {
     let dir = project().await;
     scaffold(
         dir.path(),
-        Kind::provider("knowledge").unwrap(),
+        Kind::implementation("agent_harness").unwrap(),
         "shelf",
-        Some("oxplow:oxplow/effort?id=eff1"),
+        Some("oxplow:oxplow/request?id=req1"),
     )
     .unwrap();
+    let report = check(
+        dir.path(),
+        "shelf",
+        &ExtensionCatalog::new(),
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(report.ok, "{}", render_findings(&report, Format::Text));
     let report = test_extension(dir.path(), "shelf", false).await.unwrap();
     assert!(
-        report
-            .error_lines()
-            .join("\n")
-            .contains("initialize failed"),
-        "{:?}",
-        report.errors
-    );
-    let ext = dir.path().join(".oxplow/extensions/shelf");
-    std::fs::write(
-        ext.join("bin/provider"),
-        format!(
-            "#!/bin/sh\nOXPLOW_FAKE_CAPABILITY=knowledge exec '{}' \"$@\"\n",
-            fake_bin().display()
-        ),
-    )
-    .unwrap();
-    std::fs::write(
-        ext.join("provider.json"),
-        serde_json::to_string_pretty(&oxplow_provider_fake::knowledge_declarations()).unwrap(),
-    )
-    .unwrap();
-    std::fs::write(
-        ext.join("fixtures/provider-shelf.yaml"),
-        "config: { team: core }\n",
-    )
-    .unwrap();
-    let blessed = test_extension(dir.path(), "shelf", true).await.unwrap();
-    assert_eq!(blessed.error_lines(), Vec::<String>::new());
-    let report = test_extension(dir.path(), "shelf", false).await.unwrap();
-    assert_eq!(report.error_lines(), Vec::<String>::new());
-    assert!(
-        report.ran.iter().any(|r| r == "knowledge suite"),
+        report.ran.iter().any(|r| r == "agent_harness suite"),
         "{:?}",
         report.ran
     );
+    assert!(
+        report
+            .error_lines()
+            .iter()
+            .any(|e| e.contains("agent_harness conformance")),
+        "{:?}",
+        report.errors
+    );
+    assert!(Kind::implementation("vcs").is_err());
 }
 
 /// The fields `scripts/record-just-works.sh` strips from a recorded
@@ -936,7 +756,7 @@ const SCRUBBED: [&str; 5] = [
     "modelUsage",
 ];
 
-/// P7 review (tsk723): a recorded run carries nothing of the machine or
+/// P7 review: a recorded run carries nothing of the machine or
 /// session it was recorded on.
 #[test]
 fn recorded_runs_carry_no_local_paths_session_or_cost() {
@@ -1022,18 +842,32 @@ fn copy(from: &Path, to: &Path) {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_scaffolded_advisory_checks_loads_and_stays_quiet() {
     let dir = project().await;
-    scaffolded(dir.path(), "advisory", "watch-effort").await;
+    scaffolded(dir.path(), "advisory", "watch-request").await;
     // Like a bare extension: its example has nothing to run (`extension
     // test` runs pages, collectors, commands, effects and providers), so
     // that warning is the only one.
-    let report = test_extension(dir.path(), "watch-effort", false)
+    let report = test_extension(dir.path(), "watch-request", false)
         .await
         .unwrap();
     assert_eq!(report.error_lines(), Vec::<String>::new());
     let svc = booted(dir.path()).await;
-    let ext = loaded(&svc, dir.path(), "watch-effort");
+    let ext = loaded(&svc, dir.path(), "watch-request");
     assert_eq!(ext.advisories.len(), 1);
-    assert_eq!(ext.advisories[0].id, "watch-effort");
+    assert_eq!(ext.advisories[0].id, "watch-request");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_scaffolded_agent_context_checks_and_is_declared() {
+    let dir = project().await;
+    scaffolded(dir.path(), "context", "open-threads").await;
+    let report = test_extension(dir.path(), "open-threads", false)
+        .await
+        .unwrap();
+    assert_eq!(report.error_lines(), Vec::<String>::new());
+    let svc = booted(dir.path()).await;
+    let ext = loaded(&svc, dir.path(), "open-threads");
+    assert_eq!(ext.contexts.len(), 1);
+    assert_eq!(ext.contexts[0].id, "open-threads");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1082,6 +916,28 @@ async fn a_scaffolded_panel_checks_tests_and_shows_its_page() {
     assert_eq!(ext.panels.len(), 1);
     assert_eq!(ext.panels[0].body, "open_work/open-work");
     assert_eq!(ext.page_files.len(), 1);
+}
+
+/// The four shelf examples (a shared model, its folder and database
+/// stores, and a field from a non-store) pass their own fixtures when they
+/// are in one project together.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_shelf_examples_pass_their_own_fixtures() {
+    let dir = project().await;
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions");
+    let names = ["shelf", "shelf-folder", "shelf-db", "shelf-score"];
+    for name in names {
+        copy(
+            &examples.join(name),
+            &dir.path().join(".oxplow/extensions").join(name),
+        );
+    }
+    let mut failures = Vec::new();
+    for name in names {
+        let report = test_extension(dir.path(), name, false).await.unwrap();
+        failures.extend(report.error_lines());
+    }
+    assert_eq!(failures, Vec::<String>::new());
 }
 
 /// The shipped extensions pass `extension test`, their pages' answers run.

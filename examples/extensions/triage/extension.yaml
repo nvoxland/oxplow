@@ -3,12 +3,13 @@ name: triage
 description: Sorts the code's TODO comments into bugs, cleanup and features, next to how much open work there is.
 engine: ">=0.7"
 version: 0.1.0
+requires: [oxplow-bundled]
 intent:
   purpose: >-
     Shows what the TODO comments in the code are asking for. Each TODO is
     classified by a model as a bug, cleanup or a feature, and the count of
-    open work items is kept beside them, so a growing pile of bug TODOs
-    against a short work list stands out.
+    open tasks is kept beside them, so a growing pile of bug TODOs
+    against a short task tracker stands out.
   origin: null
   examples:
     - name: summary-published
@@ -22,10 +23,10 @@ intent:
       expect: cancelled while it streams, the job ends cancelled with what it had written
     - name: summary-delivered
       input: { job: summarize }
-      expect: the job succeeds, its completion reaches publish-summary, and the triage-summary page is written
-    - name: summary-to-the-wiki
+      expect: the job succeeds, its completion reaches publish-summary, and the summary is written to `summaries/todo-summary.md`
+    - name: summary-to-a-file
       input: { event: contribution.job.completed }
-      expect: publish-summary writes the triage-summary page
+      expect: publish-summary writes `summaries/todo-summary.md`
     - name: todo-board
       input: { component: todo-board }
       expect: the board records a decision on a TODO and reads it back
@@ -41,7 +42,9 @@ intent:
     - name: the-board-decides-a-todo-from-its-card
       input: { page: todo-board }
       expect: a card per sorted TODO under its kind; a card's form records the decision
-permissions: [sql.read, files.read, ai.compute, commands:oxplow.command.sequence, commands:oxplow.knowledge.write_page]
+files:
+  - { path: summaries, access: write }
+permissions: [sql.read, files.read, files.write, ai.compute, commands:oxplow.command.sequence, commands:oxplow.extension_files.write]
 measures:
   - key: triage.todos
     title: TODO comments
@@ -51,7 +54,7 @@ measures:
     fold: sum
     captureScope: per-path
   - key: triage.open_items
-    title: Open work items
+    title: Open tasks
     unit: items
     temporalSemantics: non-additive
     fold: sum
@@ -67,7 +70,7 @@ metrics:
     displayKind: findings
 collectors:
   # On each snapshot: its tree (a fact collector reads it without asking),
-  # the open work items (`sql.read`) and a model for each TODO
+  # the open tasks (`sql.read`) and a model for each TODO
   # (`ai.compute`, under `permissions.ai`, approved when the extension is deployed).
   - id: todos
     runtime: starlark
@@ -80,7 +83,7 @@ collectors:
 # extension's permissions. Its answer streams into `v_job_run_output` as it comes; it
 # may look closer at a file (`todos.in_file`) or query oxplow's models
 # (`query_sql`, from `sql.read`) before it answers. When it finishes,
-# `publish-summary` writes the answer to the wiki.
+# `publish-summary` writes the answer to a file.
 # The model that sorts each TODO: bind `triage/sort` in Settings → AI, or
 # it uses your Decide model.
 ai_profiles:
@@ -149,7 +152,7 @@ commands:
     job: true
 effects:
   - id: publish-summary
-    summary: When a summary job succeeds, write its answer to the wiki page `triage-summary`.
+    summary: When a summary job succeeds, write its answer to the file `summaries/todo-summary.md`.
     on: [contribution.job.completed]
     where: { job: "triage/summarize" }
     entry: effects/publish_summary.star

@@ -60,6 +60,10 @@ pub struct CollectorRunReport {
     /// A fact collector's facts recorded.
     #[specta(type = oxplow_domain::JsNumber)]
     pub facts: i64,
+    /// What a run skipped and why: shared-model rows it quarantined, each
+    /// naming the row and column.
+    #[serde(default)]
+    pub problems: Vec<String>,
 }
 
 /// A declared collector with its last run.
@@ -106,6 +110,8 @@ pub struct Collectors<'a> {
     /// Where a script that reads the tree (`tree.read`) reads it; `None`
     /// in tests that read none.
     pub trees: Option<std::sync::Arc<dyn crate::services::TreeSource>>,
+    /// The shared models a run's `models` / `fields` output writes.
+    pub models: crate::models::Models,
 }
 
 /// The worktree whose `.oxplow/extensions/` declares the collectors: the
@@ -154,13 +160,14 @@ impl<'a> Collectors<'a> {
             catalog: &svc.extension_catalog,
             ai: svc.ai_compute.clone(),
             trees: Some(std::sync::Arc::new(svc.metrics.clone())),
+            models: svc.models.clone(),
         }
     }
 }
 
 /// A short stable key for a project (its canonical path, hashed): what
 /// credentials are scoped by, so a same-named extension in another repo
-/// can't read this one's (tsk348). Every worktree of the project shares it.
+/// can't read this one's. Every worktree of the project shares it.
 pub fn project_key(project_dir: &Path) -> String {
     use sha2::{Digest, Sha256};
     let canon = project_dir
@@ -394,6 +401,7 @@ pub enum Egress {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScriptOutput {
+    #[serde(default)]
     pub entities: BTreeMap<String, Vec<serde_json::Value>>,
     #[serde(default)]
     pub deleted: BTreeMap<String, Vec<serde_json::Value>>,
@@ -402,6 +410,20 @@ pub struct ScriptOutput {
     /// merged"), not a way to act — see [`plan_events`].
     #[serde(default)]
     pub events: Vec<crate::extension::extension_commands::ComposedEvent>,
+    /// Writes to shared models its extension fills (`.context/models.md`
+    /// "The output"), applied with its rows.
+    #[serde(default)]
+    pub models: Vec<crate::models::ModelOutput>,
+    /// Its extension's fields on items of a shared model.
+    #[serde(default)]
+    pub fields: Vec<crate::models::FieldsOutput>,
+    /// The checkpoint the next run gets as `cursor`.
+    #[serde(default)]
+    pub cursor: Option<serde_json::Value>,
+    /// What the script skipped and why (a file it couldn't read): reported
+    /// with the run beside the rows the models quarantined.
+    #[serde(default)]
+    pub problems: Vec<String>,
 }
 
 impl ScriptOutput {
@@ -631,16 +653,32 @@ pub async fn dry_run_collector(
         Ok(given) => given,
         Err(e) => return DryRun::Failed(e),
     };
-    match derive_collector(layer, script, spec, given, event, rows, &run).await {
+    let input = RunInput {
+        event,
+        rows,
+        observed: serde_json::Map::new(),
+    };
+    match derive_collector(layer, script, spec, given, input, &run).await {
         Ok(out) => DryRun::Output(out),
         Err(e) => DryRun::Failed(e),
     }
 }
 
+/// What a derived collector's run is handed besides its `input` query's rows.
+pub struct RunInput<'a> {
+    /// The event an `on:` collector reacts to.
+    pub event: Option<&'a EventView>,
+    /// Rows standing in for the `input` query (an example's fixture).
+    pub rows: Option<Vec<serde_json::Value>>,
+    /// What an observer's trigger adds (`trigger`, `changed`) and the last
+    /// good run's `cursor`.
+    pub observed: serde_json::Map<String, serde_json::Value>,
+}
+
 /// Run a derived (starlark / jaq) collector: read its `input` rows (the
 /// trigger event's anchors bound by name) — or take `rows`, standing in
 /// for them (an example's fixture) — then run its script over
-/// `{"rows": [...], "event"?: {...}}` in a script worker, as part of `run`
+/// `{"rows": [...], "event"?: {...}, "trigger"?, "changed"?, "cursor"}` in a script worker, as part of `run`
 /// (its budget, its cancel flag), with the services it was `given`
 /// ([`given`]).
 pub async fn derive_collector(
@@ -648,10 +686,14 @@ pub async fn derive_collector(
     script: String,
     spec: &CollectorSpec,
     given: crate::services::Given,
-    event: Option<&EventView>,
-    rows: Option<Vec<serde_json::Value>>,
+    input: RunInput<'_>,
     run: &RunContext,
 ) -> Result<ScriptOutput, String> {
+    let RunInput {
+        event,
+        rows,
+        observed,
+    } = input;
     run.check_authority()?;
     let run = run.clone();
     let read = match (rows, &spec.input) {
@@ -679,6 +721,10 @@ pub async fn derive_collector(
     if let Some(e) = event {
         input.insert("event".into(), e.to_json());
     }
+    // The trigger an observer ran for, and the last good run's cursor
+    // (`null` the first time).
+    input.extend(observed);
+    input.entry("cursor").or_insert(serde_json::Value::Null);
     let input = serde_json::Value::Object(input);
     let runtime = spec.runtime;
     let (budget, cancel, cost) = (run.budget(), run.cancel().clone(), run.clone());
@@ -816,21 +862,68 @@ impl From<RunCollectorError> for DomainError {
 }
 
 /// What ran a collector: `oxplow.collector.sync` by hand, its `every:` schedule,
-/// or an event its `on:` names.
+/// an event its `on:` names, or an observer's trigger (`start`, a file
+/// change, a SQLite file's write: `crate::observer_triggers`).
 #[derive(Debug, Clone)]
 pub enum RunTrigger {
     Manual,
     Every,
     On(Arc<StoredEvent>),
+    /// The extension started: the collector's full reconcile.
+    Start,
+    /// Files matching an `on: { files: <glob> }` changed.
+    Files(Vec<FileChange>),
+    /// A SQLite file named by `on: { sqlite: … }` was written.
+    Sqlite,
+}
+
+/// What happened to a file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FileOp {
+    Created,
+    Modified,
+    Removed,
+}
+
+/// One file an observer's `files` trigger heard of: its path from the
+/// project root, and what happened to it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileChange {
+    pub path: String,
+    pub op: FileOp,
 }
 
 impl RunTrigger {
-    fn name(&self) -> &'static str {
+    pub fn name(&self) -> &'static str {
         match self {
             RunTrigger::Manual => "manual",
             RunTrigger::Every => "every",
             RunTrigger::On(_) => "on",
+            RunTrigger::Start => "start",
+            RunTrigger::Files(_) => "files",
+            RunTrigger::Sqlite => "sqlite",
         }
+    }
+
+    /// What an observer's trigger adds to the run's input: `trigger`, and
+    /// `changed` (the files trigger's list; empty for the others, so a
+    /// script treats a manual run like `start`). Empty for the event and
+    /// schedule triggers.
+    fn observed(&self) -> serde_json::Map<String, serde_json::Value> {
+        let mut out = serde_json::Map::new();
+        if matches!(
+            self,
+            RunTrigger::Manual | RunTrigger::Start | RunTrigger::Files(_) | RunTrigger::Sqlite
+        ) {
+            out.insert("trigger".into(), self.name().into());
+            let changed = match self {
+                RunTrigger::Files(changed) => serde_json::to_value(changed).unwrap_or_default(),
+                _ => serde_json::Value::Array(Vec::new()),
+            };
+            out.insert("changed".into(), changed);
+        }
+        out
     }
 
     fn event(&self) -> Option<&StoredEvent> {
@@ -847,13 +940,13 @@ impl RunTrigger {
 pub struct Anchored {
     pub stream_id: Option<i64>,
     pub snapshot_id: Option<i64>,
-    pub effort_id: Option<i64>,
     pub thread_id: Option<i64>,
+    pub turn_id: Option<i64>,
 }
 
 /// The named parameters a collector's `input` may use: the trigger
-/// event's anchors (`:stream_id`, `:snapshot_id`, `:effort_id`,
-/// `:thread_id`, `:turn_id`), else what the run `known`, and the event
+/// event's anchors (`:stream_id`, `:snapshot_id`, `:thread_id`,
+/// `:turn_id`), else what the run `known`, and the event
 /// itself — `:event_id` its id, `:event_seq` its seq; NULL when neither
 /// has one. Ids bind as integers: they're join keys.
 pub fn anchor_params(event: Option<&EventView>, known: Anchored) -> Vec<(String, SqlCell)> {
@@ -872,20 +965,16 @@ pub fn anchor_params(event: Option<&EventView>, known: Anchored) -> Vec<(String,
             int(a.and_then(|a| a.snapshot_id).or(known.snapshot_id)),
         ),
         (
-            "effort_id".into(),
-            int(a
-                .and_then(|a| a.effort_id)
-                .map(|v| v.value())
-                .or(known.effort_id)),
-        ),
-        (
             "thread_id".into(),
             int(a
                 .and_then(|a| a.thread_id)
                 .map(|v| v.value())
                 .or(known.thread_id)),
         ),
-        ("turn_id".into(), int(a.and_then(|a| a.turn_id))),
+        (
+            "turn_id".into(),
+            int(a.and_then(|a| a.turn_id).or(known.turn_id)),
+        ),
         (
             "event_id".into(),
             event
@@ -971,12 +1060,17 @@ impl InputRows {
 }
 
 /// An exec collector's stdin: `{ "event": … }` (the event envelope) when
-/// an event triggered it, `{}` otherwise.
-fn exec_input(event: Option<&EventView>) -> serde_json::Value {
-    match event {
-        Some(e) => serde_json::json!({ "event": e.to_json() }),
-        None => serde_json::json!({}),
+/// an event triggered it, plus what an observer's trigger adds (`trigger`,
+/// `changed`) and the last good run's `cursor`.
+fn exec_input(
+    event: Option<&EventView>,
+    observed: serde_json::Map<String, serde_json::Value>,
+) -> serde_json::Value {
+    let mut input = observed;
+    if let Some(e) = event {
+        input.insert("event".into(), e.to_json());
     }
+    serde_json::Value::Object(input)
 }
 
 /// A collector's `contribution_health` key: its owner (the namespace it is
@@ -993,7 +1087,43 @@ pub fn contribution_key(owner: &str, id: &str) -> oxplow_db::ContributionKey {
 /// (P7.C2, [`crate::contribution_health`]): a disabled one doesn't run (its
 /// reason as [`RunCollectorError::Disabled`]); a failed run counts — the
 /// third in a row disables it — and a good one starts the count over.
+/// The lock one collector's runs take, per project.
+fn run_lock(root: &Path, owner: &str, id: &str) -> Arc<tokio::sync::Mutex<()>> {
+    static LOCKS: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    > = std::sync::OnceLock::new();
+    // The same project however its root was spelled (a resolved worktree
+    // path, the layout's).
+    let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let key = format!("{}\u{0}{owner}\u{0}{id}", root.display());
+    LOCKS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .entry(key)
+        .or_default()
+        .clone()
+}
+
 pub async fn run_collector(
+    ctx: &Collectors<'_>,
+    parent: &RunContext,
+    owner: &str,
+    id: &str,
+    trigger: RunTrigger,
+) -> Result<CollectorRunReport, RunCollectorError> {
+    // One run of a collector at a time, whichever path starts it (its
+    // trigger, an event, a sync, a store command's write): a snapshot read
+    // before a newer run's write must not land after it.
+    let lock = run_lock(ctx.root, owner, id);
+    let _held = lock.lock().await;
+    run_collector_held(ctx, parent, owner, id, trigger).await
+}
+
+/// [`run_collector`] for a caller that already holds the collector's run
+/// lock ([`CollectorRunner::observe_write`], which holds it across the
+/// write it observes).
+async fn run_collector_held(
     ctx: &Collectors<'_>,
     parent: &RunContext,
     owner: &str,
@@ -1091,7 +1221,7 @@ async fn run_collector_once(
         .map(|e| EventView::of(e, &ctx.vocabulary.current()))
         .transpose();
     let (spec, output) = match view {
-        Ok(view) => produce(ctx, run, owner, id, view.as_ref(), None).await?,
+        Ok(view) => produce(ctx, run, owner, id, view.as_ref(), None, trigger.observed()).await?,
         Err(e) => (
             find_collector(ctx, owner, id)?.1,
             Err(format!("collector `{id}`: its event: {e}")),
@@ -1106,7 +1236,13 @@ async fn run_collector_once(
             &spec,
             std::mem::take(&mut o.events),
         )?;
-        Ok((plan_writes(declarer, owner, &spec, o)?, events))
+        let observed = (
+            std::mem::take(&mut o.models),
+            std::mem::take(&mut o.fields),
+            o.cursor.take(),
+            std::mem::take(&mut o.problems),
+        );
+        Ok((plan_writes(declarer, owner, &spec, o)?, events, observed))
     });
     let last_event_id = trigger.event().map(|e| e.seq);
     let run_row = |status: &str, error: Option<String>| CollectorRun {
@@ -1128,9 +1264,27 @@ async fn run_collector_once(
         trigger: trigger.name(),
     };
     let error = match writes {
-        Ok((writes, events)) => {
+        Ok((writes, events, (models, fields, cursor, script_problems))) => {
             let names: Vec<String> = writes.iter().map(|(t, _)| t.entity.clone()).collect();
-            let ok_run = run_row("ok", None);
+            let ok_run = CollectorRun {
+                cursor,
+                ..run_row("ok", None)
+            };
+            let registry = ctx.models.current();
+            let (writer_ext, writer_source) = (declarer.to_string(), source.clone());
+            let reconcile = trigger.name() == "start";
+            // An event's run carries its event's anchors; one a command
+            // started (a store's write observed at once) carries the
+            // command's, so its change events are the command's turn's.
+            // A manual or scheduled sync observes what anyone changed: it is
+            // nobody's turn's.
+            let anchors = match &trigger {
+                RunTrigger::Manual | RunTrigger::Every => oxplow_domain::Anchors::default(),
+                _ => trigger
+                    .event()
+                    .map(|e| e.envelope.anchors.clone())
+                    .unwrap_or_else(|| run.anchors().clone()),
+            };
             let vocabulary = ctx.vocabulary.clone();
             let event = event.clone();
             let elapsed = elapsed_ms(started);
@@ -1141,11 +1295,56 @@ async fn run_collector_once(
                 .layer
                 .read_generation(ctx.db.transaction(move |tx| {
                     this_run.check_authority().map_err(DomainError::Invalid)?;
-                    let counts: BTreeMap<String, i64> = names
+                    let mut counts: BTreeMap<String, i64> = names
                         .iter()
                         .cloned()
                         .zip(oxplow_db::collector_store::write_rows_tx(tx, &writes)?)
                         .collect();
+                    let vocab = vocabulary.current();
+                    let mut problems: Vec<String> = Vec::new();
+                    // Its observations of shared models, with its rows or
+                    // not at all; their change events are caused by its
+                    // `collector.synced`, logged below.
+                    let synced_id = oxplow_domain::events::EventId::generate();
+                    if !models.is_empty() || !fields.is_empty() {
+                        // An agent's run is its open turn's.
+                        let mut anchors = anchors.clone();
+                        if let (Some(thread), None) = (anchors.thread_id, anchors.turn_id) {
+                            anchors.turn_id = oxplow_db::agent_stores::activity_anchors_tx(
+                                tx,
+                                thread,
+                                anchors.agent_session_id,
+                            )?
+                            .turn_id;
+                        }
+                        let applied = crate::models::apply_tx(
+                            tx,
+                            &registry,
+                            &vocab,
+                            &crate::models::Writer {
+                                extension: &writer_ext,
+                                source: &writer_source,
+                                cause: Some(synced_id.clone()),
+                                anchors: anchors.clone(),
+                                // A `start` run catches up; a snapshot is
+                                // a reconcile in `apply_tx` whatever ran it.
+                                why: if reconcile {
+                                    crate::models::Cause::Reconcile
+                                } else {
+                                    crate::models::Cause::Trigger
+                                },
+                            },
+                            &models,
+                            &fields,
+                        )
+                        .map_err(DomainError::Invalid)?;
+                        problems = applied.problems;
+                        for (model, by_op) in applied.counts {
+                            for (op, n) in by_op {
+                                counts.insert(format!("{model}.{op}"), n as i64);
+                            }
+                        }
+                    }
                     let run = CollectorRun {
                         row_counts: counts.clone(),
                         ..ok_run.clone()
@@ -1159,7 +1358,8 @@ async fn run_collector_once(
                         None,
                     )?;
                     let vocabulary = vocabulary.current();
-                    let synced = event.envelope("ok", counts.clone(), 0, elapsed, None);
+                    let mut synced = event.envelope("ok", counts.clone(), 0, elapsed, None);
+                    synced.id = synced_id;
                     oxplow_db::event_log_store::append_tx(tx, &vocabulary, &synced)?;
                     // What it observed, caused by this run: with its rows
                     // or not at all.
@@ -1170,17 +1370,22 @@ async fn run_collector_once(
                             &emitted.clone().with_cause(synced.id.clone()),
                         )?;
                     }
-                    Ok(counts)
+                    problems.extend(script_problems.iter().cloned());
+                    Ok((counts, problems))
                 }))
                 .await
                 .and_then(|committed| committed);
             match committed {
-                Ok(row_counts) => {
+                Ok((row_counts, problems)) => {
+                    for problem in &problems {
+                        tracing::warn!(collector = %format!("{owner}/{id}"), %problem, "a row was quarantined");
+                    }
                     return Ok(CollectorRunReport {
                         owner: owner.to_string(),
                         id: id.to_string(),
                         row_counts,
                         facts: 0,
+                        problems,
                     });
                 }
                 Err(e) => e.to_string(),
@@ -1397,7 +1602,7 @@ impl RunLog {
     }
 
     /// [`Self::record`] with a fact collector's `capture` and its facts in
-    /// the same transaction (tsk712), so a run never lands without its
+    /// the same transaction, so a run never lands without its
     /// record or twice for one trigger event. `false` when the event's run
     /// was already recorded (nothing written).
     pub async fn record_with(
@@ -1558,7 +1763,7 @@ const PREVIEW_ROWS: usize = 50;
 /// What a collector would store, without storing it or recording a run:
 /// how an agent checks a collector it's writing in a worktree stream
 /// (collected data is project-wide, so a real run there would overwrite
-/// the project's rows, tsk377). The same consent applies: an exec
+/// the project's rows). The same consent applies: an exec
 /// collector runs only at a version a person approved.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1613,7 +1818,16 @@ pub async fn preview_collector(
         .map_err(|e| RunCollectorError::Failed(format!("its event: {}", e.message())))?;
     let parent = RunContext::core(oxplow_domain::Actor::System, Mode::External);
     let run = collector_context(ctx, &parent, owner, id)?;
-    let (spec, output) = produce(ctx, &run, owner, id, view.as_ref(), rows).await?;
+    let (spec, output) = produce(
+        ctx,
+        &run,
+        owner,
+        id,
+        view.as_ref(),
+        rows,
+        serde_json::Map::new(),
+    )
+    .await?;
     let mut output = output.map_err(RunCollectorError::Failed)?;
     let declarer = run.extension().unwrap_or(owner);
     let events = plan_events(
@@ -1698,6 +1912,7 @@ async fn produce(
     id: &str,
     event: Option<&EventView>,
     rows: Option<Vec<serde_json::Value>>,
+    mut observed: serde_json::Map<String, serde_json::Value>,
 ) -> Result<(CollectorSpec, Result<ScriptOutput, String>), RunCollectorError> {
     let root = ctx.root;
     let (ext, spec) = find_collector(ctx, owner, id)?;
@@ -1707,6 +1922,15 @@ async fn produce(
             "collector `{owner}/{id}` reads a provider; run `oxplow.provider.sync` for it"
         )));
     }
+    // The last good run's cursor: a failed run keeps it, so the next trigger
+    // starts from the same place.
+    let cursor = ctx
+        .store
+        .run_of(owner, id)
+        .await
+        .map_err(RunCollectorError::Storage)?
+        .and_then(|run| run.cursor);
+    observed.insert("cursor".into(), cursor.unwrap_or(serde_json::Value::Null));
     if spec.runtime.is_derived() {
         let Some(script) =
             crate::extension::extensions::read_extension_file(root, &ext.path, entry_of(&spec))
@@ -1737,7 +1961,12 @@ async fn produce(
         }
         let output = match given(&spec, &run, &script, &sources).await {
             Ok(given) => {
-                derive_collector(&ctx.layer, script, &spec, given, event, rows, &run).await
+                let input = RunInput {
+                    event,
+                    rows,
+                    observed,
+                };
+                derive_collector(&ctx.layer, script, &spec, given, input, &run).await
             }
             Err(e) => Err(e),
         };
@@ -1777,7 +2006,16 @@ async fn produce(
     }
     let output = match missing {
         Some(e) => Err(e),
-        None => exec_from_deployment(&ext_dir, &spec, credentials, &exec_input(event), run).await,
+        None => {
+            exec_from_deployment(
+                &ext_dir,
+                &spec,
+                credentials,
+                &exec_input(event, observed),
+                run,
+            )
+            .await
+        }
     };
     Ok((spec, output))
 }
@@ -1786,6 +2024,7 @@ async fn produce(
 /// holds one (it's registered while `Services` is built).
 #[derive(Clone)]
 pub struct CollectorRunner {
+    pub models: crate::models::Models,
     pub project_dir: PathBuf,
     pub store: Arc<SqliteCollectorStore>,
     pub db: oxplow_db::Database,
@@ -1795,13 +2034,118 @@ pub struct CollectorRunner {
     pub catalog: Arc<crate::extension::extension_catalog::ExtensionCatalog>,
     pub ai: Arc<crate::ai_compute::AiCompute>,
     pub worktrees: Arc<crate::worktrees::WorktreeRouter>,
-    /// Runs the project's report collectors (`records:`, tsk863).
+    /// Runs the project's report collectors (`records:`).
     pub collection: crate::collection::CollectionService,
     /// The fact engine, which runs the collectors that record facts.
     pub metrics: crate::metrics_service::MetricsService,
 }
 
+/// What a store's command just wrote: its own SQLite file, or a file in
+/// one of its folders.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Wrote {
+    OwnStore,
+    File { path: String, op: FileOp },
+}
+
 impl CollectorRunner {
+    /// Make a store's command's write and observe it at once, as that
+    /// command (`run`): the extension's collectors that observe what it
+    /// writes are locked before the write and run after it under the same
+    /// locks, so no other run (a poll, another write's) can observe this
+    /// write first and without the command's anchors; the model shows the
+    /// write when the command returns, and its change events are the
+    /// command's turn's (`.context/models.md` "Attribution"). What the
+    /// observers fail at is logged, not raised: the write already happened,
+    /// and the next trigger repairs the model.
+    pub async fn observe_write<T, E>(
+        &self,
+        run: &RunContext,
+        extension: Option<&str>,
+        wrote: Wrote,
+        write: impl std::future::Future<Output = Result<T, E>>,
+    ) -> Result<T, E> {
+        use oxplow_config::collectors::ObserverSource;
+        let root = self.worktrees.resolve(None).await.into_local_path();
+        let ctx = self.collectors(&root);
+        let ext = extension.and_then(|name| {
+            ctx.catalog
+                .unpinned(
+                    &root,
+                    "a store's write is observed by its declared collectors",
+                )
+                .iter()
+                .find(|e| e.name == name && e.enabled)
+                .cloned()
+        });
+        let mut observers: Vec<(String, String, RunTrigger)> =
+            ext.iter()
+                .flat_map(|ext| {
+                    ext.collectors.iter().filter_map(|c| {
+                        let trigger = c.trigger.sources().iter().find_map(|source| {
+                            match (source, &wrote) {
+                                (ObserverSource::Sqlite { path: None }, Wrote::OwnStore) => {
+                                    Some(RunTrigger::Sqlite)
+                                }
+                                (ObserverSource::Files { glob }, Wrote::File { path, op }) => {
+                                    oxplow_config::collectors::files_matcher(std::slice::from_ref(
+                                        glob,
+                                    ))
+                                    .ok()
+                                    .filter(|m| m.is_match(path))
+                                    .map(|_| {
+                                        RunTrigger::Files(vec![FileChange {
+                                            path: path.clone(),
+                                            op: *op,
+                                        }])
+                                    })
+                                }
+                                _ => None,
+                            }
+                        })?;
+                        Some((ext.namespace.clone(), c.id.clone(), trigger))
+                    })
+                })
+                .collect();
+        // Locks in one order, so two writes never wait on each other.
+        observers.sort_by(|a, b| (&a.0, &a.1).cmp(&(&b.0, &b.1)));
+        let mut held = Vec::new();
+        for (owner, id, _) in &observers {
+            held.push(run_lock(&root, owner, id).lock_owned().await);
+        }
+        // An outside write to the file (a person's sqlite3) that no trigger
+        // has observed yet is nobody's: observed first, with no anchors, so
+        // the command's run below takes only the command's change. A files
+        // trigger names only the command's paths, so it needs no such run.
+        let nobody = RunContext::core(
+            oxplow_domain::Actor::System,
+            oxplow_domain::run::Mode::External,
+        );
+        for (owner, id, trigger) in &observers {
+            if matches!(trigger, RunTrigger::Sqlite) {
+                if let Err(e) = Box::pin(run_collector_held(
+                    &ctx,
+                    &nobody,
+                    owner,
+                    id,
+                    RunTrigger::Sqlite,
+                ))
+                .await
+                {
+                    tracing::warn!(collector = %format!("{owner}/{id}"), error = ?e, "an outside write before a store's write wasn't observed; its next trigger will");
+                }
+            }
+        }
+        let written = write.await?;
+        for (owner, id, trigger) in observers {
+            if let Err(e) = run_collector_held(&ctx, run, &owner, &id, trigger).await {
+                tracing::warn!(collector = %format!("{owner}/{id}"), error = ?e, "a store's write wasn't observed at once; its next trigger will");
+            }
+        }
+        drop(held);
+        Ok(written)
+    }
+
     fn collectors<'a>(&'a self, root: &'a Path) -> Collectors<'a> {
         Collectors {
             root,
@@ -1814,6 +2158,7 @@ impl CollectorRunner {
             catalog: &self.catalog,
             ai: self.ai.clone(),
             trees: Some(std::sync::Arc::new(self.metrics.clone())),
+            models: self.models.clone(),
         }
     }
 
@@ -1866,6 +2211,7 @@ impl CollectorRunner {
                 id: id.to_string(),
                 row_counts: BTreeMap::new(),
                 facts: i64::try_from(facts).unwrap_or(i64::MAX),
+                problems: Vec::new(),
             });
         }
         let root = self.worktrees.resolve(None).await.into_local_path();
@@ -1877,7 +2223,7 @@ impl CollectorRunner {
 /// (External: it runs the collector's program or script). Any actor may
 /// run it; none approves through it — consent is a person's, in Settings
 /// → Data. Run by the system it's the `every:` schedule's run. A project
-/// report collector (`records:`, tsk863) records what it parses in a
+/// report collector (`records:`) records what it parses in a
 /// thread: an agent's own, or the one a person names.
 pub const SYNC: &str = "oxplow.collector.sync";
 
@@ -2466,6 +2812,7 @@ pub(crate) mod tests {
             catalog: &Arc::new(crate::extension::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
+            models: Default::default(),
         };
 
         let report = reviewed_run(&ctx, "my_gh", "gh").await.unwrap();
@@ -2624,6 +2971,7 @@ pub(crate) mod tests {
             catalog: &Arc::new(crate::extension::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
+            models: Default::default(),
         };
 
         let list = list_collectors(&ctx).await.unwrap();
@@ -2654,6 +3002,7 @@ pub(crate) mod tests {
             catalog: &Arc::new(crate::extension::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
+            models: Default::default(),
         };
         let other = list_collectors(&elsewhere).await.unwrap();
         assert!(
@@ -2691,13 +3040,10 @@ pub(crate) mod tests {
             c.execute_batch(
                 "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
                    VALUES (1, 'primary', 'p', 'main', 'refs/heads/main', 'local', '/r', '2026-01-01', '2026-01-01');
-                 INSERT INTO threads (id, stream_id, title, created_at, updated_at)
-                   VALUES (1, 1, 'T', '2026-01-01', '2026-01-01');
-                 INSERT INTO capability_provider (capability, provider, active) VALUES ('work_items', 'oxplow', 1);
-                 INSERT INTO work_item (uri, provider, title, state, native_state, native, thread_id, created_at, updated_at) VALUES
-                   ('oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 'oxplow', 'Fix login', 'todo', 'ready', '{\"priority\":\"high\"}', 1, '2026-01-01', '2026-01-01'),
-                   ('oxplow:oxplow/work_item?id=tsk2&provider=oxplow', 'oxplow', 'Tidy docs', 'todo', 'ready', '{\"priority\":\"low\"}', 1, '2026-01-01', '2026-01-01'),
-                   ('oxplow:oxplow/work_item?id=tsk3&provider=oxplow', 'oxplow', 'Ship it', 'done', 'done', '{\"priority\":\"high\"}', 1, '2026-01-01', '2026-01-01');",
+                 INSERT INTO threads (id, stream_id, title, created_at, updated_at, closed_at, mark) VALUES
+                   (1, 1, 'Fix login', '2026-01-01', '2026-01-01', NULL, 'red'),
+                   (2, 1, 'Tidy docs', '2026-01-01', '2026-01-01', NULL, 'green'),
+                   (3, 1, 'Ship it', '2026-01-01', '2026-01-01', '2026-02-01', 'red');",
             )
             .map_err(|e| DomainError::Invalid(e.to_string()))
         })
@@ -2732,7 +3078,7 @@ pub(crate) mod tests {
                     .build()
                     .unwrap()
                     .block_on(async {
-                        let fx = crate::test_fixtures::services_with_effort().await;
+                        let fx = crate::test_fixtures::services_with_thread().await;
                         let svc = &fx.svc;
                         let reply = json!({ "answers": { "label": { "type": "choice", "choice": "bug", "probabilities": { "bug": 0.9, "feature": 0.1 } } } });
                         let (base, _) = oxplow_ai_fake::mock(
@@ -2790,10 +3136,10 @@ pub(crate) mod tests {
     /// `/collector`, and an unknown collector is not found.
     #[tokio::test]
     async fn sync_takes_a_collector_ref() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         for bad in [
             "work/bad",
-            "oxplow:oxplow/effort?id=eff1",
+            "oxplow:oxplow/request?id=req1",
             "oxplow:oxplow/collector?collector=nowhere",
         ] {
             let err = fx
@@ -2829,12 +3175,108 @@ pub(crate) mod tests {
         );
     }
 
+    /// A collector's `models` output fills the shared models its extension
+    /// fills, with its run: the rows land, the run's counts name them, and
+    /// its `cursor` is kept for the next run.
+    #[tokio::test]
+    async fn a_collectors_models_output_fills_the_model_and_keeps_its_cursor() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let root = fx.svc.layout.project_dir.clone();
+        // The owner declares the model, its resource and its change event;
+        // the store fills it.
+        extension(
+            &root,
+            "shelf",
+            "manifest: 2\nname: shelf\nintent:\n  purpose: test\nresources:\n  - name: book\n    description: A book.\n    label: Book\n    params: { store: { required: true }, id: { required: true } }\nmodels:\n  - name: book\n    resource: book\n    open: true\n    key: id\n    change_event: shelf.book.changed\n    columns: { id: text, title: text }\n",
+            &[],
+        );
+        extension(
+            &root,
+            "shelves",
+            "manifest: 2\nname: shelves\nintent:\n  purpose: test\nrequires: [shelf]\nfills:\n  - model: shelf/book\n    stores: [shelves]\n    fields: [{ name: rating, title: Rating, kind: number }]\ncollectors:\n  - id: books\n    runtime: starlark\n    entry: books.star\n",
+            &[(
+                "books.star",
+                "def transform(x):\n    return {\"models\": [{\"model\": \"shelf/book\", \"store\": \"shelves\", \"snapshot\": [{\"id\": \"dune\", \"title\": \"Dune\"}]}], \"cursor\": {\"n\": 1}}\n",
+            )],
+        );
+        let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
+        assert!(problems.is_empty(), "{problems:?}");
+        let declared: String = fx
+            .svc
+            .db
+            .read(|tx| {
+                tx.query_row(
+                    "SELECT namespace || ':' || name || ':' || kind FROM v_model_field_decl \
+                     WHERE model = 'shelf/book'",
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            declared, "shelves:rating:number",
+            "the store's field is published"
+        );
+        let out = fx
+            .svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                SYNC,
+                json!({ "collector": "shelves/books" }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert!(
+            out.result.to_string().contains("shelf/book.upserted"),
+            "{}",
+            out.result
+        );
+        let (title, cursor): (String, String) = fx
+            .svc
+            .db
+            .read(|tx| {
+                let title = tx
+                    .query_row("SELECT title FROM v_shelf_book", [], |r| r.get(0))
+                    .map_err(oxplow_db::map_sql_err)?;
+                let cursor = tx
+                    .query_row(
+                        "SELECT cursor_json FROM collector_run WHERE id = 'books'",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .map_err(oxplow_db::map_sql_err)?;
+                Ok((title, cursor))
+            })
+            .await
+            .unwrap();
+        assert_eq!(title, "Dune");
+        assert_eq!(cursor, r#"{"n":1}"#);
+        let changed: Vec<_> = fx
+            .svc
+            .event_log_store
+            .read_after(0, 1000)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.envelope.event_type == "shelf.book.changed")
+            .collect();
+        assert_eq!(changed.len(), 1);
+        assert_eq!(
+            changed[0].envelope.payload["uri"],
+            "oxplow:shelf/book?id=dune&store=shelves"
+        );
+    }
+
     /// P7.C2: three failed runs in a row disable a collector; then
     /// `oxplow.collector.sync` refuses it naming the reason, and
     /// `oxplow.contribution.enable` lets it run again. An agent may enable it.
     #[tokio::test]
     async fn a_collector_failing_three_runs_is_disabled_until_enabled() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let root = fx.svc.layout.project_dir.clone();
         extension(
             &root,
@@ -2891,12 +3333,12 @@ pub(crate) mod tests {
     /// around the bus.
     #[tokio::test]
     async fn the_scheduler_runs_collector_sync_through_the_bus() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let root = fx.svc.layout.project_dir.clone();
         extension(
             &root,
             "work",
-            "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    on: { every: 10m }\n    input: \"SELECT uri, title FROM v_work_item\"\n    entities:\n      - { name: hot, key: uri, columns: { uri: text, title: text } }\n",
+            "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    on: { every: 10m }\n    input: \"SELECT uri, title FROM v_thread\"\n    entities:\n      - { name: hot, key: uri, columns: { uri: text, title: text } }\n",
             &[(
                 "hot.star",
                 "def transform(input):\n    return {\"entities\": {\"hot\": [{\"uri\": r[\"uri\"], \"title\": r[\"title\"]} for r in input[\"rows\"]]}}\n",
@@ -2941,7 +3383,7 @@ pub(crate) mod tests {
         assert_eq!(trigger, "every");
         assert!(run_due_collectors(&fx.svc).await.is_empty());
 
-        // P7 review (tsk722): the schedule says when it's next due — its
+        // P7 review: the schedule says when it's next due — its
         // run plus ten minutes plus the scheduler's tick — so a missed run
         // reads unfresh.
         let (due, fresh) = due_and_fresh(&fx.svc, "work", "star").await;
@@ -2979,7 +3421,7 @@ pub(crate) mod tests {
     /// all of them.
     #[tokio::test]
     async fn a_bounded_input_says_whether_it_is_complete() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let count = |limit: Option<usize>| {
             let limit = limit.map(|l| format!(", limit: {l}")).unwrap_or_default();
             format!(
@@ -3025,7 +3467,7 @@ pub(crate) mod tests {
     /// that couldn't happen fails the preview, saying why.
     #[tokio::test]
     async fn a_preview_takes_the_event_it_reacts_to() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let root = fx.svc.layout.project_dir.clone();
         extension(
             &root,
@@ -3074,12 +3516,12 @@ pub(crate) mod tests {
             root.path(),
             "work",
             &format!(
-                "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT uri, title, json_extract(native, '$.priority') AS priority FROM v_work_item WHERE state = 'todo'\"\n{entity}  - id: jq\n    runtime: jaq\n    entry: hot.jq\n    input: \"SELECT uri, title FROM v_work_item\"\n    entities:\n      - {{ name: upper, key: uri, columns: {{ uri: text, title: text }} }}\n"
+                "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT uri, title, mark AS priority FROM v_thread WHERE closed_at IS NULL\"\n{entity}  - id: jq\n    runtime: jaq\n    entry: hot.jq\n    input: \"SELECT uri, title FROM v_thread\"\n    entities:\n      - {{ name: upper, key: uri, columns: {{ uri: text, title: text }} }}\n"
             ),
             &[
                 (
                     "hot.star",
-                    "def transform(input):\n    return {\"entities\": {\"hot\": [{\"uri\": r[\"uri\"], \"title\": r[\"title\"]} for r in input[\"rows\"] if r[\"priority\"] == \"high\"]}}\n",
+                    "def transform(input):\n    return {\"entities\": {\"hot\": [{\"uri\": r[\"uri\"], \"title\": r[\"title\"]} for r in input[\"rows\"] if r[\"priority\"] == \"red\"]}}\n",
                 ),
                 (
                     "hot.jq",
@@ -3101,6 +3543,7 @@ pub(crate) mod tests {
             catalog: &Arc::new(crate::extension::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
+            models: Default::default(),
         };
         let report = run_collector(
             &ctx,
@@ -3148,7 +3591,7 @@ pub(crate) mod tests {
         extension(
             root.path(),
             "work",
-            "manifest: 2\nname: work\nintent:\n  purpose: test\npermissions: [ai.compute]\nai_profiles:\n  - { id: sort, description: Sorts., fallback: decide }\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: kind.star\n    input: \"SELECT uri, title FROM v_work_item\"\n    entities:\n      - { name: kind, key: uri, columns: { uri: text, kind: text } }\n",
+            "manifest: 2\nname: work\nintent:\n  purpose: test\npermissions: [ai.compute]\nai_profiles:\n  - { id: sort, description: Sorts., fallback: decide }\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: kind.star\n    input: \"SELECT uri, title FROM v_thread\"\n    entities:\n      - { name: kind, key: uri, columns: { uri: text, kind: text } }\n",
             &[(
                 "kind.star",
                 "def transform(input):\n    rows = []\n    for r in input[\"rows\"]:\n        a = ai_classify(\"is this a bug?\", [\"bug\", \"feature\"], role = \"sort\")\n        b = ai_classify(\"is this a bug?\", [\"bug\", \"feature\"], role = \"sort\")\n        rows.append({\"uri\": r[\"uri\"], \"kind\": a[\"label\"] if a == b else \"differs\"})\n    return {\"entities\": {\"kind\": rows}}\n",
@@ -3215,6 +3658,7 @@ pub(crate) mod tests {
                 oxplow_db::SqliteAiResultStore::new(db.clone()),
             )),
             trees: None,
+            models: Default::default(),
         };
         let report = reviewed_run(&ctx, "work", "star").await.unwrap();
         assert_eq!(report.row_counts["kind"], 3);
@@ -3241,7 +3685,7 @@ pub(crate) mod tests {
 
     /// A preview runs the source as its worktree has it and returns the
     /// rows, storing nothing: source data is project-wide, so an agent in
-    /// a worktree stream checks its source without overwriting it (tsk377).
+    /// a worktree stream checks its source without overwriting it.
     #[cfg(unix)]
     #[tokio::test]
     async fn a_preview_returns_rows_and_stores_nothing() {
@@ -3249,10 +3693,10 @@ pub(crate) mod tests {
         extension(
             root.path(),
             "work",
-            "manifest: 2\nname: work\nintent:\n  purpose: test\npermissions: [process.run]\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT uri, title, json_extract(native, '$.priority') AS priority FROM v_work_item WHERE state = 'todo'\"\n    entities:\n      - { name: hot, key: uri, columns: { uri: text, title: text } }\n  - id: sh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: raw, key: id, columns: { id: int } }\n",
+            "manifest: 2\nname: work\nintent:\n  purpose: test\npermissions: [process.run]\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT uri, title, mark AS priority FROM v_thread WHERE closed_at IS NULL\"\n    entities:\n      - { name: hot, key: uri, columns: { uri: text, title: text } }\n  - id: sh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: raw, key: id, columns: { id: int } }\n",
             &[(
                 "hot.star",
-                "def transform(input):\n    return {\"entities\": {\"hot\": [{\"uri\": r[\"uri\"], \"title\": r[\"title\"]} for r in input[\"rows\"] if r[\"priority\"] == \"high\"]}}\n",
+                "def transform(input):\n    return {\"entities\": {\"hot\": [{\"uri\": r[\"uri\"], \"title\": r[\"title\"]} for r in input[\"rows\"] if r[\"priority\"] == \"red\"]}}\n",
             )],
         );
         script(
@@ -3274,6 +3718,7 @@ pub(crate) mod tests {
             catalog: &Arc::new(crate::extension::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
+            models: Default::default(),
         };
         let preview = preview_collector(&ctx, "work", "star", None, None)
             .await
@@ -3287,10 +3732,7 @@ pub(crate) mod tests {
         assert_eq!(hot.columns, vec!["uri", "title"]);
         assert_eq!(
             serde_json::to_value(&hot.rows).unwrap(),
-            json!([[
-                "oxplow:oxplow/work_item?id=tsk1&provider=oxplow",
-                "Fix login"
-            ]])
+            json!([["oxplow:oxplow/thread?id=thr1", "Fix login"]])
         );
         assert_eq!(hot.total, 1);
         assert!(
@@ -3331,6 +3773,7 @@ pub(crate) mod tests {
             catalog: &Arc::new(crate::extension::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
+            models: Default::default(),
         };
         script(
             &ext,
@@ -3458,6 +3901,7 @@ printf '{{"entities":{{"r":[{{"id":1,"declared":"%s","undeclared":"%s","direct":
             catalog: &Arc::new(crate::extension::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
+            models: Default::default(),
         };
         assert!(list_collectors(&ctx).await.unwrap()[0].network_enforced);
         reviewed_run(&ctx, "net", "s").await.unwrap();

@@ -119,7 +119,7 @@ fn watch(silent: Duration, reported: bool) -> Watch {
     }
 }
 
-/// Watch the async runtime from outside it (tsk1070): a task bumps a
+/// Watch the async runtime from outside it: a task bumps a
 /// heartbeat every second, and a plain OS thread checks it. When the
 /// runtime makes no progress for [`STALL_AFTER`] — every worker busy or
 /// blocked, as when CPU-bound work ran on them — the thread logs it and,

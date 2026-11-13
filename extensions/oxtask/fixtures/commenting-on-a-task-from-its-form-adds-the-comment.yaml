@@ -1,0 +1,12 @@
+# Comment… (the store's own form, placed by the task.comment point) adds a
+# comment to the task.
+requires: [oxplow-bundled]
+given:
+  - { command: oxtask.task.create, input: { title: Item with notes, stage: ready } }
+when: { page: comment-on-task, params: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" } }
+expect: { loaders: { item: { rows: [{ id: tsk1 }] } } }
+steps:
+  - submit: { node: item, input: { id: tsk1, body: A note for later. } }
+    expect: { ok: true }
+  - when: { sql: "SELECT body FROM v_oxplow_task_comment WHERE uri = 'oxplow:oxplow/task?id=tsk1&provider=oxtask'" }
+    expect: { rows: [{ body: A note for later. }] }

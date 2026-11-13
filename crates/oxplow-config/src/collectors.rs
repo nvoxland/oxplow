@@ -7,7 +7,7 @@
 //! script (`starlark` / `jaq`, no I/O, no approval) or a provider's read
 //! (`read`). It writes **entities** (rows a dataset can `ref()`),
 //! **facts** (measurements on declared measures) or **records** (a test,
-//! coverage or analysis report it parses — the project's own, tsk863), and it
+//! coverage or analysis report it parses — the project's own), and it
 //! runs when its **trigger** says: `manual`, `{ every: 15m }`,
 //! `{ on: [<event types>], where: { <payload field>: <value> } }` — when
 //! such an event is logged, after the consumers named in `after:` have
@@ -69,7 +69,7 @@ pub struct EntityColumn {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EntityRelation {
-    /// The view it joins to, e.g. `v_work_item` or `v_github_review`.
+    /// The view it joins to, e.g. `v_oxplow_task` or `v_github_review`.
     pub to: String,
     /// The SQL join condition, e.g. `v_github_pr.head_branch = v_stream.branch`.
     pub on: String,
@@ -98,20 +98,49 @@ pub enum Trigger {
     /// Every `minutes` minutes (an exec collector once approved).
     Every { minutes: u32 },
     /// When an event of one of these types is logged and its payload has
-    /// each `filter` field equal to its value — after the consumers in
+    /// each `filter` field equal to one of its values — after the consumers in
     /// the collector's `after` have handled the event.
     On {
         events: Vec<String>,
-        filter: BTreeMap<String, String>,
+        filter: WhereFilter,
         /// When the run happens after a triggering event: at
         /// once by default.
         #[serde(default)]
         pacing: Pacing,
+        /// What else in the same `on:` list sets it off: `start`, a file
+        /// glob, a SQLite file (an observer's triggers).
+        #[serde(default)]
+        sources: Vec<ObserverSource>,
     },
     /// A report collector's: when the agent runs the project's tests or an
     /// analyzer (the `collection` reactor detects the run), if its report
     /// was written by that run.
     OnRun { run: RunKind },
+}
+
+/// An observer's trigger in an `on:` list, beside event types
+/// (`.context/extensions-jobs.md` "Triggers for observers").
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum ObserverSource {
+    /// Once when the extension starts (boot, enable, a deploy that changes it).
+    Start,
+    /// Files of the primary worktree matching `glob` (relative to the
+    /// project root) were created, changed or removed.
+    Files { glob: String },
+    /// A SQLite file's `PRAGMA data_version` moved: the extension's own file
+    /// (`path` absent) or a tool's database in a `files:` folder it may read.
+    Sqlite { path: Option<String> },
+}
+
+impl Trigger {
+    /// The observer sources it lists (none for any other trigger).
+    pub fn sources(&self) -> &[ObserverSource] {
+        match self {
+            Trigger::On { sources, .. } => sources,
+            _ => &[],
+        }
+    }
 }
 
 /// When an `on:` collector runs after a triggering event. Empty,
@@ -125,7 +154,7 @@ pub enum Trigger {
 ///   agent event) for that long.
 ///
 /// An event type in `force` runs at once, past them all: a moment that
-/// needs the result fresh (an effort finishing, a commit).
+/// needs the result fresh (a commit).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Pacing {
@@ -153,25 +182,31 @@ impl Trigger {
 /// collector's (`Trigger::On`) and an effect's alike.
 pub fn fires(
     events: &[String],
-    filter: &BTreeMap<String, String>,
+    filter: &WhereFilter,
     event_type: &str,
     payload: &serde_json::Value,
 ) -> bool {
     events.iter().any(|t| t == event_type) && payload_matches(filter, payload)
 }
 
-/// Whether `payload` has each `filter` field equal to its value. The value
-/// is the YAML text: a string matches exactly, a boolean by `true`/`false`, a
-/// number by value (`1` matches `1.0`). A field the payload lacks, or holds
-/// as an object, list or null, never matches.
-pub fn payload_matches(filter: &BTreeMap<String, String>, payload: &serde_json::Value) -> bool {
-    filter.iter().all(|(field, want)| match payload.get(field) {
-        Some(serde_json::Value::String(s)) => s == want,
-        Some(serde_json::Value::Bool(b)) => want.parse::<bool>().ok() == Some(*b),
-        Some(serde_json::Value::Number(n)) => {
-            matches!((n.as_f64(), want.parse::<f64>()), (Some(a), Ok(b)) if a == b)
-        }
-        _ => false,
+/// A parsed `where:`: each payload field and the values it may equal (a
+/// scalar written alone is a list of one).
+pub type WhereFilter = BTreeMap<String, Vec<String>>;
+
+/// Whether `payload` has each `filter` field equal to one of its values
+/// (fields are ANDed). A value is the YAML text: a string matches exactly, a
+/// boolean by `true`/`false`, a number by value (`1` matches `1.0`). A field
+/// the payload lacks, or holds as an object, list or null, never matches.
+pub fn payload_matches(filter: &WhereFilter, payload: &serde_json::Value) -> bool {
+    filter.iter().all(|(field, wants)| {
+        wants.iter().any(|want| match payload.get(field) {
+            Some(serde_json::Value::String(s)) => s == want,
+            Some(serde_json::Value::Bool(b)) => want.parse::<bool>().ok() == Some(*b),
+            Some(serde_json::Value::Number(n)) => {
+                matches!((n.as_f64(), want.parse::<f64>()), (Some(a), Ok(b)) if a == b)
+            }
+            _ => false,
+        })
     })
 }
 
@@ -212,7 +247,7 @@ pub enum Records {
     Analysis,
 }
 
-/// A parser oxplow ships (tsk935: the one table — the config check and
+/// A parser oxplow ships (the one table — the config check and
 /// the parser runtime both read it).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BundledParser {
@@ -288,7 +323,7 @@ pub enum CollectorRuntime {
     /// A sandboxed jq program: no I/O, so no approval.
     Jaq,
     /// A provider instance's collector (`oxplow.provider.sync`): its records
-    /// land in the capability's dataset (`v_work_item`).
+    /// land in the capability's dataset (`v_oxplow_task`).
     Read,
 }
 
@@ -412,7 +447,7 @@ pub struct CollectorSpec {
     pub after: Vec<String>,
     /// A script's input query: read-only SQL over the semantic layer,
     /// handed over as `input.rows`. `:stream_id`, `:snapshot_id`,
-    /// `:effort_id`, `:thread_id` and `:turn_id` bind the triggering
+    /// `:thread_id` and `:turn_id` bind the triggering
     /// event's anchors, `:event_id` its id and `:event_seq` its seq (NULL
     /// otherwise).
     pub input: Option<CollectorInput>,
@@ -728,8 +763,45 @@ pub enum ColumnShape {
 pub enum OnFile {
     Manual(Manual),
     Events(EventTypeList),
+    /// Event types mixed with `start`, `{ files: <glob> }` and
+    /// `{ sqlite: own | <path> }`.
+    Observers(Vec<OnItem>),
+    Observer(ObserverFile),
     Every(EveryFile),
     Run(RunFile),
+}
+
+/// An item of an `on:` list: an event type, or an observer's trigger.
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum OnItem {
+    /// An event type, or `start`.
+    Event(String),
+    Observer(ObserverFile),
+}
+
+/// `{ files: <glob> }` or `{ sqlite: own | <path> }`.
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum ObserverFile {
+    Files(FilesFile),
+    Sqlite(SqliteFile),
+}
+
+/// `{ files: shelf/*.md }`: files of the project matching the glob (from
+/// the project root) were created, changed or removed.
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FilesFile {
+    pub files: String,
+}
+
+/// `{ sqlite: own }` or `{ sqlite: .beads/beads.db }`: a SQLite file
+/// changed (the extension's own, or one in a `files:` folder it may read).
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SqliteFile {
+    pub sqlite: String,
 }
 
 /// `manual`: only when someone runs it.
@@ -786,8 +858,17 @@ pub enum EventTypeList {
     Many(Vec<String>),
 }
 
-/// `where:` — payload fields and the scalar each must equal.
-pub type PayloadFilter = BTreeMap<String, PayloadScalar>;
+/// `where:` — payload fields and the scalar (or any of a list of scalars)
+/// each must equal.
+pub type PayloadFilter = BTreeMap<String, PayloadValue>;
+
+/// One scalar, or a non-empty list of them (the payload value equals any).
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum PayloadValue {
+    One(PayloadScalar),
+    Any(Vec<PayloadScalar>),
+}
 
 /// A `where:` value.
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -864,6 +945,16 @@ pub fn parse_trigger(
         }
         Some(Value::Mapping(map)) => {
             let get = |k: &str| map.get(Value::String(k.into())).cloned();
+            if get("files").is_some() || get("sqlite").is_some() {
+                // `on: { files: … }` alone is a list of one.
+                return parse_trigger(
+                    TriggerKeys {
+                        on: Some(&Value::Sequence(vec![Value::Mapping(map.clone())])),
+                        ..keys
+                    },
+                    knows_event,
+                );
+            }
             if map.len() != 1 || (get("every").is_none() && get("run").is_none()) {
                 return Err(shapes.to_string());
             }
@@ -927,17 +1018,20 @@ pub fn parse_trigger(
             Ok(Trigger::Every { minutes })
         }
         (None, Some(on)) => {
-            let events: Vec<String> = match on {
-                Value::String(s) => vec![s.clone()],
-                Value::Sequence(items) => items
-                    .iter()
-                    .map(|i| i.as_str().map(str::to_string))
-                    .collect::<Option<_>>()
-                    .ok_or_else(|| "`on` lists event types".to_string())?,
-                _ => return Err("`on` lists event types".into()),
-            };
-            if events.is_empty() {
+            let (events, sources) = split_on(on)?;
+            if events.is_empty() && sources.is_empty() {
                 return Err("`on` names no event type".into());
+            }
+            if events.is_empty()
+                && [&t.filter, &t.settle, &t.at_most, &t.idle, &t.force]
+                    .iter()
+                    .any(|v| v.is_some())
+            {
+                return Err(
+                    "`where`, `settle`, `at_most`, `idle` and `force` go with event types in \
+                     `on`, not with `start`, `files` or `sqlite`"
+                        .into(),
+                );
             }
             if events.iter().any(|t| t == "collector.synced") {
                 return Err(
@@ -951,16 +1045,26 @@ pub fn parse_trigger(
                     "`{unknown}` isn't a registered event type (see `v_event_type`)"
                 ));
             }
-            let mut filter = BTreeMap::new();
+            let mut filter = WhereFilter::new();
             if let Some(w) = &t.filter {
                 let w = w
                     .as_mapping()
                     .ok_or_else(|| "`where` maps payload fields to values".to_string())?;
                 for (k, v) in w {
-                    let (Some(k), Some(v)) = (k.as_str(), yaml_scalar(v)) else {
-                        return Err("`where` maps payload fields to values".into());
+                    let values = match (k.as_str(), v) {
+                        (Some(_), serde_yaml::Value::Sequence(items)) => {
+                            items.iter().map(yaml_scalar).collect::<Option<Vec<_>>>()
+                        }
+                        (Some(_), v) => yaml_scalar(v).map(|s| vec![s]),
+                        _ => None,
+                    }
+                    .filter(|v| !v.is_empty());
+                    let (Some(k), Some(values)) = (k.as_str(), values) else {
+                        return Err("`where` maps each payload field to a scalar or a \
+                             non-empty list of scalars"
+                            .into());
                     };
-                    filter.insert(k.to_string(), v);
+                    filter.insert(k.to_string(), values);
                 }
             }
             let secs = |key: &str, value: &Option<Value>| -> Result<Option<u32>, String> {
@@ -1007,10 +1111,96 @@ pub fn parse_trigger(
                 events,
                 filter,
                 pacing,
+                sources,
             })
         }
         _ => Err(shapes.to_string()),
     }
+}
+
+/// An `on:` value split into its event types and its observer sources
+/// (`start`, `{ files: <glob> }`, `{ sqlite: own | <path> }`).
+fn split_on(on: &serde_yaml::Value) -> Result<(Vec<String>, Vec<ObserverSource>), String> {
+    use serde_yaml::Value;
+    let one = std::slice::from_ref(on);
+    let items: &[Value] = match on {
+        Value::Sequence(items) => items,
+        Value::String(_) => one,
+        _ => return Err("`on` lists event types".into()),
+    };
+    let mut events = Vec::new();
+    let mut sources = Vec::new();
+    for item in items {
+        match item {
+            Value::String(s) if s == "start" => sources.push(ObserverSource::Start),
+            Value::String(s) => events.push(s.clone()),
+            Value::Mapping(map) => sources.push(observer_source(map)?),
+            _ => return Err("`on` lists event types".into()),
+        }
+    }
+    Ok((events, sources))
+}
+
+/// A `{ files: <glob> }` or `{ sqlite: own | <path> }` item of `on:`.
+fn observer_source(map: &serde_yaml::Mapping) -> Result<ObserverSource, String> {
+    use serde_yaml::Value;
+    let shapes = "an `on` item is an event type, `start`, `{ files: <glob> }` or \
+                  `{ sqlite: own | <path> }`";
+    if map.len() != 1 {
+        return Err(format!("an `on` item takes one key; {shapes}"));
+    }
+    let (key, value) = map.iter().next().expect("one key");
+    match (key.as_str(), value) {
+        (Some("files"), Value::String(glob)) => {
+            if !is_inside_glob(glob) {
+                return Err(format!(
+                    "`files: {glob}` must be a glob relative to the project root (no leading \
+                     `/`, no `..`)"
+                ));
+            }
+            globset::Glob::new(glob).map_err(|e| format!("`files: {glob}` isn't a glob: {e}"))?;
+            Ok(ObserverSource::Files { glob: glob.clone() })
+        }
+        (Some("files"), _) => Err("`files` takes a glob, like `shelf/*.md`".into()),
+        (Some("sqlite"), Value::String(s)) if s == "own" => {
+            Ok(ObserverSource::Sqlite { path: None })
+        }
+        (Some("sqlite"), Value::String(path)) => {
+            if !is_inside(path) {
+                return Err(format!(
+                    "`sqlite: {path}` must be a path relative to the project root (no leading \
+                     `/`, no `..`)"
+                ));
+            }
+            Ok(ObserverSource::Sqlite {
+                path: Some(path.clone()),
+            })
+        }
+        (Some("sqlite"), _) => Err("`sqlite` takes `own` or a path".into()),
+        _ => Err(shapes.to_string()),
+    }
+}
+
+/// The globs of an observer's `files` triggers as one matcher over
+/// project-relative paths; `*` stays inside a folder, `**` crosses them.
+pub fn files_matcher(globs: &[String]) -> Result<globset::GlobSet, globset::Error> {
+    let mut set = globset::GlobSetBuilder::new();
+    for glob in globs {
+        set.add(
+            globset::GlobBuilder::new(glob)
+                .literal_separator(true)
+                .build()?,
+        );
+    }
+    set.build()
+}
+
+/// A glob that stays inside the project: not absolute, no `..` part.
+fn is_inside_glob(glob: &str) -> bool {
+    !glob.is_empty()
+        && !glob.starts_with('/')
+        && !glob.contains('\\')
+        && glob.split('/').all(|part| part != "..")
 }
 
 fn yaml_scalar(v: &serde_yaml::Value) -> Option<String> {
@@ -1167,7 +1357,7 @@ fn validate(
             {
                 return Err(ctx(
                     "a `read` collector takes only `provider` and `on`: its records land in \
-                     the provider's capability (`v_work_item`)"
+                     the provider's capability (`v_task`)"
                         .into(),
                 ));
             }
@@ -1185,9 +1375,8 @@ fn validate(
                 }
                 None => return Err(ctx("needs an `entry` (its program or script)".into())),
             }
-            if raw.entities.is_empty() && raw.facts.is_empty() {
-                return Err(ctx("declares no `entities` and no `facts`".into()));
-            }
+            // One with neither must fill a shared model; its extension's
+            // `fills:` / `fields:` say so (checked where they are known).
         }
     }
     if runtime == CollectorRuntime::Exec {
@@ -1361,7 +1550,7 @@ fn validate(
     })
 }
 
-/// A report collector (`records:`, tsk863): the project's, reading one
+/// A report collector (`records:`): the project's, reading one
 /// report file with a bundled parser (`entry: oxplow:<name>`) or its own
 /// script or program, on `on: { run: test | analysis }` or by hand. It gets
 /// no `input`, `env`, `credentials` or `network`: its whole input is the
@@ -1416,7 +1605,7 @@ fn validate_report_collector(
         ));
     }
     // A test run's reports are tests and coverage, an analysis run's are
-    // analysis (tsk892): another pairing would be parsed and dropped.
+    // analysis: another pairing would be parsed and dropped.
     let reads = |run: RunKind| match run {
         RunKind::Test => records != Records::Analysis,
         RunKind::Analysis => records == Records::Analysis,
@@ -1563,7 +1752,7 @@ mod tests {
     use super::*;
 
     fn knows(t: &str) -> bool {
-        matches!(t, "snapshot.taken" | "effort.finished" | "vcs.head.moved")
+        matches!(t, "snapshot.taken" | "vcs.head.moved")
     }
 
     fn parse(yaml: &str) -> (Vec<CollectorSpec>, Vec<String>) {
@@ -1590,7 +1779,7 @@ mod tests {
         merged_at: time
         draft: bool
       relations:
-        - { to: v_work_item, on: "v_my_gh_pr.title LIKE '%' || substr(v_work_item.ref, 18) || '%'" }
+        - { to: v_task, on: "v_my_gh_pr.title LIKE '%' || substr(v_task.ref, 18) || '%'" }
 "#;
 
     #[test]
@@ -1628,7 +1817,7 @@ mod tests {
             ]
         );
         assert_eq!(e.columns[1].doc, "PR title");
-        assert_eq!(e.relations[0].to, "v_work_item");
+        assert_eq!(e.relations[0].to, "v_task");
     }
 
     /// Every shape of `on` parses, with `where` and the pacing keys beside
@@ -1647,29 +1836,31 @@ mod tests {
             with("on: [snapshot.taken]\n  where: { trigger: git_refs }").0[0].trigger,
             Trigger::On {
                 events: vec!["snapshot.taken".into()],
-                filter: [("trigger".to_string(), "git_refs".to_string())].into(),
+                filter: [("trigger".to_string(), vec!["git_refs".to_string()])].into(),
                 pacing: Pacing::default(),
+                sources: Vec::new(),
             }
         );
         // Pacing — settle, at most, idle, and the events that run
         // at once past them.
         assert_eq!(
-            with("on: [snapshot.taken, effort.finished]\n  settle: 30s\n  at_most: 5m\n  idle: 2m\n  force: [effort.finished]")
+            with("on: [snapshot.taken, vcs.head.moved]\n  settle: 30s\n  at_most: 5m\n  idle: 2m\n  force: [vcs.head.moved]")
                 .0[0]
                 .trigger,
             Trigger::On {
-                events: vec!["snapshot.taken".into(), "effort.finished".into()],
+                events: vec!["snapshot.taken".into(), "vcs.head.moved".into()],
                 filter: Default::default(),
                 pacing: Pacing {
                     settle_secs: Some(30),
                     at_most_secs: Some(300),
                     idle_secs: Some(120),
-                    force: vec!["effort.finished".into()],
+                    force: vec!["vcs.head.moved".into()],
                 },
+                sources: Vec::new(),
             }
         );
         assert_eq!(
-            with("on: effort.finished\n  after: [change.analyze]").0[0].after,
+            with("on: vcs.head.moved\n  after: [change.analyze]").0[0].after,
             vec!["change.analyze"]
         );
         for (t, needle) in [
@@ -1688,8 +1879,8 @@ mod tests {
                 "`force` needs",
             ),
             (
-                "on: [snapshot.taken]\n  settle: 30s\n  force: [effort.finished]",
-                "`force` names `effort.finished`, which isn't in `on`",
+                "on: [snapshot.taken]\n  settle: 30s\n  force: [vcs.head.moved]",
+                "`force` names `vcs.head.moved`, which isn't in `on`",
             ),
             ("on: [nope.happened]", "isn't a registered event type"),
             (
@@ -1709,6 +1900,132 @@ mod tests {
         // No `on`: manual.
         let (s, _) = parse(&GOOD.replace("  on: { every: 10m }\n", ""));
         assert_eq!(s[0].trigger, Trigger::Manual);
+    }
+
+    /// An observer's `on:` mixes event types with `start`, `{ files: <glob> }`
+    /// and `{ sqlite: own | <path> }` in one list.
+    #[test]
+    fn observer_triggers_mix_with_event_types() {
+        let with = |t: &str| parse(&GOOD.replace("on: { every: 10m }", t));
+        let (s, e) = with(
+            "on: [start, { files: \"shelf/*.md\" }, { sqlite: own }, { sqlite: .beads/beads.db }, snapshot.taken]",
+        );
+        assert!(e.is_empty(), "{e:?}");
+        let Trigger::On {
+            events, sources, ..
+        } = &s[0].trigger
+        else {
+            panic!("an `on` trigger");
+        };
+        assert_eq!(events, &["snapshot.taken"]);
+        assert_eq!(
+            sources,
+            &[
+                ObserverSource::Start,
+                ObserverSource::Files {
+                    glob: "shelf/*.md".into()
+                },
+                ObserverSource::Sqlite { path: None },
+                ObserverSource::Sqlite {
+                    path: Some(".beads/beads.db".into())
+                },
+            ]
+        );
+        // `start` alone, as a bare word.
+        let (s, e) = with("on: start");
+        assert!(e.is_empty(), "{e:?}");
+        assert!(matches!(&s[0].trigger, Trigger::On { events, sources, .. }
+            if events.is_empty() && sources == &[ObserverSource::Start]));
+        // `where` and pacing go with event types only.
+        for t in [
+            "on: [start]\n  where: { a: b }",
+            "on: [start]\n  settle: 30s",
+        ] {
+            let (s, e) = with(t);
+            assert!(s.is_empty(), "{t}");
+            assert!(
+                e.iter().any(|m| m.contains("go with event types")),
+                "{t}: {e:?}"
+            );
+        }
+    }
+
+    /// A `where` value is one scalar (equals) or a non-empty list of scalars
+    /// (equals any of them); fields are ANDed.
+    #[test]
+    fn a_where_value_may_be_a_list_of_scalars() {
+        let with = |w: &str| {
+            parse(&GOOD.replace(
+                "on: { every: 10m }",
+                &format!("on: [snapshot.taken]\n  where: {w}"),
+            ))
+        };
+        let (s, e) = with("{ cause: [trigger, fields], n: 2 }");
+        assert!(e.is_empty(), "{e:?}");
+        let t = &s[0].trigger;
+        assert!(t.where_fits(&serde_json::json!({ "cause": "trigger", "n": 2 })));
+        assert!(t.where_fits(&serde_json::json!({ "cause": "fields", "n": 2.0 })));
+        assert!(!t.where_fits(&serde_json::json!({ "cause": "reconcile", "n": 2 })));
+        assert!(!t.where_fits(&serde_json::json!({ "cause": "fields", "n": 3 })));
+        assert!(!t.where_fits(&serde_json::json!({ "n": 2 })));
+        // A scalar still works.
+        let (s, e) = with("{ cause: trigger }");
+        assert!(e.is_empty(), "{e:?}");
+        assert!(s[0]
+            .trigger
+            .where_fits(&serde_json::json!({ "cause": "trigger" })));
+        assert!(!s[0]
+            .trigger
+            .where_fits(&serde_json::json!({ "cause": "fields" })));
+        // Refused shapes.
+        for w in [
+            "{ cause: [] }",
+            "{ cause: [[a]] }",
+            "{ cause: [{ a: b }] }",
+            "{ cause: [null] }",
+            "{ cause: { a: b } }",
+            "{ cause: null }",
+        ] {
+            let (s, e) = with(w);
+            assert!(s.is_empty(), "{w}");
+            assert!(
+                e.iter()
+                    .any(|m| m.contains("a scalar or a non-empty list of scalars")),
+                "{w}: {e:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_bad_observer_triggers() {
+        let with = |t: &str| parse(&GOOD.replace("on: { every: 10m }", t));
+        for (t, needle) in [
+            ("on: [{ files: \"a[\" }]", "isn't a glob"),
+            (
+                "on: [{ files: \"/etc/*\" }]",
+                "relative to the project root",
+            ),
+            (
+                "on: [{ files: \"../x/*\" }]",
+                "relative to the project root",
+            ),
+            ("on: [{ files: 3 }]", "takes a glob"),
+            (
+                "on: [{ sqlite: /var/db.sqlite }]",
+                "relative to the project root",
+            ),
+            (
+                "on: [{ sqlite: ../db.sqlite }]",
+                "relative to the project root",
+            ),
+            ("on: [{ sqlite: 3 }]", "`own` or a path"),
+            ("on: [{ files: \"a\", sqlite: own }]", "one key"),
+            ("on: [{ nope: x }]", "`start`, `{ files"),
+        ] {
+            let (s, e) = with(t);
+            assert!(s.is_empty(), "{t}");
+            assert!(e.iter().any(|m| m.contains(needle)), "{t}: {e:?}");
+        }
     }
 
     #[test]
@@ -1754,7 +2071,7 @@ mod tests {
 - id: hot
   runtime: starlark
   entry: collectors/hot.star
-  input: "SELECT uri, title FROM v_work_item WHERE json_extract(native, '$.priority') = 'high'"
+  input: "SELECT uri, title FROM v_task WHERE json_extract(native, '$.priority') = 'high'"
   sync: upsert
   entities:
     - name: hot_task
@@ -1805,15 +2122,15 @@ mod tests {
         assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(out[0].input.as_ref().and_then(|i| i.limit), None);
         let bounded = DERIVED.replace(
-            r#"input: "SELECT uri, title FROM v_work_item WHERE json_extract(native, '$.priority') = 'high'""#,
-            "input: { sql: \"SELECT uri, title FROM v_work_item\", limit: 50 }",
+            r#"input: "SELECT uri, title FROM v_task WHERE json_extract(native, '$.priority') = 'high'""#,
+            "input: { sql: \"SELECT uri, title FROM v_task\", limit: 50 }",
         );
         let (out, errors) = parse(&bounded);
         assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(
             out[0].input,
             Some(CollectorInput {
-                sql: "SELECT uri, title FROM v_work_item".into(),
+                sql: "SELECT uri, title FROM v_task".into(),
                 limit: Some(50),
             })
         );
@@ -1838,7 +2155,7 @@ mod tests {
         assert!(s.runtime.is_derived());
         assert_eq!(
             s.input.as_ref().map(|i| i.sql.as_str()),
-            Some("SELECT uri, title FROM v_work_item WHERE json_extract(native, '$.priority') = 'high'")
+            Some("SELECT uri, title FROM v_task WHERE json_extract(native, '$.priority') = 'high'")
         );
         assert_eq!(parse(GOOD).0[0].sync, CollectorSync::Replace);
         for (from, to, needle) in [
@@ -1849,11 +2166,7 @@ mod tests {
                 "sync: upsert\n  credentials: [TOKEN]",
                 "can't take",
             ),
-            (
-                "FROM v_work_item",
-                "FROM v_my_gh_hot_task",
-                "feed on itself",
-            ),
+            ("FROM v_task", "FROM v_my_gh_hot_task", "feed on itself"),
         ] {
             let (s, e) = parse(&DERIVED.replace(from, to));
             assert!(s.is_empty(), "{to}: should be rejected");
@@ -1977,10 +2290,6 @@ mod tests {
         assert_eq!(out[1].report.as_ref().unwrap().format, "json");
         for (yaml, needle) in [
             (
-                "- { id: a.b, runtime: starlark, entry: x.star }",
-                "no `entities` and no `facts`",
-            ),
-            (
                 "- { id: a.b, runtime: starlark, entry: x.star, facts: [nodot] }",
                 "isn't a measure key",
             ),
@@ -2023,7 +2332,7 @@ mod tests {
         parse_collectors(&Declarer::own("project"), &v, &knows)
     }
 
-    /// tsk863: a report collector names a bundled parser or its own
+    /// a report collector names a bundled parser or its own
     /// script, the report it reads, and the run it reads after.
     #[test]
     fn report_collectors() {
@@ -2113,7 +2422,7 @@ mod tests {
             &format!("{base}  records: logs\n  entry: oxplow:junit\n"),
             "records `logs`",
         );
-        // tsk892: a test run's leg reads tests and coverage, an analysis
+        // a test run's leg reads tests and coverage, an analysis
         // run's analysis — anything else would be parsed and dropped.
         refused(
             &format!("{base}  records: analysis\n  entry: oxplow:eslint\n  on: {{ run: test }}\n"),

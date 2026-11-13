@@ -5,11 +5,11 @@
 A metric you author is an **extension** (a source under `.oxplow/extensions/<name>/`; it runs after `oxplow.extension.deploy { name }`). Get it from the
 `oxplow.metric.scaffold` command (`run_command`), which writes nothing and
 returns the files (`$OXPLOW_BIN extension new metric <name> [--language rust]
-[--glob '**/*.rs'] [--origin <your effort ref>]` writes the same ones from a
+[--glob '**/*.rs'] [--origin <your request ref>]` writes the same ones from a
 terminal):
 
 ```
-oxplow.metric.scaffold { "name": "complex-fns", "language": "rust", "glob": "src/**/*.rs", "origin": "<your effort ref>" }
+oxplow.metric.scaffold { "name": "complex-fns", "language": "rust", "glob": "src/**/*.rs", "origin": "<your request ref>" }
 → { "name": "complex-fns", "dir": ".oxplow/extensions/complex-fns", "files": [ { "path", "content" }, … ] }
 ```
 
@@ -110,10 +110,10 @@ time. A count-over-threshold is `expression: "COUNT(*) FILTER (WHERE value >= N)
 | `doc` | one line on what it collects |
 | `runtime` | `starlark` \| `jaq` (sandboxed, no I/O) \| `exec` (a program; needs `process.run`, approved at deploy) |
 | `entry` | the script or program, project-relative |
-| `trigger` | when it runs: `{ on: [snapshot.taken] }` (after a snapshot that recorded files — tree scans), `{ on: [effort.finished] }` (over the effort's end snapshot), `{ on: [<other event types>], where?: { field: value } }`, `{ every: 15m }`, or `manual` (only via `oxplow.collector.sync`) |
+| `trigger` | when it runs: `{ on: [snapshot.taken] }` (after a snapshot that recorded files — tree scans), `{ on: [<other event types>], where?: { field: value } }`, `{ every: 15m }`, or `manual` (only via `oxplow.collector.sync`) |
 | `facts` | the measure keys it may record facts on (declare-to-collect — a fact outside this list is dropped) |
 | `report` | `{ path, format }` — a tool's report file it reads (`text`\|`json`\|`xml`\|`lcov`\|`lines`), parsed into `input.report` |
-| `input` | (starlark/jaq) a SQL query whose rows arrive as `input.rows`; binds `:stream_id :snapshot_id :effort_id :thread_id :turn_id`, `:event_id` (the event's id) and `:event_seq` (its seq) |
+| `input` | (starlark/jaq) a SQL query whose rows arrive as `input.rows`; binds `:stream_id :snapshot_id :thread_id :turn_id`, `:event_id` (the event's id) and `:event_seq` (its seq) |
 
 A collector with `entities:` instead of `facts:` is an **entity collector**
 (rows, not measurements) — that belongs in an extension, not the project.

@@ -2,12 +2,12 @@
 //!
 //! Claude/Codex/opencode hooks (via the control plane) and the ACP client
 //! all hand a Claude-shaped [`HookEnvelope`] to [`HookIngestService::ingest`].
-//! One envelope is **one transaction** (P3.3, tsk473): the state it changes
+//! One envelope is **one transaction** (P3.3): the state it changes
 //! (the thread's resume session, the agent turn) and the `agent.*` events
-//! that record it commit together, anchored to the thread's stream, its open
-//! turn and its single open effort. Large bodies (tool input and output)
+//! that record it commit together, anchored to the thread's stream and its
+//! open turn. Large bodies (tool input and output)
 //! go into `event_content` by hash. Reactors on the event pump do the rest
-//! (tool-call rows, effort claims, collection, token usage).
+//! (tool-call rows, collection, token usage).
 //!
 //! Per kind:
 //! - `UserPromptSubmit`: `agent.prompt.submitted`; opens a turn when none
@@ -19,13 +19,13 @@
 //!   status Idle / AwaitingUser / Stopped; then the turn-end snapshot.
 //! - `SessionStart` (a harness process starting or resuming a session —
 //!   Claude's command hook, Codex's hook, the ACP client; not a `compact`):
-//!   closes the turns the previous process left open (interrupted), logs
+//!   closes the turns the previous process left open (`session_restarted`), logs
 //!   `agent.session.started`, status Idle.
 //! - A session id seen for the first time on a thread (on any kind)
 //!   becomes its resume id and logs `agent.session.started` once.
-//! - `SessionEnd`: closes the turns that session left open (interrupted,
-//!   "session ended" — an exit mid-turn sends no Stop, tsk449) with its
-//!   transcript, so their tokens are theirs (tsk924), status
+//! - `SessionEnd`: closes the turns that session left open
+//!   (`session_ended` — an exit mid-turn sends no Stop) with its
+//!   transcript, so their tokens are theirs, status
 //!   Stopped when it closed one; `agent.session.ended`; `reason: clear` of
 //!   the resume session clears the resume id.
 //!
@@ -45,20 +45,22 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use thiserror::Error;
 
+use oxplow_db::agent_job_store::{self, JobSighting};
+use oxplow_db::agent_message_store;
 use oxplow_db::agent_stores::{
     activity_anchors_tx, close_turn_tx, last_status_tx, log_status_tx, open_harness_turn_ids_tx,
-    open_turn_ids_in_tx, open_turn_tx, TurnEnd,
+    open_turn_ids_in_tx, open_turn_tx, turn_by_harness_id_tx, TurnEnd, TurnOpening,
 };
 use oxplow_db::event_log_store::{append_unique_tx, EventCtx};
 use oxplow_db::{event_content_store, Database};
+use oxplow_domain::agent::observe::Prompt;
 use oxplow_domain::agent::tool::{Subagent, ToolKind, ToolUse};
 use oxplow_domain::events::schema::{
-    AgentContextCompacted, AgentContextCompactedV2, AgentPeerMessageReceived,
-    AgentPeerMessageReceivedV2, AgentPlanProposed, AgentPlanProposedV2, AgentPromptSubmitted,
-    AgentPromptSubmittedV2, AgentSessionEnded, AgentSessionEndedV2, AgentSessionStarted,
-    AgentSessionStartedV3, AgentSubagentFinished, AgentSubagentFinishedV2, AgentSubagentStarted,
-    AgentSubagentStartedV2, AgentToolFinished, AgentToolFinishedV3, AgentToolRequested,
-    AgentToolRequestedV3, ContentRef, SubagentRef, ToolDecision as Decision,
+    AgentContextCompacted, AgentContextCompactedV2, AgentPlanProposed, AgentPlanProposedV2,
+    AgentPromptSubmitted, AgentPromptSubmittedV3, AgentSessionEnded, AgentSessionEndedV2,
+    AgentSessionStarted, AgentSessionStartedV3, AgentSubagentFinished, AgentSubagentFinishedV2,
+    AgentSubagentStarted, AgentSubagentStartedV2, AgentToolFinished, AgentToolFinishedV4,
+    AgentToolRequested, AgentToolRequestedV4, ContentRef, SubagentRef, ToolDecision as Decision,
 };
 use oxplow_domain::uri::build::{thread_uri, turn_uri};
 use oxplow_domain::{
@@ -67,16 +69,11 @@ use oxplow_domain::{
 };
 
 use crate::events::{EventBus, OxplowEvent};
-use oxplow_domain::hook::{TurnOutcome, TurnRun};
+use oxplow_domain::hook::{CauseBasis, TurnOutcome, TurnRun, TurnSource};
 
 /// The Stop-body key a transport puts a turn's own token counts under
 /// (ACP's prompt response); they ride `agent.turn.ended@2 { usage }`.
 pub const TURN_USAGE_KEY: &str = "oxplow_turn_usage";
-
-/// The Stop-body key holding the agent's final message for the turn
-/// (Claude's own field; ACP sends its transcript's last agent message
-/// under it): kept as the turn's `answer`.
-pub const LAST_ASSISTANT_MESSAGE: &str = "last_assistant_message";
 
 /// What the agent policy decided about a tool call (PreToolUse), carried
 /// on the envelope so the log records it.
@@ -103,10 +100,14 @@ pub struct HookEnvelope {
     /// The harness's own session id.
     pub session_id: Option<String>,
     pub payload_json: String,
-    /// UserPromptSubmit: the text the person submitted — stored with its
-    /// `agent.prompt.submitted` (every prompt, a re-prompt too) and on the
-    /// turn it opens.
-    pub prompt: Option<String>,
+    /// UserPromptSubmit: what the prompt is, as its harness read it — who
+    /// opened the turn (a person, a background job, a subagent handing
+    /// back, another session) and the text delivered, stored on the turn
+    /// it opens; a person's is logged with `agent.prompt.submitted` too
+    /// (every prompt, a re-prompt too). In-process only, as `tool` is.
+    #[serde(skip)]
+    #[specta(skip)]
+    pub prompt: Option<Prompt>,
     /// PreToolUse only: the policy's verdict (`None` reads as allowed).
     #[serde(default)]
     pub decision: Option<ToolDecision>,
@@ -118,18 +119,16 @@ pub struct HookEnvelope {
     #[serde(skip)]
     #[specta(skip)]
     pub tool: Option<ToolUse>,
-    /// The subagent the hook is about, as its harness read it: a
-    /// `SubagentStart` / `SubagentStop`'s, or — on a `UserPromptSubmit`
-    /// with no `prompt` — the subagent handing its report back. In-process
-    /// only, as `tool` is.
+    /// The subagent a `SubagentStart` / `SubagentStop` is about, as its
+    /// harness read it. In-process only, as `tool` is.
     #[serde(skip)]
     #[specta(skip)]
     pub subagent: Option<Subagent>,
-    /// On a `UserPromptSubmit` with no `prompt`: the name of the other
-    /// agent session whose message this prompt is. In-process only.
+    /// On a `UserPromptSubmit`: the harness's own id of the turn it opens
+    /// (Claude Code's `prompt_id`). In-process only.
     #[serde(skip)]
     #[specta(skip)]
-    pub peer: Option<String>,
+    pub harness_turn: Option<String>,
     /// The name its harness gives the session's conversation, when the
     /// hook says (Claude's `session_title` on a prompt). In-process only.
     #[serde(skip)]
@@ -141,6 +140,12 @@ pub struct HookEnvelope {
     #[serde(skip)]
     #[specta(skip)]
     pub turn_run: Option<TurnRun>,
+    /// What the body means, as its harness read it (the transcript, a
+    /// final message, a notification's wait, a compaction, a session's
+    /// end): core reads no harness's body keys. In-process only.
+    #[serde(skip)]
+    #[specta(skip)]
+    pub reading: oxplow_domain::hook::HookReading,
 }
 
 #[derive(Debug, Error)]
@@ -349,6 +354,23 @@ impl HookIngestService {
         Ok(())
     }
 
+    /// The harness named the open turn of `session` after it opened (Codex's
+    /// `turn/started` follows the prompt oxplow sent): keep its id on the
+    /// turn.
+    pub async fn identify_turn(
+        &self,
+        thread: ThreadId,
+        session: oxplow_domain::AgentSessionId,
+        harness_turn: String,
+    ) -> Result<(), HookIngestError> {
+        self.db
+            .transaction(move |tx| {
+                oxplow_db::agent_stores::set_harness_turn_tx(tx, thread, session, &harness_turn)
+            })
+            .await?;
+        Ok(())
+    }
+
     /// Log and announce an agent session's status outside a hook (the ACP
     /// session's permission cards). `session` resolves as a hook's does.
     pub async fn set_status(
@@ -534,16 +556,13 @@ fn record_tx(
         ..Applied::default()
     };
     let mut status = None;
-    let starts = starts_session(env.kind, &body);
-    let transcript_path = body.get("transcript_path").and_then(|p| p.as_str());
+    let starts = starts_session(env.kind, &env.reading);
+    let transcript_path = env.reading.transcript.as_deref();
     if starts {
         // The process that owned any open turn is gone: they end
         // interrupted, before the session start that resets the thread.
-        let end = TurnEnd {
-            answer: Some("session restarted"),
-            ..TurnEnd::new(now, TurnOutcome::Interrupted)
-        };
-        // A resumed session's own turns keep its transcript (tsk924): it
+        let end = TurnEnd::new(now, TurnOutcome::SessionRestarted);
+        // A resumed session's own turns keep its transcript: it
         // is the file their tokens are in. Another session's file isn't.
         if let Some(sid) = session {
             let own = TurnEnd {
@@ -559,6 +578,8 @@ fn record_tx(
         if let Some(id) = close_open_turns_tx(conn, ev, thread, slot, &end)? {
             applied.closed_turn = applied.closed_turn.or(Some(id));
         }
+        // The jobs the gone process ran will never report.
+        agent_job_store::lose_unreported_tx(conn, thread, slot, now)?;
         status = Some((AgentStatusState::Idle, None));
     }
     // The harness session a session runs is the one its own prompts and
@@ -578,41 +599,147 @@ fn record_tx(
         oxplow_db::agent_session_store::set_native_title_tx(conn, id, native, title, now)?;
     }
     applied.turn = open_turn_ids_in_tx(conn, thread, slot)?.first().copied();
+    // A prompt delivered while a turn runs opens none (a re-prompt).
+    let reprompt = applied.turn.is_some();
+    // The turn a prompt delivered to a session with none open starts: the
+    // one open path of the four prompt arms (a person's, a hand-back, a
+    // peer's message, a background job's report).
+    let open_if_none = |applied: &mut Applied, opening: &TurnOpening<'_>| {
+        if applied.turn.is_none() {
+            applied.turn = Some(open_turn_tx(conn, ev, thread, slot, opening, session, now)?);
+            applied.opened_turn = true;
+        }
+        Ok::<(), DomainError>(())
+    };
     match env.kind {
         // A subagent handing its report back: the agent goes on working on
-        // it — a turn, if none is open, with no person's prompt — and the
-        // subagent has finished.
-        HookKind::UserPromptSubmit if env.prompt.is_none() && env.subagent.is_some() => {
-            if applied.turn.is_none() {
-                applied.turn = Some(open_turn_tx(conn, ev, thread, slot, "", session, now)?);
-                applied.opened_turn = true;
-            }
-            if let Some(subagent) = &env.subagent {
-                log_subagent_tx(conn, ev, thread, slot, session, subagent, None)?;
-            }
+        // it — a turn, if none is open, that goes on with the one the
+        // subagent started in — and the subagent, a job, has reported.
+        HookKind::UserPromptSubmit if matches!(env.prompt, Some(Prompt::Handback { .. })) => {
+            let Some(Prompt::Handback { subagent, text }) = &env.prompt else {
+                unreachable!("matched above")
+            };
+            // Its start (or this first sight of it) says the turn it was
+            // started in.
+            let job = agent_job_store::seen_tx(
+                conn,
+                thread,
+                slot,
+                &JobSighting {
+                    id: &subagent.id,
+                    kind: Some(SUBAGENT_JOB),
+                    ..JobSighting::default()
+                },
+                now,
+            )?;
+            let opening = TurnOpening {
+                harness_turn: env.harness_turn.as_deref(),
+                cause_ref: Some(subagent.id.as_str()),
+                ..TurnOpening::new(TurnSource::Subagent, text)
+                    .caused_by(job.started_turn, job.basis.unwrap_or(CauseBasis::Reported))
+            };
+            open_if_none(&mut applied, &opening)?;
+            agent_job_store::reported_tx(conn, job.id, applied.turn, now, None, None)?;
+            log_subagent_tx(conn, ev, thread, slot, session, subagent, None)?;
             status = Some((AgentStatusState::Running, None));
         }
         // Another session's message: the agent goes on working on it — a
-        // turn, if none is open, with no person's prompt — and it is
-        // logged with who sent it.
-        HookKind::UserPromptSubmit if env.prompt.is_none() && env.peer.is_some() => {
-            if applied.turn.is_none() {
-                applied.turn = Some(open_turn_tx(conn, ev, thread, slot, "", session, now)?);
-                applied.opened_turn = true;
+        // turn, if none is open, that says who sent it.
+        HookKind::UserPromptSubmit if matches!(env.prompt, Some(Prompt::PeerMessage { .. })) => {
+            let Some(Prompt::PeerMessage {
+                from,
+                socket,
+                message,
+                text,
+                idle_notice,
+            }) = &env.prompt
+            else {
+                unreachable!("matched above")
+            };
+            // The turn that sent it, when exactly one recent send of the same
+            // text matches (`matched`: the harness names no link).
+            // An idle notice has no text: it matches the send that asked for
+            // it, to the session it names.
+            let sent = match message {
+                Some(message) => agent_message_store::find_sent_tx(conn, message, now)?,
+                None if *idle_notice => agent_message_store::find_idle_ask_tx(conn, from, now)?,
+                None => None,
+            };
+            let opening = TurnOpening {
+                harness_turn: env.harness_turn.as_deref(),
+                cause_ref: socket.as_deref(),
+                sender: Some(from.as_str()),
+                ..TurnOpening::new(TurnSource::Peer, text)
+                    .caused_by(sent.map(|(_, turn)| turn), CauseBasis::Matched)
+            };
+            open_if_none(&mut applied, &opening)?;
+            if let (Some((row, _)), Some(turn)) = (sent, applied.turn) {
+                if message.is_some() {
+                    agent_message_store::mark_received_tx(conn, row, turn)?;
+                } else {
+                    agent_message_store::mark_idle_notice_tx(conn, row, turn)?;
+                }
             }
-            if let Some(from) = &env.peer {
-                let envelope = ev
-                    .typed::<AgentPeerMessageReceived>(&AgentPeerMessageReceivedV2 {
-                        thread: thread.to_string(),
-                        turn: applied.turn.map(|t| t.to_string()),
-                        from: from.clone(),
-                    })
-                    .with_anchors(activity_anchors_tx(conn, thread, slot)?)
-                    .with_subject([applied
-                        .turn
-                        .map(turn_uri)
-                        .unwrap_or_else(|| thread_uri(thread))]);
-                ev.append(conn, &envelope)?;
+            status = Some((AgentStatusState::Running, None));
+        }
+        // A job the agent started in the background reported back: the
+        // agent goes on working on it — a turn, if none is open, that goes
+        // on with the one the job was started in — and the job has
+        // reported. No person spoke.
+        HookKind::UserPromptSubmit if matches!(env.prompt, Some(Prompt::BackgroundJob { .. })) => {
+            let Some(Prompt::BackgroundJob {
+                call,
+                job,
+                status: ended,
+                summary,
+                text,
+            }) = &env.prompt
+            else {
+                unreachable!("matched above")
+            };
+            // The call that started the job names its turn (`reported`);
+            // else the job's record says it (its start, or the guess of the
+            // Stop that listed it running).
+            let by_call = match call {
+                Some(call) => tool_call_turn_tx(conn, session, call)?,
+                None => None,
+            };
+            let name = job.as_deref().or(call.as_deref());
+            let recorded = match name {
+                Some(id) => Some(agent_job_store::seen_tx(
+                    conn,
+                    thread,
+                    slot,
+                    &JobSighting {
+                        id,
+                        start_call: call.as_deref(),
+                        started_turn: by_call,
+                        basis: Some(CauseBasis::Reported),
+                        ..JobSighting::default()
+                    },
+                    now,
+                )?),
+                None => None,
+            };
+            let (started_turn, basis) = match &recorded {
+                Some(job) => (job.started_turn, job.basis.unwrap_or(CauseBasis::Reported)),
+                None => (by_call, CauseBasis::Reported),
+            };
+            let opening = TurnOpening {
+                harness_turn: env.harness_turn.as_deref(),
+                cause_ref: name,
+                ..TurnOpening::new(TurnSource::BackgroundJob, text).caused_by(started_turn, basis)
+            };
+            open_if_none(&mut applied, &opening)?;
+            if let Some(job) = recorded {
+                agent_job_store::reported_tx(
+                    conn,
+                    job.id,
+                    applied.turn,
+                    now,
+                    ended.as_deref(),
+                    summary.as_deref(),
+                )?;
             }
             status = Some((AgentStatusState::Running, None));
         }
@@ -624,39 +751,57 @@ fn record_tx(
                     SubagentPhase::Started
                 } else {
                     SubagentPhase::Finished(
-                        body.get(LAST_ASSISTANT_MESSAGE)
-                            .and_then(|v| v.as_str())
+                        env.reading
+                            .final_message
+                            .as_deref()
                             .filter(|s| !s.trim().is_empty()),
                     )
                 };
+                let started = matches!(phase, SubagentPhase::Started);
                 log_subagent_tx(conn, ev, thread, slot, session, subagent, Some(phase))?;
+                // A subagent that stopped has finished its job (a background
+                // one's hand-back may still come: it fills the report's turn).
+                if !started {
+                    if let Some(job) = agent_job_store::find_tx(conn, thread, slot, &subagent.id)? {
+                        agent_job_store::reported_tx(conn, job.id, applied.turn, now, None, None)?;
+                    }
+                }
+                if started {
+                    // A harness that names the turn that spawned it (Codex's
+                    // `rootTurnId`) is believed over the turn open now.
+                    let spawning = match env.harness_turn.as_deref() {
+                        Some(id) => turn_by_harness_id_tx(conn, thread, id)?,
+                        None => None,
+                    };
+                    agent_job_store::seen_tx(
+                        conn,
+                        thread,
+                        slot,
+                        &JobSighting {
+                            id: &subagent.id,
+                            kind: Some(SUBAGENT_JOB),
+                            started_turn: spawning.or(applied.turn),
+                            basis: Some(CauseBasis::Reported),
+                            running: true,
+                            ..JobSighting::default()
+                        },
+                        now,
+                    )?;
+                }
             }
         }
         HookKind::UserPromptSubmit => {
-            let reprompt = applied.turn.is_some();
-            if !reprompt {
-                let prompt = env.prompt.as_deref().unwrap_or_default();
-                applied.turn = Some(open_turn_tx(conn, ev, thread, slot, prompt, session, now)?);
-                applied.opened_turn = true;
-            }
-            let text = env.prompt.as_deref().filter(|p| !p.is_empty());
-            let payload = AgentPromptSubmittedV2 {
-                thread: thread.to_string(),
-                turn: applied.turn.map(|t| t.to_string()),
-                session: session.map(str::to_string),
-                reprompt,
-                prompt: text
-                    .map(|t| event_content_store::put_text_tx(conn, "agent", t))
-                    .transpose()?,
+            // A person's prompt, or one the harness said nothing of.
+            let said = env.prompt.as_ref().map(Prompt::text);
+            let source = env
+                .prompt
+                .as_ref()
+                .map_or(TurnSource::Unknown, Prompt::source);
+            let opening = TurnOpening {
+                harness_turn: env.harness_turn.as_deref(),
+                ..TurnOpening::new(source, said.unwrap_or_default())
             };
-            let env = ev
-                .typed::<AgentPromptSubmitted>(&payload)
-                .with_anchors(activity_anchors_tx(conn, thread, slot)?)
-                .with_subject([applied
-                    .turn
-                    .map(turn_uri)
-                    .unwrap_or_else(|| thread_uri(thread))]);
-            ev.append(conn, &env)?;
+            open_if_none(&mut applied, &opening)?;
             status = Some((AgentStatusState::Running, None));
         }
         // A plan outside any tool call: recorded, and nothing waits on it.
@@ -672,7 +817,26 @@ fn record_tx(
             let tool = env.tool.clone();
             // A body that names no tool records nothing.
             if let Some(tool) = &tool {
-                log_tool_tx(conn, ev, thread, &row, env, tool, &body, session)?;
+                log_tool_tx(conn, ev, thread, &row, env, tool, session)?;
+                // A call that started a background job opens its record: the
+                // turn that made the call started it, as the harness reports.
+                if let Some(job) = &tool.started_job {
+                    agent_job_store::seen_tx(
+                        conn,
+                        thread,
+                        slot,
+                        &JobSighting {
+                            id: job,
+                            kind: Some(job_kind(tool.kind)),
+                            start_call: tool.call_id.as_deref(),
+                            started_turn: applied.turn,
+                            basis: Some(CauseBasis::Reported),
+                            running: true,
+                            ..JobSighting::default()
+                        },
+                        now,
+                    )?;
+                }
                 // A plan put to the person: on the record before the dialog
                 // answers (a refused call proposes nothing).
                 let allowed = env.decision.as_ref().is_none_or(|d| d.allowed);
@@ -680,7 +844,7 @@ fn record_tx(
                     let key = tool
                         .call_id
                         .as_deref()
-                        .map(|id| format!("{}:{id}:plan", session.unwrap_or("-")));
+                        .map(|id| tool_key(session, id, "plan"));
                     log_plan_tx(conn, ev, thread, &row, plan, key)?;
                 }
             }
@@ -701,16 +865,12 @@ fn record_tx(
         HookKind::Notification => {
             // A permission prompt (or a form to fill) waits on the person;
             // an idle reminder says nothing new.
-            let waits = matches!(
-                body.get("notification_type").and_then(|t| t.as_str()),
-                Some("permission_prompt" | "elicitation_dialog" | "agent_needs_input")
-            );
-            if waits {
-                let message = body
-                    .get("message")
-                    .and_then(|m| m.as_str())
-                    .unwrap_or("Waiting on you")
-                    .to_string();
+            if env.reading.waits_on_person {
+                let message = env
+                    .reading
+                    .notice
+                    .clone()
+                    .unwrap_or_else(|| "Waiting on you".to_string());
                 status = Some((AgentStatusState::AwaitingUser, Some(message)));
             }
         }
@@ -729,13 +889,20 @@ fn record_tx(
         HookKind::Interrupt if applied.turn.is_none() => {}
         HookKind::Stop | HookKind::Interrupt => {
             let (answer, outcome) = if env.kind == HookKind::Stop {
-                let said = body
-                    .get(LAST_ASSISTANT_MESSAGE)
-                    .and_then(|v| v.as_str())
+                let said = env
+                    .reading
+                    .final_message
+                    .as_deref()
                     .filter(|s| !s.trim().is_empty());
-                (said, TurnOutcome::Completed)
+                (
+                    said,
+                    env.turn_run
+                        .as_ref()
+                        .and_then(|r| r.outcome)
+                        .unwrap_or(TurnOutcome::Completed),
+                )
             } else {
-                (Some("interrupted"), TurnOutcome::Interrupted)
+                (None, TurnOutcome::Interrupted)
             };
             let end = TurnEnd {
                 answer,
@@ -748,8 +915,39 @@ fn record_tx(
                 effort: env.turn_run.as_ref().and_then(|r| r.effort.as_deref()),
                 context_tokens: env.turn_run.as_ref().and_then(|r| r.context_tokens),
                 context_window: env.turn_run.as_ref().and_then(|r| r.context_window),
+                left_running: env
+                    .turn_run
+                    .as_ref()
+                    .and_then(|r| r.left_running.as_deref()),
+                error: env.turn_run.as_ref().and_then(|r| r.error.as_deref()),
+                // Only a turn that finished can have ended on a question.
+                question: (outcome == TurnOutcome::Completed)
+                    .then(|| ending_question(answer))
+                    .flatten(),
                 ..TurnEnd::new(now, outcome)
             };
+            // What the turn left running are jobs: one no hook showed was
+            // started in this turn, as far as oxplow can tell (`matched`);
+            // one already recorded keeps what it knows.
+            if let Some(left) = env.turn_run.as_ref().and_then(|r| r.left_running.as_ref()) {
+                for work in left {
+                    agent_job_store::seen_tx(
+                        conn,
+                        thread,
+                        slot,
+                        &JobSighting {
+                            id: &work.id,
+                            kind: work.kind.as_deref(),
+                            description: work.description.as_deref(),
+                            started_turn: applied.turn,
+                            basis: Some(CauseBasis::Matched),
+                            running: true,
+                            ..JobSighting::default()
+                        },
+                        now,
+                    )?;
+                }
+            }
             applied.closed_turn = close_open_turns_tx(conn, ev, thread, slot, &end)?;
             applied.turn = None;
             status = Some(if env.kind == HookKind::Interrupt {
@@ -772,9 +970,8 @@ fn record_tx(
                 // leaves no one to close its turn.
                 // Its transcript, so the turn's tokens are its own.
                 let end = TurnEnd {
-                    answer: Some("session ended"),
                     transcript_path,
-                    ..TurnEnd::new(now, TurnOutcome::Interrupted)
+                    ..TurnEnd::new(now, TurnOutcome::SessionEnded)
                 };
                 let open = match session {
                     Some(sid) => open_harness_turn_ids_tx(conn, thread, sid)?,
@@ -789,13 +986,15 @@ fn record_tx(
                 if applied.closed_turn.is_some() {
                     status = Some((AgentStatusState::Stopped, Some("session ended".into())));
                 }
+                // Its jobs will never report.
+                agent_job_store::lose_unreported_tx(conn, thread, slot, now)?;
                 applied.turn = open_turn_ids_in_tx(conn, thread, slot)?.first().copied();
                 let ended =
                     session.or(Some(row.resume_session_id.as_str()).filter(|s| !s.is_empty()));
                 if let Some(sid) = ended {
                     // The harness said so itself before its process went.
                     if !(exited && already_ended_tx(conn, slot)?) {
-                        end_session_tx(conn, ev, thread, &row, sid, &body, now)?;
+                        end_session_tx(conn, ev, thread, &row, sid, &env.reading, now)?;
                     }
                 }
             }
@@ -804,9 +1003,10 @@ fn record_tx(
         HookKind::PostCompact => {
             let turn_id = applied.turn.map(|t| t.to_string());
             let turn = applied.turn.map(turn_uri);
-            let summary = body
-                .get("compact_summary")
-                .and_then(|v| v.as_str())
+            let summary = env
+                .reading
+                .compact_summary
+                .as_deref()
                 .filter(|s| !s.trim().is_empty())
                 .map(|text| event_content_store::put_text_tx(conn, "agent", text))
                 .transpose()?;
@@ -814,10 +1014,7 @@ fn record_tx(
                 .typed::<AgentContextCompacted>(&AgentContextCompactedV2 {
                     thread: thread.to_string(),
                     turn: turn_id,
-                    trigger: body
-                        .get("trigger")
-                        .and_then(|v| v.as_str())
-                        .map(str::to_string),
+                    trigger: env.reading.compact_trigger.clone(),
                     summary,
                 })
                 .with_anchors(activity_anchors_tx(conn, thread, slot)?)
@@ -825,6 +1022,11 @@ fn record_tx(
             ev.append(conn, &env)?;
         }
         HookKind::SessionStart => {} // handled above
+    }
+    // Every prompt delivered is logged once, with who it came from and its
+    // text, whether it opened a turn or landed in the open one.
+    if env.kind == HookKind::UserPromptSubmit {
+        log_prompt_tx(conn, ev, thread, slot, env, applied.turn, reprompt)?;
     }
     if let Some((state, detail)) = &status {
         if changed(
@@ -847,15 +1049,21 @@ fn record_tx(
     Ok(applied)
 }
 
+/// The question a final message ended on: its last line, when the message
+/// ends in a question mark. The turn stores it (`agent_turn.question`) and
+/// the thread's status waits on it.
+pub fn ending_question(answer: Option<&str>) -> Option<&str> {
+    answer
+        .map(str::trim)
+        .filter(|a| a.ends_with('?'))
+        .and_then(|a| a.lines().map(str::trim).rfind(|l| !l.is_empty()))
+}
+
 /// A Stop parks the thread on the person when the agent's final message
 /// ends in a question — its last line is the detail — else it goes idle.
 /// The next prompt moves it on.
 fn stop_status(answer: Option<&str>) -> (AgentStatusState, Option<String>) {
-    let asked = answer
-        .map(str::trim)
-        .filter(|a| a.ends_with('?'))
-        .and_then(|a| a.lines().map(str::trim).rfind(|l| !l.is_empty()));
-    match asked {
+    match ending_question(answer) {
         Some(question) => (AgentStatusState::AwaitingUser, Some(question.to_string())),
         None => (AgentStatusState::Idle, None),
     }
@@ -874,8 +1082,8 @@ fn asked_of(tool: &ToolUse) -> String {
 /// Whether this hook is a harness process starting (or resuming) a
 /// session: a `SessionStart`, except the one a context compaction posts
 /// mid-turn (Claude's `source: "compact"` keeps the same process and turn).
-fn starts_session(kind: HookKind, body: &serde_json::Value) -> bool {
-    kind == HookKind::SessionStart && body.get("source").and_then(|s| s.as_str()) != Some("compact")
+fn starts_session(kind: HookKind, reading: &oxplow_domain::hook::HookReading) -> bool {
+    kind == HookKind::SessionStart && !reading.compaction
 }
 
 /// Close every open turn of agent session `session` on the thread; returns
@@ -984,10 +1192,10 @@ fn end_session_tx(
     thread: ThreadId,
     row: &ThreadRow,
     session: &str,
-    body: &serde_json::Value,
+    reading: &oxplow_domain::hook::HookReading,
     now: Timestamp,
 ) -> Result<(), DomainError> {
-    let reason = body.get("reason").and_then(|r| r.as_str());
+    let reason = reading.end_reason.as_deref();
     let env = ev
         .typed::<AgentSessionEnded>(&AgentSessionEndedV2 {
             session: session.to_string(),
@@ -997,7 +1205,7 @@ fn end_session_tx(
         .with_anchors(activity_anchors_tx(conn, thread, row.session)?)
         .with_subject(session_subject(thread, row.session));
     ev.append(conn, &env)?;
-    if let Some(id) = row.session.filter(|_| reason == Some("clear")) {
+    if let Some(id) = row.session.filter(|_| reading.clears_conversation) {
         oxplow_db::agent_session_store::unbind_tx(conn, id, Some(session), now)?;
     }
     Ok(())
@@ -1072,6 +1280,125 @@ fn subagent_key(
     format!("subagent-event/{who}/{id}/{phase}")
 }
 
+/// Log the delivery of `env`'s prompt (none: a prompt hook that said
+/// nothing) to the agent: `agent.prompt.submitted`, in `turn` (the one it
+/// opened, or the open one it landed in when `reprompt`).
+fn log_prompt_tx(
+    conn: &rusqlite::Connection,
+    ev: &EventCtx<'_>,
+    thread: ThreadId,
+    slot: Option<oxplow_domain::AgentSessionId>,
+    env: &HookEnvelope,
+    turn: Option<AgentTurnId>,
+    reprompt: bool,
+) -> Result<(), DomainError> {
+    let prompt = env.prompt.as_ref();
+    let session = env.session_id.as_deref().filter(|s| !s.is_empty());
+    let (sender, job) = match prompt {
+        Some(Prompt::PeerMessage { from, .. }) => (Some(from.clone()), None),
+        Some(Prompt::Handback { subagent, .. }) => (None, Some(subagent.id.clone())),
+        Some(Prompt::BackgroundJob { job, call, .. }) => (None, job.clone().or(call.clone())),
+        _ => (None, None),
+    };
+    let text = prompt.map(Prompt::text).filter(|t| !t.is_empty());
+    let payload = AgentPromptSubmittedV3 {
+        thread: thread.to_string(),
+        turn: turn.map(|t| t.to_string()),
+        session: session.map(str::to_string),
+        reprompt,
+        source: prompt.map_or(TurnSource::Unknown, Prompt::source),
+        prompt: text
+            .map(|t| event_content_store::put_text_tx(conn, "agent", t))
+            .transpose()?,
+        sender,
+        job,
+    };
+    let env = ev
+        .typed::<AgentPromptSubmitted>(&payload)
+        .with_anchors(activity_anchors_tx(conn, thread, slot)?)
+        .with_subject([turn.map(turn_uri).unwrap_or_else(|| thread_uri(thread))]);
+    ev.append(conn, &env)?;
+    // What a person's prompt pointed at: links from its turn (a reprompt's
+    // are the turn's too), read by the grammar that writes them.
+    if let (Some(turn), Some(Prompt::Person { .. }), Some(text)) =
+        (turn, prompt, prompt.map(Prompt::text))
+    {
+        let source = turn_uri(turn);
+        // An `@path` is a guess at a file: linked when the file is in the
+        // thread's worktree, so no link dangles.
+        let worktree: Option<String> = conn
+            .query_row(
+                "SELECT s.worktree_path FROM threads th JOIN streams s ON s.id = th.stream_id
+                  WHERE th.id = ?1",
+                [thread.value()],
+                |r| r.get(0),
+            )
+            .ok();
+        for found in oxplow_domain::uri::prompt_refs::parse(text) {
+            if let Some(path) = &found.guessed_path {
+                let there = worktree
+                    .as_deref()
+                    .is_some_and(|w| std::path::Path::new(w).join(path).exists());
+                if !there {
+                    continue;
+                }
+            }
+            oxplow_db::page_ref_store::upsert_edge_tx(
+                conn,
+                &oxplow_db::page_ref_store::PageRefEdge::new(
+                    &source,
+                    found.target,
+                    oxplow_db::page_ref_projections::RT_PROMPT_MENTION,
+                ),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// What a job a subagent is, in `agent_job.kind`.
+const SUBAGENT_JOB: &str = "subagent";
+
+/// What a job a tool call started is, in `agent_job.kind`: the harness's
+/// own word for it (Claude Code's Stop says `shell`).
+fn job_kind(tool: oxplow_domain::agent::tool::ToolKind) -> &'static str {
+    use oxplow_domain::agent::tool::ToolKind;
+    match tool {
+        ToolKind::Shell => "shell",
+        ToolKind::Subagent => SUBAGENT_JOB,
+        _ => "other",
+    }
+}
+
+/// The dedupe key of harness session `session`'s tool call `call` at
+/// `phase` (`requested`, `finished`, `plan`): one occurrence each.
+fn tool_key(session: Option<&str>, call: &str, phase: &str) -> String {
+    format!("{}:{call}:{phase}", session.unwrap_or("-"))
+}
+
+/// The turn in which this session's tool call `call` was made: the turn
+/// anchor of its logged request (else its finish).
+fn tool_call_turn_tx(
+    conn: &rusqlite::Connection,
+    session: Option<&str>,
+    call: &str,
+) -> Result<Option<AgentTurnId>, DomainError> {
+    use rusqlite::OptionalExtension as _;
+    conn.query_row(
+        "SELECT turn_id FROM event_log
+          WHERE dedupe_key IN (?1, ?2) AND turn_id IS NOT NULL
+          ORDER BY seq LIMIT 1",
+        rusqlite::params![
+            tool_key(session, call, "requested"),
+            tool_key(session, call, "finished")
+        ],
+        |r| r.get::<_, i64>(0),
+    )
+    .optional()
+    .map(|t| t.map(AgentTurnId::new))
+    .map_err(oxplow_db::map_sql_err)
+}
+
 fn subagent_ref(s: &Subagent) -> SubagentRef {
     SubagentRef {
         id: s.id.clone(),
@@ -1142,7 +1469,7 @@ fn bracketing_subagent_tx(
 const PLAN_TEXT_CAP: usize = 64 * 1024;
 
 /// Log `agent.plan.proposed` for `plan`, anchored to the session's open
-/// turn and effort. `dedupe` makes a re-posted hook log once.
+/// turn. `dedupe` makes a re-posted hook log once.
 fn log_plan_tx(
     conn: &rusqlite::Connection,
     ev: &EventCtx<'_>,
@@ -1180,12 +1507,11 @@ fn log_tool_tx(
     row: &ThreadRow,
     env: &HookEnvelope,
     tool: &ToolUse,
-    body: &serde_json::Value,
     session: Option<&str>,
 ) -> Result<(), DomainError> {
     let recorded = crate::tool_calls::recorded(tool, &row.worktree);
-    let content = |key: &str| -> Result<Option<ContentRef>, DomainError> {
-        match body.get(key) {
+    let content = |value: &Option<serde_json::Value>| -> Result<Option<ContentRef>, DomainError> {
+        match value {
             Some(v) if !v.is_null() => event_content_store::put_json_tx(conn, "agent", v).map(Some),
             _ => Ok(None),
         }
@@ -1193,9 +1519,9 @@ fn log_tool_tx(
     let dedupe = |phase: &str| {
         tool.call_id
             .as_deref()
-            .map(|id| format!("{}:{id}:{phase}", session.unwrap_or("-")))
+            .map(|id| tool_key(session, id, phase))
     };
-    let anchors = activity_anchors_tx(conn, thread, row.session)?;
+    let mut anchors = activity_anchors_tx(conn, thread, row.session)?;
     // Who in the session made the call: the harness's word, else the
     // subagent call it falls inside. A subagent call itself is the
     // session's own.
@@ -1203,9 +1529,21 @@ fn log_tool_tx(
         Some(s) => Some(s.clone()),
         None if tool.kind == ToolKind::Subagent => None,
         None => bracketing_subagent_tx(conn, anchors.turn_id)?,
+    };
+    // A subagent's call is the work of the turn that started it, not of
+    // whatever turn is open when it lands (a background subagent goes on
+    // after its spawner's turn ended).
+    if let Some(job) = subagent
+        .as_ref()
+        .map(|s| agent_job_store::find_tx(conn, thread, row.session, &s.id))
+        .transpose()?
+        .flatten()
+    {
+        if let Some(turn) = job.started_turn {
+            anchors.turn_id = Some(turn.value());
+        }
     }
-    .as_ref()
-    .map(subagent_ref);
+    let subagent = subagent.as_ref().map(subagent_ref);
     let subject = anchors
         .turn_id
         .map(|t| turn_uri(AgentTurnId::new(t)))
@@ -1215,12 +1553,13 @@ fn log_tool_tx(
             allowed: true,
             reason: None,
         });
-        ev.typed::<AgentToolRequested>(&AgentToolRequestedV3 {
+        ev.typed::<AgentToolRequested>(&AgentToolRequestedV4 {
             tool: tool.name.clone(),
             kind: tool.kind,
+            call: tool.call_id.clone(),
             paths: recorded.paths,
             detail: recorded.detail,
-            input: content("tool_input")?,
+            input: content(&tool.input)?,
             decision: if decision.allowed {
                 Decision::Allowed
             } else {
@@ -1232,21 +1571,23 @@ fn log_tool_tx(
         .with_dedupe_key_opt(dedupe("requested"))
     } else {
         let finished = ev
-            .typed::<AgentToolFinished>(&AgentToolFinishedV3 {
+            .typed::<AgentToolFinished>(&AgentToolFinishedV4 {
                 tool: tool.name.clone(),
                 kind: tool.kind,
+                call: tool.call_id.clone(),
+                duration_ms: tool.duration_ms,
                 paths: recorded.paths,
                 detail: recorded.detail,
                 command: tool.command.clone(),
                 ok: tool.ok,
                 exit_code: tool.exit_code,
-                input: content("tool_input")?,
-                output: content("tool_response")?,
+                input: content(&tool.input)?,
+                output: content(&tool.output)?,
                 subagent,
             })
             .with_dedupe_key_opt(dedupe("finished"));
         // Caused by the call's start, so what reads the run knows when it
-        // began (tsk888: its reports are written after).
+        // began (its reports are written after).
         let requested = match dedupe("requested") {
             Some(key) => oxplow_db::event_log_store::id_by_dedupe_tx(conn, &key)?,
             None => None,
@@ -1256,8 +1597,31 @@ fn log_tool_tx(
             None => finished,
         }
     };
+    let turn = anchors.turn_id.map(AgentTurnId::new);
     let envelope = envelope.with_anchors(anchors).with_subject([subject]);
-    append_unique_tx(conn, ev.vocabulary, &envelope)?;
+    let first = append_unique_tx(conn, ev.vocabulary, &envelope)?;
+    // A message the call sends to another session, so its receipt can be
+    // matched to this turn: once per call (a re-posted hook records
+    // nothing), only when the policy let it run, and only with something to
+    // match on.
+    let allowed = env.decision.as_ref().is_none_or(|d| d.allowed);
+    if let (true, true, HookKind::PreToolUse, Some(sent)) = (first, allowed, env.kind, &tool.sent) {
+        if !sent.text.trim().is_empty() {
+            agent_message_store::record_sent_tx(
+                conn,
+                &agent_message_store::Sent {
+                    thread,
+                    session: row.session,
+                    turn,
+                    call: tool.call_id.as_deref(),
+                    recipient: &sent.to,
+                    text: &sent.text,
+                    notify_when_idle: sent.notify_when_idle,
+                    at: Timestamp::now(),
+                },
+            )?;
+        }
+    }
     Ok(())
 }
 
@@ -1405,11 +1769,12 @@ mod tests {
             prompt: body
                 .get("prompt")
                 .and_then(|p| p.as_str())
-                .map(str::to_string),
+                .map(Prompt::person),
             decision: None,
+            reading: crate::test_fixtures::claude_reading(&body),
             tool: crate::test_fixtures::claude_tool(kind, &body),
             subagent: None,
-            peer: None,
+            harness_turn: None,
         }
     }
 
@@ -1479,12 +1844,18 @@ mod tests {
     /// A subagent hook from `sid`: a start or stop naming `id`, or (with
     /// `UserPromptSubmit`) its hand-back.
     fn subagent_hook(kind: HookKind, tid: ThreadId, sid: &str, id: &str) -> HookEnvelope {
+        let subagent = Subagent {
+            id: id.into(),
+            kind: Some("general-purpose".into()),
+        };
+        // A prompt from a subagent is its hand-back.
+        let handback = kind == HookKind::UserPromptSubmit;
         HookEnvelope {
-            prompt: None,
-            subagent: Some(Subagent {
-                id: id.into(),
-                kind: Some("general-purpose".into()),
+            prompt: handback.then(|| Prompt::Handback {
+                subagent: subagent.clone(),
+                text: format!("<agent-message from=\"{id}\">done</agent-message>"),
             }),
+            subagent: (!handback).then_some(subagent),
             ..hook(kind, tid, Some(sid), json!({}))
         }
     }
@@ -1590,6 +1961,7 @@ mod tests {
         let prompt = |id: &str, title: Option<&str>| HookEnvelope {
             session_title: title.map(str::to_string),
             turn_run: None,
+            reading: Default::default(),
             ..hook(
                 HookKind::UserPromptSubmit,
                 tid,
@@ -1846,28 +2218,49 @@ mod tests {
         .await
         .unwrap();
         let events = logged(&svc).await;
-        assert_eq!(of_type(&events, "agent.prompt.submitted").len(), 1);
+        assert_eq!(
+            of_type(&events, "agent.prompt.submitted").len(),
+            2,
+            "the person's and the hand-back"
+        );
         assert_eq!(of_type(&events, "agent.subagent.started").len(), 1);
         assert_eq!(of_type(&events, "agent.subagent.finished").len(), 1);
         let all = turns(&svc).list_for_thread(&tid, 10).await.unwrap();
-        let mut prompts: Vec<String> = all.iter().map(|t| t.prompt.clone()).collect();
-        prompts.sort();
-        assert_eq!(prompts, ["", "go"]);
+        let mut sources: Vec<_> = all.iter().map(|t| (t.source, t.prompt.clone())).collect();
+        sources.sort_by_key(|(_, p)| p.clone());
+        assert_eq!(
+            sources,
+            [
+                (
+                    Some(TurnSource::Subagent),
+                    "<agent-message from=\"afd\">done</agent-message>".to_string()
+                ),
+                (Some(TurnSource::Person), "go".to_string()),
+            ]
+        );
         assert_eq!(
             status(&svc, tid).await.map(|s| s.state),
             Some(AgentStatusState::Idle)
         );
     }
 
-    /// Another session's message is no person's prompt: it opens a turn
-    /// with none, is logged with its sender, and ends with the Stop like
-    /// any turn. One arriving in an open turn opens none.
+    /// Another session's message is no person's prompt: it opens a turn of
+    /// its own (source `peer`, the message its text), is logged with its
+    /// sender, and ends with the Stop like any turn. One arriving in an
+    /// open turn opens none.
     #[tokio::test]
-    async fn a_peers_message_opens_a_turn_with_no_prompt() {
+    async fn a_peers_message_opens_a_turn_of_its_own_with_its_text() {
         let (svc, tid) = fixture().await;
         let peer = |from: &str| HookEnvelope {
-            prompt: None,
-            peer: Some(from.into()),
+            prompt: Some(Prompt::PeerMessage {
+                from: from.into(),
+                socket: Some("uds:/tmp/cc-socks/21663.sock".into()),
+                message: Some("hi".into()),
+                text: format!(
+                    "<cross-session-message from-name=\"{from}\">hi</cross-session-message>"
+                ),
+                idle_notice: false,
+            }),
             ..hook(HookKind::UserPromptSubmit, tid, Some("h1"), json!({}))
         };
         svc.ingest(peer("oxplow-main")).await.unwrap();
@@ -1877,7 +2270,8 @@ mod tests {
         );
         let all = turns(&svc).list_for_thread(&tid, 10).await.unwrap();
         assert_eq!(all.len(), 1);
-        assert_eq!(all[0].prompt, "");
+        assert_eq!(all[0].source, Some(TurnSource::Peer));
+        assert!(all[0].prompt.contains(">hi</"), "the message is kept");
         svc.ingest(peer("oxplow-other")).await.unwrap();
         assert_eq!(
             turns(&svc).list_for_thread(&tid, 10).await.unwrap().len(),
@@ -1891,12 +2285,15 @@ mod tests {
         ))
         .await
         .unwrap();
+        // Both deliveries are logged with their sender, the second inside
+        // the turn the first opened.
         let events = logged(&svc).await;
-        assert!(of_type(&events, "agent.prompt.submitted").is_empty());
-        let received = of_type(&events, "agent.peer_message.received");
+        let received = of_type(&events, "agent.prompt.submitted");
         assert_eq!(received.len(), 2);
-        assert_eq!(received[0].envelope.payload["from"], "oxplow-main");
-        assert_eq!(received[1].envelope.payload["from"], "oxplow-other");
+        assert_eq!(received[0].envelope.payload["source"], "peer");
+        assert_eq!(received[0].envelope.payload["sender"], "oxplow-main");
+        assert_eq!(received[1].envelope.payload["sender"], "oxplow-other");
+        assert_eq!(received[1].envelope.payload["reprompt"], true);
         assert_eq!(
             received[0].envelope.payload["turn"],
             received[1].envelope.payload["turn"]
@@ -1905,7 +2302,7 @@ mod tests {
         let from: Option<String> = svc
             .db
             .read(|c| {
-                c.query_row("SELECT from_peer FROM v_agent_turn", [], |r| r.get(0))
+                c.query_row("SELECT sender FROM v_agent_turn", [], |r| r.get(0))
                     .map_err(oxplow_db::map_sql_err)
             })
             .await
@@ -2107,28 +2504,12 @@ mod tests {
         assert_eq!(open_turns(&svc, tid).await, vec![None]);
     }
 
-    async fn open_effort(svc: &HookIngestService) -> i64 {
-        svc.db
-            .transaction(|c| {
-                c.execute(
-                    "INSERT INTO effort (work_item, thread_id, started_at)
-                       VALUES ('oxplow:oxplow/work_item?id=ENG-1&provider=issues', 1, '2026-01-01T00:00:00.000000Z')",
-                    [],
-                )
-                .map_err(|e| DomainError::Storage(e.to_string()))?;
-                Ok(c.last_insert_rowid())
-            })
-            .await
-            .unwrap()
-    }
-
     /// P3.3: a finished tool call is an `agent.tool.finished` anchored to
-    /// stream, thread, agent session, turn and effort, with its input and
-    /// output stored by hash and its path made worktree-relative.
+    /// stream, thread, agent session and turn, with its input and output
+    /// stored by hash and its path made worktree-relative.
     #[tokio::test]
-    async fn a_finished_tool_is_logged_with_five_anchors_and_its_content() {
+    async fn a_finished_tool_is_logged_with_four_anchors_and_its_content() {
         let (svc, tid) = fixture().await;
-        let effort = open_effort(&svc).await;
         svc.ingest(hook(
             HookKind::UserPromptSubmit,
             tid,
@@ -2158,7 +2539,6 @@ mod tests {
         assert_eq!(e.anchors.stream_id.map(|s| s.value()), Some(1));
         assert_eq!(e.anchors.thread_id, Some(tid));
         assert_eq!(e.anchors.turn_id, Some(turn));
-        assert_eq!(e.anchors.effort_id.map(|e| e.value()), Some(effort));
         assert_eq!(e.anchors.agent_session_id, Some(first_session()));
         assert_eq!(e.payload["tool"], "Edit");
         assert_eq!(e.payload["kind"], "edit");
@@ -2186,7 +2566,7 @@ mod tests {
         assert_eq!(of_type(&logged(&svc).await, "agent.tool.finished").len(), 1);
     }
 
-    /// tsk888: a call's `agent.tool.finished` is caused by its
+    /// a call's `agent.tool.finished` is caused by its
     /// `agent.tool.requested` (one tool use id), so what reads the run
     /// knows when it started.
     #[tokio::test]
@@ -2223,7 +2603,7 @@ mod tests {
         );
         env.decision = Some(ToolDecision {
             allowed: false,
-            reason: Some("no effort is open".into()),
+            reason: Some("the thread is closed".into()),
         });
         svc.ingest(env).await.unwrap();
         let events = logged(&svc).await;
@@ -2236,7 +2616,7 @@ mod tests {
                 p["decision"].as_str(),
                 p["reason"].as_str()
             ),
-            (Some("Write"), Some("denied"), Some("no effort is open"))
+            (Some("Write"), Some("denied"), Some("the thread is closed"))
         );
     }
 
@@ -2310,8 +2690,8 @@ mod tests {
         assert_eq!(ended, 3, "every end is logged, s1's exit and its clear");
     }
 
-    /// tsk449: a session that ends without a Stop (an exit mid-turn) closes
-    /// its own open turn — interrupted, "session ended" — so the turn
+    /// a session that ends without a Stop (an exit mid-turn) closes
+    /// its own open turn — `session_ended` — so the turn
     /// doesn't hold the quiet-period trigger open forever. Another
     /// session's end leaves it alone.
     #[tokio::test]
@@ -2355,12 +2735,12 @@ mod tests {
         let events = logged(&svc).await;
         let ended = of_type(&events, "agent.turn.ended");
         assert_eq!(ended.len(), 1);
-        assert_eq!(ended[0].envelope.payload["outcome"], "interrupted");
+        assert_eq!(ended[0].envelope.payload["outcome"], "session_ended");
         let status = of_type(&events, "agent.status.changed");
         assert_eq!(status.last().unwrap().envelope.payload["state"], "stopped");
     }
 
-    /// tsk924: a turn a session end or a restart closes keeps its
+    /// a turn a session end or a restart closes keeps its
     /// transcript, so its tokens are recorded as its own — the session's
     /// own file, for a resume of that session; another session's file is
     /// someone else's.
@@ -2464,7 +2844,7 @@ mod tests {
         assert_eq!(states, vec!["running", "idle"]);
         let ended = of_type(&events, "agent.turn.ended");
         assert_eq!(ended.len(), 1);
-        assert_eq!(ended[0].envelope.v, 3);
+        assert_eq!(ended[0].envelope.v, 5);
         assert_eq!(ended[0].envelope.payload["transcript_path"], "/t.jsonl");
     }
 
@@ -2490,17 +2870,18 @@ mod tests {
         let envelope = |kind, prompt: Option<&str>| HookEnvelope {
             session_title: None,
             turn_run: None,
+            reading: Default::default(),
             kind,
             thread_id: Some(tid),
             stream_id: None,
             agent_session_id: None,
             session_id: None,
             payload_json: "{}".into(),
-            prompt: prompt.map(str::to_string),
+            prompt: prompt.map(Prompt::person),
             decision: None,
             tool: None,
             subagent: None,
-            peer: None,
+            harness_turn: None,
         };
         svc.ingest(envelope(HookKind::UserPromptSubmit, Some("p")))
             .await
@@ -2522,17 +2903,18 @@ mod tests {
         let envelope = |kind, prompt: Option<&str>, turn_run| HookEnvelope {
             session_title: None,
             turn_run,
+            reading: Default::default(),
             kind,
             thread_id: Some(tid),
             stream_id: None,
             agent_session_id: None,
             session_id: None,
             payload_json: "{}".into(),
-            prompt: prompt.map(str::to_string),
+            prompt: prompt.map(Prompt::person),
             decision: None,
             tool: None,
             subagent: None,
-            peer: None,
+            harness_turn: None,
         };
         let ran_on = || {
             let db = svc.db.clone();
@@ -2565,6 +2947,7 @@ mod tests {
             effort: Some("high".into()),
             context_tokens: Some(52_000),
             context_window: Some(200_000),
+            ..TurnRun::default()
         };
         svc.ingest(envelope(HookKind::Stop, None, Some(run)))
             .await
@@ -2588,12 +2971,82 @@ mod tests {
         assert_eq!(ran_on().await, (None, None, None, None));
     }
 
+    /// A Stop whose harness says the turn was aborted or failed stores that
+    /// outcome (and the harness's words for an error), not `completed`; a
+    /// Stop that says nothing stays `completed`.
+    #[tokio::test]
+    async fn a_stop_stores_the_outcome_its_harness_reports() {
+        let (svc, tid) = fixture().await;
+        let envelope = |kind, prompt: Option<&str>, turn_run| HookEnvelope {
+            session_title: None,
+            turn_run,
+            reading: Default::default(),
+            kind,
+            thread_id: Some(tid),
+            stream_id: None,
+            agent_session_id: None,
+            session_id: None,
+            payload_json: "{}".into(),
+            prompt: prompt.map(Prompt::person),
+            decision: None,
+            tool: None,
+            subagent: None,
+            harness_turn: None,
+        };
+        let ended = || {
+            let db = svc.db.clone();
+            async move {
+                db.read(|c| {
+                    c.query_row(
+                        "SELECT outcome, error FROM v_agent_turn ORDER BY id DESC LIMIT 1",
+                        [],
+                        |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)),
+                    )
+                    .map_err(oxplow_db::map_sql_err)
+                })
+                .await
+                .unwrap()
+            }
+        };
+        let cases = [
+            (None, ("completed", None)),
+            (
+                Some(TurnRun {
+                    outcome: Some(TurnOutcome::Interrupted),
+                    ..TurnRun::default()
+                }),
+                ("interrupted", None),
+            ),
+            (
+                Some(TurnRun {
+                    outcome: Some(TurnOutcome::Errored),
+                    error: Some("APIError: overloaded".into()),
+                    ..TurnRun::default()
+                }),
+                ("errored", Some("APIError: overloaded")),
+            ),
+        ];
+        for (run, (outcome, error)) in cases {
+            svc.ingest(envelope(HookKind::UserPromptSubmit, Some("p"), None))
+                .await
+                .unwrap();
+            svc.ingest(envelope(HookKind::Stop, None, run))
+                .await
+                .unwrap();
+            assert_eq!(
+                ended().await,
+                (outcome.to_string(), error.map(str::to_string))
+            );
+        }
+    }
+
     #[tokio::test]
     async fn user_prompt_opens_turn_and_marks_running() {
         let (svc, tid) = fixture().await;
         let env = HookEnvelope {
             session_title: None,
             turn_run: None,
+            reading: Default::default(),
             kind: HookKind::UserPromptSubmit,
             thread_id: Some(tid),
             stream_id: None,
@@ -2604,7 +3057,7 @@ mod tests {
             decision: None,
             tool: None,
             subagent: None,
-            peer: None,
+            harness_turn: None,
         };
         svc.ingest(env).await.unwrap();
         // Spot-check via stores.
@@ -2621,6 +3074,7 @@ mod tests {
         let prompt_env = HookEnvelope {
             session_title: None,
             turn_run: None,
+            reading: Default::default(),
             kind: HookKind::UserPromptSubmit,
             thread_id: Some(tid),
             stream_id: None,
@@ -2631,12 +3085,13 @@ mod tests {
             decision: None,
             tool: None,
             subagent: None,
-            peer: None,
+            harness_turn: None,
         };
         svc.ingest(prompt_env).await.unwrap();
         let stop = HookEnvelope {
             session_title: None,
             turn_run: None,
+            reading: Default::default(),
             kind: HookKind::Stop,
             thread_id: Some(tid),
             stream_id: None,
@@ -2647,7 +3102,7 @@ mod tests {
             decision: None,
             tool: None,
             subagent: None,
-            peer: None,
+            harness_turn: None,
         };
         svc.ingest(stop).await.unwrap();
         assert!(turns(&svc).list_open(&tid).await.unwrap().is_empty());
@@ -2661,6 +3116,7 @@ mod tests {
         svc.ingest(HookEnvelope {
             session_title: None,
             turn_run: None,
+            reading: Default::default(),
             kind: HookKind::UserPromptSubmit,
             thread_id: Some(tid),
             stream_id: None,
@@ -2671,13 +3127,14 @@ mod tests {
             decision: None,
             tool: None,
             subagent: None,
-            peer: None,
+            harness_turn: None,
         })
         .await
         .unwrap();
         svc.ingest(HookEnvelope {
             session_title: None,
             turn_run: None,
+            reading: Default::default(),
             kind: HookKind::Interrupt,
             thread_id: Some(tid),
             stream_id: None,
@@ -2688,7 +3145,7 @@ mod tests {
             decision: None,
             tool: None,
             subagent: None,
-            peer: None,
+            harness_turn: None,
         })
         .await
         .unwrap();
@@ -2720,6 +3177,7 @@ mod tests {
         svc.ingest(HookEnvelope {
             session_title: None,
             turn_run: None,
+            reading: Default::default(),
             kind: HookKind::UserPromptSubmit,
             thread_id: Some(tid),
             stream_id: None,
@@ -2730,13 +3188,14 @@ mod tests {
             decision: None,
             tool: None,
             subagent: None,
-            peer: None,
+            harness_turn: None,
         })
         .await
         .unwrap();
         let stop = svc.ingest(HookEnvelope {
             session_title: None,
             turn_run: None,
+            reading: Default::default(),
             kind: HookKind::Stop,
             thread_id: Some(tid),
             stream_id: None,
@@ -2747,7 +3206,7 @@ mod tests {
             decision: None,
             tool: None,
             subagent: None,
-            peer: None,
+            harness_turn: None,
         });
         // The caller gives up while the take is under way: the ingest's
         // future is dropped.
@@ -2770,17 +3229,18 @@ mod tests {
         let hook = |kind, prompt: Option<&str>, payload: serde_json::Value| HookEnvelope {
             session_title: None,
             turn_run: None,
+            reading: crate::test_fixtures::claude_reading(&payload),
             kind,
             thread_id: Some(tid),
             stream_id: None,
             agent_session_id: None,
             session_id: None,
             payload_json: payload.to_string(),
-            prompt: prompt.map(str::to_string),
+            prompt: prompt.map(Prompt::person),
             decision: None,
             tool: None,
             subagent: None,
-            peer: None,
+            harness_turn: None,
         };
         svc.ingest(hook(HookKind::UserPromptSubmit, Some("p"), json!({})))
             .await
@@ -2822,6 +3282,7 @@ mod tests {
         svc.ingest(HookEnvelope {
             session_title: None,
             turn_run: None,
+            reading: Default::default(),
             kind: HookKind::Stop,
             thread_id: Some(tid),
             stream_id: None,
@@ -2832,7 +3293,7 @@ mod tests {
             decision: None,
             tool: None,
             subagent: None,
-            peer: None,
+            harness_turn: None,
         })
         .await
         .unwrap();
@@ -2847,6 +3308,7 @@ mod tests {
         svc.ingest(HookEnvelope {
             session_title: None,
             turn_run: None,
+            reading: Default::default(),
             kind: HookKind::UserPromptSubmit,
             thread_id: None,
             stream_id: None,
@@ -2857,7 +3319,7 @@ mod tests {
             decision: None,
             tool: None,
             subagent: None,
-            peer: None,
+            harness_turn: None,
         })
         .await
         .unwrap();
@@ -2874,6 +3336,7 @@ mod tests {
             svc.ingest(HookEnvelope {
                 session_title: None,
                 turn_run: None,
+                reading: Default::default(),
                 kind: HookKind::UserPromptSubmit,
                 thread_id: Some(tid),
                 stream_id: None,
@@ -2884,7 +3347,7 @@ mod tests {
                 decision: None,
                 tool: None,
                 subagent: None,
-                peer: None,
+                harness_turn: None,
             })
             .await
             .unwrap();
@@ -3049,7 +3512,7 @@ mod tests {
             HookKind::Stop,
             tid,
             None,
-            json!({ LAST_ASSISTANT_MESSAGE: "Done with the parser.\n\nShould I also fix the lexer?" }),
+            json!({ "last_assistant_message": "Done with the parser.\n\nShould I also fix the lexer?" }),
         ))
         .await
         .unwrap();
@@ -3068,7 +3531,7 @@ mod tests {
             HookKind::Stop,
             tid,
             None,
-            json!({ LAST_ASSISTANT_MESSAGE: "All done." }),
+            json!({ "last_assistant_message": "All done." }),
         ))
         .await
         .unwrap();
@@ -3271,6 +3734,1330 @@ mod tests {
         assert_eq!(
             status(&svc, tid).await.unwrap().state,
             AgentStatusState::Running
+        );
+    }
+
+    /// A turn says what opened it — a person, a background job reporting
+    /// back, a subagent handing back, or a prompt the harness said nothing
+    /// of — keeps the text it was opened with, and names the turn it goes
+    /// on with when the harness named the call or the subagent.
+    #[tokio::test]
+    async fn a_turn_records_what_opened_it_and_the_turn_it_goes_on_with() {
+        let (svc, tid) = fixture().await;
+        let stop = || {
+            hook(
+                HookKind::Stop,
+                tid,
+                Some("h1"),
+                json!({"last_assistant_message": "ok"}),
+            )
+        };
+        let job = |call: &str| HookEnvelope {
+            prompt: Some(Prompt::BackgroundJob {
+                call: Some(call.into()),
+                job: None,
+                status: None,
+                summary: None,
+                text: format!("<task-notification>{call}</task-notification>"),
+            }),
+            harness_turn: Some(format!("p-{call}")),
+            ..hook(HookKind::UserPromptSubmit, tid, Some("h1"), json!({}))
+        };
+        svc.ingest(HookEnvelope {
+            harness_turn: Some("p1".into()),
+            ..hook(
+                HookKind::UserPromptSubmit,
+                tid,
+                Some("h1"),
+                json!({"prompt": "go"}),
+            )
+        })
+        .await
+        .unwrap();
+        let bash = json!({"tool_name": "Bash", "tool_input": {"command": "sleep 9", "run_in_background": true}, "tool_use_id": "toolu_bg"});
+        svc.ingest(hook(HookKind::PreToolUse, tid, Some("h1"), bash.clone()))
+            .await
+            .unwrap();
+        svc.ingest(hook(HookKind::PostToolUse, tid, Some("h1"), bash))
+            .await
+            .unwrap();
+        svc.ingest(subagent_hook(HookKind::SubagentStart, tid, "h1", "afd"))
+            .await
+            .unwrap();
+        svc.ingest(stop()).await.unwrap();
+        svc.ingest(job("toolu_bg")).await.unwrap();
+        svc.ingest(stop()).await.unwrap();
+        svc.ingest(subagent_hook(HookKind::UserPromptSubmit, tid, "h1", "afd"))
+            .await
+            .unwrap();
+        svc.ingest(stop()).await.unwrap();
+        svc.ingest(job("toolu_gone")).await.unwrap();
+        svc.ingest(stop()).await.unwrap();
+        svc.ingest(HookEnvelope {
+            prompt: None,
+            ..hook(HookKind::UserPromptSubmit, tid, Some("h1"), json!({}))
+        })
+        .await
+        .unwrap();
+
+        type Row = (
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        );
+        let rows: Vec<Row> = svc
+            .db
+            .read(|c| {
+                let mut stmt = c
+                    .prepare(
+                        "SELECT source, prompt, cause_turn, cause_basis, cause_ref, harness_turn_id
+                           FROM v_agent_turn ORDER BY id",
+                    )
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = stmt
+                    .query_map([], |r| {
+                        Ok((
+                            r.get(0)?,
+                            r.get(1)?,
+                            r.get(2)?,
+                            r.get(3)?,
+                            r.get(4)?,
+                            r.get(5)?,
+                        ))
+                    })
+                    .map_err(oxplow_db::map_sql_err)?;
+                rows.collect::<Result<Vec<_>, _>>()
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let first = "oxplow:oxplow/turn?id=trn1".to_string();
+        let reported = Some("reported".to_string());
+        assert_eq!(
+            rows,
+            vec![
+                (
+                    "person".into(),
+                    "go".into(),
+                    None,
+                    None,
+                    None,
+                    Some("p1".into())
+                ),
+                (
+                    "background_job".into(),
+                    "<task-notification>toolu_bg</task-notification>".into(),
+                    Some(first.clone()),
+                    reported.clone(),
+                    Some("toolu_bg".into()),
+                    Some("p-toolu_bg".into()),
+                ),
+                (
+                    "subagent".into(),
+                    "<agent-message from=\"afd\">done</agent-message>".into(),
+                    Some(first),
+                    reported,
+                    Some("afd".into()),
+                    None,
+                ),
+                (
+                    "background_job".into(),
+                    "<task-notification>toolu_gone</task-notification>".into(),
+                    None,
+                    None,
+                    Some("toolu_gone".into()),
+                    Some("p-toolu_gone".into()),
+                ),
+                ("unknown".into(), "".into(), None, None, None, None),
+            ]
+        );
+        // Every delivery is logged, with who it came from.
+        let events = logged(&svc).await;
+        let sources: Vec<_> = of_type(&events, "agent.prompt.submitted")
+            .iter()
+            .map(|e| e.envelope.payload["source"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(
+            sources,
+            [
+                "person",
+                "background_job",
+                "subagent",
+                "background_job",
+                "unknown"
+            ]
+        );
+        let started = of_type(&events, "agent.turn.started");
+        assert_eq!(started[1].envelope.payload["source"], "background_job");
+        assert_eq!(started[1].envelope.payload["cause_turn"], "trn1");
+    }
+
+    /// A turn stores how it ended — the agent stopped, the person
+    /// interrupted it, its session ended or restarted with it open — and
+    /// `answer` is only ever what the agent said. A Stop's report of what
+    /// it left running is kept.
+    #[tokio::test]
+    async fn a_turn_records_how_it_ended_and_what_it_left_running() {
+        let (svc, tid) = fixture().await;
+        let prompt = |text: &str| {
+            hook(
+                HookKind::UserPromptSubmit,
+                tid,
+                Some("h1"),
+                json!({ "prompt": text }),
+            )
+        };
+        let left = vec![oxplow_domain::hook::RunningWork {
+            id: "a105c".into(),
+            kind: Some("subagent".into()),
+            description: Some("Map desktop".into()),
+        }];
+        svc.ingest(prompt("one")).await.unwrap();
+        svc.ingest(HookEnvelope {
+            turn_run: Some(TurnRun {
+                left_running: Some(left.clone()),
+                ..TurnRun::default()
+            }),
+            ..hook(
+                HookKind::Stop,
+                tid,
+                Some("h1"),
+                json!({"last_assistant_message": "started it"}),
+            )
+        })
+        .await
+        .unwrap();
+        svc.ingest(prompt("two")).await.unwrap();
+        svc.ingest(hook(HookKind::Interrupt, tid, Some("h1"), json!({})))
+            .await
+            .unwrap();
+        svc.ingest(prompt("three")).await.unwrap();
+        svc.ingest(hook(
+            HookKind::SessionStart,
+            tid,
+            Some("h1"),
+            json!({"source": "resume"}),
+        ))
+        .await
+        .unwrap();
+        svc.ingest(prompt("four")).await.unwrap();
+        svc.ingest(hook(
+            HookKind::SessionEnd,
+            tid,
+            Some("h1"),
+            json!({"reason": "prompt_input_exit"}),
+        ))
+        .await
+        .unwrap();
+        type Row = (String, Option<String>, Option<String>);
+        let rows: Vec<Row> = svc
+            .db
+            .read(|c| {
+                let mut stmt = c
+                    .prepare("SELECT prompt, outcome, answer FROM v_agent_turn ORDER BY id")
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = stmt
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                    .map_err(oxplow_db::map_sql_err)?;
+                rows.collect::<Result<Vec<_>, _>>()
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                (
+                    "one".into(),
+                    Some("completed".into()),
+                    Some("started it".into())
+                ),
+                ("two".into(), Some("interrupted".into()), None),
+                ("three".into(), Some("session_restarted".into()), None),
+                ("four".into(), Some("session_ended".into()), None),
+            ]
+        );
+        // What it left running is on its event, and is a job.
+        let events = logged(&svc).await;
+        let ended = of_type(&events, "agent.turn.ended");
+        assert_eq!(ended[0].envelope.payload["left_running"][0]["id"], "a105c");
+    }
+
+    /// A background shell's job opens at the call that starts it (its
+    /// PostToolUse names the job), in the turn that made the call, before
+    /// any Stop lists it; the Stop and the report keep that start.
+    #[tokio::test]
+    async fn a_background_shell_job_opens_at_its_starting_call() {
+        let (svc, tid) = fixture().await;
+        svc.ingest(hook(
+            HookKind::UserPromptSubmit,
+            tid,
+            Some("h1"),
+            json!({"prompt": "go"}),
+        ))
+        .await
+        .unwrap();
+        let bash = json!({
+            "tool_name": "Bash", "tool_use_id": "toolu_bg",
+            "tool_input": {"command": "sleep 9", "run_in_background": true},
+            "tool_response": {"stdout": "", "backgroundTaskId": "bsh1"}
+        });
+        svc.ingest(hook(HookKind::PostToolUse, tid, Some("h1"), bash))
+            .await
+            .unwrap();
+        let rows = |svc: &HookIngestService| {
+            let db = svc.db.clone();
+            async move {
+                db.read(|c| {
+                    let mut stmt = c
+                        .prepare(
+                            "SELECT harness_job_id, kind, started_turn, start_basis, state
+                               FROM v_agent_job ORDER BY id",
+                        )
+                        .map_err(oxplow_db::map_sql_err)?;
+                    let rows = stmt
+                        .query_map([], |r| {
+                            Ok((
+                                r.get::<_, String>(0)?,
+                                r.get::<_, Option<String>>(1)?,
+                                r.get::<_, Option<String>>(2)?,
+                                r.get::<_, Option<String>>(3)?,
+                                r.get::<_, String>(4)?,
+                            ))
+                        })
+                        .map_err(oxplow_db::map_sql_err)?;
+                    rows.collect::<Result<Vec<_>, _>>()
+                        .map_err(oxplow_db::map_sql_err)
+                })
+                .await
+                .unwrap()
+            }
+        };
+        let expected = vec![(
+            "bsh1".to_string(),
+            Some("shell".to_string()),
+            Some("oxplow:oxplow/turn?id=trn1".to_string()),
+            Some("reported".to_string()),
+            "running".to_string(),
+        )];
+        assert_eq!(rows(&svc).await, expected);
+        // The Stop that lists it running keeps the start.
+        svc.ingest(HookEnvelope {
+            turn_run: Some(TurnRun {
+                left_running: Some(vec![oxplow_domain::hook::RunningWork {
+                    id: "bsh1".into(),
+                    kind: Some("shell".into()),
+                    description: None,
+                }]),
+                ..TurnRun::default()
+            }),
+            ..hook(HookKind::Stop, tid, Some("h1"), json!({}))
+        })
+        .await
+        .unwrap();
+        assert_eq!(rows(&svc).await, expected);
+    }
+
+    /// A job the agent started in the background is one record from its
+    /// first sight to its report: a background shell a Stop listed and
+    /// whose notice came later; a subagent from its start to its hand-back;
+    /// a notice for a job no hook showed. The report's turn goes on with the
+    /// turn the job was started in, and names the job.
+    #[tokio::test]
+    async fn a_background_job_is_a_record_from_start_to_report() {
+        let (svc, tid) = fixture().await;
+        let stop = |left: Vec<oxplow_domain::hook::RunningWork>| HookEnvelope {
+            turn_run: Some(TurnRun {
+                left_running: Some(left),
+                ..TurnRun::default()
+            }),
+            ..hook(
+                HookKind::Stop,
+                tid,
+                Some("h1"),
+                json!({"last_assistant_message": "ok"}),
+            )
+        };
+        let notice = |job: &str, call: Option<&str>| HookEnvelope {
+            prompt: Some(Prompt::BackgroundJob {
+                call: call.map(str::to_string),
+                job: Some(job.into()),
+                status: Some("completed".into()),
+                summary: Some(format!("{job} finished")),
+                text: format!("<task-notification>{job}</task-notification>"),
+            }),
+            ..hook(HookKind::UserPromptSubmit, tid, Some("h1"), json!({}))
+        };
+        svc.ingest(hook(
+            HookKind::UserPromptSubmit,
+            tid,
+            Some("h1"),
+            json!({"prompt": "go"}),
+        ))
+        .await
+        .unwrap();
+        svc.ingest(subagent_hook(HookKind::SubagentStart, tid, "h1", "afd"))
+            .await
+            .unwrap();
+        svc.ingest(stop(vec![oxplow_domain::hook::RunningWork {
+            id: "bsh1".into(),
+            kind: Some("shell".into()),
+            description: Some("sleep 60".into()),
+        }]))
+        .await
+        .unwrap();
+        svc.ingest(notice("bsh1", Some("toolu_bg"))).await.unwrap();
+        svc.ingest(stop(vec![])).await.unwrap();
+        svc.ingest(subagent_hook(HookKind::UserPromptSubmit, tid, "h1", "afd"))
+            .await
+            .unwrap();
+        svc.ingest(stop(vec![])).await.unwrap();
+        svc.ingest(notice("ghost", None)).await.unwrap();
+        svc.ingest(stop(vec![])).await.unwrap();
+
+        type Job = (
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            String,
+        );
+        let jobs: Vec<Job> = svc
+            .db
+            .read(|c| {
+                let mut stmt = c
+                    .prepare(
+                        "SELECT harness_job_id, kind, started_turn, report_turn, status, state
+                           FROM v_agent_job ORDER BY id",
+                    )
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = stmt
+                    .query_map([], |r| {
+                        Ok((
+                            r.get(0)?,
+                            r.get(1)?,
+                            r.get(2)?,
+                            r.get(3)?,
+                            r.get(4)?,
+                            r.get(5)?,
+                        ))
+                    })
+                    .map_err(oxplow_db::map_sql_err)?;
+                rows.collect::<Result<Vec<_>, _>>()
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let trn = |n: i64| Some(format!("oxplow:oxplow/turn?id=trn{n}"));
+        assert_eq!(
+            jobs,
+            vec![
+                (
+                    "afd".into(),
+                    Some("subagent".into()),
+                    trn(1),
+                    trn(3),
+                    None,
+                    "reported".into()
+                ),
+                (
+                    "bsh1".into(),
+                    Some("shell".into()),
+                    trn(1),
+                    trn(2),
+                    Some("completed".into()),
+                    "reported".into()
+                ),
+                (
+                    "ghost".into(),
+                    None,
+                    None,
+                    trn(4),
+                    Some("completed".into()),
+                    "reported".into()
+                ),
+            ]
+        );
+        let causes: Vec<(Option<String>, Option<String>)> = svc
+            .db
+            .read(|c| {
+                let mut stmt = c
+                    .prepare("SELECT cause_turn, cause_ref FROM v_agent_turn ORDER BY id")
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = stmt
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                    .map_err(oxplow_db::map_sql_err)?;
+                rows.collect::<Result<Vec<_>, _>>()
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            causes,
+            vec![
+                (None, None),
+                (trn(1), Some("bsh1".into())),
+                (trn(1), Some("afd".into())),
+                (None, Some("ghost".into())),
+            ]
+        );
+    }
+
+    /// A job's start known from its call replaces the guess of the Stop that
+    /// listed it; a subagent resumed after it reported is a new run; and a
+    /// session that ends leaves its unreported jobs lost, not running.
+    #[tokio::test]
+    async fn a_jobs_start_basis_resumed_runs_and_lost_jobs() {
+        let (svc, tid) = fixture().await;
+        let prompt = |text: &str| {
+            hook(
+                HookKind::UserPromptSubmit,
+                tid,
+                Some("h1"),
+                json!({ "prompt": text }),
+            )
+        };
+        let stop = |left: Vec<&str>| HookEnvelope {
+            turn_run: Some(TurnRun {
+                left_running: Some(
+                    left.into_iter()
+                        .map(|id| oxplow_domain::hook::RunningWork {
+                            id: id.into(),
+                            kind: None,
+                            description: None,
+                        })
+                        .collect(),
+                ),
+                ..TurnRun::default()
+            }),
+            ..hook(
+                HookKind::Stop,
+                tid,
+                Some("h1"),
+                json!({"last_assistant_message": "ok"}),
+            )
+        };
+        let bash = json!({"tool_name": "Bash", "tool_input": {"command": "sleep 9"}, "tool_use_id": "toolu_x"});
+        // Turn 1 starts a shell job; turn 2's Stop is the first to list it.
+        svc.ingest(prompt("one")).await.unwrap();
+        svc.ingest(hook(HookKind::PreToolUse, tid, Some("h1"), bash))
+            .await
+            .unwrap();
+        svc.ingest(stop(vec![])).await.unwrap();
+        svc.ingest(prompt("two")).await.unwrap();
+        svc.ingest(subagent_hook(HookKind::SubagentStart, tid, "h1", "afd"))
+            .await
+            .unwrap();
+        svc.ingest(stop(vec!["bsh", "afd"])).await.unwrap();
+        // The notice names the call: the job started in turn 1.
+        svc.ingest(HookEnvelope {
+            prompt: Some(Prompt::BackgroundJob {
+                call: Some("toolu_x".into()),
+                job: Some("bsh".into()),
+                status: Some("completed".into()),
+                summary: None,
+                text: "<task-notification>bsh</task-notification>".into(),
+            }),
+            ..hook(HookKind::UserPromptSubmit, tid, Some("h1"), json!({}))
+        })
+        .await
+        .unwrap();
+        svc.ingest(stop(vec![])).await.unwrap();
+        svc.ingest(subagent_hook(HookKind::UserPromptSubmit, tid, "h1", "afd"))
+            .await
+            .unwrap();
+        svc.ingest(stop(vec![])).await.unwrap();
+        // The subagent resumed: a new run, which the session's end loses.
+        svc.ingest(prompt("five")).await.unwrap();
+        svc.ingest(subagent_hook(HookKind::SubagentStart, tid, "h1", "afd"))
+            .await
+            .unwrap();
+        svc.ingest(hook(
+            HookKind::SessionEnd,
+            tid,
+            Some("h1"),
+            json!({"reason": "prompt_input_exit"}),
+        ))
+        .await
+        .unwrap();
+
+        type Job = (String, Option<String>, Option<String>, String);
+        let jobs: Vec<Job> = svc
+            .db
+            .read(|c| {
+                let mut stmt = c
+                    .prepare(
+                        "SELECT harness_job_id, started_turn, start_basis, state
+                           FROM v_agent_job ORDER BY id",
+                    )
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = stmt
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+                    .map_err(oxplow_db::map_sql_err)?;
+                rows.collect::<Result<Vec<_>, _>>()
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let trn = |n: i64| Some(format!("oxplow:oxplow/turn?id=trn{n}"));
+        let reported = Some("reported".to_string());
+        assert_eq!(
+            jobs,
+            vec![
+                ("afd".into(), trn(2), reported.clone(), "reported".into()),
+                ("bsh".into(), trn(1), reported.clone(), "reported".into()),
+                ("afd".into(), trn(5), reported, "lost".into()),
+            ]
+        );
+    }
+
+    /// A subagent start that names the turn that spawned it (by the
+    /// harness's own id) starts its job in that turn, even when a later one
+    /// is open.
+    #[tokio::test]
+    async fn a_subagent_start_naming_its_spawning_turn_starts_there() {
+        let (svc, tid) = fixture().await;
+        let prompt = |text: &str, turn: &str| HookEnvelope {
+            harness_turn: Some(turn.into()),
+            ..hook(
+                HookKind::UserPromptSubmit,
+                tid,
+                Some("h1"),
+                json!({ "prompt": text }),
+            )
+        };
+        svc.ingest(prompt("one", "cx1")).await.unwrap();
+        svc.ingest(hook(HookKind::Stop, tid, Some("h1"), json!({})))
+            .await
+            .unwrap();
+        svc.ingest(prompt("two", "cx2")).await.unwrap();
+        svc.ingest(HookEnvelope {
+            harness_turn: Some("cx1".into()),
+            ..subagent_hook(HookKind::SubagentStart, tid, "h1", "kid")
+        })
+        .await
+        .unwrap();
+        let started: Option<String> = svc
+            .db
+            .read(|c| {
+                c.query_row(
+                    "SELECT started_turn FROM v_agent_job WHERE harness_job_id = 'kid'",
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(started.as_deref(), Some("oxplow:oxplow/turn?id=trn1"));
+    }
+
+    /// What a person's prompt pointed at is a link from its turn: a task, a
+    /// file and a URI make three; a prompt with none makes none; a
+    /// reprompt's belong to the turn it landed in.
+    #[tokio::test]
+    async fn a_prompt_links_its_turn_to_what_it_pointed_at() {
+        let (svc, tid) = fixture().await;
+        // The worktree holds `src/a.rs`; `@types/node` is no file of it.
+        let worktree = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(worktree.path().join("src")).unwrap();
+        std::fs::write(worktree.path().join("src/a.rs"), "").unwrap();
+        let wt = worktree.path().to_string_lossy().to_string();
+        svc.db
+            .transaction(move |c| {
+                c.execute("UPDATE streams SET worktree_path = ?1", [wt.as_str()])
+                    .map_err(oxplow_db::map_sql_err)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let prompt = |text: &str| {
+            hook(
+                HookKind::UserPromptSubmit,
+                tid,
+                Some("h1"),
+                json!({"prompt": text}),
+            )
+        };
+        svc.ingest(prompt("nothing to point at")).await.unwrap();
+        svc.ingest(hook(HookKind::Stop, tid, Some("h1"), json!({})))
+            .await
+            .unwrap();
+        let task = "oxplow:oxplow/task?id=tsk9&provider=oxtask";
+        let text = format!(
+            "fix {} in @src/a.rs and @types/node, see [oxplow uri oxplow:oxplow/commit?sha=abc1234]",
+            oxplow_domain::uri::prompt_refs::item_mention(task, "Fix it", "todo")
+        );
+        svc.ingest(prompt(&text)).await.unwrap();
+        svc.ingest(prompt("and [oxplow uri oxplow:oxplow/commit?sha=def5678]"))
+            .await
+            .unwrap();
+        let rows: Vec<(String, String)> = svc
+            .db
+            .read(|c| {
+                let mut stmt = c
+                    .prepare(
+                        "SELECT source_uri, target_uri FROM page_ref
+                          WHERE ref_type = 'prompt_mention' ORDER BY source_uri, target_uri",
+                    )
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = stmt
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                    .map_err(oxplow_db::map_sql_err)?;
+                rows.collect::<Result<Vec<_>, _>>()
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let second = "oxplow:oxplow/turn?id=trn2".to_string();
+        assert!(rows.iter().all(|(s, _)| *s == second), "{rows:?}");
+        let targets: Vec<&str> = rows.iter().map(|(_, t)| t.as_str()).collect();
+        assert_eq!(targets.len(), 4, "{targets:?}");
+        assert!(targets.contains(&task));
+        assert!(targets.iter().any(|t| t.contains("a.rs")));
+        assert!(targets.iter().any(|t| t.contains("abc1234")));
+        assert!(targets.iter().any(|t| t.contains("def5678")));
+    }
+
+    /// A turn stores the question its final message ended on, from the
+    /// same reading that parks the thread on the person: a finished turn
+    /// ending in a question keeps its last line; one that doesn't, or an
+    /// interrupted one, keeps none.
+    #[tokio::test]
+    async fn a_turn_records_the_question_it_ended_on() {
+        let (svc, tid) = fixture().await;
+        for (end, said) in [
+            (HookKind::Stop, "Done.\nShould I also update the docs?"),
+            (HookKind::Stop, "All done."),
+            (HookKind::Interrupt, ""),
+        ] {
+            svc.ingest(hook(
+                HookKind::UserPromptSubmit,
+                tid,
+                Some("h1"),
+                json!({"prompt": "go"}),
+            ))
+            .await
+            .unwrap();
+            svc.ingest(hook(
+                end,
+                tid,
+                Some("h1"),
+                json!({"last_assistant_message": said}),
+            ))
+            .await
+            .unwrap();
+        }
+        let questions: Vec<Option<String>> = svc
+            .db
+            .read(|c| {
+                let mut stmt = c
+                    .prepare("SELECT question FROM v_agent_turn ORDER BY id")
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = stmt
+                    .query_map([], |r| r.get(0))
+                    .map_err(oxplow_db::map_sql_err)?;
+                rows.collect::<Result<Vec<_>, _>>()
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            questions,
+            vec![Some("Should I also update the docs?".into()), None, None]
+        );
+    }
+
+    /// A turn's activity counts its compactions, the prompts delivered in
+    /// it and how many a person typed: a job's report opens a turn the
+    /// person then prompts into.
+    #[tokio::test]
+    async fn a_turns_activity_counts_its_compactions_and_prompts() {
+        let (svc, tid) = fixture().await;
+        svc.ingest(HookEnvelope {
+            prompt: Some(Prompt::BackgroundJob {
+                call: None,
+                job: Some("bsh".into()),
+                status: None,
+                summary: None,
+                text: "<task-notification>bsh</task-notification>".into(),
+            }),
+            ..hook(HookKind::UserPromptSubmit, tid, Some("h1"), json!({}))
+        })
+        .await
+        .unwrap();
+        svc.ingest(hook(
+            HookKind::UserPromptSubmit,
+            tid,
+            Some("h1"),
+            json!({"prompt": "also fix the test"}),
+        ))
+        .await
+        .unwrap();
+        svc.ingest(hook(
+            HookKind::PostCompact,
+            tid,
+            Some("h1"),
+            json!({"trigger": "auto"}),
+        ))
+        .await
+        .unwrap();
+        svc.ingest(hook(
+            HookKind::Stop,
+            tid,
+            Some("h1"),
+            json!({"last_assistant_message": "ok"}),
+        ))
+        .await
+        .unwrap();
+        let row: (i64, i64, i64) = svc
+            .db
+            .read(|c| {
+                c.query_row(
+                    "SELECT compactions, deliveries, person_prompts FROM v_turn_activity",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(row, (1, 2, 1));
+    }
+
+    /// A subagent's job ends when it stops, not only with a hand-back; and
+    /// its calls are the work of the turn that started it, also when they
+    /// land after that turn ended or while another turn runs.
+    #[tokio::test]
+    async fn a_subagents_stop_ends_its_job_and_its_calls_keep_their_turn() {
+        let (svc, tid) = fixture().await;
+        let prompt = |text: &str| {
+            hook(
+                HookKind::UserPromptSubmit,
+                tid,
+                Some("h1"),
+                json!({ "prompt": text }),
+            )
+        };
+        let stop = || {
+            hook(
+                HookKind::Stop,
+                tid,
+                Some("h1"),
+                json!({"last_assistant_message": "ok"}),
+            )
+        };
+        let call_by = |agent: &str, id: &str| {
+            hook(
+                HookKind::PostToolUse,
+                tid,
+                Some("h1"),
+                json!({"tool_name": "Bash", "tool_input": {"command": "ls"}, "tool_use_id": id,
+                       "agent_id": agent, "agent_type": "general-purpose"}),
+            )
+        };
+        // Turn 1: a foreground subagent runs and stops; a background one
+        // starts.
+        svc.ingest(prompt("one")).await.unwrap();
+        svc.ingest(subagent_hook(HookKind::SubagentStart, tid, "h1", "fg"))
+            .await
+            .unwrap();
+        svc.ingest(call_by("fg", "t1")).await.unwrap();
+        svc.ingest(subagent_hook(HookKind::SubagentStop, tid, "h1", "fg"))
+            .await
+            .unwrap();
+        svc.ingest(subagent_hook(HookKind::SubagentStart, tid, "h1", "bg"))
+            .await
+            .unwrap();
+        svc.ingest(stop()).await.unwrap();
+        // The background one works on after turn 1, and into turn 2.
+        svc.ingest(call_by("bg", "t2")).await.unwrap();
+        svc.ingest(prompt("two")).await.unwrap();
+        svc.ingest(call_by("bg", "t3")).await.unwrap();
+        svc.ingest(stop()).await.unwrap();
+        let read = |sql: &'static str| {
+            let db = svc.db.clone();
+            async move {
+                db.read(move |c| {
+                    let mut stmt = c.prepare(sql).map_err(oxplow_db::map_sql_err)?;
+                    let rows = stmt
+                        .query_map([], |r| {
+                            Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+                        })
+                        .map_err(oxplow_db::map_sql_err)?;
+                    rows.collect::<Result<Vec<_>, _>>()
+                        .map_err(oxplow_db::map_sql_err)
+                })
+                .await
+                .unwrap()
+            }
+        };
+        assert_eq!(
+            read("SELECT harness_job_id, state FROM v_agent_job ORDER BY id").await,
+            vec![
+                ("fg".to_string(), Some("reported".to_string())),
+                ("bg".to_string(), Some("running".to_string())),
+            ]
+        );
+        let events = logged(&svc).await;
+        let turns: Vec<_> = of_type(&events, "agent.tool.finished")
+            .iter()
+            .map(|e| e.envelope.anchors.turn_id)
+            .collect();
+        assert_eq!(turns, vec![Some(1), Some(1), Some(1)]);
+    }
+
+    /// A turn joins its request when it opens: a person's prompt starts
+    /// one; a job's report joins the request of the turn that started the
+    /// job — also when a person's prompt came between, and two jobs deep; a
+    /// subagent's hand-back joins its spawner's; a prompt the harness said
+    /// nothing of starts its own; a re-prompt opens no turn and starts none.
+    #[tokio::test]
+    async fn a_turn_joins_its_request_when_it_opens() {
+        let (svc, tid) = fixture().await;
+        let prompt = |text: &str| {
+            hook(
+                HookKind::UserPromptSubmit,
+                tid,
+                Some("h1"),
+                json!({ "prompt": text }),
+            )
+        };
+        let stop = || {
+            hook(
+                HookKind::Stop,
+                tid,
+                Some("h1"),
+                json!({"last_assistant_message": "ok"}),
+            )
+        };
+        let start_job = |call: &str| {
+            hook(
+                HookKind::PreToolUse,
+                tid,
+                Some("h1"),
+                json!({"tool_name": "Bash", "tool_input": {"command": "sleep 9", "run_in_background": true},
+                       "tool_use_id": call}),
+            )
+        };
+        let notice = |call: &str| HookEnvelope {
+            prompt: Some(Prompt::BackgroundJob {
+                call: Some(call.into()),
+                job: Some(format!("job-{call}")),
+                status: Some("completed".into()),
+                summary: None,
+                text: format!("<task-notification>{call}</task-notification>"),
+            }),
+            ..hook(HookKind::UserPromptSubmit, tid, Some("h1"), json!({}))
+        };
+        for env in [
+            prompt("one"),
+            start_job("a"),
+            stop(),
+            prompt("two"),
+            stop(),
+            notice("a"),
+            start_job("b"),
+            stop(),
+            notice("b"),
+            prompt("a re-prompt"),
+            stop(),
+            prompt("five"),
+            subagent_hook(HookKind::SubagentStart, tid, "h1", "afd"),
+            stop(),
+            subagent_hook(HookKind::UserPromptSubmit, tid, "h1", "afd"),
+            stop(),
+            HookEnvelope {
+                prompt: None,
+                ..hook(HookKind::UserPromptSubmit, tid, Some("h1"), json!({}))
+            },
+            stop(),
+        ] {
+            svc.ingest(env).await.unwrap();
+        }
+        let read = |sql: &'static str| {
+            let db = svc.db.clone();
+            async move {
+                db.read(move |c| {
+                    let mut stmt = c.prepare(sql).map_err(oxplow_db::map_sql_err)?;
+                    let rows = stmt
+                        .query_map([], |r| r.get::<_, Option<i64>>(0))
+                        .map_err(oxplow_db::map_sql_err)?;
+                    rows.collect::<Result<Vec<_>, _>>()
+                        .map_err(oxplow_db::map_sql_err)
+                })
+                .await
+                .unwrap()
+            }
+        };
+        assert_eq!(
+            read("SELECT CAST(substr(request, instr(request, 'id=req') + 6) AS INTEGER) FROM v_agent_turn ORDER BY id").await,
+            [1, 2, 1, 1, 3, 3, 4].map(Some).to_vec()
+        );
+        assert_eq!(
+            read("SELECT first_turn_id FROM request ORDER BY id").await,
+            [1, 2, 5, 7].map(Some).to_vec()
+        );
+    }
+
+    /// Another session's message is matched to the turn that sent it — the
+    /// one recent send of the same text — and joins that turn's request;
+    /// two sends of the same text match neither, and a message no session
+    /// here sent starts its own request.
+    #[tokio::test]
+    async fn a_peers_message_is_matched_to_the_turn_that_sent_it() {
+        let (svc, tid) = fixture().await;
+        let sender = first_session();
+        let receiver = open_session(&svc, tid).await;
+        let send = |call: &str, text: &str| {
+            hook_in(
+                HookKind::PreToolUse,
+                tid,
+                sender,
+                Some("s1"),
+                json!({"tool_name": "SendMessage", "tool_use_id": call,
+                       "tool_input": {"to": "oxplow-bugfixes", "message": text}}),
+            )
+        };
+        let receive = |text: &str| {
+            HookEnvelope {
+            prompt: Some(Prompt::PeerMessage {
+                from: "oxplow-main".into(),
+                socket: None,
+                message: Some(text.into()),
+                text: format!("<cross-session-message from-name=\"oxplow-main\">\n{text}\n</cross-session-message>"),
+                idle_notice: false,
+            }),
+            ..hook_in(HookKind::UserPromptSubmit, tid, receiver, Some("r1"), json!({}))
+        }
+        };
+        let stop = |ses, sid| {
+            hook_in(
+                HookKind::Stop,
+                tid,
+                ses,
+                Some(sid),
+                json!({"last_assistant_message": "ok"}),
+            )
+        };
+        // Turn 1 (the sender's) sends one message, and another twice.
+        svc.ingest(hook_in(
+            HookKind::UserPromptSubmit,
+            tid,
+            sender,
+            Some("s1"),
+            json!({"prompt": "tell bugfixes"}),
+        ))
+        .await
+        .unwrap();
+        // Two calls send the same text; a re-posted hook records nothing.
+        for (call, text) in [
+            ("t1", "merge main first"),
+            ("t1", "merge main first"),
+            ("t2", "twice"),
+            ("t3", "twice"),
+        ] {
+            svc.ingest(send(call, text)).await.unwrap();
+        }
+        svc.ingest(stop(sender, "s1")).await.unwrap();
+        for text in ["merge main first", "twice", "from nowhere"] {
+            svc.ingest(receive(text)).await.unwrap();
+            svc.ingest(stop(receiver, "r1")).await.unwrap();
+        }
+        type Row = (Option<String>, Option<String>, Option<String>);
+        let rows: Vec<Row> = svc
+            .db
+            .read(|c| {
+                let mut stmt = c
+                    .prepare(
+                        "SELECT cause_turn, cause_basis, request FROM v_agent_turn ORDER BY id",
+                    )
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = stmt
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                    .map_err(oxplow_db::map_sql_err)?;
+                rows.collect::<Result<Vec<_>, _>>()
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let req = |n: i64| Some(format!("oxplow:oxplow/request?id=req{n}"));
+        assert_eq!(
+            rows,
+            vec![
+                (None, None, req(1)),
+                (
+                    Some("oxplow:oxplow/turn?id=trn1".into()),
+                    Some("matched".into()),
+                    req(1)
+                ),
+                (None, None, req(2)),
+                (None, None, req(3)),
+            ]
+        );
+    }
+
+    /// The idle notice a `notify_when_idle` send asked for names only the
+    /// session that went idle: it joins the turn of the send that asked, to
+    /// that recipient. A send that did not ask, one to another recipient,
+    /// or two that asked match nothing (the notice then starts its own
+    /// request).
+    #[tokio::test]
+    async fn an_idle_notice_is_matched_to_the_send_that_asked_for_it() {
+        let (svc, tid) = fixture().await;
+        let sender = first_session();
+        let receiver = open_session(&svc, tid).await;
+        let send = |call: &str, to: &str, notify: bool| {
+            hook_in(
+                HookKind::PreToolUse,
+                tid,
+                sender,
+                Some("s1"),
+                json!({"tool_name": "SendMessage", "tool_use_id": call,
+                       "tool_input": {"to": to, "message": format!("hi {call}"),
+                                      "notify_when_idle": notify}}),
+            )
+        };
+        let notice = |from: &str, sid: &str| {
+            HookEnvelope {
+            prompt: Some(Prompt::PeerMessage {
+                from: from.into(),
+                socket: None,
+                message: None,
+                text: format!("[Cross-session idle notice] \"{from}\", which you asked to be notified about, is idle now"),
+                idle_notice: true,
+            }),
+            ..hook_in(HookKind::UserPromptSubmit, tid, sender, Some(sid), json!({}))
+        }
+        };
+        let stop = |sid| {
+            hook_in(
+                HookKind::Stop,
+                tid,
+                sender,
+                Some(sid),
+                json!({"last_assistant_message": "ok"}),
+            )
+        };
+        let _ = receiver;
+        svc.ingest(hook_in(
+            HookKind::UserPromptSubmit,
+            tid,
+            sender,
+            Some("s1"),
+            json!({"prompt": "ask peers"}),
+        ))
+        .await
+        .unwrap();
+        for (call, to, notify) in [
+            ("t1", "asked", true),
+            ("t2", "silent", false),
+            ("t3", "twice", true),
+            ("t4", "twice", true),
+        ] {
+            svc.ingest(send(call, to, notify)).await.unwrap();
+        }
+        svc.ingest(stop("s1")).await.unwrap();
+        for (n, from) in ["asked", "silent", "twice", "stranger"].iter().enumerate() {
+            let sid = format!("n{n}");
+            svc.ingest(notice(from, &sid)).await.unwrap();
+            svc.ingest(stop(Box::leak(sid.into_boxed_str())))
+                .await
+                .unwrap();
+        }
+        let rows: Vec<(Option<String>, Option<String>)> = svc
+            .db
+            .read(|c| {
+                let mut stmt = c
+                    .prepare("SELECT cause_turn, cause_basis FROM v_agent_turn ORDER BY id")
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = stmt
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                    .map_err(oxplow_db::map_sql_err)?;
+                rows.collect::<Result<Vec<_>, _>>()
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                (None, None),
+                (
+                    Some("oxplow:oxplow/turn?id=trn1".into()),
+                    Some("matched".into())
+                ),
+                (None, None),
+                (None, None),
+                (None, None),
+            ]
+        );
+    }
+
+    /// The match does not stop at a thread: a message a session of one
+    /// thread sent is received in another thread, and the received turn
+    /// joins the sender's request.
+    #[tokio::test]
+    async fn a_message_is_matched_across_threads() {
+        let (svc, tid) = fixture().await;
+        svc.db
+            .transaction(|tx| {
+                tx.execute(
+                    "INSERT INTO threads (id, stream_id, title, created_at, updated_at)
+                     SELECT 2, stream_id, 'other', created_at, updated_at FROM threads WHERE id = 1",
+                    [],
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let other = ThreadId::new(2);
+        let sender = first_session();
+        let receiver = open_session(&svc, other).await;
+        svc.ingest(hook_in(
+            HookKind::UserPromptSubmit,
+            tid,
+            sender,
+            Some("s1"),
+            json!({"prompt": "tell the other thread"}),
+        ))
+        .await
+        .unwrap();
+        svc.ingest(hook_in(
+            HookKind::PreToolUse,
+            tid,
+            sender,
+            Some("s1"),
+            json!({"tool_name": "SendMessage", "tool_use_id": "t1",
+                   "tool_input": {"to": "other", "message": "over to you"}}),
+        ))
+        .await
+        .unwrap();
+        svc.ingest(HookEnvelope {
+            prompt: Some(Prompt::PeerMessage {
+                from: "first".into(),
+                socket: None,
+                message: Some("over to you".into()),
+                text: "<cross-session-message from-name=\"first\">\nover to you\n</cross-session-message>".into(),
+                idle_notice: false,
+            }),
+            ..hook_in(HookKind::UserPromptSubmit, other, receiver, Some("r1"), json!({}))
+        })
+        .await
+        .unwrap();
+        let rows: Vec<(i64, Option<String>, Option<String>)> = svc
+            .db
+            .read(|c| {
+                let mut stmt = c
+                    .prepare("SELECT thread_id, cause_turn, request FROM v_agent_turn ORDER BY id")
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = stmt
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                    .map_err(oxplow_db::map_sql_err)?;
+                rows.collect::<Result<Vec<_>, _>>()
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let req = Some("oxplow:oxplow/request?id=req1".to_string());
+        assert_eq!(
+            rows,
+            vec![
+                (1, None, req.clone()),
+                (2, Some("oxplow:oxplow/turn?id=trn1".into()), req),
+            ]
+        );
+    }
+
+    /// A request's state is read live from its turns and jobs: running
+    /// while a turn is open, waiting on its own work while a job it started
+    /// has not reported, waiting on the person when its last turn ended on a
+    /// question, else finished; its totals count its turns.
+    #[tokio::test]
+    async fn a_requests_state_and_totals_are_read_from_its_turns() {
+        let (svc, tid) = fixture().await;
+        let state = || {
+            let db = svc.db.clone();
+            async move {
+                db.read(|c| {
+                    let mut stmt = c
+                        .prepare("SELECT state, turns FROM v_request ORDER BY id")
+                        .map_err(oxplow_db::map_sql_err)?;
+                    let rows = stmt
+                        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
+                        .map_err(oxplow_db::map_sql_err)?;
+                    rows.collect::<Result<Vec<_>, _>>()
+                        .map_err(oxplow_db::map_sql_err)
+                })
+                .await
+                .unwrap()
+            }
+        };
+        let said = |text: &str| {
+            hook(
+                HookKind::Stop,
+                tid,
+                Some("h1"),
+                json!({ "last_assistant_message": text }),
+            )
+        };
+        svc.ingest(hook(
+            HookKind::UserPromptSubmit,
+            tid,
+            Some("h1"),
+            json!({"prompt": "one"}),
+        ))
+        .await
+        .unwrap();
+        assert_eq!(state().await, vec![("running".to_string(), 1)]);
+        svc.ingest(HookEnvelope {
+            turn_run: Some(TurnRun {
+                left_running: Some(vec![oxplow_domain::hook::RunningWork {
+                    id: "bsh".into(),
+                    kind: Some("shell".into()),
+                    description: None,
+                }]),
+                ..TurnRun::default()
+            }),
+            ..said("started it")
+        })
+        .await
+        .unwrap();
+        assert_eq!(state().await, vec![("waiting_on_work".to_string(), 1)]);
+        svc.ingest(HookEnvelope {
+            prompt: Some(Prompt::BackgroundJob {
+                call: None,
+                job: Some("bsh".into()),
+                status: Some("completed".into()),
+                summary: None,
+                text: "<task-notification>bsh</task-notification>".into(),
+            }),
+            ..hook(HookKind::UserPromptSubmit, tid, Some("h1"), json!({}))
+        })
+        .await
+        .unwrap();
+        svc.ingest(said("Built it.\nShould I commit?"))
+            .await
+            .unwrap();
+        assert_eq!(state().await, vec![("waiting_on_person".to_string(), 2)]);
+        svc.ingest(hook(
+            HookKind::UserPromptSubmit,
+            tid,
+            Some("h1"),
+            json!({"prompt": "two"}),
+        ))
+        .await
+        .unwrap();
+        svc.ingest(said("Done.")).await.unwrap();
+        // The person's answer started a new request: the first stops waiting.
+        assert_eq!(
+            state().await,
+            vec![("finished".to_string(), 2), ("finished".to_string(), 1)]
         );
     }
 }

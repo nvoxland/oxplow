@@ -83,7 +83,7 @@ pub struct FunctionMetrics {
 }
 
 /// A code "unit" — the generic, language-agnostic structural element the
-/// language-support epic (tsk320) builds navigation / roll-ups on. One per
+/// language-support epic builds navigation / roll-ups on. One per
 /// function, class-like container, module/namespace, or package the file
 /// participates in. The set of kinds a language exposes is declared on its
 /// [`language::LanguageSupport::unit_kinds`].
@@ -799,7 +799,7 @@ const GENERATED_HEADER_LINES: usize = 10;
 /// Heuristic: is this file codegen output rather than hand-written source?
 /// Generated artifacts (tauri-specta bindings, protobuf stubs, …) shouldn't
 /// count toward code-shape metrics — a 3k-line bindings file read as one
-/// giant "function" dominates every tail metric (tsk68).
+/// giant "function" dominates every tail metric.
 ///
 /// Two signals, either suffices:
 /// - **path**: a `generated` path segment, or a `.generated.` /

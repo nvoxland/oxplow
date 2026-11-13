@@ -5,7 +5,7 @@
 //! `permissions:` is a list in the grammar of a script's `needs:` — a
 //! scope id, or `<scope>:<qualifier>` — of the scopes a person decides
 //! about: `[sql.read, files.read, ai.compute, process.run, agent.write,
-//! network:api.github.com, secrets:GH_TOKEN, commands:oxplow.work_item.*]`.
+//! network:api.github.com, secrets:GH_TOKEN, commands:oxtask.task.*]`.
 //!
 //! The baseline needs no declaration: pages and the rest of the
 //! declarative UI, its own datasets, its own commands and the scripts that
@@ -57,7 +57,7 @@ pub struct Permissions {
     /// Ad-hoc SQL: a script's `scope("sql.read")`, a component's own query.
     pub sql: Option<SqlAccess>,
     /// Commands outside its own namespace it may run, as patterns:
-    /// `oxplow.work_item.*` (`*` is one segment, `**` the rest).
+    /// `oxtask.task.*` (`*` is one segment, `**` the rest).
     pub commands: Vec<String>,
     /// The project's files outside the bus.
     pub files: Option<FilesAccess>,
@@ -99,7 +99,7 @@ pub const PERMISSION_IDS: &[(&str, &str)] = &[
     ("secrets:", "read a secret by name: `secrets:GH_TOKEN`"),
     (
         "commands:",
-        "run commands outside its own namespace: `commands:oxplow.work_item.*`",
+        "run commands outside its own namespace: `commands:oxplow.task.*`",
     ),
 ];
 
@@ -450,14 +450,14 @@ mod tests {
 
     #[test]
     fn commands_match_own_namespace_without_a_pattern_and_globs_otherwise() {
-        let p = parse("[commands:oxplow.work_item.*, commands:acme_pr.**]");
+        let p = parse("[commands:oxplow.task.*, commands:acme_pr.**]");
         assert!(p.command_allowed("mine", "mine.sync"));
         assert!(!p.command_allowed("mine", "minecraft.sync"));
-        assert!(p.command_allowed("mine", "oxplow.work_item.transition"));
-        assert!(!p.command_allowed("mine", "oxplow.work_item.link.add"));
+        assert!(p.command_allowed("mine", "oxplow.task.transition"));
+        assert!(!p.command_allowed("mine", "oxplow.task.link.add"));
         assert!(!p.command_allowed("mine", "oxplow.thread.close"));
         assert!(p.command_allowed("mine", "acme_pr.review.approve"));
-        assert!(p.covers(&parse("[commands:oxplow.work_item.transition]")));
+        assert!(p.covers(&parse("[commands:oxplow.task.transition]")));
     }
 
     #[test]
@@ -471,7 +471,7 @@ mod tests {
     /// The list round-trips, and is what a deployment stores.
     #[test]
     fn the_list_round_trips() {
-        let text = "[sql.read, files.write, ai.compute, process.run, agent.write, network:api.github.com, secrets:GH, commands:oxplow.work_item.*]";
+        let text = "[sql.read, files.write, ai.compute, process.run, agent.write, network:api.github.com, secrets:GH, commands:oxplow.task.*]";
         let p = parse(text);
         let ids: Vec<String> = p.clone().into();
         assert_eq!(Permissions::try_from(ids.clone()).unwrap(), p);

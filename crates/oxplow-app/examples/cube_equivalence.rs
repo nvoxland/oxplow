@@ -1,10 +1,10 @@
-//! Cube-vs-facts equivalence on a REAL database copy (tsk96 / tsk99 / tsk97).
+//! Cube-vs-facts equivalence on a REAL database copy.
 //!
 //! For every spec in the catalog: take the fact-served series (the oracle),
 //! build the cube, re-read, and demand exact equality. Each base spec is also
 //! probed through `cube_series` directly, so a read that silently DECLINED
 //! cannot pass vacuously as "equal because both sides were fact-served" —
-//! tsk99's trap, and the reason the oracle must be taken BEFORE the build.
+//! the trap, and the reason the oracle must be taken BEFORE the build.
 //!
 //! Run against a consistent copy, never the live file (second arg = the repo
 //! the DB describes, for the ancestry resolver; defaults to the cwd):
@@ -38,7 +38,7 @@ async fn main() {
     let db = Database::open(&path).expect("open db copy (migrates it, incl. the cube clears)");
     let facts = SqliteFactStore::new(db.clone());
     // Mirror production wiring exactly: the SAME resolver on the engine and
-    // the builder (tsk102) — anything else verifies a configuration the app
+    // the builder — anything else verifies a configuration the app
     // never runs.
     let resolver = std::sync::Arc::new(VisibilityResolver::new(
         oxplow_db::SqliteSnapshotStore::new(db),

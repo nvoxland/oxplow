@@ -1,0 +1,14 @@
+# A request whose turn edited a file and took a task (moved it to in progress)
+# is tracked: it records 1 for the request.
+requires: [oxtask]
+given:
+  - { command: oxtask.task.create, input: { title: The fix, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - observe:
+      turn:
+        prompt: Fix the greeting
+        during:
+          - { command: oxtask.task.move, input: { id: tsk1, stage: in_progress }, as: agent }
+        tools: [{ name: Edit, kind: edit, paths: [a.txt], ok: true }]
+when: { sql: "SELECT value FROM v_fact WHERE measure_key = 'oxplow.request_tracked'" }
+expect: { rows: [{ value: 1.0 }] }

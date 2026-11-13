@@ -2,9 +2,9 @@ import { expect, test } from "bun:test";
 
 import { InternalLink } from "./InternalLink.js";
 
-// tsk974: Tiptap registers each of Link's `protocols` with linkify when an
+// Tiptap registers each of Link's `protocols` with linkify when an
 // editor is made, and linkify throws on a scheme it can't tokenize
-// (`work_item` has an underscore) — so every rich-text field threw. Our
+// (`task` has an underscore) — so every rich-text field threw. Our
 // schemes are allowed through `isAllowedUri` instead.
 
 const options = InternalLink.options as {
@@ -19,13 +19,13 @@ test("every scheme the editor registers with linkify is one linkify accepts", ()
 
 test("internal links are allowed and a script url isn't", () => {
   const ctx = { defaultValidate: (u: string) => /^(https?|mailto):/i.test(u), protocols: [] };
-  for (const url of ["oxplow:oxplow/work_item?id=tsk1&provider=oxplow", "oxplow:oxplow/file?path=src/a.ts", "oxplow:oxplow/dir?path=src", "oxplow:oxplow/commit?sha=abc123", "https://example.com"]) {
+  for (const url of ["oxplow:oxplow/task?id=tsk1&provider=oxtask", "oxplow:oxplow/file?path=src/a.ts", "oxplow:oxplow/dir?path=src", "oxplow:oxplow/commit?sha=abc123", "https://example.com"]) {
     expect(options.isAllowedUri(url, ctx)).toBe(true);
   }
   expect(options.isAllowedUri("javascript:alert(1)", ctx)).toBe(false);
 });
 
-// tsk1007: an invalid wikilink is an `oxplow-invalid:` link (the preprocess
+// an invalid wikilink is an `oxplow-invalid:` link (the preprocess
 // keeps what it can't resolve as one), kept through the editor so it saves
 // back as `[[…]]`; and a link Tiptap hands over without an href doesn't
 // throw.

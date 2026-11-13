@@ -1,5 +1,5 @@
-//! Entity metrics (tsk322): metrics computed over a semantic-layer view
-//! (`v_work_item`, an extension's `v_*`, …) instead of a measure's facts, sliced by
+//! Entity metrics: metrics computed over a semantic-layer view
+//! (`v_thread`, an extension's `v_*`, …) instead of a measure's facts, sliced by
 //! entity dimensions (a SQL expression over the same view, with an optional
 //! join).
 //!
@@ -192,7 +192,7 @@ fn number(c: &SqlCell) -> Option<f64> {
 
 /// Run a read. One row comes back per (bucket, group); past the row cap
 /// the newest ones would be lost, so that's an error rather than a short
-/// answer (tsk367).
+/// answer.
 pub async fn run(
     layer: &crate::sql_gateway::SqlGateway,
     read: &EntityRead<'_>,
@@ -384,15 +384,14 @@ mod tests {
             c.execute_batch(
                 "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
                    VALUES (1, 'primary', 'p', 'main', 'refs/heads/main', 'local', '/r', '2026-01-01', '2026-01-01');
-                 INSERT INTO threads (id, stream_id, title, created_at, updated_at)
-                   VALUES (1, 1, 'T', '2026-01-01', '2026-01-01');
-                 INSERT INTO capability_provider (capability, provider, active) VALUES ('work_items', 'oxplow', 1);
-                 INSERT INTO work_item (uri, provider, title, state, native_state, native, thread_id, rank, created_at, updated_at, closed_at) VALUES
-                   ('oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 'oxplow', 'a', 'done', 'done', '{\"priority\":\"high\"}', 1, 10, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', '2026-09-21T09:00:00Z'),
-                   ('oxplow:oxplow/work_item?id=tsk2&provider=oxplow', 'oxplow', 'b', 'done', 'done', '{\"priority\":\"low\"}', 1, 20, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', '2026-09-21T17:30:00Z'),
-                   ('oxplow:oxplow/work_item?id=tsk3&provider=oxplow', 'oxplow', 'c', 'done', 'done', '{\"priority\":\"high\"}', 1, 30, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', '2026-09-23T12:00:00Z'),
-                   ('oxplow:oxplow/work_item?id=tsk4&provider=oxplow', 'oxplow', 'd', 'todo', 'ready', '{\"priority\":\"high\"}', 1, 40, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', NULL),
-                   ('oxplow:oxplow/work_item?id=tsk5&provider=oxplow', 'oxplow', 'e', 'in_progress', 'in_progress', '{\"priority\":\"medium\"}', 1, 50, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', NULL);",
+                 -- Threads as the rows to measure: three closed on known days, with
+                 -- a colour (the dimension) and an order (the number to aggregate).
+                 INSERT INTO threads (id, stream_id, title, created_at, updated_at, closed_at, mark, sort_index) VALUES
+                   (1, 1, 'a', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', '2026-09-21T09:00:00Z', 'red', 10),
+                   (2, 1, 'b', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', '2026-09-21T17:30:00Z', 'green', 20),
+                   (3, 1, 'c', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', '2026-09-23T12:00:00Z', 'red', 30),
+                   (4, 1, 'd', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', NULL, 'red', 40),
+                   (5, 1, 'e', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', NULL, 'amber', 50);",
             )
             .map_err(|e| DomainError::Invalid(e.to_string()))
         })
@@ -403,8 +402,8 @@ mod tests {
 
     fn done() -> EntitySpec {
         EntitySpec {
-            view: "v_work_item".into(),
-            where_: Some("state = 'done'".into()),
+            view: "v_thread".into(),
+            where_: Some("closed_at IS NOT NULL".into()),
             time: Some("closed_at".into()),
             value: None,
             aggregation: "count".into(),
@@ -413,8 +412,8 @@ mod tests {
 
     fn priority() -> EntityDimensionSpec {
         EntityDimensionSpec {
-            view: "v_work_item".into(),
-            expr: "json_extract(e.native, '$.priority')".into(),
+            view: "v_thread".into(),
+            expr: "e.mark".into(),
             join: None,
         }
     }
@@ -483,22 +482,22 @@ mod tests {
         assert_eq!(
             got,
             vec![
-                ("2026-09-21".to_string(), "high".to_string(), 1.0),
-                ("2026-09-21".to_string(), "low".to_string(), 1.0),
-                ("2026-09-23".to_string(), "high".to_string(), 1.0)
+                ("2026-09-21".to_string(), "green".to_string(), 1.0),
+                ("2026-09-21".to_string(), "red".to_string(), 1.0),
+                ("2026-09-23".to_string(), "red".to_string(), 1.0)
             ]
         );
         // With a join: the dimension may read another view.
         let by_thread = EntityDimensionSpec {
-            view: "v_work_item".into(),
-            expr: "t.title".into(),
-            join: Some("LEFT JOIN v_thread t ON t.id = e.thread_id".into()),
+            view: "v_thread".into(),
+            expr: "s.title".into(),
+            join: Some("LEFT JOIN v_stream s ON s.id = e.stream_id".into()),
         };
         let rows = current(&l, &done(), Some(&by_thread)).await.unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(
             (rows[0].group.as_deref(), rows[0].value, rows[0].rows),
-            (Some("T"), Some(3.0), 3)
+            (Some("p"), Some(3.0), 3)
         );
     }
 
@@ -506,7 +505,7 @@ mod tests {
     async fn state_values_and_order_statistics() {
         let l = layer().await;
         let open = EntitySpec {
-            where_: Some("state IN ('todo', 'in_progress', 'blocked')".into()),
+            where_: Some("closed_at IS NULL".into()),
             time: None,
             ..done()
         };
@@ -514,7 +513,7 @@ mod tests {
         assert_eq!(now[0].value, Some(2.0));
         let stat = |agg: &str| EntitySpec {
             where_: None,
-            value: Some("e.rank".into()),
+            value: Some("e.sort_index".into()),
             aggregation: agg.into(),
             ..done()
         };
@@ -526,7 +525,7 @@ mod tests {
                     .unwrap()
             }
         };
-        // rank 10..50: median 30, nearest-rank p90 of 5 = 5th = 50.
+        // order 10..50: median 30, nearest-rank p90 of 5 = 5th = 50.
         assert_eq!(one("median").await, 30.0);
         assert_eq!(one("p90").await, 50.0);
         assert_eq!(one("sum").await, 150.0);
@@ -536,25 +535,25 @@ mod tests {
             .unwrap();
         let high = by_prio
             .iter()
-            .find(|r| r.group.as_deref() == Some("high"))
+            .find(|r| r.group.as_deref() == Some("red"))
             .unwrap();
         assert_eq!(high.value, Some(3.0));
     }
 
     /// A distinct count doesn't add across buckets: the headline is one
-    /// count over the whole range, not the sum of the daily ones (tsk367).
+    /// count over the whole range, not the sum of the daily ones.
     #[tokio::test]
     async fn a_distinct_headline_counts_across_the_range() {
         let l = layer().await;
         let prios = EntitySpec {
-            value: Some("json_extract(e.native, '$.priority')".into()),
+            value: Some("e.mark".into()),
             aggregation: "count_distinct".into(),
             ..done()
         };
         let s = series(&l, &prios, None, TimeBucket::Day, None)
             .await
             .unwrap();
-        // 09-21 {high, low}, 09-22 none, 09-23 {high}.
+        // 09-21 {red, green}, 09-22 none, 09-23 {red}.
         assert_eq!(
             s.iter().map(|p| p.value).collect::<Vec<_>>(),
             vec![2.0, 0.0, 1.0]
@@ -565,7 +564,7 @@ mod tests {
             .unwrap();
         assert_eq!(headline(&l, &done(), &count).await.unwrap(), Some(3.0));
         let latest = EntitySpec {
-            value: Some("e.rank".into()),
+            value: Some("e.sort_index".into()),
             aggregation: "max".into(),
             ..done()
         };
@@ -577,21 +576,21 @@ mod tests {
     }
 
     /// Past the row cap a read would lose its newest buckets; it errors
-    /// instead (tsk367).
+    /// instead.
     #[tokio::test]
     async fn a_read_past_the_row_cap_errors() {
         let db = seeded_db().await;
         let l = crate::sql_gateway::SqlGateway::new(db.clone());
         let by_id = EntityDimensionSpec {
-            view: "v_work_item".into(),
+            view: "v_thread".into(),
             expr: "e.uri".into(),
             join: None,
         };
         db.transaction(|c| {
             c.execute_batch(
                 "WITH RECURSIVE n(i) AS (SELECT 100 UNION ALL SELECT i + 1 FROM n WHERE i < 10100)
-                 INSERT INTO work_item (uri, provider, title, state, native_state, native, thread_id, rank, created_at, updated_at)
-                 SELECT 'oxplow:oxplow/work_item?id=tsk&provider=oxplow' || i, 'oxplow', 't', 'todo', 'ready', '{\"priority\":\"low\"}', 1, i, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z' FROM n;",
+                 INSERT INTO threads (id, stream_id, title, created_at, updated_at, sort_index)
+                 SELECT i, 1, 't', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', i FROM n;",
             )
             .map_err(|e| DomainError::Invalid(e.to_string()))
         })

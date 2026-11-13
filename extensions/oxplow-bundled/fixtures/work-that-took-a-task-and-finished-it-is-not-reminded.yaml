@@ -1,0 +1,16 @@
+# An agent that did everything right — took a task (moved it to in progress),
+# edited, moved it to done before stopping — has no thread task in progress at
+# the end but its request has a task linked: nothing to remind it of.
+requires: [oxtask]
+given:
+  - { command: oxtask.task.create, input: { title: The fix, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - observe:
+      turn:
+        prompt: Fix the greeting
+        during:
+          - { command: oxtask.task.move, input: { id: tsk1, stage: in_progress }, as: agent }
+        tools: [{ name: Edit, kind: edit, paths: [greeting.txt], ok: true }]
+  - { command: oxtask.task.move, input: { id: tsk1, stage: done } }
+when: { sql: "SELECT count(*) AS n FROM v_agent_nudge" }
+expect: { rows: [{ n: 0 }] }

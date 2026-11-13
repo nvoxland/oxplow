@@ -243,7 +243,7 @@ mod tests {
     }
 
     async fn run(
-        fx: &crate::test_fixtures::EffortFixture,
+        fx: &crate::test_fixtures::ThreadFixture,
         actor: &Actor,
         name: &str,
         input: serde_json::Value,
@@ -261,7 +261,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
         extension(dir.path());
-        let fx = crate::test_fixtures::services_with_effort_in(dir).await;
+        let fx = crate::test_fixtures::services_with_thread_in(dir).await;
         crate::test_fixtures::activate(&fx.svc).await;
         let collector = "oxplow:oxplow/collector?collector=acme/s";
         let set = || async {
@@ -341,11 +341,11 @@ mod tests {
         }
     }
 
-    /// A project extension whose provider is a remote MCP server reached
-    /// with a host secret as its bearer (`reference`).
+    /// A project extension whose provider reads a host secret (`reference`)
+    /// as its credential `PROVIDER_TOKEN`.
     fn secret_extension(root: &std::path::Path, reference: &SecretRef) {
         let ext = root.join(".oxplow/extensions/tracker");
-        std::fs::create_dir_all(ext.join("mcp")).unwrap();
+        std::fs::create_dir_all(ext.join("bin")).unwrap();
         let id = serde_json::to_value(reference).unwrap()["id"]
             .as_str()
             .unwrap()
@@ -353,16 +353,11 @@ mod tests {
         std::fs::write(
             ext.join("extension.yaml"),
             format!(
-                "manifest: 2\nname: tracker\nintent:\n  purpose: notes over MCP\n  examples: [{{ name: a }}]\npermissions: [process.run, network:mcp.example.com, secrets:OXPLOW_MCP_BEARER]\nproviders:\n  - id: notes\n    capability: work_items\n    network: [mcp.example.com]\n    adapter:\n      mcp: {{ url: \"https://mcp.example.com/mcp\", auth: OXPLOW_MCP_BEARER }}\n      mapping: mcp/x.star\n      tools: mcp/tools.json\n    credentials:\n      - {{ name: OXPLOW_MCP_BEARER, secretRef: {{ schemaVersion: 1, id: \"{id}\" }} }}\n    declarations: provider.json\n"
+                "manifest: 2\nname: tracker\nintent:\n  purpose: the fake provider\n  examples: [{{ name: a }}]\npermissions: [process.run, secrets:PROVIDER_TOKEN]\nproviders:\n  - id: notes\n    capability: snapshots\n    entry: bin/provider\n    credentials:\n      - {{ name: PROVIDER_TOKEN, secretRef: {{ schemaVersion: 1, id: \"{id}\" }} }}\n    declarations: provider.json\n"
             ),
         )
         .unwrap();
-        std::fs::write(ext.join("mcp/x.star"), "def transform(x):\n    return {}\n").unwrap();
-        std::fs::write(
-            ext.join("mcp/tools.json"),
-            r#"[{ "name": "list_items", "description": "List.", "inputSchema": { "type": "object" } }]"#,
-        )
-        .unwrap();
+        std::fs::write(ext.join("bin/provider"), "#!/bin/sh\n").unwrap();
         std::fs::write(
             ext.join("provider.json"),
             serde_json::to_string_pretty(&oxplow_provider_fake::declarations()).unwrap(),
@@ -379,7 +374,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
         secret_extension(dir.path(), &reference);
-        let fx = crate::test_fixtures::services_with_effort_in(dir).await;
+        let fx = crate::test_fixtures::services_with_thread_in(dir).await;
         crate::test_fixtures::activate(&fx.svc).await;
         let rows = || async {
             fx.svc
@@ -398,7 +393,7 @@ mod tests {
         assert_eq!(listed[0][0], oxplow_db::SqlCell::Text("tracker".into()));
         assert_eq!(
             listed[0][2],
-            oxplow_db::SqlCell::Text("OXPLOW_MCP_BEARER".into())
+            oxplow_db::SqlCell::Text("PROVIDER_TOKEN".into())
         );
         assert_eq!(listed[0][4], oxplow_db::SqlCell::Int(0));
         let wire: serde_json::Value = match &listed[0][3] {

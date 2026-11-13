@@ -15,7 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
  * two render branches.
  *
  * Three rules this encodes, each of which was gotten wrong at least once
- * when the logic was hand-written per strip (tsk269, tsk270):
+ * when the logic was hand-written per strip:
  *
  * 1. **Hover does not open.** The panel expands only on an explicit click.
  *    A strip that expands on `mouseEnter` fires whenever the pointer merely

@@ -1,0 +1,20 @@
+requires: [shelf, shelf-db]
+when: { command: shelf_db.book.add, input: { title: Dune, author: Herbert, rating: 4 } }
+expect: { ok: true, result: { id: dune } }
+steps:
+  - when: { collector: shelf_db/books, trigger: sqlite }
+    expect: { ok: true }
+  - when: { sql: "SELECT cursor_json FROM v_collector_run WHERE owner = 'shelf_db' AND id = 'books'" }
+    expect: { rows: [{ cursor_json: '{"seq":1}' }] }
+  - when:
+      sql: |
+        SELECT id, title, author, store,
+               json_extract(fields, '$."shelf-db".rating') AS rating
+        FROM v_shelf_book
+    expect:
+      rows:
+        - id: dune
+          title: Dune
+          author: Herbert
+          store: shelf-db
+          rating: 4

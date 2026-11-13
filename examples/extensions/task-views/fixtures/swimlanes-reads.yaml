@@ -1,9 +1,15 @@
-# The board's page reads its cards and the active provider's features,
-# which its component is fed.
+# The board's page reads its cards, and the active list's stages, which its component is fed.
 when:
   part: swimlanes
   params: { scope: all }
 expect:
   loaders:
     swimlanes: { rows: 0 }
-    features: { rows: 1 }
+    stages:
+      rows:
+        - { value: backlog, label: Backlog, bucket: backlog }
+        - { value: ready, label: Ready, bucket: todo }
+        - { value: in_progress, label: In Progress, bucket: in_progress }
+        - { value: blocked, label: Blocked, bucket: blocked }
+        - { value: done, label: Done, bucket: done }
+        - { value: canceled, label: Canceled, bucket: canceled }

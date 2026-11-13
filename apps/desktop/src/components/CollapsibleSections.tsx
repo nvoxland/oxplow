@@ -18,7 +18,7 @@ import {
  * "Collapse all" pair. The collapsed set is the tab entry's state
  * (`useHistoryState`): Back and a restart bring it back.
  *
- * **Three parts, because the page owns placement (tsk86).** The provider holds
+ * **Three parts, because the page owns placement.** The provider holds
  * state only and renders `children` bare — no wrapper element — so it can wrap a
  * whole `<Page>` without disturbing the page chrome's `height: 100%` flex column.
  * That's what lets the controls live in the details **right rail** while the
@@ -131,7 +131,7 @@ export function CollapsibleSections({
 
 /**
  * The "Expand all" / "Collapse all" pair. Rendered wherever the page wants it —
- * on Metrics that's the details rail beside the filters (tsk86) — and
+ * on Metrics that's the details rail beside the filters — and
  * self-hides when no sections are registered (loading / empty state), rather
  * than showing two dead buttons.
  */

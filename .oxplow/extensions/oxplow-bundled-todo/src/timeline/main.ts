@@ -1,5 +1,5 @@
 // The Timeline page (oxplow-bundled-todo, `pages: [{ id: timeline, component:
-// timeline }]`): efforts, agent sessions, threads and commits on a
+// timeline }]`): requests, agent sessions, threads and commits on a
 // zoomable time axis. A custom page: it reads its rows with `querySql`
 // (the component declares `sql: read`), titles its page with the range,
 // puts Today and Fit in the page's bar, and opens what is clicked. Its
@@ -37,14 +37,15 @@ declare const oxplow: { connect(): Promise<Component> };
 const DAY = 24 * 60 * 60 * 1000;
 
 /** Each kind's rows in the window `?1`..`?2` (`?3`: one thread's), as
- *  `kind, uri, label, start_at, end_at`: efforts, sessions and threads
+ *  `kind, uri, label, start_at, end_at`: requests, sessions and threads
  *  that started before it ends and hadn't ended by its start, commits in
  *  it. One query a kind, so one busy kind can't crowd out the others
  *  under the row cap, newest first, so a capped kind keeps the latest. */
 const QUERIES: Record<string, string> = {
-  effort: `SELECT 'effort', uri, COALESCE(NULLIF(title, ''), uri), started_at, ended_at
-             FROM v_effort
-            WHERE started_at < ?2 AND COALESCE(ended_at, ?2) > ?1 AND (?3 IS NULL OR thread_id = ?3)
+  request: `SELECT 'request', uri, COALESCE(NULLIF(trim(substr(prompt, 1, 80)), ''), uri), started_at, last_activity_at
+             FROM v_request r
+            WHERE started_at < ?2 AND COALESCE(last_activity_at, ?2) > ?1
+              AND (?3 IS NULL OR EXISTS (SELECT 1 FROM v_agent_turn t WHERE t.request_id = r.id AND t.thread_id = ?3))
             ORDER BY started_at DESC`,
   session: `SELECT 'session', uri, COALESCE(display_name, title, harness), opened_at, closed_at
               FROM v_agent_session
@@ -67,9 +68,10 @@ const QUERIES: Record<string, string> = {
 const bucket = (column: string) =>
   `CASE ?4 WHEN 'day' THEN date(max(${column}, ?1)) ELSE date(max(${column}, ?1), '-6 days', 'weekday 1') END`;
 const COUNTS: Record<string, string> = {
-  effort: `SELECT ${bucket("started_at")} AS bucket, count(*)
-             FROM v_effort
-            WHERE started_at < ?2 AND COALESCE(ended_at, ?2) > ?1 AND (?3 IS NULL OR thread_id = ?3)
+  request: `SELECT ${bucket("started_at")} AS bucket, count(*)
+             FROM v_request r
+            WHERE started_at < ?2 AND COALESCE(last_activity_at, ?2) > ?1
+              AND (?3 IS NULL OR EXISTS (SELECT 1 FROM v_agent_turn t WHERE t.request_id = r.id AND t.thread_id = ?3))
             GROUP BY bucket`,
   commit: `SELECT ${bucket("committed_at")} AS bucket, count(*)
              FROM v_commit
@@ -82,10 +84,10 @@ const DETAIL = 300;
 const GROUPS = [
   { id: "thread", content: "Threads" },
   { id: "session", content: "Sessions" },
-  { id: "effort", content: "Efforts" },
+  { id: "request", content: "Requests" },
   { id: "commit", content: "Commits" },
 ];
-const NOUNS: Record<string, string> = { thread: "threads", session: "sessions", effort: "efforts", commit: "commits" };
+const NOUNS: Record<string, string> = { thread: "threads", session: "sessions", request: "requests", commit: "commits" };
 
 const dateOf = (raw: string | undefined, fallback: number) => {
   const t = raw ? Date.parse(raw) : NaN;
@@ -118,13 +120,13 @@ oxplow.connect().then((component) => {
     orientation: { axis: "top", item: "top" },
     margin: { item: { horizontal: 4, vertical: 4 } },
     // Items too close to tell apart at this zoom draw as one ("12
-    // efforts"); zooming in takes them apart.
+    // requests"); zooming in takes them apart.
     cluster: {
       maxItems: 1,
       // Only the many short ones; a thread or session span reads alone.
       clusterCriteria: (a: { group?: string; id?: string }, b: { group?: string; id?: string }) =>
         a.group === b.group &&
-        (a.group === "effort" || a.group === "commit") &&
+        (a.group === "request" || a.group === "commit") &&
         !buckets.has(String(a.id)) &&
         !buckets.has(String(b.id)),
       titleTemplate: "{count} items — zoom in to see them",

@@ -12,7 +12,7 @@ For a source build, see
 
 Oxplow stores local data and runtime files under `.oxplow/`, including
 `local.sqlite`, snapshots, and generated agent integration files. The
-built-in knowledge provider also uses `.oxplow/wiki/` when selected.
+knowledge store oxwiki also keeps its pages in `.oxplow/oxwiki/`.
 
 The **primary** stream uses the project directory and its current
 branch. Additional streams have separate worktree directories.
@@ -54,9 +54,9 @@ then inspect the resulting description and diff.
 
 Tasks are available when you want durable scope and follow-ups. They are
 optional: there is no mandatory filing step before an edit. Snapshots
-record observed changes, and enabled effort policies can group them and
-link them to tasks. Completing an effort does not automatically close a
-task.
+record observed changes, and oxplow groups each prompt's work into a
+request that can link to tasks. Finishing a request does not
+automatically close a task.
 
 Open **Local History** from the launcher (++cmd+p++) to inspect captured
 versions and compare a file with its current contents. A file restore
@@ -78,7 +78,7 @@ each session.
 
 Ask your agent for a view over the collected data, such as:
 
-> Build a page showing failed tests by effort, with links to the affected
+> Build a page showing failed tests by request, with links to the affected
 > changes and the recorded test runs.
 
 **New Page with Your Agent…** in the launcher provides a starter prompt.
@@ -97,7 +97,7 @@ and [Metrics](../guide/metrics.md).
   work and knowledge tracking.
 - [Pages](../guide/pages.md) — custom views, collection, and sharing.
 - [Metrics](../guide/metrics.md) — facts, measures, and dimensions.
-- [Work queue](../guide/work-queue.md) — optional work items.
+- [Tasks](../guide/tasks.md) — optional tasks.
 - [Agent control](../guide/agent-control.md) — observed activity and
   worktree write guards.
 - [Agents](../guide/agents.md) — sessions and harnesses.

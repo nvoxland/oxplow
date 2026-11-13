@@ -1,4 +1,4 @@
--- Archived work leaves search (tsk921): a comment in an archived stream
+-- Archived work leaves search: a comment in an archived stream
 -- isn't indexed.
 SELECT c.uri AS uri,
        CAST(c.quote AS TEXT) AS title,

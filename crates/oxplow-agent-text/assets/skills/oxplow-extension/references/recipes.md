@@ -13,7 +13,7 @@ Each recipe: write the file, check it, deploy, test.
    answers:
      - { question: "What work is open?", params: { state: todo } }
    loaders:
-     items: { sql: "SELECT title, state FROM v_work_item WHERE state = :state" }
+     items: { sql: "SELECT title, state FROM v_oxplow_task WHERE state = :state" }
    view: { viz: table, from: items }
    ```
 
@@ -36,13 +36,13 @@ Each recipe: write the file, check it, deploy, test.
 title: New item
 params: [{ name: t, default: "" }]
 loaders:
-  states: { rows: [{ value: todo, label: To do }, { value: done, label: Done }] }
+  states: { rows: [{ value: ready, label: Ready }, { value: done, label: Done }] }
 view:
   viz: form
   form:
-    command: oxplow.work_item.create
+    command: oxtask.task.create
     defaults: { title: "{{param.t}}" }
-    choices: { state: acme/new-item#states }
+    choices: { stage: acme/new-item#states }
 ```
 
 A `form` viz has no `from`. `command` is the (write) command the form
@@ -83,7 +83,7 @@ whose `expect.nodes` lists the tile ids, and give it an `answers:` entry.
 ## A slot mount (add a section to another page)
 
 Mount a part of yours into a page that has a `slot` node (foundation's
-Commit, Uncommitted Changes, Diff View, Work Item, Tasks and New Session
+Commit, Uncommitted Changes, Diff View, Task, Tasks and New Session
 pages have a `sections` slot):
 
 ```yaml part
@@ -99,12 +99,12 @@ view: { viz: list, from: stale, empty: No stale reviews. }
 # extension.yaml
 ui:
   mounts:
-    - { page: stale-reviews, at: oxplow/work-item.sections, position: { after: links }, title: Stale reviews }
+    - { page: stale-reviews, at: oxplow/task-detail.sections, position: { after: links }, title: Stale reviews }
 ```
 
-`slot: <namespace>/<page>.<name>` (the work item page is oxplow-bundled's, so an extension that mounts there declares `requires: [oxplow-bundled]`); `at` is `start`, `end` (default) or `{
+`slot: <namespace>/<page>.<name>` (the task page is oxplow-bundled's, so an extension that mounts there declares `requires: [oxplow-bundled]`); `at` is `start`, `end` (default) or `{
 before | after: <sibling id> }`. The mounted page gets the host's params by
 name, so declare the ones you need. Check the mount with
 `oxplow_validate_extension`, and see it on the host page with `oxplow_run_page
-{ page: oxplow/work-item, draft: true }` (its text includes your
+{ page: oxplow/task-detail, draft: true }` (its text includes your
 section, marked with your extension).

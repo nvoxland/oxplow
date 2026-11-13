@@ -1,0 +1,65 @@
+title: Edit
+description: "Edit an oxtask task in place: its stage, title, priority and description. Empty on another store's task."
+needs:
+- model:oxplow/task_record
+params:
+- name: uri
+loaders:
+  stages:
+    sql: |
+      SELECT 'backlog' AS value, 'Backlog' AS label UNION ALL
+      SELECT 'ready', 'Ready' UNION ALL
+      SELECT 'in_progress', 'In Progress' UNION ALL
+      SELECT 'blocked', 'Blocked' UNION ALL
+      SELECT 'done', 'Done' UNION ALL
+      SELECT 'canceled', 'Canceled'
+  state:
+    sql: |
+      SELECT w.uri, w.native_id AS id, w.stage FROM v_oxplow_task w WHERE w.uri = :uri AND w.provider = 'oxtask'
+  fields:
+    sql: |
+      SELECT w.uri, w.native_id AS id, w.title, json_extract(w.native, '$.priority') AS priority
+      FROM v_oxplow_task w WHERE w.uri = :uri AND w.provider = 'oxtask'
+  body:
+    sql: |
+      SELECT w.uri, w.native_id AS id, coalesce(w.body, '') AS body
+      FROM v_oxplow_task w WHERE w.uri = :uri AND w.provider = 'oxtask'
+view:
+  stack:
+  - id: state
+    title: Stage
+    from: state
+    viz: form
+    form:
+      command: oxtask.task.move
+      mode: edit
+      fields:
+      - { name: stage, label: Move to }
+      choices:
+        stage: oxtask/edit-task#stages
+  - id: fields
+    title: Details
+    from: fields
+    viz: form
+    form:
+      command: oxtask.task.update
+      mode: edit
+      fields:
+      - title
+      - priority
+  - id: body
+    title: Description
+    from: body
+    viz: markdown
+    markdown:
+      text: body
+    actions:
+    - id: save
+      label: Save
+      command: oxtask.task.update
+      edit: true
+      fixed:
+      - id
+      input:
+        id: '{{row.id}}'
+        body: '{{row.body}}'

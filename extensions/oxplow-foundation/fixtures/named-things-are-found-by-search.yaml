@@ -14,19 +14,13 @@ steps:
     expect:
       rows: [{ n: 1 }]
   - when:
-      sql: "SELECT uri, title FROM v_search_skill WHERE title = 'work-items'"
+      sql: "SELECT uri, title FROM v_search_collector WHERE uri LIKE '%oxplow.request_outcome'"
     expect:
       rows:
-        - uri: "oxplow:oxplow/skill?skill=oxplow/work-items"
-          title: work-items
+        - uri: "oxplow:oxplow/collector?collector=oxplow/oxplow.request_outcome"
+          title: oxplow.request_outcome
   - when:
-      sql: "SELECT uri, title FROM v_search_collector WHERE uri LIKE '%oxplow.effort_test_outcome'"
-    expect:
-      rows:
-        - uri: "oxplow:oxplow/collector?collector=oxplow/oxplow.effort_test_outcome"
-          title: oxplow.effort_test_outcome
-  - when:
-      sql: "SELECT count(*) AS n FROM v_search_dataset WHERE uri = 'oxplow:oxplow/dataset?dataset=work_item' AND title = 'v_work_item' AND body NOT LIKE '%SELECT%'"
+      sql: "SELECT count(*) AS n FROM v_search_dataset WHERE uri = 'oxplow:oxplow/dataset?dataset=thread' AND title = 'v_thread' AND body NOT LIKE '%SELECT%'"
     expect:
       rows: [{ n: 1 }]
   - when:
@@ -50,11 +44,11 @@ steps:
     expect:
       rows: [{ n: $any }]
   - when:
-      sql: "SELECT uri, title, stream_id FROM v_search_event_type WHERE title = 'effort.finished'"
+      sql: "SELECT uri, title, stream_id FROM v_search_event_type WHERE title = 'agent.turn.ended'"
     expect:
       rows:
-        - uri: "oxplow:oxplow/event_type?event_type=effort.finished"
-          title: effort.finished
+        - uri: "oxplow:oxplow/event_type?event_type=agent.turn.ended"
+          title: agent.turn.ended
           stream_id: null
   - when:
       sql: "SELECT uri, title FROM v_search_config WHERE title = 'zones'"

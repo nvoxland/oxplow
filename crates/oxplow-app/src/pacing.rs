@@ -74,7 +74,7 @@ fn between(then: oxplow_domain::Timestamp, now: oxplow_domain::Timestamp) -> Dur
 enum Paced {
     Entity(String, oxplow_config::collectors::CollectorSpec),
     Fact(crate::metrics_service::FactCollector),
-    /// Core's deep change analysis of a working tree or open effort
+    /// Core's deep change analysis of a working tree, a running request or a range
     /// (`crate::change_reactor`).
     Change(crate::change_analysis::ChangeTarget, Pacing),
 }
@@ -112,14 +112,6 @@ async fn since_run(
                 ChangeTarget::Working { stream_id } => {
                     ("working", String::new(), Some(stream(stream_id)))
                 }
-                ChangeTarget::Effort { effort_id } => (
-                    "effort",
-                    match oxplow_domain::EffortId::try_from_str(effort_id) {
-                        Some(e) => e.value().to_string(),
-                        None => return Ok(None),
-                    },
-                    None,
-                ),
                 ChangeTarget::Range {
                     stream_id: Some(stream_id),
                     base,
@@ -243,8 +235,8 @@ async fn run_due_in_generation(
     Ok(ran)
 }
 
-/// Run one due job. Whether it ran — a job with nothing to run (a closed
-/// effort's analysis, an expired event's collector) is just cleared. A
+/// Run one due job. Whether it ran — a job with nothing to run (a finished
+/// request's analysis, an expired event's collector) is just cleared. A
 /// change analysis already running is `Busy`: the row stays for the next
 /// pass.
 async fn run_one(

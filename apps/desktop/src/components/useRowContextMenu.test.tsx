@@ -60,7 +60,7 @@ test("the Menu key opens the menu for keyboard users", () => {
 test("clicking a menu item does not bubble to the underlying row's onClick", async () => {
   // Regression: the menu is rendered inline inside the row, so without
   // stopping click propagation a menu-item click also fires the row's
-  // onClick — selecting the row / closing the navigator slideout (tsk190).
+  // onClick — selecting the row / closing the navigator slideout.
   let rowClicks = 0;
   let ran = 0;
   const { getByTestId, queryByTestId } = render(
