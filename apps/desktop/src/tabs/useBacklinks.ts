@@ -251,8 +251,8 @@ function humanRefType(refType: string, sourceExtra: string | null): string {
     return sub.replace(/_/g, " ");
   }
   switch (refType) {
-    case "knowledge_file_ref":
-    case "knowledge_dir_ref":
+    case "file_pin":
+    case "dir_pin":
     case "file_mention":
     case "dir_mention":
     case "wikilink":

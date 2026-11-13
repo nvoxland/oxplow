@@ -1,6 +1,6 @@
 # The job runs in the throwaway host; the event it logs when it ends
 # reaches `publish-summary` (running there too), which writes the model's
-# answer to the `triage-summary` page.
+# answer to `summaries/todo-summary.md`.
 when:
   job: summarize
   intentKey: summary-2
@@ -13,7 +13,6 @@ expect:
   state: succeeded
   effects:
     - { id: triage/publish-summary, state: ok }
-  commands: [oxplow.knowledge.write_page]
-  pages: ["oxplow:oxplow/knowledge?id=triage-summary&store=oxwiki"]
+  commands: [oxplow.extension_files.write]
 model:
   replies: ["One bug TODO and two cleanups."]

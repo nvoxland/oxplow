@@ -2212,6 +2212,7 @@ mod tests {
                 "oxplow.collector.set_credential",
                 // The collector's own program or script (P7.B3).
                 "oxplow.collector.sync",
+                "oxplow.comment.list",
                 // A provider's process restarts (P7.C1; was provider.enable).
                 "oxplow.contribution.enable",
                 "oxplow.contribution.enable_all",
@@ -2256,7 +2257,6 @@ mod tests {
                 "oxplow.git.revert",
                 // The page's store keeps it (oxwiki's file, a provider's
                 // service); core records what it kept.
-                "oxplow.knowledge.comments",
                 "oxplow.knowledge.delete_page",
                 "oxplow.knowledge.drift",
                 "oxplow.knowledge.link",
@@ -2345,8 +2345,6 @@ mod tests {
                 // calls per input.
                 // Taking a handoff moves its task, then settles it.
                 "oxplow.handoff.resolve",
-                // A settings write for the project, its stamps read first.
-                "oxplow.knowledge.set_oxwiki",
                 // Bundled's assignment and queue order: oxplow's fields on
                 // a task, through `oxplow.model.set_fields`.
                 "oxplow.tasks.assign",

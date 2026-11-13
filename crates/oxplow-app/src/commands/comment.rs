@@ -1,11 +1,11 @@
 //! Comment commands (P8.A6, `.context/ipc-and-stores.md` "Comments"):
 //! threaded annotations anchored to a span of any page, written through
 //! the bus by a person, an agent or a page. Each is `Tx` over
-//! `oxplow_db::comment_store::*_tx`, logging `knowledge.comment.*` caused
+//! `oxplow_db::comment_store::*_tx`, logging `comment.*` caused
 //! by the run. The author is the actor — a person `user`, an agent
 //! `agent` — never something a caller names. An agent comments on its own
 //! stream, its comments in its own thread. The renderer re-locating a
-//! comment's anchor is `oxplow.knowledge.relocate_comment`: recorded when the
+//! comment's anchor is `oxplow.comment.relocate`: recorded when the
 //! anchor moved, nothing when it is where it was.
 
 use crate::commands::ops::Op;
@@ -28,11 +28,11 @@ use super::thread::agent_scope;
 use super::util::{bare_id, invalid, parse, schema};
 use super::{Handler, HandlerOutput, TxCtx};
 
-pub const ADD: &str = "oxplow.knowledge.add_comment";
-pub const REPLY: &str = "oxplow.knowledge.reply_comment";
-pub const UPDATE: &str = "oxplow.knowledge.update_comment";
-pub const DELETE: &str = "oxplow.knowledge.delete_comment";
-pub const RELOCATE: &str = "oxplow.knowledge.relocate_comment";
+pub const ADD: &str = "oxplow.comment.add";
+pub const REPLY: &str = "oxplow.comment.reply";
+pub const UPDATE: &str = "oxplow.comment.update";
+pub const DELETE: &str = "oxplow.comment.delete";
+pub const RELOCATE: &str = "oxplow.comment.relocate";
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -147,11 +147,11 @@ fn on_own_stream(ctx: &TxCtx<'_>, stream: StreamId) -> Result<(), CommandError> 
     }
 }
 
-/// `oxplow.knowledge.add_comment`: a comment with its first message.
+/// `oxplow.comment.add`: a comment with its first message.
 pub fn add_op() -> Op {
     Op::new(
-        "knowledge.write",
-        "add_comment",
+        "comment.write",
+        "add",
         schema::<AddInput>(),
         false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
@@ -226,11 +226,11 @@ pub fn add_op() -> Op {
     )
 }
 
-/// `knowledge.reply_comment { comment, body }`.
+/// `oxplow.comment.reply { comment, body }`.
 pub fn reply_op() -> Op {
     Op::new(
-        "knowledge.write",
-        "reply_comment",
+        "comment.write",
+        "reply",
         schema::<ReplyInput>(),
         false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
@@ -252,13 +252,13 @@ pub fn reply_op() -> Op {
     )
 }
 
-/// `knowledge.update_comment { comment, intent?, status?, quote? +
+/// `oxplow.comment.update { comment, intent?, status?, quote? +
 /// selectors_json? }`: its intent, open/resolved, or a relink to a new
 /// span. Undone by what each was.
 pub fn update_op() -> Op {
     Op::new(
-        "knowledge.write",
-        "update_comment",
+        "comment.write",
+        "update",
         schema::<UpdateInput>(),
         true,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
@@ -319,12 +319,12 @@ pub fn update_op() -> Op {
     )
 }
 
-/// `knowledge.delete_comment { comment }`: it and its messages. A
+/// `oxplow.comment.delete { comment }`: it and its messages. A
 /// person's, confirmed; not undoable.
 pub fn delete_op() -> Op {
     Op::new(
-        "knowledge.write",
-        "delete_comment",
+        "comment.write",
+        "delete",
         schema::<CommentInput>(),
         false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
@@ -346,15 +346,15 @@ pub fn delete_op() -> Op {
     .confirm_at_least(Confirm::Destructive)
 }
 
-/// `knowledge.relocate_comment { comment, selectors_json, orphaned }`:
+/// `oxplow.comment.relocate { comment, selectors_json, orphaned }`:
 /// the renderer, having found a comment's quote in the content as it is
 /// now (or not), stores where. Not a relink — that is a person choosing a
-/// new span (`update_comment`). An anchor already where it was changes
+/// new span (`update`). An anchor already where it was changes
 /// nothing and leaves no record (`HandlerOutput::unchanged`).
 pub fn relocate_op() -> Op {
     Op::new(
-        "knowledge.write",
-        "relocate_comment",
+        "comment.write",
+        "relocate",
         schema::<RelocateInput>(),
         false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
@@ -463,7 +463,7 @@ mod tests {
             .unwrap();
         let events = fx.svc.event_log_store.read_after(0, 500).await.unwrap();
         assert!(events.iter().any(|e| {
-            e.envelope.event_type == "knowledge.comment.written"
+            e.envelope.event_type == "comment.written"
                 && e.envelope.cause.as_ref() == out.event_id.as_ref()
         }));
     }

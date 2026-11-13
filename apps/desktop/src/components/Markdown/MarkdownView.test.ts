@@ -373,7 +373,9 @@ test("an oxwiki page's link goes into the editor as its URI and comes back as [[
 
 test("preprocessWikilinks: valid slugs (incl .md) stay live wiki links", () => {
   expect(preprocessWikilinks("[[architecture]]")).toBe("[architecture](oxplow:oxplow/knowledge?id=architecture&store=oxwiki)");
-  expect(preprocessWikilinks("[[some_note-2]]")).toBe("[some_note-2](oxplow:oxplow/knowledge?id=some_note-2&store=oxwiki)");
+  expect(preprocessWikilinks("[[some-note-2]]")).toBe("[some-note-2](oxplow:oxplow/knowledge?id=some-note-2&store=oxwiki)");
+  // What no store's id pattern matches is no page (oxwiki's ids are kebab-case).
+  expect(preprocessWikilinks("[[Some_Note]]")).toBe("[Some_Note](oxplow-invalid:Some_Note)");
   expect(preprocessWikilinks("[[some-note.md]]")).toBe("[some-note.md](oxplow:oxplow/knowledge?id=some-note&store=oxwiki)");
 });
 
@@ -476,7 +478,7 @@ test("parseMarkdownLink: a relative link resolves against the base file's folder
   expect(parseMarkdownLink("#install", readme)).toEqual({ kind: "anchor" });
   expect(parseMarkdownLink("https://a.test/", readme)).toEqual({ kind: "external" });
   expect(parseMarkdownLink("oxplow:oxplow/knowledge?id=notes&store=oxwiki", readme)).toEqual({ kind: "knowledge", store: "oxwiki", id: "notes" });
-  expect(parseMarkdownLink("docs/guide.md")).toEqual({ kind: "knowledge", store: "oxwiki", id: "docs/guide" });
+  expect(parseMarkdownLink("guide.md")).toEqual({ kind: "knowledge", store: "oxwiki", id: "guide" });
 });
 
 // A document drawn by a chosen page (its base's `#oxplow.renderer=`) links
@@ -502,8 +504,8 @@ test("relativeFilePath: joins and climbs under the base file's folder, never abo
 // is the bare `[[id]]`.
 test("a [[store:id]] link of an enabled store is that store's page, and saves back as it was written", () => {
   setKnowledgeStores([
-    { store: "oxwiki", title: "oxwiki", kinds: [], edit: true },
-    { store: "docs", title: "Docs", kinds: [], edit: true },
+    { store: "oxwiki", extension: "oxwiki", idPattern: "[a-z0-9]+(-[a-z0-9]+)*" },
+    { store: "docs", extension: "docs", idPattern: null },
   ]);
   try {
     const uri = knowledgeUri("docs", "intro");
@@ -517,6 +519,7 @@ test("a [[store:id]] link of an enabled store is that store's page, and saves ba
     // A prefix that is no enabled store is not a store link.
     expect(preprocessWikilinks("[[nope:intro]]")).toContain("oxplow-invalid:");
   } finally {
-    setKnowledgeStores([]);
+    // The test world's own: oxwiki, as the preload sets it.
+    setKnowledgeStores([{ store: "oxwiki", extension: "oxwiki", idPattern: "[a-z0-9]+(-[a-z0-9]+)*" }]);
   }
 });

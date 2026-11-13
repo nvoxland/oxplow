@@ -4,8 +4,8 @@ import { setKnowledgeStoreIds } from "./knowledgeStoreIds.js";
 import { coalesce, NO_READS, readsChanged } from "./viz/rerun.js";
 
 /**
- * The enabled knowledge stores, shared by the knowledge surfaces: read
- * once, re-read when the capability rows it read change (a store turned
+ * The knowledge stores, shared by the knowledge surfaces: read
+ * once, re-read when the model's stores change (a store's extension turned
  * on or off). Empty until the first read lands. Components use
  * `useKnowledgeStores`; markdown reads the ids (`knowledgeStoreIds.ts`).
  */
@@ -27,7 +27,7 @@ async function refresh(): Promise<void> {
 
 function publish(next: KnowledgeStore[]): void {
   stores = next;
-  setKnowledgeStoreIds(next.map((s) => s.store));
+  setKnowledgeStoreIds(next.map((s) => ({ store: s.store, idPattern: s.idPattern })));
   for (const fn of listeners) fn();
 }
 

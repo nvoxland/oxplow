@@ -1,7 +1,7 @@
 /**
  * Knowledge pages read through the datasets (`.context/knowledge.md`):
  * `v_oxplow_knowledge_page` for the index and a page's markdown (`body`),
- * `v_capability_provider` for the enabled stores (oxplow's own is oxwiki).
+ * `v_model_store` for the stores.
  * Writes are a store's own commands (oxwiki: `oxwiki.page.write`).
  */
 import { querySql } from "./api.js";
@@ -24,25 +24,14 @@ export interface KnowledgePageSummary {
   outbound_uris: string[];
 }
 
-/** A kind of page a store keeps. */
-export interface KnowledgeKind {
-  id: string;
-  title: string;
-  bucket: string;
-}
-
-/** An enabled knowledge store. */
+/** A knowledge store: a store of the knowledge model (`v_model_store`). */
 export interface KnowledgeStore {
-  /** `oxwiki` for oxplow's own. */
   store: string;
-  title: string;
-  kinds: KnowledgeKind[];
-  /** Whether oxplow writes its pages (`features.edit`; one that doesn't say, doesn't). */
-  edit: boolean;
+  /** The extension that keeps it. */
+  extension: string;
+  /** How its page ids look in text, a regex matched whole; null when it doesn't say. */
+  idPattern: string | null;
 }
-
-/** The store of oxplow's own store (oxwiki). */
-export { OXWIKI } from "./knowledgeStoreIds.js";
 
 // Every read returns what it read (`reads`); a consumer re-runs it through
 // `useRerunOnChange` (or `readsChanged`) when one of those datasets changes.
@@ -97,37 +86,22 @@ export async function readKnowledgePage(
 }
 
 /** What the knowledge surfaces say when no store is enabled. */
-export const NO_KNOWLEDGE_STORE = "No knowledge store is enabled — turn oxwiki on in Settings → Integrations → Knowledge stores";
+export const NO_KNOWLEDGE_STORE = "No knowledge store is on — turn on an extension that keeps pages, such as oxwiki";
 
-function jsonOf<T>(raw: SqlCell | undefined, fallback: T): T {
-  try {
-    const parsed: unknown = JSON.parse(String(raw ?? ""));
-    return parsed && typeof parsed === "object" ? (parsed as T) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-/** The enabled stores in a `v_capability_provider` read of the knowledge
- *  capability (`provider AS store, title, kinds, features`). */
+/** The stores in a `v_model_store` read of the knowledge model
+ *  (`store, extension, id_pattern`). */
 export function storesFromResult(result: SqlQueryResult): KnowledgeStore[] {
-  return result.rows.map((row) => {
-    const kinds = jsonOf<unknown>(cell(result, row, "kinds"), []);
-    const features = jsonOf<Record<string, unknown>>(cell(result, row, "features"), {});
-    return {
-      store: String(cell(result, row, "store")),
-      title: String(cell(result, row, "title") ?? cell(result, row, "store")),
-      kinds: Array.isArray(kinds) ? (kinds as KnowledgeKind[]) : [],
-      edit: features.edit === true,
-    };
-  });
+  return result.rows.map((row) => ({
+    store: String(cell(result, row, "store")),
+    extension: String(cell(result, row, "extension") ?? ""),
+    idPattern: cell(result, row, "id_pattern") == null ? null : String(cell(result, row, "id_pattern")),
+  }));
 }
 
-/** The enabled knowledge stores, and what the read read. */
+/** The knowledge stores, and what the read read. */
 export async function readKnowledgeStores(): Promise<{ stores: KnowledgeStore[]; reads: Reads }> {
   const res = await querySql(
-    `SELECT provider AS store, title, kinds, features FROM v_capability_provider
-      WHERE capability = 'knowledge' AND active = 1 ORDER BY provider`,
+    "SELECT store, extension, id_pattern FROM v_model_store WHERE model = 'oxplow/knowledge_record' ORDER BY store",
     [],
     100,
   );

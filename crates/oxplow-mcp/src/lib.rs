@@ -1074,7 +1074,7 @@ mod tests {
             .commands
             .run(
                 &oxplow_domain::Actor::Human,
-                "oxplow.knowledge.add_comment",
+                "oxplow.comment.add",
                 serde_json::json!({
                     "stream": stream.to_string(),
                     "target": format!("oxplow:oxplow/thread?id={primary}"),
@@ -1831,44 +1831,6 @@ mod tests {
         .await
         .unwrap_err();
         assert!(err.message.contains("thread identity"), "{err:?}");
-    }
-
-    /// Helper to write an oxwiki page's file to disk.
-    async fn seed_oxwiki(project: &std::path::Path, slug: &str, body: &str) {
-        let path = oxplow_oxwiki::page_path(project, slug);
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(path, body).unwrap();
-    }
-
-    #[tokio::test]
-    async fn knowledge_drift_reports_status_per_ref() {
-        let (proj, svc, server) = boot().await;
-        seed_oxwiki(proj.path(), "intro", "see [[crates/foo.rs]]").await;
-        oxplow_oxwiki::pages::sync_page(&svc.db, &svc.vocabulary, proj.path(), "intro")
-            .await
-            .unwrap();
-        // The file IS referenced but has no pin (no snapshot service in tests).
-        let r = call(
-            &server,
-            &rmcp::model::Extensions::new(),
-            "oxplow_knowledge_drift",
-            serde_json::json!({ "id": "intro", "path": "crates/foo.rs" }),
-        )
-        .await
-        .unwrap();
-        let body = text_payload(r);
-        assert!(body.contains("\"status\""), "{body}");
-        assert!(body.contains("no_pin"), "expected no_pin: {body}");
-        // A path the page doesn't reference at all.
-        let r2 = call(
-            &server,
-            &rmcp::model::Extensions::new(),
-            "oxplow_knowledge_drift",
-            serde_json::json!({ "id": "intro", "path": "crates/zzz.rs" }),
-        )
-        .await
-        .unwrap();
-        assert!(text_payload(r2).contains("not_a_ref"));
     }
 
     /// `oxplow_ref_drift` reads any model row's file edge, not a knowledge

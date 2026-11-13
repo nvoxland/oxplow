@@ -318,17 +318,3 @@ impl World<'_> {
         tokio::time::sleep(std::time::Duration::from_millis(2)).await;
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// oxwiki passes the suite, as a person: a delete is destructive, and
-    /// an agent's is left for the person to confirm.
-    #[tokio::test]
-    async fn oxwiki_is_a_conforming_store() {
-        let fx = crate::test_fixtures::services_with_thread().await;
-        let findings = suite(&fx.svc, oxplow_domain::knowledge::OXWIKI, &Actor::Human).await;
-        assert_eq!(findings, vec![]);
-    }
-}

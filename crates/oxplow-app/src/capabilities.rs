@@ -1788,7 +1788,6 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&out.rows).unwrap(),
             serde_json::json!([
-                ["knowledge", "oxwiki", 1, "declared", 1],
                 ["snapshots", "hashes", 0, null, 1],
                 ["snapshots", "issues", 0, null, 0],
                 ["snapshots", "oxplow", 1, "fallback", 1],

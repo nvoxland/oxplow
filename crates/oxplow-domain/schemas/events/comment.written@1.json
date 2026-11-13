@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`knowledge.comment.written@3`: a comment (a threaded annotation on a\npage) was created or changed — a reply, its intent, status or anchor.",
+  "description": "`comment.written@1`: a comment (a threaded annotation on a\npage) was created or changed — a reply, its intent, status or anchor.",
   "properties": {
     "comment": {
       "description": "The comment (`cmt5`).",
@@ -16,6 +16,6 @@
     "comment",
     "target"
   ],
-  "title": "KnowledgeCommentWrittenV3",
+  "title": "CommentWrittenV1",
   "type": "object"
 }

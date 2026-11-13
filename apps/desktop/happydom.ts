@@ -8,3 +8,8 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 // A frame's page is never fetched: tests render frames (a custom
 // component's) without a server behind them.
 GlobalRegistrator.register({ settings: { disableIframePageLoading: true } });
+
+// The test world has oxwiki's store, as the app does once its extension is
+// on: a bare `[[some-page]]` is one of its pages (its fill's id pattern).
+import { setKnowledgeStoreIds } from "./src/knowledgeStoreIds.js";
+setKnowledgeStoreIds([{ store: "oxwiki", idPattern: "[a-z0-9]+(-[a-z0-9]+)*" }]);

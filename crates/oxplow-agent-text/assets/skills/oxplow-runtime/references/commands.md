@@ -7,7 +7,7 @@
   `extensions`, `agentPromptAppend`, …) need the person's confirmation.
 - Tasks `task.*` (when a list is active); test
   evidence `oxplow.test.record_run`, `oxplow.collector.sync`; comments
-  `oxplow.knowledge.reply_comment`, ….
+  `oxplow.comment.reply`, ….
 
 ## Handing work to another thread
 

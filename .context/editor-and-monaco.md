@@ -306,7 +306,7 @@ rich-text integration:
   the resolved location so hints/context self-heal and old comments
   upgrade in place; fuzzy matches paint the dashed
   `.oxplow-comment-highlight--approx` variant. Corrected/orphaned anchors
-  persist through `relocateComment` (`oxplow.knowledge.relocate_comment`; an
+  persist through `relocateComment` (`oxplow.comment.relocate`; an
   anchor already where it was records nothing, so the re-read stops).
 - **Relinking.** The `MonacoCommentHandle` exposes `relinkTargets()` +
   `relinkToSelection(id)`; EditorPane's context menu lists "Relink

@@ -11325,10 +11325,20 @@
   }
 
   // src/knowledgeStoreIds.ts
-  var OXWIKI = "oxwiki";
-  var ids = [];
+  var stores = [];
   function enabledKnowledgeStoreIds() {
-    return ids;
+    return stores.map((s) => s.store);
+  }
+  function knowledgeStoreOfBareId(id) {
+    for (const s of stores) {
+      if (!s.idPattern)
+        continue;
+      try {
+        if (new RegExp(`^(?:${s.idPattern})$`).test(id))
+          return s.store;
+      } catch {}
+    }
+    return null;
   }
 
   // src/taskRef.ts
@@ -11440,7 +11450,7 @@
       const target = decodeURIComponent(rawHref.slice(INVALID_LINK.length));
       return {
         kind: "broken",
-        reason: `Broken link: “${target}” is not a recognized reference (use a task's id, [[some-slug]] for an oxwiki page, [[store:id]] for another store's)`
+        reason: `Broken link: “${target}” is not a recognized reference (use a task's id, [[some-id]] for a knowledge store's page, [[store:id]] for another store's)`
       };
     }
     const relativeTo = base !== null && typeOf(base) === "oxplow/file" ? parseUri(base) : null;
@@ -11463,7 +11473,8 @@
     target = target.split("#")[0]?.split("?")[0] ?? "";
     if (target.endsWith(".md"))
       target = target.slice(0, -3);
-    return target ? { kind: "knowledge", store: OXWIKI, id: target } : { kind: "empty" };
+    const store = target ? knowledgeStoreOfBareId(target) : null;
+    return store ? { kind: "knowledge", store, id: target } : { kind: "empty" };
   }
   function extensionOf(path) {
     const name = path.split("/").pop() ?? "";
@@ -11489,16 +11500,6 @@
         out.push(part);
     }
     return out.join("/");
-  }
-  function looksLikeSlug(target) {
-    const bare = target.endsWith(".md") ? target.slice(0, -3) : target;
-    if (!bare || bare.length > 80)
-      return false;
-    if (bare.includes("/") || bare.includes(".") || bare.includes(" "))
-      return false;
-    if (/^[0-9a-f]{7,40}$/i.test(bare))
-      return false;
-    return /^[A-Za-z0-9_-]+$/.test(bare);
   }
   function fileTargetUri(target) {
     let body = target;
@@ -11580,16 +11581,17 @@
         const colon = target.indexOf(":");
         if (colon > 0 && colon < target.length - 1) {
           const store = target.slice(0, colon);
-          if (store === OXWIKI || enabledKnowledgeStoreIds().includes(store)) {
+          if (enabledKnowledgeStoreIds().includes(store)) {
             return `[${display}](${linkTarget(knowledgeUri(store, target.slice(colon + 1)))})`;
           }
         }
         if (looksLikeFilePath(target)) {
           return `[${display}](${linkTarget(fileTargetUri(target))})`;
         }
-        if (looksLikeSlug(target)) {
-          const slug = target.endsWith(".md") ? target.slice(0, -3) : target;
-          return `[${display}](${linkTarget(knowledgeUri("oxwiki", slug))})`;
+        const slug = target.endsWith(".md") ? target.slice(0, -3) : target;
+        const keeper = knowledgeStoreOfBareId(slug);
+        if (keeper) {
+          return `[${display}](${linkTarget(knowledgeUri(keeper, slug))})`;
         }
         return `[${display}](${INVALID_LINK}${encodeURIComponent(target)})`;
       });

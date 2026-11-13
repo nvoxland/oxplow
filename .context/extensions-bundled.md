@@ -123,10 +123,7 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
 ## The rule: data in foundation, person-facing screens here
 
 oxplow-foundation holds the data of core's built-in knowledge (until it goes): its
-datasets, the `oxplow:oxwiki`
-implementation and its setting (`configuration: oxwiki`, default on; turned
-off by `oxplow.knowledge.set_oxwiki`, a script composing a settings write),
-the bus commands (with no `ui:`), skills and metrics. oxplow's own
+datasets, the bus commands (with no `ui:`), skills and metrics. oxplow's own
 extensions share the namespace `oxplow`, so they share one configuration
 (at one `version`) and one pair of commands over it, foundation's
 `oxplow.settings.read` / `.write`. It has

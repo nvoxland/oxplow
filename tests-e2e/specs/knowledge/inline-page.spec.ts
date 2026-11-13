@@ -5,22 +5,22 @@ import { open } from "../../support/ui.js";
 const uriOf = (id: string) => `oxplow:oxplow/knowledge?id=${id}&store=oxwiki`;
 
 test("a knowledge page's inline page fence reads live data and refreshes after a command", async ({ page, daemon }) => {
-  await run(daemon, "oxplow.knowledge.write_page", {
-    store: "oxwiki", title: "Page block signal", body: "Signal before refresh",
+  await run(daemon, "oxwiki.page.write", {
+    title: "Page block signal", body: "Signal before refresh",
   });
   const spec = [
     "title: Live signal",
     "loaders:",
     "  signal:",
-    "    sql: SELECT excerpt FROM v_knowledge_page WHERE id = 'page-block-signal'",
+    "    sql: SELECT excerpt FROM v_oxplow_knowledge_page WHERE id = 'page-block-signal'",
     "view:",
     "  id: signal",
     "  viz: table",
     "  from: signal",
     "  columns: [{ key: excerpt, label: Signal }]",
   ].join("\n");
-  await run(daemon, "oxplow.knowledge.write_page", {
-    store: "oxwiki", title: "Page block live",
+  await run(daemon, "oxwiki.page.write", {
+    title: "Page block live",
     body: `# Page block live\n\nBefore the live view.\n\n\`\`\`oxplow-page\n${spec}\n\`\`\`\n\nAfter the live view.\n`,
   });
   await open(page, daemon, uriOf("page-block-live"));
@@ -31,8 +31,8 @@ test("a knowledge page's inline page fence reads live data and refreshes after a
   await expect(body).toContainText("Before the live view.");
   await expect(body).toContainText("After the live view.");
 
-  await run(daemon, "oxplow.knowledge.write_page", {
-    store: "oxwiki", id: "page-block-signal", title: "Page block signal", body: "Signal after refresh",
+  await run(daemon, "oxwiki.page.write", {
+    id: "page-block-signal", title: "Page block signal", body: "Signal after refresh",
   });
   await expect(inline).toContainText("Signal after refresh");
   await expect(inline).not.toContainText("Signal before refresh");
@@ -42,7 +42,7 @@ test("a knowledge page's inline page fence reads live data and refreshes after a
   await body.getByRole("button", { name: "Edit YAML" }).click();
   const source = body.locator(".oxplow-rt-page pre code");
   await expect(source).toBeVisible();
-  await expect(source).toContainText("SELECT excerpt FROM v_knowledge_page");
+  await expect(source).toContainText("SELECT excerpt FROM v_oxplow_knowledge_page");
   await source.click();
   await page.keyboard.press("Escape");
   await expect(inline).toContainText("Signal after refresh");
@@ -51,8 +51,8 @@ test("a knowledge page's inline page fence reads live data and refreshes after a
 
 test("invalid YAML in a knowledge page fence shows its source and validation error inline", async ({ page, daemon }) => {
   const invalid = "title: Invalid page\nview: [";
-  await run(daemon, "oxplow.knowledge.write_page", {
-    store: "oxwiki", title: "Page block invalid",
+  await run(daemon, "oxwiki.page.write", {
+    title: "Page block invalid",
     body: `# Page block invalid\n\n\`\`\`oxplow-page\n${invalid}\n\`\`\`\n\nThe rest of the page still renders.\n`,
   });
   await open(page, daemon, uriOf("page-block-invalid"));

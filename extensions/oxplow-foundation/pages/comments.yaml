@@ -100,7 +100,7 @@ view:
     actions:
     - id: reply
       label: Reply…
-      command: oxplow.knowledge.reply_comment
+      command: oxplow.comment.reply
       form: true
       input:
         comment: '{{row.cid}}'
@@ -108,7 +108,7 @@ view:
       row: true
     - id: resolve
       label: Resolve
-      command: oxplow.knowledge.update_comment
+      command: oxplow.comment.update
       input:
         comment: '{{row.cid}}'
         status: resolved
@@ -116,7 +116,7 @@ view:
       when: is_open
     - id: reopen
       label: Reopen
-      command: oxplow.knowledge.update_comment
+      command: oxplow.comment.update
       input:
         comment: '{{row.cid}}'
         status: open
@@ -124,7 +124,7 @@ view:
       when: is_resolved
     - id: followup
       label: Make It a Follow-Up
-      command: oxplow.knowledge.update_comment
+      command: oxplow.comment.update
       input:
         comment: '{{row.cid}}'
         intent: followup
@@ -132,7 +132,7 @@ view:
       when: is_note
     - id: note
       label: Make It a Note
-      command: oxplow.knowledge.update_comment
+      command: oxplow.comment.update
       input:
         comment: '{{row.cid}}'
         intent: note
@@ -140,7 +140,7 @@ view:
       when: is_followup
     - id: delete
       label: Delete
-      command: oxplow.knowledge.delete_comment
+      command: oxplow.comment.delete
       input:
         comment: '{{row.cid}}'
       row: true

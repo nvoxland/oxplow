@@ -14,8 +14,7 @@ const fileOf = (daemon: { project: string }, id: string) => join(daemon.project,
 
 test("a written page renders, and a task link in it opens the task", async ({ page, daemon }) => {
   const created = await fileTask(daemon, "Wombat follow-up");
-  await run(daemon, "oxplow.knowledge.write_page", {
-    store: "oxwiki",
+  await run(daemon, "oxwiki.page.write", {
     title: "Wombat plan",
     body: `# Wombat plan\n\nFirst do [[${taskIdOf(created.result.uri)}]].\n`,
   });
@@ -34,13 +33,11 @@ test("a written page renders, and a task link in it opens the task", async ({ pa
 // it lists is a fixture; the match marked in the title and the text is the
 // shell's.
 test("the Knowledge index marks the filter's match", async ({ page, daemon }) => {
-  await run(daemon, "oxplow.knowledge.write_page", {
-    store: "oxwiki",
+  await run(daemon, "oxwiki.page.write", {
     title: "Kiwi notes",
     body: "# Kiwi notes\n\nThe quokka sleeps all day.\n",
   });
-  await run(daemon, "oxplow.knowledge.write_page", {
-    store: "oxwiki",
+  await run(daemon, "oxwiki.page.write", {
     title: "Other notes",
     body: "# Other notes\n\nNothing to see.\n",
   });
@@ -57,7 +54,7 @@ test("the Knowledge index marks the filter's match", async ({ page, daemon }) =>
 
 // The page's body is the markdown editor (Save only when changed).
 test("a knowledge page is edited in place and saved", async ({ page, daemon }) => {
-  await run(daemon, "oxplow.knowledge.write_page", { store: "oxwiki", title: "Ferret notes", body: "# Ferret notes\n\nThey steal socks.\n" });
+  await run(daemon, "oxwiki.page.write", { title: "Ferret notes", body: "# Ferret notes\n\nThey steal socks.\n" });
   await open(page, daemon, uriOf("ferret-notes"));
   const body = page.locator('[data-node="body"]:visible');
   const save = body.getByRole("button", { name: "Save" });
@@ -75,7 +72,7 @@ test("a knowledge page is edited in place and saved", async ({ page, daemon }) =
 
 // The tab is named by the page's title, not its id.
 test("a knowledge page's tab shows its title", async ({ page, daemon }) => {
-  await run(daemon, "oxplow.knowledge.write_page", { store: "oxwiki", title: "Pangolin facts", body: "# Pangolin facts\n\nScaly.\n" });
+  await run(daemon, "oxwiki.page.write", { title: "Pangolin facts", body: "# Pangolin facts\n\nScaly.\n" });
   await open(page, daemon, uriOf("pangolin-facts"));
   await expect(page.getByTestId(`center-tab-${uriOf("pangolin-facts")}`)).toContainText("Pangolin facts");
 });
@@ -83,8 +80,8 @@ test("a knowledge page's tab shows its title", async ({ page, daemon }) => {
 // In the editor a bare link shows its page's title, as the viewer does,
 // while the body keeps the id.
 test("a page link in the editor shows its page's title", async ({ page, daemon }) => {
-  await run(daemon, "oxplow.knowledge.write_page", { store: "oxwiki", title: "Otter den", body: "# Otter den\n" });
-  await run(daemon, "oxplow.knowledge.write_page", { store: "oxwiki", title: "Otter notes", body: "# Otter notes\n\nSee [[otter-den]] first.\n" });
+  await run(daemon, "oxwiki.page.write", { title: "Otter den", body: "# Otter den\n" });
+  await run(daemon, "oxwiki.page.write", { title: "Otter notes", body: "# Otter notes\n\nSee [[otter-den]] first.\n" });
   await open(page, daemon, uriOf("otter-notes"));
   const body = page.locator('[data-node="body"]:visible');
   const href = uriOf("otter-den");
@@ -95,8 +92,8 @@ test("a page link in the editor shows its page's title", async ({ page, daemon }
 // `[[` in the editor lists what it could link to; the picked page goes in
 // as its link, shows its title, and saves as the wikilink.
 test("[[ completes a link to a knowledge page", async ({ page, daemon }) => {
-  await run(daemon, "oxplow.knowledge.write_page", { store: "oxwiki", title: "Badger sett", body: "# Badger sett\n" });
-  await run(daemon, "oxplow.knowledge.write_page", { store: "oxwiki", title: "Badger notes", body: "# Badger notes\n\nStart here.\n" });
+  await run(daemon, "oxwiki.page.write", { title: "Badger sett", body: "# Badger sett\n" });
+  await run(daemon, "oxwiki.page.write", { title: "Badger notes", body: "# Badger notes\n\nStart here.\n" });
   // The completion lists what site search has indexed.
   await searchable(daemon, "badger", "knowledge");
   await open(page, daemon, uriOf("badger-notes"));
@@ -121,7 +118,7 @@ test("[[ completes a link to a knowledge page", async ({ page, daemon }) => {
 
 // A selection floats the format toolbar.
 test("the editor formats a selection", async ({ page, daemon }) => {
-  await run(daemon, "oxplow.knowledge.write_page", { store: "oxwiki", title: "Heron notes", body: "# Heron notes\n\nStart here.\n" });
+  await run(daemon, "oxwiki.page.write", { title: "Heron notes", body: "# Heron notes\n\nStart here.\n" });
   await open(page, daemon, uriOf("heron-notes"));
   const body = page.locator('[data-node="body"]:visible');
   await expect(body).toContainText("Start here.");
@@ -155,8 +152,8 @@ test("the editor formats a selection", async ({ page, daemon }) => {
 // The Source view shows the page as stored, wikilinks and all; an edit
 // there saves like any other.
 test("a knowledge page's Source view edits the stored text", async ({ page, daemon }) => {
-  await run(daemon, "oxplow.knowledge.write_page", { store: "oxwiki", title: "Stoat den", body: "# Stoat den\n" });
-  await run(daemon, "oxplow.knowledge.write_page", { store: "oxwiki", title: "Stoat notes", body: "# Stoat notes\n\nSee [[stoat-den]].\n" });
+  await run(daemon, "oxwiki.page.write", { title: "Stoat den", body: "# Stoat den\n" });
+  await run(daemon, "oxwiki.page.write", { title: "Stoat notes", body: "# Stoat notes\n\nSee [[stoat-den]].\n" });
   await open(page, daemon, uriOf("stoat-notes"));
   const body = page.locator('[data-node="body"]:visible');
   await expect(body).toContainText("See");

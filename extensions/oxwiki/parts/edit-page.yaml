@@ -1,0 +1,32 @@
+title: Edit
+description: "Edit an oxwiki page's text in place. Empty on another store's page."
+needs:
+- model:oxplow/knowledge_record
+params:
+- name: uri
+loaders:
+  body:
+    sql: |
+      SELECT p.uri, p.id, p.title, p.body AS body
+      FROM v_oxplow_knowledge_page p WHERE p.uri = :uri AND p.store = 'oxwiki'
+view:
+  stack:
+  - id: body
+    title: Text
+    from: body
+    viz: markdown
+    markdown:
+      text: body
+    empty: This page isn't oxwiki's.
+    actions:
+    - id: save
+      label: Save
+      command: oxwiki.page.write
+      edit: true
+      fixed:
+      - id
+      - title
+      input:
+        id: '{{row.id}}'
+        title: '{{row.title}}'
+        body: '{{row.body}}'

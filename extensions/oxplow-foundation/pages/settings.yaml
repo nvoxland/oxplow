@@ -213,17 +213,10 @@ loaders:
       ORDER BY 1, 11 DESC, 4
   knowledge_stores:
     sql: |
-      SELECT p.provider AS store, p.title, p.extension, p.description,
-             CASE WHEN p.active = 1 THEN 'On'
-                  WHEN p.chosen_by = 'setting' THEN 'Off: turned off in settings'
-                  ELSE 'Off' END AS standing,
-             CASE WHEN p.active = 1 THEN 'success' END AS tone,
-             (SELECT group_concat(json_extract(k.value, '$.title'), ', ') FROM json_each(p.kinds) k) AS kinds,
-             (p.provider = 'oxwiki' AND p.active = 1) AS can_turn_off,
-             (p.provider = 'oxwiki' AND p.active = 0 AND p.chosen_by = 'setting') AS can_turn_on
-      FROM v_capability_provider p
-      WHERE p.capability = 'knowledge'
-      ORDER BY p.provider = 'oxwiki' DESC, p.title
+      SELECT s.store, s.extension, s.extension AS title
+      FROM v_model_store s
+      WHERE s.model = 'oxplow/knowledge_record'
+      ORDER BY s.store
   replacements:
     sql: |
       SELECT target, label, extension AS whose, extension AS title,
@@ -686,39 +679,18 @@ view:
           input:
             capability: '{{row.capability}}'
             layer: personal
-      # Every knowledge store is in use at once: none is chosen, a store
-      # is on or off. oxwiki turns off here; another store is its
-      # extension's (on or off with it, set up in its own settings).
+      # Every knowledge store is an extension's, in use while it is on
+      # (turn it off with its extension).
       - id: knowledge-stores
         title: Knowledge stores
         from: knowledge_stores
         viz: table
         columns:
-        - key: title
+        - key: store
           label: Store
-        - key: standing
-          label: Standing
-          tone: tone
-        - key: description
-          label: What it is
-        - key: kinds
-          label: Kinds of page
         - key: extension
           label: From
-        empty: No knowledge store is declared.
-        actions:
-        - id: oxwiki-off
-          label: Turn Off for the Project
-          command: oxplow.knowledge.set_oxwiki
-          row: true
-          when: can_turn_off
-          input: { "on": false }
-        - id: oxwiki-on
-          label: Turn On for the Project
-          command: oxplow.knowledge.set_oxwiki
-          row: true
-          when: can_turn_on
-          input: { "on": true }
+        empty: No knowledge store is on. Turn on an extension that keeps pages, such as oxwiki.
       # Where an extension adds its own settings for the project
       # (oxtask's Task workflow).
       - { slot: integrations, id: integrations-mounts }

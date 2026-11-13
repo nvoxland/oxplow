@@ -7,7 +7,7 @@ import { searchLauncher, load } from "../../support/ui.js";
 
 test("search finds a task and a knowledge page, and opens them", async ({ page, daemon }) => {
   const created = await fileTask(daemon, "Quokka migration");
-  await run(daemon, "oxplow.knowledge.write_page", { id: "quokka-notes", title: "Quokka notes", body: "# Quokka notes\n\nWhat we know.\n" });
+  await run(daemon, "oxwiki.page.write", { id: "quokka-notes", title: "Quokka notes", body: "# Quokka notes\n\nWhat we know.\n" });
   await searchable(daemon, "quokka", "task");
   await searchable(daemon, "quokka", "knowledge");
   await load(page);

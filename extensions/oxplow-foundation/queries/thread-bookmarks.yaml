@@ -5,7 +5,7 @@ params:
 loaders:
   bookmarks:
     sql: |
-      SELECT coalesce(nullif(trim(w.title), ''), nullif(trim(b.label), ''), b.uri) AS title,
+      SELECT coalesce(nullif(trim(b.label), ''), b.uri) AS title,
              b.page_kind, b.uri, b.scope, uri_param(t.uri, 'id') AS thread, b.added_at, b.id
       FROM (
         SELECT bk.*, row_number() OVER (PARTITION BY bk.uri ORDER BY
@@ -16,6 +16,5 @@ loaders:
            OR bk.scope = 'project'
       ) b
       JOIN v_thread t ON t.id = :thread_id
-      LEFT JOIN v_knowledge_page w ON w.uri = b.uri
       WHERE b.n = 1
       ORDER BY b.added_at DESC, b.id DESC

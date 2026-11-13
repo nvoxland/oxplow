@@ -277,7 +277,7 @@ graph writer and the link checker never drift. The desktop's
   prompt is delivered) — each owns its source's slice.
 - **`comment`** (V99): `target_uri` (and `target_resource`), a
   `context_chain_json` and `referenced_json` of URIs;
-  `knowledge.comment.written@2` / `deleted@2` carry `{ comment, target }`.
+  `comment.written@1` / `comment.deleted@1` carry `{ comment, target }`.
 - **The search index**: `search_entry.kind` is the resource and `uri`
   the URI; `kind_search` keeps one index per searchable resource (an
   asset `search:<resource>`), the `search.index` consumer the files.

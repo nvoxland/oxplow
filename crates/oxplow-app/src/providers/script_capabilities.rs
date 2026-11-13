@@ -208,7 +208,7 @@ def delete_page(x):
 "###;
 
 /// `KNOWLEDGE` (or a variant of it) as one of the project's knowledge
-/// stores, beside oxwiki.
+/// stores.
 async fn knowledge_store(script: &str) -> ThreadFixture {
     let fx = activated(
         "script-knowledge",
@@ -216,8 +216,7 @@ async fn knowledge_store(script: &str) -> ThreadFixture {
         &[("store.star", script)],
     )
     .await;
-    assert_eq!(fx.svc.knowledge.enabled(), ["oxwiki", "scripted"]);
-    assert!(fx.svc.oxwiki.present(), "oxwiki stays enabled beside it");
+    assert_eq!(fx.svc.knowledge.enabled(), ["scripted"]);
     fx
 }
 

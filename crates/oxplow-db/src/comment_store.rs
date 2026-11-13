@@ -189,26 +189,25 @@ pub struct SqliteCommentStore {
 /// What a comment's event is logged as.
 const SOURCE: &str = "system:comments";
 
-/// `knowledge.comment.written` / `deleted` for comment `id` on `target`
+/// `comment.written` / `deleted` for comment `id` on `target`
 /// (how the search index hears of it).
 fn comment_event(id: i64, target: &str, deleted: bool) -> Envelope {
     use oxplow_domain::events::schema::{
-        KnowledgeCommentDeleted, KnowledgeCommentDeletedV3, KnowledgeCommentWritten,
-        KnowledgeCommentWrittenV3,
+        CommentDeleted, CommentDeletedV1, CommentWritten, CommentWrittenV1,
     };
     let comment = oxplow_domain::uri::build::comment_uri(CommentId::new(id));
     let env = if deleted {
-        Envelope::typed::<KnowledgeCommentDeleted>(
+        Envelope::typed::<CommentDeleted>(
             SOURCE,
-            &KnowledgeCommentDeletedV3 {
+            &CommentDeletedV1 {
                 comment: CommentId::new(id).to_string(),
                 target: target.into(),
             },
         )
     } else {
-        Envelope::typed::<KnowledgeCommentWritten>(
+        Envelope::typed::<CommentWritten>(
             SOURCE,
-            &KnowledgeCommentWrittenV3 {
+            &CommentWrittenV1 {
                 comment: CommentId::new(id).to_string(),
                 target: target.into(),
             },
@@ -247,7 +246,7 @@ fn written(conn: &rusqlite::Connection, id: i64) -> rusqlite::Result<Vec<Envelop
         .collect())
 }
 
-/// What a new comment is (`oxplow.knowledge.add_comment`, P8.A6).
+/// What a new comment is (`oxplow.comment.add`, P8.A6).
 #[derive(Debug, Clone)]
 pub struct NewComment {
     pub stream: StreamId,
@@ -281,7 +280,7 @@ pub fn get_tx(
 /// Create a comment with its first message, on `conn` — a command's
 /// transaction. The inline refs its quote mentions join the provided
 /// ones, so typed context survives a surface that didn't link them.
-/// Returns it and the `knowledge.comment.written` to log.
+/// Returns it and the `comment.written` to log.
 pub fn create_tx(
     conn: &rusqlite::Connection,
     kinds: &oxplow_domain::uri::resources::ResourceRegistry,

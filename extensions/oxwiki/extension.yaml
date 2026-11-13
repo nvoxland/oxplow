@@ -86,3 +86,8 @@ commands:
 skills:
   - { name: oxwiki, file: skills/oxwiki/SKILL.md, needs: [model:oxplow/knowledge_record] }
   - { name: note, kind: command, file: commands/note.md, needs: [model:oxplow/knowledge_record] }
+ui:
+  mounts:
+    # Edit an oxwiki page in place on the shared knowledge page (empty on
+    # another store's page).
+    - { page: edit-page, at: oxplow/knowledge-page.sections, title: Edit }

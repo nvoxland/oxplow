@@ -114,7 +114,7 @@ intent:
       input: { page: resource, params: { uri: "oxplow:oxplow/resource?resource=oxplow/commit" } }
       expect: a resource kind's URI form and the pages that draw it
     - name: the-implementation-page-says-whether-an-implementation-is-in-use
-      input: { page: implementation, params: { uri: "oxplow:oxplow/implementation?implementation=oxplow/knowledge.oxwiki" } }
+      input: { page: implementation, params: { uri: "oxplow:oxplow/implementation?implementation=oxplow/agent_harness.claude" } }
       expect: an implementation's capability, whether it is in use and what it can do
     - name: a-command-row-of-an-extension-links-to-the-commands-page
       input: { page: extension, params: { uri: "oxplow:oxplow/extension?name=oxplow-foundation", name: oxplow-foundation } }
@@ -231,7 +231,7 @@ intent:
       input: { page: resource, params: { uri: 'oxplow:oxplow/resource?resource=oxplow/commit' } }
       expect: its see-also links name the extension that declares it
     - name: the-implementation-page-links-to-its-extension
-      input: { page: implementation, params: { uri: 'oxplow:oxplow/implementation?implementation=oxplow/knowledge.oxwiki' } }
+      input: { page: implementation, params: { uri: 'oxplow:oxplow/implementation?implementation=oxplow/agent_harness.claude' } }
       expect: its see-also links name the extension that declares it
     - name: the-measure-page-links-to-its-extension
       input: { page: measure, params: { uri: 'oxplow:oxplow/measure?measure=oxplow.tokens' } }
@@ -282,7 +282,7 @@ intent:
       input: { page: custom-component, params: {uri:"oxplow:oxplow/custom_component?custom_component=oxplow/integrations"} }
       expect: its description is a paragraph above the facts
     - name: the-implementation-page-says-what-it-is-in-a-paragraph-above-its-facts
-      input: { page: implementation, params: {uri:"oxplow:oxplow/implementation?implementation=oxplow/knowledge.oxwiki"} }
+      input: { page: implementation, params: {uri:"oxplow:oxplow/implementation?implementation=oxplow/agent_harness.claude"} }
       expect: its description is a paragraph above the facts
     - name: the-measure-page-says-what-it-is-in-a-paragraph-above-its-facts
       input: { page: measure, params: {uri:"oxplow:oxplow/measure?measure=oxplow.tokens"} }
@@ -422,12 +422,11 @@ panels:
   # What only the person can move: a question an agent waits on, a handoff
   # no agent is there to take, an open note; counted in its header.
   - { id: waiting, title: Waiting on you, icon: bell, scope: project, body: waiting-on-you, count: waiting-count, open: 'oxplow:oxplow/page?page=waiting-on-you' }
-# What oxplow runs by default: snapshots, oxwiki (a knowledge store beside
-# any an extension adds), and the agent harnesses and AI providers — core's
-# built-ins, many of each at once (every one of those declared here is
-# active).
-# Foundation's own settings (Settings): whether oxwiki is one of the
-# project's knowledge stores.
+# What oxplow runs by default: snapshots, and the agent harnesses and AI
+# providers — core's built-ins, many of each at once (every one of those
+# declared here is active). Knowledge stores are extensions (oxwiki is one).
+# Foundation holds no setting of its own: the namespace's keys are
+# oxplow-bundled's.
 configuration:
   # oxplow's own extensions share the namespace's one configuration: its
   # `version` is theirs too (oxplow-bundled's keys are its own).
@@ -435,23 +434,9 @@ configuration:
   schema:
     type: object
     additionalProperties: false
-    properties:
-      oxwiki:
-        type: boolean
-        title: Keep pages in oxwiki
-        description: Whether oxwiki — a wiki of markdown pages in the project's .oxplow/oxwiki folder — is one of the project's knowledge stores. Off, its pages are hidden and its files left alone.
-  defaults:
-    oxwiki: true
+    properties: {}
 implementations:
   - { capability: snapshots, id: hashes, entry: "oxplow:snapshot-hashes", description: "Saves the project's files as snapshots named by their hashes." }
-  - capability: knowledge
-    id: oxwiki
-    entry: "oxplow:oxwiki"
-    title: oxwiki
-    description: "oxplow's own knowledge store: a wiki of markdown pages kept in the project's .oxplow/oxwiki folder."
-    # Settings → Integrations → Knowledge stores turns it off (`oxplow.knowledge.set_oxwiki`):
-    # declared still, its pages hidden, its files left alone.
-    when: { config: /oxwiki, in: [true] }
   - { capability: agent_harness, id: claude, entry: "oxplow:claude-code", title: Claude, icon: icons/claude.svg, description: "Runs Claude Code as a coding agent." }
   - { capability: agent_harness, id: codex, entry: "oxplow:codex-cli", title: Codex, icon: icons/codex.svg, description: "Runs Codex as a coding agent." }
   - { capability: agent_harness, id: opencode, entry: "oxplow:opencode", title: OpenCode, icon: icons/opencode.svg, description: "Runs OpenCode as a coding agent." }
@@ -887,15 +872,15 @@ commands:
   # Foundation's own settings (`configuration:`): read with their stamps,
   # written as a compare-and-swap on them.
   - name: settings.read
-    summary: The effective settings of oxplow's own extensions (they share the namespace's one configuration — oxwiki on or off, the review policy, the task workflow), where each came from, and the stamps a write needs.
+    summary: The effective settings of oxplow's own extensions (they share the namespace's one configuration — the review policy, the task workflow), where each came from, and the stamps a write needs.
     scope: extension_config.read
     op: snapshot
     example: {}
   - name: settings.write
-    summary: Set the project or personal settings of oxplow's own extensions — oxwiki on or off, the review policy, the task workflow (a compare-and-swap on the stamps `oxplow.settings.read` returns).
+    summary: Set the project or personal settings of oxplow's own extensions — the review policy, the task workflow (a compare-and-swap on the stamps `oxplow.settings.read` returns).
     scope: extension_config.write
     op: compare_exchange
-    example: {"schema_version": 2, "project": {"expected": {"schema_version": 2, "revision": 0}, "values": {"oxwiki": false}}, "personal": null}
+    example: {"schema_version": 2, "project": {"expected": {"schema_version": 2, "revision": 0}, "values": {"review": "off"}}, "personal": null}
   # agent_input.write — the window's agent input.
   - name: agent.draft
     summary: "Put text in the shown thread's agent input, unsent."
@@ -1370,10 +1355,10 @@ commands:
     op: dismiss_all
     example: {}
   # knowledge.read
-  - name: knowledge.comments
+  - name: comment.list
     summary: "List comments. Threaded annotations the user anchored to a text selection in a page (knowledge page body, code file line, task detail). `id` is a thread (`thr…`) or stream (`str…`) id; `scope` is inferred from its prefix, so usually pass only `id`. `status` filters: \"all\" (default), \"open\", or \"needs_response\" (open follow-ups whose latest message isn't yours — what the user wants you to act on). Each result carries the anchored `quote`, the message thread, and `intent` (note vs followup). Reply with `oxplow.knowledge.reply_comment { comment, body }`; resolve with `oxplow.knowledge.update_comment { comment, status: \"resolved\" }`."
-    scope: knowledge.read
-    op: comments
+    scope: comment.read
+    op: list
     tool: list_comments
     example: {"id": "str1", "status": "needs_response"}
   - name: knowledge.drift
@@ -1383,15 +1368,15 @@ commands:
     tool: knowledge_drift
     example: {"store": "oxwiki", "id": "architecture", "path": "src/app/main.py"}
   # knowledge.write
-  - name: knowledge.add_comment
+  - name: comment.add
     summary: "Comment on a span of a page (its `target`), with a first message. `intent`: `note` (the agent leaves it alone) or `followup` (the agent should act on it). An agent comments on its own stream, in its own thread."
-    scope: knowledge.write
-    op: add_comment
+    scope: comment.write
+    op: add
     example: {"stream": "str1", "target": "oxplow:oxplow/knowledge?id=vcs-capability&store=oxwiki", "quote": "Every provider implements Vcs", "intent": "followup", "body": "This is out of date: GitProvider also implements WorkspaceFiles."}
-  - name: knowledge.delete_comment
+  - name: comment.delete
     summary: "Delete a comment and its messages (`cmt12`). A person is asked first."
-    scope: knowledge.write
-    op: delete_comment
+    scope: comment.write
+    op: delete
     confirm: destructive
     example: {"comment": "cmt12"}
   - name: knowledge.delete_page
@@ -1405,37 +1390,25 @@ commands:
     scope: knowledge.write
     op: link
     example: {"id": "auth-flow", "target": "src/session.rs"}
-  - name: knowledge.relocate_comment
+  - name: comment.relocate
     summary: "Store where a comment's quote (`cmt12`) sits in its page's content now (`selectors_json`), or that it is gone (`orphaned`). The renderer's, after it re-finds the quote."
-    scope: knowledge.write
-    op: relocate_comment
+    scope: comment.write
+    op: relocate
     example: {"comment": "cmt12", "selectors_json": "[]", "orphaned": false}
-  - name: knowledge.reply_comment
+  - name: comment.reply
     summary: "Reply on a comment (`cmt12`)."
-    scope: knowledge.write
-    op: reply_comment
+    scope: comment.write
+    op: reply
     example: {"comment": "cmt4", "body": "Fixed in the page."}
   - name: knowledge.resync
     summary: "Restate an oxwiki page from its file in .oxplow/oxwiki (the repair when a row and its file disagree); a missing file deletes the page."
     scope: knowledge.write
     op: resync
     example: {"id": "auth-flow"}
-  - name: knowledge.set_oxwiki
-    summary: "Turn oxwiki — oxplow's own knowledge store, the wiki in .oxplow/oxwiki — on or off for the project. Off, its pages stay recorded but hidden and its files are left alone; on, they are back. A person's own setting, when there is one, still wins for them (the result says so)."
-    input_schema:
-      type: object
-      required: [on]
-      properties:
-        on: { type: boolean, description: "true: oxwiki is one of the project's knowledge stores; false: it is off." }
-      additionalProperties: false
-    example: {"on": false}
-    entry: handlers/set_oxwiki.star
-    needs: [extension_config.read]
-    access: write
-  - name: knowledge.update_comment
+  - name: comment.update
     summary: "Change a comment (`cmt12`): its `intent`, its `status` (`open` / `resolved`), or re-attach it to a new span (`quote` and `selectors_json` together)."
-    scope: knowledge.write
-    op: update_comment
+    scope: comment.write
+    op: update
     example: {"comment": "cmt4", "status": "resolved"}
   - name: knowledge.verify_files
     summary: "Re-pin a page's files to now without rewriting it: `files` are the files you re-read against the page as it stands (all of the page's files when omitted). The page is the one core records; a file the page does not cite is refused."

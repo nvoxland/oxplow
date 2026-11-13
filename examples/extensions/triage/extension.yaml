@@ -23,10 +23,10 @@ intent:
       expect: cancelled while it streams, the job ends cancelled with what it had written
     - name: summary-delivered
       input: { job: summarize }
-      expect: the job succeeds, its completion reaches publish-summary, and the triage-summary page is written
-    - name: summary-to-a-knowledge-page
+      expect: the job succeeds, its completion reaches publish-summary, and the summary is written to `summaries/todo-summary.md`
+    - name: summary-to-a-file
       input: { event: contribution.job.completed }
-      expect: publish-summary writes the triage-summary page
+      expect: publish-summary writes `summaries/todo-summary.md`
     - name: todo-board
       input: { component: todo-board }
       expect: the board records a decision on a TODO and reads it back
@@ -42,7 +42,9 @@ intent:
     - name: the-board-decides-a-todo-from-its-card
       input: { page: todo-board }
       expect: a card per sorted TODO under its kind; a card's form records the decision
-permissions: [sql.read, files.read, ai.compute, commands:oxplow.command.sequence, commands:oxplow.knowledge.write_page]
+files:
+  - { path: summaries, access: write }
+permissions: [sql.read, files.read, files.write, ai.compute, commands:oxplow.command.sequence, commands:oxplow.extension_files.write]
 measures:
   - key: triage.todos
     title: TODO comments
@@ -81,7 +83,7 @@ collectors:
 # extension's permissions. Its answer streams into `v_job_run_output` as it comes; it
 # may look closer at a file (`todos.in_file`) or query oxplow's models
 # (`query_sql`, from `sql.read`) before it answers. When it finishes,
-# `publish-summary` writes the answer as a knowledge page.
+# `publish-summary` writes the answer to a file.
 # The model that sorts each TODO: bind `triage/sort` in Settings → AI, or
 # it uses your Decide model.
 ai_profiles:
@@ -150,7 +152,7 @@ commands:
     job: true
 effects:
   - id: publish-summary
-    summary: When a summary job succeeds, write its answer to the knowledge page `triage-summary`.
+    summary: When a summary job succeeds, write its answer to the file `summaries/todo-summary.md`.
     on: [contribution.job.completed]
     where: { job: "triage/summarize" }
     entry: effects/publish_summary.star

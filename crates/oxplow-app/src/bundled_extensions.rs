@@ -335,43 +335,11 @@ mod tests {
         assert_eq!(out.rows.len(), 1, "{:?}", out.rows);
     }
 
-    /// oxtask is oxplow-bundled's, oxwiki is foundation's: with
-    /// oxplow-bundled off there is no task tracker (`task.*` is a sink that
-    /// tracks nothing) and oxwiki still runs.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn oxwiki_runs_with_bundled_off() {
-        let dir = tempfile::tempdir().unwrap();
-        crate::test_fixtures::init_git_repo(dir.path());
-        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
-        std::fs::write(
-            dir.path().join(".oxplow/personal.yaml"),
-            format!(
-                "disableExtensions: [{}]\n",
-                crate::test_fixtures::optional_shipped()
-            ),
-        )
-        .unwrap();
-        let svc = crate::Services::in_memory(dir.path()).await.unwrap();
-        svc.streams.ensure_primary().await.unwrap();
-        crate::test_fixtures::activate(&svc).await;
-        let human = oxplow_domain::Actor::Human;
-        svc.commands
-            .run(
-                &human,
-                "oxplow.knowledge.write_page",
-                serde_json::json!({ "id": "notes", "title": "Notes", "body": "Hello." }),
-                true,
-            )
-            .await
-            .expect("oxwiki runs with bundled off");
-    }
-
     /// The `oxplow` namespace's settings hold bundled's keys (its review
-    /// policy, say) as well as foundation's: with bundled off they are
-    /// still a valid layer, so oxwiki stays on rather than going off with
-    /// settings nobody can read.
+    /// policy, say): with bundled off they are still a valid layer, read
+    /// rather than refused, so foundation keeps running.
     #[tokio::test(flavor = "multi_thread")]
-    async fn oxwiki_stays_on_with_bundled_off_and_its_settings_stored() {
+    async fn settings_stay_readable_with_bundled_off() {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
         std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
@@ -397,7 +365,6 @@ mod tests {
             .unwrap();
         svc.streams.ensure_primary().await.unwrap();
         crate::test_fixtures::activate(&svc).await;
-        assert_eq!(svc.knowledge.enabled(), ["oxwiki"]);
         let read = svc
             .commands
             .run(
@@ -408,6 +375,6 @@ mod tests {
             )
             .await
             .expect("the settings read with bundled off");
-        assert_eq!(read.result["values"]["oxwiki"], true, "{}", read.result);
+        assert!(read.result["values"].is_object(), "{}", read.result);
     }
 }

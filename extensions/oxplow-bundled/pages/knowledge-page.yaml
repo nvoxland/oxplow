@@ -126,6 +126,7 @@ view:
         files:
         - '{{row.path}}'
       row: true
+  - slot: sections
 see_also:
   - { page: knowledge }
   - { page: knowledge-freshness, params: { store: { param: store }, id: { param: id } } }

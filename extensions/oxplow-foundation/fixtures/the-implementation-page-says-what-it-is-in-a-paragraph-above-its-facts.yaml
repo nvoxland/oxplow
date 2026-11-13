@@ -3,8 +3,8 @@
 when:
   page: oxplow/implementation
   params:
-    uri: "oxplow:oxplow/implementation?implementation=oxplow/knowledge.oxwiki"
+    uri: "oxplow:oxplow/implementation?implementation=oxplow/agent_harness.claude"
 expect:
   nodes:
     - { id: about, kind: viz, viz: detail }
-  text: { contains: ["## About [node about]\n\noxplow's own knowledge store: a wiki of markdown pages kept in the project's .oxplow/oxwiki folder."] }
+  text: { contains: ["## About [node about]\n\nRuns Claude Code as a coding agent."] }

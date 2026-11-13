@@ -18,7 +18,7 @@ mock.module("./knowledge.js", () => ({
     reads++;
     return {
       pages: [{ uri: "oxplow:oxplow/knowledge?id=local-snapshots&store=oxwiki", title }],
-      reads: { datasets: ["v_knowledge_page"], tables: [], measures: [] },
+      reads: { datasets: ["v_oxplow_knowledge_page"], tables: [], measures: [] },
     };
   },
 }));
@@ -39,7 +39,7 @@ function Title() {
   return <span data-testid="t">{useKnowledgeTitle(knowledgeUri("oxwiki", "local-snapshots")) ?? "…"}</span>;
 }
 
-const changed = { kind: "datasetsChanged", datasets: ["v_knowledge_page"] };
+const changed = { kind: "datasetsChanged", datasets: ["v_oxplow_knowledge_page"] };
 
 test("a burst of knowledge changes is one re-read, and the last change is seen", async () => {
   const view = render(<Title />);

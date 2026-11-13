@@ -4422,7 +4422,7 @@ async fn a_knowledge_provider_keeps_pages_and_core_records_them() {
     deploy(&fx, &ext).await;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     crate::test_fixtures::activate_with_problems(&fx.svc).await;
-    assert_eq!(fx.svc.knowledge.enabled(), ["oxwiki", "shelf"]);
+    assert_eq!(fx.svc.knowledge.enabled(), ["shelf"]);
     let shelf = |id: &str| oxplow_domain::uri::build::knowledge_uri("shelf", id);
 
     // A page written outside oxplow comes in on a sync.

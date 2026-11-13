@@ -1,5 +1,5 @@
-//! `knowledge.read` operations: the comments people anchored in pages
-//! (`oxplow.knowledge.comments`) and how far a knowledge page's pinned file ref
+//! The comments people anchored in pages (`comment.read`, `oxplow.comment.list`)
+//! and, `knowledge.read`, how far a knowledge page's pinned file ref
 //! has drifted from the file (`oxplow.knowledge.drift`).
 
 use oxplow_domain::comment::CommentThread;
@@ -134,8 +134,8 @@ fn resolve_comment_scope(
 pub fn ops(services: ServicesSlot) -> Vec<Op> {
     vec![
         read_op(
-            "knowledge.read",
-            "comments",
+            "comment.read",
+            "list",
             services.clone(),
             |svc, _, p: ListCommentsParams| async move {
                 let threads = match resolve_comment_scope(p.scope.as_deref(), p.id.as_deref())? {
@@ -263,41 +263,6 @@ mod tests {
         );
     }
 
-    /// A page's file ref with no pin reads `no_pin`; a path the page
-    /// doesn't reference reads `not_a_ref`.
-    #[tokio::test]
-    async fn drift_reports_status_per_ref_through_the_bus() {
-        let dir = tempfile::tempdir().unwrap();
-        crate::test_fixtures::init_git_repo(dir.path());
-        let svc = crate::Services::in_memory(dir.path()).await.unwrap();
-        let folder = oxplow_oxwiki::oxwiki_dir(dir.path());
-        std::fs::create_dir_all(&folder).unwrap();
-        std::fs::write(folder.join("intro.md"), "see [[crates/foo.rs]]").unwrap();
-        oxplow_oxwiki::pages::sync_page(&svc.db, &svc.vocabulary, dir.path(), "intro")
-            .await
-            .unwrap();
-        let actor = Actor::Agent {
-            session_id: None,
-            thread_id: None,
-            stream_id: None,
-        };
-        let status = |path: &str| {
-            let svc = svc.clone();
-            let actor = actor.clone();
-            let input = json!({ "id": "intro", "path": path });
-            async move {
-                svc.commands
-                    .run(&actor, "oxplow.knowledge.drift", input, false)
-                    .await
-                    .unwrap()
-                    .result["status"]
-                    .clone()
-            }
-        };
-        assert_eq!(status("crates/foo.rs").await, "no_pin");
-        assert_eq!(status("crates/zzz.rs").await, "not_a_ref");
-    }
-
     /// Comments list through the bus with their anchor context resolved;
     /// status filters apply.
     #[tokio::test]
@@ -309,7 +274,7 @@ mod tests {
         svc.commands
             .run(
                 &Actor::Human,
-                "oxplow.knowledge.add_comment",
+                "oxplow.comment.add",
                 json!({
                     "stream": stream.to_string(),
                     "target": oxplow_domain::uri::build::file_uri("src/app.rs"),
@@ -333,7 +298,7 @@ mod tests {
             .commands
             .run(
                 &actor,
-                "oxplow.knowledge.comments",
+                "oxplow.comment.list",
                 json!({ "id": stream.to_string() }),
                 false,
             )
@@ -349,7 +314,7 @@ mod tests {
             .commands
             .run(
                 &actor,
-                "oxplow.knowledge.comments",
+                "oxplow.comment.list",
                 json!({ "id": stream.to_string(), "status": "needs_response" }),
                 false,
             )

@@ -173,6 +173,20 @@ pub const SCOPES: &[Scope] = &[
         summary: "Run the project's and extensions' collectors now, syncing what they read.",
     },
     Scope {
+        id: "comment.read",
+        access: Access::Read,
+        host: Host::Daemon,
+        spends: false,
+        summary: "Read the comments people anchored to text in pages, files and tasks.",
+    },
+    Scope {
+        id: "comment.write",
+        access: Access::Record,
+        host: Host::Daemon,
+        spends: false,
+        summary: "Write comments: add, reply, change, relocate and delete them.",
+    },
+    Scope {
         id: "config.read",
         access: Access::Read,
         host: Host::Daemon,
@@ -325,14 +339,14 @@ pub const SCOPES: &[Scope] = &[
         access: Access::Read,
         host: Host::Daemon,
         spends: false,
-        summary: "Read knowledge pages' comments and the drift of their refs from the code they name.",
+        summary: "Read the drift of knowledge pages' refs from the code they name.",
     },
     Scope {
         id: "knowledge.write",
         access: Access::Record,
         host: Host::Daemon,
         spends: false,
-        summary: "Write the project's knowledge: pages, notes, comments and links.",
+        summary: "Write the project's knowledge: pages, notes and links.",
     },
     Scope {
         id: "links.check",

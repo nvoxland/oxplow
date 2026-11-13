@@ -345,7 +345,7 @@ implementation owns is commands, offered only while it's active
 page regions it sat inside (innermost first) and the URIs inside the
 selection, each resolved by `oxplow_app::ref_resolver` — so the agent
 gets what the highlighted thing is in one call. Replies and resolution
-are `oxplow.knowledge.reply_comment` / `update_comment` (`comment: "cmt12"`);
+are `oxplow.comment.reply` / `update` (`comment: "cmt12"`);
 a reply is authored by the actor and clears `needs_response`. oxplow
 never prompts for comments: the person runs the `review-comments`
 command.

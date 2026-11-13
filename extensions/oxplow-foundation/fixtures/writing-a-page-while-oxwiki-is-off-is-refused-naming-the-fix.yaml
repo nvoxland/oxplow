@@ -1,6 +1,0 @@
-# With oxwiki off and no other store, a write is refused, naming how to turn
-# a store on.
-given:
-  - { command: oxplow.knowledge.set_oxwiki, input: { on: false } }
-when: { command: oxplow.knowledge.write_page, input: { id: arch, body: "# Arch\n" } }
-expect: { ok: false, refused: "no knowledge store is enabled" }

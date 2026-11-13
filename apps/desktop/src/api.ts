@@ -876,46 +876,9 @@ export interface RemoteBranchTarget {
   branch: string;
 }
 
-/** Write a knowledge page — the `oxplow.knowledge.write_page` command: the
- *  page in its store, its links and its file pins, in one audited run. Every
- *  `[[link]]` must resolve (a dangling one is refused, named). `store` is
- *  needed only when several stores are enabled; `id` may be left out (the
- *  store derives it from `title`). `verifiedFiles` are files re-checked
- *  against the page: their freshness pins move to now. Returns the page's
- *  URI. */
-export async function writeKnowledgePage(input: {
-  store?: string;
-  id?: string;
-  title?: string;
-  body: string;
-  verifiedFiles?: string[];
-  removedFiles?: string[];
-}): Promise<string | null> {
-  const result = await runCommand("oxplow.knowledge.write_page", {
-    ...(input.store ? { store: input.store } : {}),
-    ...(input.id ? { id: input.id } : {}),
-    ...(input.title ? { title: input.title } : {}),
-    body: input.body,
-    verified_files: input.verifiedFiles ?? [],
-    ...(input.removedFiles ? { removed_files: input.removedFiles } : {}),
-  });
-  const uri = (result.result as { uri?: unknown } | null | undefined)?.uri;
-  return typeof uri === "string" ? uri : null;
-}
-
-/** Delete a knowledge page (`oxplow.knowledge.delete_page`, destructive): the
- *  person has confirmed. */
-export async function deleteKnowledgePage(input: { store?: string; id: string }, confirmed: boolean): Promise<void> {
-  await runCommand(
-    "oxplow.knowledge.delete_page",
-    { ...(input.store ? { store: input.store } : {}), id: input.id },
-    confirmed,
-  );
-}
-
 // ---- Comments ----
 
-/** A comment, written as the person (`oxplow.knowledge.add_comment`, P8.A6). */
+/** A comment, written as the person (`oxplow.comment.add`, P8.A6). */
 export async function createComment(input: {
   streamId: string;
   threadId: string | null;
@@ -931,7 +894,7 @@ export async function createComment(input: {
   intent: CommentIntent;
   body: string;
 }): Promise<CommentThread> {
-  const outcome = await runCommand("oxplow.knowledge.add_comment", {
+  const outcome = await runCommand("oxplow.comment.add", {
     stream: input.streamId,
     ...(input.threadId ? { thread: input.threadId } : {}),
     target: input.target,
@@ -946,7 +909,7 @@ export async function createComment(input: {
 }
 
 export async function addCommentMessage(commentId: string, body: string): Promise<CommentMessage> {
-  return (await runCommand("oxplow.knowledge.reply_comment", { comment: commentId, body })).result as CommentMessage;
+  return (await runCommand("oxplow.comment.reply", { comment: commentId, body })).result as CommentMessage;
 }
 
 export async function listCommentsForTarget(target: string): Promise<CommentThread[]> {
@@ -958,11 +921,11 @@ export async function listCommentsForStream(streamId: string): Promise<CommentTh
 }
 
 export async function setCommentIntent(commentId: string, intent: CommentIntent): Promise<void> {
-  await runCommand("oxplow.knowledge.update_comment", { comment: commentId, intent });
+  await runCommand("oxplow.comment.update", { comment: commentId, intent });
 }
 
 export async function setCommentStatus(commentId: string, status: CommentStatus): Promise<void> {
-  await runCommand("oxplow.knowledge.update_comment", { comment: commentId, status });
+  await runCommand("oxplow.comment.update", { comment: commentId, status });
 }
 
 /// Store where the renderer re-found a comment's quote (or that it is
@@ -972,7 +935,7 @@ export async function relocateComment(
   selectorsJson: string,
   orphaned: boolean,
 ): Promise<void> {
-  await runCommand("oxplow.knowledge.relocate_comment", { comment: commentId, selectors_json: selectorsJson, orphaned });
+  await runCommand("oxplow.comment.relocate", { comment: commentId, selectors_json: selectorsJson, orphaned });
 }
 
 /// Re-attach an orphaned comment to a freshly-selected span: rewrites
@@ -982,13 +945,13 @@ export async function relinkComment(
   quote: string,
   selectorsJson: string,
 ): Promise<void> {
-  await runCommand("oxplow.knowledge.update_comment", { comment: commentId, quote, selectors_json: selectorsJson });
+  await runCommand("oxplow.comment.update", { comment: commentId, quote, selectors_json: selectorsJson });
 }
 
 /** The popover's delete sits behind an `InlineConfirm`, the person's
- *  confirmation (`oxplow.knowledge.delete_comment` is destructive). */
+ *  confirmation (`oxplow.comment.delete` is destructive). */
 export async function deleteComment(commentId: string): Promise<void> {
-  await runCommand("oxplow.knowledge.delete_comment", { comment: commentId }, true);
+  await runCommand("oxplow.comment.delete", { comment: commentId }, true);
 }
 
 /// Subscribe to comment changes: a commit touched `v_comment` (a comment
@@ -1234,19 +1197,6 @@ export async function listFilesForSnapshot(snapshotId: number): Promise<Snapshot
 /** Every file in the stream's workspace at `revision`, sorted. */
 export async function filesAt(streamId: string, revision: Revision): Promise<string[]> {
   return unwrap(await commands.filesAt(streamId || null, revision));
-}
-
-/** For each snapshot id in the input list, the URIs of the knowledge pages
- *  whose body changed in that snapshot. Drives knowledge badges on the
- *  Local History dashboard. */
-export async function listKnowledgePagesForSnapshots(
-  snapshotIds: number[],
-): Promise<Array<{ snapshotId: number; uri: string }>> {
-  const rows = unwrap(await commands.listKnowledgePagesForSnapshots(snapshotIds)) as unknown as Array<{
-    snapshot_id: number;
-    uri: string;
-  }>;
-  return rows.map((row) => ({ snapshotId: row.snapshot_id, uri: row.uri }));
 }
 
 export interface SnapshotTakenEventPayload {

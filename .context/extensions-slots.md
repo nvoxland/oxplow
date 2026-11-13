@@ -67,6 +67,7 @@ loaders' first rows and params are what a mount can take):
 |---|---|---|
 | `oxplow/diff-view.sections` | the Changes page (a request's, a turn's or a range's diff; nodes `header`, `description`, `concurrent` (the other requests, on any thread, whose turns changed the same files in the same window), `files`, `extensions`) | `uri`, `start`, `end`, `stream_id`, and the page's row (`change_id`, …) |
 | `oxplow/task-detail.sections` | the Task page (nodes `state`, `fields`, `body`, `info`, `links`, `comments`, `activity`) | `uri`, `thread_id`, `stream_id` |
+| `oxplow/knowledge-page.sections` | a knowledge page (the end of its stack; oxwiki mounts its Edit part) | `uri`, `store`, `id` |
 | `oxplow/commit.sections` | a commit's page (nodes `detail`, `files`) | `uri`, `sha`, `stream_id`, and `change_id` (the page's row) |
 | `oxplow/uncommitted-changes.sections` | Uncommitted Changes (nodes `commit`, `files`; `at: { before: commit }` puts a strip above everything) | `stream_id`, and `change_id` (the page's row) |
 | `oxplow/settings.integrations` | Settings → Integrations, under Capabilities: an extension's own settings for the project. oxtask mounts its Task workflow (`task-workflow-settings`) | none (the page's params: `area`) |

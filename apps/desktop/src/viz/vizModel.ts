@@ -333,7 +333,7 @@ export function cellLinkRef(
       });
     }
     case "knowledge": {
-      // The page's URI (`v_knowledge_page.uri`).
+      // The page's URI (`v_oxplow_knowledge_page.uri`).
       const page = knowledgeOf(s);
       return page ? knowledgePageRef(page.store, page.id) : null;
     }

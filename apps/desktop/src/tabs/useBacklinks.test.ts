@@ -43,8 +43,8 @@ describe("humanRefType", () => {
   test("body-mention ref_types all collapse to 'mention'", () => {
     for (const rt of [
       "wikilink",
-      "knowledge_file_ref",
-      "knowledge_dir_ref",
+      "file_pin",
+      "dir_pin",
       "file_mention",
       "dir_mention",
       "task_mention",

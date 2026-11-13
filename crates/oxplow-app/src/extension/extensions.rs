@@ -6734,8 +6734,7 @@ commands:
         assert!(foundation.errors.is_empty(), "{:?}", foundation.errors);
         assert!(foundation.warnings.is_empty(), "{:?}", foundation.warnings);
         assert_eq!(foundation.namespace, "oxplow");
-        // Foundation's commands are core's ops, but for the one script that
-        // composes a settings write (oxwiki on or off).
+        // Foundation's commands are all core's ops: no script among them.
         let scripts: Vec<&str> = foundation
             .commands
             .iter()
@@ -6747,7 +6746,7 @@ commands:
             })
             .map(|c| c.name.as_str())
             .collect();
-        assert_eq!(scripts, ["oxplow.knowledge.set_oxwiki"]);
+        assert!(scripts.is_empty(), "{scripts:?}");
         // The agent harnesses and AI providers core runs are
         // foundation's declarations — many of each, all active.
         let declared = |capability: &str| {

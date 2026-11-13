@@ -7,7 +7,7 @@
  * and a component frame's markdown (`markdownTree`) share it.
  */
 import { fileRef, directoryRef, gitCommitRef, knowledgePageRef } from "../../tabs/pageRefs.js";
-import { OXWIKI, enabledKnowledgeStoreIds } from "../../knowledgeStoreIds.js";
+import { enabledKnowledgeStoreIds, knowledgeStoreOfBareId } from "../../knowledgeStoreIds.js";
 import { WORKING, gitRevision, revisionFromSlot, revisionSlot } from "../../revision.js";
 import { taskId, taskLabel } from "../../taskRef.js";
 import { dirUri, fileLinesUri, fileUri, identityOf, isOxplowScheme, knowledgeOf, linkTarget, commitUri, parseUri, typeOf, knowledgeUri, withUriView } from "../../uri/uri.js";
@@ -167,7 +167,7 @@ export function parseMarkdownLink(rawHref: string, base: string | null = null): 
     const target = decodeURIComponent(rawHref.slice(INVALID_LINK.length));
     return {
       kind: "broken",
-      reason: `Broken link: “${target}” is not a recognized reference (use a task's id, [[some-slug]] for an oxwiki page, [[store:id]] for another store's)`,
+      reason: `Broken link: “${target}” is not a recognized reference (use a task's id, [[some-id]] for a knowledge store's page, [[store:id]] for another store's)`,
     };
   }
   const relativeTo = base !== null && typeOf(base) === "oxplow/file" ? parseUri(base) : null;
@@ -188,7 +188,8 @@ export function parseMarkdownLink(rawHref: string, base: string | null = null): 
   let target = rawHref.replace(/^\.?\//, "");
   target = target.split("#")[0]?.split("?")[0] ?? "";
   if (target.endsWith(".md")) target = target.slice(0, -3);
-  return target ? { kind: "knowledge", store: OXWIKI, id: target } : { kind: "empty" };
+  const store = target ? knowledgeStoreOfBareId(target) : null;
+  return store ? { kind: "knowledge", store, id: target } : { kind: "empty" };
 }
 
 /** `path`'s extension, lowercased (`md`); empty with none. */
@@ -384,23 +385,6 @@ function collapseInternalLink(label: string, url: string): string | null {
  * than an oxwiki page id? File paths contain a slash or end in a recognizable
  * extension; bare slugs like `architecture` are routed to an oxwiki page.
  */
-/**
- * Heuristic: is the target a valid oxwiki-id shape? Mirrors the backend
- * `crates/oxplow-domain/src/refs.rs::looks_like_slug` (kebab/snake, no
- * slash/dot/space, not a bare sha) so the renderer and the MCP link
- * checker agree on what's a real ref vs. a broken one — with the one
- * concession that a trailing `.md` is accepted (the renderer strips it),
- * keeping `[[some-note.md]]` a live link. `#13`, `@foo`, etc. fail here
- * and render broken.
- */
-function looksLikeSlug(target: string): boolean {
-  const bare = target.endsWith(".md") ? target.slice(0, -3) : target;
-  if (!bare || bare.length > 80) return false;
-  if (bare.includes("/") || bare.includes(".") || bare.includes(" ")) return false;
-  if (/^[0-9a-f]{7,40}$/i.test(bare)) return false;
-  return /^[A-Za-z0-9_-]+$/.test(bare);
-}
-
 /** The file URI a `[[path[@version][:line]]]` interior names. A `@disk` /
  *  `@local` version is the working tree (no `rev`); anything else is a git
  *  revision (oxwiki's authoring syntax — `.context/vcs.md`). */
@@ -511,12 +495,12 @@ function rewriteWikilinksOutsideInlineCode(text: string, mentionRef: MentionRef)
       if (extensionRef) {
         return `[${display}](${linkTarget(extensionRef)})`;
       }
-      // `[[store:id]]`: a page of an enabled knowledge store (oxwiki's own
-      // may be written in full).
+      // `[[store:id]]`: a page of a knowledge store (the bare `[[id]]` is
+      // the store whose id pattern matches it, below).
       const colon = target.indexOf(":");
       if (colon > 0 && colon < target.length - 1) {
         const store = target.slice(0, colon);
-        if (store === OXWIKI || enabledKnowledgeStoreIds().includes(store)) {
+        if (enabledKnowledgeStoreIds().includes(store)) {
           return `[${display}](${linkTarget(knowledgeUri(store, target.slice(colon + 1)))})`;
         }
       }
@@ -526,25 +510,28 @@ function rewriteWikilinksOutsideInlineCode(text: string, mentionRef: MentionRef)
         // back at click time.
         return `[${display}](${linkTarget(fileTargetUri(target))})`;
       }
-      // Slug-shaped → an oxwiki page. Anything else matches no known ref
-      // shape (e.g. the GitHub `[[#13]]` form) → a broken link the
-      // renderer shows as non-clickable. Encode the target so an odd
-      // interior can't break the markdown link.
-      if (looksLikeSlug(target)) {
+      // A bare id a knowledge store's id pattern matches (oxwiki's slugs) →
+      // that store's page. Anything else matches no known ref shape (e.g.
+      // the GitHub `[[#13]]` form) → a broken link the renderer shows as
+      // non-clickable. Encode the target so an odd interior can't break the
+      // markdown link.
+      const slug = target.endsWith(".md") ? target.slice(0, -3) : target;
+      const keeper = knowledgeStoreOfBareId(slug);
+      if (keeper) {
         // Its URI, as every other ref: the editor keeps it as a link and
-        // `postprocessWikilinks` gives the `[[slug]]` back.
-        const slug = target.endsWith(".md") ? target.slice(0, -3) : target;
-        return `[${display}](${linkTarget(knowledgeUri("oxwiki", slug))})`;
+        // `postprocessWikilinks` gives the `[[id]]` back.
+        return `[${display}](${linkTarget(knowledgeUri(keeper, slug))})`;
       }
       return `[${display}](${INVALID_LINK}${encodeURIComponent(target)})`;
     });
   }).join("");
 }
 
-/** How a knowledge page is written in a `[[…]]` link: an oxwiki page by its
- *  id, another store's page as `store:id`. */
+/** How a knowledge page is written in a `[[…]]` link: by its id when its
+ *  store is the one a bare id names (the first whose id pattern matches it),
+ *  else as `store:id`. */
 export function knowledgeLinkText(store: string, id: string): string {
-  return store === OXWIKI && looksLikeSlug(id) ? id : `${store}:${id}`;
+  return knowledgeStoreOfBareId(id) === store ? id : `${store}:${id}`;
 }
 
 /** What a link names that has a title: a knowledge page, a task, an

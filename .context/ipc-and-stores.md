@@ -833,7 +833,7 @@ surface passes one. The reads stay RPCs (`list_comments_for_target`,
 
 Views re-read on `DatasetsChanged` naming `v_comment` (comments and their
 messages) — `subscribeCommentEvents` in `api.ts`. The renderer's
-re-anchor after it re-finds a quote is `oxplow.knowledge.relocate_comment`
+re-anchor after it re-finds a quote is `oxplow.comment.relocate`
 (`relocateComment`, tsk861): recorded when the anchor moved; one already
 where it was is `HandlerOutput::unchanged` and leaves no audit row and no
 event (commands.md step 5), so the re-read it causes ends the loop. The

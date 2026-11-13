@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`knowledge.comment.deleted@3`: a comment is gone, its messages with it.",
+  "description": "`comment.deleted@1`: a comment is gone, its messages with it.",
   "properties": {
     "comment": {
       "description": "The comment (`cmt5`).",
@@ -16,6 +16,6 @@
     "comment",
     "target"
   ],
-  "title": "KnowledgeCommentDeletedV3",
+  "title": "CommentDeletedV1",
   "type": "object"
 }

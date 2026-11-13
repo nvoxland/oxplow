@@ -71,6 +71,10 @@ declares no store then) and goes in step 5 of the removal. The extension:
   ref()`): read a model view directly or use CTEs.
 - **Kinds.** The metrics slice by `oxplow.knowledge_kind` (the page's kind,
   oxwiki: `note`), not by core's bucket.
+- **Editing.** The knowledge page has a `sections` slot
+  (`oxplow/knowledge-page.sections`); oxwiki mounts its `edit-page` part there
+  (a markdown viz with an `edit: true` Save on `oxwiki.page.write`, empty on
+  another store's page), because bundled can't name `oxwiki.*` commands.
 - **Skill.** Bundled's `knowledge` skill (gated on the model) is the read and
   find half of what core's `oxplow-knowledge` skill was, with the link rules;
   oxwiki's `oxwiki` skill is the writing half.
@@ -142,10 +146,8 @@ verified" (`oxplow.knowledge.verify_files`, which writes through it). It:
 
 1. **resolves the store** (`KnowledgeStores::resolve`): the one `store`
    names, which must be enabled; with none named, the only enabled one.
-   Refused naming the fix: "no knowledge store is enabled: turn oxwiki on
-   in Settings → Integrations → Knowledge stores (or
-   `oxplow.knowledge.set_oxwiki { on: true }`), or enable an extension's
-   store"; with
+   Refused naming the fix: "no knowledge store is enabled: turn on an
+   extension that keeps pages, such as oxwiki"; with
    several, "name the store: oxwiki, …". A store whose `edit` is off
    refuses;
 2. validates **every `[[link]]` the write adds** — a task, page, file,
@@ -229,16 +231,13 @@ alone.
 
 ## Turning oxwiki off
 
-oxwiki is on by default. foundation's setting `oxwiki` (Settings →
-Integrations → Knowledge stores, which lists every store on or off with
-its kinds and extension; or `oxplow.knowledge.set_oxwiki { on }`) turns it
-off: it stays declared and
-listed (`v_capability_provider` `active = 0`, `chosen_by = 'setting'`), but
-no store runs, its pages are hidden, its watch ignores its folder, `resync`
-is refused and a bare `[[slug]]` names a store that isn't enabled. On
-again, the publication declares it again and its watch rescans the folder.
-(`.context/extensions-manifest.md` "An implementation offered by a
-setting".)
+oxwiki is an extension: turn it off with its extension (Settings → Extensions,
+or `disableExtensions: [oxwiki]` in a settings file). There is no setting of
+its own and no `oxplow.knowledge.set_oxwiki`. Off, its store leaves the
+knowledge model's stores (`v_model_store`), its pages are hidden and its
+files left alone; on again, its collector rescans the folder. Settings →
+Integrations → Knowledge stores lists the stores of the model with the
+extension each is from.
 
 ## Hidden, not deleted
 

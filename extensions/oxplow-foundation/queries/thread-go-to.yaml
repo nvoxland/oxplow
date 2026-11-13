@@ -45,10 +45,9 @@ loaders:
         SELECT ord, 'Most visited', uri, page_kind, label, NULL, visits FROM top
         WHERE :mode = 'top' AND ord <= CAST(:limit AS INTEGER)
       )
-      -- A knowledge page shows its title now, not the one it had then.
       SELECT r.grp,
-             coalesce(nullif(trim(w.title), ''), nullif(trim(r.label), ''), r.uri) AS title,
+             coalesce(nullif(trim(r.label), ''), r.uri) AS title,
              r.page_kind, r.uri, r.at,
              CASE WHEN r.visits IS NULL THEN NULL ELSE r.visits || '×' END AS times
-      FROM row r LEFT JOIN v_knowledge_page w ON w.uri = r.uri
+      FROM row r
       ORDER BY r.ord

@@ -7,7 +7,7 @@ expect:
   alert: { firing: false }
 steps:
   - given:
-      - { command: oxplow.knowledge.add_comment, input: { stream: str1, target: "oxplow:oxplow/thread?id=thr1", intent: note, body: Check the release notes } }
+      - { command: oxplow.comment.add, input: { stream: str1, target: "oxplow:oxplow/thread?id=thr1", intent: note, body: Check the release notes } }
   - expect:
       loaders: { waiting_on_me: { rows: [{ what: Open note, title: Check the release notes }] } }
       alert: { firing: true, message: "Waiting on you: 1" }

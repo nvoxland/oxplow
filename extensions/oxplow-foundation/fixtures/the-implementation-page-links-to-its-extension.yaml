@@ -2,7 +2,7 @@
 when:
   page: oxplow/implementation
   params:
-    uri: "oxplow:oxplow/implementation?implementation=oxplow/knowledge.oxwiki"
+    uri: "oxplow:oxplow/implementation?implementation=oxplow/agent_harness.claude"
 expect:
   see_also:
     contains:

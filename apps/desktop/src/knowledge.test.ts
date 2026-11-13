@@ -28,19 +28,19 @@ test("the index reads v_oxplow_knowledge_page rows", () => {
   ]);
 });
 
-test("the enabled stores read v_capability_provider rows; a store that does not say it edits, doesn't", () => {
+test("the stores read v_model_store rows of the knowledge model, with the id pattern a bare [[id]] is matched by", () => {
   const stores = storesFromResult(
     result(
-      ["store", "title", "kinds", "features"],
+      ["store", "extension", "id_pattern"],
       [
-        ["oxwiki", "oxwiki", '[{"id":"note","title":"Note","bucket":"note"}]', '{"edit":true}'],
-        ["docs", "Docs", "[]", "{}"],
+        ["oxwiki", "oxwiki", "[a-z0-9]+(-[a-z0-9]+)*"],
+        ["docs", "docs", null],
       ],
     ),
   );
   expect(stores).toEqual([
-    { store: "oxwiki", title: "oxwiki", kinds: [{ id: "note", title: "Note", bucket: "note" }], edit: true },
-    { store: "docs", title: "Docs", kinds: [], edit: false },
+    { store: "oxwiki", extension: "oxwiki", idPattern: "[a-z0-9]+(-[a-z0-9]+)*" },
+    { store: "docs", extension: "docs", idPattern: null },
   ]);
-  expect(NO_KNOWLEDGE_STORE).toBe("No knowledge store is enabled — turn oxwiki on in Settings → Integrations → Knowledge stores");
+  expect(NO_KNOWLEDGE_STORE).toBe("No knowledge store is on — turn on an extension that keeps pages, such as oxwiki");
 });
