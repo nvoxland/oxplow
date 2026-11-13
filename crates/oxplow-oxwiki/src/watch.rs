@@ -114,7 +114,12 @@ mod tests {
         let store = SqliteKnowledgePageStore::new(db.clone());
         let sync = Sync {
             db,
-            vocabulary: VocabularyHandle::core(),
+            vocabulary: VocabularyHandle::new(oxplow_domain::vocabulary::Vocabulary::new(
+                oxplow_domain::events::schema::EventSchemaRegistry::core(),
+                oxplow_domain::uri::resources::with_bundled_knowledge(
+                    oxplow_domain::uri::resources::foundation().clone(),
+                ),
+            )),
             project_dir: project,
         };
         std::fs::write(dir.join("one.md"), "# One\n").unwrap();

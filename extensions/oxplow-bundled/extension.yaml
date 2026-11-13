@@ -127,6 +127,36 @@ datasets:
       - { name: title, type: TEXT, doc: "The task's title." }
       - { name: body, type: TEXT, doc: "Its own id (so typing `tsk42` finds it), then its body, then its comments." }
       - { name: stream_id, type: TEXT, doc: "Its thread's stream (`str1`); NULL for an unassigned task." }
+  - name: knowledge_page
+    version: 1
+    description: "the knowledge pages of every store over the shared knowledge model (the read contract for pages, and what the `oxplow/knowledge` resource resolves through): title, kind and bucket, excerpt, body, the URIs it links, how many of the files it cites changed since it was pinned, and its reads."
+    fields:
+      - { name: uri, type: TEXT, doc: "The page's URI (`oxplow:oxplow/knowledge?id=…&store=…`)." }
+      - { name: store, type: TEXT, doc: "The store that keeps it (oxwiki, an extension's)." }
+      - { name: id, type: TEXT, doc: "The store's own page id (oxwiki: its slug)." }
+      - { name: kind, type: TEXT, doc: "The store's kind of page." }
+      - { name: bucket, type: TEXT, doc: "note, memory or instruction." }
+      - { name: title, type: TEXT, doc: "Title." }
+      - { name: url, type: TEXT, doc: "Where the store keeps it, when it says." }
+      - { name: author, type: TEXT, doc: "Who last wrote it, as the store records it." }
+      - { name: excerpt, type: TEXT, doc: "The start of its body." }
+      - { name: body, type: TEXT, doc: "Markdown body." }
+      - { name: body_size, type: INT, doc: "Bytes of body." }
+      - { name: outbound_uris, type: TEXT, doc: "JSON array of the URIs it links." }
+      - { name: stale_ref_count, type: INT, doc: "How many of the files it cites changed since the page was pinned." }
+      - { name: read_count, type: INT, doc: "Reads by agents and people." }
+      - { name: agent_read_count, type: INT, doc: "Reads by agents." }
+      - { name: last_read_at, type: TEXT, doc: "When it was last read (RFC 3339); NULL if never." }
+      - { name: updated_at, type: TEXT, doc: "Updated (RFC 3339)." }
+  - name: search_knowledge
+    version: 1
+    description: "what site search indexes for each knowledge page, in `v_oxplow_search_knowledge`'s shape: its title and its body."
+    fields:
+      - { name: uri, type: TEXT, doc: "The page's canonical ref: what a hit opens." }
+      - { name: title, type: TEXT, doc: "The page's title." }
+      - { name: body, type: TEXT, doc: "Its body." }
+      - { name: stream_id, type: TEXT, doc: "Always NULL: a page is project-wide." }
+      - { name: version, type: TEXT, doc: "Changes whenever the page's text does (its `updated_at`): a recompute reads the text of rows whose version moved only." }
   - name: request_link
     version: 1
     description: "the tasks each request worked on, in `v_oxplow_request_link`'s shape (request, task, basis, turn, thread_id, at, turns, started_at, last_ended_at, request_id), over the `request_task` model. `basis` keeps the model's names: `filed` and `edited` are core's `command`."
@@ -208,6 +238,12 @@ action_points:
     context:
       title?: string
       body?: string
+  - name: knowledge.delete
+    label: Delete Page
+    doc: Delete a knowledge page, for whichever store keeps it.
+    item: uri
+    context:
+      uri: uri
   - name: task.new
     label: New Task
     doc: File a task. Each task store offers its own way.
@@ -276,6 +312,13 @@ resources:
     resolve: task
     searchable: search_task
     icon: check-square
+  - name: knowledge
+    description: "A page of one of the project's knowledge stores (oxwiki, an extension's)."
+    label: Knowledge page
+    params: { store: { required: true, pattern: '^[a-z][a-z0-9_-]*$' }, id: { required: true } }
+    resolve: knowledge_page
+    searchable: search_knowledge
+    icon: book-open
   - name: request_task
     label: Request link
     description: "A link from a request to a task its turns changed, and how (filed, transition, assigned, edited; prompt for a link moved from core, where a person's prompt named the task)."
@@ -457,14 +500,6 @@ commands:
     entry: handlers/reorder.star
     needs: [sql.read]
     access: write
-  # The person's menu entry for foundation's `knowledge.write_page`: an
-  # agent runs foundation's; this adds the label and the form a person uses.
-  - name: knowledge.new_page
-    summary: "The person's menu entry for `oxplow.knowledge.write_page`: New Knowledge Page… opens the form and shows the page it writes."
-    scope: knowledge.write
-    op: write_page
-    ui: { label: "New Knowledge Page…", group: Knowledge, keywords: [knowledge, page, note, write], form: "oxplow:oxplow/page?page=new-knowledge-page", open_after: "{{result.page}}" }
-    example: {"title": "Auth flow", "body": "# Auth flow\n\nThe callback validates `next` before redirecting.", "verified_files": []}
 custom_components:
   # The Work board: the tasks as cards in a column per stage, its own
   # toolbar, drag and card menu; oxplow draws its nav bar and confirms.
@@ -558,16 +593,16 @@ collectors:
   # What the project knows: the pages it keeps, restated whenever a page is
   # written, recorded or deleted, and whether a request read any.
   - id: oxplow.knowledge_pages
-    doc: How many knowledge pages there are and how many are stale, by store and bucket, restated when a page is written, recorded or deleted, and when a snapshot changes a file a page cites (knowledge.page.drifted), since a cited file drifting is what makes a page stale; a snapshot of an uncited file restates nothing.
+    doc: How many knowledge pages there are and how many are stale, by store and bucket, restated when a page is written, changed or deleted (oxplow.knowledge_record.changed), and when a snapshot changes a file a page cites (snapshot.ref_drifted), since a cited file drifting is what makes a page stale; a snapshot of an uncited file restates nothing.
     runtime: starlark
     entry: collectors/knowledge/pages.star
-    on: [knowledge.page.written, knowledge.page.recorded, knowledge.page.deleted, knowledge.page.drifted]
+    on: [oxplow.knowledge_record.changed, snapshot.ref_drifted]
     input: |
       SELECT n.placed_at, n.day, g.store, g.bucket, g.pages, g.stale
         FROM (SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now') AS placed_at, date('now') AS day) n
         LEFT JOIN (SELECT store, bucket, count(*) AS pages,
                           sum(CASE WHEN stale_ref_count > 0 THEN 1 ELSE 0 END) AS stale
-                     FROM v_knowledge_page GROUP BY store, bucket) g ON 1 = 1
+                     FROM v_oxplow_knowledge_page GROUP BY store, bucket) g ON 1 = 1
     facts: [knowledge.pages, knowledge.stale_pages]
   - id: oxplow.request_read_knowledge
     doc: Whether a request that changed files read a knowledge page, recorded when a turn of it ends and none of its turns runs.
@@ -576,8 +611,10 @@ collectors:
     on: [agent.turn.ended]
     input: |
       SELECT r.uri AS request,
-             EXISTS (SELECT 1 FROM v_knowledge_read k JOIN v_agent_turn kt ON kt.id = k.turn_id
-                      WHERE k.actor = 'agent' AND kt.request_id = r.id) AS read,
+             EXISTS (SELECT 1 FROM v_event k JOIN v_agent_turn kt ON kt.id = k.turn_id
+                      WHERE k.type = 'record.read'
+                        AND json_extract(k.payload, '$.record') LIKE 'oxplow:oxplow/knowledge?%'
+                        AND kt.request_id = r.id) AS read,
              r.started_at AS placed_at
         FROM v_agent_turn t
         JOIN v_request r ON r.id = t.request_id

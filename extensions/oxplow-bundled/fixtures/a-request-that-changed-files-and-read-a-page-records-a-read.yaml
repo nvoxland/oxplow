@@ -1,7 +1,8 @@
 # A request whose turn read a knowledge page (its file, as an agent's own
 # read) and edited a file records 1 for the request.
+requires: [oxwiki]
 given:
-  - { command: oxplow.knowledge.write_page, input: { store: oxwiki, title: Greeting notes, body: "# Greeting notes\n\nThe greeting says hello." } }
+  - { command: oxwiki.page.write, input: { title: Greeting notes, body: "# Greeting notes\n\nThe greeting says hello." } }
   - observe:
       turn:
         prompt: Fix the greeting

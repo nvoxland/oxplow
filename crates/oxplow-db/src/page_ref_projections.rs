@@ -379,10 +379,11 @@ mod tests {
 
     /// Foundation's resources with oxtask as the task tracker (`tsk<n>`).
     fn tasks_kinds() -> oxplow_domain::uri::resources::ResourceRegistry {
-        oxplow_domain::uri::resources::foundation()
-            .clone()
-            .with_task_ids("oxtask", r"tsk\d+")
-            .unwrap()
+        oxplow_domain::uri::resources::with_bundled_knowledge(
+            oxplow_domain::uri::resources::foundation().clone(),
+        )
+        .with_task_ids("oxtask", r"tsk\d+")
+        .unwrap()
     }
 
     fn task(id: &str) -> String {

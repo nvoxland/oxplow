@@ -1,11 +1,12 @@
 # A page that cites a file which changed since it was pinned is listed
 # under Stale pages and counted on its store; a page an agent read shows
 # its reads and the read in Recent reads and writes.
+requires: [oxwiki]
 given:
   - observe: { turn: { prompt: Make the file, write: { path: a.txt, body: one } } }
   - observe: { snapshot: { files: [{ path: a.txt, hash: h1 }] } }
-  - { command: oxplow.knowledge.write_page, input: { store: oxwiki, title: Cites, body: "# Cites\n\nSee [[file:a.txt]].\n" } }
-  - { command: oxplow.knowledge.write_page, input: { store: oxwiki, title: Plain, body: "# Plain\n\nNothing cited.\n" } }
+  - { command: oxwiki.page.write, input: { title: Cites, body: "# Cites\n\nSee [[file:a.txt]].\n" } }
+  - { command: oxwiki.page.write, input: { title: Plain, body: "# Plain\n\nNothing cited.\n" } }
   - observe: { snapshot: { files: [{ path: a.txt, hash: h2 }] } }
   - observe:
       turn:

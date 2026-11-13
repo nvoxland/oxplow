@@ -1,11 +1,12 @@
 # The files a page cites, the changed ones first, each with its pinned
 # snapshot. Mark verified on one file re-pins it; Mark all verified
 # re-pins the rest.
+requires: [oxwiki]
 given:
   - observe: { turn: { prompt: Build the holt, write: { path: src/holt.rs, body: "fn holt() {}\n" } } }
   - observe: { turn: { prompt: Build the den, write: { path: src/den.rs, body: "fn den() {}\n" } } }
   - observe: { snapshot: { files: [{ path: src/holt.rs, hash: h1 }, { path: src/den.rs, hash: d1 }] } }
-  - { command: oxplow.knowledge.write_page, input: { store: oxwiki, title: Otters, body: "# Otters\n\nSee [[file:src/den.rs]] and [[file:src/holt.rs]].\n" } }
+  - { command: oxwiki.page.write, input: { title: Otters, body: "# Otters\n\nSee [[file:src/den.rs]] and [[file:src/holt.rs]].\n" } }
   - observe: { snapshot: { files: [{ path: src/holt.rs, hash: h2 }, { path: src/den.rs, hash: d2 }] } }
 when: { page: knowledge-freshness, params: { store: oxwiki, id: otters } }
 expect:

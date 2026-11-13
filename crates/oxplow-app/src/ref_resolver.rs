@@ -57,8 +57,8 @@ impl RefSummary {
 /// gist, small enough not to bloat the agent's context.
 const EXCERPT_LEN: usize = 280;
 
-/// Resolve one URI into a [`RefSummary`]. Commits, files, directories,
-/// knowledge pages and findings have richer resolvers; any other resource
+/// Resolve one URI into a [`RefSummary`]. Commits, files, directories
+/// and findings have richer resolvers; any other resource
 /// (a task too) resolves through the view its declaration names
 /// (`resolve:` and `title:`), by its `ref`. Anything else — not a URI, an undeclared
 /// resource, a row that's gone — comes back `resolved: false`.
@@ -72,7 +72,6 @@ pub async fn resolve_ref(services: &Services, uri: &str) -> RefSummary {
         r::COMMIT => resolve_commit(services, base, &param("sha")).await,
         r::FILE => resolve_file(services, base, &param("path")).await,
         r::DIR => resolve_directory(services, base, &param("path")).await,
-        r::KNOWLEDGE => resolve_knowledge(services, base, &parsed.identity()).await,
         r::FINDING => resolve_finding(services, base, &param("id")).await,
         _ => resolve_owned(services, base, &parsed).await,
     };
@@ -222,22 +221,6 @@ async fn resolve_directory(services: &Services, mut summary: RefSummary, path: &
             names.sort();
             summary.body_excerpt = Some(names.join(", "));
         }
-    }
-    summary
-}
-
-async fn resolve_knowledge(services: &Services, mut summary: RefSummary, uri: &str) -> RefSummary {
-    // A page of a store that isn't enabled is hidden: it resolves to nothing.
-    let enabled = oxplow_domain::uri::build::knowledge_of_uri(uri)
-        .is_some_and(|(store, _)| services.knowledge.get(&store).is_some());
-    if !enabled {
-        return summary;
-    }
-    if let Ok(Some(page)) = services.knowledge_pages.get(uri).await {
-        summary.title = Some(page.title);
-        // The excerpt is already a stored lead; re-cap defensively so a
-        // long stored excerpt can't blow the agent's context budget.
-        summary.body_excerpt = excerpt(&page.excerpt);
     }
     summary
 }
@@ -463,39 +446,6 @@ mod tests {
         assert!(
             names.contains("x.rs") && names.contains("y.rs"),
             "got {names}"
-        );
-    }
-
-    #[tokio::test]
-    async fn resolves_a_knowledge_pages_title_and_lead() {
-        let dir = git_repo_with_commit("init", "");
-        let services = Services::in_memory(dir.path()).await.unwrap();
-        let now = oxplow_domain::Timestamp::now();
-        let page = oxplow_db::KnowledgePage {
-            uri: build::knowledge_uri("oxwiki", "architecture"),
-            store: "oxwiki".into(),
-            id: "architecture".into(),
-            kind: None,
-            title: "System Architecture".into(),
-            url: None,
-            author: None,
-            excerpt: "The workspace isolation rule.".into(),
-            body_size_bytes: 30,
-            file_refs: vec![],
-            dir_refs: vec![],
-            created_at: now,
-            updated_at: now,
-        };
-        services
-            .db
-            .transaction(move |tx| oxplow_db::knowledge_page_store::upsert_tx(tx, &page, "", ""))
-            .await
-            .unwrap();
-        let summary = resolve_ref(&services, &build::knowledge_uri("oxwiki", "architecture")).await;
-        assert_eq!(summary.title.as_deref(), Some("System Architecture"));
-        assert_eq!(
-            summary.body_excerpt.as_deref(),
-            Some("The workspace isolation rule.")
         );
     }
 

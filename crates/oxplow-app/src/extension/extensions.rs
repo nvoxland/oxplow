@@ -6785,8 +6785,7 @@ commands:
             [
                 "oxplow.tasks.clear_finished",
                 "oxplow.tasks.assign",
-                "oxplow.tasks.reorder",
-                "oxplow.knowledge.new_page"
+                "oxplow.tasks.reorder"
             ]
         );
         let mut datasets: Vec<&str> = b.datasets.iter().map(|m| m.decl.name.as_str()).collect();
@@ -6801,7 +6800,9 @@ commands:
                 "contribution_repair",
                 "deviation",
                 "finished_cleared",
+                "knowledge_page",
                 "request_link",
+                "search_knowledge",
                 "search_task",
                 "session_task_badge",
                 "snapshot_work_badge",

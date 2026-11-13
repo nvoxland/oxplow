@@ -626,13 +626,6 @@ resources:
     resolve: symbol
     title: name
     icon: list-tree
-  - name: knowledge
-    description: "A page of one of the project's knowledge stores (oxwiki, an extension's)."
-    label: Knowledge page
-    params: { store: { required: true, pattern: '^[a-z][a-z0-9_-]*$' }, id: { required: true } }
-    resolve: knowledge_page
-    searchable: search_knowledge
-    icon: book-open
   - name: comment
     description: "A comment a person left on a page or a record."
     label: Comment

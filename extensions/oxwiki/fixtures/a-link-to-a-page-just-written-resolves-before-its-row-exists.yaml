@@ -1,0 +1,15 @@
+# Two writes in a row: the second links the first, whose file is there but
+# whose row the collector hasn't made yet (it follows the folder). It is no
+# dangling link; a page that is nowhere still is.
+requires: [oxplow-bundled]
+given:
+  - files: { ".oxplow/oxwiki/first.md": "# First\n" }
+when:
+  command: oxwiki.page.write
+  input: { id: second, body: "# Second\n\nAfter [[first]].\n" }
+expect: { ok: true, result: { id: second } }
+steps:
+  - when:
+      command: oxwiki.page.write
+      input: { id: third, body: "# Third\n\nAfter [[nowhere]].\n" }
+    expect: { ok: false, refused: "[[nowhere]]" }

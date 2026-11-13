@@ -90,12 +90,31 @@ impl AgentPolicy {
             .chain(std::iter::once(project_dir.to_path_buf()))
             .filter(|p| p != &worktree_root)
             .collect();
+        // The files the stores keep their rows in: written by the store's
+        // extension's command, whatever the thread.
+        let record_folders: Vec<oxplow_runtime::RecordFolder> = svc
+            .models
+            .current()
+            .fills
+            .iter()
+            .filter_map(|fill| {
+                let files = fill.files.as_ref()?;
+                Some(oxplow_runtime::RecordFolder {
+                    folder: files.folder.clone(),
+                    suffix: files.suffix.clone(),
+                    store: fill.stores.first()?.clone(),
+                    model: fill.model.clone(),
+                    extension: fill.extension.clone(),
+                })
+            })
+            .collect();
         decide_tool(
             intent,
             &PolicyFacts {
                 worktree_root: &worktree_root,
                 other_roots: &other_roots,
                 project_dir,
+                record_folders: &record_folders,
             },
         )
     }

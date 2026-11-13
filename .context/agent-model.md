@@ -356,13 +356,14 @@ or an `lsp.servers` entry in `.oxplow/project.yaml`. `v_lsp_server` says
 what's configured, installed and running.
 
 **Knowledge and links.** Knowledge reads are `oxplow_query_sql` over
-`v_knowledge_page` / `v_knowledge_ref` (stale pins) and `v_page_ref` (the
+`v_oxplow_knowledge_page` / `v_knowledge_pin` (stale pins) and `v_page_ref` (the
 backlinks graph, both directions), plus `oxplow_search` with `resources: ["oxplow/knowledge"]`;
 `oxplow_knowledge_drift({ store?, id, path })` returns one stale ref's unified diff
 (`status` drifted, unchanged, not_a_ref, no_pin, binary or no_contents).
-Writes are the `knowledge.*` commands ([knowledge.md](./knowledge.md)).
-`knowledge.write_page` checks the `[[…]]` links in the text it keeps
-(`oxplow_app::link_check`) and refuses a page whose links don't resolve. What counts as a link is `oxplow_domain::uri::classify_wikilinks`
+Writes are a store's own commands ([knowledge.md](./knowledge.md): oxwiki's
+are `oxwiki.page.write` / `delete`). A store's write checks the `[[…]]` links in
+the text it keeps (`links.check`, `oxplow_app::link_check`) and refuses a page
+whose links don't resolve. What counts as a link is `oxplow_domain::uri::classify_wikilinks`
 ([resources.md](./resources.md)).
 
 **Id checks at the boundary.** A tool taking a thread or stream id calls
@@ -1432,7 +1433,7 @@ route. It is isolation only; nothing waits on tracked work
 **The two rules:** no thread may change another stream's worktree, and
 knowledge pages are written by command. Everything else is open to every
 thread: its own stream's worktree, files outside every stream, the shared
-knowledge pages (through `oxplow.knowledge.write_page`), and oxplow's own objects —
+knowledge pages (through the store's command: `oxwiki.page.write`), and oxplow's own objects —
 tasks, notes, comments. The bus's `WriteGate` asks only that
 a `Write` command's thread be open; `Record` commands skip it
 ([commands.md](./commands.md) "The pipeline").
@@ -1474,10 +1475,12 @@ or move) is refused in two places, and nowhere else
   every thread (`write_guard::foreign_worktree_reason`, naming the path
   and the tree). Its own stream's worktree, and an absolute path outside
   every stream's (`~/.claude/plans/foo.md`), are allowed.
-- **Knowledge pages are written by command.** A direct write to the primary
-  project's `.oxplow/oxwiki/` (oxwiki's pages) is denied for every thread
-  (`write_guard::oxwiki_page_reason`); pages go through
-  `knowledge.write_page`.
+- **A store's rows are written by command.** A direct write to a file a
+  store keeps its rows in — a fill's `files: { folder, suffix }`, the
+  primary project's `.oxplow/oxwiki/<slug>.md` for oxwiki — is denied for
+  every thread (`write_guard::record_file_reason`, from the fills the
+  running generation holds: any store that declares files is covered);
+  the refusal names the store and its extension, whose command writes it.
 - **Shell isn't classified.** An agent's shell commands aren't checked.
 - MCP tools are never refused here: their writes are commands, gated on
   the bus.

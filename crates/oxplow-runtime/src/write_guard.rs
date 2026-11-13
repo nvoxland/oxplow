@@ -1,5 +1,6 @@
-//! The write guard: the two places no agent writes with a tool. An oxwiki
-//! page is written by command, and no thread changes another stream's
+//! The write guard: the two places no agent writes with a tool. A row a
+//! store keeps as a file (a fill's `files:`; an oxwiki page) is written by its
+//! extension's command, and no thread changes another stream's
 //! worktree (the primary checkout included). Within its own worktree any
 //! thread may write — the stream's threads share it, and who works there
 //! at once is the person's call (`.context/agent-model.md` "Isolation").
@@ -7,12 +8,29 @@
 
 use std::path::{Path, PathBuf};
 
-/// Why an agent may not write `raw_path` itself, when it is an oxwiki page
-/// (`<project>/.oxplow/oxwiki/…`): pages are written with the
-/// `oxwiki.page.write` command — validated, linked and audited, the file
-/// following — whatever the thread. A person's hand edit still
-/// converges through oxwiki's watch.
-pub fn oxwiki_page_reason(raw_path: Option<&str>, project_dir: Option<&Path>) -> Option<String> {
+/// Where a store keeps its rows as files (a fill's `files:`): a file at
+/// `<folder>/<id><suffix>` is the row of that id in `store` of `model`,
+/// kept by `extension`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordFolder {
+    /// Relative to the project root (`.oxplow/oxwiki`).
+    pub folder: String,
+    pub suffix: String,
+    pub store: String,
+    pub model: String,
+    pub extension: String,
+}
+
+/// Why an agent may not write `raw_path` itself, when it is a row of a store
+/// (`<project>/<folder>/<id><suffix>` of a [`RecordFolder`]): the store's
+/// extension writes it with its own command — validated, linked and
+/// audited, the file following — whatever the thread. A person's hand edit
+/// still converges through the store's collector.
+pub fn record_file_reason(
+    raw_path: Option<&str>,
+    project_dir: Option<&Path>,
+    folders: &[RecordFolder],
+) -> Option<String> {
     let (raw, project_dir) = (raw_path?, project_dir?);
     let path = Path::new(raw);
     let abs = if path.is_absolute() {
@@ -20,16 +38,25 @@ pub fn oxwiki_page_reason(raw_path: Option<&str>, project_dir: Option<&Path>) ->
     } else {
         project_dir.join(path)
     };
-    is_inside(
-        &abs,
-        &project_dir.join(oxplow_domain::knowledge::OXWIKI_DIR),
-    )
-    .then(|| {
-        format!(
-            "`{}` is an oxwiki page: write it with mcp__oxplow__run_command → \
-             `oxwiki.page.write {{ id, body }}` (it writes the file); \
-             `oxwiki.page.delete {{ id }}` deletes one.",
-            abs.display()
+    folders.iter().find_map(|f| {
+        let name_fits = f.suffix.is_empty()
+            || abs
+                .file_name()
+                .is_some_and(|n| n.to_string_lossy().ends_with(f.suffix.as_str()));
+        (name_fits && is_inside(&abs, &project_dir.join(f.folder.trim_end_matches('/')))).then(
+            || {
+                format!(
+                    "`{}` is a row of store `{}` (`{}`), kept by the extension `{}`: write it \
+                     with that extension's command, never a tool (mcp__oxplow__list_commands \
+                     lists the `{}.*` commands; its skill says which). The command validates, \
+                     links and audits it, and the file follows.",
+                    abs.display(),
+                    f.store,
+                    f.model,
+                    f.extension,
+                    f.extension
+                )
+            },
         )
     })
 }
@@ -77,15 +104,33 @@ fn is_inside(path: &Path, root: &Path) -> bool {
 mod tests {
     use super::*;
 
+    fn oxwiki() -> Vec<RecordFolder> {
+        vec![RecordFolder {
+            folder: ".oxplow/oxwiki".into(),
+            suffix: ".md".into(),
+            store: "oxwiki".into(),
+            model: "oxplow/knowledge_record".into(),
+            extension: "oxwiki".into(),
+        }]
+    }
+
     #[test]
-    fn an_oxwiki_page_is_written_by_command() {
+    fn a_stores_row_file_is_written_by_its_extensions_command() {
         let project = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(project.path().join(".oxplow/oxwiki")).unwrap();
         let target = project.path().join(".oxplow/oxwiki/captured.md");
         std::fs::write(&target, "").unwrap();
-        let reason = oxwiki_page_reason(target.to_str(), Some(project.path())).expect("refused");
-        assert!(reason.contains("oxwiki.page.write"), "{reason}");
-        assert!(oxwiki_page_reason(Some("src/a.rs"), Some(project.path())).is_none());
+        let reason =
+            record_file_reason(target.to_str(), Some(project.path()), &oxwiki()).expect("refused");
+        assert!(
+            reason.contains("store `oxwiki`") && reason.contains("`oxwiki.*` commands"),
+            "{reason}"
+        );
+        assert!(record_file_reason(Some("src/a.rs"), Some(project.path()), &oxwiki()).is_none());
+        // Not a row: no suffix match; no store declared the files: no guard.
+        let other = project.path().join(".oxplow/oxwiki/notes.txt");
+        assert!(record_file_reason(other.to_str(), Some(project.path()), &oxwiki()).is_none());
+        assert!(record_file_reason(target.to_str(), Some(project.path()), &[]).is_none());
     }
 
     /// Another stream's tree is refused, naming it; the thread's own tree

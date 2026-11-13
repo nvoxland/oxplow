@@ -1,7 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { RememberedContext, createRememberedStore } from "../prefs/remembered.js";
-import { setKnowledgeStores } from "../knowledgeStores.js";
 import { SaveTempViewForm, SaveViewCommandContext, SaveViewForm, SaveViewSourceContext } from "./SaveViewForm.js";
 
 afterEach(cleanup);
@@ -31,53 +30,16 @@ test("Save as Page writes and deploys the exact view and remembers its extension
   expect(f.closed()).toBe(1);
 });
 
-test("Save as knowledge page writes the live block, lets the store derive the id and navigates to the page the command names", async () => {
+test("Save as knowledge page offers the store's own command at the knowledge.new point, not a save of its own", async () => {
   const calls: [string, unknown][] = [];
-  const f = form("knowledge", async (name, input) => { calls.push([name, input]); return { result: { page: "oxplow:oxplow/knowledge?id=busy-tasks&store=oxwiki" } }; });
+  const f = form("knowledge", async (name, input) => { calls.push([name, input]); return {}; });
+  // The title is asked here; the writing is the point's command (a button or a menu).
+  expect(f.view.getByTestId("save-view-title")).toBeTruthy();
+  expect(f.view.queryByTestId("save-view-submit")).toBeNull();
+  expect(f.view.queryByTestId("save-view-store")).toBeNull();
   fireEvent.submit(f.view.getByTestId("save-view-form"));
-  await waitFor(() => expect(f.opened).toEqual(["oxplow:oxplow/knowledge?id=busy-tasks&store=oxwiki"]));
-  expect(calls[0][0]).toBe("oxplow.knowledge.write_page");
-  expect((calls[0][1] as { body: string }).body).toContain("```oxplow-page\n# Comment");
-  expect(calls[0][1]).toMatchObject({ title: "Busy Tasks" });
-  expect(calls[0][1]).not.toHaveProperty("id");
-  expect(calls[0][1]).not.toHaveProperty("store");
-});
-
-test("with several stores that edit, a store is chosen and sent; one that cannot edit is not offered", async () => {
-  setKnowledgeStores([
-    { store: "oxwiki", title: "oxwiki", kinds: [], edit: true },
-    { store: "docs", title: "Docs", kinds: [], edit: true },
-    { store: "ro", title: "Read only", kinds: [], edit: false },
-  ]);
-  try {
-    const calls: [string, unknown][] = [];
-    const f = form("knowledge", async (name, input) => { calls.push([name, input]); return { result: { page: "oxplow:oxplow/knowledge?id=busy-tasks&store=docs" } }; });
-    const select = f.view.getByTestId("save-view-store") as HTMLSelectElement;
-    expect([...select.options].map((o) => o.value)).toEqual(["oxwiki", "docs"]);
-    fireEvent.change(select, { target: { value: "docs" } });
-    fireEvent.submit(f.view.getByTestId("save-view-form"));
-    await waitFor(() => expect(f.opened).toEqual(["oxplow:oxplow/knowledge?id=busy-tasks&store=docs"]));
-    expect(calls[0][1]).toMatchObject({ store: "docs" });
-  } finally {
-    setKnowledgeStores([]);
-  }
-});
-
-test("with one store that edits among several enabled, it is named without asking", async () => {
-  setKnowledgeStores([
-    { store: "oxwiki", title: "oxwiki", kinds: [], edit: true },
-    { store: "ro", title: "Read only", kinds: [], edit: false },
-  ]);
-  try {
-    const calls: [string, unknown][] = [];
-    const f = form("knowledge", async (name, input) => { calls.push([name, input]); return { result: { page: "oxplow:oxplow/knowledge?id=busy-tasks&store=oxwiki" } }; });
-    expect(f.view.queryByTestId("save-view-store")).toBeNull();
-    fireEvent.submit(f.view.getByTestId("save-view-form"));
-    await waitFor(() => expect(f.opened).toEqual(["oxplow:oxplow/knowledge?id=busy-tasks&store=oxwiki"]));
-    expect(calls[0][1]).toMatchObject({ store: "oxwiki" });
-  } finally {
-    setKnowledgeStores([]);
-  }
+  await new Promise((r) => setTimeout(r, 10));
+  expect(calls).toEqual([]);
 });
 
 test("a refused save keeps the form and source for retry; Escape cancels", async () => {
@@ -102,13 +64,10 @@ function tempForm(source: string | null) {
   return { view, reads, calls };
 }
 
-test("a temp view's YAML is read from its file on oxplow:temp, then saved as it is", async () => {
+test("a temp view's YAML is read from its file on oxplow:temp", async () => {
   const f = tempForm(spec);
   await f.view.findByTestId("save-view-title");
   expect(f.reads).toEqual([["str1", "v1.yaml"]]);
-  fireEvent.submit(f.view.getByTestId("save-view-form"));
-  await waitFor(() => expect(f.calls[0]?.[0]).toBe("oxplow.knowledge.write_page"));
-  expect((f.calls[0]![1] as { body: string }).body).toContain("```oxplow-page\n# Comment");
 });
 
 test("a temp view that is gone can't be saved", async () => {

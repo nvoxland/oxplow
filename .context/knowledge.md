@@ -38,6 +38,32 @@ declares no store then) and goes in step 5 of the removal. The extension:
   name isn't a slug is no page.
 - **Skills.** `oxwiki` (writing) and the `/note` command, gated on the model;
   the `oxplow-knowledge` skill keeps finding and reading.
+- **Reading.** The `oxplow/knowledge` resource is bundled's (as the task
+  resource is): `resolve: knowledge_page`, `searchable: search_knowledge`
+  over **`v_oxplow_knowledge_page`** — one row per page of the shared
+  knowledge model, every store: the old `v_knowledge_page` columns (`uri`,
+  `store`, `id`, `kind`, `bucket`, `title`, `url`, `author`, `excerpt`,
+  `body_size`, `outbound_uris`, `stale_ref_count`, `read_count`,
+  `agent_read_count`, `last_read_at`, `updated_at`) and the page's `body`.
+  An agent's reads are `record.read` events, the cited files' staleness
+  `v_knowledge_pin`. `oxplow_read` answers the row (its `body` column is the
+  content), the ref resolver reads the same dataset by `resolve_view`, and
+  the Knowledge pages, the metrics and the desktop's page list read it.
+  Core's `v_knowledge_page` / `v_knowledge_body` stay for the built-in until
+  step 5. With bundled off the resource is undeclared and a `[[link]]` to a
+  page is unrecognized, as a task's is.
+- **Points.** Bundled declares `oxplow/knowledge.new` (title?, body?: the
+  desktop's Save as knowledge page offers it) and `oxplow/knowledge.delete`
+  (the index's row Delete); the store's own commands join them (oxwiki:
+  `page.write`, `page.delete`). Inline editing of a page's body on the
+  knowledge page is not offered until a store's own page replaces it.
+- **The write guard** is generic: a tool's write of a file a fill's `files:`
+  names (`<folder>/<id><suffix>`) is refused, naming the store and its
+  extension (`write_guard::record_file_reason`).
+- **The collector** takes only files directly in the folder, skips a file
+  that is bigger than 1 MiB or not UTF-8 (it says so in `problems` of its
+  run) rather than failing the snapshot, and takes a heading outside a code
+  fence for the title.
 - Fixtures: `extensions/oxwiki/fixtures`.
 
 ## Stores, pages, kinds

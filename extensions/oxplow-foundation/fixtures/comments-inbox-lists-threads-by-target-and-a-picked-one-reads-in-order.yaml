@@ -1,6 +1,7 @@
 # The inbox lists open threads grouped by what they are anchored to; a
 # resolved one only when the filter reaches back to it; a picked thread reads
 # as its messages in order, and none picked shows nothing.
+requires: [oxplow-bundled]
 given:
   - { command: oxplow.knowledge.add_comment, input: { stream: str1, target: "oxplow:oxplow/knowledge?id=a-page&store=oxwiki", quote: one, intent: note, body: first }, bind: first }
   - { command: oxplow.knowledge.add_comment, input: { stream: str1, target: "oxplow:oxplow/knowledge?id=a-page&store=oxwiki", quote: two, intent: followup, body: first }, bind: second }

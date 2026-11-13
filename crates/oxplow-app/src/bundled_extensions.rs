@@ -250,6 +250,91 @@ mod tests {
         assert!(runs(&svc, "oxplow-foundation"));
     }
 
+    /// The shipped default configuration (oxwiki on, core's built-in standing
+    /// down) keeps a page end to end: a write is a file and a row, a read
+    /// answers its body, a link from one page to another resolves and is
+    /// found, a dangling one is refused, and the page is searchable.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_default_configuration_writes_reads_links_and_searches_a_page() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::test_fixtures::init_git_repo(dir.path());
+        std::fs::remove_file(dir.path().join(".oxplow/personal.yaml")).unwrap();
+        let svc = crate::Services::in_memory(dir.path()).await.unwrap();
+        svc.streams.ensure_primary().await.unwrap();
+        crate::test_fixtures::activate(&svc).await;
+        let run = |name: &'static str, input: serde_json::Value| {
+            let svc = svc.clone();
+            async move {
+                svc.commands
+                    .run(&oxplow_domain::Actor::Human, name, input, true)
+                    .await
+            }
+        };
+
+        // Write: the file is in the primary's folder, the answer names the page.
+        let first = run(
+            "oxwiki.page.write",
+            serde_json::json!({ "title": "Gears", "body": "# Gears\n\nThe sprocket turns.\n" }),
+        )
+        .await
+        .unwrap();
+        let page = first.result["result"]["page"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{first:?}"))
+            .to_string();
+        assert_eq!(page, "oxplow:oxplow/knowledge?id=gears&store=oxwiki");
+        assert!(dir.path().join(".oxplow/oxwiki/gears.md").is_file());
+
+        // Read: oxplow_read's row has the body, through the resource's own dataset.
+        let read = crate::ref_read::read(&svc, &page, &crate::ref_read::Reader::default(), None)
+            .await
+            .unwrap();
+        let row = read.row.expect("the page is a row");
+        assert_eq!(row["title"], "Gears");
+        assert!(row["body"].as_str().unwrap().contains("sprocket"));
+        // It resolves as a ref too.
+        let resolved = crate::ref_resolver::resolve_ref(&svc, &page).await;
+        assert!(resolved.resolved, "{resolved:?}");
+        assert_eq!(resolved.title.as_deref(), Some("Gears"));
+
+        // Link: one page to another; a dangling link is refused.
+        run(
+            "oxwiki.page.write",
+            serde_json::json!({ "id": "teeth", "body": "# Teeth\n\nSee [[gears]].\n" }),
+        )
+        .await
+        .unwrap();
+        let refused = run(
+            "oxwiki.page.write",
+            serde_json::json!({ "id": "bad", "body": "# Bad\n\nSee [[nowhere]].\n" }),
+        )
+        .await;
+        assert!(refused.is_err(), "a dangling link is refused");
+        let out = svc
+            .sql
+            .query_sql(
+                "SELECT outbound_uris FROM v_oxplow_knowledge_page WHERE id = 'teeth'",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        let outbound = format!("{:?}", out.rows);
+        assert!(outbound.contains("gears"), "teeth links gears: {outbound}");
+
+        // Search: the resource's search dataset holds the page's text.
+        let out = svc
+            .sql
+            .query_sql(
+                "SELECT uri FROM v_oxplow_search_knowledge WHERE body LIKE '%sprocket%'",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(out.rows.len(), 1, "{:?}", out.rows);
+    }
+
     /// oxtask is oxplow-bundled's, oxwiki is foundation's: with
     /// oxplow-bundled off there is no task tracker (`task.*` is a sink that
     /// tracks nothing) and oxwiki still runs.

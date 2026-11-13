@@ -4,7 +4,7 @@ icon: book-open
 category: Knowledge
 keywords: knowledge wiki notes pages oxwiki memory instructions
 needs:
-- knowledge
+- model:oxplow/knowledge_record
 params:
 - name: filter
   role: filter
@@ -22,43 +22,35 @@ loaders:
   # writes is on.
   row:
     sql: |
-      SELECT CASE WHEN EXISTS (SELECT 1 FROM v_capability_provider p
-                               WHERE p.capability = 'knowledge' AND p.active = 1
-                                 AND json_extract(p.features, '$.edit') = 1)
-                  THEN uri('oxplow/page', 'page', 'new-knowledge-page') END AS new_page
-  # Every store the project declares, on or off, with its pages.
+      SELECT uri('oxplow/page', 'page', 'new-knowledge-page') AS new_page
+  # Every store of the knowledge model, with its pages.
   stores:
     sql: |
-      SELECT s.provider AS store,
-             CASE WHEN s.active = 1 THEN 'On' ELSE 'Off' END AS status,
-             (SELECT group_concat(json_extract(k.value, '$.title'), ', ') FROM json_each(s.kinds) k) AS kinds,
-             (SELECT count(*) FROM v_knowledge_page p WHERE p.store = s.provider) AS page_count,
-             (SELECT count(*) FROM v_knowledge_page p WHERE p.store = s.provider AND p.stale_ref_count > 0) AS stale,
-             CASE WHEN NOT EXISTS (SELECT 1 FROM v_capability_provider a WHERE a.capability = 'knowledge' AND a.active = 1)
-                  THEN 'No knowledge store is on. Turn oxwiki on in Settings → Integrations, or enable an extension''s store.' END AS notice
-      FROM v_capability_provider s
-      WHERE s.capability = 'knowledge'
-      ORDER BY s.provider
+      SELECT s.store AS store, 'On' AS status, 'note' AS kinds,
+             (SELECT count(*) FROM v_oxplow_knowledge_page p WHERE p.store = s.store) AS page_count,
+             (SELECT count(*) FROM v_oxplow_knowledge_page p WHERE p.store = s.store AND p.stale_ref_count > 0) AS stale,
+             CAST(NULL AS TEXT) AS notice
+      FROM v_model_store s
+      WHERE s.model = 'oxplow/knowledge_record'
+      ORDER BY s.store
   # Whether a row's store lets oxplow write it: Delete is offered then.
   pages:
     sql: |
       SELECT p.uri, p.store, p.id, p.kind, p.title, p.read_count, p.updated_at, p.stale_ref_count,
              CASE WHEN :filter = '' THEN p.excerpt
-                  WHEN instr(lower(b.body), lower(:filter)) = 0 THEN p.excerpt
-                  ELSE replace(substr(b.body, max(1, instr(lower(b.body), lower(:filter)) - 40), 120), char(10), ' ') END AS snippet,
-             coalesce((SELECT json_extract(s.features, '$.edit') FROM v_capability_provider s
-                       WHERE s.capability = 'knowledge' AND s.provider = p.store), 0) AS can_edit
-      FROM v_knowledge_page p
-      JOIN v_knowledge_body b ON b.uri = p.uri
+                  WHEN instr(lower(p.body), lower(:filter)) = 0 THEN p.excerpt
+                  ELSE replace(substr(p.body, max(1, instr(lower(p.body), lower(:filter)) - 40), 120), char(10), ' ') END AS snippet,
+             1 AS can_edit
+      FROM v_oxplow_knowledge_page p
       WHERE :filter = ''
          OR instr(lower(p.title), lower(:filter)) > 0
-         OR instr(lower(b.body), lower(:filter)) > 0
+         OR instr(lower(p.body), lower(:filter)) > 0
       ORDER BY p.updated_at DESC, p.title
   stale_pages:
     sql: |
       SELECT p.uri, p.store, p.id, p.title, p.stale_ref_count,
              uri('oxplow/page', 'page', 'knowledge-freshness', 'store', p.store, 'id', p.id) AS freshness_uri
-      FROM v_knowledge_page p
+      FROM v_oxplow_knowledge_page p
       WHERE p.stale_ref_count > 0
       ORDER BY p.stale_ref_count DESC, p.title
   # The last twenty things that happened to a page: it was written, or an
@@ -68,16 +60,17 @@ loaders:
       SELECT * FROM (
         SELECT p.uri, p.id, p.title, 'Written' AS what, p.updated_at AS at,
                coalesce(p.author, '') AS who
-        FROM v_knowledge_page p
+        FROM v_oxplow_knowledge_page p
         UNION ALL
-        SELECT p.uri, p.id, p.title, 'Read', r.at, r.actor || ' (' || r.via || ')'
-        FROM v_knowledge_read r JOIN v_knowledge_page p ON p.uri = r.uri)
+        SELECT p.uri, p.id, p.title, 'Read', r.at, 'agent (' || json_extract(r.payload, '$.via') || ')'
+        FROM v_event r JOIN v_oxplow_knowledge_page p ON p.uri = json_extract(r.payload, '$.record')
+        WHERE r.type = 'record.read')
       ORDER BY at DESC LIMIT 20
   about_file:
     sql: |
       SELECT p.uri, p.title, p.store,
              CASE WHEN r.stale THEN 'changed since the page was written' ELSE 'current' END AS stale
-      FROM v_knowledge_ref r JOIN v_knowledge_page p ON p.uri = r.page
+      FROM v_knowledge_pin r JOIN v_oxplow_knowledge_page p ON p.uri = r.page
       WHERE :path <> '' AND r.path = :path
       ORDER BY p.title
 actions:
@@ -141,12 +134,10 @@ view:
     # command asks first.
     - id: delete
       label: Delete
-      command: oxplow.knowledge.delete_page
+      point: oxplow/knowledge.delete
       row: true
-      when: can_edit
-      input:
-        store: '{{row.store}}'
-        id: '{{row.id}}'
+      context:
+        uri: '{{row.uri}}'
   - id: stale_pages
     title: Stale pages
     description: Pages that cite a file which changed after the page was written or last verified.

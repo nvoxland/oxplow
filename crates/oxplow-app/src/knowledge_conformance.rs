@@ -148,6 +148,7 @@ pub async fn suite(svc: &crate::Services, store: &str, actor: &Actor) -> Vec<Fin
         crate::knowledge::WRITE_PAGE,
     )
     .await;
+    world.settle().await;
     let target = format!("{store}:{other}");
     match run(
         json!({ "store": store, "id": "conformance-page", "target": target }),
@@ -208,7 +209,13 @@ struct World<'a> {
 
 impl World<'_> {
     async fn settle(&self) {
+        // Every consumer, the model record's too: a link to a page checks
+        // the model's row of it.
         let _ = self.svc.event_pump.run_once().await;
+        self.svc
+            .event_pump
+            .settle_all(std::time::Duration::from_secs(10))
+            .await;
     }
 
     async fn page(&self, page: &str) -> Option<PageRow> {

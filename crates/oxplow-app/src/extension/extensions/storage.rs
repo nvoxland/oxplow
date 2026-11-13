@@ -89,15 +89,16 @@ const OXPLOW_OWN_DIRS: &[&str] = &[
 /// Why no extension may declare (or reach) `path`: `.git` at any depth, in
 /// any case (macOS is case-insensitive), is git's; `.oxplow` is oxplow's own
 /// data (other extensions' store files in `extensions-data`, the extensions'
-/// sources in `extensions`, the database ...) — except a folder directly
-/// under it that an extension declares `watch: true` ([`watched_problem`]).
-/// `path` is already a valid path.
-pub(crate) fn reserved(path: &str) -> Option<&'static str> {
+/// sources in `extensions`, the database ...) — except, when `watched`, a
+/// folder directly under it that an extension declares `watch: true`
+/// ([`watched_problem`]); `.git` is git's there too. `path` is already a
+/// valid path.
+pub(crate) fn reserved(path: &str, watched: bool) -> Option<&'static str> {
     let parts: Vec<&str> = path.trim_end_matches('/').split('/').collect();
     if parts.iter().any(|p| p.eq_ignore_ascii_case(".git")) {
         return Some("`.git` is git's");
     }
-    if parts[0].eq_ignore_ascii_case(".oxplow") {
+    if !watched && parts[0].eq_ignore_ascii_case(".oxplow") {
         return Some(
             "`.oxplow` is oxplow's own data (declare a folder under it with `watch: true`)",
         );
@@ -168,7 +169,7 @@ pub(crate) fn load(
         } else if let Some(why) = if folder.watch {
             watched_problem(path)
         } else {
-            reserved(path)
+            reserved(path, false)
         } {
             Some(why)
         } else if out.folders.iter().any(|f| f.path == path) {

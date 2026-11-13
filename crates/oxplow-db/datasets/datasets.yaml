@@ -1059,18 +1059,6 @@
   tests:
     - { not_null: uri }
     - { unique: uri }
-- name: search_knowledge
-  version: 1
-  description: "What site search indexes for each knowledge page of an enabled store: the `oxplow/knowledge` kind's index is restated from these rows when they change."
-  fields:
-    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/knowledge?id=<id>&store=<store>`." }
-    - { name: "title", type: "TEXT", doc: "The page's title." }
-    - { name: "body", type: "TEXT", doc: "The page's full markdown." }
-    - { name: "stream_id", type: "TEXT", doc: "Always NULL: knowledge pages are project-global." }
-    - { name: "version", type: "TEXT", doc: "Changes whenever the row's text does (the page's `updated_at`); a recompute reads the text of rows whose version moved only." }
-  tests:
-    - { not_null: uri }
-    - { unique: uri }
 - name: usage_event
   version: 2
   description: "What the person used in oxplow, one row per use (a page opened, a command run) — the telemetry behind recent and most-used lists."

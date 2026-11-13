@@ -1,0 +1,8 @@
+# With no extension that fills the knowledge model, no store is listed: the
+# index says so, and its other sections are empty.
+when: { page: knowledge }
+expect:
+  loaders:
+    stores: { rows: 0 }
+    pages: { rows: 0 }
+  text: { contains: ["No knowledge store is declared."] }

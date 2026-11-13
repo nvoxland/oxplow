@@ -68,6 +68,7 @@ commands:
     needs: [files.read]
     access: write
     confirm: destructive
+    ui: { label: Delete Page, group: Knowledge, at: oxplow/knowledge.delete, about: { resource: oxplow/knowledge, accepts: { store: oxwiki } }, input: { id: "{{uri.id}}" } }
     example: { id: auth-flow }
   - name: page.restore
     summary: "Put a page's file back as it was: `body` null removes it. The undo of page.write and page.delete; it checks no links."

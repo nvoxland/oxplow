@@ -1,45 +1,13 @@
 title: New Knowledge Page
-description: "The form for a new knowledge page - its title and its body. The store derives the page's id from the title. It asks for a store only when more than one store that oxplow writes is on."
+description: "Write a knowledge page: each knowledge store offers its own form, here as one button (several stores, a menu)."
 icon: plus
 needs:
-- knowledge
-loaders:
-  new_page:
-    sql: |
-      -- The store is the only one oxplow writes, when there is one: the
-      -- form does not ask, and the write names it.
-      SELECT '' AS title, '' AS body,
-             CASE WHEN (SELECT count(*) FROM v_capability_provider p
-                        WHERE p.capability = 'knowledge' AND p.active = 1
-                          AND json_extract(p.features, '$.edit') = 1) = 1
-                  THEN (SELECT p.provider FROM v_capability_provider p
-                        WHERE p.capability = 'knowledge' AND p.active = 1
-                          AND json_extract(p.features, '$.edit') = 1) END AS store
-  # The stores to pick from: none, so no question, while there is one.
-  stores:
-    sql: |
-      SELECT p.provider AS value, p.provider AS label
-      FROM v_capability_provider p
-      WHERE p.capability = 'knowledge' AND p.active = 1
-        AND json_extract(p.features, '$.edit') = 1
-        AND (SELECT count(*) FROM v_capability_provider q
-             WHERE q.capability = 'knowledge' AND q.active = 1
-               AND json_extract(q.features, '$.edit') = 1) > 1
-      ORDER BY p.provider
+- model:oxplow/knowledge_record
+params:
+- name: title
+- name: body
 view:
-  from: new_page
-  viz: form
-  form:
-    command: oxplow.knowledge.new_page
-    then: replace
-    fields:
-    - name: title
-      label: Title
-      help: The page's name. Its store makes the page's id from it.
-    - name: body
-      label: Page
-      help: Markdown. Link a file, task or page with [[ ]].
-    - name: store
-      label: Store
-    choices:
-      store: oxplow/new-knowledge-page#stores
+  action_point: oxplow/knowledge.new
+  context:
+    title: { param: title }
+    body: { param: body }

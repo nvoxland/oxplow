@@ -95,7 +95,8 @@ pub const SERVICES: &[ServiceSpec] = &[
         scope: "files.read",
         title: "Read the extension's declared folders",
         summary: "Read files in the folders `files:` declares: \
-                  `scope(\"files.read\", {path})` returns `{body}`, \
+                  `scope(\"files.read\", {path, lossy?})` returns `{body}` (with `lossy: true`, bytes that \
+                  are not UTF-8 become U+FFFD and `{body, lossy}` says whether any did), \
                   `scope(\"files.list\", {path, glob?})` returns `{files: [{path, size, modified_at}]}`. \
                   Writes are the commands `oxplow.extension_files.write` and `.delete`.",
         builtins: &[],
@@ -105,8 +106,10 @@ pub const SERVICES: &[ServiceSpec] = &[
         scope: "links.check",
         title: "Check a body's links",
         summary: "Check the `[[…]]` links in a body the way oxplow checks the ones it writes: \
-                  `scope(\"links.check\", {body})` returns `{warnings: [{target, reason}]}`, \
-                  empty when every link resolves. A store's write command refuses on a warning.",
+                  `scope(\"links.check\", {body, self?})` returns `{warnings: [{target, reason}]}`, \
+                  empty when every link resolves; files are looked for in the run actor's \
+                  worktree, and `self` is the page's own URI, which it may link to. A store's \
+                  write command refuses on a warning.",
         builtins: &[],
         modes: ALL,
     },

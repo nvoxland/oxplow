@@ -404,6 +404,12 @@ pub fn scaffold_with(
     match kind {
         Kind::Provider { capability } => {
             let starter = provider_starter(capability);
+            // A knowledge store fills the knowledge model, which bundled
+            // declares (with the `oxplow/knowledge` resource its pages' URIs
+            // name).
+            if capability == "knowledge" {
+                manifest.push_str("requires: [oxplow-bundled]\n");
+            }
             manifest.push_str(
                 "# A provider runs its program (bin/provider) with your authority:\n\
                  # oxplow doesn't confine it. Deploying it asks you first.\n\
@@ -424,6 +430,9 @@ pub fn scaffold_with(
             }
         }
         Kind::Implementation { capability } => {
+            if capability == "knowledge" {
+                manifest.push_str("requires: [oxplow-bundled]\n");
+            }
             manifest.push_str(&implementation_manifest(capability, &provider_id, name));
         }
         Kind::Collector

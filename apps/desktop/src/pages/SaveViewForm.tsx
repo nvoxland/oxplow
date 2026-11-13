@@ -4,7 +4,7 @@ import { TEMP_FS } from "../filesystem.js";
 import { Loading } from "../kit/Loading.js";
 import { useAppPreference } from "../prefs/remembered.js";
 import { pageUri } from "../uri/uri.js";
-import { useKnowledgeStores } from "../useKnowledgeStores.js";
+import { ActionPoint } from "../components/ActionPoint.js";
 import { pageSlug, titledPage, viewKnowledgeBody } from "./viewActions.js";
 import { useActionAnchor, useRunner } from "../commands/RunnerContext.js";
 import { InlineError } from "../kit/InlineError.js";
@@ -62,40 +62,26 @@ export function SaveViewForm({ kind, specYaml, initialTitle, onClose, onSaved }:
   const [busy, setBusy] = useState(false);
   const saving = useRef(false);
   const slug = pageSlug(title);
-  // Where a knowledge page goes: the stores that take writes; asked only when
-  // there is more than one.
-  const editable = useKnowledgeStores().filter((s) => s.edit);
-  const [chosen, setChosen] = useState<string | null>(null);
-  const store = editable.find((s) => s.store === chosen)?.store ?? editable[0]?.store ?? null;
+  // A knowledge page is written by the store's own command, offered at the
+  // `oxplow/knowledge.new` point with the title and the view as its body
+  // (one store a button, several a menu); the page form saves an
+  // extension page here.
   const save = async () => {
-    if (saving.current || !slug || (kind === "page" && !extension.trim())) return;
+    if (kind !== "page" || saving.current || !slug || !extension.trim()) return;
     saving.current = true;
     setBusy(true);
     try {
       const yaml = titledPage(specYaml, title.trim());
       const ran = await runner.run(
-        kind === "knowledge" ? "Save as knowledge page" : "Save as page",
+        "Save as page",
         async () => {
-          if (kind === "knowledge") {
-            const out = await command("oxplow.knowledge.write_page", {
-              // Named whenever there is one to name: with several stores
-              // enabled (read-only ones too), an unnamed write is refused.
-              ...(store ? { store } : {}),
-              title: title.trim(),
-              body: viewKnowledgeBody(title.trim(), yaml),
-            });
-            // The store derived the id: the command answers the page's URI.
-            const uri = (out as { result?: { page?: unknown } } | null | undefined)?.result?.page;
-            if (typeof uri === "string") onSaved(uri);
-          } else {
-            const name = extension.trim();
-            const out = await command("oxplow.extension.write_page", { extension: name, page: slug, spec: yaml, deploy: true });
-            rememberExtension(name);
-            // The page's id is its extension's namespace's (`page` in the result).
-            onSaved(pageUri((out as { result: { page: string } }).result.page));
-          }
+          const name = extension.trim();
+          const out = await command("oxplow.extension.write_page", { extension: name, page: slug, spec: yaml, deploy: true });
+          rememberExtension(name);
+          // The page's id is its extension's namespace's (`page` in the result).
+          onSaved(pageUri((out as { result: { page: string } }).result.page));
         },
-        { anchor: "save-view", command: kind === "knowledge" ? "oxplow.knowledge.write_page" : "oxplow.extension.write_page" },
+        { anchor: "save-view", command: "oxplow.extension.write_page" },
       );
       if (ran.ok) onClose();
     } finally {
@@ -107,10 +93,11 @@ export function SaveViewForm({ kind, specYaml, initialTitle, onClose, onSaved }:
     if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onClose(); }
   }}>
     <label>Title<input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} data-testid="save-view-title" /></label>
-    {kind === "knowledge" && editable.length > 1 ? <label>Store<select value={store ?? ""} onChange={(e) => setChosen(e.target.value)} data-testid="save-view-store">{editable.map((s) => <option key={s.store} value={s.store}>{s.title}</option>)}</select></label> : null}
     {kind === "page" ? <label>Extension<input value={extension} onChange={(e) => setExtension(e.target.value)} data-testid="save-view-extension" /></label> : null}
     {failure ? <InlineError failure={failure} testId="save-view-error" /> : null}
-    <button type="submit" disabled={busy || !slug || (kind === "page" && !extension.trim())} data-testid="save-view-submit">{busy ? "Saving…" : "Save"}</button>
+    {kind === "knowledge"
+      ? <ActionPoint point="oxplow/knowledge.new" context={{ title: title.trim(), body: viewKnowledgeBody(title.trim(), specYaml) }} />
+      : <button type="submit" disabled={busy || !slug || !extension.trim()} data-testid="save-view-submit">{busy ? "Saving…" : "Save"}</button>}
     <button type="button" onClick={onClose}>Cancel</button>
   </form>;
 }

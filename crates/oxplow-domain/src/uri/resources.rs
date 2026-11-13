@@ -438,6 +438,26 @@ pub fn foundation() -> &'static ResourceRegistry {
     &REGISTRY
 }
 
+/// `registry` with the `oxplow/knowledge` resource, which oxplow-bundled
+/// declares: for a test of core code that boots no extension and still
+/// names a knowledge page.
+#[doc(hidden)]
+pub fn with_bundled_knowledge(mut registry: ResourceRegistry) -> ResourceRegistry {
+    let manifest: serde_yaml::Value = serde_yaml::from_str(include_str!(
+        "../../../../extensions/oxplow-bundled/extension.yaml"
+    ))
+    .expect("oxplow-bundled's manifest is YAML");
+    let entry = manifest["resources"]
+        .as_sequence()
+        .and_then(|all| all.iter().find(|e| e["name"] == "knowledge"))
+        .expect("oxplow-bundled declares the knowledge resource");
+    let entry: ResourceEntry = serde_yaml::from_value(entry.clone()).expect("a resources: entry");
+    registry
+        .register(entry.into_decl("oxplow").expect("a resource name"))
+        .expect("the knowledge resource registers");
+    registry
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

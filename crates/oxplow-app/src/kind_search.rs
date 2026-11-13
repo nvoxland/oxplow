@@ -1241,15 +1241,20 @@ mod core_tests {
             .result
     }
 
-    /// Knowledge pages: written by command or by hand, gone when deleted.
-    #[tokio::test]
+    /// Knowledge pages (oxwiki, the extension): found when written by
+    /// command, found by their new text after an edit, gone when deleted.
+    #[tokio::test(flavor = "multi_thread")]
     async fn knowledge_pages_are_indexed() {
-        let (svc, dir) = services().await;
+        let dir = tempfile::tempdir().unwrap();
+        crate::test_fixtures::init_git_repo(dir.path());
+        std::fs::remove_file(dir.path().join(".oxplow/personal.yaml")).unwrap();
+        let svc = Services::in_memory(dir.path()).await.unwrap();
         svc.streams.ensure_primary().await.unwrap();
+        crate::test_fixtures::activate(&svc).await;
         change_loop(&svc);
         run(
             &svc,
-            crate::knowledge::WRITE_PAGE,
+            "oxwiki.page.write",
             serde_json::json!({ "id": "gears", "body": "# Gears\n\nThe sprocket turns.\n" }),
         )
         .await;
@@ -1257,21 +1262,19 @@ mod core_tests {
             found(&svc, "sprocket", None, "oxplow/knowledge")
         })
         .await;
-        std::fs::write(
-            oxplow_oxwiki::page_path(dir.path(), "gears"),
-            "# Gears\n\nThe flange holds.\n",
+        run(
+            &svc,
+            "oxwiki.page.write",
+            serde_json::json!({ "id": "gears", "body": "# Gears\n\nThe flange holds.\n" }),
         )
-        .unwrap();
-        oxplow_oxwiki::pages::sync_page(&svc.db, &svc.vocabulary, dir.path(), "gears")
-            .await
-            .unwrap();
-        eventually("a hand edit is found", || {
+        .await;
+        eventually("an edit is found", || {
             found(&svc, "flange", None, "oxplow/knowledge")
         })
         .await;
         run(
             &svc,
-            crate::knowledge::DELETE_PAGE,
+            "oxwiki.page.delete",
             serde_json::json!({ "id": "gears" }),
         )
         .await;

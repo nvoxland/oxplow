@@ -2,10 +2,10 @@
 
 Before writing, find the topic page if there is one, in every store.
 
-1. `oxplow_query_sql` over `v_knowledge_page`: every enabled store's pages,
-   `uri`, `store`, `id`, `kind`, `bucket`, `title`, `excerpt`,
+1. `oxplow_query_sql` over `v_oxplow_knowledge_page`: every store's pages,
+   `uri`, `store`, `id`, `kind`, `bucket`, `title`, `excerpt`, `body`,
    `outbound_uris`, `stale_ref_count`, `read_count`. Cheap, scan first:
-   `SELECT uri, store, title FROM v_knowledge_page WHERE title LIKE '%hook%'`.
+   `SELECT uri, store, title FROM v_oxplow_knowledge_page WHERE title LIKE '%hook%'`.
 2. `oxplow_search` with `resources: ["oxplow/knowledge"]`: full text over
    page bodies; catches pages that discuss the topic but aren't named for it.
 3. `oxplow_query_sql` over `v_page_ref`: the edges between pages and records

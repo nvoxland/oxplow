@@ -1,0 +1,18 @@
+# A markdown file in a subfolder of the folder is no page (a page's id is its
+# file's slug, and a slug has no slash), and a `# ` line inside a code fence
+# is no heading: the title is the first heading outside the fence, else the id.
+requires: [oxplow-bundled]
+given:
+  - files:
+      ".oxplow/oxwiki/top.md": "```sh\n# not a heading\n```\n\n# The real heading\n"
+      ".oxplow/oxwiki/only-code.md": "```\n# still not\n```\n"
+      ".oxplow/oxwiki/sub/deep.md": "# Deep\n"
+      ".oxplow/oxwiki/sub/deeper/more.md": "# More\n"
+when: { collector: pages, trigger: start }
+expect: { ok: true, problems: [] }
+steps:
+  - when: { sql: "SELECT id, title FROM v_oxplow_knowledge_record ORDER BY id" }
+    expect:
+      rows:
+        - { id: only-code, title: only-code }
+        - { id: top, title: The real heading }

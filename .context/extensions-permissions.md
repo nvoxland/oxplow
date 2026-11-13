@@ -585,19 +585,25 @@ under `.oxplow/`, never one of oxplow's own (`extensions`, `extensions-data`,
 it (the extension's `files:` trigger hears a change in it) and snapshots it; a
 tree (a diff, the working tree) is still git's view and leaves it out. The host
 publishes the enabled extensions' watched folders with each generation
-(`oxplow_fs_watch::set_declared_watched_folders`); until oxwiki declares its
-own, core names `.oxplow/oxwiki` itself in the same list.
+(`oxplow_fs_watch::set_declared_watched_folders`); core names no folder of
+its own.
 
 The file is removed with the extension's data (`extension_deploy::remove`),
 never on a disable.
 
 **The link check.** `links.check` (`needs: [links.check]`; it needs no `permissions:` entry, as
-`store.sql` needs none): `scope("links.check", {body})` returns `{warnings: [{target,
+`store.sql` needs none): `scope("links.check", {body, self?})` returns `{warnings: [{target,
 reason}]}` for the `[[…]]` links in `body` that are not a recognized
 reference or name something that isn't there (a file, a commit, a row a
 resource's dataset does not hold), checked as core checks the links it
-writes. A store's write command calls it and refuses when it warns. It
-reads the project's database and files; it spends nothing.
+writes. A store's write command calls it and refuses when it warns. Files are
+looked for in the run actor's worktree (the primary checkout when it has none),
+`self` is the URI of the page being written, which may link to itself, and a
+resource's row is looked up in its own `resolve:` dataset. A database error is
+an error, never a pass. It reads the project's database and files; it spends
+nothing. `files.read` also takes `lossy: true`: bytes that are not UTF-8 become
+U+FFFD and `{body, lossy}` says whether any did, so a collector skips such a
+file (its `problems` output names what it skipped) instead of failing on it.
 
 **The scoped file service.** `files:` in the manifest names folders the
 extension may use, relative to the project root, each `access: read | write`:

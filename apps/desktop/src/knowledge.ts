@@ -1,11 +1,10 @@
 /**
  * Knowledge pages read through the datasets (`.context/knowledge.md`):
- * `v_knowledge_page` for the index, `v_knowledge_body` for a page's
- * markdown, `v_capability_provider` for the enabled stores (oxplow's own
- * is oxwiki). Writes are `knowledge.*` commands (`writeKnowledgePage`).
+ * `v_oxplow_knowledge_page` for the index and a page's markdown (`body`),
+ * `v_capability_provider` for the enabled stores (oxplow's own is oxwiki).
+ * Writes are a store's own commands (oxwiki: `oxwiki.page.write`).
  */
 import { querySql } from "./api.js";
-import { unionReads } from "./viz/rerun.js";
 import type { Reads, SqlCell, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
 
 /** One page as the index lists it. */
@@ -79,7 +78,7 @@ const PAGE_COLUMNS = "uri, store, id, kind, title, excerpt, updated_at, stale_re
 export async function readKnowledgePages(): Promise<{ pages: KnowledgePageSummary[]; reads: Reads }> {
   const res = await querySql(
     `SELECT ${PAGE_COLUMNS}
-       FROM v_knowledge_page ORDER BY updated_at DESC`,
+       FROM v_oxplow_knowledge_page ORDER BY updated_at DESC`,
     [],
     100_000,
   );
@@ -91,14 +90,10 @@ export async function readKnowledgePages(): Promise<{ pages: KnowledgePageSummar
 export async function readKnowledgePage(
   uri: string,
 ): Promise<{ page: { summary: KnowledgePageSummary; body: string } | null; reads: Reads }> {
-  const [pages, body] = await Promise.all([
-    querySql(`SELECT ${PAGE_COLUMNS} FROM v_knowledge_page WHERE uri = ?1`, [uri], 1),
-    querySql("SELECT body FROM v_knowledge_body WHERE uri = ?1", [uri], 1),
-  ]);
-  const reads = unionReads([pages.reads, body.reads]);
+  const pages = await querySql(`SELECT ${PAGE_COLUMNS}, body FROM v_oxplow_knowledge_page WHERE uri = ?1`, [uri], 1);
   const summary = pagesFromResult(pages)[0];
-  if (!summary) return { page: null, reads };
-  return { page: { summary, body: String(body.rows[0]?.[0] ?? "") }, reads };
+  if (!summary) return { page: null, reads: pages.reads };
+  return { page: { summary, body: String(cell(pages, pages.rows[0]!, "body") ?? "") }, reads: pages.reads };
 }
 
 /** What the knowledge surfaces say when no store is enabled. */

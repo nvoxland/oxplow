@@ -1,6 +1,7 @@
 # A request whose turn edited a file and read no knowledge page records 0.
+requires: [oxwiki]
 given:
-  - { command: oxplow.knowledge.write_page, input: { store: oxwiki, title: Greeting notes, body: "# Greeting notes\n\nThe greeting says hello." } }
+  - { command: oxwiki.page.write, input: { title: Greeting notes, body: "# Greeting notes\n\nThe greeting says hello." } }
   - observe:
       turn:
         prompt: Fix the greeting

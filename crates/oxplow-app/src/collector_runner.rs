@@ -420,6 +420,10 @@ pub struct ScriptOutput {
     /// The checkpoint the next run gets as `cursor`.
     #[serde(default)]
     pub cursor: Option<serde_json::Value>,
+    /// What the script skipped and why (a file it couldn't read): reported
+    /// with the run beside the rows the models quarantined.
+    #[serde(default)]
+    pub problems: Vec<String>,
 }
 
 impl ScriptOutput {
@@ -1236,6 +1240,7 @@ async fn run_collector_once(
             std::mem::take(&mut o.models),
             std::mem::take(&mut o.fields),
             o.cursor.take(),
+            std::mem::take(&mut o.problems),
         );
         Ok((plan_writes(declarer, owner, &spec, o)?, events, observed))
     });
@@ -1259,7 +1264,7 @@ async fn run_collector_once(
         trigger: trigger.name(),
     };
     let error = match writes {
-        Ok((writes, events, (models, fields, cursor))) => {
+        Ok((writes, events, (models, fields, cursor, script_problems))) => {
             let names: Vec<String> = writes.iter().map(|(t, _)| t.entity.clone()).collect();
             let ok_run = CollectorRun {
                 cursor,
@@ -1365,6 +1370,7 @@ async fn run_collector_once(
                             &emitted.clone().with_cause(synced.id.clone()),
                         )?;
                     }
+                    problems.extend(script_problems.iter().cloned());
                     Ok((counts, problems))
                 }))
                 .await

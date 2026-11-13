@@ -1,6 +1,7 @@
 # A request with a turn still open has not stopped: nothing is recorded.
+requires: [oxwiki]
 given:
-  - { command: oxplow.knowledge.write_page, input: { store: oxwiki, title: Greeting notes, body: "# Greeting notes\n\nThe greeting says hello." } }
+  - { command: oxwiki.page.write, input: { title: Greeting notes, body: "# Greeting notes\n\nThe greeting says hello." } }
   - observe:
       turn:
         prompt: Fix the greeting

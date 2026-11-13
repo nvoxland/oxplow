@@ -6,7 +6,7 @@ import { NO_KNOWLEDGE_STORE, pagesFromResult, storesFromResult } from "./knowled
 const result = (columns: string[], rows: SqlQueryResult["rows"]): SqlQueryResult =>
   ({ columns, rows, truncated: false, reads: { datasets: [], tables: [], measures: [] }, freshness: {} }) as unknown as SqlQueryResult;
 
-test("the index reads v_knowledge_page rows", () => {
+test("the index reads v_oxplow_knowledge_page rows", () => {
   const pages = pagesFromResult(
     result(
       ["uri", "store", "id", "kind", "title", "excerpt", "updated_at", "stale_ref_count", "outbound_uris"],

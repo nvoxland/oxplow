@@ -1,6 +1,6 @@
 ---
 name: oxplow-knowledge
-description: Keeping and finding knowledge pages — durable understanding (codebase walkthroughs, design rationale, comparisons, tradeoffs, recommendations) in the project's knowledge stores (oxwiki, oxplow's own, and any an extension adds). Find before you create; read a page with oxplow_read; a store's own command writes it. Loads on v_knowledge_page, v_knowledge_ref, v_knowledge_read, the oxplow `oxplow_search` tool (resource oxplow/knowledge), v_page_ref, and when the user asks "how does X work", "where is X", "explain X", "trace X", "give me an overview", "walk me through X", "why does/did/should X", "compare X and Y", "what are the tradeoffs", "should I use X or Y", "rationale behind X", or says "save this" / "add a note" / "keep this".
+description: Keeping and finding knowledge pages — durable understanding (codebase walkthroughs, design rationale, comparisons, tradeoffs, recommendations) in the project's knowledge stores (oxwiki, oxplow's own, and any an extension adds). Find before you create; read a page with oxplow_read; a store's own command writes it. Loads on v_oxplow_knowledge_page, v_knowledge_pin, the oxplow `oxplow_search` tool (resource oxplow/knowledge), v_page_ref, and when the user asks "how does X work", "where is X", "explain X", "trace X", "give me an overview", "walk me through X", "why does/did/should X", "compare X and Y", "what are the tradeoffs", "should I use X or Y", "rationale behind X", or says "save this" / "add a note" / "keep this".
 ---
 
 # Knowledge pages
@@ -24,10 +24,13 @@ always keep one.
 ## Find before you create
 
 Don't fragment. Look across every store first: `oxplow_query_sql` over
-`v_knowledge_page` (`uri`, `store`, `id`, `kind`, `title`, `excerpt`,
-`stale_ref_count`), then `oxplow_search` with `resources:
+`v_oxplow_knowledge_page` (`uri`, `store`, `id`, `kind`, `title`, `excerpt`,
+`body`, `stale_ref_count`, `read_count`), then `oxplow_search` with `resources:
 ["oxplow/knowledge"]`. Read a page with `oxplow_read { uri }`: its row and
-its body (in SQL, `v_knowledge_body`: `uri`, `body`). If one fits, add a dated section to it; create a page only when
+its body (in SQL, the `body` column). `v_model_store` (`WHERE model =
+'oxplow/knowledge_record'`) lists the stores that keep pages; `v_knowledge_pin`
+lists the files a page cites and whether each changed since the page was
+pinned; an agent's read of a page is a `record.read` event in `v_event`. If one fits, add a dated section to it; create a page only when
 none does. `references/search-existing.md` has the lookups.
 
 ## Writing
@@ -37,8 +40,9 @@ how (oxwiki: the `oxwiki` skill, `oxwiki.page.write`). Never write a store's
 files yourself. Every `[[link]]` must resolve; a dangling one is refused and
 named. With no store on, say once that the page wasn't kept.
 
-`run_command oxplow.knowledge.verify_files { id, files }` records that you
-re-read the cited files against a page, so its pins move to now.
+`run_command oxplow.refs.verify { uri, files? }` records that you re-read the
+cited files against a page (all of them when `files` is left out), so its pins
+move to now.
 
 ## Links — the one way to name an oxplow object
 

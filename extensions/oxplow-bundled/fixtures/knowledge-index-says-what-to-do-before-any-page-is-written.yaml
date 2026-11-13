@@ -1,5 +1,6 @@
 # With oxwiki on and no page written, the index says so in plain words and
 # offers New page.
+requires: [oxwiki]
 when: { page: knowledge }
 expect:
   loaders:

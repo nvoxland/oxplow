@@ -70,27 +70,43 @@ impl ExtensionServices {
         self
     }
 
-    /// `links.check { body }`: the links in `body` that don't resolve, as
-    /// `{ warnings: [{ target, reason }] }`. A script call runs on a blocking
-    /// thread of the runtime, which this waits on.
-    fn links_check(&self, args: Value) -> Result<Value, String> {
+    /// `links.check { body, self? }`: the links in `body` that don't resolve,
+    /// as `{ warnings: [{ target, reason }] }`. Files are looked for in the
+    /// run actor's worktree (the primary checkout when it has none); `self`
+    /// is the URI of the page being written, which may link to itself. A
+    /// script call runs on a blocking thread of the runtime, which this
+    /// waits on.
+    fn links_check(&self, run: &RunContext, args: Value) -> Result<Value, String> {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Args {
             body: String,
+            #[serde(default, rename = "self")]
+            this: Option<String>,
         }
-        let Args { body } =
-            serde_json::from_value(args).map_err(|_| "takes { body }".to_string())?;
+        let Args { body, this } =
+            serde_json::from_value(args).map_err(|_| "takes { body, self? }".to_string())?;
         let links = self.links.as_ref().ok_or("isn't available here")?;
         let runtime = tokio::runtime::Handle::try_current()
             .map_err(|_| "needs the app's runtime".to_string())?;
-        let warnings = runtime.block_on(crate::link_check::check_links_at(
-            &links.db,
-            &links.vocabulary,
-            &links.project_dir,
-            &*links.vcs,
-            &body,
-        ));
+        let anchors = run.anchors().clone();
+        let root =
+            runtime
+                .block_on(links.db.read(move |conn| {
+                    Ok(crate::link_check::worktree_of_anchors_tx(conn, &anchors))
+                }))
+                .map_err(|e| e.to_string())?
+                .unwrap_or_else(|| links.project_dir.clone());
+        let warnings = runtime
+            .block_on(crate::link_check::check_links_at(
+                &links.db,
+                &links.vocabulary,
+                &root,
+                &*links.vcs,
+                &body,
+                this.as_deref(),
+            ))
+            .map_err(|e| e.to_string())?;
         Ok(json!({ "warnings": warnings }))
     }
 
@@ -106,7 +122,7 @@ impl ExtensionServices {
         let answer = match call {
             "store.sql" => self.store_read(&name, &storage, args),
             "files.read" | "files.list" => files(&self.project, &storage.folders, call, args),
-            "links.check" => self.links_check(args),
+            "links.check" => self.links_check(run, args),
             _ => Err("isn't a read".into()),
         }
         .map_err(|e| format!("`{call}`: {e}"))?;
@@ -289,10 +305,10 @@ pub fn check_path(folders: &[Folder], path: &str, write: bool) -> Result<String,
     if !oxplow_domain::service::valid_path(trimmed) {
         return refuse("has `..`, `.` or an empty part, or is empty");
     }
-    if !crate::extension::extensions::storage::in_watched(folders, trimmed) {
-        if let Some(why) = crate::extension::extensions::storage::reserved(trimmed) {
-            return refuse(why);
-        }
+    // A watched folder lifts `.oxplow`'s reservation, never `.git`'s.
+    let watched = crate::extension::extensions::storage::in_watched(folders, trimmed);
+    if let Some(why) = crate::extension::extensions::storage::reserved(trimmed, watched) {
+        return refuse(why);
     }
     let Some(folder) = folders
         .iter()
@@ -331,9 +347,12 @@ fn files(project: &Path, folders: &[Folder], call: &str, args: Value) -> Result<
         body: Option<String>,
         #[serde(default)]
         glob: Option<String>,
+        #[serde(default)]
+        lossy: bool,
     }
     let takes = match call {
-        "files.read" | "files.delete" => "takes { path }",
+        "files.read" => "takes { path, lossy? }",
+        "files.delete" => "takes { path }",
         "files.list" => "takes { path, glob? }",
         _ => "takes { path, body }",
     };
@@ -347,6 +366,14 @@ fn files(project: &Path, folders: &[Folder], call: &str, args: Value) -> Result<
             let meta = std::fs::metadata(&full).map_err(|e| format!("`{rel}`: {e}"))?;
             if !meta.is_file() || meta.len() > MAX_FILE_BYTES {
                 return Err(format!("`{rel}` isn't a file of at most 16 MiB"));
+            }
+            if args.lossy {
+                // Bytes that aren't UTF-8 become U+FFFD, and say so, so a
+                // script can skip the file rather than fail on it.
+                let bytes = std::fs::read(&full).map_err(|e| format!("`{rel}`: {e}"))?;
+                let body = String::from_utf8_lossy(&bytes);
+                let lossy = matches!(body, std::borrow::Cow::Owned(_));
+                return Ok(json!({ "body": body, "lossy": lossy }));
             }
             let body = std::fs::read_to_string(&full).map_err(|e| format!("`{rel}`: {e}"))?;
             Ok(json!({ "body": body }))
@@ -448,6 +475,24 @@ mod tests {
             check_path(&f, "docs/notes/x.md", false).unwrap(),
             "docs/notes/x.md"
         );
+    }
+
+    /// A watched folder lifts the `.oxplow` reservation, never git's.
+    #[test]
+    fn a_watched_folder_keeps_gits_reservation() {
+        let f = vec![Folder {
+            path: ".oxplow/wiki".into(),
+            access: FolderAccess::Write,
+            watch: true,
+        }];
+        assert_eq!(
+            check_path(&f, ".oxplow/wiki/a.md", true).unwrap(),
+            ".oxplow/wiki/a.md"
+        );
+        for path in [".oxplow/wiki/.git/config", ".oxplow/wiki/.GIT/x"] {
+            let error = check_path(&f, path, true).unwrap_err();
+            assert!(error.contains("`.git` is git's"), "{error}");
+        }
     }
 
     #[test]

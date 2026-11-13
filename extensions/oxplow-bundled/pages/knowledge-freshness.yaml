@@ -3,7 +3,7 @@ description: "The files a knowledge page cites, the ones that changed first, eac
 icon: book-open
 category: Knowledge
 needs:
-- knowledge
+- model:oxplow/knowledge_record
 params:
 - name: store
   role: filter
@@ -15,6 +15,10 @@ params:
 answers:
 - {"question":"Which files does this knowledge page cite, and which have changed?","params":{"store":"oxwiki","id":"auth-flow"},"skill":"oxplow-knowledge"}
 loaders:
+  # The page itself: the one row the page's actions read.
+  row:
+    sql: |
+      SELECT p.uri FROM v_oxplow_knowledge_page p WHERE p.store = :store AND p.id = :id
   freshness:
     sql: |
       SELECT p.uri, p.title,
@@ -25,8 +29,8 @@ loaders:
                        ELSE ' ' || CASE WHEN r.pinned_vcs_rev_exact THEN '=' ELSE '~' END || ' ' || substr(r.pinned_vcs_rev, 1, 8) END AS pinned,
              CASE WHEN r.stale THEN 'stale' ELSE 'fresh' END AS status,
              CASE WHEN r.stale THEN 'warning' ELSE 'success' END AS tone, r.stale
-      FROM v_knowledge_page p
-      JOIN v_knowledge_ref r ON r.page = p.uri
+      FROM v_oxplow_knowledge_page p
+      JOIN v_knowledge_pin r ON r.page = p.uri
       WHERE p.store = :store AND p.id = :id
       ORDER BY r.stale DESC, r.path
 view:
@@ -52,18 +56,16 @@ view:
   actions:
   - id: verify
     label: Mark verified
-    command: oxplow.knowledge.verify_files
+    command: oxplow.refs.verify
     when: stale
     input:
-      store: '{{param.store}}'
-      id: '{{param.id}}'
+      uri: '{{row.uri}}'
       files:
       - '{{row.path}}'
     row: true
 actions:
 - id: verify-all
   label: Mark all verified
-  command: oxplow.knowledge.verify_files
+  command: oxplow.refs.verify
   input:
-    store: '{{param.store}}'
-    id: '{{param.id}}'
+    uri: '{{row.uri}}'

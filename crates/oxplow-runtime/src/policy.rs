@@ -11,7 +11,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::write_guard::{foreign_worktree_reason, oxwiki_page_reason};
+use crate::write_guard::{foreign_worktree_reason, record_file_reason, RecordFolder};
 
 /// What a tool call would do, as far as the policy cares.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,9 +56,12 @@ pub struct PolicyFacts<'a> {
     /// Every other stream's worktree (the primary checkout included). No
     /// thread edits them (workspace isolation).
     pub other_roots: &'a [PathBuf],
-    /// The primary project, whose `.oxplow/oxwiki` pages every stream shares
-    /// (written by `oxwiki.page.write`, never by a tool).
+    /// The primary project, whose stores' row files (`record_folders`) every
+    /// stream shares.
     pub project_dir: &'a Path,
+    /// The files stores keep their rows in (the fills' `files:`): written by
+    /// the store's extension's command, never by a tool.
+    pub record_folders: &'a [RecordFolder],
 }
 
 /// `path` made absolute (against `base`), with `.`/`..` resolved and the
@@ -128,9 +131,9 @@ pub fn decide_tool(intent: &ToolIntent<'_>, facts: &PolicyFacts<'_>) -> PolicyDe
                 .into_owned()
         })
         .collect();
-    // An oxwiki page is written by command, whatever the thread.
+    // A store's row file is written by its command, whatever the thread.
     for p in &resolved {
-        if let Some(reason) = oxwiki_page_reason(Some(p), Some(&project)) {
+        if let Some(reason) = record_file_reason(Some(p), Some(&project), facts.record_folders) {
             return PolicyDecision::Deny {
                 layer: DenyLayer::WriteGuard,
                 reason,
@@ -153,6 +156,16 @@ pub fn decide_tool(intent: &ToolIntent<'_>, facts: &PolicyFacts<'_>) -> PolicyDe
 mod tests {
     use super::*;
 
+    fn oxwiki() -> Vec<RecordFolder> {
+        vec![RecordFolder {
+            folder: ".oxplow/oxwiki".into(),
+            suffix: ".md".into(),
+            store: "oxwiki".into(),
+            model: "oxplow/knowledge_record".into(),
+            extension: "oxwiki".into(),
+        }]
+    }
+
     /// A call from a thread of the stream at `own`, the other stream's
     /// tree at `other`, the project at `/proj`.
     fn decide_at(own: &str, other: &str, kind: IntentKind, paths: &[&str]) -> PolicyDecision {
@@ -167,6 +180,7 @@ mod tests {
                 worktree_root: Path::new(own),
                 other_roots: &[std::path::PathBuf::from(other)],
                 project_dir: Path::new("/proj"),
+                record_folders: &oxwiki(),
             },
         )
     }
@@ -244,7 +258,7 @@ mod tests {
         ] {
             assert!(
                 matches!(&d, PolicyDecision::Deny { layer: DenyLayer::WriteGuard, reason }
-                    if reason.contains("oxwiki.page.write")),
+                    if reason.contains("`oxwiki.*` commands")),
                 "{d:?}"
             );
         }
@@ -270,24 +284,30 @@ mod tests {
         // Adopted as the stream at `/proj/.claude/worktrees/x`: its own
         // agent edits it, the primary's can't.
         let adopted = [std::path::PathBuf::from("/proj/.claude/worktrees/x")];
-        fn facts<'a>(own: &'a str, others: &'a [std::path::PathBuf]) -> PolicyFacts<'a> {
+        fn facts<'a>(
+            own: &'a str,
+            others: &'a [std::path::PathBuf],
+            record_folders: &'a [RecordFolder],
+        ) -> PolicyFacts<'a> {
             PolicyFacts {
                 worktree_root: Path::new(own),
                 other_roots: others,
                 project_dir: Path::new("/proj"),
+                record_folders,
             }
         }
+        let folders = oxwiki();
         let paths = vec![native.to_string()];
         let intent = ToolIntent {
             label: "Edit",
             kind: IntentKind::WorktreeWrite,
             paths: &paths,
         };
-        let primary = decide_tool(&intent, &facts("/proj", &adopted));
+        let primary = decide_tool(&intent, &facts("/proj", &adopted, &folders));
         assert_eq!(layer(&primary), Some(DenyLayer::WriteGuard), "{primary:?}");
         let own = [std::path::PathBuf::from("/proj")];
         assert_eq!(
-            decide_tool(&intent, &facts("/proj/.claude/worktrees/x", &own)),
+            decide_tool(&intent, &facts("/proj/.claude/worktrees/x", &own, &folders)),
             PolicyDecision::Allow
         );
     }
@@ -317,6 +337,7 @@ mod tests {
                     worktree_root: &own,
                     other_roots: std::slice::from_ref(&other),
                     project_dir: &own,
+                    record_folders: &[],
                 },
             );
             assert_eq!(layer(&d), Some(DenyLayer::WriteGuard), "{p}");

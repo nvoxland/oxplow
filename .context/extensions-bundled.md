@@ -90,7 +90,7 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
     `the-reminder-is-only-for-the-agent-tracks-workflow`, `next-task-*`.
   - `oxwiki` (`oxwiki`): the knowledge store as an extension (on by default): `.oxplow/oxwiki/<slug>.md` pages, `oxwiki.page.write` / `delete` / `restore`, a collector filling bundled's `knowledge_record` model, the `oxwiki` skill and `/note`. `knowledge.md` "The oxwiki extension". Fixtures are its own.
 
-- **The knowledge metrics** (in `oxplow-bundled`). The `oxplow.knowledge_pages` collector restates the page counts (`knowledge.pages`, `knowledge.stale_pages`, sliced by `oxplow.knowledge_store` and `oxplow.knowledge_bucket`) when a page is written, recorded or deleted and when a snapshot changes a file a page cites (`knowledge.page.drifted`); the `oxplow.request_read_knowledge` collector records, per stopped request that changed files, whether an agent read a page (`knowledge.read_requests`). Metrics: `knowledge.pages`, `knowledge.stale_pct`, `knowledge.read_requests_pct`. See `metrics.md` (knowledge pages, request read knowledge).
+- **The knowledge metrics** (in `oxplow-bundled`). The `oxplow.knowledge_pages` collector restates the page counts (`knowledge.pages`, `knowledge.stale_pages`, sliced by `oxplow.knowledge_store` and `oxplow.knowledge_bucket`) when a page of the model changes (`oxplow.knowledge_record.changed`) and when a snapshot changes a file a page cites (`snapshot.ref_drifted`); the `oxplow.request_read_knowledge` collector records, per stopped request that changed files, whether an agent read a page (`knowledge.read_requests`). Metrics: `knowledge.pages`, `knowledge.stale_pct`, `knowledge.read_requests_pct`. See `metrics.md` (knowledge pages, request read knowledge).
 - **The tracking metric** (in `oxplow-bundled`). The `oxplow.request_tracked` collector records, per stopped request that changed files, whether it has a task linked; the `tasks.tracked_requests_pct` metric is the share. See `metrics.md` (request tracked).
 - **The review packet**. Its pages, mounted in
   the `sections` slots of `oxplow/diff-view` (the Changes
@@ -122,8 +122,8 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
 
 ## The rule: data in foundation, person-facing screens here
 
-oxplow-foundation holds the data of knowledge: its
-datasets, the `knowledge` resource, the `oxplow:oxwiki`
+oxplow-foundation holds the data of core's built-in knowledge (until it goes): its
+datasets, the `oxplow:oxwiki`
 implementation and its setting (`configuration: oxwiki`, default on; turned
 off by `oxplow.knowledge.set_oxwiki`, a script composing a settings write),
 the bus commands (with no `ui:`), skills and metrics. oxplow's own
@@ -417,36 +417,34 @@ screens and the holder's add the review and analysis:
   `summary`, `first_sentence(body)`) is tested from the desktop suite
   (`viz/boardModel.test.ts`); the frame by a `ui:` fixture.
 
-**The knowledge pages** (moved from the holder; written for URIs and
-stores, not slugs). They are bundled's, so with `oxplow-bundled` off a
-knowledge page link opens core's generic resource page. The data they read
-is foundation's (`.context/knowledge.md` "Pages").
+**The knowledge pages** (written for URIs and stores, not slugs). They are
+bundled's, so with `oxplow-bundled` off a knowledge page link opens core's
+generic resource page; bundled also declares the `oxplow/knowledge` resource
+(`resolve: knowledge_page`, `searchable: search_knowledge`) and the dataset
+`knowledge_page` (`v_oxplow_knowledge_page`, the pages of every store of the
+shared model with their `body`). `.context/knowledge.md` "The oxwiki
+extension" has the read contract.
 
 - `knowledge` (the Knowledge index, launcher section Knowledge): Stores
-  (every knowledge row of `v_capability_provider`, on or off, with page
-  and stale counts; with none on, a line says how to turn one on), Pages
-  (newest change first; a filter over title and body; Delete in the row's
-  right-click menu, confirmed, only for a store that can `edit`), Stale
-  pages, and Recent reads and writes. New page opens `new-knowledge-page`.
-  It also answers which pages cite a file (its `path` param).
+  (every store of `oxplow/knowledge_record`, from `v_model_store`, with page
+  and stale counts), Pages (newest change first; a filter over title and
+  body; Delete in the row's right-click menu, confirmed, through the
+  `oxplow/knowledge.delete` point), Stale pages, and Recent reads and writes
+  (`record.read` events). New page opens `new-knowledge-page`. It also
+  answers which pages cite a file (its `path` param).
 - `knowledge-page` (`for: oxplow/knowledge`, default): the tab is the
-  page's title. The body is the markdown, editable (Save) only when the
-  page's store has `edit` on. The rail has About (store, kind, author, last
+  page's title. The body is the markdown (read-only: a store's own page
+  would replace it to edit). The rail has About (store, kind, author, last
   edited, freshness, reads) and Open in its store (when the page has a
-  `url`). Referenced files has Mark verified. See also: the index, the
-  page's freshness, and what links to it.
+  `url`). Referenced files has Mark verified (`oxplow.refs.verify`). See
+  also: the index, the page's freshness, and what links to it.
 - `knowledge-freshness` (params `store`, `id`): the page's files, stale
-  ones first, Mark verified per file and for all.
-- `new-knowledge-page`: a form of title and body. It has no id field, the
-  store derives it. It asks for a store only when more than one store that
-  oxplow writes is on; with one, the form sends that one. Its command is
-  `knowledge.new_page` (menu: New Knowledge Page…), which opens the page the
-  write answers (`open_after: {{result.page}}`).
-- The body field is plain text in the form: the write's `body` carries no
-  `contentMediaType: text/markdown`, which is what makes a form field the
-  markdown editor. Fixtures: `knowledge-*`, `new-knowledge-page-*`,
-  `the-knowledge-page-*`, `deleting-a-knowledge-page-*`. A store that can't
-  edit is not a fixture: the throwaway has only oxwiki.
+  ones first, Mark verified per file and for all (`oxplow.refs.verify`).
+- `new-knowledge-page`: the `oxplow/knowledge.new` point as a button (several
+  stores, a menu); each store's own command and form answer it (oxwiki:
+  `oxwiki.page.write`, form `oxwiki/new-page`).
+- Fixtures: `knowledge-*`, `the-knowledge-page-*`, `deleting-a-knowledge-page-*`
+  run on oxwiki (`requires: [oxwiki]`).
 
 **Owns what reads tables (P7.B5).** Derived data computed only from
 core's rows is the extension's, as SQL: the "look here first" score is

@@ -601,7 +601,7 @@ async fn extension_test_runs_the_knowledge_suite_over_a_knowledge_provider() {
     let write = "{ command: write_page, input: { id: example, body: '# Example', verified_files: [], removed_files: [] } }";
     std::fs::write(
         ext.join("extension.yaml"),
-        format!("manifest: 2\nname: shelf\nintent:\n  purpose: Knowledge over the protocol.\n  examples:\n    - {{ name: basic, input: {write}, expect: the page }}\npermissions: [process.run]\nproviders:\n  - id: shelf\n    capability: knowledge\n    entry: bin/provider\n    declarations: provider.json\n"),
+        format!("manifest: 2\nname: shelf\nintent:\n  purpose: Knowledge over the protocol.\n  examples:\n    - {{ name: basic, input: {write}, expect: the page }}\nrequires: [oxplow-bundled]\npermissions: [process.run]\nproviders:\n  - id: shelf\n    capability: knowledge\n    entry: bin/provider\n    declarations: provider.json\n"),
     )
     .unwrap();
     std::fs::write(

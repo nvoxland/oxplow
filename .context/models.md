@@ -690,7 +690,7 @@ Every open model keeps per-item values beyond its columns.
   hidden (kept until it is removed). There is no "active store".
 - The owner publishes **one read contract** joining its model with its
   annotations: bundled's `v_oxplow_task` (the model, stages, assignment,
-  rank) and `v_knowledge_page` (the model, pins, reads). Core has no alias
+  rank) and `v_oxplow_knowledge_page` (the model, pins, reads, body). Core has no alias
   for them. With bundled off they do not exist, and core readers of the
   models (the ref resolver) say so (empty, never an error).
 - Any extension may `ref()` an open model, and add dimensions and

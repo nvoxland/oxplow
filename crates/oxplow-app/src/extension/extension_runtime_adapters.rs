@@ -54,10 +54,17 @@ impl PreparedRuntimeAdapters {
             knowledge: crate::knowledge::prepare_built_ins(
                 &declared,
                 &svc.layout.project_dir,
-                snapshot
-                    .extensions()
-                    .iter()
-                    .any(|e| e.enabled && e.name == "oxwiki"),
+                // Core's built-in oxwiki stands down while an enabled
+                // extension's fill claims its store.
+                snapshot.extensions().iter().any(|e| {
+                    e.enabled
+                        && e.shared_models.fills.iter().any(|f| {
+                            f.model == "oxplow/knowledge_record"
+                                && f.stores
+                                    .iter()
+                                    .any(|s| s == oxplow_domain::knowledge::OXWIKI)
+                        })
+                }),
             ),
             snapshots: crate::snapshots::prepare_built_ins(
                 &declared,

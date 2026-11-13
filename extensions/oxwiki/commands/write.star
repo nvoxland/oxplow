@@ -49,7 +49,12 @@ def transform(x):
     # the write names it.
     if i.get("id") == None and before != None:
         return {"refuse": "oxwiki already has a page `" + slug + "`: pass `id: " + slug + "` to replace it, or another title"}
-    warnings = scope("links.check", {"body": i["body"]})["warnings"]
+    # A page whose file is there but whose row isn't yet (the collector follows
+    # the folder a moment after a write) is no dangling link.
+    warnings = [
+        w for w in scope("links.check", {"body": i["body"], "self": "oxplow:oxplow/knowledge?id=" + slug + "&store=oxwiki"})["warnings"]
+        if not (valid(w["target"]) and current(w["target"]) != None)
+    ]
     if len(warnings) > 0:
         return {"refuse": "a link doesn't resolve: " + "; ".join(["[[" + w["target"] + "]]: " + w["reason"] for w in warnings])}
     path = FOLDER + "/" + slug + ".md"

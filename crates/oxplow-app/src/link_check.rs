@@ -10,15 +10,13 @@
 //! Classification (recognized-or-not) lives in
 //! [`oxplow_domain::uri::classify_wikilinks`]; this module adds only the
 //! existence probes — the database, the project's files and the VCS's
-//! revision graph — synchronously, so `oxplow.knowledge.write_page` refuses a
-//! dangling link inside its transaction.
+//! revision graph — synchronously, so a store's write command refuses a dangling link
+//! (`links.check`, and core's own commands inside their transaction).
 
 use serde::{Deserialize, Serialize};
 
 use oxplow_domain::uri::{classify_wikilinks, Reference};
 use oxplow_domain::vcs::RevisionGraph;
-
-use crate::Services;
 
 /// One invalid wikilink found in a body.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -153,46 +151,61 @@ pub(crate) fn worktree_of_tx(
     .filter(|p| p.is_dir())
 }
 
-/// [`check_links_in`] over the app's services, for the tools that report
-/// warnings rather than refuse (task and note bodies).
-pub async fn check_links(services: &Services, body: &str) -> Vec<LinkWarning> {
-    check_links_at(
-        &services.db,
-        &services.vocabulary,
-        &services.layout.project_dir,
-        &*services.vcs,
-        body,
+/// The worktree of the thread, else the stream, a run is anchored to, when
+/// it has one on disk.
+pub(crate) fn worktree_of_anchors_tx(
+    conn: &rusqlite::Connection,
+    anchors: &oxplow_domain::events::Anchors,
+) -> Option<std::path::PathBuf> {
+    use rusqlite::OptionalExtension;
+    if let Some(thread) = anchors.thread_id {
+        if let Some(root) = worktree_of_tx(conn, thread) {
+            return Some(root);
+        }
+    }
+    let stream = anchors.stream_id?;
+    conn.query_row(
+        "SELECT worktree_path FROM streams WHERE id = ?1",
+        [stream.value()],
+        |r| r.get::<_, String>(0),
     )
-    .await
+    .optional()
+    .ok()
+    .flatten()
+    .map(std::path::PathBuf::from)
+    .filter(|p| p.is_dir())
 }
 
 /// [`check_links_in`] against a project's database and VCS, for a command
-/// run outside the bus's transaction.
+/// run outside the bus's transaction. Files are looked for under `root`
+/// (the checkout the caller works in); `this_page` is a page that may link
+/// to itself. A database error is an error, never a pass.
 pub async fn check_links_at(
     db: &oxplow_db::Database,
     vocabulary: &oxplow_domain::vocabulary::VocabularyHandle,
-    project_dir: &std::path::Path,
+    root: &std::path::Path,
     vcs: &dyn oxplow_domain::vcs::Vcs,
     body: &str,
-) -> Vec<LinkWarning> {
-    let project_dir = project_dir.to_path_buf();
-    let graph = vcs.revision_graph(&project_dir);
+    this_page: Option<&str>,
+) -> Result<Vec<LinkWarning>, oxplow_domain::DomainError> {
+    let root = root.to_path_buf();
+    let graph = vcs.revision_graph(&root);
     let body = body.to_string();
+    let this_page = this_page.map(str::to_string);
     let vocabulary = vocabulary.current();
     db.read(move |conn| {
         Ok(check_links_in(
             &LinkWorld {
                 conn,
                 resources: &vocabulary.resources,
-                project_dir: &project_dir,
+                project_dir: &root,
                 graph: &*graph,
-                this_page: None,
+                this_page: this_page.as_deref(),
             },
             &body,
         ))
     })
     .await
-    .unwrap_or_default()
 }
 
 fn exists(conn: &rusqlite::Connection, sql: &str, param: &dyn rusqlite::ToSql) -> bool {
@@ -221,11 +234,13 @@ fn unresolved_ref(
             [&at],
             |_| Ok(()),
         )
-        .optional()
-        .ok()?;
-    found
-        .is_none()
-        .then(|| format!("`{at}` does not exist (no row in `{resolve}`)"))
+        .optional();
+    match found {
+        Ok(None) => Some(format!("`{at}` does not exist (no row in `{resolve}`)")),
+        Ok(Some(())) => None,
+        // A dataset that can't be read says so; the link isn't passed.
+        Err(e) => Some(format!("`{at}` could not be checked in `{resolve}`: {e}")),
+    }
 }
 
 /// `Some(reason)` when a recognized reference's object doesn't exist,
@@ -237,15 +252,33 @@ fn missing_reason(world: &LinkWorld<'_>, reference: &Reference) -> Option<String
             Ok(canonical) => unresolved_ref(world, &canonical),
             Err(_) => Some(format!("task `{uri}` does not exist")),
         },
+        // Through the knowledge resource's `resolve:` dataset, whichever it
+        // is; a page may link to itself before its row exists.
         Reference::Knowledge { store, id } => {
             let uri = oxplow_domain::uri::build::knowledge_uri(store, id);
-            (world.this_page != Some(uri.as_str())
-                && !exists(
-                    world.conn,
-                    "SELECT 1 FROM v_knowledge_page WHERE uri = ?1",
-                    &uri,
-                ))
-            .then(|| format!("knowledge page `{id}` of `{store}` does not exist"))
+            if world.this_page == Some(uri.as_str()) {
+                return None;
+            }
+            // Core's own record of a page kept by a built-in store (oxwiki's
+            // built-in, a provider's) holds it too, until that record goes
+            // with the built-in (the removal's last step).
+            if exists(
+                world.conn,
+                "SELECT 1 FROM knowledge_page WHERE uri = ?1",
+                &uri,
+            ) {
+                return None;
+            }
+            match oxplow_domain::uri::OxplowUri::parse(&uri) {
+                Ok(canonical) => unresolved_ref(world, &canonical).map(|why| {
+                    if why.contains("could not be checked") {
+                        why
+                    } else {
+                        format!("knowledge page `{id}` of `{store}` does not exist")
+                    }
+                }),
+                Err(_) => Some(format!("knowledge page `{id}` of `{store}` does not exist")),
+            }
         }
         Reference::Commit(sha) => world
             .graph
@@ -295,6 +328,46 @@ mod tests {
         config.set_str("user.name", "test").unwrap();
         config.set_str("user.email", "test@example.com").unwrap();
         dir
+    }
+
+    async fn check_links(services: &Services, body: &str) -> Vec<LinkWarning> {
+        check_links_at(
+            &services.db,
+            &services.vocabulary,
+            &services.layout.project_dir,
+            &*services.vcs,
+            body,
+            None,
+        )
+        .await
+        .unwrap()
+    }
+
+    /// A page may link to itself before its row exists: the `this_page` it
+    /// is written under passes, another page that isn't there doesn't.
+    #[tokio::test]
+    async fn a_page_may_link_to_itself() {
+        let dir = git_repo();
+        let services = Services::in_memory(dir.path()).await.unwrap();
+        let me = oxplow_domain::uri::build::knowledge_uri("oxwiki", "me");
+        let warnings = check_links_at(
+            &services.db,
+            &services.vocabulary,
+            &services.layout.project_dir,
+            &*services.vcs,
+            "Me [[me]], not [[you]].",
+            Some(&me),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            warnings
+                .iter()
+                .map(|w| w.target.as_str())
+                .collect::<Vec<_>>(),
+            vec!["you"],
+            "{warnings:?}"
+        );
     }
 
     #[tokio::test]

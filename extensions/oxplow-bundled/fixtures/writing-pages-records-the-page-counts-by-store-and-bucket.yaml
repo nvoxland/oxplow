@@ -1,7 +1,8 @@
 # Each page written restates the counts: two pages of oxwiki, both notes.
+requires: [oxwiki]
 given:
-  - { command: oxplow.knowledge.write_page, input: { store: oxwiki, title: First, body: "# First\n\nOne." } }
-  - { command: oxplow.knowledge.write_page, input: { store: oxwiki, title: Second, body: "# Second\n\nTwo." } }
+  - { command: oxwiki.page.write, input: { title: First, body: "# First\n\nOne." } }
+  - { command: oxwiki.page.write, input: { title: Second, body: "# Second\n\nTwo." } }
 when: { sql: "SELECT MEASURE('knowledge.pages') AS pages FROM metric_grid('month')" }
 expect: { rows: [{ pages: 2.0 }] }
 steps:
