@@ -88,7 +88,7 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
     `the-task-workflow-dataset-reads-the-setting-as-it-changes`,
     `setting-the-task-workflow-keeps-the-definition-of-done`,
     `the-reminder-is-only-for-the-agent-tracks-workflow`, `next-task-*`.
-  - `oxwiki` (`oxwiki`): will hold the knowledge store and its commands. Empty now.
+  - `oxwiki` (`oxwiki`): the knowledge store as an extension (on by default): `.oxplow/oxwiki/<slug>.md` pages, `oxwiki.page.write` / `delete` / `restore`, a collector filling bundled's `knowledge_record` model, the `oxwiki` skill and `/note`. `knowledge.md` "The oxwiki extension". Fixtures are its own.
 
 - **The knowledge metrics** (in `oxplow-bundled`). The `oxplow.knowledge_pages` collector restates the page counts (`knowledge.pages`, `knowledge.stale_pages`, sliced by `oxplow.knowledge_store` and `oxplow.knowledge_bucket`) when a page is written, recorded or deleted and when a snapshot changes a file a page cites (`knowledge.page.drifted`); the `oxplow.request_read_knowledge` collector records, per stopped request that changed files, whether an agent read a page (`knowledge.read_requests`). Metrics: `knowledge.pages`, `knowledge.stale_pct`, `knowledge.read_requests_pct`. See `metrics.md` (knowledge pages, request read knowledge).
 - **The tracking metric** (in `oxplow-bundled`). The `oxplow.request_tracked` collector records, per stopped request that changed files, whether it has a task linked; the `tasks.tracked_requests_pct` metric is the share. See `metrics.md` (request tracked).

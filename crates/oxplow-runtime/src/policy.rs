@@ -57,7 +57,7 @@ pub struct PolicyFacts<'a> {
     /// thread edits them (workspace isolation).
     pub other_roots: &'a [PathBuf],
     /// The primary project, whose `.oxplow/oxwiki` pages every stream shares
-    /// (written by `oxplow.knowledge.write_page`, never by a tool).
+    /// (written by `oxwiki.page.write`, never by a tool).
     pub project_dir: &'a Path,
 }
 
@@ -244,7 +244,7 @@ mod tests {
         ] {
             assert!(
                 matches!(&d, PolicyDecision::Deny { layer: DenyLayer::WriteGuard, reason }
-                    if reason.contains("oxplow.knowledge.write_page")),
+                    if reason.contains("oxwiki.page.write")),
                 "{d:?}"
             );
         }

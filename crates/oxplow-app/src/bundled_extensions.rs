@@ -180,27 +180,29 @@ mod tests {
         assert!(hits.is_empty(), "{}", hits.join("\n"));
     }
 
-    /// `oxtask` ships on by default and `oxwiki` off: both are found and load
-    /// clean; with bundled on they activate clean (oxtask by default, oxwiki
-    /// when listed); with bundled off they are held (listed with why), not a
-    /// boot failure.
+    /// `oxtask` and `oxwiki` ship on by default: both are found and load
+    /// clean and activate clean with bundled on; with bundled off they are
+    /// held (listed with why), not a boot failure.
     #[tokio::test(flavor = "multi_thread")]
-    async fn oxtask_is_on_by_default_oxwiki_is_not_and_both_need_bundled() {
+    async fn oxtask_and_oxwiki_are_on_by_default_and_need_bundled() {
         for name in ["oxtask", "oxwiki"] {
             assert!(find(name).is_some(), "{name} ships");
             assert!(!is_required(name), "{name} is optional");
         }
         assert!(oxplow_config::DEFAULT_EXTENSIONS.contains(&"oxtask"));
-        assert!(!oxplow_config::DEFAULT_EXTENSIONS.contains(&"oxwiki"));
+        assert!(oxplow_config::DEFAULT_EXTENSIONS.contains(&"oxwiki"));
         let project = |yaml: &str| {
             let dir = tempfile::tempdir().unwrap();
             crate::test_fixtures::init_git_repo(dir.path());
             std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
             std::fs::write(dir.path().join(".oxplow/project.yaml"), yaml).unwrap();
+            // The defaults are what this test is about: not the fixture's
+            // personal setting that turns oxwiki off.
+            std::fs::remove_file(dir.path().join(".oxplow/personal.yaml")).unwrap();
             dir
         };
 
-        // The defaults: oxtask is on and running, oxwiki is loaded clean and off.
+        // The defaults: both are on and running.
         let dir = project("");
         let loaded = crate::extension::extensions::load_extensions(dir.path());
         for (name, namespace) in [("oxtask", "oxtask"), ("oxwiki", "oxwiki")] {
@@ -208,7 +210,7 @@ mod tests {
             assert!(ext.errors.is_empty(), "{name}: {:?}", ext.errors);
             assert_eq!(ext.namespace, namespace);
             assert_eq!(ext.requires, ["oxplow-bundled"]);
-            assert_eq!(ext.enabled, name == "oxtask", "{name} by default");
+            assert!(ext.enabled, "{name} by default");
         }
         let svc = crate::Services::in_memory(dir.path()).await.unwrap();
         svc.streams.ensure_primary().await.unwrap();
@@ -218,9 +220,13 @@ mod tests {
                 .active()
                 .is_some_and(|s| s.extensions().iter().any(|e| e.name == name && e.enabled))
         };
-        assert!(runs(&svc, "oxtask") && !runs(&svc, "oxwiki"));
+        assert!(runs(&svc, "oxtask") && runs(&svc, "oxwiki"));
+        // The oxwiki extension keeps the store: core's built-in stands down
+        // (two keepers of one folder would write its pages twice).
+        assert!(svc.knowledge.enabled().is_empty(), "built-in stands down");
+        assert!(!svc.oxwiki.present());
 
-        // On, with bundled on: both activate with nothing held.
+        // Listed, with bundled on: both activate with nothing held.
         let dir = project("extensions: [oxplow-bundled, oxtask, oxwiki]\n");
         let svc = crate::Services::in_memory(dir.path()).await.unwrap();
         svc.streams.ensure_primary().await.unwrap();

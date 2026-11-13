@@ -1170,6 +1170,7 @@ mod core_tests {
     async fn services() -> (Arc<Services>, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         git2::Repository::init(dir.path()).unwrap();
+        crate::test_fixtures::disable_oxwiki_extension(dir.path());
         let svc = Services::in_memory(dir.path())
             .await
             .expect("in-memory services");

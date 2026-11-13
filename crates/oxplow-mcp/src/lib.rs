@@ -697,6 +697,14 @@ mod tests {
         let tree = repo.find_tree(tree_id).unwrap();
         repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
             .unwrap();
+        // These tests run on core's built-in oxwiki, which stands down while
+        // the oxwiki extension is on.
+        std::fs::create_dir_all(project.path().join(".oxplow")).unwrap();
+        std::fs::write(
+            project.path().join(".oxplow/personal.yaml"),
+            "disableExtensions: [oxwiki]\n",
+        )
+        .unwrap();
         let services = Services::in_memory(project.path()).await.unwrap();
         let server = OxplowMcp::new(services.clone());
         (project, services, server)

@@ -1,6 +1,6 @@
 ---
 name: oxplow-knowledge
-description: Keeping and finding knowledge pages — durable understanding (codebase walkthroughs, design rationale, comparisons, tradeoffs, recommendations) in the project's knowledge stores (oxwiki, oxplow's own, and any an extension adds). Find before you create; read a page with oxplow_read; write with oxplow.knowledge.write_page. Loads on v_knowledge_page, v_knowledge_ref, v_knowledge_read, the oxplow `oxplow_search` tool (resource oxplow/knowledge), v_page_ref, oxplow.knowledge.write_page, on /note, and when the user asks "how does X work", "where is X", "explain X", "trace X", "give me an overview", "walk me through X", "why does/did/should X", "compare X and Y", "what are the tradeoffs", "should I use X or Y", "rationale behind X", or says "save this" / "add a note" / "keep this".
+description: Keeping and finding knowledge pages — durable understanding (codebase walkthroughs, design rationale, comparisons, tradeoffs, recommendations) in the project's knowledge stores (oxwiki, oxplow's own, and any an extension adds). Find before you create; read a page with oxplow_read; a store's own command writes it. Loads on v_knowledge_page, v_knowledge_ref, v_knowledge_read, the oxplow `oxplow_search` tool (resource oxplow/knowledge), v_page_ref, and when the user asks "how does X work", "where is X", "explain X", "trace X", "give me an overview", "walk me through X", "why does/did/should X", "compare X and Y", "what are the tradeoffs", "should I use X or Y", "rationale behind X", or says "save this" / "add a note" / "keep this".
 ---
 
 # Knowledge pages
@@ -32,22 +32,13 @@ none does. `references/search-existing.md` has the lookups.
 
 ## Writing
 
-`run_command oxplow.knowledge.write_page { store?, id?, title?, body,
-verified_files, removed_files }`. One run writes the page through its
-store and records it; never write a store's files yourself.
+A knowledge store writes its pages with its own command, and its skill says
+how (oxwiki: the `oxwiki` skill, `oxwiki.page.write`). Never write a store's
+files yourself. Every `[[link]]` must resolve; a dangling one is refused and
+named. With no store on, say once that the page wasn't kept.
 
-- `store`: needed only when more than one store is on (refused naming
-  them otherwise). The person's or your config's choice, never a guess.
-- `id`: the store's page id (oxwiki: kebab-case, topic-shaped,
-  `stop-hook-pipeline`, never dated). Omit it on a new page and give a
-  `title`: the store derives the id. A title naming an existing page is
-  refused: pass its `id` to replace it.
-- Every `[[link]]` must resolve; a dangling one is refused and named.
-- `verified_files`: files you re-read against this body (their pins move
-  to now). `removed_files`: files you took out.
-
-`references/write-page.md` has the details: appending, `link`,
-`verify_files`, `delete_page`, no store on.
+`run_command oxplow.knowledge.verify_files { id, files }` records that you
+re-read the cited files against a page, so its pins move to now.
 
 ## Links — the one way to name an oxplow object
 

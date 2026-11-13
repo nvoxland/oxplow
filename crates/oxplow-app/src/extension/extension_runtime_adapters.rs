@@ -51,7 +51,14 @@ impl PreparedRuntimeAdapters {
         }
         Ok(Self {
             harnesses: crate::harnesses::prepare_built_ins(&declared),
-            knowledge: crate::knowledge::prepare_built_ins(&declared, &svc.layout.project_dir),
+            knowledge: crate::knowledge::prepare_built_ins(
+                &declared,
+                &svc.layout.project_dir,
+                snapshot
+                    .extensions()
+                    .iter()
+                    .any(|e| e.enabled && e.name == "oxwiki"),
+            ),
             snapshots: crate::snapshots::prepare_built_ins(
                 &declared,
                 &svc.snapshot_captures,

@@ -25,7 +25,7 @@ pub fn is_ignore_file(path: &Path) -> bool {
 /// language caches, IDE state) is the user's call via the
 /// `generated` config; we don't pretend to know which dirs each
 /// project actually treats as generated. `.oxplow` is handled
-/// separately above — watched for oxwiki and for anything
+/// separately above — watched for the folders extensions declare watched and for anything
 /// `.oxplow/.gitignore` un-ignores with a `!` — not via this segment
 /// list.
 const DEFAULT_IGNORED_SEGMENTS: &[&str] = &[".git"];
@@ -36,7 +36,7 @@ const DEFAULT_IGNORED_SEGMENTS: &[&str] = &[".git"];
 /// consumers, and the indexer — no consumer keeps its own skip-list.
 ///
 /// A path is ignored when, in precedence order:
-/// 1. it is under `.git`, or under the root's `.oxplow` (except `.oxplow/oxwiki/`) —
+/// 1. it is under `.git`, or under the root's `.oxplow` (except a folder an extension declares watched) —
 ///    absolute, never overridable;
 /// 2. otherwise, if it matches an **`include`** entry it is **kept**
 ///    (force-track something `.gitignore` would otherwise drop);
@@ -127,17 +127,13 @@ enum FilterEntry {
 /// published generation, and every filter reads it.
 static DECLARED_FOLDERS: RwLock<Vec<String>> = RwLock::new(Vec::new());
 
-/// Folders core itself names until the extension that keeps them declares
-/// them: oxwiki's, until it does (`files:` in its manifest).
-const BUILT_IN_FOLDERS: &[&str] = &["oxwiki"];
-
 /// Replace the folders extensions declare watched (names under `.oxplow/`).
 pub fn set_declared_watched_folders(names: impl IntoIterator<Item = String>) {
     *write(&DECLARED_FOLDERS) = names.into_iter().collect();
 }
 
 fn is_watched_folder(name: &str) -> bool {
-    BUILT_IN_FOLDERS.contains(&name) || read(&DECLARED_FOLDERS).iter().any(|n| n == name)
+    read(&DECLARED_FOLDERS).iter().any(|n| n == name)
 }
 
 impl WorkspaceFilter {
@@ -353,9 +349,9 @@ impl WorkspaceFilter {
 
     /// True if `path` is out of a tree (`oxplow-app`'s `Trees`: a diff,
     /// the working tree, a snapshot's files). The same rules as
-    /// [`Self::ignore`] but git's view of `.oxplow/oxwiki/`, which oxplow
+    /// [`Self::ignore`] but git's view of a declared watched folder (oxwiki's), which oxplow
     /// watches though git ignores it: a tree answers "what would git
-    /// see?", so oxwiki is no one's uncommitted work (tsk1083).
+    /// see?", so such a folder is no one's uncommitted work.
     pub fn ignore_in_trees(&self, path: &Path, is_dir: bool) -> bool {
         self.decide(path, is_dir, false)
     }
@@ -582,6 +578,7 @@ mod tests {
     /// is out of a tree (`ignore_in_trees`): trees are git's view.
     #[test]
     fn global_excludes_count_and_trees_follow_git_for_oxwiki() {
+        set_declared_watched_folders(["oxwiki".to_string()]);
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("repo");
         std::fs::create_dir_all(root.join(".oxplow/oxwiki")).unwrap();
@@ -692,12 +689,13 @@ mod tests {
 
     #[test]
     fn should_ignore_filters_oxplow_and_git() {
-        // Always-on: anything under `.oxplow/` except `.oxplow/oxwiki/`,
-        // and anything under `.git/`. Everything else is the user's
+        // Always-on: anything under `.oxplow/` except a declared watched
+        // folder, and anything under `.git/`. Everything else is the user's
         // call via the `generated` config.
         assert!(should_ignore_workspace_watch_path(Path::new(
             ".oxplow/snapshots/aa/foo.tmp"
         )));
+        set_declared_watched_folders(["oxwiki".to_string()]);
         assert!(!should_ignore_workspace_watch_path(Path::new(
             ".oxplow/oxwiki/local-snapshots.md"
         )));
@@ -783,7 +781,8 @@ mod tests {
     }
 
     #[test]
-    fn workspace_filter_oxwiki_passes_through() {
+    fn workspace_filter_a_declared_folder_passes_through() {
+        set_declared_watched_folders(["oxwiki".to_string()]);
         let f = WorkspaceFilter::default();
         assert!(!f.ignore(Path::new(".oxplow/oxwiki/page.md"), false));
         assert!(f.ignore(Path::new(".oxplow/local.sqlite"), false));
@@ -1018,6 +1017,7 @@ mod tests {
         //
         // Generalised deliberately: this is NOT a `project.yaml` carve-out.
         // Whatever a project un-ignores in that file becomes visible.
+        set_declared_watched_folders(["oxwiki".to_string()]);
         let dir = tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".oxplow/oxwiki")).unwrap();
         std::fs::create_dir_all(dir.path().join(".oxplow/snapshots")).unwrap();
@@ -1065,7 +1065,7 @@ mod tests {
             false
         ));
 
-        // oxwiki stays watched. This one CANNOT come from .gitignore:
+        // A declared watched folder stays watched. This one CANNOT come from .gitignore:
         // it is deliberately not committed, but it IS snapshotted (Local
         // History's oxwiki badges), and gitignore can't say "don't commit but
         // do watch".
@@ -1078,6 +1078,7 @@ mod tests {
         // where the user deleted it) → the safe default still holds.
         let dir = tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
+        set_declared_watched_folders(["oxwiki".to_string()]);
         let f = WorkspaceFilter::for_project(dir.path(), empty(), empty());
         assert!(f.ignore(Path::new(".oxplow/project.yaml"), false));
         assert!(f.ignore(Path::new(".oxplow/local.sqlite"), false));

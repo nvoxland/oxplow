@@ -906,7 +906,7 @@ pub fn bundled_from_sources(requested: Option<bool>, dev_build: bool) -> bool {
 pub const EXTENSION_SOURCES_DIR: &str = ".oxplow/extensions";
 
 /// The team's list when `.oxplow/project.yaml` has no `extensions` key.
-pub const DEFAULT_EXTENSIONS: &[&str] = &["oxplow-bundled", "oxtask"];
+pub const DEFAULT_EXTENSIONS: &[&str] = &["oxplow-bundled", "oxtask", "oxwiki"];
 
 fn default_extensions() -> Vec<String> {
     DEFAULT_EXTENSIONS.iter().map(|s| s.to_string()).collect()

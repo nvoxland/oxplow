@@ -1,0 +1,14 @@
+# The id is kebab-case; a title that makes none, and no id or title, are
+# refused; so is a body with a link that names nothing (the link is named).
+requires: [oxplow-bundled]
+when: { command: oxwiki.page.write, input: { id: "Not A Slug", body: "x" } }
+expect: { ok: false, refused: "does not match" }
+steps:
+  - when: { command: oxwiki.page.write, input: { title: "!!", body: "x" } }
+    expect: { ok: false, refused: "makes no page id" }
+  - when: { command: oxwiki.page.write, input: { body: "x" } }
+    expect: { ok: false, refused: "needs an `id`" }
+  - when: { command: oxwiki.page.write, input: { id: dangling, body: "see [[src/gone.rs]] and [[#13]]" } }
+    expect: { ok: false, refused: "src/gone.rs" }
+  - when: { sql: "SELECT count(*) AS n FROM v_oxplow_knowledge_record" }
+    expect: { rows: [{ n: 0 }] }

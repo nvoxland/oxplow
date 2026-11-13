@@ -202,6 +202,12 @@ effects:
 # Task" once, whichever stores are on (a button with one, a menu with
 # several). A store's command joins with `ui: { at: oxplow/task.new }`.
 action_points:
+  - name: knowledge.new
+    label: New Page
+    doc: Write a knowledge page. Each knowledge store offers its own way.
+    context:
+      title?: string
+      body?: string
   - name: task.new
     label: New Task
     doc: File a task. Each task store offers its own way.

@@ -294,6 +294,7 @@ mod tests {
     fn git_repo_with_commit(subject: &str, body: &str) -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
         let repo = git2::Repository::init(dir.path()).unwrap();
+        crate::test_fixtures::disable_oxwiki_extension(dir.path());
         let mut config = repo.config().unwrap();
         config.set_str("user.name", "test").unwrap();
         config.set_str("user.email", "test@example.com").unwrap();

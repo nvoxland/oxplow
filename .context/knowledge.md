@@ -8,6 +8,38 @@ freshness and the events. The store keeps the page; the record is derived
 from what it kept. oxplow observes every store the same way, so the UI,
 metrics and tracking are common to all of them.
 
+## The oxwiki extension (phase 4, built)
+
+oxwiki is an extension (`extensions/oxwiki`, on by default, requires
+oxplow-bundled) that fills bundled's `oxplow/knowledge_record` model as the
+store `oxwiki`; the sections below describe core's built-in oxwiki, which
+stands down while the extension is enabled (`knowledge::prepare_built_ins`
+declares no store then) and goes in step 5 of the removal. The extension:
+
+- **Files.** `files: [{ path: .oxplow/oxwiki, access: write, watch: true }]`:
+  the folder is watched and snapshotted though git ignores it
+  (`extensions-permissions.md` "Declared folders"), and the fill's `files: {
+  folder, suffix: .md }` makes an agent's read of a page's file a read of the
+  row (`record.read`, `models.md`).
+- **Commands.** `oxwiki.page.write { id?, title?, body }` and
+  `oxwiki.page.delete { id }` write and delete `.oxplow/oxwiki/<slug>.md`
+  through `oxplow.extension_files.write`/`delete`. The files service resolves
+  against the project root, so a write from any worktree stream lands in the
+  primary checkout's folder (never refused, never written into a worktree).
+  The slug rules are the ones below (kebab-case; a title makes one; a title
+  naming an existing page is refused). A body whose `[[links]]` don't resolve
+  is refused through the `links.check` service. `oxwiki.page.restore` is their
+  undo (the previous file, or none). A write joins bundled's
+  `oxplow/knowledge.new` point.
+- **The collector** `pages` (`on: [start, { files: ".oxplow/oxwiki/*.md" }]`)
+  states every page file as a snapshot of the store's rows (`id`, `title`
+  from the first heading, `body`, `kind: note`, `updated_at` from the file's
+  mtime), so a hand edit, a new file and a deleted one converge; a file whose
+  name isn't a slug is no page.
+- **Skills.** `oxwiki` (writing) and the `/note` command, gated on the model;
+  the `oxplow-knowledge` skill keeps finding and reading.
+- Fixtures: `extensions/oxwiki/fixtures`.
+
 ## Stores, pages, kinds
 
 - **One capability, one unit: a page.** A page has a markdown body, a

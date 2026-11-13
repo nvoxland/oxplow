@@ -1,0 +1,21 @@
+title: New page
+description: "The form for a new oxwiki page - its title and its body. The page's id is made from the title."
+icon: plus
+needs:
+- model:oxplow/knowledge_record
+loaders:
+  new_page:
+    sql: |
+      SELECT '' AS title, '' AS body
+view:
+  from: new_page
+  viz: form
+  form:
+    command: oxwiki.page.write
+    then: replace
+    fields:
+    - name: title
+      label: Title
+      help: The page's name. Its id is made from it.
+    - name: body
+      label: Page

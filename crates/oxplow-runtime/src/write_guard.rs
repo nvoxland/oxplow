@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 
 /// Why an agent may not write `raw_path` itself, when it is an oxwiki page
 /// (`<project>/.oxplow/oxwiki/…`): pages are written with the
-/// `oxplow.knowledge.write_page` command — validated, linked and audited, the
-/// file following — whatever the thread. A person's hand edit still
+/// `oxwiki.page.write` command — validated, linked and audited, the file
+/// following — whatever the thread. A person's hand edit still
 /// converges through oxwiki's watch.
 pub fn oxwiki_page_reason(raw_path: Option<&str>, project_dir: Option<&Path>) -> Option<String> {
     let (raw, project_dir) = (raw_path?, project_dir?);
@@ -27,8 +27,8 @@ pub fn oxwiki_page_reason(raw_path: Option<&str>, project_dir: Option<&Path>) ->
     .then(|| {
         format!(
             "`{}` is an oxwiki page: write it with mcp__oxplow__run_command → \
-             `oxplow.knowledge.write_page {{ id, body, verified_files, removed_files }}` \
-             (it writes the file); `oxplow.knowledge.delete_page {{ id }}` deletes one.",
+             `oxwiki.page.write {{ id, body }}` (it writes the file); \
+             `oxwiki.page.delete {{ id }}` deletes one.",
             abs.display()
         )
     })
@@ -84,7 +84,7 @@ mod tests {
         let target = project.path().join(".oxplow/oxwiki/captured.md");
         std::fs::write(&target, "").unwrap();
         let reason = oxwiki_page_reason(target.to_str(), Some(project.path())).expect("refused");
-        assert!(reason.contains("oxplow.knowledge.write_page"), "{reason}");
+        assert!(reason.contains("oxwiki.page.write"), "{reason}");
         assert!(oxwiki_page_reason(Some("src/a.rs"), Some(project.path())).is_none());
     }
 

@@ -994,7 +994,7 @@ mod tests {
         // Only this test's collector: oxtask's is off.
         std::fs::write(
             fx._dir.path().join(".oxplow/personal.yaml"),
-            "disableExtensions: [oxtask]\n",
+            "disableExtensions: [oxtask, oxwiki]\n",
         )
         .unwrap();
         declare(&fx.svc).await;

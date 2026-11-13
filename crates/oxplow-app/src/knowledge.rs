@@ -122,12 +122,19 @@ impl PreparedKnowledge {
 
 /// Prepare oxwiki's store for its declaration — only under its own id,
 /// which its pages' URIs carry. This does not change the live stores.
+///
+/// Core's oxwiki stands down (`stand_down`) while the `oxwiki` extension is
+/// enabled: it fills the knowledge model as the store `oxwiki`, with its own
+/// commands and watch, and two keepers of one folder would write the same
+/// pages twice. This goes with the built-in store.
 pub fn prepare_built_ins(
     declared: &[crate::capabilities::Implementation],
     project_dir: &Path,
+    stand_down: bool,
 ) -> PreparedKnowledge {
     let providers = declared
         .iter()
+        .filter(|_| !stand_down)
         .filter(|i| i.capability == CAPABILITY && i.id == OXWIKI)
         .filter(|i| matches!(i.source, crate::capabilities::Source::BuiltIn(BUILT_IN)))
         .take(1)

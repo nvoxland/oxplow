@@ -118,6 +118,7 @@ metrics:
 extensions:
 - oxplow-bundled
 - oxtask
+- oxwiki
 - project
 # What hasn't moved into oxplow-bundled yet: kept here, off.
 disableExtensions:

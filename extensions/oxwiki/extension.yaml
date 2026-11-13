@@ -1,12 +1,87 @@
 manifest: 2
 name: oxwiki
 namespace: oxwiki
-description: oxplow's own knowledge store, as an extension. Plumbing only for now; the pages store and its commands arrive later. Off by default.
+description: oxplow's own knowledge store, as an extension. A page is a markdown file in the project's .oxplow/oxwiki folder; its commands write the files, and a collector keeps the knowledge model in step with them, a hand edit included.
 engine: ">=0.7"
 requires: [oxplow-bundled]
+permissions: [files.read, files.write, agent.write, 'commands:oxplow.extension_files.write', 'commands:oxplow.extension_files.delete']
 intent:
   purpose: >-
-    Hold oxplow's own knowledge store (oxwiki) as an ordinary extension with
-    its own store, so knowledge stops being special to core. It holds
-    nothing yet.
+    Hold oxplow's own knowledge store (oxwiki) as an ordinary extension: a
+    page is a markdown file in the project's .oxplow/oxwiki folder, named by
+    its slug. oxwiki.page.write and oxwiki.page.delete write and delete the
+    files (always in the primary checkout's folder, from any worktree),
+    refusing a page whose [[links]] don't resolve; a collector fills bundled's
+    knowledge_record model from the folder on start and on every change, so
+    a page edited by hand converges.
   origin: null
+  examples:
+    - name: writing-a-page-writes-its-file-and-names-it
+      input: { command: oxwiki.page.write }
+      expect: the page's file is written and the answer names its id and uri
+    - name: a-dangling-link-is-refused
+      input: { command: oxwiki.page.write }
+      expect: a page whose [[link]] names nothing is refused, naming the link
+    - name: a-start-states-every-page-file-as-a-row
+      input: { collector: pages, trigger: start }
+      expect: each valid page file is a row with its title from the first heading
+files:
+  - { path: .oxplow/oxwiki, access: write, watch: true }
+fills:
+  - model: oxplow/knowledge_record
+    stores: [oxwiki]
+    # `[[some-slug]]`: a bare kebab-case word is an oxwiki page.
+    id_pattern: "[a-z0-9]+(-[a-z0-9]+)*"
+    files: { folder: .oxplow/oxwiki, suffix: .md }
+collectors:
+  - id: pages
+    doc: States every page file of .oxplow/oxwiki as a row of the knowledge model, on start and whenever a file changes.
+    runtime: starlark
+    entry: collectors/pages.star
+    needs: [files.read]
+    on: [start, { files: ".oxplow/oxwiki/*.md" }]
+commands:
+  - name: page.write
+    summary: "Write a knowledge page in oxwiki (the project's .oxplow/oxwiki folder), whichever checkout you are in. `id` (kebab-case, topic-shaped, never dated) replaces or adds to that page; with only a `title` the id is made from it and a page already there is refused. Every `[[link]]` in the body must resolve: a dangling one is refused and named. The answer names the page (`id`, `page`). Undo restores the file as it was."
+    input_schema:
+      type: object
+      required: [body]
+      properties:
+        id: { type: string, pattern: "^[a-z0-9]+(-[a-z0-9]+)*$", description: "The page's id: kebab-case. Give it to replace or add to a page." }
+        title: { type: string, description: "A new page's title: its id is made from it." }
+        body: { type: string, description: "The page, in markdown." }
+      additionalProperties: false
+    entry: commands/write.star
+    needs: [files.read, links.check]
+    access: write
+    ui: { label: New Page, group: Knowledge, at: oxplow/knowledge.new, form: "oxplow:oxplow/page?page=oxwiki/new-page", open_after: "{{result.page}}" }
+    example: { title: Auth flow, body: "# Auth flow\n\nThe callback validates `next` before redirecting. See [[src/auth.rs]]." }
+  - name: page.delete
+    summary: "Delete an oxwiki page's file (`id`). Undo writes it back."
+    input_schema:
+      type: object
+      required: [id]
+      properties:
+        id: { type: string, pattern: "^[a-z0-9]+(-[a-z0-9]+)*$" }
+      additionalProperties: false
+    entry: commands/delete.star
+    needs: [files.read]
+    access: write
+    confirm: destructive
+    example: { id: auth-flow }
+  - name: page.restore
+    summary: "Put a page's file back as it was: `body` null removes it. The undo of page.write and page.delete; it checks no links."
+    input_schema:
+      type: object
+      required: [id, body]
+      properties:
+        id: { type: string, pattern: "^[a-z0-9]+(-[a-z0-9]+)*$" }
+        body: { type: [string, "null"] }
+      additionalProperties: false
+    entry: commands/restore.star
+    needs: [files.read]
+    access: write
+    example: { id: auth-flow, body: null }
+skills:
+  - { name: oxwiki, file: skills/oxwiki/SKILL.md, needs: [model:oxplow/knowledge_record] }
+  - { name: note, kind: command, file: commands/note.md, needs: [model:oxplow/knowledge_record] }

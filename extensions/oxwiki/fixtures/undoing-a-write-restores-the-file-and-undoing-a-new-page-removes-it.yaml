@@ -1,0 +1,30 @@
+# The undo of a write puts the file back as it was (or removes a new one);
+# the undo of a delete writes it back.
+requires: [oxplow-bundled]
+given:
+  - files: { ".oxplow/oxwiki/arch.md": "# Original\n" }
+when: { collector: pages, trigger: start }
+expect: { ok: true }
+steps:
+  - when: { command: oxwiki.page.write, input: { id: arch, body: "# Revised\n" } }
+    expect: { ok: true }
+  - when: { sql: "SELECT title FROM v_oxplow_knowledge_record WHERE id = 'arch'" }
+    expect: { rows: [{ title: Revised }] }
+  - when: { undo: oxwiki.page.write }
+    expect: { ok: true }
+  - when: { sql: "SELECT title FROM v_oxplow_knowledge_record WHERE id = 'arch'" }
+    expect: { rows: [{ title: Original }] }
+  - when: { command: oxwiki.page.write, input: { id: fresh-page, body: "# Fresh\n" } }
+    expect: { ok: true }
+  - when: { undo: oxwiki.page.write }
+    expect: { ok: true }
+  - when: { sql: "SELECT id FROM v_oxplow_knowledge_record ORDER BY id" }
+    expect: { rows: [{ id: arch }] }
+  - when: { command: oxwiki.page.delete, input: { id: arch }, confirmed: true }
+    expect: { ok: true }
+  - when: { sql: "SELECT count(*) AS n FROM v_oxplow_knowledge_record" }
+    expect: { rows: [{ n: 0 }] }
+  - when: { undo: oxwiki.page.delete }
+    expect: { ok: true }
+  - when: { sql: "SELECT title FROM v_oxplow_knowledge_record" }
+    expect: { rows: [{ title: Original }] }

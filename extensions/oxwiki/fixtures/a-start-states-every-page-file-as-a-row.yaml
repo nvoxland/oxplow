@@ -1,0 +1,18 @@
+# On start the collector states each page file as a row of the knowledge
+# model: its id the file's slug, its title the first heading (else the id).
+# A file whose name isn't a slug, and one that isn't markdown, is no page.
+requires: [oxplow-bundled]
+given:
+  - files:
+      ".oxplow/oxwiki/auth-flow.md": "# Auth flow\n\nThe callback validates `next`.\n"
+      ".oxplow/oxwiki/no-heading.md": "Just prose.\n"
+      ".oxplow/oxwiki/Bad Name.md": "# Nope\n"
+      ".oxplow/oxwiki/notes.txt": "# Nope\n"
+when: { collector: pages, trigger: start }
+expect: { ok: true }
+steps:
+  - when: { sql: "SELECT id, title, kind, store FROM v_oxplow_knowledge_record ORDER BY id" }
+    expect:
+      rows:
+        - { id: auth-flow, title: Auth flow, kind: note, store: oxwiki }
+        - { id: no-heading, title: no-heading, kind: note, store: oxwiki }
