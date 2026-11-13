@@ -117,6 +117,7 @@ pub mod pacing;
 pub mod page_ref_backfill;
 pub mod pages;
 pub mod param_pattern;
+pub(crate) mod pin_drift;
 #[cfg(test)]
 mod plan_tests;
 pub mod post_tool_reactors;
@@ -125,6 +126,7 @@ pub mod providers;
 mod reading_data_tests;
 #[cfg(test)]
 mod real_watch_tests;
+pub(crate) mod record_reads;
 pub mod recovery;
 pub(crate) mod ref_drift;
 pub mod ref_moves;
@@ -959,6 +961,7 @@ impl Services {
         // Where pages are kept: oxwiki when foundation declares it, a
         // provider's instance once it runs — every one in use at once.
         let knowledge = Arc::new(oxplow_domain::knowledge::KnowledgeStores::new());
+        let models = models::Models::default();
         let event_pump = Arc::new(event_pump::EventPump::new(
             db.clone(),
             (*event_log_store).clone(),
@@ -971,6 +974,11 @@ impl Services {
                     vocabulary: vocabulary.clone(),
                 }),
                 Arc::new(knowledge::KnowledgeReads),
+                Arc::new(record_reads::RecordFileReads {
+                    models: models.clone(),
+                    project_dir: layout.project_dir.clone(),
+                    vocabulary: vocabulary.clone(),
+                }),
                 Arc::new(knowledge::KnowledgeDrift {
                     vocabulary: vocabulary.clone(),
                 }),
@@ -1255,10 +1263,18 @@ impl Services {
         // A query's result says which collectors feed what it read and how
         // they stand, and the catalog generation it ran against.
         let feeds = Arc::new(collection_coverage::Feeds::default());
-        let extension_services = Arc::new(extension::extension_services::ExtensionServices::new(
-            extension_catalog.clone(),
-            layout.project_dir.clone(),
-        ));
+        let extension_services = Arc::new(
+            extension::extension_services::ExtensionServices::new(
+                extension_catalog.clone(),
+                layout.project_dir.clone(),
+            )
+            .with_links(link_check::LinkDeps {
+                project_dir: layout.project_dir.clone(),
+                vcs: vcs.clone(),
+                db: db.clone(),
+                vocabulary: vocabulary.clone(),
+            }),
+        );
         let sql = sql.with_collection(sql_gateway::Collection {
             ai: ai.clone(),
             jobs: jobs.clone(),
@@ -1577,7 +1593,6 @@ impl Services {
             vocabulary: event_log_store.vocabulary().clone(),
             layer: sql.clone(),
         });
-        let models = models::Models::default();
         event_pump.register_async(providers::model_records::consumer(
             models.clone(),
             db.clone(),
@@ -2281,6 +2296,7 @@ mod tests {
                 "oxplow.provider.sync",
                 "oxplow.provider.turn_off_here",
                 "oxplow.records.read",
+                "oxplow.refs.drift",
                 "oxplow.search.find",
                 "oxplow.skill.read",
                 // Overwrites a worktree file (P8.A9).

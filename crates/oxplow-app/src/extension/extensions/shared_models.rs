@@ -150,6 +150,20 @@ pub struct FillFile {
     stages: Vec<oxplow_domain::tasks::StageDecl>,
     #[serde(default)]
     fields: Vec<FieldFile>,
+    /// Where its store keeps its rows as files: a file at
+    /// `<folder>/<id><suffix>` is the row of that id (in the fill's first
+    /// store), so an agent's read of the file is a read of the row.
+    #[serde(default)]
+    files: Option<FillFilesFile>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FillFilesFile {
+    /// A folder relative to the project root (`.oxplow/oxwiki`).
+    folder: String,
+    /// What follows the row's id in the file's name (`.md`).
+    suffix: String,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -157,6 +171,26 @@ pub struct FillFile {
 pub struct FieldsFile {
     model: String,
     fields: Vec<FieldFile>,
+}
+
+fn files_of(raw: FillFilesFile) -> Result<crate::models::FillFiles, String> {
+    let folder = raw.folder.trim_end_matches('/').to_string();
+    if !oxplow_domain::service::valid_path(&folder) {
+        return Err(format!(
+            "`files.folder` `{}` is a folder relative to the project root, with no `..`, `.` or empty parts",
+            raw.folder
+        ));
+    }
+    if !raw.suffix.starts_with('.') || raw.suffix.len() < 2 || raw.suffix.contains('/') {
+        return Err(format!(
+            "`files.suffix` `{}` is what follows the id in a file's name, such as `.md`",
+            raw.suffix
+        ));
+    }
+    Ok(crate::models::FillFiles {
+        folder,
+        suffix: raw.suffix,
+    })
 }
 
 fn word(s: &str) -> bool {
@@ -478,6 +512,7 @@ pub fn parse(
                         provider: false,
                         id_pattern: raw.id_pattern,
                         stages: raw.stages,
+                        files: raw.files.map(files_of).transpose()?,
                     })
                 });
             match parsed {

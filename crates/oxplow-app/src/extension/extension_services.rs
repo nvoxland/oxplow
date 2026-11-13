@@ -49,6 +49,8 @@ pub struct ExtensionServices {
     owner: StateHost,
     project: PathBuf,
     stores: Mutex<HashMap<String, Opened>>,
+    /// What `links.check` looks links up in; none: the service is off.
+    links: Option<crate::link_check::LinkDeps>,
 }
 
 impl ExtensionServices {
@@ -58,7 +60,38 @@ impl ExtensionServices {
             owner: StateHost::new(catalog, project.clone()),
             project,
             stores: Mutex::default(),
+            links: None,
         }
+    }
+
+    /// Serve `links.check` over `links`.
+    pub fn with_links(mut self, links: crate::link_check::LinkDeps) -> Self {
+        self.links = Some(links);
+        self
+    }
+
+    /// `links.check { body }`: the links in `body` that don't resolve, as
+    /// `{ warnings: [{ target, reason }] }`. A script call runs on a blocking
+    /// thread of the runtime, which this waits on.
+    fn links_check(&self, args: Value) -> Result<Value, String> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Args {
+            body: String,
+        }
+        let Args { body } =
+            serde_json::from_value(args).map_err(|_| "takes { body }".to_string())?;
+        let links = self.links.as_ref().ok_or("isn't available here")?;
+        let runtime = tokio::runtime::Handle::try_current()
+            .map_err(|_| "needs the app's runtime".to_string())?;
+        let warnings = runtime.block_on(crate::link_check::check_links_at(
+            &links.db,
+            &links.vocabulary,
+            &links.project_dir,
+            &*links.vcs,
+            &body,
+        ));
+        Ok(json!({ "warnings": warnings }))
     }
 
     /// Answer a read `call` (`store.sql`, `files.read`, `files.list`) for the
@@ -73,6 +106,7 @@ impl ExtensionServices {
         let answer = match call {
             "store.sql" => self.store_read(&name, &storage, args),
             "files.read" | "files.list" => files(&self.project, &storage.folders, call, args),
+            "links.check" => self.links_check(args),
             _ => Err("isn't a read".into()),
         }
         .map_err(|e| format!("`{call}`: {e}"))?;
@@ -441,6 +475,48 @@ mod tests {
         assert!(check_path(&[], "a", false)
             .unwrap_err()
             .contains("none declared"));
+    }
+
+    /// A script checks the links in a body through `links.check`: the ones
+    /// that don't resolve come back with why, the ones that do don't.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_script_checks_a_bodys_links() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::test_fixtures::init_git_repo(dir.path());
+        let write = |rel: &str, body: &str| {
+            let p = dir.path().join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, body).unwrap();
+        };
+        write(
+            ".oxplow/extensions/acme/extension.yaml",
+            "manifest: 2\nname: acme\nintent:\n  purpose: p\ncommands:\n  - name: note.check\n    summary: The links of a body that do not resolve.\n    entry: commands/check.star\n    needs: [links.check]\n    access: read\n    input_schema: { type: object, required: [body], additionalProperties: false, properties: { body: { type: string } } }\n",
+        );
+        write(
+            ".oxplow/extensions/acme/commands/check.star",
+            "def transform(x):\n    return {\"commands\": [], \"result\": scope(\"links.check\", {\"body\": x[\"input\"][\"body\"]})}\n",
+        );
+        write("src/there.rs", "fn main() {}\n");
+        let svc = crate::Services::in_memory(dir.path()).await.unwrap();
+        let problems = crate::test_fixtures::activate_with_problems(&svc).await;
+        assert!(problems.is_empty(), "{problems:?}");
+        let out = svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                "acme.note.check",
+                json!({ "body": "see [[src/there.rs]], [[src/gone.rs]] and [[#13]]" }),
+                false,
+            )
+            .await
+            .unwrap();
+        let targets: Vec<&str> = out.result["result"]["warnings"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{}", out.result))
+            .iter()
+            .map(|w| w["target"].as_str().unwrap())
+            .collect();
+        assert_eq!(targets, ["src/gone.rs", "#13"], "{}", out.result);
     }
 
     #[test]

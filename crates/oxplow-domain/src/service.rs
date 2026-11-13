@@ -38,6 +38,7 @@ pub const CALLABLE: &[&str] = &[
     "ai.discover",
     "store.sql",
     "files.read",
+    "links.check",
 ];
 
 /// The service a `scope()` call of `call` needs declared: `files.list`
@@ -97,6 +98,15 @@ pub const SERVICES: &[ServiceSpec] = &[
                   `scope(\"files.read\", {path})` returns `{body}`, \
                   `scope(\"files.list\", {path, glob?})` returns `{files: [{path, size, modified_at}]}`. \
                   Writes are the commands `oxplow.extension_files.write` and `.delete`.",
+        builtins: &[],
+        modes: ALL,
+    },
+    ServiceSpec {
+        scope: "links.check",
+        title: "Check a body's links",
+        summary: "Check the `[[…]]` links in a body the way oxplow checks the ones it writes: \
+                  `scope(\"links.check\", {body})` returns `{warnings: [{target, reason}]}`, \
+                  empty when every link resolves. A store's write command refuses on a warning.",
         builtins: &[],
         modes: ALL,
     },

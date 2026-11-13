@@ -431,7 +431,7 @@ impl<'a> Calls<'a> {
             "sql.read" => self.sql_read(args),
             "extension_config.read" => self.configuration_read(),
             "state.read" => self.state_read(state_input.expect("parsed state request")),
-            "store.sql" | "files.read" | "files.list" => self
+            "store.sql" | "files.read" | "files.list" | "links.check" => self
                 .services
                 .as_mut()
                 .ok_or_else(|| format!("`{id}` isn't available where this script runs"))?(

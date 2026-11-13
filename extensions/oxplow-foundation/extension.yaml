@@ -1658,6 +1658,12 @@ commands:
     op: read
     tool: read
     example: {"uri": "oxplow:oxplow/file?path=src/auth.rs&rev=git:HEAD#lines=10-40"}
+  - name: refs.drift
+    summary: "What a file a model row cites drifted. The unified diff between the snapshot the ref was pinned to and the file's CURRENT on-disk content — so you can read just what drifted instead of re-opening the whole file. `uri` is the row (`oxplow:oxplow/knowledge?id=architecture&store=oxwiki`), `path` a file it cites. Find the drifted refs with `oxplow.sql.query` over the row's model views. Returns `{ record, path, pinned_snapshot_id, status, unified_diff, truncated }`; `status` is one of drifted | unchanged | not_a_ref | no_pin | binary | no_contents (the pin was taken by 'Track changes only', which keeps no text)."
+    scope: records.read
+    op: drift
+    tool: ref_drift
+    example: {"uri": "oxplow:oxplow/knowledge?id=architecture&store=oxwiki", "path": "src/app/main.py"}
   # search.read
   - name: search.find
     summary: "Site-wide BM25 search across every searchable resource (`v_resource.searchable`: tasks, knowledge pages, comments, an extension's) and file contents. Tokens match as stemmed prefixes. `stream_id` scopes file/stream-bound hits to one worktree (knowledge pages etc. always included); omit it to search everything. `resources` optionally restricts to some of those (`oxplow/knowledge`), or `oxplow/file`. Each hit names the `uri` it found and its `resource` (read it with `oxplow_read`, show it with `oxplow_navigate`); best first."

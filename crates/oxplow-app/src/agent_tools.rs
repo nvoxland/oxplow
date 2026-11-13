@@ -240,6 +240,7 @@ mod tests {
                 "oxplow_preview_collector",
                 "oxplow_query_sql",
                 "oxplow_read",
+                "oxplow_ref_drift",
                 "oxplow_request_summary",
                 "oxplow_run_page",
                 "oxplow_run_page_action",

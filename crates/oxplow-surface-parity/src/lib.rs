@@ -331,6 +331,7 @@ pub const MANIFEST: &[Capability] = &[
     // ---- agent-only (orchestration / agent affordances) ----
     // One reader for anything a ref names.
     agent("oxplow_read"),
+    agent("oxplow_ref_drift"),
     agent("oxplow_knowledge_drift"),
     // ---- collection (observations) ----
     agent("oxplow_code_definition"),

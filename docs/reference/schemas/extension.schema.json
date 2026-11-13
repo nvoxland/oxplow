@@ -2713,6 +2713,17 @@
           "items": {
             "$ref": "#/definitions/FieldFile"
           }
+        },
+        "files": {
+          "description": "Where its store keeps its rows as files: a file at\n`<folder>/<id><suffix>` is the row of that id (in the fill's first\nstore), so an agent's read of the file is a read of the row.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FillFilesFile"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false,
@@ -2787,6 +2798,24 @@
         "name",
         "title",
         "kind"
+      ]
+    },
+    "FillFilesFile": {
+      "type": "object",
+      "properties": {
+        "folder": {
+          "description": "A folder relative to the project root (`.oxplow/oxwiki`).",
+          "type": "string"
+        },
+        "suffix": {
+          "description": "What follows the row's id in the file's name (`.md`).",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "folder",
+        "suffix"
       ]
     },
     "FieldsFile": {

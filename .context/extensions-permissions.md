@@ -591,6 +591,14 @@ own, core names `.oxplow/oxwiki` itself in the same list.
 The file is removed with the extension's data (`extension_deploy::remove`),
 never on a disable.
 
+**The link check.** `links.check` (`needs: [links.check]`; it needs no `permissions:` entry, as
+`store.sql` needs none): `scope("links.check", {body})` returns `{warnings: [{target,
+reason}]}` for the `[[…]]` links in `body` that are not a recognized
+reference or name something that isn't there (a file, a commit, a row a
+resource's dataset does not hold), checked as core checks the links it
+writes. A store's write command calls it and refuses when it warns. It
+reads the project's database and files; it spends nothing.
+
 **The scoped file service.** `files:` in the manifest names folders the
 extension may use, relative to the project root, each `access: read | write`:
 

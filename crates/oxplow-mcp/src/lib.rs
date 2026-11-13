@@ -1863,6 +1863,33 @@ mod tests {
         assert!(text_payload(r2).contains("not_a_ref"));
     }
 
+    /// `oxplow_ref_drift` reads any model row's file edge, not a knowledge
+    /// page's alone.
+    #[tokio::test]
+    async fn ref_drift_reads_any_rows_file_edge() {
+        let (_proj, svc, server) = boot().await;
+        let row = "oxplow:oxplow/book?id=dune&store=shelves";
+        svc.page_ref_store
+            .upsert_edge(oxplow_db::PageRefEdge::new(
+                row,
+                oxplow_domain::uri::build::file_uri("crates/foo.rs"),
+                "file_pin",
+            ))
+            .await
+            .unwrap();
+        let r = call(
+            &server,
+            &rmcp::model::Extensions::new(),
+            "oxplow_ref_drift",
+            serde_json::json!({ "uri": row, "path": "crates/foo.rs" }),
+        )
+        .await
+        .unwrap();
+        let body = text_payload(r);
+        assert!(body.contains("no_pin"), "expected no_pin: {body}");
+        assert!(body.contains("\"record\""), "{body}");
+    }
+
     // ---- Pure helpers: parse_status / parse_priority ----
 
     /// Point the in-memory services' `role` at a mock provider at `base`.

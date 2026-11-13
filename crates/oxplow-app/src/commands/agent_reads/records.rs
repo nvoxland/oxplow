@@ -78,6 +78,12 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                         .await
                         .map_err(failed)?;
                 }
+                // Any row of a shared model is read the same way.
+                if matches!(invocation.actor(), Actor::Agent { .. }) {
+                    crate::record_reads::log_read(&svc, invocation.actor(), &out.uri)
+                        .await
+                        .map_err(failed)?;
+                }
                 Ok(HandlerOutput {
                     result: serde_json::to_value(out).map_err(failed)?,
                     ..HandlerOutput::default()

@@ -335,6 +335,13 @@ pub const SCOPES: &[Scope] = &[
         summary: "Write the project's knowledge: pages, notes, comments and links.",
     },
     Scope {
+        id: "links.check",
+        access: Access::Read,
+        host: Host::Daemon,
+        spends: false,
+        summary: "Check the `[[…]]` links in a body against the project: which are not a recognized reference, or name something that isn't there.",
+    },
+    Scope {
         id: "lsp.control",
         access: Access::Write,
         host: Host::Daemon,

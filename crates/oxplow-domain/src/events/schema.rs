@@ -40,6 +40,7 @@ pub const CORE_NAMESPACES: &[&str] = &[
     "vcs",
     "task",
     "knowledge",
+    "record",
     "handoff",
     "test",
     "code",
@@ -200,6 +201,7 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<KnowledgePageRead>()
             .expect("core type registers");
+        r.register::<RecordRead>().expect("core type registers");
         r.register::<KnowledgePageDrifted>()
             .expect("core type registers");
         r.register::<RefDrifted>().expect("core type registers");
@@ -1950,6 +1952,26 @@ pub struct KnowledgePageReadV1 {
     pub via: ReadVia,
 }
 
+/// `record.read@1`: an agent read a row of a shared model — through
+/// `oxplow_read` (`via: tool`), or its own read of the file the row's store
+/// keeps it in (`via: file`, caused by the tool call; the store's `files`
+/// declaration in its `fills`). Whatever keeps reads of a model's rows follows
+/// this event; a person's opens are their page visits.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RecordReadV1 {
+    /// The row (`oxplow:oxplow/knowledge?id=<id>&store=<store>`).
+    pub record: String,
+    pub via: ReadVia,
+}
+
+pub struct RecordRead;
+impl EventType for RecordRead {
+    const TYPE: &'static str = "record.read";
+    const V: u32 = 1;
+    type Payload = RecordReadV1;
+}
+
 pub struct KnowledgePageRead;
 impl EventType for KnowledgePageRead {
     const TYPE: &'static str = "knowledge.page.read";
@@ -2297,6 +2319,7 @@ mod tests {
                 ("knowledge.page.read", 1),
                 ("knowledge.page.recorded", 3),
                 ("knowledge.page.written", 3),
+                ("record.read", 1),
                 ("snapshot.ref_drifted", 1),
                 ("snapshot.taken", 3),
                 ("stream.archived", 1),

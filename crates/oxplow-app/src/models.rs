@@ -53,6 +53,19 @@ pub struct FillSpec {
     /// instance's declared stages): each stage's id, title and bucket.
     #[serde(default)]
     pub stages: Vec<oxplow_domain::tasks::StageDecl>,
+    /// The files its store keeps its rows in (`fills.files`): an agent's read
+    /// of one is a read of the row.
+    #[serde(default)]
+    pub files: Option<FillFiles>,
+}
+
+/// Where a store keeps its rows as files: a file at
+/// `<folder>/<id><suffix>` (folder relative to the project root) is the row
+/// of that id in the fill's first store.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FillFiles {
+    pub folder: String,
+    pub suffix: String,
 }
 
 /// Fields an extension declares on a model it doesn't fill.
@@ -195,6 +208,7 @@ impl ModelRegistry {
                 provider: true,
                 id_pattern: row.id_pattern.clone(),
                 stages: serde_json::from_value(row.stages.clone()).unwrap_or_default(),
+                files: None,
             });
         }
         self
@@ -202,6 +216,36 @@ impl ModelRegistry {
 }
 
 impl ModelRegistry {
+    /// The row whose file `rel` (a path from the project root) is, as a
+    /// fill's `files` says: `(model id, row uri)`.
+    pub fn row_of_file(&self, rel: &str) -> Option<(String, String)> {
+        for fill in &self.fills {
+            let Some(files) = &fill.files else { continue };
+            let Some(rest) = rel
+                .strip_prefix(files.folder.trim_end_matches('/'))
+                .and_then(|r| r.strip_prefix('/'))
+            else {
+                continue;
+            };
+            let Some(id) = rest.strip_suffix(files.suffix.as_str()) else {
+                continue;
+            };
+            if id.is_empty() || id.contains('/') {
+                continue;
+            }
+            let (Some(store), Some(spec)) = (fill.stores.first(), self.models.get(&fill.model))
+            else {
+                continue;
+            };
+            let uri = oxplow_domain::uri::build::of(
+                &spec.decl.resource,
+                &[(&spec.decl.key, id), (&spec.decl.store_param, store)],
+            );
+            return Some((fill.model.clone(), uri));
+        }
+        None
+    }
+
     /// Each store of a task model (one whose resource is `oxplow/task`)
     /// that declares how its ids look: `(store, pattern)`, in fill order.
     /// What makes a loose `tsk42` in text that store's item.
@@ -718,6 +762,7 @@ mod tests {
             provider: false,
             id_pattern: None,
             stages: vec![],
+            files: None,
         });
         r.fields.push(FieldsSpec {
             extension: "shelf-score".into(),
@@ -771,6 +816,38 @@ mod tests {
 
     /// A task model's stores that declare an id pattern recognize their
     /// ids; another model's fills, and a fill with none, don't.
+    /// A fill's `files` names the file a store keeps each row in: a file at
+    /// `<folder>/<id><suffix>` is that row of the fill's first store, and
+    /// nothing else is.
+    #[test]
+    fn a_fills_files_name_the_row_each_file_is() {
+        let mut r = registry();
+        r.fills[0].files = Some(FillFiles {
+            folder: ".oxplow/shelves".into(),
+            suffix: ".md".into(),
+        });
+        let store = r.fills[0].stores[0].clone();
+        let (model, row) = r
+            .row_of_file(".oxplow/shelves/dune.md")
+            .expect("a row's file");
+        assert_eq!(model, r.fills[0].model);
+        assert!(
+            row.contains("id=dune") && row.contains(&format!("={store}")),
+            "{row}"
+        );
+        for not in [
+            ".oxplow/shelves/dune.txt",
+            ".oxplow/shelves/.md",
+            ".oxplow/shelves/sub/dune.md",
+            ".oxplow/shelvesx/dune.md",
+            "dune.md",
+        ] {
+            assert_eq!(r.row_of_file(not), None, "{not}");
+        }
+        r.fills[0].files = None;
+        assert_eq!(r.row_of_file(".oxplow/shelves/dune.md"), None);
+    }
+
     #[test]
     fn a_task_models_stores_name_their_id_patterns() {
         let mut r = registry();
@@ -787,6 +864,7 @@ mod tests {
             provider: false,
             id_pattern: Some("tsk[0-9]+".into()),
             stages: vec![],
+            files: None,
         });
         r.fills.push(FillSpec {
             extension: "quiet".into(),
@@ -796,6 +874,7 @@ mod tests {
             provider: false,
             id_pattern: None,
             stages: vec![],
+            files: None,
         });
         assert_eq!(
             r.task_ids(),

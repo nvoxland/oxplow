@@ -222,6 +222,13 @@ fills:
   text, what the desktop links loose ids by once the capability rows
   no longer say.
 
+- **Files** (built): a fill's `files: { folder, suffix }` says the store
+  keeps each row as a file, `<folder>/<id><suffix>` (folder relative to the
+  project root; the row is the fill's first store's, with that id). An
+  agent's own read of such a file is a read of the row (`record.read`,
+  "Reads of rows"). The folder is a watched folder when the extension
+  declares it so in `files:` (`extensions-permissions.md` "Declared
+  folders").
 - A store id is owned by one extension. Two extensions naming the same
   store id is a load error. A provider instance's store id is its
   instance id.
@@ -327,6 +334,33 @@ undone. To build:
 - **`x["actor"]`** for `transform` and `finish`: who runs it (`{ kind:
   agent | person | system, thread?: <uri>, uri: <uri> }`), so a store
   records its author reliably.
+
+## Reads of rows, links and drift (core, generic)
+
+What a store of any model gets from core, with no knowledge capability:
+
+- **`record.read { record, via }`** (core event, namespace `record`): an
+  agent's read of a row. `oxplow_read` of any URI of a model's resource
+  logs it with `via: tool` (as the actor, anchored to its open turn); an
+  agent's own read of the file a fill's `files` names logs it with `via:
+  file`, caused by the tool call (`record_reads::RecordFileReads`, an
+  `agent.tool.finished` consumer: relative paths are the worktree the agent
+  ran in, one outside the project or of a row that isn't there is nothing).
+  Whatever keeps reads of a model's rows follows this event.
+- **`links.check { body }`** (a script service, `needs: [links.check]`): the
+  `[[…]]` links in `body` that don't resolve, `{ warnings: [{ target,
+  reason }] }`, checked as core checks the links it writes. A store's write
+  command calls it and refuses on a warning.
+- **`oxplow.refs.drift { uri, path }`** and the agent tool
+  `oxplow_ref_drift`: the unified diff between the snapshot a row's pinned
+  file ref (`file_pin` edge) was taken at and the file now, with a status
+  (`drifted | unchanged | not_a_ref | no_pin | binary | no_contents`). It
+  works for any model row; `oxplow_knowledge_drift` is the same for a
+  knowledge page until that capability goes.
+- **Pins**: new file refs take the primary stream's latest snapshot
+  (`model_store::pin_tx`), and a directory ref covers the files under it
+  (`path_under_any_dir`); both live in the model store, shared by every
+  model's pinned refs.
 
 ## A store's folder and worktree streams (decided 2026-11-12)
 
