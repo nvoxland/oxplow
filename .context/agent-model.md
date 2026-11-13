@@ -258,7 +258,7 @@ Every tool foundation declares is named below
 | Show the person | `oxplow_navigate` (takes them to any URI's page, switching stream when needed; by default the shown tab goes there, pushed; `replace` rewrites its entry, `new_tab` opens another) |
 | Common questions, typed | foundation pages with `tool:`: `oxplow_thread_tasks`, `oxtask_next_task` (oxtask's page), `oxplow_catalog`, `oxplow_request_summary { request }` (a request at a glance: its facts, tasks, files, tests and coverage, metric changes and commits; foundation's `request-summary`) (each runs `oxplow.page.run` on its page, its params the tool's input: `agent_tools::ToolTarget::Page`). Every other page is `oxplow_find_page` → `oxplow_run_page` (`file-history`, `recent-commits`, `snapshots`, `thread-sessions`, `session-transcript`) |
 | What the person has | `oxplow_list_tabs` (the tabs each of their windows shows, per thread, stream or project: selected, on screen, stale), `oxplow_get_open_page` (the page open in a thread in the window they were in last, the others' beside it, or one listed tab: `page` is its identity, `view` its `#`; the page's run as a tree with their params, and the focused node), `oxplow_list_comments` (their anchored comments, hydrated) |
-| Pinned refs | `oxplow_ref_drift { uri, path }` (one pinned file ref of any model row: its diff against its pin); `oxplow_knowledge_drift` is the knowledge page's own form |
+| Pinned refs | `oxplow_ref_drift { uri, path }` (one pinned file ref of any model row: its diff against its pin) |
 | Extension authoring | `oxplow_validate_extension`, `oxplow_preview_collector`; its tests run in a process of their own, `$OXPLOW_BIN extension test <name>` (`OXPLOW_BIN`: the daemon's binary, set for every agent session) |
 | oxplow's guidance | `oxplow_get_skill { name, reference? }` |
 
@@ -358,7 +358,7 @@ what's configured, installed and running.
 **Knowledge and links.** Knowledge reads are `oxplow_query_sql` over
 `v_oxplow_knowledge_page` / `v_oxplow_knowledge_ref` (stale pins) and `v_page_ref` (the
 backlinks graph, both directions), plus `oxplow_search` with `resources: ["oxplow/knowledge"]`;
-`oxplow_knowledge_drift({ store?, id, path })` returns one stale ref's unified diff
+`oxplow_ref_drift({ uri, path })` returns one stale ref's unified diff
 (`status` drifted, unchanged, not_a_ref, no_pin, binary or no_contents).
 Writes are a store's own commands ([knowledge.md](./knowledge.md): oxwiki's
 are `oxwiki.page.write` / `delete`). A store's write checks the `[[…]]` links in

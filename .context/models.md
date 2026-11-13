@@ -327,8 +327,7 @@ What a store of any model gets from core:
   `oxplow_ref_drift`: the unified diff between the snapshot a row's pinned
   file ref (`file_pin` edge) was taken at and the file now, with a status
   (`drifted | unchanged | not_a_ref | no_pin | binary | no_contents`). It
-  works for any model row; `oxplow_knowledge_drift` is the same for a
-  knowledge page until that capability goes.
+  works for any model row, a knowledge page included.
 - **Pins**: new file refs take the primary stream's latest snapshot
   (`model_store::pin_tx`), and a directory ref covers the files under it
   (`path_under_any_dir`); both live in the model store, shared by every
