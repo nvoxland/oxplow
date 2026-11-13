@@ -9,13 +9,13 @@ import { knowledgeUri } from "../../uri/uri.js";
 
 // The title cache is the module's, shared with every other test: stand in
 // for its lookup.
-const realCache = { ...(await import("../../knowledgeTitleCache.js")) };
+const realCache = { ...(await import("../../refTitleCache.js")) };
 afterAll(() => {
-  mock.module("../../knowledgeTitleCache.js", () => realCache);
+  mock.module("../../refTitleCache.js", () => realCache);
 });
-mock.module("../../knowledgeTitleCache.js", () => ({
+mock.module("../../refTitleCache.js", () => ({
   ...realCache,
-  useKnowledgeRef: (uri: string | null | undefined) =>
+  useRefTitle: (uri: string | null | undefined) =>
     uri === knowledgeUri("oxwiki", "local-snapshots") ? { title: "Local Snapshots", status: "found" } : { title: null, status: "loading" },
 }));
 const { RichTextField } = await import("./RichTextField.js");

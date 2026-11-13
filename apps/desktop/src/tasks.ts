@@ -9,7 +9,6 @@
  */
 import { querySql, type SqlCell } from "./api.js";
 import { NO_READS } from "./viz/rerun.js";
-import { taskUri } from "./uri/uri.js";
 import type { Bucket, FieldDecl, Reads, SqlQueryResult, StageDecl } from "./tauri-bridge/generated/bindings.js";
 
 /** One of core's six buckets, each of a list's stages in one: what oxplow
@@ -108,16 +107,15 @@ export async function readTasksByRef(refs: string[]): Promise<{ items: Task[]; r
 
 export type { FieldDecl };
 
-/** What the screens draw for one store: its stages, its own fields and how
- *  its ids look. It says nothing of what the store can do: the UI offers
+/** What the screens draw for one store: its stages and its own fields (how
+ *  its ids look in text is the shared record stores', `recordStores.ts`).
+ *  It says nothing of what the store can do: the UI offers
  *  what the store's action points offer. */
 export interface TaskTrackerProfile {
   provider: string;
   fields: FieldDecl[];
   /** Its stages, in its order. */
   stages: StageDecl[];
-  /** How its own ids look in text; null when it doesn't say (none). */
-  idPattern: string | null;
 }
 
 /** Each store's profile, by store id (a task's `provider`). */
@@ -137,8 +135,6 @@ export function taskTrackerProfilesOf(stages: SqlQueryResult, fields: SqlQueryRe
   if (stores) for (const row of stores.rows) ids.add(String(at(stores, row, "store")));
   const profiles: TaskTrackerProfiles = {};
   for (const provider of ids) {
-    const storeRow = stores?.rows.find((r) => String(at(stores, r, "store")) === provider);
-    const pattern = stores && storeRow ? at(stores, storeRow, "id_pattern") : null;
     profiles[provider] = {
       provider,
       fields: fields.rows
@@ -160,7 +156,6 @@ export function taskTrackerProfilesOf(stages: SqlQueryResult, fields: SqlQueryRe
           title: String(at(stages, row, "title")),
           bucket: String(at(stages, row, "bucket")) as Bucket,
         })),
-      idPattern: pattern ? String(pattern) : null,
     };
   }
   return profiles;
@@ -180,23 +175,6 @@ function jsonOf<T>(raw: SqlCell | null, fallback: T): T {
   }
 }
 
-/** The task ref a loose id in text names (`tsk42` with oxtask →
- *  `task:oxplow:tsk42`): the first store whose id pattern matches it; null
- *  when none does (a store with no pattern says nothing about its ids). */
-export function taskRefOfMention(profiles: TaskTrackerProfiles, id: string): string | null {
-  for (const profile of Object.values(profiles)) {
-    if (!profile.idPattern) continue;
-    let re: RegExp;
-    try {
-      re = new RegExp(`^(?:${profile.idPattern})$`);
-    } catch {
-      continue;
-    }
-    if (re.test(id)) return taskUri(profile.provider, id);
-  }
-  return null;
-}
-
 /** The task model's profiles, and what was read. */
 export async function readTaskTrackerProfiles(): Promise<{ profiles: TaskTrackerProfiles; reads: Reads }> {
   const stages = await querySql(
@@ -209,7 +187,7 @@ export async function readTaskTrackerProfiles(): Promise<{ profiles: TaskTracker
     [],
     500,
   );
-  const stores = await querySql("SELECT store, id_pattern FROM v_model_store WHERE model = 'oxplow/task_record'", [], 50);
+  const stores = await querySql("SELECT store FROM v_model_store WHERE model = 'oxplow/task_record'", [], 50);
   return {
     profiles: taskTrackerProfilesOf(stages, fields, stores),
     reads: {

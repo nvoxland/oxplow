@@ -144,6 +144,7 @@ import { usePersonCommands } from "./personCommandsStore.js";
 import { personCommands, setPersonCommandsOpener } from "./personCommands.js";
 import { getUiClientId, logUi, setUiLogContext } from "./logger.js";
 import { startKnowledgeStores } from "./knowledgeStores.js";
+import { startRecordStores } from "./recordStoresLoader.js";
 
 /// Prompt for a folder and open it as an **existing** project.
 /// `newWindow=false` replaces the current window (this process exits
@@ -314,10 +315,11 @@ export function App() {
     return set;
   }, []);
   const [error, setError] = useState<string | null>(null);
-  // Markdown reads `[[<store>:<id>]]` for the enabled knowledge stores:
+  // Markdown reads `[[<store>:<id>]]` for the stores of every shared model:
   // know them from the start.
   useEffect(() => {
     startKnowledgeStores();
+    startRecordStores();
   }, []);
   // The error banner auto-dismisses; it's transient feedback (e.g. a
   // mistargeted file link), not a persistent state the user must clear.

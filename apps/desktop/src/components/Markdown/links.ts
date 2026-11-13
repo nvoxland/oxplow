@@ -10,7 +10,7 @@ import { classifyExternalUrl } from "../../external-url-allowlist.js";
 import type { MenuItem } from "../../menu.js";
 import type { NavigateOptions } from "../../tabs/PageNavigationContext.js";
 import { externalUrlRef } from "../../tabs/pageRefs.js";
-import { taskLabel } from "../../taskRef.js";
+import { recordLabel, recordOf } from "../../recordStores.js";
 import { linkRef, parseMarkdownLink } from "./markdownLinks.js";
 
 /** How a link opens a page: the page navigation's `openRef`, or none
@@ -81,11 +81,8 @@ export function linkMenu(href: string, open: OpenRef, base: string | null = null
     case "commit":
       items.push(copy("copy-sha", "Copy SHA", parsed.sha));
       break;
-    case "task":
-      items.push(copy("copy-id", "Copy id", taskLabel(parsed.ref)));
-      break;
-    case "knowledge":
     case "ref":
+      if (recordOf(parsed.ref)) items.push(copy("copy-id", "Copy id", recordLabel(parsed.ref)));
       if (target) items.push(copy("copy-link", "Copy link", target));
       break;
   }

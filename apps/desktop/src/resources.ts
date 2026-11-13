@@ -18,9 +18,8 @@ import { iconFor } from "./icons.js";
 import { querySql } from "./api.js";
 import { recordOpError } from "./opErrors.js";
 import { NO_READS, useRerunOnChange } from "./viz/rerun.js";
-import { typeOf } from "./uri/uri.js";
 import type { Reads } from "./tauri-bridge/generated/bindings.js";
-import { currentResources, extensionTitleQuery, resourcesFromResult, setResources, subscribe, type Resource } from "./resourceStore.js";
+import { currentResources, resourcesFromResult, setResources, subscribe, type Resource } from "./resourceStore.js";
 
 
 
@@ -69,44 +68,4 @@ export function useResourcesLoader(): void {
   }, []);
   useEffect(load, [load]);
   useRerunOnChange(reads, load);
-}
-
-/** The title of an extension's ref from its kind's `resolve` dataset
- *  (`SELECT title … WHERE ref = ?`); null while loading, or when the
- *  dataset has no row for it. */
-/** The same as `useExtensionRefTitle`, awaited (a component frame's
- *  markdown, drawn once its titles are known). */
-export async function loadExtensionRefTitle(ref: string): Promise<string | null> {
-  const query = extensionTitleQuery(ref, currentResources().get(typeOf(ref) ?? "") ?? undefined);
-  if (!query) return null;
-  try {
-    const cell = (await querySql(query.sql, query.params, 1)).rows[0]?.[0];
-    return cell == null ? null : String(cell);
-  } catch {
-    return null;
-  }
-}
-
-export function useExtensionRefTitle(ref: string | null): string | null {
-  const resources = useResources();
-  const resource = ref ? resources.get(typeOf(ref) ?? "") : undefined;
-  const [title, setTitle] = useState<string | null>(null);
-  const [reads, setReads] = useState<Reads>(NO_READS);
-  const load = useCallback(() => {
-    const query = ref ? extensionTitleQuery(ref, resource) : null;
-    if (!query) {
-      setTitle(null);
-      return;
-    }
-    void querySql(query.sql, query.params, 1)
-      .then((res) => {
-        const cell = res.rows[0]?.[0];
-        setTitle(cell == null ? null : String(cell));
-        setReads(res.reads);
-      })
-      .catch(() => setTitle(null));
-  }, [ref, resource]);
-  useEffect(load, [load]);
-  useRerunOnChange(reads, load);
-  return title;
 }

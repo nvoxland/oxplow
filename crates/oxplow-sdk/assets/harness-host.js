@@ -820,17 +820,9 @@
     const u = parseUri(text);
     return u ? `${u.resource.namespace}/${u.resource.name}` : null;
   }
-  function taskOf(text) {
-    const u = parseUri(text);
-    if (!u || typeOf(text) !== "oxplow/task")
-      return null;
-    const { provider, id } = u.params;
-    return provider && id ? { provider, id } : null;
-  }
   function linkTarget(uri) {
     return uri.replace(/\(/g, "%28").replace(/\)/g, "%29");
   }
-  var knowledgeUri = (store, id) => resourceUri("oxplow/knowledge", { store, id });
   var commitUri = (sha) => resourceUri("oxplow/commit", { sha });
   var filesystemParam = (filesystem) => filesystem === LOCAL_FS ? null : filesystem;
   var fileUri = (path, rev = null, filesystem = null) => resourceUri("oxplow/file", { path, rev, filesystem: filesystemParam(filesystem) });
@@ -11317,34 +11309,48 @@
     const bare = path.replace(/\/+$/, "");
     return { id: dirUri(bare) };
   }
-  function knowledgePageRef(store, id) {
-    return { id: knowledgeUri(store, id) };
-  }
   function gitCommitRef(sha) {
     return { id: commitUri(sha) };
   }
 
-  // src/knowledgeStoreIds.ts
+  // src/recordStores.ts
   var stores = [];
-  function enabledKnowledgeStoreIds() {
-    return stores.map((s) => s.store);
+  var listeners = new Set;
+  function recordUri(store, id) {
+    return resourceUri(store.resource, { [store.storeParam]: store.store, [store.key]: id });
   }
-  function knowledgeStoreOfBareId(id) {
+  function recordOfStoreId(store, id) {
+    const s = stores.find((x) => x.store === store);
+    return s && id ? recordUri(s, id) : null;
+  }
+  function recordOfBareId(id, loose) {
     for (const s of stores) {
-      if (!s.idPattern)
+      if (!s.idPattern || s.loose !== loose)
         continue;
       try {
         if (new RegExp(`^(?:${s.idPattern})$`).test(id))
-          return s.store;
+          return recordUri(s, id);
       } catch {}
     }
     return null;
   }
-
-  // src/taskRef.ts
-  function taskId(ref) {
-    const item = taskOf(ref);
-    return item === null ? null : `${item.provider}:${item.id}`;
+  function recordOfAnyBareId(id) {
+    return recordOfBareId(id, true) ?? recordOfBareId(id, false);
+  }
+  function recordOf(uri) {
+    const resource = typeOf(uri);
+    if (!resource)
+      return null;
+    const params = parseUri(uri)?.params ?? {};
+    for (const s of stores) {
+      if (s.resource !== resource)
+        continue;
+      const store = params[s.storeParam];
+      const id = params[s.key];
+      if (store === s.store && id)
+        return { store, id, resource };
+    }
+    return null;
   }
 
   // src/pages/renderers.ts
@@ -11352,7 +11358,7 @@
 
   // src/resourceStore.ts
   var current = new Map;
-  var listeners = new Set;
+  var listeners2 = new Set;
   function resourceInfo(resource) {
     return current.get(resource) ?? null;
   }
@@ -11435,13 +11441,9 @@
         }
         case "oxplow/commit":
           return p.sha ? { kind: "commit", sha: p.sha } : { kind: "empty" };
-        case "oxplow/knowledge":
-          return p.store && p.id ? { kind: "knowledge", store: p.store, id: p.id } : { kind: "empty" };
-        case "oxplow/task":
-          return taskId(rawHref) === null ? { kind: "empty" } : { kind: "task", ref: identityOf(rawHref) ?? rawHref };
         default: {
           const resource = typeOf(rawHref);
-          if (resource && resourceInfo(resource))
+          if (recordOf(rawHref) || resource && resourceInfo(resource))
             return { kind: "ref", ref: rawHref };
         }
       }
@@ -11450,7 +11452,7 @@
       const target = decodeURIComponent(rawHref.slice(INVALID_LINK.length));
       return {
         kind: "broken",
-        reason: `Broken link: “${target}” is not a recognized reference (use a task's id, [[some-id]] for a knowledge store's page, [[store:id]] for another store's)`
+        reason: `Broken link: “${target}” is not a recognized reference (use a record's id, [[some-id]], or [[store:id]])`
       };
     }
     const relativeTo = base !== null && typeOf(base) === "oxplow/file" ? parseUri(base) : null;
@@ -11473,8 +11475,8 @@
     target = target.split("#")[0]?.split("?")[0] ?? "";
     if (target.endsWith(".md"))
       target = target.slice(0, -3);
-    const store = target ? knowledgeStoreOfBareId(target) : null;
-    return store ? { kind: "knowledge", store, id: target } : { kind: "empty" };
+    const record = target ? recordOfAnyBareId(target) : null;
+    return record ? { kind: "ref", ref: record } : { kind: "empty" };
   }
   function extensionOf(path) {
     const name = path.split("/").pop() ?? "";
@@ -11539,15 +11541,15 @@
     const ext = path.slice(dot + 1).toLowerCase();
     return ext.length > 0 && ext !== "md" && /^[a-z0-9]+$/i.test(ext);
   }
-  function preprocessWikilinks(body, mentionRef = () => null) {
+  function preprocessWikilinks(body) {
     const segments = body.split(/(```[\s\S]*?```)/g);
     return segments.map((seg, idx) => {
       if (idx % 2 === 1)
         return seg;
-      return rewriteWikilinksOutsideInlineCode(seg, mentionRef);
+      return rewriteWikilinksOutsideInlineCode(seg);
     }).join("");
   }
-  function rewriteWikilinksOutsideInlineCode(text, mentionRef) {
+  function rewriteWikilinksOutsideInlineCode(text) {
     const parts = text.split(/(`[^`\n]*`)/g);
     return parts.map((part, idx) => {
       if (idx % 2 === 1)
@@ -11570,39 +11572,34 @@
             return `[${dirDisplay}](${linkTarget(dirUri(dir))})`;
           }
         }
-        const itemRef = taskId(target) !== null ? identityOf(target) ?? target : mentionRef(target);
-        if (itemRef) {
-          return `[${display}](${linkTarget(itemRef)})`;
+        if (recordOf(target)) {
+          return `[${display}](${linkTarget(identityOf(target) ?? target)})`;
         }
+        const loose = recordOfBareId(target, true);
+        if (loose)
+          return `[${display}](${linkTarget(loose)})`;
         const extensionRef = extensionWikilinkRef(target);
         if (extensionRef) {
           return `[${display}](${linkTarget(extensionRef)})`;
         }
         const colon = target.indexOf(":");
         if (colon > 0 && colon < target.length - 1) {
-          const store = target.slice(0, colon);
-          if (enabledKnowledgeStoreIds().includes(store)) {
-            return `[${display}](${linkTarget(knowledgeUri(store, target.slice(colon + 1)))})`;
-          }
+          const named = recordOfStoreId(target.slice(0, colon), target.slice(colon + 1));
+          if (named)
+            return `[${display}](${linkTarget(named)})`;
         }
         if (looksLikeFilePath(target)) {
           return `[${display}](${linkTarget(fileTargetUri(target))})`;
         }
-        const slug = target.endsWith(".md") ? target.slice(0, -3) : target;
-        const keeper = knowledgeStoreOfBareId(slug);
-        if (keeper) {
-          return `[${display}](${linkTarget(knowledgeUri(keeper, slug))})`;
-        }
+        const bare = recordOfBareId(target.endsWith(".md") ? target.slice(0, -3) : target, false);
+        if (bare)
+          return `[${display}](${linkTarget(bare)})`;
         return `[${display}](${INVALID_LINK}${encodeURIComponent(target)})`;
       });
     }).join("");
   }
-  function refLinkNames(parsed) {
-    return {
-      knowledgeRef: parsed.kind === "knowledge" ? knowledgeUri(parsed.store, parsed.id) : null,
-      itemRef: parsed.kind === "task" ? parsed.ref : null,
-      extensionRef: parsed.kind === "ref" ? parsed.ref : null
-    };
+  function titledRef(parsed) {
+    return parsed.kind === "ref" ? parsed.ref : null;
   }
   function linkRef(parsed) {
     switch (parsed.kind) {
@@ -11612,11 +11609,8 @@
         return directoryRef(parsed.path).id;
       case "commit":
         return gitCommitRef(parsed.sha).id;
-      case "task":
       case "ref":
         return parsed.ref;
-      case "knowledge":
-        return knowledgePageRef(parsed.store, parsed.id).id;
       default:
         return null;
     }
@@ -11626,7 +11620,7 @@
   var BLOCK_ELEMENTS = ["p", "ul", "ol", "li", "blockquote", "pre", "h1", "h2", "h3", "h4", "h5", "h6", "hr"];
   var parser = unified().use(remarkParse).use(remarkGfm).use(remarkRehype);
   async function markdownTree(text, inline, deps) {
-    const hast = await parser.run(parser.parse(preprocessWikilinks(text, deps.mentionRef)));
+    const hast = await parser.run(parser.parse(preprocessWikilinks(text)));
     const allowed = new Set(inline ? INLINE_ELEMENTS : [...INLINE_ELEMENTS, ...BLOCK_ELEMENTS]);
     const nodes = merge(await convertAll(hast.children, allowed, deps), inline);
     return inline ? trimLine2(nodes) : nodes.filter((n) => typeof n !== "string" || n.trim() !== "");
@@ -11657,7 +11651,7 @@
     const ref = linkRef(parsed);
     if (ref) {
       const text = children.length === 1 && typeof children[0] === "string" ? children[0] : null;
-      const { title, brokenReason } = await deps.refTitle(refLinkNames(parsed), text ?? "");
+      const { title, brokenReason } = await deps.refTitle(titledRef(parsed), text ?? "");
       if (brokenReason)
         return { tag: "a", broken: brokenReason, children };
       return { tag: "a", ref, children: title ? [title] : children };
@@ -11688,7 +11682,6 @@
     return out.filter((n) => n !== "");
   }
   var NO_LOOKUPS = {
-    mentionRef: () => null,
     refTitle: async () => ({ title: null, brokenReason: null })
   };
 

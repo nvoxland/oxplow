@@ -4,7 +4,7 @@ import type { Editor } from "@tiptap/core";
 import { useEditorState } from "@tiptap/react";
 import { Bold, Code, Heading2, Heading3, Italic, Link2, MessageSquarePlus } from "lucide-react";
 
-import { type MentionRef, preprocessWikilinks } from "./markdownLinks.js";
+import { preprocessWikilinks } from "./markdownLinks.js";
 
 /**
  * The editor's selection toolbar (`.context/markdown.md`): floated over a
@@ -20,13 +20,11 @@ export function SelectionToolbar({
   editor,
   rect,
   inlineOnly,
-  mentionRef,
   onComment,
 }: {
   editor: Editor;
   rect: DOMRect;
   inlineOnly: boolean;
-  mentionRef: MentionRef;
   onComment?: () => void;
 }) {
   const on = useEditorState({
@@ -47,7 +45,7 @@ export function SelectionToolbar({
 
   const applyLink = () => {
     if (!linking) return;
-    const href = linkHref(linking.value, mentionRef);
+    const href = linkHref(linking.value);
     const chain = editor.chain().focus().setTextSelection({ from: linking.from, to: linking.to });
     (href ? chain.extendMarkRange("link").setLink({ href }) : chain.extendMarkRange("link").unsetLink()).run();
     setLinking(null);
@@ -163,12 +161,12 @@ function ToolButton({
 
 /** What the link box's text links to: a URL as it is, else the target a
  *  wikilink of it names (`preprocessWikilinks`); null for nothing. */
-export function linkHref(value: string, mentionRef: MentionRef): string | null {
+export function linkHref(value: string): string | null {
   const v = value.trim();
   if (!v) return null;
   if (/^(https?|mailto|oxplow):/i.test(v)) return v;
   const interior = v.replace(/^\[\[/, "").replace(/\]\]$/, "");
-  const md = preprocessWikilinks(`[[${interior}]]`, mentionRef);
+  const md = preprocessWikilinks(`[[${interior}]]`);
   return /\]\(([^)]+)\)$/.exec(md)?.[1] ?? null;
 }
 

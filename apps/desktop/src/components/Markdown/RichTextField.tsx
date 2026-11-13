@@ -30,7 +30,7 @@ import { SelectionToolbar, selectionToolbarVisible } from "./SelectionToolbar.js
 import { ContextMenu } from "../ContextMenu.js";
 import type { MenuItem } from "../../menu.js";
 import { followLink, linkMenu, type OpenRef } from "./links.js";
-import { refLinkOf, type MentionRef } from "./markdownLinks.js";
+import { refLinkOf } from "./markdownLinks.js";
 import { pastedLink, type RefLink } from "./refPaste.js";
 import { linkTarget } from "../../uri/uri.js";
 import type { RefSearch } from "./refOptions.js";
@@ -66,13 +66,13 @@ function buildAnchorJson(doc: PMNode, from: number, to: number, approx: boolean)
 
 /** Put `refs` in at `pos` as their links (`refLinkOf`), a space between
  *  them and before them when the text there doesn't end in one. */
-export function insertRefLinks(editor: Editor, pos: number, refs: readonly RefLink[], mentionRef: MentionRef): void {
+export function insertRefLinks(editor: Editor, pos: number, refs: readonly RefLink[]): void {
   if (refs.length === 0) return;
   const before = pos > 0 ? editor.state.doc.textBetween(Math.max(0, pos - 1), pos, "\n", "\n") : "";
   const content: Array<{ type: "text"; text: string; marks?: Array<{ type: "link"; attrs: { href: string } }> }> = [];
   refs.forEach((ref, i) => {
     if (i > 0 || (before !== "" && !/\s/.test(before))) content.push({ type: "text", text: " " });
-    const { href, text } = refLinkOf(ref.uri, ref.title, mentionRef);
+    const { href, text } = refLinkOf(ref.uri, ref.title);
     content.push({ type: "text", text, marks: [{ type: "link", attrs: { href } }] });
   });
   editor.chain().focus().insertContentAt(pos, content).run();
@@ -150,7 +150,6 @@ export interface RichTextFieldProps {
    *  Read at mount: a field has it or doesn't. */
   refSearch?: RefSearch;
   /** A task id that is the active list's: a picked item saves as it. */
-  mentionRef?: MentionRef;
 }
 
 export function RichTextField({
@@ -169,13 +168,12 @@ export function RichTextField({
   hidePencil,
   comments,
   refSearch,
-  mentionRef,
 }: RichTextFieldProps) {
   const lastCommittedRef = useRef(value);
   const debounceRef = useRef<number | null>(null);
   // The owner's latest callbacks: the editor is made once.
-  const owner = useRef({ onCommit, onChange, onSubmitShortcut, onSaveShortcut, onEscape, refSearch, mentionRef });
-  owner.current = { onCommit, onChange, onSubmitShortcut, onSaveShortcut, onEscape, refSearch, mentionRef };
+  const owner = useRef({ onCommit, onChange, onSubmitShortcut, onSaveShortcut, onEscape, refSearch });
+  owner.current = { onCommit, onChange, onSubmitShortcut, onSaveShortcut, onEscape, refSearch };
   // A popover of the field's is open: Escape is the popover's.
   const popoverOpenRef = useRef(false);
   const commit = (md: string) => {
@@ -228,7 +226,6 @@ export function RichTextField({
       refCompletion: refSearch
         ? {
             search: (query, signal) => owner.current.refSearch?.(query, signal) ?? Promise.resolve([]),
-            mentionRef: (id) => owner.current.mentionRef?.(id) ?? null,
           }
         : undefined,
     }),
@@ -274,7 +271,7 @@ export function RichTextField({
           return true;
         }
         if (link.kind !== "ref") return false;
-        insertRefLinks(ed, from, [{ uri: link.uri, title: link.uri }], (id) => owner.current.mentionRef?.(id) ?? null);
+        insertRefLinks(ed, from, [{ uri: link.uri, title: link.uri }]);
         return true;
       },
     },
@@ -736,7 +733,6 @@ export function RichTextField({
           editor={editor}
           rect={selToolbarRect}
           inlineOnly={inlineOnly}
-          mentionRef={(id) => owner.current.mentionRef?.(id) ?? null}
           onComment={comments ? () => startCommentForSelection() : undefined}
         />
       )}

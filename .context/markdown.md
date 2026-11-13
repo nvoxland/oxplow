@@ -13,14 +13,14 @@ editor (`RichTextField.tsx`, Tiptap). **Both modes have the one feature
 set**, and a surface never builds its own:
 
 - **Links** (`links.ts`): a wikilink or ref link (a knowledge page, a file at
-  a revision, a directory, a commit, a task, an extension's
-  resource) opens through the page's navigation (`openRef`);
+  a revision, a directory, a commit, a record of any shared model's store — a
+  task, a knowledge page —, an extension's resource) opens through the page's navigation (`openRef`);
   Cmd/Ctrl-click or middle-click opens it in a new tab; right-click
   offers Open, Open in new tab and a Copy of what it names (path, SHA,
   id, link). A web link opens in the app's web page when the allowlist
   takes it (`classifyExternalUrl`), else in the browser. An in-page
   anchor jumps. A broken `[[…]]` is inert and marked. A bare ref link
-  (a knowledge page, a task, an extension's ref, written without a
+  (a record of a store, an extension's ref, written without a
   `|label`) shows its title (`useRefLinkTitle`, one rule for both modes;
   in the editor the stored text stays the slug, below).
 - **`[[` completes** (the editor): typing `[[` lists what it could link
@@ -133,8 +133,10 @@ line through the kit (`renderMarkdown`: extensions-components.md
 **Where the rules live.** `markdownLinks.ts` is a link's meaning with no
 React — wikilinks in and out (`preprocessWikilinks`,
 `postprocessWikilinks`, `refLinkOf`), `parseMarkdownLink`, `linkRef`,
-the title rule (`refLinkTitle`, which `useRefLinkTitle` runs over the
-title caches' hooks) and the URLs a link may hold (`urlTransform`).
+the title rule (`refLinkTitle`, which `useRefLinkTitle` runs over
+`useRefTitle`'s lookup) and the URLs a link may hold (`urlTransform`).
+Nothing in that path names a model, a store or a resource (`oxplow/task`,
+oxtask, oxwiki): see "Records and titles".
 `MarkdownView.tsx` draws with them; `markdownTree.ts` builds a frame's
 tree with them.
 
@@ -300,26 +302,57 @@ markdown links (`[label](oxplow:oxplow/file?path=…)`) for read-rendering; the
 `postprocessWikilinks` helper is the inverse — it collapses standard
 markdown links to oxplow URIs back into `[[ ]]` form on save.
 
-**Task wikilinks** — a full URI (`[[oxplow:oxplow/task?id=ENG-1&provider=issues]]`) or a
-bare id of a store's (`[[tsk42]]` with oxtask), matched
-by the id pattern the store declares (`fills.id_pattern`,
-`taskRefOfMention`), as the backend ref extractor does (its one recognizer, `ResourceRegistry::with_record_ids`; this client reads the stores' patterns from `v_model_store`) — route to the
-item's `oxplow/task` URI link and **resolve to its title** at
-render time via `useTaskTitle` (`apps/desktop/src/taskTitleCache.ts`,
-a lazy per-ref sibling of `knowledgeTitleCache`, keyed by a page's URI) — same display-swap rule knowledge
-page links use (bare `[[tsk42]]` shows the title; `[[tsk42|label]]` keeps the
-label). An item no store holds renders broken. Click
-routes through `taskTabRef` via the page-nav chokepoint.
+**Record wikilinks** — see "Records and titles" below: a bare id, `[[store:id]]`
+or a whole URI of any shared model's store links to that record, and a link
+to it **resolves to its title** at render time (a bare `[[tsk42]]` shows the
+title; `[[tsk42|label]]` keeps the label). A record no row holds renders
+broken. Click routes through the page-nav chokepoint like every ref.
 
 The `Markdown` component applies `preprocessWikilinks` to the value it
-is given and `postprocessWikilinks` to the text it hands back. A knowledge
-page's `[[slug]]` (an oxwiki page) goes in as its URI (`oxplow:oxplow/knowledge?id=…&store=oxwiki`), as
+is given and `postprocessWikilinks` to the text it hands back. A record's
+`[[id]]` goes in as its URI (`oxplow:oxplow/knowledge?id=…&store=oxwiki`), as
 every other ref does, so the editor keeps it as a link and it comes back
-as `[[slug]]` (`[[<store>:<id>]]` for another enabled store's page) (a bare slug as the href was once kept as a relative link
+as `[[id]]` (`[[<store>:<id>]]` when no bare id names it) (a bare slug as the href was once kept as a relative link
 and saved as `[slug](slug)`). The on-disk shape is preserved across edits,
 including the bare vs. labeled forms (`[[path]]` vs.
 `[[path|label]]`). Plain http/https links and image links are left
 alone — collapsing those into `[[ ]]` form would be lossy.
+
+## Records and titles
+
+A task, a knowledge page and a row of a model an extension adds are all
+**records of a store of a shared model** (`.context/models.md`): the desktop
+treats them one way, with no model, store or resource named in the link and
+title code.
+
+- **`recordStores.ts`** holds the stores, read from `v_model_store`
+  (`recordStoresLoader.ts`, started at boot, re-read when it changes): per
+  store its model, its **resource** and the params that name the store
+  (`store_param`) and the record (`key`), its `id_pattern` and its `loose`
+  flag — the declarations core's one record recognizer reads
+  (`ResourceRegistry::with_record_ids`). From them: `recordOfStoreId`
+  (`[[store:id]]`, any store), `recordOfBareId(id, loose)` (the first store,
+  in the order read, whose pattern matches the id whole; **loose** stores'
+  ids are tried before a path or a slug, the others after, as core does),
+  `recordOf(uri)` (is this URI a store's record), `recordLinkText` (written
+  as its id when a bare id names it, else `store:id`). Tests and the
+  harness set them with `setRecordStores`.
+- **A link to a record is a `ref` link** (`ParsedLink` has no `task` or
+  `knowledge` kind): the one kind for any resource's URI. Its icon is its
+  resource's (`parsedLinkIconKind`: the resource name, the `PageKindIcon`
+  table's key). Its right-click menu adds Copy id for a record.
+- **`refTitleCache.ts` is the one title cache**: `useRefTitle(ref)` /
+  `loadRefTitle(ref)` read the title from the ref's resource's `resolve`
+  dataset and title column (`v_resource`, `extensionTitleQuery`), lazily per
+  ref, re-read (coalesced) when a dataset the read touched changes.
+  `status` is `loading`, `found`, `missing` (the dataset has no such row) or
+  `untitled` (the resource names no dataset). `refLinkTitle` turns it into
+  the link's title and, for a **record** whose row is missing, the broken
+  reason; a missing row of any other ref is never flagged.
+- A model an extension adds links and titles with no desktop change: the
+  tests prove it with a made-up `acme/ticket` store.
+- What stays per store is the task board's: stages, buckets and fields
+  (`useTaskTrackerProfiles`), none of it in the link path.
 
 ## A ref link's title in the editor
 

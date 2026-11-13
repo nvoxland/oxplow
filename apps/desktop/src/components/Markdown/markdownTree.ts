@@ -21,7 +21,7 @@ import remarkRehype from "remark-rehype";
 import { unified } from "unified";
 
 import { INLINE_ELEMENTS } from "./inlineMarkdown.js";
-import { linkRef, parseMarkdownLink, preprocessWikilinks, refLinkNames, urlTransform, type RefLinkNames } from "./markdownLinks.js";
+import { linkRef, parseMarkdownLink, preprocessWikilinks, titledRef, urlTransform } from "./markdownLinks.js";
 
 /** The block elements a whole body keeps, beside the inline ones. */
 export const BLOCK_ELEMENTS: readonly string[] = ["p", "ul", "ol", "li", "blockquote", "pre", "h1", "h2", "h3", "h4", "h5", "h6", "hr"];
@@ -39,18 +39,17 @@ export interface MarkdownElement {
   broken?: string;
 }
 
-/** What the tree reads beyond the text: the active list's bare ids, and a
- *  ref link's title by the viewer's rule. */
+/** What the tree reads beyond the text: a ref link's title by the viewer's
+ *  rule (the stores' ids are `recordStores.ts`'s). */
 export interface TreeDeps {
-  mentionRef(id: string): string | null;
-  refTitle(names: RefLinkNames, text: string): Promise<{ title: string | null; brokenReason: string | null }>;
+  refTitle(ref: string | null, text: string): Promise<{ title: string | null; brokenReason: string | null }>;
 }
 
 const parser = unified().use(remarkParse).use(remarkGfm).use(remarkRehype);
 
 /** `text` as the tree a frame draws: one line when `inline`. */
 export async function markdownTree(text: string, inline: boolean, deps: TreeDeps): Promise<MarkdownNode[]> {
-  const hast = (await parser.run(parser.parse(preprocessWikilinks(text, deps.mentionRef)))) as HastRoot;
+  const hast = (await parser.run(parser.parse(preprocessWikilinks(text)))) as HastRoot;
   const allowed = new Set(inline ? INLINE_ELEMENTS : [...INLINE_ELEMENTS, ...BLOCK_ELEMENTS]);
   const nodes = merge(await convertAll(hast.children as ElementContent[], allowed, deps), inline);
   return inline ? trimLine(nodes) : nodes.filter((n) => typeof n !== "string" || n.trim() !== "");
@@ -79,7 +78,7 @@ async function link(node: HastElement, children: MarkdownNode[], deps: TreeDeps)
   const ref = linkRef(parsed);
   if (ref) {
     const text = children.length === 1 && typeof children[0] === "string" ? children[0] : null;
-    const { title, brokenReason } = await deps.refTitle(refLinkNames(parsed), text ?? "");
+    const { title, brokenReason } = await deps.refTitle(titledRef(parsed), text ?? "");
     if (brokenReason) return { tag: "a", broken: brokenReason, children };
     return { tag: "a", ref, children: title ? [title] : children };
   }
@@ -109,9 +108,8 @@ function trimLine(nodes: MarkdownNode[]): MarkdownNode[] {
   return out.filter((n) => n !== "");
 }
 
-/** No lookups: bare ids name no item, and no link gets a title (the test
+/** No lookups: no link gets a title (the test
  *  harness's host, which reads nothing of the app's). */
 export const NO_LOOKUPS: TreeDeps = {
-  mentionRef: () => null,
   refTitle: async () => ({ title: null, brokenReason: null }),
 };

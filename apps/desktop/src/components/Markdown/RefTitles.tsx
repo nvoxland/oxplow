@@ -4,12 +4,12 @@ import { ReactWidgetRenderer } from "@tiptap/react";
 
 import { PageKindIcon } from "../../pageKinds.js";
 import { BrokenLink, useRefLinkTitle } from "./MarkdownView.js";
-import { parseMarkdownLink, parsedLinkIconKind, refLinkNames } from "./markdownLinks.js";
+import { parseMarkdownLink, parsedLinkIconKind, titledRef } from "./markdownLinks.js";
 
 /**
  * A ref link's title in the editor, as the viewer shows it
  * (`useRefLinkTitle`): a widget drawn before each link that names a titled
- * ref (a knowledge page, a task, an extension's ref). Once its title
+ * ref (a record of a shared model, an extension's resource). Once its title
  * resolves for a bare link, the widget shows the kind's icon and the title,
  * and CSS hides the link beside it (`.oxplow-ref-title:has([data-ref-title])
  * + a`, in `index.html`) — the stored text stays the slug. With the caret
@@ -29,8 +29,7 @@ export const RefTitles = Extension.create({
           // The caret (or a selection) strictly inside: edit the link text.
           if (selTo > run.from && selFrom < run.to) continue;
           const parsed = parseMarkdownLink(run.href);
-          const names = refLinkNames(parsed);
-          if (!names.knowledgeRef && !names.itemRef && !names.extensionRef) continue;
+          if (!titledRef(parsed)) continue;
           const n = seen.get(run.href) ?? 0;
           seen.set(run.href, n + 1);
           out.push(
@@ -72,7 +71,7 @@ export function linkRuns(doc: PMNode): Array<{ from: number; to: number; href: s
 
 function RefTitle({ href, text }: { href: string; text: string }) {
   const parsed = parseMarkdownLink(href);
-  const { title, brokenReason } = useRefLinkTitle(refLinkNames(parsed), text);
+  const { title, brokenReason } = useRefLinkTitle(titledRef(parsed), text);
   if (brokenReason) {
     return (
       <span data-ref-title="">

@@ -24,8 +24,7 @@ import { searchSite } from "../../api.js";
 import { useVizStream } from "../../viz/VizStream.js";
 import { useResources } from "../../resources.js";
 import { readWorkspaceIndex } from "../../workspaceFiles.js";
-import { useTaskTrackerProfiles } from "../../useTaskTrackerProfiles.js";
-import { taskRefOfMention } from "../../tasks.js";
+import { useRecordStores } from "../../recordStoresLoader.js";
 import { MarkdownView } from "./MarkdownView.js";
 import { postprocessWikilinks, preprocessWikilinks } from "./markdownLinks.js";
 import { RichTextField, type RichTextCommentConfig } from "./RichTextField.js";
@@ -98,9 +97,8 @@ function MarkdownEditor({
   style,
 }: MarkdownProps) {
   const refKinds = useResources();
-  const profile = useTaskTrackerProfiles();
+  const recordStores = useRecordStores();
   const refSearch = useRefSearch();
-  const mentionRef = useCallback((id: string) => taskRefOfMention(profile, id), [profile]);
   // The last text handed out, as stored and as the editor spelled it: the
   // owner's echo of it is the editor's own text, not a change to apply. A
   // value from outside (not that echo) replaces it.
@@ -110,7 +108,7 @@ function MarkdownEditor({
     seenValue.current = value;
     if (lastOut.current && value !== lastOut.current.stored) lastOut.current = null;
   }
-  const preprocess = useCallback((md: string) => preprocessWikilinks(md, (id) => taskRefOfMention(profile, id)), [profile]);
+  const preprocess = useCallback((md: string) => preprocessWikilinks(md), [recordStores]);
   // The Source view: the stored text in a plain box (not in a one-line field).
   const [sourceView, setSourceView] = useState(false);
   const shown = useMemo(
@@ -119,7 +117,7 @@ function MarkdownEditor({
     // The ref kinds change what a `[[…]]` names; leaving Source shows what
     // it was given.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [value, refKinds, profile, sourceView],
+    [value, refKinds, recordStores, sourceView],
   );
   const out = useCallback(
     (handler: ((md: string) => void) | undefined) =>
@@ -174,7 +172,6 @@ function MarkdownEditor({
       hidePencil={hidePencil || canSource}
       comments={comments}
       refSearch={refSearch}
-      mentionRef={mentionRef}
       testId={testId}
       className={className}
       style={style}

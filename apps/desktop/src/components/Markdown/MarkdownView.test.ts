@@ -1,14 +1,12 @@
 import { expect, test } from "bun:test";
-import { linkRef, parseMarkdownLink, postprocessWikilinks, preprocessWikilinks, refLinkOf, relativeFilePath } from "./markdownLinks.js";
+import { linkRef, parseMarkdownLink, postprocessWikilinks, preprocessWikilinks, refLinkOf, refLinkTitle, relativeFilePath } from "./markdownLinks.js";
 import {
   directoryRef,
   fileRef,
   gitCommitRef,
-  taskTabRef,
-  knowledgePageRef,
 } from "../../tabs/pageRefs.js";
 import { WORKING } from "../../revision.js";
-import { setKnowledgeStores } from "../../knowledgeStores.js";
+import { recordStores, setRecordStores, type RecordStore } from "../../recordStores.js";
 import { commitUri, dirUri, fileLinesUri, fileUri, resourceUri, knowledgeUri, taskUri } from "../../uri/uri.js";
 
 // parseMarkdownLink is shared by the knowledge page viewer and TaskDetail. The viewer needs
@@ -34,12 +32,12 @@ test("parseMarkdownLink: external http(s) and mailto", () => {
 });
 
 test("parseMarkdownLink: internal — strips leading ./, .md suffix, query, fragment", () => {
-  expect(parseMarkdownLink("foo")).toEqual({ kind: "knowledge", store: "oxwiki", id: "foo" });
-  expect(parseMarkdownLink("./foo")).toEqual({ kind: "knowledge", store: "oxwiki", id: "foo" });
-  expect(parseMarkdownLink("/foo")).toEqual({ kind: "knowledge", store: "oxwiki", id: "foo" });
-  expect(parseMarkdownLink("foo.md")).toEqual({ kind: "knowledge", store: "oxwiki", id: "foo" });
-  expect(parseMarkdownLink("foo.md#sec")).toEqual({ kind: "knowledge", store: "oxwiki", id: "foo" });
-  expect(parseMarkdownLink("foo.md?x=1")).toEqual({ kind: "knowledge", store: "oxwiki", id: "foo" });
+  expect(parseMarkdownLink("foo")).toEqual({ kind: "ref", ref: knowledgeUri("oxwiki", "foo") });
+  expect(parseMarkdownLink("./foo")).toEqual({ kind: "ref", ref: knowledgeUri("oxwiki", "foo") });
+  expect(parseMarkdownLink("/foo")).toEqual({ kind: "ref", ref: knowledgeUri("oxwiki", "foo") });
+  expect(parseMarkdownLink("foo.md")).toEqual({ kind: "ref", ref: knowledgeUri("oxwiki", "foo") });
+  expect(parseMarkdownLink("foo.md#sec")).toEqual({ kind: "ref", ref: knowledgeUri("oxwiki", "foo") });
+  expect(parseMarkdownLink("foo.md?x=1")).toEqual({ kind: "ref", ref: knowledgeUri("oxwiki", "foo") });
 });
 
 test("parseMarkdownLink: internal that resolves to empty slug", () => {
@@ -300,9 +298,8 @@ test("postprocessWikilinks ∘ preprocessWikilinks is identity for supported for
     "see [[tsk42|fix the parser]] for the work",
     `see [[${taskUri("issues", "ENG-1")}]] for theirs`,
   ];
-  const ids = (id: string) => (/^tsk\d+$/.test(id) ? taskUri("oxtask", id) : null);
-  for (const sample of samples) {
-    expect(postprocessWikilinks(preprocessWikilinks(sample, ids))).toBe(sample);
+    for (const sample of samples) {
+    expect(postprocessWikilinks(preprocessWikilinks(sample))).toBe(sample);
   }
 });
 
@@ -312,33 +309,37 @@ test("postprocessWikilinks ∘ preprocessWikilinks is identity for supported for
 // `tsk<id>` token for the task title at display time. The backend ref
 // extractor (refs.rs) already recognizes the same form for backlinks.
 
-const oxplowIds = (id: string) => (/^tsk\d+$/.test(id) ? taskUri("oxtask", id) : null);
-
 test("preprocessWikilinks: an id of the active list rewrites to its task href", () => {
-  expect(preprocessWikilinks("see [[tsk42]] for context", oxplowIds))
+  expect(preprocessWikilinks("see [[tsk42]] for context"))
     .toBe(`see [tsk42](${taskUri("oxtask", "tsk42")}) for context`);
 });
 
 test("preprocessWikilinks: a task with a custom display label", () => {
-  expect(preprocessWikilinks("[[tsk42|fix the parser]]", oxplowIds))
+  expect(preprocessWikilinks("[[tsk42|fix the parser]]"))
     .toBe(`[fix the parser](${taskUri("oxtask", "tsk42")})`);
 });
 
 test("preprocessWikilinks: a full task ref links whichever list", () => {
   const eng1 = taskUri("issues", "ENG-1");
-  expect(preprocessWikilinks(`[[${eng1}]]`)).toBe(`[${eng1}](${eng1})`);
+  withStores([...recordStores(), ISSUES], () => {
+    expect(preprocessWikilinks(`[[${eng1}]]`)).toBe(`[${eng1}](${eng1})`);
+  });
 });
 
 test("preprocessWikilinks: what isn't the active list's id is a wiki slug", () => {
-  // `tsk-notes` doesn't match the list's ids; with no list (none), even
-  // `tsk42` is an ordinary slug.
-  expect(preprocessWikilinks("[[tsk-notes]]", oxplowIds)).toBe("[tsk-notes](oxplow:oxplow/knowledge?id=tsk-notes&store=oxwiki)");
-  expect(preprocessWikilinks("[[tsk42]]")).toBe("[tsk42](oxplow:oxplow/knowledge?id=tsk42&store=oxwiki)");
+  // `tsk-notes` doesn't match the task store's ids: it's an ordinary slug.
+  expect(preprocessWikilinks("[[tsk-notes]]")).toBe("[tsk-notes](oxplow:oxplow/knowledge?id=tsk-notes&store=oxwiki)");
+  // With no task store, even `tsk42` is an ordinary slug.
+  withStores(recordStores().filter((s) => s.store !== "oxtask"), () => {
+    expect(preprocessWikilinks("[[tsk42]]")).toBe("[tsk42](oxplow:oxplow/knowledge?id=tsk42&store=oxwiki)");
+  });
 });
 
 test("parseMarkdownLink: task: scheme, any list", () => {
-  expect(parseMarkdownLink("oxplow:oxplow/task?id=tsk42&provider=oxtask")).toEqual({ kind: "task", ref: "oxplow:oxplow/task?id=tsk42&provider=oxtask" });
-  expect(parseMarkdownLink("oxplow:oxplow/task?id=ENG-1&provider=issues")).toEqual({ kind: "task", ref: "oxplow:oxplow/task?id=ENG-1&provider=issues" });
+  expect(parseMarkdownLink("oxplow:oxplow/task?id=tsk42&provider=oxtask")).toEqual({ kind: "ref", ref: "oxplow:oxplow/task?id=tsk42&provider=oxtask" });
+  withStores([...recordStores(), ISSUES], () => {
+    expect(parseMarkdownLink("oxplow:oxplow/task?id=ENG-1&provider=issues")).toEqual({ kind: "ref", ref: "oxplow:oxplow/task?id=ENG-1&provider=issues" });
+  });
 });
 
 test("parseMarkdownLink: task: with empty target", () => {
@@ -404,12 +405,9 @@ test("postprocessWikilinks: broken link round-trips back to the authored [[#13]]
 // newTab, file / directory / commit links fell through to legacy
 // single-tab callbacks and dropped it.
 
-test("linkRef: a knowledge link targets its page", () => {
-  expect(linkRef({ kind: "knowledge", store: "oxwiki", id: "some-page" })).toBe(knowledgePageRef("oxwiki", "some-page").id);
-});
-
-test("linkRef: a task link targets its page", () => {
-  expect(linkRef({ kind: "task", ref: "oxplow:oxplow/task?id=tsk42&provider=oxtask" })).toBe("oxplow:oxplow/task?id=tsk42&provider=oxtask");
+test("linkRef: a record link targets its page", () => {
+  expect(linkRef({ kind: "ref", ref: knowledgeUri("oxwiki", "some-page") })).toBe(knowledgeUri("oxwiki", "some-page"));
+  expect(linkRef({ kind: "ref", ref: "oxplow:oxplow/task?id=tsk42&provider=oxtask" })).toBe("oxplow:oxplow/task?id=tsk42&provider=oxtask");
 });
 
 test("linkRef: a directory link targets its directory", () => {
@@ -445,8 +443,8 @@ test("linkRef: things that aren't pages have no target", () => {
 // wikilink a person would have typed, and a ref with no bare form keeps
 // its title as the label.
 test("refLinkOf: each kind saves as its bare wikilink", () => {
-  const saved = (uri: string, title = "T", mention?: (id: string) => string | null) => {
-    const { href, text } = refLinkOf(uri, title, mention);
+  const saved = (uri: string, title = "T") => {
+    const { href, text } = refLinkOf(uri, title);
     return postprocessWikilinks(`[${text}](${href})`);
   };
   expect(saved(knowledgeUri("oxwiki", "local-snapshots"))).toBe("[[local-snapshots]]");
@@ -456,9 +454,9 @@ test("refLinkOf: each kind saves as its bare wikilink", () => {
   const sha = "0123456789abcdef0123456789abcdef01234567";
   expect(saved(commitUri(sha))).toBe(`[[git:${sha}]]`);
   const item = taskUri("oxtask", "tsk42");
-  // A bare id when it is the active list's, else the whole URI.
-  expect(saved(item, "T", (id) => (id === "tsk42" ? item : null))).toBe("[[tsk42]]");
-  expect(saved(item, "T", () => null)).toBe(`[[${item}]]`);
+  // A bare id when a store's id pattern names it, else `store:id`.
+  expect(saved(item)).toBe("[[tsk42]]");
+  expect(saved(taskUri("oxtask", "odd id"))).toBe("[[oxtask:odd id]]");
   expect(saved(resourceUri("acme/pr", { id: 12 }), "Fix the parser")).toBe(`[Fix the parser](${resourceUri("acme/pr", { id: 12 })})`);
 });
 
@@ -477,8 +475,8 @@ test("parseMarkdownLink: a relative link resolves against the base file's folder
   expect(parseMarkdownLink("sibling%20file.md", deep)).toEqual({ kind: "file", path: "a/b/sibling file.md", version: "git:abc1234", filesystem: "oxplow:extensions" });
   expect(parseMarkdownLink("#install", readme)).toEqual({ kind: "anchor" });
   expect(parseMarkdownLink("https://a.test/", readme)).toEqual({ kind: "external" });
-  expect(parseMarkdownLink("oxplow:oxplow/knowledge?id=notes&store=oxwiki", readme)).toEqual({ kind: "knowledge", store: "oxwiki", id: "notes" });
-  expect(parseMarkdownLink("guide.md")).toEqual({ kind: "knowledge", store: "oxwiki", id: "guide" });
+  expect(parseMarkdownLink("oxplow:oxplow/knowledge?id=notes&store=oxwiki", readme)).toEqual({ kind: "ref", ref: knowledgeUri("oxwiki", "notes") });
+  expect(parseMarkdownLink("guide.md")).toEqual({ kind: "ref", ref: knowledgeUri("oxwiki", "guide") });
 });
 
 // A document drawn by a chosen page (its base's `#oxplow.renderer=`) links
@@ -500,14 +498,10 @@ test("relativeFilePath: joins and climbs under the base file's folder, never abo
   expect(relativeFilePath("a/README.md", "/x/y.md")).toBe("x/y.md");
 });
 
-// `[[store:id]]` names a page of another enabled knowledge store; oxwiki's own
-// is the bare `[[id]]`.
-test("a [[store:id]] link of an enabled store is that store's page, and saves back as it was written", () => {
-  setKnowledgeStores([
-    { store: "oxwiki", extension: "oxwiki", idPattern: "[a-z0-9]+(-[a-z0-9]+)*" },
-    { store: "docs", extension: "docs", idPattern: null },
-  ]);
-  try {
+// `[[store:id]]` names a record of any enabled store of a shared model;
+// a store's own bare ids are the bare `[[id]]`.
+test("a [[store:id]] link of an enabled store is that store's record, and saves back as it was written", () => {
+  withStores([...recordStores(), DOCS], () => {
     const uri = knowledgeUri("docs", "intro");
     expect(preprocessWikilinks("see [[docs:intro]]")).toBe(`see [docs:intro](${uri})`);
     expect(postprocessWikilinks(preprocessWikilinks("see [[docs:intro]] and [[docs:intro|the intro]]"))).toBe("see [[docs:intro]] and [[docs:intro|the intro]]");
@@ -518,8 +512,51 @@ test("a [[store:id]] link of an enabled store is that store's page, and saves ba
     expect(postprocessWikilinks(`[arch](${knowledgeUri("oxwiki", "arch")})`)).toBe("[[arch]]");
     // A prefix that is no enabled store is not a store link.
     expect(preprocessWikilinks("[[nope:intro]]")).toContain("oxplow-invalid:");
+  });
+});
+
+// A model nobody here has heard of: its store's resource, id pattern and
+// `loose` are all the links need — no code names it.
+test("a store of a made-up model links by its declared ids and resource", () => {
+  withStores([...recordStores(), TICKETS], () => {
+    const uri = resourceUri("acme/ticket", { id: "AC-7", team: "core" });
+    expect(preprocessWikilinks("see [[AC-7]] and [[core:AC-7|that one]]")).toBe(`see [AC-7](${uri}) and [that one](${uri})`);
+    expect(parseMarkdownLink(uri)).toEqual({ kind: "ref", ref: uri });
+    expect(linkRef(parseMarkdownLink(uri))).toBe(uri);
+    expect(refLinkOf(uri, "T")).toEqual({ href: uri, text: "AC-7" });
+    expect(postprocessWikilinks(`[AC-7](${uri}) and [that one](${uri})`)).toBe("[[AC-7]] and [[AC-7|that one]]");
+  });
+});
+
+const DOCS: RecordStore = { model: "oxplow/knowledge_record", store: "docs", resource: "oxplow/knowledge", storeParam: "store", key: "id", idPattern: null, loose: false };
+const ISSUES: RecordStore = { model: "oxplow/task_record", store: "issues", resource: "oxplow/task", storeParam: "provider", key: "id", idPattern: "[A-Z]+-[0-9]+", loose: true };
+const TICKETS: RecordStore = { model: "acme/ticket_record", store: "core", resource: "acme/ticket", storeParam: "team", key: "id", idPattern: "AC-[0-9]+", loose: true };
+
+/** Run `fn` with `stores` as the world's, then put the test world's own back. */
+function withStores(stores: readonly RecordStore[], fn: () => void): void {
+  const before = recordStores();
+  setRecordStores(stores);
+  try {
+    fn();
   } finally {
-    // The test world's own: oxwiki, as the preload sets it.
-    setKnowledgeStores([{ store: "oxwiki", extension: "oxwiki", idPattern: "[a-z0-9]+(-[a-z0-9]+)*" }]);
+    setRecordStores(before);
   }
+}
+
+// The title rule is one for every record of every model: a bare link takes
+// its row's title, a label stays, and a record whose row is gone is broken
+// (a ref that is no record is never flagged).
+test("refLinkTitle: a bare record link takes the title, a labelled one keeps its label, a missing row is broken", () => {
+  withStores([...recordStores(), TICKETS], () => {
+    const uri = resourceUri("acme/ticket", { id: "AC-7", team: "core" });
+    const found = { title: "Fix the parser", status: "found" as const };
+    expect(refLinkTitle(uri, "AC-7", found)).toEqual({ title: "Fix the parser", brokenReason: null });
+    expect(refLinkTitle(uri, "core:AC-7", found).title).toBe("Fix the parser");
+    expect(refLinkTitle(uri, "that one", found).title).toBeNull();
+    expect(refLinkTitle(uri, "AC-7", { title: null, status: "loading" })).toEqual({ title: null, brokenReason: null });
+    expect(refLinkTitle(uri, "AC-7", { title: null, status: "missing" }).brokenReason).toContain("“AC-7” does not exist");
+    const pr = resourceUri("acme/pr", { id: 12 });
+    expect(refLinkTitle(pr, "pr", { title: null, status: "missing" })).toEqual({ title: null, brokenReason: null });
+    expect(refLinkTitle(null, "x", found)).toEqual({ title: null, brokenReason: null });
+  });
 });

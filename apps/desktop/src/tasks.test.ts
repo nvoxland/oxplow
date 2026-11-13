@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import type { SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
-import { itemsFromResult, taskRefOfMention, taskTrackerProfilesOf, profileOfTask, type Task } from "./tasks.js";
+import { itemsFromResult, taskTrackerProfilesOf, profileOfTask, type Task } from "./tasks.js";
 
 const result = (rows: SqlQueryResult["rows"]): SqlQueryResult =>
   ({
@@ -80,13 +80,11 @@ test("each store has its own profile; no store has none", () => {
       { id: "ready", title: "Ready", bucket: "todo" },
       { id: "done", title: "Done", bucket: "done" },
     ],
-    idPattern: "tsk[0-9]+",
   });
-  // The second store keeps its own stages, fields and pattern.
+  // The second store keeps its own stages and fields.
   expect(profiles.issues.stages.map((s) => s.id)).toEqual(["open", "review", "closed"]);
   expect(profiles.issues.fields.map((f) => f.name)).toEqual(["milestone"]);
   expect(profiles.issues.fields[0].read_only).toBe(true);
-  expect(profiles.issues.idPattern).toBe("[A-Z]+-[0-9]+");
   // A task's profile is its own store's.
   expect(profileOfTask(profiles, { provider: "issues" })?.stages.length).toBe(3);
   expect(profileOfTask(profiles, { provider: "gone" })).toBeNull();
@@ -96,7 +94,7 @@ test("each store has its own profile; no store has none", () => {
 // A store with no stages row still has a profile when it is a store.
 test("a store without stages has an empty profile", () => {
   const profiles = taskTrackerProfilesOf(rowsOf(STAGE_COLUMNS, []), rowsOf(FIELD_COLUMNS, []), rowsOf(STORE_COLUMNS, [["wiki", null]]));
-  expect(profiles.wiki).toEqual({ provider: "wiki", fields: [], stages: [], idPattern: null });
+  expect(profiles.wiki).toEqual({ provider: "wiki", fields: [], stages: [] });
 });
 
 // The UI offers what a store's action points offer: a profile declares no
@@ -104,17 +102,5 @@ test("a store without stages has an empty profile", () => {
 test("a profile has no feature flags", () => {
   const profiles = taskTrackerProfilesOf(rowsOf(STAGE_COLUMNS, [["oxtask", "a", "A", "todo"]]), rowsOf(FIELD_COLUMNS, []));
   expect("features" in profiles.oxtask).toBe(false);
-  expect(Object.keys(profiles.oxtask).sort()).toEqual(["fields", "idPattern", "provider", "stages"]);
-});
-
-// A loose id in text names an item of a store only when the store says
-// what its ids look like (none says nothing).
-test("a mention resolves through the stores' id patterns", () => {
-  const profile = (provider: string, idPattern: string | null) => ({ provider, fields: [], stages: [], idPattern });
-  const profiles = { oxtask: profile("oxtask", "tsk\\d+"), issues: profile("issues", "[A-Z]+-\\d+") };
-  expect(taskRefOfMention(profiles, "tsk42")).toBe("oxplow:oxplow/task?id=tsk42&provider=oxtask");
-  expect(taskRefOfMention(profiles, "tsk42x")).toBeNull();
-  expect(taskRefOfMention(profiles, "ENG-1")).toBe("oxplow:oxplow/task?id=ENG-1&provider=issues");
-  expect(taskRefOfMention({ oxtask: profile("oxtask", null) }, "tsk42")).toBeNull();
-  expect(taskRefOfMention({}, "tsk42")).toBeNull();
+  expect(Object.keys(profiles.oxtask).sort()).toEqual(["fields", "provider", "stages"]);
 });

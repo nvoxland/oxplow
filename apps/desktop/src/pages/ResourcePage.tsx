@@ -4,13 +4,14 @@
 /// resource or its dataset has no such row, shows the URI as a dead link:
 /// muted, as written, never an error (`.context/resources.md` "Using URIs").
 import { Page } from "../tabs/Page.js";
-import { useExtensionRefTitle, useResources } from "../resources.js";
+import { useResources } from "../resources.js";
+import { useRefTitle } from "../refTitleCache.js";
 import { identityOf, parseUri, typeOf } from "../uri/uri.js";
 
 export function ResourcePage({ uri }: { uri: string }) {
   const resources = useResources();
   const resource = resources.get(typeOf(uri) ?? "") ?? null;
-  const title = useExtensionRefTitle(uri);
+  const title = useRefTitle(uri).title;
   const params = parseUri(uri)?.params ?? {};
   // Dead: nothing declares it, or the dataset that names its rows has none.
   const dead = resource === null || (resource.resolve !== null && title === null);

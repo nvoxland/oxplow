@@ -9,12 +9,10 @@ import type { MenuItem } from "../../menu.js";
 import { PageKindIcon } from "../../pageKinds.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 import { WORKING } from "../../revision.js";
-import { useKnowledgeRef } from "../../knowledgeTitleCache.js";
-import { useTaskRef } from "../../taskTitleCache.js";
-import { useTaskTrackerProfiles } from "../../useTaskTrackerProfiles.js";
-import { taskRefOfMention } from "../../tasks.js";
-import { useExtensionRefTitle, useResources } from "../../resources.js";
-import { parseMarkdownLink, parsedLinkIconKind, preprocessWikilinks, refLinkNames, refLinkTitle, urlTransform, type RefLinkNames } from "./markdownLinks.js";
+import { useRefTitle } from "../../refTitleCache.js";
+import { useRecordStores } from "../../recordStoresLoader.js";
+import { useResources } from "../../resources.js";
+import { parseMarkdownLink, parsedLinkIconKind, preprocessWikilinks, refLinkTitle, titledRef, urlTransform } from "./markdownLinks.js";
 import { attachPanZoom, loadMermaid } from "./mermaidRender.js";
 import { CopyCodeButton } from "./CopyCodeButton.js";
 import { rehypeHighlightCode } from "./codeHighlight.js";
@@ -30,7 +28,7 @@ import { useVizStream } from "../../viz/VizStream.js";
 
 /**
  * Inline anchor wrapper that owns the page-title swap. Lives as its
- * own component so `useKnowledgeRef` (a hook) can be called per-link
+ * own component so `useRefLinkTitle` (a hook) can be called per-link
  * without violating rules-of-hooks in the parent's render-prop.
  */
 function RefLinkSpan({
@@ -38,23 +36,18 @@ function RefLinkSpan({
   handleLinkClick,
   items,
   iconKind,
-  knowledgeRef,
-  itemRef,
-  extensionRef,
+  titledRef: ref,
 }: {
   anchorProps: React.AnchorHTMLAttributes<HTMLAnchorElement> & { node?: unknown };
   handleLinkClick: (event: React.MouseEvent<HTMLAnchorElement>) => void;
   items: MenuItem[];
   iconKind: string | null;
-  knowledgeRef: string | null;
-  /** A task's ref. */
-  itemRef: string | null;
-  /** A ref of an extension's kind: titled from its kind's dataset. */
-  extensionRef: string | null;
+  /** The ref the link names when it has a title: read from its resource's dataset. */
+  titledRef: string | null;
 }) {
   const cm = useRowContextMenu(items);
   const { children, ...rest } = anchorProps;
-  const { title: overrideText, brokenReason } = useRefLinkTitle({ knowledgeRef, itemRef, extensionRef }, flattenChildrenText(children));
+  const { title: overrideText, brokenReason } = useRefLinkTitle(ref, flattenChildrenText(children));
   if (brokenReason) {
     return <BrokenLink reason={brokenReason}>{children}</BrokenLink>;
   }
@@ -88,11 +81,8 @@ function RefLinkSpan({
  * is broken, with the reason. `loading` and `found` both stay a live
  * link, so a ref not yet resolved isn't briefly flagged.
  */
-export function useRefLinkTitle(names: RefLinkNames, text: string): { title: string | null; brokenReason: string | null } {
-  const knowledge = useKnowledgeRef(names.knowledgeRef);
-  const item = useTaskRef(names.itemRef);
-  const extensionTitle = useExtensionRefTitle(names.extensionRef);
-  return refLinkTitle(names, text, { knowledge, item, extensionTitle });
+export function useRefLinkTitle(ref: string | null, text: string): { title: string | null; brokenReason: string | null } {
+  return refLinkTitle(ref, text, useRefTitle(ref));
 }
 
 /**
@@ -191,11 +181,11 @@ export interface MarkdownViewProps {
 export function MarkdownView({ body, base = null, maxHeight, style, className, inline = false, testId }: MarkdownViewProps) {
   // Extensions' ref kinds change what a `[[…]]` names.
   const refKinds = useResources();
-  // …and the active task tracker's ids do too.
-  const profile = useTaskTrackerProfiles();
+  // …and the stores of the shared models (their ids) do too.
+  const stores = useRecordStores();
   const processedBody = useMemo(
-    () => preprocessWikilinks(body, (id) => taskRefOfMention(profile, id)),
-    [body, refKinds, profile],
+    () => preprocessWikilinks(body),
+    [body, refKinds, stores],
   );
   const ref = useRef<HTMLDivElement & HTMLSpanElement>(null);
   const [lightbox, setLightbox] = useState<LightboxContent | null>(null);
@@ -375,20 +365,17 @@ export function MarkdownView({ body, base = null, maxHeight, style, className, i
             }
             const items = linkMenu(href, open, base);
             const iconKind = parsedLinkIconKind(parsed);
-            // For knowledge links written as bare `[[slug]]` (no
-            // `|label`), swap the rendered text from the id to the
-            // page title so readers see "Local Snapshots" not
-            // `local-snapshots`. Author-supplied labels are preserved.
-            const { knowledgeRef, itemRef, extensionRef } = refLinkNames(parsed);
+            // For links written bare (`[[slug]]`, no `|label`), swap the
+            // rendered text from the id to the row's title so readers see
+            // "Local Snapshots" not `local-snapshots`. Author-supplied
+            // labels are preserved.
             return (
               <RefLinkSpan
                 anchorProps={props}
                 handleLinkClick={handleLinkClick}
                 items={items}
                 iconKind={iconKind}
-                knowledgeRef={knowledgeRef}
-                itemRef={itemRef}
-                extensionRef={extensionRef}
+                titledRef={titledRef(parsed)}
               />
             );
           },

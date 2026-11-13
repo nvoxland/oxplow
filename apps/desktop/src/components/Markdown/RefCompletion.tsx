@@ -5,15 +5,12 @@ import Suggestion, { type SuggestionKeyDownProps, type SuggestionProps } from "@
 import { PluginKey } from "@tiptap/pm/state";
 
 import { PageKindIcon } from "../../pageKinds.js";
-import type { MentionRef } from "./markdownLinks.js";
 import { refLinkOf } from "./markdownLinks.js";
 import type { RefOption, RefSearch } from "./refOptions.js";
 
 export interface RefCompletionOptions {
   /** Where `[[` looks; none, and `[[` is plain text. */
   search: RefSearch | null;
-  /** A task id that is the active list's (`refLinkOf`). */
-  mentionRef: MentionRef;
 }
 
 export interface RefCompletionStorage {
@@ -38,7 +35,7 @@ declare module "@tiptap/core" {
 export const RefCompletion = Extension.create<RefCompletionOptions, RefCompletionStorage>({
   name: "refCompletion",
   addOptions() {
-    return { search: null, mentionRef: () => null };
+    return { search: null };
   },
   addStorage() {
     return { open: false };
@@ -56,7 +53,7 @@ export const RefCompletion = Extension.create<RefCompletionOptions, RefCompletio
         allow: ({ state, range }) => ext.options.search !== null && !state.doc.textBetween(range.from, range.to).includes("]]"),
         items: ({ query, signal }) => (ext.options.search ? ext.options.search(query, signal) : []),
         command: ({ editor, range, props }) => {
-          const { href, text } = refLinkOf(props.uri, props.title, ext.options.mentionRef);
+          const { href, text } = refLinkOf(props.uri, props.title);
           editor
             .chain()
             .focus()

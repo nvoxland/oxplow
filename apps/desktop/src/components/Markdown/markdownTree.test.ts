@@ -8,9 +8,8 @@ import { markdownTree, type TreeDeps } from "./markdownTree.js";
 
 const ITEM = "oxplow:oxplow/task?id=tsk7&provider=oxtask";
 const deps: TreeDeps = {
-  mentionRef: (id) => (id === "tsk7" ? ITEM : null),
-  refTitle: async ({ itemRef }) =>
-    itemRef === ITEM ? { title: "The item", brokenReason: null } : itemRef ? { title: null, brokenReason: `Broken link: ${itemRef}` } : { title: null, brokenReason: null },
+  refTitle: async (ref) =>
+    ref === ITEM ? { title: "The item", brokenReason: null } : ref ? { title: null, brokenReason: `Broken link: ${ref}` } : { title: null, brokenReason: null },
 };
 
 test("one line keeps its marks and links, a wikilink by its title, and unwraps blocks", async () => {
