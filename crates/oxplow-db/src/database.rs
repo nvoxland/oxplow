@@ -224,6 +224,23 @@ pub struct Database {
     changes: Arc<crate::changes::Changes>,
     /// How long a call waits for the write lock.
     lock_waits: LockWaits,
+    /// The fact dimensions extensions' datasets answer, as the metrics
+    /// service last published them: per database, so two apps in one
+    /// process (a test's throwaways) never read each other's.
+    derived_dimensions: Arc<std::sync::RwLock<Vec<DerivedDimension>>>,
+}
+
+/// A fact dimension an extension's dataset answers (`from:` in its
+/// `dimensions:`): the fact's `by` key is looked up in the dataset's column of
+/// the same name, and the value is the dataset's `value` column of the first
+/// row in `order`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DerivedDimension {
+    pub key: String,
+    pub dataset: String,
+    pub by: String,
+    pub value: String,
+    pub order: Option<String>,
 }
 
 /// How many connections background work may hold at once: all but two,
@@ -451,6 +468,24 @@ fn require_math_functions(c: &Connection) -> Result<(), DbInitError> {
 }
 
 impl Database {
+    /// The derived dimensions in force on this database.
+    pub fn derived_dimensions(&self) -> Vec<DerivedDimension> {
+        self.derived_dimensions
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Replace the derived dimensions in force: the metrics service does
+    /// on every reseed (an extension turned off takes its dimensions with
+    /// it).
+    pub fn set_derived_dimensions(&self, dims: Vec<DerivedDimension>) {
+        *self
+            .derived_dimensions
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) = dims;
+    }
+
     /// Open an existing project database **read-only**, without migrating
     /// or writing anything — for a tool (the `oxplow extension check` CLI)
     /// that may be a different oxplow version than the app that owns the
@@ -525,6 +560,7 @@ impl Database {
             writing: Arc::default(),
             changes,
             lock_waits: LockWaits::default(),
+            derived_dimensions: Arc::default(),
         })
     }
 
@@ -582,6 +618,7 @@ impl Database {
             writing: Arc::default(),
             changes,
             lock_waits: LockWaits::default(),
+            derived_dimensions: Arc::default(),
         })
     }
 
@@ -640,6 +677,7 @@ impl Database {
             writing: Arc::default(),
             changes,
             lock_waits: LockWaits::default(),
+            derived_dimensions: Arc::default(),
         }
     }
 

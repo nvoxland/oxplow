@@ -324,13 +324,13 @@ impl FactFilter {
     /// `min_value`/`max_value` read `value` and are never slice-decidable. A
     /// `dim_eq` is decidable exactly when its dimension is (see
     /// [`dim_is_slice_key`]).
-    pub fn slice_key_only(&self) -> bool {
+    pub fn slice_key_only(&self, db: &oxplow_db::Database) -> bool {
         self.min_value.is_none()
             && self.max_value.is_none()
             && self
                 .dim_eq
                 .as_ref()
-                .is_none_or(|(key, _)| dim_is_slice_key(key))
+                .is_none_or(|(key, _)| dim_is_slice_key(db, key))
     }
 
     /// [`Self::matches`] against a slice key instead of a fact. Only meaningful
@@ -548,46 +548,10 @@ pub(crate) fn dim_value_cached(
     }
 }
 
-/// A fact dimension an extension's dataset answers (`from:` in its
-/// `dimensions:`): the fact's `by` key is looked up in the dataset's column of
-/// the same name, and the value is the dataset's `value` column of the first
-/// row in `order`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DerivedDimension {
-    pub key: String,
-    pub dataset: String,
-    pub by: String,
-    pub value: String,
-    pub order: Option<String>,
-}
+pub use oxplow_db::DerivedDimension;
 
-/// The derived dimensions in force. Process-wide, like the dimension
-/// catalog it comes from: the metrics service replaces it on every reseed (an
-/// extension turned off takes its dimensions with it), and the engine, the
-/// cube and the filter classification read it.
-static DERIVED_DIMENSIONS: std::sync::RwLock<Vec<DerivedDimension>> =
-    std::sync::RwLock::new(Vec::new());
-
-/// Replace the derived dimensions in force.
-pub fn set_derived_dimensions(dims: Vec<DerivedDimension>) {
-    *DERIVED_DIMENSIONS
-        .write()
-        .unwrap_or_else(|e| e.into_inner()) = dims;
-}
-
-fn derived_dimensions() -> Vec<DerivedDimension> {
-    DERIVED_DIMENSIONS
-        .read()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone()
-}
-
-fn is_derived_dim(dimension: &str) -> bool {
-    DERIVED_DIMENSIONS
-        .read()
-        .unwrap_or_else(|e| e.into_inner())
-        .iter()
-        .any(|d| d.key == dimension)
+fn is_derived_dim(db: &oxplow_db::Database, dimension: &str) -> bool {
+    db.derived_dimensions().iter().any(|d| d.key == dimension)
 }
 
 /// Dimensions read off the capture spine (stream, thread, request, git
@@ -603,8 +567,8 @@ pub(crate) const SPINE_DIMS: &[&str] = &[
 
 /// A dimension that reads outside a fact's own slice: the capture spine, and
 /// the ones an extension's dataset answers.
-pub(crate) fn is_spine_dim(dimension: &str) -> bool {
-    SPINE_DIMS.contains(&dimension) || is_derived_dim(dimension)
+pub(crate) fn is_spine_dim(db: &oxplow_db::Database, dimension: &str) -> bool {
+    SPINE_DIMS.contains(&dimension) || is_derived_dim(db, dimension)
 }
 
 /// Whether a dimension resolves entirely from a [`FactSliceKey`] — i.e. from
@@ -618,11 +582,11 @@ pub(crate) fn is_spine_dim(dimension: &str) -> bool {
 /// doesn't fail loudly — it silently changes which producers zero-fill. The
 /// `every_pseudo_dimension_is_classified` test walks the arms and is what
 /// actually holds the two together.
-pub(crate) fn dim_is_slice_key(dimension: &str) -> bool {
+pub(crate) fn dim_is_slice_key(db: &oxplow_db::Database, dimension: &str) -> bool {
     !matches!(
         dimension,
         "oxplow.package" | "oxplow.branch" | "subject" | "oxplow.model"
-    ) && !is_spine_dim(dimension)
+    ) && !is_spine_dim(db, dimension)
 }
 
 /// [`dim_value_cached`] restricted to a slice key. Mirrors the arms
@@ -1737,7 +1701,7 @@ impl MetricEngine {
     /// leaves its dimension absent: the facts have no value on it, and
     /// nothing fails.
     pub(crate) async fn stamp_derived(&self, facts: &mut [FactRow]) {
-        for dim in derived_dimensions() {
+        for dim in self.facts.database().derived_dimensions() {
             let key_of = |f: &FactRow| -> Option<i64> {
                 match dim.by.as_str() {
                     "request_id" => f.request_id,
@@ -2717,6 +2681,7 @@ mod tests {
 
     #[test]
     fn every_pseudo_dimension_is_classified_as_slice_key_or_not() {
+        let db = oxplow_db::Database::in_memory();
         // `dim_is_slice_key` is the negative image of the match
         // in `dim_value_cached`, and nothing in the compiler holds them
         // together — a new pseudo-dimension reading `path`/`branch`/`subject`
@@ -2756,7 +2721,10 @@ mod tests {
             // The long tail: any un-promoted `dims_json` key.
             "oxplow.status",
         ] {
-            assert!(dim_is_slice_key(key), "{key} resolves from dims/columns");
+            assert!(
+                dim_is_slice_key(&db, key),
+                "{key} resolves from dims/columns"
+            );
             assert_eq!(
                 slice_dim_value(&k, key),
                 dim_value(&f, key),
@@ -2775,7 +2743,10 @@ mod tests {
             "oxplow.request",
             "oxplow.vcs_rev",
         ] {
-            assert!(!dim_is_slice_key(key), "{key} reads outside the slice key");
+            assert!(
+                !dim_is_slice_key(&db, key),
+                "{key} reads outside the slice key"
+            );
             assert_ne!(
                 slice_dim_value(&k, key),
                 dim_value(&f, key),
@@ -2818,29 +2789,56 @@ mod tests {
                 ..fact(1, "2026-06-30T00:00:00Z", 1.0)
             },
         ];
-        set_derived_dimensions(vec![derived("v_thread")]);
+        facts
+            .database()
+            .set_derived_dimensions(vec![derived("v_thread")]);
         engine.stamp_derived(&mut rows).await;
         assert_eq!(dim_value(&rows[0], "acme.title").as_deref(), Some("second"));
         assert_eq!(dim_value(&rows[1], "acme.title"), None, "no thread there");
         // Read outside a fact's own slice, never bucketed by the cube.
-        assert!(is_spine_dim("acme.title"));
-        assert!(!dim_is_slice_key("acme.title"));
+        assert!(is_spine_dim(&facts.database(), "acme.title"));
+        assert!(!dim_is_slice_key(&facts.database(), "acme.title"));
 
         // The dataset isn't there (its extension is off): the dimension is
         // absent and the read goes on.
-        set_derived_dimensions(vec![derived("v_not_there")]);
+        facts
+            .database()
+            .set_derived_dimensions(vec![derived("v_not_there")]);
         let mut rows = vec![FactRow {
             stream_id: 1,
             ..fact(1, "2026-06-30T00:00:00Z", 1.0)
         }];
         engine.stamp_derived(&mut rows).await;
         assert_eq!(dim_value(&rows[0], "acme.title"), None);
-        set_derived_dimensions(Vec::new());
-        assert!(!is_spine_dim("acme.title"));
+        facts.database().set_derived_dimensions(Vec::new());
+        assert!(!is_spine_dim(&facts.database(), "acme.title"));
+    }
+
+    /// Two apps in one process (the extension tests' throwaways, run side
+    /// by side) each have their own derived dimensions: one's publication
+    /// never changes what the other reads.
+    #[test]
+    fn derived_dimensions_belong_to_their_own_database() {
+        let (a, b) = (
+            oxplow_db::Database::in_memory(),
+            oxplow_db::Database::in_memory(),
+        );
+        a.set_derived_dimensions(vec![DerivedDimension {
+            key: "acme.title".into(),
+            dataset: "v_thread".into(),
+            by: "stream_id".into(),
+            value: "title".into(),
+            order: None,
+        }]);
+        assert!(is_spine_dim(&a, "acme.title"));
+        assert!(!is_spine_dim(&b, "acme.title"));
+        b.set_derived_dimensions(Vec::new());
+        assert!(is_spine_dim(&a, "acme.title"), "b's reseed left a's alone");
     }
 
     #[test]
     fn spine_dimensions_read_the_capture_it_came_from() {
+        let db = oxplow_db::Database::in_memory();
         let f = FactRow {
             thread_id: Some(4),
             request_id: Some(9),
@@ -2870,27 +2868,28 @@ mod tests {
         assert_eq!(dim_value(&bare, "oxplow.request"), None);
         // The cube never buckets by these: a turn is linked to its request
         // after the cube may have folded its captures.
-        assert!(SPINE_DIMS.iter().all(|d| is_spine_dim(d)));
-        assert!(!is_spine_dim("oxplow.language"));
+        assert!(SPINE_DIMS.iter().all(|d| is_spine_dim(&db, d)));
+        assert!(!is_spine_dim(&db, "oxplow.language"));
     }
 
     #[test]
     fn slice_key_only_gates_the_cheap_producer_discovery() {
+        let db = oxplow_db::Database::in_memory();
         // Value bounds always need a real fact; a dim_eq is decidable exactly
         // when its dimension is.
-        assert!(FactFilter::default().slice_key_only());
+        assert!(FactFilter::default().slice_key_only(&db));
         assert!(FactFilter::from_json(r#"{"severity":"error"}"#)
             .unwrap()
-            .slice_key_only());
+            .slice_key_only(&db));
         assert!(
             FactFilter::from_json(r#"{"dim_eq":["oxplow.rule","unsafe_block"]}"#)
                 .unwrap()
-                .slice_key_only()
+                .slice_key_only(&db)
         );
         assert!(
             FactFilter::from_json(r#"{"dim_eq":["oxplow.status","failed"]}"#)
                 .unwrap()
-                .slice_key_only(),
+                .slice_key_only(&db),
             "a plain dims_json key rides the slice"
         );
         for j in [
@@ -2901,7 +2900,7 @@ mod tests {
             r#"{"dim_eq":["oxplow.model","opus"]}"#,
         ] {
             assert!(
-                !FactFilter::from_json(j).unwrap().slice_key_only(),
+                !FactFilter::from_json(j).unwrap().slice_key_only(&db),
                 "{j} reads outside the slice key"
             );
         }
@@ -2909,6 +2908,7 @@ mod tests {
 
     #[test]
     fn matches_slice_agrees_with_matches_for_slice_key_filters() {
+        let db = oxplow_db::Database::in_memory();
         // The two must never disagree, or the cheap branch changes results.
         let mk = |sev: &str, rule: &str, dims: &str| {
             let f = FactRow {
@@ -2938,7 +2938,7 @@ mod tests {
             r#"{"severity":"error","dim_eq":["oxplow.status","failed"]}"#,
         ] {
             let filter = FactFilter::from_json(j).unwrap();
-            assert!(filter.slice_key_only());
+            assert!(filter.slice_key_only(&db));
             for (f, k) in &rows {
                 assert_eq!(
                     filter.matches_slice(k),
@@ -3474,6 +3474,7 @@ mod tests {
     /// `model`) is just an undeclared key, never an alias.
     #[test]
     fn a_dimension_is_requested_by_its_conformed_key() {
+        let db = oxplow_db::Database::in_memory();
         let f = FactRow {
             dims_json: Some("{\"oxplow.language\":\"rust\"}".into()),
             path: Some("crates/a/src/lib.rs".into()),
@@ -3488,7 +3489,7 @@ mod tests {
         assert_eq!(dim_value(&f, "oxplow.model").as_deref(), Some("opus"));
         for bare in ["language", "package", "branch", "model"] {
             assert_eq!(dim_value(&f, bare), None, "`{bare}` is no alias");
-            assert!(dim_is_slice_key(bare), "`{bare}` is an ordinary key");
+            assert!(dim_is_slice_key(&db, bare), "`{bare}` is an ordinary key");
         }
     }
 

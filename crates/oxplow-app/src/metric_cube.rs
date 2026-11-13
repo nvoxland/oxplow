@@ -263,7 +263,9 @@ impl MetricCubeBuilder {
             .list_dimensions()
             .await?
             .into_iter()
-            .filter(|d| d.promoted && !crate::metric_engine::is_spine_dim(&d.key))
+            .filter(|d| {
+                d.promoted && !crate::metric_engine::is_spine_dim(&self.facts.database(), &d.key)
+            })
             .map(|d| d.key)
             .collect();
         let mut bounds: Vec<ValueBound> = Vec::new();
@@ -786,7 +788,7 @@ pub async fn cube_series(
         .list_dimensions()
         .await?
         .into_iter()
-        .filter(|d| d.promoted && !crate::metric_engine::is_spine_dim(&d.key))
+        .filter(|d| d.promoted && !crate::metric_engine::is_spine_dim(&facts.database(), &d.key))
         .map(|d| d.key)
         .collect();
     // Every dim the read filters or slices on must be IN the grain — the cube

@@ -20,6 +20,12 @@
 //! that consumer wait behind it); any other failure or a panic parks the
 //! event as a dead letter and moves on, like the sync kind.
 //!
+//! **Order a consumer can rely on.** An async consumer (a collector, an
+//! effect) handles an event only after every sync consumer has handled
+//! it and every earlier event: `run_slot` catches the projections up
+//! before each batch. Between async consumers there is no order unless one
+//! declares `after`.
+//!
 //! [`EventPump::settle`] runs the pump now and waits (bounded) for it — a
 //! caller whose answer depends on a consumer's effect (a turn-end
 //! advisory reads the turn's checkpoint) settles instead of
@@ -341,6 +347,11 @@ impl EventPump {
                 if events.is_empty() {
                     break;
                 }
+                // Every sync projection has caught up with these events
+                // before a handler reads them: the sync loop and this one
+                // are independent, so without it a collector can read a
+                // projection (tool-call paths) its own event is ahead of.
+                self.run_sync().await?;
                 // The last event the consumer has no handler for, whose
                 // checkpoint isn't written yet: a run of them is one write
                 // (a handled event's checkpoint covers the ones before it).
@@ -1095,6 +1106,48 @@ mod tests {
             *log.lock(),
             vec!["first:e1", "second:e1", "first:e2", "second:e2"]
         );
+    }
+
+    /// Reads, when it handles an event, what the sync consumer `rec` wrote
+    /// for it.
+    struct ReadsProjection {
+        db: Database,
+        found: Arc<Mutex<Vec<Vec<String>>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl AsyncEventConsumer for ReadsProjection {
+        fn name(&self) -> &'static str {
+            "reads_projection"
+        }
+        fn handles(&self, event_type: &str) -> bool {
+            event_type == "config.changed"
+        }
+        async fn handle(&self, _: &StoredEvent) -> Result<(), DomainError> {
+            let rows = seen(&self.db, "rec").await;
+            self.found.lock().push(rows);
+            Ok(())
+        }
+    }
+
+    /// An async consumer (a collector) sees every sync projection of its
+    /// event, whichever loop got there first.
+    #[tokio::test]
+    async fn an_async_consumer_sees_the_sync_projections_of_its_event() {
+        let (db, store) = setup().await;
+        store.append(config_changed("a")).await.unwrap();
+        let found = Arc::new(Mutex::new(Vec::new()));
+        let pump = Arc::new(pump(&db, &store, vec![Recorder::new("rec", None)]));
+        pump.register_async(Arc::new(ReadsProjection {
+            db: db.clone(),
+            found: found.clone(),
+        }));
+        // Only the async consumer is run: the sync loop has not been.
+        assert!(
+            pump.settle(&["reads_projection"], Duration::from_secs(5))
+                .await
+        );
+        assert_eq!(*found.lock(), vec![vec!["a".to_string()]]);
     }
 
     #[tokio::test]

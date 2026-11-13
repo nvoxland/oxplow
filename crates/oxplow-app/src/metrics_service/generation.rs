@@ -316,7 +316,13 @@ impl PreparedMetricCatalog {
         let config = crate::config_service::read_config(&self.frozen.config);
         let global = self.frozen.with_global_catalog(Clone::clone);
         *metrics.published_inputs.lock() = Some(Arc::new(PublishedMetricInputs { config, global }));
-        crate::metric_engine::set_derived_dimensions(self.derived.clone());
+        // On the database the engine reads, not a process-wide list: two
+        // apps in one process (a test's throwaways) must not share it.
+        if let Some(facts) = metrics.fact_store.as_ref() {
+            facts
+                .database()
+                .set_derived_dimensions(self.derived.clone());
+        }
     }
 }
 

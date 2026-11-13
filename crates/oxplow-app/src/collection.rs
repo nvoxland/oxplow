@@ -2999,7 +2999,7 @@ impl CollectionService {
                 .unwrap_or_default()
                 .into_iter()
                 .collect()
-        } else if filter.slice_key_only() {
+        } else if filter.slice_key_only(&self.facts.database()) {
             // The predicate reads only (rule, severity, dims_json), and
             // every fact of a slice agrees on those — so the slice key
             // decides it and no representative row is needed. Same

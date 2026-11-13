@@ -955,7 +955,8 @@ NOT a store method — it lives in `metric_engine::aggregate_facts`.
   no dataset. `oxplow.task` is bundled's, over `v_oxplow_request_link` (the
   prompt's task first, then the one filed or edited, then the one moved).
   The metrics service publishes the resolved list with each catalog
-  generation (`metric_engine::set_derived_dimensions`); the engine stamps
+  generation, onto the database it reads (`Database::set_derived_dimensions`; never a
+  process-wide list, which two apps in one process, a test's throwaways, would share); the engine stamps
   the values onto the facts it loads (`stamp_derived`, one query per dimension
   per read, into `FactRow.derived`). A dimension is on the fact path only
   (`is_spine_dim` is true for it; it can't be `promote`d). With the extension

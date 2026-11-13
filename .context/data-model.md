@@ -1490,6 +1490,14 @@ events that trigger it, and `after()` still orders consumers in `settle`.
 consumers — side by side within a level, a consumer in a level after those
 it runs `after` — and waits for it, for callers whose answer needs their
 effect.
+**Sync projections come first.** Whatever its `after()`, an async
+consumer (a collector, an effect) handles an event only after every sync
+consumer has handled it and all earlier events: `run_slot` runs the sync
+consumers up to date before each batch it delivers (`run_sync`). A
+collector's input may therefore read any projection (`v_tool_call_path`,
+`v_agent_turn`) of its trigger event without an `after:`. Between async
+consumers there is still no order but `after`; events reach one consumer
+in log order, so a collector sees what an earlier event's collector wrote.
 
 Letters are `pending | retried | discarded`; the
 person's moves are `oxplow.delivery.retry { id }` (re-runs the consumer now;

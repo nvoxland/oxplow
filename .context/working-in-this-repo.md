@@ -412,6 +412,13 @@ such a test again, alone, in its own process
 (`stop_all_reaps_every_live_group` starts `current_exe()` with `--exact`). To
 check a suspect, run the test binary itself with `--test-threads=4`.
 
+The extension tests (`bun run test:ext`) run their fixtures side by side as
+tasks of one process, each on its own throwaway app, so any `static` that
+holds per-app state makes a fixture flaky: it reads what another fixture
+published. The derived dimensions once were one (`oxplow.task` read empty
+in about one full run in three); they live on the `Database` now. Keep
+per-app state on the app's own handles (`Database`, `Services`).
+
 ### Dependencies are optimized in dev and test builds
 
 `[profile.dev.package."*"]` sets `opt-level = 1`. Unoptimized, parsing YAML,
