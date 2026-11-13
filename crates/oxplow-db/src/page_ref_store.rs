@@ -611,10 +611,10 @@ pub fn replace_source_for_ref_types_tx(
 mod tests {
     use super::*;
 
-    use oxplow_domain::uri::build::{file_uri, knowledge_uri, task_uri};
+    use oxplow_domain::uri::build::file_uri;
 
     fn w(slug: &str) -> String {
-        knowledge_uri("oxwiki", slug)
+        format!("oxplow:oxplow/knowledge?id={slug}&store=oxwiki")
     }
 
     fn f(path: &str) -> String {
@@ -721,7 +721,11 @@ mod tests {
         let store = SqlitePageRefStore::new(Database::in_memory());
         let edges = vec![
             edge(&w("a"), &f("x.rs"), "knowledge_file_ref"),
-            edge(&w("a"), &task_uri("oxtask", "wi-1"), "task_mention"),
+            edge(
+                &w("a"),
+                "oxplow:oxplow/task?id=wi-1&provider=oxtask",
+                "task_mention",
+            ),
         ];
         store.replace_source(&w("a"), edges.clone()).await.unwrap();
         store.replace_source(&w("a"), edges.clone()).await.unwrap();

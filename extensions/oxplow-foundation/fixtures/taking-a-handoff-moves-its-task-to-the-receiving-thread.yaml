@@ -7,7 +7,7 @@ given:
   - { command: oxplow.thread.create, input: { stream: str1, title: Docs }, bind: docs }
   - { command: oxtask.task.create, input: { title: Write the guide, stage: ready } }
   - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr2" } }
-  - { command: oxplow.handoff.send, input: { from_thread: $docs.id, to_thread: thr1, task: "oxplow:oxplow/task?id=tsk1&provider=oxtask", body: The outline is done; write the rest. } }
+  - { command: oxplow.handoff.send, input: { from_thread: $docs.id, to_thread: thr1, about: "oxplow:oxplow/task?id=tsk1&provider=oxtask", body: The outline is done; write the rest. } }
 when: { sql: "SELECT state, body FROM v_handoff" }
 expect: { rows: [{ state: open, body: The outline is done; write the rest. }] }
 steps:

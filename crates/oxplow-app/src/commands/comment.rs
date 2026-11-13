@@ -421,7 +421,7 @@ mod tests {
     }
 
     fn comment_on(stream: &str, thread: Option<&str>) -> Value {
-        let mut v = json!({ "stream": stream, "target": oxplow_domain::uri::build::knowledge_uri("oxwiki", "a-page"),
+        let mut v = json!({ "stream": stream, "target": "oxplow:oxplow/knowledge?id=a-page&store=oxwiki".to_string(),
                             "quote": "the words", "body": "what about this?" });
         if let Some(t) = thread {
             v["thread"] = json!(t);

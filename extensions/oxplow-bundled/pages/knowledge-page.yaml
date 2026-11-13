@@ -54,7 +54,7 @@ loaders:
              'Links to this page' AS description
       FROM v_page_ref r
       WHERE r.target_uri = :uri
-        AND r.ref_type IN ('wikilink', 'summary_wikilink')
+        AND r.ref_type = 'record_mention'
       GROUP BY r.source_uri
       ORDER BY title LIMIT 10
 rail:

@@ -42,6 +42,10 @@ pub struct FillSpec {
     /// a loose id that matches is its store's item (`fills.id_pattern`).
     #[serde(default)]
     pub id_pattern: Option<String>,
+    /// Its ids count in running text (`tsk42`), not only inside `[[…]]`
+    /// (`fills.loose`).
+    #[serde(default)]
+    pub loose: bool,
     /// Its store's workflow, in order (`fills.stages`): each stage's id, title and bucket.
     #[serde(default)]
     pub stages: Vec<oxplow_domain::tasks::StageDecl>,
@@ -163,38 +167,26 @@ impl ModelRegistry {
         None
     }
 
-    /// Each store of a task model (one whose resource is `oxplow/task`)
-    /// that declares how its ids look: `(store, pattern)`, in fill order.
-    /// What makes a loose `tsk42` in text that store's item.
-    pub fn task_ids(&self) -> Vec<(String, String)> {
+    /// Each store of each model, with how its records' ids look in text, as
+    /// its fill says (`fills.id_pattern`, `fills.loose`) and its model's
+    /// resource names its URIs: what makes `[[<store>:<id>]]`, a bare
+    /// `[[id]]` the pattern matches, and a loose id in running text, one of
+    /// its records. In fill order: the first told of wins an id two match.
+    pub fn id_patterns(&self) -> Vec<oxplow_domain::uri::resources::RecordIds> {
         self.fills
             .iter()
-            .filter(|f| {
-                self.models
-                    .get(&f.model)
-                    .is_some_and(|m| m.decl.resource == oxplow_domain::uri::resources::TASK)
-            })
-            .filter_map(|f| f.id_pattern.as_ref().map(|p| (f, p)))
-            .flat_map(|(f, p)| f.stores.iter().map(move |s| (s.clone(), p.clone())))
-            .collect()
-    }
-
-    /// Each store of the knowledge model (one whose resource is
-    /// `oxplow/knowledge`) with how its page ids look in text, when its fill
-    /// says: what makes `[[<store>:<id>]]`, and a bare `[[id]]` the pattern
-    /// matches, one of its pages.
-    pub fn knowledge_stores(&self) -> Vec<(String, Option<String>)> {
-        self.fills
-            .iter()
-            .filter(|f| {
-                self.models
-                    .get(&f.model)
-                    .is_some_and(|m| m.decl.resource == oxplow_domain::uri::resources::KNOWLEDGE)
-            })
-            .flat_map(|f| {
+            .filter_map(|f| self.models.get(&f.model).map(|m| (f, m)))
+            .flat_map(|(f, m)| {
                 f.stores
                     .iter()
-                    .map(move |s| (s.clone(), f.id_pattern.clone()))
+                    .map(move |store| oxplow_domain::uri::resources::RecordIds {
+                        resource: m.decl.resource.clone(),
+                        store: store.clone(),
+                        store_param: m.decl.store_param.clone(),
+                        key: m.decl.key.clone(),
+                        pattern: f.id_pattern.clone(),
+                        loose: f.loose,
+                    })
             })
             .collect()
     }
@@ -696,6 +688,7 @@ mod tests {
             stores: vec!["shelf-folder".into()],
             fields: vec![],
             id_pattern: None,
+            loose: false,
             stages: vec![],
             files: None,
         });
@@ -784,35 +777,46 @@ mod tests {
     }
 
     #[test]
-    fn a_task_models_stores_name_their_id_patterns() {
+    fn every_store_names_its_id_patterns_by_its_models_resource() {
+        use oxplow_domain::uri::resources::RecordIds;
         let mut r = registry();
         r.fills[0].id_pattern = Some("bk[0-9]+".into());
-        assert!(r.task_ids().is_empty(), "shelf/book isn't a task model");
-        let mut task = r.models["shelf/book"].clone();
-        task.decl.resource = oxplow_domain::uri::resources::TASK.into();
-        r.models.insert("x/task".into(), task);
-        r.fills.push(FillSpec {
-            extension: "tracker".into(),
-            model: "x/task".into(),
-            stores: vec!["tracker".into()],
-            fields: vec![],
-            id_pattern: Some("tsk[0-9]+".into()),
-            stages: vec![],
-            files: None,
-        });
-        r.fills.push(FillSpec {
-            extension: "quiet".into(),
-            model: "x/task".into(),
-            stores: vec!["quiet".into()],
-            fields: vec![],
-            id_pattern: None,
-            stages: vec![],
-            files: None,
-        });
+        let book = r.models["shelf/book"].decl.clone();
         assert_eq!(
-            r.task_ids(),
-            vec![("tracker".to_string(), "tsk[0-9]+".to_string())]
+            r.id_patterns(),
+            vec![RecordIds {
+                resource: book.resource.clone(),
+                store: r.fills[0].stores[0].clone(),
+                store_param: book.store_param.clone(),
+                key: book.key.clone(),
+                pattern: Some("bk[0-9]+".into()),
+                loose: false,
+            }]
         );
+        // A second model, filled loosely by one store and quietly by another.
+        let mut other = r.models["shelf/book"].clone();
+        other.decl.resource = "acme/ticket".into();
+        other.decl.store_param = "queue".into();
+        r.models.insert("x/ticket".into(), other);
+        let fill = |store: &str, pattern: Option<&str>, loose| FillSpec {
+            extension: store.into(),
+            model: "x/ticket".into(),
+            stores: vec![store.into()],
+            fields: vec![],
+            id_pattern: pattern.map(str::to_string),
+            loose,
+            stages: vec![],
+            files: None,
+        };
+        r.fills.push(fill("tracker", Some("tsk[0-9]+"), true));
+        r.fills.push(fill("quiet", None, false));
+        let all = r.id_patterns();
+        assert_eq!(all.len(), 3);
+        assert_eq!(
+            (&all[1].resource[..], &all[1].store_param[..], all[1].loose),
+            ("acme/ticket", "queue", true)
+        );
+        assert_eq!(all[2].pattern, None);
     }
 
     fn output(v: Value) -> ModelOutput {

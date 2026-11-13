@@ -1329,17 +1329,17 @@ commands:
     example: {"stream": "str1", "uri": "oxplow:oxplow/file?path=src/lib.rs", "line": 10, "col": 5, "new_name": "Gadget"}
   # handoffs.write
   - name: handoff.send
-    summary: "Hand work to another open thread (any stream's): what it is and what its agent needs to know, and the task it hands over, if any. The thread's agent is given it at its next prompt; the person sees it at once. Nothing wakes an agent. Returns the handoff and `link_warnings`."
+    summary: "Hand work to another open thread (any stream's): what it is and what its agent needs to know, and what it is about (the URI of any record), if anything. The thread's agent is given it at its next prompt; the person sees it at once. Nothing wakes an agent. Returns the handoff and `link_warnings`."
     scope: handoffs.write
     op: send
-    example: {"to_thread": "thr4", "task": "oxplow:oxplow/task?id=tsk12&provider=oxtask", "body": "The parser fix is in; the remaining failure is the timezone case in [[src/dates.rs]]."}
+    example: {"to_thread": "thr4", "about": "oxplow:oxplow/commit?sha=4c44d495", "body": "The parser fix is in; the remaining failure is the timezone case in [[src/dates.rs]]."}
   - name: handoff.resolve
-    summary: "Take or decline a handoff to your thread. Taking one moves its task onto your thread. Its sender reads the note."
+    summary: "Take or decline a handoff to your thread. Its sender reads the note. What taking one does to what it is about is an extension's (oxplow-bundled moves a task onto your thread)."
     scope: handoffs.write
     op: resolve
     example: {"handoff": "hnd3", "outcome": "taken"}
   - name: handoff.settle
-    summary: "Record how a handoff ended: `taken` or `declined` (its recipient; `oxplow.handoff.resolve` also moves its task), `withdrawn` (its sender), each only while open; `open` again undoes it."
+    summary: "Record how a handoff ended: `taken` or `declined` (its recipient), `withdrawn` (its sender), each only while open; `open` again undoes it."
     scope: handoffs.write
     op: settle
     example: {"handoff": "hnd3", "state": "withdrawn", "note": "Fixed it here after all."}

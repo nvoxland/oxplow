@@ -258,7 +258,7 @@ async fn comment_and_note_reads_over_fresh_project() {
     );
     assert!(commands::generated::list_comments_for_target(
         app.state(),
-        oxplow_domain::uri::build::knowledge_uri("oxwiki", "some-page")
+        "oxplow:oxplow/knowledge?id=some-page&store=oxwiki".to_string()
     )
     .await
     .unwrap()
@@ -272,7 +272,7 @@ async fn page_ref_reads_empty_for_fresh_project() {
     let app = TestApp::build().await;
     assert!(commands::generated::list_backlinks(
         app.state(),
-        oxplow_domain::uri::build::knowledge_uri("oxwiki", "slug"),
+        "oxplow:oxplow/knowledge?id=slug&store=oxwiki".to_string(),
         None
     )
     .await
@@ -280,7 +280,7 @@ async fn page_ref_reads_empty_for_fresh_project() {
     .is_empty());
     assert!(commands::generated::list_outbound(
         app.state(),
-        oxplow_domain::uri::build::task_uri("oxtask", "tsk1"),
+        "oxplow:oxplow/task?id=tsk1&provider=oxtask".to_string(),
         Some(10)
     )
     .await

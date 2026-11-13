@@ -1889,14 +1889,16 @@ None is cross-thread, visible to the person, and acknowledged.
   kind are the actor's, never an input. **To** an open thread, never a
   session (the thread outlives its processes), any stream's: a handoff
   is knowledge, not a write into that worktree. To the sender's own
-  thread is refused ("a note is for that"). An optional **task** on
-  the active list (a loose id is canonicalised), and a Markdown **body**
+  thread is refused ("a note is for that"). An optional **about**: the URI of a record of any
+  resource, which its resource's own `resolve` dataset must hold (a resource
+  with none is taken as written); the prompt shows its title through that
+  dataset. And a Markdown **body**
   whose `[[…]]` links are `page_ref` edges, checked like a note's
   (`link_warnings`) and restated by the boot repair. Searchable
   (`v_search_handoff`, under the recipient's stream).
 - **Commands**, all `Record` and open to every invoker (scope
-  `handoffs.write`): `oxplow.handoff.send { to_thread, body, task?,
-  from_thread? }` logs `handoff.sent@2`, not undoable.
+  `handoffs.write`): `oxplow.handoff.send { to_thread, body, about?,
+  from_thread? }` logs `handoff.sent@3` (v2 named `about` `task`; it upcasts), not undoable.
   `oxplow.handoff.settle { handoff, state, note? }` is the record of how
   it ended — `taken` / `declined` by the recipient thread, `withdrawn` by
   the sender, each only while `open`, and `open` again by whoever settled
@@ -1904,8 +1906,9 @@ None is cross-thread, visible to the person, and acknowledged.
   `oxplow.handoff.resolve { handoff, outcome: taken | declined, note? }`
   is how a recipient takes one: a native composite that checks the same
   rule (`may_settle`) against the run's actor before it composes, then
-  composes the settle. Moving a taken handoff's task onto the recipient
-  thread is bundled's (it reacts to `handoff.settled@2`). A decline
+  composes the settle. What taking one does to what it is about is an
+  extension's: oxplow-bundled moves a task onto the recipient thread (it
+  reacts to `handoff.settled@2` and acts only when `about` is a task). A decline
   undoes.
 - **Thread notes stay as they are.** They were the candidate carrier and
   don't fit: a note belongs to its writer's thread, has no recipient,
@@ -1949,8 +1952,9 @@ agent's `oxplow.handoff.send` still works and there is no menu entry):
   touched; it stays derived from agent activity.
 
 foundation's fixture `taking-a-handoff-moves-its-task-to-the-receiving-thread`
-checks it: a handoff with a task is open with the task on the sender's
-thread; taken, the task is on the receiver's.
+checks it: a handoff about a task is open with the task on the sender's
+thread; taken, the task is on the receiver's. bundled's fixture adds a
+handoff about something that is not a task, which taking changes nothing for.
 
 **Nothing wakes a model.** oxplow never opens an inbox socket, a channel,
 a server prompt or `turn/start` for a handoff: those are Drive on an

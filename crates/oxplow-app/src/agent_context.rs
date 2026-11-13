@@ -755,6 +755,35 @@ pub fn basket_block(items: &[oxplow_db::thread_context_store::ContextItem]) -> S
 /// through its ref.
 pub const HANDOFF_BODY_IN_CONTEXT: usize = 1_500;
 
+/// How a handoff's `about` reads in the prompt: its title through its
+/// resource's own dataset (`resolve:`, `title:`), in quotes with its URI;
+/// the URI alone when nothing holds a title for it.
+async fn about_label(svc: &Services, about: &str) -> String {
+    use oxplow_db::semantic_layer::SqlCell;
+    let titled = async {
+        let uri = oxplow_domain::uri::OxplowUri::parse(about).ok()?;
+        let (view, title) = crate::ref_resolver::resolve_view(svc, &uri.resource().to_string())?;
+        let out = svc
+            .sql
+            .query_sql(
+                &format!("SELECT {title} FROM {view} WHERE uri = ?1"),
+                vec![SqlCell::Text(uri.identity())],
+                None,
+            )
+            .await
+            .ok()?;
+        match out.rows.first()?.first()? {
+            SqlCell::Text(t) => Some(t.clone()),
+            _ => None,
+        }
+    }
+    .await;
+    match titled {
+        Some(t) => format!("\"{t}\" (`{about}`)"),
+        None => format!("`{about}`"),
+    }
+}
+
 /// The open handoffs to `thread` no agent was given yet, as one
 /// `<handoffs>` block and their ids, still undelivered: each reaches the
 /// thread's agents once, at the first prompt that carries it — never with
@@ -771,22 +800,15 @@ async fn handoffs(svc: &Services, thread: ThreadId) -> Option<(String, Vec<Hando
         }
     };
     let ids: Vec<HandoffId> = taken.iter().map(|h| h.id).collect();
-    // How the person sees each: its sender's thread and session, its item.
-    // Its task's title through the task resource's own dataset.
-    let (task_view, task_title) =
-        crate::ref_resolver::resolve_view(svc, oxplow_domain::uri::resources::TASK)
-            .unwrap_or_else(|| ("(SELECT NULL AS uri, NULL AS title)".into(), "title".into()));
-    let labels: HashMap<String, (String, Option<String>, Option<String>)> = match svc
+    // How the person sees each: its sender's thread and session.
+    let labels: HashMap<String, (String, Option<String>)> = match svc
         .sql
         .query_sql(
-            &format!(
-                "SELECT h.uri, t.title, s.display_name, w.{task_title}
-                   FROM v_handoff h
-                   JOIN v_thread t ON t.id = h.from_thread_id
-                   LEFT JOIN v_agent_session s ON s.id = h.from_session_id
-                   LEFT JOIN {task_view} w ON w.uri = h.task
-                  WHERE h.to_thread_id = ?1"
-            ),
+            "SELECT h.uri, t.title, s.display_name
+               FROM v_handoff h
+               JOIN v_thread t ON t.id = h.from_thread_id
+               LEFT JOIN v_agent_session s ON s.id = h.from_session_id
+              WHERE h.to_thread_id = ?1",
             vec![SqlCell::Int(thread.value())],
             None,
         )
@@ -799,7 +821,7 @@ async fn handoffs(svc: &Services, thread: ThreadId) -> Option<(String, Vec<Hando
             };
             out.rows
                 .iter()
-                .filter_map(|r| Some((text(&r[0])?, (text(&r[1])?, text(&r[2]), text(&r[3])))))
+                .filter_map(|r| Some((text(&r[0])?, (text(&r[1])?, text(&r[2])))))
                 .collect()
         }
         Err(err) => {
@@ -809,16 +831,17 @@ async fn handoffs(svc: &Services, thread: ThreadId) -> Option<(String, Vec<Hando
     };
     let mut s = String::from(
         "<handoffs>\nWork handed to this thread. When you take one on or decline it, say so with \
-         `oxplow.handoff.resolve { handoff, outcome: taken | declined, note? }`: taking one \
-         moves its task onto this thread, and its sender reads the note.\n",
+         `oxplow.handoff.resolve { handoff, outcome: taken | declined, note? }`: its sender \
+         reads the note, and taking one that is about a task moves that task onto this thread.\n",
     );
     for h in taken {
         let r = oxplow_domain::uri::build::handoff_uri(h.id);
-        let (from_title, from_name, item_title) = labels.get(&r).cloned().unwrap_or_default();
+        let (from_title, from_name) = labels.get(&r).cloned().unwrap_or_default();
         let by = from_name.unwrap_or_else(|| "the person".into());
-        let item = item_title
-            .map(|t| format!("; task \"{t}\""))
-            .unwrap_or_default();
+        let item = match &h.about {
+            Some(about) => format!("; about {}", about_label(svc, about).await),
+            None => String::new(),
+        };
         s.push_str(&format!(
             "\n- `{r}` from thread {from_title} (`{}`), by {by}, {}{item}:\n",
             h.from_thread_id, h.sent_at

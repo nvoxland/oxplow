@@ -1983,27 +1983,45 @@ impl EventType for UiOpErrorDismissed {
     type Payload = UiOpErrorMarkV1;
 }
 
-/// `handoff.sent@2`: work was handed from one thread to another
+/// `handoff.sent@3`: work was handed from one thread to another
 /// (`oxplow.handoff.send`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct HandoffSentV2 {
+pub struct HandoffSentV3 {
     /// The handoff (`hnd1`).
     pub handoff: String,
     /// The sending thread (`thr3`).
     pub from_thread: String,
     /// The receiving thread (`thr4`).
     pub to_thread: String,
-    /// The task it hands over, when it names one.
+    /// What it is about, when it names one: the URI of a record of any
+    /// resource (a task, a page).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub task: Option<String>,
+    pub about: Option<String>,
 }
 
 pub struct HandoffSent;
 impl EventType for HandoffSent {
     const TYPE: &'static str = "handoff.sent";
-    const V: u32 = 2;
-    type Payload = HandoffSentV2;
+    const V: u32 = 3;
+    type Payload = HandoffSentV3;
+    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
+        match from_v {
+            // v2 is v3 with `about` named `task`.
+            2 => {
+                let mut payload = payload;
+                if let Some(object) = payload.as_object_mut() {
+                    if let Some(task) = object.remove("task") {
+                        object.insert("about".into(), task);
+                    }
+                }
+                Ok(payload)
+            }
+            _ => Err(DomainError::Invalid(format!(
+                "handoff.sent@{from_v} has no upcast"
+            ))),
+        }
+    }
 }
 
 /// `handoff.settled@2`: a handoff's state moved (`oxplow.handoff.settle`):
@@ -2172,7 +2190,7 @@ mod tests {
                 ("file.directory_created", 1),
                 ("file.renamed", 1),
                 ("file.saved", 1),
-                ("handoff.sent", 2),
+                ("handoff.sent", 3),
                 ("handoff.settled", 2),
                 ("record.read", 1),
                 ("snapshot.ref_drifted", 1),
@@ -2203,6 +2221,23 @@ mod tests {
         assert_eq!(r.latest("task.created"), Some(2));
         assert_eq!(r.latest("agent.turn.ended"), Some(5));
         assert_eq!(r.owner("config.changed", 2), Some(None));
+    }
+
+    /// A handoff sent before `about` was named `task` still reads: its
+    /// task is what it is about.
+    #[test]
+    fn a_v2_handoff_sent_upcasts_its_task_to_about() {
+        let r = EventSchemaRegistry::core();
+        let (v, payload) = r
+            .upcast_to_latest(
+                "handoff.sent",
+                2,
+                serde_json::json!({ "handoff": "hnd1", "from_thread": "thr1", "to_thread": "thr2", "task": "oxplow:acme/t?id=1" }),
+            )
+            .unwrap();
+        assert_eq!(v, 3);
+        assert_eq!(payload["about"], "oxplow:acme/t?id=1");
+        assert!(payload.get("task").is_none());
     }
 
     #[test]

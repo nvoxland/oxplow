@@ -1,8 +1,15 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`handoff.sent@2`: work was handed from one thread to another\n(`oxplow.handoff.send`).",
+  "description": "`handoff.sent@3`: work was handed from one thread to another\n(`oxplow.handoff.send`).",
   "properties": {
+    "about": {
+      "description": "What it is about, when it names one: the URI of a record of any\nresource (a task, a page).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "from_thread": {
       "description": "The sending thread (`thr3`).",
       "type": "string"
@@ -10,13 +17,6 @@
     "handoff": {
       "description": "The handoff (`hnd1`).",
       "type": "string"
-    },
-    "task": {
-      "description": "The task it hands over, when it names one.",
-      "type": [
-        "string",
-        "null"
-      ]
     },
     "to_thread": {
       "description": "The receiving thread (`thr4`).",
@@ -28,6 +28,6 @@
     "from_thread",
     "to_thread"
   ],
-  "title": "HandoffSentV2",
+  "title": "HandoffSentV3",
   "type": "object"
 }

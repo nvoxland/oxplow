@@ -2700,6 +2700,11 @@
           ],
           "default": null
         },
+        "loose": {
+          "description": "Its ids count in running text (`tsk42`), not only inside `[[…]]`\n(`[[some-page]]`): set with `id_pattern`.",
+          "type": "boolean",
+          "default": false
+        },
         "stages": {
           "description": "Its store's workflow, in order: `[{ id, title, bucket }]`, checked\nas a task tracker's stages are.",
           "type": "array",

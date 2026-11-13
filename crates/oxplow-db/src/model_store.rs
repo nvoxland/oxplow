@@ -1860,7 +1860,7 @@ fn restate_edges_tx(
     }
     let pinned = pins(decl);
     let mut edges: Vec<PageRefEdge> = match &row.refs {
-        Some(refs) => model_stated_edges(uri, refs, pinned),
+        Some(refs) => model_stated_edges(kinds, uri, refs, pinned),
         None => decl
             .columns
             .iter()
@@ -2125,8 +2125,8 @@ fn restate_child_edges_tx(
         }
     }
     if comments {
-        types.extend(crate::page_ref_projections::task_comment_ref_types());
-        edges.extend(crate::page_ref_projections::task_comment_edges(
+        types.extend(crate::page_ref_projections::comment_ref_types());
+        edges.extend(crate::page_ref_projections::comment_edges(
             kinds,
             parent,
             bodies.iter().map(String::as_str),

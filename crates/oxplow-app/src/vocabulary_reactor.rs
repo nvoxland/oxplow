@@ -38,18 +38,13 @@ use oxplow_domain::uri::resources::{ResourceDecl, ResourceRegistry};
 /// What the generation needs of the host to build a vocabulary.
 pub struct VocabularyService;
 
-/// What text names through what is in use, from the model registry: the
-/// live task stores' ids (a store's `id_pattern`, how `tsk42` is read) and
-/// the knowledge stores (how `[[<store>:<id>]]` is read, and a bare
-/// `[[id]]` a store's `id_pattern` matches).
+/// What text names through what is in use, from the model registry: every
+/// live store's record ids (a fill's `id_pattern`, how `tsk42` is read when
+/// the fill is `loose`, and a bare `[[id]]` otherwise), through one path.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Recognizers {
-    /// `(store, pattern)` per task store whose ids text may name loosely;
-    /// the first match wins.
-    pub task_ids: Vec<(String, String)>,
-    /// `(store, pattern)` per knowledge store; the pattern, when it says,
-    /// makes a bare id one of its pages.
-    pub knowledge_stores: Vec<(String, Option<String>)>,
+    /// One per live store, in fill order; the first match wins.
+    pub ids: Vec<oxplow_domain::uri::resources::RecordIds>,
 }
 
 /// What one enabled extension brings to the vocabulary.
@@ -97,8 +92,7 @@ impl PreparedVocabulary {
         // The live stores' own id patterns (`fills.id_pattern`).
         let models = crate::models::ModelRegistry::of(snapshot.extensions());
         let recognizers = Recognizers {
-            task_ids: models.task_ids(),
-            knowledge_stores: models.knowledge_stores(),
+            ids: models.id_patterns(),
         };
         Ok(Self {
             generation: snapshot.generation().to_string(),
@@ -128,43 +122,17 @@ impl PreparedVocabulary {
             Ok((mut vocabulary, mut errors)) => {
                 // A bad recognizer rejects the candidate instead of
                 // silently dropping recognition.
-                vocabulary.resources = vocabulary
-                    .resources
-                    .clone()
-                    .without_knowledge_stores()
-                    .without_task_ids();
-                for (store, pattern) in &self.recognizers.knowledge_stores {
-                    match vocabulary
-                        .resources
-                        .clone()
-                        .with_knowledge_store(store, pattern.as_deref())
-                    {
+                vocabulary.resources = vocabulary.resources.clone().without_record_ids();
+                for ids in &self.recognizers.ids {
+                    match vocabulary.resources.clone().with_record_ids(ids.clone()) {
                         Ok(resources) => vocabulary.resources = resources,
                         Err(error) => {
                             errors.entry("<host>".to_string()).or_default().push(
                                 Diagnostic::error(
-                                    "activation.knowledge_id_recognizer",
-                                    format!("knowledge id recognizer: {error}"),
+                                    "activation.record_id_recognizer",
+                                    format!("record id recognizer: {error}"),
                                 ),
                             );
-                        }
-                    }
-                }
-                for (provider, pattern) in &self.recognizers.task_ids {
-                    match vocabulary
-                        .resources
-                        .clone()
-                        .with_task_ids(provider, pattern)
-                    {
-                        Ok(resources) => vocabulary.resources = resources,
-                        Err(error) => {
-                            errors
-                                .entry("<host>".to_string())
-                                .or_default()
-                                .push(Diagnostic::error(
-                                    "activation.task_id_recognizer",
-                                    format!("task id recognizer: {error}"),
-                                ))
                         }
                     }
                 }

@@ -600,7 +600,7 @@ Work handed from one thread to another (`oxplow.handoff.*`,
 [agent-model.md](./agent-model.md) "Handoffs and native messaging"):
 `from_thread_id`, `from_session_id` (NULL for a person or an effect),
 `from_actor` (CHECK `user` / `agent` / `effect` / `job` / `system`),
-`to_thread_id` (CHECK it isn't the sender's), `task` (a ref),
+`to_thread_id` (CHECK it isn't the sender's), `about` (a URI; V37 renamed it from `task`),
 `body`, `sent_at`, `delivered_at` + `delivered_to_session_id` (stamped by
 `SqliteHandoffStore::mark_delivered` once the agent has the prompt or
 injected context that carries it), `state` (CHECK `open` / `taken` / `declined` /
@@ -1206,15 +1206,15 @@ so other owners' rows survive.
 Writers (one per source kind / slice):
 
 The vocabulary speaks of tasks, whichever list they're on (V21
-renamed the `task_…` spellings: a mention is `task_mention` /
-`summary_task_mention`, a link `task_link:<type>`).
+renamed the `task_…` spellings; V36 made a mention of any model's record one
+type: `record_mention` / `comment_record_mention`; a link is `task_link:<type>`).
 
 | Owner | Source | Slice (`ref_type`s) |
 |---|---|---|
-| `model_store::write_tx` (`oxplow-db`), for a model's markdown columns | the row's URI | the body's edges: `file_pin` / `dir_pin` (pinned columns) or `file_mention` / `dir_mention`, `wikilink`, `task_mention`, … |
-| `task_refs::restate_tx` (`oxplow-db`), run by the `page_ref.task` consumer on an item's events and by the boot repair — any list's item, from `task` / `task_link` / `task_comment` | the task's URI, body slice | `task_mention`, `wikilink`, `file_mention`, `dir_mention`, `finding_mention`, `commit_mention` |
+| `model_store::write_tx` (`oxplow-db`), for a model's markdown columns | the row's URI | the body's edges: `file_pin` / `dir_pin` (pinned columns) or `file_mention` / `dir_mention`, `record_mention`, … |
+| `task_refs::restate_tx` (`oxplow-db`), run by the `page_ref.task` consumer on an item's events and by the boot repair — any list's item, from `task` / `task_link` / `task_comment` | the task's URI, body slice | `record_mention`, `file_mention`, `dir_mention`, `finding_mention`, `commit_mention` |
 | (the same) | link slice | `task_link:<type>` — every type with the prefix, the list's own (V28 dropped the CHECK naming oxplow's six) |
-| (the same) | comment slice: the comments' mentions, as the item's own edges (V28 dropped the old `oxtask_note` sources) | `comment_file_ref`, `comment_dir_ref`, `comment_wikilink`, `comment_task_mention`, `comment_finding_mention`, `comment_commit_mention` |
+| (the same) | comment slice: the comments' mentions, as the item's own edges (V28 dropped the old `oxtask_note` sources) | `comment_file_ref`, `comment_dir_ref`, `comment_record_mention`, `comment_finding_mention`, `comment_commit_mention` |
 | `analytics_stores::SqliteCodeQualityStore::append_finding` | the finding's URI | full source |
 | `commit_indexer.rs` (`oxplow-app`) | the commit's URI | full source — diff yields `touched_file`, message yields the same body-mention set |
 

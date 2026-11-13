@@ -42,12 +42,11 @@ describe("graphUriOf", () => {
 describe("humanRefType", () => {
   test("body-mention ref_types all collapse to 'mention'", () => {
     for (const rt of [
-      "wikilink",
+      "record_mention",
       "file_pin",
       "dir_pin",
       "file_mention",
       "dir_mention",
-      "task_mention",
       "finding_mention",
       "commit_mention",
     ]) {
@@ -61,8 +60,7 @@ describe("humanRefType", () => {
     for (const rt of [
       "comment_file_ref",
       "comment_dir_ref",
-      "comment_wikilink",
-      "comment_task_mention",
+      "comment_record_mention",
       "comment_finding_mention",
       "comment_commit_mention",
     ]) {

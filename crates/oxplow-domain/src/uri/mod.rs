@@ -2,8 +2,8 @@
 //!
 //! Given a free-text body (knowledge page, task description, commit
 //! message, task-note, …) extracts the references it makes to other
-//! pages: file paths, directory paths, knowledge pages, task ids
-//! (`tsk<n>`), finding ids (`oxplow:oxplow/finding?id=…`), and git commit shas.
+//! pages: file paths, directory paths, the records of shared models (a
+//! knowledge page, a task: `.context/models.md`), finding ids (`oxplow:oxplow/finding?id=…`), and git commit shas.
 //!
 //! Lives in `oxplow-domain` because it has zero IO and no async — it
 //! takes a `&str` and returns plain data. Every writer that mirrors
@@ -15,15 +15,15 @@
 //!    - `oxplow:oxplow/dir?path=<path>` → directory ref
 //!    - `git:<sha>` → commit ref (also `[[<sha>]]` if 7-40 hex)
 //!    - `oxplow:oxplow/finding?id=<id>` → finding ref
-//!    - `tsk<digits>` → task ref
+//!    - a loose record id a store's fill declares (`tsk42`) → that record
 //!    - `path/with/slash.ext[@version][:line]` → file ref
-//!    - `<store>:<id>` for an enabled knowledge store → that store's page
-//!    - a bare id a knowledge store's fill says is its own → that store's page
+//!    - `<store>:<id>` for a store of a shared model → that store's record
+//!    - a bare id a store's fill says is its own → that store's record
 //!
 //!    Custom display text after `|` is stripped (`[[a/b.ts|label]]`).
 //!
 //! 2. **Inline mentions** — fallback for free-text:
-//!    - bare `tsk<digits>` task ids
+//!    - loose record ids (`tsk42`), for the stores whose fill says `loose`
 //!    - bare `oxplow:oxplow/finding?id=<id>` (with the prefix to disambiguate from words)
 //!    - bare file-shaped paths (slash + 1–6 char extension)
 //!
@@ -69,11 +69,9 @@ pub struct ExtractedRefs {
     pub files: Vec<String>,
     pub files_detail: Vec<FileRefDetail>,
     pub dirs: Vec<String>,
-    /// The knowledge pages it names, as their URIs.
-    pub knowledge: Vec<String>,
-    /// The active task tracker's items it names, as their URIs: `[[…]]` or
-    /// loose, as the list declares its ids.
-    pub tasks: Vec<String>,
+    /// The records of shared models it names (a task, a knowledge page), as
+    /// their URIs: `[[…]]` or loose, as each store's fill declares its ids.
+    pub records: Vec<String>,
     pub findings: Vec<String>,
     pub commits: Vec<String>,
 }
@@ -86,13 +84,13 @@ pub struct ExtractedRefs {
 pub enum Reference {
     File(FileRefDetail),
     Dir(String),
-    /// A knowledge page: its store and the store's page id.
-    Knowledge {
+    /// A record of a shared model: its resource, its store and its id in the
+    /// store.
+    Record {
+        resource: String,
         store: String,
         id: String,
     },
-    /// A task, by its URI.
-    Task(String),
     Finding(String),
     Commit(String),
 }
@@ -148,12 +146,12 @@ fn named(resource: &str, params: &[(&str, &str)], view: &[(&str, &str)]) -> Opti
 /// URI itself and the authoring sugar:
 /// - a declared `<prefix>:<value>` (`git:<sha>`, `oxplow:oxplow/dir?path=<path>`,
 ///   `oxplow:oxplow/finding?id=<id>`, an extension's `pr:12`)
-/// - one of the active task tracker's ids (`tsk42`)
+/// - one of a store's loose ids (`tsk42`), as its fill declares them
 /// - `path/file.ext[@version][:line]` → a file (`@disk` / `@local` mean
 ///   the working tree and add no revision)
-/// - `<store>:<id>` for an enabled knowledge store → that store's page
-/// - a bare 7–40 hex sha → a commit; a bare id one knowledge store's fill
-///   says is its own → that store's page
+/// - `<store>:<id>` for a store of a shared model → that store's record
+/// - a bare 7–40 hex sha → a commit; a bare id a store's fill says is its
+///   own (and not loose) → that store's record
 pub fn canonical_wikilink(resources: &ResourceRegistry, interior: &str) -> Option<OxplowUri> {
     let interior = interior.trim();
     if interior.is_empty() {
@@ -192,13 +190,14 @@ pub fn canonical_wikilink(resources: &ResourceRegistry, interior: &str) -> Optio
         if let Some(u) = u.filter(|u| resources.validate(u).is_ok()) {
             return Some(u);
         }
-        // `<store>:<id>`: an enabled knowledge store's page — after core's
-        // and the declared prefixes and the resource names, which a store id
-        // never shadows (`[[dir:…]]` stays a directory whatever a store is
-        // called).
+        // `<store>:<id>`: a store's record — after core's and the declared
+        // prefixes and the resource names, which a store id never shadows
+        // (`[[dir:…]]` stays a directory whatever a store is called).
         let id = rest.trim();
-        if resources.is_knowledge_store(store) && !id.is_empty() {
-            return named(resources::KNOWLEDGE, &[("store", store), ("id", id)], &[]);
+        if !id.is_empty() {
+            if let Some(uri) = resources.record_uri(store, id) {
+                return OxplowUri::parse(&uri).ok();
+            }
         }
         if resources.for_wikilink(&prefix).is_some()
             || build::expand_short(&format!("{prefix}:{}", rest.trim())).is_some()
@@ -206,9 +205,9 @@ pub fn canonical_wikilink(resources: &ResourceRegistry, interior: &str) -> Optio
             return None;
         }
     }
-    // One of the active task tracker's own ids (`tsk42`, `ENG-12`), as it
-    // declares them; anything else falls through (a slug or path).
-    if let Some(uri) = resources.task_uri_of(interior) {
+    // One of a store's loose ids (`tsk42`, `ENG-12`), as its fill declares
+    // them; anything else falls through (a slug or path).
+    if let Some(uri) = resources.record_uri_of(interior, true) {
         return OxplowUri::parse(&uri).ok();
     }
     // path/file.ext[@version][:line]
@@ -223,7 +222,7 @@ pub fn canonical_wikilink(resources: &ResourceRegistry, interior: &str) -> Optio
         let view: Vec<(&str, &str)> = line.as_deref().map(|l| ("lines", l)).into_iter().collect();
         return named(resources::FILE, &params, &view);
     }
-    // A bare commit sha or a knowledge store's page id. `word:tail` is an attempted
+    // A bare commit sha or a store's own id. `word:tail` is an attempted
     // `prefix:value` with an unknown prefix, not a slug named `word`.
     if interior.contains(':') {
         return None;
@@ -231,8 +230,8 @@ pub fn canonical_wikilink(resources: &ResourceRegistry, interior: &str) -> Optio
     if looks_like_commit_sha(interior) {
         return named(resources::COMMIT, &[("sha", interior)], &[]);
     }
-    // One of a knowledge store's own page ids, as its fill declares them.
-    if let Some(uri) = resources.knowledge_uri_of(interior) {
+    // One of a store's bracket-only ids, as its fill declares them.
+    if let Some(uri) = resources.record_uri_of(interior, false) {
         return OxplowUri::parse(&uri).ok();
     }
     None
@@ -243,49 +242,42 @@ fn first_line(lines: &str) -> Option<u32> {
     lines.split('-').next()?.parse().ok()
 }
 
-impl TryFrom<&OxplowUri> for Reference {
-    type Error = ();
-
-    /// The typed view for the six resources the link checker and graph
-    /// writers handle; others (`request`, `dataset`, …) have no view yet.
-    fn try_from(u: &OxplowUri) -> Result<Self, ()> {
-        let param = |name: &str| u.param(name).map(str::to_string).ok_or(());
+impl Reference {
+    /// The typed view of `u` for the resources the link checker and graph
+    /// writers handle (a record of a shared model among them, as `resources`
+    /// knows its stores); others (`request`, `dataset`, …) have none yet.
+    pub fn of(resources: &ResourceRegistry, u: &OxplowUri) -> Option<Self> {
+        let param = |name: &str| u.param(name).map(str::to_string);
+        if let Some(record) = resources.record_of(u) {
+            return Some(Reference::Record {
+                resource: record.resource,
+                store: record.store,
+                id: record.id,
+            });
+        }
         match u.resource().to_string().as_str() {
-            resources::DIR => Ok(Reference::Dir(param("path")?)),
-            resources::KNOWLEDGE => Ok(Reference::Knowledge {
-                store: param("store")?,
-                id: param("id")?,
-            }),
-            resources::FINDING => Ok(Reference::Finding(param("id")?)),
-            resources::COMMIT => Ok(Reference::Commit(param("sha")?)),
-            resources::TASK => Ok(Reference::Task(u.identity())),
+            resources::DIR => Some(Reference::Dir(param("path")?)),
+            resources::FINDING => Some(Reference::Finding(param("id")?)),
+            resources::COMMIT => Some(Reference::Commit(param("sha")?)),
             resources::FILE => {
                 let version = match u.param("rev").map(|v| v.strip_prefix("git:")) {
                     Some(Some(v)) => RefVersion::Ref(v.to_string()),
-                    Some(None) => return Err(()),
+                    Some(None) => return None,
                     None => RefVersion::Disk,
                 };
                 let line = match u.view().get("lines") {
-                    Some(l) => Some(first_line(l).ok_or(())?),
+                    Some(l) => Some(first_line(l)?),
                     None => None,
                 };
-                Ok(Reference::File(FileRefDetail {
+                Some(Reference::File(FileRefDetail {
                     path: param("path")?,
                     version,
                     line,
                 }))
             }
-            _ => Err(()),
+            _ => None,
         }
     }
-}
-
-/// The typed [`Reference`] a `[[…]]` interior names, if it names one of
-/// the resources that have a typed view. Shared by [`extract`] and
-/// [`classify_wikilinks`] so the graph writer and the link checker never
-/// drift; both go through [`canonical_wikilink`].
-fn classify_interior(resources: &ResourceRegistry, interior: &str) -> Option<Reference> {
-    Reference::try_from(&canonical_wikilink(resources, interior)?).ok()
 }
 
 /// Classify every `[[…]]` wikilink in `body`. Code spans / fenced
@@ -304,7 +296,7 @@ pub fn classify_wikilinks(resources: &ResourceRegistry, body: &str) -> Vec<Class
             continue;
         }
         let canonical = canonical_wikilink(resources, interior);
-        let reference = canonical.as_ref().and_then(|c| Reference::try_from(c).ok());
+        let reference = canonical.as_ref().and_then(|c| Reference::of(resources, c));
         out.push(ClassifiedWikilink {
             raw: interior.to_string(),
             canonical,
@@ -325,8 +317,7 @@ pub fn extract(resources: &ResourceRegistry, body: &str) -> ExtractedRefs {
     let body = masked.as_str();
     let mut files: BTreeSet<String> = BTreeSet::new();
     let mut dirs: BTreeSet<String> = BTreeSet::new();
-    let mut knowledge: BTreeSet<String> = BTreeSet::new();
-    let mut tasks: BTreeSet<String> = BTreeSet::new();
+    let mut records: BTreeSet<String> = BTreeSet::new();
     let mut findings: BTreeSet<String> = BTreeSet::new();
     let mut commits: BTreeSet<String> = BTreeSet::new();
     let mut files_detail: Vec<FileRefDetail> = Vec::new();
@@ -334,7 +325,9 @@ pub fn extract(resources: &ResourceRegistry, body: &str) -> ExtractedRefs {
 
     for cap in find_wikilinks(body) {
         let interior = cap.split('|').next().unwrap_or(cap).trim();
-        match classify_interior(resources, interior) {
+        let canonical = canonical_wikilink(resources, interior);
+        let reference = canonical.as_ref().and_then(|c| Reference::of(resources, c));
+        match reference {
             Some(Reference::Dir(d)) => {
                 dirs.insert(d);
             }
@@ -343,9 +336,6 @@ pub fn extract(resources: &ResourceRegistry, body: &str) -> ExtractedRefs {
             }
             Some(Reference::Finding(id)) => {
                 findings.insert(id);
-            }
-            Some(Reference::Task(uri)) => {
-                tasks.insert(uri);
             }
             Some(Reference::File(detail)) => {
                 if files.insert(detail.path.clone()) {
@@ -359,8 +349,10 @@ pub fn extract(resources: &ResourceRegistry, body: &str) -> ExtractedRefs {
                     }
                 }
             }
-            Some(Reference::Knowledge { store, id }) => {
-                knowledge.insert(build::knowledge_uri(&store, &id));
+            Some(Reference::Record { .. }) => {
+                if let Some(c) = &canonical {
+                    records.insert(c.identity());
+                }
             }
             None => {}
         }
@@ -381,7 +373,7 @@ pub fn extract(resources: &ResourceRegistry, body: &str) -> ExtractedRefs {
             }
         }
     }
-    tasks.extend(resources.find_task_uris(&stripped));
+    records.extend(resources.find_record_uris(&stripped));
     for f in find_inline_findings(&stripped) {
         findings.insert(f);
     }
@@ -390,8 +382,7 @@ pub fn extract(resources: &ResourceRegistry, body: &str) -> ExtractedRefs {
         files: files.into_iter().collect(),
         files_detail,
         dirs: dirs.into_iter().collect(),
-        knowledge: knowledge.into_iter().collect(),
-        tasks: tasks.into_iter().collect(),
+        records: records.into_iter().collect(),
         findings: findings.into_iter().collect(),
         commits: commits.into_iter().collect(),
     }
@@ -768,13 +759,47 @@ fn mask_inline_code(out: &mut String, line: &str) {
 mod tests {
     use super::*;
 
-    /// oxplow-foundation's resources with oxtask as the task tracker
-    /// (`tsk<n>`).
+    /// A store of the task model: `provider` names the store in its URIs.
+    fn tasks(store: &str, pattern: &str) -> resources::RecordIds {
+        resources::RecordIds {
+            resource: "oxplow/task".into(),
+            store: store.into(),
+            store_param: "provider".into(),
+            key: "id".into(),
+            pattern: Some(pattern.into()),
+            loose: true,
+        }
+    }
+
+    /// A store of the knowledge model: `store` names the store in its URIs,
+    /// and its ids count only inside `[[…]]`.
+    fn pages(store: &str, pattern: Option<&str>) -> resources::RecordIds {
+        resources::RecordIds {
+            resource: "oxplow/knowledge".into(),
+            store: store.into(),
+            store_param: "store".into(),
+            key: "id".into(),
+            pattern: pattern.map(str::to_string),
+            loose: false,
+        }
+    }
+
+    fn task_uri(provider: &str, id: &str) -> String {
+        build::of("oxplow/task", &[("id", id), ("provider", provider)])
+    }
+
+    fn page_uri(store: &str, id: &str) -> String {
+        build::of("oxplow/knowledge", &[("id", id), ("store", store)])
+    }
+
+    /// Foundation's resources with oxtask's tasks (`tsk<n>`, loose) and
+    /// oxwiki's pages (kebab-case slugs, in `[[…]]`) recognized.
     fn tasks_kinds() -> ResourceRegistry {
-        resources::with_bundled_knowledge(resources::foundation().clone())
-            .with_task_ids("oxtask", r"tsk\d+")
+        resources::foundation()
+            .clone()
+            .with_record_ids(tasks("oxtask", r"tsk\d+"))
             .unwrap()
-            .with_knowledge_store("oxwiki", Some("[a-z0-9]+(-[a-z0-9]+)*"))
+            .with_record_ids(pages("oxwiki", Some("[a-z0-9]+(-[a-z0-9]+)*")))
             .unwrap()
     }
 
@@ -784,26 +809,26 @@ mod tests {
     fn a_task_stores_ids_are_recognized_as_it_declares_them() {
         let issues = resources::foundation()
             .clone()
-            .with_task_ids("issues", r"[A-Z]+-\d+")
+            .with_record_ids(tasks("issues", r"[A-Z]+-\d+"))
             .unwrap();
         assert_eq!(
-            issues.task_uri_of("ENG-12").as_deref(),
+            issues.record_uri_of("ENG-12", true).as_deref(),
             Some("oxplow:oxplow/task?id=ENG-12&provider=issues")
         );
-        assert_eq!(issues.task_uri_of("ENG-12x"), None);
+        assert_eq!(issues.record_uri_of("ENG-12x", true), None);
         let r = extract(
             &issues,
             "Fixes ENG-12 (see [[ENG-7]]); not XENG-7a or tsk42.",
         );
         assert_eq!(
-            r.tasks,
+            r.records,
             vec![
                 "oxplow:oxplow/task?id=ENG-12&provider=issues".to_string(),
                 "oxplow:oxplow/task?id=ENG-7&provider=issues".to_string()
             ]
         );
         let none = extract(resources::foundation(), "tsk42 [[tsk7]] ENG-12");
-        assert!(none.tasks.is_empty(), "{none:?}");
+        assert!(none.records.is_empty(), "{none:?}");
     }
 
     /// Several stores' ids are recognized at once, each as its own store's
@@ -812,14 +837,14 @@ mod tests {
     fn several_stores_ids_are_recognized_at_once() {
         let both = resources::foundation()
             .clone()
-            .with_task_ids("oxtask", r"tsk\d+")
+            .with_record_ids(tasks("oxtask", r"tsk\d+"))
             .unwrap()
-            .with_task_ids("issues", r"[A-Z]+-\d+")
+            .with_record_ids(tasks("issues", r"[A-Z]+-\d+"))
             .unwrap()
-            .with_task_ids("shadow", r"tsk\d+")
+            .with_record_ids(tasks("shadow", r"tsk\d+"))
             .unwrap();
         assert_eq!(
-            extract(&both, "tsk4 and ENG-2").tasks,
+            extract(&both, "tsk4 and ENG-2").records,
             vec![
                 "oxplow:oxplow/task?id=ENG-2&provider=issues".to_string(),
                 "oxplow:oxplow/task?id=tsk4&provider=oxtask".to_string()
@@ -827,8 +852,8 @@ mod tests {
         );
         assert!(both
             .clone()
-            .without_task_ids()
-            .task_uri_of("tsk4")
+            .without_record_ids()
+            .record_uri_of("tsk4", true)
             .is_none());
     }
 
@@ -853,12 +878,11 @@ mod tests {
         let r = extract(&tasks_kinds(), body);
         assert_eq!(r.dirs, vec!["src/components"]);
         assert_eq!(
-            r.knowledge,
-            vec![build::knowledge_uri("oxwiki", "architecture")]
-        );
-        assert_eq!(
-            r.tasks,
-            vec!["oxplow:oxplow/task?id=tsk42&provider=oxtask".to_string()]
+            r.records,
+            vec![
+                page_uri("oxwiki", "architecture"),
+                task_uri("oxtask", "tsk42")
+            ]
         );
         assert_eq!(r.findings, vec!["fnd-1"]);
         assert_eq!(r.commits, vec!["abcdef0"]);
@@ -868,7 +892,7 @@ mod tests {
     fn bare_hex_in_wikilink_is_commit() {
         let r = extract(&tasks_kinds(), "[[abc1234567]]");
         assert_eq!(r.commits, vec!["abc1234567"]);
-        assert!(r.knowledge.is_empty());
+        assert!(r.records.is_empty());
     }
 
     #[test]
@@ -887,7 +911,7 @@ mod tests {
     fn inline_task_and_finding_mention() {
         let r = extract(&tasks_kinds(), "blocked by tsk42 see finding:fnd-2");
         assert_eq!(
-            r.tasks,
+            r.records,
             vec!["oxplow:oxplow/task?id=tsk42&provider=oxtask".to_string()]
         );
         assert_eq!(r.findings, vec!["fnd-2"]);
@@ -896,14 +920,14 @@ mod tests {
     #[test]
     fn inline_task_rejects_non_digits() {
         let r = extract(&tasks_kinds(), "tskfoo and tsk42abc");
-        assert!(r.tasks.is_empty());
+        assert!(r.records.is_empty());
     }
 
     #[test]
     fn inline_task_with_trailing_punctuation() {
         let r = extract(&tasks_kinds(), "tsk42 fixes issue. also tsk7, see");
         assert_eq!(
-            r.tasks,
+            r.records,
             vec![
                 "oxplow:oxplow/task?id=tsk42&provider=oxtask".to_string(),
                 "oxplow:oxplow/task?id=tsk7&provider=oxtask".to_string()
@@ -913,8 +937,15 @@ mod tests {
 
     #[test]
     fn wikilink_task_rejects_non_digits() {
+        // Not a task's id; a slug the page store's pattern matches is a page.
         let r = extract(&tasks_kinds(), "[[tsknotanumber]] [[tsk42abc]]");
-        assert!(r.tasks.is_empty());
+        assert_eq!(
+            r.records,
+            vec![
+                page_uri("oxwiki", "tsk42abc"),
+                page_uri("oxwiki", "tsknotanumber")
+            ]
+        );
     }
 
     #[test]
@@ -934,16 +965,16 @@ mod tests {
     /// that isn't enabled names nothing, and a bare id is the store whose pattern matches it.
     #[test]
     fn a_store_qualified_wikilink_names_that_stores_page() {
-        let kinds = tasks_kinds().with_knowledge_store("vault", None).unwrap();
+        let kinds = tasks_kinds().with_record_ids(pages("vault", None)).unwrap();
         let r = extract(
             &kinds,
             "see [[vault:Notes/Design Doc]], [[gone:x]] and [[intro]]",
         );
         assert_eq!(
-            r.knowledge,
+            r.records,
             vec![
-                build::knowledge_uri("vault", "Notes/Design Doc"),
-                build::knowledge_uri("oxwiki", "intro"),
+                page_uri("vault", "Notes/Design Doc"),
+                page_uri("oxwiki", "intro"),
             ]
         );
         let links = classify_wikilinks(&kinds, "[[gone:x]]");
@@ -959,24 +990,23 @@ mod tests {
     #[test]
     fn a_store_id_never_shadows_a_prefix() {
         let kinds = tasks_kinds()
-            .with_knowledge_store("dir", None)
+            .with_record_ids(pages("dir", None))
             .unwrap()
-            .with_knowledge_store("git", None)
+            .with_record_ids(pages("git", None))
             .unwrap()
-            .with_knowledge_store("commit", None)
+            .with_record_ids(pages("commit", None))
             .unwrap();
         let r = extract(&kinds, "[[dir:src]] [[git:abc1234]] [[commit:abc1234]]");
         assert_eq!(r.dirs, vec!["src"]);
         assert_eq!(r.commits, vec!["abc1234"]);
-        assert!(r.knowledge.is_empty(), "{:?}", r.knowledge);
+        assert!(r.records.is_empty(), "{:?}", r.records);
     }
 
     #[test]
     fn wikilink_task_form_does_not_become_slug() {
         let r = extract(&tasks_kinds(), "[[tsk7]]");
-        assert!(r.knowledge.is_empty());
         assert_eq!(
-            r.tasks,
+            r.records,
             vec!["oxplow:oxplow/task?id=tsk7&provider=oxtask".to_string()]
         );
     }
@@ -991,13 +1021,16 @@ mod tests {
         let refs: Vec<Option<Reference>> = links.into_iter().map(|l| l.reference).collect();
         assert_eq!(
             refs[0],
-            Some(Reference::Task(
-                "oxplow:oxplow/task?id=tsk7&provider=oxtask".into()
-            ))
+            Some(Reference::Record {
+                resource: "oxplow/task".into(),
+                store: "oxtask".into(),
+                id: "tsk7".into()
+            })
         );
         assert_eq!(
             refs[1],
-            Some(Reference::Knowledge {
+            Some(Reference::Record {
+                resource: "oxplow/knowledge".into(),
                 store: "oxwiki".into(),
                 id: "architecture".into()
             })
@@ -1026,9 +1059,11 @@ mod tests {
         assert_eq!(links[0].raw, "tsk7");
         assert_eq!(
             links[0].reference,
-            Some(Reference::Task(
-                "oxplow:oxplow/task?id=tsk7&provider=oxtask".into()
-            ))
+            Some(Reference::Record {
+                resource: "oxplow/task".into(),
+                store: "oxtask".into(),
+                id: "tsk7".into()
+            })
         );
     }
 
@@ -1039,7 +1074,7 @@ mod tests {
         // itself does not gatekeep — that's the renderer's job.
         let r = extract(&tasks_kinds(), "[[tsk0]] inline tsk0");
         assert_eq!(
-            r.tasks,
+            r.records,
             vec!["oxplow:oxplow/task?id=tsk0&provider=oxtask".to_string()]
         );
     }
@@ -1049,7 +1084,7 @@ mod tests {
         // The wikilink grammar accepts only ASCII digits — the leading
         // `-` makes the body fail the digit check.
         let r = extract(&tasks_kinds(), "[[tsk-1]] inline tsk-1");
-        assert!(r.tasks.is_empty());
+        assert_eq!(r.records, vec![page_uri("oxwiki", "tsk-1")]);
     }
 
     /// An id is the list's declared shape, not a number: a long one is
@@ -1058,12 +1093,12 @@ mod tests {
     fn a_long_task_id_is_an_id() {
         let r = extract(&tasks_kinds(), "see tsk99999999999999999999 in passing");
         assert_eq!(
-            r.tasks,
+            r.records,
             vec!["oxplow:oxplow/task?id=tsk99999999999999999999&provider=oxtask".to_string()]
         );
         let r = extract(&tasks_kinds(), "[[tsk99999999999999999999]]");
         assert_eq!(
-            r.tasks,
+            r.records,
             vec!["oxplow:oxplow/task?id=tsk99999999999999999999&provider=oxtask".to_string()]
         );
     }
@@ -1100,7 +1135,7 @@ mod tests {
             &tasks_kinds(),
             "normalized to the `[[some-slug]]` form, see `[[src/foo.rs]]`",
         );
-        assert!(r.knowledge.is_empty(), "got {:?}", r.knowledge);
+        assert!(r.records.is_empty(), "got {:?}", r.records);
         assert!(r.files.is_empty(), "got files {:?}", r.files);
     }
 
@@ -1109,10 +1144,7 @@ mod tests {
         let body = "before\n```\n[[src/foo.rs]] and [[in-fence-slug]]\n```\nafter [[real-slug]]";
         let r = extract(&tasks_kinds(), body);
         assert!(r.files.is_empty(), "got files {:?}", r.files);
-        assert_eq!(
-            r.knowledge,
-            vec![build::knowledge_uri("oxwiki", "real-slug")]
-        );
+        assert_eq!(r.records, vec![page_uri("oxwiki", "real-slug")]);
     }
 
     #[test]
@@ -1131,10 +1163,7 @@ mod tests {
     fn unterminated_backtick_does_not_swallow_rest() {
         // A lone backtick is not a code span — refs after it still parse.
         let r = extract(&tasks_kinds(), "a stray ` then [[real-slug]]");
-        assert_eq!(
-            r.knowledge,
-            vec![build::knowledge_uri("oxwiki", "real-slug")]
-        );
+        assert_eq!(r.records, vec![page_uri("oxwiki", "real-slug")]);
     }
 
     #[test]
@@ -1153,5 +1182,83 @@ mod tests {
             "got {:?}",
             r.files,
         );
+    }
+
+    /// Two made-up models, nothing core knows: tickets whose ids count in
+    /// running text, notes whose ids count only inside `[[…]]`. Each names
+    /// its store in its own param; the first told of wins an id both match.
+    fn tickets_and_notes() -> ResourceRegistry {
+        let ids =
+            |resource: &str, store: &str, param: &str, pattern: &str, loose| resources::RecordIds {
+                resource: resource.into(),
+                store: store.into(),
+                store_param: param.into(),
+                key: "id".into(),
+                pattern: Some(pattern.into()),
+                loose,
+            };
+        ResourceRegistry::default()
+            .with_record_ids(ids("acme/ticket", "desk", "queue", r"TK-\d+", true))
+            .unwrap()
+            .with_record_ids(ids("acme/note", "jots", "book", "[a-z]+(-[a-z]+)*", false))
+            .unwrap()
+            .with_record_ids(ids("acme/note", "second", "book", "[a-z]+", false))
+            .unwrap()
+    }
+
+    #[test]
+    fn a_record_is_named_by_its_models_resource_and_store_param() {
+        let kinds = tickets_and_notes();
+        let r = extract(&kinds, "Fix TK-12 (also [[TK-7]]), see [[some-note]].");
+        assert_eq!(
+            r.records,
+            vec![
+                "oxplow:acme/note?book=jots&id=some-note".to_string(),
+                "oxplow:acme/ticket?id=TK-12&queue=desk".to_string(),
+                "oxplow:acme/ticket?id=TK-7&queue=desk".to_string(),
+            ]
+        );
+        let uri = canonical_wikilink(&kinds, "TK-3").unwrap();
+        assert_eq!(
+            Reference::of(&kinds, &uri),
+            Some(Reference::Record {
+                resource: "acme/ticket".into(),
+                store: "desk".into(),
+                id: "TK-3".into()
+            })
+        );
+    }
+
+    /// A loose id counts in running text; a bracket-only one counts only
+    /// inside `[[…]]`. Both count as `[[<store>:<id>]]`.
+    #[test]
+    fn only_a_loose_pattern_counts_outside_brackets() {
+        let kinds = tickets_and_notes();
+        assert_eq!(
+            extract(&kinds, "TK-1 and some-note and jots:x").records,
+            vec!["oxplow:acme/ticket?id=TK-1&queue=desk".to_string()]
+        );
+        assert_eq!(
+            extract(&kinds, "[[jots:x]] [[desk:TK-9]]").records,
+            vec![
+                "oxplow:acme/note?book=jots&id=x".to_string(),
+                "oxplow:acme/ticket?id=TK-9&queue=desk".to_string(),
+            ]
+        );
+    }
+
+    /// An id two stores of different models match belongs to the first told
+    /// of; one that matches neither is no record.
+    #[test]
+    fn the_first_matching_store_wins() {
+        let kinds = tickets_and_notes();
+        assert_eq!(
+            kinds.record_uri_of("word", false).as_deref(),
+            Some("oxplow:acme/note?book=jots&id=word")
+        );
+        assert_eq!(kinds.record_uri_of("Word", false), None);
+        assert_eq!(kinds.record_uri_of("TK-1", false), None);
+        assert!(kinds.is_record_store("second"));
+        assert!(!kinds.is_record_store("nowhere"));
     }
 }

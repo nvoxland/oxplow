@@ -24,10 +24,6 @@ pub const BRANCH: &str = "oxplow/branch";
 pub const FILE: &str = "oxplow/file";
 pub const DIR: &str = "oxplow/dir";
 pub const SYMBOL: &str = "oxplow/symbol";
-pub const TASK: &str = "oxplow/task";
-/// A knowledge store's page: `store` (the store's id) and `id` (the
-/// store's own page id).
-pub const KNOWLEDGE: &str = "oxplow/knowledge";
 pub const COMMENT: &str = "oxplow/comment";
 pub const EVENT: &str = "oxplow/event";
 pub const PAGE: &str = "oxplow/page";
@@ -233,122 +229,164 @@ struct Entry {
 pub struct ResourceRegistry {
     resources: BTreeMap<ResourceName, Entry>,
     wikilinks: BTreeMap<String, ResourceName>,
-    /// The task stores' own ids, as each declares them: what makes a loose
-    /// `tsk42` (or `ENG-12`) in text one of a store's items. The first told
-    /// of wins an id two would match.
-    task_ids: Vec<TaskIds>,
-    /// The knowledge stores (the stores of the knowledge model), each with
-    /// how its page ids look when it says: what makes `[[<store>:<id>]]`, and
-    /// a bare `[[slug]]` its pattern matches, one of its pages. The first
-    /// told of wins a bare id two would match.
-    knowledge_ids: Vec<KnowledgeIds>,
+    /// The stores of the shared models, each with how its records' ids look
+    /// in text (`fills.id_pattern`): what makes `[[<store>:<id>]]`, a bare
+    /// `[[id]]` and (when the fill says `loose`) a loose `tsk42`, one of its
+    /// records. The first told of wins an id two would match.
+    records: Vec<RecordStore>,
 }
 
-/// A knowledge store and how its page ids look, as its fill declares them.
+/// How one store of a shared model names its records in text: set by the
+/// app from the models' fills (`fills.id_pattern`, `fills.loose`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordIds {
+    /// The model's resource (its records' URIs are of it).
+    pub resource: String,
+    /// The store's id.
+    pub store: String,
+    /// The param of the resource's URIs that names the store (`store`, `provider`).
+    pub store_param: String,
+    /// The param that names the record in its store (`id`).
+    pub key: String,
+    /// How its ids look, a regex matched whole; none: only
+    /// `[[<store>:<id>]]` names its records.
+    pub pattern: Option<String>,
+    /// A match in running text counts, not only one inside `[[…]]`.
+    pub loose: bool,
+}
+
+impl RecordIds {
+    /// A store's records, named by one `id` param beside `store_param`.
+    pub fn new(
+        resource: &str,
+        store: &str,
+        store_param: &str,
+        pattern: Option<&str>,
+        loose: bool,
+    ) -> Self {
+        Self {
+            resource: resource.into(),
+            store: store.into(),
+            store_param: store_param.into(),
+            key: "id".into(),
+            pattern: pattern.map(str::to_string),
+            loose,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
-struct KnowledgeIds {
-    store: String,
-    /// The pattern, matched whole; none: only `[[<store>:<id>]]` names its pages.
+struct RecordStore {
+    ids: RecordIds,
     whole: Option<Regex>,
 }
 
-/// A task tracker's ids, as it declares them (`TaskTracker::id_pattern`).
-#[derive(Debug, Clone)]
-struct TaskIds {
-    provider: String,
-    /// The pattern, matched whole.
-    whole: Regex,
+/// A record a URI names: its resource, its store and its id in the store.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordRef {
+    pub resource: String,
+    pub store: String,
+    pub id: String,
 }
 
 impl ResourceRegistry {
-    /// This registry also recognizing `provider`'s ids (`pattern`, a regex
-    /// matched whole), after those it already does: set by the app.
-    pub fn with_task_ids(mut self, provider: &str, pattern: &str) -> Result<Self, ResourceError> {
-        let whole =
-            Regex::new(&format!("^(?:{pattern})$")).map_err(|e| ResourceError::BadPattern {
-                resource: TASK.into(),
-                param: "id".into(),
-                error: e.to_string(),
-            })?;
-        self.task_ids.push(TaskIds {
-            provider: provider.into(),
-            whole,
-        });
-        Ok(self)
-    }
-
-    /// This registry recognizing no task store's ids.
-    pub fn without_task_ids(mut self) -> Self {
-        self.task_ids.clear();
-        self
-    }
-
-    /// This registry also recognizing `store`'s pages: `[[<store>:<id>]]`,
-    /// and a bare `[[id]]` when `pattern` (a regex matched whole) says it is
-    /// one of its ids. Set by the app from the knowledge model's fills.
-    pub fn with_knowledge_store(
-        mut self,
-        store: &str,
-        pattern: Option<&str>,
-    ) -> Result<Self, ResourceError> {
-        let whole = pattern
+    /// This registry also recognizing `ids`' store's records, after those of
+    /// the stores it already does.
+    pub fn with_record_ids(mut self, ids: RecordIds) -> Result<Self, ResourceError> {
+        let whole = ids
+            .pattern
+            .as_deref()
             .map(|p| Regex::new(&format!("^(?:{p})$")))
             .transpose()
             .map_err(|e| ResourceError::BadPattern {
-                resource: KNOWLEDGE.into(),
-                param: "id".into(),
+                resource: ids.resource.clone(),
+                param: ids.key.clone(),
                 error: e.to_string(),
             })?;
-        self.knowledge_ids.push(KnowledgeIds {
-            store: store.into(),
-            whole,
-        });
+        self.records.push(RecordStore { ids, whole });
         Ok(self)
     }
 
-    /// This registry recognizing no knowledge store.
-    pub fn without_knowledge_stores(mut self) -> Self {
-        self.knowledge_ids.clear();
+    /// This registry recognizing no store's records.
+    pub fn without_record_ids(mut self) -> Self {
+        self.records.clear();
         self
     }
 
-    /// Whether `id` is one of the knowledge stores this registry recognizes.
-    pub fn is_knowledge_store(&self, id: &str) -> bool {
-        self.knowledge_ids.iter().any(|k| k.store == id)
+    /// Whether `id` is a store of some shared model this registry recognizes.
+    pub fn is_record_store(&self, id: &str) -> bool {
+        self.records.iter().any(|r| r.ids.store == id)
     }
 
-    /// `text`, whole, as one of a knowledge store's page ids: that page's URI.
-    pub fn knowledge_uri_of(&self, text: &str) -> Option<String> {
-        self.knowledge_ids
+    /// The URI of record `id` of `store`, when `store` is one this registry
+    /// recognizes (its first model's, when two share the id).
+    pub fn record_uri(&self, store: &str, id: &str) -> Option<String> {
+        self.records
             .iter()
-            .find(|k| k.whole.as_ref().is_some_and(|w| w.is_match(text)))
-            .map(|k| super::build::knowledge_uri(&k.store, text))
+            .find(|r| r.ids.store == store)
+            .map(|r| Self::uri_of(&r.ids, id))
     }
 
-    /// `text`, whole, as one of a task store's ids: that item's URI.
-    pub fn task_uri_of(&self, text: &str) -> Option<String> {
-        self.task_ids
+    /// The URI of `record`, when its resource and store are ones this
+    /// registry recognizes.
+    pub fn uri_of_record(&self, record: &RecordRef) -> Option<String> {
+        self.records
             .iter()
-            .find(|ids| ids.whole.is_match(text))
-            .map(|ids| super::build::task_uri(&ids.provider, text))
+            .find(|r| r.ids.resource == record.resource && r.ids.store == record.store)
+            .map(|r| Self::uri_of(&r.ids, &record.id))
     }
 
-    /// Every token of `text` that is one of the active task tracker's ids — a
-    /// token being a run of letters, digits, `_` and `-` — as its item's
-    /// URI, in order, each once.
-    pub fn find_task_uris(&self, text: &str) -> Vec<String> {
-        if self.task_ids.is_empty() {
+    fn uri_of(ids: &RecordIds, id: &str) -> String {
+        super::build::of(
+            &ids.resource,
+            &[(&ids.key, id), (&ids.store_param, &ids.store)],
+        )
+    }
+
+    /// `text`, whole, as one of the ids a store's pattern matches: that
+    /// record's URI. `loose` picks the stores whose ids count in running text
+    /// (`true`) or those whose ids only count inside `[[…]]` (`false`); the
+    /// first told of wins.
+    pub fn record_uri_of(&self, text: &str, loose: bool) -> Option<String> {
+        self.records
+            .iter()
+            .filter(|r| r.ids.loose == loose)
+            .find(|r| r.whole.as_ref().is_some_and(|w| w.is_match(text)))
+            .map(|r| Self::uri_of(&r.ids, text))
+    }
+
+    /// Every token of `text` that is a loose id of some store — a token being
+    /// a run of letters, digits, `_` and `-` — as its record's URI, in order,
+    /// each once.
+    pub fn find_record_uris(&self, text: &str) -> Vec<String> {
+        if !self.records.iter().any(|r| r.ids.loose) {
             return Vec::new();
         }
         let mut out: Vec<String> = Vec::new();
         for token in text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '-')) {
-            if let Some(uri) = self.task_uri_of(token) {
+            if let Some(uri) = self.record_uri_of(token, true) {
                 if !out.contains(&uri) {
                     out.push(uri);
                 }
             }
         }
         out
+    }
+
+    /// The record `uri` names, when its resource is a shared model's and it
+    /// carries the store and the id.
+    pub fn record_of(&self, uri: &OxplowUri) -> Option<RecordRef> {
+        let resource = uri.resource().to_string();
+        let ids = &self
+            .records
+            .iter()
+            .find(|r| r.ids.resource == resource)?
+            .ids;
+        Some(RecordRef {
+            store: uri.param(&ids.store_param)?.to_string(),
+            id: uri.param(&ids.key)?.to_string(),
+            resource,
+        })
     }
 
     pub fn register(&mut self, decl: ResourceDecl) -> Result<(), ResourceError> {
@@ -474,23 +512,26 @@ pub fn foundation() -> &'static ResourceRegistry {
     &REGISTRY
 }
 
-/// `registry` with the `oxplow/knowledge` resource, which oxplow-bundled
-/// declares: for a test of core code that boots no extension and still
-/// names a knowledge page.
+/// `registry` with the resources `names` (`["task", "knowledge"]`) that
+/// oxplow-bundled declares: for a test of core code that boots no extension
+/// and still names one of its records.
 #[doc(hidden)]
-pub fn with_bundled_knowledge(mut registry: ResourceRegistry) -> ResourceRegistry {
+pub fn with_bundled_resources(mut registry: ResourceRegistry, names: &[&str]) -> ResourceRegistry {
     let manifest: serde_yaml::Value = serde_yaml::from_str(include_str!(
         "../../../../extensions/oxplow-bundled/extension.yaml"
     ))
     .expect("oxplow-bundled's manifest is YAML");
-    let entry = manifest["resources"]
-        .as_sequence()
-        .and_then(|all| all.iter().find(|e| e["name"] == "knowledge"))
-        .expect("oxplow-bundled declares the knowledge resource");
-    let entry: ResourceEntry = serde_yaml::from_value(entry.clone()).expect("a resources: entry");
-    registry
-        .register(entry.into_decl("oxplow").expect("a resource name"))
-        .expect("the knowledge resource registers");
+    for name in names {
+        let entry = manifest["resources"]
+            .as_sequence()
+            .and_then(|all| all.iter().find(|e| e["name"] == *name))
+            .unwrap_or_else(|| panic!("oxplow-bundled declares the `{name}` resource"));
+        let entry: ResourceEntry =
+            serde_yaml::from_value(entry.clone()).expect("a resources: entry");
+        registry
+            .register(entry.into_decl("oxplow").expect("a resource name"))
+            .unwrap_or_else(|e| panic!("the `{name}` resource registers: {e}"));
+    }
     registry
 }
 

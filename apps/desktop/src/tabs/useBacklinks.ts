@@ -141,10 +141,10 @@ function entryFor(edge: BacklinkEdge, uri: string): BacklinkEntry {
  * Two cases that need this today:
  *
  *  1. An oxwiki page is referenced both as its knowledge URI (via
- *     `wikilink`) and as `file:.oxplow/oxwiki/<slug>.md` (via
+ *     `record_mention`) and as `file:.oxplow/oxwiki/<slug>.md` (via
  *     `touched_file`). Same underlying entity, two rows.
  *  2. Multiple ref_types pointing at the same target (e.g. a
- *     wikilink edge AND a touched_file edge to the same slug).
+ *     record_mention edge AND a touched_file edge to the same slug).
  *
  * Strategy: bucket by canonical key, prefer the knowledge ref over the
  * file ref when both exist, prefer a non-fallback label, and merge
@@ -255,15 +255,13 @@ function humanRefType(refType: string, sourceExtra: string | null): string {
     case "dir_pin":
     case "file_mention":
     case "dir_mention":
-    case "wikilink":
-    case "task_mention":
+    case "record_mention":
     case "finding_mention":
     case "commit_mention":
       return "mention";
     case "comment_file_ref":
     case "comment_dir_ref":
-    case "comment_wikilink":
-    case "comment_task_mention":
+    case "comment_record_mention":
     case "comment_finding_mention":
     case "comment_commit_mention":
       return "comment";

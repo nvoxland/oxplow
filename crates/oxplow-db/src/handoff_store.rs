@@ -9,7 +9,7 @@
 use rusqlite::{params, OptionalExtension};
 use serde::Serialize;
 
-use oxplow_domain::events::schema::{HandoffSent, HandoffSentV2, HandoffSettled, HandoffSettledV2};
+use oxplow_domain::events::schema::{HandoffSent, HandoffSentV3, HandoffSettled, HandoffSettledV2};
 use oxplow_domain::uri::build::{handoff_uri, thread_uri};
 use oxplow_domain::uri::resources::ResourceRegistry;
 use oxplow_domain::{AgentSessionId, DomainError, Envelope, HandoffId, ThreadId, Timestamp};
@@ -58,7 +58,7 @@ pub struct Handoff {
     /// `user`, `agent`, `effect`, `job` or `system`.
     pub from_actor: String,
     pub to_thread_id: ThreadId,
-    pub task: Option<String>,
+    pub about: Option<String>,
     pub body: String,
     pub sent_at: Timestamp,
     pub delivered_at: Option<Timestamp>,
@@ -75,7 +75,7 @@ pub struct NewHandoff<'a> {
     pub from_session: Option<AgentSessionId>,
     pub from_actor: &'a str,
     pub to_thread: ThreadId,
-    pub task: Option<&'a str>,
+    pub about: Option<&'a str>,
     pub body: &'a str,
 }
 
@@ -105,7 +105,7 @@ fn row_to_handoff(row: &rusqlite::Row<'_>) -> rusqlite::Result<Handoff> {
         from_session_id: session("from_session_id")?,
         from_actor: row.get("from_actor")?,
         to_thread_id: ThreadId::new(row.get("to_thread_id")?),
-        task: row.get("task")?,
+        about: row.get("about")?,
         body: row.get("body")?,
         sent_at: ts("sent_at")?.unwrap_or_else(Timestamp::now),
         delivered_at: ts("delivered_at")?,
@@ -147,14 +147,14 @@ pub fn send_tx(
     let now = Timestamp::now();
     conn.execute(
         "INSERT INTO handoff (from_thread_id, from_session_id, from_actor, to_thread_id,
-                              task, body, sent_at)
+                              about, body, sent_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
             new.from_thread.value(),
             new.from_session.map(|s| s.value()),
             new.from_actor,
             new.to_thread.value(),
-            new.task,
+            new.about,
             new.body,
             ts_to_string(now),
         ],
@@ -168,11 +168,11 @@ pub fn send_tx(
     })?;
     let event = Envelope::typed::<HandoffSent>(
         SOURCE,
-        &HandoffSentV2 {
+        &HandoffSentV3 {
             handoff: id.to_string(),
             from_thread: new.from_thread.to_string(),
             to_thread: new.to_thread.to_string(),
-            task: new.task.map(str::to_string),
+            about: new.about.map(str::to_string),
         },
     )
     .with_subject(subject(&handoff));
@@ -224,7 +224,7 @@ fn subject(h: &Handoff) -> Vec<String> {
         thread_uri(h.from_thread_id),
         thread_uri(h.to_thread_id),
     ];
-    subject.extend(h.task.clone());
+    subject.extend(h.about.clone());
     subject
 }
 

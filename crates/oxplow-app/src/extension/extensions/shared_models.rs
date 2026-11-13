@@ -144,6 +144,10 @@ pub struct FillFile {
     /// matches is its store's item (a task model's stores).
     #[serde(default)]
     id_pattern: Option<String>,
+    /// Its ids count in running text (`tsk42`), not only inside `[[…]]`
+    /// (`[[some-page]]`): set with `id_pattern`.
+    #[serde(default)]
+    loose: bool,
     /// Its store's workflow, in order: `[{ id, title, bucket }]`, checked
     /// as a task tracker's stages are.
     #[serde(default)]
@@ -504,12 +508,19 @@ pub fn parse(
                         regex::Regex::new(&format!("^(?:{pattern})$"))
                             .map_err(|e| format!("`id_pattern` `{pattern}` isn't a regex: {e}"))?;
                     }
+                    if raw.loose && raw.id_pattern.is_none() {
+                        return Err(
+                            "`loose` needs an `id_pattern` to say what a loose id looks like"
+                                .into(),
+                        );
+                    }
                     Ok(FillSpec {
                         extension: extension.to_string(),
                         model: raw.model,
                         stores,
                         fields: fields_of(raw.fields)?,
                         id_pattern: raw.id_pattern,
+                        loose: raw.loose,
                         stages: raw.stages,
                         files: raw.files.map(files_of).transpose()?,
                     })

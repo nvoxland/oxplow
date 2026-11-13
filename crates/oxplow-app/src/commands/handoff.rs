@@ -2,10 +2,10 @@
 //! oxplow keeps — never a message it delivers (`.context/agent-model.md`
 //! "Handoffs and native messaging"). `Tx` over `oxplow_db::handoff_store`.
 //!
-//! - `oxplow.handoff.send { to_thread, body, task?, from_thread? }`:
+//! - `oxplow.handoff.send { to_thread, body, about?, from_thread? }`:
 //!   from the actor's thread (an agent's own, an effect's event's, the one
 //!   a person names) to another open thread, any stream's. Logs
-//!   `handoff.sent@1`. The result carries `link_warnings`.
+//!   `handoff.sent@3`. The result carries `link_warnings`.
 //! - `oxplow.handoff.settle { handoff, state, note? }`: the record of how
 //!   one ended. `taken` / `declined` are the recipient's, `withdrawn` the
 //!   sender's, each only while open; `open` again undoes either. Logs
@@ -13,7 +13,7 @@
 //!
 //! - `oxplow.handoff.resolve { handoff, outcome, note? }`: how the
 //!   recipient takes or declines one. A composite over settle; who may is
-//!   checked before anything is composed. Moving a taken handoff's task
+//!   checked before anything is composed. What a taken handoff does to what it is about
 //!   onto the recipient is bundled's (it reacts to `handoff.settled`).
 //!
 //! Nothing here reaches an agent. The recipient thread's agent is given
@@ -53,10 +53,12 @@ pub struct SendInput {
     /// `[[…]]` links are checked).
     #[schemars(extend("contentMediaType" = "text/markdown"))]
     pub body: String,
-    /// The task it hands over (`oxplow:oxplow/task?id=&provider=oxtask`, or a loose
-    /// id): taking the handoff moves it onto the recipient thread.
+    /// What it is about: the URI of a record of any resource (a task, a
+    /// page, a thread) that its resource's own dataset holds. What taking
+    /// the handoff does to it is an extension's (oxplow-bundled moves a task
+    /// onto the recipient thread).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub task: Option<String>,
+    pub about: Option<String>,
     /// The sending thread; an agent's is always its own, so only a person
     /// names one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -108,7 +110,8 @@ pub enum Outcome {
 pub struct ResolveInput {
     /// The handoff to your thread (`hnd3`).
     pub handoff: String,
-    /// `taken` moves its task onto your thread; `declined` leaves it.
+    /// `taken` takes it on (a handoff about a task moves that task onto your
+    /// thread); `declined` leaves it.
     pub outcome: Outcome,
     /// Why, for its sender to read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -165,33 +168,45 @@ fn acting_for(actor: &Actor) -> Option<Option<ThreadId>> {
     }
 }
 
-/// Whether the task resource's own dataset (its `resolve:` view, whichever
-/// extension declares the resource) holds `item`; no such resource (no
-/// task model) holds nothing.
-fn task_known(ctx: &TxCtx<'_>, item: &str) -> Result<bool, CommandError> {
-    let Some(view) = oxplow_domain::uri::resources::TASK
-        .parse()
-        .ok()
-        .and_then(|r: oxplow_domain::uri::ResourceName| ctx.events.vocabulary.resources.get(&r))
+/// `about` as the URI it names, when it is one of a declared resource whose
+/// own dataset (its `resolve:` view, whichever extension declares the
+/// resource) holds it; a resource with no such dataset can't be probed and
+/// is taken as written. The error says why not.
+fn about_uri(ctx: &TxCtx<'_>, about: &str) -> Result<String, CommandError> {
+    let resources = &ctx.events.vocabulary.resources;
+    let uri = oxplow_domain::uri::validate_uri(resources, about)
+        .map_err(|e| invalid("/about", e.to_string()))?;
+    let identity = uri.identity();
+    let Some(view) = resources
+        .get(uri.resource())
         .and_then(|decl| decl.resolve.clone())
     else {
-        return Ok(false);
+        return Ok(identity);
     };
-    ctx.conn
+    let held = ctx
+        .conn
         .query_row(
             &format!(
                 "SELECT 1 FROM \"{}\" WHERE uri = ?1",
                 view.replace('\"', "")
             ),
-            [item],
+            [&identity],
             |_| Ok(()),
         )
         .optional()
-        .map(|row| row.is_some())
-        .map_err(sql)
+        .map_err(sql)?
+        .is_some();
+    if held {
+        Ok(identity)
+    } else {
+        Err(invalid(
+            "/about",
+            format!("`{identity}` isn't held by `{view}`, its resource's own dataset"),
+        ))
+    }
 }
 
-/// `handoff.send { to_thread, body, task?, from_thread? }`.
+/// `handoff.send { to_thread, body, about?, from_thread? }`.
 pub fn send_op(deps: LinkDeps) -> Op {
     Op::new(
         "handoffs.write",
@@ -221,14 +236,11 @@ pub fn send_op(deps: LinkDeps) -> Op {
             if input.body.trim().is_empty() {
                 return Err(invalid("/body", "say what is handed over"));
             }
-            if let Some(item) = &input.task {
-                if !task_known(ctx, item)? {
-                    return Err(invalid(
-                        "/task",
-                        format!("`{item}` isn't a task the task model holds"),
-                    ));
-                }
-            }
+            let about = input
+                .about
+                .as_deref()
+                .map(|about| about_uri(ctx, about))
+                .transpose()?;
             let (handoff, event) = send_tx(
                 ctx.conn,
                 &ctx.events.vocabulary.resources,
@@ -237,7 +249,7 @@ pub fn send_op(deps: LinkDeps) -> Op {
                     from_session: ctx.actor().session_id(),
                     from_actor: author_of(ctx.actor()),
                     to_thread: to,
-                    task: input.task.as_deref(),
+                    about: about.as_deref(),
                     body: &input.body,
                 },
             )?;
@@ -374,7 +386,7 @@ pub fn resolve_op() -> Op {
                 result: Some(json!({
                     "handoff": id.to_string(),
                     "state": to.as_str(),
-                    "task": handoff.task,
+                    "about": handoff.about,
                 })),
                 events: Vec::new(),
                 inverse: None,
@@ -397,7 +409,7 @@ fn shown(h: &Handoff) -> Value {
         "uri": handoff_uri(h.id),
         "from_thread": h.from_thread_id.to_string(),
         "to_thread": h.to_thread_id.to_string(),
-        "task": h.task,
+        "about": h.about,
         "state": h.state.as_str(),
         "sent_at": h.sent_at,
         "delivered_at": h.delivered_at,
@@ -478,6 +490,55 @@ mod tests {
         assert_eq!(actor, "agent");
     }
 
+    /// A handoff is about a record of any resource its own dataset holds,
+    /// not only a task: here a thread. It is stored and shown as given, and
+    /// one the dataset doesn't hold is refused naming that dataset.
+    #[tokio::test]
+    async fn a_handoff_may_be_about_any_resource_not_only_a_task() {
+        let fx = services_with_thread().await;
+        let to = second_thread(&fx.svc).await;
+        let agent = agent_on(fx.thread);
+        let about = oxplow_domain::uri::build::thread_uri(fx.thread);
+        let out = run(
+            &fx.svc,
+            &agent,
+            SEND,
+            json!({ "to_thread": to.id.to_string(), "body": "look here", "about": about }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(out.result["handoff"]["about"], about.as_str());
+        let stored: Option<String> = fx
+            .svc
+            .db
+            .read(|tx| {
+                tx.query_row("SELECT about FROM v_handoff", [], |r| r.get(0))
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(stored.as_deref(), Some(about.as_str()));
+        let events = fx.svc.event_log_store.read_after(0, 500).await.unwrap();
+        let sent = events
+            .iter()
+            .find(|e| e.envelope.event_type == "handoff.sent")
+            .expect("the send is logged");
+        assert_eq!(sent.envelope.payload["about"], about.as_str());
+        // A thread nobody has is no thread the dataset holds.
+        let err = run(
+            &fx.svc,
+            &agent,
+            SEND,
+            json!({ "to_thread": to.id.to_string(), "body": "x", "about": "oxplow:oxplow/thread?id=thr999" }),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(&err, CommandError::Invalid { field: Some(f), message } if f == "/about" && message.contains("isn't held by")),
+            "{err:?}"
+        );
+    }
+
     /// What a send refuses: an agent naming another thread as its own, its
     /// own thread as the recipient, a closed thread, an empty body, an item
     /// the task model doesn't hold, and a person who names no sender.
@@ -528,12 +589,12 @@ mod tests {
             &fx.svc,
             &agent,
             SEND,
-            json!({ "to_thread": to_ref, "body": "x", "task": "oxplow:oxplow/task?id=tsk999&provider=oxtask" }),
+            json!({ "to_thread": to_ref, "body": "x", "about": "oxplow:oxplow/task?id=tsk999&provider=oxtask" }),
         )
         .await
         .unwrap_err();
         assert!(
-            matches!(&err, CommandError::Invalid { field: Some(f), .. } if f == "/task"),
+            matches!(&err, CommandError::Invalid { field: Some(f), .. } if f == "/about"),
             "{err:?}"
         );
 

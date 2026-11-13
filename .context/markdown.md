@@ -303,7 +303,7 @@ markdown links to oxplow URIs back into `[[ ]]` form on save.
 **Task wikilinks** — a full URI (`[[oxplow:oxplow/task?id=ENG-1&provider=issues]]`) or a
 bare id of a store's (`[[tsk42]]` with oxtask), matched
 by the id pattern the store declares (`fills.id_pattern`,
-`taskRefOfMention`), as the backend ref extractor does — route to the
+`taskRefOfMention`), as the backend ref extractor does (its one recognizer, `ResourceRegistry::with_record_ids`; this client reads the stores' patterns from `v_model_store`) — route to the
 item's `oxplow/task` URI link and **resolve to its title** at
 render time via `useTaskTitle` (`apps/desktop/src/taskTitleCache.ts`,
 a lazy per-ref sibling of `knowledgeTitleCache`, keyed by a page's URI) — same display-swap rule knowledge

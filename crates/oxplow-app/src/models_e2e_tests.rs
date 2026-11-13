@@ -388,25 +388,31 @@ async fn an_outside_write_pending_when_a_command_writes_is_nobodys() {
     }
 }
 
-/// A task store that declares how its ids look (`fills.id_pattern`) makes a
-/// loose id in text its item, beside the active tracker's.
+/// A store that declares how its ids look (`fills.id_pattern`, `loose`)
+/// makes a loose id in text its item, beside every other store's.
 #[tokio::test(flavor = "multi_thread")]
-async fn an_id_pattern_on_a_fill_recognizes_its_loose_task_ids() {
+async fn an_id_pattern_on_a_fill_recognizes_its_loose_ids() {
     let fx = services_with_thread().await;
     let root = fx._dir.path();
     write(
         root,
         ".oxplow/extensions/zz/extension.yaml",
-        "manifest: 2\nname: zz\nintent:\n  purpose: p\nfills:\n  - model: oxplow/task_record\n    stores: [zz]\n    id_pattern: \"zz[0-9]+\"\n",
+        "manifest: 2\nname: zz\nintent:\n  purpose: p\nfills:\n  - model: oxplow/task_record\n    stores: [zz]\n    id_pattern: \"zz[0-9]+\"\n    loose: true\n",
     );
     let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
     assert!(problems.is_empty(), "{problems:?}");
     let resources = fx.svc.vocabulary.current().resources.clone();
     assert_eq!(
-        resources.task_uri_of("zz4").as_deref(),
+        resources.record_uri_of("zz4", true).as_deref(),
         Some("oxplow:oxplow/task?id=zz4&provider=zz")
     );
-    assert_eq!(resources.task_uri_of("zzz"), None);
+    assert_eq!(resources.record_uri_of("zzz", true), None);
+    // A loose store isn't among the bracket-only ones (oxwiki, on by
+    // default, is: its page ids may match `zz4` there).
+    assert_ne!(
+        resources.record_uri_of("zz4", false).as_deref(),
+        Some("oxplow:oxplow/task?id=zz4&provider=zz")
+    );
 }
 
 /// A script's inverse can't name `oxplow.model.set_fields`: that command
@@ -593,5 +599,81 @@ async fn a_models_stores_are_read_as_model_store() {
     assert_eq!(
         out.rows,
         vec![vec![oxplow_db::SqlCell::Text("zz|zz[0-9]+".into())]]
+    );
+}
+
+/// A made-up third model (no task, no page) whose store declares a loose id
+/// pattern: its ids are recognized in text and in `[[…]]`, and the link
+/// check probes its records through its resource's own `resolve` dataset.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_link_to_any_models_record_is_checked_through_its_resolve_dataset() {
+    let fx = services_with_thread().await;
+    let root = fx._dir.path();
+    let owner = OWNER
+        .replace(
+            "    params: { store: { required: true }, id: { required: true } }\n",
+            "    params: { store: { required: true }, id: { required: true } }\n    resolve: books\ndatasets:\n  - name: books\n    version: 1\n    description: Books.\n    fields:\n      - { name: uri, type: TEXT, doc: u }\n      - { name: title, type: TEXT, doc: t }\n",
+        );
+    write(root, ".oxplow/extensions/shelf/extension.yaml", &owner);
+    write(
+        root,
+        ".oxplow/extensions/shelf/datasets/books.sql",
+        "SELECT uri, title FROM ref('book')",
+    );
+    write(
+        root,
+        ".oxplow/extensions/shelves/extension.yaml",
+        &STORE.replace(
+            "stores: [shelves]\n",
+            "stores: [shelves]\n    id_pattern: \"bk[0-9]+\"\n    loose: true\n",
+        ),
+    );
+    write(
+        root,
+        ".oxplow/extensions/shelves/books.star",
+        "def transform(x):\n    return {\"models\": [{\"model\": \"shelf/book\", \"store\": \"shelves\", \"snapshot\": [{\"id\": \"bk1\", \"title\": \"Dune\"}]}]}\n",
+    );
+    let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
+    assert!(problems.is_empty(), "{problems:?}");
+    fx.svc
+        .commands
+        .run(
+            &Actor::Human,
+            crate::collector_runner::SYNC,
+            json!({ "collector": "shelves/books" }),
+            false,
+        )
+        .await
+        .unwrap();
+    let resources = fx.svc.vocabulary.current().resources.clone();
+    let refs = oxplow_domain::uri::extract(&resources, "see bk1 and [[bk2]]");
+    assert_eq!(
+        refs.records,
+        vec![
+            "oxplow:shelf/book?id=bk1&store=shelves".to_string(),
+            "oxplow:shelf/book?id=bk2&store=shelves".to_string()
+        ]
+    );
+    let warnings = crate::link_check::check_links_at(
+        &fx.svc.db,
+        &fx.svc.vocabulary,
+        &fx.svc.layout.project_dir,
+        &*fx.svc.vcs,
+        "[[bk1]], [[shelves:bk1]] and [[bk2]]",
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        warnings
+            .iter()
+            .map(|w| w.target.as_str())
+            .collect::<Vec<_>>(),
+        vec!["bk2"],
+        "{warnings:?}"
+    );
+    assert!(
+        warnings[0].reason.contains("no row in `v_shelf_books`"),
+        "{warnings:?}"
     );
 }

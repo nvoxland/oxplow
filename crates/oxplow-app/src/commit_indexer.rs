@@ -4,7 +4,7 @@
 //! - The diff against parent#0 produces `(git-commit:<sha>) --
 //!   touched_file --> (file:<path>)` edges.
 //! - The commit message (subject + body) is run through the shared
-//!   ref extractor so `(git-commit:<sha>) --task_mention/
+//!   ref extractor so `(git-commit:<sha>) --record_mention/
 //!   wikilink/finding_mention--> (target)` edges appear too.
 //!
 //! Idempotent. The indexer uses [`SqlitePageRefStore::replace_source`]
@@ -23,7 +23,7 @@
 use std::path::Path;
 
 use oxplow_db::page_ref_projections::{
-    RT_BODY_COMMIT, RT_BODY_FINDING, RT_BODY_TASK, RT_TOUCHED_FILE, RT_WIKILINK,
+    RT_BODY_COMMIT, RT_BODY_FINDING, RT_BODY_RECORD, RT_TOUCHED_FILE,
 };
 use oxplow_db::{PageRefEdge, SqlitePageRefStore};
 use oxplow_domain::uri::build;
@@ -80,11 +80,8 @@ pub fn commit_edges(kinds: &ResourceRegistry, detail: &RevisionDetail) -> Vec<Pa
         combined.push_str(&detail.body);
     }
     let refs = extract(kinds, &combined);
-    for item in refs.tasks {
-        out.push(PageRefEdge::new(&source, item, RT_BODY_TASK));
-    }
-    for page in refs.knowledge {
-        out.push(PageRefEdge::new(&source, page, RT_WIKILINK));
+    for record in refs.records {
+        out.push(PageRefEdge::new(&source, record, RT_BODY_RECORD));
     }
     for f in refs.findings {
         out.push(PageRefEdge::new(
@@ -444,13 +441,25 @@ mod tests {
 
     /// The core kinds with oxtask as the task tracker (`tsk<n>`).
     fn tasks_kinds() -> oxplow_domain::uri::resources::ResourceRegistry {
-        oxplow_domain::uri::resources::with_bundled_knowledge(
-            oxplow_domain::uri::resources::foundation().clone(),
-        )
-        .with_task_ids("oxtask", r"tsk\d+")
-        .unwrap()
-        .with_knowledge_store("oxwiki", Some("[a-z0-9]+(-[a-z0-9]+)*"))
-        .unwrap()
+        use oxplow_domain::uri::resources::RecordIds;
+        oxplow_domain::uri::resources::foundation()
+            .clone()
+            .with_record_ids(RecordIds::new(
+                "oxplow/task",
+                "oxtask",
+                "provider",
+                Some(r"tsk\d+"),
+                true,
+            ))
+            .unwrap()
+            .with_record_ids(RecordIds::new(
+                "oxplow/knowledge",
+                "oxwiki",
+                "store",
+                Some("[a-z0-9]+(-[a-z0-9]+)*"),
+                false,
+            ))
+            .unwrap()
     }
     use oxplow_domain::vcs::{FileStatus, RevisionFile, RevisionInfo};
 
@@ -507,8 +516,10 @@ mod tests {
         let edges = commit_edges(&tasks_kinds(), &c);
         let targets: Vec<_> = edges.iter().map(|e| e.target.clone()).collect();
         use oxplow_domain::uri::build;
-        assert!(targets.contains(&build::task_uri("oxtask", "tsk42")));
-        assert!(targets.contains(&build::knowledge_uri("oxwiki", "architecture")));
+        assert!(targets.contains(&"oxplow:oxplow/task?id=tsk42&provider=oxtask".to_string()));
+        assert!(
+            targets.contains(&"oxplow:oxplow/knowledge?id=architecture&store=oxwiki".to_string())
+        );
         assert!(targets.contains(&build::finding_uri("fnd-7")));
     }
 
@@ -752,10 +763,7 @@ mod tests {
 
         // tsk42 has the commit as a backlink.
         let inbound = page_refs
-            .list_backlinks(
-                &oxplow_domain::uri::build::task_uri("oxtask", "tsk42"),
-                None,
-            )
+            .list_backlinks("oxplow:oxplow/task?id=tsk42&provider=oxtask", None)
             .await
             .unwrap();
         assert!(inbound

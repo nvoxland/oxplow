@@ -116,7 +116,7 @@ pub(crate) async fn log_task_done(
     let env = Envelope::typed::<oxplow_domain::events::schema::TaskStateChanged>(
         "human",
         &oxplow_domain::events::schema::TaskStateChangedV1 {
-            task: oxplow_domain::uri::build::task_uri("issues", task),
+            task: format!("oxplow:oxplow/task?id={task}&provider=issues"),
             to: oxplow_domain::tasks::Bucket::Done,
         },
     )

@@ -63,7 +63,10 @@ fn stmt(sql: &str, params: Vec<Value>, expect_changes: Option<usize>) -> Stateme
 
 /// `tsk42`, `12` or a task URI, as the file's id (`tsk42`).
 fn task_id(raw: &str) -> Result<String, String> {
-    let id = oxplow_domain::uri::build::task_of_uri(raw).map_or(raw.to_string(), |(_, item)| item);
+    let id = oxplow_domain::uri::OxplowUri::parse(raw)
+        .ok()
+        .and_then(|uri| uri.param("id").map(str::to_string))
+        .unwrap_or_else(|| raw.to_string());
     let digits = id.strip_prefix("tsk").unwrap_or(&id);
     if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
         return Err(format!("`{raw}` isn't a task id (tsk12)"));

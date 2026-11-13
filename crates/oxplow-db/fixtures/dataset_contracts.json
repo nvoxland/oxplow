@@ -25920,6 +25920,56 @@
         }
       ],
       "key": []
+    },
+    "5": {
+      "columns": [
+        {
+          "name": "source_uri",
+          "type": "TEXT",
+          "doc": "The page or record the edge starts at (`oxplow:oxplow/knowledge?id=intro&store=oxwiki`, a commit's, a task's)."
+        },
+        {
+          "name": "target_uri",
+          "type": "TEXT",
+          "doc": "What it points at (`oxplow:oxplow/file?path=src/app.rs`, a task's, a knowledge page's)."
+        },
+        {
+          "name": "source_resource",
+          "type": "TEXT",
+          "doc": "The source's resource (`oxplow/knowledge`)."
+        },
+        {
+          "name": "target_resource",
+          "type": "TEXT",
+          "doc": "The target's resource (`oxplow/file`)."
+        },
+        {
+          "name": "ref_type",
+          "type": "TEXT",
+          "doc": "How the source relates to the target (`touched_file`, `record_mention`: a body naming a record of a shared model, `impact`, `commit_mention`, `prompt_mention`: a turn whose prompt pointed at the target, …)."
+        },
+        {
+          "name": "source_extra",
+          "type": "TEXT",
+          "doc": "Edge-specific extras as JSON (a line anchor, a version pin, a link sub-type), when the writer recorded any."
+        },
+        {
+          "name": "local_snapshot_id",
+          "type": "INTEGER",
+          "doc": "The snapshot the edge was recorded at, when there is one (v_snapshot.id)."
+        },
+        {
+          "name": "closest_vcs_rev",
+          "type": "TEXT",
+          "doc": "The VCS revision nearest the edge when recorded."
+        },
+        {
+          "name": "vcs_rev_exact",
+          "type": "INTEGER",
+          "doc": "1 when that revision is exactly the state recorded."
+        }
+      ],
+      "key": []
     }
   },
   "ai_role": {
@@ -28101,6 +28151,101 @@
           "name": "task",
           "type": "TEXT",
           "doc": "The task it hands over (a `task:` ref), when it names one; taking the handoff moves the item onto the recipient thread."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Markdown body."
+        },
+        {
+          "name": "sent_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "delivered_at",
+          "type": "TEXT",
+          "doc": "When a prompt in the recipient thread carried it to its agent; NULL until then."
+        },
+        {
+          "name": "delivered_to_session_id",
+          "type": "INTEGER",
+          "doc": "The agent session that prompt was in."
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "doc": "`open`, `taken`, `declined` (by the recipient) or `withdrawn` (by the sender)."
+        },
+        {
+          "name": "settled_at",
+          "type": "TEXT",
+          "doc": "When it was taken, declined or withdrawn; NULL while open."
+        },
+        {
+          "name": "settled_by_session_id",
+          "type": "INTEGER",
+          "doc": "The agent session that settled it; NULL for a person."
+        },
+        {
+          "name": "note",
+          "type": "TEXT",
+          "doc": "What its settler said, when anything."
+        }
+      ],
+      "key": []
+    },
+    "4": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Handoff id (`hnd<n>`)."
+        },
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/handoff?id=hnd<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it."
+        },
+        {
+          "name": "from_thread_id",
+          "type": "INTEGER",
+          "doc": "The thread that sent it."
+        },
+        {
+          "name": "from_thread_uri",
+          "type": "TEXT",
+          "doc": "That thread's URI (`oxplow:oxplow/thread?id=thr<n>`)."
+        },
+        {
+          "name": "from_session_id",
+          "type": "INTEGER",
+          "doc": "The agent session that sent it; NULL when a person or an effect did."
+        },
+        {
+          "name": "from_session_uri",
+          "type": "TEXT",
+          "doc": "That session's URI (`oxplow:oxplow/agent_session?id=ses<n>`)."
+        },
+        {
+          "name": "from_actor",
+          "type": "TEXT",
+          "doc": "Who sent it: `user`, `agent`, `effect`, `job` or `system` (the actor, never an input)."
+        },
+        {
+          "name": "to_thread_id",
+          "type": "INTEGER",
+          "doc": "The thread it is for (never a session: the thread outlives its processes)."
+        },
+        {
+          "name": "to_thread_uri",
+          "type": "TEXT",
+          "doc": "That thread's URI: where a handoff opens."
+        },
+        {
+          "name": "about",
+          "type": "TEXT",
+          "doc": "What it is about: the URI of a record of any resource (a task, a page), when it names one. What an extension does when the handoff is taken (oxplow-bundled moves a task onto the recipient thread) is its own."
         },
         {
           "name": "body",

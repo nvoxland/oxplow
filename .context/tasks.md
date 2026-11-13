@@ -66,7 +66,7 @@ is the store's (oxtask's `oxtask.tasks.set_workflow`), not bundled's.
 ## Reactions (events, not core code)
 
 - `thread.closed` and `stream.archived` release the work of the thread or
-  stream's threads; a taken handoff (`handoff.settled`) moves its task to
+  stream's threads; a taken handoff (`handoff.settled`) about a task (`v_handoff.about`) moves that task to
   the recipient; starting a task (the first move to `in_progress` by an
   agent) assigns it to the agent's thread. These are bundled effects over
   the model.
@@ -83,8 +83,11 @@ is the store's (oxtask's `oxtask.tasks.set_workflow`), not bundled's.
 ## Recognizers (loose ids)
 
 Text and commands name a task by a bare id (`tsk42`) when a live store
-declared the id pattern: `ModelRegistry` (`fills.id_pattern`) is the only
-source. There is no active tracker; every live store's pattern applies.
+declared the id pattern and `loose: true`: `ModelRegistry`
+(`fills.id_pattern`, `fills.loose`) is the only source, and core's recognizer
+(`ResourceRegistry::with_record_ids`) is the one every model's stores go
+through; it names no task. There is no active tracker; every live store's
+pattern applies.
 
 ## External providers
 

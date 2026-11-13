@@ -36,7 +36,7 @@ fields that hold a URI are named `uri` (V101); prose says URI.
 
 | Where | Build | Read |
 |---|---|---|
-| Rust | `oxplow_domain::uri::build::{request_uri, file_uri, knowledge_uri, task_uri, …}`; `keyed(resource, value)` for a resource named by its key param; `of(resource, &[(k, v)])` / `of_with_view` for one known only at run time | `parse_as::<T>(uri, resource)` (the key, typed), `id_of` (the key), `param_of(uri, resource, name)`, `parse_resource` (keeps the view), `resource_of`, `task_of_uri` → `(provider, id)`, `file_of_uri` → `(path, rev, lines)`; resource names are `uri::resources::{REQUEST, FILE, …}` |
+| Rust | `oxplow_domain::uri::build::{request_uri, file_uri, …}` (a shared model's record has no builder: `ResourceRegistry::record_uri(store, id)`); `keyed(resource, value)` for a resource named by its key param; `of(resource, &[(k, v)])` / `of_with_view` for one known only at run time | `parse_as::<T>(uri, resource)` (the key, typed), `id_of` (the key), `param_of(uri, resource, name)`, `parse_resource` (keeps the view), `resource_of`, `file_of_uri` → `(path, rev, lines)`; resource names are `uri::resources::{REQUEST, FILE, …}` |
 | SQL (datasets, pages, scripts' queries) | the owning dataset's `uri` column; to build one, `uri('oxplow/request', 'id', 'req' \|\| id)` (a NULL value leaves its param out, so `uri()` is never NULL: over a `LEFT JOIN`, `CASE WHEN x.id IS NULL THEN NULL ELSE uri(…) END`) | `SELECT URI`, `WHERE uri = :uri`, `JOIN … ON x.uri = y.subject`; `uri_param(URI, 'id')`, `uri_resource(URI)` |
 | Starlark (commands, effects, collectors, policies, mappings) | `uri.build("oxplow/file", path = p, view = {"lines": "3-9"})` (a param a string or an int; `None` leaves it out) | `uri.parse(u)` → `{resource, params, view}`, `uri.param(u, name, resource=)`, `uri.id(u, resource=)`, `uri.resource(u)`, `uri.is_uri(v)`, `uri.contribution(u)` |
 | TS (desktop) | `uri/uri.ts` builders (`knowledgeUri(store, id)`, `taskUri(provider, id)`, `fileUri(path, rev)`, `fileLinesUri`, `pageUri(page, params, view)`, `metricUri`, `withUriView`, `viewParamsOfUri`, `resourceUri(resource, params, view)`, …) | `parseUri`, `identityOf`, `typeOf` (the resource), `paramOf`, `viewOf`, `idOf(uri, resource)`, `keyOf`, `taskOf`, `isExternal` |
@@ -145,7 +145,7 @@ oxplow:github/pr?id=12
 (`build::key_param`): `id` for a stored record (`request?id=req1`,
 `thread?id=thr3`, `turn?id=trn1`), a word for the value's shape
 (`commit?sha=`, `branch?name=`, `extension?name=`,
-`ai_model?name=`, `config?key=`, `nudge?kind=`, `consumer?name=`; a knowledge page has two, `knowledge?id=<id>&store=<store>`, built by `knowledge_uri(store, id)` and read by `knowledgeOf`), and
+`ai_model?name=`, `config?key=`, `nudge?kind=`, `consumer?name=`; a record of a shared model has two, its id and its store's param, e.g. `knowledge?id=<id>&store=<store>`, built by `ResourceRegistry::record_uri(store, id)` and read by `record_of`), and
 the resource's own name for a contribution (`page?page=work`, `command?command=oxplow.file.save`,
 `collector?collector=triage/todos`, `effect?effect=acme/notify`,
 `resource?resource=github/pr`). Resources with several identity params
@@ -210,11 +210,21 @@ resources:
   read from its manifest (`resources::foundation()`); manifest checks that
   run before any vocabulary (a decorator's `resource:`, a prompt's
   `about:`) read the same list (`extension_resources::resource_problem`).
-- **A task store's own ids.** The registry carries each store's id
-  recognizer (`with_task_ids(provider, id_pattern)`, from the models'
-  `fills.id_pattern`): `tsk42` in text, `[[…]]` or loose,
-  is `oxplow:oxplow/task?id=tsk42&provider=oxtask` while oxtask fills the
-  task model (`task_uri_of`, `find_task_uris`).
+- **A store's own ids.** The registry carries one id recognizer per live
+  store of every shared model (`with_record_ids(RecordIds { resource, store,
+  store_param, key, pattern, loose })`, from the models' fills:
+  `fills.id_pattern`, `fills.loose`, the model's `resource` and
+  `store_param`). Core names no model: `tsk42` is
+  `oxplow:oxplow/task?id=tsk42&provider=oxtask` because oxtask's fill says
+  `id_pattern: "tsk[0-9]+"` and `loose: true`, and a bare `[[some-page]]` is
+  a page of oxwiki because its fill's pattern matches it. A `loose` store's
+  ids count in running text and `[[…]]` and are tried before paths and shas;
+  a store whose ids are not loose counts only inside `[[…]]`, after the sha
+  check. `[[<store>:<id>]]` names a record of any store. The first store told
+  of wins an id two match (`record_uri_of`, `find_record_uris`). A body's
+  mentions come back as one list, `ExtractedRefs.records`; the typed view is
+  `Reference::Record { resource, store, id }`, and the link check probes it
+  through its resource's `resolve` dataset like any other URI.
 - **What names a resource elsewhere** is its name: `ui.about` on a command
   (`about: oxplow/task`), an intent prompt's `about:`, a decorator's
   `resource:`, a fact subject's `subject_kind` (`oxplow/file`), a search

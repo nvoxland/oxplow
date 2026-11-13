@@ -830,7 +830,7 @@ and `v_dataset_test` are the catalog of all of them:
 | `v_capture` | the scan/run that produced facts |
 | `v_fact` | atomic measurements, joined to `measure_key` and capture context |
 | `v_oxplow_task_comment` | comments on tasks (bundled's dataset over the model's `comments` child) |
-| `v_handoff` | work handed from one thread to another (`oxplow.handoff.*`; V84): sender thread and session, recipient thread, task, body, `delivered_at` (stamped at the recipient's next prompt), `state` `open` / `taken` / `declined` / `withdrawn`; `v_search_handoff` is its search feed |
+| `v_handoff` | work handed from one thread to another (`oxplow.handoff.*`; V84): sender thread and session, recipient thread, `about` (what it concerns, a URI), body, `delivered_at` (stamped at the recipient's next prompt), `state` `open` / `taken` / `declined` / `withdrawn`; `v_search_handoff` is its search feed |
 | `v_oxplow_task_link` | typed links between tasks (bundled's dataset over the model's `links` child) |
 | `v_agent_turn` | human prompt → agent answer, per thread (V74); what a turn changed is `v_turn_file` |
 | `v_token_usage` | model tokens per thread / request / model, with each turn's prompt (V74, `prompt` V82) |

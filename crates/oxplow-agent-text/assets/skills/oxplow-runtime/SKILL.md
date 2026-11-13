@@ -39,8 +39,8 @@ finish.
 - **Handoffs.** Work another thread hands you arrives at the start of a
   prompt in a `<handoffs>` block. Take it on or decline it with
   `oxplow.handoff.resolve`; to hand work to another thread, see
-  `references/commands.md`. A handoff names its task by its URI
-  (`oxplow:oxplow/task?id=…&provider=…`); core has no task commands. Nothing wakes the other agent.
+  `references/commands.md`. A handoff may be `about` any record (a task, a
+  page), by its URI. Nothing wakes the other agent.
 - **Context basket.** A `<context-basket>` block is what the person
   collected for you; read each `[oxplow uri …]` with `oxplow_read`.
 - **Hints.** oxplow may add short advisory guidance to your next prompt or

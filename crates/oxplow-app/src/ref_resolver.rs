@@ -308,10 +308,14 @@ mod tests {
     async fn unknown_task_id_is_bare() {
         let dir = git_repo_with_commit("init", "");
         let services = Services::in_memory(dir.path()).await.unwrap();
-        let summary = resolve_ref(&services, &build::task_uri("oxtask", "tsk999999")).await;
+        let summary =
+            resolve_ref(&services, "oxplow:oxplow/task?id=tsk999999&provider=oxtask").await;
         assert_eq!(summary.title, None);
         assert_eq!(summary.detail, None);
-        assert_eq!(summary.uri, build::task_uri("oxtask", "tsk999999"));
+        assert_eq!(
+            summary.uri,
+            "oxplow:oxplow/task?id=tsk999999&provider=oxtask".to_string()
+        );
     }
 
     #[tokio::test]

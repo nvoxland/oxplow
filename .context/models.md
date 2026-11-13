@@ -130,7 +130,8 @@ models:
   `task_link:blocks` it is today.
 - **Markdown bodies.** A column with `markdown:` is parsed as oxplow's
   markdown (`page_ref_projections::body_edges`: `file_mention`,
-  `dir_mention`, `wikilink`, `task_mention`, `finding_mention`,
+  `dir_mention`, `record_mention` (a record of any model: a task, a
+  page), `finding_mention`,
   `commit_mention`), restated in the same transaction as the row, by diff.
   A child's markdown column (a comment) projects onto the parent:
   `comment_*` types from the parent's URI, as comment mentions are today.
@@ -157,17 +158,17 @@ models:
   - The page-ref boot repair covers every model's markdown and edge
     columns, keyed on the vocabulary too (edges depend on which ids
     resolve).
-- **Bare links.** A loose id in text (`tsk42`, `[[slug]]`) resolves by
-  the stores' declared patterns: each `fills:` entry of a task model (one
-  whose resource is `oxplow/task`) may declare `id_pattern:` (a regex,
-  matched whole, checked at load). The vocabulary recognizes each live
-  fill's pattern (`ModelRegistry::task_ids`, in
-  `PreparedVocabulary::prepare`), in load order; the first match wins an
-  id two would match (whether two regexes overlap can't be checked in
-  general, so the order is the rule). A store's loose ids are links whether it is the only one or not.
-  `[[slug]]` resolves to the store the model's
-  owner names as `default_store` (bundled: `oxwiki`), else is left as
-  text.
+- **Bare links.** A bare id in text (`tsk42`, `[[slug]]`) resolves by
+  the stores' declared patterns: each `fills:` entry of any model may
+  declare `id_pattern:` (a regex, matched whole, checked at load) and
+  `loose: true` (its ids count in running text, not only inside `[[…]]`).
+  The vocabulary recognizes each live fill's pattern as the model's
+  resource names its URIs (`ModelRegistry::id_patterns`, one path, fed
+  through `PreparedVocabulary::prepare`), in load order; the first match wins
+  an id two would match (whether two regexes overlap can't be checked in
+  general, so the order is the rule). A store with no pattern is still named
+  by `[[<store>:<id>]]`. Core names no model here: oxtask's fill is loose
+  (`tsk42`), oxwiki's is not (`[[some-page]]`).
 - **Search.** The resource's `searchable: <dataset>` stays the mechanism
   (it can scope by stream, drop archived items, index ids and comments).
   `search: { title, body }` on a model only generates a default
@@ -199,6 +200,7 @@ fills:
   - model: oxplow/task          # <owner namespace>/<model>
     stores: [oxtask]            # store ids this extension writes; default [<namespace>]
     id_pattern: "tsk[0-9]+"     # how its ids look in text (optional)
+    loose: true                 # they count in running text, not only in [[…]] (optional)
     stages:                     # a task store's own stages (bundled's task model asks for them)
       - { id: backlog, title: Backlog, bucket: backlog }
     fields:
@@ -459,7 +461,7 @@ The shape of the task side; `.context/tasks.md` is the map.
   `thread.closed@1 { thread }`, archiving a stream logs `stream.archived@1
   { stream, threads }` (core namespace `stream`, kept without expiry).
   Bundled releases what they were working on by reacting to them; core's
-  commands name no task. A taken handoff's task is read from `v_handoff`
+  commands name no task. A taken handoff's `about` is read from `v_handoff`
   by the `handoff.settled` event's `handoff`.
 - **The read contract is bundled's dataset `task` (`v_oxplow_task`)**,
   over `task_record` joined with oxplow's fields and the store's stages.
@@ -728,7 +730,7 @@ and two contributors, and the store filter.
 
 Core holds no task table, command or reader. The read adapter
 Loose-id
-recognizers come from the models' `fills.id_pattern` alone.
+recognizers come from the models' `fills.id_pattern` and `fills.loose` alone.
 `v_oxplow_contribution_repair` and `v_oxplow_commit_task` are bundled's
 datasets. The `oxplow.task` fact dimension is declared by bundled over its
 request-link dataset. See `.context/tasks.md`.

@@ -19,13 +19,14 @@ events are derived from what it kept.
   keeps a row as a file).
 - **The `oxplow/knowledge` resource** is bundled's too (as the task resource
   is): a page's URI is `oxplow:oxplow/knowledge?id=<id>&store=<store>`
-  (`uri::build::knowledge_uri`). `resolve: knowledge_page`, `searchable:
+  (built by the registry, `ResourceRegistry::record_uri`). `resolve: knowledge_page`, `searchable:
   search_knowledge`. With bundled off the resource is undeclared and a `[[link]]`
   to a page is unrecognized, as a task's is.
 - **Wikilinks.** `[[<store>:<id>]]` names a page of a knowledge store; a bare
   `[[id]]` names the first store whose fill's `id_pattern` matches it whole
-  (`ResourceRegistry::with_knowledge_store`, fed from the model registry's
-  fills by `vocabulary_reactor`, as `tsk42` is for tasks).
+  (`ResourceRegistry::with_record_ids`, fed from the model registry's fills
+  by `vocabulary_reactor`: the one recognizer every model's stores go
+  through). A knowledge fill's ids are not `loose`: only inside `[[…]]`.
 
 ## Reading
 

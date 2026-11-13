@@ -5,8 +5,9 @@
 //! every reader reads one back through [`parse_as`] / [`id_of`] /
 //! [`param_of`] / [`parse_resource`], so a resource's name and params are
 //! spelled once (`uri::resources::{REQUEST, FILE, …}`) and a value is always
-//! escaped and decoded by the grammar. A task tracker builds its own items'
-//! URIs through [`task_uri`]. The `refs_are_built_and_parsed_through_the_grammar`
+//! escaped and decoded by the grammar. A shared model's records are named
+//! through the registry (`ResourceRegistry::record_uri`), never by a builder
+//! here. The `refs_are_built_and_parsed_through_the_grammar`
 //! source guard refuses a hand-built or hand-parsed URI anywhere else.
 //!
 //! The params of oxplow's resources are oxplow-foundation's declarations
@@ -74,15 +75,9 @@ pub fn key_param(resource: &str) -> Option<String> {
             "branch" | "ai_model" | "extension" | "consumer" => "name",
             "config" => "key",
             "nudge" => "kind",
-            "file"
-            | "dir"
-            | "symbol"
-            | "task"
-            | "knowledge"
-            | "subagent"
-            | "block"
-            | "test"
-            | "extension_deployment" => return None,
+            "file" | "dir" | "symbol" | "subagent" | "block" | "test" | "extension_deployment" => {
+                return None
+            }
             _ => "id",
         }
         .to_string(),
@@ -159,7 +154,7 @@ pub fn parse_as<T: FromStr>(text: &str, resource: &str) -> Result<T, NotA> {
         .map_err(|_| not_a(text, resource))
 }
 
-/// The resource a URI names (`oxplow/knowledge`), or `None` for a string that
+/// The resource a URI names (`oxplow/file`), or `None` for a string that
 /// isn't one of oxplow's URIs.
 pub fn resource_of(text: &str) -> Option<String> {
     OxplowUri::parse(text)
@@ -319,18 +314,6 @@ pub fn symbol_uri_at(path: &str, id: &str, rev: Option<&str>) -> String {
     of(r::SYMBOL, &params)
 }
 
-/// A knowledge store's page: the store's id and the store's own page id
-/// (oxwiki's slug, a vault path, a uuid).
-pub fn knowledge_uri(store: &str, id: &str) -> String {
-    of(r::KNOWLEDGE, &[("store", store), ("id", id)])
-}
-
-/// The store and the store's page id a knowledge page's URI names.
-pub fn knowledge_of_uri(text: &str) -> Option<(String, String)> {
-    let u = parse_resource(text, r::KNOWLEDGE).ok()?;
-    Some((u.param("store")?.to_string(), u.param("id")?.to_string()))
-}
-
 pub fn comment_uri(id: CommentId) -> String {
     keyed(r::COMMENT, &id.to_string())
 }
@@ -457,49 +440,6 @@ pub fn test_uri(class: &str, name: &str) -> String {
     of(r::TEST, &[("class", class), ("name", name)])
 }
 
-/// A task tracker's item: its provider's id and the item's.
-pub fn task_uri(provider: &str, id: &str) -> String {
-    of(r::TASK, &[("provider", provider), ("id", id)])
-}
-
-/// The provider and the provider's id a task's URI names.
-pub fn task_of_uri(text: &str) -> Option<(String, String)> {
-    let u = parse_resource(text, r::TASK).ok()?;
-    Some((u.param("provider")?.to_string(), u.param("id")?.to_string()))
-}
-
-/// A task's URI in its one canonical spelling, or `Invalid` naming
-/// what's wrong with it. Links key on the string (`request_task.task_uri`),
-/// so an alias — a view, an extra param, an escaped spelling — is
-/// refused rather than treated as a different item.
-/// What a list's own ids look like is that list's to say.
-pub fn validate_task_uri(text: &str) -> Result<(), crate::DomainError> {
-    let invalid = |why: &str| Err(crate::DomainError::Invalid(format!("`{text}` {why}")));
-    const SHAPE: &str = "a task's URI is `oxplow:oxplow/task?id=<id>&provider=<provider>`";
-    let parsed = OxplowUri::parse(text).map_err(|e| {
-        crate::DomainError::Invalid(format!("`{text}` is not a URI: {}; {SHAPE}", e.reason()))
-    })?;
-    if parsed.resource().to_string() != r::TASK {
-        return invalid(&format!("is not a task's; {SHAPE}"));
-    }
-    let provider_ok = parsed.param("provider").is_some_and(|provider| {
-        provider.starts_with(|c: char| c.is_ascii_lowercase())
-            && provider
-                .chars()
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
-    });
-    if !provider_ok || parsed.param("id").is_none_or(str::is_empty) {
-        return invalid(&format!("names no provider and id; {SHAPE}"));
-    }
-    if parsed.params().len() != 2 || !parsed.view().is_empty() {
-        return invalid("names a task with other params or a view");
-    }
-    if parsed.to_string() != text {
-        return invalid(&format!("is not canonical; write `{parsed}`"));
-    }
-    Ok(())
-}
-
 /// The `source` of an event a system component emits on its own behalf
 /// (`system:snapshot_capture`); an actor's runs use `Actor::source()`.
 ///
@@ -574,10 +514,6 @@ mod tests {
             "oxplow:oxplow/collector?collector=triage/todos"
         );
         assert_eq!(commit_uri("4c44d495"), "oxplow:oxplow/commit?sha=4c44d495");
-        assert_eq!(
-            knowledge_uri("oxwiki", "auth-flow"),
-            "oxplow:oxplow/knowledge?id=auth-flow&store=oxwiki"
-        );
     }
 
     /// A working-tree file of the local filesystem is named as it always
@@ -630,16 +566,7 @@ mod tests {
     /// wanted.
     #[test]
     fn a_uri_reads_back_through_the_grammar() {
-        assert_eq!(
-            knowledge_of_uri(&knowledge_uri("vault", "a b/c.md")),
-            Some(("vault".to_string(), "a b/c.md".to_string()))
-        );
-        assert_eq!(knowledge_of_uri(&task_uri("oxtask", "tsk1")), None);
-        assert_eq!(
-            key_param("oxplow/knowledge"),
-            None,
-            "a page is named by two"
-        );
+        assert_eq!(key_param("oxplow/file"), None, "a file is named by two");
         assert_eq!(parse_as::<i64>(&proposal_uri(3), r::PROPOSAL).unwrap(), 3);
         assert_eq!(
             parse_as::<ThreadId>(&thread_uri(ThreadId::new(3)), r::THREAD).unwrap(),
@@ -659,8 +586,8 @@ mod tests {
             "a view needs parse_resource"
         );
         assert_eq!(
-            resource_of(&knowledge_uri("oxwiki", "x")).as_deref(),
-            Some("oxplow/knowledge")
+            resource_of(&of("acme/note", &[("id", "x"), ("vault", "v")])).as_deref(),
+            Some("acme/note")
         );
         assert_eq!(resource_of("nope"), None);
         assert_eq!(key_param("acme/pr").as_deref(), Some("id"));
@@ -668,30 +595,7 @@ mod tests {
     }
 
     #[test]
-    fn the_task_inverses() {
+    fn system_sources_are_spelled_here() {
         assert_eq!(system_source("hook_ingest"), "system:hook_ingest");
-        let item = task_uri("issues", "ENG-1");
-        assert_eq!(item, "oxplow:oxplow/task?id=ENG-1&provider=issues");
-        assert_eq!(task_of_uri(&item), Some(("issues".into(), "ENG-1".into())));
-        assert_eq!(task_of_uri(&request_uri(RequestId::new(1))), None);
-        assert!(validate_task_uri(&item).is_ok());
-        for bad in ["", "tsk1", "oxplow:tsk1097", "oxplow:oxplow/task?id=x"] {
-            let e = validate_task_uri(bad).unwrap_err().to_string();
-            assert!(
-                e.contains("oxplow:oxplow/task?id=<id>&provider=<provider>"),
-                "{bad}: {e}"
-            );
-        }
-        // Only the canonical spelling is a key: a link compares strings,
-        // so a view, an extra param or an escaped spelling would read as
-        // a second item.
-        for alias in [
-            "oxplow:oxplow/task?id=tsk1&provider=oxtask#x=1",
-            "oxplow:oxplow/task?id=tsk1&provider=oxtask&v=2",
-            "oxplow:oxplow/task?provider=oxtask&id=tsk1",
-            "oxplow:oxplow/task?id=ts%6B1&provider=oxtask",
-        ] {
-            assert!(validate_task_uri(alias).is_err(), "{alias}");
-        }
     }
 }

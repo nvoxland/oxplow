@@ -12,4 +12,4 @@ expect:
   rows:
     - { ref_type: file_mention, target_uri: "oxplow:oxplow/file?path=src/body.rs" }
     - { ref_type: file_mention, target_uri: "oxplow:oxplow/file?path=src/lib.rs" }
-    - { ref_type: task_mention, target_uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" }
+    - { ref_type: record_mention, target_uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" }

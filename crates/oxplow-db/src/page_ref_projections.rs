@@ -7,21 +7,19 @@
 //! boot-time backfill replay the exact same mapping from existing rows.
 //!
 //! Every end is a URI (`.context/resources.md`), built here through
-//! `uri::build`: a knowledge page's, a task's, a file's, a directory's, a
-//! finding's, a commit's, a thread note's.
+//! `uri::build`, or by the registry for a shared model's record (a task, a
+//! page): a file's, a directory's, a finding's, a commit's, a thread note's.
 
 use crate::page_ref_store::PageRefEdge;
 use oxplow_domain::uri::build;
 use oxplow_domain::uri::resources::{self as r, ResourceRegistry};
 use oxplow_domain::uri::{extract, RefVersion};
 
-pub const RT_KNOWLEDGE_FILE: &str = "knowledge_file_ref";
-pub const RT_KNOWLEDGE_DIR: &str = "knowledge_dir_ref";
-pub const RT_WIKILINK: &str = "wikilink";
-/// A text body (a task's, a handoff's) → a file or directory it names.
+/// A text body (a record's, a handoff's) → a file or directory it names.
 pub const RT_BODY_FILE: &str = "file_mention";
 pub const RT_BODY_DIR: &str = "dir_mention";
-pub const RT_BODY_TASK: &str = "task_mention";
+/// A text body → a record of a shared model it names (a task, a page).
+pub const RT_BODY_RECORD: &str = "record_mention";
 pub const RT_BODY_FINDING: &str = "finding_mention";
 pub const RT_BODY_COMMIT: &str = "commit_mention";
 /// A pinned markdown column's file and directory refs (`.context/models.md`
@@ -81,21 +79,15 @@ pub fn stamp_file_versions(edges: &mut [PageRefEdge], version: FileRefVersion<'_
     }
 }
 
-/// A task's body slice: its title and body's mentions.
-pub fn task_body_ref_types() -> Vec<String> {
-    BODY_MENTIONS.all()
-}
-
-/// A task's comment slice: its comments' mentions, recorded as the
-/// item's own edges (a comment lives on its item's page).
-pub fn task_comment_ref_types() -> Vec<String> {
+/// A row's comment slice: its comments' mentions, recorded as the row's
+/// own edges (a comment lives on its row's page).
+pub fn comment_ref_types() -> Vec<String> {
     COMMENT_MENTIONS.all()
 }
 
 pub const RT_COMMENT_FILE: &str = "comment_file_ref";
 pub const RT_COMMENT_DIR: &str = "comment_dir_ref";
-pub const RT_COMMENT_WIKILINK: &str = "comment_wikilink";
-pub const RT_COMMENT_TASK: &str = "comment_task_mention";
+pub const RT_COMMENT_RECORD: &str = "comment_record_mention";
 pub const RT_COMMENT_FINDING: &str = "comment_finding_mention";
 pub const RT_COMMENT_COMMIT: &str = "comment_commit_mention";
 
@@ -103,43 +95,23 @@ pub const RT_COMMENT_COMMIT: &str = "comment_commit_mention";
 struct MentionTypes {
     file: &'static str,
     dir: &'static str,
-    knowledge: &'static str,
-    task: &'static str,
+    record: &'static str,
     finding: &'static str,
     commit: &'static str,
 }
 
 impl MentionTypes {
     fn all(&self) -> Vec<String> {
-        [
-            self.file,
-            self.dir,
-            self.knowledge,
-            self.task,
-            self.finding,
-            self.commit,
-        ]
-        .map(str::to_string)
-        .to_vec()
+        [self.file, self.dir, self.record, self.finding, self.commit]
+            .map(str::to_string)
+            .to_vec()
     }
 }
 
 const BODY_MENTIONS: MentionTypes = MentionTypes {
     file: RT_BODY_FILE,
     dir: RT_BODY_DIR,
-    knowledge: RT_WIKILINK,
-    task: RT_BODY_TASK,
-    finding: RT_BODY_FINDING,
-    commit: RT_BODY_COMMIT,
-};
-
-/// A knowledge page's body: its files and directories are what freshness
-/// pins (`v_oxplow_knowledge_ref`).
-const KNOWLEDGE_MENTIONS: MentionTypes = MentionTypes {
-    file: RT_KNOWLEDGE_FILE,
-    dir: RT_KNOWLEDGE_DIR,
-    knowledge: RT_WIKILINK,
-    task: RT_BODY_TASK,
+    record: RT_BODY_RECORD,
     finding: RT_BODY_FINDING,
     commit: RT_BODY_COMMIT,
 };
@@ -148,8 +120,7 @@ const KNOWLEDGE_MENTIONS: MentionTypes = MentionTypes {
 const PINNED_MENTIONS: MentionTypes = MentionTypes {
     file: RT_FILE_PIN,
     dir: RT_DIR_PIN,
-    knowledge: RT_WIKILINK,
-    task: RT_BODY_TASK,
+    record: RT_BODY_RECORD,
     finding: RT_BODY_FINDING,
     commit: RT_BODY_COMMIT,
 };
@@ -201,8 +172,15 @@ pub fn model_body_edges(
 }
 
 /// A shared model's stated refs (a provider's), as the edges its markdown
-/// would have given: each URI typed by what it names.
-pub fn model_stated_edges(source: &str, uris: &[String], pins: bool) -> Vec<PageRefEdge> {
+/// would have given: each URI typed by what it names (a record `kinds`
+/// recognizes, a file, a directory, a finding, a commit); any other is no
+/// edge a row has.
+pub fn model_stated_edges(
+    kinds: &ResourceRegistry,
+    source: &str,
+    uris: &[String],
+    pins: bool,
+) -> Vec<PageRefEdge> {
     let types = if pins {
         &PINNED_MENTIONS
     } else {
@@ -210,14 +188,17 @@ pub fn model_stated_edges(source: &str, uris: &[String], pins: bool) -> Vec<Page
     };
     uris.iter()
         .filter_map(|u| {
-            let t = match build::resource_of(u)?.as_str() {
-                r::FILE => types.file,
-                r::DIR => types.dir,
-                r::KNOWLEDGE => types.knowledge,
-                r::TASK => types.task,
-                r::FINDING => types.finding,
-                r::COMMIT => types.commit,
-                _ => return None,
+            let parsed = oxplow_domain::uri::OxplowUri::parse(u).ok()?;
+            let t = if kinds.record_of(&parsed).is_some() {
+                types.record
+            } else {
+                match parsed.resource().to_string().as_str() {
+                    r::FILE => types.file,
+                    r::DIR => types.dir,
+                    r::FINDING => types.finding,
+                    r::COMMIT => types.commit,
+                    _ => return None,
+                }
             };
             Some(PageRefEdge::new(source, u, t))
         })
@@ -227,66 +208,10 @@ pub fn model_stated_edges(source: &str, uris: &[String], pins: bool) -> Vec<Page
 const COMMENT_MENTIONS: MentionTypes = MentionTypes {
     file: RT_COMMENT_FILE,
     dir: RT_COMMENT_DIR,
-    knowledge: RT_COMMENT_WIKILINK,
-    task: RT_COMMENT_TASK,
+    record: RT_COMMENT_RECORD,
     finding: RT_COMMENT_FINDING,
     commit: RT_COMMENT_COMMIT,
 };
-
-/// Edges contributed by a knowledge page's body (`page` its URI), parsed
-/// as oxplow's markdown. A file edge carries the line and version the link
-/// named.
-pub fn knowledge_edges(kinds: &ResourceRegistry, page: &str, body: &str) -> Vec<PageRefEdge> {
-    let source = page;
-    let refs = extract(kinds, body);
-    let mut out = Vec::new();
-    for fd in &refs.files_detail {
-        let mut edge = PageRefEdge::new(source, build::file_uri(&fd.path), RT_KNOWLEDGE_FILE);
-        if !(fd.version == RefVersion::Disk && fd.line.is_none()) {
-            edge = edge.with_extra(
-                serde_json::json!({
-                    "line": fd.line,
-                    "version": match &fd.version {
-                        RefVersion::Disk => "disk".to_string(),
-                        RefVersion::Ref(r) => format!("ref:{r}"),
-                    }
-                })
-                .to_string(),
-            );
-        }
-        out.push(edge);
-    }
-    out.extend(
-        mention_edges(kinds, source, body, &KNOWLEDGE_MENTIONS)
-            .into_iter()
-            .filter(|e| e.ref_type != RT_KNOWLEDGE_FILE),
-    );
-    out
-}
-
-/// The ref type a knowledge page's stated link to `target` is recorded under,
-/// by what it names; `None` for a resource that isn't a page's link.
-fn stated_type(target: &str) -> Option<&'static str> {
-    Some(match build::resource_of(target)?.as_str() {
-        r::FILE => RT_KNOWLEDGE_FILE,
-        r::DIR => RT_KNOWLEDGE_DIR,
-        r::KNOWLEDGE => RT_WIKILINK,
-        r::TASK => RT_BODY_TASK,
-        r::FINDING => RT_BODY_FINDING,
-        r::COMMIT => RT_BODY_COMMIT,
-        _ => return None,
-    })
-}
-
-/// Edges of a knowledge page (`page` its URI) whose store states its links
-/// (a provider's record: a file's URI, another page's, a task's, …) rather
-/// than a body core parses. A URI of another resource isn't an edge a page
-/// has.
-pub fn stated_edges(page: &str, uris: &[String]) -> Vec<PageRefEdge> {
-    uris.iter()
-        .filter_map(|u| Some(PageRefEdge::new(page, u, stated_type(u)?)))
-        .collect()
-}
 
 /// Edges contributed by a text body (`source` its URI: a handoff's, …).
 /// Single-owner source.
@@ -294,19 +219,8 @@ pub fn body_edges(kinds: &ResourceRegistry, source: &str, body: &str) -> Vec<Pag
     mention_edges(kinds, source, body, &BODY_MENTIONS)
 }
 
-/// A task's body-mention edges — what its title and body name — for
-/// any list's item; `item` is its URI.
-pub fn task_edges(
-    kinds: &ResourceRegistry,
-    item: &str,
-    title: &str,
-    body: &str,
-) -> Vec<PageRefEdge> {
-    mention_edges(kinds, item, &format!("{title}\n{body}"), &BODY_MENTIONS)
-}
-
-/// A task's comment-mention edges: what its comments' bodies name.
-pub fn task_comment_edges<'a>(
+/// A row's comment-mention edges: what its comments' bodies name.
+pub fn comment_edges<'a>(
     kinds: &ResourceRegistry,
     item: &str,
     bodies: impl IntoIterator<Item = &'a str>,
@@ -342,12 +256,11 @@ fn mention_edges(
             .map(|fd| edge(build::file_uri(&fd.path), types.file)),
     );
     out.extend(refs.dirs.iter().map(|d| edge(build::dir_uri(d), types.dir)));
-    out.extend(refs.knowledge.into_iter().map(|k| edge(k, types.knowledge)));
     out.extend(
-        refs.tasks
+        refs.records
             .into_iter()
             .filter(|t| t != source)
-            .map(|t| edge(t, types.task)),
+            .map(|t| edge(t, types.record)),
     );
     out.extend(
         refs.findings
@@ -375,73 +288,81 @@ pub fn finding_edges(finding_id: &str, path: &str) -> Vec<PageRefEdge> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_domain::uri::build::resource_of;
+    use oxplow_domain::uri::resources::RecordIds;
 
-    /// Foundation's resources with oxtask as the task tracker (`tsk<n>`).
-    fn tasks_kinds() -> oxplow_domain::uri::resources::ResourceRegistry {
-        oxplow_domain::uri::resources::with_bundled_knowledge(
-            oxplow_domain::uri::resources::foundation().clone(),
-        )
-        .with_task_ids("oxtask", r"tsk\d+")
-        .unwrap()
-        .with_knowledge_store("oxwiki", Some("[a-z0-9]+(-[a-z0-9]+)*"))
-        .unwrap()
+    fn ids(resource: &str, store: &str, param: &str, pattern: &str, loose: bool) -> RecordIds {
+        RecordIds {
+            resource: resource.into(),
+            store: store.into(),
+            store_param: param.into(),
+            key: "id".into(),
+            pattern: Some(pattern.into()),
+            loose,
+        }
     }
 
-    fn task(id: &str) -> String {
-        build::task_uri("oxtask", id)
+    /// Foundation's resources with one loose model (`tsk<n>`) and one
+    /// bracket-only (kebab-case slugs), both made up: core names neither.
+    fn kinds() -> ResourceRegistry {
+        oxplow_domain::uri::resources::foundation()
+            .clone()
+            .with_record_ids(ids("acme/job", "jobs", "queue", r"tsk\d+", true))
+            .unwrap()
+            .with_record_ids(ids(
+                "acme/page",
+                "wiki",
+                "store",
+                "[a-z0-9]+(-[a-z0-9]+)*",
+                false,
+            ))
+            .unwrap()
     }
 
-    fn resource(e: &PageRefEdge) -> String {
-        resource_of(&e.target).unwrap()
+    fn job(id: &str) -> String {
+        build::of("acme/job", &[("id", id), ("queue", "jobs")])
+    }
+
+    fn page(id: &str) -> String {
+        build::of("acme/page", &[("id", id), ("store", "wiki")])
     }
 
     #[test]
-    fn knowledge_edges_cover_all_kinds() {
-        let body = "[[src/app.rs]] [[dir:src]] [[architecture]] [[tsk7]] [[finding:fnd-1]] [[git:abcdef0]]";
-        let intro = build::knowledge_uri("oxwiki", "intro");
-        let edges = knowledge_edges(&tasks_kinds(), &intro, body);
-        let kinds: std::collections::BTreeSet<_> = edges.iter().map(resource).collect();
-        for k in ["file", "dir", "knowledge", "task", "finding", "commit"] {
-            assert!(kinds.contains(&format!("oxplow/{k}")), "{k}: {kinds:?}");
-        }
-        // Every stored target is a URI foundation declares, but a task's:
-        // oxplow-bundled declares that resource.
-        for e in edges.iter().filter(|e| resource(e) != "oxplow/task") {
-            let r = oxplow_domain::uri::OxplowUri::parse(&e.target)
-                .unwrap_or_else(|err| panic!("{}: {err}", e.target));
-            tasks_kinds()
-                .validate(&r)
-                .unwrap_or_else(|err| panic!("{}: {err}", e.target));
-            assert_eq!(e.source, intro);
-        }
-        assert!(edges.iter().any(|e| e.target == task("tsk7")));
-    }
-
-    #[test]
-    fn task_edges_parse_the_body() {
-        let edges = task_edges(
-            &tasks_kinds(),
-            &task("tsk1"),
-            "fix something",
-            "see [[src/app.rs]] for context, blocked by tsk2, touches finding:fnd-9",
+    fn a_body_mentions_each_kind_and_records_are_one_kind() {
+        let edges = model_body_edges(
+            &kinds(),
+            &job("tsk1"),
+            "see [[src/app.rs]] [[dir:src]] [[architecture]] tsk2 [[finding:fnd-1]] [[git:abcdef0]] tsk1",
+            false,
         );
-        let targets: Vec<_> = edges.iter().map(|e| e.target.as_str()).collect();
-        assert!(targets.contains(&build::file_uri("src/app.rs").as_str()));
-        assert!(targets.contains(&task("tsk2").as_str()));
-        assert!(targets.contains(&build::finding_uri("fnd-9").as_str()));
-        // self-mention filtered out
-        assert!(!targets.contains(&task("tsk1").as_str()));
-        assert!(edges.iter().all(|e| e.source == task("tsk1")));
+        let got: std::collections::BTreeSet<(String, String)> = edges
+            .iter()
+            .map(|e| (e.target.clone(), e.ref_type.clone()))
+            .collect();
+        for (target, ty) in [
+            (build::file_uri("src/app.rs"), RT_BODY_FILE),
+            (build::dir_uri("src"), RT_BODY_DIR),
+            (page("architecture"), RT_BODY_RECORD),
+            (job("tsk2"), RT_BODY_RECORD),
+            (build::finding_uri("fnd-1"), RT_BODY_FINDING),
+            (build::commit_uri("abcdef0"), RT_BODY_COMMIT),
+        ] {
+            assert!(
+                got.contains(&(target.clone(), ty.to_string())),
+                "{target} {ty}: {got:?}"
+            );
+        }
+        // A row naming itself isn't an edge.
+        assert!(edges.iter().all(|e| e.target != job("tsk1")));
+        assert!(edges.iter().all(|e| e.source == job("tsk1")));
     }
 
-    /// Comments' mentions are the item's own edges, under the comment
-    /// ref types, each target once.
+    /// Comments' mentions are the row's own edges, under the comment ref
+    /// types, each target once.
     #[test]
-    fn comment_edges_are_the_items_under_comment_types() {
-        let edges = task_comment_edges(
-            &tasks_kinds(),
-            &task("tsk1"),
+    fn comment_edges_are_the_rows_under_comment_types() {
+        let edges = comment_edges(
+            &kinds(),
+            &job("tsk1"),
             ["see [[src/app.rs]] and tsk2", "again [[src/app.rs]]"],
         );
         let got: Vec<(String, String, &str)> = edges
@@ -451,8 +372,35 @@ mod tests {
         assert_eq!(
             got,
             vec![
-                (task("tsk1"), build::file_uri("src/app.rs"), RT_COMMENT_FILE),
-                (task("tsk1"), task("tsk2"), RT_COMMENT_TASK),
+                (job("tsk1"), build::file_uri("src/app.rs"), RT_COMMENT_FILE),
+                (job("tsk1"), job("tsk2"), RT_COMMENT_RECORD),
+            ]
+        );
+    }
+
+    /// A provider's stated refs are typed by what they name: a record its
+    /// models hold, a file; a resource that isn't a row's link is no edge.
+    #[test]
+    fn stated_refs_are_typed_by_what_they_name() {
+        let edges = model_stated_edges(
+            &kinds(),
+            &job("tsk1"),
+            &[
+                page("intro"),
+                build::file_uri("a.rs"),
+                build::thread_uri(oxplow_domain::ThreadId::new(1)),
+            ],
+            false,
+        );
+        let got: Vec<(&str, &str)> = edges
+            .iter()
+            .map(|e| (e.target.as_str(), e.ref_type.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (page("intro").as_str(), RT_BODY_RECORD),
+                (build::file_uri("a.rs").as_str(), RT_BODY_FILE),
             ]
         );
     }

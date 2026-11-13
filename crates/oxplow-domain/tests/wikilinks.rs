@@ -1,20 +1,48 @@
 //! `[[…]]` authoring sugar against oxplow-foundation's declared resources.
 
-use oxplow_domain::uri::resources::ResourceRegistry;
+use oxplow_domain::uri::resources::{RecordIds, ResourceRegistry};
 use oxplow_domain::uri::{canonical_wikilink, classify_wikilinks, OxplowUri, Reference};
 
-/// oxplow-foundation's resources with oxtask as the task tracker
-/// (`tsk<n>`) and oxwiki and a vault as the knowledge stores.
+fn ids(
+    resource: &str,
+    store: &str,
+    store_param: &str,
+    pattern: Option<&str>,
+    loose: bool,
+) -> RecordIds {
+    RecordIds {
+        resource: resource.into(),
+        store: store.into(),
+        store_param: store_param.into(),
+        key: "id".into(),
+        pattern: pattern.map(str::to_string),
+        loose,
+    }
+}
+
+/// oxplow-foundation's resources with oxtask as a task store (`tsk<n>`,
+/// loose) and oxwiki and a vault as the knowledge stores.
 fn tasks() -> ResourceRegistry {
-    oxplow_domain::uri::resources::with_bundled_knowledge(
-        oxplow_domain::uri::resources::foundation().clone(),
-    )
-    .with_task_ids("oxtask", r"tsk\d+")
-    .expect("the pattern compiles")
-    .with_knowledge_store("oxwiki", Some("[a-z0-9]+(-[a-z0-9]+)*"))
-    .expect("the pattern compiles")
-    .with_knowledge_store("vault", None)
-    .expect("a store with no pattern")
+    oxplow_domain::uri::resources::foundation()
+        .clone()
+        .with_record_ids(ids(
+            "oxplow/task",
+            "oxtask",
+            "provider",
+            Some(r"tsk\d+"),
+            true,
+        ))
+        .expect("the pattern compiles")
+        .with_record_ids(ids(
+            "oxplow/knowledge",
+            "oxwiki",
+            "store",
+            Some("[a-z0-9]+(-[a-z0-9]+)*"),
+            false,
+        ))
+        .expect("the pattern compiles")
+        .with_record_ids(ids("oxplow/knowledge", "vault", "store", None, false))
+        .expect("a store with no pattern")
 }
 
 #[test]
@@ -108,14 +136,21 @@ fn classify_wikilinks_reports_the_uri_beside_the_typed_view() {
         ]
     );
     // The typed view is derived from the URI, never parsed twice.
-    assert_eq!(links[0].reference, Some(Reference::Task(item.into())));
+    assert_eq!(
+        links[0].reference,
+        Some(Reference::Record {
+            resource: "oxplow/task".into(),
+            store: "oxtask".into(),
+            id: "tsk42".into()
+        })
+    );
     let uri = |s: &str| OxplowUri::parse(s).unwrap();
     assert_eq!(
-        Reference::try_from(&uri("oxplow:oxplow/commit?sha=abc1234")).unwrap(),
+        Reference::of(&tasks(), &uri("oxplow:oxplow/commit?sha=abc1234")).unwrap(),
         Reference::Commit("abc1234".into())
     );
     assert!(
-        Reference::try_from(&uri("oxplow:oxplow/request?id=req3")).is_err(),
+        Reference::of(&tasks(), &uri("oxplow:oxplow/request?id=req3")).is_none(),
         "no typed view yet"
     );
 }

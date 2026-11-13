@@ -246,28 +246,30 @@ fn unresolved_ref(
 /// `None` when it resolves.
 fn missing_reason(world: &LinkWorld<'_>, reference: &Reference) -> Option<String> {
     match reference {
-        // Through the task resource's `resolve:` dataset, whichever it is.
-        Reference::Task(uri) => match oxplow_domain::uri::OxplowUri::parse(uri) {
-            Ok(canonical) => unresolved_ref(world, &canonical),
-            Err(_) => Some(format!("task `{uri}` does not exist")),
-        },
-        // Through the knowledge resource's `resolve:` dataset, whichever it
-        // is; a page may link to itself before its row exists.
-        Reference::Knowledge { store, id } => {
-            let uri = oxplow_domain::uri::build::knowledge_uri(store, id);
-            if world.this_page == Some(uri.as_str()) {
+        // A record of a shared model: through its resource's `resolve:`
+        // dataset, whichever it is; a page may link to itself before its row
+        // exists.
+        Reference::Record {
+            resource,
+            store,
+            id,
+        } => {
+            let record = oxplow_domain::uri::resources::RecordRef {
+                resource: resource.clone(),
+                store: store.clone(),
+                id: id.clone(),
+            };
+            let Some(canonical) = world
+                .resources
+                .uri_of_record(&record)
+                .and_then(|uri| oxplow_domain::uri::OxplowUri::parse(&uri).ok())
+            else {
+                return Some(format!("`{id}` of `{store}` is no record of `{resource}`"));
+            };
+            if world.this_page == Some(canonical.identity().as_str()) {
                 return None;
             }
-            match oxplow_domain::uri::OxplowUri::parse(&uri) {
-                Ok(canonical) => unresolved_ref(world, &canonical).map(|why| {
-                    if why.contains("could not be checked") {
-                        why
-                    } else {
-                        format!("knowledge page `{id}` of `{store}` does not exist")
-                    }
-                }),
-                Err(_) => Some(format!("knowledge page `{id}` of `{store}` does not exist")),
-            }
+            unresolved_ref(world, &canonical)
         }
         Reference::Commit(sha) => world
             .graph
@@ -338,7 +340,7 @@ mod tests {
     async fn a_page_may_link_to_itself() {
         let dir = git_repo();
         let services = Services::in_memory(dir.path()).await.unwrap();
-        let me = oxplow_domain::uri::build::knowledge_uri("oxwiki", "me");
+        let me = "oxplow:oxplow/knowledge?id=me&store=oxwiki".to_string();
         let warnings = check_links_at(
             &services.db,
             &services.vocabulary,
