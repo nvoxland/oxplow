@@ -16,7 +16,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-mod move_tasks;
 mod oxtask_file;
 
 use oxplow_app::commands::CommandBus;
@@ -33,15 +32,6 @@ oxplow-dev task update <id> [--title T] [--body B] [--parent ID]
 oxplow-dev task comment <id> <body>
 oxplow-dev task link <id> <target> <blocks|discovered_from|relates_to|duplicates|supersedes|replies_to|about>
 oxplow-dev task unlink <id> <target> <link type>
-
-oxplow-dev task move-to-oxtask [--dry-run] [--replace [--force-discard]]
-                                             one-off: move core's tasks into oxtask's own file
-                                             and bundled's fields (oxplow quit, the new
-                                             binary booted once; --dry-run keeps nothing;
-                                             --replace redoes a move already made,
-                                             keeping the old file as a backup, and
-                                             refuses to lose tasks core lacks unless
-                                             --force-discard)
 
 oxplow-dev knowledge list [--store oxwiki]   the pages (id, title)
 oxplow-dev knowledge show <id> [--store S]
@@ -100,17 +90,6 @@ async fn run(mut args: Vec<String>, env_thread: Option<String>) -> Result<String
     if args.first().is_some_and(|a| a == "help") || args.iter().any(|a| a == "--help" || a == "-h")
     {
         return Ok(USAGE.to_string());
-    }
-    if args.first().is_some_and(|a| a == "task")
-        && args.get(1).is_some_and(|a| a == "move-to-oxtask")
-    {
-        let dry_run = take_switch(&mut args, "--dry-run");
-        let replace = take_switch(&mut args, "--replace");
-        let force_discard = take_switch(&mut args, "--force-discard");
-        if args.len() != 2 {
-            return Err(format!("usage:\n{USAGE}"));
-        }
-        return move_tasks::move_to_oxtask(&project, dry_run, replace, force_discard).await;
     }
     match args.first().map(String::as_str) {
         Some("task") => {
@@ -1252,16 +1231,6 @@ mod tests {
             )
             .unwrap();
         assert_eq!(author, ("oxplow:oxplow/person".into(), "person".into()));
-        let db =
-            Database::open_existing(oxplow_app::AppLayout::for_project(p).state_db_path).unwrap();
-        let core: i64 = db
-            .read(|c| {
-                c.query_row("SELECT count(*) FROM oxtask", [], |r| r.get(0))
-                    .map_err(oxplow_db::map_sql_err)
-            })
-            .await
-            .unwrap();
-        assert_eq!(core, 0);
     }
 
     /// A run with `--thread` writes as that thread's agent.

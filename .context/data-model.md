@@ -547,9 +547,9 @@ running an older DB get the columns/tables dropped on first launch with
 the new binary; existing rows are not migrated forward (no surface
 reads them).
 
-### `task`, `task_link`, `task_comment`, `task_assignment`, `oxtask`, `oxtask_link`, `oxtask_note` (legacy)
+### Core's task tables (gone, `V34__drop_core_tasks.sql`)
 
-> **Legacy.** Core reads and writes none of these tables; nothing in core names them but `oxplow-dev task move-to-oxtask`, which moved their rows into oxtask's own file. A task is a row of the shared model `oxplow/task_record`, read as `v_oxplow_task` (with `v_oxplow_task_link`, `v_oxplow_task_comment` and `v_oxplow_request_link`) and written by its store (`.context/tasks.md`, `.context/models.md`). The tables go in a later migration.
+Core keeps no tasks. A task is a row of the shared model `oxplow/task_record`, read as `v_oxplow_task` (with `v_oxplow_task_link`, `v_oxplow_task_comment` and `v_oxplow_request_link`) and written by its store (`.context/tasks.md`, `.context/models.md`). V34 dropped the tables core kept before — `task`, `task_link`, `task_comment`, `task_assignment`, `oxtask`, `oxtask_link`, `oxtask_note` and `request_task` — with their indexes, change-counter triggers and counter rows, and the `event_log_task_uri` index. What requests worked on is the model `request_task` (`model__oxplow__request_task`), which is another table.
 
 ### `symbol` + `symbol_capture` — code symbols (migration `V62__symbols_from_tree_sitter.sql`)
 

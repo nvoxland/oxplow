@@ -265,9 +265,7 @@ mod tests {
                 "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
                    VALUES (1, 'primary', 'p', 'main', 'refs/heads/main', 'local', '/tmp/x', '2026-01-01', '2026-01-01');
                  INSERT INTO threads (id, stream_id, title, created_at, updated_at)
-                   VALUES (1, 1, 'T', '2026-01-01', '2026-01-01');
-                 INSERT INTO oxtask (id, title, status, priority, created_by, created_at, updated_at)
-                   VALUES (1, 'Task', 'in_progress', 'medium', 'agent', '2026-01-01', '2026-01-01');",
+                   VALUES (1, 1, 'T', '2026-01-01', '2026-01-01');",
             )
         })
         .await

@@ -994,13 +994,10 @@ fn a_handoff_reaches_an_agent_only_at_its_prompt() {
 }
 
 /// Where core's old task tables may still be named in production code:
-/// the files listed here. Tasks are the task model's (`.context/tasks.md`);
-/// the one-off move out of the old tables is the only reader left, and says
-/// why.
+/// the files listed here. Tasks are the task model's (`.context/tasks.md`) and
+/// core's old task tables are dropped, so nothing is listed.
 #[rustfmt::skip]
-const TASK_IMPLEMENTATION: &[(&str, &str)] = &[
-    ("crates/oxplow-dev/src/move_tasks.rs", "the one-off move of core's old task tables into the oxtask extension's file; goes with core's tables"),
-];
+const TASK_IMPLEMENTATION: &[(&str, &str)] = &[];
 
 /// Production files outside the task crate that name oxplow's task list
 /// (comments left out).

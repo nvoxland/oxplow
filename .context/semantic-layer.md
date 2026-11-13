@@ -119,7 +119,7 @@ What core publishes, by where it comes from. Each row names its datasets
 
 | Source | Datasets | Facts |
 |---|---|---|
-| work | `stream`, `thread`, `task`, `oxtask_note`, `oxtask_link`, `request`, `request_task`, `context_read` | cycle time, lifecycle |
+| work | `stream`, `thread`, `request`, `context_read` (tasks are the task model's datasets, `.context/tasks.md`) | cycle time, lifecycle |
 | collectors | `collector` (each enabled extension's collectors with their trigger, enabled flag, state and last run: a plain view over `contribution`, `collector_run` and `contribution_health`; the machine's network and credential standing are the live `collector_state` / `collector_credential`) | — |
 | knowledge | `knowledge_page`, `comment` | freshness |
 | git | `commit`, `commit_file`, `commit_task`, `branch`, and change analysis (`change`, `change_file`, `change_function`, `change_import`, `change_duplicate`, `change_test_file`) | churn |

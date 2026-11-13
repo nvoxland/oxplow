@@ -301,9 +301,7 @@ they were.
 ## The rename (V101)
 
 `V101__uri_names.sql` renamed every name that said `ref` for a URI to
-`uri`. Tables: `task.uri` / `parent_uri`, `task_comment.uri`,
-`task_link.from_uri` / `to_uri`, `oxtask_link.to_uri`,
-`fact_subject.uri`, `search_entry.uri` (was `ref_id`), `bookmark.uri`,
+`uri`. Tables: `fact_subject.uri`, `search_entry.uri` (was `ref_id`), `bookmark.uri`,
 `symbol.uri`, `change_function.uri`.
 `wiki_page.file_refs_json` / `dir_refs_json` (the table is `knowledge_page` now) became `files_json` /
 `dirs_json`: a knowledge page's citation is a file path, so its names say `files`

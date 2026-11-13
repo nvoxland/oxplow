@@ -2114,7 +2114,10 @@ mod tests {
                (2, 2, '2026-01-01T00:00:00Z', '2026-01-01T01:00:00Z', NULL);",
         )
         .unwrap();
-        embedded::migrations::runner().run(&mut conn).unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(23))
+            .run(&mut conn)
+            .unwrap();
         let rows: Vec<(i64, String, String)> = conn
             .prepare("SELECT request_id, task_uri, basis FROM request_task ORDER BY request_id")
             .unwrap()
@@ -2678,7 +2681,6 @@ mod tests {
             "runtime_state",
             "threads",
             "thread_selection",
-            "oxtask_note",
             "agent_turn",
             "knowledge_page",
             "page_visit",
@@ -2687,8 +2689,6 @@ mod tests {
             "code_quality_finding",
             "file_snapshot",
             "snapshot",
-            "task",
-            "oxtask_link",
             "knowledge_page_touch",
             "knowledge_page_read",
             "model_field_value",
@@ -2753,6 +2753,15 @@ mod tests {
             // V28: knowledge pages replace the wiki's.
             "wiki_page",
             "wiki_page_thread_update",
+            // V34: tasks are the shared model's rows, kept by a store.
+            "task",
+            "task_link",
+            "task_comment",
+            "task_assignment",
+            "oxtask",
+            "oxtask_link",
+            "oxtask_note",
+            "request_task",
         ];
         let mut stmt = conn
             .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
@@ -2778,6 +2787,55 @@ mod tests {
                 "expected table `{table}` to be DROPPED; got: {actual:?}"
             );
         }
+    }
+
+    /// V34 drops core's task tables with everything on them: their indexes,
+    /// triggers, the change-counter rows, and the event-log index for a
+    /// provider's item uri. Bundled's `request_task` model table is another
+    /// table and stays out of it.
+    #[test]
+    fn v34_leaves_nothing_of_core_tasks() {
+        let db = Database::in_memory();
+        let conn = db.conn().unwrap();
+        let gone = [
+            "task",
+            "task_link",
+            "task_comment",
+            "task_assignment",
+            "oxtask",
+            "oxtask_link",
+            "oxtask_note",
+            "request_task",
+        ];
+        let mut st = conn
+            .prepare("SELECT type, name, tbl_name FROM sqlite_master")
+            .unwrap();
+        let objects: Vec<(String, String, String)> = st
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let left: Vec<_> = objects
+            .iter()
+            .filter(|(_, name, table)| {
+                gone.contains(&table.as_str()) || name == "event_log_task_uri"
+            })
+            .collect();
+        assert!(left.is_empty(), "{left:?}");
+        let counted: i64 = conn
+            .query_row(
+                &format!(
+                    "SELECT count(*) FROM table_generation WHERE name IN ({})",
+                    gone.iter()
+                        .map(|g| format!("'{g}'"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(counted, 0, "change counters of dropped tables");
     }
 
     /// The unique-primary-stream and unique-active-thread invariants
@@ -2814,50 +2872,6 @@ mod tests {
         assert!(
             result.is_err(),
             "FK enforcement must be on so dangling stream_id is rejected"
-        );
-    }
-
-    #[test]
-    fn work_note_xor_invariant_enforced() {
-        let db = Database::in_memory();
-        let conn = db.conn().unwrap();
-        // Setup minimal parent rows.
-        let now = "2026-04-29T00:00:00Z";
-        conn.execute(
-            "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
-             VALUES (1, 'primary', 'a', 'main', 'r', 'r', '/r', ?1, ?1)",
-            [now],
-        ).unwrap();
-        conn.execute(
-            "INSERT INTO threads (id, stream_id, title, created_at, updated_at)
-             VALUES (1, 1, 't', ?1, ?1)",
-            [now],
-        )
-        .unwrap();
-        // Both null — must fail.
-        let r = conn.execute(
-            "INSERT INTO oxtask_note (body, author, created_at) VALUES ('b', 'u', ?1)",
-            [now],
-        );
-        assert!(
-            r.is_err(),
-            "oxtask_note with neither parent should fail CHECK"
-        );
-        // Both set — must fail.
-        let r = conn.execute(
-            "INSERT INTO oxtask (title, status, priority, created_by, created_at, updated_at)
-             VALUES ('t', 'ready', 'medium', 'user', ?1, ?1)",
-            [now],
-        );
-        assert!(r.is_ok());
-        let r = conn.execute(
-            "INSERT INTO oxtask_note (task_id, thread_id, body, author, created_at)
-             VALUES (1, 1, 'b', 'u', ?1)",
-            [now],
-        );
-        assert!(
-            r.is_err(),
-            "oxtask_note with both parents should fail CHECK"
         );
     }
 
@@ -2919,25 +2933,5 @@ mod tests {
         })
         .unwrap_err();
         assert!(err.to_string().contains("`c`"), "{err}");
-    }
-
-    /// The task table's `acceptance_criteria` column is gone (V18 dropped
-    /// it with `ALTER TABLE … DROP COLUMN`, leaving child rows untouched).
-    #[test]
-    fn oxtask_has_no_acceptance_criteria_column() {
-        let db = Database::in_memory();
-        let conn = db.conn().unwrap();
-        // acceptance_criteria column is gone.
-        let cols: Vec<String> = conn
-            .prepare("PRAGMA table_info(oxtask)")
-            .unwrap()
-            .query_map([], |row| row.get::<_, String>(1))
-            .unwrap()
-            .map(|r| r.unwrap())
-            .collect();
-        assert!(
-            !cols.iter().any(|c| c == "acceptance_criteria"),
-            "task.acceptance_criteria column must be dropped by V18 (cols: {cols:?})"
-        );
     }
 }

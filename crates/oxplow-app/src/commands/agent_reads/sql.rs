@@ -113,7 +113,7 @@ mod tests {
             .run(
                 &anonymous(),
                 SQL_QUERY,
-                json!({ "sql": "DELETE FROM oxtask" }),
+                json!({ "sql": "DELETE FROM threads" }),
                 false,
             )
             .await

@@ -112,8 +112,7 @@ extensions declare (bundled's `oxplow_thread_tasks`, oxtask's
 
 `oxplow-dev task …` works over oxtask's own file when the project has oxtask
 enabled; without it there is no task tracker to reach (the command says
-so). `oxplow-dev task move-to-oxtask` is the one-off that moved core's old
-tables into oxtask's file (`--replace` keeps a backup).
+so).
 
 ## Testing
 

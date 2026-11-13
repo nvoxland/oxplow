@@ -4421,16 +4421,6 @@ mod tests {
         assert!(targets.iter().any(|t| t.contains("a.rs")));
         assert!(targets.iter().any(|t| t.contains("abc1234")));
         assert!(targets.iter().any(|t| t.contains("def5678")));
-        // No task tracker is active here: the task it named links no request.
-        let links: i64 = svc
-            .db
-            .read(|c| {
-                c.query_row("SELECT COUNT(*) FROM request_task", [], |r| r.get(0))
-                    .map_err(oxplow_db::map_sql_err)
-            })
-            .await
-            .unwrap();
-        assert_eq!(links, 0);
     }
 
     /// A turn stores the question its final message ended on, from the

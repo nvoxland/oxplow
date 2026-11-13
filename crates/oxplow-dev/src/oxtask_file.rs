@@ -1,7 +1,7 @@
 //! `oxplow-dev task …` over oxtask's own file, for a project that has the
-//! oxtask extension enabled: the same subcommands and output as over core's
-//! tables, written to `.oxplow/extensions-data/oxtask.sqlite` (migrated the
-//! way the move tool migrates it). Every write is one statement through the
+//! oxtask extension enabled: written to
+//! `.oxplow/extensions-data/oxtask.sqlite` (created with the extension's first
+//! migration). Every write is one statement through the
 //! file's own triggers (`seq`, the delete guard), so the app's collector sees
 //! it on its next `sqlite` trigger.
 //!
@@ -14,6 +14,13 @@ use std::path::Path;
 
 use oxplow_db::extension_store::{ExtensionStore, Statement};
 use serde_json::{json, Value};
+
+/// oxtask's first migration: the file is made the way the extension makes it.
+/// (Later migrations are applied by the extension's own boot.)
+pub(crate) const STORE_MIGRATIONS: &[(&str, &str)] = &[(
+    "V1__tasks.sql",
+    include_str!("../../../extensions/oxtask/storage/migrations/V1__tasks.sql"),
+)];
 
 const PERSON: &str = "oxplow:oxplow/person";
 const STAGES: [&str; 6] = [
@@ -86,7 +93,7 @@ impl OxtaskFile {
             std::fs::create_dir_all(dir).map_err(err)?;
         }
         let store = ExtensionStore::open(&path).map_err(err)?;
-        let migrations: Vec<(String, String)> = crate::move_tasks::STORE_MIGRATIONS
+        let migrations: Vec<(String, String)> = STORE_MIGRATIONS
             .iter()
             .map(|(f, s)| (f.to_string(), s.to_string()))
             .collect();

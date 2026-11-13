@@ -4189,25 +4189,13 @@ mod tests {
                      VALUES (1, 1, 't', ?1, ?1)",
                     [now],
                 )?;
-                conn.execute(
-                    "INSERT INTO oxtask (title, status, priority, created_by, created_at, updated_at)
-                     VALUES ('t', 'in_progress', 'medium', 'user', ?1, ?1)",
-                    [now],
-                )?;
-                let task_id = conn.last_insert_rowid();
-                // A turn (1) of a request (1) that worked on the task, so a
-                // capture made in the turn resolves to both.
+                // A turn (1) of a request (1), so a capture made in the turn
+                // resolves to both.
                 conn.execute_batch(
                     "INSERT INTO agent_turn (id, thread_id, prompt, started_at)
                        VALUES (1, 1, 'p', '2026-06-30T10:00:00.000000Z');
                      INSERT INTO request (id, thread_id, first_turn_id) VALUES (1, 1, 1);
                      UPDATE agent_turn SET request_id = 1 WHERE id = 1;",
-                )?;
-                conn.execute(
-                    "INSERT INTO request_task (request_id, task_uri, basis, turn_id, at)
-                     VALUES (1, 'oxplow:oxplow/task?id=tsk' || ?1 || '&provider=oxtask', 'command', 1,
-                             '2026-06-30T10:00:00.000000Z')",
-                    params![task_id],
                 )?;
                 Ok(())
             })

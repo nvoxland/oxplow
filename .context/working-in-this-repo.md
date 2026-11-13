@@ -112,7 +112,6 @@ cargo run -q -p oxplow-dev -- task transition tsk12 done
 cargo run -q -p oxplow-dev -- task update tsk12 [--title …] [--body …] [--parent …]
 cargo run -q -p oxplow-dev -- task comment tsk12 "…"
 cargo run -q -p oxplow-dev -- task link tsk12 tsk13 blocks
-cargo run -q -p oxplow-dev -- task move-to-oxtask [--dry-run]   # one-off, see below
 cargo run -q -p oxplow-dev -- knowledge list [--store oxwiki]
 cargo run -q -p oxplow-dev -- knowledge show some-page [--store S]
 cargo run -q -p oxplow-dev -- knowledge write some-page [--title …] [--file body.md] [--store S]   # body from stdin without --file
@@ -126,7 +125,7 @@ cargo run -q -p oxplow-dev -- --help
 
 **What `task` works on.** Only oxtask's own file
 (`.oxplow/extensions-data/oxtask.sqlite`, created and migrated with oxtask's
-migrations as the move tool does), and only when the oxtask extension is
+migrations, with its first migration built in), and only when the oxtask extension is
 enabled (`extensions:` / `enableExtensions` in `.oxplow/project.yaml` and
 `.oxplow/personal.yaml`, less `disableExtensions`;
 `oxplow_config::extension_settings(..).is_enabled("oxtask")`); with it off
@@ -137,59 +136,6 @@ the pages use (`tsk12`, `state:`, the pretty JSON with `id` and `uri`);
 statement through the file's own triggers (a change number, the delete
 guard), so the app's collector sees it on its next `sqlite` trigger. The SQL
 is the one in `extensions/oxtask/handlers/*.star`.
-
-`task move-to-oxtask` is the one-off move of core's tasks into the oxtask
-extension's own file (`.oxplow/extensions-data/oxtask.sqlite`) and bundled's
-fields (`.context/tasks.md`). Run it with oxplow quit, after the new binary
-booted once on the project (so bundled's `task_record` and `request_task`
-model tables exist) and with oxtask enabled. Each task keeps its
-number (so `tsk<N>` and its URI), links and notes go to the store, an
-assignment becomes the `oxplow` fields `assignee` and `rank`, and request
-links go to the `oxplow/request_task` model's table (basis `command` becomes
-`edited`; core's `at` and `turn_id` are kept). It refuses when the store
-already has tasks. It reads core's task tables and changes the main database
-in these ways only: it drops the `request_task_next` table an earlier build of
-bundled left; it deletes the command log's `oxplow.task.*` rows (audit rows,
-audit rows whose inverse names one, pending proposals) and nulls the
-`effect_run` references they leave; and it deletes the old `task_link:*` edges of
-`page_ref` (the model writes them again as oxtask fills it). `--dry-run` does
-it all, keeps nothing, and prints the counts of audit rows, proposals and
-edges it would delete.
-
-The move runs as part of the flip (quit oxplow, build the flip, move
-`--replace` under the instance lock, start), never earlier. It takes the
-instance lock as `extension deploy` does and refuses while oxplow runs.
-Before anything is renamed or written it checks its preconditions (the main
-database opens, bundled's two model tables exist, oxtask is enabled) and
-copies the main database next to itself (`local.sqlite.pre-move-<unix
-seconds>`, a `VACUUM INTO`). The main database commits first (every write in
-it is idempotent), then the store file; `--replace` deletes the
-`oxplow`-namespace fields of the `oxplow/task_record` model and every row of
-the `oxplow/request_task` model (store `oxplow`) first, in the same
-transactions, so a move made earlier can be redone; if the move fails after
-it set the old store file aside, the old file is put back (with `--dry-run`
-it works on a scratch file and keeps nothing).
-Its rules:
-
-- **Authors come from the event log.** A task's author is the `thread_id`
-  of the `task.created` event whose subject is the task's URI; failing that
-  the thread of the request link its creation made (basis `command`, at the
-  task's creation time, to the second); otherwise none. It is never the
-  earliest link of any basis. A note's author is the thread of the
-  `task.commented` event whose payload `comment` is `not<N>`; it never
-  inherits the task's author. A person's rows are `oxplow:oxplow/person`.
-  `author_kind` is always core's old author column (`user` is `person`,
-  `agent`, `system`).
-- **`--replace` keeps a backup.** It renames the old store file (and its
-  journal files) to `oxtask.sqlite.bak-<unix seconds>` instead of deleting
-  it, and refuses when the store has a task core's `oxtask` table lacks
-  (work made since the first move) unless `--force-discard` is given (a
-  dry run says so too).
-- **`closed_at`** is core's `task` row's `closed_at` for a done or canceled
-  task (the old `completed_at` was set for done only), else the task's
-  `updated_at`; an open task has none.
-- **Request links** keep core's `at` and `turn_id`; the thread becomes a
-  thread URI. They are rows of a model, so a later shape change keeps them.
 
 `extension status` and `extension deploy` change what oxplow runs from
 outside it. Boot deploys nothing, so they are how a checkout gets its
