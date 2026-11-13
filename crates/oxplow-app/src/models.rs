@@ -259,19 +259,23 @@ impl ModelRegistry {
     /// namespace (`v_model_field_decl`).
     /// Each live store of each model: `(model, store, extension, provider,
     /// id_pattern)`.
-    pub fn store_decls(&self) -> Vec<(String, String, String, Option<String>)> {
+    pub fn store_decls(&self) -> Vec<oxplow_db::model_store::StoreDecl> {
         self.fills
             .iter()
-            .filter(|f| self.models.contains_key(&f.model))
-            .flat_map(|f| {
-                f.stores.iter().map(move |store| {
-                    (
-                        f.model.clone(),
-                        store.clone(),
-                        f.extension.clone(),
-                        f.id_pattern.clone(),
-                    )
-                })
+            .filter_map(|f| self.models.get(&f.model).map(|m| (f, m)))
+            .flat_map(|(f, m)| {
+                f.stores
+                    .iter()
+                    .map(move |store| oxplow_db::model_store::StoreDecl {
+                        model: f.model.clone(),
+                        store: store.clone(),
+                        extension: f.extension.clone(),
+                        resource: m.decl.resource.clone(),
+                        store_param: m.decl.store_param.clone(),
+                        key: m.decl.key.clone(),
+                        id_pattern: f.id_pattern.clone(),
+                        loose: f.loose,
+                    })
             })
             .collect()
     }

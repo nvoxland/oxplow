@@ -33986,6 +33986,51 @@
         }
       ],
       "key": []
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "model",
+          "type": "TEXT",
+          "doc": "The model (`<owner namespace>/<model>`)."
+        },
+        {
+          "name": "store",
+          "type": "TEXT",
+          "doc": "The store id."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension that fills it."
+        },
+        {
+          "name": "id_pattern",
+          "type": "TEXT",
+          "doc": "How its items' ids look in text, a regex matched whole (`tsk[0-9]+`); NULL when it doesn't say."
+        },
+        {
+          "name": "resource",
+          "type": "TEXT",
+          "doc": "The model's resource, the first part of its records' URIs (`oxplow/task`)."
+        },
+        {
+          "name": "store_param",
+          "type": "TEXT",
+          "doc": "The URI param that names the store (`provider`, `store`)."
+        },
+        {
+          "name": "key",
+          "type": "TEXT",
+          "doc": "The URI param that names the record (`id`)."
+        },
+        {
+          "name": "loose",
+          "type": "INTEGER",
+          "doc": "1 when its ids count in running text (`tsk12`), 0 when only inside `[[…]]`."
+        }
+      ],
+      "key": []
     }
   }
 }

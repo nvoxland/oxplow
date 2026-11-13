@@ -572,20 +572,48 @@ pub fn replace_field_decls_tx(
 /// `(model, store, extension, id_pattern)`.
 pub fn replace_store_decls_tx(
     conn: &rusqlite::Connection,
-    decls: &[(String, String, String, Option<String>)],
+    decls: &[StoreDecl],
 ) -> Result<(), DomainError> {
     conn.execute("DELETE FROM model_store_decl", [])
         .map_err(map_sql_err)?;
-    for (model, store, extension, id_pattern) in decls {
+    for d in decls {
         conn.execute(
             "INSERT OR IGNORE INTO model_store_decl
-               (model, store, extension, id_pattern)
-             VALUES (?1, ?2, ?3, ?4)",
-            params![model, store, extension, id_pattern],
+               (model, store, extension, id_pattern, resource, store_param, record_key, loose)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                d.model,
+                d.store,
+                d.extension,
+                d.id_pattern,
+                d.resource,
+                d.store_param,
+                d.key,
+                d.loose,
+            ],
         )
         .map_err(map_sql_err)?;
     }
     Ok(())
+}
+
+/// One live store of a model, as `model_store_decl` keeps it: who fills it,
+/// and how a reader links its records without knowing the model.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoreDecl {
+    pub model: String,
+    pub store: String,
+    pub extension: String,
+    /// The model's resource (`oxplow/task`).
+    pub resource: String,
+    /// The URI param naming the store (`provider`, `store`).
+    pub store_param: String,
+    /// The URI param naming the record (`id`).
+    pub key: String,
+    /// How its ids look in text, a regex matched whole.
+    pub id_pattern: Option<String>,
+    /// Its ids count in running text, not only inside `[[…]]`.
+    pub loose: bool,
 }
 
 /// Restate every store's declared stages (`model_stage_decl`):

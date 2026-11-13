@@ -574,15 +574,17 @@ async fn a_model_need_is_met_while_the_model_has_a_live_store() {
     assert!(active().unmet(&need).is_empty(), "zz fills it");
 }
 
-/// Each live store of a model is a row of `v_model_store`: who fills it,
-/// whether it is a provider instance's, and how its ids look in text.
+/// Each live store of a model is a row of `v_model_store`: who fills it, and
+/// what a reader needs to link its records without knowing the model — the
+/// model's resource, its store and key params, the id pattern and whether
+/// its ids count in running text.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_models_stores_are_read_as_model_store() {
     let fx = services_with_thread().await;
     write(
         fx._dir.path(),
         ".oxplow/extensions/zz/extension.yaml",
-        "manifest: 2\nname: zz\nintent:\n  purpose: p\nfills:\n  - model: oxplow/task_record\n    stores: [zz]\n    id_pattern: \"zz[0-9]+\"\n",
+        "manifest: 2\nname: zz\nintent:\n  purpose: p\nfills:\n  - model: oxplow/task_record\n    stores: [zz]\n    id_pattern: \"zz[0-9]+\"\n    loose: true\n",
     );
     let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
     assert!(problems.is_empty(), "{problems:?}");
@@ -590,7 +592,7 @@ async fn a_models_stores_are_read_as_model_store() {
         .svc
         .sql
         .query_sql(
-            "SELECT extension || '|' || coalesce(id_pattern, '-') FROM v_model_store WHERE model = 'oxplow/task_record' AND store = 'zz'",
+            "SELECT extension || '|' || coalesce(id_pattern, '-') || '|' || resource || '|' || store_param || '|' || key || '|' || loose FROM v_model_store WHERE model = 'oxplow/task_record' AND store = 'zz'",
             vec![],
             None,
         )
@@ -598,7 +600,9 @@ async fn a_models_stores_are_read_as_model_store() {
         .unwrap();
     assert_eq!(
         out.rows,
-        vec![vec![oxplow_db::SqlCell::Text("zz|zz[0-9]+".into())]]
+        vec![vec![oxplow_db::SqlCell::Text(
+            "zz|zz[0-9]+|oxplow/task|provider|id|1".into()
+        )]]
     );
 }
 

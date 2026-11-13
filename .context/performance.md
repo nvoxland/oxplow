@@ -1067,8 +1067,8 @@ both datasets.
 
 A burst of commits is one re-read in the UI: every reader of change events
 goes through `coalesce` (`apps/desktop/src/viz/rerun.ts`, 100 ms after
-the last event) — `useRerunOnChange`, the knowledge title cache
-(`knowledgeTitleCache.ts`, which also re-reads once after an in-flight read
+the last event) — `useRerunOnChange`, the record title cache
+(`refTitleCache.ts`, which also re-reads once after an in-flight read
 that missed a change) and `useChange`. A new reader of events adopts it
 rather than re-reading per event. Writers help from their side by
 committing a unit of work once (a duplicate scan stores its findings in

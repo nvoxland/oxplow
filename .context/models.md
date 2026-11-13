@@ -216,11 +216,12 @@ fills:
   what shared screens draw a store's columns from, without the
   capability rows.
 - **Stores** (built): each live store of a model (an enabled extension's
-  fill, or a running provider instance's) is restated each publication
-  into `model_store_decl` (V33), read as `v_model_store` (model, store,
-  extension, provider, id_pattern): who fills it and how its ids look in
-  text, what the desktop links loose ids by once the capability rows
-  no longer say.
+  fill) is restated each publication into `model_store_decl` (V33, V39),
+  read as `v_model_store` (model, store, extension, id_pattern, resource,
+  store_param, key, loose): who fills it, and how a reader links its
+  records without knowing the model (`oxplow:<resource>?<key>=<id>&<store_param>=<store>`;
+  `loose` ids count in running text, the others only inside `[[…]]`).
+  The desktop's record links read it (`recordStores.ts`).
 
 - **Files** (built): a fill's `files: { folder, suffix }` says the store
   keeps each row as a file, `<folder>/<id><suffix>` (folder relative to the

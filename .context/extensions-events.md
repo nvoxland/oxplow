@@ -304,7 +304,7 @@ and `useResources` subscribes to:
 - `preprocessWikilinks` turns `[[pr:12]]` into a link when the value
   matches the param's pattern (`extensionWikilinkRef`, as the backend's
   `canonical_wikilink` does), and the link's text becomes its title from
-  the `resolve` dataset (`useExtensionRefTitle`) unless the author
+  the `resolve` dataset (`useRefTitle`, `refTitleCache.ts`) unless the author
   labelled it.
 
 **Searchable resources** (P9.D3, `kind_search.rs`). `searchable: <dataset>`
