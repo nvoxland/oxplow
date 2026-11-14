@@ -124,6 +124,36 @@ oxplow-bundled), oxplow's own knowledge store: one markdown file per page,
   rescans.
 - Fixtures: `extensions/oxwiki/fixtures`.
 
+## Claude Code's memories
+
+oxplow-bundled keeps a second store, `claude-memory`: the memories Claude Code
+keeps of this project, read only (Claude Code writes them; oxplow observes).
+
+- **Where.** The markdown files directly in the `memory/` folder of Claude
+  Code's own data folder for the project, `<config dir>/projects/<project,
+  encoded>/memory` (`files:` root `agent:claude`,
+  `extensions-permissions.md` "Folders outside the project"). A Claude
+  session in a worktree keeps its memories there too, under the main
+  checkout's name. Only this project's folder is read: never another
+  project's, and never `~/.claude/CLAUDE.md`.
+- **The collector** `oxplow.claude_memories` (`on: [start, { files:
+  "memory/*.md", root: "agent:claude" }]`) states the folder as a snapshot:
+  `id` the file's name without `.md` (so the fill's `files:` makes an agent's
+  read of the file a read of the row), `title` the one `MEMORY.md` (Claude
+  Code's index, no page itself) gives the file, else its frontmatter `name`,
+  else the id; `kind` its `type` (top-level or under `metadata:`), else
+  `memory`; `body` its `description` and then its text; `author` `Claude
+  Code`; `updated_at` the file's mtime. The same skips as oxwiki (over 1 MiB,
+  not UTF-8).
+- **Links.** A memory's bare `[[x]]` is written `[[claude-memory:<id>]]`,
+  `x` matched to a memory's `name`, then its id, then with `_` and `-`
+  swapped; one that matches none stays inside the store (a dangling link),
+  never another store's page. A link with `:`, `/`, `#`, `|` or `.` (a file,
+  another store) is kept as written. The fill has no `id_pattern`.
+- **No writes.** The store joins no action point (no New page, no Delete)
+  and replaces nothing: a memory's page shows its body read only.
+- Fixtures: `extensions/oxplow-bundled/fixtures/claude-code-*`.
+
 ## A provider or script store
 
 A store may be any extension that fills the model — a script collector reading

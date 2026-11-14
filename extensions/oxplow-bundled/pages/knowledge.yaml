@@ -26,7 +26,8 @@ loaders:
   # Every store of the knowledge model, with its pages.
   stores:
     sql: |
-      SELECT s.store AS store, 'On' AS status, 'note' AS kinds,
+      SELECT s.store AS store, 'On' AS status,
+             coalesce((SELECT group_concat(DISTINCT p.kind) FROM v_oxplow_knowledge_page p WHERE p.store = s.store), '') AS kinds,
              (SELECT count(*) FROM v_oxplow_knowledge_page p WHERE p.store = s.store) AS page_count,
              (SELECT count(*) FROM v_oxplow_knowledge_page p WHERE p.store = s.store AND p.stale_ref_count > 0) AS stale,
              CAST(NULL AS TEXT) AS notice

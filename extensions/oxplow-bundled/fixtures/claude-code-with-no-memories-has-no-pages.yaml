@@ -1,0 +1,8 @@
+# A project Claude Code has kept no memories of (its folder isn't there)
+# has no `claude-memory` pages, and the collector doesn't fail.
+when: { collector: oxplow.claude_memories, trigger: start }
+expect: { ok: true }
+steps:
+  - when: { sql: "SELECT count(*) AS pages FROM v_oxplow_knowledge_record WHERE store = 'claude-memory'" }
+    expect:
+      rows: [{ pages: 0 }]

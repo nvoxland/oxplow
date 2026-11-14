@@ -376,6 +376,16 @@ fills:
     stores: [oxplow]
   - model: oxplow/knowledge_touch_record
     stores: [oxplow]
+  # Claude Code's memories of this project, as pages of a read-only store:
+  # Claude Code writes them, oxplow observes them. No id_pattern: a bare
+  # `[[id]]` never names a memory.
+  - model: oxplow/knowledge_record
+    stores: [claude-memory]
+    files: { root: "agent:claude", folder: memory, suffix: .md }
+# The folder Claude Code keeps this project's memories in (its own data
+# folder for the project; sessions in a worktree write there too).
+files:
+  - { root: "agent:claude", path: memory, access: read, watch: true }
 models:
   - name: request_task
     resource: request_task
@@ -671,6 +681,12 @@ collectors:
     input: |
       SELECT th.uri AS thread_uri FROM v_thread th WHERE th.id = :thread_id
     sync: upsert
+  - id: oxplow.claude_memories
+    doc: "States each of Claude Code's memories of this project (the markdown files of its `memory/` folder) as a page of the knowledge store `claude-memory`, on start and whenever a memory file changes."
+    runtime: starlark
+    entry: collectors/knowledge/claude_memories.star
+    needs: [files.read]
+    on: [start, { files: "memory/*.md", root: "agent:claude" }]
   # What the project knows: the pages it keeps, restated whenever a page is
   # written, recorded or deleted, and whether a request read any.
   - id: oxplow.knowledge_pages

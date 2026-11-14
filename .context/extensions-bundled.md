@@ -424,11 +424,17 @@ extension" has the read contract.
 
 - `knowledge` (the Knowledge index, launcher section Knowledge): Stores
   (every store of `oxplow/knowledge_record`, from `v_model_store`, with page
-  and stale counts), Pages (newest change first; a filter over title and
+  and stale counts and the kinds its pages are; an empty store is listed
+  too, so with bundled on `claude-memory` always is), Pages (newest change first; a filter over title and
   body; Delete in the row's right-click menu, confirmed, through the
   `oxplow/knowledge.delete` point), Stale pages, and Recent reads and writes
   (`v_oxplow_knowledge_read`). New page opens `new-knowledge-page`. It also
   answers which pages cite a file (its `path` param).
+- **Claude Code's memories** (the store `claude-memory`): bundled fills
+  `oxplow/knowledge_record` from the `memory/` folder of Claude Code's own
+  data folder for the project (`files:` root `agent:claude`, read only), with
+  the `oxplow.claude_memories` collector. `knowledge.md` "Claude Code's
+  memories".
 - Bundled's own models `knowledge_read_record` (written by the `oxplow.knowledge_read` collector from `record.read`) and `knowledge_touch_record` (by `oxplow.knowledge_touch`, from the change event's thread) back `v_oxplow_knowledge_read` / `_touch`; `v_oxplow_knowledge_ref` is `v_ref_pin` of the pages. Its `knowledge` skill reads and finds pages (gated on the knowledge model).
 - `knowledge-page` (`for: oxplow/knowledge`, default): the tab is the
   page's title. The body is the markdown (read-only: a store's own page

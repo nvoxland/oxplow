@@ -11,6 +11,7 @@ expect:
   loaders:
     stores:
       rows:
+        - { store: claude-memory, status: "On", page_count: 0, stale: 0, notice: null }
         - { store: oxwiki, status: "On", page_count: 3, stale: 0, notice: null }
     pages:
       rows:

@@ -1,0 +1,47 @@
+# Claude Code's memories of this project (the `memory/` folder of its own
+# data folder for the project, root `agent:claude`) are the pages of the
+# knowledge store `claude-memory`: one per memory file, its title the one
+# MEMORY.md gives it (else its `name`), its kind the memory's type (either
+# frontmatter shape), its body the description and then the text. A
+# `[[link]]` names another memory of the store, by name or by file, even
+# one that isn't there, so it never opens another store's page. MEMORY.md
+# (the index), a file that isn't markdown and one in a sub-folder are no
+# pages. A memory whose file is gone is a page that is gone.
+given:
+  - root: "agent:claude"
+    files:
+      "memory/MEMORY.md": "- [Commit directly to main](commit_on_main.md) — in this repo\n"
+      "memory/commit_on_main.md": "---\nname: commit-on-main\ndescription: Commit to main, never a branch\nmetadata:\n  node_type: memory\n  type: feedback\n---\n\nCommit to main. See [[no-trailers]], [[no_trailers]] and [[gone-one]].\n"
+      "memory/no_trailers.md": "---\nname: no-trailers\ndescription: No attribution lines\ntype: user\n---\nNever add them.\n"
+      "memory/plain.md": "Just text, no frontmatter.\n"
+      "memory/notes.txt": "not a memory\n"
+      "memory/sub/deep.md": "---\nname: deep\n---\nToo deep.\n"
+when: { collector: oxplow.claude_memories, trigger: start }
+expect: { ok: true }
+steps:
+  - when: { sql: "SELECT id, title, kind, author, body FROM v_oxplow_knowledge_record WHERE store = 'claude-memory' ORDER BY id" }
+    expect:
+      rows:
+        - id: commit_on_main
+          title: Commit directly to main
+          kind: feedback
+          author: Claude Code
+          body: "Commit to main, never a branch\n\nCommit to main. See [[claude-memory:no_trailers]], [[claude-memory:no_trailers]] and [[claude-memory:gone-one]].\n"
+        - id: no_trailers
+          title: no-trailers
+          kind: user
+          author: Claude Code
+          body: "No attribution lines\n\nNever add them.\n"
+        - id: plain
+          title: plain
+          kind: memory
+          author: Claude Code
+          body: "Just text, no frontmatter.\n"
+  - given:
+      - root: "agent:claude"
+        remove_files: ["memory/plain.md"]
+  - when: { collector: oxplow.claude_memories, trigger: { files: [{ path: "memory/plain.md", op: removed }] } }
+    expect: { ok: true }
+  - when: { sql: "SELECT id FROM v_oxplow_knowledge_record WHERE store = 'claude-memory' ORDER BY id" }
+    expect:
+      rows: [{ id: commit_on_main }, { id: no_trailers }]

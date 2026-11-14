@@ -12,5 +12,5 @@ steps:
     expect: { ok: true }
   - expect:
       loaders:
-        stores: { rows: [{ store: oxwiki, page_count: 1 }] }
+        stores: { rows: [{ store: claude-memory, page_count: 0 }, { store: oxwiki, page_count: 1 }] }
         pages: { rows: [{ id: first }] }

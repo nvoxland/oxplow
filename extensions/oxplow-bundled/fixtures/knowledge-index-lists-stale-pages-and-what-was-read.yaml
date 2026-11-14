@@ -16,7 +16,7 @@ given:
 when: { page: knowledge }
 expect:
   loaders:
-    stores: { rows: [{ store: oxwiki, page_count: 2, stale: 1 }] }
+    stores: { rows: [{ store: claude-memory, page_count: 0, stale: 0 }, { store: oxwiki, page_count: 2, stale: 1 }] }
     stale_pages: { rows: [{ id: cites, stale_ref_count: 1 }] }
     pages:
       rows:
