@@ -1,6 +1,6 @@
 # The Knowledge index: each store with its page and stale counts, the
-# pages newest change first, and a filter that lists the pages whose title
-# or body holds the text, with the text around the match.
+# pages newest change first (or oldest first), a search that lists the pages
+# whose title or body holds the text, and a store filter.
 requires: [oxwiki]
 given:
   - { command: oxwiki.page.write, input: { title: Alpha, body: "# Alpha\n\nThe quick brown fox jumps.\n" } }
@@ -9,21 +9,21 @@ given:
 when: { page: knowledge }
 expect:
   loaders:
-    stores:
-      rows:
-        - { store: claude-memory, status: "On", page_count: 0, stale: 0, notice: null }
-        - { store: oxwiki, status: "On", page_count: 3, stale: 0, notice: null }
     pages:
       rows:
         - { id: gamma, store: oxwiki, title: Gamma, kind: note }
         - { id: beta, title: Beta }
         - { id: alpha, title: Alpha }
 steps:
+  - params: { order: oldest }
+    expect: { loaders: { pages: { rows: [{ id: alpha }, { id: beta }, { id: gamma }] } } }
   - params: { filter: LAZY }
-    expect:
-      loaders:
-        pages: { rows: [{ id: gamma, snippet: "# Gamma  A lazy dog sleeps. " }] }
+    expect: { loaders: { pages: { rows: [{ id: gamma }] } } }
   - params: { filter: beta }
     expect: { loaders: { pages: { rows: [{ id: beta }] } } }
   - params: { filter: nothing-matches-this }
     expect: { loaders: { pages: { rows: 0 } } }
+  - params: { store: claude-memory }
+    expect: { loaders: { pages: { rows: 0 } } }
+  - params: { store: oxwiki, filter: fox }
+    expect: { loaders: { pages: { rows: [{ id: alpha }] } } }

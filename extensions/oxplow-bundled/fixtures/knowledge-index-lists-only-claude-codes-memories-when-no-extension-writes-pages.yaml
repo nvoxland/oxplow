@@ -1,8 +1,7 @@
-# With no extension that writes pages (no oxwiki), the only store is
-# bundled's own read-only one of Claude Code's memories, listed though it
-# holds none, and the other sections are empty.
+# With no extension that writes pages (no oxwiki), the only store to filter
+# by is bundled's own read-only one of Claude Code's memories, and with none
+# kept there are no pages.
 when: { page: knowledge }
 expect:
   loaders:
-    stores: { rows: [{ store: claude-memory, page_count: 0, kinds: "" }] }
     pages: { rows: 0 }

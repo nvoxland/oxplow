@@ -1,5 +1,5 @@
 title: Knowledge
-description: The project's knowledge pages across every store that is on, newest change first, the stale ones, and what was read and written lately.
+description: The project's knowledge pages across every store that is on, newest change first (or oldest), and the stale ones.
 icon: book-open
 category: Knowledge
 keywords: knowledge wiki notes pages oxwiki memory instructions
@@ -7,9 +7,25 @@ needs:
 - model:oxplow/knowledge_record
 params:
 - name: filter
+  type: search
   role: filter
-  label: Search titles + bodies
+  label: Search
   default: ''
+# One store's pages, or every store's (`all`).
+- name: store
+  type: choice
+  role: filter
+  label: Store
+  default: all
+  options_from: '#store_options'
+- name: order
+  type: choice
+  role: filter
+  label: Order
+  default: newest
+  options:
+  - { value: newest, label: Newest first }
+  - { value: oldest, label: Oldest first }
 # Which pages cite a file: for an agent that asks (the page itself needs none).
 - name: path
   default: ''
@@ -23,49 +39,31 @@ loaders:
   row:
     sql: |
       SELECT uri('oxplow/page', 'page', 'new-knowledge-page') AS new_page
-  # Every store of the knowledge model, with its pages.
-  stores:
+  # The store filter's choices: every store, then each one.
+  store_options:
     sql: |
-      SELECT s.store AS store, 'On' AS status,
-             coalesce((SELECT group_concat(DISTINCT p.kind) FROM v_oxplow_knowledge_page p WHERE p.store = s.store), '') AS kinds,
-             (SELECT count(*) FROM v_oxplow_knowledge_page p WHERE p.store = s.store) AS page_count,
-             (SELECT count(*) FROM v_oxplow_knowledge_page p WHERE p.store = s.store AND p.stale_ref_count > 0) AS stale,
-             CAST(NULL AS TEXT) AS notice
-      FROM v_model_store s
-      WHERE s.model = 'oxplow/knowledge_record'
-      ORDER BY s.store
-  # Whether a row's store lets oxplow write it: Delete is offered then.
+      SELECT 'all' AS value, 'All stores' AS label, 0 AS ord
+      UNION ALL
+      SELECT s.store, s.store, 1 FROM v_model_store s WHERE s.model = 'oxplow/knowledge_record'
+      ORDER BY ord, label
   pages:
     sql: |
-      SELECT p.uri, p.store, p.id, p.kind, p.title, p.read_count, p.updated_at, p.stale_ref_count,
-             CASE WHEN :filter = '' THEN p.excerpt
-                  WHEN instr(lower(p.body), lower(:filter)) = 0 THEN p.excerpt
-                  ELSE replace(substr(p.body, max(1, instr(lower(p.body), lower(:filter)) - 40), 120), char(10), ' ') END AS snippet,
-             1 AS can_edit
+      SELECT p.uri, p.store, p.id, p.kind, p.title, p.updated_at, p.stale_ref_count
       FROM v_oxplow_knowledge_page p
-      WHERE :filter = ''
-         OR instr(lower(p.title), lower(:filter)) > 0
-         OR instr(lower(p.body), lower(:filter)) > 0
-      ORDER BY p.updated_at DESC, p.title
+      WHERE (:store = 'all' OR p.store = :store)
+        AND (coalesce(:filter, '') = ''
+             OR instr(lower(p.title), lower(:filter)) > 0
+             OR instr(lower(p.body), lower(:filter)) > 0)
+      ORDER BY CASE WHEN :order = 'oldest' THEN p.updated_at END ASC,
+               CASE WHEN :order = 'oldest' THEN NULL ELSE p.updated_at END DESC,
+               p.title
   stale_pages:
     sql: |
       SELECT p.uri, p.store, p.id, p.title, p.stale_ref_count,
              uri('oxplow/page', 'page', 'knowledge-freshness', 'store', p.store, 'id', p.id) AS freshness_uri
       FROM v_oxplow_knowledge_page p
-      WHERE p.stale_ref_count > 0
+      WHERE p.stale_ref_count > 0 AND (:store = 'all' OR p.store = :store)
       ORDER BY p.stale_ref_count DESC, p.title
-  # The last twenty things that happened to a page: it was written, or an
-  # agent or a person read it.
-  activity:
-    sql: |
-      SELECT * FROM (
-        SELECT p.uri, p.id, p.title, 'Written' AS what, p.updated_at AS at,
-               coalesce(p.author, '') AS who
-        FROM v_oxplow_knowledge_page p
-        UNION ALL
-        SELECT p.uri, p.id, p.title, 'Read', r.at, r.actor || ' (' || r.via || ')'
-        FROM v_oxplow_knowledge_read r JOIN v_oxplow_knowledge_page p ON p.uri = r.uri)
-      ORDER BY at DESC LIMIT 20
   about_file:
     sql: |
       SELECT p.uri, p.title, p.store,
@@ -77,29 +75,6 @@ actions:
 - { id: new, label: New page…, open: new_page, when: new_page, prominent: true, icon: plus }
 view:
   stack:
-  - id: stores
-    title: Stores
-    description: Where pages are kept. Several stores can be on at once; every page is recorded and tracked the same way whichever store keeps it.
-    from: stores
-    viz: table
-    lead: notice
-    columns:
-    - key: store
-      label: Store
-    - key: status
-      label: State
-      width: 70
-    - key: kinds
-      label: Kinds of page
-    - key: page_count
-      label: Pages
-      format: integer
-      width: 80
-    - key: stale
-      label: Stale
-      format: integer
-      width: 80
-    empty: No knowledge store is declared.
   - id: pages
     title: Pages
     from: pages
@@ -117,13 +92,6 @@ view:
         kind: page
         from: uri
       highlight: filter
-    - key: snippet
-      label: Text
-      highlight: filter
-    - key: read_count
-      label: Reads
-      format: integer
-      width: 70
     - key: updated_at
       label: Modified
       format: relative
@@ -162,26 +130,6 @@ view:
         kind: page
         from: freshness_uri
     empty: No page cites a file that has changed.
-  - id: activity
-    title: Recent reads and writes
-    from: activity
-    viz: table
-    columns:
-    - key: title
-      label: Page
-      link:
-        kind: page
-        from: uri
-    - key: what
-      label: What
-      width: 80
-    - key: who
-      label: By
-    - key: at
-      label: When
-      format: relative
-      width: 120
-    empty: Nothing has been read or written yet.
   - id: about_file
     title: Pages that cite the file
     from: about_file

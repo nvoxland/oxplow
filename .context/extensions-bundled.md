@@ -422,14 +422,14 @@ generic resource page; bundled also declares the `oxplow/knowledge` resource
 shared model with their `body`). `.context/knowledge.md` "The oxwiki
 extension" has the read contract.
 
-- `knowledge` (the Knowledge index, launcher section Knowledge): Stores
-  (every store of `oxplow/knowledge_record`, from `v_model_store`, with page
-  and stale counts and the kinds its pages are; an empty store is listed
-  too, so with bundled on `claude-memory` always is), Pages (newest change first; a filter over title and
-  body; Delete in the row's right-click menu, confirmed, through the
-  `oxplow/knowledge.delete` point), Stale pages, and Recent reads and writes
-  (`v_oxplow_knowledge_read`). New page opens `new-knowledge-page`. It also
-  answers which pages cite a file (its `path` param).
+- `knowledge` (the Knowledge index, launcher section Knowledge): Pages
+  (newest change first, or oldest with the Order filter; Search over title
+  and body; a Store filter, every store of `oxplow/knowledge_record` from
+  `v_model_store`; Delete in the row's right-click menu, confirmed, through
+  the `oxplow/knowledge.delete` point, offered only for a store that joins
+  it), Stale pages, and the pages that cite a file (its `path` param). New
+  page opens `new-knowledge-page`. It shows no reads: those are on the
+  datasets.
 - **Claude Code's memories** (the store `claude-memory`): bundled fills
   `oxplow/knowledge_record` from the `memory/` folder of Claude Code's own
   data folder for the project (`files:` root `agent:claude`, read only), with
@@ -439,7 +439,8 @@ extension" has the read contract.
 - `knowledge-page` (`for: oxplow/knowledge`, default): the tab is the
   page's title. The body is the markdown (read-only: a store's own page
   would replace it to edit). The rail has About (store, kind, author, last
-  edited, freshness, reads) and Open in its store (when the page has a
+  edited; for a page that cites files, its freshness and how many of the
+  cited files changed since it pinned them) and Open in its store (when the page has a
   `url`). Referenced files has Mark verified (`oxplow.refs.verify`). See
   also: the index, the page's freshness, and what links to it.
 - `knowledge-freshness` (params `store`, `id`): the page's files, stale

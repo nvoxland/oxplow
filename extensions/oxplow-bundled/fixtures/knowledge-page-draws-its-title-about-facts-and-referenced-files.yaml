@@ -13,7 +13,7 @@ expect:
   loaders:
     row: { rows: [{ title: Otters }] }
     body: { rows: [{ id: otters, store: oxwiki }] }
-    about: { rows: [{ store: oxwiki, kind: note, freshness: fresh, cited_files: 1, stale_files: 0, read_count: 0 }] }
+    about: { rows: [{ store: oxwiki, kind: note, freshness: fresh, cited_files: 1, stale_files: 0 }] }
     refs: { rows: [{ path: src/holt.rs, status: current }] }
 steps:
   - given:

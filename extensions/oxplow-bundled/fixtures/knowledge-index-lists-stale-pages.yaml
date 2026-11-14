@@ -1,6 +1,5 @@
 # A page that cites a file which changed since it was pinned is listed
-# under Stale pages and counted on its store; a page an agent read shows
-# its reads and the read in Recent reads and writes.
+# under Stale pages and counted on its store; one that cites nothing isn't.
 requires: [oxwiki]
 given:
   - observe: { turn: { prompt: Make the file, write: { path: a.txt, body: one } } }
@@ -8,19 +7,8 @@ given:
   - { command: oxwiki.page.write, input: { title: Cites, body: "# Cites\n\nSee [[file:a.txt]].\n" } }
   - { command: oxwiki.page.write, input: { title: Plain, body: "# Plain\n\nNothing cited.\n" } }
   - observe: { snapshot: { files: [{ path: a.txt, hash: h2 }] } }
-  - observe:
-      turn:
-        prompt: Read the plain page
-        tools:
-          - { name: Read, kind: read, paths: [".oxplow/oxwiki/plain.md"], ok: true }
 when: { page: knowledge }
 expect:
   loaders:
-    stores: { rows: [{ store: claude-memory, page_count: 0, stale: 0 }, { store: oxwiki, page_count: 2, stale: 1 }] }
     stale_pages: { rows: [{ id: cites, stale_ref_count: 1 }] }
-    pages:
-      rows:
-        - { id: plain, read_count: 1 }
-        - { id: cites, read_count: 0 }
-    activity:
-      rows: { contains: [{ id: plain, what: Read }, { id: plain, what: Written }, { id: cites, what: Written }] }
+    pages: { rows: [{ id: plain }, { id: cites }] }
