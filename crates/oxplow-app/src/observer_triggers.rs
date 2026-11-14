@@ -201,6 +201,54 @@ pub async fn follow_files(
     }
 }
 
+/// [`follow_files`] for globs of a folder outside the project, relative to
+/// `base` (its root's folder on this machine): its own watch on the globs'
+/// folder, not the primary worktree's. Another tool makes that folder when
+/// it first writes there, so until it exists this looks for it every
+/// `poll`; when it appears later, the collector is sent a `start` (a full
+/// reconcile) and the watch begins.
+pub async fn follow_outside(
+    base: PathBuf,
+    globs: Vec<String>,
+    set: globset::GlobSet,
+    send: mpsc::UnboundedSender<RunTrigger>,
+    poll: Duration,
+) {
+    // One literal folder for every glob is what's watched; else the root.
+    let mut dirs: Vec<String> = globs.iter().map(|g| literal_dir(g)).collect();
+    dirs.sort();
+    dirs.dedup();
+    let dir = match dirs.as_slice() {
+        [one] if !one.is_empty() => base.join(one),
+        _ => base.clone(),
+    };
+    let mut late = false;
+    while !dir.is_dir() {
+        late = true;
+        if send.is_closed() {
+            return;
+        }
+        tokio::time::sleep(poll).await;
+    }
+    // The OS reports the folder's real path (macOS: `/private/var` for
+    // `/var`), so paths are made relative to the real one.
+    let base = base.canonicalize().unwrap_or(base);
+    let dir = dir.canonicalize().unwrap_or(dir);
+    let watcher = match oxplow_fs_watch::FsWatcher::watch(&dir) {
+        Ok(w) => w,
+        Err(e) => {
+            tracing::warn!(folder = %dir.display(), error = %e, "a files trigger's folder can't be watched");
+            return;
+        }
+    };
+    let changes = watcher.subscribe();
+    if late && send.send(RunTrigger::Start).is_err() {
+        return;
+    }
+    follow_files(changes, base, set, send).await;
+    drop(watcher);
+}
+
 /// `PRAGMA data_version` of `conn`.
 fn data_version(conn: &rusqlite::Connection) -> rusqlite::Result<i64> {
     conn.query_row("PRAGMA data_version", [], |r| r.get(0))
@@ -407,23 +455,39 @@ fn start(svc: &Arc<Services>, observer: &Observer) -> Running {
         receive,
     ))];
     let root = svc.layout.project_dir.clone();
-    let globs: Vec<String> = observer
-        .sources
-        .iter()
-        .filter_map(|s| match s {
-            ObserverSource::Files { glob } => Some(glob.clone()),
-            _ => None,
-        })
-        .collect();
-    if !globs.is_empty() {
-        match matcher(&globs) {
-            Ok(set) => tasks.push(tokio::spawn(follow_files(
+    // The globs by the root they are relative to.
+    let mut by_root: BTreeMap<oxplow_domain::folder_root::FolderRoot, Vec<String>> =
+        BTreeMap::new();
+    for source in &observer.sources {
+        if let ObserverSource::Files { glob, root } = source {
+            by_root.entry(root.clone()).or_default().push(glob.clone());
+        }
+    }
+    for (folder_root, globs) in by_root {
+        let set = match matcher(&globs) {
+            Ok(set) => set,
+            Err(e) => {
+                tracing::warn!(error = %e, "a files trigger isn't a glob");
+                continue;
+            }
+        };
+        if folder_root.is_project() {
+            tasks.push(tokio::spawn(follow_files(
                 svc.stream_watches.subscribe_primary(scope_of(&globs)),
                 root.clone(),
                 set,
                 send.clone(),
-            ))),
-            Err(e) => tracing::warn!(error = %e, "a files trigger isn't a glob"),
+            )));
+        } else if let Some(base) =
+            oxplow_domain::folder_root::FolderBases::base(&*svc.folder_roots, &folder_root)
+        {
+            tasks.push(tokio::spawn(follow_outside(
+                base,
+                globs,
+                set,
+                send.clone(),
+                POLL,
+            )));
         }
     }
     // The SQLite baselines are read before the `start` run is sent, so a
@@ -784,6 +848,47 @@ mod tests {
             .expect("heard in time");
         assert!(matches!(heard, Some(RunTrigger::Sqlite)));
         poll.abort();
+    }
+
+    /// A trigger on a folder outside the project waits for the folder
+    /// (another tool makes it when it first writes), then sends a `start`
+    /// and hears each change, its path relative to the root.
+    #[tokio::test]
+    async fn a_folder_outside_the_project_is_watched_once_it_appears() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("claude-project");
+        let (send, mut receive) = mpsc::unbounded_channel();
+        let follow = tokio::spawn(follow_outside(
+            base.clone(),
+            vec!["memory/*.md".into()],
+            files(&["memory/*.md"]),
+            send,
+            Duration::from_millis(20),
+        ));
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        assert!(receive.try_recv().is_err(), "no folder, nothing to hear");
+        std::fs::create_dir_all(base.join("memory")).unwrap();
+        let first = tokio::time::timeout(Duration::from_secs(5), receive.recv())
+            .await
+            .expect("heard in time");
+        assert!(matches!(first, Some(RunTrigger::Start)), "{first:?}");
+        // Let the watch settle before the write it must hear.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        std::fs::write(base.join("memory/a.md"), "x").unwrap();
+        std::fs::write(base.join("memory/notes.txt"), "x").unwrap();
+        let changed = loop {
+            match tokio::time::timeout(Duration::from_secs(5), receive.recv())
+                .await
+                .expect("heard in time")
+            {
+                Some(RunTrigger::Files(changed)) => break changed,
+                Some(RunTrigger::Start) => continue,
+                other => panic!("a files trigger, got {other:?}"),
+            }
+        };
+        let paths: Vec<&str> = changed.iter().map(|c| c.path.as_str()).collect();
+        assert_eq!(paths, ["memory/a.md"]);
+        follow.abort();
     }
 
     /// A `{ files: ".oxplow/oxwiki/*.md" }` trigger is heard on a real

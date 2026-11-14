@@ -77,6 +77,7 @@ pub mod file_ref_version;
 #[cfg(test)]
 pub(crate) mod filesystem_conformance;
 pub(crate) mod filesystems;
+pub(crate) mod folder_roots;
 pub mod grants;
 pub mod harness_conformance;
 pub mod harnesses;
@@ -462,6 +463,9 @@ struct MachineEnv {
     /// The environment a provider's declared `env` is read from: this
     /// process's, or the one a test or `extension test` run names.
     host_env: providers::host::HostEnv,
+    /// Where `files:` folders outside the project are: this machine's home
+    /// and harness folders, or (a test) a folder of the test's own.
+    outside: folder_roots::Outside,
 }
 
 /// All the long-lived services oxplow needs to serve a UI.
@@ -529,6 +533,9 @@ pub struct Services {
     pub commands: Arc<commands::CommandBus>,
     /// The agent harnesses the project's extensions declare, by key.
     pub harnesses: oxplow_domain::agent::registry::HarnessRegistry,
+    /// Where each folder root of an extension's `files:` is on this machine
+    /// ([`Self::folder_base`]).
+    pub(crate) folder_roots: Arc<folder_roots::FolderRoots>,
     /// Where the harnesses' saved conversations are read: the machine's,
     /// or a throwaway's stand-in (`saved_conversations`).
     pub saved_conversations: Arc<saved_conversations::SavedConversations>,
@@ -740,6 +747,12 @@ impl Services {
     /// group of its own) and the LSP servers — which get two seconds,
     /// together. The daemon's `process::exit` runs no destructors, so
     /// what isn't ended here outlives it.
+    /// Where `root`'s folder is on this machine (a test's: under its own
+    /// folder): what a `files:` folder with that root is relative to.
+    pub fn folder_base(&self, root: &oxplow_domain::folder_root::FolderRoot) -> Option<PathBuf> {
+        oxplow_domain::folder_root::FolderBases::base(&*self.folder_roots, root)
+    }
+
     pub async fn shutdown(&self) {
         self.stopping.cancel();
         self.jobs.shutdown();
@@ -911,6 +924,7 @@ impl Services {
             provider_max_uncheckpointed: 10_000,
             lsp_request_timeout: std::time::Duration::from_secs(30),
             host_env: providers::host::process_env(),
+            outside: folder_roots::Outside::machine(),
         };
         Self::build(layout, config, db, machine)
     }
@@ -948,6 +962,25 @@ impl Services {
         event_bus.reach_open_runs(page_runs.clone());
         let ref_moves = ref_moves::RefMoves::new(event_bus.clone());
         let models = models::Models::default();
+        let config_arc = Arc::new(RwLock::new(config));
+        // The agent harnesses, by key; filled from the declarations below.
+        // A new session's default is the project's first enabled agent,
+        // else the first declared.
+        let harnesses = {
+            let config = config_arc.clone();
+            oxplow_domain::agent::registry::HarnessRegistry::new(Arc::new(move || {
+                config_service::read_config(&config)
+                    .agents
+                    .first()
+                    .cloned()
+                    .unwrap_or_default()
+            }))
+        };
+        let folder_roots = Arc::new(folder_roots::FolderRoots::new(
+            layout.project_dir.clone(),
+            machine.outside.clone(),
+            harnesses.clone(),
+        ));
         let event_pump = Arc::new(event_pump::EventPump::new(
             db.clone(),
             (*event_log_store).clone(),
@@ -956,6 +989,7 @@ impl Services {
                 Arc::new(record_reads::RecordFileReads {
                     models: models.clone(),
                     project_dir: layout.project_dir.clone(),
+                    roots: folder_roots.clone(),
                     vocabulary: vocabulary.clone(),
                 }),
                 Arc::new(ref_drift::RefDrift {
@@ -1020,7 +1054,6 @@ impl Services {
         let change_store = Arc::new(oxplow_db::SqliteChangeStore::new(db.clone()));
 
         let workspace_layout = WorkspaceLayout::for_project(&layout.project_dir);
-        let config_arc = Arc::new(RwLock::new(config));
         let streams = StreamService::new(
             workspace_layout,
             vcs.clone(),
@@ -1029,19 +1062,6 @@ impl Services {
         );
         let threads = ThreadService::new(thread_store.clone());
 
-        // The agent harnesses, by key; filled from the declarations below.
-        // A new session's default is the project's first enabled agent,
-        // else the first declared.
-        let harnesses = {
-            let config = config_arc.clone();
-            oxplow_domain::agent::registry::HarnessRegistry::new(Arc::new(move || {
-                config_service::read_config(&config)
-                    .agents
-                    .first()
-                    .cloned()
-                    .unwrap_or_default()
-            }))
-        };
         let hook_ingest = HookIngestService::new(
             db.clone(),
             vocabulary.clone(),
@@ -1243,6 +1263,7 @@ impl Services {
                 extension_catalog.clone(),
                 layout.project_dir.clone(),
             )
+            .with_roots(folder_roots.clone())
             .with_links(link_check::LinkDeps {
                 project_dir: layout.project_dir.clone(),
                 vcs: vcs.clone(),
@@ -1740,6 +1761,7 @@ impl Services {
             client_host,
             commands,
             harnesses,
+            folder_roots,
             saved_conversations,
             session_auth,
             capabilities,
@@ -1919,6 +1941,8 @@ impl Services {
             provider_max_uncheckpointed: 100,
             lsp_request_timeout: std::time::Duration::from_secs(2),
             host_env,
+            // A test never reads the person's home or an agent's folder.
+            outside: folder_roots::Outside::Under(global_dir.join("outside")),
         };
         let services = Arc::new(Self::build(layout, config, db, machine)?);
         services.services_slot.fill(&services);

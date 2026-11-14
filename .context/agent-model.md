@@ -454,7 +454,11 @@ answers: `id`, `title`, `launch`, `tool_use` (its calls in
 oxplow's vocabulary, "Tool vocabulary") and `render` (a `HookAnswer` in
 its wire shape). Everything else defaults to none: `env_markers`,
 `settings`, `refresh_text`, `turns`, `token_readings`, `prompt`,
-`subagent`. The operations are async and their data serde shapes
+`subagent`, `project_data_dir` (the folder it keeps of its own for the
+project, what an extension's `files:` folder with `root: agent:<id>` is
+relative to: Claude's `<config dir>/projects/<project, encoded>`; a session
+in a worktree keeps its memories there too, under the main checkout's
+name). The operations are async and their data serde shapes
 (`LaunchSpec` and `HookAnswer` tagged by `kind`), because a harness may be
 a provider's process ([providers.md](./providers.md), the `agent_harness`
 contract): what a built-in answers in code, a provider declares or answers

@@ -2710,6 +2710,13 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     }
     check_config_reads(&mut ext);
     ext.permissions = m.permissions.clone();
+    // A folder outside the project is a permission a person approves by
+    // name (`folders:<root>/<path>`).
+    for folder in storage::outside_folders(&ext.storage.folders) {
+        if !ext.permissions.folders.contains(&folder) {
+            ext.permissions.folders.push(folder);
+        }
+    }
     check_permissions(&mut ext, files, man, &manifest);
     ext.contributions = descriptors::describe(&ext, &manifest);
     descriptors::check_ids(&mut ext);

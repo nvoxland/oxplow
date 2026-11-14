@@ -277,6 +277,18 @@ impl AgentHarness for Claude {
             .map(str::to_string)
     }
 
+    /// `<config dir>/projects/<project, encoded>`: where it keeps the
+    /// project's transcripts and its `memory/` folder. Sessions in a
+    /// worktree of the project keep their memories here too, under the
+    /// main checkout's name.
+    fn project_data_dir(&self, home: &Path, project: &Path) -> Option<PathBuf> {
+        Some(
+            config_dir(home, std::env::var_os("CLAUDE_CONFIG_DIR"))
+                .join("projects")
+                .join(encode_cwd(&project.to_string_lossy())),
+        )
+    }
+
     /// Its transcripts under the effective config dir, for the worktree
     /// (`transcripts`).
     async fn conversations(
@@ -1658,6 +1670,33 @@ mod tests {
         fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
         if !readable {
             assert_eq!(state, ResumeState::Unknown);
+        }
+    }
+
+    /// The project's own folder of Claude's config dir, named as Claude
+    /// names it: where its memories are (`root: agent:claude`).
+    #[test]
+    fn the_project_data_dir_is_the_projects_folder_claude_names() {
+        let h = super::super::built_in("oxplow:claude-code", "claude", "Claude").unwrap();
+        let dir = h.project_data_dir(Path::new("/home/me"), Path::new("/Users/me/src/my.app"));
+        if std::env::var_os("CLAUDE_CONFIG_DIR").is_none_or(|v| v.is_empty()) {
+            assert_eq!(
+                dir,
+                Some(PathBuf::from(
+                    "/home/me/.claude/projects/-Users-me-src-my-app"
+                ))
+            );
+        }
+        // Codex and opencode keep none oxplow reads.
+        for (entry, id) in [
+            ("oxplow:codex-cli", "codex"),
+            ("oxplow:opencode", "opencode"),
+        ] {
+            let h = super::super::built_in(entry, id, id).unwrap();
+            assert_eq!(
+                h.project_data_dir(Path::new("/home/me"), Path::new("/p")),
+                None
+            );
         }
     }
 

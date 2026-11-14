@@ -318,6 +318,18 @@ pub trait AgentHarness: Send + Sync {
     async fn turn_run(&self, _body: &serde_json::Value) -> Option<TurnRun> {
         None
     }
+    /// The folder it keeps of its own for the project at `project` (its
+    /// root, the primary checkout) for the person whose home folder is
+    /// `home`: what an extension's `files:` folder with `root: agent:<id>`
+    /// is relative to. `None` for a harness that keeps none oxplow reads
+    /// (the default).
+    fn project_data_dir(
+        &self,
+        _home: &std::path::Path,
+        _project: &std::path::Path,
+    ) -> Option<std::path::PathBuf> {
+        None
+    }
 }
 
 #[cfg(test)]

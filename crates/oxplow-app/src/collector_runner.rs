@@ -2078,19 +2078,20 @@ impl CollectorRunner {
                 .find(|e| e.name == name && e.enabled)
                 .cloned()
         });
-        let mut observers: Vec<(String, String, RunTrigger)> =
-            ext.iter()
-                .flat_map(|ext| {
-                    ext.collectors.iter().filter_map(|c| {
-                        let trigger = c.trigger.sources().iter().find_map(|source| {
-                            match (source, &wrote) {
-                                (ObserverSource::Sqlite { path: None }, Wrote::OwnStore) => {
-                                    Some(RunTrigger::Sqlite)
-                                }
-                                (ObserverSource::Files { glob }, Wrote::File { path, op }) => {
-                                    oxplow_config::collectors::files_matcher(std::slice::from_ref(
-                                        glob,
-                                    ))
+        let mut observers: Vec<(String, String, RunTrigger)> = ext
+            .iter()
+            .flat_map(|ext| {
+                ext.collectors.iter().filter_map(|c| {
+                    let trigger = c.trigger.sources().iter().find_map(|source| {
+                        match (source, &wrote) {
+                            (ObserverSource::Sqlite { path: None }, Wrote::OwnStore) => {
+                                Some(RunTrigger::Sqlite)
+                            }
+                            // A command writes the project's files only.
+                            (ObserverSource::Files { glob, root }, Wrote::File { path, op })
+                                if root.is_project() =>
+                            {
+                                oxplow_config::collectors::files_matcher(std::slice::from_ref(glob))
                                     .ok()
                                     .filter(|m| m.is_match(path))
                                     .map(|_| {
@@ -2099,14 +2100,14 @@ impl CollectorRunner {
                                             op: *op,
                                         }])
                                     })
-                                }
-                                _ => None,
                             }
-                        })?;
-                        Some((ext.namespace.clone(), c.id.clone(), trigger))
-                    })
+                            _ => None,
+                        }
+                    })?;
+                    Some((ext.namespace.clone(), c.id.clone(), trigger))
                 })
-                .collect();
+            })
+            .collect();
         // Locks in one order, so two writes never wait on each other.
         observers.sort_by(|a, b| (&a.0, &a.1).cmp(&(&b.0, &b.1)));
         let mut held = Vec::new();

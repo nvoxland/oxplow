@@ -56,10 +56,12 @@ pub struct FillSpec {
 }
 
 /// Where a store keeps its rows as files: a file at
-/// `<folder>/<id><suffix>` (folder relative to the project root) is the row
-/// of that id in the fill's first store.
+/// `<folder>/<id><suffix>` (folder relative to `root`) is the row of that
+/// id in the fill's first store.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FillFiles {
+    #[serde(default)]
+    pub root: oxplow_domain::folder_root::FolderRoot,
     pub folder: String,
     pub suffix: String,
 }
@@ -137,11 +139,22 @@ impl ModelRegistry {
 }
 
 impl ModelRegistry {
-    /// The row whose file `rel` (a path from the project root) is, as a
-    /// fill's `files` says: `(model id, row uri)`.
-    pub fn row_of_file(&self, rel: &str) -> Option<(String, String)> {
+    /// The row whose file is at `path` (absolute), as a fill's `files`
+    /// says, its folder under its root where `bases` puts it: `(model id,
+    /// row uri)`.
+    pub fn row_of_file(
+        &self,
+        bases: &dyn oxplow_domain::folder_root::FolderBases,
+        path: &std::path::Path,
+    ) -> Option<(String, String)> {
         for fill in &self.fills {
             let Some(files) = &fill.files else { continue };
+            let Some(base) = bases.base(&files.root) else {
+                continue;
+            };
+            let Some(rel) = path.strip_prefix(&base).ok().and_then(|r| r.to_str()) else {
+                continue;
+            };
             let Some(rest) = rel
                 .strip_prefix(files.folder.trim_end_matches('/'))
                 .and_then(|r| r.strip_prefix('/'))
@@ -755,12 +768,15 @@ mod tests {
     fn a_fills_files_name_the_row_each_file_is() {
         let mut r = registry();
         r.fills[0].files = Some(FillFiles {
+            root: Default::default(),
             folder: ".oxplow/shelves".into(),
             suffix: ".md".into(),
         });
+        let project = std::path::PathBuf::from("/p");
+        let at = |rel: &str| project.join(rel);
         let store = r.fills[0].stores[0].clone();
         let (model, row) = r
-            .row_of_file(".oxplow/shelves/dune.md")
+            .row_of_file(&project, &at(".oxplow/shelves/dune.md"))
             .expect("a row's file");
         assert_eq!(model, r.fills[0].model);
         assert!(
@@ -774,10 +790,46 @@ mod tests {
             ".oxplow/shelvesx/dune.md",
             "dune.md",
         ] {
-            assert_eq!(r.row_of_file(not), None, "{not}");
+            assert_eq!(r.row_of_file(&project, &at(not)), None, "{not}");
         }
+        // A folder outside the project is under its own root: the same path
+        // in the project is no row's file, and a root with no folder here
+        // has none.
+        r.fills[0].files = Some(FillFiles {
+            root: oxplow_domain::folder_root::FolderRoot::Agent("claude".into()),
+            folder: "memory".into(),
+            suffix: ".md".into(),
+        });
+        struct Claude;
+        impl oxplow_domain::folder_root::FolderBases for Claude {
+            fn base(
+                &self,
+                root: &oxplow_domain::folder_root::FolderRoot,
+            ) -> Option<std::path::PathBuf> {
+                Some(
+                    if root.is_project() {
+                        "/p"
+                    } else {
+                        "/home/me/.claude/projects/-p"
+                    }
+                    .into(),
+                )
+            }
+        }
+        let (_, row) = r
+            .row_of_file(
+                &Claude,
+                std::path::Path::new("/home/me/.claude/projects/-p/memory/dune.md"),
+            )
+            .expect("a memory's file");
+        assert!(row.contains("id=dune"), "{row}");
+        assert_eq!(r.row_of_file(&Claude, &at("memory/dune.md")), None);
+        assert_eq!(r.row_of_file(&project, &at("memory/dune.md")), None);
         r.fills[0].files = None;
-        assert_eq!(r.row_of_file(".oxplow/shelves/dune.md"), None);
+        assert_eq!(
+            r.row_of_file(&project, &at(".oxplow/shelves/dune.md")),
+            None
+        );
     }
 
     #[test]

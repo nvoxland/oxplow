@@ -23,6 +23,7 @@ pub mod extension_path;
 pub mod extension_secret;
 pub mod extension_state;
 pub mod filesystem;
+pub mod folder_root;
 pub mod grant;
 pub mod hook;
 pub mod ids;

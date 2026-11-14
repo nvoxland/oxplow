@@ -588,6 +588,27 @@ publishes the enabled extensions' watched folders with each generation
 (`oxplow_fs_watch::set_declared_watched_folders`); core names no folder of
 its own.
 
+**Folders outside the project (`root:`).** A `files:` entry may name its
+`root` (`oxplow_domain::folder_root::FolderRoot`): `project` (the default),
+`home` (the person's home folder) or `agent:<harness id>` (that harness's own
+data folder for this project, `AgentHarness::project_data_dir`: Claude Code's
+is `<config dir>/projects/<project, encoded>`, where its memories are; Codex
+and opencode keep none oxplow reads). `path` stays relative under every root,
+so a manifest never writes an absolute path or a `..`. Such a folder is
+**read only** (`access: write` is a load error, and the run-time check refuses
+a write): oxplow observes another tool's files, it never writes them. `.git`
+stays closed in it; `.oxplow`'s rules are the project's only, so any outside
+folder may say `watch: true`, which only lets the extension's `files` trigger
+hear it (it is never snapshotted). Each one is a permission the person
+approves by name: loading the extension adds `folders:<root>/<path>`
+(`agent:claude/memory`) to its permissions, and a deploy that adds one asks
+"files — may read agent:claude/memory outside the project". Where a root is on
+this machine is `folder_roots::FolderRoots` (`Services::folder_base`); a
+test's oxplow puts every outside root under a folder of its own, so it never
+reads the person's home. A root with no folder here (a harness that keeps
+none, no home) leaves the folder absent: `files.list` answers nothing, a read
+fails, the extension is not held. Removing an extension never touches it.
+
 The file is removed with the extension's data (`extension_deploy::remove`),
 never on a disable.
 
@@ -625,6 +646,9 @@ files:
   write`, and need `permissions: [files.write]` and
   `commands:oxplow.extension_files.*`. A write is whole or not at all (a
   temporary file is renamed into place).
+- **Roots.** `files.read` and `files.list` take `root` (default `project`):
+  the path is relative to that root, and only that root's folders hold it
+  (`check_root_path`); listed paths stay relative to it.
 - **Path checks** (`extension_services::check_path`): an absolute path, a
   `..`, `.` or empty part, a path outside every declared folder, or a write
   to a read-only folder is refused with the path and the declared folders
@@ -637,7 +661,4 @@ its `needs`; the router checks it like `state.read`.
 
 **Not built here** (kept from the design): a tool's own SQLite file (beads'
 `.beads/beads.db`) read with `files.sqlite { path, sql, params }`, read
-only, when `path` is inside a `files:` folder the extension may read; and a
-folder outside the project (a vault): a `files:` entry that is an absolute
-or `~/` path, which the person approves by name at install, like any
-grant. Today an absolute path in `files:` is a load error.
+only, when `path` is inside a `files:` folder the extension may read.

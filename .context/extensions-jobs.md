@@ -338,7 +338,13 @@ collectors:
   "start"`.
 - **`{ files: <glob> }`**: files of the primary worktree matching the glob
   (relative to the project root; `*` stays in a folder, `**` crosses
-  them) were created, changed or removed. The watch is the primary
+  them) were created, changed or removed. With `root:` (`{ files:
+  "memory/*.md", root: "agent:claude" }`) the glob is of a `files:` folder
+  outside the project, relative to that root: it has a watch of its own on
+  the glob's literal folder (`observer_triggers::follow_outside`), which
+  waits for the folder to exist (another tool makes it on its first write)
+  and then sends a `start`. A command's own write (`observe_write`) is
+  always the project's. Otherwise the watch is the primary
   stream's (`stream_watch::subscribe_primary`), narrowed to the glob's
   literal folder (`shelf/*.md` hears `shelf/`; a glob that starts with a
   wildcard hears every kept path). Changes are coalesced: a burst is one

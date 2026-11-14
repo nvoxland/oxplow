@@ -98,7 +98,9 @@ impl AgentPolicy {
             .fills
             .iter()
             .filter_map(|fill| {
-                let files = fill.files.as_ref()?;
+                // Only the project's folders: oxplow never writes one
+                // outside it, so there is nothing to guard.
+                let files = fill.files.as_ref().filter(|f| f.root.is_project())?;
                 Some(oxplow_runtime::RecordFolder {
                     folder: files.folder.clone(),
                     suffix: files.suffix.clone(),

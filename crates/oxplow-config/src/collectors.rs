@@ -125,9 +125,17 @@ pub enum Trigger {
 pub enum ObserverSource {
     /// Once when the extension starts (boot, enable, a deploy that changes it).
     Start,
-    /// Files of the primary worktree matching `glob` (relative to the
-    /// project root) were created, changed or removed.
-    Files { glob: String },
+    /// Files matching `glob` were created, changed or removed: the primary
+    /// worktree's (relative to the project root), or, with a `root`, those
+    /// of a `files:` folder outside the project (relative to that root).
+    Files {
+        glob: String,
+        #[serde(
+            default,
+            skip_serializing_if = "oxplow_domain::folder_root::FolderRoot::is_project"
+        )]
+        root: oxplow_domain::folder_root::FolderRoot,
+    },
     /// A SQLite file's `PRAGMA data_version` moved: the extension's own file
     /// (`path` absent) or a tool's database in a `files:` folder it may read.
     Sqlite { path: Option<String> },
@@ -1144,22 +1152,40 @@ fn split_on(on: &serde_yaml::Value) -> Result<(Vec<String>, Vec<ObserverSource>)
 /// A `{ files: <glob> }` or `{ sqlite: own | <path> }` item of `on:`.
 fn observer_source(map: &serde_yaml::Mapping) -> Result<ObserverSource, String> {
     use serde_yaml::Value;
-    let shapes = "an `on` item is an event type, `start`, `{ files: <glob> }` or \
+    let shapes = "an `on` item is an event type, `start`, `{ files: <glob>, root? }` or \
                   `{ sqlite: own | <path> }`";
-    if map.len() != 1 {
+    // `files` alone, or with the `root` its glob is relative to.
+    let root = match map.get("root") {
+        None => None,
+        Some(Value::String(root)) if map.contains_key("files") && map.len() == 2 => {
+            Some(root.parse::<oxplow_domain::folder_root::FolderRoot>()?)
+        }
+        Some(_) => {
+            return Err(format!(
+                "`root` goes with `files` and names a folder root; {shapes}"
+            ))
+        }
+    };
+    if map.len() != 1 + usize::from(root.is_some()) {
         return Err(format!("an `on` item takes one key; {shapes}"));
     }
-    let (key, value) = map.iter().next().expect("one key");
+    let (key, value) = map
+        .iter()
+        .find(|(k, _)| k.as_str() != Some("root"))
+        .expect("one key");
     match (key.as_str(), value) {
         (Some("files"), Value::String(glob)) => {
             if !is_inside_glob(glob) {
                 return Err(format!(
-                    "`files: {glob}` must be a glob relative to the project root (no leading \
-                     `/`, no `..`)"
+                    "`files: {glob}` must be a glob relative to its root (no leading `/`, no \
+                     `..`)"
                 ));
             }
             globset::Glob::new(glob).map_err(|e| format!("`files: {glob}` isn't a glob: {e}"))?;
-            Ok(ObserverSource::Files { glob: glob.clone() })
+            Ok(ObserverSource::Files {
+                glob: glob.clone(),
+                root: root.unwrap_or_default(),
+            })
         }
         (Some("files"), _) => Err("`files` takes a glob, like `shelf/*.md`".into()),
         (Some("sqlite"), Value::String(s)) if s == "own" => {
@@ -1923,13 +1949,24 @@ mod tests {
             &[
                 ObserverSource::Start,
                 ObserverSource::Files {
-                    glob: "shelf/*.md".into()
+                    glob: "shelf/*.md".into(),
+                    root: Default::default(),
                 },
                 ObserverSource::Sqlite { path: None },
                 ObserverSource::Sqlite {
                     path: Some(".beads/beads.db".into())
                 },
             ]
+        );
+        // A glob of a folder outside the project names its root.
+        let (s, e) = with("on: [{ files: \"memory/*.md\", root: \"agent:claude\" }]");
+        assert!(e.is_empty(), "{e:?}");
+        assert_eq!(
+            s[0].trigger.sources(),
+            &[ObserverSource::Files {
+                glob: "memory/*.md".into(),
+                root: oxplow_domain::folder_root::FolderRoot::Agent("claude".into()),
+            }]
         );
         // `start` alone, as a bare word.
         let (s, e) = with("on: start");
@@ -2001,14 +2038,13 @@ mod tests {
         let with = |t: &str| parse(&GOOD.replace("on: { every: 10m }", t));
         for (t, needle) in [
             ("on: [{ files: \"a[\" }]", "isn't a glob"),
+            ("on: [{ files: \"/etc/*\" }]", "relative to its root"),
+            ("on: [{ files: \"../x/*\" }]", "relative to its root"),
             (
-                "on: [{ files: \"/etc/*\" }]",
-                "relative to the project root",
+                "on: [{ files: \"a/*\", root: \"agent:\" }]",
+                "isn't a folder root",
             ),
-            (
-                "on: [{ files: \"../x/*\" }]",
-                "relative to the project root",
-            ),
+            ("on: [{ sqlite: own, root: home }]", "goes with `files`"),
             ("on: [{ files: 3 }]", "takes a glob"),
             (
                 "on: [{ sqlite: /var/db.sqlite }]",

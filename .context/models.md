@@ -223,11 +223,13 @@ fills:
   `loose` ids count in running text, the others only inside `[[…]]`).
   The desktop's record links read it (`recordStores.ts`).
 
-- **Files** (built): a fill's `files: { folder, suffix }` says the store
-  keeps each row as a file, `<folder>/<id><suffix>` (folder relative to the
-  project root; the row is the fill's first store's, with that id). An
-  agent's own read of such a file is a read of the row (`record.read`,
-  "Reads of rows"). The folder is a watched folder when the extension
+- **Files** (built): a fill's `files: { folder, suffix, root? }` says the
+  store keeps each row as a file, `<folder>/<id><suffix>` (folder relative to
+  its root, the project by default or a folder root outside it such as
+  `agent:claude`; the row is the fill's first store's, with that id). An
+  agent's own read of such a file (by its path, absolute for one outside the
+  project) is a read of the row (`record.read`, "Reads of rows"). Only a
+  project folder is write-guarded. The folder is a watched folder when the extension
   declares it so in `files:` (`extensions-permissions.md` "Declared
   folders").
 - A store id is owned by one extension. Two extensions naming the same

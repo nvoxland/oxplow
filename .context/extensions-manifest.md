@@ -748,14 +748,16 @@ New manifest keys of the shared-models work. Their contracts:
 new `on:` kinds). `requires:` may name an extension in another namespace
 (a store requires its model's owner).
 
-`files:` is a list of `{ path, access: read | write, watch? }`, a path relative
-to the project root. `watch: true` is for a folder directly under `.oxplow/`
+`files:` is a list of `{ path, access: read | write, root?, watch? }`, a path
+relative to its `root`: the project (the default), `home` or `agent:<harness
+id>` (`extensions-permissions.md` "Folders outside the project"; read only).
+In the project, `watch: true` is for a folder directly under `.oxplow/`
 (`.oxplow/oxwiki`): oxplow follows it though git ignores it, so the
 extension's `files:` trigger hears a change in it, and its snapshots hold it.
 It lifts `.oxplow`'s reservation for that folder only — never `.git`'s, at any
 depth — and the folder may not be one of oxplow's own (`extensions`,
 `extensions-data`, `runtime`, `logs`, `snapshots`, …). A fill's `files: {
-folder, suffix }` names where a store keeps a row as a file: an agent's read
+folder, suffix, root? }` names where a store keeps a row as a file: an agent's read
 of it is a read of the row (`record.read`), and a tool's write of it is
 refused, naming the store's extension (the write guard reads the fills, not a
 store's name).

@@ -105,6 +105,8 @@ pub async fn log_read(
 pub struct RecordFileReads {
     pub models: Models,
     pub project_dir: PathBuf,
+    /// Where each fill's `files` folder's root is.
+    pub roots: std::sync::Arc<dyn oxplow_domain::folder_root::FolderBases>,
     pub vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
 }
 
@@ -164,11 +166,7 @@ impl crate::event_pump::EventConsumer for RecordFileReads {
             } else {
                 worktree.join(path)
             };
-            let Ok(rel) = abs.strip_prefix(&self.project_dir) else {
-                continue;
-            };
-            let Some(rel) = rel.to_str() else { continue };
-            let Some((model, row)) = registry.row_of_file(rel) else {
+            let Some((model, row)) = registry.row_of_file(&*self.roots, &abs) else {
                 continue;
             };
             if !row_exists(conn, &registry, &model, &row)? {
@@ -307,5 +305,82 @@ mod tests {
         let all = reads(&fx).await;
         assert_eq!(all.len(), 3, "{all:?}");
         assert_eq!(all[2], (DUNE.to_string(), "tool".to_string()));
+    }
+
+    /// A store whose files are in a folder outside the project (an agent
+    /// harness's own) has its rows read when an agent reads one of those
+    /// files by its absolute path; the same path under the project is not.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_read_of_a_rows_file_outside_the_project_is_a_read_of_it() {
+        use oxplow_domain::events::schema::{AgentToolFinished, AgentToolFinishedV4};
+        use oxplow_domain::folder_root::FolderRoot;
+        let fx = services_with_thread().await;
+        let root = fx._dir.path();
+        write(root, ".oxplow/extensions/shelf/extension.yaml", OWNER);
+        write(
+            root,
+            ".oxplow/extensions/memories/extension.yaml",
+            "manifest: 2\nname: memories\nintent:\n  purpose: p\nrequires: [shelf]\nfiles:\n  - { root: 'agent:claude', path: memory, access: read }\nfills:\n  - model: shelf/book\n    stores: [memories]\n    files: { root: 'agent:claude', folder: memory, suffix: .md }\ncollectors:\n  - id: books\n    runtime: starlark\n    entry: books.star\n",
+        );
+        write(
+            root,
+            ".oxplow/extensions/memories/books.star",
+            "def transform(x):\n    return {\"models\": [{\"model\": \"shelf/book\", \"store\": \"memories\", \"snapshot\": [{\"id\": \"m1\", \"title\": \"M\"}]}]}\n",
+        );
+        let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
+        assert!(problems.is_empty(), "{problems:?}");
+        fx.svc
+            .commands
+            .run(
+                &Actor::Human,
+                crate::collector_runner::SYNC,
+                json!({ "collector": "memories/books" }),
+                false,
+            )
+            .await
+            .unwrap();
+        let base = fx
+            .svc
+            .folder_base(&FolderRoot::Agent("claude".into()))
+            .expect("a test's agent folder");
+        let vocabulary = fx.svc.vocabulary.current();
+        for path in [
+            base.join("memory/m1.md"),
+            root.join("memory/m1.md"),
+            base.join("memory/gone.md"),
+        ] {
+            let env = oxplow_db::EventCtx {
+                vocabulary: &vocabulary,
+                source: "agent:claude".into(),
+                cause: None,
+            }
+            .typed::<AgentToolFinished>(&AgentToolFinishedV4 {
+                tool: "Read".into(),
+                kind: oxplow_domain::agent::tool::ToolKind::Read,
+                call: None,
+                duration_ms: None,
+                paths: vec![path.display().to_string()],
+                detail: None,
+                command: None,
+                ok: Some(true),
+                exit_code: None,
+                input: None,
+                output: None,
+                subagent: None,
+            })
+            .with_anchors(oxplow_domain::Anchors {
+                thread_id: Some(fx.thread),
+                ..Default::default()
+            });
+            fx.svc.event_log_store.append(env).await.unwrap();
+        }
+        fx.svc.event_pump.run_once().await.unwrap();
+        assert_eq!(
+            reads(&fx).await,
+            [(
+                "oxplow:shelf/book?id=m1&store=memories".to_string(),
+                "file".to_string()
+            )]
+        );
     }
 }

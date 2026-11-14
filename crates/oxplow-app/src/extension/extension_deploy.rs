@@ -465,7 +465,17 @@ fn shipped_permissions(b: &crate::bundled_extensions::BundledExtension) -> Permi
             serde_yaml::from_slice::<crate::extension::extensions::manifest_v2::ManifestV2>(bytes)
                 .ok()
         })
-        .map(|m| m.permissions)
+        .map(|m| {
+            // Its folders outside the project, as loading it adds them.
+            let mut permissions = m.permissions;
+            for f in m.files.iter().filter(|f| !f.root.is_project()) {
+                let folder = format!("{}/{}", f.root, f.path.trim_end_matches('/'));
+                if !permissions.folders.contains(&folder) {
+                    permissions.folders.push(folder);
+                }
+            }
+            permissions
+        })
         .unwrap_or_default()
 }
 

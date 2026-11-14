@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use oxplow_db::extension_store::{ExtensionStore, Statement};
+use oxplow_domain::folder_root::{FolderBases, FolderRoot};
 use oxplow_domain::run::RunContext;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -48,6 +49,9 @@ struct Opened {
 pub struct ExtensionServices {
     owner: StateHost,
     project: PathBuf,
+    /// Where each root of a `files:` folder is (by default only the
+    /// project's: [`Self::with_roots`] adds the ones outside it).
+    roots: Arc<dyn FolderBases>,
     stores: Mutex<HashMap<String, Opened>>,
     /// What `links.check` looks links up in; none: the service is off.
     links: Option<crate::link_check::LinkDeps>,
@@ -58,10 +62,21 @@ impl ExtensionServices {
         let project = catalog.project_of(&project).to_path_buf();
         Self {
             owner: StateHost::new(catalog, project.clone()),
+            roots: Arc::new(project.clone()),
             project,
             stores: Mutex::default(),
             links: None,
         }
+    }
+
+    /// Reach `files:` folders outside the project where `roots` says they are.
+    pub fn with_roots(mut self, roots: Arc<dyn FolderBases>) -> Self {
+        self.roots = roots;
+        self
+    }
+
+    fn bases(&self) -> &dyn FolderBases {
+        self.roots.as_ref()
     }
 
     /// Serve `links.check` over `links`.
@@ -121,7 +136,7 @@ impl ExtensionServices {
             .map_err(|e| format!("`{call}`: {e}"))?;
         let answer = match call {
             "store.sql" => self.store_read(&name, &storage, args),
-            "files.read" | "files.list" => files(&self.project, &storage.folders, call, args),
+            "files.read" | "files.list" => files(self.bases(), &storage.folders, call, args),
             "links.check" => self.links_check(run, args),
             _ => Err("isn't a read".into()),
         }
@@ -148,7 +163,7 @@ impl ExtensionServices {
     pub fn write_file(&self, run: &RunContext, path: &str, body: &str) -> Result<Value, String> {
         let (_, storage) = self.file_composer(run, "oxplow.extension_files.write")?;
         files(
-            &self.project,
+            self.bases(),
             &storage.folders,
             "files.write",
             json!({ "path": path, "body": body }),
@@ -159,7 +174,7 @@ impl ExtensionServices {
     pub fn delete_file(&self, run: &RunContext, path: &str) -> Result<Value, String> {
         let (_, storage) = self.file_composer(run, "oxplow.extension_files.delete")?;
         files(
-            &self.project,
+            self.bases(),
             &storage.folders,
             "files.delete",
             json!({ "path": path }),
@@ -292,6 +307,17 @@ fn declared(folders: &[Folder]) -> String {
 /// absolute path, a `..`, an empty part, and a folder not declared — the
 /// message names the path and the declared folders.
 pub fn check_path(folders: &[Folder], path: &str, write: bool) -> Result<String, String> {
+    check_root_path(folders, &FolderRoot::Project, path, write)
+}
+
+/// [`check_path`] for a path relative to `root`: only that root's folders
+/// hold it, and one outside the project is never written.
+pub fn check_root_path(
+    folders: &[Folder],
+    root: &FolderRoot,
+    path: &str,
+    write: bool,
+) -> Result<String, String> {
     let refuse = |why: &str| {
         Err(format!(
             "path `{path}` {why}; declared folders: {}",
@@ -299,21 +325,27 @@ pub fn check_path(folders: &[Folder], path: &str, write: bool) -> Result<String,
         ))
     };
     if path.starts_with('/') || path.contains(['\\', ':']) || path.chars().nth(1) == Some(':') {
-        return refuse("is absolute; use a path relative to the project root");
+        return refuse("is absolute; use a path relative to its root");
+    }
+    if write && !root.is_project() {
+        return refuse(&format!(
+            "is outside the project (`{root}`), which oxplow never writes"
+        ));
     }
     let trimmed = path.trim_end_matches('/');
     if !oxplow_domain::service::valid_path(trimmed) {
         return refuse("has `..`, `.` or an empty part, or is empty");
     }
-    // A watched folder lifts `.oxplow`'s reservation, never `.git`'s.
-    let watched = crate::extension::extensions::storage::in_watched(folders, trimmed);
+    // A watched folder lifts `.oxplow`'s reservation, never `.git`'s; a
+    // folder outside the project has no `.oxplow` of oxplow's.
+    let watched =
+        !root.is_project() || crate::extension::extensions::storage::in_watched(folders, trimmed);
     if let Some(why) = crate::extension::extensions::storage::reserved(trimmed, watched) {
         return refuse(why);
     }
-    let Some(folder) = folders
-        .iter()
-        .find(|f| trimmed == f.path || trimmed.starts_with(&format!("{}/", f.path)))
-    else {
+    let Some(folder) = folders.iter().find(|f| {
+        &f.root == root && (trimmed == f.path || trimmed.starts_with(&format!("{}/", f.path)))
+    }) else {
         return refuse("is outside every declared folder");
     };
     if write && folder.access != FolderAccess::Write {
@@ -338,10 +370,17 @@ fn no_symlink(project: &Path, rel: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn files(project: &Path, folders: &[Folder], call: &str, args: Value) -> Result<Value, String> {
+fn files(
+    bases: &(impl FolderBases + ?Sized),
+    folders: &[Folder],
+    call: &str,
+    args: Value,
+) -> Result<Value, String> {
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
     struct Args {
+        #[serde(default)]
+        root: FolderRoot,
         path: String,
         #[serde(default)]
         body: Option<String>,
@@ -351,14 +390,23 @@ fn files(project: &Path, folders: &[Folder], call: &str, args: Value) -> Result<
         lossy: bool,
     }
     let takes = match call {
-        "files.read" => "takes { path, lossy? }",
+        "files.read" => "takes { path, root?, lossy? }",
         "files.delete" => "takes { path }",
-        "files.list" => "takes { path, glob? }",
+        "files.list" => "takes { path, root?, glob? }",
         _ => "takes { path, body }",
     };
     let args: Args = serde_json::from_value(args).map_err(|e| format!("{takes}: {e}"))?;
     let write = matches!(call, "files.write" | "files.delete");
-    let rel = check_path(folders, &args.path, write)?;
+    let rel = check_root_path(folders, &args.root, &args.path, write)?;
+    // A root with no folder on this machine (a harness that keeps none):
+    // nothing is in it.
+    let Some(project) = bases.base(&args.root) else {
+        return match call {
+            "files.list" => Ok(json!({ "files": [] })),
+            _ => Err(format!("`{rel}`: `{}` has no folder here", args.root)),
+        };
+    };
+    let project = project.as_path();
     no_symlink(project, &rel)?;
     let full = project.join(&rel);
     match call {
@@ -452,11 +500,13 @@ mod tests {
         vec![
             Folder {
                 path: "shelf".into(),
+                root: Default::default(),
                 access: FolderAccess::Write,
                 watch: false,
             },
             Folder {
                 path: "docs/notes".into(),
+                root: Default::default(),
                 access: FolderAccess::Read,
                 watch: false,
             },
@@ -482,6 +532,7 @@ mod tests {
     fn a_watched_folder_keeps_gits_reservation() {
         let f = vec![Folder {
             path: ".oxplow/wiki".into(),
+            root: Default::default(),
             access: FolderAccess::Write,
             watch: true,
         }];
@@ -604,6 +655,100 @@ mod tests {
         // Read-only and undeclared folders refuse a write; nothing lands.
         assert!(run("files.write", json!({ "path": "docs/notes/x", "body": "" })).is_err());
         assert!(!dir.path().join("docs").exists());
+    }
+
+    /// Where a test's roots are: the project at `project`, every other root
+    /// under `outside` (none for `agent:gone`).
+    struct Bases {
+        project: PathBuf,
+        outside: PathBuf,
+    }
+
+    impl FolderBases for Bases {
+        fn base(&self, root: &FolderRoot) -> Option<PathBuf> {
+            match root {
+                FolderRoot::Project => Some(self.project.clone()),
+                FolderRoot::Agent(id) if id == "gone" => None,
+                other => Some(self.outside.join(other.to_string().replace(':', "-"))),
+            }
+        }
+    }
+
+    /// A folder outside the project is read and listed under its own root,
+    /// its paths relative to that root; it is never written, and a root with
+    /// no folder here lists nothing.
+    #[test]
+    fn a_folder_outside_the_project_is_read_under_its_root() {
+        let project = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let memory = outside.path().join("agent-claude/memory");
+        std::fs::create_dir_all(&memory).unwrap();
+        std::fs::write(memory.join("a.md"), "remembered").unwrap();
+        // The same path in the project is another folder.
+        std::fs::create_dir_all(project.path().join("memory")).unwrap();
+        std::fs::write(project.path().join("memory/b.md"), "project's").unwrap();
+        let bases = Bases {
+            project: project.path().to_path_buf(),
+            outside: outside.path().to_path_buf(),
+        };
+        let agent = |id: &str| FolderRoot::Agent(id.into());
+        let f = vec![
+            Folder {
+                path: "memory".into(),
+                root: agent("claude"),
+                access: FolderAccess::Read,
+                watch: true,
+            },
+            Folder {
+                path: "memory".into(),
+                root: agent("gone"),
+                access: FolderAccess::Read,
+                watch: false,
+            },
+        ];
+        let run = |call: &str, args: Value| files(&bases, &f, call, args);
+        let listed = run(
+            "files.list",
+            json!({ "root": "agent:claude", "path": "memory", "glob": "*.md" }),
+        )
+        .unwrap();
+        assert_eq!(listed["files"][0]["path"], "memory/a.md");
+        assert_eq!(listed["files"].as_array().unwrap().len(), 1);
+        let read = run(
+            "files.read",
+            json!({ "root": "agent:claude", "path": "memory/a.md" }),
+        )
+        .unwrap();
+        assert_eq!(read["body"], "remembered");
+        // No root: the project's, where no folder is declared.
+        let error = run("files.read", json!({ "path": "memory/b.md" })).unwrap_err();
+        assert!(error.contains("outside every declared folder"), "{error}");
+        // A root with no folder on this machine has nothing in it.
+        let none = run(
+            "files.list",
+            json!({ "root": "agent:gone", "path": "memory" }),
+        )
+        .unwrap();
+        assert_eq!(none, json!({ "files": [] }));
+        assert!(run(
+            "files.read",
+            json!({ "root": "agent:gone", "path": "memory/a.md" })
+        )
+        .is_err());
+        // Never written, even if a read-write folder slipped through.
+        let writable = vec![Folder {
+            access: FolderAccess::Write,
+            ..f[0].clone()
+        }];
+        let error = files(
+            &bases,
+            &writable,
+            "files.write",
+            json!({ "root": "agent:claude", "path": "memory/c.md", "body": "x" }),
+        )
+        .unwrap_err();
+        assert!(error.contains("outside the project"), "{error}");
+        assert!(!memory.join("c.md").exists());
     }
 
     #[cfg(unix)]

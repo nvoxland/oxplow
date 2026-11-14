@@ -164,7 +164,11 @@ pub struct FillFile {
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FillFilesFile {
-    /// A folder relative to the project root (`.oxplow/oxwiki`).
+    /// What `folder` is relative to: the project (the default) or a folder
+    /// root outside it (`agent:claude`), as a `files:` entry names it.
+    #[serde(default)]
+    root: oxplow_domain::folder_root::FolderRoot,
+    /// A folder relative to its root (`.oxplow/oxwiki`).
     folder: String,
     /// What follows the row's id in the file's name (`.md`).
     suffix: String,
@@ -181,7 +185,7 @@ fn files_of(raw: FillFilesFile) -> Result<crate::models::FillFiles, String> {
     let folder = raw.folder.trim_end_matches('/').to_string();
     if !oxplow_domain::service::valid_path(&folder) {
         return Err(format!(
-            "`files.folder` `{}` is a folder relative to the project root, with no `..`, `.` or empty parts",
+            "`files.folder` `{}` is a folder relative to its root, with no `..`, `.` or empty parts",
             raw.folder
         ));
     }
@@ -192,6 +196,7 @@ fn files_of(raw: FillFilesFile) -> Result<crate::models::FillFiles, String> {
         ));
     }
     Ok(crate::models::FillFiles {
+        root: raw.root,
         folder,
         suffix: raw.suffix,
     })

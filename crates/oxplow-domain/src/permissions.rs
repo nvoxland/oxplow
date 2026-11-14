@@ -72,6 +72,11 @@ pub struct Permissions {
     pub secrets: Vec<String>,
     /// Contributing to the agent's context: skills, advisories, prompts.
     pub agent: bool,
+    /// The folders outside the project it may read, as `<root>/<path>`
+    /// (`agent:claude/memory`): its `files:` entries with a `root` other
+    /// than the project, added when it loads, so a person approves each by
+    /// name.
+    pub folders: Vec<String>,
 }
 
 /// The scopes a `permissions:` list may name: each alone, or (those ending
@@ -101,6 +106,10 @@ pub const PERMISSION_IDS: &[(&str, &str)] = &[
         "commands:",
         "run commands outside its own namespace: `commands:oxplow.task.*`",
     ),
+    (
+        "folders:",
+        "read a folder outside the project: `folders:agent:claude/memory` (added from `files:`)",
+    ),
 ];
 
 impl TryFrom<Vec<String>> for Permissions {
@@ -115,6 +124,7 @@ impl TryFrom<Vec<String>> for Permissions {
                 Some(("commands", pattern)) if !pattern.is_empty() => {
                     push(&mut out.commands, pattern)
                 }
+                Some(("folders", folder)) if !folder.is_empty() => push(&mut out.folders, folder),
                 None => match id.as_str() {
                     "sql.read" => out.sql = Some(SqlAccess::Read),
                     "files.read" => out.files = out.files.max(Some(FilesAccess::Read)),
@@ -154,6 +164,7 @@ impl From<Permissions> for Vec<String> {
         out.extend(p.network.iter().map(|h| format!("network:{h}")));
         out.extend(p.secrets.iter().map(|s| format!("secrets:{s}")));
         out.extend(p.commands.iter().map(|c| format!("commands:{c}")));
+        out.extend(p.folders.iter().map(|f| format!("folders:{f}")));
         out
     }
 }
@@ -194,12 +205,12 @@ impl schemars::JsonSchema for Permissions {
             .filter(|id| !id.ends_with(':'))
             .collect();
         schemars::json_schema!({
-            "description": "The scopes a person approves at deploy, in a script's `needs:` grammar: `sql.read`, `files.read`, `files.write`, `ai.compute`, `process.run`, `agent.write`, `network:<host>`, `secrets:<name>`, `commands:<pattern>`.",
+            "description": "The scopes a person approves at deploy, in a script's `needs:` grammar: `sql.read`, `files.read`, `files.write`, `ai.compute`, `process.run`, `agent.write`, `network:<host>`, `secrets:<name>`, `commands:<pattern>`, `folders:<root>/<path>` (added from `files:`).",
             "type": "array",
             "items": {
                 "anyOf": [
                     { "enum": exact },
-                    { "type": "string", "pattern": "^(network|secrets|commands):.+$" },
+                    { "type": "string", "pattern": "^(network|secrets|commands|folders):.+$" },
                 ],
             },
         })
@@ -334,6 +345,18 @@ impl Permissions {
         if self.agent && !baseline.agent {
             out.push("agent — may add skills, advisories and prompts to your agent".to_string());
         }
+        let folders: Vec<&str> = self
+            .folders
+            .iter()
+            .filter(|f| !baseline.folders.contains(f))
+            .map(String::as_str)
+            .collect();
+        if !folders.is_empty() {
+            out.push(format!(
+                "files — may read {} outside the project",
+                folders.join(", ")
+            ));
+        }
         out
     }
 
@@ -349,6 +372,7 @@ impl Permissions {
             (&mut self.commands, &other.commands),
             (&mut self.network, &other.network),
             (&mut self.secrets, &other.secrets),
+            (&mut self.folders, &other.folders),
         ] {
             for item in theirs {
                 if !mine.contains(item) {

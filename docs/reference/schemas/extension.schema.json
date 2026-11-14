@@ -552,7 +552,7 @@
       ]
     },
     "Permissions": {
-      "description": "The scopes a person approves at deploy, in a script's `needs:` grammar: `sql.read`, `files.read`, `files.write`, `ai.compute`, `process.run`, `agent.write`, `network:<host>`, `secrets:<name>`, `commands:<pattern>`.",
+      "description": "The scopes a person approves at deploy, in a script's `needs:` grammar: `sql.read`, `files.read`, `files.write`, `ai.compute`, `process.run`, `agent.write`, `network:<host>`, `secrets:<name>`, `commands:<pattern>`, `folders:<root>/<path>` (added from `files:`).",
       "type": "array",
       "items": {
         "anyOf": [
@@ -568,7 +568,7 @@
           },
           {
             "type": "string",
-            "pattern": "^(network|secrets|commands):.+$"
+            "pattern": "^(network|secrets|commands|folders):.+$"
           }
         ]
       }
@@ -590,8 +590,17 @@
       "type": "object",
       "properties": {
         "path": {
-          "description": "A folder relative to the project root, without `..`.",
+          "description": "A folder relative to its `root`, without `..`.",
           "type": "string"
+        },
+        "root": {
+          "description": "What `path` is relative to: the project (the default), the person's\nhome folder (`home`) or an agent harness's own data folder for this\nproject (`agent:<harness id>`). A folder outside the project is read\nonly: oxplow observes another tool's files, it never writes them.",
+          "default": "project",
+          "allOf": [
+            {
+              "$ref": "#/definitions/FolderRoot"
+            }
+          ]
         },
         "access": {
           "description": "`read` for `files.read`; `write` also allows `files.write`.",
@@ -602,7 +611,7 @@
           ]
         },
         "watch": {
-          "description": "A folder directly under `.oxplow/` that oxplow watches (the\nextension's `files` trigger hears it) and snapshots, though git\nignores it: the extension's own store of files, as oxwiki's pages are.\nOnly a folder under `.oxplow/` may say so, and it may not be one of\noxplow's own.",
+          "description": "A folder oxplow watches, so the extension's `files` trigger hears\nit. In the project it is one folder directly under `.oxplow/`, not\none of oxplow's own, which oxplow also snapshots though git ignores\nit: the extension's own store of files, as oxwiki's pages are.\nOutside the project any folder may be watched.",
           "type": "boolean",
           "default": false
         }
@@ -612,6 +621,11 @@
         "path",
         "access"
       ]
+    },
+    "FolderRoot": {
+      "description": "What the folder's `path` is relative to: `project` (the default), `home` (the person's home folder) or `agent:<harness id>` (that agent harness's own data folder for this project, such as Claude Code's). A folder outside the project is read only.",
+      "type": "string",
+      "pattern": "^(project|home|agent:[a-z0-9_-]+)$"
     },
     "FolderAccess": {
       "description": "What a folder of `files:` allows.",
@@ -2808,8 +2822,17 @@
     "FillFilesFile": {
       "type": "object",
       "properties": {
+        "root": {
+          "description": "What `folder` is relative to: the project (the default) or a folder\nroot outside it (`agent:claude`), as a `files:` entry names it.",
+          "default": "project",
+          "allOf": [
+            {
+              "$ref": "#/definitions/FolderRoot"
+            }
+          ]
+        },
         "folder": {
-          "description": "A folder relative to the project root (`.oxplow/oxwiki`).",
+          "description": "A folder relative to its root (`.oxplow/oxwiki`).",
           "type": "string"
         },
         "suffix": {

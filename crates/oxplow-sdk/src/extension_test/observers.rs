@@ -154,7 +154,7 @@ fn listens_to(
             let globs: Vec<String> = sources
                 .iter()
                 .filter_map(|s| match s {
-                    ObserverSource::Files { glob } => Some(glob.clone()),
+                    ObserverSource::Files { glob, .. } => Some(glob.clone()),
                     _ => None,
                 })
                 .collect();

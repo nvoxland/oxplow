@@ -4,6 +4,7 @@
 //! does with them is `extension_services`.
 
 use oxplow_domain::diagnostic::Diagnostic;
+use oxplow_domain::folder_root::FolderRoot;
 use serde::{Deserialize, Serialize};
 
 use super::manifest_v2::{at, key_line};
@@ -36,24 +37,32 @@ pub enum FolderAccess {
 #[derive(Debug, Clone, PartialEq, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FolderFile {
-    /// A folder relative to the project root, without `..`.
+    /// A folder relative to its `root`, without `..`.
     pub path: String,
+    /// What `path` is relative to: the project (the default), the person's
+    /// home folder (`home`) or an agent harness's own data folder for this
+    /// project (`agent:<harness id>`). A folder outside the project is read
+    /// only: oxplow observes another tool's files, it never writes them.
+    #[serde(default)]
+    pub root: FolderRoot,
     /// `read` for `files.read`; `write` also allows `files.write`.
     pub access: FolderAccess,
-    /// A folder directly under `.oxplow/` that oxplow watches (the
-    /// extension's `files` trigger hears it) and snapshots, though git
-    /// ignores it: the extension's own store of files, as oxwiki's pages are.
-    /// Only a folder under `.oxplow/` may say so, and it may not be one of
-    /// oxplow's own.
+    /// A folder oxplow watches, so the extension's `files` trigger hears
+    /// it. In the project it is one folder directly under `.oxplow/`, not
+    /// one of oxplow's own, which oxplow also snapshots though git ignores
+    /// it: the extension's own store of files, as oxwiki's pages are.
+    /// Outside the project any folder may be watched.
     #[serde(default)]
     pub watch: bool,
 }
 
-/// A folder the extension may use, its `path` relative to the project root
+/// A folder the extension may use, its `path` relative to its `root`
 /// without a trailing slash.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Folder {
     pub path: String,
+    #[serde(default)]
+    pub root: FolderRoot,
     pub access: FolderAccess,
     /// See [`FolderFile::watch`].
     #[serde(default)]
@@ -132,7 +141,7 @@ pub(crate) fn watched_names(extensions: &[super::Extension]) -> Vec<String> {
         .iter()
         .filter(|e| e.enabled)
         .flat_map(|e| e.storage.folders.iter())
-        .filter(|f| f.watch)
+        .filter(|f| f.watch && f.root.is_project())
         .filter_map(|f| f.path.strip_prefix(".oxplow/").map(str::to_string))
         .collect();
     names.sort();
@@ -140,11 +149,23 @@ pub(crate) fn watched_names(extensions: &[super::Extension]) -> Vec<String> {
     names
 }
 
-/// Whether `path` lies in a declared watched folder.
-pub(crate) fn in_watched(folders: &[Folder], path: &str) -> bool {
+/// The folders outside the project, as their permission names them
+/// (`agent:claude/memory`).
+pub(crate) fn outside_folders(folders: &[Folder]) -> Vec<String> {
     folders
         .iter()
-        .any(|f| f.watch && (path == f.path || path.starts_with(&format!("{}/", f.path))))
+        .filter(|f| !f.root.is_project())
+        .map(|f| format!("{}/{}", f.root, f.path))
+        .collect()
+}
+
+/// Whether `path` (of the project) lies in a declared watched folder.
+pub(crate) fn in_watched(folders: &[Folder], path: &str) -> bool {
+    folders.iter().any(|f| {
+        f.watch
+            && f.root.is_project()
+            && (path == f.path || path.starts_with(&format!("{}/", f.path)))
+    })
 }
 
 /// Read and check the two keys. `files` is the extension's own folder, for
@@ -164,15 +185,25 @@ pub(crate) fn load(
     let line = key_line(manifest, "files");
     for folder in folders {
         let path = folder.path.trim_end_matches('/');
+        let outside = !folder.root.is_project();
         let problem = if !oxplow_domain::service::valid_path(path) {
-            Some("a folder is relative to the project root, with no `..`, `.` or empty parts")
-        } else if let Some(why) = if folder.watch {
+            Some("a folder is relative to its root, with no `..`, `.` or empty parts")
+        } else if outside && folder.access == FolderAccess::Write {
+            Some("a folder outside the project is read only (`access: read`)")
+        } else if let Some(why) = if outside {
+            // Another tool's folder: only git's own is closed.
+            reserved(path, true)
+        } else if folder.watch {
             watched_problem(path)
         } else {
             reserved(path, false)
         } {
             Some(why)
-        } else if out.folders.iter().any(|f| f.path == path) {
+        } else if out
+            .folders
+            .iter()
+            .any(|f| f.path == path && f.root == folder.root)
+        {
             Some("it is declared twice")
         } else {
             None
@@ -186,6 +217,7 @@ pub(crate) fn load(
             )),
             None => out.folders.push(Folder {
                 path: path.to_string(),
+                root: folder.root.clone(),
                 access: folder.access,
                 watch: folder.watch,
             }),
@@ -329,10 +361,60 @@ mod tests {
         assert!(filter.ignore(page, false), "off with the extension");
     }
 
+    /// A folder outside the project is read only, may be watched wherever
+    /// it is, keeps git's reservation, and is another folder than the same
+    /// path in the project. It never reaches the project's file watch.
+    #[test]
+    fn a_folder_outside_the_project_is_read_only() {
+        let ext = load_tree(
+            "files:\n  - { root: 'agent:claude', path: memory, access: read, watch: true }\n  - { path: memory, access: read }\n  - { root: home, path: Notes/vault, access: read }\n",
+            &[],
+        );
+        assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+        assert_eq!(
+            ext.storage.folders[0],
+            Folder {
+                path: "memory".into(),
+                root: FolderRoot::Agent("claude".into()),
+                access: FolderAccess::Read,
+                watch: true,
+            }
+        );
+        assert_eq!(ext.storage.folders.len(), 3);
+        assert!(watched_names(std::slice::from_ref(&ext)).is_empty());
+        // Each is a permission a person approves by name.
+        assert_eq!(
+            ext.permissions.folders,
+            ["agent:claude/memory", "home/Notes/vault"]
+        );
+        assert_eq!(
+            ext.permissions.added_over(&Default::default()),
+            ["files — may read agent:claude/memory, home/Notes/vault outside the project"]
+        );
+        for (entry, needle) in [
+            ("{ root: home, path: notes, access: write }", "read only"),
+            ("{ root: home, path: a/.git, access: read }", ".git"),
+            (
+                "{ root: home, path: ../x, access: read }",
+                "relative to its root",
+            ),
+            (
+                "{ root: 'agent:Bad', path: x, access: read }",
+                "folder root",
+            ),
+        ] {
+            let ext = load_tree(&format!("files:\n  - {entry}\n"), &[]);
+            let all = format!("{:?}", ext.errors);
+            assert!(ext.storage.folders.is_empty(), "{entry} was kept");
+            assert!(all.contains(needle), "{entry}: {all}");
+        }
+    }
+
     #[test]
     fn the_run_time_path_check_refuses_the_same_places() {
         let f = [Folder {
             path: ".oxplow/oxwiki".into(),
+            root: Default::default(),
             access: FolderAccess::Write,
             watch: true,
         }];
@@ -340,16 +422,19 @@ mod tests {
         let all = [
             Folder {
                 path: ".GIT".into(),
+                root: Default::default(),
                 access: FolderAccess::Write,
                 watch: false,
             },
             Folder {
                 path: "sub".into(),
+                root: Default::default(),
                 access: FolderAccess::Write,
                 watch: false,
             },
             Folder {
                 path: ".oxplow".into(),
+                root: Default::default(),
                 access: FolderAccess::Write,
                 watch: false,
             },
@@ -388,11 +473,13 @@ mod tests {
             vec![
                 Folder {
                     path: "shelf".into(),
+                    root: Default::default(),
                     access: FolderAccess::Write,
                     watch: false
                 },
                 Folder {
                     path: "docs".into(),
+                    root: Default::default(),
                     access: FolderAccess::Read,
                     watch: false
                 },
