@@ -2,23 +2,43 @@ use super::*;
 use oxplow_app::collector_runner::{FileChange, RunCollectorError, RunTrigger};
 use oxplow_config::collectors::ObserverSource;
 
-/// A path of the project the fixture may write: relative, inside it.
-fn project_path(host: &Host, rel: &str) -> Result<std::path::PathBuf, String> {
+/// Where a files step's paths are: the project, or with `root:` (`home`,
+/// `agent:<harness id>`) that root's folder in the test's oxplow — never
+/// the person's own.
+pub(super) fn root_base(host: &Host, root: Option<&Value>) -> Result<std::path::PathBuf, String> {
+    let fix = "`root: home` or `root: \"agent:claude\"` (the project's when left out)";
+    let root = match root {
+        None => return Ok(host.root.clone()),
+        Some(Value::String(root)) => root
+            .parse::<oxplow_domain::folder_root::FolderRoot>()
+            .map_err(|e| format!("{e} — fix: {fix}"))?,
+        Some(_) => return Err(format!("`root` names a folder root — fix: {fix}")),
+    };
+    host.svc
+        .folder_base(&root)
+        .ok_or_else(|| format!("`{root}` has no folder in a test's oxplow"))
+}
+
+/// A path under `base` (the project, or a root's folder) the fixture may
+/// write: relative, inside it.
+fn project_path(base: &std::path::Path, rel: &str) -> Result<std::path::PathBuf, String> {
     let inside = !rel.starts_with('/')
         && !rel.contains('\\')
         && !rel.split('/').next().is_some_and(|first| first == ".git")
         && oxplow_domain::service::valid_path(rel);
     if inside {
-        Ok(host.root.join(rel))
+        Ok(base.join(rel))
     } else {
         Err(format!(
-            "`{rel}` isn't a path inside the project — fix: relative to the project root, no `..`"
+            "`{rel}` isn't a path inside its root — fix: relative to the project root (or the \
+             step's `root`), no `..`"
         ))
     }
 }
 
-/// `files: { "<path>": "<body>" }`: project files written, folders made.
-pub(super) fn given_files(host: &Host, files: &Value) -> Result<(), String> {
+/// `files: { "<path>": "<body>" }`: files written under `host` (the
+/// project, or the step's `root`), folders made.
+pub(super) fn given_files(host: &std::path::Path, files: &Value) -> Result<(), String> {
     let files = files
         .as_object()
         .ok_or("`files` maps each path to its text — fix: `files: { \"shelf/a.md\": \"# A\" }`")?;
@@ -86,7 +106,7 @@ pub(super) fn given_store_sql(host: &Host, spec: &Value) -> Result<(), String> {
 
 /// `remove_files: ["<path>"]`: project files removed; one that isn't there is
 /// an error (a fixture removes what it made).
-pub(super) fn given_remove_files(host: &Host, files: &Value) -> Result<(), String> {
+pub(super) fn given_remove_files(host: &std::path::Path, files: &Value) -> Result<(), String> {
     let files = files
         .as_array()
         .ok_or("`remove_files` lists paths — fix: `remove_files: [\"shelf/a.md\"]`")?;
@@ -98,7 +118,7 @@ pub(super) fn given_remove_files(host: &Host, files: &Value) -> Result<(), Strin
 }
 
 /// `rename_files: [{ from, to }]`: project files renamed, in order.
-pub(super) fn given_rename_files(host: &Host, files: &Value) -> Result<(), String> {
+pub(super) fn given_rename_files(host: &std::path::Path, files: &Value) -> Result<(), String> {
     let fix = "`rename_files: [{ from: \"shelf/a.md\", to: \"shelf/b.md\" }]`";
     let files = files
         .as_array()

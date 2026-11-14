@@ -324,7 +324,8 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      project files it follows in `given:` first — `- { files: { "<path>":
      "<body>" } }` writes them, `- { remove_files: ["<path>"] }` removes
      them, `- { rename_files: [{ from, to }] }` moves them (paths from the
-     project root). A store that follows its own SQLite file
+     project root; with `root: "agent:claude"` or `root: home` on the step,
+     from that folder root, the test's own and never the person's). A store that follows its own SQLite file
      (`on: [{ sqlite: own }]`) is written from outside with `- { store_sql: {
      extension: <name>, sql: "INSERT …", params: [..] } }` — one statement on
      that extension's file (the fixture's own or a required one with `storage:

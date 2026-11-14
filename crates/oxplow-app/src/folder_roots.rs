@@ -6,7 +6,7 @@
 //! under a folder of its own ([`Outside::Under`]), so it never reads the
 //! person's home.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use oxplow_domain::agent::registry::HarnessRegistry;
 use oxplow_domain::folder_root::{FolderBases, FolderRoot};
@@ -49,9 +49,6 @@ impl FolderRoots {
         }
     }
 
-    pub fn project(&self) -> &Path {
-        &self.project
-    }
 }
 
 impl FolderBases for FolderRoots {

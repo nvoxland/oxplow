@@ -655,7 +655,10 @@ New fixture forms for the shared-models work ([models.md](./models.md)):
   rename_files: [{ from, to }] }` renames (built, `extension_test/observers.rs`;
   a path is relative to the throwaway's project root, no `..`, not
   under `.git`; it is a `given` step, so it also runs inside a scenario's
-  `steps: - given: [..]`).
+  `steps: - given: [..]`). A step's `root: home | "agent:<harness id>"`
+  puts its paths under that folder root instead (`observers::root_base`):
+  the throwaway's own folder for it (`Services::folder_base`), never the
+  person's home, so a fixture of a store outside the project runs anywhere.
 - `given: - { store_sql: { extension: <name>, sql, params? } }` (built,
   `observers::given_store_sql`) runs one statement on that extension's own
   SQLite file from outside, as a person's sqlite3 or `oxplow-dev` would: no

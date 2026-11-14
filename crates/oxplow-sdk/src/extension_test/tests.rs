@@ -3933,7 +3933,7 @@ expect: { ok: true }
         "{errors}"
     );
     assert!(
-        errors.contains("`../escape.md` isn't a path inside the project"),
+        errors.contains("`../escape.md` isn't a path inside its root"),
         "{errors}"
     );
     assert!(

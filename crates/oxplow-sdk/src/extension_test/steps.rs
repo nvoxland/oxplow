@@ -134,10 +134,11 @@ pub(super) async fn run_steps(
             continue;
         }
         // Project files a tool would have written, removed or moved.
+        // A step's `root` puts its paths under a folder outside the project.
         let on_files = [
             (
                 "files",
-                given_files as fn(&Host, &Value) -> Result<(), String>,
+                given_files as fn(&std::path::Path, &Value) -> Result<(), String>,
             ),
             ("remove_files", given_remove_files),
             ("rename_files", given_rename_files),
@@ -145,7 +146,9 @@ pub(super) async fn run_steps(
         .into_iter()
         .find_map(|(kind, make)| step.get(kind).map(|value| (kind, make, value)));
         if let Some((kind, make, value)) = on_files {
-            if let Err(e) = make(host, value) {
+            let made =
+                root_base(host, step.get("root")).and_then(|base| make(&base, value));
+            if let Err(e) = made {
                 report.errors.push(error(
                     shown,
                     None,
