@@ -3817,6 +3817,48 @@ mod tests {
         assert!(onto_live.quarantined[0].message.contains("already an item"));
     }
 
+    /// `v_ref_pin` finds a pin's snapshots through an index on
+    /// `file_snapshot`'s path, a file's by its path and a directory's by the
+    /// range of paths under it, never by reading every snapshot of every
+    /// file: a page of pins is read once per pin.
+    #[tokio::test]
+    async fn the_pins_snapshots_are_found_by_path_not_scanned() {
+        let db = Database::in_memory();
+        snapshot(&db).await;
+        let plan = db
+            .read(|tx| {
+                let mut st = tx
+                    .prepare("EXPLAIN QUERY PLAN SELECT stale FROM v_ref_pin WHERE source = 'x'")
+                    .map_err(map_sql_err)?;
+                let rows = st
+                    .query_map([], |r| r.get::<_, String>(3))
+                    .map_err(map_sql_err)?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(map_sql_err)?;
+                Ok(rows)
+            })
+            .await
+            .unwrap();
+        let text = plan.join("\n");
+        assert!(
+            !plan
+                .iter()
+                .any(|l| l.starts_with("SCAN") && l.contains("fs")),
+            "file_snapshot is scanned:\n{text}"
+        );
+        // A file's by its path, a directory's by its paths' range.
+        assert!(
+            plan.iter()
+                .any(|l| l.starts_with("SEARCH fs") && l.contains("path=?")),
+            "{text}"
+        );
+        assert!(
+            plan.iter()
+                .any(|l| l.starts_with("SEARCH fs") && l.contains("path>?")),
+            "{text}"
+        );
+    }
+
     /// A directory pin matches the files under it by their exact prefix:
     /// `my_dir` isn't stale for a change to `myXdir/a.md` (`_` is no
     /// wildcard), only for one under `my_dir/`.

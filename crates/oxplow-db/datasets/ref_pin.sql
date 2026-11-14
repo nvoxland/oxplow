@@ -21,12 +21,22 @@ SELECT CAST(p.source_uri AS TEXT) AS source,
             AND (p.local_snapshot_id IS NULL OR l.snapshot_id > p.local_snapshot_id)
             AS INTEGER) AS stale
 FROM pins p
-LEFT JOIN (SELECT p2.source_uri, p2.ref_type, p2.path, MAX(fs.snapshot_id) AS snapshot_id
-             FROM pins p2
-             JOIN source('file_snapshot') fs
-               ON (p2.ref_type = 'file_pin' AND fs.path = p2.path)
-               OR (p2.ref_type = 'dir_pin'
-                   AND substr(fs.path, 1, length(p2.path) + 1) = p2.path || '/')
-             JOIN source('streams') st ON st.id = fs.stream_id AND st.kind = 'primary'
-            GROUP BY p2.source_uri, p2.ref_type, p2.path) l
+LEFT JOIN (
+  -- A file's snapshots by its path, a directory's by the range of paths
+  -- under it (`<dir>/` up to `<dir>0`, `0` being the byte after `/`): both
+  -- seek the path index, where one join with an OR read every snapshot.
+  SELECT p2.source_uri, p2.ref_type, p2.path, MAX(fs.snapshot_id) AS snapshot_id
+    FROM pins p2
+    JOIN source('file_snapshot') fs ON fs.path = p2.path
+    JOIN source('streams') st ON st.id = fs.stream_id AND st.kind = 'primary'
+   WHERE p2.ref_type = 'file_pin'
+   GROUP BY p2.source_uri, p2.ref_type, p2.path
+  UNION ALL
+  SELECT p2.source_uri, p2.ref_type, p2.path, MAX(fs.snapshot_id) AS snapshot_id
+    FROM pins p2
+    JOIN source('file_snapshot') fs
+      ON fs.path >= p2.path || '/' AND fs.path < p2.path || '0'
+    JOIN source('streams') st ON st.id = fs.stream_id AND st.kind = 'primary'
+   WHERE p2.ref_type = 'dir_pin'
+   GROUP BY p2.source_uri, p2.ref_type, p2.path) l
   ON l.source_uri = p.source_uri AND l.ref_type = p.ref_type AND l.path = p.path
