@@ -146,8 +146,7 @@ pub(super) async fn run_steps(
         .into_iter()
         .find_map(|(kind, make)| step.get(kind).map(|value| (kind, make, value)));
         if let Some((kind, make, value)) = on_files {
-            let made =
-                root_base(host, step.get("root")).and_then(|base| make(&base, value));
+            let made = root_base(host, step.get("root")).and_then(|base| make(&base, value));
             if let Err(e) = made {
                 report.errors.push(error(
                     shown,
