@@ -440,8 +440,8 @@ extension" has the read contract.
   page's title. The body is the markdown (read-only: a store's own page
   would replace it to edit). The rail has About (store, kind, author, last
   edited; for a page that cites files, its freshness and how many of the
-  cited files changed since it pinned them) and Open in its store (when the page has a
-  `url`). Referenced files has Mark verified (`oxplow.refs.verify`). See
+  cited files changed since it pinned them, and Mark all verified) and Open in its store (when the page has a
+  `url`). Referenced files has Mark verified per changed file (`oxplow.refs.verify`). See
   also: the index, the page's freshness, and what links to it.
 - `knowledge-freshness` (params `store`, `id`): the page's files, stale
   ones first, Mark verified per file and for all (`oxplow.refs.verify`).

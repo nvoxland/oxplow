@@ -88,6 +88,13 @@ rail:
       label: Open in its store
       open: store_url
       when: store_url
+    # Only a page that cites files has anything to verify.
+    - id: verify-all
+      label: Mark all verified
+      command: oxplow.refs.verify
+      when: cited_files
+      input:
+        uri: '{{param.uri}}'
 view:
   stack:
   # The text, as its store's own page may draw it instead
@@ -116,11 +123,6 @@ view:
       width: 230
     empty: This page cites no files.
     actions:
-    - id: verify-all
-      label: Mark all verified
-      command: oxplow.refs.verify
-      input:
-        uri: '{{param.uri}}'
     - id: verify
       label: Mark verified
       command: oxplow.refs.verify

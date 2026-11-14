@@ -1,0 +1,13 @@
+# A page that cites no files has nothing to verify: About counts no cited
+# files, which is what hides its Mark all verified and its freshness rows
+# (`when: cited_files`).
+requires: [oxwiki]
+given:
+  - { command: oxwiki.page.write, input: { title: Plain, body: "# Plain\n\nNothing cited.\n" } }
+when: { page: knowledge-page, params: { uri: "oxplow:oxplow/knowledge?id=plain&store=oxwiki", store: oxwiki, id: plain } }
+expect:
+  loaders:
+    row: { rows: [{ title: Plain }] }
+    about: { rows: [{ cited_files: 0, stale_files: 0 }] }
+    refs: { rows: 0 }
+  text: { contains: ["This page cites no files."] }
