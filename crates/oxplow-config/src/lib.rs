@@ -4313,7 +4313,7 @@ mod tests {
     /// own: `oxplow`, and a core namespace.
     #[test]
     fn an_instance_id_may_not_be_oxplows_own() {
-        for id in ["oxplow", "code", "config", "task"] {
+        for id in ["oxplow", "code", "config", "thread"] {
             let mut all = std::collections::BTreeMap::new();
             all.insert(
                 format!("tracker/{id}"),
