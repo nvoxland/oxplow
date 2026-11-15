@@ -154,3 +154,19 @@ test("railHas: another view of the tab's item is something, except on a page tha
   expect(railHas(run(plain), { fills: false, saveOpen: false, views: true })).toBe(true);
   expect(railHas(run(plain), { fills: true, saveOpen: false, views: true })).toBe(false);
 });
+
+
+const withSettings = (rows: number) => fakeRun(
+  fakePage(node.viz("settings", "many", { viz: "settings" } as never), { loaders: [decl("many")] }),
+  { loaders: { many: loader(["key", "title", "schema"], Array.from({ length: rows }, (_, i) => [`acme.option${i}`, `Option ${i}`, '{"type":"string"}'])) } },
+);
+
+test("settings rows count as standard sections when deciding whether to mount Contents", async () => {
+  expect(contentsHas(withSettings(0), false)).toBe(false);
+  expect(contentsHas(withSettings(1), false)).toBe(false);
+  expect(contentsHas(withSettings(2), false)).toBe(true);
+  expect(contentsHas(withSettings(2), true)).toBe(false);
+  const view = host(withSettings(2));
+  const contents = await view.findByRole("navigation", { name: "Contents" });
+  expect(Array.from(contents.querySelectorAll("button")).map((button) => button.textContent)).toEqual(["Option 0", "Option 1"]);
+});

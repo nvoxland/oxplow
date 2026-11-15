@@ -10,6 +10,14 @@ test("Settings links to category forms and operational tools", async ({ page, da
   await expect(settings).toBeVisible();
   await expect(settings.getByLabel(/View\/edit level/).first()).toBeVisible();
   await expect(settings.getByText("All levels").first()).toBeVisible();
+  const titles = await settings.getByRole("heading").allTextContents();
+  expect(titles.length).toBeGreaterThan(1);
+  const contents = shown(page).getByRole("navigation", { name: "Contents" });
+  for (const title of titles) await expect(contents.getByRole("button", { name: title, exact: true })).toBeVisible();
+  await expect(contents.getByRole("button", { name: "All levels", exact: true })).toHaveCount(0);
+  await expect(contents.getByRole("button", { name: "Technical details", exact: true })).toHaveCount(0);
+  await contents.getByRole("button", { name: titles.at(-1)!, exact: true }).click();
+  await expect(settings.getByRole("heading", { name: titles.at(-1)!, exact: true })).toBeInViewport();
   await open(page, daemon, "oxplow:oxplow/page?page=management#area=data");
   await expect(shown(page).getByRole("heading", { name: "Collectors", exact: true })).toBeVisible();
 });

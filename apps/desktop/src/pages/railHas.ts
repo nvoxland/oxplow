@@ -9,14 +9,14 @@ import type { Node, PageRun, RunNode } from "../tauri-bridge/generated/bindings.
  *  or slot's children with a title (a hidden heading counts: it stays in
  *  the page for Contents; an empty section stays too). Mirrors
  *  `PageTree`'s drawing of `placement="section"`, and counts a
- *  `sections` viz's subsections, every row. */
+ *  `sections` or `settings` viz's subsections, every row. */
 function sectionCount(run: PageRun): number {
   const walk = (run: PageRun, at: RunNode): number => {
     const def = nodeById(run.page, at.id);
     if (!def) return 0;
     let n = 0;
-    // A `sections` viz's subsections: a section each, and each group.
-    if (def.kind === "viz" && def.config.viz === "sections") {
+    // Row-based section renderers draw one shared Section per row.
+    if (def.kind === "viz" && (def.config.viz === "sections" || def.config.viz === "settings")) {
       const result = def.from !== null ? run.loaders[def.from]?.result : undefined;
       n += result?.rows.length ?? 0;
       const group = def.config.sections?.group ? result?.columns.indexOf(def.config.sections.group) : undefined;

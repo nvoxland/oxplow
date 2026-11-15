@@ -171,6 +171,15 @@ YAML batch. Multi-key undo uses the same batch API.
 
 The Settings index lists categories and searches titles, descriptions and keys.
 Category URLs share one native `settings` visualization, backed by `v_config_value`.
+The visualization composes the shared `Section`, `Facts` and `DataTable` kit
+components rather than defining its own page chrome. Each setting has a stable
+section identity (`<viz node>/<setting key>`) and participates in the ordinary
+Contents outline with the correct nested heading level. The page host counts
+settings rows alongside other row-based sections when deciding whether to mount
+Contents, including pages that have no filters or other rail content. All-level and technical
+metadata stay native disclosures within the section, outside the outline.
+`SettingEditor` owns only the level-specific draft/save/reset behavior, while
+`SettingField` supplies structured schema controls styled by the standard form kit.
 Every setting shows its effective value/source separately from the View/edit level
 selector. All levels is collapsed initially; it exposes hidden overrides and the
 registered default. Choosing a level is read-only. Save and Discard apply to one

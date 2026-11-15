@@ -3,6 +3,8 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigationContext.js";
 import type { VizRun } from "../api.js";
+import { Contents } from "./Contents.js";
+import { Section } from "../kit/Section.js";
 import { SettingField } from "./SettingField.js";
 import { inventory, validate } from "./settingsModel.js";
 
@@ -157,4 +159,26 @@ test("saving or closing a secret editor clears its input rather than retaining t
   fireEvent.click(ui.getByText("Collapse editor"));
   fireEvent.click(ui.getByText("Edit local value"));
   expect((ui.getByLabelText("Example", { selector: "input" }) as HTMLInputElement).value).toBe("");
+});
+
+
+test("settings use standard nested sections and Contents links without listing editor disclosures", async () => {
+  const data = run();
+  data.result.rows.push(run({ key: "oxplow.second", title: "Second setting" }).result.rows[0]!);
+  function Page() {
+    const [root, setRoot] = useState<HTMLDivElement | null>(null);
+    return <><div ref={setRoot}><Section id="category" title="Preferences"><SettingsViz run={data} /></Section></div><Contents root={root} /></>;
+  }
+  const ui = render(<Page />);
+  const contents = await ui.findByRole("navigation", { name: "Contents" });
+  expect(Array.from(contents.querySelectorAll("button")).map((button) => button.textContent)).toEqual(["Preferences", "Example", "Second setting"]);
+  const heading = ui.getByRole("heading", { name: "Second setting", level: 3 });
+  let scrolled = false;
+  heading.scrollIntoView = () => { scrolled = true; };
+  fireEvent.click(ui.getByRole("button", { name: "Second setting" }));
+  expect(scrolled).toBe(true);
+  expect(heading.closest("section")?.getAttribute("data-section")).toBe("settings/oxplow.second");
+  fireEvent.click(ui.getAllByText("Edit local value", { selector: "button" })[0]!);
+  expect(contents.textContent).not.toContain("All levels");
+  expect(contents.textContent).not.toContain("Technical details");
 });
