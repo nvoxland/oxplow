@@ -32,7 +32,7 @@ export const LOG_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", ".out
  *  spec ever starts a real agent CLI. The suite's extensions are on; the
  *  fixtures deploy them once the daemon has started (boot deploys nothing). */
 function projectYaml(): string {
-  return `agents: [scripted]\nextensions: [oxplow-bundled, oxtask, oxwiki, e2e, github]\nextensionInstances:\n  e2e/scripted: { enabled: true, config: { team: core } }\n`;
+  return `oxplow.agents.claude.enabled: false\noxplow.agents.codex.enabled: false\noxplow.agents.opencode.enabled: false\noxplow.extensions.e2e.enabled: true\noxplow.extensions.github.enabled: true\noxplow.extensionInstances:\n  e2e/scripted: { enabled: true, config: { team: core } }\n`;
 }
 
 /** Put the suite's test extension's source (`tests-e2e/fixtures/extension`)

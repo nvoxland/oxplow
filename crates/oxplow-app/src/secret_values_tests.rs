@@ -24,13 +24,13 @@ async fn a_secret_set_by_anyone_is_never_read_back() {
         on_behalf_of: Box::new(agent.clone()),
     };
     let mut results = Vec::new();
-    for (i, actor) in [Actor::Human, agent, page].iter().enumerate() {
+    for actor in &[Actor::Human, agent, page] {
         let out = svc
             .commands
             .run(
                 actor,
                 crate::commands::ai_settings::SET_PROVIDER,
-                json!({ "id": format!("p{i}"), "kind": "openrouter", "key": SECRET }),
+                json!({ "id": "openrouter", "kind": "openrouter", "key": SECRET }),
                 false,
             )
             .await

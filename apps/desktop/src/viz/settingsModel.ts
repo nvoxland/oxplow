@@ -21,7 +21,7 @@ export function inventory(run: VizRun): Setting[] {
       statuses[level] = String(r[`${level}_status`] ?? (Object.hasOwn(overrides, level) ? "set" : "unset"));
     }
     return { key: String(r.key), title: String(r.title || r.key), doc: String(r.doc ?? r.description ?? ""), category: String(r.category ?? ""), schema,
-      ui: (decode(r.ui) ?? {}) as Record<string, unknown>, value: decode(r.value), origin: r.origin == null ? null : String(r.origin), secret: r.secret === 1 || r.secret === true,
+      ui: (decode(r.ui) ?? {}) as Record<string, unknown>, value: r.value == null && r.is_set !== 1 && r.is_set !== true ? undefined : decode(r.value), origin: r.origin == null ? null : String(r.origin), secret: r.secret === 1 || r.secret === true,
       owner: String(r.owner ?? r.extension ?? "core"), isSet: r.is_set == null ? r.origin != null && r.origin !== "default" : r.is_set === 1 || r.is_set === true,
       unavailable: r.unavailable === 1 || r.unavailable === true, defaultValue: r.default_value == null ? schema.default : decode(r.default_value), overrides, statuses,
       restartRequired: r.restart_required === 1 || r.restart_required === true };

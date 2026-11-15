@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use oxplow_config::settings::{Level, SettingsError};
-use oxplow_domain::events::schema::{ConfigChanged, ConfigChangedV2, ConfigLayer};
+use oxplow_domain::events::schema::{ConfigChanged, ConfigChangedV3, ConfigLayer};
 use oxplow_domain::{CommandCall, CommandError, Envelope};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -192,10 +192,15 @@ pub(super) fn ops(target: ConfigTarget) -> Vec<Op> {
 }
 
 pub(super) fn validate_change(key: &str, value: Option<&Value>) -> Result<(), CommandError> {
-    if key == "oxplow.extensions.oxplow-foundation.enabled" && value == Some(&Value::Bool(false)) {
+    if key
+        .strip_prefix("oxplow.extensions.")
+        .and_then(|key| key.strip_suffix(".enabled"))
+        .is_some_and(crate::bundled_extensions::is_required)
+        && value == Some(&Value::Bool(false))
+    {
         return Err(CommandError::Invalid {
             field: Some("/value".into()),
-            message: "oxplow-foundation is required and cannot be disabled".into(),
+            message: "This extension is required and cannot be disabled".into(),
         });
     }
     Ok(())
@@ -274,7 +279,7 @@ fn write_changes(
         events.push(
             Envelope::typed::<ConfigChanged>(
                 invocation.run.actor().source(),
-                &ConfigChangedV2 {
+                &ConfigChangedV3 {
                     key: key.clone(),
                     before: before.unwrap_or(Value::Null),
                     after: if has_secret {

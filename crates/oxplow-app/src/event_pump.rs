@@ -785,7 +785,7 @@ fn event_by_seq_tx(
 mod tests {
     use super::*;
     use oxplow_db::event_log_store::SqliteEventLogStore;
-    use oxplow_domain::events::schema::{ConfigChanged, ConfigChangedV2};
+    use oxplow_domain::events::schema::{ConfigChanged, ConfigChangedV3};
     use oxplow_domain::Envelope;
     use parking_lot::Mutex;
     use serde_json::{json, Value};
@@ -869,7 +869,7 @@ mod tests {
     fn config_changed(key: &str) -> Envelope {
         Envelope::typed::<ConfigChanged>(
             "test",
-            &ConfigChangedV2 {
+            &ConfigChangedV3 {
                 key: key.into(),
                 before: Value::Null,
                 after: json!(1),

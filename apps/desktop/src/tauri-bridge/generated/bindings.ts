@@ -1408,7 +1408,10 @@ export type CollectorRuntime =
 "read";
 
 /**  One declared collector. */
-export type CollectorSpec = {
+export type CollectorSpec = CollectorSpec_Serialize | CollectorSpec_Deserialize;
+
+/**  One declared collector. */
+export type CollectorSpec_Deserialize = {
 	/**  Unique in its owner; a dotted id (`repo.scan_clone`) is fine. */
 	id: string,
 	doc: string,
@@ -1420,7 +1423,7 @@ export type CollectorSpec = {
 	entry: string | null,
 	/**  For `read`: the provider collector it runs. */
 	provider: ProviderRead | null,
-	trigger: Trigger,
+	trigger: Trigger_Deserialize,
 	/**
 	 *  With an `on:` trigger: what it runs after on one event — an effect,
 	 *  a collector or a core consumer (`change.analyze`), as written; the
@@ -1461,6 +1464,67 @@ export type CollectorSpec = {
 	 *  rather than only the files the snapshot changed.
 	 */
 	wholeTree?: boolean,
+	/**
+	 *  A report collector's kind: it parses `report` with `entry` and its
+	 *  output joins the run (`on: { run: … }`).
+	 */
+	records: Records | null,
+};
+
+/**  One declared collector. */
+export type CollectorSpec_Serialize = {
+	/**  Unique in its owner; a dotted id (`repo.scan_clone`) is fine. */
+	id: string,
+	doc: string,
+	runtime: CollectorRuntime,
+	/**
+	 *  The program or script, relative to its owner's folder (the
+	 *  extension's, or the project's); absent for `read`.
+	 */
+	entry: string | null,
+	/**  For `read`: the provider collector it runs. */
+	provider: ProviderRead | null,
+	trigger: Trigger_Serialize,
+	/**
+	 *  With an `on:` trigger: what it runs after on one event — an effect,
+	 *  a collector or a core consumer (`change.analyze`), as written; the
+	 *  catalog resolves it to refs.
+	 */
+	after: string[],
+	/**
+	 *  A script's input query: read-only SQL over the semantic layer,
+	 *  handed over as `input.rows`. `:stream_id`, `:snapshot_id`,
+	 *  `:thread_id` and `:turn_id` bind the triggering
+	 *  event's anchors, `:event_id` its id and `:event_seq` its seq (NULL
+	 *  otherwise).
+	 */
+	input: CollectorInput | null,
+	/**  A report file handed over as `input.report`. */
+	report: ReportInput | null,
+	sync: CollectorSync,
+	/**  Host environment variables an exec collector gets. */
+	env: string[],
+	/**  Hosts an exec collector may reach; part of what a person approves. */
+	network: string[],
+	/**  Keychain secrets an exec collector gets as environment variables. */
+	credentials: string[],
+	/**
+	 *  The services a Starlark collector's script uses beyond what its kind
+	 *  implies (`tree.read`, `sql.read`, `ai.compute`; `oxplow_domain::service`).
+	 */
+	needs: string[],
+	entities: EntityDecl[],
+	/**
+	 *  The measures its facts land on (`repo.rust_clone`); a fact on any
+	 *  other is dropped.
+	 */
+	facts: string[],
+	/**
+	 *  A fact collector that reads the whole tree as of the snapshot on
+	 *  every run, so its capture restates every file (a duplication scan),
+	 *  rather than only the files the snapshot changed.
+	 */
+	wholeTree: boolean,
 	/**
 	 *  A report collector's kind: it parses `report` with `entry` and its
 	 *  output joins the run (`on: { run: … }`).
@@ -2630,7 +2694,7 @@ export type Extension_Deserialize = {
 	 */
 	pageFiles?: Page_Deserialize[],
 	/**  Declared collectors (valid ones; invalid ones are in `errors`). */
-	collectors: CollectorSpec[],
+	collectors: CollectorSpec_Deserialize[],
 	/**  Declared providers (valid ones — invalid ones are in `errors`). */
 	providers: ProviderSpec[],
 	/**  Web components its `custom` viz nodes render, sandboxed (valid ones). */
@@ -2798,7 +2862,7 @@ export type Extension_Serialize = {
 	 */
 	pageFiles: Page_Serialize[],
 	/**  Declared collectors (valid ones; invalid ones are in `errors`). */
-	collectors: CollectorSpec[],
+	collectors: CollectorSpec_Serialize[],
 	/**  Declared providers (valid ones — invalid ones are in `errors`). */
 	providers: ProviderSpec[],
 	/**  Web components its `custom` viz nodes render, sandboxed (valid ones). */
@@ -3001,6 +3065,9 @@ export type FileSnapshot = {
 
 /**  A `file_snapshot` row: one captured file under a snapshot. */
 export type FileSnapshotId = number;
+
+/**  What a folder's `path` is relative to. */
+export type FolderRoot = string;
 
 /**
  *  An effect's or collector's `on:` naming an event type of another
@@ -4205,19 +4272,45 @@ export type OAuthListener = {
  *  An observer's trigger in an `on:` list, beside event types
  *  (`.context/extensions-jobs.md` "Triggers for observers").
  */
-export type ObserverSource =
-/**  Once when the extension starts (boot, enable, a deploy that changes it). */
-{ kind: "start" } |
+export type ObserverSource = ObserverSource_Serialize | ObserverSource_Deserialize;
+
 /**
- *  Files of the primary worktree matching `glob` (relative to the
- *  project root) were created, changed or removed.
+ *  An observer's trigger in an `on:` list, beside event types
+ *  (`.context/extensions-jobs.md` "Triggers for observers").
  */
-{ kind: "files"; glob: string } |
+export type ObserverSource_Deserialize =
+/**  Once when the extension starts (boot, enable, a deploy that changes it). */
+({ kind: "start" }) & { glob?: never; path?: never; root?: never } |
+/**
+ *  Files matching `glob` were created, changed or removed: the primary
+ *  worktree's (relative to the project root), or, with a `root`, those
+ *  of a `files:` folder outside the project (relative to that root).
+ */
+({ kind: "files"; glob: string; root?: FolderRoot }) & { path?: never } |
 /**
  *  A SQLite file's `PRAGMA data_version` moved: the extension's own file
  *  (`path` absent) or a tool's database in a `files:` folder it may read.
  */
-{ kind: "sqlite"; path: string | null };
+({ kind: "sqlite"; path: string | null }) & { glob?: never; root?: never };
+
+/**
+ *  An observer's trigger in an `on:` list, beside event types
+ *  (`.context/extensions-jobs.md` "Triggers for observers").
+ */
+export type ObserverSource_Serialize =
+/**  Once when the extension starts (boot, enable, a deploy that changes it). */
+({ kind: "start" }) & { glob?: never; path?: never; root?: never } |
+/**
+ *  Files matching `glob` were created, changed or removed: the primary
+ *  worktree's (relative to the project root), or, with a `root`, those
+ *  of a `files:` folder outside the project (relative to that root).
+ */
+({ kind: "files"; glob: string; root?: FolderRoot }) & { path?: never } |
+/**
+ *  A SQLite file's `PRAGMA data_version` moved: the extension's own file
+ *  (`path` absent) or a tool's database in a `files:` folder it may read.
+ */
+({ kind: "sqlite"; path: string | null }) & { glob?: never; root?: never };
 
 /**
  *  What a mutation did. `log` is the provider's own account (a CLI's
@@ -4282,13 +4375,9 @@ export type Owner = {
 };
 
 export type OxplowConfig = {
-	/**
-	 *  The agent harnesses enabled for this project, by registry key, in
-	 *  priority order: the first is a new session's default. Empty (the
-	 *  default) enables every registered harness, the first declared one
-	 *  the default.
-	 */
+	/**  Legacy runtime projection; enabled state is resolved independently by key. */
 	agents: string[],
+	agentEnabled?: { [key in string]: boolean },
 	/**
 	 *  Human-readable project name. Defaults to the basename of the
 	 *  project dir when not set in .oxplow/project.yaml.
@@ -4401,12 +4490,14 @@ export type OxplowConfig = {
 	activeProviders: { [key in string]: string },
 	/**
 	 *  A person's own choices (`activeProviders` in
-	 *  `.oxplow/personal.yaml`), over the project's.
+	 *  `.oxplow/local.yaml`), over the project's.
 	 */
 	personalActiveProviders: { [key in string]: string },
+	/**  Resolved origin of each independently registered capability preference. */
+	activeProviderOrigins?: { [key in string]: string },
 	/**
 	 *  What a new thread starts with, a person's own (`newThreadSession`
-	 *  in `.oxplow/personal.yaml`): `ask` (the session picker), `none`, or
+	 *  in `.oxplow/local.yaml`): `ask` (the session picker), `none`, or
 	 *  an agent (a harness's key). Unset means `ask`.
 	 */
 	personalNewThreadSession: string | null,
@@ -4428,9 +4519,8 @@ export type OxplowConfig = {
 	 */
 	eventRetention: { [key in string]: RetentionWindow },
 	/**
-	 *  This project's AI role assignments (`ai: { roles: … }`), layered
-	 *  over the user-global `ai.yaml`. Keyed by role name (one of
-	 *  [`AI_ROLE_NAMES`]). Provider ids refer to each person's `ai.yaml`.
+	 *  Resolved AI role assignments, keyed by role name (one of
+	 *  [`AI_ROLE_NAMES`]). Provider ids refer to `oxplow.ai.providers`.
 	 */
 	aiRoles: { [key in string]: AiRoleOverride },
 	/**
@@ -4453,12 +4543,12 @@ export type OxplowConfig = {
 	extensionSources: { [key in string]: string },
 	/**
 	 *  A person's own turning on and off over the team's list
-	 *  (`enableExtensions`, `disableExtensions` in `.oxplow/personal.yaml`).
+	 *  (`enableExtensions`, `disableExtensions` in `.oxplow/local.yaml`).
 	 */
 	personalExtensions: PersonalExtensions,
 	/**
 	 *  A person's own sources (`extensionSources` in
-	 *  `.oxplow/personal.yaml`), over the team's.
+	 *  `.oxplow/local.yaml`), over the team's.
 	 */
 	personalExtensionSources: { [key in string]: string },
 	/**
@@ -5936,7 +6026,7 @@ export type RoleStatus = {
 	binding: RoleBinding | null,
 	/**  What a call would use now: its binding, else its fallback's. */
 	effective: RoleBinding | null,
-	/**  The binding comes from the project, not the global `ai.yaml`. */
+	/**  The binding comes from the project, not the global `global.yaml`. */
 	overridden: boolean,
 	/**
 	 *  Why a call on it would be refused, when it would be: a profile no
@@ -6626,17 +6716,20 @@ export type TranscriptItem = {
 } & ItemBody;
 
 /**  When a collector runs by itself. */
-export type Trigger =
+export type Trigger = Trigger_Serialize | Trigger_Deserialize;
+
+/**  When a collector runs by itself. */
+export type Trigger_Deserialize =
 /**  Only when someone runs it (`oxplow.collector.sync`). */
-{ kind: "manual" } |
+({ kind: "manual" }) & { events?: never; filter?: never; minutes?: never; pacing?: never; run?: never; sources?: never } |
 /**  Every `minutes` minutes (an exec collector once approved). */
-{ kind: "every"; minutes: number } |
+({ kind: "every"; minutes: number }) & { events?: never; filter?: never; pacing?: never; run?: never; sources?: never } |
 /**
  *  When an event of one of these types is logged and its payload has
  *  each `filter` field equal to one of its values — after the consumers in
  *  the collector's `after` have handled the event.
  */
-{ kind: "on"; events: string[]; filter: { [key in string]: string[] };
+({ kind: "on"; events: string[]; filter: { [key in string]: string[] };
 /**
  *  When the run happens after a triggering event: at
  *  once by default.
@@ -6646,13 +6739,42 @@ pacing?: Pacing;
  *  What else in the same `on:` list sets it off: `start`, a file
  *  glob, a SQLite file (an observer's triggers).
  */
-sources?: ObserverSource[] } |
+sources?: ObserverSource_Deserialize[] }) & { minutes?: never; run?: never } |
 /**
  *  A report collector's: when the agent runs the project's tests or an
  *  analyzer (the `collection` reactor detects the run), if its report
  *  was written by that run.
  */
-{ kind: "onRun"; run: RunKind };
+({ kind: "onRun"; run: RunKind }) & { events?: never; filter?: never; minutes?: never; pacing?: never; sources?: never };
+
+/**  When a collector runs by itself. */
+export type Trigger_Serialize =
+/**  Only when someone runs it (`oxplow.collector.sync`). */
+({ kind: "manual" }) & { events?: never; filter?: never; minutes?: never; pacing?: never; run?: never; sources?: never } |
+/**  Every `minutes` minutes (an exec collector once approved). */
+({ kind: "every"; minutes: number }) & { events?: never; filter?: never; pacing?: never; run?: never; sources?: never } |
+/**
+ *  When an event of one of these types is logged and its payload has
+ *  each `filter` field equal to one of its values — after the consumers in
+ *  the collector's `after` have handled the event.
+ */
+({ kind: "on"; events: string[]; filter: { [key in string]: string[] };
+/**
+ *  When the run happens after a triggering event: at
+ *  once by default.
+ */
+pacing: Pacing;
+/**
+ *  What else in the same `on:` list sets it off: `start`, a file
+ *  glob, a SQLite file (an observer's triggers).
+ */
+sources: ObserverSource_Serialize[] }) & { minutes?: never; run?: never } |
+/**
+ *  A report collector's: when the agent runs the project's tests or an
+ *  analyzer (the `collection` reactor detects the run), if its report
+ *  was written by that run.
+ */
+({ kind: "onRun"; run: RunKind }) & { events?: never; filter?: never; minutes?: never; pacing?: never; sources?: never };
 
 /**  What a kept earlier version is a version of. */
 export type Twin = {
@@ -6858,6 +6980,8 @@ export type Viz =
  *  list.
  */
 "approvals" |
+/**  Standard registry-backed settings forms. */
+"settings" |
 /**
  *  A terminal per row (`terminal.of`: an `oxplow/terminal` shell's URI
  *  or an `oxplow/agent_session`'s), kept running while hidden, at full

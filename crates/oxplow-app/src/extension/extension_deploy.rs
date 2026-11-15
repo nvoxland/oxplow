@@ -219,7 +219,10 @@ pub async fn source_diff(
     name: &str,
 ) -> Result<SourceDiff, DomainError> {
     valid(name)?;
-    let dir = oxplow_config::extension_settings(&svc.layout.project_dir).source(checkout, name);
+    let dir = svc
+        .extension_catalog
+        .settings(&svc.layout.project_dir)
+        .source(checkout, name);
     if !dir.join("extension.yaml").is_file() {
         return Err(invalid(format!(
             "no source for extension `{name}`: {} has no extension.yaml",
@@ -716,8 +719,12 @@ fn problems_of(svc: &Services, error: TxError<VocabularyErrors>) -> DomainError 
 /// Where `name`'s one deployable source is: in the primary checkout (the
 /// project's), checked to hold a manifest. Another stream's checkout holds
 /// a draft of it, never deployed ([`refuse_draft_deploy`]).
-fn source_of(project: &Path, name: &str) -> Result<PathBuf, DomainError> {
-    let dir = oxplow_config::extension_settings(project).source(project, name);
+fn source_of(svc: &Services, name: &str) -> Result<PathBuf, DomainError> {
+    let project = &svc.layout.project_dir;
+    let dir = svc
+        .extension_catalog
+        .settings(project)
+        .source(project, name);
     if dir.join("extension.yaml").is_file() {
         Ok(dir)
     } else {
@@ -745,7 +752,10 @@ pub async fn refuse_draft_deploy(
         return Ok(());
     };
     let project = &svc.layout.project_dir;
-    let source = oxplow_config::extension_settings(project).source(project, name);
+    let source = svc
+        .extension_catalog
+        .settings(project)
+        .source(project, name);
     if !source.starts_with(project) {
         return Ok(());
     }
@@ -811,7 +821,8 @@ pub async fn deploy_together(
     confirmed: bool,
 ) -> Vec<(String, Result<Deployed, DeployError>)> {
     let mut results: Vec<(String, Option<Result<Deployed, DeployError>>)> = Vec::new();
-    let mut ready: Vec<(usize, Deployed, Option<String>, Option<Option<bool>>)> = Vec::new();
+    type ReadyDeployment = (usize, Deployed, Option<String>, Option<Option<bool>>);
+    let mut ready: Vec<ReadyDeployment> = Vec::new();
     for name in names {
         let staged = stage_deploy(svc, name, confirmed).await;
         let at = results.len();
@@ -901,7 +912,7 @@ async fn stage_deploy(
 ) -> Result<Staged, DeployError> {
     valid(name)?;
     let project = svc.layout.project_dir.clone();
-    let source = source_of(&project, name)?;
+    let source = source_of(svc, name)?;
     let (commit, dirty) = provenance(svc, &project, &source).await;
     let (hash, size, mut loaded) = {
         let (source, owned) = (source.clone(), name.to_string());
@@ -931,7 +942,7 @@ async fn stage_deploy(
             _ => false,
         });
     requirements_met(
-        &oxplow_config::extension_settings(&project),
+        &svc.extension_catalog.settings(&svc.layout.project_dir),
         name,
         &loaded.requires,
     )?;
@@ -1282,7 +1293,7 @@ fn write_enabled(
 /// layer has heard of yet: on the person's disable list, or off with a
 /// deployment still chosen for it.
 fn turned_off(svc: &Services, name: &str) -> bool {
-    let settings = oxplow_config::extension_settings(&svc.layout.project_dir);
+    let settings = svc.extension_catalog.settings(&svc.layout.project_dir);
     !settings.is_enabled(name)
         && !crate::bundled_extensions::is_required(name)
         && (settings.turned_off(name) || svc.extension_catalog.live().contains_key(name))
@@ -1291,7 +1302,7 @@ fn turned_off(svc: &Services, name: &str) -> bool {
 /// Turn `name` on in the person's layer unless it is on already. True when
 /// it wrote something (a failed deploy takes it back).
 fn turn_on(svc: &Services, name: &str) -> Result<Option<Option<bool>>, DomainError> {
-    let settings = oxplow_config::extension_settings(&svc.layout.project_dir);
+    let settings = svc.extension_catalog.settings(&svc.layout.project_dir);
     if settings.is_enabled(name) || crate::bundled_extensions::is_required(name) {
         return Ok(None);
     }
@@ -1325,7 +1336,7 @@ pub async fn set_enabled(
     if crate::bundled_extensions::is_required(name) {
         return Err(invalid(format!("`{name}` is part of oxplow; it is always on")).into());
     }
-    let settings = oxplow_config::extension_settings(&svc.layout.project_dir);
+    let settings = svc.extension_catalog.settings(&svc.layout.project_dir);
     if enabled {
         if let Some(running) = active_entry(svc, name) {
             requirements_met(&settings, name, &running.requires)?;
@@ -1421,7 +1432,7 @@ fn share_lines(name: &str, inputs: &extension_store::Inputs) -> Vec<String> {
 pub fn share(svc: &Services, name: &str) -> Result<(), DomainError> {
     valid(name)?;
     let project = &svc.layout.project_dir;
-    let settings = oxplow_config::extension_settings(project);
+    let settings = svc.extension_catalog.settings(&svc.layout.project_dir);
     let source = settings.source(project, name);
     if source
         != project
@@ -1593,7 +1604,23 @@ pub struct NextBoot {
 /// oxplow recorded that no longer activates against this one is found
 /// before anyone starts it (`oxplow-dev extension status`).
 pub async fn next_boot(project: &Path, rows: &[DeploymentRow]) -> Result<NextBoot, String> {
-    let settings = oxplow_config::extension_settings(project);
+    next_boot_with_source_mode(
+        project,
+        rows,
+        oxplow_config::extension_settings(project).bundled_from_sources,
+    )
+    .await
+}
+
+async fn next_boot_with_source_mode(
+    project: &Path,
+    rows: &[DeploymentRow],
+    from_sources: bool,
+) -> Result<NextBoot, String> {
+    let settings = ExtensionSettings {
+        bundled_from_sources: from_sources,
+        ..oxplow_config::extension_settings(project)
+    };
     let mut names: Vec<String> = settings.enabled().into_iter().map(|(n, _)| n).collect();
     for b in crate::bundled_extensions::BUNDLED
         .iter()
@@ -1627,7 +1654,13 @@ pub async fn next_boot(project: &Path, rows: &[DeploymentRow]) -> Result<NextBoo
         &root,
         root.join(".global"),
         Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
-        Arc::new(|_: &str| None),
+        Arc::new(move |name: &str| {
+            if name == "OXPLOW_EXTENSIONS_FROM_SOURCE" && from_sources {
+                Some("true".into())
+            } else {
+                None
+            }
+        }),
         oxplow_db::Database::in_memory(),
     )
     .map_err(|e| e.to_string())?;
@@ -1720,7 +1753,7 @@ pub async fn next_boot(project: &Path, rows: &[DeploymentRow]) -> Result<NextBoo
 #[cfg(test)]
 pub(crate) async fn stage_sources(svc: &Arc<Services>) -> LiveChanges {
     let project = svc.layout.project_dir.clone();
-    let settings = oxplow_config::extension_settings(&project);
+    let settings = svc.extension_catalog.settings(&svc.layout.project_dir);
     let mut changes = LiveChanges::new();
     for name in crate::extension::extensions::known_names(&project, &settings) {
         let source = settings.source(&project, &name);
@@ -1772,6 +1805,24 @@ mod tests {
                 .value;
             assert_eq!(restored, prior.map(|value| json!(value)));
         }
+    }
+
+    #[tokio::test]
+    async fn deploy_source_uses_the_hosts_global_settings() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let outside = tempfile::tempdir().unwrap();
+        write(
+            outside.path(),
+            "extension.yaml",
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\n",
+        );
+        fx.svc.commands.run(
+            &oxplow_domain::Actor::Human,
+            "oxplow.config.set",
+            serde_json::json!({"key":"oxplow.extensionSources", "level":"global", "value":{"acme":outside.path()}}),
+            false,
+        ).await.unwrap();
+        assert_eq!(source_of(&fx.svc, "acme").unwrap(), outside.path());
     }
 
     fn write(dir: &Path, rel: &str, text: &str) {
@@ -2885,10 +2936,7 @@ mod tests {
                 hash: deployed.hash.clone()
             }
         );
-        assert!(oxplow_config::extension_settings(&root)
-            .personal
-            .enable
-            .contains(&"acme".to_string()));
+        assert!(oxplow_config::extension_settings(&root).is_enabled("acme"));
         assert_eq!(rows(svc).await, [(deployed.hash.clone(), true)]);
         assert!(extension_store::deployment_dir(&root, "acme", &deployed.hash).is_dir());
 
@@ -2988,8 +3036,24 @@ mod tests {
         unshare(svc, "acme").unwrap();
         assert!(ignored(".oxplow/extensions/acme/extension.yaml"));
         let settings = oxplow_config::extension_settings(&root);
-        assert!(!settings.team.contains(&"acme".to_string()));
-        assert!(settings.personal.enable.contains(&"acme".to_string()));
+        assert!(settings.is_enabled("acme"));
+        let project = oxplow_config::settings::read_layer(
+            &root,
+            &root,
+            oxplow_config::settings::Level::Project,
+        )
+        .unwrap();
+        assert!(!project.contains_key("oxplow.extensions.acme.enabled"));
+        let local = oxplow_config::settings::read_layer(
+            &root,
+            &root,
+            oxplow_config::settings::Level::Local,
+        )
+        .unwrap();
+        assert_eq!(
+            local.get("oxplow.extensions.acme.enabled"),
+            Some(&serde_json::json!(true))
+        );
     }
 
     /// Boot deploys nothing: an enabled extension with a source and no
@@ -3129,7 +3193,7 @@ mod tests {
             .run(
                 &oxplow_domain::Actor::Human,
                 "oxplow.config.get",
-                serde_json::json!({ "key": "oxplow.extensions" }),
+                serde_json::json!({ "key": "oxplow.extensions.oxwiki.enabled" }),
                 false,
             )
             .await
@@ -3363,7 +3427,7 @@ mod tests {
         // Built after the files: the mode is read when it is made.
         let svc = {
             drop(svc);
-            Services::in_memory_inactive(dir.path()).unwrap()
+            Services::in_memory_inactive_from_sources(dir.path()).unwrap()
         };
         svc.extension_activation
             .initialize(svc.clone())
@@ -3431,7 +3495,7 @@ mod tests {
         for (rel, text) in shipped_with("oxplow-foundation", |t| format!("{t}not_a_key: 1\n")) {
             write(&stale, rel, &text);
         }
-        let next = next_boot(project, &[row("00000000000000ba")])
+        let next = next_boot_with_source_mode(project, &[row("00000000000000ba")], true)
             .await
             .unwrap();
         let why = next
@@ -3511,7 +3575,7 @@ mod tests {
         // Built after the files: the mode is read when it is made.
         let svc = {
             drop(svc);
-            Services::in_memory_inactive(dir.path()).unwrap()
+            Services::in_memory_inactive_from_sources(dir.path()).unwrap()
         };
         active_deployment(
             &svc,

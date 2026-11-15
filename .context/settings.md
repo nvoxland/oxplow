@@ -193,3 +193,14 @@ internal default. Development source selection is the debug-only launch environm
 setting. Metric definitions remain extension contributions; metric settings only
 select them and adjust preferences. Change-ranking coefficients are extension
 constants. Session-context injection remains configurable pending a separate decision.
+
+Obsolete aggregate core keys fail with replacement guidance and no value disclosure;
+no file is rewritten or migrated. Extension catalogs, including frozen metric
+preparation catalogs, retain their host's injected Global directory. A different
+machine/global directory cannot change feature enablement in an isolated host.
+
+Settings writes emit `config.changed@3` with local/project/global levels;
+capability selections emit `capability.switched@2`, including global provenance.
+V40 carries existing core event rows to these versions, renaming the old personal
+level to local without changing values or expired payloads. As with other core
+event bumps, only the newest versions remain registered.

@@ -662,7 +662,7 @@ effects:
                 .append(
                     oxplow_domain::Envelope::new(
                         "config.changed",
-                        2,
+                        3,
                         "test",
                         serde_json::json!({ "key": "zones", "before": null, "after": [], "layer": "project" }),
                     )

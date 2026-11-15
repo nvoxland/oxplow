@@ -21,7 +21,7 @@ async fn rows(fx: &ThreadFixture, sql: &str) -> Vec<Vec<Value>> {
 fn provider(id: &str) -> oxplow_ai::config::ProviderConfig {
     oxplow_ai::config::ProviderConfig {
         id: id.into(),
-        kind: "typesafe".into(),
+        kind: id.into(),
         base_url: None,
     }
 }
@@ -43,25 +43,25 @@ async fn ai_roles_and_providers_are_read_live_and_never_show_a_key() {
 
     fx.svc
         .ai
-        .save_provider(provider("ts"), Some("sk-very-secret".into()))
+        .save_provider(provider("typesafe"), Some("sk-very-secret".into()))
         .unwrap();
     fx.svc
         .ai
         .set_role(
             &oxplow_ai::config::Role::DECIDE,
-            Some(oxplow_ai::config::RoleBinding::new("ts", "jev")),
+            Some(oxplow_ai::config::RoleBinding::new("typesafe", "jev")),
         )
         .unwrap();
     assert_eq!(
         rows(&fx, roles).await,
         vec![
-            vec![json!("decide"), json!("ts"), json!("jev"), json!(1)],
+            vec![json!("decide"), json!("typesafe"), json!("jev"), json!(1)],
             vec![json!("main"), Value::Null, Value::Null, json!(0)],
         ]
     );
     assert_eq!(
         rows(&fx, "SELECT id, kind, key_set FROM v_ai_provider").await,
-        vec![vec![json!("ts"), json!("typesafe"), json!(1)]]
+        vec![vec![json!("typesafe"), json!("typesafe"), json!(1)]]
     );
     let everything = format!(
         "{:?}{:?}",
@@ -76,7 +76,7 @@ async fn ai_roles_and_providers_are_read_live_and_never_show_a_key() {
         .run(
             &oxplow_domain::Actor::Human,
             "oxplow.config.unset",
-            json!({"key":crate::ai_service::provider_key_setting("ts"),"level":"global"}),
+            json!({"key":crate::ai_service::provider_key_setting("typesafe"),"level":"global"}),
             false,
         )
         .await
@@ -413,7 +413,7 @@ async fn config_values_are_read_live_with_where_each_comes_from() {
     // The AI roles are settings too, documented like the rest.
     let roles = rows(
         &fx,
-        "SELECT doc FROM v_config_value WHERE key = 'oxplow.ai.roles'",
+        "SELECT doc FROM v_config_value WHERE key = 'oxplow.ai.roles.main'",
     )
     .await;
     assert_eq!(roles.len(), 1);

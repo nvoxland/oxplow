@@ -3112,7 +3112,7 @@ mod typed_tests {
             .unwrap_err();
         assert!(
             err.to_string()
-                .contains("the `summarize` role's binding `p · m` is restricted: no tools"),
+                .contains("the `summarize` role's binding `fake · m` is restricted: no tools"),
             "{err}"
         );
         assert!(fx.seen.lock().unwrap().is_empty(), "nothing was sent");
@@ -3196,7 +3196,9 @@ mod typed_tests {
             .unwrap();
         assert_eq!(
             row.problem.as_deref(),
-            Some("AI profile `acme/review` needs tool calling, which its binding `p · m` forbids")
+            Some(
+                "AI profile `acme/review` needs tool calling, which its binding `fake · m` forbids"
+            )
         );
     }
 

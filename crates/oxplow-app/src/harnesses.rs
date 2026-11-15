@@ -103,6 +103,138 @@ pub fn listing(
         .collect()
 }
 
+/// Independent settings for every declared built-in harness, including disabled ones.
+pub(crate) fn setting_definitions(
+    extensions: &[crate::extension::extensions::Extension],
+) -> Vec<oxplow_config::settings::SettingDefinition> {
+    use oxplow_config::settings::SettingDefinition;
+    let mut definitions = std::collections::BTreeMap::new();
+    for declaration in extensions
+        .iter()
+        .filter(|e| e.enabled)
+        .flat_map(|e| &e.implementations)
+        .filter(|i| i.capability == "agent_harness")
+    {
+        let Some(harness) = declaration.entry.as_deref().and_then(|entry| {
+            oxplow_harnesses::built_in(
+                entry,
+                &declaration.id,
+                declaration.title.as_deref().unwrap_or(&declaration.id),
+            )
+        }) else {
+            continue;
+        };
+        let prefix = format!("oxplow.agents.{}", harness.id());
+        let base = |key: String,
+                    title: String,
+                    description: String,
+                    schema: serde_json::Value,
+                    default| SettingDefinition {
+            key,
+            title,
+            description,
+            category: "agents".into(),
+            schema,
+            default,
+            secret: false,
+            order: 0,
+            ui: serde_json::json!({}),
+            restart_required: false,
+            owner: "core".into(),
+        };
+        let enabled = base(
+            format!("{prefix}.enabled"),
+            format!("Enable {}", harness.title()),
+            "Allow new sessions with this agent".into(),
+            serde_json::json!({"type":"boolean"}),
+            Some(serde_json::json!(true)),
+        );
+        definitions.insert(enabled.key.clone(), enabled);
+        for setting in harness.settings() {
+            let definition = base(
+                format!(
+                    "{prefix}.{}",
+                    oxplow_config::settings::key_segment(&setting.key)
+                ),
+                format!("{} {}", harness.title(), setting.title),
+                setting.hint,
+                setting.schema,
+                None,
+            );
+            definitions.insert(definition.key.clone(), definition);
+        }
+    }
+    definitions.into_values().collect()
+}
+
+pub(crate) fn declared_instance_settings(
+    project: &std::path::Path,
+    extension: &crate::extension::extensions::Extension,
+    provider: &crate::providers::ProviderSpec,
+    instance: &str,
+) -> Vec<oxplow_config::settings::SettingDefinition> {
+    if provider.capability != "agent_harness" {
+        return Vec::new();
+    }
+    let declared = crate::providers::spec::read_declarations(provider, &|rel| {
+        crate::extension::extensions::read_extension_file(project, &extension.path, rel)
+    })
+    .ok();
+    let data = declared
+        .as_ref()
+        .and_then(|d| {
+            d.capabilities
+                .iter()
+                .find(|c| c.capability == "agent_harness")
+        })
+        .and_then(|c| {
+            serde_json::from_value::<oxplow_domain::agent::harness::HarnessData>(c.data.clone())
+                .ok()
+        });
+    let title = declared
+        .as_ref()
+        .map(|d| d.provider.name.as_str())
+        .unwrap_or(instance);
+    let mut fields = vec![(
+        "enabled".to_owned(),
+        format!("Enable {title}"),
+        "Allow new sessions with this agent".to_owned(),
+        serde_json::json!({"type":"boolean"}),
+        Some(serde_json::json!(true)),
+    )];
+    for setting in data.into_iter().flat_map(|d| d.settings) {
+        fields.push((
+            setting.key,
+            format!("{title} {}", setting.title),
+            setting.hint,
+            setting.schema,
+            None,
+        ));
+    }
+    fields
+        .into_iter()
+        .map(|(field, title, description, schema, default)| {
+            oxplow_config::settings::SettingDefinition {
+                key: format!(
+                    "oxplow.agents.{}.{}",
+                    instance.replace('/', "."),
+                    oxplow_config::settings::key_segment(&field)
+                ),
+                title,
+                description,
+                category: "agents".into(),
+                schema,
+                default,
+                secret: false,
+                order: 0,
+                ui: serde_json::json!({}),
+                restart_required: false,
+                owner: "core".into(),
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     fn register(registry: &HarnessRegistry, declared: &[Implementation]) {
@@ -291,129 +423,4 @@ mod tests {
         assert_eq!(keys("opencode"), ["model"]);
         assert_eq!(keys("claude"), ["mcpServers", "model", "effort"]);
     }
-}
-
-/// Independent settings for every declared built-in harness, including disabled ones.
-pub(crate) fn setting_definitions(
-    extensions: &[crate::extension::extensions::Extension],
-) -> Vec<oxplow_config::settings::SettingDefinition> {
-    use oxplow_config::settings::SettingDefinition;
-    let mut definitions = std::collections::BTreeMap::new();
-    for declaration in extensions
-        .iter()
-        .filter(|e| e.enabled)
-        .flat_map(|e| &e.implementations)
-        .filter(|i| i.capability == "agent_harness")
-    {
-        let Some(harness) = declaration.entry.as_deref().and_then(|entry| {
-            oxplow_harnesses::built_in(
-                entry,
-                &declaration.id,
-                declaration.title.as_deref().unwrap_or(&declaration.id),
-            )
-        }) else {
-            continue;
-        };
-        let prefix = format!("oxplow.agents.{}", harness.id());
-        let base = |key: String,
-                    title: String,
-                    description: String,
-                    schema: serde_json::Value,
-                    default| SettingDefinition {
-            key,
-            title,
-            description,
-            category: "agents".into(),
-            schema,
-            default,
-            secret: false,
-            order: 0,
-            ui: serde_json::json!({}),
-            restart_required: false,
-            owner: "core".into(),
-        };
-        let enabled = base(
-            format!("{prefix}.enabled"),
-            format!("Enable {}", harness.title()),
-            "Allow new sessions with this agent".into(),
-            serde_json::json!({"type":"boolean"}),
-            Some(serde_json::json!(true)),
-        );
-        definitions.insert(enabled.key.clone(), enabled);
-        for setting in harness.settings() {
-            let definition = base(
-                format!("{prefix}.{}", setting.key),
-                format!("{} {}", harness.title(), setting.title),
-                setting.hint,
-                setting.schema,
-                None,
-            );
-            definitions.insert(definition.key.clone(), definition);
-        }
-    }
-    definitions.into_values().collect()
-}
-
-pub(crate) fn declared_instance_settings(
-    project: &std::path::Path,
-    extension: &crate::extension::extensions::Extension,
-    provider: &crate::providers::ProviderSpec,
-    instance: &str,
-) -> Vec<oxplow_config::settings::SettingDefinition> {
-    if provider.capability != "agent_harness" {
-        return Vec::new();
-    }
-    let declared = crate::providers::spec::read_declarations(provider, &|rel| {
-        crate::extension::extensions::read_extension_file(project, &extension.path, rel)
-    })
-    .ok();
-    let data = declared
-        .as_ref()
-        .and_then(|d| {
-            d.capabilities
-                .iter()
-                .find(|c| c.capability == "agent_harness")
-        })
-        .and_then(|c| {
-            serde_json::from_value::<oxplow_domain::agent::harness::HarnessData>(c.data.clone())
-                .ok()
-        });
-    let title = declared
-        .as_ref()
-        .map(|d| d.provider.name.as_str())
-        .unwrap_or(instance);
-    let mut fields = vec![(
-        "enabled".to_owned(),
-        format!("Enable {title}"),
-        "Allow new sessions with this agent".to_owned(),
-        serde_json::json!({"type":"boolean"}),
-        Some(serde_json::json!(true)),
-    )];
-    for setting in data.into_iter().flat_map(|d| d.settings) {
-        fields.push((
-            setting.key,
-            format!("{title} {}", setting.title),
-            setting.hint,
-            setting.schema,
-            None,
-        ));
-    }
-    fields
-        .into_iter()
-        .map(|(field, title, description, schema, default)| {
-            oxplow_config::settings::SettingDefinition {
-                key: format!("oxplow.agents.{}.{field}", instance.replace('/', ".")),
-                title,
-                description,
-                category: "agents".into(),
-                schema,
-                default,
-                secret: false,
-                order: 0,
-                ui: serde_json::json!({}),
-                restart_required: false,
-                owner: "core".into(),
-            }
-        })
-        .collect()
 }

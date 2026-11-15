@@ -338,7 +338,7 @@ mod secret_recording_tests {
                 oxplow_domain::events::schema::ConfigChanged,
             >(
                 "test",
-                &oxplow_domain::events::schema::ConfigChangedV2 {
+                &oxplow_domain::events::schema::ConfigChangedV3 {
                     key: "test.secret-derived".into(),
                     before: Value::Null,
                     after: input,
@@ -378,20 +378,12 @@ mod secret_recording_tests {
             )
             .unwrap();
             store
-                .set(
-                    "oxplow.ai.providers",
-                    json!([{"id":"audit-test", "kind":"openai"}]),
-                    Level::Local,
-                )
+                .registry
+                .write()
+                .unwrap()
+                .register_many(crate::settings::ai_provider_definitions("openai"))
                 .unwrap();
-            let store = crate::settings::store(
-                &fx.svc.layout.project_dir,
-                &global,
-                fx.svc.secrets.clone(),
-                &[],
-            )
-            .unwrap();
-            let key = crate::ai_service::provider_key_setting("audit-test");
+            let key = crate::ai_service::provider_key_setting("openai");
             store.set(&key, json!(MARKER), Level::Local).unwrap();
             let bus = fx.svc.commands.clone();
             let read = bus

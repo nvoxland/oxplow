@@ -1204,7 +1204,12 @@ impl Services {
         // only (never `Arc<Services>`); the `collector.triggers` consumer
         // hands it events, and its catalog loop is spawned in `boot.rs`.
         let extension_catalog = Arc::new(
-            extension::extension_catalog::ExtensionCatalog::for_project(&layout.project_dir),
+            extension::extension_catalog::ExtensionCatalog::for_project_with_source_mode(
+                &layout.project_dir,
+                machine.config_dir.clone(),
+                (machine.host_env)("OXPLOW_EXTENSIONS_FROM_SOURCE")
+                    .is_some_and(|value| value == "true" || value == "1"),
+            ),
         );
         let temp = Arc::new(filesystems::temp::TempFs::new(&layout.project_dir));
         filesystems.register(temp.clone());
@@ -1908,6 +1913,26 @@ impl Services {
         )
     }
 
+    #[cfg(test)]
+    pub(crate) fn in_memory_inactive_from_sources(
+        project_dir: impl Into<PathBuf>,
+    ) -> Result<Arc<Self>, AppInitError> {
+        let project = project_dir.into();
+        Self::on_machine_inactive(
+            &project,
+            project.join(".oxplow/global-config"),
+            Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
+            Arc::new(|name| {
+                if name == "OXPLOW_EXTENSIONS_FROM_SOURCE" {
+                    Some("true".into())
+                } else {
+                    std::env::var(name).ok()
+                }
+            }),
+            Database::in_memory(),
+        )
+    }
+
     /// [`Self::in_memory`] for one of several projects on one machine:
     /// `global_dir`, `secrets` and `host_env` stand in for the machine's
     /// global config dir, keychain and environment, shared by every
@@ -2341,10 +2366,6 @@ mod tests {
         assert_eq!(
             services.commands.composite_commands(),
             [
-                "oxplow.agent_session.open",
-                "oxplow.agent_session.open_claude",
-                "oxplow.agent_session.open_codex",
-                "oxplow.agent_session.open_opencode",
                 "oxplow.command.sequence",
                 // The bundled extension's script commands compose their
                 // calls per input.

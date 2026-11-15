@@ -53,8 +53,6 @@ expect:
       - role: summarize
         bound: openrouter · m1
         restrict: '["tools"]'
-        can_assign: 1
-        can_unassign: 1
       - role: decide
       - role: assistant
     ai_calls:
@@ -71,4 +69,4 @@ steps:
         rows:
           contains:
           - role: summarize
-            bound: Not assigned
+            bound: fixture · fixture

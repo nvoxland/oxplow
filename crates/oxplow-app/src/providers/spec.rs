@@ -429,6 +429,36 @@ pub fn read_declarations(
     Ok(declared)
 }
 
+fn check_harness_settings(data: &oxplow_domain::agent::harness::HarnessData) -> Result<(), String> {
+    let mut registry = oxplow_config::settings::SettingsRegistry::default();
+    for setting in &data.settings {
+        if setting.key == "enabled" {
+            return Err("agent setting `enabled` is reserved for the host's feature switch".into());
+        }
+        registry
+            .register(oxplow_config::settings::SettingDefinition {
+                key: format!(
+                    "provider.{}",
+                    oxplow_config::settings::key_segment(&setting.key)
+                ),
+                title: setting.title.clone(),
+                description: setting.hint.clone(),
+                category: "agents".into(),
+                schema: setting.schema.clone(),
+                default: None,
+                secret: false,
+                order: 0,
+                ui: serde_json::json!({}),
+                restart_required: false,
+                owner: "core".into(),
+            })
+            .map_err(|_| {
+                "agent settings must have unique keys and valid offline schemas".to_string()
+            })?;
+    }
+    Ok(())
+}
+
 /// What the host needs from a provider's declarations: the protocol
 /// version, the capability the spec names, and the commands that
 /// capability calls, each a valid `<id>.<name>` command.
@@ -532,6 +562,11 @@ pub fn check_declarations(spec: &ProviderSpec, declared: &InitializeResult) -> R
             ))
         }
     }
+    if spec.capability == "agent_harness" {
+        let data: oxplow_domain::agent::harness::HarnessData =
+            serde_json::from_value(capability.data.clone()).unwrap_or_default();
+        check_harness_settings(&data)?;
+    }
     for name in contract.required(&capability.features) {
         if !declared.commands.iter().any(|c| c.name == name) {
             return Err(format!(
@@ -615,4 +650,19 @@ pub fn parse_providers(
         }
     }
     (specs, errors)
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::*;
+    #[test]
+    fn harness_properties_are_encoded_and_invalid_schemas_are_refused_before_registration() {
+        let data = |schema| {
+            serde_json::from_value::<oxplow_domain::agent::harness::HarnessData>(serde_json::json!({"settings":[{"key":"api/url", "title":"Endpoint", "schema":schema}]})).unwrap()
+        };
+        assert!(check_harness_settings(&data(serde_json::json!({"type":"string"}))).is_ok());
+        assert!(check_harness_settings(&data(serde_json::json!({"type":"invented"}))).is_err());
+        let duplicate = serde_json::from_value(serde_json::json!({"settings":[{"key":"model","title":"Model"},{"key":"model","title":"Model again"}]})).unwrap();
+        assert!(check_harness_settings(&duplicate).is_err());
+    }
 }

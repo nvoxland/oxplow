@@ -536,3 +536,10 @@ its exact prior local override, including false or absence. Sharing source also
 writes project true and removes the local override; unsharing writes local true
 and removes the project override. Sharing's gitignore rules remain independent
 of how the enablement value resolves.
+
+Source-mode selection is a launch environment, read through the host's injected
+machine environment when the catalog is built. Isolated tests and SDK throwaways
+inject it explicitly, rather than changing process environment or writing a
+preference. Sharing metadata reads the Project-level enable switch independently
+of effective enablement; the catalog fingerprint includes that provenance, so
+sharing a locally enabled extension refreshes its metadata.

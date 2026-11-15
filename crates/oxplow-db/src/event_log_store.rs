@@ -554,7 +554,7 @@ mod tests {
     use super::*;
     use oxplow_domain::events::schema::{
         ActorKind, CommandExecuted, CommandExecutedV5, CommandOutcome, ConfigChanged,
-        ConfigChangedV2, ThreadClosed, ThreadClosedV1,
+        ConfigChangedV3, ThreadClosed, ThreadClosedV1,
     };
     use serde_json::{json, Value};
 
@@ -566,11 +566,11 @@ mod tests {
         SqliteEventLogStore::new(db.clone(), vocabulary())
     }
 
-    /// A valid `config.changed@2` envelope, optionally with a dedupe key.
+    /// A valid `config.changed@3` envelope, optionally with a dedupe key.
     fn env(key: Option<&str>) -> Envelope {
         let e = Envelope::typed::<ConfigChanged>(
             "test",
-            &ConfigChangedV2 {
+            &ConfigChangedV3 {
                 key: "zones".into(),
                 before: Value::Null,
                 after: json!([]),
@@ -697,7 +697,7 @@ mod tests {
                 let env = |key: &str| {
                     Envelope::new(
                         "config.changed",
-                        2,
+                        3,
                         "test",
                         serde_json::json!({"key": "k", "before": null, "after": 1, "layer": "project"}),
                     )

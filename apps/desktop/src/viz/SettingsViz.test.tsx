@@ -144,3 +144,17 @@ test("ordinary drafts survive changing levels in tab history; secrets never ente
   fireEvent.change(secrets.getByLabelText("Example", { selector: "input" }), { target: { value: "private-token" } });
   expect(JSON.stringify(persisted)).not.toContain("private-token");
 });
+
+
+test("saving or closing a secret editor clears its input rather than retaining the submitted value", async () => {
+  const ui = render(<SettingsViz run={run({ secret: 1, value: null, local_value: null, is_set: 1 })} />);
+  fireEvent.click(ui.getByText("Edit local value"));
+  const input = ui.getByLabelText("Example", { selector: "input" }) as HTMLInputElement;
+  fireEvent.change(input, { target: { value: "private-secret-draft" } });
+  fireEvent.click(ui.getByText("Save"));
+  await waitFor(() => expect(input.value).toBe(""));
+  fireEvent.change(input, { target: { value: "another-private-draft" } });
+  fireEvent.click(ui.getByText("Collapse editor"));
+  fireEvent.click(ui.getByText("Edit local value"));
+  expect((ui.getByLabelText("Example", { selector: "input" }) as HTMLInputElement).value).toBe("");
+});

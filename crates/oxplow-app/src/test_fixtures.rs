@@ -86,7 +86,10 @@ pub(crate) fn write_settings_fixture(
                 let enabled = !key.ends_with("disableExtensions");
                 if matches!(key.as_str(), "extensions" | "oxplow.extensions") {
                     for name in oxplow_config::DEFAULT_EXTENSIONS {
-                        flat.insert(format!("oxplow.extensions.{name}.enabled"), serde_json::json!(false));
+                        flat.insert(
+                            format!("oxplow.extensions.{name}.enabled"),
+                            serde_json::json!(false),
+                        );
                     }
                 }
                 for name in value.as_array()? {
@@ -97,7 +100,10 @@ pub(crate) fn write_settings_fixture(
                 }
                 continue;
             }
-            if matches!(key.as_str(), "enableBundledExtensions" | "oxplow.enableBundledExtensions") {
+            if matches!(
+                key.as_str(),
+                "enableBundledExtensions" | "oxplow.enableBundledExtensions"
+            ) {
                 // Source selection is a launch concern; it never enables or disables extensions.
                 continue;
             }
@@ -436,12 +442,8 @@ async fn developing_oxplow() -> (tempfile::TempDir, Arc<crate::Services>) {
             crate::test_fixtures::write_settings_fixture(file, bytes).unwrap();
         }
     }
-    crate::test_fixtures::write_settings_fixture(
-        dir.path().join(".oxplow/project.yaml"),
-        "enableBundledExtensions: false\n",
-    )
-    .unwrap();
-    let svc = crate::Services::in_memory(dir.path()).await.unwrap();
+    let svc = crate::Services::in_memory_inactive_from_sources(dir.path()).unwrap();
+    svc.initialize_extensions().await.unwrap();
     crate::extension::extension_deploy::deploy(&svc, "oxplow-foundation", true)
         .await
         .expect("foundation deploys from its source");
@@ -772,37 +774,37 @@ pub async fn run_as_page_in(
         ("oxplow/agents-settings", "settings", "agents-settings"),
         ("oxplow/agents-new-thread", "settings", "agents-new-thread"),
         ("oxplow/agents-prompt", "settings", "agents-prompt"),
-        ("oxplow/settings-lsp", "settings", "lsp"),
-        ("oxplow/lsp-servers", "settings", "lsp-servers"),
-        ("oxplow/lsp-install", "settings", "lsp-install"),
-        ("oxplow/lsp-suggestions", "settings", "lsp-suggestions"),
+        ("oxplow/settings-lsp", "management", "lsp"),
+        ("oxplow/lsp-servers", "management", "lsp-servers"),
+        ("oxplow/lsp-install", "management", "lsp-install"),
+        ("oxplow/lsp-suggestions", "management", "lsp-suggestions"),
         (
             "oxplow/extensions-credentials",
-            "settings",
+            "management",
             "extensions-credentials",
         ),
         (
             "oxplow/extensions-secrets",
-            "settings",
+            "management",
             "extensions-secrets",
         ),
-        ("oxplow/settings-data", "settings", "data"),
-        ("oxplow/data-entities", "settings", "data-entities"),
-        ("oxplow/data-sources", "settings", "data-sources"),
-        ("oxplow/data-effects", "settings", "data-effects"),
+        ("oxplow/settings-data", "management", "data"),
+        ("oxplow/data-entities", "management", "data-entities"),
+        ("oxplow/data-sources", "management", "data-sources"),
+        ("oxplow/data-effects", "management", "data-effects"),
         ("oxplow/settings-integrations", "settings", "integrations"),
-        ("oxplow/capabilities", "settings", "capabilities"),
-        ("oxplow/replacements", "settings", "replacements"),
+        ("oxplow/capabilities", "management", "capabilities"),
+        ("oxplow/replacements", "management", "replacements"),
         (
             "oxplow/integrations",
-            "settings",
+            "management",
             "integrations-integrations",
         ),
-        ("oxplow/settings-ai", "settings", "ai"),
-        ("oxplow/ai-providers", "settings", "ai-providers"),
+        ("oxplow/settings-ai", "management", "ai"),
+        ("oxplow/ai-providers", "management", "ai-providers"),
         ("oxplow/ai-provider-form", "settings", "ai-provider-form"),
-        ("oxplow/ai-roles", "settings", "ai-roles"),
-        ("oxplow/ai-calls", "settings", "ai-calls"),
+        ("oxplow/ai-roles", "management", "ai-roles"),
+        ("oxplow/ai-calls", "management", "ai-calls"),
         ("oxplow/catalog-prompts", "catalog", "ask"),
         ("oxplow/catalog-config-keys", "catalog", "configure"),
         ("oxplow/alerts-decisions", "alerts", "decisions"),

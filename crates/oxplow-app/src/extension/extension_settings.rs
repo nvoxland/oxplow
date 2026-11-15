@@ -172,16 +172,7 @@ pub(crate) fn origins_for(
 /// Preserve ordinary segments, reserving one prefix for reversible UTF-8 hex
 /// escapes. Encoding the entire unusual segment keeps dots distinct from paths.
 fn key_segment(segment: &str) -> String {
-    if !segment.is_empty()
-        && !segment.starts_with("__hex_")
-        && segment
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-    {
-        segment.to_owned()
-    } else {
-        format!("__hex_{}", hex::encode(segment))
-    }
+    oxplow_config::settings::key_segment(segment)
 }
 
 fn insert(root: &mut Value, path: &[String], value: Value) -> Result<(), ExtensionSettingsError> {

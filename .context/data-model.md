@@ -2273,6 +2273,12 @@ Registry definitions supply title, description, category, schema, default, UI
 metadata, restart requirement and secret status. Public inventory datasets expose
 redacted values and provenance rather than a separate configuration model.
 
+V40 advances recorded configuration changes to `config.changed@3` (personal
+becomes local) and capability switches to `capability.switched@2` (global
+provenance is supported). Expired payloads remain expired and untouched; only
+their version advances. Core registers the newest shapes, as for other core
+event migrations.
+
 The old `extension_config` database schema/store is historical persistence only:
 runtime extension reads, writes, publication and schema changes do not consult or
 mutate it. There is no automatic migration from old configuration files or rows,

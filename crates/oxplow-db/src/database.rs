@@ -2228,6 +2228,83 @@ mod tests {
         assert_eq!(versions, vec![4, 4]);
     }
 
+    #[test]
+    fn v40_preserves_settings_events_at_the_new_level_versions() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(39))
+            .run(&mut conn)
+            .unwrap();
+        for (id, ty, v, payload, expired) in [
+            (
+                "personal",
+                "config.changed",
+                2,
+                r#"{"key":"k","before":1,"after":2,"layer":"personal"}"#,
+                None,
+            ),
+            (
+                "project",
+                "config.changed",
+                2,
+                r#"{"key":"k","before":1,"after":2,"layer":"project"}"#,
+                None,
+            ),
+            (
+                "global",
+                "config.changed",
+                2,
+                r#"{"key":"k","before":1,"after":2,"layer":"global"}"#,
+                None,
+            ),
+            ("expired", "config.changed", 2, "{}", Some("a")),
+            (
+                "capability",
+                "capability.switched",
+                1,
+                r#"{"capability":"snapshots","from":"a","to":"b","chosen_by":"project"}"#,
+                None,
+            ),
+        ] {
+            conn.execute(
+                "INSERT INTO event_log (id, type, v, at, source, subject, payload, payload_expired_at)
+                 VALUES (?1, ?2, ?3, 'a', 's', '[]', ?4, ?5)",
+                rusqlite::params![id, ty, v, payload, expired],
+            ).unwrap();
+        }
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let registry = oxplow_domain::events::schema::EventSchemaRegistry::core();
+        let mut statement = conn
+            .prepare("SELECT id, type, v, payload, payload_expired_at FROM event_log ORDER BY seq")
+            .unwrap();
+        let rows = statement
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, u32>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, Option<String>>(4)?,
+                ))
+            })
+            .unwrap();
+        for row in rows {
+            let (id, ty, version, raw, expired) = row.unwrap();
+            assert_eq!(version, if ty == "config.changed" { 3 } else { 2 });
+            let payload: serde_json::Value = serde_json::from_str(&raw).unwrap();
+            if expired.is_some() {
+                assert_eq!(payload, serde_json::json!({}));
+            } else {
+                registry.validate(&ty, version, &payload).unwrap();
+                if id == "personal" {
+                    assert_eq!(payload["layer"], "local");
+                    assert_eq!(payload["before"], 1);
+                    assert_eq!(payload["after"], 2);
+                }
+            }
+        }
+    }
+
     /// V38 drops the events of the task types core no longer defines
     /// (`task.*` and `task.recorded`), with what waited on them, and keeps
     /// every other event.

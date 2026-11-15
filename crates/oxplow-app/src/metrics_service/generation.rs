@@ -29,10 +29,8 @@ impl MetricsService {
         frozen.published_inputs = Arc::default();
         frozen.global_catalog = Arc::new(std::sync::Mutex::new(None));
         frozen.extensions_cache = Arc::new(
-            crate::extension::extension_catalog::ExtensionCatalog::staged(
-                &self.project_dir,
-                snapshot.clone(),
-            ),
+            self.extensions_cache
+                .staged(&self.project_dir, snapshot.clone()),
         );
         let ext = frozen.extension_catalog();
         let (global_measures, global_dims) = frozen

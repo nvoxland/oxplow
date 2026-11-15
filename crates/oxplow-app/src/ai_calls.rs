@@ -108,7 +108,7 @@ mod tests {
             .ai
             .save_provider(
                 ProviderConfig {
-                    id: "m".into(),
+                    id: "openai_compatible".into(),
                     kind: "openai_compatible".into(),
                     base_url: Some(base),
                 },
@@ -117,7 +117,10 @@ mod tests {
             .unwrap();
         fx.svc
             .ai
-            .set_role(&Role::SUMMARIZE, Some(RoleBinding::new("m", "x")))
+            .set_role(
+                &Role::SUMMARIZE,
+                Some(RoleBinding::new("openai_compatible", "x")),
+            )
             .unwrap();
         let mine = "oxplow:oxplow/thread?id=thr1";
         let id = fx

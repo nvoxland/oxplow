@@ -262,17 +262,27 @@ mod tests {
         )
         .await
         .unwrap();
-        let err = run(&fx, &me, super::REMOVE_PROVIDER, json!({ "id": "openrouter" }))
-            .await
-            .unwrap_err();
+        let err = run(
+            &fx,
+            &me,
+            super::REMOVE_PROVIDER,
+            json!({ "id": "openrouter" }),
+        )
+        .await
+        .unwrap_err();
         assert!(matches!(err, CommandError::Invalid { .. }), "{err:?}");
 
         run(&fx, &me, super::SET_ROLE, json!({ "role": "summarize" }))
             .await
             .unwrap();
-        run(&fx, &me, super::REMOVE_PROVIDER, json!({ "id": "openrouter" }))
-            .await
-            .unwrap();
+        run(
+            &fx,
+            &me,
+            super::REMOVE_PROVIDER,
+            json!({ "id": "openrouter" }),
+        )
+        .await
+        .unwrap();
         assert!(fx.svc.ai.settings().await.unwrap().providers.is_empty());
 
         // A refusal that could quote the input is recorded without its

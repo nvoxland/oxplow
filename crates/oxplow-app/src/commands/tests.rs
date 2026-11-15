@@ -1,7 +1,7 @@
 //! The command bus's own tests (`commands/mod.rs`).
 
 use super::*;
-use oxplow_domain::events::schema::{ActorKind, ConfigChanged, ConfigChangedV2};
+use oxplow_domain::events::schema::{ActorKind, ConfigChanged, ConfigChangedV3};
 use oxplow_domain::{Access, Confirm, Lifecycle, ThreadId};
 use serde_json::json;
 
@@ -157,7 +157,7 @@ fn kv_set() -> Handler {
             }),
             events: vec![Envelope::typed::<ConfigChanged>(
                 "test",
-                &ConfigChangedV2 {
+                &ConfigChangedV3 {
                     key: k.clone(),
                     before: before.map(Value::String).unwrap_or(Value::Null),
                     after: Value::String(v),
@@ -620,7 +620,7 @@ fn kv_unchanged() -> Handler {
         let events = if v == "with-events" {
             vec![Envelope::typed::<ConfigChanged>(
                 "test",
-                &ConfigChangedV2 {
+                &ConfigChangedV3 {
                     key: k.clone(),
                     before: Value::Null,
                     after: Value::String(v.clone()),
@@ -1650,7 +1650,7 @@ async fn a_composites_own_events_land_with_its_steps_only_when_all_landed() {
                 oxplow_domain::events::schema::ConfigChanged,
             >(
                 "test",
-                &oxplow_domain::events::schema::ConfigChangedV2 {
+                &oxplow_domain::events::schema::ConfigChangedV3 {
                     key: "announced".into(),
                     before: Value::Null,
                     after: input["v"].clone(),

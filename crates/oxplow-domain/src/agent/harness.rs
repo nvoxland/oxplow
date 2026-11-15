@@ -138,8 +138,8 @@ pub struct Launch {
     pub transcript_missing: bool,
 }
 
-/// One project setting a harness reads (`agentConfig.<harness>.<key>`), as
-/// Settings shows it: a text value.
+/// One independently registered harness preference. The schema supplies the
+/// standard Settings control and validation; omitted schemas describe text.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HarnessSetting {

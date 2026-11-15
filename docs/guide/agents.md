@@ -11,20 +11,12 @@ PTY in the stream's worktree.
 
 ## Choose available harnesses
 
-Project Settings or `.oxplow/project.yaml` can limit and order the
-harnesses offered for new sessions:
+Open **Settings → Agents** to enable or disable each harness and edit its
+launch preferences. Each preference can apply locally, to this project, or to
+all your projects. Additional implementations can extend the registry.
 
-```yaml
-agents:
-  - claude
-  - codex
-  - opencode
-```
-
-Names are registered harness keys. Omitting the setting offers the
-registered harnesses; an explicit list must be nonempty and contain no
-duplicates. Its first available entry is the default. Additional
-implementations can extend the registry.
+Choices are alphabetical. There is no agent priority or implicit default,
+and you can disable every harness.
 
 Enabling an implementation does not install its CLI or authenticate it.
 See [Settings](../reference/settings.md#agents).
@@ -33,8 +25,8 @@ See [Settings](../reference/settings.md#agents).
 
 Open a session from the session picker or **New Agent Session…**. Choose
 its implementation. Each open
-session has its own tab. A personal new-thread preference can seed a
-session when a thread is created; otherwise a thread can start empty.
+session has its own tab. A new thread opens the picker, which remembers your
+last successful choice without opening a session automatically.
 
 To use a different agent, open another session. Closing or renaming a
 session does not replace the thread or discard its recorded work. A

@@ -641,7 +641,7 @@ pub const ZONE_EXTERNAL: &str = "external";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct OxplowConfig {
-    /// Legacy runtime projection; enabled state is resolved independently by key.
+    /// Runtime projection; enabled state is resolved independently by key.
     pub agents: Vec<String>,
     #[serde(rename = "agentEnabled", default)]
     pub agent_enabled: std::collections::BTreeMap<String, bool>,
@@ -950,9 +950,13 @@ impl ExtensionSettings {
 pub fn extension_settings(project_dir: impl AsRef<Path>) -> ExtensionSettings {
     let project = project_dir.as_ref();
     let global = global_config_dir().unwrap_or_else(|| project.join(".oxplow/no-global-settings"));
+    extension_settings_with_global(project, &global)
+}
+
+pub fn extension_settings_with_global(project: &Path, global: &Path) -> ExtensionSettings {
     let documents: Vec<_> = settings::Level::PRECEDENCE
         .into_iter()
-        .filter_map(|level| settings::read_layer(project, &global, level).ok())
+        .filter_map(|level| settings::read_layer(project, global, level).ok())
         .collect();
     let value = |key: &str| {
         documents
@@ -1310,6 +1314,11 @@ pub fn load_project_config_with_global(
         {
             if !key.contains('.') {
                 return Err(ConfigError::Invalid(format!("unknown setting `{key}`")));
+            }
+            if let Some(replacement) = core_settings::retired_setting(&key) {
+                return Err(ConfigError::Invalid(format!(
+                    "setting `{key}` is retired; remove its obsolete override and {replacement}"
+                )));
             }
             if store.definition(&key).is_ok() {
                 store
@@ -4333,8 +4342,8 @@ dimensions:
         std::fs::create_dir_all(cfg_path(dir.path()).parent().unwrap()).unwrap();
         std::fs::write(cfg_path(dir.path()), "oxplow.agents.claude.enabled: false\noxplow.agents.codex.enabled: true\noxplow.projectName: explicit-name\n").unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
-        assert_eq!(cfg.agent_enabled["claude"], false);
-        assert_eq!(cfg.agent_enabled["codex"], true);
+        assert!(!cfg.agent_enabled["claude"]);
+        assert!(cfg.agent_enabled["codex"]);
         assert_eq!(cfg.project_name, "explicit-name");
     }
 
@@ -4380,8 +4389,11 @@ dimensions:
         let dir = tempdir().unwrap();
         std::fs::create_dir_all(cfg_path(dir.path()).parent().unwrap()).unwrap();
         std::fs::write(cfg_path(dir.path()), "oxplow.agents: [claude, codex]\n").unwrap();
-        let cfg = load_project_config(dir.path()).unwrap();
-        assert!(cfg.agent_enabled.is_empty());
+        let error = load_project_config(dir.path()).unwrap_err().to_string();
+        assert!(
+            error.contains("is retired") && error.contains("oxplow.agents.<harness>.enabled"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -5146,10 +5158,7 @@ testing:
         )
         .unwrap_err()
         .to_string();
-        assert!(
-            err.contains("oxplow.metrics"),
-            "{err}"
-        );
+        assert!(err.contains("oxplow.metrics"), "{err}");
         let cfg =
             load_from_yaml("metrics:\n  - use: acme.loc\n    target: 5\n    warnAt: 7\n").unwrap();
         assert_eq!(cfg.metrics.len(), 1);
@@ -5651,6 +5660,24 @@ metrics:
     // --- collectors (the fact producers, P7.B3) ------------------------------
 
     /// This repo's own `.oxplow/project.yaml` loads.
+    #[test]
+    fn retired_settings_are_reported_without_migration_or_value_disclosure() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".oxplow")).unwrap();
+        let path = dir.path().join(".oxplow/project.yaml");
+        let original = "oxplow.disableExtensions: [private-marker]\n";
+        std::fs::write(&path, original).unwrap();
+        let error = load_project_config_with_global(dir.path(), None)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("is retired") && error.contains("oxplow.extensions.<name>.enabled"),
+            "{error}"
+        );
+        assert!(!error.contains("private-marker"));
+        assert_eq!(std::fs::read_to_string(path).unwrap(), original);
+    }
+
     #[test]
     fn this_repos_project_config_loads() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");

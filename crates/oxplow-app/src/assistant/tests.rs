@@ -226,7 +226,7 @@ async fn fixture_held(rounds: Vec<(Vec<String>, Duration)>, bound: bool) -> Fx {
     svc.ai
         .save_provider(
             ProviderConfig {
-                id: "a".into(),
+                id: "openai_compatible".into(),
                 kind: "openai_compatible".into(),
                 base_url: Some(base),
             },
@@ -235,7 +235,10 @@ async fn fixture_held(rounds: Vec<(Vec<String>, Duration)>, bound: bool) -> Fx {
         .unwrap();
     if bound {
         svc.ai
-            .set_role(&Role::ASSISTANT, Some(RoleBinding::new("a", "m")))
+            .set_role(
+                &Role::ASSISTANT,
+                Some(RoleBinding::new("openai_compatible", "m")),
+            )
             .unwrap();
     }
     register_probes(&svc);
@@ -534,7 +537,7 @@ async fn a_second_prompt_carries_the_first_exchange() {
     let caller = format!("assistant:{id}");
     assert_eq!(
         row,
-        json!(["assistant", caller, "a", "m", 10, 5, 1]),
+        json!(["assistant", caller, "openai_compatible", "m", 10, 5, 1]),
         "{row}"
     );
 }
@@ -564,7 +567,7 @@ async fn no_model_bound_is_a_problem() {
             &fx.svc,
             &id,
             Some(AssistantModelChoice::Model(AssistantModel {
-                provider: "a".into(),
+                provider: "openai_compatible".into(),
                 model: "m".into(),
             })),
             None,

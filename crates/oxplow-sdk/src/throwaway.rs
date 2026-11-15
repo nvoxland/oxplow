@@ -237,11 +237,29 @@ impl Host {
         // The checkout's choice of where oxplow's own extensions run from
         // (their built-in copies, or their sources) is the throwaway's too:
         // otherwise each copied source would be ignored with a warning.
-        let mut project =
-            serde_json::json!({ "oxplow.extensions": on, "oxplow.extensionSources": sources });
-        if let Some(requested) = settings.bundled_requested {
-            project["oxplow.enableBundledExtensions"] = requested.into();
+        let mut project = serde_json::json!({"oxplow.extensionSources": sources});
+        for extension in oxplow_app::bundled_extensions::BUNDLED
+            .iter()
+            .filter(|extension| !extension.required)
+        {
+            project[format!("oxplow.extensions.{}.enabled", extension.name)] =
+                on.contains(&extension.name.to_string()).into();
         }
+        for name in &on {
+            project[format!("oxplow.extensions.{name}.enabled")] = true.into();
+        }
+        let source_mode = on
+            .iter()
+            .filter(|name| oxplow_app::bundled_extensions::find(name).is_some())
+            .all(|name| copied.contains_key(name));
+        let original_env = env.clone();
+        let env: HostEnv = Arc::new(move |name| {
+            if name == "OXPLOW_EXTENSIONS_FROM_SOURCE" {
+                Some(source_mode.to_string())
+            } else {
+                original_env(name)
+            }
+        });
         let yaml = serde_yaml::to_string(&project).map_err(|e| e.to_string())?;
         std::fs::write(config, yaml).map_err(|e| e.to_string())?;
         Self::boot(dir, root, checkout.to_path_buf(), on, copied, env, builds).await
@@ -761,7 +779,10 @@ mod tests {
                 oxplow_config::settings::Level::Global,
             )
             .unwrap();
-            assert!(values.contains_key("oxplow.ai.providers"));
+            assert_eq!(
+                values.get("oxplow.ai.fixture.enabled"),
+                Some(&serde_json::json!(true))
+            );
         }
         writer.join().unwrap();
     }
@@ -813,12 +834,12 @@ mod tests {
         );
     }
 
-    /// A throwaway keeps its checkout's `enableBundledExtensions`, and what
+    /// A throwaway writes scalar enablement and what
     /// it copies in (its `.oxplow/`, the extension sources) is not part of
     /// its worktree: nothing shows as untracked, so a working-tree listing
     /// holds only what an example makes.
     #[tokio::test]
-    async fn the_checkouts_bundled_choice_is_kept_and_its_scaffolding_is_not_untracked() {
+    async fn scalar_feature_settings_and_scaffolding_are_isolated() {
         let project = tempfile::tempdir().unwrap();
         oxplow_app::vcs::GitProvider
             .init_repository(project.path())
@@ -827,7 +848,7 @@ mod tests {
         write(
             project.path(),
             ".oxplow/project.yaml",
-            "oxplow.extensionSources: { acme: extensions/acme }\noxplow.enableBundledExtensions: false\n",
+            "oxplow.extensionSources: { acme: extensions/acme }\n",
         );
         write(
             project.path(),
@@ -839,7 +860,7 @@ mod tests {
             .unwrap();
         let config = std::fs::read_to_string(host.root.join(".oxplow/project.yaml")).unwrap();
         assert!(
-            config.contains("oxplow.enableBundledExtensions: false"),
+            config.contains("oxplow.extensions.acme.enabled: true"),
             "{config}"
         );
         assert!(host.root.join("extensions/acme").is_dir());

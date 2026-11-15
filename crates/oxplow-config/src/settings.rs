@@ -302,6 +302,41 @@ fn compile_definition(definition: SettingDefinition) -> Result<RegisteredSetting
     })
 }
 
+/// Preserve one declaration property as a single registered key segment.
+pub fn key_segment(segment: &str) -> String {
+    if !segment.is_empty()
+        && !segment.starts_with("__hex_")
+        && segment
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+    {
+        segment.to_owned()
+    } else {
+        format!(
+            "__hex_{}",
+            segment
+                .as_bytes()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        )
+    }
+}
+
+pub fn decoded_segment(segment: &str) -> Option<String> {
+    let Some(hex) = segment.strip_prefix("__hex_") else {
+        return Some(segment.to_owned());
+    };
+    let bytes = (0..hex.len())
+        .step_by(2)
+        .map(|at| {
+            hex.get(at..at + 2)
+                .and_then(|byte| u8::from_str_radix(byte, 16).ok())
+        })
+        .collect::<Option<Vec<_>>>()?;
+    String::from_utf8(bytes).ok()
+}
+
 fn valid_key(key: &str) -> bool {
     key.len() <= 256
         && key.contains('.')

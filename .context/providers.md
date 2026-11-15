@@ -1243,3 +1243,13 @@ Runtime catalog reads use the committed snapshot plus immediate explicit-disable
 and missing-folder revocation, without loading changed declarations. Some
 native/background and synchronous metadata entrypoints still need reader-pin
 review, and metric catalog reseeding remains separate.
+
+### Harness preference declarations
+
+A harness's `data.settings` entries may carry an offline JSON `schema` (text by
+default). The host validates schemas and duplicate names with the common registry
+before accepting the provider declaration. The `enabled` preference is reserved
+for the host's switch. Names with punctuation are encoded as one key segment using
+the same reversible encoding as extension properties; launch configuration keeps
+the original property name. A malformed provider declaration cannot poison the
+settings inventory for unrelated features.

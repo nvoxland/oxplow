@@ -30,7 +30,7 @@ use oxplow_db::capability_store::{list_tx, reset_tx};
 use oxplow_db::CapabilityProvider;
 pub use oxplow_domain::capability::ChosenBy;
 use oxplow_domain::capability::{self, NONE};
-use oxplow_domain::events::schema::{CapabilitySwitched, CapabilitySwitchedV1, EventType as _};
+use oxplow_domain::events::schema::{CapabilitySwitched, CapabilitySwitchedV2, EventType as _};
 use oxplow_domain::events::Envelope;
 use oxplow_domain::stores::StreamStore as _;
 use oxplow_domain::vocabulary::VocabularyHandle;
@@ -927,7 +927,7 @@ impl CapabilityRegistry {
     /// implementation, the active one marked with why, and a choice that
     /// isn't available as its own row (`available = 0`). A capability whose
     /// active implementation differs from the one the rows had logs
-    /// `capability.switched@1`, in the same transaction — so a change is
+    /// `capability.switched@2`, in the same transaction — so a change is
     /// logged once, across restarts too; the very first statement, with
     /// nothing active before, logs nothing.
     pub async fn publish(
@@ -1026,7 +1026,7 @@ impl CapabilityRegistry {
     }
 }
 
-/// Restate the rows and log each switch (`capability.switched@1`), in one
+/// Restate the rows and log each switch (`capability.switched@2`), in one
 /// transaction.
 fn restate(
     tx: &rusqlite::Transaction<'_>,
@@ -1052,7 +1052,7 @@ fn restate(
 /// The capabilities whose active implementation in `before` (the rows as
 /// they were) isn't the one `now` resolves; one with no active row before
 /// (the first statement) isn't a switch.
-fn switches(before: &[CapabilityProvider], now: &[(&str, Resolved)]) -> Vec<CapabilitySwitchedV1> {
+fn switches(before: &[CapabilityProvider], now: &[(&str, Resolved)]) -> Vec<CapabilitySwitchedV2> {
     now.iter()
         // Many serve at once: nothing is chosen, so nothing switches.
         .filter(|(capability, _)| !capability::spec(capability).is_some_and(|s| s.many))
@@ -1060,7 +1060,7 @@ fn switches(before: &[CapabilityProvider], now: &[(&str, Resolved)]) -> Vec<Capa
             let from = before
                 .iter()
                 .find(|r| r.active && r.capability == *capability)?;
-            (from.provider != resolved.id).then(|| CapabilitySwitchedV1 {
+            (from.provider != resolved.id).then(|| CapabilitySwitchedV2 {
                 capability: capability.to_string(),
                 from: from.provider.clone(),
                 to: resolved.id.clone(),

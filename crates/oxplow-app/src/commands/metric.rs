@@ -359,7 +359,7 @@ pub fn ops(target: MetricTarget) -> Vec<Op> {
                     &target,
                     invocation.actor(),
                     "metrics",
-                    Some(value),
+                    Some(oxplow_config::core_settings::metric_preferences(&value)),
                     super::config_commands::Layer::Project,
                 )
             })

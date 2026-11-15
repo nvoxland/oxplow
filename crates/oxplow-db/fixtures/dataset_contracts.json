@@ -28680,6 +28680,123 @@
       "key": [
         "key"
       ]
+    },
+    "5": {
+      "columns": [
+        {
+          "name": "key",
+          "type": "TEXT",
+          "doc": "The registered fully qualified setting key."
+        },
+        {
+          "name": "value",
+          "type": "TEXT",
+          "doc": "Effective value as JSON; NULL for secrets or absent values."
+        },
+        {
+          "name": "origin",
+          "type": "TEXT",
+          "doc": "Effective origin: local, project, global, or default; NULL when unavailable or absent."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "Owning extension, or NULL for core."
+        },
+        {
+          "name": "doc",
+          "type": "TEXT",
+          "doc": "Setting description."
+        },
+        {
+          "name": "schema",
+          "type": "TEXT",
+          "doc": "Value validation schema as JSON."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Display title."
+        },
+        {
+          "name": "category",
+          "type": "TEXT",
+          "doc": "Display category, independent of namespace ownership."
+        },
+        {
+          "name": "secret",
+          "type": "INT",
+          "doc": "1 when the value is stored securely."
+        },
+        {
+          "name": "is_set",
+          "type": "INT",
+          "doc": "1 when an effective value is present, including secrets."
+        },
+        {
+          "name": "owner",
+          "type": "TEXT",
+          "doc": "Registry owner: core or extension namespace."
+        },
+        {
+          "name": "restart_required",
+          "type": "INT",
+          "doc": "1 when a change requires restart."
+        },
+        {
+          "name": "ui",
+          "type": "TEXT",
+          "doc": "Display hints as JSON."
+        },
+        {
+          "name": "local_value",
+          "type": "TEXT",
+          "doc": "Explicit local override as JSON; SQL NULL when absent or secret. JSON null remains the text null."
+        },
+        {
+          "name": "project_value",
+          "type": "TEXT",
+          "doc": "Explicit shared project override as JSON; SQL NULL when absent or secret."
+        },
+        {
+          "name": "global_value",
+          "type": "TEXT",
+          "doc": "Explicit machine-global override as JSON; SQL NULL when absent or secret."
+        },
+        {
+          "name": "unavailable",
+          "type": "INT",
+          "doc": "1 when resolution failed safely. Value, origin and presence are unavailable; no backend error or secret bytes are exposed."
+        },
+        {
+          "name": "default_value",
+          "type": "TEXT",
+          "doc": "Registered default as JSON, NULL when absent; secrets have no defaults."
+        },
+        {
+          "name": "setting_order",
+          "type": "INT",
+          "doc": "Display order within the category, then title and key."
+        },
+        {
+          "name": "local_status",
+          "type": "TEXT",
+          "doc": "Local override presence: set, unset or unavailable. Never contains secret bytes."
+        },
+        {
+          "name": "project_status",
+          "type": "TEXT",
+          "doc": "Project override presence: set, unset or unavailable."
+        },
+        {
+          "name": "global_status",
+          "type": "TEXT",
+          "doc": "Global override presence: set, unset or unavailable."
+        }
+      ],
+      "key": [
+        "key"
+      ]
     }
   },
   "agent_conversation": {
@@ -29344,6 +29461,38 @@
           "name": "settings",
           "type": "TEXT",
           "doc": "The settings it declares for the person to set (`agentConfig.<id>.<key>` in project.yaml), as a JSON array of `{ key, title, hint, placeholder }`; `[]` when it declares none. (v2)"
+        }
+      ],
+      "key": [
+        "id"
+      ]
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "Its key: what a session's harness names."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "What it is called."
+        },
+        {
+          "name": "enabled",
+          "type": "INT",
+          "doc": "1 when oxplow.agents.<id>.enabled resolves to true."
+        },
+        {
+          "name": "position",
+          "type": "INT",
+          "doc": "Its alphabetical position by title, from 0."
+        },
+        {
+          "name": "settings",
+          "type": "TEXT",
+          "doc": "Declared preferences registered independently as oxplow.agents.<id>.<key>, as a JSON array of { key, title, hint, placeholder }."
         }
       ],
       "key": [

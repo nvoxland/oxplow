@@ -75,7 +75,7 @@ fn configure(svc: &crate::Services, base: String) {
     svc.ai
         .save_provider(
             ProviderConfig {
-                id: "a".into(),
+                id: "openai_compatible".into(),
                 kind: "openai_compatible".into(),
                 base_url: Some(base),
             },
@@ -83,7 +83,10 @@ fn configure(svc: &crate::Services, base: String) {
         )
         .unwrap();
     svc.ai
-        .set_role(&Role::SUMMARIZE, Some(RoleBinding::new("a", "m")))
+        .set_role(
+            &Role::SUMMARIZE,
+            Some(RoleBinding::new("openai_compatible", "m")),
+        )
         .unwrap();
 }
 
@@ -225,7 +228,7 @@ async fn a_restricted_binding_fails_a_job_needing_what_it_forbids() {
             &Role::SUMMARIZE,
             Some(RoleBinding {
                 restrict: [oxplow_domain::ai::AiRestriction::Sql].into(),
-                ..RoleBinding::new("a", "m")
+                ..RoleBinding::new("openai_compatible", "m")
             }),
         )
         .unwrap();
@@ -242,9 +245,9 @@ async fn a_restricted_binding_fails_a_job_needing_what_it_forbids() {
     let id = job_run(run(&fx, "triage.summary.ask", lookup).await);
     let failed = until(&fx, &id, |s| s["state"] == json!("failed")).await;
     assert!(
-        failed
-            .to_string()
-            .contains("the `summarize` role's binding `a · m` is restricted: no SQL"),
+        failed.to_string().contains(
+            "the `summarize` role's binding `openai_compatible · m` is restricted: no SQL"
+        ),
         "{failed}"
     );
     assert!(fx.seen.lock().unwrap().is_empty(), "no model call");

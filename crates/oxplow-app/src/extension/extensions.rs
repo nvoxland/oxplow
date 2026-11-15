@@ -589,7 +589,13 @@ pub fn load_extensions(root: &Path) -> Vec<Extension> {
 /// saying which are on and where sources are — a stream's working copy
 /// read under the main checkout's config.
 pub fn load_extensions_in(root: &Path, project: &Path) -> Vec<Extension> {
-    let settings = oxplow_config::extension_settings(project);
+    load_sources_with_settings(root, oxplow_config::extension_settings(project))
+}
+
+pub(super) fn load_sources_with_settings(
+    root: &Path,
+    settings: oxplow_config::ExtensionSettings,
+) -> Vec<Extension> {
     let sources = load_sources(root, &settings);
     let settings = sources_on(settings, &sources);
     resolve_catalog(sources, &settings)
@@ -914,8 +920,17 @@ pub fn load_deployed(
             }
         })
         .collect();
+    let project_overrides = oxplow_config::settings::read_layer(
+        project,
+        project,
+        oxplow_config::settings::Level::Project,
+    )
+    .unwrap_or_default();
     for ext in &mut out {
-        ext.shared = settings.team.contains(&ext.name);
+        ext.shared = project_overrides
+            .get(&format!("oxplow.extensions.{}.enabled", ext.name))
+            .and_then(serde_json::Value::as_bool)
+            == Some(true);
         locate(ext, project, settings);
     }
     out.sort_by(|a, b| a.name.cmp(&b.name).then(a.origin.cmp(&b.origin)));

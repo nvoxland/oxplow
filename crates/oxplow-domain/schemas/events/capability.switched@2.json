@@ -14,6 +14,11 @@
           "type": "string"
         },
         {
+          "const": "global",
+          "description": "The machine-global preference.",
+          "type": "string"
+        },
+        {
           "const": "default",
           "description": "Nothing chose: the capability's default.",
           "type": "string"
@@ -28,22 +33,18 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`capability.switched@1`: a capability's active implementation changed\n— a person's or the project's choice, or the chosen one coming or\ngoing (`.context/work-tracking.md` \"Capabilities\").",
+  "description": "`capability.switched@2`: a switch, including a global preference.",
   "properties": {
     "capability": {
-      "description": "`snapshots`, `knowledge`.",
       "type": "string"
     },
     "chosen_by": {
-      "$ref": "#/$defs/ChosenBy",
-      "description": "Why it's the one now."
+      "$ref": "#/$defs/ChosenBy"
     },
     "from": {
-      "description": "The implementation id that was active (`none` for nothing).",
       "type": "string"
     },
     "to": {
-      "description": "The one active now.",
       "type": "string"
     }
   },
@@ -53,6 +54,6 @@
     "to",
     "chosen_by"
   ],
-  "title": "CapabilitySwitchedV1",
+  "title": "CapabilitySwitchedV2",
   "type": "object"
 }

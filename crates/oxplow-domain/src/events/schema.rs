@@ -623,30 +623,24 @@ impl EventType for CommandDeclined {
     type Payload = CommandDeclinedV2;
 }
 
-/// Which layer of a project's config a change was to.
+/// Which level of the shared settings service changed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ConfigLayer {
-    /// This machine's project override (`.oxplow/local.yaml`).
+    /// The local project override.
     Local,
-    /// This person's defaults across projects (`global.yaml`).
+    /// The person's defaults across projects.
     Global,
-    /// The project's shared config (`.oxplow/project.yaml`).
+    /// The project's shared preferences.
     Project,
-    /// A person's own layer over it (`.oxplow/personal.yaml`), which git
-    /// ignores.
-    Personal,
 }
 
-/// `config.changed@2`: one config key changed, in one layer.
+/// `config.changed@3`: one registered setting changed at an explicit level.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct ConfigChangedV2 {
-    /// The `ConfigKey` (`zones`, `metricRetentionDays`).
+pub struct ConfigChangedV3 {
     pub key: String,
-    /// `null` when the key was unset.
     pub before: Value,
-    /// `null` when the key was removed.
     pub after: Value,
     pub layer: ConfigLayer,
 }
@@ -654,8 +648,19 @@ pub struct ConfigChangedV2 {
 pub struct ConfigChanged;
 impl EventType for ConfigChanged {
     const TYPE: &'static str = "config.changed";
-    const V: u32 = 2;
-    type Payload = ConfigChangedV2;
+    const V: u32 = 3;
+    type Payload = ConfigChangedV3;
+    fn upcast(from_v: u32, mut payload: Value) -> Result<Value, DomainError> {
+        if from_v != 2 {
+            return Err(DomainError::Invalid(format!(
+                "config.changed@{from_v} has no upcast"
+            )));
+        }
+        if payload.get("layer").and_then(Value::as_str) == Some("personal") {
+            payload["layer"] = Value::String("local".into());
+        }
+        Ok(payload)
+    }
 }
 
 /// `file.saved@1`: a person saved a file of a stream's worktree from the
@@ -810,27 +815,29 @@ impl EventType for FileDeleted {
     type Payload = FileDeletedV1;
 }
 
-/// `capability.switched@1`: a capability's active implementation changed
-/// — a person's or the project's choice, or the chosen one coming or
-/// going (`.context/work-tracking.md` "Capabilities").
+/// `capability.switched@2`: a switch, including a global preference.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct CapabilitySwitchedV1 {
-    /// `snapshots`, `knowledge`.
+pub struct CapabilitySwitchedV2 {
     pub capability: String,
-    /// The implementation id that was active (`none` for nothing).
     pub from: String,
-    /// The one active now.
     pub to: String,
-    /// Why it's the one now.
     pub chosen_by: crate::capability::ChosenBy,
 }
-
 pub struct CapabilitySwitched;
 impl EventType for CapabilitySwitched {
     const TYPE: &'static str = "capability.switched";
-    const V: u32 = 1;
-    type Payload = CapabilitySwitchedV1;
+    const V: u32 = 2;
+    type Payload = CapabilitySwitchedV2;
+    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
+        if from_v == 1 {
+            Ok(payload)
+        } else {
+            Err(DomainError::Invalid(format!(
+                "capability.switched@{from_v} has no upcast"
+            )))
+        }
+    }
 }
 
 /// How an effect's reaction to one event ended.
@@ -1998,7 +2005,7 @@ mod tests {
                 ("agent.tool.requested", 4),
                 ("agent.turn.ended", 5),
                 ("agent.turn.started", 3),
-                ("capability.switched", 1),
+                ("capability.switched", 2),
                 ("code.diagnostics.changed", 2),
                 ("collector.synced", 2),
                 ("command.approved", 2),
@@ -2007,7 +2014,7 @@ mod tests {
                 ("command.proposed", 4),
                 ("comment.deleted", 1),
                 ("comment.written", 1),
-                ("config.changed", 2),
+                ("config.changed", 3),
                 ("contribution.disabled", 1),
                 ("contribution.enabled", 1),
                 ("contribution.job.completed", 2),
@@ -2039,7 +2046,7 @@ mod tests {
         );
         assert_eq!(r.latest("thread.closed"), Some(1));
         assert_eq!(r.latest("agent.turn.ended"), Some(5));
-        assert_eq!(r.owner("config.changed", 2), Some(None));
+        assert_eq!(r.owner("config.changed", 3), Some(None));
     }
 
     /// A handoff sent before `about` was named `task` still reads: its
@@ -2084,7 +2091,7 @@ mod tests {
         let extra = r
             .validate(
                 "config.changed",
-                2,
+                3,
                 &json!({"key": "zones", "before": null, "after": 1, "layer": "project", "oops": 1}),
             )
             .unwrap_err();
@@ -2115,25 +2122,25 @@ mod tests {
     impl EventType for AcmeDecided {
         const TYPE: &'static str = "acme.decided";
         const V: u32 = 1;
-        type Payload = ConfigChangedV2;
+        type Payload = ConfigChangedV3;
     }
     struct NamedForTheExtension;
     impl EventType for NamedForTheExtension {
         const TYPE: &'static str = "acme_review.decided";
         const V: u32 = 1;
-        type Payload = ConfigChangedV2;
+        type Payload = ConfigChangedV3;
     }
     struct AcmeFiled;
     impl EventType for AcmeFiled {
         const TYPE: &'static str = "acme.filed";
         const V: u32 = 1;
-        type Payload = ConfigChangedV2;
+        type Payload = ConfigChangedV3;
     }
     struct Squatter;
     impl EventType for Squatter {
         const TYPE: &'static str = "thread.hijacked";
         const V: u32 = 1;
-        type Payload = ConfigChangedV2;
+        type Payload = ConfigChangedV3;
     }
 
     #[test]

@@ -3153,7 +3153,7 @@ pub(crate) mod tests {
                         svc.ai
                             .save_provider(
                                 crate::ai_service::ProviderConfig {
-                                    id: "m".into(),
+                                    id: "openai_compatible".into(),
                                     kind: "openai_compatible".into(),
                                     base_url: Some(base),
                                 },
@@ -3163,7 +3163,7 @@ pub(crate) mod tests {
                         svc.ai
                             .set_role(
                                 &oxplow_ai::config::Role::DECIDE,
-                                Some(crate::ai_service::RoleBinding::new("m", "x")),
+                                Some(crate::ai_service::RoleBinding::new("openai_compatible", "x")),
                             )
                             .unwrap();
                         extension(
@@ -3683,18 +3683,21 @@ pub(crate) mod tests {
         );
         ai.save_provider(
             ProviderConfig {
-                id: "m".into(),
+                id: "openai_compatible".into(),
                 kind: "openai_compatible".into(),
                 base_url: Some(base),
             },
             None,
         )
         .unwrap();
-        ai.set_role(&Role::DECIDE, Some(RoleBinding::new("m", "x")))
-            .unwrap();
+        ai.set_role(
+            &Role::DECIDE,
+            Some(RoleBinding::new("openai_compatible", "x")),
+        )
+        .unwrap();
         ai.set_role(
             &Role::parse("work/sort").unwrap(),
-            Some(RoleBinding::new("m", "y")),
+            Some(RoleBinding::new("openai_compatible", "y")),
         )
         .unwrap();
         ai.set_profiles(std::sync::Arc::new(|| {

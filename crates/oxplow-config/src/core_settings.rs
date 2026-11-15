@@ -161,6 +161,31 @@ pub fn role_definition(role: &str) -> SettingDefinition {
             }}), None).definition
 }
 
+/// A clean break reports obsolete core keys rather than silently ignoring a
+/// preference that could otherwise re-enable a feature.
+pub fn retired_setting(key: &str) -> Option<&'static str> {
+    match key {
+        "oxplow.agents" | "oxplow.agentConfig" => {
+            Some("use oxplow.agents.<harness>.enabled and the harness's declared preference keys")
+        }
+        "oxplow.extensions" | "oxplow.enableExtensions" | "oxplow.disableExtensions" => {
+            Some("use oxplow.extensions.<name>.enabled")
+        }
+        "oxplow.ai.providers" => {
+            Some("use oxplow.ai.<provider>.enabled, .baseUrl and secret .apiKey")
+        }
+        "oxplow.ai.roles" => Some("use one oxplow.ai.roles.<role> assignment per role"),
+        "oxplow.newThreadSession" => {
+            Some("new threads open the picker; its last choice is remembered in UI state")
+        }
+        "oxplow.enableBundledExtensions" => {
+            Some("use OXPLOW_EXTENSIONS_FROM_SOURCE=true when launching a development build")
+        }
+        "oxplow.snapshotTurnBudgetMs" => Some("the hook wait timeout is now managed internally"),
+        _ => None,
+    }
+}
+
 /// Dynamic feature names can be discovered before extension activation.
 pub fn register_dynamic_keys(
     registry: &mut crate::settings::SettingsRegistry,
@@ -214,7 +239,9 @@ pub fn document_from_values(
                 if field == "enabled" {
                     document["agentEnabled"][harness.replace('.', "/")] = value.clone();
                 } else {
-                    document["agentConfig"][harness.replace('.', "/")][field] = value.clone();
+                    document["agentConfig"][harness.replace('.', "/")]
+                        [crate::settings::decoded_segment(field)
+                            .unwrap_or_else(|| field.to_owned())] = value.clone();
                 }
             }
         }
@@ -270,6 +297,34 @@ pub fn project_document(store: &SettingsStore) -> Result<serde_yaml::Value, Sett
     Ok(document_from_values(&fallback, &values))
 }
 
+/// Internal metric entries share a type with extension definitions; persisted
+/// preferences contain only the fields users can configure.
+pub fn metric_preferences(value: &Value) -> Value {
+    Value::Array(
+        value
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|entry| {
+                Value::Object(
+                    entry
+                        .as_object()
+                        .into_iter()
+                        .flatten()
+                        .filter(|(key, value)| {
+                            matches!(
+                                key.as_str(),
+                                "use" | "enabled" | "target" | "warnAt" | "failAt"
+                            ) && !value.is_null()
+                        })
+                        .map(|(key, value)| (key.clone(), value.clone()))
+                        .collect(),
+                )
+            })
+            .collect(),
+    )
+}
+
 /// Split an internal runtime-document field into its registered values.
 /// This lets existing domain operations write their individual settings
 /// through the shared service without persisting an old-format object.
@@ -279,7 +334,11 @@ pub fn values_for_runtime_field(
     value: &Value,
 ) -> BTreeMap<String, Value> {
     let mut document = json!({});
-    document[field] = value.clone();
+    document[field] = if field == "metrics" {
+        metric_preferences(value)
+    } else {
+        value.clone()
+    };
     bindings(fallback_name)
         .into_iter()
         .filter(|binding| binding.path.first().is_some_and(|first| first == field))
@@ -580,6 +639,13 @@ mod tests {
             ("oxplow.agents.claude.model".into(), json!("opus")),
             ("oxplow.agents.acme.coder.enabled".into(), json!(false)),
             ("oxplow.agents.acme.coder.model".into(), json!("custom")),
+            (
+                format!(
+                    "oxplow.agents.acme.coder.{}",
+                    super::super::settings::key_segment("api/url")
+                ),
+                json!("https://example.test"),
+            ),
         ]);
         let config =
             crate::parse_project_config(document_from_values("demo", &values), "demo").unwrap();
@@ -587,6 +653,10 @@ mod tests {
         assert!(!config.agent_enabled["acme/coder"]);
         assert_eq!(config.agent_config["claude"]["model"], json!("opus"));
         assert_eq!(config.agent_config["acme/coder"]["model"], json!("custom"));
+        assert_eq!(
+            config.agent_config["acme/coder"]["api/url"],
+            json!("https://example.test")
+        );
         let definitions = definitions("demo");
         assert!(!definitions.iter().any(|d| d.key == "oxplow.agents"
             || d.key == "oxplow.agentConfig"

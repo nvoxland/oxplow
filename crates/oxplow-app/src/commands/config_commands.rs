@@ -7,7 +7,7 @@ use std::sync::{Arc, RwLock};
 
 use oxplow_config::settings::Level;
 use oxplow_config::OxplowConfig;
-use oxplow_domain::events::schema::{ConfigChanged, ConfigChangedV2, ConfigLayer};
+use oxplow_domain::events::schema::{ConfigChanged, ConfigChangedV3, ConfigLayer};
 use oxplow_domain::{Actor, CommandCall, CommandError, Envelope};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -321,7 +321,7 @@ pub(crate) fn change(
         events.push(
             Envelope::typed::<ConfigChanged>(
                 actor.source(),
-                &ConfigChangedV2 {
+                &ConfigChangedV3 {
                     key: key.clone(),
                     before: before.unwrap_or(Value::Null),
                     after: value.clone().unwrap_or(Value::Null),

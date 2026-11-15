@@ -7,9 +7,9 @@ see_also:
 - { page: oxplow/settings }
 - { page: oxplow/management }
 params:
-- { name: category, default: '' }
+- { name: category, role: view, default: '' }
 - { name: q, type: search, role: filter, label: Search settings, default: '' }
-- { name: setting, default: '' }
+- { name: setting, role: view, default: '' }
 loaders:
   settings:
     sql: |

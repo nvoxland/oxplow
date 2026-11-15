@@ -705,6 +705,7 @@ mod tests {
         // on `measure_has_active_spec`, so the specs must exist.
         let stream = svc.streams.ensure_primary().await.unwrap();
         let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
+        crate::test_fixtures::open_session(&svc, thread.id).await;
         (svc, dir, thread.id)
     }
 
@@ -865,7 +866,15 @@ mod tests {
         crate::test_fixtures::write_settings_fixture(&path, format!("{ASSISTANT_LINE}\n")).unwrap();
         let id0 = svc
             .token_usage
-            .on_stop(&thread, Some("sess-1"), &payload, &TurnRecord::default())
+            .on_stop(
+                &thread,
+                Some("sess-1"),
+                &payload,
+                &TurnRecord {
+                    agent_session: Some(oxplow_domain::AgentSessionId::new(1)),
+                    ..TurnRecord::default()
+                },
+            )
             .await
             .unwrap();
         assert!(id0.is_none(), "bootstrap Stop seeds, records nothing");
@@ -890,7 +899,15 @@ mod tests {
         }
         let id1 = svc
             .token_usage
-            .on_stop(&thread, Some("sess-1"), &payload, &TurnRecord::default())
+            .on_stop(
+                &thread,
+                Some("sess-1"),
+                &payload,
+                &TurnRecord {
+                    agent_session: Some(oxplow_domain::AgentSessionId::new(1)),
+                    ..TurnRecord::default()
+                },
+            )
             .await
             .unwrap();
         assert!(id1.is_some());
@@ -915,7 +932,15 @@ mod tests {
         }
         let id2 = svc
             .token_usage
-            .on_stop(&thread, Some("sess-1"), &payload, &TurnRecord::default())
+            .on_stop(
+                &thread,
+                Some("sess-1"),
+                &payload,
+                &TurnRecord {
+                    agent_session: Some(oxplow_domain::AgentSessionId::new(1)),
+                    ..TurnRecord::default()
+                },
+            )
             .await
             .unwrap();
         assert!(id2.is_some());
@@ -931,7 +956,15 @@ mod tests {
         // Stop with no new bytes → nothing recorded.
         let id3 = svc
             .token_usage
-            .on_stop(&thread, Some("sess-1"), &payload, &TurnRecord::default())
+            .on_stop(
+                &thread,
+                Some("sess-1"),
+                &payload,
+                &TurnRecord {
+                    agent_session: Some(oxplow_domain::AgentSessionId::new(1)),
+                    ..TurnRecord::default()
+                },
+            )
             .await
             .unwrap();
         assert!(id3.is_none());
@@ -972,7 +1005,15 @@ mod tests {
         // First Stop (no stored cursor): records nothing, just seeds.
         let id = svc
             .token_usage
-            .on_stop(&thread, Some("sess-boot"), &payload, &TurnRecord::default())
+            .on_stop(
+                &thread,
+                Some("sess-boot"),
+                &payload,
+                &TurnRecord {
+                    agent_session: Some(oxplow_domain::AgentSessionId::new(1)),
+                    ..TurnRecord::default()
+                },
+            )
             .await
             .unwrap();
         assert!(id.is_none(), "first capture must seed, not ingest history");
@@ -997,7 +1038,15 @@ mod tests {
         }
         let id2 = svc
             .token_usage
-            .on_stop(&thread, Some("sess-boot"), &payload, &TurnRecord::default())
+            .on_stop(
+                &thread,
+                Some("sess-boot"),
+                &payload,
+                &TurnRecord {
+                    agent_session: Some(oxplow_domain::AgentSessionId::new(1)),
+                    ..TurnRecord::default()
+                },
+            )
             .await
             .unwrap();
         assert!(id2.is_some());
@@ -1031,7 +1080,15 @@ mod tests {
         crate::test_fixtures::write_settings_fixture(&path, format!("{ASSISTANT_LINE}\n")).unwrap();
         assert!(svc
             .token_usage
-            .on_stop(&thread, Some("sess-2p"), &payload, &TurnRecord::default())
+            .on_stop(
+                &thread,
+                Some("sess-2p"),
+                &payload,
+                &TurnRecord {
+                    agent_session: Some(oxplow_domain::AgentSessionId::new(1)),
+                    ..TurnRecord::default()
+                }
+            )
             .await
             .unwrap()
             .is_none());
@@ -1051,7 +1108,7 @@ mod tests {
         }
         let rec = TurnRecord {
             turn_id: None,
-            agent_session: None,
+            agent_session: Some(oxplow_domain::AgentSessionId::new(1)),
             cause: Some("evt-stop-1".into()),
         };
         assert!(svc
@@ -1075,7 +1132,15 @@ mod tests {
         let (svc, _dir, thread) = service_fixture().await;
         let id = svc
             .token_usage
-            .on_stop(&thread, Some("sess-1"), "{}", &TurnRecord::default())
+            .on_stop(
+                &thread,
+                Some("sess-1"),
+                "{}",
+                &TurnRecord {
+                    agent_session: Some(oxplow_domain::AgentSessionId::new(1)),
+                    ..TurnRecord::default()
+                },
+            )
             .await
             .unwrap();
         assert!(id.is_none());
@@ -1246,7 +1311,15 @@ mod tests {
         // Bootstrap (seed cursor, record nothing).
         crate::test_fixtures::write_settings_fixture(&path, format!("{ASSISTANT_LINE}\n")).unwrap();
         svc.token_usage
-            .on_stop(&thread, Some("sess-m"), &payload, &TurnRecord::default())
+            .on_stop(
+                &thread,
+                Some("sess-m"),
+                &payload,
+                &TurnRecord {
+                    agent_session: Some(oxplow_domain::AgentSessionId::new(1)),
+                    ..TurnRecord::default()
+                },
+            )
             .await
             .unwrap();
         // Append one watched turn.
@@ -1259,7 +1332,15 @@ mod tests {
                 .unwrap();
         }
         svc.token_usage
-            .on_stop(&thread, Some("sess-m"), &payload, &TurnRecord::default())
+            .on_stop(
+                &thread,
+                Some("sess-m"),
+                &payload,
+                &TurnRecord {
+                    agent_session: Some(oxplow_domain::AgentSessionId::new(1)),
+                    ..TurnRecord::default()
+                },
+            )
             .await
             .unwrap();
 

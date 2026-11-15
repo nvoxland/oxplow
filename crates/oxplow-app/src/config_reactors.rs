@@ -15,7 +15,7 @@
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use oxplow_domain::events::schema::ConfigChangedV2;
+use oxplow_domain::events::schema::ConfigChangedV3;
 use oxplow_domain::{DomainError, StoredEvent};
 
 use crate::event_pump::AsyncEventConsumer;
@@ -39,7 +39,7 @@ const APPLY_WAIT: Duration = Duration::from_secs(5);
 /// longer reads `before` (it reads `after`, or a later change's value) —
 /// or [`APPLY_WAIT`] passes. `oxplow.config.set` swaps it right after the commit
 /// the pump may already have seen.
-pub async fn applied(svc: &crate::Services, change: &ConfigChangedV2) {
+pub async fn applied(svc: &crate::Services, change: &ConfigChangedV3) {
     let deadline = tokio::time::Instant::now() + APPLY_WAIT;
     loop {
         // Registered before the check, so a swap between the two wakes it.
@@ -96,7 +96,7 @@ impl AsyncEventConsumer for KeyReactor {
     }
 
     async fn handle(&self, event: &StoredEvent) -> Result<(), DomainError> {
-        let change: ConfigChangedV2 = serde_json::from_value(event.envelope.payload.clone())
+        let change: ConfigChangedV3 = serde_json::from_value(event.envelope.payload.clone())
             .map_err(|e| DomainError::Invalid(format!("config.changed: {e}")))?;
         if self.name == PROVIDERS {
             if let Some((namespace, rest)) = change.key.split_once(".providerCredentials.") {
@@ -202,7 +202,7 @@ impl AsyncEventConsumer for WorkspaceFilterConsumer {
     }
 
     async fn handle(&self, event: &StoredEvent) -> Result<(), DomainError> {
-        let change: ConfigChangedV2 = serde_json::from_value(event.envelope.payload.clone())
+        let change: ConfigChangedV3 = serde_json::from_value(event.envelope.payload.clone())
             .map_err(|e| DomainError::Invalid(format!("config.changed: {e}")))?;
         if !change.key.starts_with("oxplow.generated.") {
             return Ok(());
@@ -335,6 +335,50 @@ mod tests {
         assert!(enabled().await);
     }
 
+    #[tokio::test]
+    async fn extension_switches_use_the_hosts_global_directory_and_normal_precedence() {
+        let f = crate::test_fixtures::services_with_thread().await;
+        let key = "oxplow.extensions.oxwiki.enabled";
+        for (level, enabled) in [("global", false), ("project", true), ("local", false)] {
+            f.svc
+                .commands
+                .run(
+                    &Actor::Human,
+                    "oxplow.config.set",
+                    json!({"key":key,"level":level,"value":enabled}),
+                    false,
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                f.svc
+                    .extension_catalog
+                    .settings(&f.svc.layout.project_dir)
+                    .is_enabled("oxwiki"),
+                enabled
+            );
+        }
+        for (level, expected) in [("local", true), ("project", false)] {
+            f.svc
+                .commands
+                .run(
+                    &Actor::Human,
+                    "oxplow.config.unset",
+                    json!({"key":key,"level":level}),
+                    false,
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                f.svc
+                    .extension_catalog
+                    .settings(&f.svc.layout.project_dir)
+                    .is_enabled("oxwiki"),
+                expected
+            );
+        }
+    }
+
     /// P7.B6: turning an extension off reaches whatever follows the
     /// extensions through the catalog's change signal.
     #[tokio::test]
@@ -347,7 +391,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 "oxplow.config.set",
-                json!({ "key": "oxplow.extensions", "value": [], "level": "project" }),
+                json!({ "key": "oxplow.extensions.oxwiki.enabled", "value": false, "level": "project" }),
                 true,
             )
             .await

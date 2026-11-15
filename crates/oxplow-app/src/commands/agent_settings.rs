@@ -66,7 +66,7 @@ pub fn ops(target: ConfigTarget, harnesses: HarnessRegistry) -> Vec<Op> {
                 let key = format!(
                     "oxplow.agents.{}.{}",
                     input.agent.replace('/', "."),
-                    input.key
+                    oxplow_config::settings::key_segment(&input.key)
                 );
                 let value = input
                     .value
@@ -180,9 +180,9 @@ mod tests {
             .harnesses
             .all()
             .into_iter()
-            .find(|h| !h.settings().is_empty())
+            .find(|h| h.settings().iter().any(|setting| setting.key == "model"))
             .expect("a harness declares a setting");
-        let (agent, key) = (harness.id().to_string(), harness.settings()[0].key.clone());
+        let (agent, key) = (harness.id().to_string(), "model".to_string());
         let config = || crate::config_service::read_config(&svc.config).agent_config;
         svc.commands
             .run(

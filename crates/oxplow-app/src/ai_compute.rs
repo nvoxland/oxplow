@@ -759,7 +759,7 @@ mod tests {
     use crate::ai_service::{ProviderConfig, RoleBinding};
 
     async fn with_model(svc: &crate::Services, role: Role, reply: Value) {
-        with_provider(svc, role, "m", reply).await
+        with_provider(svc, role, "openai_compatible", reply).await
     }
 
     /// Bind `role` to model `x` served by provider `provider`.
@@ -769,7 +769,7 @@ mod tests {
             .save_provider(
                 ProviderConfig {
                     id: provider.into(),
-                    kind: "openai_compatible".into(),
+                    kind: provider.into(),
                     base_url: Some(base),
                 },
                 None,
@@ -933,7 +933,13 @@ mod tests {
     #[tokio::test]
     async fn another_provider_of_the_same_model_computes_afresh() {
         let fx = crate::test_fixtures::services_with_thread().await;
-        with_provider(&fx.svc, Role::SUMMARIZE, "local", chat("local says")).await;
+        with_provider(
+            &fx.svc,
+            Role::SUMMARIZE,
+            "openai_compatible",
+            chat("local says"),
+        )
+        .await;
         let local = fx
             .svc
             .ai_compute
@@ -941,7 +947,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(local.value, "local says");
-        with_provider(&fx.svc, Role::SUMMARIZE, "hosted", chat("hosted says")).await;
+        with_provider(&fx.svc, Role::SUMMARIZE, "openrouter", chat("hosted says")).await;
         let hosted = fx
             .svc
             .ai_compute
@@ -952,7 +958,10 @@ mod tests {
         assert_eq!(hosted.value, "hosted says");
         fx.svc
             .ai
-            .set_role(&Role::SUMMARIZE, Some(RoleBinding::new("local", "x")))
+            .set_role(
+                &Role::SUMMARIZE,
+                Some(RoleBinding::new("openai_compatible", "x")),
+            )
             .unwrap();
         let again = fx
             .svc

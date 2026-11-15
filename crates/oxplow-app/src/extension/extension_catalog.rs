@@ -265,6 +265,7 @@ pub struct ExtensionCatalog {
     /// `None` standalone (the CLI, the SDK's checks): each root is its own
     /// project, loaded from its sources.
     project: Option<PathBuf>,
+    global: Option<PathBuf>,
     by_root: Mutex<HashMap<PathBuf, Entry>>,
     /// The deployed load and its key.
     deployed: Mutex<Option<(String, Arc<CatalogSnapshot>)>>,
@@ -299,6 +300,7 @@ impl Default for ExtensionCatalog {
     fn default() -> Self {
         Self {
             project: None,
+            global: None,
             by_root: Mutex::default(),
             deployed: Mutex::default(),
             live: Mutex::default(),
@@ -324,16 +326,22 @@ impl ExtensionCatalog {
     /// The daemon's: whatever root it is asked about, it loads
     /// `project_dir`'s live set.
     pub fn for_project(project_dir: &Path) -> Self {
-        let settings = oxplow_config::extension_settings(project_dir);
-        if settings.bundled_requested == Some(false) && !settings.bundled_from_sources {
-            tracing::warn!(
-                "enableBundledExtensions: false is honored only by a dev build; \
-                 oxplow's own extensions run as they ship"
-            );
-        }
+        Self::for_project_with_source_mode(
+            project_dir,
+            oxplow_config::global_config_dir(),
+            oxplow_config::extension_settings(project_dir).bundled_from_sources,
+        )
+    }
+
+    pub(crate) fn for_project_with_source_mode(
+        project_dir: &Path,
+        global: Option<PathBuf>,
+        from_sources: bool,
+    ) -> Self {
         Self {
             project: Some(project_dir.to_path_buf()),
-            bundled_from_sources: settings.bundled_from_sources,
+            global,
+            bundled_from_sources: cfg!(debug_assertions) && from_sources,
             ..Self::default()
         }
     }
@@ -343,17 +351,23 @@ impl ExtensionCatalog {
     pub fn settings(&self, project: &Path) -> oxplow_config::ExtensionSettings {
         oxplow_config::ExtensionSettings {
             bundled_from_sources: self.bundled_from_sources,
-            ..oxplow_config::extension_settings(project)
+            ..match &self.global {
+                Some(global) => oxplow_config::extension_settings_with_global(project, global),
+                None => oxplow_config::extension_settings(project),
+            }
         }
     }
 
     /// A private catalog whose only generation is `candidate`, for staging
     /// it before it is published.
-    pub(crate) fn staged(project_dir: &Path, candidate: Arc<CatalogSnapshot>) -> Self {
+    pub(crate) fn staged(&self, project_dir: &Path, candidate: Arc<CatalogSnapshot>) -> Self {
         let catalog = Self {
+            project: Some(project_dir.to_path_buf()),
+            global: self.global.clone(),
+            bundled_from_sources: self.bundled_from_sources,
             #[cfg(test)]
             staged: true,
-            ..Self::for_project(project_dir)
+            ..Self::default()
         };
         catalog.publish_active(candidate);
         catalog
@@ -449,6 +463,22 @@ impl ExtensionCatalog {
         let names = extensions::known_names(project, &settings);
         let mut h = xxhash_rust::xxh3::Xxh3::new();
         h.update(format!("{settings:?}|{live:?}|{names:?}").as_bytes());
+        // Sharing is project-level provenance, even when a local override
+        // leaves effective enablement unchanged.
+        let shared = oxplow_config::settings::read_layer(
+            project,
+            project,
+            oxplow_config::settings::Level::Project,
+        )
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|(key, _)| key.starts_with("oxplow.extensions."))
+        .collect::<std::collections::BTreeMap<_, _>>();
+        h.update(
+            serde_json::to_string(&shared)
+                .unwrap_or_default()
+                .as_bytes(),
+        );
         let key = format!("{:016x}", h.digest());
         let mut cache = self.deployed.lock();
         if let Some((cached, snapshot)) = cache.as_ref() {
@@ -474,7 +504,10 @@ impl ExtensionCatalog {
                 return entry.snapshot.clone();
             }
         }
-        let extensions = Arc::new(extensions::load_extensions(root));
+        let extensions = Arc::new(extensions::load_sources_with_settings(
+            root,
+            self.settings(root),
+        ));
         let source_generation = fingerprint_generation(&fingerprint);
         let snapshot = Arc::new(CatalogSnapshot {
             extensions,
@@ -851,7 +884,10 @@ mod tests {
             std::fs::create_dir_all(file.parent().unwrap()).unwrap();
             crate::test_fixtures::write_settings_fixture(file, bytes).unwrap();
         }
-        let catalog = ExtensionCatalog::new();
+        let catalog = ExtensionCatalog {
+            bundled_from_sources: true,
+            ..ExtensionCatalog::default()
+        };
         let (good, held) = catalog.snapshot(dir.path()).admitted(None, &Failed::new());
         assert!(held.is_empty(), "{held:?}");
         let manifest = std::fs::read_to_string(to.join("extension.yaml")).unwrap();

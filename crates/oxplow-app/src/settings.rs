@@ -175,7 +175,10 @@ pub(crate) fn store(
             .flat_map(|document| document.keys().cloned()),
     )?;
     for extension in extensions {
-        let definition = oxplow_config::core_settings::extension_definition(&extension.name);
+        let mut definition = oxplow_config::core_settings::extension_definition(&extension.name);
+        if crate::bundled_extensions::is_required(&extension.name) {
+            definition.schema = serde_json::json!({"type":"boolean", "const":true});
+        }
         if registry.get(&definition.key).is_none() {
             registry.register(definition)?;
         }

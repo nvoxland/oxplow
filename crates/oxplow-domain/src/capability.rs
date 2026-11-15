@@ -263,7 +263,8 @@ pub const HARNESS_DATA: &str = r#"{
           "key": { "type": "string", "minLength": 1 },
           "title": { "type": "string", "minLength": 1 },
           "hint": { "type": "string" },
-          "placeholder": { "type": "string" }
+          "placeholder": { "type": "string" },
+          "schema": { "type": ["object", "boolean"] }
         }
       }
     }

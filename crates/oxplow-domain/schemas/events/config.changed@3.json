@@ -1,0 +1,45 @@
+{
+  "$defs": {
+    "ConfigLayer": {
+      "description": "Which level of the shared settings service changed.",
+      "oneOf": [
+        {
+          "const": "local",
+          "description": "The local project override.",
+          "type": "string"
+        },
+        {
+          "const": "global",
+          "description": "The person's defaults across projects.",
+          "type": "string"
+        },
+        {
+          "const": "project",
+          "description": "The project's shared preferences.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`config.changed@3`: one registered setting changed at an explicit level.",
+  "properties": {
+    "after": true,
+    "before": true,
+    "key": {
+      "type": "string"
+    },
+    "layer": {
+      "$ref": "#/$defs/ConfigLayer"
+    }
+  },
+  "required": [
+    "key",
+    "before",
+    "after",
+    "layer"
+  ],
+  "title": "ConfigChangedV3",
+  "type": "object"
+}
