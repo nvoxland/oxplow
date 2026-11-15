@@ -1290,7 +1290,7 @@ mod tests {
     fn write_context(svc: &Services, name: &str, permissions: &str, context: &str) {
         let dir = svc.layout.project_dir.join(".oxplow/extensions").join(name);
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             dir.join("extension.yaml"),
             format!(
                 "manifest: 2\nname: {name}\nintent:\n  purpose: test\n{permissions}context:\n{context}"
@@ -1462,7 +1462,6 @@ mod tests {
     /// one whose `needs` stop being met (no snapshot contents) does too.
     #[tokio::test]
     async fn a_context_turned_off_by_its_setting_or_its_needs_is_taken_back() {
-        use oxplow_db::extension_config_store::{ConfigNamespace, SqliteExtensionConfigStore};
         let fx = crate::test_fixtures::services_with_thread().await;
         write_context(
             &fx.svc,
@@ -1473,19 +1472,23 @@ mod tests {
         crate::test_fixtures::activate(&fx.svc).await;
         let ctx = AgentContext::default();
         assert_eq!(prompt(&ctx, &fx).await.len(), 2);
-        SqliteExtensionConfigStore::new(fx.svc.db.clone())
-            .compare_exchange(
-                ConfigNamespace::new(
-                    "state".into(),
-                    oxplow_domain::extension_state::Scope::Project,
-                )
-                .unwrap(),
-                None,
-                1,
-                serde_json::json!({ "mode": "beta" }),
-            )
-            .await
-            .unwrap();
+        let extensions = fx
+            .svc
+            .extension_catalog
+            .live_snapshot(&fx.svc.layout.project_dir);
+        crate::settings::store(
+            &fx.svc.layout.project_dir,
+            &fx.svc.global_config_dir,
+            fx.svc.secrets.clone(),
+            extensions.extensions(),
+        )
+        .unwrap()
+        .set(
+            "state.mode",
+            serde_json::json!("beta"),
+            oxplow_config::settings::Level::Project,
+        )
+        .unwrap();
         assert_eq!(
             prompt(&ctx, &fx).await,
             vec![format!(

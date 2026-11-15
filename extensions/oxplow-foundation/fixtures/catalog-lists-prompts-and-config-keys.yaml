@@ -7,8 +7,8 @@ expect:
     contains:
       - "## What you can ask [node ask]\n\n### Code\n\n| Question"
       - "## What you can configure [node configure]"
-      - "| activeProviders |"
-      - "| agentPromptAppend |"
+      - "| oxplow.activeProviders |"
+      - "| oxplow.agentPromptAppend |"
   nodes:
     - { id: ask, kind: viz, actions: [ask] }
     - { id: data }

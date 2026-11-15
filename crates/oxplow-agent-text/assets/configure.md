@@ -48,19 +48,22 @@ leave the diffs for the user to review — these are committed files.
 
 ## 3. Record the test commands, and declare every report
 
-The commands go under `testing:` in `.oxplow/project.yaml`:
+The commands are registered settings. Set each value with
+`oxplow.config.set { key, value, level: "project" }`; in
+`.oxplow/project.yaml`, the same project overrides are flat namespaced
+keys:
 
 ```yaml
-testing:
-  command: "<command that runs the tests and writes the reports>"
-  fastCommand: "<the same without coverage, taking a filter>"   # optional
-  # Extra command substrings that count as a test (or analysis) run, on
-  # top of the built-in defaults (pytest, jest, go test, …):
-  runPatterns: [make check]
-  analysisPatterns: [make lint]
-  # Globs naming test files beyond the built-in conventions (spec/, it/ …):
-  # testPaths: ["spec/**"]
-  agentHint: "Run tests with <command>."   # injected into every agent prompt
+oxplow.testing.command: "<command that runs the tests and writes the reports>"
+oxplow.testing.fastCommand: "<the same without coverage, taking a filter>"   # optional
+# Extra command substrings that count as a test (or analysis) run, on
+# top of the built-in defaults (pytest, jest, go test, …):
+oxplow.testing.runPatterns: [make check]
+oxplow.testing.analysisPatterns: [make lint]
+# Globs naming test files beyond the built-in conventions (spec/, it/ …):
+# oxplow.testing.testPaths: ["spec/**"]
+# Injected into every agent prompt:
+oxplow.testing.agentHint: "Run tests with <command>."
 ```
 
 Each report is read by a **report collector** under `collectors:` in

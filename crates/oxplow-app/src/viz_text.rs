@@ -2039,9 +2039,9 @@ mod tests {
     async fn hunks_resolve_from_the_workspace() {
         let fx = crate::test_fixtures::services_with_thread().await;
         let root = fx.svc.layout.project_dir.clone();
-        std::fs::write(root.join("h.txt"), "one\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("h.txt"), "one\n").unwrap();
         let sha = crate::test_fixtures::commit_all(&root, "h");
-        std::fs::write(root.join("h.txt"), "two\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("h.txt"), "two\n").unwrap();
         let r = with(
             run(
                 Viz::Hunks,
@@ -2167,9 +2167,10 @@ mod tests {
     async fn code_and_diff_resolve_from_the_workspace() {
         let fx = crate::test_fixtures::services_with_thread().await;
         let root = fx.svc.layout.project_dir.clone();
-        std::fs::write(root.join("c.txt"), "one\ntwo\nthree\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("c.txt"), "one\ntwo\nthree\n")
+            .unwrap();
         let sha = crate::test_fixtures::commit_all(&root, "c");
-        std::fs::write(root.join("c.txt"), "uno\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("c.txt"), "uno\n").unwrap();
         let code = with(
             run(
                 Viz::Code,
@@ -2220,7 +2221,7 @@ mod tests {
     async fn an_editor_reads_the_working_file() {
         let fx = crate::test_fixtures::services_with_thread().await;
         let root = fx.svc.layout.project_dir.clone();
-        std::fs::write(root.join("e.txt"), "saved text\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("e.txt"), "saved text\n").unwrap();
         let editor = with(
             run(Viz::Editor, None, &["path"], vec![vec![t("e.txt")]]),
             |l| {

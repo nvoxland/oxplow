@@ -1,9 +1,9 @@
 # A search matches a setting's key, its doc or its whole value; with none
 # it lists them all.
-when: { page: settings, params: { q: snapshotretention } }
+when: { page: settings, params: { q: oxplow.snapshots.retentionDays } }
 expect:
   loaders:
-    settings_values: { rows: [{ key: snapshotRetentionDays }] }
+    settings_values: { rows: [{ key: oxplow.snapshots.retentionDays }] }
 steps:
   - params: { q: no such setting anywhere }
     expect: { loaders: { settings_values: { rows: 0 } } }

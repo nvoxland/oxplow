@@ -1,416 +1,17 @@
-//! Extension configuration end to end: the stale-layer contract, and the hardening of the three native operations
-//! and the hosts that serve them.
-
-use std::sync::Arc;
-
-use oxplow_db::extension_config_store::{ConfigNamespace, SqliteExtensionConfigStore};
-use oxplow_domain::extension_state::Scope;
-use oxplow_domain::run::{Authority, ContributionRef, Mode, RunContext};
-use oxplow_domain::{Actor, CommandError};
-use serde_json::{json, Value};
-
+//! Shared settings projections preserve extension host ownership.
 use crate::extension::extension_configuration::ConfigurationHost;
-use crate::extension::extension_private_state_tests::{
-    declare, reconcile, run, write, CONFIGURATION,
-};
-use crate::test_fixtures::lifecycle::CONFIGURATION_V2;
+use crate::extension::extension_private_state_tests::{declare, reconcile, run, CONFIGURATION};
 use crate::test_fixtures::{services_with_thread, ThreadFixture};
-
-async fn store_layer(fx: &ThreadFixture, scope: Scope, version: u32, values: Value) {
-    let namespace = ConfigNamespace::new("alpha".into(), scope).unwrap();
-    SqliteExtensionConfigStore::new(fx.svc.db.clone())
-        .compare_exchange(namespace, None, version, values)
-        .await
-        .unwrap();
-}
-
-async fn stamp_of(fx: &ThreadFixture, which: &str) -> Value {
-    run(fx, "alpha.config.inspect", json!({})).await.unwrap()[which].clone()
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn activation_leaves_an_old_layer_alone_until_the_extension_writes_it_again() {
-    let fx = services_with_thread().await;
-    declare(fx._dir.path(), "alpha", CONFIGURATION);
-    reconcile(&fx).await;
-    store_layer(&fx, Scope::Project, 1, json!({"max": 20})).await;
-    declare(fx._dir.path(), "alpha", CONFIGURATION_V2);
-    reconcile(&fx).await;
-
-    // Activation did not touch the stored row.
-    assert_eq!(
-        stamp_of(&fx, "project").await,
-        json!({"schema_version": 1, "revision": 1})
-    );
-    // The read fails closed instead of returning old values.
-    let refused = run(&fx, "alpha.config.read", json!({}))
-        .await
-        .expect_err("a layer at another version is not read");
-    let CommandError::Invalid { field, .. } = refused else {
-        panic!("{refused:?}")
-    };
-    assert_eq!(field.as_deref(), Some("/schema_version"));
-    // The extension's own command replaces it at the new version.
-    let stamps = run(
-        &fx,
-        "alpha.config.write",
-        json!({"schema_version": 2,
-               "project": {"expected": {"schema_version": 1, "revision": 1},
-                           "values": {"limit": 20}}}),
-    )
-    .await
-    .unwrap();
-    assert_eq!(
-        stamps["project"],
-        json!({"schema_version": 2, "revision": 2})
-    );
-    let config = run(&fx, "alpha.config.read", json!({})).await.unwrap();
-    assert_eq!(config["values"]["limit"], json!(20));
-}
-
-/// A schema version bump carries a stored layer forward when the new schema
-/// still takes its values (restamped at the new version, values as stored);
-/// a layer it doesn't take stays at the old version and fails closed.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_version_bump_carries_forward_a_layer_the_new_schema_takes() {
-    let fx = services_with_thread().await;
-    declare(fx._dir.path(), "alpha", CONFIGURATION);
-    reconcile(&fx).await;
-    // Version 2 still takes `limit`; it has no `nested`.
-    store_layer(&fx, Scope::Project, 1, json!({"limit": 20})).await;
-    store_layer(&fx, Scope::Personal, 1, json!({"nested": {"a": 2}})).await;
-    declare(fx._dir.path(), "alpha", CONFIGURATION_V2);
-    reconcile(&fx).await;
-
-    assert_eq!(
-        stamp_of(&fx, "project").await,
-        json!({"schema_version": 2, "revision": 2}),
-        "the compatible layer is restamped"
-    );
-    assert_eq!(
-        stamp_of(&fx, "personal").await,
-        json!({"schema_version": 1, "revision": 1}),
-        "the incompatible layer is left as it was"
-    );
-    let refused = run(&fx, "alpha.config.read", json!({}))
-        .await
-        .expect_err("the old personal layer still fails closed");
-    let CommandError::Invalid { field, .. } = refused else {
-        panic!("{refused:?}")
-    };
-    assert_eq!(field.as_deref(), Some("/schema_version"));
-
-    // Once the extension's own command replaces the personal layer, the
-    // carried project value is what's read.
-    run(
-        &fx,
-        "alpha.config.write",
-        json!({"schema_version": 2,
-               "personal": {"expected": {"schema_version": 1, "revision": 1},
-                            "values": {}}}),
-    )
-    .await
-    .unwrap();
-    let config = run(&fx, "alpha.config.read", json!({})).await.unwrap();
-    assert_eq!(config["values"]["limit"], json!(20));
-}
-
-// ---- stale layers fail closed -----------------------------------------
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_layer_behind_the_declared_version_fails_closed_and_says_so() {
-    let fx = services_with_thread().await;
-    declare(fx._dir.path(), "alpha", CONFIGURATION_V2);
-    reconcile(&fx).await;
-    // A row from before the schema moved (a restored backup, say).
-    store_layer(&fx, Scope::Project, 1, json!({"max": 5})).await;
-
-    let refused = run(&fx, "alpha.config.read", json!({}))
-        .await
-        .expect_err("a stale layer is not read");
-    let CommandError::Invalid { field, message } = refused else {
-        panic!("{refused:?}")
-    };
-    assert_eq!(field.as_deref(), Some("/schema_version"));
-    assert!(message.contains("schema"), "{message}");
-
-    let inspected = run(&fx, "alpha.config.inspect", json!({})).await.unwrap();
-    assert_eq!(
-        inspected["needs_migration"],
-        json!({"project": true, "personal": false})
-    );
-    // A write that leaves the old layer untouched is refused the same way.
-    let untouched = run(
-        &fx,
-        "alpha.config.write",
-        json!({"schema_version": 2,
-               "personal": {"expected": null, "values": {"limit": 3}}}),
-    )
-    .await
-    .expect_err("the stale project layer blocks it");
-    let CommandError::Invalid { field, .. } = untouched else {
-        panic!()
-    };
-    assert_eq!(field.as_deref(), Some("/schema_version"));
-
-    // A stale stamp is a different failure, naming a different field.
-    let conflict = run(
-        &fx,
-        "alpha.config.write",
-        json!({"schema_version": 2,
-               "project": {"expected": {"schema_version": 1, "revision": 9}, "values": {"limit": 3}}}),
-    )
-    .await
-    .expect_err("a wrong stamp conflicts");
-    let CommandError::Invalid { field, message } = conflict else {
-        panic!()
-    };
-    assert_eq!(field.as_deref(), Some("/expected"));
-    assert!(message.contains("changed"), "{message}");
-
-    // Replacing the stale layer explicitly, at the new version, works.
-    let stamps = run(
-        &fx,
-        "alpha.config.write",
-        json!({"schema_version": 2,
-               "project": {"expected": {"schema_version": 1, "revision": 1},
-                           "values": {"limit": 5}}}),
-    )
-    .await
-    .unwrap();
-    assert_eq!(
-        stamps["project"],
-        json!({"schema_version": 2, "revision": 2})
-    );
-    assert_eq!(stamps["needs_migration"]["project"], json!(false));
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn an_explicit_migration_writes_both_layers_in_one_commit() {
-    let fx = services_with_thread().await;
-    declare(fx._dir.path(), "alpha", CONFIGURATION_V2);
-    reconcile(&fx).await;
-    store_layer(&fx, Scope::Project, 1, json!({"max": 5})).await;
-    store_layer(&fx, Scope::Personal, 1, json!({"max": 6})).await;
-
-    // One layer is invalid under the schema: neither layer is replaced.
-    let refused = run(
-        &fx,
-        "alpha.config.write",
-        json!({"schema_version": 2,
-               "project": {"expected": {"schema_version": 1, "revision": 1},
-                           "values": {"limit": 5}},
-               "personal": {"expected": {"schema_version": 1, "revision": 1},
-                            "values": {"limit": 5000}}}),
-    )
-    .await;
-    assert!(matches!(refused, Err(CommandError::Invalid { .. })));
-    let inspected = run(&fx, "alpha.config.inspect", json!({})).await.unwrap();
-    assert_eq!(inspected["project"]["schema_version"], json!(1));
-    assert_eq!(inspected["personal"]["schema_version"], json!(1));
-
-    let stamps = run(
-        &fx,
-        "alpha.config.write",
-        json!({"schema_version": 2,
-               "project": {"expected": {"schema_version": 1, "revision": 1},
-                           "values": {"limit": 5}},
-               "personal": {"expected": {"schema_version": 1, "revision": 1},
-                            "values": {"limit": 6}}}),
-    )
-    .await
-    .unwrap();
-    assert_eq!(stamps["project"]["schema_version"], json!(2));
-    assert_eq!(stamps["personal"]["schema_version"], json!(2));
-    let config = run(&fx, "alpha.config.read", json!({})).await.unwrap();
-    assert_eq!(config["values"]["limit"], json!(6));
-}
-
-// ---- input hardening ---------------------------------------------------
-
-#[tokio::test(flavor = "multi_thread")]
-async fn every_operation_refuses_input_of_the_wrong_shape() {
-    let fx = services_with_thread().await;
-    declare(fx._dir.path(), "alpha", CONFIGURATION);
-    reconcile(&fx).await;
-
-    for name in ["alpha.config.read", "alpha.config.inspect"] {
-        for bad in [
-            json!({"extension": "beta"}),
-            json!([]),
-            json!("x"),
-            json!(7),
-        ] {
-            let refused = run(&fx, name, bad.clone()).await;
-            assert!(
-                matches!(refused, Err(CommandError::Invalid { .. })),
-                "{name} {bad}: {refused:?}"
-            );
-        }
-    }
-    let layer = |values: Value| json!({"expected": null, "values": values});
-    for bad in [
-        json!({"schema_version": "1", "project": layer(json!({"limit": 5}))}),
-        json!({"schema_version": -1, "project": layer(json!({"limit": 5}))}),
-        json!({"schema_version": 1.5, "project": layer(json!({"limit": 5}))}),
-        json!({"schema_version": 1}),
-        json!({"project": layer(json!({"limit": 5}))}),
-        json!({"schema_version": 1, "project": layer(json!({"limit": 5})), "extension": "beta"}),
-        json!({"schema_version": 1, "project": {"expected": null, "values": {"limit": 5}, "extra": 1}}),
-        json!({"schema_version": 1, "project": {"expected": "no", "values": {"limit": 5}}}),
-        json!({"schema_version": 1, "project": {"expected": {"schema_version": 1}, "values": {"limit": 5}}}),
-        json!({"schema_version": 1, "project": layer(json!([1, 2]))}),
-        json!({"schema_version": 1, "project": layer(json!("limit"))}),
-        json!({"schema_version": 1, "project": layer(json!({"limit": "5"}))}),
-        json!({"schema_version": 1, "project": layer(json!({"nope": 5}))}),
-        json!({"schema_version": 1, "project": null, "personal": null}),
-        json!([]),
-        json!(null),
-    ] {
-        let refused = run(&fx, "alpha.config.write", bad.clone()).await;
-        assert!(
-            matches!(refused, Err(CommandError::Invalid { .. })),
-            "{bad}: {refused:?}"
-        );
-    }
-    // None of it stored anything.
-    let inspected = run(&fx, "alpha.config.inspect", json!({})).await.unwrap();
-    assert_eq!(inspected["project"], Value::Null);
-    assert_eq!(inspected["personal"], Value::Null);
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn an_oversized_or_too_deep_value_is_refused_over_the_bus() {
-    let fx = services_with_thread().await;
-    declare(fx._dir.path(), "alpha", CONFIGURATION);
-    reconcile(&fx).await;
-    let huge = "x".repeat(2 * 1024 * 1024);
-    let mut deep = json!(1);
-    for _ in 0..200 {
-        deep = json!({ "nested": deep });
-    }
-    for values in [json!({"limit": 5, "label": huge}), deep] {
-        let refused = run(
-            &fx,
-            "alpha.config.write",
-            json!({"schema_version": 1, "project": {"expected": null, "values": values}}),
-        )
-        .await
-        .expect_err("the value is too big");
-        let message = format!("{refused:?}");
-        assert!(matches!(refused, CommandError::Invalid { .. }), "{message}");
-        assert!(message.len() < 2000, "the error does not echo the value");
-    }
-    assert_eq!(stamp_of(&fx, "project").await, Value::Null);
-}
-
-// ---- races --------------------------------------------------------------
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn racing_writers_to_one_layer_win_exactly_once() {
-    let fx = Arc::new(services_with_thread().await);
-    declare(fx._dir.path(), "alpha", CONFIGURATION);
-    reconcile(&fx).await;
-    let mut tasks = Vec::new();
-    for n in 1..=8 {
-        let fx = fx.clone();
-        tasks.push(tokio::spawn(async move {
-            run(
-                &fx,
-                "alpha.config.write",
-                json!({"schema_version": 1,
-                       "project": {"expected": null, "values": {"limit": n}}}),
-            )
-            .await
-        }));
-    }
-    let mut won = Vec::new();
-    for task in tasks {
-        if let Ok(stamps) = task.await.unwrap() {
-            won.push(stamps);
-        }
-    }
-    assert_eq!(won.len(), 1, "{won:?}");
-    assert_eq!(
-        won[0]["project"],
-        json!({"schema_version": 1, "revision": 1})
-    );
-    // The stored value is the winner's, not a blend.
-    let config = run(&fx, "alpha.config.read", json!({})).await.unwrap();
-    assert!((1..=8).contains(&config["values"]["limit"].as_i64().unwrap()));
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn writes_racing_a_disable_and_a_generation_change_leave_a_consistent_layer() {
-    let fx = Arc::new(services_with_thread().await);
-    declare(fx._dir.path(), "alpha", CONFIGURATION);
-    reconcile(&fx).await;
-    let writer = {
-        let fx = fx.clone();
-        tokio::spawn(async move {
-            let mut accepted = 0u64;
-            for n in 0..40 {
-                let expected = if accepted == 0 {
-                    Value::Null
-                } else {
-                    json!({"schema_version": 1, "revision": accepted})
-                };
-                let attempt = run(
-                    &fx,
-                    "alpha.config.write",
-                    json!({"schema_version": 1,
-                           "project": {"expected": expected, "values": {"limit": n % 90 + 1}}}),
-                )
-                .await;
-                match attempt {
-                    Ok(_) => accepted += 1,
-                    // Refused while the extension is disabled or between
-                    // generations; never a half write.
-                    Err(
-                        CommandError::Denied { .. }
-                        | CommandError::Invalid { .. }
-                        | CommandError::Unknown { .. },
-                    ) => {}
-                    Err(other) => panic!("{other:?}"),
-                }
-                tokio::task::yield_now().await;
-            }
-            accepted
-        })
-    };
-    // Meanwhile: disable, change the generation (a sibling extension
-    // appears), and enable again.
-    let project = fx._dir.path().to_path_buf();
-    write(
-        &project,
-        ".oxplow/personal.yaml",
-        "disableExtensions: [alpha]\n",
-    );
-    reconcile(&fx).await;
-    declare(&project, "beta", "");
-    reconcile(&fx).await;
-    std::fs::remove_file(project.join(".oxplow/personal.yaml")).unwrap();
-    reconcile(&fx).await;
-    let accepted = writer.await.unwrap();
-
-    // The row counts exactly the writes that were accepted: none lost,
-    // none invented, and still readable at the current schema.
-    let stamp = stamp_of(&fx, "project").await;
-    if accepted == 0 {
-        assert_eq!(stamp, Value::Null);
-    } else {
-        assert_eq!(stamp["revision"].as_u64(), Some(accepted));
-    }
-    assert!(run(&fx, "alpha.config.read", json!({})).await.is_ok());
-}
-
-// ---- host denials with a hand-built run --------------------------------
-
+use oxplow_domain::run::{Authority, ContributionRef, Mode, RunContext};
+use oxplow_domain::Actor;
+use serde_json::json;
+use std::sync::Arc;
 fn host(fx: &ThreadFixture) -> ConfigurationHost {
     ConfigurationHost::new(
         fx.svc.extension_catalog.clone(),
         fx.svc.layout.project_dir.clone(),
     )
+    .with_settings(fx.svc.global_config_dir.clone(), fx.svc.secrets.clone())
 }
 
 fn owner(fx: &ThreadFixture, generation: Option<String>) -> ContributionRef {
@@ -460,8 +61,8 @@ async fn denied_snapshot(fx: &ThreadFixture, run: RunContext) -> String {
     let refused = fx
         .svc
         .db
-        .read_or(move |conn| {
-            host.snapshot(conn, &run)
+        .read_or(move |_conn| {
+            host.snapshot(&run)
                 .map(|_| ())
                 .map_err(oxplow_db::TxError::Aborted)
         })
@@ -490,11 +91,7 @@ async fn the_host_refuses_runs_that_do_not_own_the_service() {
     let ok = read();
     fx.svc
         .db
-        .read_or(move |conn| {
-            host_ok
-                .snapshot(conn, &ok)
-                .map_err(oxplow_db::TxError::Aborted)
-        })
+        .read_or(move |_conn| host_ok.snapshot(&ok).map_err(oxplow_db::TxError::Aborted))
         .await
         .expect("a declared, current run reads");
 
@@ -524,114 +121,154 @@ async fn the_host_refuses_runs_that_do_not_own_the_service() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_write_needs_a_transaction_a_cause_and_a_run_that_may_write() {
-    use crate::commands::TxCtx;
+async fn a_script_reads_shared_settings_with_atomic_precedence() {
     let fx = services_with_thread().await;
     declare(fx._dir.path(), "alpha", CONFIGURATION);
     reconcile(&fx).await;
-    let input: crate::extension::extension_configuration::WriteInput =
-        serde_json::from_value(json!({
-            "schema_version": 1,
-            "project": {"expected": null, "values": {"limit": 5}}
-        }))
-        .unwrap();
-
-    let attempt = |mode: Mode, cause: Option<oxplow_domain::EventId>| {
-        let (host, input) = (host(&fx), input.clone());
-        let run = declaring(
-            "extension_config.write",
-            RunContext::contribution(owner(&fx, None), Actor::Human, mode),
-        );
-        let db = fx.svc.db.clone();
-        async move {
-            db.transaction_or(move |tx| {
-                let vocabulary = oxplow_domain::vocabulary::Vocabulary::core();
-                let mut events = oxplow_db::EventCtx::system(&vocabulary, "test");
-                events.cause = cause.clone();
-                let ctx = TxCtx {
-                    conn: tx,
-                    run: &run,
-                    events,
-                    confirmed: true,
-                    may_write: None,
-                    depth: 0,
-                    trace: &Default::default(),
-                };
-                host.compare_exchange(&ctx, &input)
-                    .map(|_| ())
-                    .map_err(oxplow_db::TxError::Aborted)
-            })
-            .await
-        }
-    };
-    let cause = Some(oxplow_domain::EventId::generate());
-    assert!(attempt(Mode::Pure, cause.clone()).await.is_err(), "pure");
-    assert!(attempt(Mode::External, None).await.is_err(), "no cause");
-    attempt(Mode::External, cause)
-        .await
-        .expect("a caused, external run writes");
-    assert_eq!(stamp_of(&fx, "project").await["revision"], json!(1));
-}
-
-// ---- other readers -------------------------------------------------------
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_script_reads_its_own_configuration() {
-    let fx = services_with_thread().await;
-    declare(fx._dir.path(), "alpha", CONFIGURATION);
-    reconcile(&fx).await;
-    run(
-        &fx,
-        "alpha.config.write",
-        json!({"schema_version": 1, "project": {"expected": null, "values": {"limit": 12}}}),
+    let extensions = fx
+        .svc
+        .extension_catalog
+        .live_snapshot(&fx.svc.layout.project_dir);
+    let store = crate::settings::store(
+        &fx.svc.layout.project_dir,
+        &fx.svc.global_config_dir,
+        fx.svc.secrets.clone(),
+        extensions.extensions(),
     )
-    .await
     .unwrap();
+    store
+        .set(
+            "alpha.limit",
+            json!(12),
+            oxplow_config::settings::Level::Project,
+        )
+        .unwrap();
     let peeked = run(&fx, "alpha.config.peek", json!({})).await.unwrap();
     assert_eq!(peeked["result"]["values"]["limit"], json!(12));
     assert_eq!(peeked["result"]["origins"]["/limit"], json!("project"));
-    // Each layer as stored, so a script can change one key and write the
-    // rest of the layer back (a write replaces the whole layer).
-    assert_eq!(peeked["result"]["layers"]["project"], json!({"limit": 12}));
-    assert_eq!(peeked["result"]["layers"]["personal"], Value::Null);
-    // Another extension's script reads its own namespace, never alpha's.
-    declare(
-        fx._dir.path(),
-        "beta",
-        &CONFIGURATION.replace("limit: 10", "limit: 77"),
-    );
-    reconcile(&fx).await;
-    let theirs = run(&fx, "beta.config.peek", json!({})).await.unwrap();
-    assert_eq!(theirs["result"]["values"]["limit"], json!(77));
+    store
+        .set(
+            "alpha.limit",
+            json!(17),
+            oxplow_config::settings::Level::Local,
+        )
+        .unwrap();
+    let peeked = run(&fx, "alpha.config.peek", json!({})).await.unwrap();
+    assert_eq!(peeked["result"]["values"]["limit"], json!(17));
+    assert_eq!(peeked["result"]["origins"]["/limit"], json!("local"));
+    assert!(peeked["result"].get("layers").is_none());
 }
 
-/// Removing an extension forgets its stored settings along with its
-/// deployments; putting it back starts from the defaults.
 #[tokio::test(flavor = "multi_thread")]
-async fn removing_an_extension_forgets_its_stored_layers() {
+async fn a_script_reads_a_registered_key_and_validates_its_request() {
     let fx = services_with_thread().await;
     declare(fx._dir.path(), "alpha", CONFIGURATION);
     reconcile(&fx).await;
-    run(
-        &fx,
-        "alpha.config.write",
-        json!({"schema_version": 1,
-               "project": {"expected": null, "values": {"limit": 21}},
-               "personal": {"expected": null, "values": {"label": "mine"}}}),
-    )
-    .await
-    .unwrap();
-
-    std::fs::remove_dir_all(fx._dir.path().join(".oxplow/extensions/alpha")).unwrap();
-    crate::extension::extension_deploy::remove(&fx.svc, "alpha")
+    let read = run(&fx, "alpha.config.get", json!({"key":"alpha.limit"}))
         .await
         .unwrap();
-    assert!(fx.svc.commands.spec("alpha.config.read").is_none());
+    assert_eq!(read["result"]["value"], json!(10));
+    assert_eq!(read["result"]["origin"], json!("default"));
+    assert!(run(&fx, "alpha.config.get", json!({"key":"beta.limit"}))
+        .await
+        .is_err());
+    assert!(run(
+        &fx,
+        "alpha.config.get",
+        json!({"key":"alpha.limit", "level":"personal"})
+    )
+    .await
+    .is_err());
+    assert!(run(
+        &fx,
+        "alpha.config.get",
+        json!({"key":"alpha.limit", "extra":true})
+    )
+    .await
+    .is_err());
+}
 
-    declare(fx._dir.path(), "alpha", CONFIGURATION);
+#[tokio::test(flavor = "multi_thread")]
+async fn extension_reads_use_the_services_global_directory_and_fake_secrets() {
+    let fx = services_with_thread().await;
+    let declaration = CONFIGURATION.replace(
+        "      label: { type: string }",
+        "      token: { type: string, x-secret: true }\n      label: { type: string }",
+    );
+    declare(fx._dir.path(), "alpha", &declaration);
     reconcile(&fx).await;
-    let config = run(&fx, "alpha.config.read", json!({})).await.unwrap();
-    assert_eq!(config["values"]["limit"], json!(10));
-    assert_ne!(config["values"]["label"], json!("mine"));
-    assert_eq!(stamp_of(&fx, "project").await, Value::Null);
+    for (key, value) in [
+        ("alpha.limit", json!(24)),
+        ("alpha.token", json!("fake-backend-secret")),
+    ] {
+        run(
+            &fx,
+            "oxplow.config.set",
+            json!({"key":key,"value":value,"level":"global"}),
+        )
+        .await
+        .unwrap();
+    }
+    let read = run(&fx, "alpha.config.get", json!({"key":"alpha.limit"}))
+        .await
+        .unwrap();
+    assert_eq!(read["result"]["value"], json!(24));
+    assert_eq!(read["result"]["origin"], json!("global"));
+    let token = run(&fx, "alpha.config.get", json!({"key":"alpha.token"}))
+        .await
+        .unwrap();
+    assert_eq!(token["result"]["value"], json!("fake-backend-secret"));
+    let snapshot = run(&fx, "alpha.config.peek", json!({})).await.unwrap();
+    assert_eq!(snapshot["result"]["values"]["limit"], json!(24));
+    assert_eq!(
+        snapshot["result"]["values"]["token"],
+        json!("fake-backend-secret")
+    );
+    let catalog = fx
+        .svc
+        .extension_catalog
+        .live_snapshot(&fx.svc.layout.project_dir);
+    let ext = catalog
+        .extensions()
+        .iter()
+        .find(|ext| ext.name == "alpha")
+        .unwrap();
+    assert_eq!(
+        fx.svc
+            .sql
+            .with_extension_config(ext, "SELECT config('/limit')")
+            .await
+            .unwrap(),
+        "SELECT 24"
+    );
+    assert!(fx
+        .svc
+        .sql
+        .with_extension_config(ext, "SELECT config('/token')")
+        .await
+        .is_err());
+    let values = crate::extension::extension_configuration::effective_values(
+        &fx.svc.layout.project_dir,
+        &fx.svc.global_config_dir,
+        "alpha",
+        ext.configuration.as_ref().unwrap(),
+    )
+    .unwrap();
+    assert_eq!(values["limit"], json!(24));
+    assert!(values.get("token").is_none());
+    assert!(
+        !std::fs::read_to_string(fx.svc.global_config_dir.join("global.yaml"))
+            .unwrap()
+            .contains("fake-backend-secret")
+    );
+    assert!(!format!(
+        "{:?}",
+        fx.svc
+            .commands
+            .audit_store()
+            .list_recent(1000)
+            .await
+            .unwrap()
+    )
+    .contains("fake-backend-secret"));
 }

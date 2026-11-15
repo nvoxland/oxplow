@@ -638,7 +638,7 @@ mod tests {
     fn write(root: &Path, rel: &str, body: &str) {
         let p = root.join(rel);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-        std::fs::write(p, body).unwrap();
+        crate::test_fixtures::write_settings_fixture(p, body).unwrap();
     }
 
     const NUMBER_SCHEMA: &str =
@@ -1020,14 +1020,14 @@ mod catalog_tests {
     fn write(root: &std::path::Path, ext: &str, body: &str) {
         let dir = root.join(".oxplow/extensions").join(ext);
         std::fs::create_dir_all(dir.join("skills")).unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             dir.join("extension.yaml"),
             format!(
                 "manifest: 2\nname: {ext}\nintent:\n  purpose: p\n  examples: [{{ name: a }}]\n{body}"
             ),
         )
         .unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             dir.join("skills/deploy.md"),
             "---\nname: deploy\ndescription: d\n---\nShip it.\n",
         )
@@ -1131,9 +1131,9 @@ mod ordering_tests {
                 ));
             }
         }
-        std::fs::write(dir.join("extension.yaml"), yaml).unwrap();
-        std::fs::write(dir.join("e.star"), SKIP).unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(dir.join("extension.yaml"), yaml).unwrap();
+        crate::test_fixtures::write_settings_fixture(dir.join("e.star"), SKIP).unwrap();
+        crate::test_fixtures::write_settings_fixture(
             dir.join("c.star"),
             "def transform(input):\n    return {\"entities\": {}}\n",
         )
@@ -1279,8 +1279,8 @@ mod ordering_tests {
             &[],
         );
         std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
-        std::fs::write(
-            dir.path().join(".oxplow/personal.yaml"),
+        crate::test_fixtures::write_settings_fixture(
+            dir.path().join(".oxplow/local.yaml"),
             "disableExtensions: [first]\n",
         )
         .unwrap();

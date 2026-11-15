@@ -74,12 +74,13 @@ fn agents_value(harnesses: &HarnessRegistry, agents: &[String]) -> Result<Value,
 }
 
 /// The `agentConfig` value with `agent`'s `key` set to `value` (or
-/// removed, blank), an emptied entry dropped; `None` when nothing is left.
+/// removed, blank), an emptied entry dropped. An empty map remains an
+/// explicit override so clearing an inherited entry does not restore it.
 fn agent_config_value(
     harnesses: &HarnessRegistry,
     current: &std::collections::BTreeMap<String, Value>,
     input: SetSettingInput,
-) -> Result<Option<Value>, CommandError> {
+) -> Result<Value, CommandError> {
     let harness = harnesses
         .get(&input.agent)
         .map_err(|e| invalid("/agent", e.to_string()))?;
@@ -112,7 +113,7 @@ fn agent_config_value(
     if !fields.is_empty() {
         all.insert(input.agent, entry);
     }
-    Ok((!all.is_empty()).then(|| json!(all)))
+    Ok(json!(all))
 }
 
 /// The two `agent.*` settings commands, over the project's config.
@@ -141,14 +142,14 @@ pub fn ops(target: ConfigTarget, harnesses: HarnessRegistry) -> Vec<Op> {
             true,
             Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
                 let input: SetSettingInput = parse(input)?;
-                let current = t
-                    .config
-                    .read()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .agent_config
-                    .clone();
+                let current = Layer::Project
+                    .value(&t.settings()?, "agentConfig")?
+                    .map(serde_json::from_value)
+                    .transpose()
+                    .map_err(|error| invalid("/agent", error.to_string()))?
+                    .unwrap_or_default();
                 let value = agent_config_value(&harnesses, &current, input)?;
-                change(&t, ctx.actor(), "agentConfig", value, Layer::Project)
+                change(&t, ctx.actor(), "agentConfig", Some(value), Layer::Project)
             })),
         )
     };
@@ -297,6 +298,79 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(prompt(), "");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn project_agent_setting_edits_do_not_copy_local_overrides() {
+        use oxplow_config::settings::Level;
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let svc = &fx.svc;
+        let harness = svc
+            .harnesses
+            .all()
+            .into_iter()
+            .find(|harness| !harness.settings().is_empty())
+            .unwrap();
+        let agent = harness.id().to_string();
+        let setting = harness.settings()[0].key.clone();
+        let global = svc.layout.state_dir.join("global-config");
+        let store =
+            crate::settings::store(&svc.layout.project_dir, &global, svc.secrets.clone(), &[])
+                .unwrap();
+        let key = "oxplow.agentConfig";
+        store
+            .set(
+                key,
+                json!({(agent.clone()):{(setting.clone()):"global"}}),
+                Level::Global,
+            )
+            .unwrap();
+        store
+            .set(
+                key,
+                json!({(agent.clone()):{(setting.clone()):"project","projectOnly":"shared"}}),
+                Level::Project,
+            )
+            .unwrap();
+        store
+            .set(
+                key,
+                json!({(agent.clone()):{(setting.clone()):"local","localOnly":"private"}}),
+                Level::Local,
+            )
+            .unwrap();
+        svc.reload_config_from_disk().unwrap();
+        svc.commands
+            .run(
+                &Actor::Human,
+                SET_SETTING,
+                json!({"agent":agent,"key":setting,"value":"edited"}),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            store.get(key, Some(Level::Project)).unwrap().value,
+            Some(json!({(agent.clone()):{(setting.clone()):"edited","projectOnly":"shared"}}))
+        );
+        assert_eq!(
+            store.get(key, Some(Level::Local)).unwrap().value,
+            Some(json!({(agent.clone()):{(setting.clone()):"local","localOnly":"private"}}))
+        );
+        store.unset(key, Level::Project).unwrap();
+        svc.commands
+            .run(
+                &Actor::Human,
+                SET_SETTING,
+                json!({"agent":agent,"key":setting,"value":""}),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            store.get(key, Some(Level::Project)).unwrap().value,
+            Some(json!({}))
+        );
     }
 
     /// A person sets one of a harness's declared settings; a blank value

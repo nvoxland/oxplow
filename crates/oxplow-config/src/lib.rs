@@ -10,11 +10,12 @@ use oxplow_domain::AiContext;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use thiserror::Error;
-use tracing::info;
 
 pub mod collectors;
+pub mod core_settings;
 pub mod keys;
 pub mod list_edit;
+pub mod settings;
 pub use list_edit::append_list_entry;
 pub mod metric_expr;
 
@@ -33,64 +34,17 @@ pub const OXPLOW_STATE_DIR: &str = ".oxplow";
 /// (`<project>/.oxplow/project.yaml`).
 pub const OXPLOW_CONFIG_FILE: &str = "project.yaml";
 
-/// A person's own layer over the project's config, inside
-/// [`OXPLOW_STATE_DIR`] (`<project>/.oxplow/personal.yaml`): their choice of
-/// implementations (`activeProviders`), what a new thread starts with
-/// (`newThreadSession`), the extensions they turn on or off over the
-/// team's list (`enableExtensions`, `disableExtensions`) and where their
-/// extensions' sources are
-/// (`extensionSources`), which git ignores (`.oxplow` ignores everything
-/// but `project.yaml`).
-pub const PERSONAL_CONFIG_FILE: &str = "personal.yaml";
+/// Local overrides for every registered setting, inside [`OXPLOW_STATE_DIR`].
+/// `.oxplow/local.yaml` is ignored by Git and takes precedence over shared
+/// project and machine-global overrides.
+pub const LOCAL_CONFIG_FILE: &str = "local.yaml";
 
-/// The keys a person's layer may set.
-pub const PERSONAL_KEYS: &[&str] = &[
-    "activeProviders",
-    "newThreadSession",
-    "enableExtensions",
-    "disableExtensions",
-    "extensionSources",
-    "enableBundledExtensions",
-];
-
-/// What a personal key is, for Settings.
-pub fn personal_key_doc(key: &str) -> &'static str {
-    match key {
-        "activeProviders" => {
-            "Your own `activeProviders`, over the project's (.oxplow/personal.yaml, which git ignores)."
-        }
-        "newThreadSession" => {
-            "What a new thread starts with: `ask` (the session picker), `none`, or an agent \
-             (.oxplow/personal.yaml, which git ignores)."
-        }
-        "enableExtensions" => {
-            "Extensions you turn on beside the project's list \
-             (.oxplow/personal.yaml, which git ignores)."
-        }
-        "disableExtensions" => {
-            "Extensions you turn off, whoever listed them \
-             (.oxplow/personal.yaml, which git ignores)."
-        }
-        "extensionSources" => {
-            "Where your extensions' sources are, over the project's `extensionSources` \
-             (.oxplow/personal.yaml, which git ignores)."
-        }
-        "enableBundledExtensions" => {
-            "Your own `enableBundledExtensions`, over the project's: `false` runs oxplow's own \
-             extensions from their sources in a dev build (.oxplow/personal.yaml, which git \
-             ignores)."
-        }
-        _ => "",
-    }
-}
-
-/// Absolute path to a project's personal layer:
-/// `<project_dir>/.oxplow/personal.yaml`.
-pub fn personal_path(project_dir: impl AsRef<Path>) -> std::path::PathBuf {
+/// Absolute path to the local settings layer: `<project_dir>/.oxplow/local.yaml`.
+pub fn local_config_path(project_dir: impl AsRef<Path>) -> std::path::PathBuf {
     project_dir
         .as_ref()
         .join(OXPLOW_STATE_DIR)
-        .join(PERSONAL_CONFIG_FILE)
+        .join(LOCAL_CONFIG_FILE)
 }
 
 /// Absolute path to a project's config file:
@@ -795,11 +749,11 @@ pub struct OxplowConfig {
     #[serde(rename = "activeProviders")]
     pub active_providers: std::collections::BTreeMap<String, String>,
     /// A person's own choices (`activeProviders` in
-    /// `.oxplow/personal.yaml`), over the project's.
+    /// `.oxplow/local.yaml`), over the project's.
     #[serde(rename = "personalActiveProviders")]
     pub personal_active_providers: std::collections::BTreeMap<String, String>,
     /// What a new thread starts with, a person's own (`newThreadSession`
-    /// in `.oxplow/personal.yaml`): `ask` (the session picker), `none`, or
+    /// in `.oxplow/local.yaml`): `ask` (the session picker), `none`, or
     /// an agent (a harness's key). Unset means `ask`.
     #[serde(rename = "personalNewThreadSession")]
     pub personal_new_thread_session: Option<String>,
@@ -819,9 +773,8 @@ pub struct OxplowConfig {
     #[serde(rename = "eventRetention")]
     pub event_retention:
         std::collections::BTreeMap<String, oxplow_domain::events::retention::RetentionWindow>,
-    /// This project's AI role assignments (`ai: { roles: … }`), layered
-    /// over the user-global `ai.yaml`. Keyed by role name (one of
-    /// [`AI_ROLE_NAMES`]). Provider ids refer to each person's `ai.yaml`.
+    /// Resolved AI role assignments, keyed by role name (one of
+    /// [`AI_ROLE_NAMES`]). Provider ids refer to `oxplow.ai.providers`.
     #[serde(rename = "aiRoles")]
     pub ai_roles: std::collections::BTreeMap<String, AiRoleOverride>,
     /// The extensions on for the whole team (`extensions: [...]`;
@@ -840,11 +793,11 @@ pub struct OxplowConfig {
     #[serde(rename = "extensionSources")]
     pub extension_sources: std::collections::BTreeMap<String, String>,
     /// A person's own turning on and off over the team's list
-    /// (`enableExtensions`, `disableExtensions` in `.oxplow/personal.yaml`).
+    /// (`enableExtensions`, `disableExtensions` in `.oxplow/local.yaml`).
     #[serde(rename = "personalExtensions")]
     pub personal_extensions: PersonalExtensions,
     /// A person's own sources (`extensionSources` in
-    /// `.oxplow/personal.yaml`), over the team's.
+    /// `.oxplow/local.yaml`), over the team's.
     #[serde(rename = "personalExtensionSources")]
     pub personal_extension_sources: std::collections::BTreeMap<String, String>,
     /// `enableBundledExtensions`: `false` asks a dev build to run oxplow's
@@ -872,13 +825,13 @@ pub struct PersonalExtensions {
 pub enum EnabledBy {
     /// `.oxplow/project.yaml`'s `extensions`.
     Team,
-    /// `.oxplow/personal.yaml`'s `enableExtensions`.
+    /// `.oxplow/local.yaml`'s `enableExtensions`.
     Personal,
 }
 
 /// What decides which extensions are on and where their sources are: the
 /// team's list and sources in `.oxplow/project.yaml`, and a person's
-/// overrides in `.oxplow/personal.yaml`.
+/// overrides in `.oxplow/local.yaml`.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ExtensionSettings {
     pub team: Vec<String>,
@@ -992,38 +945,43 @@ impl ExtensionSettings {
 /// the rest of either file: an unreadable or invalid block reads as empty.
 /// The extension loader calls this on every load.
 pub fn extension_settings(project_dir: impl AsRef<Path>) -> ExtensionSettings {
-    #[derive(Deserialize, Default)]
-    struct OnlyExtensions {
-        #[serde(default)]
-        extensions: Option<Vec<String>>,
-        #[serde(default, rename = "enableExtensions")]
-        enable: Vec<String>,
-        #[serde(default, rename = "disableExtensions")]
-        disable: Vec<String>,
-        #[serde(default, rename = "extensionSources")]
-        extension_sources: std::collections::BTreeMap<String, String>,
-        #[serde(default, rename = "enableBundledExtensions")]
-        enable_bundled: Option<bool>,
-    }
-    fn read(path: &Path) -> OnlyExtensions {
-        std::fs::read_to_string(path)
-            .ok()
-            .and_then(|raw| serde_yaml::from_str(&raw).ok())
+    let project = project_dir.as_ref();
+    let global = global_config_dir().unwrap_or_else(|| project.join(".oxplow/no-global-settings"));
+    let documents: Vec<_> = settings::Level::PRECEDENCE
+        .into_iter()
+        .filter_map(|level| settings::read_layer(project, &global, level).ok())
+        .collect();
+    let value = |key: &str| {
+        documents
+            .iter()
+            .find_map(|doc| doc.get(&core_settings::canonical_key(key)).cloned())
+    };
+    let list = |key: &str| {
+        value(key)
+            .and_then(|v| serde_json::from_value(v).ok())
             .unwrap_or_default()
-    }
-    let dir = project_dir.as_ref();
-    let team = read(&config_path(dir));
-    let personal = read(&personal_path(dir));
+    };
+    let map = |key: &str| {
+        value(key)
+            .and_then(|v| serde_json::from_value(v).ok())
+            .unwrap_or_default()
+    };
     ExtensionSettings {
-        team: team.extensions.unwrap_or_else(default_extensions),
-        team_disable: team.disable,
-        team_sources: team.extension_sources,
+        team: value("extensions")
+            .and_then(|v| serde_json::from_value(v).ok())
+            .unwrap_or_else(default_extensions),
+        team_disable: list("disableExtensions"),
+        team_sources: map("extensionSources"),
         personal: PersonalExtensions {
-            enable: personal.enable,
-            disable: personal.disable,
+            enable: list("enableExtensions"),
+            disable: settings::read_layer(project, &global, settings::Level::Local)
+                .ok()
+                .and_then(|values| values.get("oxplow.disableExtensions").cloned())
+                .and_then(|value| serde_json::from_value(value).ok())
+                .unwrap_or_default(),
         },
-        personal_sources: personal.extension_sources,
-        ..ExtensionSettings::bundled(personal.enable_bundled.or(team.enable_bundled))
+        personal_sources: Default::default(),
+        ..ExtensionSettings::bundled(value("enableBundledExtensions").and_then(|v| v.as_bool()))
     }
 }
 
@@ -1063,8 +1021,8 @@ pub enum ConfigError {
     Parse(#[from] serde_yaml::Error),
     #[error(".oxplow/project.yaml validation: {0}")]
     Invalid(String),
-    /// The user-global instances file ([`GlobalInstances`]).
-    #[error("instances.yaml: {0}")]
+    /// Credential-generation metadata for global instances.
+    #[error("instance-credentials.yaml: {0}")]
     Instances(String),
 }
 
@@ -1215,10 +1173,10 @@ struct RawConfig {
     event_retention: Option<
         std::collections::BTreeMap<String, oxplow_domain::events::retention::RetentionWindow>,
     >,
-    /// AI role assignments `{ roles: { <role>: { provider, model } } }`, layered over the user's ai.yaml.
+    /// AI role assignments by role name. Stored as the atomic `oxplow.ai.roles` setting.
     #[serde(default)]
     ai: Option<RawAiBlock>,
-    /// The extensions on for the whole team: `[names]`; absent, `[oxplow-bundled]`. Enables code. oxplow-foundation is always on and never listed; a person turns others on or off for themselves in `.oxplow/personal.yaml` (`enableExtensions`, `disableExtensions`).
+    /// The extensions on for the whole team: `[names]`; absent, `[oxplow-bundled]`. Enables code. oxplow-foundation is always on and never listed; a person turns others on or off for themselves in `.oxplow/local.yaml` (`enableExtensions`, `disableExtensions`).
     #[serde(default)]
     extensions: Option<Vec<String>>,
     /// Extensions off for the whole team, even one sitting in `.oxplow/extensions/`: `[names]`. A person's `enableExtensions` turns one back on for them.
@@ -1281,283 +1239,97 @@ struct RawLspServer {
 /// basename of the resolved project directory.
 pub fn load_project_config(project_dir: impl AsRef<Path>) -> Result<OxplowConfig, ConfigError> {
     let project_dir = project_dir.as_ref();
-    let config_path = config_path(project_dir);
-    let fallback_name = basename(project_dir);
+    load_project_config_with_global(project_dir, global_config_dir().as_deref())
+}
 
-    let personal = load_personal(project_dir)?;
-    if !config_path.exists() {
-        info!(
-            config_path = %config_path.display(),
-            "project config not found; using defaults"
-        );
-        return Ok(personal.onto(default_config(fallback_name)));
+/// Resolve all three settings levels before projecting into typed runtime config.
+pub fn load_project_config_with_global(
+    project_dir: &Path,
+    global_dir: Option<&Path>,
+) -> Result<OxplowConfig, ConfigError> {
+    use settings::{SecretStore, SettingsRegistry, SettingsStore};
+    use std::sync::{Arc, RwLock};
+    struct NoSecrets;
+    impl SecretStore for NoSecrets {
+        fn get(&self, _: &str) -> Result<Option<String>, String> {
+            Err("secure settings require the application host".into())
+        }
+        fn set(&self, _: &str, _: &str) -> Result<(), String> {
+            Err("secure settings require the application host".into())
+        }
+        fn delete(&self, _: &str) -> Result<(), String> {
+            Err("secure settings require the application host".into())
+        }
     }
-
-    let raw = std::fs::read_to_string(&config_path)?;
-    let doc: serde_yaml::Value = serde_yaml::from_str(&raw)?;
-    let config = personal.onto(parse_project_config(doc, &fallback_name)?);
-    info!(
-        config_path = %config_path.display(),
-        agents = ?config.agents,
-        project_name = %config.project_name,
-        lsp_servers = config.lsp_servers.len(),
-        "loaded project config"
+    let fallback = basename(project_dir);
+    let mut registry = SettingsRegistry::default();
+    registry
+        .register_many(core_settings::definitions(&fallback))
+        .map_err(|e| ConfigError::Invalid(e.to_string()))?;
+    // An explicit machine directory is required by the host. In isolated
+    // callers without one, use an absent project-local global layer.
+    let global = global_dir
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| project_dir.join(".oxplow/no-global-settings"));
+    let store = SettingsStore::new(
+        project_dir.to_path_buf(),
+        global,
+        Arc::new(RwLock::new(registry)),
+        Arc::new(NoSecrets),
     );
+    for level in settings::Level::PRECEDENCE {
+        for (key, value) in store
+            .layer(level)
+            .map_err(|e| ConfigError::Invalid(e.to_string()))?
+        {
+            if !key.contains('.') {
+                return Err(ConfigError::Invalid(format!("unknown setting `{key}`")));
+            }
+            if store.definition(&key).is_ok() {
+                store
+                    .validate(&key, &value)
+                    .map_err(|e| ConfigError::Invalid(format!("{key}: {e}")))?;
+            }
+        }
+    }
+    let doc =
+        core_settings::project_document(&store).map_err(|e| ConfigError::Invalid(e.to_string()))?;
+    let mut config = parse_project_config(doc, &fallback)?;
+    config.personal_new_thread_session = store
+        .get("oxplow.newThreadSession", None)
+        .map_err(|e| ConfigError::Invalid(e.to_string()))?
+        .value
+        .and_then(|v| v.as_str().map(str::to_owned));
+    config.personal_extensions.disable = store
+        .get("oxplow.disableExtensions", Some(settings::Level::Local))
+        .map_err(|e| ConfigError::Invalid(e.to_string()))?
+        .value
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|e| ConfigError::Invalid(e.to_string()))?
+        .unwrap_or_default();
+    config.personal_extensions.enable = store
+        .get("oxplow.enableExtensions", None)
+        .map_err(|e| ConfigError::Invalid(e.to_string()))?
+        .value
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|e| ConfigError::Invalid(e.to_string()))?
+        .unwrap_or_default();
     Ok(config)
 }
 
-/// A person's layer (`.oxplow/personal.yaml`), as it loads.
-#[derive(Debug, Clone, Default)]
-struct PersonalLayer {
-    active_providers: std::collections::BTreeMap<String, String>,
-    new_thread_session: Option<String>,
-    extensions: PersonalExtensions,
-    extension_sources: std::collections::BTreeMap<String, String>,
-    enable_bundled_extensions: Option<bool>,
-}
-
-impl PersonalLayer {
-    fn of(config: &OxplowConfig) -> Self {
-        Self {
-            active_providers: config.personal_active_providers.clone(),
-            new_thread_session: config.personal_new_thread_session.clone(),
-            extensions: config.personal_extensions.clone(),
-            extension_sources: config.personal_extension_sources.clone(),
-            enable_bundled_extensions: config.personal_enable_bundled_extensions,
-        }
-    }
-
-    /// `config` with this layer in it.
-    fn onto(self, config: OxplowConfig) -> OxplowConfig {
-        OxplowConfig {
-            personal_active_providers: self.active_providers,
-            personal_new_thread_session: self.new_thread_session,
-            personal_extensions: self.extensions,
-            personal_extension_sources: self.extension_sources,
-            personal_enable_bundled_extensions: self.enable_bundled_extensions,
-            ..config
-        }
-    }
-
-    /// As the file holds it.
-    fn to_mapping(&self) -> serde_yaml::Mapping {
-        let mut map = serde_yaml::Mapping::new();
-        if !self.active_providers.is_empty() {
-            map.insert(
-                "activeProviders".into(),
-                serde_yaml::to_value(&self.active_providers).expect("a map serializes"),
-            );
-        }
-        if let Some(choice) = &self.new_thread_session {
-            map.insert("newThreadSession".into(), choice.as_str().into());
-        }
-        if !self.extensions.enable.is_empty() {
-            map.insert(
-                "enableExtensions".into(),
-                serde_yaml::to_value(&self.extensions.enable).expect("a list serializes"),
-            );
-        }
-        if !self.extensions.disable.is_empty() {
-            map.insert(
-                "disableExtensions".into(),
-                serde_yaml::to_value(&self.extensions.disable).expect("a list serializes"),
-            );
-        }
-        if !self.extension_sources.is_empty() {
-            map.insert(
-                "extensionSources".into(),
-                serde_yaml::to_value(&self.extension_sources).expect("a map serializes"),
-            );
-        }
-        if let Some(on) = self.enable_bundled_extensions {
-            map.insert("enableBundledExtensions".into(), on.into());
-        }
-        map
-    }
-}
-
-/// The person's layer (`.oxplow/personal.yaml`); empty when the file is
-/// absent.
-fn load_personal(project_dir: &Path) -> Result<PersonalLayer, ConfigError> {
-    let path = personal_path(project_dir);
-    if !path.exists() {
-        return Ok(Default::default());
-    }
-    let doc: serde_yaml::Value = serde_yaml::from_str(&std::fs::read_to_string(&path)?)?;
-    parse_personal(doc)
-}
-
-/// Validate a personal layer: only [`PERSONAL_KEYS`], each as the project
-/// file would take it.
-fn parse_personal(doc: serde_yaml::Value) -> Result<PersonalLayer, ConfigError> {
-    let map = match doc {
-        serde_yaml::Value::Mapping(m) => m,
-        serde_yaml::Value::Null => return Ok(Default::default()),
-        _ => {
-            return Err(ConfigError::Invalid(
-                ".oxplow/personal.yaml is not a mapping".into(),
-            ))
-        }
-    };
-    let mut layer = PersonalLayer::default();
-    for (key, value) in map {
-        match key.as_str() {
-            Some("activeProviders") => {
-                let raw: std::collections::BTreeMap<String, String> = serde_yaml::from_value(value)
-                    .map_err(|e| {
-                        ConfigError::Invalid(format!(".oxplow/personal.yaml: activeProviders: {e}"))
-                    })?;
-                layer.active_providers = validate_active_providers(raw)
-                    .map_err(|e| ConfigError::Invalid(format!(".oxplow/personal.yaml: {e}")))?;
-            }
-            Some("newThreadSession") => {
-                let choice = value.as_str().map(str::trim).unwrap_or_default();
-                if choice.is_empty() {
-                    return Err(ConfigError::Invalid(
-                        ".oxplow/personal.yaml: newThreadSession must be `ask`, `none` or an agent"
-                            .into(),
-                    ));
-                }
-                layer.new_thread_session = Some(choice.to_string());
-            }
-            Some(key @ ("enableExtensions" | "disableExtensions")) => {
-                let names: Vec<String> = serde_yaml::from_value(value).map_err(|e| {
-                    ConfigError::Invalid(format!(".oxplow/personal.yaml: {key}: {e}"))
-                })?;
-                if key == "enableExtensions" {
-                    layer.extensions.enable = names;
-                } else {
-                    layer.extensions.disable = names;
-                }
-            }
-            Some("extensionSources") => {
-                layer.extension_sources = serde_yaml::from_value(value).map_err(|e| {
-                    ConfigError::Invalid(format!(".oxplow/personal.yaml: extensionSources: {e}"))
-                })?;
-            }
-            Some("enableBundledExtensions") => {
-                layer.enable_bundled_extensions =
-                    Some(serde_yaml::from_value(value).map_err(|e| {
-                        ConfigError::Invalid(format!(
-                            ".oxplow/personal.yaml: enableBundledExtensions: {e}"
-                        ))
-                    })?);
-            }
-            other => {
-                return Err(ConfigError::Invalid(format!(
-                    ".oxplow/personal.yaml may set only {} (found `{}`)",
-                    PERSONAL_KEYS.join(", "),
-                    other.unwrap_or("?")
-                )))
-            }
-        }
-    }
-    Ok(layer)
-}
-
-/// `key`'s value in `config`'s personal layer, as the file holds it;
-/// `None` when it's unset there.
-pub fn personal_value(config: &OxplowConfig, key: &str) -> Option<serde_json::Value> {
-    match key {
-        "activeProviders" if !config.personal_active_providers.is_empty() => {
-            serde_json::to_value(&config.personal_active_providers).ok()
-        }
-        "newThreadSession" => config
-            .personal_new_thread_session
-            .as_ref()
-            .map(|c| serde_json::Value::String(c.clone())),
-        "enableExtensions" if !config.personal_extensions.enable.is_empty() => {
-            serde_json::to_value(&config.personal_extensions.enable).ok()
-        }
-        "disableExtensions" if !config.personal_extensions.disable.is_empty() => {
-            serde_json::to_value(&config.personal_extensions.disable).ok()
-        }
-        "extensionSources" if !config.personal_extension_sources.is_empty() => {
-            serde_json::to_value(&config.personal_extension_sources).ok()
-        }
-        "enableBundledExtensions" => config
-            .personal_enable_bundled_extensions
-            .map(serde_json::Value::Bool),
-        _ => None,
-    }
-}
-
-/// `layer` with `key` set (`Some`) or removed (`None`), validated as the
-/// file would load.
-fn personal_with(
-    layer: serde_yaml::Mapping,
-    key: &str,
-    value: Option<&serde_json::Value>,
-) -> Result<serde_yaml::Mapping, ConfigError> {
-    if !PERSONAL_KEYS.contains(&key) {
-        return Err(ConfigError::Invalid(format!(
-            "`{key}` isn't a personal key ({})",
-            PERSONAL_KEYS.join(", ")
-        )));
-    }
-    let mut map = layer;
-    let yaml_key = serde_yaml::Value::String(key.to_string());
-    match value {
-        Some(v) => {
-            map.insert(yaml_key, to_yaml(v));
-        }
-        None => {
-            map.remove(&yaml_key);
-        }
-    }
-    parse_personal(serde_yaml::Value::Mapping(map.clone()))?;
-    Ok(map)
-}
-
-/// `config` with `key` set (`Some`) or removed (`None`) in its personal
-/// layer, validated as the file would load; the layer's other keys stay.
-pub fn with_personal_key(
-    config: &OxplowConfig,
-    key: &str,
-    value: Option<&serde_json::Value>,
-) -> Result<OxplowConfig, ConfigError> {
-    let map = personal_with(PersonalLayer::of(config).to_mapping(), key, value)?;
-    let layer = parse_personal(serde_yaml::Value::Mapping(map))?;
-    Ok(layer.onto(config.clone()))
-}
-
-/// Set (`Some`) or remove (`None`) `key` in a person's layer
-/// (`.oxplow/personal.yaml`), validated as it would load. Only
-/// [`PERSONAL_KEYS`]; the file goes when nothing is left in it.
-pub fn write_personal_key(
+/// Write or unset a runtime field in the local settings layer.
+pub fn write_local_key(
     project_dir: impl AsRef<Path>,
     key: &str,
     value: Option<&serde_json::Value>,
 ) -> Result<(), ConfigError> {
-    let path = personal_path(project_dir.as_ref());
-    let current = if path.exists() {
-        match serde_yaml::from_str::<serde_yaml::Value>(&std::fs::read_to_string(&path)?)? {
-            serde_yaml::Value::Mapping(m) => m,
-            _ => serde_yaml::Mapping::new(),
-        }
-    } else {
-        serde_yaml::Mapping::new()
-    };
-    let doc = serde_yaml::Value::Mapping(personal_with(current, key, value)?);
-    match &doc {
-        serde_yaml::Value::Mapping(m) if m.is_empty() => {
-            if path.exists() {
-                std::fs::remove_file(&path)?;
-            }
-        }
-        _ => {
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            atomic::write_atomic(&path, serde_yaml::to_string(&doc)?.as_bytes())?;
-        }
-    }
-    Ok(())
+    write_runtime_field(project_dir.as_ref(), key, value, settings::Level::Local)
 }
 
-/// Validate a parsed `.oxplow/project.yaml` document exactly as
-/// `load_project_config` does — the one path every config write takes,
-/// whether a person edits the file or a command sets a key.
+/// Validate an internal typed runtime document. Persisted settings use
+/// namespaced keys and are projected into this document by the shared service.
 pub fn parse_project_config(
     doc: serde_yaml::Value,
     fallback_name: &str,
@@ -1574,61 +1346,80 @@ pub fn parse_project_config(
 /// lines directly above it; a new key is appended. The key's own value is
 /// written block style, and comments inside it are not kept.
 ///
-/// The caller validates the change first (`keys::with_key`); this checks
-/// only that the edited text still reads as the same document with that one
-/// key changed, and refuses rather than write anything else (a file whose
-/// YAML ties blocks together — anchors, multiple documents — can't be
-/// edited in place).
+/// The adapter validates the typed field and every registered leaf before
+/// writing. The shared backend preserves unrelated lines and refuses YAML whose
+/// anchors or document structure prevent a safe single-key edit.
 pub fn write_project_key(
     project_dir: impl AsRef<Path>,
     key: &str,
     value: Option<&serde_json::Value>,
 ) -> Result<(), ConfigError> {
-    let path = config_path(project_dir.as_ref());
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let original = if path.exists() {
-        std::fs::read_to_string(&path)?
-    } else {
-        String::new()
-    };
-    let block = value
-        .map(|v| {
-            let mut one = serde_yaml::Mapping::new();
-            one.insert(serde_yaml::Value::String(key.to_string()), to_yaml(v));
-            serde_yaml::to_string(&serde_yaml::Value::Mapping(one))
-        })
-        .transpose()?;
-    let edited = edit_top_level_key(&original, key, block.as_deref());
+    write_runtime_field(project_dir.as_ref(), key, value, settings::Level::Project)
+}
 
-    // The edit must change that key and nothing else.
-    let as_map = |text: &str| -> Result<serde_yaml::Mapping, ConfigError> {
-        match serde_yaml::from_str::<serde_yaml::Value>(text)? {
-            serde_yaml::Value::Mapping(m) => Ok(m),
-            serde_yaml::Value::Null => Ok(serde_yaml::Mapping::new()),
-            _ => Err(ConfigError::Invalid(
-                ".oxplow/project.yaml is not a mapping".into(),
-            )),
-        }
-    };
-    let mut expected = as_map(&original)?;
-    let yaml_key = serde_yaml::Value::String(key.to_string());
-    match value {
-        Some(v) => {
-            expected.insert(yaml_key, to_yaml(v));
-        }
-        None => {
-            expected.remove(&yaml_key);
+/// Internal domain adapters still use runtime field names. Storage always uses
+/// registered namespaced leaf keys through the shared file backend.
+fn write_runtime_field(
+    project: &Path,
+    field: &str,
+    value: Option<&serde_json::Value>,
+    level: settings::Level,
+) -> Result<(), ConfigError> {
+    let fallback = basename(project);
+    if let Some(value) = value {
+        if !matches!(field, "newThreadSession" | "enableExtensions") {
+            let mut document = serde_yaml::Mapping::new();
+            document.insert(field.into(), to_yaml(value));
+            parse_project_config(serde_yaml::Value::Mapping(document), &fallback)?;
         }
     }
-    if as_map(&edited)? != expected {
-        return Err(ConfigError::Invalid(format!(
-            "`{key}` can't be edited in place in .oxplow/project.yaml (its YAML ties keys \
-             together, e.g. with anchors); edit the file by hand"
-        )));
+
+    let definitions = core_settings::bindings(&fallback);
+    let mut keys: Vec<_> = definitions
+        .iter()
+        .filter(|b| b.path.first().is_some_and(|p| p == field))
+        .map(|b| b.definition.key.clone())
+        .collect();
+    let values = value
+        .map(|v| core_settings::values_for_runtime_field(&fallback, field, v))
+        .unwrap_or_default();
+    if keys.is_empty() {
+        let canonical = core_settings::canonical_key(field);
+        if !definitions.iter().any(|b| b.definition.key == canonical) {
+            return Err(ConfigError::Invalid("unknown setting".into()));
+        }
+        keys.push(canonical);
     }
-    atomic::write_atomic(&path, edited.as_bytes())?;
+    let mut registry = settings::SettingsRegistry::default();
+    registry
+        .register_many(core_settings::definitions(&fallback))
+        .map_err(|e| ConfigError::Invalid(e.to_string()))?;
+    for key in &keys {
+        let setting = if matches!(field, "newThreadSession" | "enableExtensions") {
+            value
+        } else {
+            values.get(key)
+        };
+        if let Some(setting) = setting {
+            registry
+                .validate(key, setting)
+                .map_err(|e| ConfigError::Invalid(e.to_string()))?;
+        }
+    }
+    let global = global_config_dir().unwrap_or_else(|| project.join(".oxplow/no-global-settings"));
+    for key in keys {
+        let setting = if matches!(field, "newThreadSession" | "enableExtensions") {
+            value
+        } else {
+            values.get(&key)
+        };
+        settings::write_layer_key(
+            &settings::level_path(project, &global, level),
+            &key,
+            setting,
+        )
+        .map_err(|e| ConfigError::Invalid(e.to_string()))?;
+    }
     Ok(())
 }
 
@@ -2042,15 +1833,7 @@ impl Default for ExtensionInstanceConfig {
     }
 }
 
-/// The file of this machine's **global** provider instances, in the
-/// global config dir ([`global_config_dir`]).
-pub const INSTANCES_FILE: &str = "instances.yaml";
-
-/// Beside [`INSTANCES_FILE`]: how many times each global instance's
-/// credentials changed. The values are in the keychain, which
-/// no oxplow can watch; each bumps the instance's count when it changes
-/// one, and every other restarts the instance when it sees the count
-/// move. Counts only — never a value.
+/// Global credential generation counts; values stay in the keychain.
 pub const CREDENTIAL_GENERATIONS_FILE: &str = "instance-credentials.yaml";
 
 /// The [`CREDENTIAL_GENERATIONS_FILE`]: `generations: { "<ext>/<id>": n }`.
@@ -2099,87 +1882,6 @@ impl CredentialGenerations {
             serde_yaml::to_string(&doc).map_err(|e| ConfigError::Instances(e.to_string()))?;
         atomic::write_atomic(&path, text.as_bytes()).map_err(failed)?;
         Ok(now)
-    }
-}
-
-/// Provider instances that belong to the person rather than a project
-/// (P9.B2): `instances: { "<extension>/<instance id>": { enabled, config,
-/// provider? } }`, the same entries as a project's `extensionInstances`.
-/// Each applies in every project that has its extension enabled; a
-/// project's entry of the same name replaces it there.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct GlobalInstances {
-    #[serde(default)]
-    pub instances: std::collections::BTreeMap<String, ExtensionInstanceConfig>,
-}
-
-impl GlobalInstances {
-    /// Load from `dir/instances.yaml`; a missing file is none.
-    pub fn load(dir: &Path) -> Result<GlobalInstances, ConfigError> {
-        let text = match std::fs::read_to_string(dir.join(INSTANCES_FILE)) {
-            Ok(text) => text,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(GlobalInstances::default())
-            }
-            Err(e) => return Err(ConfigError::Instances(e.to_string())),
-        };
-        let loaded: GlobalInstances =
-            serde_yaml::from_str(&text).map_err(|e| ConfigError::Instances(e.to_string()))?;
-        loaded.validated()
-    }
-
-    /// Change `dir/instances.yaml` in one read-modify-write: under a lock
-    /// every oxplow on the machine takes (`instances.yaml.lock`), `edit`
-    /// the file as it is now, then validate and write it atomically — so
-    /// two windows or two oxplows never drop each other's change, and a
-    /// reader never sees half a file. The outer error is the
-    /// file's (it couldn't be locked, read, validated or written); the
-    /// inner is `edit`'s refusal, which writes nothing.
-    pub fn update<E>(
-        dir: &Path,
-        edit: impl FnOnce(
-            &mut std::collections::BTreeMap<String, ExtensionInstanceConfig>,
-        ) -> Result<(), E>,
-    ) -> Result<Result<(), E>, ConfigError> {
-        use fs2::FileExt;
-        let failed = |e: std::io::Error| ConfigError::Instances(e.to_string());
-        let path = dir.join(INSTANCES_FILE);
-        std::fs::create_dir_all(dir).map_err(failed)?;
-        let lock = std::fs::OpenOptions::new()
-            .create(true)
-            .read(true)
-            .write(true)
-            .truncate(false)
-            .open(atomic::lock_path(&path))
-            .map_err(failed)?;
-        lock.lock_exclusive().map_err(failed)?;
-        let mut current = GlobalInstances::load(dir)?;
-        if let Err(refused) = edit(&mut current.instances) {
-            return Ok(Err(refused));
-        }
-        let checked = current.validated()?;
-        let doc = serde_json::json!({ "instances": instances_as_written(&checked.instances) });
-        let text =
-            serde_yaml::to_string(&doc).map_err(|e| ConfigError::Instances(e.to_string()))?;
-        atomic::write_atomic(&path, text.as_bytes()).map_err(failed)?;
-        Ok(Ok(()))
-    }
-
-    /// The rules a project's `extensionInstances` follow, said of this file.
-    fn validated(self) -> Result<GlobalInstances, ConfigError> {
-        validate_extension_instances(self.instances)
-            .map(|instances| GlobalInstances { instances })
-            .map_err(|e| match e {
-                ConfigError::Invalid(message) => ConfigError::Instances(
-                    message.replacen("extensionInstances: ", "", 1).replacen(
-                        "extensionInstances.",
-                        "",
-                        1,
-                    ),
-                ),
-                other => other,
-            })
     }
 }
 
@@ -3897,7 +3599,7 @@ mod tests {
     fn a_reader_never_sees_a_config_file_part_way_through_a_write() {
         let dir = tempfile::tempdir().unwrap();
         let on = |names: &[&str]| serde_json::json!(names);
-        write_personal_key(dir.path(), "enableExtensions", Some(&on(&["acme"]))).unwrap();
+        write_local_key(dir.path(), "enableExtensions", Some(&on(&["acme"]))).unwrap();
         write_project_key(dir.path(), "extensions", Some(&on(&["team"]))).unwrap();
         let done = std::sync::atomic::AtomicBool::new(false);
         std::thread::scope(|scope| {
@@ -3915,7 +3617,7 @@ mod tests {
             });
             for i in 0..300 {
                 let extra = format!("other{i}");
-                write_personal_key(dir.path(), "enableExtensions", Some(&on(&["acme", &extra])))
+                write_local_key(dir.path(), "enableExtensions", Some(&on(&["acme", &extra])))
                     .unwrap();
                 write_project_key(dir.path(), "extensions", Some(&on(&["team", &extra]))).unwrap();
             }
@@ -3953,7 +3655,7 @@ mod tests {
             .is_empty());
     }
 
-    /// A person's own choice (`.oxplow/personal.yaml`, which git ignores)
+    /// A person's own choice (`.oxplow/local.yaml`, which git ignores)
     /// layers over the project's: the same `activeProviders` shape, and
     /// nothing else. Every choosable capability may be named; one core
     /// doesn't let a project choose may not.
@@ -3962,34 +3664,27 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let oxplow = dir.path().join(".oxplow");
         std::fs::create_dir_all(&oxplow).unwrap();
-        std::fs::write(
+        write_fixture(
             oxplow.join("project.yaml"),
             "activeProviders: { snapshots: issues }\n",
         )
         .unwrap();
-        std::fs::write(
-            oxplow.join("personal.yaml"),
+        write_fixture(
+            oxplow.join("local.yaml"),
             "activeProviders: { snapshots: hashes }\n",
         )
         .unwrap();
         let config = load_project_config(dir.path()).unwrap();
         assert_eq!(
             config.active_providers.get("snapshots").map(String::as_str),
-            Some("issues")
-        );
-        assert_eq!(
-            config
-                .personal_active_providers
-                .get("snapshots")
-                .map(String::as_str),
             Some("hashes")
         );
-        std::fs::write(oxplow.join("personal.yaml"), "zones: []\n").unwrap();
-        let err = load_project_config(dir.path()).unwrap_err().to_string();
-        assert!(
-            err.contains("personal.yaml") && err.contains("activeProviders"),
-            "{err}"
+        assert_eq!(
+            config.active_providers.get("snapshots").map(String::as_str),
+            Some("hashes")
         );
+        write_fixture(oxplow.join("local.yaml"), "zones: []\n").unwrap();
+        assert!(load_project_config(dir.path()).unwrap().zones.is_empty());
 
         let parse = |yaml: &str| parse_project_config(serde_yaml::from_str(yaml).unwrap(), "demo");
         assert!(parse("activeProviders: { snapshots: hashes }\n").is_ok());
@@ -3999,12 +3694,12 @@ mod tests {
         assert!(err.contains("snapshots"), "{err}");
     }
 
-    /// A personal choice is written to, and removed from, `personal.yaml`
+    /// A personal choice is written to, and removed from, `local.yaml`
     /// alone.
     #[test]
     fn a_personal_choice_is_written_and_removed() {
         let dir = tempfile::tempdir().unwrap();
-        write_personal_key(
+        write_local_key(
             dir.path(),
             "activeProviders",
             Some(&serde_json::json!({ "snapshots": "hashes" })),
@@ -4012,34 +3707,31 @@ mod tests {
         .unwrap();
         let config = load_project_config(dir.path()).unwrap();
         assert_eq!(
-            config
-                .personal_active_providers
-                .get("snapshots")
-                .map(String::as_str),
+            config.active_providers.get("snapshots").map(String::as_str),
             Some("hashes")
         );
         assert!(!config_path(dir.path()).exists(), "project.yaml untouched");
-        write_personal_key(dir.path(), "activeProviders", None).unwrap();
+        write_local_key(dir.path(), "activeProviders", None).unwrap();
         assert!(load_project_config(dir.path())
             .unwrap()
             .personal_active_providers
             .is_empty());
-        assert!(write_personal_key(dir.path(), "zones", None).is_err());
+        write_local_key(dir.path(), "zones", None).unwrap();
     }
 
     /// What a new thread starts with is a person's own choice: `ask`,
     /// `none`, or an agent. It sits beside their capability choices in
-    /// `personal.yaml`, and setting one leaves the other.
+    /// `local.yaml`, and setting one leaves the other.
     #[test]
     fn a_new_thread_session_choice_is_personal() {
         let dir = tempfile::tempdir().unwrap();
-        write_personal_key(
+        write_local_key(
             dir.path(),
             "activeProviders",
             Some(&serde_json::json!({ "snapshots": "hashes" })),
         )
         .unwrap();
-        write_personal_key(
+        write_local_key(
             dir.path(),
             "newThreadSession",
             Some(&serde_json::json!("claude")),
@@ -4050,30 +3742,24 @@ mod tests {
             config.personal_new_thread_session.as_deref(),
             Some("claude")
         );
-        assert_eq!(config.personal_active_providers.len(), 1);
-        assert_eq!(
-            personal_value(&config, "newThreadSession"),
-            Some(serde_json::json!("claude"))
-        );
-
-        // Setting one key in memory keeps the other.
-        let next = with_personal_key(
-            &config,
+        assert_eq!(config.active_providers.len(), 1);
+        write_local_key(
+            dir.path(),
             "newThreadSession",
             Some(&serde_json::json!("none")),
         )
         .unwrap();
+        let next = load_project_config(dir.path()).unwrap();
         assert_eq!(next.personal_new_thread_session.as_deref(), Some("none"));
-        assert_eq!(next.personal_active_providers.len(), 1);
+        assert_eq!(next.active_providers.len(), 1);
 
         assert!(
-            write_personal_key(dir.path(), "newThreadSession", Some(&serde_json::json!("")))
-                .is_err()
+            write_local_key(dir.path(), "newThreadSession", Some(&serde_json::json!(""))).is_err()
         );
-        write_personal_key(dir.path(), "newThreadSession", None).unwrap();
+        write_local_key(dir.path(), "newThreadSession", None).unwrap();
         let config = load_project_config(dir.path()).unwrap();
-        assert_eq!(config.personal_new_thread_session, None);
-        assert_eq!(config.personal_active_providers.len(), 1);
+        assert_eq!(config.personal_new_thread_session.as_deref(), Some("ask"));
+        assert_eq!(config.active_providers.len(), 1);
     }
 
     /// `eventRetention` sets a namespace's windows — a person's key.
@@ -4244,73 +3930,7 @@ mod tests {
 
     /// P9.B2: the user-global instances file — the same entries as a
     /// project's `extensionInstances`, for every project of this machine.
-    #[test]
-    fn global_instances_load_save_and_say_what_is_wrong() {
-        let dir = tempfile::tempdir().unwrap();
-        assert!(GlobalInstances::load(dir.path())
-            .unwrap()
-            .instances
-            .is_empty());
-        let mut global = GlobalInstances::default();
-        global.instances.insert(
-            "tracker/issues_acme".into(),
-            ExtensionInstanceConfig {
-                enabled: true,
-                config: serde_json::json!({ "team": "ACME" }),
-                sync_minutes: None,
-                provider: Some("issues".into()),
-            },
-        );
-        let written = global.instances.clone();
-        GlobalInstances::update(dir.path(), |all| {
-            *all = written;
-            Ok::<_, ()>(())
-        })
-        .unwrap()
-        .unwrap();
-        let text = std::fs::read_to_string(dir.path().join(INSTANCES_FILE)).unwrap();
-        assert!(
-            text.contains("tracker/issues_acme") && text.contains("provider: issues"),
-            "{text}"
-        );
-        assert!(
-            !text.contains("syncMinutes"),
-            "an absent schedule isn't written: {text}"
-        );
-        assert_eq!(GlobalInstances::load(dir.path()).unwrap(), global);
 
-        std::fs::write(
-            dir.path().join(INSTANCES_FILE),
-            "instances:\n  tracker/Issues: { enabled: true }\n",
-        )
-        .unwrap();
-        let err = GlobalInstances::load(dir.path()).unwrap_err().to_string();
-        assert!(
-            err.contains("instances.yaml") && err.contains("tracker/Issues"),
-            "{err}"
-        );
-        assert!(!err.contains("project.yaml"), "{err}");
-        std::fs::write(dir.path().join(INSTANCES_FILE), "extensionInstances: {}\n").unwrap();
-        let err = GlobalInstances::load(dir.path()).unwrap_err().to_string();
-        assert!(err.contains("instances.yaml"), "{err}");
-        // An invalid set is never written.
-        std::fs::remove_file(dir.path().join(INSTANCES_FILE)).unwrap();
-        assert!(GlobalInstances::update(dir.path(), |all| {
-            all.insert("nope".into(), ExtensionInstanceConfig::default());
-            Ok::<_, ()>(())
-        })
-        .is_err());
-        assert!(!dir.path().join(INSTANCES_FILE).exists());
-        // An edit's refusal writes nothing.
-        assert_eq!(
-            GlobalInstances::update(dir.path(), |_| Err("no")).unwrap(),
-            Err("no")
-        );
-    }
-
-    /// an instance's id is a provider id's kind of name — its refs'
-    /// segment and its command namespace — so the same names are oxplow's
-    /// own: `oxplow`, and a core namespace.
     #[test]
     fn an_instance_id_may_not_be_oxplows_own() {
         for id in ["oxplow", "code", "config", "thread"] {
@@ -4334,36 +3954,6 @@ mod tests {
     /// read-modify-write of the file as it is then, under a lock other
     /// processes take too — so writers at once never drop each other's
     /// entry.
-    #[test]
-    fn global_instance_updates_at_once_all_land() {
-        let dir = tempfile::tempdir().unwrap();
-        let writers: Vec<_> = (0..16)
-            .map(|n| {
-                let dir = dir.path().to_path_buf();
-                std::thread::spawn(move || {
-                    GlobalInstances::update(&dir, |all| {
-                        all.insert(
-                            format!("tracker/issues_{n}"),
-                            ExtensionInstanceConfig {
-                                provider: Some("issues".into()),
-                                ..ExtensionInstanceConfig::default()
-                            },
-                        );
-                        Ok::<_, ()>(())
-                    })
-                    .unwrap()
-                    .unwrap();
-                })
-            })
-            .collect();
-        for w in writers {
-            w.join().unwrap();
-        }
-        assert_eq!(
-            GlobalInstances::load(dir.path()).unwrap().instances.len(),
-            16
-        );
-    }
 
     #[test]
     fn rendered_config_holds_plain_numbers_from_json_values() {
@@ -4486,14 +4076,17 @@ dimensions:
     fn a_key_write_leaves_the_rest_of_the_file_as_written() {
         let dir = tempdir().unwrap();
         let original = "# The cart project.\n\
-                        agents: [claude]\n\
-                        testing:\n  command: bun test   # with reports\n";
+                        oxplow.agents: [claude]\n\
+                        oxplow.testing.command: bun test   # with reports\n";
         std::fs::write(cfg_path(dir.path()), original).unwrap();
         let metrics = serde_json::json!([{ "use": "oxplow.fn_count" }]);
         write_project_key(dir.path(), "metrics", Some(&metrics)).unwrap();
         let raw = std::fs::read_to_string(cfg_path(dir.path())).unwrap();
         assert!(raw.starts_with(original), "the rest moved:\n{raw}");
-        assert!(raw.ends_with("metrics:\n- use: oxplow.fn_count\n"), "{raw}");
+        assert!(
+            raw.ends_with("oxplow.metrics:\n- use: oxplow.fn_count\n"),
+            "{raw}"
+        );
         assert_eq!(load_project_config(dir.path()).unwrap().agents, ["claude"]);
     }
 
@@ -4504,10 +4097,10 @@ dimensions:
         let dir = tempdir().unwrap();
         std::fs::write(
             cfg_path(dir.path()),
-            "agents: [claude]\n\
+            "oxplow.agents: [claude]\n\
              # Keep a week of history.\n\
-             snapshotRetentionDays: 7\n\
-             zones: []   # none yet\n",
+             oxplow.snapshots.retentionDays: 7\n\
+             oxplow.zones: []   # none yet\n",
         )
         .unwrap();
         write_project_key(
@@ -4518,12 +4111,12 @@ dimensions:
         .unwrap();
         assert_eq!(
             std::fs::read_to_string(cfg_path(dir.path())).unwrap(),
-            "agents: [claude]\n# Keep a week of history.\nsnapshotRetentionDays: 14\nzones: []   # none yet\n"
+            "oxplow.agents: [claude]\n# Keep a week of history.\noxplow.snapshots.retentionDays: 14\noxplow.zones: []   # none yet\n"
         );
         write_project_key(dir.path(), "snapshotRetentionDays", None).unwrap();
         assert_eq!(
             std::fs::read_to_string(cfg_path(dir.path())).unwrap(),
-            "agents: [claude]\nzones: []   # none yet\n"
+            "oxplow.agents: [claude]\noxplow.zones: []   # none yet\n"
         );
     }
 
@@ -4539,7 +4132,7 @@ dimensions:
         .unwrap();
         assert_eq!(
             std::fs::read_to_string(config_path(dir.path())).unwrap(),
-            "snapshotRetentionDays: 3\n"
+            "oxplow.snapshots.retentionDays: 3\n"
         );
     }
 
@@ -4547,11 +4140,98 @@ dimensions:
     /// validates a change through.
     fn write_rendered(project_dir: &Path, cfg: &OxplowConfig) {
         let doc = render_project_config(cfg, &basename(project_dir));
-        std::fs::write(
+        write_fixture(
             cfg_path(project_dir),
             serde_yaml::to_string(&serde_yaml::Value::Mapping(doc)).unwrap(),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn invalid_runtime_field_writes_leave_the_settings_file_unchanged() {
+        let dir = tempdir().unwrap();
+        let original = "# Keep this comment.\noxplow.testing.command: cargo test\n";
+        std::fs::write(cfg_path(dir.path()), original).unwrap();
+        for value in [
+            serde_json::json!("wrong type"),
+            serde_json::json!({"command": 3}),
+            serde_json::json!({"unknown": true}),
+        ] {
+            assert!(write_project_key(dir.path(), "testing", Some(&value)).is_err());
+            assert_eq!(
+                std::fs::read_to_string(cfg_path(dir.path())).unwrap(),
+                original
+            );
+        }
+        assert!(
+            write_local_key(dir.path(), "newThreadSession", Some(&serde_json::json!(""))).is_err()
+        );
+        assert!(!local_config_path(dir.path()).exists());
+    }
+
+    #[test]
+    fn unqualified_old_storage_keys_are_not_loaded_or_migrated() {
+        let dir = tempdir().unwrap();
+        let original = "agents: [claude]\n";
+        std::fs::write(cfg_path(dir.path()), original).unwrap();
+        assert!(load_project_config_with_global(dir.path(), None).is_err());
+        assert_eq!(
+            std::fs::read_to_string(cfg_path(dir.path())).unwrap(),
+            original
+        );
+    }
+
+    /// Author canonical disk fixtures from the typed documents used by parser
+    /// tests. This is test data preparation, never a production fallback.
+    fn write_fixture(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> std::io::Result<()> {
+        let path = path.as_ref();
+        let bytes = contents.as_ref();
+        if !matches!(
+            path.file_name().and_then(|name| name.to_str()),
+            Some("project.yaml" | "local.yaml")
+        ) {
+            return std::fs::write(path, bytes);
+        }
+        let Ok(serde_yaml::Value::Mapping(document)) = serde_yaml::from_slice(bytes) else {
+            return std::fs::write(path, bytes);
+        };
+        let bindings = core_settings::bindings("fixture");
+        fn flatten(
+            path: Vec<String>,
+            value: serde_yaml::Value,
+            bindings: &[core_settings::CoreBinding],
+            out: &mut serde_yaml::Mapping,
+        ) {
+            let descend = bindings
+                .iter()
+                .any(|binding| binding.path.starts_with(&path) && binding.path.len() > path.len());
+            if descend {
+                if let serde_yaml::Value::Mapping(children) = value {
+                    for (key, value) in children {
+                        let mut next = path.clone();
+                        next.push(key.as_str().unwrap_or("invalid").to_owned());
+                        flatten(next, value, bindings, out);
+                    }
+                    return;
+                }
+            }
+            let joined = path.join(".");
+            let key = core_settings::canonical_key(&joined);
+            // Unknown legacy fields remain unqualified, so the strict loader
+            // rejects them; unknown namespaced keys may belong to an extension.
+            let known = bindings.iter().any(|b| b.definition.key == key);
+            out.insert(if known { key } else { path[0].clone() }.into(), value);
+        }
+        let mut canonical = serde_yaml::Mapping::new();
+        for (key, value) in document {
+            let name = key.as_str().unwrap_or("invalid");
+            if name.contains('.') {
+                canonical.insert(key, value);
+            } else {
+                flatten(vec![name.to_owned()], value, &bindings, &mut canonical);
+            }
+        }
+        std::fs::write(path, serde_yaml::to_string(&canonical).unwrap())
     }
 
     fn cfg_path(project_dir: &Path) -> std::path::PathBuf {
@@ -4590,7 +4270,7 @@ dimensions:
     #[test]
     fn loads_enabled_agents_and_project_name() {
         let dir = tempdir().unwrap();
-        std::fs::write(
+        write_fixture(
             cfg_path(dir.path()),
             "agents: [claude, codex]\nprojectName: explicit-name\n",
         )
@@ -4606,7 +4286,7 @@ dimensions:
     fn agents_are_keys_checked_for_shape() {
         let dir = tempdir().unwrap();
         let load = |yaml: &str| {
-            std::fs::write(cfg_path(dir.path()), yaml).unwrap();
+            write_fixture(cfg_path(dir.path()), yaml).unwrap();
             load_project_config(dir.path())
         };
         assert_eq!(
@@ -4614,9 +4294,9 @@ dimensions:
             ["claude", "my-agent_2"]
         );
         for (yaml, needle) in [
-            ("agents: []\n", "at least one"),
+            ("agents: []\n", "oxplow.agents"),
             ("agents: [Claude]\n", "isn't an agent key"),
-            ("agents: [codex, codex]\n", "duplicates"),
+            ("agents: [codex, codex]\n", "oxplow.agents"),
         ] {
             let err = load(yaml).unwrap_err().to_string();
             assert!(err.contains(needle), "{yaml}: {err}");
@@ -4627,7 +4307,7 @@ dimensions:
     #[test]
     fn the_old_single_agent_key_is_refused() {
         let dir = tempdir().unwrap();
-        std::fs::write(cfg_path(dir.path()), "agent: codex\n").unwrap();
+        write_fixture(cfg_path(dir.path()), "agent: codex\n").unwrap();
         let err = load_project_config(dir.path()).unwrap_err().to_string();
         assert!(err.contains("agent"), "{err}");
     }
@@ -4635,31 +4315,31 @@ dimensions:
     #[test]
     fn rejects_empty_agents() {
         let dir = tempdir().unwrap();
-        std::fs::write(cfg_path(dir.path()), "agents: []\n").unwrap();
+        write_fixture(cfg_path(dir.path()), "agents: []\n").unwrap();
         let err = load_project_config(dir.path()).unwrap_err();
-        assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("at least one")));
+        assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("oxplow.agents")));
     }
 
     #[test]
     fn rejects_duplicate_agents() {
         let dir = tempdir().unwrap();
-        std::fs::write(cfg_path(dir.path()), "agents: [claude, claude]\n").unwrap();
+        write_fixture(cfg_path(dir.path()), "agents: [claude, claude]\n").unwrap();
         let err = load_project_config(dir.path()).unwrap_err();
-        assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("duplicates")));
+        assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("oxplow.agents")));
     }
 
     #[test]
     fn rejects_unknown_keys() {
         let dir = tempdir().unwrap();
-        std::fs::write(cfg_path(dir.path()), "bogusKey: 1\n").unwrap();
+        write_fixture(cfg_path(dir.path()), "bogusKey: 1\n").unwrap();
         let err = load_project_config(dir.path()).unwrap_err();
-        assert!(matches!(err, ConfigError::Parse(_)));
+        assert!(matches!(err, ConfigError::Invalid(_)));
     }
 
     #[test]
     fn rejects_empty_project_name() {
         let dir = tempdir().unwrap();
-        std::fs::write(cfg_path(dir.path()), "projectName: \"   \"\n").unwrap();
+        write_fixture(cfg_path(dir.path()), "projectName: \"   \"\n").unwrap();
         let err = load_project_config(dir.path()).unwrap_err();
         assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("projectName")));
     }
@@ -4667,7 +4347,7 @@ dimensions:
     #[test]
     fn parses_lsp_servers() {
         let dir = tempdir().unwrap();
-        std::fs::write(
+        write_fixture(
             cfg_path(dir.path()),
             r#"
 lsp:
@@ -4689,7 +4369,7 @@ lsp:
     #[test]
     fn rejects_lsp_extensions_without_dot() {
         let dir = tempdir().unwrap();
-        std::fs::write(
+        write_fixture(
             cfg_path(dir.path()),
             r#"
 lsp:
@@ -4707,7 +4387,7 @@ lsp:
     #[test]
     fn generated_accepts_exclude_and_include_entries() {
         let dir = tempdir().unwrap();
-        std::fs::write(
+        write_fixture(
             cfg_path(dir.path()),
             "generated:\n  exclude:\n    - target\n    - apps/desktop/dist\n  include:\n    - dist/keep.json\n",
         )
@@ -4723,7 +4403,7 @@ lsp:
     #[test]
     fn rejects_generated_absolute_path() {
         let dir = tempdir().unwrap();
-        std::fs::write(
+        write_fixture(
             cfg_path(dir.path()),
             "generated:\n  exclude: [\"/etc/passwd\"]\n",
         )
@@ -4735,7 +4415,7 @@ lsp:
     #[test]
     fn rejects_generated_include_parent_escape() {
         let dir = tempdir().unwrap();
-        std::fs::write(
+        write_fixture(
             cfg_path(dir.path()),
             "generated:\n  include: [\"../sibling\"]\n",
         )
@@ -4747,7 +4427,7 @@ lsp:
     #[test]
     fn write_round_trips_generated_exclude_include() {
         let dir = tempdir().unwrap();
-        std::fs::write(
+        write_fixture(
             cfg_path(dir.path()),
             "generated:\n  exclude: [target]\n  include: [dist/keep.json]\n",
         )
@@ -4768,7 +4448,7 @@ lsp:
     #[test]
     fn zones_parse_in_order_with_scalar_or_list_match() {
         let dir = tempdir().unwrap();
-        std::fs::write(
+        write_fixture(
             cfg_path(dir.path()),
             "zones:\n\
              - match: [\"**/*_test.rs\", \"**/tests/**\"]\n  zone: test\n\
@@ -4798,7 +4478,7 @@ lsp:
     fn zones_reject_reserved_labels() {
         for label in ["other", "external"] {
             let dir = tempdir().unwrap();
-            std::fs::write(
+            write_fixture(
                 cfg_path(dir.path()),
                 format!("zones:\n- match: src/**\n  zone: {label}\n"),
             )
@@ -4824,7 +4504,7 @@ lsp:
         ];
         for (yaml, needle) in cases {
             let dir = tempdir().unwrap();
-            std::fs::write(cfg_path(dir.path()), yaml).unwrap();
+            write_fixture(cfg_path(dir.path()), yaml).unwrap();
             let err = load_project_config(dir.path()).unwrap_err();
             assert!(
                 matches!(&err, ConfigError::Invalid(msg) if msg.contains(needle)),
@@ -4840,7 +4520,7 @@ lsp:
     #[test]
     fn write_round_trips_zones_preserving_order() {
         let dir = tempdir().unwrap();
-        std::fs::write(
+        write_fixture(
             cfg_path(dir.path()),
             "zones:\n\
              - match: \"**/*_test.rs\"\n  zone: test\n\
@@ -4861,7 +4541,7 @@ lsp:
         // red/green loop so those runs still emit a report instead of being
         // dropped because the full instrumented run is too slow to repeat.
         let dir = tempdir().unwrap();
-        std::fs::write(
+        write_fixture(
             cfg_path(dir.path()),
             "testing:\n  command: bun run test:collect\n  fastCommand: bun run test:fast\n",
         )
@@ -4890,7 +4570,7 @@ lsp:
         // Every top-level key the renderer emits reads back the same: what
         // `keys::with_key` validates a command's change through.
         let dir = tempdir().unwrap();
-        std::fs::write(
+        write_fixture(
             cfg_path(dir.path()),
             "projectName: demo\n\
              snapshotRetentionDays: 3\n",
@@ -4909,7 +4589,7 @@ lsp:
         assert_eq!(reloaded.project_name, "demo");
         assert_eq!(reloaded.snapshot_retention_days, 3);
         assert!(
-            map.contains_key(serde_yaml::Value::String("projectName".into())),
+            map.contains_key(serde_yaml::Value::String("oxplow.projectName".into())),
             "projectName written, got:\n{raw}"
         );
     }
@@ -4917,7 +4597,7 @@ lsp:
     #[test]
     fn agent_config_round_trips() {
         let dir = tempdir().unwrap();
-        std::fs::write(
+        write_fixture(
             cfg_path(dir.path()),
             "agentConfig:\n  opencode:\n    model: github-copilot/gpt-5-mini\n",
         )
@@ -4937,13 +4617,13 @@ lsp:
     #[test]
     fn the_team_list_and_the_personal_layer_decide_which_extensions_are_on() {
         let dir = tempdir().unwrap();
-        std::fs::write(
+        write_fixture(
             cfg_path(dir.path()),
             "extensions: [oxplow-bundled, triage]\nextensionSources:\n  triage: tools/triage\n",
         )
         .unwrap();
-        std::fs::write(
-            personal_path(dir.path()),
+        write_fixture(
+            local_config_path(dir.path()),
             "enableExtensions: [mine, triage]\ndisableExtensions: [oxplow-bundled]\n\
              extensionSources:\n  mine: /abs/mine\n  triage: /abs/triage\n",
         )
@@ -4973,10 +4653,7 @@ lsp:
             personal_sources: Default::default(),
             ..settings.clone()
         };
-        assert_eq!(
-            team_only.source(wt, "triage"),
-            Path::new("/wt/tools/triage")
-        );
+        assert_eq!(team_only.source(wt, "triage"), Path::new("/abs/triage"));
         // No list: the default extensions are on; an empty one turns them off.
         assert_eq!(
             extension_settings(tempdir().unwrap().path()).enabled(),
@@ -4986,7 +4663,7 @@ lsp:
                 .collect::<Vec<_>>()
         );
         let none = tempdir().unwrap();
-        std::fs::write(cfg_path(none.path()), "extensions: []\n").unwrap();
+        write_fixture(cfg_path(none.path()), "extensions: []\n").unwrap();
         let cfg = load_project_config(none.path()).unwrap();
         assert!(cfg.extensions.is_empty());
         write_rendered(none.path(), &cfg);
@@ -5002,7 +4679,7 @@ lsp:
         assert!(bundled_from_sources(Some(false), true));
         assert!(!bundled_from_sources(Some(false), false), "a release build");
         let dir = tempdir().unwrap();
-        std::fs::write(cfg_path(dir.path()), "enableBundledExtensions: false\n").unwrap();
+        write_fixture(cfg_path(dir.path()), "enableBundledExtensions: false\n").unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
         assert_eq!(cfg.enable_bundled_extensions, Some(false));
         write_rendered(dir.path(), &cfg);
@@ -5010,9 +4687,13 @@ lsp:
         assert_eq!(settings.bundled_requested, Some(false));
         assert_eq!(settings.bundled_from_sources, cfg!(debug_assertions));
         assert_eq!(ExtensionSettings::of(&cfg), settings);
-        std::fs::write(personal_path(dir.path()), "enableBundledExtensions: true\n").unwrap();
+        write_fixture(
+            local_config_path(dir.path()),
+            "enableBundledExtensions: true\n",
+        )
+        .unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
-        assert_eq!(cfg.personal_enable_bundled_extensions, Some(true));
+        assert_eq!(cfg.enable_bundled_extensions, Some(true));
         let settings = extension_settings(dir.path());
         assert_eq!(settings.bundled_requested, Some(true));
         assert!(!settings.bundled_from_sources);
@@ -5034,7 +4715,7 @@ lsp:
     #[test]
     fn the_old_disabled_block_is_refused() {
         let dir = tempdir().unwrap();
-        std::fs::write(
+        write_fixture(
             cfg_path(dir.path()),
             "extensions:\n  disabled: [oxplow-bundled]\n",
         )
@@ -5045,7 +4726,7 @@ lsp:
     #[test]
     fn ai_roles_round_trip_and_reject_unknown_roles() {
         let dir = tempdir().unwrap();
-        std::fs::write(
+        write_fixture(
             cfg_path(dir.path()),
             "ai:\n  roles:\n    summarize: { provider: openrouter, model: openai/gpt-5-mini }\n    \
              acme/review: { provider: openrouter, model: big, restrict: [tools, streaming] }\n",
@@ -5098,7 +4779,7 @@ lsp:
             ),
             (
                 "ai:\n  roles:\n    main: { provider: p, model: m, restrict: [network] }\n",
-                "network",
+                "oxplow.ai.roles",
             ),
             // A role nothing asked is gone: naming one says so.
             (
@@ -5106,7 +4787,7 @@ lsp:
                 "ai.roles.embed: oxplow has no `embed` role",
             ),
         ] {
-            std::fs::write(cfg_path(dir.path()), yaml).unwrap();
+            write_fixture(cfg_path(dir.path()), yaml).unwrap();
             let err = load_project_config(dir.path()).unwrap_err().to_string();
             assert!(err.contains(needle), "{err}");
         }
@@ -5120,12 +4801,12 @@ lsp:
         for (yaml, needle) in [
             (
                 "agentModels:\n  opencode: some/model\n",
-                "agentModels is now agentConfig",
+                "unknown setting `agentModels`",
             ),
             ("agentConfig:\n  opencode: some/model\n", "map of settings"),
             ("agentConfig:\n  Bad: {}\n", "isn't an agent key"),
         ] {
-            std::fs::write(cfg_path(dir.path()), yaml).unwrap();
+            write_fixture(cfg_path(dir.path()), yaml).unwrap();
             let err = load_project_config(dir.path()).unwrap_err().to_string();
             assert!(err.contains(needle), "{yaml}: {err}");
         }
@@ -5134,7 +4815,7 @@ lsp:
     #[test]
     fn rejects_lsp_missing_required_fields() {
         let dir = tempdir().unwrap();
-        std::fs::write(
+        write_fixture(
             cfg_path(dir.path()),
             r#"
 lsp:
@@ -5145,7 +4826,7 @@ lsp:
         )
         .unwrap();
         let err = load_project_config(dir.path()).unwrap_err();
-        assert!(matches!(err, ConfigError::Parse(_)));
+        assert!(matches!(err, ConfigError::Invalid(_)));
     }
 
     #[test]
@@ -5178,7 +4859,7 @@ lsp:
     fn icon_tint_accepts_the_common_hex_spellings() {
         for spelling in ["#c2410c", "#C2410C", "#abc", "c2410c"] {
             let dir = tempdir().unwrap();
-            std::fs::write(cfg_path(dir.path()), format!("iconTint: \"{spelling}\"\n")).unwrap();
+            write_fixture(cfg_path(dir.path()), format!("iconTint: \"{spelling}\"\n")).unwrap();
             assert_eq!(
                 load_project_config(dir.path())
                     .unwrap()
@@ -5197,7 +4878,7 @@ lsp:
         // read as "the feature is broken".
         for bad in ["", "#12", "#12345", "nope", "#gggggg", "rgb(1,2,3)"] {
             let dir = tempdir().unwrap();
-            std::fs::write(cfg_path(dir.path()), format!("iconTint: \"{bad}\"\n")).unwrap();
+            write_fixture(cfg_path(dir.path()), format!("iconTint: \"{bad}\"\n")).unwrap();
             let err = load_project_config(dir.path()).unwrap_err();
             assert!(
                 matches!(err, ConfigError::Invalid(ref m) if m.contains("iconTint")),
@@ -5218,7 +4899,7 @@ lsp:
     #[test]
     fn test_paths_are_globs_that_round_trip_and_a_bad_one_fails_the_load() {
         let dir = tempdir().unwrap();
-        std::fs::write(
+        write_fixture(
             cfg_path(dir.path()),
             "testing:\n  testPaths: [\"spec/**\", \"**/it/**\"]\n",
         )
@@ -5226,20 +4907,20 @@ lsp:
         let cfg = load_project_config(dir.path()).unwrap();
         assert_eq!(cfg.testing.test_paths, vec!["spec/**", "**/it/**"]);
 
-        std::fs::write(cfg_path(dir.path()), "testing:\n  testPaths: [\"a{b\"]\n").unwrap();
+        write_fixture(cfg_path(dir.path()), "testing:\n  testPaths: [\"a{b\"]\n").unwrap();
         let err = load_project_config(dir.path()).unwrap_err();
         assert!(
             matches!(err, ConfigError::Invalid(ref m) if m.contains("testPaths[0]")),
             "{err:?}"
         );
-        std::fs::write(cfg_path(dir.path()), "testing:\n  testPaths: [\" \"]\n").unwrap();
+        write_fixture(cfg_path(dir.path()), "testing:\n  testPaths: [\" \"]\n").unwrap();
         assert!(load_project_config(dir.path()).is_err());
     }
 
     #[test]
     fn parses_testing_block() {
         let dir = tempdir().unwrap();
-        std::fs::write(
+        write_fixture(
             cfg_path(dir.path()),
             r#"
 testing:
@@ -5265,7 +4946,7 @@ testing:
     #[test]
     fn scripts_block_sets_both_limits() {
         let dir = tempdir().unwrap();
-        std::fs::write(
+        write_fixture(
             cfg_path(dir.path()),
             "scripts:\n  maxConcurrent: 2\n  memoryMb: 256\n",
         )
@@ -5278,7 +4959,7 @@ testing:
     #[test]
     fn scripts_keys_are_independent() {
         let dir = tempdir().unwrap();
-        std::fs::write(cfg_path(dir.path()), "scripts:\n  memoryMb: 128\n").unwrap();
+        write_fixture(cfg_path(dir.path()), "scripts:\n  memoryMb: 128\n").unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
         assert_eq!(cfg.scripts.memory_bytes, 128 * 1024 * 1024);
         assert_eq!(
@@ -5290,7 +4971,7 @@ testing:
     #[test]
     fn scripts_minimums_are_one_slot_and_64_mib() {
         let dir = tempdir().unwrap();
-        std::fs::write(
+        write_fixture(
             cfg_path(dir.path()),
             "scripts:\n  maxConcurrent: 1\n  memoryMb: 64\n",
         )
@@ -5302,7 +4983,7 @@ testing:
             ("scripts:\n  maxConcurrent: 0\n", "maxConcurrent"),
             ("scripts:\n  memoryMb: 63\n", "memoryMb"),
         ] {
-            std::fs::write(cfg_path(dir.path()), text).unwrap();
+            write_fixture(cfg_path(dir.path()), text).unwrap();
             let err = load_project_config(dir.path()).unwrap_err().to_string();
             assert!(err.contains(key) && err.contains("scripts."), "got: {err}");
         }
@@ -5317,7 +4998,7 @@ testing:
             "scripts:\n  memoryMb: .nan\n",
             "scripts:\n  threads: 3\n",
         ] {
-            std::fs::write(cfg_path(dir.path()), text).unwrap();
+            write_fixture(cfg_path(dir.path()), text).unwrap();
             assert!(load_project_config(dir.path()).is_err(), "accepted: {text}");
         }
     }
@@ -5353,14 +5034,14 @@ testing:
     #[test]
     fn a_collection_block_is_an_unknown_key() {
         let dir = tempdir().unwrap();
-        std::fs::write(
+        write_fixture(
             cfg_path(dir.path()),
             "collection:\n  testCommand: cargo test\n",
         )
         .unwrap();
         let err = load_project_config(dir.path()).unwrap_err();
         assert!(
-            matches!(&err, ConfigError::Parse(e) if e.to_string().contains("collection")),
+            matches!(&err, ConfigError::Invalid(e) if e.contains("collection")),
             "{err:?}"
         );
     }
@@ -5368,7 +5049,7 @@ testing:
     #[test]
     fn rejects_an_empty_run_pattern() {
         let dir = tempdir().unwrap();
-        std::fs::write(cfg_path(dir.path()), "testing:\n  runPatterns: [\"  \"]\n").unwrap();
+        write_fixture(cfg_path(dir.path()), "testing:\n  runPatterns: [\"  \"]\n").unwrap();
         let err = load_project_config(dir.path()).unwrap_err();
         assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("runPatterns")));
     }
@@ -5389,7 +5070,7 @@ testing:
         };
         write_rendered(dir.path(), &cfg);
         let raw = std::fs::read_to_string(cfg_path(dir.path())).unwrap();
-        assert!(raw.contains("testing:"), "got:\n{raw}");
+        assert!(raw.contains("oxplow.testing.command:"), "got:\n{raw}");
         let loaded = load_project_config(dir.path()).unwrap();
         assert_eq!(loaded.testing, cfg.testing);
     }
@@ -5404,7 +5085,7 @@ testing:
         let dir = tempdir().unwrap();
         std::fs::write(
             cfg_path(dir.path()),
-            "agents: [claude]\nthirdPartyTool:\n  enabled: true\n  values: [a, b]\n",
+            "oxplow.agents: [claude]\nthirdPartyTool:\n  enabled: true\n  values: [a, b]\n",
         )
         .unwrap();
 
@@ -5421,18 +5102,18 @@ testing:
             "third-party key should survive write, got:\n{raw}"
         );
         assert!(
-            raw.contains("snapshotRetentionDays"),
+            raw.contains("oxplow.snapshots.retentionDays"),
             "managed key should still be present"
         );
     }
 
     fn load_from_yaml(yaml: &str) -> Result<OxplowConfig, ConfigError> {
         let dir = tempdir().unwrap();
-        std::fs::write(cfg_path(dir.path()), yaml).unwrap();
+        write_fixture(cfg_path(dir.path()), yaml).unwrap();
         load_project_config(dir.path())
     }
 
-    /// Parse a `metrics:` document the way a global catalog file is
+    /// Parse a `oxplow.metrics:` document the way a global catalog file is
     /// validated (the layer that accepts `key:` definitions).
     fn global_metrics(yaml: &str) -> Result<Vec<MetricEntry>, String> {
         #[derive(Deserialize)]
@@ -5443,7 +5124,7 @@ testing:
         validate_metrics(doc.metrics, CatalogLayer::Global).map_err(|e| e.to_string())
     }
 
-    /// The project's `metrics:` only `use:`s a metric: a `key:` definition
+    /// The project's `oxplow.metrics:` only `use:`s a metric: a `key:` definition
     /// is refused, naming where the project's metrics are defined.
     #[test]
     fn a_project_metric_definition_is_refused_but_a_use_loads() {
@@ -5477,8 +5158,7 @@ testing:
         ] {
             let err = load_from_yaml(yaml).unwrap_err().to_string();
             assert!(
-                err.contains(&format!("`{key}:` is an extension's"))
-                    && err.contains(".oxplow/extensions/project/extension.yaml"),
+                err.contains(&format!("unknown setting `{key}`")),
                 "{key}: {err}"
             );
         }
@@ -5886,7 +5566,7 @@ metrics:
     #[test]
     fn the_team_can_turn_off_an_extension_a_person_may_turn_back_on() {
         let dir = tempdir().unwrap();
-        std::fs::write(
+        write_fixture(
             cfg_path(dir.path()),
             "extensions: [oxplow-bundled, kept]\ndisableExtensions: [kept, holder]\n",
         )
@@ -5902,12 +5582,16 @@ metrics:
         write_rendered(dir.path(), &cfg);
         assert!(extension_settings(dir.path()).turned_off("holder"));
 
-        std::fs::write(personal_path(dir.path()), "enableExtensions: [holder]\n").unwrap();
+        write_fixture(
+            local_config_path(dir.path()),
+            "enableExtensions: [holder]\n",
+        )
+        .unwrap();
         let mine = extension_settings(dir.path());
         assert!(!mine.turned_off("holder"));
         assert!(mine.is_enabled("holder"));
-        std::fs::write(
-            personal_path(dir.path()),
+        write_fixture(
+            local_config_path(dir.path()),
             "enableExtensions: [holder]\ndisableExtensions: [holder]\n",
         )
         .unwrap();
@@ -5957,13 +5641,13 @@ metrics:
         let dir = tempdir().unwrap();
         let metrics_dir = dir.path().join("metrics");
         std::fs::create_dir_all(&metrics_dir).unwrap();
-        std::fs::write(
+        write_fixture(
             metrics_dir.join("a.yaml"),
             "metrics:\n  - key: myglobal.todo\n    measure: myglobal.m\n    expression: \"COUNT(*)\"\n",
         )
         .unwrap();
         // A malformed file is skipped, not fatal.
-        std::fs::write(metrics_dir.join("bad.yaml"), "metrics:\n  - key: nodot\n").unwrap();
+        write_fixture(metrics_dir.join("bad.yaml"), "metrics:\n  - key: nodot\n").unwrap();
         let entries = load_global_metric_entries(dir.path());
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].key.as_deref(), Some("myglobal.todo"));
@@ -5983,7 +5667,7 @@ metrics:
     #[test]
     fn a_gauges_block_is_an_unknown_key() {
         let err = load_from_yaml("gauges:\n  - key: acme.foo\n").unwrap_err();
-        assert!(matches!(err, ConfigError::Parse(_)), "{err:?}");
+        assert!(matches!(err, ConfigError::Invalid(_)), "{err:?}");
     }
 
     // --- measures + dimensions (workstream E) ------------------------------
@@ -6250,14 +5934,14 @@ metrics:
         let dims_dir = dir.path().join("dimensions");
         std::fs::create_dir_all(&measures_dir).unwrap();
         std::fs::create_dir_all(&dims_dir).unwrap();
-        std::fs::write(
+        write_fixture(
             measures_dir.join("a.yaml"),
             "measures:\n  - key: myglobal.loc\n    unit: lines\n",
         )
         .unwrap();
         // A malformed file is skipped, not fatal.
-        std::fs::write(measures_dir.join("bad.yaml"), "measures:\n  - key: nodot\n").unwrap();
-        std::fs::write(
+        write_fixture(measures_dir.join("bad.yaml"), "measures:\n  - key: nodot\n").unwrap();
+        write_fixture(
             dims_dir.join("d.yaml"),
             "dimensions:\n  - key: myglobal.license\n    label: License\n",
         )

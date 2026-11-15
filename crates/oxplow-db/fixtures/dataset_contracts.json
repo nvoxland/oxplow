@@ -28516,6 +28516,78 @@
       "key": [
         "key"
       ]
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "key",
+          "type": "TEXT",
+          "doc": "The registered fully qualified setting key."
+        },
+        {
+          "name": "value",
+          "type": "TEXT",
+          "doc": "Effective value as JSON; NULL for secrets or absent values."
+        },
+        {
+          "name": "origin",
+          "type": "TEXT",
+          "doc": "Effective origin: local, project, global, or default."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "Owning extension, or NULL for core."
+        },
+        {
+          "name": "doc",
+          "type": "TEXT",
+          "doc": "Setting description."
+        },
+        {
+          "name": "schema",
+          "type": "TEXT",
+          "doc": "Value validation schema as JSON."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Display title."
+        },
+        {
+          "name": "category",
+          "type": "TEXT",
+          "doc": "Display category, independent of namespace ownership."
+        },
+        {
+          "name": "secret",
+          "type": "INT",
+          "doc": "1 when the value is stored securely."
+        },
+        {
+          "name": "is_set",
+          "type": "INT",
+          "doc": "1 when an effective value is present, including secrets."
+        },
+        {
+          "name": "owner",
+          "type": "TEXT",
+          "doc": "Registry owner: core or extension namespace."
+        },
+        {
+          "name": "restart_required",
+          "type": "INT",
+          "doc": "1 when a change requires restart."
+        },
+        {
+          "name": "ui",
+          "type": "TEXT",
+          "doc": "Display hints as JSON."
+        }
+      ],
+      "key": [
+        "key"
+      ]
     }
   },
   "agent_conversation": {

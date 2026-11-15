@@ -36,8 +36,8 @@ pub struct SetCredentialInput {
     pub collector: String,
     /// The credential's name, as the collector declares it.
     pub name: String,
-    /// Its value, kept in the OS keychain and never read back. Left out or
-    /// blank, the credential is cleared. A secret (`writeOnly`).
+    /// Its value, saved as the local override of the registered secret setting.
+    /// Left out or blank, the local override is removed. A secret (`writeOnly`).
     #[serde(default)]
     #[schemars(extend("writeOnly" = true))]
     pub value: Option<String>,
@@ -99,7 +99,6 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                     let svc = services.get()?;
                     let namespace = namespace_of(&input.collector)?;
                     let root = svc.worktrees.resolve(None).await.into_local_path();
-                    let given = input.value.as_deref().is_some_and(|v| !v.trim().is_empty());
                     collector_runner::set_credential(
                         &Collectors::of(&svc, &root),
                         &namespace,
@@ -114,6 +113,12 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                         ),
                         other => failed(other),
                     })?;
+                    let given = collector_runner::credential_is_set(
+                        &Collectors::of(&svc, &root),
+                        &namespace,
+                        &input.name,
+                    )
+                    .map_err(failed)?;
                     let events = svc.events.clone();
                     let name = input.name.clone();
                     Ok(HandlerOutput {
@@ -230,12 +235,12 @@ mod tests {
     fn extension(root: &std::path::Path) {
         let ext = root.join(".oxplow/extensions/acme");
         std::fs::create_dir_all(&ext).unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             ext.join("extension.yaml"),
             "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [process.run, secrets:TOKEN]\ncollectors:\n  - id: s\n    runtime: exec\n    entry: sync.sh\n    credentials: [TOKEN]\n    entities:\n      - { name: row, key: id, columns: { id: int } }\n",
         )
         .unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             ext.join("sync.sh"),
             "#!/bin/sh\necho '{\"entities\":{\"row\":[]}}'\n",
         )
@@ -341,6 +346,110 @@ mod tests {
         }
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn generic_settings_and_collector_credentials_share_all_levels() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::test_fixtures::init_git_repo(dir.path());
+        extension(dir.path());
+        let fx = crate::test_fixtures::services_with_thread_in(dir).await;
+        crate::test_fixtures::activate(&fx.svc).await;
+        let key = crate::extension::extension_settings::credential_definition("acme", "TOKEN").key;
+        let root = fx.svc.layout.project_dir.clone();
+        let ctx = Collectors::of(&fx.svc, &root);
+        for (level, value) in [("global", "global-private"), ("project", "project-private")] {
+            run(
+                &fx,
+                &Actor::Human,
+                "oxplow.config.set",
+                json!({"key":key,"value":value,"level":level}),
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                collector_runner::credential_value(&ctx, "acme", "TOKEN")
+                    .unwrap()
+                    .as_deref(),
+                Some(value)
+            );
+        }
+        run(
+            &fx,
+            &Actor::Human,
+            SET_CREDENTIAL,
+            json!({"collector":"acme/s","name":"TOKEN","value":"local-private"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            collector_runner::credential_value(&ctx, "acme", "TOKEN")
+                .unwrap()
+                .as_deref(),
+            Some("local-private")
+        );
+        run(
+            &fx,
+            &Actor::Human,
+            SET_CREDENTIAL,
+            json!({"collector":"acme/s","name":"TOKEN"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            collector_runner::credential_value(&ctx, "acme", "TOKEN")
+                .unwrap()
+                .as_deref(),
+            Some("project-private")
+        );
+        run(
+            &fx,
+            &Actor::Human,
+            "oxplow.config.unset",
+            json!({"key":key,"level":"project"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            collector_runner::credential_value(&ctx, "acme", "TOKEN")
+                .unwrap()
+                .as_deref(),
+            Some("global-private")
+        );
+        let read = run(&fx, &Actor::Human, "oxplow.config.get", json!({"key":key}))
+            .await
+            .unwrap();
+        assert_eq!(read.result["value"], json!("global-private"));
+        let listed = fx
+            .svc
+            .sql
+            .query_sql(
+                "SELECT is_set FROM v_collector_credential WHERE name = 'TOKEN'",
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(listed.rows[0][0], oxplow_db::SqlCell::Int(1));
+        assert!(!format!(
+            "{:?}",
+            fx.svc
+                .commands
+                .audit_store()
+                .list_recent(1000)
+                .await
+                .unwrap()
+        )
+        .contains("-private"));
+        for file in [
+            root.join(".oxplow/local.yaml"),
+            root.join(".oxplow/project.yaml"),
+            fx.svc.global_config_dir.join("global.yaml"),
+        ] {
+            assert!(!std::fs::read_to_string(file)
+                .unwrap_or_default()
+                .contains("-private"));
+        }
+    }
+
     /// A project extension whose provider reads a host secret (`reference`)
     /// as its credential `PROVIDER_TOKEN`.
     fn secret_extension(root: &std::path::Path, reference: &SecretRef) {
@@ -350,15 +459,16 @@ mod tests {
             .as_str()
             .unwrap()
             .to_string();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             ext.join("extension.yaml"),
             format!(
                 "manifest: 2\nname: tracker\nintent:\n  purpose: the fake provider\n  examples: [{{ name: a }}]\npermissions: [process.run, secrets:PROVIDER_TOKEN]\nproviders:\n  - id: notes\n    capability: snapshots\n    entry: bin/provider\n    credentials:\n      - {{ name: PROVIDER_TOKEN, secretRef: {{ schemaVersion: 1, id: \"{id}\" }} }}\n    declarations: provider.json\n"
             ),
         )
         .unwrap();
-        std::fs::write(ext.join("bin/provider"), "#!/bin/sh\n").unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(ext.join("bin/provider"), "#!/bin/sh\n")
+            .unwrap();
+        crate::test_fixtures::write_settings_fixture(
             ext.join("provider.json"),
             serde_json::to_string_pretty(&oxplow_provider_fake::declarations()).unwrap(),
         )

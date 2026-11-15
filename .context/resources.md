@@ -56,6 +56,11 @@ the id columns the views carry next to it (`request_id`, `turn_id`, `id`).
 a hand-built or hand-parsed URI outside the builders. When one fires, the
 fix is a builder or reader — never a string.
 
+Settings use `oxplow/config?key=<namespaced setting key>`. The resource accepts
+registered dotted keys (including scalar leaf names); historical unqualified
+keys remain valid URI identities for old event subjects, although the settings
+API no longer accepts those legacy keys.
+
 ## Bare ids
 
 A field whose name already fixes the resource — a command input, a

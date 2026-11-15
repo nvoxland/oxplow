@@ -97,7 +97,8 @@ mod tests {
     #[tokio::test]
     async fn a_ref_reads_through_the_bus_for_the_calling_thread() {
         let fx = services_with_thread().await;
-        std::fs::write(fx._dir.path().join("who.txt"), "mine").unwrap();
+        crate::test_fixtures::write_settings_fixture(fx._dir.path().join("who.txt"), "mine")
+            .unwrap();
         let actor = Actor::Agent {
             session_id: None,
             thread_id: Some(fx.thread),

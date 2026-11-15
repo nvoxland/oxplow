@@ -35,33 +35,35 @@ What can be called, as of 2026-09:
 
 ## Providers
 
-- User-global, in `global_config_dir()/ai.yaml` (`OXPLOW_HOME` applies).
-  `oxplow_ai::config::AiConfig` parses it (camelCase, unknown keys are
-  errors) and `validate` runs before every `save`:
+- Provider connections and role bindings are registered settings:
+  `oxplow.ai.providers` (an atomic array) and `oxplow.ai.roles` (an atomic map).
+  They support local, project and global overrides with the shared precedence
+  in [settings.md](./settings.md). Specialized Settings → AI controls write the
+  global level through the same service; generic `config.*` writes can choose
+  any level. `AiConfig` is a typed projection, not a separate file format.
 
   ```yaml
-  providers:
+  # global.yaml, or a project/local override file
+  oxplow.ai.providers:
     - { id: or, kind: openrouter }
     - { id: local, kind: openai_compatible, baseUrl: http://localhost:11434/v1 }
     - { id: ts, kind: typesafe }
-  roles:
+  oxplow.ai.roles:
     summarize: { provider: or, model: openai/gpt-5-mini }
-    decide:    { provider: ts, model: jev-latest }
+    decide: { provider: ts, model: jev-latest }
   ```
 
-- Keys are stored in the **OS keychain** (`keyring` 4.2, service
-  `net.voxland.oxplow`, account = provider id), never in the repo and never
-  under the project dir. A provider with no key is called without auth
-  (local servers). `SecretStore` is a trait; tests use `MemorySecrets`.
-  Gotcha: on macOS an unsigned dev build is a "different app" after each
-  rebuild, so the keychain may prompt again for access.
-- **A key is bound to the URL it was saved for**. The keychain
-  entry is `{"key", "endpoint"}`, where `endpoint` is the provider's
-  normalized `baseUrl` (empty for the kind's default). `ai.yaml` is a
-  plain file an agent can edit, so a provider pointed at another host gets
-  no key; the call fails with "re-save the AI provider in Settings → AI".
-  Saving a provider (UI-only) rebinds a kept key to its current URL. A
-  pre-binding bare key counts as bound to the default URL.
+- Provider keys are secret registry settings, registered dynamically by
+  `ai_service::provider_key_definition`: `oxplow.ai.providerKeys.<hex provider id>`.
+  They use the shared keychain backend, with local/project identity including
+  the project and global identity independent of it. Tests use `MemorySecrets`.
+  A provider with no key can call a local server without authentication. No key
+  value is stored in YAML, inventory SQL, events, audit or undo payloads.
+  macOS may prompt again after an unsigned development build changes identity.
+- **A key is bound to the URL it was saved for.** Its secure value carries the
+  key and normalized endpoint (empty for the kind's default). A connection
+  pointed at another host gets no key; the call asks to re-save the provider in
+  Settings → AI. Saving a provider rebinds a kept key to its current URL.
 - **A provider's `kind:` is a declared model provider**: an
   `ai_provider` implementation an extension declares, registered in
   `ModelProviders` under its declared id. `oxplow-foundation` declares one
@@ -78,27 +80,22 @@ What can be called, as of 2026-09:
 ## Roles
 
 Extensions and core refer to **roles, never to models**. Each role maps to
-`{provider, model}`. Defaults are global (`ai.yaml`); a project overrides
-any of them in `.oxplow/project.yaml`, which is committed, so the team
-shares them:
+`{provider, model}`. The `oxplow.ai.roles` setting resolves the same way as
+other settings. A project-level map replaces the whole global map; a local map
+replaces the project's. Role fallback happens after that atomic resolution.
 
 ```yaml
-ai:
-  roles:
-    summarize: { provider: openrouter, model: openai/gpt-5-mini }
+oxplow.ai.roles:
+  summarize: { provider: openrouter, model: openai/gpt-5-mini }
 ```
 
-- Provider ids refer to each person's own `ai.yaml`; a role naming a
-  provider someone hasn't set up shows "AI provider X isn't set up" for them.
-- `OxplowConfig.ai_roles` holds them (a built-in name from
-  `oxplow_config::AI_ROLE_NAMES`, which a test keeps equal to
-  `BuiltinRole::ALL`, or a profile's `<namespace>/<name>`, checked for
-  shape only).
-- `AiService` gets an `OverridesSource` closure that reads the live config
-  on every resolve, so edits and `reload_config_from_disk` apply with
-  nothing to sync. Settings → AI shows such roles read-only
-  ("Set by this project", hover says where to change them): its editor
-  writes the global file, which the project value would override anyway.
+- Provider ids name entries in the effective `oxplow.ai.providers` array. A role
+  naming an unavailable provider shows “AI provider X isn't set up.”
+- `OxplowConfig.ai_roles` is the typed runtime projection. Core roles are from
+  `AI_ROLE_NAMES`; extension profiles use `<namespace>/<name>`.
+- `AiService.with_settings` reads through the shared store. Settings → AI keeps
+  its specialized controls; registry metadata and origins remain available in
+  `v_config_value`. Global edits may be shadowed by project or local overrides.
 
 | Role | Used for |
 |---|---|
@@ -128,8 +125,8 @@ an id, a description, a required `fallback` built-in role and optional
 `features` (`text | tool_calling | streaming | image`). So
 `oxplow_ai::config::Role` is open: `Builtin(BuiltinRole)` or
 `Profile { extension, name }`, written as one string (`summarize`,
-`review/review`) wherever a person sees it — `ai.yaml`,
-`project.yaml`'s `ai.roles`, Settings, `ai_call.role`, `ai_result.role`.
+`review/review`) wherever a person sees it — `global.yaml`,
+`project.yaml`'s `oxplow.ai.roles`, Settings, `ai_call.role`, `ai_result.role`.
 
 - **Naming.** Inside its own extension an author writes the bare id (a
   job request's `role`, a collector's `role=`); the host qualifies it
@@ -277,7 +274,7 @@ an id, a description, a required `fallback` built-in role and optional
 - **Rust kinds over Rig.** Every model provider is a Rust kind in
   `crates/oxplow-ai-rig`, and an `ai_provider` declaration names one with
   `provider: <kind>` (`oxplow_ai_rig::KINDS`; an unknown one is a load
-  error naming the known ones). The declaration gives the id `ai.yaml`'s
+  error naming the known ones). The declaration gives the id `global.yaml`'s
   `kind:` names, the title and `config: { baseUrl? }`, the URL an
   instance that names none uses. Foundation's ids are the kinds' names and
   its URLs are Rig's defaults (a test keeps them equal). Every kind but
@@ -410,7 +407,7 @@ an id, a description, a required `fallback` built-in role and optional
   working-in-this-repo.md "Builds and `target/`"), a local axum server
   standing in for a provider. `Services::in_memory` gets
   `MemorySecrets` and a config dir under the test project's `.oxplow/`, so
-  rpc/mcp tests never touch the real keychain or `ai.yaml`.
+  rpc/mcp tests never touch the real keychain or `global.yaml`.
 - `oxplow_app::ai_service` re-exports the `oxplow-ai` types the adapters
   need (`Role`, `ProviderConfig`, `Question`, …), so `oxplow-rpc`,
   `oxplow-tauri-ipc` and `oxplow-mcp` depend only on `oxplow-app`.
@@ -579,7 +576,8 @@ turn's prompt (`turn_kind`).
 
 - `v_ai_provider` (with `key_set`, never keys) and `v_ai_role` (every role's
   binding, what a call would use now, and whether its provider has a key),
-  read live: `ai.yaml`, `project.yaml` and the keychain change with no hook.
+  read live from registered effective settings and secure presence metadata;
+  local/project/global file changes refresh the runtime configuration.
 - `oxplow_ai_decide`: typed questions (`noul` / `choice` / `score`) about some
   text, on the `decide` role (an agent can't pick a costlier one) — a
   recorded computation (`AiCompute::decide`), returning `{ answers,

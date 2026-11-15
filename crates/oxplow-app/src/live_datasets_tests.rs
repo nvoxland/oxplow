@@ -70,8 +70,17 @@ async fn ai_roles_and_providers_are_read_live_and_never_show_a_key() {
     );
     assert!(!everything.contains("sk-very-secret"), "{everything}");
 
-    // Remove the key from the keychain behind the service's back.
-    fx.svc.secrets.delete("ts").unwrap();
+    // Remove through the shared settings API; the live model sees presence.
+    fx.svc
+        .commands
+        .run(
+            &oxplow_domain::Actor::Human,
+            "oxplow.config.unset",
+            json!({"key":crate::ai_service::provider_key_setting("ts"),"level":"global"}),
+            false,
+        )
+        .await
+        .unwrap();
     assert_eq!(
         rows(&fx, "SELECT key_set FROM v_ai_provider").await,
         vec![vec![json!(0)]]
@@ -124,8 +133,9 @@ async fn collector_state_and_credentials_are_read_live() {
     let fx = services_with_thread().await;
     let dir = fx.svc.layout.project_dir.join(".oxplow/extensions/acme");
     std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join("extension.yaml"), MANIFEST).unwrap();
-    std::fs::write(dir.join("sync.sh"), "#!/bin/sh\necho '[]'\n").unwrap();
+    crate::test_fixtures::write_settings_fixture(dir.join("extension.yaml"), MANIFEST).unwrap();
+    crate::test_fixtures::write_settings_fixture(dir.join("sync.sh"), "#!/bin/sh\necho '[]'\n")
+        .unwrap();
     crate::test_fixtures::activate(&fx.svc).await;
 
     let state =
@@ -235,7 +245,7 @@ async fn zones_show_what_each_rule_matches_in_the_worktree() {
     ] {
         let file = fx._dir.path().join(path);
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-        std::fs::write(file, body).unwrap();
+        crate::test_fixtures::write_settings_fixture(file, body).unwrap();
     }
     let none = rows(&fx, zone).await;
     assert_eq!(none.len(), 1, "{none:?}");
@@ -343,7 +353,7 @@ async fn rows_in(fx: &ThreadFixture, sql: &str, stream: i64) -> Vec<Vec<Value>> 
 async fn worktree_stream(fx: &ThreadFixture, branch: &str) -> (i64, std::path::PathBuf) {
     use oxplow_domain::stores::StreamStore as _;
     let project = fx._dir.path();
-    std::fs::write(project.join("seed.txt"), "seed").unwrap();
+    crate::test_fixtures::write_settings_fixture(project.join("seed.txt"), "seed").unwrap();
     crate::test_fixtures::commit_all(project, "seed");
     let wt = fx._dir.path().join(format!(
         "../{}-{branch}",
@@ -377,18 +387,25 @@ async fn worktree_stream(fx: &ThreadFixture, branch: &str) -> (i64, std::path::P
 #[tokio::test]
 async fn config_values_are_read_live_with_where_each_comes_from() {
     let fx = services_with_thread().await;
-    let key = "SELECT origin FROM v_config_value WHERE key = 'snapshotRetentionDays'";
+    let key = "SELECT origin FROM v_config_value WHERE key = 'oxplow.snapshots.retentionDays'";
     assert_eq!(rows(&fx, key).await, vec![vec![json!("default")]]);
+    std::fs::create_dir_all(&fx.svc.global_config_dir).unwrap();
     std::fs::write(
+        fx.svc.global_config_dir.join("global.yaml"),
+        "oxplow.snapshots.retentionDays: 7\n",
+    )
+    .unwrap();
+    assert_eq!(rows(&fx, key).await, vec![vec![json!("global")]]);
+    crate::test_fixtures::write_settings_fixture(
         fx._dir.path().join(".oxplow/project.yaml"),
-        "snapshotRetentionDays: 3\n",
+        "oxplow.snapshots.retentionDays: 3\n",
     )
     .unwrap();
     fx.svc.config.write().unwrap().snapshot_retention_days = 3;
     assert_eq!(
         rows(
             &fx,
-            "SELECT origin, value FROM v_config_value WHERE key = 'snapshotRetentionDays'"
+            "SELECT origin, value FROM v_config_value WHERE key = 'oxplow.snapshots.retentionDays'"
         )
         .await,
         vec![vec![json!("project"), json!("3")]]
@@ -396,7 +413,7 @@ async fn config_values_are_read_live_with_where_each_comes_from() {
     // The AI roles are settings too, documented like the rest.
     let roles = rows(
         &fx,
-        "SELECT doc FROM v_config_value WHERE key = 'ai.roles.main'",
+        "SELECT doc FROM v_config_value WHERE key = 'oxplow.ai.roles'",
     )
     .await;
     assert_eq!(roles.len(), 1);
@@ -414,9 +431,9 @@ async fn files_are_the_streams_worktrees() {
     let fx = services_with_thread().await;
     let (stream, wt) = worktree_stream(&fx, "side").await;
     std::fs::create_dir_all(fx._dir.path().join("src")).unwrap();
-    std::fs::write(fx._dir.path().join("src/a.rs"), "a").unwrap();
+    crate::test_fixtures::write_settings_fixture(fx._dir.path().join("src/a.rs"), "a").unwrap();
     std::fs::create_dir_all(wt.join("lib")).unwrap();
-    std::fs::write(wt.join("lib/b.rs"), "b").unwrap();
+    crate::test_fixtures::write_settings_fixture(wt.join("lib/b.rs"), "b").unwrap();
 
     let listing = "SELECT path, parent, name, kind FROM v_file WHERE path IN ('src', 'src/a.rs', 'lib', 'lib/b.rs') ORDER BY path";
     assert_eq!(
@@ -468,10 +485,10 @@ async fn a_folder_listing_reads_that_folder_alone() {
     std::fs::create_dir_all(root.join("src/deep")).unwrap();
     std::fs::create_dir_all(root.join("src/empty")).unwrap();
     std::fs::create_dir_all(root.join("src/skipped")).unwrap();
-    std::fs::write(root.join("src/a.rs"), "a").unwrap();
-    std::fs::write(root.join("src/deep/x.rs"), "x").unwrap();
-    std::fs::write(root.join("src/skipped/y.rs"), "y").unwrap();
-    std::fs::write(root.join(".gitignore"), "skipped/\n").unwrap();
+    crate::test_fixtures::write_settings_fixture(root.join("src/a.rs"), "a").unwrap();
+    crate::test_fixtures::write_settings_fixture(root.join("src/deep/x.rs"), "x").unwrap();
+    crate::test_fixtures::write_settings_fixture(root.join("src/skipped/y.rs"), "y").unwrap();
+    crate::test_fixtures::write_settings_fixture(root.join(".gitignore"), "skipped/\n").unwrap();
 
     let walked = "SELECT path, name, kind FROM v_file WHERE parent || '' = 'src' ORDER BY path";
     let expected = vec![
@@ -518,7 +535,7 @@ async fn a_folder_listing_reads_that_folder_alone() {
 async fn v_file_lists_local_by_default_and_fills_size_for_one_level() {
     let fx = services_with_thread().await;
     std::fs::create_dir_all(fx._dir.path().join("src")).unwrap();
-    std::fs::write(fx._dir.path().join("src/a.rs"), "hello").unwrap();
+    crate::test_fixtures::write_settings_fixture(fx._dir.path().join("src/a.rs"), "hello").unwrap();
 
     let walk = rows(
         &fx,
@@ -569,10 +586,10 @@ async fn v_file_lists_local_by_default_and_fills_size_for_one_level() {
 async fn v_file_lists_a_local_git_revision() {
     let fx = services_with_thread().await;
     let root = fx._dir.path();
-    std::fs::write(root.join("old.txt"), "old").unwrap();
+    crate::test_fixtures::write_settings_fixture(root.join("old.txt"), "old").unwrap();
     let sha = crate::test_fixtures::commit_all(root, "add old");
     std::fs::remove_file(root.join("old.txt")).unwrap();
-    std::fs::write(root.join("new.txt"), "new").unwrap();
+    crate::test_fixtures::write_settings_fixture(root.join("new.txt"), "new").unwrap();
 
     let at = rows(
         &fx,
@@ -608,8 +625,9 @@ async fn v_file_lists_the_extensions_filesystem() {
     let hash = "0123456789abcdef";
     let dir = crate::extension::extension_store::deployment_dir(fx._dir.path(), "acme", hash);
     std::fs::create_dir_all(dir.join("pages")).unwrap();
-    std::fs::write(dir.join("extension.yaml"), "name: acme\n").unwrap();
-    std::fs::write(dir.join("pages/p.yaml"), "x").unwrap();
+    crate::test_fixtures::write_settings_fixture(dir.join("extension.yaml"), "name: acme\n")
+        .unwrap();
+    crate::test_fixtures::write_settings_fixture(dir.join("pages/p.yaml"), "x").unwrap();
 
     let top = rows(
         &fx,
@@ -739,10 +757,10 @@ async fn branch_divergence_and_the_commits_between_are_read_live() {
     let (_, wt) = worktree_stream(&fx, "feature").await;
     let project = fx._dir.path();
     let split = fx.svc.vcs.resolve(project, "HEAD").await.unwrap();
-    std::fs::write(wt.join("seed.txt"), "seed, grown").unwrap();
-    std::fs::write(wt.join("feature.txt"), "f").unwrap();
+    crate::test_fixtures::write_settings_fixture(wt.join("seed.txt"), "seed, grown").unwrap();
+    crate::test_fixtures::write_settings_fixture(wt.join("feature.txt"), "f").unwrap();
     let on_feature = crate::test_fixtures::commit_all(&wt, "feature work");
-    std::fs::write(project.join("seed.txt"), "seed, pruned").unwrap();
+    crate::test_fixtures::write_settings_fixture(project.join("seed.txt"), "seed, pruned").unwrap();
     let on_main = crate::test_fixtures::commit_all(project, "main work");
 
     assert_eq!(
@@ -958,8 +976,8 @@ async fn a_collector_is_a_v_collector_row_with_its_standing() {
     let fx = services_with_thread().await;
     let dir = fx.svc.layout.project_dir.join(".oxplow/extensions/acme");
     std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join("extension.yaml"), MANIFEST).unwrap();
-    std::fs::write(
+    crate::test_fixtures::write_settings_fixture(dir.join("extension.yaml"), MANIFEST).unwrap();
+    crate::test_fixtures::write_settings_fixture(
         dir.join("sync.sh"),
         "#!/bin/sh\necho '{\"entities\":{\"item\":[]}}'\n",
     )

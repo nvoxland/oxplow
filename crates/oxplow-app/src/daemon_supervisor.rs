@@ -555,7 +555,8 @@ mod tests {
     fn end_own_group_ends_what_runs_in_the_daemons_group() {
         if let Ok(pidfile) = std::env::var("OXPLOW_TEST_END_OWN_GROUP") {
             let sleeper = Command::new("sleep").arg("60").spawn().unwrap();
-            std::fs::write(&pidfile, sleeper.id().to_string()).unwrap();
+            crate::test_fixtures::write_settings_fixture(&pidfile, sleeper.id().to_string())
+                .unwrap();
             end_own_group();
             std::process::exit(0);
         }

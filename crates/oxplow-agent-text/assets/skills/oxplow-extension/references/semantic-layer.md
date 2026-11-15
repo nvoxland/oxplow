@@ -20,11 +20,12 @@
   a particular store's own tables.
 - `oxplow_query_sql` runs one read-only `SELECT`/`WITH`. Iterate on the query
   here until the rows are what the user wants, before writing any files.
-- The project's architectural zones are `v_zone` (each rule of the `zones:` table
+- The project's architectural zones are `v_zone` (each rule of the `oxplow.zones` setting
   in `.oxplow/project.yaml`, in order, with the files it claims in the worktree,
   then a closing `other` row) and `v_zone_unmatched` (paths no rule matched);
-  both are read live. Read the rules with `oxplow.config.get { key: "zones" }`,
-  change them with `oxplow.config.set` (the whole ordered table).
+  both are read live. Read the rules with `oxplow.config.get { key: "oxplow.zones" }`,
+  change them with `oxplow.config.set { key: "oxplow.zones", value: […], level: "project" }`
+  (the whole ordered table).
 - Also read live, for the stream a page runs for (its `stream_id`; the
   primary checkout's without one): `v_file` (the files and folders
   of a filesystem: the worktree's by default, with each file's change;
@@ -34,8 +35,8 @@
   `modified_at`; each row's `uri` opens it) and `v_agent_conversation` (every harness's saved conversations
   begun there; join `v_agent_session` on `resume_session_id = native_id`).
   And for the project: `v_agent_harness` (the registered agents, those
-  `agents:` names first, `enabled` and `position`), `v_config_value` (every setting's value now and
-  where it comes from) and `v_vcs_workspace` (the repository's working
+  `oxplow.agents` names first, `enabled` and `position`), `v_config_value` (registry definitions with title, category, schema,
+  redacted effective values and local/project/global/default origins) and `v_vcs_workspace` (the repository's working
   copies and the stream in each; `stream_id IS NULL` is adoptable). A stream's
   terminals — shells in its worktree, in order — are `v_terminal` (open one with
   `oxplow.terminal.open`). A page

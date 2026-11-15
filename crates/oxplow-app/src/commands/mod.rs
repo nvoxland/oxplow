@@ -43,6 +43,7 @@ pub mod ops;
 mod proposals;
 pub mod provider_instances;
 mod record;
+mod settings_commands;
 pub use record::tracking_failed_audit;
 pub mod action_point_offers;
 pub mod ref_commands;
@@ -1243,8 +1244,20 @@ impl CommandBus {
                     .await
                     .map_err(CommandError::from)??
             };
-        self.run_prepared(run, command, input, confirmed, origin)
-            .await
+        let result = self
+            .run_prepared(run, command, input, confirmed, origin)
+            .await;
+        if result.is_err() && run.trace().summary().contains_key("config.secret") {
+            if matches!(&result, Err(CommandError::Denied { .. })) {
+                return Err(CommandError::Denied {
+                    reason: "private configuration access was denied".into(),
+                });
+            }
+            return Err(CommandError::Failed {
+                message: "secret configuration consumer failed".into(),
+            });
+        }
+        result
     }
 
     /// The pipeline (`.context/commands.md` "Running a command") for a
@@ -1509,7 +1522,9 @@ impl CommandBus {
                             depth: 0,
                             trace: &trace,
                         };
-                        let out = match handler(&ctx, input_c.clone()) {
+                        let handled = handler(&ctx, input_c.clone());
+                        run_c.trace().add(&trace.summary());
+                        let out = match handled {
                             // A call that changed nothing: its answer, its
                             // transaction rolled back.
                             Ok(out) if out.unchanged && matches!(origin_tx, RunOrigin::Call) => {
@@ -1735,7 +1750,14 @@ impl CommandBus {
         }
         let (ended, error) = match failed {
             None => (oxplow_domain::run::Outcome::Ok, None),
-            Some(e) => (oxplow_domain::run::Outcome::Failed, Some(e.to_string())),
+            Some(e) => (
+                oxplow_domain::run::Outcome::Failed,
+                Some(if run.trace().summary().contains_key("config.secret") {
+                    "secret configuration consumer failed".into()
+                } else {
+                    e.to_string()
+                }),
+            ),
         };
         let run = run.clone();
         if let Err(e) = self

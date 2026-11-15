@@ -44,7 +44,7 @@ intent:
     - name: task-state-tells-the-agent-its-task-whats-next-and-what-done-means
       input: { context: task-state }
       expect: the thread's task in progress, the next three and the definition of done
-permissions: ['commands:oxplow.extension_store.write', sql.read, agent.write]
+permissions: ['commands:oxplow.extension_store.write', 'commands:oxplow.config.set', sql.read, agent.write]
 storage: { sqlite: true }
 datasets:
   - name: ready_queue
@@ -75,10 +75,14 @@ configuration:
         description: How this project's agents use oxtask's tasks.
         properties:
           workflow:
+            title: Task workflow
+            x-category: tasks
             type: string
             enum: [off, person_files, agent_tracks, custom]
             description: "off: oxtask tells agents nothing about tasks (the tracker's own commands stay); person_files: the agent works the tasks people file and assign; agent_tracks: the agent takes or files a task for each piece of work; custom: the project's own extension says how."
           definitionOfDone:
+            title: Definition of done
+            x-category: tasks
             type: string
             maxLength: 1000
             description: "What done means here, one item per line (tests pass, committed, …); the agent checks it before closing a task. Empty for none."
@@ -115,20 +119,14 @@ collectors:
     needs: [store.sql]
     on: [start, { sqlite: own }]
 commands:
-  # oxtask's settings (`configuration:` above): read with their stamps,
-  # written as a compare-and-swap on them.
+  # oxtask's settings (`configuration:` above): read as a nested projection of the shared registry.
   - name: settings.read
-    summary: The effective settings of oxtask (the task workflow and the definition of done), where each came from, and the stamps a write needs.
+    summary: The effective settings of oxtask (the task workflow and the definition of done), where each came from.
     scope: extension_config.read
     op: snapshot
     example: {}
-  - name: settings.write
-    summary: Set the project or personal settings of oxtask (a compare-and-swap on the stamps `oxtask.settings.read` returns).
-    scope: extension_config.write
-    op: compare_exchange
-    example: {"schema_version": 1, "project": {"expected": {"schema_version": 1, "revision": 0}, "values": {"tasks": {"workflow": "person_files"}}}, "personal": null}
   - name: tasks.set_workflow
-    summary: "Choose how this project's agents use tasks (off, person files and the agent works them, the agent tracks everything, or the project's own way) and what \"done\" means here, for the project. The task state and the reminder follow at the next prompt; the skills offered change for agent sessions started after it. A person's own setting of the workflow, when there is one, still wins for them (the result says so)."
+    summary: "Choose how this project's agents use tasks (off, person files and the agent works them, the agent tracks everything, or the project's own way) and what \"done\" means here, for the project. The task state and the reminder follow at the next prompt; the skills offered change for agent sessions started after it. A local setting of the workflow, when there is one, still wins for them (the result says so)."
     input_schema:
       type: object
       properties:
@@ -138,7 +136,7 @@ commands:
       additionalProperties: false
     example: {"workflow": "person_files", "definition_of_done": "Tests pass.\nCommitted."}
     entry: handlers/set_workflow.star
-    needs: [extension_config.read]
+    needs: [config.read]
     access: write
   - name: task.create
     summary: File a task. The result names its id (tsk and a number); undo deletes it. Its author is who runs the command.

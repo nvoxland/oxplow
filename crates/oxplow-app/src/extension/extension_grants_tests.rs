@@ -13,7 +13,7 @@ use crate::test_fixtures::{services_with_thread, ThreadFixture};
 fn write(root: &Path, rel: &str, body: &str) {
     let path = root.join(rel);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(path, body).unwrap();
+    crate::test_fixtures::write_settings_fixture(path, body).unwrap();
 }
 
 /// A command `read.<name>` whose script is `<name>.star`.
@@ -259,7 +259,7 @@ mod program_collectors {
     fn script(root: &Path, rel: &str, body: &str) {
         let path = root.join(".oxplow/extensions/acme").join(rel);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, body).unwrap();
+        crate::test_fixtures::write_settings_fixture(&path, body).unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
 
@@ -314,11 +314,7 @@ mod program_collectors {
         assert!(super::run(&fx, "acme.read.all").await.is_ok());
         go(&fx).await.unwrap();
 
-        write(
-            &root,
-            ".oxplow/personal.yaml",
-            "disableExtensions: [acme]\n",
-        );
+        write(&root, ".oxplow/local.yaml", "disableExtensions: [acme]\n");
         crate::test_fixtures::activate(&fx.svc).await;
         assert!(
             super::run(&fx, "acme.read.all").await.is_err(),
@@ -334,7 +330,7 @@ mod program_collectors {
         );
 
         // Enabling it again restores both.
-        std::fs::remove_file(root.join(".oxplow/personal.yaml")).unwrap();
+        std::fs::remove_file(root.join(".oxplow/local.yaml")).unwrap();
         crate::test_fixtures::activate(&fx.svc).await;
         assert!(super::run(&fx, "acme.read.all").await.is_ok());
         go(&fx).await.unwrap();

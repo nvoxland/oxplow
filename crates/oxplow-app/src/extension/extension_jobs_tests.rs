@@ -49,7 +49,7 @@ fn project() -> tempfile::TempDir {
     crate::test_fixtures::init_git_repo(dir.path());
     let ext = dir.path().join(".oxplow/extensions/triage");
     std::fs::create_dir_all(&ext).unwrap();
-    std::fs::write(ext.join("extension.yaml"), MANIFEST).unwrap();
+    crate::test_fixtures::write_settings_fixture(ext.join("extension.yaml"), MANIFEST).unwrap();
     dir
 }
 

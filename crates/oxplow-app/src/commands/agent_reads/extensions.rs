@@ -179,7 +179,7 @@ mod tests {
         let elsewhere = tempfile::tempdir().unwrap();
         let ext = elsewhere.path().join(".oxplow/extensions/mine");
         std::fs::create_dir_all(&ext).unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             ext.join("extension.yaml"),
             "manifest: 2\nname: mine\nintent:\n  purpose: test\n",
         )
@@ -243,7 +243,7 @@ mod tests {
         let write = |dir: &Path, rel: &str, text: &str| {
             let path = dir.join(rel);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            std::fs::write(path, text).unwrap();
+            crate::test_fixtures::write_settings_fixture(path, text).unwrap();
         };
         let manifest = "manifest: 2\nname: acme\nintent:\n  purpose: test\n";
         write(&ext, "extension.yaml", manifest);

@@ -802,6 +802,9 @@ pub enum ObserverFile {
 #[serde(deny_unknown_fields)]
 pub struct FilesFile {
     pub files: String,
+    /// The registered files root to observe; absent means the project.
+    #[serde(default)]
+    pub root: Option<String>,
 }
 
 /// `{ sqlite: own }` or `{ sqlite: .beads/beads.db }`: a SQLite file

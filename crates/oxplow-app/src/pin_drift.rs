@@ -288,7 +288,11 @@ mod tests {
 
         // Drifted: disk differs from the pinned blob.
         std::fs::create_dir_all(project.join("src")).unwrap();
-        std::fs::write(project.join("src/x.rs"), "alpha\nBETA\ngamma\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            project.join("src/x.rs"),
+            "alpha\nBETA\ngamma\n",
+        )
+        .unwrap();
         let drift = compute_pin_drift(
             &page_refs,
             &snapshots,
@@ -305,7 +309,7 @@ mod tests {
         assert!(d.contains("-beta") && d.contains("+BETA"), "diff: {d}");
 
         // Unchanged: disk matches the pinned blob.
-        std::fs::write(project.join("src/x.rs"), pinned).unwrap();
+        crate::test_fixtures::write_settings_fixture(project.join("src/x.rs"), pinned).unwrap();
         let same = compute_pin_drift(
             &page_refs,
             &snapshots,

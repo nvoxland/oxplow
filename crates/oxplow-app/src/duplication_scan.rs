@@ -206,8 +206,8 @@ mod tests {
     async fn a_second_scan_reuses_the_cache_and_an_edit_is_seen() {
         let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
-        std::fs::write(root.join("a.rs"), BODY).unwrap();
-        std::fs::write(root.join("b.rs"), BODY).unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("a.rs"), BODY).unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("b.rs"), BODY).unwrap();
         assert_eq!(f.svc.dup_cache.held(), (0, 0));
         let first = scan(&f).await;
         let held = f.svc.dup_cache.held();
@@ -216,7 +216,11 @@ mod tests {
         assert_eq!(first, second);
         assert_eq!(f.svc.dup_cache.held(), held, "nothing new to keep");
 
-        std::fs::write(root.join("b.rs"), "pub fn unrelated() -> i32 {\n    1\n}\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            root.join("b.rs"),
+            "pub fn unrelated() -> i32 {\n    1\n}\n",
+        )
+        .unwrap();
         let third = scan(&f).await;
         assert!(third.is_empty(), "{third:?}");
     }
@@ -227,8 +231,8 @@ mod tests {
     async fn a_scan_records_its_findings_and_no_facts() {
         let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
-        std::fs::write(root.join("a.rs"), BODY).unwrap();
-        std::fs::write(root.join("b.rs"), BODY).unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("a.rs"), BODY).unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("b.rs"), BODY).unwrap();
         let findings = scan(&f).await;
         assert!(findings.iter().any(|f| f.path == "a.rs"), "{findings:?}");
 
@@ -263,8 +267,8 @@ mod tests {
         let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
-        std::fs::write(root.join("a.rs"), BODY).unwrap();
-        std::fs::write(root.join("b.rs"), BODY).unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("a.rs"), BODY).unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("b.rs"), BODY).unwrap();
         let sha = crate::test_fixtures::commit_all(&root, "copies");
         let stream = svc.stream_store.list().await.unwrap()[0].id;
         let snap = svc.snapshot_store.create_snapshot(stream).await.unwrap();
@@ -285,8 +289,8 @@ mod tests {
                 .await
                 .unwrap();
         }
-        std::fs::write(root.join("a.rs"), "fn a() {}\n").unwrap();
-        std::fs::write(root.join("b.rs"), "fn b() {}\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("a.rs"), "fn a() {}\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("b.rs"), "fn b() {}\n").unwrap();
         let recorder = DuplicationRecorder::new(svc);
         for rev in [Revision::git(sha), Revision::Snapshot(snap)] {
             let findings = recorder

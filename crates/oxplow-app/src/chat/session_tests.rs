@@ -781,7 +781,7 @@ async fn an_fs_write_denial_reaches_the_agent_and_an_allowed_one_lands() {
 async fn fs_reads_are_served() {
     let mut rig = open(Host::default()).await;
     let p = rig.dir.path().join("r.txt");
-    std::fs::write(&p, "contents").unwrap();
+    crate::test_fixtures::write_settings_fixture(&p, "contents").unwrap();
     rig.turn(&format!("fake:fsread {}", p.display())).await;
     assert_eq!(rig.agent_text(), vec!["read: contents".to_string()]);
 }
@@ -1004,7 +1004,8 @@ async fn fs_reads_and_writes_stay_inside_the_sessions_worktree() {
     let mut rig = open(Host::default()).await;
     let outside = tempfile::tempdir().unwrap();
     let target = outside.path().join("x.txt");
-    std::fs::write(outside.path().join("secret.txt"), "s3cret").unwrap();
+    crate::test_fixtures::write_settings_fixture(outside.path().join("secret.txt"), "s3cret")
+        .unwrap();
     // `..` out of the worktree is outside too.
     let escape_name = format!(
         "escape-{}.txt",

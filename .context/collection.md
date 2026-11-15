@@ -112,17 +112,20 @@ section for the column.
   branch and commits are read there, never in the primary
   checkout.
   The UI builds the test tree from `classname`+`name`.
-- **`testing:` block** (`TestingConfig`, `crates/oxplow-config/src/lib.rs`):
-  `command`, `fastCommand`, `runPatterns`, `analysisPatterns`,
-  `testPaths`, `agentHint` — how the project's tests run, read by the
-  detector and the agent prompt. `testPaths` is a list of globs (`spec/**`,
+- **Registered testing settings** (`TestingConfig` is their typed projection):
+  `oxplow.testing.command`, `oxplow.testing.fastCommand`,
+  `oxplow.testing.runPatterns`, `oxplow.testing.analysisPatterns`,
+  `oxplow.testing.testPaths`, `oxplow.testing.agentHint` — how the project's tests
+  run, read by the detector and the agent prompt. These are flat keys in the
+  shared local/project/global settings maps, resolved independently with their
+  registered defaults. `testPaths` is a list of globs (`spec/**`,
   `**/it/**`; repo-relative, `*` stays within a directory) naming test
   files on top of the built-in conventions (`.test.` / `.spec.` files,
   `test/` and `tests/` directories, `test_*.py|rs`, `*_test.go|clj|cljc`): change
   analysis reads them for `is_test` on its next run (stored changes aren't
-  recomputed), and a bad glob fails the config load. Human-only (its hint steers every agent). The
-  `collection:` block is gone: the file
-  rejects it as an unknown key (`a_collection_block_is_an_unknown_key`).
+  recomputed), and a bad glob fails validation. Writes use the shared config
+  APIs with an explicit level. The former nested `testing:`/`collection:` file
+  blocks are not the settings format.
 
   **`fastCommand` ** is the coverage-free counterpart to
   `command`, for the red/green loop. It must still emit a test report, but
@@ -143,8 +146,8 @@ section for the column.
 - **`/oxplow:configure` command** + **`oxplow-collection` skill** (assets in
   `crates/oxplow-agent-text/`). `/configure` does two durable things: instruments
   the project's test tooling to emit a standard-format report at a stable
-  path, and records the `testing:` block in
-  `.oxplow/project.yaml` and writes the report collectors into the project's
+  path, records the `oxplow.testing.*` keys in
+  `.oxplow/project.yaml`, and writes the report collectors into the project's
   extension (`.oxplow/extensions/project/extension.yaml`). The standing skill keeps
   coverage flowing after configure (run tests through the report-emitting
   commands — which, and when, is the agent's call; never type the numbers)
@@ -536,10 +539,10 @@ worker's counting allocator (`worker::MemoryCap`, exit code 3,
 `CollectError::MemoryExceeded`); a worker whose host is gone exits on its
 own (Unix: its parent changed; Windows: it waits on a handle to the
 host's pid, which the host passes as `--parent-pid`, and leaves at once
-without one). At most `scripts.maxConcurrent` run at once (default `min(4,
+without one). At most `oxplow.scripts.maxConcurrent` run at once (default `min(4,
 available parallelism)`); one more waits for a slot (counted in its
-ceiling). `scripts.memoryMb` is the cap (default 512). Both are
-person-only keys, applied at boot and on change
+ceiling). `oxplow.scripts.memoryMb` is the cap (default 512). Both are
+registered settings supporting every level, applied at boot and on change
 (`config_reactors::apply_script_limits`). A finished run reports its CPU
 time and peak bytes (`workers::Ran`). The engines themselves
 (`runtime::run_jaq`, `run_starlark_inner`) run only inside the worker;

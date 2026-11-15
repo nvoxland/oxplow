@@ -207,7 +207,9 @@ active (`to` a hash or its start; a bundled one with nothing older returns
 to the shipped deployment). `oxplow.extension.enable` / `disable` write the
 person's lists (enable deploys one with no deployment here).
 `oxplow.extension.remove` takes it out of both lists, stops it, forgets its
-deployments, private state and settings, and never deletes its source.
+deployments and private state, and never deletes its source. Registered setting
+overrides remain at their selected levels; removing an extension removes its
+active definitions, not the stored overrides.
 
 **Builds.** `build: { run, output, exclude? }` is for a component or a
 program that needs a tool to make (TypeScript, a bundler). Deploy runs
@@ -355,9 +357,9 @@ One test per story: a redeploy that changes a command, a dataset, a
 collector and an effect (the old collector's rows stay); disable then enable
 (the dataset, page, command and an importing consumer go and come back, a
 paced collector run that was due runs after enable); rollback (the earlier
-version returns, private state outlives it, a configuration layer written at
-a newer schema fails closed until the rolled-back version's command writes
-it again at its own schema); a deploy that loads but does not activate (the running
+version returns and private state outlives it; a registered setting remains
+readable when the earlier schema accepts it, while an incompatible value is
+refused until a generic config.set replaces it with a valid value); a deploy that loads but does not activate (the running
 version keeps working and the error says why); private state read by the
 next version; a producer's export changing under two consumers (the
 unversioned one keeps working; the one pinned to the old contract is held

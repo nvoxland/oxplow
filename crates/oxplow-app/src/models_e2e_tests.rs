@@ -559,7 +559,7 @@ async fn a_model_need_is_met_while_the_model_has_a_live_store() {
     // oxtask is on by default and fills the model: turned off, no store does.
     write(
         fx._dir.path(),
-        ".oxplow/personal.yaml",
+        ".oxplow/local.yaml",
         "disableExtensions: [oxtask]\n",
     );
     crate::test_fixtures::activate(&fx.svc).await;

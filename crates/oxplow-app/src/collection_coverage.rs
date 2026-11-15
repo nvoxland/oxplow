@@ -147,12 +147,13 @@ mod tests {
         let fx = crate::test_fixtures::services_with_thread().await;
         let dir = fx.svc.layout.project_dir.join(".oxplow/extensions/my-gh");
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             dir.join("extension.yaml"),
             "manifest: 2\nname: my-gh\nintent:\n  purpose: test\npermissions: [process.run]\ncollectors:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int, title: text } }\n",
         )
         .unwrap();
-        std::fs::write(dir.join("sync.sh"), "#!/bin/sh\necho '{}'\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(dir.join("sync.sh"), "#!/bin/sh\necho '{}'\n")
+            .unwrap();
         fx.svc.extension_catalog.changed();
         crate::test_fixtures::activate_with_problems(&fx.svc).await;
         fx
@@ -215,7 +216,7 @@ mod tests {
             fx.svc.sql.run(query()).await.unwrap().generation,
             Some(generation.clone())
         );
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             fx.svc
                 .layout
                 .project_dir

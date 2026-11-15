@@ -362,13 +362,13 @@ mod tests {
     ) -> crate::vocabulary_reactor::VocabularyErrors {
         let dir = svc.layout.project_dir.join(".oxplow/extensions/work");
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             dir.join("extension.yaml"),
             format!("{HEAD}collectors:\n{collectors}"),
         )
         .unwrap();
         for (name, body) in files {
-            std::fs::write(dir.join(name), body).unwrap();
+            crate::test_fixtures::write_settings_fixture(dir.join(name), body).unwrap();
         }
         crate::test_fixtures::activate_with_problems(svc).await
     }
@@ -759,18 +759,18 @@ mod tests {
                 )
             })
             .collect();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             dir.join("extension.yaml"),
             format!("manifest: 2\nname: acme-pr\nintent: {{ purpose: t, origin: null, examples: [] }}\nevent_types:\n  types:\n{types}collectors:\n{collectors}"),
         )
         .unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             dir.join("number.json"),
             r#"{"type": "object", "required": ["number"], "properties": {"number": {"type": "integer"}}}"#,
         )
         .unwrap();
         for (name, body) in files {
-            std::fs::write(dir.join(name), body).unwrap();
+            crate::test_fixtures::write_settings_fixture(dir.join(name), body).unwrap();
         }
         crate::test_fixtures::activate_with_problems(svc).await;
     }

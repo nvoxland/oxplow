@@ -126,7 +126,7 @@ mod tests {
     fn a_vcs_row_reads_its_committed_object() {
         let dir = tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
-        std::fs::write(dir.path().join("f.txt"), "git body").unwrap();
+        crate::test_fixtures::write_settings_fixture(dir.path().join("f.txt"), "git body").unwrap();
         crate::test_fixtures::commit_all(dir.path(), "c");
         let content = reader(dir.path());
         let oid = content.objects().id_of(b"git body").0;

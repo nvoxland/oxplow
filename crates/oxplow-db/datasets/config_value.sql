@@ -1,4 +1,11 @@
 SELECT CAST(NULL AS TEXT) AS key, CAST(NULL AS TEXT) AS value, CAST(NULL AS TEXT) AS origin,
        CAST(NULL AS TEXT) AS extension, CAST(NULL AS TEXT) AS doc,
-       CAST(NULL AS TEXT) AS schema
+       CAST(NULL AS TEXT) AS schema,
+       CAST(NULL AS TEXT) AS title,
+       CAST(NULL AS TEXT) AS category,
+       CAST(NULL AS INTEGER) AS secret,
+       CAST(NULL AS INTEGER) AS is_set,
+       CAST(NULL AS TEXT) AS owner,
+       CAST(NULL AS INTEGER) AS restart_required,
+       CAST(NULL AS TEXT) AS ui
 WHERE 0

@@ -648,7 +648,7 @@ mod tests {
             thread_id: Some(second),
             stream_id: None,
         };
-        let set = |v: i64| json!({ "key": "metricRetentionDays", "value": v });
+        let set = |v: i64| json!({ "key": "oxplow.metrics.retentionDays", "value": v, "level": "project" });
         run(&fx, &agent(&fx), "oxplow.config.set", set(30))
             .await
             .unwrap();

@@ -3797,7 +3797,7 @@ pub(crate) mod test_support {
             manifest.push_str(entry);
             manifest.push('\n');
         }
-        std::fs::write(dir.join("extension.yaml"), manifest).unwrap();
+        crate::test_fixtures::write_settings_fixture(dir.join("extension.yaml"), manifest).unwrap();
     }
 }
 
@@ -4310,7 +4310,7 @@ mod tests {
             // The window's start snapshot: src/foo.rs as `a b c`.
             let foo = project_dir.join("src/foo.rs");
             std::fs::create_dir_all(project_dir.join("src")).unwrap();
-            std::fs::write(&foo, "a\nb\nc\n").unwrap();
+            crate::test_fixtures::write_settings_fixture(&foo, "a\nb\nc\n").unwrap();
             capture.mark_dirty(foo.clone(), oxplow_fs_watch::WatchEventKind::Other);
             let snap_id = capture
                 .request_snapshot(oxplow_domain::snapshot::SnapshotTrigger::TurnEnd)
@@ -4323,19 +4323,24 @@ mod tests {
 
             // The agent's edit, on disk only — line 2 changed, line 4 added.
             // A coverage run takes the snapshot it measured.
-            std::fs::write(&foo, NEW_FOO).unwrap();
+            crate::test_fixtures::write_settings_fixture(&foo, NEW_FOO).unwrap();
             capture.mark_dirty(foo, oxplow_fs_watch::WatchEventKind::Other);
             // Optional git repo + base commit so HEAD has a parent.
             if git_init {
                 git_in(&project_dir, &["init", "-q"]);
-                std::fs::write(project_dir.join("README.md"), "base\n").unwrap();
+                crate::test_fixtures::write_settings_fixture(
+                    project_dir.join("README.md"),
+                    "base\n",
+                )
+                .unwrap();
                 git_in(&project_dir, &["add", "README.md"]);
                 git_commit(&project_dir, "base");
             }
 
             let cfg = oxplow_config::load_project_config(&project_dir).unwrap();
             if let Some(xml) = report_xml {
-                std::fs::write(project_dir.join("coverage.xml"), xml).unwrap();
+                crate::test_fixtures::write_settings_fixture(project_dir.join("coverage.xml"), xml)
+                    .unwrap();
                 super::super::test_support::write_project_extension(
                     &project_dir,
                     &[super::super::test_support::report_collector(
@@ -4477,7 +4482,8 @@ mod tests {
         async fn diff_coverage_ignores_edits_after_the_run() {
             let h = build(Some(COBERTURA_50PCT)).await;
             sync_coverage(&h).await;
-            std::fs::write(h.tmp.path().join("src/foo.rs"), "x\n").unwrap();
+            crate::test_fixtures::write_settings_fixture(h.tmp.path().join("src/foo.rs"), "x\n")
+                .unwrap();
             let pct = diff_pct(&h).await.expect("a diff");
             assert!((pct - 50.0).abs() < 1e-6, "got {pct}");
         }
@@ -4519,7 +4525,11 @@ mod tests {
             let h = build(Some(COBERTURA_50PCT)).await;
             std::fs::remove_file(h.tmp.path().join("coverage.xml")).unwrap();
             let worktree = tempfile::tempdir().unwrap();
-            std::fs::write(worktree.path().join("coverage.xml"), COBERTURA_50PCT).unwrap();
+            crate::test_fixtures::write_settings_fixture(
+                worktree.path().join("coverage.xml"),
+                COBERTURA_50PCT,
+            )
+            .unwrap();
             // A worktree is a checkout of the repo: it has the project extension.
             super::super::test_support::write_project_extension(
                 worktree.path(),
@@ -4632,7 +4642,8 @@ mod tests {
         async fn coverage_analysis_and_nudge_captures_carry_the_tools_turn() {
             const ESLINT: &str = r#"[{"filePath":"src/a.ts","messages":[{"ruleId":"r","severity":2,"message":"m","line":1,"column":1}]}]"#;
             let h = build(Some(COBERTURA_50PCT)).await;
-            std::fs::write(h.tmp.path().join("eslint.json"), ESLINT).unwrap();
+            crate::test_fixtures::write_settings_fixture(h.tmp.path().join("eslint.json"), ESLINT)
+                .unwrap();
             declare(
                 &h,
                 vec![
@@ -4744,7 +4755,11 @@ mod tests {
     <line number="1" hits="1"/></lines></class>
 </classes>"#;
             let absolute = absolute.replace("</classes>", outside);
-            std::fs::write(h.tmp.path().join("coverage.xml"), absolute).unwrap();
+            crate::test_fixtures::write_settings_fixture(
+                h.tmp.path().join("coverage.xml"),
+                absolute,
+            )
+            .unwrap();
             sync_coverage(&h).await;
 
             let pct = diff_pct(&h).await.expect("a diff");
@@ -4900,7 +4915,11 @@ mod tests {
   </class>
 </classes></package></packages></coverage>"#;
             let h = build(None).await;
-            std::fs::write(h.tmp.path().join("cov.xml"), COBERTURA_BF).unwrap();
+            crate::test_fixtures::write_settings_fixture(
+                h.tmp.path().join("cov.xml"),
+                COBERTURA_BF,
+            )
+            .unwrap();
             declare(
                 &h,
                 vec![report_collector(
@@ -4958,8 +4977,8 @@ mod tests {
   </class>
 </classes></package></packages></coverage>"#;
             let h = build(None).await;
-            std::fs::write(h.tmp.path().join("a.xml"), A).unwrap();
-            std::fs::write(h.tmp.path().join("b.xml"), B).unwrap();
+            crate::test_fixtures::write_settings_fixture(h.tmp.path().join("a.xml"), A).unwrap();
+            crate::test_fixtures::write_settings_fixture(h.tmp.path().join("b.xml"), B).unwrap();
             declare(
                 &h,
                 vec![
@@ -6747,8 +6766,13 @@ mod tests {
         #[tokio::test]
         async fn a_run_reads_only_its_on_run_collectors() {
             let h = build(None).await;
-            std::fs::write(h.tmp.path().join("tests.xml"), JUNIT_ONE).unwrap();
-            std::fs::write(h.tmp.path().join("clippy.json"), CLIPPY_JSON).unwrap();
+            crate::test_fixtures::write_settings_fixture(h.tmp.path().join("tests.xml"), JUNIT_ONE)
+                .unwrap();
+            crate::test_fixtures::write_settings_fixture(
+                h.tmp.path().join("clippy.json"),
+                CLIPPY_JSON,
+            )
+            .unwrap();
             declare(
                 &h,
                 vec![
@@ -6777,7 +6801,8 @@ mod tests {
         #[tokio::test]
         async fn a_report_collector_run_is_recorded() {
             let h = build(None).await;
-            std::fs::write(h.tmp.path().join("tests.xml"), JUNIT_ONE).unwrap();
+            crate::test_fixtures::write_settings_fixture(h.tmp.path().join("tests.xml"), JUNIT_ONE)
+                .unwrap();
             declare(
                 &h,
                 vec![report_collector(
@@ -6840,13 +6865,17 @@ mod tests {
             let ext_dir = dir.join(".oxplow/extensions/project");
             std::fs::create_dir_all(ext_dir.join("tools")).unwrap();
             let program = ext_dir.join("tools/parse.sh");
-            std::fs::write(
+            crate::test_fixtures::write_settings_fixture(
                 &program,
                 "#!/bin/sh\ncat >/dev/null\necho '{\"suites\":[{\"name\":\"s\",\"cases\":[{\"classname\":\"c\",\"name\":\"t\",\"status\":\"passed\"}]}]}'\n",
             )
             .unwrap();
             std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
-            std::fs::write(dir.join("out.txt"), "whatever the tool wrote").unwrap();
+            crate::test_fixtures::write_settings_fixture(
+                dir.join("out.txt"),
+                "whatever the tool wrote",
+            )
+            .unwrap();
             let entry = "- { id: tests.parse, records: tests, runtime: exec, entry: tools/parse.sh, report: { path: out.txt }, on: { run: test } }";
             let value: serde_yaml::Value = serde_yaml::from_str(entry).unwrap();
             let (_, errors) = oxplow_config::collectors::parse_collectors(
@@ -6888,7 +6917,11 @@ mod tests {
         #[tokio::test]
         async fn three_failed_parses_disable_the_collector() {
             let h = build(None).await;
-            std::fs::write(h.tmp.path().join("tests.xml"), "<testsuites><testcase").unwrap();
+            crate::test_fixtures::write_settings_fixture(
+                h.tmp.path().join("tests.xml"),
+                "<testsuites><testcase",
+            )
+            .unwrap();
             declare(
                 &h,
                 vec![report_collector(
@@ -6915,7 +6948,8 @@ mod tests {
             }
             assert!(health.disabled_reason(&key).await.unwrap().is_some());
             // A good report now isn't read: the collector is off.
-            std::fs::write(h.tmp.path().join("tests.xml"), JUNIT_ONE).unwrap();
+            crate::test_fixtures::write_settings_fixture(h.tmp.path().join("tests.xml"), JUNIT_ONE)
+                .unwrap();
             assert!(run_reads(&h, RunKind::Test).await.tests().is_none());
             assert!(matches!(
                 h.service
@@ -7119,7 +7153,7 @@ mod tests {
             // exercises exactly the branch that suppresses the nudge
             // (produced_report is true).
             let h = build(None).await;
-            std::fs::write(
+            crate::test_fixtures::write_settings_fixture(
                 h.tmp.path().join("tests.xml"),
                 r#"<testsuites><testsuite name="suite"><testcase classname="c" name="t1"/></testsuite></testsuites>"#,
             )
@@ -7256,8 +7290,10 @@ mod tests {
         #[tokio::test]
         async fn a_run_whose_collector_failed_says_why() {
             let h = build(None).await;
-            std::fs::write(h.tmp.path().join("r.xml"), "not junit").unwrap();
-            std::fs::write(h.tmp.path().join("cov.xml"), "<coverage").unwrap();
+            crate::test_fixtures::write_settings_fixture(h.tmp.path().join("r.xml"), "not junit")
+                .unwrap();
+            crate::test_fixtures::write_settings_fixture(h.tmp.path().join("cov.xml"), "<coverage")
+                .unwrap();
             declare(
                 &h,
                 vec![
@@ -7436,12 +7472,12 @@ mod tests {
         async fn merged_test_reports_union_suites_from_several_stacks() {
             let h = build(None).await;
             // Two JUnit reports from different stacks, both written now.
-            std::fs::write(
+            crate::test_fixtures::write_settings_fixture(
                 h.tmp.path().join("rust.xml"),
                 r#"<testsuites><testsuite name="rust-crate"><testcase classname="c" name="t1"/></testsuite></testsuites>"#,
             )
             .unwrap();
-            std::fs::write(
+            crate::test_fixtures::write_settings_fixture(
                 h.tmp.path().join("front.xml"),
                 r#"<testsuites><testsuite name="frontend"><testcase classname="d" name="t2"/></testsuite></testsuites>"#,
             )
@@ -7638,7 +7674,11 @@ mod tests {
         #[tokio::test]
         async fn merged_analysis_reports_union_findings() {
             let h = build(None).await;
-            std::fs::write(h.tmp.path().join("clippy.json"), CLIPPY_JSON).unwrap();
+            crate::test_fixtures::write_settings_fixture(
+                h.tmp.path().join("clippy.json"),
+                CLIPPY_JSON,
+            )
+            .unwrap();
             // Just written, so inside a window ending now.
             declare(
                 &h,
@@ -7674,7 +7714,11 @@ mod tests {
             // End-to-end TS path: the bundled eslint parser → store, through
             // the real service entry point (not just the golden parser test).
             let h = build(None).await;
-            std::fs::write(h.tmp.path().join("eslint.json"), ESLINT_JSON).unwrap();
+            crate::test_fixtures::write_settings_fixture(
+                h.tmp.path().join("eslint.json"),
+                ESLINT_JSON,
+            )
+            .unwrap();
             declare(
                 &h,
                 vec![report_collector(
@@ -7749,7 +7793,11 @@ mod tests {
                 ..h.window()
             };
 
-            std::fs::write(h.tmp.path().join("eslint.json"), ESLINT_JSON).unwrap();
+            crate::test_fixtures::write_settings_fixture(
+                h.tmp.path().join("eslint.json"),
+                ESLINT_JSON,
+            )
+            .unwrap();
             declare(
                 &h,
                 vec![report_collector(
@@ -7844,15 +7892,20 @@ mod tests {
         async fn a_report_or_parser_outside_the_checkout_is_refused() {
             let h = build(None).await;
             let outside = tempfile::tempdir().unwrap();
-            std::fs::write(outside.path().join("secret"), "[]").unwrap();
-            std::fs::write(outside.path().join("p.jq"), ".").unwrap();
+            crate::test_fixtures::write_settings_fixture(outside.path().join("secret"), "[]")
+                .unwrap();
+            crate::test_fixtures::write_settings_fixture(outside.path().join("p.jq"), ".").unwrap();
             std::fs::create_dir_all(h.tmp.path().join("reports")).unwrap();
             std::os::unix::fs::symlink(
                 outside.path().join("secret"),
                 h.tmp.path().join("reports/x.json"),
             )
             .unwrap();
-            std::fs::write(h.tmp.path().join("reports/ok.json"), ESLINT_JSON).unwrap();
+            crate::test_fixtures::write_settings_fixture(
+                h.tmp.path().join("reports/ok.json"),
+                ESLINT_JSON,
+            )
+            .unwrap();
             // The parser's entry is the project extension's own file.
             let ext_dir = h.tmp.path().join(".oxplow/extensions/project");
             std::fs::create_dir_all(&ext_dir).unwrap();

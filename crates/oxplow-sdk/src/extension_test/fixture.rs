@@ -211,32 +211,26 @@ pub(super) async fn run_setup(
     }
 }
 
-/// `project: { <key>: <value>, .. }`: keys of `.oxplow/project.yaml` set on
-/// the throwaway's root, as a person's edit of the file, and the config read
-/// again from disk, as core does when the file changes.
-pub(super) fn given_project(host: &Host, project: &Value) -> Result<(), String> {
+/// A fixture's `project` setup accepts registered fully qualified keys only.
+/// The normal settings service validates and writes each project override;
+/// secrets therefore never enter an override file.
+pub(super) async fn given_project(host: &Host, project: &Value) -> Result<(), String> {
     let Some(keys) = project.as_object() else {
-        return Err(
-            "`project` is a map of project.yaml keys — fix: `project: { lspServers: [..] }`".into(),
-        );
+        return Err("`project` is a map of registered keys — fix: `project: { oxplow.snapshots.retentionDays: 14 }`".into());
     };
-    let file = host.root.join(".oxplow/project.yaml");
-    let text = std::fs::read_to_string(&file).unwrap_or_default();
-    let mut doc: serde_yaml::Mapping = serde_yaml::from_str(&text).unwrap_or_default();
     for (key, value) in keys {
-        doc.insert(
-            serde_yaml::Value::String(key.clone()),
-            serde_yaml::to_value(value).map_err(|e| e.to_string())?,
-        );
+        host.svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                "oxplow.config.set",
+                serde_json::json!({"key": key, "value": value, "level": "project"}),
+                true,
+            )
+            .await
+            .map_err(|e| e.to_string())?;
     }
-    std::fs::write(
-        &file,
-        serde_yaml::to_string(&doc).map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| e.to_string())?;
-    host.svc
-        .reload_config_from_disk()
-        .map_err(|e| e.to_string())
+    Ok(())
 }
 
 /// One intent example with its fixture.

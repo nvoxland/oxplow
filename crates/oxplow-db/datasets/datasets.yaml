@@ -1743,16 +1743,23 @@
     - { name: "color", type: "TEXT", doc: "The rule's display colour, if it gave one." }
     - { name: "files", type: "INT", doc: "Files in the worktree this rule claims (none of its earlier siblings did); on `other`, the files no rule matched." }
 - name: config_value
-  version: 2
+  version: 3
   key: [key]
-  description: "Every setting with its value now and where that comes from: the project keys (`.oxplow/project.yaml`, else their default), a person's own layer (`personal.*`, `.oxplow/personal.yaml`), the AI roles (`ai.roles.*`), and the metrics and dimensions extensions declare. Read live when a query names it; what Settings shows (v2: no key is a person's alone). `v_config_key` says what a project key is for; change a value with `oxplow.config.set`."
+  description: "Registered core and extension settings with redacted effective values, schema and display metadata. Overrides resolve local, project, global, then default; metric and dimension definitions are not settings. Write through oxplow.config.set with an explicit level."
   fields:
-    - { name: "key", type: "TEXT", doc: "A project key (`snapshotRetentionDays`), or a scoped name (`ai.roles.main`, `personal.activeProviders`, `metrics.<key>`, `dimensions.<key>`)." }
-    - { name: "value", type: "TEXT", doc: "Its value now, as JSON." }
-    - { name: "origin", type: "TEXT", doc: "Where the value comes from: `default`, `global`, `project`, `personal` or `extension`." }
-    - { name: "extension", type: "TEXT", doc: "The extension it comes from, when `origin` is `extension`." }
-    - { name: "doc", type: "TEXT", doc: "What it is for." }
-    - { name: "schema", type: "TEXT", doc: "A project key's value schema, as JSON; NULL for the rest." }
+    - { name: key, type: TEXT, doc: "The registered fully qualified setting key." }
+    - { name: value, type: TEXT, doc: "Effective value as JSON; NULL for secrets or absent values." }
+    - { name: origin, type: TEXT, doc: "Effective origin: local, project, global, or default." }
+    - { name: extension, type: TEXT, doc: "Owning extension, or NULL for core." }
+    - { name: doc, type: TEXT, doc: "Setting description." }
+    - { name: schema, type: TEXT, doc: "Value validation schema as JSON." }
+    - { name: title, type: TEXT, doc: "Display title." }
+    - { name: category, type: TEXT, doc: "Display category, independent of namespace ownership." }
+    - { name: secret, type: INT, doc: "1 when the value is stored securely." }
+    - { name: is_set, type: INT, doc: "1 when an effective value is present, including secrets." }
+    - { name: owner, type: TEXT, doc: "Registry owner: core or extension namespace." }
+    - { name: restart_required, type: INT, doc: "1 when a change requires restart." }
+    - { name: ui, type: TEXT, doc: "Display hints as JSON." }
   tests:
     - { not_null: key }
     - { unique: key }

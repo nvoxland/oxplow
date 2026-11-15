@@ -1,4 +1,4 @@
-//! `ai.yaml`: the providers you've connected and which model each role
+//! Shared AI settings: the providers you've connected and which model each role
 //! uses. User-global (in oxplow's global config dir); a project can
 //! override role bindings. Keys are NOT here; they live in the keychain
 //! under the provider id.
@@ -10,7 +10,7 @@ use oxplow_domain::ai::AiRestriction;
 use serde::{Deserialize, Serialize};
 
 /// File name inside the global config dir.
-pub const AI_CONFIG_FILE: &str = "ai.yaml";
+pub const AI_CONFIG_FILE: &str = "global.yaml";
 
 /// The jobs oxplow itself gives models. Every extension can name them,
 /// and each extension AI profile falls back to one.
@@ -100,7 +100,7 @@ impl Role {
     pub const DECIDE: Role = Role::Builtin(BuiltinRole::Decide);
     pub const ASSISTANT: Role = Role::Builtin(BuiltinRole::Assistant);
 
-    /// A role as a person writes it in `ai.yaml` or `project.yaml`: a
+    /// A role as a person writes it in `global.yaml` or `project.yaml`: a
     /// built-in name or `<namespace>/<profile>`.
     pub fn parse(text: &str) -> Result<Role, String> {
         if let Some(role) = BuiltinRole::from_name(text) {
@@ -280,27 +280,43 @@ pub struct AiConfig {
 pub enum ConfigError {
     #[error("{0}")]
     Invalid(String),
-    #[error("ai.yaml: {0}")]
+    #[error("global.yaml: {0}")]
     Io(String),
 }
 
 impl AiConfig {
-    /// Load from `dir/ai.yaml`; a missing file is an empty config.
+    /// Load AI keys from `dir/global.yaml`; a missing file is an empty config.
     pub fn load(dir: &Path) -> Result<AiConfig, ConfigError> {
-        match std::fs::read_to_string(dir.join(AI_CONFIG_FILE)) {
-            Ok(text) => serde_yaml::from_str(&text)
-                .map_err(|e| ConfigError::Invalid(format!("ai.yaml: {e}"))),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(AiConfig::default()),
-            Err(e) => Err(ConfigError::Io(e.to_string())),
+        let text = match std::fs::read_to_string(dir.join(AI_CONFIG_FILE)) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Self::default()),
+            Err(e) => return Err(ConfigError::Io(e.to_string())),
+        };
+        let values: BTreeMap<String, serde_yaml::Value> =
+            serde_yaml::from_str(&text).map_err(|e| ConfigError::Invalid(e.to_string()))?;
+        let mut config = serde_yaml::Mapping::new();
+        for field in ["providers", "roles"] {
+            if let Some(value) = values.get(&format!("oxplow.ai.{field}")) {
+                config.insert(field.into(), value.clone());
+            }
         }
+        serde_yaml::from_value(serde_yaml::Value::Mapping(config))
+            .map_err(|e| ConfigError::Invalid(e.to_string()))
     }
 
-    /// Validate and write to `dir/ai.yaml`.
+    /// Write the standalone global AI settings, preserving unrelated settings.
     pub fn save(&self, dir: &Path) -> Result<(), ConfigError> {
         self.validate()?;
-        let mut value = serde_yaml::to_value(self).map_err(|e| ConfigError::Io(e.to_string()))?;
-        // A role restricted from nothing is written without `restrict`.
-        if let Some(serde_yaml::Value::Mapping(roles)) = value.get_mut("roles") {
+        let path = dir.join(AI_CONFIG_FILE);
+        let mut values: BTreeMap<String, serde_yaml::Value> = match std::fs::read_to_string(&path) {
+            Ok(text) => {
+                serde_yaml::from_str(&text).map_err(|e| ConfigError::Invalid(e.to_string()))?
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
+            Err(e) => return Err(ConfigError::Io(e.to_string())),
+        };
+        let mut config = serde_yaml::to_value(self).map_err(|e| ConfigError::Io(e.to_string()))?;
+        if let Some(serde_yaml::Value::Mapping(roles)) = config.get_mut("roles") {
             for (_, role) in roles.iter_mut() {
                 if let serde_yaml::Value::Mapping(role) = role {
                     if role
@@ -313,9 +329,12 @@ impl AiConfig {
                 }
             }
         }
-        let text = serde_yaml::to_string(&value).map_err(|e| ConfigError::Io(e.to_string()))?;
+        for field in ["providers", "roles"] {
+            values.insert(format!("oxplow.ai.{field}"), config[field].clone());
+        }
+        let text = serde_yaml::to_string(&values).map_err(|e| ConfigError::Io(e.to_string()))?;
         std::fs::create_dir_all(dir).map_err(|e| ConfigError::Io(e.to_string()))?;
-        std::fs::write(dir.join(AI_CONFIG_FILE), text).map_err(|e| ConfigError::Io(e.to_string()))
+        std::fs::write(path, text).map_err(|e| ConfigError::Io(e.to_string()))
     }
 
     /// Problems that would make a role unusable, as messages. Whether each
@@ -408,14 +427,33 @@ roles:
         assert_eq!(AiConfig::load(dir.path()).unwrap(), cfg());
     }
 
-    /// A role nothing asked is gone: an `ai.yaml` naming one fails saying
+    #[test]
+    fn global_settings_preserve_other_keys_and_ignore_legacy_ai_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("ai.yaml"), YAML).unwrap();
+        assert_eq!(AiConfig::load(dir.path()).unwrap(), AiConfig::default());
+        std::fs::write(
+            dir.path().join(AI_CONFIG_FILE),
+            "oxplow.editor.fontSize: 17\n",
+        )
+        .unwrap();
+        cfg().save(dir.path()).unwrap();
+        let values: BTreeMap<String, serde_yaml::Value> = serde_yaml::from_str(
+            &std::fs::read_to_string(dir.path().join(AI_CONFIG_FILE)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(values["oxplow.editor.fontSize"].as_i64(), Some(17));
+        assert_eq!(AiConfig::load(dir.path()).unwrap(), cfg());
+    }
+
+    /// A role nothing asked is gone: an `global.yaml` naming one fails saying
     /// so, not with a bare unknown variant.
     #[test]
     fn a_role_oxplow_dropped_fails_naming_it() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join(AI_CONFIG_FILE),
-            "providers: [{ id: p, kind: openai }]\nroles:\n  fast: { provider: p, model: m }\n",
+            "oxplow.ai.providers: [{ id: p, kind: openai }]\noxplow.ai.roles:\n  fast: { provider: p, model: m }\n",
         )
         .unwrap();
         let err = AiConfig::load(dir.path()).unwrap_err().to_string();
@@ -423,14 +461,14 @@ roles:
         assert!(!err.contains("unknown variant"), "{err}");
     }
 
-    /// A person restricts a binding in `ai.yaml`: what it forbids loads,
+    /// A person restricts a binding in `global.yaml`: what it forbids loads,
     /// saves back the same way, and an unknown restriction fails naming it.
     #[test]
     fn a_binding_carries_what_it_forbids() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join(AI_CONFIG_FILE),
-            "providers: [{ id: p, kind: openai }]\nroles:\n  summarize: { provider: p, model: m, restrict: [tools, sql] }\n  main: { provider: p, model: m }\n",
+            "oxplow.ai.providers: [{ id: p, kind: openai }]\noxplow.ai.roles:\n  summarize: { provider: p, model: m, restrict: [tools, sql] }\n  main: { provider: p, model: m }\n",
         )
         .unwrap();
         let loaded = AiConfig::load(dir.path()).unwrap();
@@ -448,7 +486,7 @@ roles:
         assert_eq!(AiConfig::load(dir.path()).unwrap(), loaded);
         std::fs::write(
             dir.path().join(AI_CONFIG_FILE),
-            "providers: [{ id: p, kind: openai }]\nroles:\n  main: { provider: p, model: m, restrict: [network] }\n",
+            "oxplow.ai.providers: [{ id: p, kind: openai }]\noxplow.ai.roles:\n  main: { provider: p, model: m, restrict: [network] }\n",
         )
         .unwrap();
         let err = AiConfig::load(dir.path()).unwrap_err().to_string();
@@ -585,7 +623,7 @@ roles:
     }
 
     #[test]
-    fn ai_yaml_binds_a_profile_by_its_qualified_name() {
+    fn ai_config_binds_a_profile_by_its_qualified_name() {
         let c: AiConfig = serde_yaml::from_str(
             "providers: [{ id: p, kind: openai }]\nroles:\n  acme/review: { provider: p, model: m }\n",
         )

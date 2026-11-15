@@ -559,17 +559,17 @@ fn an_extensions_page_files_load_and_a_broken_one_names_its_file() {
     let dir = tempfile::tempdir().unwrap();
     let ext = dir.path().join("acme");
     std::fs::create_dir_all(ext.join("pages")).unwrap();
-    std::fs::write(
+    crate::test_fixtures::write_settings_fixture(
         ext.join("extension.yaml"),
         "manifest: 2\nname: acme\nintent:\n  purpose: test\n",
     )
     .unwrap();
-    std::fs::write(
+    crate::test_fixtures::write_settings_fixture(
         ext.join("pages/busy.yaml"),
         "title: Busy\nloaders:\n  a: { sql: SELECT 1 AS n }\nview: { viz: table, from: a }\n",
     )
     .unwrap();
-    std::fs::write(
+    crate::test_fixtures::write_settings_fixture(
         ext.join("pages/broken.yaml"),
         "title: Broken\nview: { viz: table }\n",
     )
@@ -624,17 +624,17 @@ fn a_panel_names_its_extensions_pages() {
     let dir = tempfile::tempdir().unwrap();
     let ext = dir.path().join("acme");
     std::fs::create_dir_all(ext.join("pages")).unwrap();
-    std::fs::write(
+    crate::test_fixtures::write_settings_fixture(
         ext.join("extension.yaml"),
         "manifest: 2\nname: acme\nintent:\n  purpose: test\npanels:\n  - { id: work, title: Work, scope: stream, body: list, badge: count }\n  - { id: bad, title: Bad, scope: project, body: list, badge: list }\n",
     )
     .unwrap();
-    std::fs::write(
+    crate::test_fixtures::write_settings_fixture(
         ext.join("pages/list.yaml"),
         "title: List\nparams: [{ name: stream_id }]\nloaders:\n  a: { sql: SELECT 1 AS n }\nview: { viz: table, from: a }\n",
     )
     .unwrap();
-    std::fs::write(
+    crate::test_fixtures::write_settings_fixture(
         ext.join("pages/count.yaml"),
         "title: Count\nparams: [{ name: stream_id }]\nloaders:\n  c: { sql: SELECT 3 AS n }\nview: { viz: number, from: c }\nbadge: { loader: c }\n",
     )

@@ -1,335 +1,58 @@
-//! Settings as a view (P6.H1, target §13.3.4): every setting that shapes
-//! this project, with its value and where it comes from — the project's
-//! `.oxplow/project.yaml`, the person's global config (`ai.yaml`, the
-//! global metric manifests), an enabled extension, or the default. The
-//! Settings page lists these; a person asks the agent to change one, or
-//! changes a person-only one themselves. See `.context/commands.md` →
-//! "`config.*` and the key registry".
+//! The shared registry's redacted settings inventory, used by live SQL reads.
 
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
-use oxplow_config::OxplowConfig;
-use serde_json::Value;
+use oxplow_config::settings::{SettingInventory, SettingsError};
 
-use crate::ai_service::AiSettings;
 use crate::extension::extensions::Extension;
 
-/// Where a setting's value comes from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
-#[serde(rename_all = "lowercase")]
-pub enum ConfigOrigin {
-    Default,
-    Global,
-    Project,
-    /// A person's own layer (`.oxplow/personal.yaml`).
-    Personal,
-    Extension,
-}
-
-/// One setting as the Settings view shows it.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct EffectiveSetting {
-    /// A project key (`snapshotRetentionDays`), or a scoped name
-    /// (`ai.roles.main`, `metrics.<key>`, `dimensions.<key>`).
-    pub key: String,
-    pub doc: String,
-    #[specta(type = oxplow_domain::Json)]
-    pub value: Value,
-    pub origin: ConfigOrigin,
-    /// The extension a value comes from (`origin: extension`).
-    pub extension: Option<String>,
-    /// A project key's value schema; null for the rest.
-    #[specta(type = oxplow_domain::Json)]
-    pub schema: Value,
-}
-
-fn yaml_to_json(v: &serde_yaml::Value) -> Value {
-    serde_json::from_str(&serde_json::to_string(v).expect("yaml serializes as json"))
-        .expect("json parses")
-}
-
-fn entry_key<T: serde::Serialize>(entry: &T) -> Option<String> {
-    serde_json::to_value(entry)
-        .ok()?
-        .get("key")?
-        .as_str()
-        .map(str::to_string)
-}
-
-fn plain<T: serde::Serialize>(entry: &T) -> Value {
-    serde_json::from_str(&serde_json::to_string(entry).expect("entry serializes"))
-        .expect("json parses")
-}
-
-/// Every setting: the project keys (value, and `project` when the file
-/// sets it, else `default` with the default's value), the AI roles
-/// (`project` when the project overrides one, `global` from `ai.yaml`,
-/// `default` when unbound), metrics and dimensions from the global
-/// manifests and from enabled extensions.
+/// Registry definitions and effective values. Secret values are never exposed;
+/// their inventory rows retain only presence and origin metadata.
 pub fn effective_config(
-    config: &OxplowConfig,
-    project_dir: &Path,
-    ai: Option<&AiSettings>,
-    global_dir: Option<&Path>,
+    project: &Path,
+    global: &Path,
+    secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
     extensions: &[Extension],
-) -> Vec<EffectiveSetting> {
-    let fallback = project_dir
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let keys = oxplow_config::keys::config_keys();
-    let mut out: Vec<EffectiveSetting> = oxplow_config::config_entries(config, &fallback)
-        .into_iter()
-        .map(|e| {
-            let key = keys.iter().find(|k| k.key == e.key);
-            EffectiveSetting {
-                key: e.key.to_string(),
-                doc: key.map(|k| k.doc.clone()).unwrap_or_default(),
-                value: yaml_to_json(&e.value),
-                origin: if e.set {
-                    ConfigOrigin::Project
-                } else {
-                    ConfigOrigin::Default
-                },
-                extension: None,
-                schema: key.map(|k| k.schema.clone()).unwrap_or(Value::Null),
-            }
-        })
-        .collect();
-    // A person's own layer, beside the project's value it overrides.
-    for key in oxplow_config::PERSONAL_KEYS {
-        if let Some(value) = oxplow_config::personal_value(config, key) {
-            let spec = keys.iter().find(|k| k.key == *key);
-            out.push(EffectiveSetting {
-                key: format!("personal.{key}"),
-                doc: oxplow_config::personal_key_doc(key).to_string(),
-                value,
-                origin: ConfigOrigin::Personal,
-                extension: None,
-                schema: spec.map(|k| k.schema.clone()).unwrap_or(Value::Null),
-            });
-        }
-    }
-    if let Some(ai) = ai {
-        for r in &ai.roles {
-            let role = &r.role;
-            out.push(EffectiveSetting {
-                key: format!("ai.roles.{role}"),
-                doc: match r.fallback {
-                    Some(fallback) => format!(
-                        "The model the `{role}` AI profile uses (a provider, a model and \
-                         what the binding is restricted from: `restrict: [tools, sql, \
-                         streaming, images]`); unset, it uses the `{}` role's.",
-                        fallback.name()
-                    ),
-                    None => {
-                        format!(
-                            "The model the `{role}` AI role uses (a provider, a model and what \
-                             the binding is restricted from: `restrict: [tools, sql, streaming, \
-                             images]`)."
-                        )
-                    }
-                },
-                value: r.binding.as_ref().map(plain).unwrap_or(Value::Null),
-                origin: match (&r.binding, r.overridden) {
-                    (_, true) => ConfigOrigin::Project,
-                    (Some(_), false) => ConfigOrigin::Global,
-                    (None, false) => ConfigOrigin::Default,
-                },
-                extension: r.namespace.clone(),
-                schema: Value::Null,
-            });
-        }
-    }
-    let mut catalog = |kind: &str,
-                       doc: &str,
-                       key: Option<String>,
-                       value: Value,
-                       origin,
-                       extension: Option<String>| {
-        if let Some(key) = key {
-            out.push(EffectiveSetting {
-                key: format!("{kind}.{key}"),
-                doc: doc.to_string(),
-                value,
-                origin,
-                extension,
-                schema: Value::Null,
-            });
-        }
-    };
-    if let Some(dir) = global_dir {
-        for m in oxplow_config::load_global_metric_entries(dir) {
-            catalog(
-                "metrics",
-                "A metric defined in your global metric manifests.",
-                entry_key(&m),
-                plain(&m),
-                ConfigOrigin::Global,
-                None,
-            );
-        }
-        for d in oxplow_config::load_global_dimension_entries(dir) {
-            catalog(
-                "dimensions",
-                "A dimension defined in your global manifests.",
-                entry_key(&d),
-                plain(&d),
-                ConfigOrigin::Global,
-                None,
-            );
-        }
-    }
-    for ext in extensions.iter().filter(|e| e.enabled) {
-        for m in &ext.metrics {
-            catalog(
-                "metrics",
-                "A metric this extension contributes.",
-                entry_key(m),
-                plain(m),
-                ConfigOrigin::Extension,
-                Some(ext.name.clone()),
-            );
-        }
-        for d in &ext.dimensions {
-            catalog(
-                "dimensions",
-                "A dimension this extension contributes.",
-                entry_key(d),
-                plain(d),
-                ConfigOrigin::Extension,
-                Some(ext.name.clone()),
-            );
-        }
-    }
-    out
+) -> Result<Vec<SettingInventory>, SettingsError> {
+    crate::settings::store(project, global, secrets, extensions)?.inventory()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ai_service::RoleStatus;
-    use oxplow_ai::config::{Role, RoleBinding};
+    use oxplow_config::settings::Origin;
+    use serde_json::json;
 
-    fn find<'a>(all: &'a [EffectiveSetting], key: &str) -> &'a EffectiveSetting {
-        all.iter()
-            .find(|s| s.key == key)
-            .unwrap_or_else(|| panic!("no {key}"))
-    }
-
-    /// A person's own choices (`.oxplow/personal.yaml`) show as their own
-    /// row, `personal`, beside the project's.
     #[test]
-    fn a_personal_choice_shows_as_personal() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
-        std::fs::write(
-            dir.path().join(".oxplow/personal.yaml"),
-            "activeProviders: { snapshots: hashes }\n",
+    fn inventory_uses_registry_metadata_and_effective_levels_without_metric_definitions() {
+        let project = tempfile::tempdir().unwrap();
+        let global = tempfile::tempdir().unwrap();
+        std::fs::create_dir(project.path().join(".oxplow")).unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            project.path().join(".oxplow/local.yaml"),
+            "oxplow.snapshots.retentionDays: 14\n",
         )
         .unwrap();
-        let config = oxplow_config::load_project_config(dir.path()).unwrap();
-        let all = effective_config(&config, dir.path(), None, None, &[]);
-        let personal = find(&all, "personal.activeProviders");
-        assert_eq!(personal.origin, ConfigOrigin::Personal);
-        assert_eq!(personal.value, serde_json::json!({ "snapshots": "hashes" }));
-        assert_eq!(find(&all, "activeProviders").origin, ConfigOrigin::Default);
-    }
-
-    /// What a new thread starts with shows as the person's own row.
-    #[test]
-    fn a_new_thread_session_choice_shows_as_personal() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
-        std::fs::write(
-            dir.path().join(".oxplow/personal.yaml"),
-            "newThreadSession: none\n",
+        let mut extension = crate::extension::extensions::empty_extension("gh", "gh", "project");
+        extension.metrics = vec![serde_json::from_value(json!({"key": "gh.prs.open"})).unwrap()];
+        let rows = effective_config(
+            project.path(),
+            global.path(),
+            Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
+            &[extension],
         )
         .unwrap();
-        let config = oxplow_config::load_project_config(dir.path()).unwrap();
-        let all = effective_config(&config, dir.path(), None, None, &[]);
-        let row = find(&all, "personal.newThreadSession");
-        assert_eq!(row.origin, ConfigOrigin::Personal);
-        assert_eq!(row.value, serde_json::json!("none"));
-        assert!(row.doc.contains("new thread"), "{}", row.doc);
-    }
-
-    /// P6.H1: a project-set key is `project`; an unset one is `default`,
-    /// with the default's value; a global AI role is `global` and one the
-    /// project overrides `project`; an extension's metric is `extension`.
-    #[test]
-    fn every_setting_says_where_its_value_comes_from() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
-        std::fs::write(
-            dir.path().join(".oxplow/project.yaml"),
-            "snapshotRetentionDays: 14\n",
-        )
-        .unwrap();
-        let config = oxplow_config::load_project_config(dir.path()).unwrap();
-        let ai = AiSettings {
-            providers: vec![],
-            kinds: vec![],
-            roles: vec![
-                RoleStatus {
-                    role: Role::MAIN,
-                    description: String::new(),
-                    namespace: None,
-                    fallback: None,
-                    effective: Some(RoleBinding::new("p", "m")),
-                    binding: Some(RoleBinding::new("p", "m")),
-                    overridden: false,
-                    problem: None,
-                },
-                RoleStatus {
-                    role: Role::SUMMARIZE,
-                    description: String::new(),
-                    namespace: None,
-                    fallback: None,
-                    effective: Some(RoleBinding::new("p", "f")),
-                    binding: Some(RoleBinding::new("p", "f")),
-                    overridden: true,
-                    problem: None,
-                },
-                RoleStatus {
-                    role: Role::DECIDE,
-                    description: String::new(),
-                    namespace: None,
-                    fallback: None,
-                    effective: None,
-                    binding: None,
-                    overridden: false,
-                    problem: None,
-                },
-            ],
-        };
-        let mut ext = crate::extension::extensions::empty_extension("gh", "gh", "project");
-        ext.metrics =
-            vec![serde_json::from_value(serde_json::json!({ "key": "gh.prs.open" })).unwrap()];
-        let all = effective_config(&config, dir.path(), Some(&ai), None, &[ext]);
-
-        let set = find(&all, "snapshotRetentionDays");
-        assert_eq!(
-            (set.origin, set.value.clone()),
-            (ConfigOrigin::Project, serde_json::json!(14))
-        );
-        let unset = find(&all, "metricDetailRetentionDays");
-        assert_eq!(
-            (unset.origin, unset.value.clone()),
-            (ConfigOrigin::Default, serde_json::json!(30))
-        );
-        assert!(!unset.doc.is_empty() && !unset.schema.is_null());
-        assert_eq!(find(&all, "ai.roles.main").origin, ConfigOrigin::Global);
-        assert_eq!(
-            find(&all, "ai.roles.summarize").origin,
-            ConfigOrigin::Project
-        );
-        assert_eq!(find(&all, "ai.roles.decide").origin, ConfigOrigin::Default);
-        let metric = find(&all, "metrics.gh.prs.open");
-        assert_eq!(
-            (metric.origin, metric.extension.as_deref()),
-            (ConfigOrigin::Extension, Some("gh"))
-        );
+        let retention = rows
+            .iter()
+            .find(|row| row.definition.key == "oxplow.snapshots.retentionDays")
+            .unwrap();
+        assert_eq!(retention.origin, Some(Origin::Local));
+        assert_eq!(retention.value, Some(json!(14)));
+        assert_eq!(retention.definition.category, "snapshots");
+        assert!(!retention.definition.title.is_empty());
+        assert!(!retention.definition.schema.is_null());
+        assert!(!rows
+            .iter()
+            .any(|row| row.definition.key == "metrics.gh.prs.open"));
     }
 }

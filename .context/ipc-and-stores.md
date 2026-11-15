@@ -35,8 +35,6 @@ command):
 | workspace file write / create / rename / delete, applying an LSP edit | the person's own hands on their worktree, like their terminal; snapshots record it |
 | a change's analysis (`oxplow_ensure_change`) | a derived cache, recomputed from the VCS on demand like a materialized dataset — not an intent |
 | a model call's record (`ai_call`, `ai_result`) | the computation as it happened (`AiCompute`), like a test run's capture — the run that asked for it is what's audited |
-| AI providers and roles, credentials | secrets: unreachable from `run_command`, so no invoker list can ever open them to an agent, and no audit row holds a secret |
-| a person's global external provider instances (`instances.yaml`, P9.B2: `oxplow.provider.add_instance` / `set_instance` / `remove_instance` on a global one) | the person's own machine-level settings, like `ai.yaml`: what runs in every project of theirs is theirs alone to say — the registry writes the file only for `Actor::Human` (a project's instances still go through `oxplow.config.set`) |
 
 **Guards** (`crates/oxplow-app/src/source_guards.rs`). The thin
 callers — oxplow-rpc, oxplow-mcp, oxplow-control-plane, oxplow-daemon,
@@ -90,26 +88,32 @@ is registered as a native command operation and its read result is not audited.
 private input from audit, including composed calls; private proposals are refused
 before durable storage. The store itself grants no authority.
 
-**Private extension configuration.** `extension_config_store` CAS writes are
-also denied to thin callers. `ConfigurationHost` derives the exact current owner,
-checks declared/live `extension_config.read/write` authority around access and
-resolves defaults/project/personal with the manifest schema. Native read
-`snapshot` returns settings and origins, while `inspect` returns only layer
-stamps for migration. Native write `compare_exchange` validates and updates one
-or both layers in a single audited savepoint, returns stamps, and omits layer
-input from audit/proposals. Scripts/provider hosts have a separate callable
-`extension_config.read` service; this is unrelated to core app settings scopes.
-No private table, settings payload, credential resolver or arbitrary-owner API
-is exposed through SQL/RPC. Both scopes are local project rows. Disable/uninstall
-retains rows but denies access; reset is an empty-object CAS. Draft migrations
-remain unapplied. Opaque versioned host secret references can be stored as
-identity-only settings; the separate human settings ingress writes machine
-keychain values and returns only references/presence. No script, native command
-or MCP service resolves them. The first consumer is the shipped remote MCP HTTP
-transport, after the extension's `secrets` declaration and live owner checks. Secret
-rotation/revocation changes a synchronous authority revision and schedules
-cancellation-safe consumer cleanup. References are always scoped to the primary
-project and owning extension, including for globally configured instances.
+**Shared settings.** Core and extension definitions use the same registry and
+`SettingsStore` backend ([settings.md](./settings.md)). Generic get/set/unset
+commands validate registered keys; writes specify local, project or global.
+Ordinary overrides are flat YAML maps and objects/arrays resolve atomically,
+without layer merging. Secret definitions use the same APIs but route values to
+secure storage, with project identity at local/project levels. Inventories omit
+secret bytes, and audit/event/undo payloads never retain them. AI/provider
+settings and collector credentials use this backend too; specialized UI commands
+are adapters over it, not independent files or keychain account formats.
+
+`ConfigurationHost` derives the current owning contribution and checks its
+declared/live authority around extension script reads. `config.read` takes
+`{key, level?}`; the retained `extension_config.read`/`snapshot` alias returns a
+nested `{values, origins}` projection. It exposes no arbitrary owner selector,
+layer revisions, `inspect`, CAS writes or schema migration. Public SQL and
+contribution conditions omit secret settings before secure lookup. Historical
+`extension_config` tables may remain in applied schemas; runtime configuration
+has no reader, writer or carry-forward migration through that store.
+
+Opaque provider secret references are operational identities rather than stored
+secret setting values. Their separate commands keep machine keychain bytes out
+of references and records; the shipped remote MCP HTTP transport resolves them
+after the extension's `secrets` declaration and live owner checks. Rotation and
+revocation change a synchronous authority revision and schedule cancellation-safe
+consumer cleanup. References remain scoped to the primary project and owning
+extension, including for globally configured instances.
 
 **Durable extension jobs.** Job store enqueue, transition and append-only
 observation writes (sync and async) are denied to thin callers. The helpers

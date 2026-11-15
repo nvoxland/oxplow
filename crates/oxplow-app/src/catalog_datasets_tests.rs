@@ -23,7 +23,7 @@ async fn rows(fx: &ThreadFixture, sql: &str) -> Vec<Vec<Value>> {
 fn write(root: &std::path::Path, rel: &str, body: &str) {
     let path = root.join(".oxplow/extensions/acme").join(rel);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(path, body).unwrap();
+    crate::test_fixtures::write_settings_fixture(path, body).unwrap();
 }
 
 /// A project extension is a row once it activates, and the row follows
@@ -265,7 +265,8 @@ async fn waiting_permissions_are_a_problem_only_for_an_extension_that_is_on() {
             "extension.yaml",
             &format!("{MANIFEST}permissions: [ai.compute]\n"),
         );
-        std::fs::write(root.join(".oxplow/personal.yaml"), personal).unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join(".oxplow/local.yaml"), personal)
+            .unwrap();
         fx.svc.reload_config_from_disk().unwrap();
         fx.svc
             .extension_activation
@@ -375,11 +376,23 @@ async fn questions_and_config_keys_are_datasets() {
     assert_eq!(ours, vec![vec![json!("oxplow-foundation")]]);
 
     let keys = rows(&fx, "SELECT key, doc <> '' FROM v_config_key ORDER BY key").await;
-    let mut want: Vec<String> = oxplow_config::keys::config_keys()
+    let mut want: Vec<String> = oxplow_config::core_settings::definitions("")
         .into_iter()
-        .map(|k| k.key)
+        .chain(
+            fx.svc
+                .extension_catalog
+                .unpinned(
+                    &root,
+                    "a catalog dataset test reads declared setting definitions",
+                )
+                .iter()
+                .filter(|e| e.enabled)
+                .flat_map(|e| crate::extension::extension_settings::definitions(e).unwrap()),
+        )
+        .map(|definition| definition.key)
         .collect();
     want.sort();
+    want.dedup();
     assert_eq!(
         keys,
         want.into_iter()

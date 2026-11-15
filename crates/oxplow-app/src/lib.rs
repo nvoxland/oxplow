@@ -144,6 +144,7 @@ pub mod services;
 mod services_tests;
 pub mod session_auth;
 pub mod session_outcome;
+mod settings;
 pub mod snapshot_capture;
 pub mod snapshot_capture_registry;
 pub mod snapshot_conformance;
@@ -432,7 +433,8 @@ mod instance_lock_tests {
         let dir = tempfile::tempdir().unwrap();
         let state_dir = dir.path().join(".oxplow");
         std::fs::create_dir_all(&state_dir).unwrap();
-        std::fs::write(state_dir.join(".gitignore"), "custom\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(state_dir.join(".gitignore"), "custom\n")
+            .unwrap();
 
         ensure_state_dir(&state_dir).unwrap();
 
@@ -478,6 +480,7 @@ struct MachineEnv {
 /// `Services.clone()` doesn't spawn a duplicate runtime — it just
 /// hands out another sender into the same backing task.
 pub struct Services {
+    pub(crate) global_config_dir: PathBuf,
     pub config: Arc<RwLock<OxplowConfig>>,
     /// Woken each time the in-memory config is swapped (`oxplow.config.set`'s
     /// after-commit apply) — what a `config.changed` reactor waits on.
@@ -1085,6 +1088,20 @@ impl Services {
                 Arc::new(oxplow_db::SqliteAiCallStore::new(db.clone())),
                 machine.config_dir.clone(),
             )
+            .with_settings(
+                crate::settings::store(
+                    &layout.project_dir,
+                    &machine
+                        .config_dir
+                        .clone()
+                        .unwrap_or_else(|| layout.state_dir.join("global")),
+                    machine.secrets.clone(),
+                    &[],
+                )
+                .map_err(|e| {
+                    AppInitError::Config(oxplow_config::ConfigError::Invalid(e.to_string()))
+                })?,
+            )
             .with_activation(extension_activation.clone())
             // Read live, so project.yaml edits and reloads apply at once.
             .with_project_overrides(Arc::new(move || {
@@ -1221,6 +1238,10 @@ impl Services {
         let services_slot = commands::util::ServicesSlot::default();
         // The live datasets (`live_datasets`) read these when a query names them.
         sql.live_datasets().bind(live_datasets::LiveSources {
+            global_dir: machine
+                .config_dir
+                .clone()
+                .unwrap_or_else(|| layout.state_dir.join("global")),
             ai: ai.clone(),
             lsp: lsp.clone(),
             worktrees: worktrees.clone(),
@@ -1279,6 +1300,11 @@ impl Services {
             services: extension_services.clone(),
             catalog: extension_catalog.clone(),
             root: layout.project_dir.clone(),
+            global_dir: machine
+                .config_dir
+                .clone()
+                .unwrap_or_else(|| layout.state_dir.join("global")),
+            secrets: machine.secrets.clone(),
         });
         // Every capability's implementations (`capabilities`): core's (the
         // VCS here, knowledge once it's built), what the project's
@@ -1414,6 +1440,12 @@ impl Services {
         }));
         let config_applied = Arc::new(tokio::sync::Notify::new());
         let config_target = commands::config_commands::ConfigTarget {
+            global_dir: machine
+                .config_dir
+                .clone()
+                .unwrap_or_else(|| layout.state_dir.join("global")),
+            secrets: machine.secrets.clone(),
+            catalog: Some(extension_catalog.clone()),
             config: config_arc.clone(),
             project_dir: layout.project_dir.clone(),
             events: event_bus.clone(),
@@ -1566,6 +1598,10 @@ impl Services {
             layer: sql.clone(),
         });
         let collector_runner = collector_runner::CollectorRunner {
+            global_dir: machine
+                .config_dir
+                .clone()
+                .unwrap_or_else(|| layout.state_dir.join("global")),
             models: models.clone(),
             project_dir: layout.project_dir.clone(),
             store: collector_store.clone(),
@@ -1646,6 +1682,13 @@ impl Services {
                 extension::extension_configuration::ConfigurationHost::new(
                     extension_catalog.clone(),
                     layout.project_dir.clone(),
+                )
+                .with_settings(
+                    machine
+                        .config_dir
+                        .clone()
+                        .unwrap_or_else(|| layout.state_dir.join("global")),
+                    machine.secrets.clone(),
                 ),
             ))
             .chain(commands::effect::ops(services_slot.clone()))
@@ -1690,6 +1733,7 @@ impl Services {
         }));
         // A `generated` change reaches the snapshot captures.
         event_pump.register_async(Arc::new(config_reactors::WorkspaceFilterConsumer {
+            config: config_arc.clone(),
             captures: snapshot_captures.clone(),
         }));
         // An agent's telemetry export is counted once it is logged (P10.M2).
@@ -1730,6 +1774,10 @@ impl Services {
             deps: advisory_deps,
         }));
         Ok(Self {
+            global_config_dir: machine
+                .config_dir
+                .clone()
+                .unwrap_or_else(|| layout.state_dir.join("global")),
             extension_activation,
             jobs,
             config: config_arc,
@@ -1928,7 +1976,8 @@ impl Services {
             state_dir: state_dir.clone(),
             state_db_path: state_dir.join("local.sqlite"),
         };
-        let config = oxplow_config::load_project_config(&project_dir)?;
+        let config =
+            oxplow_config::load_project_config_with_global(&project_dir, Some(&global_dir))?;
         // Tests never touch the real keychain or the user's ai.yaml.
         let machine = MachineEnv {
             secrets,
@@ -1962,7 +2011,10 @@ impl Services {
     /// thousands of files), and each `ConfigChanged` re-runs every open page
     /// that follows config.
     pub fn reload_config_from_disk(&self) -> Result<(), AppInitError> {
-        let fresh = oxplow_config::load_project_config(&self.layout.project_dir)?;
+        let fresh = oxplow_config::load_project_config_with_global(
+            &self.layout.project_dir,
+            Some(&self.global_config_dir),
+        )?;
         if *self.config.read().unwrap_or_else(|e| e.into_inner()) == fresh {
             return Ok(());
         }
@@ -2091,14 +2143,14 @@ mod tests {
         init_git(project.path());
         let services = Services::in_memory(project.path()).await.unwrap();
         let path = oxplow_config::config_path(project.path());
-        std::fs::write(&path, "snapshotRetentionDays: 3\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(&path, "snapshotRetentionDays: 3\n").unwrap();
         services.reload_config_from_disk().unwrap();
         let mut rx = services.events.subscribe_ui();
         services.reload_config_from_disk().unwrap();
         let heard = std::iter::from_fn(|| rx.try_recv().ok())
             .any(|e| matches!(e, OxplowEvent::ConfigChanged));
         assert!(!heard, "an unchanged reload announced ConfigChanged");
-        std::fs::write(&path, "snapshotRetentionDays: 4\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(&path, "snapshotRetentionDays: 4\n").unwrap();
         services.reload_config_from_disk().unwrap();
         let heard = std::iter::from_fn(|| rx.try_recv().ok())
             .any(|e| matches!(e, OxplowEvent::ConfigChanged));
@@ -2117,7 +2169,7 @@ mod tests {
             .is_none());
 
         // Simulate `/oxplow:configure` writing the file out-of-band.
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             oxplow_config::config_path(project.path()),
             "testing:\n  command: cargo test\n",
         )
@@ -2170,6 +2222,9 @@ mod tests {
                 // The collector's own program or script (P7.B3).
                 "oxplow.collector.sync",
                 "oxplow.comment.list",
+                // Shared settings use files/keychain outside the DB transaction.
+                "oxplow.config.set",
+                "oxplow.config.unset",
                 // A provider's process restarts (P7.C1; was provider.enable).
                 "oxplow.contribution.enable",
                 "oxplow.contribution.enable_all",

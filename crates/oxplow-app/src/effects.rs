@@ -565,12 +565,12 @@ effects:
     pub(crate) fn write_acme(root: &Path, manifest: &str, script: &str) {
         let dir = root.join(".oxplow/extensions/acme/effects");
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             root.join(".oxplow/extensions/acme/extension.yaml"),
             manifest,
         )
         .unwrap();
-        std::fs::write(dir.join("announce.star"), script).unwrap();
+        crate::test_fixtures::write_settings_fixture(dir.join("announce.star"), script).unwrap();
     }
 
     fn acme(root: &Path) -> Extension {

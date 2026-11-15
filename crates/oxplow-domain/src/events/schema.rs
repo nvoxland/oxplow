@@ -627,6 +627,10 @@ impl EventType for CommandDeclined {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ConfigLayer {
+    /// This machine's project override (`.oxplow/local.yaml`).
+    Local,
+    /// This person's defaults across projects (`global.yaml`).
+    Global,
     /// The project's shared config (`.oxplow/project.yaml`).
     Project,
     /// A person's own layer over it (`.oxplow/personal.yaml`), which git

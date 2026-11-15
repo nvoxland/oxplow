@@ -306,7 +306,7 @@ mod tests {
 
     fn write(f: &ThreadFixture, svc: &SnapshotCaptureService, path: &str, body: &str) {
         let full = f.svc.layout.project_dir.join(path);
-        std::fs::write(&full, body).unwrap();
+        crate::test_fixtures::write_settings_fixture(&full, body).unwrap();
         svc.mark_dirty(full, WatchEventKind::Other);
     }
 

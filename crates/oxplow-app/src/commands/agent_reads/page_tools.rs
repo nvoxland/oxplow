@@ -1975,8 +1975,8 @@ mod describe_tests {
         let fx = services_with_thread().await;
         let dir = fx.svc.layout.project_dir.join(".oxplow/extensions/acme");
         std::fs::create_dir_all(dir.join("pages")).unwrap();
-        std::fs::write(dir.join("extension.yaml"), MANIFEST).unwrap();
-        std::fs::write(dir.join("pages/pr.yaml"), PAGE).unwrap();
+        crate::test_fixtures::write_settings_fixture(dir.join("extension.yaml"), MANIFEST).unwrap();
+        crate::test_fixtures::write_settings_fixture(dir.join("pages/pr.yaml"), PAGE).unwrap();
         crate::test_fixtures::activate(&fx.svc).await;
         let hash = fx
             .svc
@@ -2041,7 +2041,7 @@ mod describe_tests {
             "old1",
         );
         std::fs::create_dir_all(old.join("pages")).unwrap();
-        std::fs::write(old.join("pages/pr.yaml"), OLD).unwrap();
+        crate::test_fixtures::write_settings_fixture(old.join("pages/pr.yaml"), OLD).unwrap();
         let def = describe(
             &fx,
             json!({ "uri": uri(EXTENSIONS, "acme/pages/pr.yaml", Some("old1")) }),
@@ -2086,7 +2086,7 @@ mod describe_tests {
         let old =
             crate::extension::extension_store::deployment_dir(project, "oxplow-foundation", "old1");
         std::fs::create_dir_all(old.join("pages")).unwrap();
-        std::fs::write(old.join("pages/commit.yaml"), OLD).unwrap();
+        crate::test_fixtures::write_settings_fixture(old.join("pages/commit.yaml"), OLD).unwrap();
         let older = describe(
             &fx,
             json!({ "uri": uri(EXTENSIONS, "oxplow-foundation/pages/commit.yaml", Some("old1")) }),
@@ -2194,7 +2194,7 @@ mod describe_tests {
         .await;
         assert_eq!(query["kind"], json!("query"), "{query}");
         // Without text it is read from the worktree.
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             fx.svc
                 .layout
                 .project_dir

@@ -15,7 +15,6 @@
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use oxplow_config::GeneratedConfig;
 use oxplow_domain::events::schema::ConfigChangedV2;
 use oxplow_domain::{DomainError, StoredEvent};
 
@@ -45,13 +44,23 @@ pub async fn applied(svc: &crate::Services, change: &ConfigChangedV2) {
     loop {
         // Registered before the check, so a swap between the two wakes it.
         let swapped = svc.config_applied.notified();
-        let now = oxplow_config::keys::key_value(
-            &crate::config_service::read_config(&svc.config),
-            &svc.layout.project_dir,
-            &change.key,
-        )
-        .unwrap_or(serde_json::Value::Null);
-        if now != change.before || change.before == change.after {
+        let config = crate::config_service::read_config(&svc.config);
+        let field = change
+            .key
+            .strip_prefix("oxplow.")
+            .unwrap_or(&change.key)
+            .split('.')
+            .next()
+            .unwrap_or_default();
+        let field_value = oxplow_config::keys::key_value(&config, &svc.layout.project_dir, field)
+            .unwrap_or(serde_json::Value::Null);
+        let values =
+            oxplow_config::core_settings::values_for_runtime_field("", field, &field_value);
+        let Some(now) = values.get(&change.key) else {
+            // Extension-only settings have no typed core projection to await.
+            return;
+        };
+        if *now != change.before || change.before == change.after {
             return;
         }
         if tokio::time::timeout_at(deadline, swapped).await.is_err() {
@@ -89,6 +98,27 @@ impl AsyncEventConsumer for KeyReactor {
     async fn handle(&self, event: &StoredEvent) -> Result<(), DomainError> {
         let change: ConfigChangedV2 = serde_json::from_value(event.envelope.payload.clone())
             .map_err(|e| DomainError::Invalid(format!("config.changed: {e}")))?;
+        if self.name == PROVIDERS {
+            if let Some((namespace, rest)) = change.key.split_once(".providerCredentials.") {
+                let Some((instance, _)) = rest.split_once('.') else {
+                    return Ok(());
+                };
+                if let (Some(svc), Ok(bytes)) = (self.svc.upgrade(), hex::decode(instance)) {
+                    if let Ok(instance) = String::from_utf8(bytes) {
+                        let instance = format!("{namespace}/{instance}");
+                        if change.layer == oxplow_domain::events::schema::ConfigLayer::Global {
+                            oxplow_config::CredentialGenerations::bump(
+                                &svc.global_config_dir,
+                                &instance,
+                            )
+                            .map_err(|e| DomainError::Storage(e.to_string()))?;
+                        }
+                        svc.providers.credential_changed(&instance).await;
+                    }
+                }
+                return Ok(());
+            }
+        }
         if !self.keys.is_empty() && !self.keys.contains(&change.key.as_str()) {
             return Ok(());
         }
@@ -124,21 +154,21 @@ pub fn register(state: &Arc<crate::Services>) {
     state.event_pump.register_async(reactor(
         EXTENSIONS,
         &[
-            "extensions",
-            "enableExtensions",
-            "disableExtensions",
-            "extensionSources",
+            "oxplow.extensions",
+            "oxplow.enableExtensions",
+            "oxplow.disableExtensions",
+            "oxplow.extensionSources",
         ],
         Box::new(|svc| Box::pin(async move { svc.extension_catalog.changed() })),
     ));
     state.event_pump.register_async(reactor(
         PROVIDERS,
-        &["extensionInstances", "activeProviders"],
+        &["oxplow.extensionInstances", "oxplow.activeProviders"],
         Box::new(|svc| Box::pin(async move { svc.extension_activation.request() })),
     ));
     state.event_pump.register_async(reactor(
         SCRIPTS,
-        &["scripts"],
+        &["oxplow.scripts.maxConcurrent", "oxplow.scripts.memoryMb"],
         Box::new(|svc| {
             Box::pin(async move {
                 apply_script_limits(&crate::config_service::read_config(&svc.config))
@@ -156,6 +186,7 @@ pub fn register(state: &Arc<crate::Services>) {
 /// include/exclude change applies without a restart.
 pub struct WorkspaceFilterConsumer {
     pub captures: SnapshotCaptureRegistry,
+    pub config: Arc<std::sync::RwLock<oxplow_config::OxplowConfig>>,
 }
 
 #[async_trait::async_trait]
@@ -171,15 +202,24 @@ impl AsyncEventConsumer for WorkspaceFilterConsumer {
     async fn handle(&self, event: &StoredEvent) -> Result<(), DomainError> {
         let change: ConfigChangedV2 = serde_json::from_value(event.envelope.payload.clone())
             .map_err(|e| DomainError::Invalid(format!("config.changed: {e}")))?;
-        if change.key != "generated" {
+        if !change.key.starts_with("oxplow.generated.") {
             return Ok(());
         }
-        let generated: GeneratedConfig = if change.after.is_null() {
-            GeneratedConfig::default()
-        } else {
-            serde_json::from_value(change.after)
-                .map_err(|e| DomainError::Invalid(format!("config.changed generated: {e}")))?
-        };
+        // Apply this leaf to the latest projection; sibling leaves retain
+        // their effective values even if the event precedes the config swap.
+        let mut generated = crate::config_service::read_config(&self.config).generated;
+        match change.key.as_str() {
+            _ if change.after.is_null() => {} // Unset inherits the already-resolved projection.
+            "oxplow.generated.include" => {
+                generated.include = serde_json::from_value(change.after)
+                    .map_err(|e| DomainError::Invalid(format!("config.changed generated: {e}")))?
+            }
+            "oxplow.generated.exclude" => {
+                generated.exclude = serde_json::from_value(change.after)
+                    .map_err(|e| DomainError::Invalid(format!("config.changed generated: {e}")))?
+            }
+            _ => return Ok(()),
+        }
         self.captures.set_generated(&generated);
         Ok(())
     }
@@ -220,7 +260,7 @@ mod tests {
             .run(
                 &agent,
                 "oxplow.config.set",
-                json!({ "key": "generated", "value": { "exclude": ["out"] } }),
+                json!({ "key": "oxplow.generated.exclude", "value": ["out"], "level": "project" }),
                 false,
             )
             .await
@@ -235,7 +275,7 @@ mod tests {
             .run(
                 &agent,
                 "oxplow.config.unset",
-                json!({ "key": "generated" }),
+                json!({ "key": "oxplow.generated.exclude", "level": "project" }),
                 false,
             )
             .await
@@ -257,7 +297,7 @@ mod tests {
         // The project's own extension defines the metric, off by default.
         let ext = svc.layout.project_dir.join(".oxplow/extensions/project");
         std::fs::create_dir_all(&ext).unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             ext.join("extension.yaml"),
             "manifest: 2\nname: project\nintent:\n  purpose: test\nmetrics:\n  - { key: work.ready_now, entity: v_thread, where: \"closed_at IS NULL\", default: off }\n",
         )
@@ -278,7 +318,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 "oxplow.config.set",
-                json!({ "key": "metrics", "value": [{ "use": "work.ready_now" }] }),
+                json!({ "key": "oxplow.metrics", "value": [{ "use": "work.ready_now" }], "level": "project" }),
                 false,
             )
             .await
@@ -305,7 +345,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 "oxplow.config.set",
-                json!({ "key": "extensions", "value": [] }),
+                json!({ "key": "oxplow.extensions", "value": [], "level": "project" }),
                 true,
             )
             .await

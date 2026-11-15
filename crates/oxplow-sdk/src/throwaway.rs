@@ -44,6 +44,10 @@ pub(crate) struct Host {
     /// Its database as the deploys left it, before anything ran: what a
     /// fork starts from.
     deployed: oxplow_db::Database,
+    /// A fork copies files only between fixture-model settings updates. Atomic
+    /// writers create and rename sibling temp files; copying mid-write can
+    /// otherwise enumerate a source file that is gone before it is opened.
+    files: std::sync::Mutex<()>,
     /// A step changed something its materialized datasets haven't caught up
     /// with yet.
     stale: std::sync::atomic::AtomicBool,
@@ -224,7 +228,8 @@ impl Host {
             if rel != default {
                 sources.insert(name.clone(), rel.to_string_lossy().into_owned());
             }
-            copy_dir(&source, &root.join(&rel)).map_err(|e| e.to_string())?;
+            copy_dir(&source, &root.join(&rel))
+                .map_err(|e| format!("copying extension source `{}`: {e}", source.display()))?;
             copied.insert(name.clone(), rel);
         }
         let config = root.join(".oxplow/project.yaml");
@@ -232,9 +237,10 @@ impl Host {
         // The checkout's choice of where oxplow's own extensions run from
         // (their built-in copies, or their sources) is the throwaway's too:
         // otherwise each copied source would be ignored with a warning.
-        let mut project = serde_json::json!({ "extensions": on, "extensionSources": sources });
+        let mut project =
+            serde_json::json!({ "oxplow.extensions": on, "oxplow.extensionSources": sources });
         if let Some(requested) = settings.bundled_requested {
-            project["enableBundledExtensions"] = requested.into();
+            project["oxplow.enableBundledExtensions"] = requested.into();
         }
         let yaml = serde_yaml::to_string(&project).map_err(|e| e.to_string())?;
         std::fs::write(config, yaml).map_err(|e| e.to_string())?;
@@ -260,7 +266,11 @@ impl Host {
         let store = self
             .root
             .join(oxplow_app::extension::extension_store::STORE_DIR);
-        copy_all(&self.root, &root, &store).map_err(|e| e.to_string())?;
+        {
+            let _files = self.files.lock().unwrap_or_else(|error| error.into_inner());
+            copy_all(&self.root, &root, &store)
+                .map_err(|e| format!("forking throwaway files: {e}"))?;
+        }
         oxplow_app::vcs::GitProvider
             .init_repository(&root)
             .await
@@ -281,7 +291,7 @@ impl Host {
             db,
         )
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| format!("booting throwaway `{}`: {e}", root.display()))?;
         // The machine's saved conversations aren't the test's data.
         svc.saved_conversations.stand_in();
         // The copy's streams live in the copy's folder, not the one it was
@@ -309,6 +319,7 @@ impl Host {
             env: self.env.clone(),
             builds: self.builds,
             deployed: self.deployed.clone(),
+            files: Default::default(),
             stale: Default::default(),
         };
         host.start_runtime()?;
@@ -338,7 +349,7 @@ impl Host {
             env.clone(),
         )
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| format!("booting throwaway `{}`: {e}", root.display()))?;
         // The machine's saved conversations aren't the test's data.
         svc.saved_conversations.stand_in();
         // Boot deploys nothing; the author's own test run deploys what it
@@ -378,6 +389,7 @@ impl Host {
             problems: problems(&svc, deploys),
             svc,
             deployed,
+            files: Default::default(),
             on,
             copied,
             env,
@@ -456,6 +468,7 @@ impl Host {
         &self,
         replies: Vec<oxplow_ai::fixture::FixtureReply>,
     ) -> Result<(), String> {
+        let _files = self.files.lock().unwrap_or_else(|error| error.into_inner());
         self.svc
             .ai
             .providers()
@@ -501,19 +514,34 @@ fn problems(
         .collect()
 }
 
+fn io_context(error: std::io::Error, action: &str, path: &Path) -> std::io::Error {
+    std::io::Error::new(
+        error.kind(),
+        format!("{action} `{}`: {error}", path.display()),
+    )
+}
+
 /// Copy throwaway `from` to `to` whole but its git repository: symlinks
 /// stay symlinks. The deployment store `store` is linked, not copied:
 /// nothing writes into a deployment after it is made, and a fork per
 /// example copying it was hundreds of files written and removed each time.
 fn copy_all(from: &Path, to: &Path, store: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(to)?;
-    for entry in std::fs::read_dir(from)? {
-        let entry = entry?;
+    std::fs::create_dir_all(to).map_err(|e| io_context(e, "create copy directory", to))?;
+    for entry in
+        std::fs::read_dir(from).map_err(|e| io_context(e, "list source directory", from))?
+    {
+        let entry = entry.map_err(|e| io_context(e, "read source entry", from))?;
         let target = to.join(entry.file_name());
-        let kind = entry.file_type()?;
+        let kind = entry
+            .file_type()
+            .map_err(|e| io_context(e, "stat source entry", &entry.path()))?;
         if kind.is_symlink() {
             #[cfg(unix)]
-            std::os::unix::fs::symlink(std::fs::read_link(entry.path())?, &target)?;
+            std::os::unix::fs::symlink(
+                std::fs::read_link(entry.path())
+                    .map_err(|e| io_context(e, "read source symlink", &entry.path()))?,
+                &target,
+            )?;
         } else if kind.is_dir() {
             if from.join(".git") == entry.path() {
                 continue;
@@ -525,7 +553,8 @@ fn copy_all(from: &Path, to: &Path, store: &Path) -> std::io::Result<()> {
             }
             copy_all(&entry.path(), &target, store)?;
         } else {
-            std::fs::copy(entry.path(), &target)?;
+            std::fs::copy(entry.path(), &target)
+                .map_err(|e| io_context(e, "copy source file", &entry.path()))?;
         }
     }
     Ok(())
@@ -592,7 +621,7 @@ mod tests {
     /// oxplow has, whoever runs it: its `requires:` (and theirs) are on, a
     /// sibling source it doesn't name is not — so a broken one is no noise
     /// in its report — and the person's own `disableExtensions` (here in
-    /// the main checkout, as a worktree has no `personal.yaml`) turns
+    /// the main checkout, as a worktree has no `local.yaml`) turns
     /// nothing off.
     #[tokio::test]
     async fn a_test_runs_an_extension_with_what_it_declares_and_nothing_else() {
@@ -603,8 +632,8 @@ mod tests {
             .unwrap();
         write(
             main.path(),
-            ".oxplow/personal.yaml",
-            "disableExtensions: [dep]\n",
+            ".oxplow/local.yaml",
+            "oxplow.disableExtensions: [dep]\n",
         );
         let parent = tempfile::tempdir().unwrap();
         let wt = parent.path().join("wt");
@@ -650,7 +679,7 @@ mod tests {
         );
         assert!(!host.root.join(EXTENSIONS_DIR).join("other").exists());
         assert!(host.problems.is_empty(), "{:?}", host.problems);
-        assert!(!host.root.join(".oxplow/personal.yaml").exists());
+        assert!(!host.root.join(".oxplow/local.yaml").exists());
     }
 
     /// A fork links to the deployment store it was made from (a deployment
@@ -688,6 +717,55 @@ mod tests {
         assert!(fork.problems.is_empty(), "{:?}", fork.problems);
     }
 
+    /// Shared read-only examples rebind their fixture model while data-making
+    /// examples fork the same host. Both operations must see whole settings
+    /// files, not the atomic writer's disappearing sibling temporary files.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn forks_share_a_file_boundary_with_fixture_model_settings_writes() {
+        let project = tempfile::tempdir().unwrap();
+        oxplow_app::vcs::GitProvider
+            .init_repository(project.path())
+            .await
+            .unwrap();
+        write(
+            project.path(),
+            ".oxplow/extensions/acme/extension.yaml",
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\n",
+        );
+        let base = Arc::new(
+            Host::start(project.path(), "acme", &[], Arc::new(|_: &str| None), true)
+                .await
+                .unwrap(),
+        );
+        base.start_runtime().unwrap();
+        let (start, ready) = std::sync::mpsc::channel();
+        let writer_base = base.clone();
+        let writer = std::thread::spawn(move || {
+            start.send(()).unwrap();
+            for _ in 0..32 {
+                writer_base.answer_with(Vec::new()).unwrap();
+            }
+        });
+        ready.recv().unwrap();
+        let mut forks = Vec::new();
+        for _ in 0..4 {
+            let base = base.clone();
+            forks.push(tokio::spawn(async move { base.fork().await }));
+        }
+        for fork in forks {
+            let host = fork.await.unwrap().unwrap();
+            assert!(host.problems.is_empty(), "{:?}", host.problems);
+            let values = oxplow_config::settings::read_layer(
+                &host.root,
+                &host.root.join(".oxplow/global-config"),
+                oxplow_config::settings::Level::Global,
+            )
+            .unwrap();
+            assert!(values.contains_key("oxplow.ai.providers"));
+        }
+        writer.join().unwrap();
+    }
+
     /// An extension whose source the project keeps elsewhere
     /// (`extensionSources`, as oxplow's own are kept in `extensions/`) is
     /// copied to the same place in the throwaway, so every finding names the
@@ -702,7 +780,7 @@ mod tests {
         write(
             project.path(),
             ".oxplow/project.yaml",
-            "extensionSources: { acme: extensions/acme }\n",
+            "oxplow.extensionSources: { acme: extensions/acme }\n",
         );
         write(
             project.path(),
@@ -749,7 +827,7 @@ mod tests {
         write(
             project.path(),
             ".oxplow/project.yaml",
-            "extensionSources: { acme: extensions/acme }\nenableBundledExtensions: false\n",
+            "oxplow.extensionSources: { acme: extensions/acme }\noxplow.enableBundledExtensions: false\n",
         );
         write(
             project.path(),
@@ -761,7 +839,7 @@ mod tests {
             .unwrap();
         let config = std::fs::read_to_string(host.root.join(".oxplow/project.yaml")).unwrap();
         assert!(
-            config.contains("enableBundledExtensions: false"),
+            config.contains("oxplow.enableBundledExtensions: false"),
             "{config}"
         );
         assert!(host.root.join("extensions/acme").is_dir());

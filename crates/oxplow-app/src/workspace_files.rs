@@ -609,7 +609,7 @@ mod tests {
     #[test]
     fn the_workspace_root_itself_is_never_a_target() {
         let dir = tempdir().unwrap();
-        std::fs::write(dir.path().join("keep.txt"), "x").unwrap();
+        crate::test_fixtures::write_settings_fixture(dir.path().join("keep.txt"), "x").unwrap();
         for root_path in ["", ".", "/", "./"] {
             assert!(
                 matches!(
@@ -651,9 +651,15 @@ mod tests {
     async fn a_streams_files_follow_its_own_ignores() {
         let fx = crate::test_fixtures::services_with_thread().await;
         let other = tempdir().unwrap();
-        std::fs::write(other.path().join(".gitignore"), "local.txt\n").unwrap();
-        std::fs::write(other.path().join("local.txt"), "needle\n").unwrap();
-        std::fs::write(other.path().join("kept.txt"), "needle\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            other.path().join(".gitignore"),
+            "local.txt\n",
+        )
+        .unwrap();
+        crate::test_fixtures::write_settings_fixture(other.path().join("local.txt"), "needle\n")
+            .unwrap();
+        crate::test_fixtures::write_settings_fixture(other.path().join("kept.txt"), "needle\n")
+            .unwrap();
         let path = other.path().display().to_string();
         fx.svc
             .db
@@ -695,11 +701,16 @@ mod tests {
         let dir = tempdir().unwrap();
         let root = dir.path();
         std::fs::create_dir(root.join("src")).unwrap();
-        std::fs::write(root.join("src/a.rs"), "fn a() {}\nlet x = foo(1);\n").unwrap();
-        std::fs::write(root.join("b.txt"), "foo( twice foo(\n").unwrap();
-        std::fs::write(root.join("bin.dat"), b"foo(\0\x01").unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            root.join("src/a.rs"),
+            "fn a() {}\nlet x = foo(1);\n",
+        )
+        .unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("b.txt"), "foo( twice foo(\n")
+            .unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("bin.dat"), b"foo(\0\x01").unwrap();
         std::fs::create_dir(root.join("gen")).unwrap();
-        std::fs::write(root.join("gen/out.rs"), "foo(\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("gen/out.rs"), "foo(\n").unwrap();
         let skip_gen = |p: &str| p.starts_with("gen");
 
         let hits = search_workspace_text(root, "foo(", 200, &skip_gen).unwrap();
@@ -734,7 +745,7 @@ mod tests {
     fn a_long_line_is_cut_on_a_character_boundary() {
         let dir = tempdir().unwrap();
         let line = format!("needle {}", "é".repeat(400));
-        std::fs::write(dir.path().join("long.txt"), &line).unwrap();
+        crate::test_fixtures::write_settings_fixture(dir.path().join("long.txt"), &line).unwrap();
         let hits = search_workspace_text(dir.path(), "needle", 10, &|_| false).unwrap();
         assert!(hits[0].snippet.ends_with('…'));
         assert!(hits[0].snippet.len() <= 404);

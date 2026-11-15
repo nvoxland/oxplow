@@ -1696,6 +1696,14 @@
       "properties": {
         "files": {
           "type": "string"
+        },
+        "root": {
+          "description": "The registered files root to observe; absent means the project.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         }
       },
       "additionalProperties": false,

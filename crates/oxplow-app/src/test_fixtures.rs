@@ -4,6 +4,72 @@
 
 pub(crate) mod lifecycle;
 
+/// Keep runtime-shaped test inputs convenient while writing only canonical
+/// settings files. Malformed inputs stay untouched for rejection tests.
+pub(crate) fn write_settings_fixture(
+    path: impl AsRef<std::path::Path>,
+    data: impl AsRef<[u8]>,
+) -> std::io::Result<()> {
+    let path = path.as_ref();
+    let data = data.as_ref();
+    let settings_file = path.file_name().and_then(|name| name.to_str());
+    if !matches!(settings_file, Some("project.yaml" | "local.yaml")) {
+        return std::fs::write(path, data);
+    }
+    let converted = (|| {
+        let yaml: serde_yaml::Value = serde_yaml::from_slice(data).ok()?;
+        let object =
+            serde_json::from_str::<serde_json::Value>(&serde_json::to_string(&yaml).ok()?).ok()?;
+        let object = object.as_object()?;
+        if object.keys().all(|key| key.contains('.')) {
+            return None;
+        }
+        let bindings = oxplow_config::core_settings::bindings("test");
+        let legacy: serde_json::Map<String, serde_json::Value> = object
+            .iter()
+            .filter(|(key, _)| {
+                !key.contains('.')
+                    && !bindings.iter().any(|binding| {
+                        binding.path.is_empty()
+                            && binding.definition.key
+                                == oxplow_config::core_settings::canonical_key(key)
+                    })
+            })
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        let legacy_yaml: serde_yaml::Value =
+            serde_yaml::from_str(&serde_json::to_string(&legacy).ok()?).ok()?;
+        oxplow_config::parse_project_config(legacy_yaml, "test").ok()?;
+        let mut flat = serde_json::Map::new();
+        for (key, value) in object {
+            if key.contains('.') {
+                flat.insert(key.clone(), value.clone());
+                continue;
+            }
+            let values = oxplow_config::core_settings::values_for_runtime_field("test", key, value);
+            if values.is_empty() {
+                let canonical = oxplow_config::core_settings::canonical_key(key);
+                if !bindings
+                    .iter()
+                    .any(|binding| binding.definition.key == canonical)
+                {
+                    return None;
+                }
+                flat.insert(canonical, value.clone());
+            } else {
+                flat.extend(values);
+            }
+        }
+        let yaml: serde_yaml::Value =
+            serde_yaml::from_str(&serde_json::to_string(&flat).ok()?).ok()?;
+        serde_yaml::to_string(&yaml).ok()
+    })();
+    match converted {
+        Some(converted) => std::fs::write(path, converted),
+        None => std::fs::write(path, data),
+    }
+}
+
 /// Every shipped extension a project may turn off, for a test of what runs
 /// without them, as a YAML list's items.
 pub(crate) fn optional_shipped() -> String {
@@ -266,10 +332,10 @@ async fn developing_oxplow() -> (tempfile::TempDir, Arc<crate::Services>) {
         for (rel, bytes) in b.files() {
             let file = to.join(rel);
             std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-            std::fs::write(file, bytes).unwrap();
+            crate::test_fixtures::write_settings_fixture(file, bytes).unwrap();
         }
     }
-    std::fs::write(
+    crate::test_fixtures::write_settings_fixture(
         dir.path().join(".oxplow/project.yaml"),
         "enableBundledExtensions: false\n",
     )
@@ -361,7 +427,7 @@ pub fn generated_section(doc: &str, name: &str, generated: &str) {
         .unwrap_or_else(|| panic!("{doc}: the {name}:end marker"));
     let generated = format!("\n{generated}");
     if std::env::var_os("OXPLOW_BLESS").is_some() {
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             &path,
             format!("{}{generated}{}", &text[..begin], &text[end..]),
         )
@@ -770,4 +836,40 @@ pub async fn run_as_page_in(
         panic!("page {} loader {loader}: {error}", page.id);
     }
     run.result.clone()
+}
+
+#[test]
+fn settings_fixture_writes_flat_keys_and_preserves_other_inputs() {
+    let root = tempfile::tempdir().unwrap();
+    let project = root.path().join("project.yaml");
+    write_settings_fixture(
+        &project,
+        "snapshotRetentionDays: 14\ntesting:\n  command: make test\n",
+    )
+    .unwrap();
+    let saved: serde_yaml::Value =
+        serde_yaml::from_slice(&std::fs::read(&project).unwrap()).unwrap();
+    assert_eq!(saved["oxplow.snapshots.retentionDays"].as_i64(), Some(14));
+    assert_eq!(saved["oxplow.testing.command"].as_str(), Some("make test"));
+    assert!(saved.get("testing").is_none());
+
+    for original in [
+        "# keep comment\noxplow.snapshots.retentionDays: 2\n",
+        "unknownKey: true\n",
+        "testing: { unknown: true }\n",
+        "[broken",
+    ] {
+        write_settings_fixture(&project, original).unwrap();
+        assert_eq!(std::fs::read_to_string(&project).unwrap(), original);
+    }
+    let local = root.path().join("local.yaml");
+    write_settings_fixture(&local, "newThreadSession: none\n").unwrap();
+    let saved: serde_yaml::Value = serde_yaml::from_slice(&std::fs::read(local).unwrap()).unwrap();
+    assert_eq!(saved["oxplow.newThreadSession"].as_str(), Some("none"));
+    let other = root.path().join("extension.yaml");
+    write_settings_fixture(&other, "projectName: leave alone\n").unwrap();
+    assert_eq!(
+        std::fs::read_to_string(other).unwrap(),
+        "projectName: leave alone\n"
+    );
 }

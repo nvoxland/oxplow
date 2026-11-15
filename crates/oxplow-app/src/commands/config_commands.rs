@@ -1,34 +1,14 @@
-//! `config.*`: `.oxplow/project.yaml` as commands (`.context/commands.md`).
-//!
-//! `oxplow.config.list_keys` / `oxplow.config.get` describe the file through the key
-//! registry (`oxplow_config::keys`); `oxplow.config.set` / `oxplow.config.unset` change
-//! one key, taking the new document through the loader's own validation,
-//! writing the file, updating the in-memory config, and logging
-//! `config.changed@2 { key, before, after, layer }` with an inverse that restores
-//! the prior value. A human-only key (`ai`, `agents`, `lsp`, …) asks for
-//! confirmation per input, so an agent's change is kept as a proposal for
-//! a person (the bus's `Proposed`) while a person's confirmed call goes
-//! through.
-//!
-//! The handlers are `Tx` and **pure**: inside the bus's transaction they
-//! only validate and compute before/after (the closure may run more than
-//! once — `Database::transaction` retries on SQLITE_BUSY). The file write
-//! and the in-memory swap happen after commit, re-applying just this key
-//! to the config as it is then, so two sets of different keys can't lose
-//! each other. A post-commit write failure is logged at error level; the
-//! audit and `config.changed` then describe a change the file lacks —
-//! rare (a full disk), visible, and fixed by setting the key again.
+//! Domain settings actions compose the same registered storage used by config.*.
+//! Runtime document fields are translated to independently registered keys.
 
 use crate::commands::ops::Op;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
-use oxplow_config::keys::{config_key, config_keys, key_value, with_key, ConfigKey};
-use oxplow_config::{
-    personal_value, with_personal_key, write_personal_key, write_project_key, OxplowConfig,
-};
+use oxplow_config::settings::Level;
+use oxplow_config::OxplowConfig;
 use oxplow_domain::events::schema::{ConfigChanged, ConfigChangedV2, ConfigLayer};
-use oxplow_domain::{Actor, CommandCall, CommandError, Envelope, InputValidator};
+use oxplow_domain::{Actor, CommandCall, CommandError, Envelope};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -47,6 +27,9 @@ pub const UNSET: &str = "oxplow.config.unset";
 #[derive(Clone)]
 pub struct ConfigTarget {
     pub config: Arc<RwLock<OxplowConfig>>,
+    pub global_dir: PathBuf,
+    pub secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
+    pub catalog: Option<Arc<crate::extension::extension_catalog::ExtensionCatalog>>,
     pub project_dir: PathBuf,
     pub events: EventBus,
     /// Woken after each swap of the in-memory config.
@@ -56,37 +39,6 @@ pub struct ConfigTarget {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct NoInput {}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct KeyInput {
-    /// A `.oxplow/project.yaml` key (`zones`, `metricRetentionDays`, …).
-    pub key: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct SetInput {
-    /// A `.oxplow/project.yaml` key.
-    pub key: String,
-    /// The new value, in the key's own shape (see `oxplow.config.list_keys`).
-    pub value: Value,
-    /// `project` (the default: `.oxplow/project.yaml`, shared) or
-    /// `personal` (`.oxplow/personal.yaml`, a person's own; only
-    /// `activeProviders` and `newThreadSession`, which is only there).
-    #[serde(default)]
-    pub layer: Layer,
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct UnsetInput {
-    /// A `.oxplow/project.yaml` key.
-    pub key: String,
-    /// The layer to unset it in (see `oxplow.config.set`).
-    #[serde(default)]
-    pub layer: Layer,
-}
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -116,7 +68,7 @@ pub struct ChooseProviderInput {
     /// `project` (the default: shared in `.oxplow/project.yaml`) or
     /// `personal` (just for this person).
     #[serde(default)]
-    pub layer: Layer,
+    pub level: Layer,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -136,285 +88,292 @@ pub struct ChooseReplacementInput {
 pub enum Layer {
     #[default]
     Project,
-    Personal,
+    Local,
+    Global,
 }
 
 impl Layer {
+    fn level(self) -> Level {
+        match self {
+            Self::Project => Level::Project,
+            Self::Local => Level::Local,
+            Self::Global => Level::Global,
+        }
+    }
     fn logged(self) -> ConfigLayer {
         match self {
-            Layer::Project => ConfigLayer::Project,
-            Layer::Personal => ConfigLayer::Personal,
+            Self::Project => ConfigLayer::Project,
+            Self::Local => ConfigLayer::Local,
+            Self::Global => ConfigLayer::Global,
         }
     }
-
-    fn value(self, cfg: &OxplowConfig, project_dir: &std::path::Path, key: &str) -> Option<Value> {
-        match self {
-            Layer::Project => key_value(cfg, project_dir, key),
-            Layer::Personal => personal_value(cfg, key),
-        }
-    }
-
-    fn apply(
+    /// Resolve an action's starting value at its chosen level or below.
+    /// Editing a shared map must never copy a local override into Git.
+    pub(super) fn value(
         self,
-        cfg: &OxplowConfig,
-        project_dir: &std::path::Path,
+        store: &oxplow_config::settings::SettingsStore,
         key: &str,
-        value: Option<&Value>,
-    ) -> Result<OxplowConfig, oxplow_config::ConfigError> {
-        match self {
-            Layer::Project => with_key(cfg, project_dir, key, value),
-            Layer::Personal => with_personal_key(cfg, key, value),
+    ) -> Result<Option<Value>, CommandError> {
+        let key = if key.starts_with("oxplow.") {
+            key.to_owned()
+        } else {
+            oxplow_config::core_settings::canonical_key(key)
+        };
+        let levels: &[Level] = match self {
+            Self::Local => &Level::PRECEDENCE,
+            Self::Project => &[Level::Project, Level::Global],
+            Self::Global => &[Level::Global],
+        };
+        let failed = |error: oxplow_config::settings::SettingsError| CommandError::Invalid {
+            field: Some("/key".into()),
+            message: error.to_string(),
+        };
+        for level in levels {
+            if let Some(value) = store.get(&key, Some(*level)).map_err(failed)?.value {
+                return Ok(Some(value));
+            }
         }
+        Ok(store.definition(&key).map_err(failed)?.default)
     }
+}
 
-    fn write(
-        self,
-        project_dir: &std::path::Path,
-        key: &str,
-        value: Option<&Value>,
-    ) -> Result<(), oxplow_config::ConfigError> {
-        match self {
-            Layer::Project => write_project_key(project_dir, key, value),
-            Layer::Personal => write_personal_key(project_dir, key, value),
+impl ConfigTarget {
+    pub(crate) fn settings(&self) -> Result<oxplow_config::settings::SettingsStore, CommandError> {
+        let extensions = self
+            .catalog
+            .as_ref()
+            .map(|catalog| catalog.unpinned(&self.project_dir, "settings registry"));
+        crate::settings::store(
+            &self.project_dir,
+            &self.global_dir,
+            self.secrets.clone(),
+            extensions.as_deref().map(|v| v.as_slice()).unwrap_or(&[]),
+        )
+        .map_err(|e| CommandError::Failed {
+            message: e.to_string(),
+        })
+    }
+    pub(crate) fn refresh(&self) -> Result<(), CommandError> {
+        let fresh = oxplow_config::load_project_config_with_global(
+            &self.project_dir,
+            Some(&self.global_dir),
+        )
+        .map_err(|e| CommandError::Failed {
+            message: e.to_string(),
+        })?;
+        *self.config.write().unwrap_or_else(|e| e.into_inner()) = fresh;
+        self.applied.notify_waiters();
+        self.events.emit(OxplowEvent::ConfigChanged);
+        Ok(())
+    }
+}
+
+/// Validate the whole typed core projection before any file write.
+pub(super) fn preflight(
+    target: &ConfigTarget,
+    changes: &[(String, Option<Value>)],
+    level: Level,
+) -> Result<(), CommandError> {
+    let store = target.settings()?;
+    let fail = |e: oxplow_config::settings::SettingsError| CommandError::Invalid {
+        field: Some("/value".into()),
+        message: e.to_string(),
+    };
+    let mut layers = std::collections::BTreeMap::new();
+    for at in Level::PRECEDENCE {
+        let mut values = store.layer(at).map_err(fail)?;
+        if at == level {
+            for (key, value) in changes {
+                if let Some(value) = value {
+                    values.insert(key.clone(), value.clone());
+                } else {
+                    values.remove(key);
+                }
+            }
         }
+        layers.insert(format!("{at:?}"), values);
     }
-
-    fn input(self) -> Value {
-        match self {
-            Layer::Project => Value::Null,
-            Layer::Personal => json!("personal"),
+    let fallback = target
+        .project_dir
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy();
+    let validate_projection = |precedence: &[Level]| -> Result<(), CommandError> {
+        let mut effective = std::collections::BTreeMap::new();
+        for binding in oxplow_config::core_settings::bindings(&fallback) {
+            if binding.path.is_empty() {
+                continue;
+            }
+            for at in precedence {
+                if let Some(value) = layers[&format!("{at:?}")].get(&binding.definition.key) {
+                    store
+                        .validate(&binding.definition.key, value)
+                        .map_err(fail)?;
+                    effective.insert(binding.definition.key, value.clone());
+                    break;
+                }
+            }
         }
+        oxplow_config::parse_project_config(
+            oxplow_config::core_settings::document_from_values(&fallback, &effective),
+            &fallback,
+        )
+        .map_err(|error| CommandError::Invalid {
+            field: Some("/value".into()),
+            message: error.to_string(),
+        })?;
+        Ok(())
+    };
+    // A valid local value must not hide an invalid shared override. Validate
+    // what the edited level would expose without higher overrides, as well
+    // as the effective combination the running project will use.
+    if level != Level::Local {
+        let selected: Vec<_> = Level::PRECEDENCE
+            .into_iter()
+            .skip_while(|at| *at != level)
+            .collect();
+        validate_projection(&selected)?;
     }
+    validate_projection(&Level::PRECEDENCE)?;
+    Ok(())
 }
 
-/// One key as `oxplow.config.list_keys` / `oxplow.config.get` report it.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct KeyReport {
-    #[serde(flatten)]
-    pub key: ConfigKey,
-    /// Whether the file sets it (else the value is the default).
-    pub set: bool,
-    /// The value as written to the file; `null` when unset.
-    pub value: Value,
-}
-
-fn known_key(key: &str) -> Result<ConfigKey, CommandError> {
-    config_key(key).ok_or_else(|| CommandError::Invalid {
-        field: Some("/key".into()),
-        message: format!("`{key}` is not a project.yaml key; see oxplow.config.list_keys"),
-    })
-}
-
-fn report(target: &ConfigTarget, cfg: &OxplowConfig, key: ConfigKey) -> KeyReport {
-    let value = key_value(cfg, &target.project_dir, &key.key);
-    KeyReport {
-        set: value.is_some(),
-        value: value.unwrap_or(Value::Null),
-        key,
-    }
-}
-
-/// Set (`Some`) or unset (`None`) `key`: validate and describe the change;
-/// the file write and config swap run after commit ([`apply_committed`]).
+/// Translate a domain action into registered settings, preserving canonical undo.
 pub(crate) fn change(
     target: &ConfigTarget,
     actor: &Actor,
-    key: &str,
+    field: &str,
     value: Option<Value>,
     layer: Layer,
 ) -> Result<HandlerOutput, CommandError> {
-    let personal_only = layer == Layer::Personal
-        && oxplow_config::PERSONAL_KEYS.contains(&key)
-        && config_key(key).is_none();
-    // A personal-only key (`newThreadSession`) has no project.yaml schema;
-    // the personal layer's own load validates it.
-    let spec = if personal_only {
-        None
+    let store = target.settings()?;
+    let fallback = target
+        .project_dir
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy();
+    let bindings = oxplow_config::core_settings::bindings(&fallback);
+    let canonical = if field.starts_with("oxplow.") {
+        field.to_owned()
     } else {
-        Some(known_key(key)?)
+        oxplow_config::core_settings::canonical_key(field)
     };
-    if layer == Layer::Personal && !oxplow_config::PERSONAL_KEYS.contains(&key) {
-        return Err(CommandError::Invalid {
-            field: Some("/layer".into()),
-            message: format!(
-                "`{key}` is the project's; a person's layer holds only {}",
-                oxplow_config::PERSONAL_KEYS.join(", ")
-            ),
-        });
-    }
-    if let Some(v) = &value {
-        if v.is_null() {
+    let changes = if bindings
+        .iter()
+        .any(|binding| binding.definition.key == canonical)
+    {
+        // A registered key (including a dotted runtime leaf) changes only
+        // that setting. Sibling options retain their own level and origin.
+        vec![(canonical, value)]
+    } else {
+        let keys: Vec<_> = bindings
+            .iter()
+            .filter(|binding| binding.path.first().is_some_and(|path| path == field))
+            .map(|binding| binding.definition.key.clone())
+            .collect();
+        if keys.is_empty() {
             return Err(CommandError::Invalid {
-                field: Some("/value".into()),
-                message: format!("`{key}` cannot be set to null; use oxplow.config.unset"),
+                field: Some("/key".into()),
+                message: "unknown setting".into(),
             });
         }
+        let values = value
+            .as_ref()
+            .map(|value| {
+                oxplow_config::core_settings::values_for_runtime_field(&fallback, field, value)
+            })
+            .unwrap_or_default();
+        keys.into_iter()
+            .map(|key| {
+                let value = values.get(&key).cloned();
+                (key, value)
+            })
+            .collect()
+    };
+    let fail = |e: oxplow_config::settings::SettingsError| CommandError::Invalid {
+        field: Some("/value".into()),
+        message: e.to_string(),
+    };
+    for (key, value) in &changes {
+        if let Some(v) = value {
+            store.validate(key, v).map_err(fail)?;
+        }
     }
-    if let (Some(v), Some(spec)) = (&value, &spec) {
-        InputValidator::compile(&spec.schema)?
-            .check(v)
-            .map_err(|e| match e {
-                CommandError::Invalid { field, message } => CommandError::Invalid {
-                    field: Some(format!("/value{}", field.unwrap_or_default())),
-                    message,
+    preflight(target, &changes, layer.level())?;
+    let mut inverses = Vec::new();
+    let mut events = Vec::new();
+    let mut writes = Vec::new();
+    for (key, value) in changes {
+        let before = store.get(&key, Some(layer.level())).map_err(fail)?.value;
+        if before == value {
+            continue;
+        }
+        inverses.push(match &before {
+            Some(v) => CommandCall {
+                name: SET.into(),
+                input: json!({"key":key,"value":v,"level":layer.level()}),
+            },
+            None => CommandCall {
+                name: UNSET.into(),
+                input: json!({"key":key,"level":layer.level()}),
+            },
+        });
+        events.push(
+            Envelope::typed::<ConfigChanged>(
+                actor.source(),
+                &ConfigChangedV2 {
+                    key: key.clone(),
+                    before: before.unwrap_or(Value::Null),
+                    after: value.clone().unwrap_or(Value::Null),
+                    layer: layer.logged(),
                 },
-                other => other,
-            })?;
+            )
+            .with_subject([oxplow_domain::uri::build::config_uri(&key)]),
+        );
+        writes.push((key, value));
     }
-    let current = target
-        .config
-        .read()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone();
-    let before = layer.value(&current, &target.project_dir, key);
-    let next = layer
-        .apply(&current, &target.project_dir, key, value.as_ref())
-        .map_err(|e| CommandError::Invalid {
-            field: Some("/value".into()),
-            message: e.to_string(),
-        })?;
-    let after = layer.value(&next, &target.project_dir, key);
-    if before == after {
-        // Nothing to write, log or undo: the run leaves no record, and
-        // doesn't keep a composite it's part of from undoing the rest.
+    if writes.is_empty() {
         return Ok(HandlerOutput {
-            result: json!({ "key": key, "before": before, "after": after, "changed": false }),
+            result: json!({"changed":false}),
             unchanged: true,
-            ..HandlerOutput::default()
+            ..Default::default()
         });
     }
-    let with_layer = |mut input: Value| {
-        if layer == Layer::Personal {
-            input["layer"] = layer.input();
-        }
-        input
+    let inverse = if inverses.len() == 1 {
+        inverses.pop()
+    } else {
+        Some(CommandCall {
+            name: "oxplow.command.sequence".into(),
+            input: json!({"calls":inverses}),
+        })
     };
-    let inverse = match &before {
-        Some(prev) => CommandCall {
-            name: SET.into(),
-            input: with_layer(json!({ "key": key, "value": prev })),
-        },
-        None => CommandCall {
-            name: UNSET.into(),
-            input: with_layer(json!({ "key": key })),
-        },
-    };
-    let event = Envelope::typed::<ConfigChanged>(
-        actor.source(),
-        &ConfigChangedV2 {
-            key: key.to_string(),
-            before: before.clone().unwrap_or(Value::Null),
-            after: after.clone().unwrap_or(Value::Null),
-            layer: layer.logged(),
-        },
-    )
-    .with_subject([oxplow_domain::uri::build::config_uri(key)]);
-    let committed = target.clone();
-    let key_owned = key.to_string();
+    let target = target.clone();
     Ok(HandlerOutput {
-        result: json!({ "key": key, "before": before, "after": after, "changed": true }),
-        inverse: Some(inverse),
-        events: vec![event],
+        result: json!({"changed":true}),
+        inverse,
+        events,
         after_commit: Some(Box::new(move || {
-            apply_committed(&committed, &key_owned, value.as_ref(), layer)
+            for (key, value) in writes {
+                let result = match value {
+                    Some(value) => store.set(&key, value, layer.level()),
+                    None => store.unset(&key, layer.level()),
+                };
+                if let Err(error) = result {
+                    tracing::error!(%error, "committed domain settings could not be stored");
+                    return;
+                }
+            }
+            if let Err(error) = target.refresh() {
+                tracing::error!(%error, "committed domain settings could not be applied");
+            }
         })),
-        unchanged: false,
+        ..Default::default()
     })
-}
-
-/// After commit: apply `key` to the config as it is NOW (another key may
-/// have changed since the handler ran), write that one key into the file —
-/// the rest stays as the person wrote it — swap memory, wake the
-/// UI. Holding the write lock across write + swap keeps the file and the
-/// in-memory config in step.
-fn apply_committed(target: &ConfigTarget, key: &str, value: Option<&Value>, layer: Layer) {
-    let mut guard = target.config.write().unwrap_or_else(|e| e.into_inner());
-    let next = match layer.apply(&guard, &target.project_dir, key, value) {
-        Ok(next) => next,
-        Err(e) => {
-            tracing::error!(key, error = %e, "config.set: committed change no longer applies");
-            return;
-        }
-    };
-    if let Err(e) = layer.write(&target.project_dir, key, value) {
-        tracing::error!(key, ?layer, error = %e, "config.set: writing the config after commit failed");
-        return;
-    }
-    *guard = next;
-    drop(guard);
-    target.applied.notify_waiters();
-    target.events.emit(OxplowEvent::ConfigChanged);
 }
 
 /// The four `config.*` commands over `target`.
 pub fn ops(target: ConfigTarget) -> Vec<Op> {
-    let list = {
-        let t = target.clone();
-        Op::new(
-            "config.read",
-            "list_keys",
-            schema::<NoInput>(),
-            false,
-            Handler::Tx(Arc::new(move |_ctx: &super::TxCtx<'_>, input| {
-                parse::<NoInput>(input)?;
-                let cfg = t.config.read().unwrap_or_else(|e| e.into_inner()).clone();
-                let keys: Vec<KeyReport> = config_keys()
-                    .into_iter()
-                    .map(|k| report(&t, &cfg, k))
-                    .collect();
-                Ok(HandlerOutput {
-                    result: serde_json::to_value(keys).expect("reports serialize"),
-                    ..HandlerOutput::default()
-                })
-            })),
-        )
-    };
-    let get = {
-        let t = target.clone();
-        Op::new(
-            "config.read",
-            "get",
-            schema::<KeyInput>(),
-            false,
-            Handler::Tx(Arc::new(move |_ctx: &super::TxCtx<'_>, input| {
-                let input: KeyInput = parse(input)?;
-                let key = known_key(&input.key)?;
-                let cfg = t.config.read().unwrap_or_else(|e| e.into_inner()).clone();
-                Ok(HandlerOutput {
-                    result: serde_json::to_value(report(&t, &cfg, key)).expect("report serializes"),
-                    ..HandlerOutput::default()
-                })
-            })),
-        )
-    };
-    let set = {
-        let t = target.clone();
-        Op::new(
-            "config.write",
-            "set",
-            schema::<SetInput>(),
-            true,
-            Handler::Tx(Arc::new(move |ctx: &super::TxCtx<'_>, input| {
-                let actor = ctx.actor();
-                let input: SetInput = parse(input)?;
-                change(&t, actor, &input.key, Some(input.value), input.layer)
-            })),
-        )
-    };
-    let unset = {
-        let t = target.clone();
-        Op::new(
-            "config.write",
-            "unset",
-            schema::<UnsetInput>(),
-            true,
-            Handler::Tx(Arc::new(move |ctx: &super::TxCtx<'_>, input| {
-                let actor = ctx.actor();
-                let input: UnsetInput = parse(input)?;
-                change(&t, actor, &input.key, None, input.layer)
-            })),
-        )
-    };
+    let target_for_settings = target.clone();
     let mark_generated = {
         let t = target.clone();
         Op::new(
@@ -431,21 +390,27 @@ pub fn ops(target: ConfigTarget) -> Vec<Op> {
                         message: "name a file or folder".into(),
                     });
                 }
-                let mut generated = t
-                    .config
-                    .read()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .generated
-                    .clone();
-                generated.exclude.retain(|e| e != &entry);
+                let mut exclude: Vec<String> = Layer::Project
+                    .value(&t.settings()?, "generated.exclude")?
+                    .map(serde_json::from_value)
+                    .transpose()
+                    .map_err(|error| CommandError::Invalid {
+                        field: Some("/entry".into()),
+                        message: error.to_string(),
+                    })?
+                    .unwrap_or_default();
+                exclude.retain(|excluded| excluded != &entry);
                 if input.generated {
-                    generated.exclude.push(entry);
-                    generated.exclude.sort();
+                    exclude.push(entry);
+                    exclude.sort();
                 }
-                // Nothing marked is the key absent, as the file is written.
-                let value = (generated != oxplow_config::GeneratedConfig::default())
-                    .then(|| serde_json::to_value(&generated).expect("generated serializes"));
-                change(&t, ctx.actor(), "generated", value, Layer::Project)
+                change(
+                    &t,
+                    ctx.actor(),
+                    "generated.exclude",
+                    Some(json!(exclude)),
+                    Layer::Project,
+                )
             })),
         )
     };
@@ -465,10 +430,9 @@ pub fn ops(target: ConfigTarget) -> Vec<Op> {
                         message: "name a capability".into(),
                     });
                 }
-                let cfg = t.config.read().unwrap_or_else(|e| e.into_inner()).clone();
                 let mut chosen: serde_json::Map<String, Value> = input
-                    .layer
-                    .value(&cfg, &t.project_dir, "activeProviders")
+                    .level
+                    .value(&t.settings()?, "activeProviders")?
                     .and_then(|v| v.as_object().cloned())
                     .unwrap_or_default();
                 match input
@@ -484,9 +448,13 @@ pub fn ops(target: ConfigTarget) -> Vec<Op> {
                         chosen.remove(&capability);
                     }
                 }
-                // Nothing chosen is the key absent.
-                let value = (!chosen.is_empty()).then_some(Value::Object(chosen));
-                change(&t, ctx.actor(), "activeProviders", value, input.layer)
+                change(
+                    &t,
+                    ctx.actor(),
+                    "activeProviders",
+                    Some(Value::Object(chosen)),
+                    input.level,
+                )
             })),
         )
     };
@@ -506,9 +474,8 @@ pub fn ops(target: ConfigTarget) -> Vec<Op> {
                         message: "name the component".into(),
                     });
                 }
-                let cfg = t.config.read().unwrap_or_else(|e| e.into_inner()).clone();
                 let mut chosen: serde_json::Map<String, Value> = Layer::Project
-                    .value(&cfg, &t.project_dir, "replacements")
+                    .value(&t.settings()?, "replacements")?
                     .and_then(|v| v.as_object().cloned())
                     .unwrap_or_default();
                 match input
@@ -524,41 +491,36 @@ pub fn ops(target: ConfigTarget) -> Vec<Op> {
                         chosen.remove(&target);
                     }
                 }
-                let value = (!chosen.is_empty()).then_some(Value::Object(chosen));
-                change(&t, ctx.actor(), "replacements", value, Layer::Project)
+                change(
+                    &t,
+                    ctx.actor(),
+                    "replacements",
+                    Some(Value::Object(chosen)),
+                    Layer::Project,
+                )
             })),
         )
     };
-    vec![
-        list,
-        get,
-        set,
-        unset,
-        mark_generated,
-        choose_provider,
-        choose_replacement,
-    ]
+    let mut ops = super::settings_commands::ops(target_for_settings);
+    ops.extend([mark_generated, choose_provider, choose_replacement]);
+    ops
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent_policy::AgentPolicy;
-    use crate::commands::CommandBus;
-    use crate::event_pump::EventPump;
-    use oxplow_config::load_project_config;
+    use crate::{agent_policy::AgentPolicy, commands::CommandBus, event_pump::EventPump};
     use oxplow_db::{Database, SqliteEventLogStore};
-    use oxplow_domain::ThreadId;
 
-    fn setup(initial_yaml: Option<&str>) -> (tempfile::TempDir, ConfigTarget, Arc<CommandBus>) {
+    fn setup() -> (tempfile::TempDir, ConfigTarget, Arc<CommandBus>) {
         let dir = tempfile::tempdir().unwrap();
-        if let Some(yaml) = initial_yaml {
-            std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
-            std::fs::write(dir.path().join(".oxplow/project.yaml"), yaml).unwrap();
-        }
-        let config = Arc::new(RwLock::new(load_project_config(dir.path()).unwrap()));
         let target = ConfigTarget {
-            config,
+            global_dir: dir.path().join("global"),
+            secrets: Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
+            catalog: None,
+            config: Arc::new(RwLock::new(
+                oxplow_config::load_project_config_with_global(dir.path(), None).unwrap(),
+            )),
             project_dir: dir.path().to_path_buf(),
             events: EventBus::new(),
             applied: Arc::new(tokio::sync::Notify::new()),
@@ -574,46 +536,343 @@ mod tests {
             bus.add_op(op).unwrap();
         }
         crate::extension::extension_commands::register_declared(&bus);
-        // The thread `agent()` runs in (the bus resolves an agent's stream
-        // from it); a test that runs a handler by hand has no runtime and
-        // no need.
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            tokio::task::block_in_place(|| handle.block_on(seed_agent_thread(&bus)));
-        }
         (dir, target, bus)
     }
 
-    fn agent() -> Actor {
-        Actor::Agent {
-            session_id: None,
-            thread_id: Some(ThreadId::new(1)),
-            stream_id: None,
-        }
-    }
-
-    fn file(dir: &tempfile::TempDir) -> String {
-        std::fs::read_to_string(dir.path().join(".oxplow/project.yaml")).unwrap_or_default()
-    }
-
-    /// `Database::transaction` re-runs a handler when its commit hits
-    /// SQLITE_BUSY. The handler must be pure: running it twice (the first
-    /// attempt rolled back, its after-commit never ran) records the same
-    /// change both times, and nothing touches the file or the in-memory
-    /// config until the after-commit step.
-    #[test]
-    fn set_is_retry_safe_and_writes_only_after_commit() {
-        let (dir, target, _bus) = setup(None);
-        let set = ops(target.clone())
-            .into_iter()
-            .find(|o| o.name == "set")
+    #[tokio::test(flavor = "multi_thread")]
+    async fn settings_levels_override_and_unset_reveals_inheritance() {
+        let (dir, target, bus) = setup();
+        let key = "oxplow.snapshots.retentionDays";
+        for (level, value) in [("global", 20), ("project", 10), ("local", 3)] {
+            bus.run(
+                &Actor::Human,
+                SET,
+                json!({"key":key,"value":value,"level":level}),
+                false,
+            )
+            .await
             .unwrap();
-        let Handler::Tx(handler) = &set.handler else {
-            panic!("config.set is a Tx handler")
-        };
+        }
+        assert_eq!(target.config.read().unwrap().snapshot_retention_days, 3);
+        let read = bus
+            .run(&Actor::Human, GET, json!({"key":key}), false)
+            .await
+            .unwrap();
+        assert_eq!(read.result["value"], 3);
+        assert_eq!(read.result["origin"], "local");
+        bus.run(
+            &Actor::Human,
+            UNSET,
+            json!({"key":key,"level":"local"}),
+            false,
+        )
+        .await
+        .unwrap();
+        assert_eq!(target.config.read().unwrap().snapshot_retention_days, 10);
+        let project = std::fs::read_to_string(dir.path().join(".oxplow/project.yaml")).unwrap();
+        assert!(project.contains("oxplow.snapshots.retentionDays: 10"));
+        assert!(dir.path().join("global/global.yaml").exists());
+        assert!(!dir.path().join(".oxplow/personal.yaml").exists());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn settings_require_a_level_and_reject_invalid_values_before_storage() {
+        let (dir, target, bus) = setup();
+        for input in [
+            json!({"key":"oxplow.snapshots.retentionDays","value":5}),
+            json!({"key":"snapshotRetentionDays","value":5,"level":"project"}),
+            json!({"key":"oxplow.snapshots.retentionDays","value":"soon","level":"project"}),
+            json!({"key":"oxplow.agents","value":[],"level":"project"}),
+        ] {
+            assert!(bus.run(&Actor::Human, SET, input, false).await.is_err());
+        }
+        assert!(!dir.path().join(".oxplow/project.yaml").exists());
+        assert_eq!(target.config.read().unwrap().snapshot_retention_days, 7);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn higher_overrides_cannot_hide_invalid_shared_writes() {
+        let (_dir, target, bus) = setup();
+        let key = "oxplow.activeProviders";
+        let store = target.settings().unwrap();
+        store
+            .set(key, json!({"snapshots":"hashes"}), Level::Local)
+            .unwrap();
+        target.refresh().unwrap();
+        for (level, label) in [(Level::Project, "project"), (Level::Global, "global")] {
+            // This object passes the registry's string-map schema; the
+            // typed capability rules must reject it before any file change.
+            assert!(bus
+                .run(
+                    &Actor::Human,
+                    SET,
+                    json!({"key":key,"value":{"vcs":"invalid"},"level":label}),
+                    false
+                )
+                .await
+                .is_err());
+            assert!(store.get(key, Some(level)).unwrap().value.is_none());
+            // Convenience domain actions share the same preflight path.
+            assert!(bus
+                .run(
+                    &Actor::Human,
+                    "oxplow.capability.choose",
+                    json!({"capability":"vcs","provider":"invalid","level":label}),
+                    false
+                )
+                .await
+                .is_err());
+            assert!(store.get(key, Some(level)).unwrap().value.is_none());
+        }
+        assert_eq!(
+            store.get(key, Some(Level::Local)).unwrap().value,
+            Some(json!({"snapshots":"hashes"}))
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn settings_whole_maps_replace_and_canonical_undo_restores_the_layer() {
+        let (_, target, bus) = setup();
+        let key = "oxplow.activeProviders";
+        bus.run(
+            &Actor::Human,
+            SET,
+            json!({"key":key,"value":{"snapshots":"hashes"},"level":"global"}),
+            false,
+        )
+        .await
+        .unwrap();
+        let out = bus
+            .run(
+                &Actor::Human,
+                SET,
+                json!({"key":key,"value":{},"level":"local"}),
+                false,
+            )
+            .await
+            .unwrap();
+        assert!(target.config.read().unwrap().active_providers.is_empty());
+        let inverse = out.inverse.unwrap();
+        assert_eq!(inverse.input["level"], "local");
+        bus.run(&Actor::Human, &inverse.name, inverse.input, false)
+            .await
+            .unwrap();
+        assert!(target
+            .config
+            .read()
+            .unwrap()
+            .active_providers
+            .contains_key("snapshots"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn secret_settings_share_the_api_without_plaintext_or_audit_values() {
+        let (dir, target, bus) = setup();
+        bus.run(&Actor::Human, SET, json!({"key":"oxplow.ai.providers","value":[{"id":"test","kind":"openai_compatible","baseUrl":"https://example.test/v1"}],"level":"project"}), false).await.unwrap();
+        let key = crate::ai_service::provider_key_setting("test");
+        let marker = "fixture-sensitive-token";
+        let out = bus
+            .run(
+                &Actor::Human,
+                SET,
+                json!({"key":key,"value":marker,"level":"local"}),
+                false,
+            )
+            .await
+            .unwrap();
+        assert!(out.inverse.is_none());
+        let read = bus
+            .run(&Actor::Human, GET, json!({"key":key}), false)
+            .await
+            .unwrap();
+        assert_eq!(read.result["value"], marker);
+        assert_eq!(read.result["origin"], "local");
+        let inventory = target.settings().unwrap().inventory().unwrap();
+        let secret = inventory
+            .iter()
+            .find(|entry| entry.definition.key == key)
+            .unwrap();
+        assert!(secret.is_set && secret.value.is_none());
+        for path in [
+            dir.path().join(".oxplow/project.yaml"),
+            dir.path().join(".oxplow/local.yaml"),
+            dir.path().join("global/global.yaml"),
+        ] {
+            assert!(!std::fs::read_to_string(path)
+                .unwrap_or_default()
+                .contains(marker));
+        }
+        let audits = bus.db.read(|conn| {
+            let mut stmt = conn.prepare("SELECT coalesce(input_json,'') || coalesce(result_json,'') || coalesce(inverse_json,'') FROM command_audit").map_err(oxplow_db::map_sql_err)?;
+            let rows = stmt.query_map([], |row| row.get::<_,String>(0)).map_err(oxplow_db::map_sql_err)?;
+            rows.collect::<Result<Vec<_>,_>>().map_err(oxplow_db::map_sql_err)
+        }).await.unwrap();
+        assert!(audits.iter().all(|row| !row.contains(marker)));
+        // Changing a destination cannot carry an existing token to that host.
+        bus.run(&Actor::Human, SET, json!({"key":"oxplow.ai.providers","value":[{"id":"test","kind":"openai_compatible","baseUrl":"https://other.test/v1"}],"level":"project"}), false).await.unwrap();
+        assert!(bus
+            .run(&Actor::Human, GET, json!({"key":key}), false)
+            .await
+            .is_err());
+        bus.run(
+            &Actor::Human,
+            SET,
+            json!({"key":key,"value":"rotated-fixture-token","level":"local"}),
+            false,
+        )
+        .await
+        .unwrap();
+        let rotated = bus
+            .run(&Actor::Human, GET, json!({"key":key}), false)
+            .await
+            .unwrap();
+        assert_eq!(rotated.result["value"], "rotated-fixture-token");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn project_map_actions_do_not_copy_local_overrides() {
+        let (_dir, target, bus) = setup();
+        let store = target.settings().unwrap();
+        let key = "oxplow.replacements";
+        for (level, value) in [
+            (Level::Global, json!({"task.board":"global_view"})),
+            (Level::Project, json!({"task.list":"project_view"})),
+            (Level::Local, json!({"task.detail":"local_view"})),
+        ] {
+            store.set(key, value, level).unwrap();
+        }
+        target.refresh().unwrap();
+        assert_eq!(
+            Layer::Global.value(&store, key).unwrap(),
+            Some(json!({"task.board":"global_view"}))
+        );
+        assert_eq!(
+            Layer::Project.value(&store, key).unwrap(),
+            Some(json!({"task.list":"project_view"}))
+        );
+        assert_eq!(
+            Layer::Local.value(&store, key).unwrap(),
+            Some(json!({"task.detail":"local_view"}))
+        );
+        bus.run(
+            &Actor::Human,
+            "oxplow.replacement.choose",
+            json!({"target":"task.board","whose":"project_new"}),
+            false,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            store.get(key, Some(Level::Project)).unwrap().value,
+            Some(json!({"task.list":"project_view","task.board":"project_new"}))
+        );
+        assert_eq!(
+            store.get(key, Some(Level::Local)).unwrap().value,
+            Some(json!({"task.detail":"local_view"}))
+        );
+        // Clearing an inherited final entry masks it with an empty map.
+        store.unset(key, Level::Project).unwrap();
+        bus.run(
+            &Actor::Human,
+            "oxplow.replacement.choose",
+            json!({"target":"task.board"}),
+            false,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            store.get(key, Some(Level::Project)).unwrap().value,
+            Some(json!({}))
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn generated_actions_change_only_the_project_exclude_leaf() {
+        let (_dir, target, bus) = setup();
+        let store = target.settings().unwrap();
+        for (level, include) in [
+            (Level::Global, "global/**"),
+            (Level::Project, "project/**"),
+            (Level::Local, "local/**"),
+        ] {
+            store
+                .set("oxplow.generated.include", json!([include]), level)
+                .unwrap();
+        }
+        store
+            .set(
+                "oxplow.generated.exclude",
+                json!(["inherited"]),
+                Level::Global,
+            )
+            .unwrap();
+        store
+            .set("oxplow.generated.exclude", json!(["private"]), Level::Local)
+            .unwrap();
+        target.refresh().unwrap();
+        bus.run(
+            &Actor::Human,
+            "oxplow.file.mark_generated",
+            json!({"entry":"dist"}),
+            false,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            store
+                .get("oxplow.generated.exclude", Some(Level::Project))
+                .unwrap()
+                .value,
+            Some(json!(["dist", "inherited"]))
+        );
+        for (level, include) in [
+            (Level::Global, "global/**"),
+            (Level::Project, "project/**"),
+            (Level::Local, "local/**"),
+        ] {
+            assert_eq!(
+                store
+                    .get("oxplow.generated.include", Some(level))
+                    .unwrap()
+                    .value,
+                Some(json!([include]))
+            );
+        }
+        for entry in ["dist", "inherited"] {
+            bus.run(
+                &Actor::Human,
+                "oxplow.file.mark_generated",
+                json!({"entry":entry,"generated":false}),
+                false,
+            )
+            .await
+            .unwrap();
+        }
+        assert_eq!(
+            store
+                .get("oxplow.generated.exclude", Some(Level::Project))
+                .unwrap()
+                .value,
+            Some(json!([]))
+        );
+        assert_eq!(
+            store
+                .get("oxplow.generated.exclude", Some(Level::Local))
+                .unwrap()
+                .value,
+            Some(json!(["private"]))
+        );
+    }
+
+    #[test]
+    fn domain_settings_are_retry_safe_and_use_registered_leaf_storage() {
+        let (dir, target, _) = setup();
+        let run = oxplow_domain::run::RunContext::core(
+            Actor::Human,
+            oxplow_domain::run::Mode::Transactional,
+        );
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         let vocabulary = oxplow_domain::vocabulary::Vocabulary::core();
-        let run =
-            oxplow_domain::run::RunContext::core(agent(), oxplow_domain::run::Mode::Transactional);
         let ctx = super::super::TxCtx {
             conn: &conn,
             run: &run,
@@ -623,464 +882,22 @@ mod tests {
             depth: 0,
             trace: &Default::default(),
         };
-        let input = json!({ "key": "metricRetentionDays", "value": 30 });
-        let first = handler(&ctx, input.clone()).unwrap();
-        assert_eq!(first.result["changed"], true);
-        // Attempt one rolled back: no file, config untouched.
-        assert_eq!(file(&dir), "");
-        assert_ne!(target.config.read().unwrap().metric_retention_days, 30);
+        let op = ops(target)
+            .into_iter()
+            .find(|op| op.name == "mark_generated")
+            .unwrap();
+        let Handler::Tx(handler) = op.handler else {
+            panic!("domain action must be pure until commit")
+        };
+        let first = handler(&ctx, json!({"entry":"dist"})).unwrap();
         drop(first);
-        let second = handler(&ctx, input).unwrap();
-        assert_eq!(
-            second.result["changed"], true,
-            "the retry still sees the change"
-        );
-        assert!(second.inverse.is_some());
-        assert_eq!(second.events.len(), 1);
+        assert!(!dir.path().join(".oxplow/project.yaml").exists());
+        let second = handler(&ctx, json!({"entry":"dist"})).unwrap();
         (second.after_commit.unwrap())();
         assert!(
-            file(&dir).contains("metricRetentionDays: 30"),
-            "{}",
-            file(&dir)
-        );
-        assert_eq!(target.config.read().unwrap().metric_retention_days, 30);
-    }
-
-    /// A person's own choice: `layer: personal` writes
-    /// `.oxplow/personal.yaml` alone and updates the config's personal
-    /// layer; unsetting it there removes it. A key a person's layer can't
-    /// hold is refused.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn a_personal_choice_is_set_and_unset() {
-        let (dir, target, bus) = setup(None);
-        let human = Actor::Human;
-        bus.run(
-            &human,
-            SET,
-            json!({ "key": "activeProviders", "value": { "snapshots": "hashes" }, "layer": "personal" }),
-            true,
-        )
-        .await
-        .unwrap();
-        assert_eq!(file(&dir), "", "project.yaml untouched");
-        let personal = std::fs::read_to_string(dir.path().join(".oxplow/personal.yaml")).unwrap();
-        assert!(personal.contains("snapshots: hashes"), "{personal}");
-        assert_eq!(
-            target
-                .config
-                .read()
+            std::fs::read_to_string(dir.path().join(".oxplow/project.yaml"))
                 .unwrap()
-                .personal_active_providers
-                .get("snapshots")
-                .map(String::as_str),
-            Some("hashes")
+                .contains("oxplow.generated.exclude:")
         );
-        bus.run(
-            &human,
-            UNSET,
-            json!({ "key": "activeProviders", "layer": "personal" }),
-            true,
-        )
-        .await
-        .unwrap();
-        assert!(target
-            .config
-            .read()
-            .unwrap()
-            .personal_active_providers
-            .is_empty());
-        assert!(bus
-            .run(
-                &human,
-                SET,
-                json!({ "key": "zones", "value": [], "layer": "personal" }),
-                true
-            )
-            .await
-            .is_err());
-    }
-
-    /// What a new thread starts with is a key of a person's own layer,
-    /// with no project counterpart: set and unset in that layer, an empty
-    /// choice refused.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn a_new_thread_session_choice_is_in_a_persons_layer() {
-        let (dir, target, bus) = setup(None);
-        let human = Actor::Human;
-        let set = |value: Value| json!({ "key": "newThreadSession", "value": value, "layer": "personal" });
-        bus.run(&human, SET, set(json!("none")), true)
-            .await
-            .unwrap();
-        let personal = std::fs::read_to_string(dir.path().join(".oxplow/personal.yaml")).unwrap();
-        assert!(personal.contains("newThreadSession: none"), "{personal}");
-        assert_eq!(
-            target
-                .config
-                .read()
-                .unwrap()
-                .personal_new_thread_session
-                .as_deref(),
-            Some("none")
-        );
-        assert!(bus.run(&human, SET, set(json!("")), true).await.is_err());
-        assert!(bus
-            .run(
-                &human,
-                SET,
-                json!({ "key": "newThreadSession", "value": "none" }),
-                true
-            )
-            .await
-            .is_err());
-        bus.run(
-            &human,
-            UNSET,
-            json!({ "key": "newThreadSession", "layer": "personal" }),
-            true,
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            target.config.read().unwrap().personal_new_thread_session,
-            None
-        );
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn sets_of_different_keys_each_survive() {
-        let (dir, target, bus) = setup(None);
-        bus.run(
-            &agent(),
-            SET,
-            json!({ "key": "metricRetentionDays", "value": 30 }),
-            false,
-        )
-        .await
-        .unwrap();
-        bus.run(
-            &agent(),
-            SET,
-            json!({ "key": "zones", "value": [{ "match": "src/**", "zone": "core" }] }),
-            false,
-        )
-        .await
-        .unwrap();
-        let text = file(&dir);
-        assert!(text.contains("metricRetentionDays: 30"), "{text}");
-        assert!(text.contains("zone: core"), "{text}");
-        let cfg = target.config.read().unwrap();
-        assert_eq!(cfg.metric_retention_days, 30);
-        assert_eq!(cfg.zones.len(), 1);
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn list_and_get_describe_every_key_with_its_state() {
-        let (_dir, _t, bus) =
-            setup(Some("zones:\n  - match: src/**\n    zone: core\n")).await_ready();
-        let out = bus
-            .run(&agent(), LIST_KEYS, json!({}), false)
-            .await
-            .unwrap();
-        let keys = out.result.as_array().unwrap();
-        let zones = keys.iter().find(|k| k["key"] == "zones").unwrap();
-        assert_eq!(zones["set"], true);
-        assert_eq!(zones["value"][0]["zone"], "core");
-        let ai = keys.iter().find(|k| k["key"] == "ai").unwrap();
-        assert_eq!(ai["set"], false);
-        assert!(ai["schema"].get("$defs").is_some());
-        let got = bus
-            .run(
-                &Actor::Human,
-                GET,
-                json!({"key": "metricRetentionDays"}),
-                false,
-            )
-            .await
-            .unwrap();
-        assert_eq!(got.result["set"], false);
-        assert_eq!(got.result["value"], Value::Null);
-        let err = bus
-            .run(&Actor::Human, GET, json!({"key": "nope"}), false)
-            .await
-            .unwrap_err();
-        assert!(
-            matches!(&err, CommandError::Invalid { field: Some(f), .. } if f == "/key"),
-            "{err:?}"
-        );
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn an_agent_sets_zones_and_undo_restores_the_file() {
-        let (dir, target, bus) = setup(None).await_ready();
-        let out = bus
-            .run(
-                &agent(),
-                SET,
-                json!({"key": "zones", "value": [{"match": "src/**", "zone": "core"}]}),
-                false,
-            )
-            .await
-            .unwrap();
-        assert_eq!(out.result["changed"], true);
-        assert_eq!(out.result["before"], Value::Null);
-        assert_eq!(out.result["after"][0]["zone"], "core");
-        assert!(file(&dir).contains("zone: core"), "{}", file(&dir));
-        assert_eq!(target.config.read().unwrap().zones.len(), 1);
-        // The change was logged with the command that caused it.
-        let events = bus.log_for_tests().read_after(0, 10).await.unwrap();
-        let changed = events
-            .iter()
-            .find(|e| e.envelope.event_type == "config.changed")
-            .unwrap();
-        assert_eq!(changed.envelope.payload["key"], "zones");
-        assert_eq!(changed.envelope.payload["before"], Value::Null);
-        assert_eq!(changed.envelope.source, "agent:thr1");
-        assert_eq!(
-            changed.envelope.subject,
-            vec!["oxplow:oxplow/config?key=zones"]
-        );
-        assert!(changed.envelope.cause.is_some());
-        // Undo: the inverse of a first set is an unset.
-        assert_eq!(out.inverse.as_ref().unwrap().name, UNSET);
-        bus.undo(&agent(), out.audit_id.unwrap(), false)
-            .await
-            .unwrap();
-        assert!(!file(&dir).contains("zones"), "{}", file(&dir));
-        assert!(target.config.read().unwrap().zones.is_empty());
-        // A set that changes nothing leaves no record: no audit row, no
-        // `command.executed`, nothing to undo.
-        let before = bus.log_for_tests().read_after(0, 100).await.unwrap().len();
-        let noop = bus
-            .run(&agent(), UNSET, json!({"key": "zones"}), false)
-            .await
-            .unwrap();
-        assert_eq!(noop.result["changed"], false);
-        assert!(noop.inverse.is_none());
-        assert_eq!(noop.audit_id, None);
-        assert_eq!(
-            bus.log_for_tests().read_after(0, 100).await.unwrap().len(),
-            before
-        );
-    }
-
-    /// Any key is anyone's to set, a person's or their agent's, and
-    /// neither is asked: `ai` (which picks the model) included.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn any_key_is_anyones_to_set_unasked() {
-        let (dir, target, bus) = setup(None).await_ready();
-        let value = json!({"roles": {"main": {"provider": "anthropic", "model": "claude"}}});
-        bus.run(&agent(), SET, json!({"key": "ai", "value": value}), false)
-            .await
-            .unwrap();
-        assert_eq!(
-            target.config.read().unwrap().ai_roles["main"].model,
-            "claude"
-        );
-        assert!(file(&dir).contains("anthropic"));
-        bus.run(&Actor::Human, UNSET, json!({"key": "ai"}), false)
-            .await
-            .unwrap();
-        assert!(target.config.read().unwrap().ai_roles.is_empty());
-    }
-
-    /// The agent's thread (and its stream), which a proposal names.
-    async fn seed_agent_thread(bus: &CommandBus) {
-        bus.db
-            .transaction(|tx| {
-                tx.execute_batch(
-                    "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source,
-                                          worktree_path, created_at, updated_at)
-                       VALUES (1, 'primary', 'p', 'main', 'refs/heads/main', 'local', '/tmp/x',
-                               '2026-01-01', '2026-01-01');
-                     INSERT INTO threads (id, stream_id, title, created_at, updated_at)
-                       VALUES (1, 1, 'T', '2026-01-01', '2026-01-01');",
-                )
-                .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))
-            })
-            .await
-            .unwrap();
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn values_are_validated_by_schema_and_by_the_loaders_rules() {
-        let (dir, _t, bus) = setup(None).await_ready();
-        let err = bus
-            .run(
-                &agent(),
-                SET,
-                json!({"key": "metricRetentionDays", "value": "soon"}),
-                false,
-            )
-            .await
-            .unwrap_err();
-        assert!(
-            matches!(&err, CommandError::Invalid { field: Some(f), .. } if f.starts_with("/value")),
-            "{err:?}"
-        );
-        let err = bus
-            .run(
-                &agent(),
-                SET,
-                json!({"key": "zones", "value": [{"match": "x", "zone": "other"}]}),
-                false,
-            )
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains("reserved"), "{err}");
-        let err = bus
-            .run(&agent(), SET, json!({"key": "zones", "value": null}), false)
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains("oxplow.config.unset"), "{err}");
-        assert!(file(&dir).is_empty());
-    }
-
-    /// The old `MANAGED_KEYS` list missed `metricRetentionDays` (and the
-    /// detail knobs, and `iconTint`): the on-disk value came back as an
-    /// "extra" and overwrote the one just set. The registry closes that.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn a_previously_unmanaged_key_round_trips_instead_of_reverting() {
-        let (dir, target, bus) =
-            setup(Some("metricRetentionDays: 7\niconTint: '#abc'\n")).await_ready();
-        bus.run(
-            &agent(),
-            SET,
-            json!({"key": "metricRetentionDays", "value": 30}),
-            false,
-        )
-        .await
-        .unwrap();
-        bus.run(
-            &agent(),
-            SET,
-            json!({"key": "iconTint", "value": "#c2410c"}),
-            false,
-        )
-        .await
-        .unwrap();
-        let reloaded = load_project_config(dir.path()).unwrap();
-        assert_eq!(reloaded.metric_retention_days, 30);
-        assert_eq!(reloaded.icon_tint.as_deref(), Some("#c2410c"));
-        assert_eq!(target.config.read().unwrap().metric_retention_days, 30);
-    }
-
-    /// `setup` is sync; this lets the tests read as one chain.
-    trait AwaitReady {
-        fn await_ready(self) -> Self;
-    }
-    impl<T> AwaitReady for T {
-        fn await_ready(self) -> Self {
-            self
-        }
-    }
-
-    /// `.oxplow/project.yaml` changes only through `config.*` —
-    /// validated, audited, logged and undoable. No other production code
-    /// writes it (the config crate defines the writer and tests it).
-    #[test]
-    fn only_the_config_commands_write_project_yaml() {
-        let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
-        let this = std::path::Path::new(file!())
-            .file_name()
-            .unwrap()
-            .to_owned();
-        let mut writers = Vec::new();
-        let mut todo = vec![crates.clone()];
-        while let Some(dir) = todo.pop() {
-            for entry in std::fs::read_dir(&dir).unwrap().flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    let name = path.file_name().unwrap().to_string_lossy().to_string();
-                    if name != "target" && name != "oxplow-config" && !name.starts_with('.') {
-                        todo.push(path);
-                    }
-                } else if path.extension().is_some_and(|e| e == "rs")
-                    && path.file_name() != Some(this.as_os_str())
-                {
-                    let text = std::fs::read_to_string(&path).unwrap();
-                    // Production code only: stop at the test module.
-                    let prod = text.split("#[cfg(test)]").next().unwrap_or_default();
-                    // Sharing an extension is the one other writer: it moves a
-                    // name onto the team's list (`extension_deploy::share`).
-                    if prod.contains("write_project_key(")
-                        && path.file_name() != Some(std::ffi::OsStr::new("extension_deploy.rs"))
-                    {
-                        writers.push(path.strip_prefix(&crates).unwrap().display().to_string());
-                    }
-                }
-            }
-        }
-        assert!(
-            writers.is_empty(),
-            "project.yaml written outside config.*: {writers:?}"
-        );
-    }
-
-    /// Marking a folder generated adds it to the `generated` key's
-    /// `exclude` list (sorted, once), unmarking takes it off, and
-    /// nothing marked removes the key.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn marking_a_path_generated_edits_the_exclude_list() {
-        let fx = crate::test_fixtures::services_with_thread().await;
-        let svc = &fx.svc;
-        let run = |input: Value| {
-            let svc = svc.clone();
-            async move {
-                svc.commands
-                    .run(&Actor::Human, "oxplow.file.mark_generated", input, true)
-                    .await
-                    .unwrap()
-            }
-        };
-        let exclude = || {
-            crate::config_service::read_config(&svc.config)
-                .generated
-                .exclude
-        };
-        run(json!({ "entry": "dist" })).await;
-        run(json!({ "entry": "build/" })).await;
-        run(json!({ "entry": "dist" })).await;
-        assert_eq!(exclude(), ["build", "dist"]);
-        run(json!({ "entry": "dist", "generated": false })).await;
-        assert_eq!(exclude(), ["build"]);
-        run(json!({ "entry": "build", "generated": false })).await;
-        assert!(exclude().is_empty());
-    }
-
-    /// Choosing an implementation edits `activeProviders` in the layer
-    /// asked for, keeping the other capabilities' choices; no provider
-    /// goes back to the default, and the last one removes the key.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn choosing_a_provider_edits_that_capabilitys_entry_in_its_layer() {
-        let fx = crate::test_fixtures::services_with_thread().await;
-        let svc = &fx.svc;
-        let run = |input: Value| {
-            let svc = svc.clone();
-            async move {
-                svc.commands
-                    .run(&Actor::Human, "oxplow.capability.choose", input, true)
-                    .await
-                    .unwrap()
-            }
-        };
-        let project = || crate::config_service::read_config(&svc.config).active_providers;
-        let personal = || crate::config_service::read_config(&svc.config).personal_active_providers;
-        run(json!({ "capability": "snapshots", "provider": "contents_store" })).await;
-        assert_eq!(project().len(), 1);
-        run(json!({ "capability": "snapshots", "provider": "other", "layer": "personal" })).await;
-        assert_eq!(
-            personal().get("snapshots").map(String::as_str),
-            Some("other")
-        );
-        assert_eq!(
-            project().len(),
-            1,
-            "a personal choice leaves the project's alone"
-        );
-        run(json!({ "capability": "snapshots" })).await;
-        assert!(!project().contains_key("snapshots"));
-        assert!(project().is_empty());
-        run(json!({ "capability": "snapshots", "layer": "personal" })).await;
-        assert!(personal().is_empty());
     }
 }

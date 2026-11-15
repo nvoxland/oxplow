@@ -113,6 +113,13 @@ pub type ConfigurationReader<'a> = dyn FnMut() -> Result<
         crate::extension::extension_configuration::ConfigurationError,
     > + 'a;
 
+pub type SettingsReader<'a> = dyn FnMut(
+        crate::extension::extension_configuration::GetInput,
+    ) -> Result<
+        oxplow_config::settings::SettingValue,
+        crate::extension::extension_configuration::ConfigurationError,
+    > + 'a;
+
 pub type JobReader<'a> = dyn FnMut(crate::extension::extension_jobs::JobInput) -> Result<Value, oxplow_domain::CommandError>
     + 'a;
 
@@ -165,6 +172,7 @@ pub struct Calls<'a> {
     /// Only a capability implementation's script is given one.
     state_write: Option<Box<StateWriter<'a>>>,
     configuration: Option<Box<ConfigurationReader<'a>>>,
+    settings: Option<Box<SettingsReader<'a>>>,
     jobs: Option<Box<JobReader<'a>>>,
     ai: Option<Box<AiReader<'a>>>,
     services: Option<Box<ServiceCaller<'a>>>,
@@ -184,6 +192,7 @@ impl<'a> Calls<'a> {
             state: None,
             state_write: None,
             configuration: None,
+            settings: None,
             jobs: None,
             ai: None,
             services: None,
@@ -250,6 +259,11 @@ impl<'a> Calls<'a> {
         self
     }
 
+    pub fn with_settings_reader(mut self, settings: Box<SettingsReader<'a>>) -> Self {
+        self.settings = Some(settings);
+        self
+    }
+
     fn with_configuration_source(
         self,
         source: Option<crate::extension::extension_configuration::ConfigurationSource>,
@@ -258,8 +272,12 @@ impl<'a> Calls<'a> {
         match source {
             Some(source) => {
                 let (run, runtime) = (self.run.clone(), runtime.clone());
+                let (settings_run, settings_source) = (run.clone(), source.clone());
                 self.with_configuration_reader(Box::new(move || {
                     runtime.block_on(source.snapshot(run.clone()))
+                }))
+                .with_settings_reader(Box::new(move |input| {
+                    settings_source.get(&settings_run, input)
                 }))
             }
             None => self,
@@ -385,6 +403,14 @@ impl<'a> Calls<'a> {
             crate::extension::extension_configuration::ReadInput::deserialize(&args)
                 .map_err(|_| "`extension_config.read` takes {}".to_string())?;
         }
+        let settings_input = if id == "config.read" {
+            Some(
+                crate::extension::extension_configuration::GetInput::deserialize(&args)
+                    .map_err(|_| "`config.read` takes {key, level?}".to_string())?,
+            )
+        } else {
+            None
+        };
         let write_input = if id == "state.write" {
             Some(
                 crate::extension::extension_state::WriteInput::deserialize(&args).map_err(|_| {
@@ -418,7 +444,9 @@ impl<'a> Calls<'a> {
         } else {
             None
         };
-        if !matches!(id, "state.read" | "extension_config.read") || self.answers.contains_key(id) {
+        if !matches!(id, "state.read" | "extension_config.read" | "config.read")
+            || self.answers.contains_key(id)
+        {
             self.run.trace().count(id);
             self.run.used_scope(id);
         }
@@ -430,6 +458,17 @@ impl<'a> Calls<'a> {
         match id {
             "sql.read" => self.sql_read(args),
             "extension_config.read" => self.configuration_read(),
+            "config.read" => {
+                let reader = self
+                    .settings
+                    .as_mut()
+                    .ok_or("`config.read` isn't available where this script runs")?;
+                serde_json::to_value(
+                    reader(settings_input.expect("parsed settings input"))
+                        .map_err(|error| error.to_string())?,
+                )
+                .map_err(|_| "setting could not be encoded".to_string())
+            }
             "state.read" => self.state_read(state_input.expect("parsed state request")),
             "store.sql" | "files.read" | "files.list" | "links.check" => self
                 .services
@@ -528,14 +567,6 @@ impl<'a> Calls<'a> {
         match reader() {
             Ok(snapshot) => serde_json::to_value(snapshot)
                 .map_err(|_| "extension configuration could not be encoded".into()),
-            Err(crate::extension::extension_configuration::ConfigurationError::Store(
-                oxplow_db::extension_config_store::ConfigStoreError::Storage(DomainError::Busy(
-                    message,
-                )),
-            )) => {
-                self.busy = Some(message.clone());
-                Err(message)
-            }
             Err(error) => Err(error.to_string()),
         }
     }
@@ -961,6 +992,7 @@ mod tests {
             ),
             ("state.read", json!({ "scope": "project", "area": "state" })),
             ("extension_config.read", json!({})),
+            ("config.read", json!({ "key": "oxplow.projectName" })),
             ("ai.discover", json!({ "role": "main" })),
         ] {
             let script = format!(

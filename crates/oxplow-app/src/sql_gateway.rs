@@ -51,6 +51,8 @@ pub struct Collection {
     /// The store and file services (`store.sql`, `files.*`).
     pub services: std::sync::Arc<crate::extension::extension_services::ExtensionServices>,
     pub root: std::path::PathBuf,
+    pub global_dir: std::path::PathBuf,
+    pub secrets: std::sync::Arc<dyn oxplow_ai::secrets::SecretStore>,
 }
 
 impl SqlGateway {
@@ -219,7 +221,8 @@ impl SqlGateway {
                 crate::extension::extension_configuration::ConfigurationHost::new(
                     resources.catalog.clone(),
                     resources.root.clone(),
-                ),
+                )
+                .with_settings(resources.global_dir.clone(), resources.secrets.clone()),
                 resources.db.clone(),
             )
         })
@@ -443,24 +446,29 @@ impl SqlGateway {
         }
         let values = match ext.configuration.clone() {
             Some(declaration) => {
-                // Settings are stored under the namespace.
-                let name = ext.namespace.clone();
+                let root = &self
+                    .collection
+                    .as_ref()
+                    .ok_or_else(|| {
+                        DomainError::Invalid("extension settings require a project".into())
+                    })?
+                    .root;
                 Some(
-                    self.layer
-                        .database()
-                        .read(move |conn| {
-                            crate::extension::extension_configuration::effective_values(
-                                conn,
-                                &name,
-                                &declaration,
-                            )
-                            .map_err(|error| {
-                                DomainError::Invalid(format!(
-                                    "the extension's stored configuration can't be read: {error:?}"
-                                ))
-                            })
-                        })
-                        .await?,
+                    crate::extension::extension_configuration::effective_values(
+                        root,
+                        &self
+                            .collection
+                            .as_ref()
+                            .expect("checked resources")
+                            .global_dir,
+                        &ext.namespace,
+                        &declaration,
+                    )
+                    .map_err(|error| {
+                        DomainError::Invalid(format!(
+                            "the extension's settings can't be read: {error:?}"
+                        ))
+                    })?,
                 )
             }
             None => None,

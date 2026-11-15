@@ -33,7 +33,7 @@ fn rust(functions: &[(&str, usize)]) -> (String, Vec<usize>) {
 fn write(root: &Path, rel: &str, body: &str) {
     let path = root.join(rel);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(path, body).unwrap();
+    crate::test_fixtures::write_settings_fixture(path, body).unwrap();
 }
 
 /// The corpus: two folders, four files.
@@ -694,7 +694,11 @@ async fn an_oversized_file_is_reported_as_excluded_not_silently_dropped() {
     huge.push_str(&"// padding\n".repeat(1100));
     write(dir.path(), "engine/huge.rs", &huge);
     // A binary file is not text a collector can read either.
-    std::fs::write(dir.path().join("ui/icon.rs"), [0u8, 159, 146, 150]).unwrap();
+    crate::test_fixtures::write_settings_fixture(
+        dir.path().join("ui/icon.rs"),
+        [0u8, 159, 146, 150],
+    )
+    .unwrap();
     write(
         dir.path(),
         ".oxplow/project.yaml",

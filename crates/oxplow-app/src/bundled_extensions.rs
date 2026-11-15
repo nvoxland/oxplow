@@ -195,7 +195,11 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             crate::test_fixtures::init_git_repo(dir.path());
             std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
-            std::fs::write(dir.path().join(".oxplow/project.yaml"), yaml).unwrap();
+            crate::test_fixtures::write_settings_fixture(
+                dir.path().join(".oxplow/project.yaml"),
+                yaml,
+            )
+            .unwrap();
             dir
         };
 
@@ -335,8 +339,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
         std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
-        std::fs::write(
-            dir.path().join(".oxplow/personal.yaml"),
+        crate::test_fixtures::write_settings_fixture(
+            dir.path().join(".oxplow/local.yaml"),
             format!(
                 "disableExtensions: [{}]\n",
                 crate::test_fixtures::optional_shipped()

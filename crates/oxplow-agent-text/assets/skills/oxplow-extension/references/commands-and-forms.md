@@ -162,3 +162,32 @@
   `scope("state.read", …)` and composes your `state.write/compare_exchange`
   command with it; a read command returns it for a view to show. The
   triage example's TODO board does both.
+
+
+## Registered settings
+
+An extension's `configuration.schema` declares settings in the shared registry.
+Fixed object fields become independent fully qualified keys, such as
+`oxtask.tasks.workflow`; arrays and open maps are atomic settings. Put `title`,
+`description` and `x-category` on fields for the Settings inventory. Optional
+annotations are `x-ui`, `x-order`, `x-restart-required`, `x-secret` and `x-atomic`.
+Secret defaults are prohibited.
+
+A command script reads a setting with
+`scope("config.read", {"key": "oxtask.tasks.workflow"})` (declare
+`needs: [config.read]`). The result has `key`, `value`, `origin`, `isSet` and
+`secret`. Add `level: "local"`, `"project"` or `"global"` to read only that
+override. Omit the level to resolve local → project → global → default.
+
+To write, compose `oxplow.config.set` with `{key, value, level}` or
+`oxplow.config.unset` with `{key, level}`; the level is always explicit. Write
+each independent field separately so changing one preserves the others.
+Settings do not use revision stamps, compare-and-swap, or whole-namespace
+writes. Namespace `settings.read` aliases may return a nested read projection;
+they are not a separate settings store. Private runtime state still uses the
+`state.read` / `state.write` protocol above.
+
+Ordinary overrides are flat fully qualified keys in `.oxplow/local.yaml`,
+`.oxplow/project.yaml` and the user-global `global.yaml`. Secret settings use
+secure storage behind the same API; inventory SQL exposes only presence and
+origin. No secret value belongs in a page, an event or a command's result.

@@ -4908,7 +4908,7 @@ mod tests {
                 // Its `- ` line is the one before.
                 ;
             std::fs::create_dir_all(d.path().join(".oxplow/extensions/x")).unwrap();
-            std::fs::write(d.path().join(".oxplow/extensions/x/extension.yaml"), &manifest).unwrap();
+            crate::test_fixtures::write_settings_fixture(d.path().join(".oxplow/extensions/x/extension.yaml"), &manifest).unwrap();
             let ext = load_extensions(d.path())
                 .into_iter()
                 .find(|e| e.name == "x")
@@ -4929,12 +4929,12 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let manifest = "manifest: 2\nname: x\nintent:\n  purpose: p\n  examples:\n    - { name: a }\n    - { name: b, bogus: 1 }\nui:\n  mounts:\n    - { page: l, at: diff.file.header, bogus: 1 }\nskills:\n  - name: s\n    file: s.md\n";
         std::fs::create_dir_all(d.path().join(".oxplow/extensions/x")).unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             d.path().join(".oxplow/extensions/x/extension.yaml"),
             manifest,
         )
         .unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             d.path().join(".oxplow/extensions/x/s.md"),
             "---\nname: s\ndescription: S.\n---\n# s\n",
         )
@@ -4979,7 +4979,7 @@ mod tests {
                 .trim();
             let file = d.path().join(path);
             std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-            std::fs::write(file, block).unwrap();
+            crate::test_fixtures::write_settings_fixture(file, block).unwrap();
         }
         let ext = load_extensions(d.path())
             .into_iter()
@@ -5013,7 +5013,7 @@ mod tests {
     fn write(root: &Path, rel: &str, body: &str) {
         let p = root.join(rel);
         fs::create_dir_all(p.parent().unwrap()).unwrap();
-        fs::write(p, body).unwrap();
+        crate::test_fixtures::write_settings_fixture(p, body).unwrap();
     }
 
     /// A shipped oxplow runs the copy of its own extensions built into it:
@@ -5624,7 +5624,7 @@ columns: [{ key: title }]
         for (name, body) in exts {
             let dir = root.join(".oxplow/extensions").join(name);
             std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(
+            crate::test_fixtures::write_settings_fixture(
                 dir.join("extension.yaml"),
                 format!("manifest: 2\nname: {name}\nintent:\n  purpose: p\n{body}"),
             )
@@ -6663,14 +6663,14 @@ commands:
         let dir = d.path().join(".oxplow/extensions/x");
         std::fs::create_dir_all(dir.join("effects")).unwrap();
         std::fs::create_dir_all(dir.join("commands")).unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             dir.join("extension.yaml"),
             "manifest: 2\nname: x\nintent:\n  purpose: p\npermissions: [ai.compute]\neffects:\n  - { id: e, summary: s, on: [thread.closed], entry: effects/e.star, needs: [ai.discover] }\ncommands:\n  - { name: c.go, summary: s, entry: commands/c.star, needs: [ai.discover], input_schema: { type: object, additionalProperties: false } }\n",
         )
         .unwrap();
         let script = "def transform(x):\n    r = scope(\"ai.discover\", {\"role\": \"summarize\"})\n    if not r[\"dataset\"]:\n        return {\"skip\": r[\"problem\"]}\n    return {\"commands\": []}\n";
-        std::fs::write(dir.join("effects/e.star"), script).unwrap();
-        std::fs::write(dir.join("commands/c.star"), script).unwrap();
+        crate::test_fixtures::write_settings_fixture(dir.join("effects/e.star"), script).unwrap();
+        crate::test_fixtures::write_settings_fixture(dir.join("commands/c.star"), script).unwrap();
         let ext = load_extensions(d.path())
             .into_iter()
             .find(|e| e.name == "x")
@@ -6687,7 +6687,7 @@ commands:
         let d = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(d.path().join(".oxplow/extensions/x")).unwrap();
         let manifest = "manifest: 2\nname: x\nintent:\n  purpose: p\nai_profiles:\n  - { id: review, description: Reviews., fallback: summarize, features: [tool_calling] }\n  - { id: bad, description: x, fallback: huge }\n";
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             d.path().join(".oxplow/extensions/x/extension.yaml"),
             manifest,
         )
@@ -10104,7 +10104,7 @@ commands:
         );
         write(
             dir.path(),
-            ".oxplow/personal.yaml",
+            ".oxplow/local.yaml",
             &format!(
                 "disableExtensions: [review, {}]\n",
                 crate::test_fixtures::optional_shipped()
@@ -10471,8 +10471,12 @@ commands:
         };
         let dir = ws.join(".oxplow/extensions/acme");
         std::fs::create_dir_all(dir.join("pages")).unwrap();
-        std::fs::write(dir.join("extension.yaml"), manifest("Committed.")).unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
+            dir.join("extension.yaml"),
+            manifest("Committed."),
+        )
+        .unwrap();
+        crate::test_fixtures::write_settings_fixture(
             dir.join("pages/streams.yaml"),
             viz_page("title: Streams\n", "SELECT id FROM v_stream", ""),
         )

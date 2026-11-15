@@ -100,12 +100,12 @@ async fn a_credential_or_secret_set_by_anyone_is_never_read_back() {
     crate::test_fixtures::init_git_repo(dir.path());
     let ext = dir.path().join(".oxplow/extensions/acme");
     std::fs::create_dir_all(&ext).unwrap();
-    std::fs::write(
+    crate::test_fixtures::write_settings_fixture(
         ext.join("extension.yaml"),
         "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [process.run, secrets:TOKEN]\ncollectors:\n  - id: s\n    runtime: exec\n    entry: sync.sh\n    credentials: [TOKEN]\n    entities:\n      - { name: row, key: id, columns: { id: int } }\n",
     )
     .unwrap();
-    std::fs::write(
+    crate::test_fixtures::write_settings_fixture(
         ext.join("sync.sh"),
         "#!/bin/sh\necho '{\"entities\":{\"row\":[]}}'\n",
     )

@@ -2112,8 +2112,8 @@ mod tests {
         let (svc, _store, db) = svc_with_db(project.path()).await;
         let a = project.path().join("a.txt");
         let b = project.path().join("b.txt");
-        std::fs::write(&a, "a").unwrap();
-        std::fs::write(&b, "b").unwrap();
+        crate::test_fixtures::write_settings_fixture(&a, "a").unwrap();
+        crate::test_fixtures::write_settings_fixture(&b, "b").unwrap();
         svc.mark_dirty(a.clone(), WatchEventKind::Other);
         tokio::time::sleep(Duration::from_millis(400)).await;
         svc.mark_dirty(b.clone(), WatchEventKind::Other);
@@ -2139,7 +2139,8 @@ mod tests {
     async fn a_file_the_startup_sweep_found_carries_no_change_time() {
         let project = tempdir().unwrap();
         let (svc, _store, db) = svc_with_db(project.path()).await;
-        std::fs::write(project.path().join("swept.txt"), "x").unwrap();
+        crate::test_fixtures::write_settings_fixture(project.path().join("swept.txt"), "x")
+            .unwrap();
         svc.enqueue_startup_diff().await.unwrap();
         svc.request_snapshot(SnapshotTrigger::Startup)
             .await
@@ -2171,7 +2172,7 @@ mod tests {
             if let Some(parent) = full.parent() {
                 std::fs::create_dir_all(parent).unwrap();
             }
-            std::fs::write(&full, c).unwrap();
+            crate::test_fixtures::write_settings_fixture(&full, c).unwrap();
             std::fs::OpenOptions::new()
                 .write(true)
                 .open(&full)
@@ -2192,7 +2193,8 @@ mod tests {
         let project = tempdir().unwrap();
         init_git_repo_with(project.path(), &[("tracked.txt", "hello world\n")]);
         // An untracked, uncommitted file — must take the oxplow path.
-        std::fs::write(project.path().join("dirty.txt"), "scratch").unwrap();
+        crate::test_fixtures::write_settings_fixture(project.path().join("dirty.txt"), "scratch")
+            .unwrap();
 
         let (svc, store) = svc_for(project.path()).await;
         let queued = svc.enqueue_startup_diff().await.unwrap();
@@ -2270,8 +2272,12 @@ mod tests {
         let project = tempdir().unwrap();
         let root = project.path();
         init_git_repo_with(root, &[("edited.txt", "old\n"), ("clean.txt", "c\n")]);
-        std::fs::write(root.join("edited.txt"), "changed while off\n").unwrap();
-        std::fs::write(root.join("new.txt"), "new\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            root.join("edited.txt"),
+            "changed while off\n",
+        )
+        .unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("new.txt"), "new\n").unwrap();
         let (svc, store) = sparse_svc_for(root).await;
         assert_eq!(svc.enqueue_startup_diff().await.unwrap(), 2);
         svc.request_snapshot(SnapshotTrigger::Startup)
@@ -2290,8 +2296,9 @@ mod tests {
         let project = tempdir().unwrap();
         let root = project.path();
         init_git_repo_with(root, &[("a.txt", "committed\n"), ("gone.txt", "g\n")]);
-        std::fs::write(root.join("a.txt"), "edited\n").unwrap();
-        std::fs::write(root.join("gone.txt"), "edited too\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("a.txt"), "edited\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("gone.txt"), "edited too\n")
+            .unwrap();
         let (svc, store) = sparse_svc_for(root).await;
         svc.enqueue_startup_diff().await.unwrap();
         svc.request_snapshot(SnapshotTrigger::Startup)
@@ -2299,7 +2306,7 @@ mod tests {
             .unwrap();
         // Back to what's committed, as git's stat would see it: written well
         // before the index, or git can't vouch for it in this same second.
-        std::fs::write(root.join("a.txt"), "committed\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("a.txt"), "committed\n").unwrap();
         let earlier = std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1_600_000_000);
         std::fs::File::options()
             .write(true)
@@ -2332,8 +2339,8 @@ mod tests {
             &[("rewritten.txt", "same\n"), ("edited.txt", "old\n")],
         );
         std::thread::sleep(Duration::from_millis(20));
-        std::fs::write(root.join("rewritten.txt"), "same\n").unwrap();
-        std::fs::write(root.join("edited.txt"), "new\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("rewritten.txt"), "same\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("edited.txt"), "new\n").unwrap();
         let (svc, store) = sparse_svc_for(root).await;
         assert_eq!(svc.enqueue_startup_diff().await.unwrap(), 1);
         svc.request_snapshot(SnapshotTrigger::Startup)
@@ -2367,7 +2374,7 @@ mod tests {
         // are the same, so the sweep must record nothing.
         let project = tempdir().unwrap();
         let path = project.path().join("note.txt");
-        std::fs::write(&path, "same bytes\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(&path, "same bytes\n").unwrap();
         let (svc, store) = svc_for(project.path()).await;
         svc.mark_dirty(path.clone(), WatchEventKind::Other);
         svc.request_snapshot(SnapshotTrigger::Startup)
@@ -2385,7 +2392,7 @@ mod tests {
         );
 
         // A real edit still shows up.
-        std::fs::write(&path, "new bytes\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(&path, "new bytes\n").unwrap();
         assert_eq!(svc.enqueue_startup_diff().await.unwrap(), 1);
     }
 
@@ -2407,14 +2414,14 @@ mod tests {
         assert_eq!(rows[0].storage, SnapshotStorage::Git);
 
         let path = project.path().join("lib.rs");
-        std::fs::write(&path, "fn a() {}\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(&path, "fn a() {}\n").unwrap();
         svc.mark_dirty(path.clone(), WatchEventKind::Other);
         let again = svc.request_snapshot(SnapshotTrigger::Quiet).await.unwrap();
         assert_eq!(again, Some(base));
         assert_eq!(store.list_for_path("lib.rs").await.unwrap().len(), 1);
 
         // A real edit is still a change.
-        std::fs::write(&path, "fn b() {}\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(&path, "fn b() {}\n").unwrap();
         svc.mark_dirty(path.clone(), WatchEventKind::Other);
         let edited = svc
             .request_snapshot(SnapshotTrigger::Quiet)
@@ -2437,7 +2444,7 @@ mod tests {
         let (svc, store) = svc_for(project.path()).await;
         svc.set_idle(true);
         let path = project.path().join("new.rs");
-        std::fs::write(&path, "fn n() {}\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(&path, "fn n() {}\n").unwrap();
         assert_eq!(svc.enqueue_startup_diff().await.unwrap(), 0);
         svc.mark_dirty(path.clone(), WatchEventKind::Other);
         assert_eq!(
@@ -2465,13 +2472,13 @@ mod tests {
     async fn the_sweep_records_a_file_that_grew_past_the_cap() {
         let project = tempdir().unwrap();
         let path = project.path().join("data.bin");
-        std::fs::write(&path, "small").unwrap();
+        crate::test_fixtures::write_settings_fixture(&path, "small").unwrap();
         let (svc, store) = svc_for(project.path()).await;
         svc.enqueue_startup_diff().await.unwrap();
         svc.request_snapshot(SnapshotTrigger::Startup)
             .await
             .unwrap();
-        std::fs::write(&path, vec![b'x'; 1_100_000]).unwrap();
+        crate::test_fixtures::write_settings_fixture(&path, vec![b'x'; 1_100_000]).unwrap();
         assert_eq!(svc.enqueue_startup_diff().await.unwrap(), 1);
         svc.request_snapshot(SnapshotTrigger::Startup)
             .await
@@ -2485,7 +2492,7 @@ mod tests {
     async fn a_failed_take_puts_its_paths_back_in_the_dirty_set() {
         let project = tempdir().unwrap();
         let a = project.path().join("a.txt");
-        std::fs::write(&a, "one").unwrap();
+        crate::test_fixtures::write_settings_fixture(&a, "one").unwrap();
         let db = Database::in_memory();
         seed_stream(&db).await;
         let store = Arc::new(SqliteSnapshotStore::new(db));
@@ -2530,8 +2537,8 @@ mod tests {
         let project = tempdir().unwrap();
         let a = project.path().join("a.txt");
         let b = project.path().join("b.txt");
-        std::fs::write(&a, "one").unwrap();
-        std::fs::write(&b, "two").unwrap();
+        crate::test_fixtures::write_settings_fixture(&a, "one").unwrap();
+        crate::test_fixtures::write_settings_fixture(&b, "two").unwrap();
         let (svc, store) = svc_for(project.path()).await;
         svc.mark_dirty(a.clone(), WatchEventKind::Other);
         svc.mark_dirty(b.clone(), WatchEventKind::Other);
@@ -2542,8 +2549,8 @@ mod tests {
             .unwrap();
 
         // Rewrite a with the same bytes, change b: only b gets a row.
-        std::fs::write(&a, "one").unwrap();
-        std::fs::write(&b, "TWO").unwrap();
+        crate::test_fixtures::write_settings_fixture(&a, "one").unwrap();
+        crate::test_fixtures::write_settings_fixture(&b, "TWO").unwrap();
         svc.mark_dirty(a.clone(), WatchEventKind::Other);
         svc.mark_dirty(b.clone(), WatchEventKind::Other);
         let second = svc
@@ -2556,7 +2563,7 @@ mod tests {
         assert_eq!(store.list_for_path("b.txt").await.unwrap().len(), 2);
 
         // Only a touch: nothing to record, the latest snapshot stands.
-        std::fs::write(&a, "one").unwrap();
+        crate::test_fixtures::write_settings_fixture(&a, "one").unwrap();
         svc.mark_dirty(a.clone(), WatchEventKind::Other);
         let third = svc.request_snapshot(SnapshotTrigger::Manual).await.unwrap();
         assert_eq!(third, Some(second));
@@ -2618,15 +2625,15 @@ mod tests {
         let project = tempdir().unwrap();
         let root = project.path();
         std::fs::create_dir(root.join("src")).unwrap();
-        std::fs::write(root.join("src/a.txt"), "1").unwrap();
-        std::fs::write(root.join("src/gone.txt"), "1").unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("src/a.txt"), "1").unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("src/gone.txt"), "1").unwrap();
         let (svc, store) = svc_for(root).await;
         svc.enqueue_startup_diff().await.unwrap();
         svc.request_snapshot(SnapshotTrigger::Startup)
             .await
             .unwrap();
 
-        std::fs::write(root.join("src/a.txt"), "changed").unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("src/a.txt"), "changed").unwrap();
         std::fs::remove_file(root.join("src/gone.txt")).unwrap();
         svc.on_batch(oxplow_fs_watch::Batch {
             paths: Vec::new(),
@@ -2647,10 +2654,10 @@ mod tests {
         let project = tempdir().unwrap();
         let root = project.path().to_path_buf();
         std::fs::create_dir(root.join(".oxplow")).unwrap();
-        std::fs::write(root.join("a.txt"), "1").unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("a.txt"), "1").unwrap();
         let (svc, store) = svc_for(&root).await;
         svc.inner.watching.store(true, Ordering::SeqCst);
-        std::fs::write(root.join("a.txt"), "changed").unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("a.txt"), "changed").unwrap();
 
         let take = {
             let svc = svc.clone();
@@ -2725,14 +2732,14 @@ mod tests {
         let project = tempdir().unwrap();
         let root = project.path();
         std::fs::create_dir(root.join("a")).unwrap();
-        std::fs::write(root.join("a/f.txt"), "1").unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("a/f.txt"), "1").unwrap();
         let (svc, store) = svc_for(root).await;
         svc.enqueue_startup_diff().await.unwrap();
         svc.request_snapshot(SnapshotTrigger::Startup)
             .await
             .unwrap();
 
-        std::fs::write(root.join("a/f.txt"), "changed").unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("a/f.txt"), "changed").unwrap();
         svc.set_uncovered(oxplow_fs_watch::Uncovered::new([root.join("a")]));
         svc.request_snapshot(SnapshotTrigger::Quiet).await.unwrap();
         let latest = store.latest_stat_per_path(StreamId::new(1)).await.unwrap();
@@ -2747,7 +2754,8 @@ mod tests {
         let root = project.path();
         for dir in ["a", "b"] {
             std::fs::create_dir(root.join(dir)).unwrap();
-            std::fs::write(root.join(dir).join("f.txt"), "1").unwrap();
+            crate::test_fixtures::write_settings_fixture(root.join(dir).join("f.txt"), "1")
+                .unwrap();
         }
         let (svc, store) = svc_for(root).await;
         svc.enqueue_startup_diff().await.unwrap();
@@ -2755,8 +2763,8 @@ mod tests {
             .await
             .unwrap();
 
-        std::fs::write(root.join("a/f.txt"), "changed").unwrap();
-        std::fs::write(root.join("b/f.txt"), "changed").unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("a/f.txt"), "changed").unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("b/f.txt"), "changed").unwrap();
         svc.on_batch(oxplow_fs_watch::Batch {
             paths: Vec::new(),
             rescans: vec![root.join("a")],
@@ -2821,8 +2829,8 @@ mod tests {
         let project = tempdir().unwrap();
         let a = project.path().join("a.txt");
         let b = project.path().join("b.txt");
-        std::fs::write(&a, "hello").unwrap();
-        std::fs::write(&b, "world").unwrap();
+        crate::test_fixtures::write_settings_fixture(&a, "hello").unwrap();
+        crate::test_fixtures::write_settings_fixture(&b, "world").unwrap();
         let (svc, store) = svc_for(project.path()).await;
         svc.mark_dirty(a.clone(), WatchEventKind::Other);
         svc.mark_dirty(b.clone(), WatchEventKind::Other);
@@ -2856,7 +2864,7 @@ mod tests {
         // racing caller to land on the in-flight slot.
         for i in 0..50 {
             let p = project.path().join(format!("f{i}.txt"));
-            std::fs::write(&p, format!("contents-{i}")).unwrap();
+            crate::test_fixtures::write_settings_fixture(&p, format!("contents-{i}")).unwrap();
         }
         let (svc, store) = svc_for(project.path()).await;
         for i in 0..50 {
@@ -2896,7 +2904,7 @@ mod tests {
     async fn request_snapshot_collapses_repeated_dirty_marks() {
         let project = tempdir().unwrap();
         let file = project.path().join("a.txt");
-        std::fs::write(&file, "x").unwrap();
+        crate::test_fixtures::write_settings_fixture(&file, "x").unwrap();
         let (svc, store) = svc_for(project.path()).await;
         for _ in 0..10 {
             svc.mark_dirty(file.clone(), WatchEventKind::Other);
@@ -2923,9 +2931,13 @@ mod tests {
         // Real projects gitignore `.oxplow/` so the snapshot
         // manager's own writes don't dirty the worktree. Mirror that
         // here.
-        std::fs::write(project.path().join(".gitignore"), ".oxplow\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            project.path().join(".gitignore"),
+            ".oxplow\n",
+        )
+        .unwrap();
         let tracked = project.path().join("tracked.txt");
-        std::fs::write(&tracked, "v1").unwrap();
+        crate::test_fixtures::write_settings_fixture(&tracked, "v1").unwrap();
         let mut idx = repo.index().unwrap();
         idx.add_path(std::path::Path::new("tracked.txt")).unwrap();
         idx.add_path(std::path::Path::new(".gitignore")).unwrap();
@@ -2954,7 +2966,7 @@ mod tests {
 
         // Mutate the tracked file → worktree now dirty. The next
         // snapshot must NOT carry a git_commit.
-        std::fs::write(&tracked, "v2").unwrap();
+        crate::test_fixtures::write_settings_fixture(&tracked, "v2").unwrap();
         svc.mark_dirty(tracked.clone(), WatchEventKind::Other);
         let dirty_id = svc
             .request_snapshot(SnapshotTrigger::Startup)
@@ -2970,8 +2982,12 @@ mod tests {
         // Gitignored files don't affect cleanliness. Reset the
         // tracked file, then extend .gitignore to also cover junk.log
         // and commit that change so the tree is clean.
-        std::fs::write(&tracked, "v1").unwrap();
-        std::fs::write(project.path().join(".gitignore"), ".oxplow\njunk.log\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(&tracked, "v1").unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            project.path().join(".gitignore"),
+            ".oxplow\njunk.log\n",
+        )
+        .unwrap();
         let mut idx = repo.index().unwrap();
         idx.add_path(std::path::Path::new(".gitignore")).unwrap();
         idx.write().unwrap();
@@ -2982,7 +2998,8 @@ mod tests {
             .commit(Some("HEAD"), &sig, &sig, "ignore", &tree, &[&parent])
             .unwrap();
         // Create an ignored file — should not break cleanliness.
-        std::fs::write(project.path().join("junk.log"), "noise").unwrap();
+        crate::test_fixtures::write_settings_fixture(project.path().join("junk.log"), "noise")
+            .unwrap();
         svc.mark_dirty(tracked.clone(), WatchEventKind::Other);
         let with_ignored = svc
             .request_snapshot(SnapshotTrigger::Startup)
@@ -3005,9 +3022,13 @@ mod tests {
         let mut cfg = repo.config().unwrap();
         cfg.set_str("user.name", "t").unwrap();
         cfg.set_str("user.email", "t@example.com").unwrap();
-        std::fs::write(project.path().join(".gitignore"), ".oxplow\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            project.path().join(".gitignore"),
+            ".oxplow\n",
+        )
+        .unwrap();
         let tracked = project.path().join("tracked.txt");
-        std::fs::write(&tracked, "v1").unwrap();
+        crate::test_fixtures::write_settings_fixture(&tracked, "v1").unwrap();
         let mut idx = repo.index().unwrap();
         idx.add_path(std::path::Path::new("tracked.txt")).unwrap();
         idx.add_path(std::path::Path::new(".gitignore")).unwrap();
@@ -3055,9 +3076,9 @@ mod tests {
         let mut cfg = repo.config().unwrap();
         cfg.set_str("user.name", "t").unwrap();
         cfg.set_str("user.email", "t@example.com").unwrap();
-        std::fs::write(dir.join(".gitignore"), ".oxplow\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(dir.join(".gitignore"), ".oxplow\n").unwrap();
         let tracked = dir.join("tracked.txt");
-        std::fs::write(&tracked, "v1").unwrap();
+        crate::test_fixtures::write_settings_fixture(&tracked, "v1").unwrap();
         let mut idx = repo.index().unwrap();
         idx.add_path(std::path::Path::new("tracked.txt")).unwrap();
         idx.add_path(std::path::Path::new(".gitignore")).unwrap();
@@ -3218,9 +3239,13 @@ mod tests {
         let mut cfg = repo.config().unwrap();
         cfg.set_str("user.name", "t").unwrap();
         cfg.set_str("user.email", "t@example.com").unwrap();
-        std::fs::write(project.path().join(".gitignore"), ".oxplow\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            project.path().join(".gitignore"),
+            ".oxplow\n",
+        )
+        .unwrap();
         let tracked = project.path().join("tracked.txt");
-        std::fs::write(&tracked, "v1").unwrap();
+        crate::test_fixtures::write_settings_fixture(&tracked, "v1").unwrap();
         let mut idx = repo.index().unwrap();
         idx.add_path(std::path::Path::new("tracked.txt")).unwrap();
         idx.add_path(std::path::Path::new(".gitignore")).unwrap();
@@ -3315,11 +3340,11 @@ mod tests {
         // A human edits twice in quick succession: one take, after the
         // second edit has been still for a whole period.
         let a = project.path().join("notes.md");
-        std::fs::write(&a, "draft").unwrap();
+        crate::test_fixtures::write_settings_fixture(&a, "draft").unwrap();
         svc.mark_dirty(a.clone(), WatchEventKind::Other);
         svc.note_activity();
         tokio::time::sleep(Duration::from_millis(20)).await;
-        std::fs::write(&a, "draft 2").unwrap();
+        crate::test_fixtures::write_settings_fixture(&a, "draft 2").unwrap();
         svc.mark_dirty(a.clone(), WatchEventKind::Other);
         svc.note_activity();
         let ops = wait_for_ops(&store, Duration::from_secs(3), |ops| !ops.is_empty()).await;
@@ -3340,7 +3365,7 @@ mod tests {
         let svc = svc.with_quiet_period(Duration::from_millis(150));
         let _quiet = svc.spawn_quiet_trigger();
         let a = project.path().join("edit.rs");
-        std::fs::write(&a, "fn main() {}").unwrap();
+        crate::test_fixtures::write_settings_fixture(&a, "fn main() {}").unwrap();
         svc.mark_dirty(a.clone(), WatchEventKind::Other);
         svc.note_activity();
         // Another request captures the edit before the period is over.
@@ -3361,7 +3386,7 @@ mod tests {
     async fn a_take_that_captured_files_logs_one_anchored_op_and_a_clean_request_logs_none() {
         let project = tempdir().unwrap();
         let a = project.path().join("a.txt");
-        std::fs::write(&a, "one").unwrap();
+        crate::test_fixtures::write_settings_fixture(&a, "one").unwrap();
         let (svc, store) = svc_for(project.path()).await;
         svc.mark_dirty(a.clone(), WatchEventKind::Other);
         let first = svc
@@ -3386,7 +3411,7 @@ mod tests {
         assert_eq!(ops[0].trigger, SnapshotTrigger::Startup);
         assert_eq!(ops[0].snapshot_id, first);
         // A take that captures a file logs its op with who asked.
-        std::fs::write(&a, "two").unwrap();
+        crate::test_fixtures::write_settings_fixture(&a, "two").unwrap();
         svc.mark_dirty(a.clone(), WatchEventKind::Other);
         let second = svc
             .request_snapshot(TakeRequest {
@@ -3425,7 +3450,7 @@ mod tests {
 
         // Take a real snapshot.
         let file = project.path().join("a.txt");
-        std::fs::write(&file, "hi").unwrap();
+        crate::test_fixtures::write_settings_fixture(&file, "hi").unwrap();
         svc.mark_dirty(file, WatchEventKind::Other);
         let parent = svc
             .request_snapshot(SnapshotTrigger::Startup)
@@ -3460,7 +3485,7 @@ mod tests {
         let (svc, store) = svc_for(project.path()).await;
 
         // Prime: real capture so a content row exists.
-        std::fs::write(&file, "hello").unwrap();
+        crate::test_fixtures::write_settings_fixture(&file, "hello").unwrap();
         svc.mark_dirty(file.clone(), WatchEventKind::Other);
         svc.request_snapshot(SnapshotTrigger::Startup)
             .await
@@ -3507,7 +3532,7 @@ mod tests {
         // within the settle window must defer to a later snapshot.
         let project = tempdir().unwrap();
         let file = project.path().join("fresh.txt");
-        std::fs::write(&file, "x").unwrap();
+        crate::test_fixtures::write_settings_fixture(&file, "x").unwrap();
         let db = Database::in_memory();
         seed_stream(&db).await;
         let store = Arc::new(SqliteSnapshotStore::new(db));
@@ -3553,7 +3578,7 @@ mod tests {
         // missing on disk, so it's a pure transient.
         let project = tempdir().unwrap();
         let file = project.path().join("transient.txt");
-        std::fs::write(&file, "tmp").unwrap();
+        crate::test_fixtures::write_settings_fixture(&file, "tmp").unwrap();
         let db = Database::in_memory();
         seed_stream(&db).await;
         let store = Arc::new(SqliteSnapshotStore::new(db));
@@ -3632,7 +3657,7 @@ mod tests {
     async fn startup_sweep_short_circuits_when_size_and_mtime_match() {
         let project = tempdir().unwrap();
         let file = project.path().join("a.txt");
-        std::fs::write(&file, "v1").unwrap();
+        crate::test_fixtures::write_settings_fixture(&file, "v1").unwrap();
         let (svc, store) = svc_for(project.path()).await;
 
         // Prime: capture once so a baseline row exists with mtime.
@@ -3650,7 +3675,7 @@ mod tests {
 
         // Real change: write longer content. Size mismatches → falls
         // through to the read+hash path and queues the file.
-        std::fs::write(&file, "v3-much-longer").unwrap();
+        crate::test_fixtures::write_settings_fixture(&file, "v3-much-longer").unwrap();
         let queued = svc.enqueue_startup_diff().await.unwrap();
         assert_eq!(queued, 1);
     }
@@ -3661,9 +3686,9 @@ mod tests {
         let a = project.path().join("a.txt");
         let b = project.path().join("b.txt");
         let c = project.path().join("c.txt");
-        std::fs::write(&a, "one").unwrap();
-        std::fs::write(&b, "two").unwrap();
-        std::fs::write(&c, "three").unwrap();
+        crate::test_fixtures::write_settings_fixture(&a, "one").unwrap();
+        crate::test_fixtures::write_settings_fixture(&b, "two").unwrap();
+        crate::test_fixtures::write_settings_fixture(&c, "three").unwrap();
         let (svc, store) = svc_for(project.path()).await;
 
         // Prime: capture all three so they have a baseline row.
@@ -3676,7 +3701,7 @@ mod tests {
         assert_eq!(store.list_for_path("a.txt").await.unwrap().len(), 1);
 
         // Mutate `a`, leave `b` alone, delete `c`.
-        std::fs::write(&a, "one!").unwrap();
+        crate::test_fixtures::write_settings_fixture(&a, "one!").unwrap();
         std::fs::remove_file(&c).unwrap();
 
         let queued = svc.enqueue_startup_diff().await.unwrap();
@@ -3707,14 +3732,14 @@ mod tests {
 
         // a.txt: two captures ("v1" then "v2"). b.txt: one capture — its only
         // row IS its stream's newest, so its blob must survive at ANY age.
-        std::fs::write(&file, "v1").unwrap();
-        std::fs::write(&single, "only").unwrap();
+        crate::test_fixtures::write_settings_fixture(&file, "v1").unwrap();
+        crate::test_fixtures::write_settings_fixture(&single, "only").unwrap();
         svc.mark_dirty(file.clone(), WatchEventKind::Other);
         svc.mark_dirty(single.clone(), WatchEventKind::Other);
         svc.request_snapshot(SnapshotTrigger::Startup)
             .await
             .unwrap();
-        std::fs::write(&file, "v2").unwrap();
+        crate::test_fixtures::write_settings_fixture(&file, "v2").unwrap();
         svc.mark_dirty(file.clone(), WatchEventKind::Other);
         svc.request_snapshot(SnapshotTrigger::Startup)
             .await
@@ -3773,12 +3798,12 @@ mod tests {
         let project = tempdir().unwrap();
         let file = project.path().join("a.txt");
         let (svc, store) = svc_for(project.path()).await;
-        std::fs::write(&file, "v1").unwrap();
+        crate::test_fixtures::write_settings_fixture(&file, "v1").unwrap();
         svc.mark_dirty(file.clone(), WatchEventKind::Other);
         svc.request_snapshot(SnapshotTrigger::Startup)
             .await
             .unwrap();
-        std::fs::write(&file, "v2").unwrap();
+        crate::test_fixtures::write_settings_fixture(&file, "v2").unwrap();
         svc.mark_dirty(file.clone(), WatchEventKind::Other);
         svc.request_snapshot(SnapshotTrigger::Startup)
             .await
@@ -3847,7 +3872,7 @@ mod tests {
         let (svc, store) = svc_for(project.path()).await;
 
         let staged = project.path().join("staged.txt");
-        std::fs::write(&staged, "staged-body").unwrap();
+        crate::test_fixtures::write_settings_fixture(&staged, "staged-body").unwrap();
         let staged_bytes = std::fs::read(&staged).unwrap();
         let staged_hash = svc.inner.blobs.write(&staged_bytes).unwrap();
         svc.mark_dirty_with_staging(
@@ -3862,7 +3887,8 @@ mod tests {
         );
 
         let unstaged = project.path().join("unstaged.txt");
-        std::fs::write(&unstaged, "unstaged-body-which-is-longer").unwrap();
+        crate::test_fixtures::write_settings_fixture(&unstaged, "unstaged-body-which-is-longer")
+            .unwrap();
         svc.mark_dirty(unstaged.clone(), WatchEventKind::Other);
 
         let parent = svc
@@ -3925,7 +3951,7 @@ mod tests {
         // missed and the snapshot returns None.
         let project = tempdir().unwrap();
         let file = project.path().join("late.txt");
-        std::fs::write(&file, "hello").unwrap();
+        crate::test_fixtures::write_settings_fixture(&file, "hello").unwrap();
         let db = Database::in_memory();
         seed_stream(&db).await;
         let store = Arc::new(SqliteSnapshotStore::new(db));
@@ -3969,7 +3995,7 @@ mod tests {
     async fn oversize_file_skips_hash_and_blob() {
         let project = tempdir().unwrap();
         let file = project.path().join("big.bin");
-        std::fs::write(&file, vec![0u8; 1024]).unwrap();
+        crate::test_fixtures::write_settings_fixture(&file, vec![0u8; 1024]).unwrap();
         let db = Database::in_memory();
         seed_stream(&db).await;
         let store = Arc::new(SqliteSnapshotStore::new(db));
@@ -4024,7 +4050,11 @@ mod tests {
     #[tokio::test]
     async fn a_hashes_only_take_writes_identities_and_no_blobs() {
         let project = tempdir().unwrap();
-        std::fs::write(project.path().join("swept.txt"), "swept body").unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            project.path().join("swept.txt"),
+            "swept body",
+        )
+        .unwrap();
         let (svc, store) = svc_for(project.path()).await;
         svc.set_content_policy(ContentPolicy::HashesOnly);
         svc.enqueue_startup_diff().await.unwrap();
@@ -4033,7 +4063,11 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        std::fs::write(project.path().join("marked.txt"), "marked body").unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            project.path().join("marked.txt"),
+            "marked body",
+        )
+        .unwrap();
         svc.mark_dirty(project.path().join("marked.txt"), WatchEventKind::Other);
         let second = svc
             .request_snapshot(take_by("hashes"))
@@ -4066,7 +4100,7 @@ mod tests {
             svc.set_content_policy(policy);
             let write = |name: &str, body: &str| {
                 let full = project.path().join(name);
-                std::fs::write(&full, body).unwrap();
+                crate::test_fixtures::write_settings_fixture(&full, body).unwrap();
                 svc.mark_dirty(full, WatchEventKind::Other);
             };
             write("keep.txt", "same");
@@ -4114,7 +4148,7 @@ mod tests {
         let files = files_for(&svc, &store, project.path());
         let write = |name: &str, body: &str| {
             let full = project.path().join(name);
-            std::fs::write(&full, body).unwrap();
+            crate::test_fixtures::write_settings_fixture(&full, body).unwrap();
             svc.mark_dirty(full, WatchEventKind::Other);
         };
 

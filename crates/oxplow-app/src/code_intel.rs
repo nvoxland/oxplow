@@ -544,7 +544,7 @@ mod tests {
     async fn fixture() -> (Arc<crate::Services>, tempfile::TempDir, StreamId) {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             dir.path().join("w.py"),
             "\n\nclass Widget:\n    def spin(self): pass\n",
         )

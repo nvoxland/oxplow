@@ -410,7 +410,7 @@ impl ProviderRegistry {
         &'a self,
         prepared: &'a mut PreparedProviderGeneration,
         running: &'a mut tokio::sync::OwnedMutexGuard<BTreeMap<String, Arc<Instance>>>,
-        config: &OxplowConfig,
+        _config: &OxplowConfig,
     ) -> Result<ProviderGenerationReservation<'a>, VocabularyErrors> {
         let current = &**running;
         let same_base = current.len() == prepared.base.len()
@@ -448,17 +448,10 @@ impl ProviderRegistry {
             ));
         }
 
-        let mut configured: BTreeMap<_, _> = self
-            .global_instances()
-            .into_iter()
-            .map(|(name, config)| (name, (Scope::Global, config)))
-            .collect();
-        configured.extend(
-            config
-                .extension_instances
-                .iter()
-                .map(|(name, config)| (name.clone(), (Scope::Project, config.clone()))),
-        );
+        // Use the same atomic map and origin resolution as preparation. The
+        // typed runtime map already contains inherited global values, so
+        // treating every entry in it as project-owned changes the fence.
+        let configured = self.scoped_instances();
         if configured != prepared.configured {
             return Err(host_error(
                 "activation.provider_configuration_changed",
@@ -535,6 +528,12 @@ impl ProviderGenerationReservation<'_> {
             return Err(host_error(
                 "activation.provider_source_changed",
                 "provider source changed during preparation",
+            ));
+        }
+        if self.registry.scoped_instances() != self.prepared.configured {
+            return Err(host_error(
+                "activation.provider_configuration_changed",
+                "provider configuration changed during preparation",
             ));
         }
         Ok(())

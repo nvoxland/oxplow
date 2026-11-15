@@ -14,9 +14,10 @@ automatic; your job is small and is about making sure the data exists,
 
 Which tests you run, and when, is up to you and the project — oxplow
 doesn't ask for any. What it needs is to **see the runs you do make**,
-so their results and coverage attach to the request. The project's
-commands are in the `testing:` block of `.oxplow/project.yaml`, and its report
-collectors in the project's own extension, `.oxplow/extensions/project/extension.yaml`.
+so their results and coverage attach to the request. The project's commands
+are the registered `oxplow.testing.*` settings (project overrides appear as
+flat namespaced keys in `.oxplow/project.yaml`), and its report collectors are
+in the project's own extension, `.oxplow/extensions/project/extension.yaml`.
 
 - **Run tests through a report-emitting command.** A bare
   test-runner call (say `pytest <file>`) writes no report, so the run

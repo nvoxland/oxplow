@@ -7,10 +7,10 @@ mock.module("./api.js", () => ({
   querySql: async (sql: string) => {
     asked.push(sql);
     return {
-      columns: ["key", "value", "origin", "extension", "doc", "schema"],
+      columns: ["key", "value", "origin", "extension", "doc", "schema", "title", "category", "secret", "is_set", "owner", "restart_required", "ui"],
       rows: [
-        ["snapshotRetentionDays", "3", "project", null, "How long snapshots are kept.", '{"type":"integer"}'],
-        ["ai.roles.main", "null", "default", null, "The main role.", null],
+        ["oxplow.snapshots.retentionDays", "3", "project", null, "How long snapshots are kept.", '{"type":"integer"}', 'Retention', 'snapshots', 0, 1, 'core', 0, '{}'],
+        ["oxplow.ai.roles.main", "null", "default", null, "The main role.", null, "Main", "ai", 0, 0, "core", 0, "{}"],
       ],
       truncated: false,
       reads: { datasets: ["v_config_value"], tables: [], measures: [] },
@@ -26,14 +26,15 @@ test("every setting is read from v_config_value, its value and schema as JSON", 
   expect(asked[0]).toContain("FROM v_config_value");
   expect(settings).toEqual([
     {
-      key: "snapshotRetentionDays",
+      key: "oxplow.snapshots.retentionDays",
       value: 3,
       origin: "project",
       extension: null,
       doc: "How long snapshots are kept.",
       schema: { type: "integer" },
+      title: "Retention", category: "snapshots", secret: false, isSet: true, owner: "core", restartRequired: false, ui: {},
     },
-    { key: "ai.roles.main", value: null, origin: "default", extension: null, doc: "The main role.", schema: null },
+    { key: "oxplow.ai.roles.main", value: null, origin: "default", extension: null, doc: "The main role.", schema: null, title: "Main", category: "ai", secret: false, isSet: false, owner: "core", restartRequired: false, ui: {} },
   ]);
   expect(reads.datasets).toEqual(["v_config_value"]);
 });

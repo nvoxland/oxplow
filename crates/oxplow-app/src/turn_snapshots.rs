@@ -169,7 +169,11 @@ mod tests {
         let stream = svc.streams.list_streams().await.unwrap()[0].id;
         let capture = svc.snapshot_captures.get(&stream).unwrap();
         // A baseline before the turn.
-        std::fs::write(svc.layout.project_dir.join("seed.txt"), "seed").unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            svc.layout.project_dir.join("seed.txt"),
+            "seed",
+        )
+        .unwrap();
         capture.enqueue_startup_diff().await.unwrap();
         let baseline = capture
             .request_snapshot(SnapshotTrigger::Startup)
@@ -184,7 +188,11 @@ mod tests {
 
         // The agent edits a file, and another take captures the edit before
         // the turn ends — which used to make the turn look empty.
-        std::fs::write(svc.layout.project_dir.join("made.txt"), "by the agent").unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            svc.layout.project_dir.join("made.txt"),
+            "by the agent",
+        )
+        .unwrap();
         capture.enqueue_startup_diff().await.unwrap();
         capture
             .request_snapshot(SnapshotTrigger::Manual)
@@ -266,7 +274,11 @@ mod tests {
         )
         .with_predrain_delay(Duration::from_millis(600));
         // Something for the take to record.
-        std::fs::write(svc.layout.project_dir.join("big.txt"), "work").unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            svc.layout.project_dir.join("big.txt"),
+            "work",
+        )
+        .unwrap();
         slow.enqueue_startup_diff().await.unwrap();
         svc.snapshot_captures
             .insert_for_test(stream, Arc::new(slow));

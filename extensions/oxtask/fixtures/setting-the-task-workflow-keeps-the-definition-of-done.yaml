@@ -1,26 +1,28 @@
-# The project chooses how its agents use tasks: `set_workflow` writes the
-# workflow and the definition of done to the project's settings, each
-# alone or together, and reading them back gives what was set; one alone
-# keeps the other. A value outside the presets is refused.
+# Independent registered leaves preserve one another, with local inheritance.
 requires: [oxplow-bundled, oxtask]
 given:
   - { command: oxtask.tasks.set_workflow, input: { workflow: person_files, definition_of_done: "Tests pass.\nCommitted." } }
   - { command: oxtask.tasks.set_workflow, input: { workflow: off } }
-when: { command: oxtask.settings.read, input: {} }
+when: { command: oxplow.config.get, input: { key: oxtask.tasks.definitionOfDone, level: project } }
 expect:
   ok: true
-  result: { values: { tasks: { workflow: "off", definitionOfDone: "Tests pass.\nCommitted." } } }
+  result: { value: "Tests pass.\nCommitted.", origin: project }
 steps:
+  - when: { command: oxplow.config.get, input: { key: oxtask.tasks.workflow, level: project } }
+    expect: { ok: true, result: { value: off, origin: project } }
   - when: { command: oxtask.tasks.set_workflow, input: { workflow: sometimes } }
     expect: { ok: false }
-  # An empty input changes nothing, so it is refused.
   - when: { command: oxtask.tasks.set_workflow, input: {} }
     expect: { ok: false }
-  # A person's own workflow still wins for them: the project's write says so.
   - given:
-      - command: oxtask.settings.write
-        input: { schema_version: 1, personal: { expected: null, values: { tasks: { workflow: agent_tracks } } } }
+      - command: oxplow.config.set
+        input: { key: oxtask.tasks.workflow, level: local, value: agent_tracks }
+        confirmed: true
   - when: { command: oxtask.tasks.set_workflow, input: { workflow: person_files } }
     expect:
       ok: true
-      result: { tasks: { workflow: person_files }, personal_workflow: agent_tracks }
+      result: { tasks: { workflow: person_files }, local_workflow: agent_tracks }
+  - when: { command: oxplow.config.get, input: { key: oxtask.tasks.workflow } }
+    expect: { ok: true, result: { value: agent_tracks, origin: local } }
+  - when: { command: oxplow.config.get, input: { key: oxtask.tasks.definitionOfDone, level: project } }
+    expect: { ok: true, result: { value: "Tests pass.\nCommitted." } }

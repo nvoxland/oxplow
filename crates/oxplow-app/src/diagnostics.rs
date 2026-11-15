@@ -247,9 +247,14 @@ mod tests {
     fn old_stall_samples_are_pruned() {
         let dir = tempfile::tempdir().unwrap();
         for t in 1..=(KEEP_STALL_SAMPLES as u64 + 3) {
-            std::fs::write(dir.path().join(format!("stall-{t:010}.txt")), "x").unwrap();
+            crate::test_fixtures::write_settings_fixture(
+                dir.path().join(format!("stall-{t:010}.txt")),
+                "x",
+            )
+            .unwrap();
         }
-        std::fs::write(dir.path().join("daemon.2026-10-07.log"), "x").unwrap();
+        crate::test_fixtures::write_settings_fixture(dir.path().join("daemon.2026-10-07.log"), "x")
+            .unwrap();
         prune_stall_samples(dir.path());
         let mut left: Vec<String> = std::fs::read_dir(dir.path())
             .unwrap()

@@ -103,7 +103,11 @@ mod tests {
     async fn collector_sync_reads_a_report_into_the_agents_thread() {
         let fx = services_with_thread().await;
         // Coverage is recorded while a metric consumes it.
-        std::fs::write(fx._dir.path().join("coverage.xml"), COBERTURA).unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            fx._dir.path().join("coverage.xml"),
+            COBERTURA,
+        )
+        .unwrap();
         crate::collection::test_support::write_project_extension(
             fx._dir.path(),
             &[crate::collection::test_support::report_collector(

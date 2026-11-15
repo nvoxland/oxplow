@@ -161,7 +161,7 @@ async fn turning_the_extension_off_stops_a_streaming_job() {
 async fn change_another_extension(fx: &Fixture) {
     let other = fx._dir.path().join(".oxplow/extensions/other");
     std::fs::create_dir_all(&other).unwrap();
-    std::fs::write(
+    crate::test_fixtures::write_settings_fixture(
         other.join("extension.yaml"),
         "manifest: 2\nname: other\nintent:\n  purpose: p\n",
     )
@@ -188,7 +188,7 @@ async fn a_queued_job_runs_after_another_extension_changes() {
 /// Rewrite the triage extension's manifest in place, keeping its version
 /// and its job's contract: another deployment all the same.
 async fn redeploy_same_version(fx: &Fixture) {
-    std::fs::write(
+    crate::test_fixtures::write_settings_fixture(
         fx._dir
             .path()
             .join(".oxplow/extensions/triage/extension.yaml"),
@@ -263,7 +263,7 @@ async fn a_job_does_not_succeed_across_a_change_to_its_declaration() {
     streaming(&fx, &id).await;
 
     let changed = MANIFEST.replace("version: 1", "version: 2");
-    std::fs::write(
+    crate::test_fixtures::write_settings_fixture(
         fx._dir
             .path()
             .join(".oxplow/extensions/triage/extension.yaml"),
@@ -292,8 +292,8 @@ async fn a_restart_runs_what_was_queued_and_interrupts_what_was_running() {
     crate::test_fixtures::init_git_repo(dir.path());
     let ext = dir.path().join(".oxplow/extensions/triage");
     std::fs::create_dir_all(ext.join("commands")).unwrap();
-    std::fs::write(ext.join("extension.yaml"), MANIFEST).unwrap();
-    std::fs::write(ext.join("commands/lookup.star"), LOOKUP).unwrap();
+    crate::test_fixtures::write_settings_fixture(ext.join("extension.yaml"), MANIFEST).unwrap();
+    crate::test_fixtures::write_settings_fixture(ext.join("commands/lookup.star"), LOOKUP).unwrap();
     let global = dir.path().join(".oxplow/global-config");
     let secrets: Arc<dyn oxplow_ai::secrets::SecretStore> =
         Arc::new(oxplow_ai::secrets::MemorySecrets::default());
@@ -398,7 +398,7 @@ async fn a_stalled_stream_holds_no_write_transaction() {
             &fx,
             &Actor::Human,
             "oxplow.config.set",
-            json!({ "key": "metricRetentionDays", "value": 30 }),
+            json!({ "key": "oxplow.metrics.retentionDays", "value": 30, "level": "project" }),
         )
         .await;
         assert!(
@@ -498,8 +498,9 @@ async fn a_restart_replays_an_idempotent_job_that_was_running() {
     crate::test_fixtures::init_git_repo(dir.path());
     let ext = dir.path().join(".oxplow/extensions/triage");
     std::fs::create_dir_all(ext.join("commands")).unwrap();
-    std::fs::write(ext.join("extension.yaml"), manifest_idempotent()).unwrap();
-    std::fs::write(ext.join("commands/lookup.star"), LOOKUP).unwrap();
+    crate::test_fixtures::write_settings_fixture(ext.join("extension.yaml"), manifest_idempotent())
+        .unwrap();
+    crate::test_fixtures::write_settings_fixture(ext.join("commands/lookup.star"), LOOKUP).unwrap();
     let global = dir.path().join(".oxplow/global-config");
     let secrets: Arc<dyn oxplow_ai::secrets::SecretStore> =
         Arc::new(oxplow_ai::secrets::MemorySecrets::default());

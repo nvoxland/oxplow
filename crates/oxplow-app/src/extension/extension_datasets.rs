@@ -70,7 +70,11 @@ impl crate::event_pump::AsyncEventConsumer for EntitiesConsumer {
         if let Some(svc) = self.services.upgrade() {
             if event.envelope.event_type == "command.executed" {
                 svc.extension_activation
-                    .request_config_refresh(&svc.db)
+                    .request_config_refresh(
+                        &svc.db,
+                        &svc.layout.project_dir,
+                        &svc.global_config_dir,
+                    )
                     .await?;
             } else {
                 svc.extension_activation
@@ -96,7 +100,7 @@ mod tests {
     fn write(root: &Path, rel: &str, body: &str) {
         let p = root.join(rel);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-        std::fs::write(p, body).unwrap();
+        crate::test_fixtures::write_settings_fixture(p, body).unwrap();
     }
 
     const MANIFEST: &str = "manifest: 2\nname: late\nintent:\n  purpose: x\n  examples: [{ name: a }]\ndatasets:\n  - name: blocked\n    version: 1\n    description: Blocked tasks.\n    fields:\n      - { name: uri, type: TEXT, doc: Task ref. }\n  - name: broken\n    version: 1\n    description: Broken.\n    fields:\n      - { name: nope, doc: x }\n";
@@ -150,11 +154,7 @@ mod tests {
             shaky.errors
         );
         // Off: its views go.
-        write(
-            &root,
-            ".oxplow/personal.yaml",
-            "disableExtensions: [late]\n",
-        );
+        write(&root, ".oxplow/local.yaml", "disableExtensions: [late]\n");
         crate::test_fixtures::activate_with_problems(svc).await;
         assert!(svc
             .sql

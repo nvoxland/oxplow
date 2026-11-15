@@ -115,12 +115,16 @@ mod tests {
         crate::test_fixtures::init_git_repo(dir.path());
         let ext = dir.path().join(".oxplow/extensions/work");
         std::fs::create_dir_all(&ext).unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             ext.join("extension.yaml"),
             "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: one\n    runtime: jaq\n    entry: one.jq\n    input: \"SELECT 1 AS n\"\n    entities:\n      - { name: nums, key: n, columns: { n: int } }\n",
         )
         .unwrap();
-        std::fs::write(ext.join("one.jq"), "{entities: {nums: .rows}}").unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            ext.join("one.jq"),
+            "{entities: {nums: .rows}}",
+        )
+        .unwrap();
         let svc = crate::Services::in_memory(dir.path()).await.unwrap();
         crate::test_fixtures::activate_with_problems(&svc).await;
         let actor = Actor::Agent {

@@ -772,9 +772,11 @@ mod tests {
         let mut errors = checked.error_lines();
         if std::env::var("OXPLOW_LIVE_ANSWERABILITY").as_deref() == Ok("1") {
             let ai = AiService::for_this_machine(
+                &svc.layout.project_dir,
                 std::sync::Arc::new(oxplow_db::SqliteAiCallStore::new(svc.db.clone())),
                 svc.ai.providers().clone(),
-            );
+            )
+            .expect("machine settings are available for live answerability");
             errors.extend(live_pages(&shipped, &skill, &catalog(&svc).await, &ai).await);
         }
         assert_eq!(errors, Vec::<String>::new());

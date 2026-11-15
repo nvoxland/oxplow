@@ -289,7 +289,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
         let before = "\n\nclass Widget:\n    def spin(self): pass\n";
-        std::fs::write(dir.path().join("w.py"), before).unwrap();
+        crate::test_fixtures::write_settings_fixture(dir.path().join("w.py"), before).unwrap();
         let svc = crate::Services::in_memory(dir.path()).await.unwrap();
         svc.config
             .write()

@@ -244,7 +244,7 @@ mod tests {
     fn dir_with(root: &Path, name: &str, bin: &str) -> PathBuf {
         let dir = root.join(name);
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join(bin), "#!/bin/sh\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(dir.join(bin), "#!/bin/sh\n").unwrap();
         dir
     }
 

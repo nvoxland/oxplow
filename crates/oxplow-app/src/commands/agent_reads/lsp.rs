@@ -244,7 +244,7 @@ mod tests {
     async fn code_reads_fall_back_or_say_how_to_get_a_server() {
         let (dir, svc, stream) = project().await;
         std::fs::create_dir_all(dir.path().join("src")).unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             dir.path().join("src/x.rs"),
             "fn alpha() {}\n\nstruct Beta;\n",
         )

@@ -990,9 +990,13 @@ mod tests {
     async fn extension(svc: &std::sync::Arc<Services>, effects: &str, files: &[(&str, &str)]) {
         let dir = svc.layout.project_dir.join(".oxplow/extensions/acme");
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("extension.yaml"), format!("{HEAD}{effects}")).unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            dir.join("extension.yaml"),
+            format!("{HEAD}{effects}"),
+        )
+        .unwrap();
         for (name, body) in files {
-            std::fs::write(dir.join(name), body).unwrap();
+            crate::test_fixtures::write_settings_fixture(dir.join(name), body).unwrap();
         }
         crate::test_fixtures::activate(svc).await;
     }
@@ -2019,7 +2023,7 @@ mod tests {
     fn write(root: &Path, rel: &str, body: &str) {
         let p = root.join(rel);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-        std::fs::write(p, body).unwrap();
+        crate::test_fixtures::write_settings_fixture(p, body).unwrap();
     }
 
     /// P9.D1: an effect of one extension reacts to another's event type,

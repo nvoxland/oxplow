@@ -49,6 +49,75 @@ pub use generation::{
     PreparedProviderGeneration, ProviderGenerationPublication, ProviderGenerationReservation,
 };
 
+/// The generic settings key for one pasted credential of a provider instance.
+pub(crate) fn provider_credential_key(namespace: &str, instance: &str, name: &str) -> String {
+    fn hex(value: &str) -> String {
+        value
+            .as_bytes()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    }
+    format!(
+        "{namespace}.providerCredentials.{}.{}",
+        hex(instance),
+        hex(name)
+    )
+}
+
+pub(crate) fn provider_credential_definition(
+    namespace: &str,
+    instance: &str,
+    name: &str,
+) -> oxplow_config::settings::SettingDefinition {
+    oxplow_config::settings::SettingDefinition {
+        key: provider_credential_key(namespace, instance, name),
+        title: format!("{instance}: {name}"),
+        description: format!(
+            "Pasted credential {name} for provider instance {namespace}/{instance}."
+        ),
+        category: "integrations".into(),
+        schema: json!({"type":"string"}),
+        default: None,
+        secret: true,
+        order: 0,
+        ui: json!({}),
+        restart_required: false,
+        owner: format!("extension/{namespace}"),
+    }
+}
+
+fn credential_settings(
+    deps: &HostDeps,
+) -> Result<oxplow_config::settings::SettingsStore, DomainError> {
+    let global = deps
+        .global_dir
+        .as_deref()
+        .ok_or_else(|| DomainError::Storage("settings unavailable".into()))?;
+    let extensions = deps.catalog.live_snapshot(&deps.project_dir);
+    crate::settings::store(
+        &deps.project_dir,
+        global,
+        deps.secrets.clone(),
+        extensions.extensions(),
+    )
+    .map_err(|_| DomainError::Storage("settings unavailable".into()))
+}
+
+fn pasted_credential(
+    deps: &HostDeps,
+    namespace: &str,
+    instance: &str,
+    name: &str,
+) -> Result<Option<String>, DomainError> {
+    let value = credential_settings(deps)?
+        .get(&provider_credential_key(namespace, instance, name), None)
+        .map_err(|_| DomainError::Storage("credential storage unavailable".into()))?;
+    Ok(value
+        .value
+        .and_then(|value| value.as_str().map(str::to_owned)))
+}
+
 /// The longest a failed instance waits before its next start.
 pub const MAX_BACKOFF: Duration = Duration::from_secs(60);
 /// The errors an instance's health keeps.
@@ -96,7 +165,7 @@ pub struct HostDeps {
     /// streams more fails, rather than buffering without end.
     pub max_uncheckpointed: usize,
     /// This machine's global config dir, where the person's global
-    /// instances are kept (`instances.yaml`); none, there are none.
+    /// instances are kept in `global.yaml`; none, there are none.
     pub global_dir: Option<PathBuf>,
     /// Where the renderer hears that a sign-in finished.
     pub events: crate::events::EventBus,
@@ -114,7 +183,7 @@ pub enum Scope {
     /// The project's: in its `extensionInstances`, shared with the team;
     /// its credentials are this project's on this machine.
     Project,
-    /// The person's: in this machine's `instances.yaml`, running in every
+    /// The person's: in this machine's `global.yaml`, running in every
     /// project that has its extension; its credentials are set once.
     Global,
 }
@@ -123,12 +192,9 @@ pub enum Scope {
 /// the project's key).
 const GLOBAL_CREDENTIALS: &str = "global";
 
-/// The global instances as last read, and the file's time then.
+/// Global runtime reconciliation and credential-generation observations.
 #[derive(Default)]
 struct GlobalFile {
-    read_at: Option<std::time::SystemTime>,
-    loaded: bool,
-    instances: BTreeMap<String, oxplow_config::ExtensionInstanceConfig>,
     /// The file's time at the last reconcile.
     reconciled_at: Option<std::time::SystemTime>,
     /// Each global instance's credential count
@@ -487,9 +553,9 @@ impl Instance {
                 if self.spec.is_client_secret(name) {
                     continue;
                 }
-                if let Some(value) = secrets
-                    .get(&self.account(name))
-                    .map_err(|e| failed(name, e.to_string()))?
+                if let Some(value) =
+                    pasted_credential(&self.deps, &self.ext.namespace, &self.id, name)
+                        .map_err(|_| failed(name, "credential storage unavailable".into()))?
                 {
                     out.insert(name.to_string(), value);
                 }
@@ -497,19 +563,20 @@ impl Instance {
             };
             let client_secret = match &decl.client_secret {
                 None => None,
-                Some(secret) => match secrets
-                    .get(&self.account(secret))
-                    .map_err(|e| failed(secret, e.to_string()))?
-                {
-                    Some(value) => Some(value),
-                    None => {
-                        problems.push(problem(
-                            secret,
-                            format!("isn't set — `{name}`'s sign-in needs it"),
-                        ));
-                        continue;
+                Some(secret) => {
+                    match pasted_credential(&self.deps, &self.ext.namespace, &self.id, secret)
+                        .map_err(|_| failed(secret, "credential storage unavailable".into()))?
+                    {
+                        Some(value) => Some(value),
+                        None => {
+                            problems.push(problem(
+                                secret,
+                                format!("isn't set — `{name}`'s sign-in needs it"),
+                            ));
+                            continue;
+                        }
                     }
-                },
+                }
             };
             match oauth::access_token(
                 secrets,
@@ -1491,7 +1558,7 @@ struct Gone {
     namespace: String,
     id: String,
     /// Its credentials' names, when its extension still declares it.
-    credentials: Option<Vec<String>>,
+    credentials: Option<Vec<spec::CredentialDecl>>,
 }
 
 impl Gone {
@@ -1500,7 +1567,7 @@ impl Gone {
             Some(r) => Gone {
                 namespace: r.ext.namespace.clone(),
                 id: r.id.clone(),
-                credentials: Some(r.spec.credential_names()),
+                credentials: Some(r.spec.credentials.clone()),
             },
             None => {
                 let (namespace, id) = instance.split_once('/').unwrap_or((instance, ""));
@@ -1706,8 +1773,7 @@ impl ProviderRegistry {
         self.resolve(instance).ok().map(|r| (r.ext, r.spec))
     }
 
-    /// The instances in effect here: this machine's global ones, each
-    /// replaced whole by the project's entry of the same name.
+    /// The whole instance map selected by local/project/global precedence.
     pub(super) fn instances_config(
         &self,
     ) -> BTreeMap<String, oxplow_config::ExtensionInstanceConfig> {
@@ -1722,51 +1788,95 @@ impl ProviderRegistry {
     fn scoped_instances(
         &self,
     ) -> BTreeMap<String, (Scope, oxplow_config::ExtensionInstanceConfig)> {
-        let mut all: BTreeMap<_, _> = self
-            .global_instances()
+        // Maps are atomic settings: a local/project map replaces the entire
+        // global map, including entries with different names.
+        let project = self.project_instances();
+        let has_override = self.instance_settings().ok().is_some_and(|store| {
+            [
+                oxplow_config::settings::Level::Local,
+                oxplow_config::settings::Level::Project,
+            ]
             .into_iter()
-            .map(|(name, config)| (name, (Scope::Global, config)))
-            .collect();
-        all.extend(
-            self.project_instances()
-                .into_iter()
-                .map(|(name, config)| (name, (Scope::Project, config))),
-        );
-        all
+            .any(|level| {
+                store
+                    .get("oxplow.extensionInstances", Some(level))
+                    .ok()
+                    .is_some_and(|value| value.value.is_some())
+            })
+        });
+        let (scope, all) = if has_override {
+            (Scope::Project, project)
+        } else {
+            (Scope::Global, self.global_instances())
+        };
+        all.into_iter()
+            .map(|(name, config)| (name, (scope, config)))
+            .collect()
     }
 
-    /// The project's own entries (`extensionInstances`).
+    fn instance_settings(
+        &self,
+    ) -> Result<oxplow_config::settings::SettingsStore, oxplow_config::settings::SettingsError>
+    {
+        let global = self
+            .deps
+            .global_dir
+            .as_deref()
+            .ok_or(oxplow_config::settings::SettingsError::Storage)?;
+        crate::settings::store(
+            &self.deps.project_dir,
+            global,
+            self.deps.secrets.clone(),
+            &self.extensions(),
+        )
+    }
+
+    fn project_level(&self) -> oxplow_config::settings::Level {
+        use oxplow_config::settings::Level;
+        if self
+            .instance_settings()
+            .ok()
+            .and_then(|store| {
+                store
+                    .get("oxplow.extensionInstances", Some(Level::Local))
+                    .ok()
+            })
+            .is_some_and(|value| value.value.is_some())
+        {
+            Level::Local
+        } else {
+            Level::Project
+        }
+    }
+
+    /// The highest project-scoped override, without inheriting global values.
     fn project_instances(&self) -> BTreeMap<String, oxplow_config::ExtensionInstanceConfig> {
-        crate::config_service::read_config(&self.deps.config).extension_instances
+        self.instances_at(self.project_level())
+    }
+
+    fn instances_at(
+        &self,
+        level: oxplow_config::settings::Level,
+    ) -> BTreeMap<String, oxplow_config::ExtensionInstanceConfig> {
+        self.instance_settings()
+            .and_then(|store| store.get("oxplow.extensionInstances", Some(level)))
+            .ok()
+            .and_then(|value| value.value)
+            .and_then(|value| serde_json::from_value(value).ok())
+            .unwrap_or_default()
     }
 
     /// When the machine's instances file last changed (none: no file).
     fn global_mtime(&self) -> Option<std::time::SystemTime> {
         let dir = self.deps.global_dir.as_ref()?;
-        std::fs::metadata(dir.join(oxplow_config::INSTANCES_FILE))
+        std::fs::metadata(dir.join("global.yaml"))
             .and_then(|m| m.modified())
             .ok()
     }
 
-    /// This machine's global instances, re-read when their file changed.
-    /// A file that doesn't load keeps what was last read (and says so).
+    /// This machine's global map through the shared settings service.
     fn global_instances(&self) -> BTreeMap<String, oxplow_config::ExtensionInstanceConfig> {
-        let Some(dir) = self.deps.global_dir.as_ref() else {
-            return BTreeMap::new();
-        };
-        let mtime = self.global_mtime();
-        let mut file = self.global.lock();
-        if !file.loaded || file.read_at != mtime {
-            match oxplow_config::GlobalInstances::load(dir) {
-                Ok(read) => file.instances = read.instances,
-                Err(error) => {
-                    tracing::warn!(%error, "the global instances file didn't load; keeping what was last read")
-                }
-            }
-            file.loaded = true;
-            file.read_at = mtime;
-        }
-        file.instances.clone()
+        self.instances_at(oxplow_config::settings::Level::Global)
     }
 
     /// Whose `instance` is, and whether a project entry replaces a global
@@ -1776,14 +1886,15 @@ impl ProviderRegistry {
     /// credentials. An instance configured nowhere is the
     /// project's too.
     fn scope_of(&self, instance: &str) -> (Scope, bool) {
-        let global = self.global_instances().contains_key(instance);
-        if self.project_instances().contains_key(instance) {
-            (Scope::Project, global)
-        } else if global {
-            (Scope::Global, false)
-        } else {
-            (Scope::Project, false)
-        }
+        let scope = self
+            .scoped_instances()
+            .get(instance)
+            .map(|(scope, _)| *scope)
+            .unwrap_or(Scope::Project);
+        let overridden = scope == Scope::Project
+            && self.project_instances().contains_key(instance)
+            && self.global_instances().contains_key(instance);
+        (scope, overridden)
     }
 
     /// The machine's instances file changed since the last reconcile
@@ -1809,9 +1920,8 @@ impl ProviderRegistry {
         };
         let mut restarted = false;
         for instance in changed {
-            if self.scope_of(&instance).0 == Scope::Global {
-                restarted |= self.stop(&instance).await;
-            }
+            // A project/local connection can inherit a global secret too.
+            restarted |= self.stop(&instance).await;
         }
         if !restarted && self.global.lock().reconciled_at == self.global_mtime() {
             return false;
@@ -1887,7 +1997,23 @@ impl ProviderRegistry {
                             Some(state) => {
                                 matches!(state, oauth::SignInState::SignedIn { .. })
                             }
-                            None => secrets.get(&account).ok().flatten().is_some(),
+                            None if c.secret_ref.is_some() => {
+                                secrets.get(&account).ok().flatten().is_some()
+                            }
+                            None => credential_settings(&self.deps)
+                                .and_then(|store| {
+                                    store
+                                        .inspect(
+                                            &provider_credential_key(&ext.namespace, id, &c.name),
+                                            None,
+                                        )
+                                        .map_err(|_| {
+                                            DomainError::Storage(
+                                                "credential storage unavailable".into(),
+                                            )
+                                        })
+                                })
+                                .is_ok_and(|value| value.is_set),
                         },
                         sign_in,
                         redirect_port: c.oauth.as_ref().and_then(|o| o.redirect_port),
@@ -2080,6 +2206,13 @@ impl ProviderRegistry {
                         crate::extension::extension_configuration::ConfigurationHost::new(
                             self.deps.catalog.clone(),
                             self.deps.project_dir.clone(),
+                        )
+                        .with_settings(
+                            self.deps
+                                .global_dir
+                                .clone()
+                                .unwrap_or_else(|| self.deps.project_dir.join(".oxplow/global")),
+                            self.deps.secrets.clone(),
                         ),
                         self.deps.db.clone(),
                     ),
@@ -2404,7 +2537,7 @@ impl ProviderRegistry {
     /// it up — the project's (written through `oxplow.config.set`:
     /// `extensionInstances` is a person's key, so an agent's is refused or
     /// proposed) or, with `Scope::Global`, their own on this machine
-    /// (`instances.yaml`, a person's only). Refused when
+    /// (`global.yaml`, a person's only). Refused when
     /// the extension doesn't declare `provider`, or the id is taken — by
     /// another instance, or as another provider's own id.
     pub async fn add_instance(
@@ -2509,7 +2642,7 @@ impl ProviderRegistry {
             field: Some("/instance".into()),
             message: format!("no provider instance `{instance}`"),
         };
-        let (gone, home, still_there) = {
+        let (gone, home, still_there, credential_level) = {
             let gate = self.instances_gate.lock().await;
             let resolved = self.resolve(instance).ok();
             let in_project = self.project_instances().contains_key(instance);
@@ -2520,11 +2653,20 @@ impl ProviderRegistry {
                 (false, true) => Scope::Global,
                 (false, false) => return Err(missing()),
             };
+            let credential_level = match home {
+                Scope::Project => self.project_level(),
+                Scope::Global => oxplow_config::settings::Level::Global,
+            };
             self.write_instances(&gate, actor, home, |all| {
                 all.remove(instance).map(|_| ()).ok_or_else(missing)
             })
             .await?;
-            (Gone::of(instance, resolved), home, in_project && in_global)
+            (
+                Gone::of(instance, resolved),
+                home,
+                in_project && in_global,
+                credential_level,
+            )
         };
         self.reconcile().await;
         // Its credentials go with it — a project's replacement's are its
@@ -2532,15 +2674,47 @@ impl ProviderRegistry {
         // named by the extension; one that no longer declares the
         // provider (when Remove is offered) has none left to name.
         let names = gone.credentials.clone().unwrap_or_default();
-        for name in &names {
-            let account = crate::collector_runner::instance_credential_account(
-                credential_scope(&self.deps, home),
-                &gone.namespace,
-                &gone.id,
-                name,
-            );
-            if let Err(e) = self.deps.secrets.delete(&account) {
-                tracing::warn!(%instance, credential = %name, error = %e, "removing an instance's credential failed");
+        for credential in &names {
+            if credential.secret_ref.is_some() {
+                continue;
+            }
+            let name = &credential.name;
+            if credential.oauth.is_some() {
+                let account = crate::collector_runner::instance_credential_account(
+                    credential_scope(&self.deps, home),
+                    &gone.namespace,
+                    &gone.id,
+                    name,
+                );
+                if self.deps.secrets.delete(&account).is_err() {
+                    tracing::warn!(%instance, credential = %name, "removing an instance's sign-in failed");
+                }
+            } else if let Ok(store) = self.instance_settings() {
+                let key = provider_credential_key(&gone.namespace, &gone.id, name);
+                // The instance was removed from the registry inventory already.
+                if store
+                    .registry
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(&key)
+                    .is_none()
+                {
+                    store
+                        .registry
+                        .write()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .register(provider_credential_definition(
+                            &gone.namespace,
+                            &gone.id,
+                            name,
+                        ))
+                        .map_err(|_| CommandError::Failed {
+                            message: "credential settings unavailable".into(),
+                        })?;
+                }
+                if store.unset(&key, credential_level).is_err() {
+                    tracing::warn!(%instance, credential = %name, "removing an instance's credential failed");
+                }
             }
         }
         // The global one showing through keeps what it has.
@@ -2572,7 +2746,7 @@ impl ProviderRegistry {
             bus.run(
                 actor,
                 crate::commands::config_commands::SET,
-                json!({ "key": "activeProviders", "value": active }),
+                json!({ "key": "oxplow.activeProviders", "value": active, "level": credential_level }),
                 matches!(actor, Actor::Human),
             )
             .await?;
@@ -2596,37 +2770,30 @@ impl ProviderRegistry {
             &mut BTreeMap<String, oxplow_config::ExtensionInstanceConfig>,
         ) -> Result<(), CommandError>,
     ) -> Result<(), CommandError> {
-        match scope {
-            Scope::Project => {
-                let bus = self.bus.upgrade().ok_or_else(|| CommandError::Failed {
-                    message: "the command bus is gone".into(),
-                })?;
-                let mut all = self.project_instances();
-                edit(&mut all)?;
-                bus.run(
-                    actor,
-                    crate::commands::config_commands::SET,
-                    json!({ "key": "extensionInstances", "value": all }),
-                    matches!(actor, Actor::Human),
-                )
-                .await?;
-            }
-            Scope::Global => {
-                let dir = self
-                    .deps
-                    .global_dir
-                    .clone()
-                    .ok_or_else(|| CommandError::Failed {
-                        message: "this machine has no global config dir to keep instances in"
-                            .into(),
-                    })?;
-                oxplow_config::GlobalInstances::update(&dir, edit).map_err(|e| {
-                    CommandError::Failed {
-                        message: e.to_string(),
-                    }
-                })??;
-            }
-        }
+        let bus = self.bus.upgrade().ok_or_else(|| CommandError::Failed {
+            message: "the command bus is gone".into(),
+        })?;
+        let level = match scope {
+            Scope::Project => self.project_level(),
+            Scope::Global => oxplow_config::settings::Level::Global,
+        };
+        let mut all = self.instances_at(level);
+        edit(&mut all)?;
+        let (command, input) = if all.is_empty() {
+            // Removing the last row removes this level's override. Generic
+            // config.set of {} remains an explicit empty atomic map.
+            (
+                crate::commands::config_commands::UNSET,
+                json!({ "key": "oxplow.extensionInstances", "level": level }),
+            )
+        } else {
+            (
+                crate::commands::config_commands::SET,
+                json!({ "key": "oxplow.extensionInstances", "value": all, "level": level }),
+            )
+        };
+        bus.run(actor, command, input, matches!(actor, Actor::Human))
+            .await?;
         Ok(())
     }
 
@@ -2675,7 +2842,7 @@ impl ProviderRegistry {
         name: &str,
         value: Option<&str>,
     ) -> Result<(), DomainError> {
-        let (account, decl, _) = self.credential(instance, name)?;
+        let (account, decl, resolved) = self.credential(instance, name)?;
         if decl.secret_ref.is_some() {
             return Err(DomainError::Invalid(
                 "manage this credential through its host secret reference".into(),
@@ -2687,11 +2854,26 @@ impl ProviderRegistry {
                  in); it isn't given a value"
             )));
         }
-        match value {
-            Some(v) => self.deps.secrets.set(&account, v),
-            None => self.deps.secrets.delete(&account),
+        if decl.oauth.is_some() {
+            return self
+                .deps
+                .secrets
+                .delete(&account)
+                .map_err(|_| DomainError::Storage("credential storage unavailable".into()));
         }
-        .map_err(|e| DomainError::Storage(format!("credential `{name}`: {e}")))
+        let level = match resolved.scope {
+            Scope::Project => self.project_level(),
+            Scope::Global => oxplow_config::settings::Level::Global,
+        };
+        let store = self
+            .instance_settings()
+            .map_err(|_| DomainError::Storage("settings unavailable".into()))?;
+        let key = provider_credential_key(&resolved.ext.namespace, &resolved.id, name);
+        match value {
+            Some(value) => store.set(&key, json!(value), level),
+            None => store.unset(&key, level),
+        }
+        .map_err(|_| DomainError::Storage("credential storage unavailable".into()))
     }
 
     /// `instance`'s credential changed: it restarts on the new value (a
@@ -2770,17 +2952,7 @@ impl ProviderRegistry {
         let client_secret = match &oauth_decl.client_secret {
             None => None,
             Some(secret) => {
-                let of_secret = crate::collector_runner::instance_credential_account(
-                    credential_scope(&self.deps, resolved.scope),
-                    &resolved.ext.namespace,
-                    &resolved.id,
-                    secret,
-                );
-                match self
-                    .deps
-                    .secrets
-                    .get(&of_secret)
-                    .map_err(|e| DomainError::Storage(format!("credential `{secret}`: {e}")))?
+                match pasted_credential(&self.deps, &resolved.ext.namespace, &resolved.id, secret)?
                 {
                     Some(value) => Some(value),
                     None => {
@@ -3435,5 +3607,67 @@ fn invoke_context(run: &RunContext) -> oxplow_provider_protocol::model::InvokeCo
         actor: run.actor().source(),
         cause: run.cause().map(|c| c.to_string()),
         anchors: serde_json::to_value(run.anchors()).unwrap_or_default(),
+    }
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::*;
+    use crate::test_fixtures::services_with_thread;
+
+    /// Instance maps obey the shared settings service's atomic precedence;
+    /// local definitions keep project-scoped credentials.
+    #[tokio::test]
+    async fn instance_maps_resolve_atomically_across_settings_levels() {
+        use oxplow_config::settings::Level;
+
+        let fx = services_with_thread().await;
+        let project = &fx.svc.layout.project_dir;
+        let global = fx.svc.layout.state_dir.join("global-config");
+        let store = crate::settings::store(project, &global, fx.svc.secrets.clone(), &[]).unwrap();
+        store
+            .set(
+                "oxplow.extensionInstances",
+                json!({"tracker/global": {"enabled": false}}),
+                Level::Global,
+            )
+            .unwrap();
+        let providers = &fx.svc.providers;
+        assert_eq!(
+            providers.scoped_instances()["tracker/global"].0,
+            Scope::Global
+        );
+        store
+            .set(
+                "oxplow.extensionInstances",
+                json!({"tracker/project": {"enabled": false}}),
+                Level::Project,
+            )
+            .unwrap();
+        let instances = providers.scoped_instances();
+        assert_eq!(instances.len(), 1);
+        assert_eq!(instances["tracker/project"].0, Scope::Project);
+        store
+            .set(
+                "oxplow.extensionInstances",
+                json!({"tracker/local": {"enabled": false}}),
+                Level::Local,
+            )
+            .unwrap();
+        assert_eq!(providers.project_level(), Level::Local);
+        let instances = providers.scoped_instances();
+        assert_eq!(instances.len(), 1);
+        assert_eq!(instances["tracker/local"].0, Scope::Project);
+        store
+            .unset("oxplow.extensionInstances", Level::Local)
+            .unwrap();
+        store
+            .unset("oxplow.extensionInstances", Level::Project)
+            .unwrap();
+        assert_eq!(
+            providers.scoped_instances()["tracker/global"].0,
+            Scope::Global
+        );
+        assert!(!global.join("instances.yaml").exists());
     }
 }

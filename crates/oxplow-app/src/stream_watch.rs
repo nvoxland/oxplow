@@ -494,8 +494,9 @@ mod tests {
         let mut config = repo.config().unwrap();
         config.set_str("user.name", "t").unwrap();
         config.set_str("user.email", "t@example.com").unwrap();
-        std::fs::write(rig.project.join("clean.txt"), "c\n").unwrap();
-        std::fs::write(rig.project.join("edited.txt"), "old\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(rig.project.join("clean.txt"), "c\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(rig.project.join("edited.txt"), "old\n")
+            .unwrap();
         crate::test_fixtures::commit_all(&rig.project, "files");
         let captures = rig.registry.inner.captures.clone();
         let streams = rig.svc.list_streams().await.unwrap();
@@ -509,8 +510,12 @@ mod tests {
         let capture = captures.register(&side).unwrap();
         // While oxplow was off.
         let tree = Path::new(&side.worktree_path);
-        std::fs::write(tree.join("edited.txt"), "changed while off\n").unwrap();
-        std::fs::write(tree.join("new.txt"), "new\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            tree.join("edited.txt"),
+            "changed while off\n",
+        )
+        .unwrap();
+        crate::test_fixtures::write_settings_fixture(tree.join("new.txt"), "new\n").unwrap();
 
         for svc in [&primary, &capture] {
             svc.begin_initial_sweep();
@@ -646,7 +651,7 @@ mod tests {
         rig.registry.register_all().await;
         let primary = rig.svc.list_streams().await.unwrap()[0].id;
         let capture = rig.registry.inner.captures.get(&primary).unwrap();
-        std::fs::write(rig.project.join("edit.txt"), "1").unwrap();
+        crate::test_fixtures::write_settings_fixture(rig.project.join("edit.txt"), "1").unwrap();
         capture.enqueue_startup_diff().await.unwrap();
         capture
             .request_snapshot(oxplow_domain::snapshot::SnapshotTrigger::Startup)
@@ -654,7 +659,8 @@ mod tests {
             .unwrap();
         for n in 2..6 {
             let text = "x".repeat(n);
-            std::fs::write(rig.project.join("edit.txt"), &text).unwrap();
+            crate::test_fixtures::write_settings_fixture(rig.project.join("edit.txt"), &text)
+                .unwrap();
             capture
                 .request_snapshot(oxplow_domain::snapshot::SnapshotTrigger::Quiet)
                 .await
@@ -675,7 +681,11 @@ mod tests {
         std::fs::create_dir(rig.project.join("src")).unwrap();
         let mut heard = None;
         for n in 0..240 {
-            std::fs::write(rig.project.join("src").join("edit.txt"), n.to_string()).unwrap();
+            crate::test_fixtures::write_settings_fixture(
+                rig.project.join("src").join("edit.txt"),
+                n.to_string(),
+            )
+            .unwrap();
             if let Ok(moved) = timeout(Duration::from_millis(500), index.recv()).await {
                 heard = moved;
                 break;

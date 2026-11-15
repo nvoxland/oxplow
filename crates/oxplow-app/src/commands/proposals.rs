@@ -19,11 +19,16 @@ impl CommandBus {
         origin: RunOrigin,
         run: Prepared<'_>,
         input: Value,
-        preview: Preview,
+        mut preview: Preview,
         gates: Gates,
     ) -> CommandError {
         let Prepared { command, resolved } = run;
         let actor = run_ctx.actor();
+        let private_configuration = run_ctx.trace().summary().contains_key("config.secret");
+        if private_configuration {
+            preview.input = serde_json::json!({"redacted": true});
+            preview.details.clear();
+        }
         if !actor.proposes() {
             return CommandError::NeedsConfirmation {
                 preview: Box::new(preview),
@@ -45,10 +50,11 @@ impl CommandBus {
         // An operation's private fields must never enter that storage. A
         // direct confirmed human invocation can use the ordinary redacted
         // audit path; unattended callers cannot retain a payload for approval.
-        if spec
-            .unrecorded
-            .iter()
-            .any(|field| field == "*" || input.get(field).is_some())
+        if private_configuration
+            || spec
+                .unrecorded
+                .iter()
+                .any(|field| field == "*" || input.get(field).is_some())
         {
             let error = CommandError::Denied {
                 reason: "private command input requires a direct confirmed invocation".into(),
@@ -65,7 +71,7 @@ impl CommandBus {
         }
         let dry_run = match resolved {
             Resolved::Tx(handler) => {
-                match self.dry_run(handler.clone(), actor, &input, gates).await {
+                match self.dry_run(handler.clone(), run_ctx, &input, gates).await {
                     Ok(result) => Some(result),
                     Err(err) => {
                         let recorded = match err {
@@ -81,6 +87,23 @@ impl CommandBus {
             // Nothing outside the transaction runs before a person decides.
             Resolved::External(_) | Resolved::Steps(_) => None,
         };
+        // A finisher or transactional read can discover sensitive data only
+        // during rehearsal. Such a proposal cannot safely retain a replay or
+        // its debug result; require a direct confirmed invocation instead.
+        if run_ctx.trace().summary().contains_key("config.secret") {
+            let error = CommandError::Denied {
+                reason: "private configuration requires a direct confirmed invocation".into(),
+            };
+            self.audit_only(
+                run_ctx,
+                spec,
+                &input,
+                Outcome::Denied,
+                Some(error.to_string()),
+            )
+            .await;
+            return error;
+        }
         let row = NewProposal {
             command: spec.id.clone(),
             input,
@@ -156,17 +179,17 @@ impl CommandBus {
     pub(super) async fn dry_run(
         &self,
         handler: Arc<TxHandler>,
-        actor: &Actor,
+        parent: &RunContext,
         input: &Value,
         gates: Gates,
     ) -> Result<Value, CommandError> {
-        let (run, input) = (
-            RunContext::core(actor.clone(), Mode::Transactional),
-            input.clone(),
-        );
+        let (run, input) = (parent.child(None, Mode::Transactional), input.clone());
+        let observed = run.clone();
         let vocabulary = self.log.vocabulary().clone();
-        self.db
+        let answer = self
+            .db
             .rehearse_or(move |tx| {
+                let trace = oxplow_domain::scope::ScopeTrace::default();
                 let ctx = TxCtx {
                     conn: tx,
                     run: &run,
@@ -178,9 +201,11 @@ impl CommandBus {
                     confirmed: true,
                     may_write: gates.may_write,
                     depth: 0,
-                    trace: &oxplow_domain::scope::ScopeTrace::default(),
+                    trace: &trace,
                 };
-                match handler(&ctx, input.clone()) {
+                let answer = handler(&ctx, input.clone());
+                run.trace().add(&trace.summary());
+                match answer {
                     Ok(out) => Ok(out.result),
                     Err(CommandError::Busy { message }) => {
                         Err(TxError::Storage(oxplow_domain::DomainError::Busy(message)))
@@ -189,7 +214,9 @@ impl CommandBus {
                 }
             })
             .await
-            .map_err(command_error)
+            .map_err(command_error);
+        parent.trace().add(&observed.trace().summary());
+        answer
     }
 
     /// A person approves proposal `id`: its command runs as them,
@@ -287,4 +314,95 @@ pub(super) fn log_approved_tx(
     .with_cause(recorded.event_id.clone());
     append_tx(tx, vocabulary, &approved)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod secret_tests {
+    use super::*;
+    use crate::commands::compose::{Compose, Composition, Finished};
+
+    /// A secret first read by a finisher during rehearsal must not become a
+    /// stored proposal's debug result, even though routing was public.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_secret_read_during_rehearsal_cannot_be_saved_as_a_proposal() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let mut leaf = super::super::compose::sequence_spec();
+        leaf.id = "oxplow.secret_test.rehearse_leaf".into();
+        leaf.atomicity = oxplow_domain::Atomicity::Tx;
+        leaf.confirm = oxplow_domain::Confirm::Always;
+        leaf.input_schema = serde_json::json!({"type":"object"});
+        fx.svc
+            .commands
+            .register(
+                Command::new(
+                    leaf,
+                    Handler::Tx(Arc::new(|_, _| Ok(HandlerOutput::default()))),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let mut composed = super::super::compose::sequence_spec();
+        composed.id = "oxplow.secret_test.rehearse".into();
+        composed.input_schema = serde_json::json!({"type":"object"});
+        let composer = Arc::new(
+            |_: &super::super::compose::Composing<'_>, _: &RunContext, _: &Value| {
+                Ok(Composition {
+                    calls: vec![CommandCall {
+                        name: "oxplow.secret_test.rehearse_leaf".into(),
+                        input: serde_json::json!({}),
+                    }],
+                    ..Default::default()
+                })
+            },
+        );
+        let finisher: Arc<super::super::compose::Finisher> = Arc::new(|_, run, _, _| {
+            run.trace().count("config.secret");
+            Ok(Finished {
+                result: Some(serde_json::json!("rehearsal-secret-marker")),
+                inverse: None,
+            })
+        });
+        fx.svc
+            .commands
+            .register(
+                Command::new(
+                    composed,
+                    Compose::handler_finishing(composer, Some(finisher)),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        // Agents deliberately bypass command confirmations; an effect is
+        // unattended work whose Confirm::Always call enters proposal rehearsal.
+        let actor = Actor::Effect {
+            effect: "test/secret-rehearsal".into(),
+            thread_id: Some(fx.thread),
+            stream_id: None,
+        };
+        let error = fx
+            .svc
+            .commands
+            .run(
+                &actor,
+                "oxplow.secret_test.rehearse",
+                serde_json::json!({}),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, CommandError::Denied {ref reason} if reason.contains("private configuration")),
+            "{error:?}"
+        );
+        let proposals = oxplow_db::SqliteProposalStore::new(fx.svc.db.clone())
+            .list_pending()
+            .await
+            .unwrap();
+        assert!(proposals.is_empty());
+        let audits = oxplow_db::SqliteCommandAuditStore::new(fx.svc.db.clone())
+            .list_recent(100)
+            .await
+            .unwrap();
+        assert!(!format!("{audits:?}").contains("rehearsal-secret-marker"));
+    }
 }

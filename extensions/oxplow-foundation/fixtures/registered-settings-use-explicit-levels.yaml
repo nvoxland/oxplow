@@ -1,0 +1,28 @@
+given:
+  - command: oxplow.config.set
+    input: { key: oxplow.snapshots.retentionDays, value: 14, level: project }
+when:
+  command: oxplow.config.get
+  input: { key: oxplow.snapshots.retentionDays }
+expect:
+  ok: true
+  result: { key: oxplow.snapshots.retentionDays, value: 14, origin: project, isSet: true, secret: false }
+steps:
+  - given:
+      - command: oxplow.config.set
+        input: { key: oxplow.snapshots.retentionDays, value: 3, level: local }
+  - when:
+      command: oxplow.config.get
+      input: { key: oxplow.snapshots.retentionDays }
+    expect: { ok: true, result: { value: 3, origin: local } }
+  - given:
+      - command: oxplow.config.unset
+        input: { key: oxplow.snapshots.retentionDays, level: local }
+  - when:
+      command: oxplow.config.get
+      input: { key: oxplow.snapshots.retentionDays }
+    expect: { ok: true, result: { value: 14, origin: project } }
+  - when:
+      command: oxplow.config.set
+      input: { key: oxplow.snapshots.retentionDays, value: 5 }
+    expect: { ok: false }

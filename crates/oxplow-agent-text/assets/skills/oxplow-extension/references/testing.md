@@ -244,8 +244,9 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      kind?, disable } } }` (a contribution disabled after failures), `{ observe: { token_usage: {
      thread?, session?, prompt?, input_tokens?, output_tokens?, … } } }`, `{ observe: {
      hint: { hint, evaluated? } } }` and `{ observe: { nudge: { kind, message, delivered? } } }`,
-     a `{ project: { <project.yaml key>: … } }` given (keys of `.oxplow/project.yaml`, read again
-     as core does), and a `turn` that also takes `thread`, `session`, `prompt: null` with
+     a `{ project: { oxplow.snapshots.retentionDays: 14 } }` given (registered fully qualified
+     keys, validated and written at project level through the shared settings service;
+     split fixed object settings such as `oxplow.testing.command` into separate keys), and a `turn` that also takes `thread`, `session`, `prompt: null` with
      `subagent` / `peer` (a hand-back), and `pre: true` on a tool (the call as it
      starts), `{ observe: { analyze: { kind: working | commit, sha? } } }` (a change
      analyzed to the end, so its files and functions are there to read; make

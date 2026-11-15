@@ -4,6 +4,14 @@ The SDK behind `oxplow extension new|check|test` and the answerability check. Pa
 
 ## The SDK
 
+Throwaway fixture forks copy the shared host's filesystem under the same
+per-host boundary as fixture-model provider/role writes. Those settings writes
+use atomic sibling temp files; copying the live directory without that boundary
+can enumerate a `.global.yaml.tmp-*` file after it has been renamed, causing
+intermittent bootstrap ENOENT failures in unrelated parallel fixtures. Keep
+copy failures contextual (operation and source path), rather than skipping
+missing files or retrying a broken fixture boot.
+
 `crates/oxplow-sdk` (P1.14; target §10.5) is the one
 implementation behind three doors: the `oxplow extension new|check|test`
 CLI, the agent's `oxplow_validate_extension`, and `extension.write_page`. Every
@@ -540,8 +548,8 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   harness, unavailable: <why> }`: `SavedConversations`, whose stand-in a
   throwaway turns on at boot, so a fixture never reads the machine's
   conversations or runs its `codex`; a harness given nothing lists nothing),
-  a `project:` given (keys of
-  `.oxplow/project.yaml`, then `reload_config_from_disk`), and a `turn` that
+  a `project:` given (fully qualified registered keys, written through
+  `oxplow.config.set` at explicit project level; legacy nested vocabulary is refused), and a `turn` that
   also takes `thread`, `session`, `conversation` (what the hooks name and the
   session is bound to: default `fixture`, `null` for none), `prompt: null` +
   `subagent` (a hand-back), `peer` (another session's message, `prompt` its
@@ -692,3 +700,6 @@ New fixture forms for the shared-models work ([models.md](./models.md)):
   }`.
 - `when: { search: "<text>", resource?: <id> }` → `expect: { uris: [...]
   }`, through the search index (not a `LIKE`).
+
+The generated manifest schema includes the optional `root` on a collector
+file observer, matching the runtime parser (including `agent:<harness>` roots).

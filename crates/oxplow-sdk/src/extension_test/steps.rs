@@ -107,7 +107,7 @@ pub(super) async fn run_steps(
             continue;
         }
         if let Some(project) = step.get("project") {
-            if let Err(e) = given_project(host, project) {
+            if let Err(e) = given_project(host, project).await {
                 report.errors.push(error(
                     shown,
                     None,

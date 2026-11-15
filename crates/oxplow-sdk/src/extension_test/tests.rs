@@ -262,8 +262,8 @@ async fn extension_test_reports_how_each_import_resolved() {
     producer_and_consumer(dir.path(), 1);
     write(
         dir.path(),
-        ".oxplow/personal.yaml",
-        "disableExtensions: [maker]\n",
+        ".oxplow/local.yaml",
+        "oxplow.disableExtensions: [maker]\n",
     );
     let report = test_extension(dir.path(), "reader", false).await.unwrap();
     assert_eq!(
@@ -3516,7 +3516,7 @@ fn kept_under_extensions(root: &std::path::Path, loader_sql: &str) {
     write(
         root,
         ".oxplow/project.yaml",
-        "extensionSources:\n  lists: extensions/lists\n",
+        "oxplow.extensionSources:\n  lists: extensions/lists\n",
     );
     write(
         root,
@@ -3621,7 +3621,7 @@ async fn a_shipped_extension_is_reported_under_its_source_folder() {
     write(
         dir.path(),
         ".oxplow/project.yaml",
-        "extensionSources:\n  oxplow-bundled: extensions/oxplow-bundled\n",
+        "oxplow.extensionSources:\n  oxplow-bundled: extensions/oxplow-bundled\n",
     );
     write(
         dir.path(),
@@ -4152,4 +4152,46 @@ expect: {{ ok: true, problems: {problems} }}
             "{failing}: {errors}"
         );
     }
+}
+
+#[tokio::test]
+async fn project_setup_uses_registered_flat_keys_and_rejects_legacy_vocabulary() {
+    let checkout = tempfile::tempdir().unwrap();
+    write(
+        checkout.path(),
+        ".oxplow/extensions/prefs/extension.yaml",
+        "manifest: 2\nname: prefs\nintent:\n  purpose: Test settings setup.\n",
+    );
+    let host = crate::throwaway::Host::start(
+        checkout.path(),
+        "prefs",
+        &[],
+        std::sync::Arc::new(|_: &str| None),
+        false,
+    )
+    .await
+    .unwrap();
+    let error =
+        super::fixture::given_project(&host, &serde_json::json!({"snapshotRetentionDays":14}))
+            .await
+            .unwrap_err();
+    assert!(error.contains("unknown setting"), "{error}");
+    super::fixture::given_project(
+        &host,
+        &serde_json::json!({
+            "oxplow.snapshots.retentionDays":14,
+            "oxplow.testing.command":"make test",
+        }),
+    )
+    .await
+    .unwrap();
+    let config = host.svc.config.read().unwrap();
+    assert_eq!(config.snapshot_retention_days, 14);
+    assert_eq!(config.testing.command.as_deref(), Some("make test"));
+    let contents = std::fs::read_to_string(host.root.join(".oxplow/project.yaml")).unwrap();
+    assert!(
+        contents.contains("oxplow.snapshots.retentionDays: 14"),
+        "{contents}"
+    );
+    assert!(!contents.contains("\ntesting:"), "{contents}");
 }

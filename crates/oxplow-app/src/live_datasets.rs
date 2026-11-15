@@ -107,7 +107,21 @@ pub fn columns(name: &str) -> &'static [&'static str] {
         "zone" => &["position", "zone", "patterns", "color", "files"],
         "zone_unmatched" => &["path"],
         "scope" => &["id", "access", "host", "spends", "summary"],
-        "config_value" => &["key", "value", "origin", "extension", "doc", "schema"],
+        "config_value" => &[
+            "key",
+            "value",
+            "origin",
+            "extension",
+            "doc",
+            "schema",
+            "title",
+            "category",
+            "secret",
+            "is_set",
+            "owner",
+            "restart_required",
+            "ui",
+        ],
         "agent_conversation" => &[
             "stream_id",
             "harness",
@@ -390,6 +404,7 @@ pub fn follows(name: &str, change: &Change<'_>) -> bool {
 
 /// What the live datasets read, bound once the app has built it all.
 pub struct LiveSources {
+    pub global_dir: std::path::PathBuf,
     pub ai: Arc<AiService>,
     pub lsp: LspSessionManager,
     pub worktrees: Arc<crate::worktrees::WorktreeRouter>,
@@ -708,7 +723,8 @@ impl LiveSources {
             store: &self.collector_store,
             db: self.db.clone(),
             vocabulary: self.vocabulary.clone(),
-            secrets: self.secrets.as_ref(),
+            secrets: self.secrets.clone(),
+            global: &self.global_dir,
             catalog: &self.catalog,
         })
         .await
@@ -882,40 +898,44 @@ impl LiveSources {
     }
 
     async fn config_values(&self) -> Result<Vec<Vec<SqlCell>>, DomainError> {
-        let config = self
-            .config
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
         let project_dir = self.worktrees.project_dir();
         let extensions = self
             .catalog
-            .unpinned(project_dir, "v_config_value lists what extensions declare");
-        let ai = self.ai.settings().await.ok();
-        let global = oxplow_config::global_config_dir();
-        Ok(crate::effective_config::effective_config(
-            &config,
+            .unpinned(project_dir, "settings registry inventory");
+        let inventory = crate::effective_config::effective_config(
             project_dir,
-            ai.as_ref(),
-            global.as_deref(),
+            &self.global_dir,
+            self.secrets.clone(),
             extensions.as_ref(),
         )
-        .iter()
-        .map(|s| {
-            vec![
-                text(s.key.clone()),
-                json(&s.value),
-                text(wire_name(&s.origin)),
-                opt(s.extension.clone()),
-                text(s.doc.clone()),
-                if s.schema.is_null() {
-                    SqlCell::Null(())
-                } else {
-                    json(&s.schema)
-                },
-            ]
-        })
-        .collect())
+        .map_err(|error| DomainError::Storage(error.to_string()))?;
+        Ok(inventory
+            .into_iter()
+            .map(|s| {
+                let d = s.definition;
+                vec![
+                    text(d.key),
+                    s.value.as_ref().map(json).unwrap_or(SqlCell::Null(())),
+                    text(wire_name(
+                        &s.origin.unwrap_or(oxplow_config::settings::Origin::Default),
+                    )),
+                    if d.owner == "core" {
+                        SqlCell::Null(())
+                    } else {
+                        text(d.owner.strip_prefix("extension/").unwrap_or(&d.owner))
+                    },
+                    text(d.description),
+                    json(&d.schema),
+                    text(d.title),
+                    text(d.category),
+                    SqlCell::Int(i64::from(d.secret)),
+                    SqlCell::Int(i64::from(s.is_set)),
+                    text(d.owner),
+                    SqlCell::Int(i64::from(d.restart_required)),
+                    json(&d.ui),
+                ]
+            })
+            .collect())
     }
 
     /// Every harness's saved conversations in the stream's worktree, each

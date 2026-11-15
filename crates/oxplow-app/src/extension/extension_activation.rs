@@ -245,7 +245,9 @@ impl ExtensionActivation {
     /// `config()`, a skill's `when:`): republish when it has.
     pub(crate) async fn request_config_refresh(
         &self,
-        db: &oxplow_db::Database,
+        _db: &oxplow_db::Database,
+        project: &std::path::Path,
+        global: &std::path::Path,
     ) -> Result<(), DomainError> {
         let pin = self.pin().await?;
         let extensions = pin
@@ -258,14 +260,11 @@ impl ExtensionActivation {
         {
             return Ok(());
         }
-        let configs = db
-            .read(move |conn| {
-                Ok(crate::extension::extension_generation::config_signature_tx(
-                    conn,
-                    &extensions,
-                ))
-            })
-            .await?;
+        let configs = crate::extension::extension_generation::config_signature_tx(
+            project,
+            global,
+            &extensions,
+        );
         if pin.state.configs != configs {
             self.request();
         }
@@ -757,16 +756,8 @@ impl ExtensionActivation {
                             .map_err(TxError::Storage)?;
                         }
                     }
-                    // A raised configuration version keeps the stored
-                    // layers its schema still takes, before datasets
-                    // compile against them.
-                    crate::extension::extension_configuration::carry_forward_tx(
-                        publication.transaction()?,
-                        published.extensions(),
-                    )
-                    .map_err(TxError::Storage)?;
                     let vocabulary =
-                        database.replace_tx(publication.transaction()?, Timestamp::now())?;
+                        database.replace_tx(publication.transaction()?, Timestamp::now(), &svc.layout.project_dir, &svc.global_config_dir)?;
                     metrics.replace_tx(publication.transaction()?)?;
                     providers
                         .validate_vocabulary(&vocabulary)
@@ -775,12 +766,14 @@ impl ExtensionActivation {
                     let entities =
                         crate::extension::extension_datasets::entity_signature_tx(publication.transaction()?)?;
                     let configs = crate::extension::extension_generation::config_signature_tx(
-                        publication.transaction()?,
+                        &svc.layout.project_dir,
+                        &svc.global_config_dir,
                         published.extensions(),
                     );
                     stale.store(
                         crate::capabilities::offering_implementations_tx(
-                            publication.transaction()?,
+                            &svc.layout.project_dir,
+                            &svc.global_config_dir,
                             published.extensions(),
                         ) != offered,
                         std::sync::atomic::Ordering::SeqCst,

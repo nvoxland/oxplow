@@ -13,7 +13,7 @@ use crate::test_fixtures::{services_with_thread, ThreadFixture};
 pub(crate) fn write(root: &Path, rel: &str, body: &str) {
     let path = root.join(rel);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(path, body).unwrap();
+    crate::test_fixtures::write_settings_fixture(path, body).unwrap();
 }
 
 /// An extension whose commands read and write its own private state and
@@ -34,6 +34,11 @@ pub(crate) fn declare(root: &Path, name: &str, configuration: &str) {
     input_schema: {{ type: object }}
     entry: handlers/peek.star
     needs: [state.read]
+  - name: config.get
+    summary: Read one shared setting.
+    input_schema: {{ type: object }}
+    entry: handlers/config_get.star
+    needs: [config.read]
   - name: config.peek
     summary: Read the configuration from a script.
     input_schema: {{ type: object }}
@@ -43,20 +48,18 @@ pub(crate) fn declare(root: &Path, name: &str, configuration: &str) {
     summary: The effective configuration.
     scope: extension_config.read
     op: snapshot
-  - name: config.inspect
-    summary: The layer stamps.
-    scope: extension_config.read
-    op: inspect
-  - name: config.write
-    summary: Replace configuration overrides.
-    scope: extension_config.write
-    op: compare_exchange
+
 "
     );
     write(
         root,
         &format!(".oxplow/extensions/{name}/extension.yaml"),
         &manifest,
+    );
+    write(
+        root,
+        &format!(".oxplow/extensions/{name}/handlers/config_get.star"),
+        "def transform(x):\n    return {\"commands\": [], \"result\": scope(\"config.read\", x[\"input\"])}\n",
     );
     write(
         root,
@@ -255,16 +258,16 @@ async fn a_disabled_extension_is_denied_while_its_rows_are_kept() {
     .unwrap();
     run(
         &fx,
-        "alpha.config.write",
-        json!({"schema_version": 1, "project": {"expected": null, "values": {"limit": 7}}}),
+        "oxplow.config.set",
+        json!({"key":"alpha.limit", "value":7, "level":"project"}),
     )
     .await
     .unwrap();
 
     write(
         fx._dir.path(),
-        ".oxplow/personal.yaml",
-        "disableExtensions: [alpha]\n",
+        ".oxplow/local.yaml",
+        "oxplow.disableExtensions: [alpha]\n",
     );
     reconcile(&fx).await;
     assert!(fx.svc.commands.spec("alpha.state.read").is_none());
@@ -289,7 +292,7 @@ async fn a_disabled_extension_is_denied_while_its_rows_are_kept() {
         .expect("disabling keeps the state row");
     assert_eq!(rows.values["kept"], json!(true));
 
-    std::fs::remove_file(fx._dir.path().join(".oxplow/personal.yaml")).unwrap();
+    std::fs::remove_file(fx._dir.path().join(".oxplow/local.yaml")).unwrap();
     reconcile(&fx).await;
     let read = run(
         &fx,
@@ -304,83 +307,61 @@ async fn a_disabled_extension_is_denied_while_its_rows_are_kept() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn configuration_resolves_defaults_then_project_then_personal() {
+async fn configuration_resolves_defaults_project_and_local() {
     let fx = services_with_thread().await;
     declare(fx._dir.path(), "alpha", CONFIGURATION);
     reconcile(&fx).await;
-
-    let config = run(&fx, "alpha.config.read", json!({})).await.unwrap();
-    assert_eq!(
-        config["values"],
-        json!({"limit": 10, "label": "default", "nested": {"a": 1, "b": 1}})
-    );
-    assert_eq!(config["origins"]["/limit"], json!("defaults"));
-    assert_eq!(config["project"], Value::Null);
-
-    let stamps = run(
-        &fx,
-        "alpha.config.write",
-        json!({"schema_version": 1,
-               "project": {"expected": null, "values": {"limit": 20, "nested": {"a": 2}}},
-               "personal": {"expected": null, "values": {"limit": 30}}}),
+    let snapshot = fx
+        .svc
+        .extension_catalog
+        .live_snapshot(&fx.svc.layout.project_dir);
+    let store = crate::settings::store(
+        &fx.svc.layout.project_dir,
+        &fx.svc.global_config_dir,
+        fx.svc.secrets.clone(),
+        snapshot.extensions(),
     )
-    .await
     .unwrap();
-    assert_eq!(
-        stamps["project"],
-        json!({"schema_version": 1, "revision": 1})
-    );
-    assert_eq!(
-        stamps["personal"],
-        json!({"schema_version": 1, "revision": 1})
-    );
-
     let config = run(&fx, "alpha.config.read", json!({})).await.unwrap();
-    assert_eq!(
-        config["values"],
-        json!({"limit": 30, "label": "default", "nested": {"a": 2, "b": 1}})
-    );
-    assert_eq!(config["origins"]["/limit"], json!("personal"));
-    assert_eq!(config["origins"]["/nested/a"], json!("project"));
-    assert_eq!(config["origins"]["/nested/b"], json!("defaults"));
-    assert_eq!(config["origins"]["/label"], json!("defaults"));
-
-    // Resetting a layer is an empty object at the next revision.
-    run(
-        &fx,
-        "alpha.config.write",
-        json!({"schema_version": 1,
-               "personal": {"expected": {"schema_version": 1, "revision": 1}, "values": {}}}),
-    )
-    .await
-    .unwrap();
+    assert_eq!(config["values"]["limit"], json!(10));
+    assert_eq!(config["origins"]["/limit"], json!("default"));
+    store
+        .set(
+            "alpha.limit",
+            json!(20),
+            oxplow_config::settings::Level::Project,
+        )
+        .unwrap();
+    store
+        .set(
+            "alpha.limit",
+            json!(30),
+            oxplow_config::settings::Level::Local,
+        )
+        .unwrap();
+    let config = run(&fx, "alpha.config.read", json!({})).await.unwrap();
+    assert_eq!(config["values"]["limit"], json!(30));
+    assert_eq!(config["origins"]["/limit"], json!("local"));
+    store
+        .unset("alpha.limit", oxplow_config::settings::Level::Local)
+        .unwrap();
     let config = run(&fx, "alpha.config.read", json!({})).await.unwrap();
     assert_eq!(config["values"]["limit"], json!(20));
-    let inspected = run(&fx, "alpha.config.inspect", json!({})).await.unwrap();
-    assert_eq!(
-        inspected["personal"],
-        json!({"schema_version": 1, "revision": 2})
-    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_value_failing_the_schema_is_refused_without_echoing_it() {
+async fn a_setting_failing_the_schema_is_refused_without_echoing_it() {
     let fx = services_with_thread().await;
     declare(fx._dir.path(), "alpha", CONFIGURATION);
     reconcile(&fx).await;
-
-    for bad in [
-        json!({"limit": "hunter2-not-a-number"}),
-        json!({"limit": 1000}),
-        json!({"unknown-setting-hunter2": 1}),
-    ] {
+    for bad in [json!("hunter2-not-a-number"), json!(1000)] {
         let refused = run(
             &fx,
-            "alpha.config.write",
-            json!({"schema_version": 1, "project": {"expected": null, "values": bad}}),
+            "oxplow.config.set",
+            json!({"key":"alpha.limit", "value":bad, "level":"project"}),
         )
         .await
-        .expect_err("a schema violation is refused");
+        .expect_err("schema violation");
         let message = format!("{refused:?} {refused}");
         assert!(matches!(refused, CommandError::Invalid { .. }), "{message}");
         assert!(
@@ -388,35 +369,8 @@ async fn a_value_failing_the_schema_is_refused_without_echoing_it() {
             "{message}"
         );
     }
-    // Nothing was stored.
-    let inspected = run(&fx, "alpha.config.inspect", json!({})).await.unwrap();
-    assert_eq!(inspected["project"], Value::Null);
-
-    // A wrong schema version and a stale stamp are refused too.
-    let wrong_version = run(
-        &fx,
-        "alpha.config.write",
-        json!({"schema_version": 2, "project": {"expected": null, "values": {"limit": 5}}}),
-    )
-    .await;
-    assert!(matches!(wrong_version, Err(CommandError::Invalid { .. })));
-    run(
-        &fx,
-        "alpha.config.write",
-        json!({"schema_version": 1, "project": {"expected": null, "values": {"limit": 5}}}),
-    )
-    .await
-    .unwrap();
-    let stale = run(
-        &fx,
-        "alpha.config.write",
-        json!({"schema_version": 1, "project": {"expected": null, "values": {"limit": 6}}}),
-    )
-    .await;
-    assert!(
-        matches!(stale, Err(CommandError::Invalid { .. })),
-        "{stale:?}"
-    );
+    let config = run(&fx, "alpha.config.read", json!({})).await.unwrap();
+    assert_eq!(config["values"]["limit"], json!(10));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -446,8 +400,8 @@ async fn state_and_configuration_survive_a_restart() {
             write_state("personal", Value::Null, json!({"kept": [1, 2]})),
         ),
         (
-            "alpha.config.write",
-            json!({"schema_version": 1, "project": {"expected": null, "values": {"limit": 42}}}),
+            "oxplow.config.set",
+            json!({"key":"alpha.limit", "value":42, "level":"project"}),
         ),
     ] {
         first
@@ -481,5 +435,5 @@ async fn state_and_configuration_survive_a_restart() {
         .unwrap()
         .result;
     assert_eq!(config["values"]["limit"], json!(42));
-    assert_eq!(config["project"]["revision"], json!(1));
+    assert_eq!(config["origins"]["/limit"], json!("project"));
 }

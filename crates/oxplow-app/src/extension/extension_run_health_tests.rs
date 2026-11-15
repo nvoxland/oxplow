@@ -35,7 +35,7 @@ commands:
 fn write(root: &std::path::Path, rel: &str, body: &str) {
     let path = root.join(".oxplow/extensions/acme").join(rel);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(&path, body).unwrap();
+    crate::test_fixtures::write_settings_fixture(&path, body).unwrap();
     if rel.ends_with(".sh") {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
@@ -294,8 +294,8 @@ async fn disabling_an_extension_stops_a_collector_script_that_is_computing() {
         })
     };
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    std::fs::write(
-        root.join(".oxplow/personal.yaml"),
+    crate::test_fixtures::write_settings_fixture(
+        root.join(".oxplow/local.yaml"),
         "disableExtensions: [acme]\n",
     )
     .unwrap();

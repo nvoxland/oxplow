@@ -55,8 +55,9 @@ bundled's `v_oxplow_contribution_repair` has the open `repair_item`). Each colle
   the name to the team list in `.oxplow/project.yaml`; the person then
   commits. `oxplow.extension.unshare { name }` reverses it.
 - **Use someone else's extension:** only when the user asks. Clone it into
-  `.oxplow/extensions/<name>/` (or point `extensionSources` at the clone),
-  list it in `extensions:` or `enableExtensions`, and deploy it. Read its
+  `.oxplow/extensions/<name>/` (or point `oxplow.extensionSources` at the clone),
+  add its name to `oxplow.enableExtensions` with `oxplow.config.set` at the
+  `project` level, and deploy it. Read its
   `permissions:` first (the programs it runs, the hosts it reaches, the
   secrets it reads): the deploy asks the person to approve them.
   Do not hand-edit a clone you want to update

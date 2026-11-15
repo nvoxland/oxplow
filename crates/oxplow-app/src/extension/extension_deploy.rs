@@ -1250,7 +1250,7 @@ fn write_personal(svc: &Services, settings: &ExtensionSettings) -> Result<(), Do
         ("enableExtensions", &settings.personal.enable),
         ("disableExtensions", &settings.personal.disable),
     ] {
-        oxplow_config::write_personal_key(project, key, personal_list(names).as_ref())
+        oxplow_config::write_local_key(project, key, personal_list(names).as_ref())
             .map_err(storage)?;
     }
     svc.reload_config_from_disk().map_err(storage)
@@ -1382,7 +1382,7 @@ pub async fn remove(svc: &Arc<Services>, name: &str) -> Result<(), DomainError> 
                 return Ok(());
             }
             oxplow_db::extension_state_store::forget_extension_tx(tx, &namespace)?;
-            oxplow_db::extension_config_store::forget_extension_tx(tx, &namespace)
+            Ok(())
         })
         .await
 }
@@ -1629,17 +1629,16 @@ pub async fn next_boot(project: &Path, rows: &[DeploymentRow]) -> Result<NextBoo
         .iter()
         .map(|n| (n.clone(), settings.source(project, n).display().to_string()))
         .collect();
-    let mut config =
-        serde_json::json!({ "extensions": settings.team, "extensionSources": sources });
+    let mut config = serde_json::json!({ "oxplow.extensions": settings.team, "oxplow.extensionSources": sources });
     if let Some(requested) = settings.bundled_requested {
-        config["enableBundledExtensions"] = requested.into();
+        config["oxplow.enableBundledExtensions"] = requested.into();
     }
     let personal = serde_json::json!({
-        "enableExtensions": settings.personal.enable,
-        "disableExtensions": settings.personal.disable,
+        "oxplow.enableExtensions": settings.personal.enable,
+        "oxplow.disableExtensions": settings.team_disable,
     });
     std::fs::create_dir_all(root.join(".oxplow")).map_err(|e| e.to_string())?;
-    for (file, value) in [("project.yaml", config), ("personal.yaml", personal)] {
+    for (file, value) in [("project.yaml", config), ("local.yaml", personal)] {
         let yaml = serde_yaml::to_string(&value).map_err(|e| e.to_string())?;
         std::fs::write(root.join(".oxplow").join(file), yaml).map_err(|e| e.to_string())?;
     }
@@ -1776,7 +1775,7 @@ mod tests {
     fn write(dir: &Path, rel: &str, text: &str) {
         let path = dir.join(rel);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(path, text).unwrap();
+        crate::test_fixtures::write_settings_fixture(path, text).unwrap();
     }
 
     /// `acme`'s source in the project, with one page titled `title`.
@@ -2543,7 +2542,7 @@ mod tests {
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         source_built(svc, "One", BUILD);
-        write(&root, ".oxplow/personal.yaml", "enableExtensions: [acme]\n");
+        write(&root, ".oxplow/local.yaml", "enableExtensions: [acme]\n");
         svc.reload_config_from_disk().unwrap();
         svc.extension_activation
             .initialize(svc.clone())
@@ -2563,7 +2562,7 @@ mod tests {
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         source_with(svc, "One", AI);
-        write(&root, ".oxplow/personal.yaml", "enableExtensions: [acme]\n");
+        write(&root, ".oxplow/local.yaml", "enableExtensions: [acme]\n");
         svc.reload_config_from_disk().unwrap();
         svc.extension_activation
             .initialize(svc.clone())
@@ -2693,7 +2692,7 @@ mod tests {
         {
             let path = dir.join(rel);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            std::fs::write(path, bytes).unwrap();
+            crate::test_fixtures::write_settings_fixture(path, bytes).unwrap();
         }
         write(
             &dir,
@@ -3002,7 +3001,7 @@ mod tests {
         source(svc, "One");
         write(
             &root,
-            ".oxplow/personal.yaml",
+            ".oxplow/local.yaml",
             "enableExtensions: [acme, ghost]\n",
         );
         svc.reload_config_from_disk().unwrap();
@@ -3070,7 +3069,7 @@ mod tests {
         // An edit deploys like any extension's, and rolls back.
         let manifest =
             std::fs::read_to_string(source("oxplow-foundation").join("extension.yaml")).unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             source("oxplow-foundation").join("extension.yaml"),
             manifest.replacen("\ncommands:\n", "\ncommands:\n  - name: test.draft_again\n    summary: \"A second draft command.\"\n    scope: agent_input.write\n    op: draft\n", 1),
         )
@@ -3107,12 +3106,12 @@ mod tests {
         for (rel, bytes) in shipped.files() {
             let to = dir.join(rel);
             std::fs::create_dir_all(to.parent().unwrap()).unwrap();
-            std::fs::write(to, bytes).unwrap();
+            crate::test_fixtures::write_settings_fixture(to, bytes).unwrap();
         }
         let manifest = std::fs::read_to_string(dir.join("extension.yaml")).unwrap();
         let added = "commands:\n  - name: test.draft_again\n    summary: \"A second draft command.\"\n    scope: agent_input.write\n    op: draft\n";
         assert!(manifest.contains("\ncommands:\n"));
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             dir.join("extension.yaml"),
             manifest.replacen("\ncommands:\n", &format!("\n{added}"), 1),
         )
@@ -3128,7 +3127,7 @@ mod tests {
             .run(
                 &oxplow_domain::Actor::Human,
                 "oxplow.config.get",
-                serde_json::json!({ "key": "extensions" }),
+                serde_json::json!({ "key": "oxplow.extensions" }),
                 false,
             )
             .await
@@ -3341,7 +3340,7 @@ mod tests {
             for (rel, bytes) in b.files() {
                 let file = to.join(rel);
                 std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-                std::fs::write(file, bytes).unwrap();
+                crate::test_fixtures::write_settings_fixture(file, bytes).unwrap();
             }
         }
         write(
@@ -3640,7 +3639,11 @@ mod tests {
         let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let dir = source(svc, "One");
-        std::fs::write(dir.join("data.bin"), vec![0u8; 26 * 1024 * 1024]).unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            dir.join("data.bin"),
+            vec![0u8; 26 * 1024 * 1024],
+        )
+        .unwrap();
         let deployed = deploy(svc, "acme", true).await.unwrap();
         assert!(
             deployed

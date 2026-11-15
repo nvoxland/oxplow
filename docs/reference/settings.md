@@ -1,53 +1,56 @@
 # Settings
 
-Oxplow stores per-project state in `.oxplow/local.sqlite` and a
-small amount of per-user state in your OS user-config directory.
-Most settings are toggles in the UI; almost nothing requires
-editing a file.
+Settings → Every setting lists registered core and extension settings with their
+current values, categories and origins. The agent can change them through the
+same commands as the app.
 
-## Where state lives
+## Levels and storage
 
-- **Per-project** — everything that matters lives under
-  `.oxplow/` inside the project root:
+A setting resolves from the first level that provides a value:
 
-    ```
-    .oxplow/
-      project.yaml        # shared project config — commit this
-      .gitignore          # written by oxplow on first run
-      local.sqlite        # tasks, threads, snapshots, settings
-      oxwiki/             # oxwiki's knowledge pages (markdown)
-      snapshots/          # file snapshots (Local History)
-      runtime/            # generated agent runtime files
-      lsp/                # installed LSP server binaries (appears after
-                          #   an explicit install)
-      lsp-cache/          # download cache for the above
-    ```
+1. **Local** — `.oxplow/local.yaml`, ignored by Git, for this person and project.
+2. **Project** — `.oxplow/project.yaml`, shared with the team.
+3. **Global** — `global.yaml` in oxplow's user configuration directory.
+4. The registered default.
 
-    **Don't add `.oxplow/` to `.gitignore`.** On first run oxplow
-    writes `.oxplow/.gitignore` containing:
+Every setting supports every level. Objects and arrays are complete values;
+levels do not merge their contents. Removing an override restores inheritance.
+The global directory is `~/Library/Application Support/net.voxland.oxplow/` on macOS,
+`%APPDATA%/net.voxland.oxplow/` on Windows, or `~/.config/net.voxland.oxplow/` on Linux;
+`OXPLOW_HOME` overrides it.
 
-    ```
-    *
-    !.gitignore
-    !project.yaml
-    ```
+Files contain flat maps of fully qualified keys:
 
-    so `project.yaml` is committable and shared with the team while
-    the database, snapshots, oxwiki, and runtime files stay local to
-    your machine. An existing `.gitignore` is left untouched.
-    Ignoring the whole directory defeats that split.
+```yaml
+# .oxplow/project.yaml
+oxplow.snapshots.retentionDays: 14
+oxplow.testing.command: make test-report
+oxtask.tasks.workflow: person_files
+```
 
-    Note oxwiki is *not* excepted — `.oxplow/oxwiki/` is local-only
-    by default.
+Use `oxplow.config.get { key }` for the effective value, or add
+`level: local`, `project` or `global` to inspect one override. Set with
+`oxplow.config.set { key, value, level }`; remove with
+`oxplow.config.unset { key, level }`. Writes require an explicit level and
+validate the setting's schema. `oxplow.config.list_keys` lists definitions.
 
-- **Per-user** — the Tauri app's data dir under your OS config
-  location: `~/Library/Application Support/oxplow/` (macOS),
-  `%APPDATA%/oxplow/` (Windows), or `~/.config/oxplow/` (Linux).
-  Window position, recent projects, theme preference. Wipe
-  freely — it rebuilds.
+Secret settings use these same levels and commands, but values live in the OS
+keychain. Settings lists only whether a secret is set and where it comes from.
+A project-level secret is specific to this project on this machine; committing
+`project.yaml` does not share it. Secure-store failures do not write secrets to
+YAML.
 
-There is no global config file you need to edit to get started.
-Sensible defaults; opinionated product.
+Old nested project configuration, `personal.yaml`, `ai.yaml` and
+`instances.yaml` are not read or migrated. Use the registered keys in the new
+files when converting an existing project.
+
+## Project state
+
+The database (`.oxplow/local.sqlite`), snapshots, extension runtime state,
+installed language servers and oxwiki pages remain under `.oxplow/`. They are
+separate from settings. Keep `.oxplow/project.yaml` committed and
+`.oxplow/local.yaml` ignored. Do not ignore all of `.oxplow/`: oxplow's own
+`.gitignore` keeps the shared project file visible while ignoring local state.
 
 ## Settings worth knowing
 
@@ -69,12 +72,12 @@ never edit").
 
 ### Agents
 
-Per-project `agents` controls which agent implementations are offered
+`oxplow.agents` controls which agent implementations are offered
 when an agent session is opened. Configure it from the project Settings page
 or in `.oxplow/project.yaml`:
 
 ```yaml
-agents:
+oxplow.agents:
   - claude
   - codex
 ```
@@ -98,11 +101,8 @@ cannot launch a session. Empty explicit lists and duplicates are rejected.
 
 Sessions store their selected harness and resume identity. A thread can
 have none or several, including different harnesses. Reordering the
-project list does not rewrite existing sessions. A personal new-thread
+project list does not rewrite existing sessions. A local `oxplow.newThreadSession`
 preference can choose a default session or show the session picker.
-
-The singular `agent:` key is not accepted: a file that has it is
-refused as having an unknown key. Use `agents`.
 
 The selected CLI must be installed, authenticated, and available on
 `PATH`. See [Agents](../guide/agents.md) for session selection, runtime
@@ -132,38 +132,38 @@ Settings → Capabilities chooses how snapshots are kept:
   It is offered by the bundled extension, so it appears once that is
   enabled.
 
-### Other project keys
+### Registered core keys
 
-Everything else `.oxplow/project.yaml` accepts, with its default:
+Some frequently used settings and defaults (all support local, project and global overrides):
 
 | Key | Default | What it does |
 | --- | --- | --- |
-| `projectName` | the directory name | Display name for the project. |
-| `snapshotRetentionDays` | `7` | Days to keep snapshot *content*. `0` disables expiry entirely. |
-| `metricRetentionDays` | `0` | Days to keep raw metric facts. `0` means **keep everything** — pruning is opt-in. |
-| `metricDetailMaxPerProducer` | `100` | Keep each run's drill-in payload (`detail_json`) for only the newest N runs *per producer*. `0` disables the cap. |
-| `metricDetailRetentionDays` | `30` | Also drop drill-in payloads older than this many days. `0` disables. |
-| `snapshotMaxFileBytes` | `5242880` (5 MiB) | Files larger than this are recorded but their bytes aren't stored. |
-| `scripts.maxConcurrent` | `min(4, CPU cores)` | How many script workers run at once, across collectors, effects, command scripts and the rest. A run past it waits for a slot. Minimum `1`. Only a person can set it. |
-| `scripts.memoryMb` | `512` | The memory one script worker may use, in MiB, before it is stopped. Minimum `64`. Only a person can set it. |
-| `injectSessionContext` | `true` | Whether oxplow prepends the session-context block (stream / worktree / branch / thread) to the agent's prompt. |
-| `agentPromptAppend` | *empty* | Free text appended to every agent system prompt for this project. |
-| `agentModels` | *empty* | Per-agent model override, e.g. `opencode: github-copilot/gpt-5-mini`. |
-| `ai.roles` | *empty* | This project's [AI role](../guide/ai-models.md) assignments, over your own, e.g. `summarize: { provider: openrouter, model: openai/gpt-5-mini }`. Add `restrict: [tools, sql, streaming, images]` to forbid a role's model any of those. |
-| `lsp.servers` | *empty* | Per-project language-server pins. |
-| `iconTint` | *unset* | Hex colour composited behind this project's app icon, so concurrent windows are tellable apart. See below. |
-| `extensions` | `[oxplow-bundled]` | The extensions on for the whole team. `oxplow-foundation` is always on and never listed. Only a person can set it. |
-| `disableExtensions` | *empty* | Extensions off for the whole team, even one sitting in `.oxplow/extensions/`. A person's `enableExtensions` turns one back on for them. |
-| `extensionSources` | *empty* | Where an extension's source is when it isn't `.oxplow/extensions/<name>/`: `{ <name>: <folder> }`. Only a person can set it. |
-| `enableBundledExtensions` | `true` | `false` runs oxplow's own extensions from their `extensionSources` folders, deployed like any extension, instead of the copies built into oxplow — how oxplow develops itself. Honored only by a development build; read when oxplow starts. Your own `.oxplow/personal.yaml` may set it too. Only a person can set it. |
+| `oxplow.projectName` | the directory name | Display name for the project. |
+| `oxplow.snapshots.retentionDays` | `7` | Days to keep snapshot *content*. `0` disables expiry entirely. |
+| `oxplow.metrics.retentionDays` | `0` | Days to keep raw metric facts. `0` means **keep everything** — pruning is opt-in. |
+| `oxplow.metrics.detailMaxPerProducer` | `100` | Keep each run's drill-in payload (`detail_json`) for only the newest N runs *per producer*. `0` disables the cap. |
+| `oxplow.metrics.detailRetentionDays` | `30` | Also drop drill-in payloads older than this many days. `0` disables. |
+| `oxplow.snapshots.maxFileBytes` | `5242880` (5 MiB) | Files larger than this are recorded but their bytes aren't stored. |
+| `oxplow.scripts.maxConcurrent` | `min(4, CPU cores)` | How many script workers run at once, across collectors, effects, command scripts and the rest. A run past it waits for a slot. Minimum `1`. |
+| `oxplow.scripts.memoryMb` | `512` | The memory one script worker may use, in MiB, before it is stopped. Minimum `64`. |
+| `oxplow.injectSessionContext` | `true` | Whether oxplow prepends the session-context block (stream / worktree / branch / thread) to the agent's prompt. |
+| `oxplow.agentPromptAppend` | *empty* | Free text appended to every agent system prompt for this project. |
+| `oxplow.agentConfig` | *empty* | Per-harness declared settings, such as `opencode: { model: github-copilot/gpt-5-mini }`. |
+| `oxplow.ai.roles` | *empty* | This project's [AI role](../guide/ai-models.md) assignments, over your own, e.g. `summarize: { provider: openrouter, model: openai/gpt-5-mini }`. Add `restrict: [tools, sql, streaming, images]` to forbid a role's model any of those. |
+| `oxplow.lsp.servers` | *empty* | Per-project language-server pins. |
+| `oxplow.iconTint` | *unset* | Hex colour composited behind this project's app icon, so concurrent windows are tellable apart. See below. |
+| `oxplow.extensions` | `[oxplow-bundled]` | The extensions on for the whole team. `oxplow-foundation` is always on and never listed. |
+| `oxplow.disableExtensions` | *empty* | Extensions off for the whole team, even one sitting in `.oxplow/extensions/`. A person's `oxplow.enableExtensions` turns one back on for them. |
+| `oxplow.extensionSources` | *empty* | Where an extension's source is when it isn't `.oxplow/extensions/<name>/`: `{ <name>: <folder> }`. |
+| `oxplow.enableBundledExtensions` | `true` | `false` runs oxplow's own extensions from their `oxplow.extensionSources` folders, deployed like any extension, instead of the copies built into oxplow — how oxplow develops itself. Honored only by a development build; read when oxplow starts. A local override may set it too. |
 
-#### `iconTint`
+#### `oxplow.iconTint`
 
-Several oxplow windows open at once look identical in the Dock. `iconTint`
+Several oxplow windows open at once look identical in the Dock. `oxplow.iconTint`
 paints a colour behind this project's icon:
 
 ```yaml
-iconTint: "#c2410c"
+oxplow.iconTint: "#c2410c"
 ```
 
 Accepts `#rrggbb`, the `#rgb` shorthand, or either without the `#`. A value
@@ -174,8 +174,8 @@ to leave the stock icon alone.
 running app; it does not alter the installed `.app` on disk, so it applies
 equally to a release build and a `cargo`-built one.
 
-The four metric blocks — `measures`, `collectors`, `metrics`, and
-`dimensions` — are covered in [Metrics](../guide/metrics.md), which
+Extension declarations for measures, collectors, metrics and dimensions
+are covered in [Metrics](../guide/metrics.md), which
 also explains why you normally let the agent write them rather than
 editing them by hand.
 
@@ -183,12 +183,12 @@ editing them by hand.
 
 These two do different things, which is why their defaults differ.
 
-`metricRetentionDays` **deletes** old captures, and their facts go with
+`oxplow.metrics.retentionDays` **deletes** old captures, and their facts go with
 them — so a metric's history gets shorter. That's a real trade
 (per-test drill-down, flakiness horizon), so it defaults to `0` = keep
 everything and you opt in.
 
-`metricDetailMaxPerProducer` / `metricDetailRetentionDays` only
+`oxplow.metrics.detailMaxPerProducer` / `oxplow.metrics.detailRetentionDays` only
 **compact**: they null out a run's `detail_json` — the verbatim payload
 behind the request Tests/Coverage panel — while the capture and every one
 of its facts stay. No metric value, trend point, or count ever changes,
@@ -210,22 +210,20 @@ so `node_modules`, `target`, `dist` and friends are already
 invisible without any oxplow config. Most projects need nothing
 here.
 
-The `generated` block is for the two cases `.gitignore` can't
+The `oxplow.generated.exclude` and `oxplow.generated.include` settings cover the two cases `.gitignore` can't
 express: build output that *is* committed, and ignored paths you
 want oxplow to watch anyway.
 
 ```yaml
 # .oxplow/project.yaml
-generated:
-  exclude:
-    - target             # single segment — matches at any depth
-    - apps/desktop/dist  # repo-relative — only this path
-  include:
-    - vendor/generated   # force back in, despite .gitignore
+oxplow.generated.exclude:
+  - target             # single segment — matches at any depth
+  - apps/desktop/dist  # repo-relative — only this path
+oxplow.generated.include:
+  - vendor/generated   # force back in, despite .gitignore
 ```
 
-Both keys are optional, but `generated` is a **map**, not a list —
-a bare sequence (`generated: [target, …]`) is rejected at load.
+Both lists are independent settings; each override replaces that entire list.
 
 Entries in either list take one of two forms:
 
@@ -263,7 +261,7 @@ out of the UI immediately — no rescan, no purge.
 
 ### Testing (tests & coverage)
 
-The `testing` block says how your tests run; **report collectors**
+The `oxplow.testing.*` settings say how your tests run; **report collectors**
 read what a run writes and attach it to each request: the individual
 tests, diff coverage and analyzer findings. Point a collector at a
 report file your test run already emits; after each test run oxplow
@@ -272,11 +270,10 @@ up per stack. Run `/oxplow:configure` to wire this up automatically.
 
 ```yaml
 # .oxplow/project.yaml
-testing:
-  command: make test-report          # surfaced to the agent
-  fastCommand: make test-fast        # the same without coverage, for iterating
-  runPatterns: [pytest]              # extra substrings that count as a test run
-  agentHint: Run tests with make test-report.
+oxplow.testing.command: make test-report       # surfaced to the agent
+oxplow.testing.fastCommand: make test-fast     # without coverage, for iterating
+oxplow.testing.runPatterns: [pytest]           # extra test-run matches
+oxplow.testing.agentHint: Run tests with make test-report.
 ```
 
 The collectors are declared in the project's own extension, not in
@@ -353,7 +350,7 @@ separately in `.oxplow/lsp-cache/`), and the proxy hands the right
 binary to whichever stream asked. Which server serves a file is
 resolved by language id, not by root markers.
 
-You can also pin servers per project under an `lsp.servers` block
+You can also pin servers per project under an `oxplow.lsp.servers` block
 in `.oxplow/project.yaml`. If a server you need isn't packaged, use the Mason-backed installer
 (**Language servers** in Settings).
 
@@ -368,9 +365,10 @@ Off. Always. There is no telemetry to configure.
 
 ## Settings the agent can change
 
-None. The MCP surface deliberately does not expose product
-settings — the agent operates on intent, files, tasks, and
-knowledge pages. Configuration is the human's job.
+The agent can read and change registered settings through `oxplow.config.*`.
+Ask for a specific level when it matters, such as “use this just for me”
+(local), “share this with the team” (project), or “use this across projects”
+(global). The app's specialized settings controls use the same service.
 
 ## Resetting
 

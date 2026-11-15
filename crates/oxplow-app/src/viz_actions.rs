@@ -1035,12 +1035,12 @@ mod tests {
         let root = fx.svc.layout.project_dir.clone();
         let ext = root.join(".oxplow/extensions/acme");
         std::fs::create_dir_all(ext.join("pages")).unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             ext.join("extension.yaml"),
             "manifest: 2\nname: acme\nintent:\n  purpose: test\n",
         )
         .unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             ext.join("pages/tasks.yaml"),
             r#"title: Threads
 params:
@@ -1058,7 +1058,7 @@ loaders:
 actions:
   - { id: finish, label: Finish, command: oxplow.thread.mark, input: { thread: "{{param.item}}", mark: green } }
   - { id: push, label: Push, command: oxplow.vcs.push, input: { stream: str1 } }
-  - { id: prompt, label: Prompt, command: oxplow.config.set, input: { key: agentPromptAppend, value: be brief } }
+  - { id: prompt, label: Prompt, command: oxplow.config.set, input: { key: oxplow.agentPromptAppend, value: be brief, level: project } }
 view:
   viz: table
   from: items
@@ -1070,7 +1070,7 @@ view:
 "#,
         )
         .unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             ext.join("pages/one.yaml"),
             r#"title: One
 params: [{ name: n, default: "1" }, { name: item, default: "" }]
@@ -1091,7 +1091,7 @@ view:
 "#,
         )
         .unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             ext.join("pages/board.yaml"),
             r#"title: Board
 loaders:
@@ -1107,7 +1107,7 @@ view:
 "#,
         )
         .unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             ext.join("pages/note.yaml"),
             r#"title: Note
 loaders:
@@ -1352,7 +1352,7 @@ view:
                 )
             })
             .collect();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             ext.join("extension.yaml"),
             format!(
                 "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [commands:oxplow.thread.mark]\n\
@@ -1362,13 +1362,13 @@ view:
         )
         .unwrap();
         std::fs::create_dir_all(ext.join("handlers")).unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             ext.join("handlers/finish.star"),
             "def transform(x):\n    i = x[\"input\"]\n    return {\"commands\": [{\"name\": \"oxplow.thread.mark\", \
              \"input\": {\"thread\": i[\"thread\"], \"mark\": i[\"mark\"]}}]}\n",
         )
         .unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             ext.join("pages/pointed.yaml"),
             r#"title: Pointed
 loaders:
@@ -1837,13 +1837,13 @@ view:
     async fn a_secret_field_is_one_its_command_doesnt_record() {
         let (fx, root) = fixture().await;
         let item = fx.thread.to_string();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             root.join(".oxplow/extensions/acme/pages/leaky.yaml"),
             "title: Leaky\nparams: [{ name: thread }]\nloaders:\n  item: { sql: \"SELECT title FROM v_thread WHERE uri = uri('oxplow/thread', 'id', :thread)\" }\n\
              view: { viz: form, from: item, form: { command: oxplow.thread.rename, defaults: { thread: '{{param.thread}}' }, fixed: [thread], fields: [{ name: title, secret: true }] } }\n",
         )
         .unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             root.join(".oxplow/extensions/acme/pages/kept.yaml"),
             "title: Kept\nloaders:\n  file: { sql: \"SELECT 'notes.txt' AS path, 'what was there' AS content\" }\n\
              view: { viz: form, from: file, form: { command: oxplow.file.create, fields: [path, { name: content, secret: true }] } }\n",
@@ -1872,7 +1872,7 @@ view:
     async fn a_form_keeps_its_fixed_fields() {
         let (fx, root) = fixture().await;
         let item = fx.thread.to_string();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             root.join(".oxplow/extensions/acme/pages/edit.yaml"),
             "title: Edit\nparams: [{ name: thread }]\nloaders:\n  item: { sql: \"SELECT title FROM v_thread WHERE uri = uri('oxplow/thread', 'id', :thread)\" }\n\
              view: { viz: form, from: item, form: { command: oxplow.thread.rename, defaults: { thread: '{{param.thread}}' }, fixed: [thread], fields: [title] } }\n",
@@ -1968,7 +1968,7 @@ view:
     #[tokio::test]
     async fn a_form_submits_its_command_as_the_page() {
         let (fx, root) = fixture().await;
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             root.join(".oxplow/extensions/acme/pages/new-thread.yaml"),
             "title: New Thread\nparams: [{ name: stream, default: str1 }]\n\
              view: { viz: form, form: { command: oxplow.thread.create, defaults: { stream: '{{param.stream}}' } } }\n",
@@ -2012,14 +2012,19 @@ view:
     async fn component_fixture() -> (crate::test_fixtures::ThreadFixture, std::path::PathBuf) {
         let (fx, root) = fixture().await;
         let ext = root.join(".oxplow/extensions/acme");
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             ext.join("extension.yaml"),
             "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [commands:oxplow.thread.mark]\ncustom_components:\n  - { id: board, commands: [oxplow.thread.mark] }\n",
         )
         .unwrap();
         std::fs::create_dir_all(ext.join("components/board")).unwrap();
-        std::fs::write(ext.join("components/board/index.html"), "<!doctype html>").unwrap();
-        std::fs::write(ext.join("pages/view.yaml"), VIEW_PAGE).unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            ext.join("components/board/index.html"),
+            "<!doctype html>",
+        )
+        .unwrap();
+        crate::test_fixtures::write_settings_fixture(ext.join("pages/view.yaml"), VIEW_PAGE)
+            .unwrap();
         crate::test_fixtures::activate(&fx.svc).await;
         (fx, root)
     }
@@ -2075,7 +2080,8 @@ view:
             .unwrap_err(),
             "isn't loaded",
         );
-        std::fs::write(&index, "<!doctype html><p>later</p>").unwrap();
+        crate::test_fixtures::write_settings_fixture(&index, "<!doctype html><p>later</p>")
+            .unwrap();
         invoke_component_command(
             &fx.svc,
             &root,
@@ -2109,7 +2115,7 @@ view:
                 )
             })
             .collect();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             ext.join("extension.yaml"),
             format!(
                 "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [commands:oxplow.thread.mark]\n\
@@ -2120,15 +2126,20 @@ view:
         )
         .unwrap();
         std::fs::create_dir_all(ext.join("handlers")).unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             ext.join("handlers/finish.star"),
             "def transform(x):\n    i = x[\"input\"]\n    return {\"commands\": [{\"name\": \"oxplow.thread.mark\", \
              \"input\": {\"thread\": i[\"thread\"], \"mark\": i[\"mark\"]}}]}\n",
         )
         .unwrap();
         std::fs::create_dir_all(ext.join("components/board")).unwrap();
-        std::fs::write(ext.join("components/board/index.html"), "<!doctype html>").unwrap();
-        std::fs::write(ext.join("pages/view.yaml"), VIEW_PAGE).unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            ext.join("components/board/index.html"),
+            "<!doctype html>",
+        )
+        .unwrap();
+        crate::test_fixtures::write_settings_fixture(ext.join("pages/view.yaml"), VIEW_PAGE)
+            .unwrap();
         crate::test_fixtures::activate(&fx.svc).await;
         (fx, root)
     }
@@ -2253,7 +2264,7 @@ view:
         activate().await;
         let old = load_board(&fx, &root).await;
 
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             root.join(".oxplow/extensions/acme/components/board/index.html"),
             "<!doctype html><p>2</p>",
         )
@@ -2291,7 +2302,7 @@ view:
         let (fx, root) = component_fixture().await;
         let first = load_board(&fx, &root).await;
         let first_hash = fx.svc.extension_catalog.live()["acme"].clone();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             root.join(".oxplow/extensions/acme/components/board/index.html"),
             "<!doctype html><p>2</p>",
         )
@@ -2329,17 +2340,26 @@ view:
             // folder there, a load error, never a silent hash.
             return;
         }
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             ext.join("extension.yaml"),
             "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [commands:oxplow.thread.mark]\ncustom_components:\n  - { id: board, bundle: components/Board, commands: [oxplow.thread.mark] }\n",
         )
         .unwrap();
-        std::fs::write(ext.join("components/board/index.html"), "<!doctype html>").unwrap();
-        std::fs::write(ext.join("pages/view.yaml"), VIEW_PAGE).unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            ext.join("components/board/index.html"),
+            "<!doctype html>",
+        )
+        .unwrap();
+        crate::test_fixtures::write_settings_fixture(ext.join("pages/view.yaml"), VIEW_PAGE)
+            .unwrap();
         let first = load_board(&fx, &root).await;
         let served = fx.svc.component_bundles.get(&first).unwrap();
         assert_eq!(served.file("").as_deref(), Some(&b"<!doctype html>"[..]));
-        std::fs::write(ext.join("components/board/index.html"), "<!doctype html>2").unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            ext.join("components/board/index.html"),
+            "<!doctype html>2",
+        )
+        .unwrap();
         assert_ne!(load_board(&fx, &root).await, first);
     }
 
@@ -2349,14 +2369,19 @@ view:
     async fn a_component_without_commands_can_only_show() {
         let (fx, root) = fixture().await;
         let ext = root.join(".oxplow/extensions/acme");
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             ext.join("extension.yaml"),
             "manifest: 2\nname: acme\nintent:\n  purpose: test\ncustom_components:\n  - { id: board }\n",
         )
         .unwrap();
         std::fs::create_dir_all(ext.join("components/board")).unwrap();
-        std::fs::write(ext.join("components/board/index.html"), "<!doctype html>").unwrap();
-        std::fs::write(ext.join("pages/view.yaml"), VIEW_PAGE).unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            ext.join("components/board/index.html"),
+            "<!doctype html>",
+        )
+        .unwrap();
+        crate::test_fixtures::write_settings_fixture(ext.join("pages/view.yaml"), VIEW_PAGE)
+            .unwrap();
         let version = load_board(&fx, &root).await;
         let err = invoke_component_command(
             &fx.svc,
@@ -2434,7 +2459,7 @@ view:
                 .contains("component `board` doesn't declare `sql: read`"),
             "{err}"
         );
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             ext.join("extension.yaml"),
             "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [sql.read, commands:oxplow.thread.mark]\ncustom_components:\n  - { id: board, commands: [oxplow.thread.mark], sql: read }\n",
         )
@@ -2451,7 +2476,7 @@ view:
     async fn the_timeline_queries_read_through_component_sql() {
         let (fx, root) = component_fixture().await;
         let ext = root.join(".oxplow/extensions/acme");
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             ext.join("extension.yaml"),
             "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [sql.read, commands:oxplow.thread.mark]\ncustom_components:\n  - { id: board, commands: [oxplow.thread.mark], sql: read }\n",
         )

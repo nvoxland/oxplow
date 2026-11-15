@@ -286,7 +286,7 @@ async fn disabling_keeps_the_file_and_removing_deletes_it() {
         .unwrap();
     write(
         fx._dir.path(),
-        ".oxplow/personal.yaml",
+        ".oxplow/local.yaml",
         "disableExtensions: [alpha]\n",
     );
     reconcile(&fx).await;
@@ -296,7 +296,7 @@ async fn disabling_keeps_the_file_and_removing_deletes_it() {
         "a disable keeps the file"
     );
 
-    std::fs::remove_file(fx._dir.path().join(".oxplow/personal.yaml")).unwrap();
+    std::fs::remove_file(fx._dir.path().join(".oxplow/local.yaml")).unwrap();
     reconcile(&fx).await;
     let peek: Value = run(&fx, "alpha.book.peek", json!({"id": "b1"}))
         .await

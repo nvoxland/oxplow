@@ -13,7 +13,7 @@ use std::{path::Path, sync::Arc};
 fn write(root: &Path, rel: &str, body: &str) {
     let p = root.join(rel);
     std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-    std::fs::write(p, body).unwrap();
+    crate::test_fixtures::write_settings_fixture(p, body).unwrap();
 }
 
 #[derive(Clone)]
@@ -253,7 +253,7 @@ async fn activate(svc: &Arc<crate::Services>) {
 fn disable(root: &Path, names: &str) {
     write(
         root,
-        ".oxplow/personal.yaml",
+        ".oxplow/local.yaml",
         &format!("disableExtensions: [{names}]\n"),
     );
 }

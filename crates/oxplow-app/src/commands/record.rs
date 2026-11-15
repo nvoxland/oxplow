@@ -41,7 +41,8 @@ impl CommandBus {
         error: Option<String>,
     ) {
         let actor = run.actor();
-        let private_input = spec.atomicity == oxplow_domain::Atomicity::Dispatch
+        let private_input = run.trace().summary().contains_key("config.secret")
+            || spec.atomicity == oxplow_domain::Atomicity::Dispatch
             || spec
                 .unrecorded
                 .iter()
@@ -61,7 +62,7 @@ impl CommandBus {
             session_id: actor.session_id(),
             // Before a failed composite is fully routed, private descendants
             // may be unknown. Its original input cannot safely be recorded.
-            input: if spec.atomicity == oxplow_domain::Atomicity::Dispatch {
+            input: if private_input || spec.atomicity == oxplow_domain::Atomicity::Dispatch {
                 super::steps::private_composite_spec(spec).recorded_input(input)
             } else {
                 spec.recorded_input(input)
@@ -207,6 +208,8 @@ pub(super) enum Abort {
 pub(super) struct Recorded {
     pub(super) audit_id: i64,
     pub(super) event_id: oxplow_domain::EventId,
+    /// Undo is withheld for runs that consumed secret configuration values.
+    inverse_recorded: bool,
 }
 
 /// A call that changed nothing (`HandlerOutput::unchanged`): its answer,
@@ -231,7 +234,7 @@ pub(super) fn finish(mut out: HandlerOutput, recorded: Recorded) -> CommandOutco
         result: out.result,
         audit_id: Some(recorded.audit_id),
         event_id: Some(recorded.event_id),
-        inverse: out.inverse,
+        inverse: out.inverse.filter(|_| recorded.inverse_recorded),
     }
 }
 
@@ -280,10 +283,13 @@ pub(super) fn record_tx(
         scopes,
     } = executed;
     let actor = run.actor();
-    let failed = if spec
-        .unrecorded
-        .iter()
-        .any(|field| field == "*" || input.get(field).is_some())
+    let sensitive =
+        scopes.contains_key("config.secret") || run.trace().summary().contains_key("config.secret");
+    let failed = if sensitive
+        || spec
+            .unrecorded
+            .iter()
+            .any(|field| field == "*" || input.get(field).is_some())
     {
         failed.map(|_| "command with private input failed".into())
     } else {
@@ -296,7 +302,7 @@ pub(super) fn record_tx(
     } else {
         Outcome::Ok
     };
-    let inverse = if spec.undoable {
+    let inverse = if spec.undoable && !sensitive {
         out.inverse.clone()
     } else {
         None
@@ -309,10 +315,21 @@ pub(super) fn record_tx(
             actor_id: actor.id(),
             thread_id: actor.thread_id(),
             session_id: actor.session_id(),
-            input: spec.recorded_input(input),
+            input: if sensitive {
+                super::steps::private_composite_spec(spec).recorded_input(input)
+            } else {
+                spec.recorded_input(input)
+            },
             outcome,
             error: failed.clone(),
-            result: Some(out.result.clone()),
+            // A secret configuration read returns sensitive data. A composite may
+            // transform it into an arbitrary shape, so redact the entire
+            // result of any run that consumed secret configuration values.
+            result: Some(if sensitive {
+                serde_json::json!({ "redacted": true })
+            } else {
+                out.result.clone()
+            }),
             inverse: inverse.clone(),
             scopes,
             run_id: Some(run.run().to_string()),
@@ -358,7 +375,7 @@ pub(super) fn record_tx(
     // A handler's own events carry the actor's thread and stream unless
     // it anchored them itself.
     let fallback = actor.anchors();
-    for event in &out.events {
+    for event in out.events.iter().filter(|_| !sensitive) {
         let mut event = event.clone().with_cause(executed.id.clone());
         event.anchors.thread_id = event.anchors.thread_id.or(fallback.thread_id);
         event.anchors.stream_id = event.anchors.stream_id.or(fallback.stream_id);
@@ -370,5 +387,6 @@ pub(super) fn record_tx(
     Ok(Recorded {
         audit_id,
         event_id: executed.id,
+        inverse_recorded: inverse.is_some(),
     })
 }

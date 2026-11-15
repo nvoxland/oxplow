@@ -475,7 +475,7 @@ extensionInstances:
 `oxplow_domain::tasks::provider_id_problem`: lowercase
 letters, digits and underscores, starting with a letter, and none of
 oxplow's own (`oxplow`, a core namespace such as `code` or `config`),
-checked wherever an id is written (`extensionInstances`, `instances.yaml`,
+checked wherever an id is written (`oxplow.extensionInstances`,
 a manifest's `providers`). An instance oxplow still won't run — its id is
 a namespace or provider something else registered first, or it declares
 an event type oxplow doesn't know with that schema — is `refused { reason
@@ -522,39 +522,24 @@ extension's `source:<project>:<ext>:<name>` accounts. An extension's
 command declared over its provider's operation runs on the instance its
 input names (`instance`, else its `uri`'s, else the default).
 
-**Scope** (P9.B2). An instance is the **project's** (above: shared with
-the team in `project.yaml`) or the **person's** — global, in this
-machine's `instances.yaml` in the global config dir
-(`oxplow_config::GlobalInstances`: `instances: { "<namespace>/<id>": { enabled,
-config, provider? } }`, the same entries and the same validation):
+**Scope**. Instance definitions are the ordinary atomic setting
+`oxplow.extensionInstances`, stored in local/project/global YAML through the
+shared settings service. A local map wins over a project map, then a global map;
+entries are never merged across levels. Global definitions apply wherever their
+extension is enabled. Local and project definitions use project-scoped
+credentials; global definitions use machine-global credentials. Domain edits
+choose the existing local override when present, otherwise project, or explicitly
+global for a global row. `off_here` writes a project-scoped map containing the
+chosen global definition disabled. Removing a key edits only its selected map;
+unsetting the map through config reveals the inherited level.
 
-- a global instance applies in **every project whose catalog has its
-  extension enabled**; where the extension isn't, it isn't listed at all;
-- a project's entry of the same name **replaces it there, whole**
-  (`instances_config()` is the one merge: global, then project) — to turn
-  it off or configure it differently in one project. A person makes one
-  from the global row's **Off in this project** (`off_here`, command
-  `oxplow.provider.turn_off_here`): the project's own entry,
-  off, with the global one's config and provider; Disable or a config
-  edit on a global row with no project entry changes it everywhere, and
-  Remove on the project's entry brings the global one back here. **A project's entry
-  is the project's, credentials included** (`scope_of`: `project`, with
-  `overridden` saying it replaces a global one; the row reads "this
-  project's, replacing yours"). The P9 plan had an override keep the
-  global scope and credentials; that broke a team's committed entry the
-  moment the person added a global instance of the same name in another
-  project — it moved onto the global credentials (unconfigured, or the
-  other project's token against this one's config), and back when the
-  global one went. Now a global one appearing or going never
-  moves a project entry onto other credentials, and removing a project's
-  replacement removes its own credentials, never the global one's;
 - its credentials are the person's, set once:
   `instance:global:<namespace>/<id>:<name>` (a project instance's are
   `instance:<project>:…`). Changing one — a pasted value, a sign-in, a
   sign-out — restarts it in **every** project, not only where it was
   changed: the keychain can't be watched, so
   `credential_changed` bumps the instance's count in
-  `instance-credentials.yaml` beside `instances.yaml`
+  `instance-credentials.yaml` beside `global.yaml`
   (`oxplow_config::CredentialGenerations`: counts only, never a value,
   under the same kind of machine-wide lock), and every other oxplow, on
   its per-minute tick (`reconcile_if_global_changed`), restarts a global
@@ -563,26 +548,16 @@ config, provider? } }`, the same entries and the same validation):
 - **the program is the project's**: a global instance runs *this* project's
   deployment of the extension, under the permissions deployed here, so in a
   project that hasn't deployed the extension it is not listed at all (above);
-- it is written where it lives (`set_instance`: the project's entry if
-  there is one, else the file; `add_instance(…, scope)`;
-  `remove_instance` takes a project's replacement first, and the global
-  one then shows through). The file is written only by the registry for a
-  person (`Actor::Human`; anyone else is `Denied`) — no command reaches
-  it, so no agent or page can;
-- **every change is one read-modify-write of the instances as they are
-  then**: `write_instances` takes an `edit` of them, under the
-  registry's `instances_gate` (one change at a time in a process, never
-  held across a check or a reconcile — `set_instance` checks first, then
-  takes the gate, re-resolves and edits) and, for the file,
-  `GlobalInstances::update` — under `instances.yaml.lock`, which every
-  oxplow on the machine takes, it reads the file as it is, edits,
-  validates and writes it atomically (temp file and rename). So Enables
-  on two rows at once both stand, two oxplows never drop each other's
-  entry, and a reader never sees half a file;
-- another project's oxplow re-reads it by its modification time, on the
-  per-minute sync tick (`reconcile_if_global_changed`); the one that
-  wrote it reconciles at once. A file that doesn't load keeps what was
-  last read, with a warning.
+- definitions are written through canonical `oxplow.config.set` with an
+  explicit level, preserving the command bus policy and audit path. Provider
+  domain operations still protect person-only global instance actions;
+- the registry serializes instance edits within this process using
+  `instances_gate`; the shared settings store validates and atomically writes
+  the selected setting under the YAML file lock. Runtime health, credential
+  generations and collector checkpoints remain outside settings;
+- each open project's config watcher follows `global.yaml`, while the sync
+  tick also notices global modification times and credential generations.
+  No provider definition reads or writes `instances.yaml`.
 
 **Credentials and sign-in** (P9.B3; `spec.rs` `CredentialDecl`,
 `oauth.rs`). A credential is a name (a value the person pastes) or one
@@ -1209,7 +1184,7 @@ refuse the old instance's state access until lifetime reconciliation. See
 ## Provider resolution snapshots
 
 Resolution captures effective instance config and credential scope together:
-global entries first, replaced whole by project entries of the same name.
+one atomic map from local, project, global, then the registered default.
 Provider choice and scope use that captured mapping, so an override removed
 mid-resolution cannot pair project config with global credentials. A reconcile
 pass uses one such mapping and one extension declaration snapshot for every

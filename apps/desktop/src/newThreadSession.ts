@@ -1,6 +1,6 @@
 /**
  * What a new thread starts with — the person's own `newThreadSession`
- * (`.oxplow/personal.yaml`): `ask` (the session picker, the default),
+ * (`.oxplow/local.yaml`): `ask` (the session picker, the default),
  * `none`, or an agent (a harness's key). Settings →
  * Agents and the picker's Remember This set it.
  */
@@ -8,20 +8,20 @@ import { listAgentHarnesses, runCommand } from "./api.js";
 import { settingValue } from "./configValues.js";
 import { newThreadTabs } from "./tabs/sessionTabs.js";
 
-const KEY = "newThreadSession";
+const KEY = "oxplow.newThreadSession";
 
 /** The person's choice; `ask` when they haven't made one. */
 export async function readNewThreadSession(): Promise<string> {
-  const value = await settingValue(`personal.${KEY}`);
+  const value = await settingValue(KEY);
   return typeof value === "string" && value !== "" ? value : "ask";
 }
 
 /** Make `choice` what new threads start with (`ask` clears it). */
 export async function saveNewThreadSession(choice: string): Promise<void> {
   if (choice === "ask") {
-    await runCommand("oxplow.config.unset", { key: KEY, layer: "personal" }, true);
+    await runCommand("oxplow.config.unset", { key: KEY, level: "local" }, true);
   } else {
-    await runCommand("oxplow.config.set", { key: KEY, value: choice, layer: "personal" }, true);
+    await runCommand("oxplow.config.set", { key: KEY, value: choice, level: "local" }, true);
   }
 }
 

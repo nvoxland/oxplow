@@ -530,13 +530,14 @@ resources:
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join(".oxplow/extensions/acme");
         std::fs::create_dir_all(root.join("datasets")).unwrap();
-        std::fs::write(root.join("extension.yaml"), manifest).unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("extension.yaml"), manifest)
+            .unwrap();
         for (rel, text) in files {
             let path = root.join(rel);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            std::fs::write(path, text).unwrap();
+            crate::test_fixtures::write_settings_fixture(path, text).unwrap();
         }
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             root.join("datasets/prs.sql"),
             "SELECT CAST('oxplow:acme/pr?id=1' AS TEXT) AS uri, CAST('One' AS TEXT) AS title",
         )

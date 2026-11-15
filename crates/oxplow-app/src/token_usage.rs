@@ -687,7 +687,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("t.jsonl");
         // Two complete lines + a partial third (no trailing newline).
-        std::fs::write(&path, "line1\nline2\npartial").unwrap();
+        crate::test_fixtures::write_settings_fixture(&path, "line1\nline2\npartial").unwrap();
         let (tail, off) = read_complete_tail(&path, 0).unwrap();
         assert_eq!(tail, "line1\nline2\n");
         assert_eq!(off, "line1\nline2\n".len() as u64);
@@ -763,10 +763,10 @@ mod tests {
         let svc = &f.svc;
         let tdir = tempfile::tempdir().unwrap();
         let path = tdir.path().join("session.jsonl");
-        std::fs::write(&path, "").unwrap();
+        crate::test_fixtures::write_settings_fixture(&path, "").unwrap();
         svc.token_usage_store.set_cursor("sess-r", 0).await.unwrap();
         let turn = prompt(svc, f.thread).await;
-        std::fs::write(&path, format!("{ASSISTANT_LINE}\n")).unwrap();
+        crate::test_fixtures::write_settings_fixture(&path, format!("{ASSISTANT_LINE}\n")).unwrap();
         svc.hook_ingest
             .ingest(stop(
                 f.thread,
@@ -864,7 +864,7 @@ mod tests {
         // Bootstrap Stop: the session already has one assistant message when
         // oxplow first sees it. The first capture seeds the cursor to the end
         // WITHOUT recording (history isn't attributed).
-        std::fs::write(&path, format!("{ASSISTANT_LINE}\n")).unwrap();
+        crate::test_fixtures::write_settings_fixture(&path, format!("{ASSISTANT_LINE}\n")).unwrap();
         let id0 = svc
             .token_usage
             .on_stop(&thread, Some("sess-1"), &payload, &TurnRecord::default())
@@ -969,7 +969,7 @@ mod tests {
             history.push_str(ASSISTANT_LINE);
             history.push('\n');
         }
-        std::fs::write(&path, &history).unwrap();
+        crate::test_fixtures::write_settings_fixture(&path, &history).unwrap();
 
         // First Stop (no stored cursor): records nothing, just seeds.
         let id = svc
@@ -1030,7 +1030,7 @@ mod tests {
         let user_b = serde_json::json!({"type":"user","message":{"content":"prompt B"}});
 
         // Bootstrap: one assistant line already present; first Stop seeds only.
-        std::fs::write(&path, format!("{ASSISTANT_LINE}\n")).unwrap();
+        crate::test_fixtures::write_settings_fixture(&path, format!("{ASSISTANT_LINE}\n")).unwrap();
         assert!(svc
             .token_usage
             .on_stop(&thread, Some("sess-2p"), &payload, &TurnRecord::default())
@@ -1246,7 +1246,7 @@ mod tests {
             path.to_string_lossy()
         );
         // Bootstrap (seed cursor, record nothing).
-        std::fs::write(&path, format!("{ASSISTANT_LINE}\n")).unwrap();
+        crate::test_fixtures::write_settings_fixture(&path, format!("{ASSISTANT_LINE}\n")).unwrap();
         svc.token_usage
             .on_stop(&thread, Some("sess-m"), &payload, &TurnRecord::default())
             .await

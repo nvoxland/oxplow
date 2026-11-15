@@ -1909,7 +1909,7 @@ mod tests {
     fn write(root: &Path, rel: &str, body: &str) {
         let p = root.join(rel);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-        std::fs::write(p, body).unwrap();
+        crate::test_fixtures::write_settings_fixture(p, body).unwrap();
     }
 
     /// Renames a thread to done.
@@ -2357,7 +2357,7 @@ mod tests {
         write_ext(d.path(), "ab", GOOD, &files);
         let manifest = d.path().join(".oxplow/extensions/ab/extension.yaml");
         let text = std::fs::read_to_string(&manifest).unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             &manifest,
             text.replace("name: ab\n", "name: ab\nnamespace: a_b\n"),
         )
@@ -2373,11 +2373,7 @@ mod tests {
             );
             assert!(ext.commands.is_empty(), "{name}");
         }
-        write(
-            d.path(),
-            ".oxplow/personal.yaml",
-            "disableExtensions: [ab]\n",
-        );
+        write(d.path(), ".oxplow/local.yaml", "disableExtensions: [ab]\n");
         let ext = project(d.path(), "a-b");
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         assert_eq!(ext.commands.len(), 1);
@@ -4002,7 +3998,7 @@ def finish(x):
 
         write(
             fx._dir.path(),
-            ".oxplow/personal.yaml",
+            ".oxplow/local.yaml",
             "disableExtensions: [my-review]\n",
         );
         crate::test_fixtures::activate_with_problems(&fx.svc).await;
@@ -4012,7 +4008,7 @@ def finish(x):
         );
 
         // A namespace someone else holds (a provider's) is refused whole.
-        std::fs::remove_file(fx._dir.path().join(".oxplow/personal.yaml")).unwrap();
+        std::fs::remove_file(fx._dir.path().join(".oxplow/local.yaml")).unwrap();
         bus.register_namespace(
             "my_review",
             "provider:held",

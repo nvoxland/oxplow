@@ -1434,7 +1434,11 @@ mod tests {
     async fn a_cut_off_duplicate_scan_is_redone() {
         let f = crate::thread_checkpoint::tests::with_baseline().await;
         let svc = &f.svc;
-        std::fs::write(svc.layout.project_dir.join("a.rs"), "fn a() {}\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            svc.layout.project_dir.join("a.rs"),
+            "fn a() {}\n",
+        )
+        .unwrap();
         let stream = svc.streams.list_streams().await.unwrap()[0].id;
         let capture = svc.snapshot_captures.get(&stream).unwrap();
         capture.enqueue_startup_diff().await.unwrap();
@@ -1485,7 +1489,7 @@ mod tests {
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         crate::test_fixtures::commit_all(&root, "base");
-        std::fs::write(root.join("w.rs"), "fn w() {}\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("w.rs"), "fn w() {}\n").unwrap();
         let stream = svc.streams.ensure_primary().await.unwrap().id;
         let working = || ChangeTarget::Working {
             stream_id: stream.to_string(),
@@ -1520,7 +1524,7 @@ mod tests {
         let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
-        std::fs::write(root.join("a.rs"), "fn a() {}\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("a.rs"), "fn a() {}\n").unwrap();
         let sha = crate::test_fixtures::commit_all(&root, "a");
         let stream = svc.streams.ensure_primary().await.unwrap().id.value();
         let run = |sql: &'static str, params: Vec<oxplow_db::SqlCell>| async move {
@@ -1592,9 +1596,9 @@ mod tests {
         let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
         std::fs::create_dir_all(root.join("src")).unwrap();
-        std::fs::write(root.join("src/lib.rs"), BEFORE).unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("src/lib.rs"), BEFORE).unwrap();
         let base = crate::test_fixtures::commit_all(&root, "base");
-        std::fs::write(root.join("src/lib.rs"), AFTER).unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("src/lib.rs"), AFTER).unwrap();
         let head = crate::test_fixtures::commit_all(&root, "change");
         let range = |base: Option<&str>, head: &str| ChangeTarget::Range {
             stream_id: None,
@@ -1668,7 +1672,11 @@ mod tests {
     async fn a_forced_rerun_of_an_unchanged_tree_is_skipped() {
         let f = crate::thread_checkpoint::tests::with_baseline().await;
         let svc = &f.svc;
-        std::fs::write(svc.layout.project_dir.join("a.rs"), "fn a() {}\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            svc.layout.project_dir.join("a.rs"),
+            "fn a() {}\n",
+        )
+        .unwrap();
         let stream = svc.streams.list_streams().await.unwrap()[0].id;
         let capture = svc.snapshot_captures.get(&stream).unwrap();
         capture.enqueue_startup_diff().await.unwrap();
@@ -1684,7 +1692,11 @@ mod tests {
         let again = refresh_change(svc, working()).await.unwrap();
         assert_eq!(again.computed_at, first.computed_at, "skipped");
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        std::fs::write(svc.layout.project_dir.join("a.rs"), "fn a() { 1; }\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            svc.layout.project_dir.join("a.rs"),
+            "fn a() { 1; }\n",
+        )
+        .unwrap();
         capture.enqueue_startup_diff().await.unwrap();
         capture
             .request_snapshot(oxplow_domain::snapshot::SnapshotTrigger::Manual)
@@ -2062,13 +2074,13 @@ mod tests {
         let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
         std::fs::create_dir_all(root.join("tests")).unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             root.join("tests/it.rs"),
             "#[test]\nfn a() {\n    assert_eq!(1, 1);\n    assert!(true);\n}\n\n#[test]\nfn b() {\n    assert!(true);\n}\n",
         )
         .unwrap();
         crate::test_fixtures::commit_all(&root, "base");
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             root.join("tests/it.rs"),
             "#[test]\n#[ignore]\nfn a() {\n    assert_eq!(1, 1);\n}\n",
         )
@@ -2166,7 +2178,7 @@ mod tests {
         let take = |path: &str, body: &str| {
             let full = root.join(path);
             std::fs::create_dir_all(full.parent().unwrap()).unwrap();
-            std::fs::write(&full, body).unwrap();
+            crate::test_fixtures::write_settings_fixture(&full, body).unwrap();
             capture.mark_dirty(full, oxplow_fs_watch::WatchEventKind::Other);
             capture.request_snapshot(crate::snapshot_capture::TakeRequest {
                 trigger: oxplow_domain::snapshot::SnapshotTrigger::Manual,
@@ -2259,7 +2271,7 @@ mod tests {
         let take = |path: &str, body: &str| {
             let full = root.join(path);
             std::fs::create_dir_all(full.parent().unwrap()).unwrap();
-            std::fs::write(&full, body).unwrap();
+            crate::test_fixtures::write_settings_fixture(&full, body).unwrap();
             capture.mark_dirty(full, oxplow_fs_watch::WatchEventKind::Other);
             capture.request_snapshot(crate::snapshot_capture::TakeRequest {
                 trigger: oxplow_domain::snapshot::SnapshotTrigger::Manual,
@@ -2323,7 +2335,7 @@ mod tests {
         let take = |path: &str, body: &str| {
             let full = root.join(path);
             std::fs::create_dir_all(full.parent().unwrap()).unwrap();
-            std::fs::write(&full, body).unwrap();
+            crate::test_fixtures::write_settings_fixture(&full, body).unwrap();
             capture.mark_dirty(full, oxplow_fs_watch::WatchEventKind::Other);
             capture.request_snapshot(crate::snapshot_capture::TakeRequest {
                 trigger: oxplow_domain::snapshot::SnapshotTrigger::Manual,
@@ -2413,9 +2425,9 @@ mod tests {
         let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
         std::fs::create_dir_all(root.join("src")).unwrap();
-        std::fs::write(root.join("src/lib.rs"), BEFORE).unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("src/lib.rs"), BEFORE).unwrap();
         crate::test_fixtures::commit_all(&root, "base");
-        std::fs::write(root.join("src/lib.rs"), AFTER).unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("src/lib.rs"), AFTER).unwrap();
         let sha = crate::test_fixtures::commit_all(&root, "change");
 
         let c = ensure_change(
@@ -2486,9 +2498,9 @@ mod tests {
         let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
         std::fs::create_dir_all(root.join("src")).unwrap();
-        std::fs::write(root.join("src/lib.rs"), BEFORE).unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("src/lib.rs"), BEFORE).unwrap();
         crate::test_fixtures::commit_all(&root, "base");
-        std::fs::write(root.join("src/lib.rs"), AFTER).unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("src/lib.rs"), AFTER).unwrap();
         let target = ChangeTarget::Working {
             stream_id: oxplow_domain::StreamId::new(1).to_string(),
         };
@@ -2504,7 +2516,8 @@ mod tests {
             .await,
             serde_json::json!([["src/lib.rs"]])
         );
-        std::fs::write(root.join("src/other.rs"), "fn x() {}\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("src/other.rs"), "fn x() {}\n")
+            .unwrap();
         let cached = ensure_change(&f.svc, target.clone()).await.unwrap();
         assert_eq!(
             rows(
@@ -2538,10 +2551,11 @@ mod tests {
         let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
         std::fs::create_dir_all(root.join("src")).unwrap();
-        std::fs::write(root.join("src/lib.rs"), BEFORE).unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("src/lib.rs"), BEFORE).unwrap();
         crate::test_fixtures::commit_all(&root, "base");
-        std::fs::write(root.join("src/lib.rs"), AFTER).unwrap();
-        std::fs::write(root.join("src/new.rs"), "fn n() {}\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("src/lib.rs"), AFTER).unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("src/new.rs"), "fn n() {}\n")
+            .unwrap();
         let target = ChangeTarget::Working {
             stream_id: oxplow_domain::StreamId::new(1).to_string(),
         };
@@ -2581,10 +2595,18 @@ mod tests {
         git(&["checkout", "-q", "--", "src/lib.rs"]);
         std::fs::remove_file(root.join("src/new.rs")).unwrap();
         git(&["checkout", "-q", "-b", "other"]);
-        std::fs::write(root.join("src/lib.rs"), "fn a() -> i32 {\n    3\n}\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            root.join("src/lib.rs"),
+            "fn a() -> i32 {\n    3\n}\n",
+        )
+        .unwrap();
         git(&["commit", "-qam", "other"]);
         git(&["checkout", "-q", "-"]);
-        std::fs::write(root.join("src/lib.rs"), "fn a() -> i32 {\n    4\n}\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            root.join("src/lib.rs"),
+            "fn a() -> i32 {\n    4\n}\n",
+        )
+        .unwrap();
         git(&["commit", "-qam", "mine"]);
         git(&["merge", "-q", "other"]);
         let c = refresh_files(&f.svc, target).await.unwrap();
@@ -2605,9 +2627,13 @@ mod tests {
         let root = f.svc.layout.project_dir.clone();
         let body = "pub fn tally(items: &[u32]) -> u32 {\n    let mut total = 0;\n    for item in items {\n        if *item > 10 {\n            total += item * 2;\n        } else {\n            total += item + 1;\n        }\n    }\n    total\n}\n";
         std::fs::create_dir_all(root.join("src")).unwrap();
-        std::fs::write(root.join("src/a.rs"), body).unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("src/a.rs"), body).unwrap();
         crate::test_fixtures::commit_all(&root, "base");
-        std::fs::write(root.join("src/b.rs"), body.replace("tally", "count_up")).unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            root.join("src/b.rs"),
+            body.replace("tally", "count_up"),
+        )
+        .unwrap();
         let sha = crate::test_fixtures::commit_all(&root, "copy");
         let c = ensure_change(
             &f.svc,

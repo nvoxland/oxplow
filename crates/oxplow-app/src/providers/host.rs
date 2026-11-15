@@ -547,6 +547,8 @@ impl HostCalls {
                         enforcement: crate::grants::enforcement(),
                     });
                 let configuration_run = state_run.clone();
+                let settings_run = state_run.clone();
+                let settings_source = configuration.clone();
                 let (state_runtime, parent) = (runtime.clone(), &run);
                 calls = calls.with_state_reader(Box::new(move |input| {
                     let result = state_runtime.block_on(source.snapshot(state_run.clone(), input));
@@ -556,13 +558,32 @@ impl HostCalls {
                     }
                     result
                 }));
+                calls = calls.with_settings_reader(Box::new(move |input| {
+                    let result = settings_source.get(&settings_run, input);
+                    if result.as_ref().is_ok_and(|value| value.secret) {
+                        parent.trace().count("config.secret");
+                    }
+                    if result.is_ok() {
+                        parent.trace().count("config.read");
+                        parent.used_scope("config.read");
+                    }
+                    result
+                }));
                 let configuration_runtime = runtime.clone();
                 calls = calls.with_configuration_reader(Box::new(move || {
                     let result = configuration_runtime
                         .block_on(configuration.snapshot(configuration_run.clone()));
+                    if configuration_run
+                        .trace()
+                        .summary()
+                        .contains_key("config.secret")
+                    {
+                        parent.trace().count("config.secret");
+                    }
                     if result.is_ok() {
                         parent.trace().count("extension_config.read");
                         parent.used_scope("extension_config.read");
+                        parent.used_scope("config.read");
                     }
                     result
                 }));

@@ -22,7 +22,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use oxplow_config::{OXPLOW_CONFIG_FILE, PERSONAL_CONFIG_FILE};
+use oxplow_config::OXPLOW_CONFIG_FILE;
 use oxplow_fs_watch::{Batch, FsWatcher, Scope, Subscription};
 use tracing::{debug, warn};
 
@@ -52,15 +52,20 @@ impl ConfigWatcher {
         let changes = services.stream_watches.subscribe_primary(
             Scope::default()
                 .file(state_dir.join(OXPLOW_CONFIG_FILE))
-                .file(state_dir.join(PERSONAL_CONFIG_FILE))
+                .file(state_dir.join("local.yaml"))
                 .dir(oxplow_config::EXTENSION_SOURCES_DIR),
         );
-        let global_metrics_dir = oxplow_config::global_config_dir()
-            .map(|d| d.join("metrics"))
-            .filter(|d| d.is_dir());
-        let global = global_metrics_dir.as_ref().and_then(|dir| {
-            FsWatcher::watch(dir)
-                .inspect_err(|e| warn!(error = %e, ?dir, "global metrics watcher failed to start"))
+        // Each project's watcher subscribes to the common global directory,
+        // so a global setting change is projected into every open project.
+        // Follow the closest existing ancestor so first creation also works.
+        let global_dir = Some(services.global_config_dir.clone());
+        let global_metrics_dir = global_dir.as_ref().map(|dir| dir.join("metrics"));
+        let global = global_dir.as_ref().and_then(|dir| {
+            let watch_dir = dir.ancestors().find(|ancestor| ancestor.is_dir())?;
+            FsWatcher::watch(watch_dir)
+                .inspect_err(
+                    |e| warn!(error = %e, ?watch_dir, "global settings watcher failed to start"),
+                )
                 .ok()
         });
         let global_changes = global.as_ref().map(FsWatcher::subscribe);
@@ -83,8 +88,11 @@ impl ConfigWatcher {
                     }
                     if says.config {
                         match services.reload_config_from_disk() {
-                            Ok(()) => debug!("reloaded project.yaml after on-disk change"),
-                            Err(e) => warn!(error = %e, "failed to reload project.yaml"),
+                            Ok(()) => {
+                                services.extension_activation.request();
+                                debug!("reloaded settings after on-disk change");
+                            }
+                            Err(e) => warn!(error = %e, "failed to reload settings"),
                         }
                     }
                     if says.global_metrics {
@@ -133,7 +141,7 @@ fn what_changed(batch: &Batch, sources_dir: &Path, global_metrics: Option<&Path>
         }
         let is_config = path
             .file_name()
-            .is_some_and(|n| n == OXPLOW_CONFIG_FILE || n == PERSONAL_CONFIG_FILE);
+            .is_some_and(|n| n == OXPLOW_CONFIG_FILE || n == "local.yaml" || n == "global.yaml");
         // A `.yaml`/`.yml` change under the global metrics dir is announced:
         // the runner re-reads the global scope on `ConfigChanged`.
         let is_global_metric = global_metrics.is_some_and(|dir| {
@@ -174,6 +182,11 @@ mod tests {
     fn a_batch_asks_for_what_its_paths_touch() {
         assert_eq!(says(&["/p/.oxplow/local.sqlite"], &[]), Says::default());
         assert!(says(&["/p/.oxplow/project.yaml"], &[]).config);
+        assert!(says(&["/p/.oxplow/local.yaml"], &[]).config);
+        assert!(says(&["/g/global.yaml"], &[]).config);
+        assert!(says(&["/p/.oxplow/local.yaml"], &[]).config);
+        assert!(says(&["/global/global.yaml"], &[]).config);
+        assert!(!says(&["/p/.oxplow/unrelated.yaml"], &[]).config);
         // A global metric isn't project.yaml: reloading it would read the
         // same config and announce nothing, so it is its own ask.
         let metric = says(&["/g/metrics/a.yaml"], &[]);

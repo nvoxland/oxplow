@@ -351,7 +351,11 @@ mod tests {
     fn the_prompt_carries_no_project_instruction_files() {
         let dir = tempdir().unwrap();
         for file in ["AGENTS.md", "CLAUDE.md"] {
-            std::fs::write(dir.path().join(file), "## Repo rules\nRule 1.").unwrap();
+            crate::test_fixtures::write_settings_fixture(
+                dir.path().join(file),
+                "## Repo rules\nRule 1.",
+            )
+            .unwrap();
         }
         let mut s = stream();
         s.worktree_path = dir.path().to_string_lossy().into_owned();

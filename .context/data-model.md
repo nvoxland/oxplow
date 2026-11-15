@@ -89,18 +89,17 @@ use their current connection, while external hosts use StateSource for a
 separate owned read per call. Provider namespace ownership is captured from
 its active provider declaration, independently of the invoking command.
 Public write commands still require private audit/proposal input handling.
-Neither configuration nor state has a migration runner: a stored configuration layer at
-another schema version fails closed until the extension's own command rewrites it at its
-version — after a rollback too, where the layer is newer than the running version. One
-exception: a layer behind a raised version whose values the new schema still takes is
-restamped by the publication (`extensions-manifest.md` "Changing the schema version"). The
-lower-level store APIs grant no authority themselves. Configuration continues to
-use the project/personal file layers. A file edit and a SQLite
-reset cannot be represented as one atomic DB transaction.
+State has no migration runner; extensions transform state outside the DB and
+publish with its CAS. Settings are separate: registered keys resolve atomic
+local/project/global overrides and defaults through `SettingsStore`, with ordinary
+values in YAML and secret values in secure storage ([settings.md](./settings.md)).
+They have no DB layer stamps or schema carry-forward. The lower-level persistence
+APIs grant no authority themselves. File/secure-storage mutations are not part
+of a SQLite transaction.
 
 ## Storage
 
-All persistence lives in one SQLite file under `.oxplow/local.sqlite`, opened
+Project database persistence lives in `.oxplow/local.sqlite`, opened
 through `Database::open` (`crates/oxplow-db/src/database.rs`). Every store is
 a thin class wrapping that connection. Schema changes go through versioned
 refinery migrations in `crates/oxplow-db/migrations/`, append-only; never
@@ -2263,30 +2262,24 @@ the docs in one diff:
 - [agent-model.md](./agent-model.md) — how the agent acts on this data.
 - [git-integration.md](./git-integration.md) — the commit actions (user-driven).
 
-## Private extension configuration overrides
+## Registered configuration overrides
 
-`extension_config_store` and draft `V53__extension_config.sql` persist one JSON
-object per host-derived namespace (V6: `extension_config.namespace`; the
-extensions sharing one share one document, their declarations merged,
-`extensions-manifest.md`) and Project/Personal layer, both in the local
-project database. There is no global-user namespace or cross-project lookup.
-The store exposes no SQL model, wire type, payload Debug or authority. The host
-must validate the manifest schema, derive the owner, check live grants and
-resolve host-owned secret references before using the effective configuration.
+Core and extension configuration use the shared registry and `SettingsStore`.
+Ordinary values are flat fully qualified keys in `.oxplow/local.yaml`,
+`.oxplow/project.yaml` and `global.yaml`; each registered value resolves local,
+project, global, then default. Objects and arrays are atomic. Secret values use
+the same levels and APIs, with the host routing storage to the OS keychain.
+Registry definitions supply title, description, category, schema, default, UI
+metadata, restart requirement and secret status. Public inventory datasets expose
+redacted values and provenance rather than a separate configuration model.
 
-Whole-object CAS requires the exact schema-version/revision stamp. Creation
-requires no prior stamp; updates increase revision and cannot decrease schema
-version. Reset uses an empty object at a newer revision, preserving stale-token
-rejection. Canonical JSON has a 1 MiB byte and 64-level depth limit; writes count
-before cloning/canonical allocation, reads bound borrowed SQLite text first.
-Namespace-changing/counter-regressing SQL updates are also rejected by a trigger.
-Writes require a caller transaction and roll back their savepoint on logical or
-storage failure. The configuration host now resolves and authorizes reads and
-native audited writes. An explicit migration can CAS both layers together;
-metadata inspection supplies old stamps without invalid effective values.
-Disable/uninstall retain rows while ownership guards deny access; reset uses an
-empty object. Declared migration steps carry old layers forward at activation, in
-the generation's transaction, writing each layer by compare-and-swap.
+The old `extension_config` database schema/store is historical persistence only:
+runtime extension reads, writes, publication and schema changes do not consult or
+mutate it. There is no automatic migration from old configuration files or rows,
+no override schema stamp, and no configuration compare-and-swap. Extension nested
+snapshots are projections over registered keys; private workflow state continues
+to use its separate CAS store above. See [settings.md](./settings.md) and
+[extensions-manifest.md](./extensions-manifest.md) for the runtime contracts.
 
 ## Dedicated job actor audit compatibility
 

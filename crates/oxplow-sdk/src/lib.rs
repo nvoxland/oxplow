@@ -1927,7 +1927,7 @@ mod tests {
         write(
             dir.path(),
             ".oxplow/project.yaml",
-            "ai:\n  roles:\n    prof/plain: { provider: p, model: big }\n    \
+            "oxplow.ai.roles:\n  prof/plain: { provider: p, model: big }\n  \
              summarize: { provider: p, model: small, restrict: [tools] }\n",
         );
         let report = check(

@@ -100,7 +100,8 @@ pub struct Collectors<'a> {
     pub db: oxplow_db::Database,
     pub vocabulary: VocabularyHandle,
     /// Where credential values are kept (the OS keychain in the app).
-    pub secrets: &'a dyn SecretStore,
+    pub secrets: Arc<dyn SecretStore>,
+    pub global: &'a Path,
     /// What a derived collector's `input` is read through.
     pub layer: crate::sql_gateway::SqlGateway,
     /// The loaded-extensions cache (`Services.extension_catalog`).
@@ -128,7 +129,8 @@ pub struct Listing<'a> {
     pub store: &'a SqliteCollectorStore,
     pub db: oxplow_db::Database,
     pub vocabulary: VocabularyHandle,
-    pub secrets: &'a dyn SecretStore,
+    pub secrets: Arc<dyn SecretStore>,
+    pub global: &'a Path,
     pub catalog: &'a Arc<crate::extension::extension_catalog::ExtensionCatalog>,
 }
 
@@ -141,7 +143,8 @@ impl Collectors<'_> {
             store: self.store,
             db: self.db.clone(),
             vocabulary: self.vocabulary.clone(),
-            secrets: self.secrets,
+            secrets: self.secrets.clone(),
+            global: self.global,
             catalog: self.catalog,
         }
     }
@@ -155,7 +158,8 @@ impl<'a> Collectors<'a> {
             store: &svc.collector_store,
             db: svc.db.clone(),
             vocabulary: svc.event_log_store.vocabulary().clone(),
-            secrets: svc.secrets.as_ref(),
+            secrets: svc.secrets.clone(),
+            global: &svc.global_config_dir,
             layer: svc.sql.clone(),
             catalog: &svc.extension_catalog,
             ai: svc.ai_compute.clone(),
@@ -192,8 +196,53 @@ pub fn instance_credential_account(
     format!("instance:{scope}:{extension}/{instance_id}:{name}")
 }
 
-pub fn credential_account(project: &str, extension: &str, name: &str) -> String {
-    format!("source:{project}:{extension}:{name}")
+/// Read the same registered secret used by generic config.get/set/unset.
+pub(crate) fn credential_value(
+    ctx: &Collectors<'_>,
+    namespace: &str,
+    name: &str,
+) -> Result<Option<String>, DomainError> {
+    let extensions = ctx
+        .catalog
+        .unpinned(ctx.root, "collector credential settings");
+    let project = ctx.catalog.project_of(ctx.root);
+    let store = crate::settings::store(project, ctx.global, ctx.secrets.clone(), &extensions)
+        .map_err(|_| DomainError::Storage("collector settings unavailable".into()))?;
+    let key = crate::extension::extension_settings::credential_definition(namespace, name).key;
+    let setting = store
+        .get(&key, None)
+        .map_err(|_| DomainError::Storage("collector credential unavailable".into()))?;
+    setting
+        .value
+        .map(|value| {
+            value
+                .as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| DomainError::Storage("invalid collector credential".into()))
+        })
+        .transpose()
+}
+
+pub(crate) fn credential_is_set(
+    ctx: &Collectors<'_>,
+    namespace: &str,
+    name: &str,
+) -> Result<bool, DomainError> {
+    let extensions = ctx
+        .catalog
+        .unpinned(ctx.root, "collector credential presence");
+    let store = crate::settings::store(
+        ctx.catalog.project_of(ctx.root),
+        ctx.global,
+        ctx.secrets.clone(),
+        &extensions,
+    )
+    .map_err(|_| DomainError::Storage("collector settings unavailable".into()))?;
+    let key = crate::extension::extension_settings::credential_definition(namespace, name).key;
+    store
+        .inspect(&key, None)
+        .map(|setting| setting.is_set)
+        .map_err(|_| DomainError::Storage("collector credential unavailable".into()))
 }
 
 /// Set (or with `None`, clear) a credential some collector of `extension`
@@ -229,12 +278,16 @@ pub fn set_credential(
             "no collector in `{namespace}` declares a credential named `{name}`"
         )));
     }
-    let account = credential_account(&ctx.project, namespace, name);
-    let result = match value.map(str::trim).filter(|v| !v.is_empty()) {
-        Some(v) => ctx.secrets.set(&account, v),
-        None => ctx.secrets.delete(&account),
-    };
-    result.map_err(|e| DomainError::Storage(e.to_string()))
+    let project = ctx.catalog.project_of(ctx.root);
+    let store = crate::settings::store(project, ctx.global, ctx.secrets.clone(), &extensions)
+        .map_err(|_| DomainError::Storage("collector settings unavailable".into()))?;
+    let key = crate::extension::extension_settings::credential_definition(namespace, name).key;
+    let level = oxplow_config::settings::Level::Local;
+    match value.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) => store.set(&key, serde_json::json!(value), level),
+        None => store.unset(&key, level),
+    }
+    .map_err(|_| DomainError::Storage("collector credential could not be saved".into()))
 }
 
 /// Every declared collector under `root`, with its last run.
@@ -248,15 +301,15 @@ pub async fn list_with(ctx: &Listing<'_>) -> Result<Vec<CollectorListing>, Domai
     let health =
         crate::contribution_health::ContributionHealth::new(ctx.db.clone(), ctx.vocabulary.clone());
     let mut out = Vec::new();
-    for ext in ctx
-        .catalog
-        .unpinned(
-            ctx.root,
-            "a collector is found on its declaration; its run pins",
-        )
-        .iter()
-        .cloned()
-    {
+    let extensions = ctx.catalog.unpinned(ctx.root, "collector listing settings");
+    let settings = crate::settings::store(
+        ctx.catalog.project_of(ctx.root),
+        ctx.global,
+        ctx.secrets.clone(),
+        &extensions,
+    )
+    .map_err(|_| DomainError::Storage("collector settings unavailable".into()))?;
+    for ext in extensions.iter().cloned() {
         for spec in ext.collectors.clone() {
             let run = runs
                 .iter()
@@ -267,12 +320,17 @@ pub async fn list_with(ctx: &Listing<'_>) -> Result<Vec<CollectorListing>, Domai
                 .iter()
                 .map(|name| CredentialStatus {
                     name: name.clone(),
-                    set: ctx
-                        .secrets
-                        .get(&credential_account(ctx.project, &ext.namespace, name))
-                        .ok()
-                        .flatten()
-                        .is_some(),
+                    set: settings
+                        .inspect(
+                            &crate::extension::extension_settings::credential_definition(
+                                &ext.namespace,
+                                name,
+                            )
+                            .key,
+                            None,
+                        )
+                        .map(|setting| setting.is_set)
+                        .unwrap_or(false),
                 })
                 .collect();
             let disabled = health
@@ -1992,10 +2050,7 @@ async fn produce(
             missing = Some(format!("credential `{name}`: {why}"));
             continue;
         }
-        match ctx
-            .secrets
-            .get(&credential_account(&ctx.project, owner, name))
-        {
+        match credential_value(ctx, owner, name) {
             Ok(Some(v)) => {
                 credentials.insert(name.clone(), v);
             }
@@ -2030,6 +2085,7 @@ pub struct CollectorRunner {
     pub db: oxplow_db::Database,
     pub vocabulary: VocabularyHandle,
     pub secrets: Arc<dyn SecretStore>,
+    pub global_dir: PathBuf,
     pub layer: crate::sql_gateway::SqlGateway,
     pub catalog: Arc<crate::extension::extension_catalog::ExtensionCatalog>,
     pub ai: Arc<crate::ai_compute::AiCompute>,
@@ -2154,7 +2210,8 @@ impl CollectorRunner {
             store: &self.store,
             db: self.db.clone(),
             vocabulary: self.vocabulary.clone(),
-            secrets: self.secrets.as_ref(),
+            secrets: self.secrets.clone(),
+            global: &self.global_dir,
             layer: self.layer.clone(),
             catalog: &self.catalog,
             ai: self.ai.clone(),
@@ -2591,7 +2648,7 @@ pub(crate) mod tests {
         use std::os::unix::fs::PermissionsExt;
         let p = dir.join(name);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-        std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
+        crate::test_fixtures::write_settings_fixture(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
         std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
 
@@ -2602,12 +2659,12 @@ pub(crate) mod tests {
         let dir = tempfile::tempdir().unwrap();
         let ext_dir = dir.path().join(".oxplow/extensions/my-gh");
         std::fs::create_dir_all(&ext_dir).unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             ext_dir.join("extension.yaml"),
             "manifest: 2\nname: my-gh\nintent:\n  purpose: p\ncollectors:\n  - id: gh\n    runtime: starlark\n    entry: gh.star\n    entities:\n      - name: pr\n        key: number\n        columns: { number: int, title: text }\n",
         )
         .unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             ext_dir.join("gh.star"),
             "def transform(x):\n    return {}\n",
         )
@@ -2789,7 +2846,7 @@ pub(crate) mod tests {
         let root = tempfile::tempdir().unwrap();
         let ext = root.path().join(".oxplow/extensions/my-gh");
         std::fs::create_dir_all(&ext).unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             ext.join("extension.yaml"),
             "manifest: 2\nname: my-gh\nintent:\n  purpose: test\npermissions: [process.run]\ncollectors:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int, title: text } }\n",
         )
@@ -2801,12 +2858,13 @@ pub(crate) mod tests {
         );
         let db = oxplow_db::Database::in_memory();
         let store = SqliteCollectorStore::new(db.clone());
-        let secrets = oxplow_ai::secrets::MemorySecrets::default();
+        let secrets = Arc::new(oxplow_ai::secrets::MemorySecrets::default());
         let ctx = Collectors {
             root: root.path(),
             project: "test-project".into(),
             store: &store,
-            secrets: &secrets,
+            secrets: secrets.clone(),
+            global: root.path(),
             db: db.clone(),
             vocabulary: VocabularyHandle::core(),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
@@ -2940,7 +2998,7 @@ pub(crate) mod tests {
         for name in ["one", "two"] {
             let ext = root.join(format!(".oxplow/extensions/{name}"));
             std::fs::create_dir_all(&ext).unwrap();
-            std::fs::write(
+            crate::test_fixtures::write_settings_fixture(
                 ext.join("extension.yaml"),
                 format!("manifest: 2\nname: {name}\nintent:\n  purpose: test\npermissions: [process.run, secrets:TOKEN]\ncollectors:\n  - id: s\n    runtime: exec\n    entry: sync.sh\n    credentials: [TOKEN]\n    entities:\n      - {{ name: row, key: id, columns: {{ id: int, token: text }} }}\n"),
             )
@@ -2960,12 +3018,13 @@ pub(crate) mod tests {
         two_extensions(root.path());
         let db = oxplow_db::Database::in_memory();
         let store = SqliteCollectorStore::new(db.clone());
-        let secrets = oxplow_ai::secrets::MemorySecrets::default();
+        let secrets = Arc::new(oxplow_ai::secrets::MemorySecrets::default());
         let ctx = Collectors {
             root: root.path(),
             project: "test-project".into(),
             store: &store,
-            secrets: &secrets,
+            secrets: secrets.clone(),
+            global: root.path(),
             db: db.clone(),
             vocabulary: VocabularyHandle::core(),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
@@ -2992,11 +3051,14 @@ pub(crate) mod tests {
         assert!(!two.credentials[0].set, "scoped to its extension");
         assert!(!serde_json::to_string(&list).unwrap().contains("secret-one"));
         // Another project with an extension of the same name doesn't see it.
+        let other_root = tempfile::tempdir().unwrap();
+        two_extensions(other_root.path());
         let elsewhere = Collectors {
-            root: root.path(),
+            root: other_root.path(),
             project: "another-project".into(),
             store: &store,
-            secrets: &secrets,
+            secrets: secrets.clone(),
+            global: root.path(),
             db: db.clone(),
             vocabulary: VocabularyHandle::core(),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
@@ -3056,11 +3118,11 @@ pub(crate) mod tests {
     fn extension(root: &Path, name: &str, manifest: &str, files: &[(&str, &str)]) {
         let ext = root.join(format!(".oxplow/extensions/{name}"));
         std::fs::create_dir_all(&ext).unwrap();
-        std::fs::write(ext.join("extension.yaml"), manifest).unwrap();
+        crate::test_fixtures::write_settings_fixture(ext.join("extension.yaml"), manifest).unwrap();
         for (path, body) in files {
             let p = ext.join(path);
             std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-            std::fs::write(p, body).unwrap();
+            crate::test_fixtures::write_settings_fixture(p, body).unwrap();
         }
     }
 
@@ -3532,12 +3594,13 @@ pub(crate) mod tests {
         );
         let db = task_db().await;
         let store = SqliteCollectorStore::new(db.clone());
-        let secrets = oxplow_ai::secrets::MemorySecrets::default();
+        let secrets = Arc::new(oxplow_ai::secrets::MemorySecrets::default());
         let ctx = Collectors {
             root: root.path(),
             project: "test-project".into(),
             store: &store,
-            secrets: &secrets,
+            secrets: secrets.clone(),
+            global: root.path(),
             db: db.clone(),
             vocabulary: VocabularyHandle::core(),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
@@ -3644,12 +3707,13 @@ pub(crate) mod tests {
             }]
         }));
         let store = SqliteCollectorStore::new(db.clone());
-        let secrets = oxplow_ai::secrets::MemorySecrets::default();
+        let secrets = Arc::new(oxplow_ai::secrets::MemorySecrets::default());
         let ctx = Collectors {
             root: root.path(),
             project: "test-project".into(),
             store: &store,
-            secrets: &secrets,
+            secrets: secrets.clone(),
+            global: root.path(),
             db: db.clone(),
             vocabulary: VocabularyHandle::core(),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()).with_activation(activation),
@@ -3707,12 +3771,13 @@ pub(crate) mod tests {
         );
         let db = task_db().await;
         let store = SqliteCollectorStore::new(db.clone());
-        let secrets = oxplow_ai::secrets::MemorySecrets::default();
+        let secrets = Arc::new(oxplow_ai::secrets::MemorySecrets::default());
         let ctx = Collectors {
             root: root.path(),
             project: "test-project".into(),
             store: &store,
-            secrets: &secrets,
+            secrets: secrets.clone(),
+            global: root.path(),
             db: db.clone(),
             vocabulary: VocabularyHandle::core(),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
@@ -3762,12 +3827,13 @@ pub(crate) mod tests {
         let ext = root.path().join(".oxplow/extensions/inc");
         let db = task_db().await;
         let store = SqliteCollectorStore::new(db.clone());
-        let secrets = oxplow_ai::secrets::MemorySecrets::default();
+        let secrets = Arc::new(oxplow_ai::secrets::MemorySecrets::default());
         let ctx = Collectors {
             root: root.path(),
             project: "test-project".into(),
             store: &store,
-            secrets: &secrets,
+            secrets: secrets.clone(),
+            global: root.path(),
             db: db.clone(),
             vocabulary: VocabularyHandle::core(),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),
@@ -3890,12 +3956,13 @@ printf '{{"entities":{{"r":[{{"id":1,"declared":"%s","undeclared":"%s","direct":
         );
         let db = task_db().await;
         let store = SqliteCollectorStore::new(db.clone());
-        let secrets = oxplow_ai::secrets::MemorySecrets::default();
+        let secrets = Arc::new(oxplow_ai::secrets::MemorySecrets::default());
         let ctx = Collectors {
             root: root.path(),
             project: "test-project".into(),
             store: &store,
-            secrets: &secrets,
+            secrets: secrets.clone(),
+            global: root.path(),
             db: db.clone(),
             vocabulary: VocabularyHandle::core(),
             layer: crate::sql_gateway::SqlGateway::new(db.clone()),

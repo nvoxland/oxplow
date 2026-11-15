@@ -301,3 +301,198 @@ mod tests {
         assert_eq!(undone.title, before.title);
     }
 }
+
+#[cfg(test)]
+mod secret_recording_tests {
+    use super::*;
+    use crate::commands::{HandlerOutput, Invocation, TxCtx};
+    use oxplow_config::settings::Level;
+    use oxplow_domain::{Actor, Envelope};
+    use serde_json::json;
+
+    const MARKER: &str = "secret-audit-marker-do-not-record";
+
+    fn spec(id: &str, atomicity: Atomicity) -> CommandSpec {
+        let mut spec = sequence_spec();
+        spec.id = id.into();
+        spec.input_schema = json!({"type":"object"});
+        spec.atomicity = atomicity;
+        spec
+    }
+
+    fn answer(input: Value) -> HandlerOutput {
+        HandlerOutput {
+            result: input.clone(),
+            inverse: Some(CommandCall {
+                name: "oxplow.secret_test.leaf".into(),
+                input: input.clone(),
+            }),
+            events: vec![Envelope::typed::<
+                oxplow_domain::events::schema::ConfigChanged,
+            >(
+                "test",
+                &oxplow_domain::events::schema::ConfigChangedV2 {
+                    key: "test.secret-derived".into(),
+                    before: Value::Null,
+                    after: input,
+                    layer: oxplow_domain::events::schema::ConfigLayer::Project,
+                },
+            )],
+            ..Default::default()
+        }
+    }
+
+    async fn assert_no_secret_history(svc: &crate::Services) {
+        let audits = oxplow_db::SqliteCommandAuditStore::new(svc.db.clone())
+            .list_recent(100)
+            .await
+            .unwrap();
+        assert!(!format!("{audits:?}").contains(MARKER), "{audits:?}");
+        let events = svc.event_log_store.read_after(0, 1000).await.unwrap();
+        assert!(!format!("{events:?}").contains(MARKER));
+        assert!(!events
+            .iter()
+            .any(|event| event.envelope.event_type == "config.changed"
+                && event.envelope.payload["key"] == "test.secret-derived"));
+    }
+
+    /// The authorized read stays useful, while arbitrary transformations of
+    /// its value cannot enter child audit inputs, results, events or undo.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_secret_read_derived_composite_keeps_values_out_of_history() {
+        for external in [false, true] {
+            let fx = crate::test_fixtures::services_with_thread().await;
+            let global = fx.svc.layout.state_dir.join("global-config");
+            let store = crate::settings::store(
+                &fx.svc.layout.project_dir,
+                &global,
+                fx.svc.secrets.clone(),
+                &[],
+            )
+            .unwrap();
+            store
+                .set(
+                    "oxplow.ai.providers",
+                    json!([{"id":"audit-test", "kind":"openai"}]),
+                    Level::Local,
+                )
+                .unwrap();
+            let store = crate::settings::store(
+                &fx.svc.layout.project_dir,
+                &global,
+                fx.svc.secrets.clone(),
+                &[],
+            )
+            .unwrap();
+            let key = crate::ai_service::provider_key_setting("audit-test");
+            store.set(&key, json!(MARKER), Level::Local).unwrap();
+            let bus = fx.svc.commands.clone();
+            let read = bus
+                .run(
+                    &Actor::Human,
+                    "oxplow.config.get",
+                    json!({"key":key}),
+                    false,
+                )
+                .await
+                .unwrap();
+            assert_eq!(read.result["value"], MARKER);
+            let handler = if external {
+                Handler::External(Arc::new(|_: Invocation, input| {
+                    Box::pin(async move { Ok(answer(input)) })
+                }))
+            } else {
+                Handler::Tx(Arc::new(|_: &TxCtx<'_>, input| Ok(answer(input))))
+            };
+            bus.register(
+                Command::new(
+                    spec(
+                        "oxplow.secret_test.leaf",
+                        if external {
+                            Atomicity::External
+                        } else {
+                            Atomicity::Tx
+                        },
+                    ),
+                    handler,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+            let compose = Arc::new(
+                move |_: &Composing<'_>, run: &oxplow_domain::run::RunContext, _: &Value| {
+                    let setting = store.get(&key, None).unwrap();
+                    assert!(setting.secret);
+                    run.trace().count("config.secret");
+                    let derived = json!({"arbitrary":{"nested":[format!("prefix:{}", setting.value.unwrap().as_str().unwrap())]}});
+                    Ok(Composition {
+                        calls: vec![CommandCall {
+                            name: "oxplow.secret_test.leaf".into(),
+                            input: derived.clone(),
+                        }],
+                        result: Some(derived.clone()),
+                        inverse: external.then(|| {
+                            vec![CommandCall {
+                                name: "oxplow.secret_test.leaf".into(),
+                                input: derived,
+                            }]
+                        }),
+                        ..Default::default()
+                    })
+                },
+            );
+            bus.register(
+                Command::new(
+                    spec("oxplow.secret_test.compose", Atomicity::Dispatch),
+                    Compose::handler(compose),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+            let result = bus
+                .run(&Actor::Human, "oxplow.secret_test.compose", json!({}), true)
+                .await
+                .unwrap();
+            assert!(
+                result.result.to_string().contains(MARKER),
+                "authorized callers receive the result"
+            );
+            assert!(result.inverse.is_none());
+            assert_no_secret_history(&fx.svc).await;
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_secret_read_failed_composer_redacts_its_error() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let compose = Arc::new(
+            |_: &Composing<'_>, run: &oxplow_domain::run::RunContext, _: &Value| {
+                run.trace().count("config.secret");
+                Err(CommandError::Failed {
+                    message: MARKER.into(),
+                })
+            },
+        );
+        fx.svc
+            .commands
+            .register(
+                Command::new(
+                    spec("oxplow.secret_test.fail", Atomicity::Dispatch),
+                    Compose::handler(compose),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let error = fx
+            .svc
+            .commands
+            .run(&Actor::Human, "oxplow.secret_test.fail", json!({}), true)
+            .await
+            .unwrap_err();
+        assert!(!error.to_string().contains(MARKER));
+        assert!(error
+            .to_string()
+            .contains("secret configuration consumer failed"));
+        assert_no_secret_history(&fx.svc).await;
+    }
+}

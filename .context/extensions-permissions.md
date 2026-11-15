@@ -11,7 +11,7 @@ declaration: pages, panels, slots, decorators, replacements; its
 own datasets; a collector's `input:` query (declared and reviewable); its
 own commands and the effects, jobs and commands whose scripts compose them;
 components that query their own datasets; Starlark and jaq collectors that
-don't ask a model; `state.read`, `extension_config.read`, `jobs.read`.
+don't ask a model; `state.read`, `config.read`, `extension_config.read`, `jobs.read`.
 
 ```yaml
 # A list, in a script's `needs:` grammar (a scope id, or `<scope>:<qualifier>`);
@@ -256,10 +256,35 @@ uses):
 
 | Service | Builtins | Needs permission | Modes |
 |---|---|---|---|
+| `config.read` | `scope("config.read", {key, level?})` | no; current owner and secret ownership checked | any |
+| `extension_config.read` | `scope("extension_config.read", {})` (nested read alias) | no; current owner checked | any |
 | `sql.read` | `scope("sql.read", …)` | no | any |
 | `tree.read` | `files`, `source_files`, `duplicate_blocks` | no | any |
 | `ai.compute` | `ai_classify`, `ai_score`, `ai_summarize`, `ai_extract`, `ai_complete` | `ai` | external only |
 | `ai.discover` | `ai_capabilities`, `ai_models`; `scope("ai.discover", { role })` | no | any, when the host supplies AI metadata |
+
+Settings reads use the shared registry and backend, for both core and extension
+keys. Service-backed hosts receive the daemon's global directory and secure
+backend explicitly; fixture hosts therefore use their injected directory and
+memory secrets. SQL/condition projections receive that same global directory
+and use a non-secure reader because they omit secrets before resolution. `config.read` checks the current contribution and its declared/live scope,
+then exposes core definitions plus its extension's definitions. A secret owned
+by another registry owner is refused. An authorized direct read can return the
+owning extension's secret; the host marks the read so audit results are redacted.
+The nested `extension_config.read` alias returns `{values, origins}` from the
+same backend, with no layer snapshots, revisions, inspect or CAS operation.
+Scripts write by composing the generic config set/unset commands with explicit
+levels and normal command permissions; there is no writable settings service.
+SQL `config('/pointer')` and contribution conditions use a public projection
+that omits secrets before secure lookup.
+
+All settings resolve complete local, project, global, then default values.
+Ordinary overrides live in flat YAML maps; secret values use the secure backend
+through the same get/set/unset APIs. Collector credentials are registered secret
+strings (`<namespace>.credentials.<hex UTF-8 name>`); execution still checks the
+collector's named credential grant before reading a value. Collector inventory
+uses redacted inspection. Opaque provider references and OAuth runtime state are
+separate operational identities, as described below.
 
 - **Who may declare what** (checked at load): a Starlark collector's
   `needs:` any service (`check_declared`; another runtime has no

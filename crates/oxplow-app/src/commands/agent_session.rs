@@ -212,7 +212,7 @@ pub fn open_op(config: super::config_commands::ConfigTarget, harnesses: HarnessR
                     ctx.actor(),
                     "newThreadSession",
                     Some(json!(harness)),
-                    super::config_commands::Layer::Personal,
+                    super::config_commands::Layer::Local,
                 )?)
             } else {
                 None

@@ -1197,17 +1197,14 @@ pub(crate) async fn offering_implementations(
     svc: &crate::Services,
     extensions: &[crate::extension::extensions::Extension],
 ) -> Settings {
-    let extensions = extensions.to_vec();
-    svc.db
-        .read(move |conn| Ok(offering_implementations_tx(conn, &extensions)))
-        .await
-        .unwrap_or_default()
+    offering_implementations_tx(&svc.layout.project_dir, &svc.global_config_dir, extensions)
 }
 
 /// [`offering_implementations`] in the caller's transaction: what the
 /// publication checks, after it commits, against what it was prepared with.
 pub(crate) fn offering_implementations_tx(
-    conn: &rusqlite::Connection,
+    project: &std::path::Path,
+    global: &std::path::Path,
     extensions: &[crate::extension::extensions::Extension],
 ) -> Settings {
     let mut out = Settings::new();
@@ -1222,7 +1219,8 @@ pub(crate) fn offering_implementations_tx(
             continue;
         }
         match crate::extension::extension_configuration::effective_values(
-            conn,
+            project,
+            global,
             &e.namespace,
             declaration,
         ) {
@@ -1265,31 +1263,12 @@ pub(crate) async fn offering_settings(
     if wanted.is_empty() {
         return Default::default();
     }
-    let read = svc
-        .db
-        .read(move |conn| {
-            Ok(wanted
-                .into_iter()
-                .filter_map(|(namespace, declaration)| {
-                    match crate::extension::extension_configuration::effective_values(
-                        conn,
-                        &namespace,
-                        &declaration,
-                    ) {
-                        Ok(values) => Some((namespace, values)),
-                        Err(error) => {
-                            tracing::warn!(%namespace, %error, "its settings can't be read; the skills they offer are left out");
-                            None
-                        }
-                    }
-                })
-                .collect())
-        })
-        .await;
-    read.unwrap_or_else(|error| {
-        tracing::warn!(%error, "reading the settings that offer skills failed");
-        Default::default()
-    })
+    wanted.into_iter().filter_map(|(namespace, declaration)| {
+        match crate::extension::extension_configuration::effective_values(&svc.layout.project_dir, &svc.global_config_dir, &namespace, &declaration) {
+            Ok(values) => Some((namespace, values)),
+            Err(error) => { tracing::warn!(%namespace, %error, "its settings can't be read; the skills they offer are left out"); None }
+        }
+    }).collect()
 }
 
 /// Rewrite the skills and commands of the agent runtimes already on disk
@@ -1632,7 +1611,7 @@ mod tests {
         let svc = &fx.svc;
         svc.config.write().unwrap().extensions = Vec::new();
         std::fs::create_dir_all(svc.layout.project_dir.join(".oxplow")).unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             oxplow_config::config_path(&svc.layout.project_dir),
             "extensions: []\n",
         )
@@ -1799,7 +1778,11 @@ mod tests {
         let (skills, commands) = (plugin.join("skills"), plugin.join("commands"));
         std::fs::create_dir_all(skills.join("oxplow-extension")).unwrap();
         std::fs::create_dir_all(&commands).unwrap();
-        std::fs::write(skills.join("oxplow-extension/SKILL.md"), "stale").unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            skills.join("oxplow-extension/SKILL.md"),
+            "stale",
+        )
+        .unwrap();
         // A harness that keeps its skills beside a stream's worktree
         // (Codex) has them refreshed there.
         let stream = svc.stream_store.list().await.unwrap().remove(0);
@@ -1807,8 +1790,9 @@ mod tests {
             crate::worktrees::workspace_path(&svc.layout.project_dir, &stream.worktree_path)
                 .join(".agents/skills/oxplow-extension");
         std::fs::create_dir_all(&in_worktree).unwrap();
-        std::fs::write(in_worktree.join("SKILL.md"), "stale").unwrap();
-        std::fs::write(in_worktree.join(".oxplow"), "").unwrap();
+        crate::test_fixtures::write_settings_fixture(in_worktree.join("SKILL.md"), "stale")
+            .unwrap();
+        crate::test_fixtures::write_settings_fixture(in_worktree.join(".oxplow"), "").unwrap();
         refresh_agent_text(svc).await;
         let current = oxplow_agent_text::core_text()
             .skill_body("oxplow-extension")
@@ -1834,12 +1818,12 @@ mod contribution_tests {
         let fx = crate::test_fixtures::services_with_thread().await;
         let dir = fx.svc.layout.project_dir.join(".oxplow/extensions/acme");
         std::fs::create_dir_all(dir.join("skills")).unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             dir.join("extension.yaml"),
             "manifest: 2\nname: acme\nversion: 1.2.0\nintent:\n  purpose: p\n  examples: [{ name: a }]\npermissions: [agent.write]\nskills:\n  - { name: deploy, file: skills/deploy.md }\n",
         )
         .unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             dir.join("skills/deploy.md"),
             "---\nname: deploy\ndescription: d\n---\nShip it.\n",
         )
@@ -1937,8 +1921,7 @@ mod contribution_tests {
 
 #[cfg(test)]
 mod setting_tests {
-    use oxplow_db::extension_config_store::{ConfigNamespace, SqliteExtensionConfigStore};
-    use oxplow_domain::extension_state::Scope;
+    use oxplow_config::settings::Level;
     use oxplow_domain::Actor;
     use serde_json::{json, Value};
 
@@ -1949,7 +1932,7 @@ mod setting_tests {
     fn declare(fx: &ThreadFixture) {
         let dir = fx.svc.layout.project_dir.join(".oxplow/extensions/acme");
         std::fs::create_dir_all(dir.join("skills")).unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             dir.join("extension.yaml"),
             "manifest: 2
 name: acme
@@ -1969,16 +1952,11 @@ skills:
   - { name: on-a, file: skills/on-a.md, when: { config: /mode, in: [a] } }
   - { name: on-b, file: skills/on-b.md, when: { config: /mode, in: [b] } }
   - { name: always, file: skills/always.md }
-commands:
-  - name: config.write
-    summary: Replace configuration overrides.
-    scope: extension_config.write
-    op: compare_exchange
 ",
         )
         .unwrap();
         for name in ["on-a", "on-b", "always"] {
-            std::fs::write(
+            crate::test_fixtures::write_settings_fixture(
                 dir.join(format!("skills/{name}.md")),
                 format!("---\nname: {name}\ndescription: d\n---\nGo.\n"),
             )
@@ -2003,16 +1981,20 @@ commands:
         names
     }
 
-    async fn store(fx: &ThreadFixture, scope: Scope, values: Value) {
-        SqliteExtensionConfigStore::new(fx.svc.db.clone())
-            .compare_exchange(
-                ConfigNamespace::new("acme".into(), scope).unwrap(),
-                None,
-                1,
-                values,
-            )
-            .await
-            .unwrap();
+    async fn store(fx: &ThreadFixture, level: Level, values: Value) {
+        let extensions = fx
+            .svc
+            .extension_catalog
+            .live_snapshot(&fx.svc.layout.project_dir);
+        crate::settings::store(
+            &fx.svc.layout.project_dir,
+            &fx.svc.global_config_dir,
+            fx.svc.secrets.clone(),
+            extensions.extensions(),
+        )
+        .unwrap()
+        .set("acme.mode", values["mode"].clone(), level)
+        .unwrap();
     }
 
     /// A skill with `when:` is offered only while the extension's effective
@@ -2025,10 +2007,10 @@ commands:
         crate::test_fixtures::activate_with_problems(&fx.svc).await;
         assert_eq!(offered(&fx).await, ["always", "on-a"], "the default is a");
 
-        store(&fx, Scope::Project, json!({ "mode": "b" })).await;
+        store(&fx, Level::Project, json!({ "mode": "b" })).await;
         assert_eq!(offered(&fx).await, ["always", "on-b"], "the project's b");
 
-        store(&fx, Scope::Personal, json!({ "mode": "a" })).await;
+        store(&fx, Level::Local, json!({ "mode": "a" })).await;
         assert_eq!(
             offered(&fx).await,
             ["always", "on-a"],
@@ -2059,9 +2041,8 @@ commands:
             .commands
             .run(
                 &Actor::Human,
-                "acme.config.write",
-                json!({ "schema_version": 1,
-                        "project": { "expected": null, "values": { "mode": "b" } } }),
+                "oxplow.config.set",
+                json!({ "key": "acme.mode", "value": "b", "level": "project" }),
                 false,
             )
             .await
@@ -2069,7 +2050,11 @@ commands:
         // What the event pump does when the write's `command.executed` arrives.
         fx.svc
             .extension_activation
-            .request_config_refresh(&fx.svc.db)
+            .request_config_refresh(
+                &fx.svc.db,
+                &fx.svc.layout.project_dir,
+                &fx.svc.global_config_dir,
+            )
             .await
             .unwrap();
         assert!(
@@ -2112,26 +2097,25 @@ commands:
             names
         };
         assert_eq!(offered().await, ["next-task", "track-work"], "the default");
-        let store = SqliteExtensionConfigStore::new(fx.svc.db.clone());
-        let mut expected = None;
+        let extensions = fx
+            .svc
+            .extension_catalog
+            .live_snapshot(&fx.svc.layout.project_dir);
+        let store = crate::settings::store(
+            &fx.svc.layout.project_dir,
+            &fx.svc.global_config_dir,
+            fx.svc.secrets.clone(),
+            extensions.extensions(),
+        )
+        .unwrap();
         for (workflow, skills) in [
             ("person_files", vec!["next-task", "work-tasks"]),
             ("custom", vec!["next-task"]),
             ("off", vec![]),
         ] {
-            let values = json!({ "tasks": { "workflow": workflow } });
-            expected = Some(
-                store
-                    .compare_exchange(
-                        ConfigNamespace::new("oxtask".into(), Scope::Project).unwrap(),
-                        expected,
-                        1,
-                        values,
-                    )
-                    .await
-                    .unwrap()
-                    .stamp(),
-            );
+            store
+                .set("oxtask.tasks.workflow", json!(workflow), Level::Project)
+                .unwrap();
             assert_eq!(offered().await, skills, "{workflow}");
         }
     }

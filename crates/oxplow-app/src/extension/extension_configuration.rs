@@ -1,270 +1,161 @@
-//! Private configuration services: host-derived ownership, validated effective
-//! layers and atomic override updates. Settings data never conveys authority.
-
-use std::{path::PathBuf, sync::Arc};
-
-use oxplow_db::extension_config_store::{self, ConfigNamespace, ConfigSnapshot, ConfigStoreError};
-use oxplow_domain::{
-    extension_state::{Scope, Stamp},
-    run::{Mode, RunContext},
+//! Authorized nested projections of the shared settings service.
+use crate::{
+    extension::extension_catalog::ExtensionCatalog,
+    extension::extension_state::{StateHost, StateHostError},
+    extension::extensions::config_schema::ConfigurationFile,
 };
-use rusqlite::Connection;
+use oxplow_domain::run::RunContext;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-
-use crate::{
-    commands::TxCtx,
-    extension::extension_catalog::ExtensionCatalog,
-    extension::extension_state::{StateHost, StateHostError},
-    extension::extensions::{config::ResolvedConfig, config_schema::ConfigurationFile},
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+    sync::Arc,
 };
-
 #[derive(Clone, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReadInput {}
-
 #[derive(Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct LayerUpdate {
-    pub expected: Option<Stamp>,
-    pub values: Value,
+pub struct GetInput {
+    pub key: String,
+    pub level: Option<oxplow_config::settings::Level>,
 }
-
-/// A single override or both layers during an explicit schema migration.
-/// The host fixes the extension; no credential/authority selector is accepted.
-#[derive(Clone, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct WriteInput {
-    pub schema_version: u32,
-    pub project: Option<LayerUpdate>,
-    pub personal: Option<LayerUpdate>,
-}
-
-#[derive(Clone, Serialize)]
-pub struct Stamps {
-    pub schema_version: u32,
-    pub project: Option<Stamp>,
-    pub personal: Option<Stamp>,
-    /// Which stored layers are at a schema version other than the declared
-    /// one: reads of them fail closed until the extension's own write
-    /// replaces them at the declared version.
-    pub needs_migration: NeedsMigration,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-pub struct NeedsMigration {
-    pub project: bool,
-    pub personal: bool,
-}
-
-impl Stamps {
-    fn of(schema_version: u32, project: Option<Stamp>, personal: Option<Stamp>) -> Self {
-        let behind = |stamp: &Option<Stamp>| {
-            stamp.is_some_and(|stamp| stamp.schema_version != schema_version)
-        };
-        Self {
-            schema_version,
-            needs_migration: NeedsMigration {
-                project: behind(&project),
-                personal: behind(&personal),
-            },
-            project,
-            personal,
-        }
-    }
-}
-
 #[derive(Clone, Serialize)]
 pub struct ConfigurationSnapshot {
-    #[serde(flatten)]
-    pub stamps: Stamps,
-    #[serde(flatten)]
-    pub resolved: ResolvedConfig,
-    /// Each override layer as stored (`null`: none): a write replaces a
-    /// whole layer, so a caller changing one key writes the rest back.
-    pub layers: LayerValues,
+    pub values: Value,
+    pub origins: BTreeMap<String, oxplow_config::settings::Origin>,
 }
-
-/// The project and personal layers' own values, as stored.
-#[derive(Clone, Serialize)]
-pub struct LayerValues {
-    pub project: Option<Value>,
-    pub personal: Option<Value>,
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigurationError {
     #[error("extension configuration access denied")]
     Denied,
     #[error("the owning extension has no configuration declaration")]
     Undeclared,
-    #[error("extension configuration requires an explicit schema migration")]
-    VersionMismatch,
     #[error("invalid extension configuration")]
     Invalid,
-    #[error(transparent)]
-    Store(#[from] ConfigStoreError),
 }
-
 #[derive(Clone)]
 pub struct ConfigurationHost {
     owner: StateHost,
+    project: PathBuf,
+    global: PathBuf,
+    secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
 }
-
 #[derive(Clone)]
 pub struct ConfigurationSource {
     host: ConfigurationHost,
-    db: oxplow_db::Database,
 }
-
 impl ConfigurationSource {
-    pub fn new(host: ConfigurationHost, db: oxplow_db::Database) -> Self {
-        Self { host, db }
+    pub fn new(host: ConfigurationHost, _db: oxplow_db::Database) -> Self {
+        Self { host }
     }
-
+    pub fn get(
+        &self,
+        run: &RunContext,
+        input: GetInput,
+    ) -> Result<oxplow_config::settings::SettingValue, ConfigurationError> {
+        self.host.get(run, input)
+    }
     pub async fn snapshot(
         &self,
         run: RunContext,
     ) -> Result<ConfigurationSnapshot, ConfigurationError> {
-        let host = self.host.clone();
-        self.db
-            .read_or(move |conn| {
-                host.snapshot(conn, &run).map_err(|error| match error {
-                    ConfigurationError::Store(ConfigStoreError::Storage(storage)) => {
-                        oxplow_db::TxError::Storage(storage)
-                    }
-                    error => oxplow_db::TxError::Aborted(error),
-                })
-            })
-            .await
-            .map_err(|error| match error {
-                oxplow_db::TxError::Storage(storage) => {
-                    ConfigurationError::Store(ConfigStoreError::Storage(storage))
-                }
-                oxplow_db::TxError::Aborted(error) => error,
-            })
+        self.host.snapshot(&run)
     }
 }
-
 impl ConfigurationHost {
     pub fn new(catalog: Arc<ExtensionCatalog>, project: PathBuf) -> Self {
+        let project = catalog.project_of(&project).to_path_buf();
         Self {
-            owner: StateHost::new(catalog, project),
+            owner: StateHost::new(catalog, project.clone()),
+            global: oxplow_config::global_config_dir()
+                .unwrap_or_else(|| project.join(".oxplow/global")),
+            secrets: Arc::new(oxplow_ai::secrets::KeychainSecrets),
+            project,
         }
     }
-
-    pub fn snapshot(
-        &self,
-        conn: &Connection,
-        run: &RunContext,
-    ) -> Result<ConfigurationSnapshot, ConfigurationError> {
-        let (extension, declaration) = self.declaration(run, "extension_config.read")?;
-        let (project, personal) = layers(conn, &extension)?;
-        let resolved = resolve(
-            &extension,
-            &declaration,
-            project.as_ref(),
-            personal.as_ref(),
-        )?;
-        self.declaration(run, "extension_config.read")?;
-        run.trace().count("extension_config.read");
-        run.used_scope("extension_config.read");
-        Ok(ConfigurationSnapshot {
-            stamps: stamps(declaration.version, &project, &personal),
-            resolved,
-            layers: LayerValues {
-                project: project.as_ref().map(|l| l.values().clone()),
-                personal: personal.as_ref().map(|l| l.values().clone()),
-            },
-        })
+    pub fn with_settings(
+        mut self,
+        global: PathBuf,
+        secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
+    ) -> Self {
+        self.global = global;
+        self.secrets = secrets;
+        self
     }
-
-    /// Metadata survives a schema change so callers can submit a fenced,
-    /// explicit migration without receiving invalid effective settings.
-    pub fn inspect(
+    pub fn get(
         &self,
-        conn: &Connection,
         run: &RunContext,
-    ) -> Result<Stamps, ConfigurationError> {
-        let (extension, declaration) = self.declaration(run, "extension_config.read")?;
-        let project = extension_config_store::inspect_tx(
-            conn,
-            &ConfigNamespace::new(extension.clone(), Scope::Project)?,
-        )?;
-        let personal = extension_config_store::inspect_tx(
-            conn,
-            &ConfigNamespace::new(extension, Scope::Personal)?,
-        )?;
-        self.declaration(run, "extension_config.read")?;
-        run.trace().count("extension_config.read");
-        run.used_scope("extension_config.read");
-        Ok(Stamps::of(declaration.version, project, personal))
-    }
-
-    /// Validate the complete candidate before mutating either layer. Both CAS
-    /// changes and the command audit commit together; no external code runs.
-    pub fn compare_exchange(
-        &self,
-        ctx: &TxCtx<'_>,
-        input: &WriteInput,
-    ) -> Result<Stamps, ConfigurationError> {
-        if ctx.run.mode() == Mode::Pure || ctx.conn.is_autocommit() || ctx.events.cause.is_none() {
-            return Err(ConfigurationError::Denied);
-        }
-        let (extension, declaration) = self.declaration(ctx.run, "extension_config.write")?;
-        if input.schema_version != declaration.version
-            || (input.project.is_none() && input.personal.is_none())
+        input: GetInput,
+    ) -> Result<oxplow_config::settings::SettingValue, ConfigurationError> {
+        let extension = self
+            .owner
+            .with_owner(run, "config.read", Clone::clone)
+            .map_err(|_| ConfigurationError::Denied)?;
+        let namespace = extension.namespace.clone();
+        let store = crate::settings::store(
+            &self.project,
+            &self.global,
+            self.secrets.clone(),
+            &[extension],
+        )
+        .map_err(|_| ConfigurationError::Invalid)?;
         {
-            return Err(ConfigurationError::Invalid);
+            let registry = store
+                .registry
+                .read()
+                .unwrap_or_else(|error| error.into_inner());
+            let definition = registry
+                .get(&input.key)
+                .ok_or(ConfigurationError::Invalid)?;
+            if definition.secret && definition.owner != format!("extension/{namespace}") {
+                return Err(ConfigurationError::Denied);
+            }
         }
-        let (mut project, mut personal) = layers(ctx.conn, &extension)?;
-        // Untouched layers must already speak the target schema. A migration
-        // can replace both old layers in the same audited transaction.
-        let candidate_project = candidate(&project, input.project.as_ref(), declaration.version)?;
-        let candidate_personal =
-            candidate(&personal, input.personal.as_ref(), declaration.version)?;
-        declaration
-            .resolve(&extension, candidate_project, candidate_personal)
+        let setting = store
+            .get(&input.key, input.level)
             .map_err(|_| ConfigurationError::Invalid)?;
-        ctx.conn
-            .execute_batch("SAVEPOINT extension_configuration_host")
-            .map_err(storage)?;
-        let result = (|| {
-            for (scope, update, stored) in [
-                (Scope::Project, input.project.as_ref(), &mut project),
-                (Scope::Personal, input.personal.as_ref(), &mut personal),
-            ] {
-                if let Some(update) = update {
-                    let namespace = ConfigNamespace::new(extension.clone(), scope)?;
-                    *stored = Some(extension_config_store::compare_exchange_tx(
-                        ctx.conn,
-                        &namespace,
-                        update.expected,
-                        input.schema_version,
-                        &update.values,
-                    )?);
-                }
-            }
-            self.declaration(ctx.run, "extension_config.write")?;
-            ctx.conn
-                .execute_batch("RELEASE extension_configuration_host")
-                .map_err(storage)?;
-            Ok(stamps(declaration.version, &project, &personal))
-        })();
-        match result {
-            Ok(stamps) => {
-                ctx.trace.count("extension_config.write");
-                ctx.run.used_scope("extension_config.write");
-                Ok(stamps)
-            }
-            Err(error) => {
-                ctx.conn.execute_batch("ROLLBACK TO extension_configuration_host; RELEASE extension_configuration_host").map_err(storage)?;
-                Err(error)
-            }
+        self.owner
+            .with_owner(run, "config.read", |_| ())
+            .map_err(|_| ConfigurationError::Denied)?;
+        run.used_scope("config.read");
+        run.trace().count("config.read");
+        if setting.secret {
+            run.trace().count("config.secret");
         }
+        Ok(setting)
     }
-
+    pub fn snapshot(&self, run: &RunContext) -> Result<ConfigurationSnapshot, ConfigurationError> {
+        let (namespace, declaration) = self.declaration(run, "extension_config.read")?;
+        let store = crate::settings::store_for_declaration(
+            &self.project,
+            &self.global,
+            self.secrets.clone(),
+            &namespace,
+            &declaration,
+        )
+        .map_err(|_| ConfigurationError::Invalid)?;
+        let values = super::extension_settings::values_for(&namespace, &declaration, &store, false)
+            .map_err(|_| ConfigurationError::Invalid)?;
+        let origins =
+            super::extension_settings::origins_for(&namespace, &declaration, &store, false)
+                .map_err(|_| ConfigurationError::Invalid)?;
+        self.declaration(run, "extension_config.read")?;
+        if super::extension_settings::definitions_for(&namespace, &declaration)
+            .map_err(|_| ConfigurationError::Invalid)?
+            .iter()
+            .any(|definition| definition.secret)
+        {
+            run.trace().count("config.secret");
+        }
+        run.trace().count("extension_config.read");
+        run.used_scope("extension_config.read");
+        run.used_scope("config.read");
+        run.trace().count("config.read");
+        Ok(ConfigurationSnapshot { values, origins })
+    }
     fn declaration(
         &self,
         run: &RunContext,
@@ -286,183 +177,21 @@ impl ConfigurationHost {
         ))
     }
 }
-
-/// A namespace's effective configuration as stored now — its declared
-/// defaults under the project and personal layers — which the SQL that reads
-/// it with `config()` is compiled and run against.
+/// Public settings projection for SQL and conditions; secret keys are omitted.
 pub(crate) fn effective_values(
-    conn: &Connection,
+    project: &Path,
+    global: &Path,
     namespace: &str,
     declaration: &ConfigurationFile,
 ) -> Result<Value, ConfigurationError> {
-    let (project, personal) = layers(conn, namespace)?;
-    Ok(resolve(namespace, declaration, project.as_ref(), personal.as_ref())?.values)
-}
-
-/// After an extension raises its configuration schema `version`, carry each
-/// stored layer at an older version forward when the new schema still takes
-/// its values: restamp it at the declared version, values as stored. "Takes"
-/// is the declaration resolving with that layer alone over the defaults (and
-/// the other layer when that one is already at the declared version). A
-/// layer it doesn't take is left as it is, failing closed until the
-/// extension's own command rewrites it; a layer newer than the declared
-/// version (after a rollback) is never touched. Runs in the publication's
-/// transaction, before datasets compile against the values. Returns the
-/// layers carried, as `(namespace, scope)`. Only a storage failure fails it
-/// (and the publication); a namespace whose rows can't be read is logged
-/// and left as it is.
-pub(crate) fn carry_forward_tx(
-    conn: &Connection,
-    extensions: &[crate::extension::extensions::Extension],
-) -> Result<Vec<(String, Scope)>, oxplow_domain::DomainError> {
-    let mut seen = std::collections::BTreeSet::new();
-    let mut carried = Vec::new();
-    for ext in extensions.iter().filter(|e| e.enabled) {
-        let Some(declaration) = &ext.configuration else {
-            continue;
-        };
-        // Settings are the namespace's: one declaration its extensions share.
-        if !seen.insert(ext.namespace.clone()) {
-            continue;
-        }
-        match carry_namespace(conn, &ext.namespace, declaration) {
-            Ok(scopes) => carried.extend(scopes.into_iter().map(|s| (ext.namespace.clone(), s))),
-            Err(ConfigStoreError::Storage(error)) => return Err(error),
-            Err(error) => {
-                tracing::warn!(namespace = %ext.namespace, %error, "its configuration layers can't be carried forward");
-            }
-        }
-    }
-    Ok(carried)
-}
-
-fn carry_namespace(
-    conn: &Connection,
-    ns: &str,
-    declaration: &ConfigurationFile,
-) -> Result<Vec<Scope>, ConfigStoreError> {
-    let mut carried = Vec::new();
-    let namespace = |scope| ConfigNamespace::new(ns.to_string(), scope);
-    let project = extension_config_store::read_tx(conn, &namespace(Scope::Project)?)?;
-    let personal = extension_config_store::read_tx(conn, &namespace(Scope::Personal)?)?;
-    fn at(layer: &Option<ConfigSnapshot>, version: u32) -> Option<&Value> {
-        layer
-            .as_ref()
-            .filter(|l| l.stamp().schema_version == version)
-            .map(ConfigSnapshot::values)
-    }
-    let current = |layer| at(layer, declaration.version);
-    for scope in [Scope::Project, Scope::Personal] {
-        let (layer, other) = match scope {
-            Scope::Project => (&project, &personal),
-            Scope::Personal => (&personal, &project),
-        };
-        let Some(layer) = layer
-            .as_ref()
-            .filter(|l| l.stamp().schema_version < declaration.version)
-        else {
-            continue;
-        };
-        let (p, q) = match scope {
-            Scope::Project => (Some(layer.values()), current(other)),
-            Scope::Personal => (current(other), Some(layer.values())),
-        };
-        if declaration.resolve(ns, p, q).is_err() {
-            continue;
-        }
-        extension_config_store::compare_exchange_tx(
-            conn,
-            &namespace(scope)?,
-            Some(layer.stamp()),
-            declaration.version,
-            layer.values(),
-        )?;
-        tracing::info!(
-            namespace = %ns,
-            ?scope,
-            from = layer.stamp().schema_version,
-            to = declaration.version,
-            "a configuration layer the new schema takes was carried forward"
-        );
-        carried.push(scope);
-    }
-    Ok(carried)
-}
-
-fn layers(
-    conn: &Connection,
-    extension: &str,
-) -> Result<(Option<ConfigSnapshot>, Option<ConfigSnapshot>), ConfigurationError> {
-    Ok((
-        extension_config_store::read_tx(
-            conn,
-            &ConfigNamespace::new(extension.into(), Scope::Project)?,
-        )?,
-        extension_config_store::read_tx(
-            conn,
-            &ConfigNamespace::new(extension.into(), Scope::Personal)?,
-        )?,
-    ))
-}
-
-fn candidate<'a>(
-    stored: &'a Option<ConfigSnapshot>,
-    update: Option<&'a LayerUpdate>,
-    version: u32,
-) -> Result<Option<&'a Value>, ConfigurationError> {
-    match update {
-        Some(update) => {
-            if update.expected != stored.as_ref().map(ConfigSnapshot::stamp) {
-                return Err(ConfigStoreError::Conflict {
-                    actual: stored.as_ref().map(ConfigSnapshot::stamp),
-                }
-                .into());
-            }
-            Ok(Some(&update.values))
-        }
-        None => {
-            check_version(stored.as_ref(), version)?;
-            Ok(stored.as_ref().map(ConfigSnapshot::values))
-        }
-    }
-}
-
-fn check_version(stored: Option<&ConfigSnapshot>, version: u32) -> Result<(), ConfigurationError> {
-    if stored.is_some_and(|stored| stored.stamp().schema_version != version) {
-        return Err(ConfigurationError::VersionMismatch);
-    }
-    Ok(())
-}
-
-fn resolve(
-    extension: &str,
-    declaration: &ConfigurationFile,
-    project: Option<&ConfigSnapshot>,
-    personal: Option<&ConfigSnapshot>,
-) -> Result<ResolvedConfig, ConfigurationError> {
-    check_version(project, declaration.version)?;
-    check_version(personal, declaration.version)?;
-    declaration
-        .resolve(
-            extension,
-            project.map(ConfigSnapshot::values),
-            personal.map(ConfigSnapshot::values),
-        )
-        .map_err(|_| ConfigurationError::Invalid)
-}
-
-fn stamps(
-    schema_version: u32,
-    project: &Option<ConfigSnapshot>,
-    personal: &Option<ConfigSnapshot>,
-) -> Stamps {
-    Stamps::of(
-        schema_version,
-        project.as_ref().map(ConfigSnapshot::stamp),
-        personal.as_ref().map(ConfigSnapshot::stamp),
+    let store = crate::settings::store_for_declaration(
+        project,
+        global,
+        Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
+        namespace,
+        declaration,
     )
-}
-
-fn storage(error: rusqlite::Error) -> ConfigurationError {
-    ConfigurationError::Store(ConfigStoreError::Storage(oxplow_db::map_sql_err(error)))
+    .map_err(|_| ConfigurationError::Invalid)?;
+    super::extension_settings::values_for(namespace, declaration, &store, true)
+        .map_err(|_| ConfigurationError::Invalid)
 }

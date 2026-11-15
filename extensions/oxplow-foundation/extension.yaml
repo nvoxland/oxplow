@@ -647,7 +647,7 @@ resources:
   - name: config
     description: "A setting in the project's configuration."
     label: Setting
-    params: { key: { required: true, pattern: '^[A-Za-z][A-Za-z0-9]*$' } }
+    params: { key: { required: true, pattern: '^[A-Za-z][A-Za-z0-9_.-]*$' } }
     searchable: search_config
     icon: settings
   - name: finding
@@ -869,19 +869,12 @@ resources:
     params: { custom_component: { required: true, pattern: '^[a-z][a-z0-9_]*/[a-z][a-z0-9_.-]*$' } }
     icon: box
 commands:
-  # Foundation's own settings (`configuration:`): read with their stamps,
-  # written as a compare-and-swap on them.
+  # Foundation's own settings (`configuration:`): read as a nested projection of the shared registry.
   - name: settings.read
-    summary: The effective settings of oxplow's own extensions (they share the namespace's one configuration — how changed files are ranked, which files change together, when a request counts as a struggle), where each came from, and the stamps a write needs.
+    summary: The effective settings of oxplow's own extensions (they share the namespace's one configuration — how changed files are ranked, which files change together, when a request counts as a struggle), where each came from.
     scope: extension_config.read
     op: snapshot
     example: {}
-  - name: settings.write
-    summary: Set the project or personal settings of oxplow's own extensions — how changed files are ranked, which files change together, when a request counts as a struggle (a compare-and-swap on the stamps `oxplow.settings.read` returns).
-    scope: extension_config.write
-    op: compare_exchange
-    example: {"schema_version": 2, "project": {"expected": {"schema_version": 2, "revision": 0}, "values": {"review": "off"}}, "personal": null}
-  # agent_input.write — the window's agent input.
   - name: agent.draft
     summary: "Put text in the shown thread's agent input, unsent."
     scope: agent_input.write
@@ -1055,56 +1048,56 @@ commands:
     example: {"collector": "work/hot"}
   # config.read
   - name: config.get
-    summary: "One .oxplow/project.yaml key: its doc, value schema and current value."
+    summary: "Read a registered setting by fully qualified key; omit level for the effective inherited value, or choose local, project or global."
     scope: config.read
     op: get
-    example: {"key": "metricRetentionDays"}
+    example: {"key": "oxplow.metrics.retentionDays"}
   - name: config.list_keys
-    summary: "Every .oxplow/project.yaml key with its doc, value schema, current value and whether only a person may set it."
+    summary: "Every registered setting definition: key, title, description, category, schema, default and secret metadata."
     scope: config.read
     op: list_keys
     example: {}
   # config.write
   - name: config.set
-    summary: "Set one .oxplow/project.yaml key, or with `layer: personal` a person's own choice in .oxplow/personal.yaml. Those are (`activeProviders`, `newThreadSession`, `enableExtensions`, `disableExtensions`, `extensionSources`, `enableBundledExtensions`). The value is validated against the key's schema and the file's own rules, written to the file, and logged as config.changed; undo restores the prior value."
+    summary: "Set a registered setting by fully qualified key at an explicit level: local, project or global. Values are schema-validated; secrets use secure storage. Ordinary writes are undoable."
     scope: config.write
     op: set
-    example: {"key": "metricRetentionDays", "value": 30}
+    example: {"key": "oxplow.metrics.retentionDays", "value": 30, "level": "project"}
   - name: file.mark_generated
-    summary: "Mark a file or folder (by the name the project's `generated` list holds it by: `target`, `dist`, `*.min.js`) as generated, or with `generated: false` take the mark off. Writes the `generated` key's `exclude` list in .oxplow/project.yaml (logged as config.changed, undoable); snapshots and change views leave marked paths out."
+    summary: "Mark a file or folder (by the name the project's `generated` list holds it by: `target`, `dist`, `*.min.js`) as generated, or with `generated: false` take the mark off. Writes `oxplow.generated.exclude` in .oxplow/project.yaml (logged as config.changed, undoable); snapshots and change views leave marked paths out."
     scope: config.write
     op: mark_generated
     example: {"entry": "dist"}
   - name: capability.choose
-    summary: "Choose which implementation a capability uses (`snapshots`, …): the project's choice in .oxplow/project.yaml (`activeProviders`), or with `layer: personal` this person's own in .oxplow/personal.yaml. Leave `provider` out to go back to the default (for a personal choice, the same as the project). Logged as config.changed, undoable."
+    summary: "Choose a capability implementation at an explicit local, project or global level through oxplow.activeProviders. Omit provider to remove that capability choice at the chosen level."
     scope: config.write
     op: choose_provider
-    example: {"capability": "snapshots", "provider": "oxplow/diffs"}
+    example: {"capability": "snapshots", "provider": "oxplow/diffs", "level": "project"}
   - name: replacement.choose
-    summary: "Choose whose component shows where an extension replaces a core one (`replacements` in .oxplow/project.yaml): an extension's name, or `oxplow` for oxplow's own. Leave `whose` out for the default. Logged as config.changed, undoable."
+    summary: "Choose whose component shows where an extension replaces a core one (`oxplow.replacements` at project level): an extension's name, or `oxplow` for oxplow's own. Leave `whose` out for the default. Logged as config.changed, undoable."
     scope: config.write
     op: choose_replacement
     example: {"target": "task.board", "whose": "task-views"}
   - name: agent.set_agents
-    summary: "Set which agent harnesses are on, by key, in priority order: the first is a new session's default. Each must be registered. Writes `agents` in .oxplow/project.yaml (logged as config.changed, undoable)."
+    summary: "Set which agent harnesses are on, by key, in priority order: the first is a new session's default. Each must be registered. Writes `oxplow.agents` at project level (logged as config.changed, undoable)."
     scope: config.write
     op: set_agents
     example: {"agents": ["claude", "codex"]}
   - name: agent.set_setting
-    summary: "Set one of an agent harness's declared settings (`agentConfig.<agent>.<key>`, what its launch reads); a blank value clears it. Logged as config.changed, undoable."
+    summary: "Set one of an agent harness's declared settings (`oxplow.agentConfig`, what its launch reads); a blank value clears it. Logged as config.changed, undoable."
     scope: config.write
     op: set_agent_setting
     example: {"agent": "claude", "key": "model", "value": "opus"}
   - name: agent.set_prompt_append
-    summary: "Set the text appended to every agent's system prompt (`agentPromptAppend`); blank removes it. It applies to sessions started after. Logged as config.changed, undoable."
+    summary: "Set the text appended to every agent's system prompt (`oxplow.agentPromptAppend` at project level); blank removes it. It applies to sessions started after. Logged as config.changed, undoable."
     scope: config.write
     op: set_prompt_append
     example: {"text": "Prefer small commits."}
   - name: config.unset
-    summary: "Remove one .oxplow/project.yaml key so it returns to its default (or, with `layer: personal`, a person's own choice); logged as config.changed, undo restores it."
+    summary: "Remove a registered setting override at an explicit level: local, project or global. The effective value inherits from the next level or default."
     scope: config.write
     op: unset
-    example: {"key": "metricRetentionDays"}
+    example: {"key": "oxplow.metrics.retentionDays", "level": "project"}
   - name: delivery.retry
     summary: "Run an event a consumer couldn't take through that consumer again, now. The letter is `retried`, or stays `pending` with the new error."
     scope: deliveries.write
@@ -1249,12 +1242,12 @@ commands:
     op: rollback
     example: {"name": "my-extension"}
   - name: extension.enable
-    summary: "Turn an extension on for you (`.oxplow/personal.yaml`), over the project's list. One with no deployment here is deployed from the main checkout's source (asking first when it declares `permissions:`)."
+    summary: "Turn an extension on for you (`.oxplow/local.yaml`), over the project's list. One with no deployment here is deployed from the main checkout's source (asking first when it declares `permissions:`)."
     scope: extensions.deploy
     op: enable
     example: {"name": "my-extension"}
   - name: extension.disable
-    summary: "Turn an extension off for you (`.oxplow/personal.yaml`), whoever listed it. oxplow-foundation is always on."
+    summary: "Turn an extension off for you (`.oxplow/local.yaml`), whoever listed it. oxplow-foundation is always on."
     scope: extensions.deploy
     op: disable
     example: {"name": "my-extension"}

@@ -706,7 +706,10 @@ fn fingerprint(root: &Path) -> Fingerprint {
         }
     }
     push_file(&oxplow_config::config_path(root), &mut out);
-    push_file(&oxplow_config::personal_path(root), &mut out);
+    push_file(&oxplow_config::local_config_path(root), &mut out);
+    if let Some(global) = oxplow_config::global_config_dir() {
+        push_file(&global.join("global.yaml"), &mut out);
+    }
     out.sort();
     out
 }
@@ -743,7 +746,7 @@ mod tests {
     fn write(root: &Path, rel: &str, body: &str) {
         let p = root.join(rel);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-        std::fs::write(p, body).unwrap();
+        crate::test_fixtures::write_settings_fixture(p, body).unwrap();
     }
 
     const EXT: &str =
@@ -836,7 +839,7 @@ mod tests {
     fn a_required_extension_that_cant_load_is_held_like_any_other() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             dir.path().join(".oxplow/project.yaml"),
             "enableBundledExtensions: false\n",
         )
@@ -846,13 +849,17 @@ mod tests {
         for (rel, bytes) in foundation.files() {
             let file = to.join(rel);
             std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-            std::fs::write(file, bytes).unwrap();
+            crate::test_fixtures::write_settings_fixture(file, bytes).unwrap();
         }
         let catalog = ExtensionCatalog::new();
         let (good, held) = catalog.snapshot(dir.path()).admitted(None, &Failed::new());
         assert!(held.is_empty(), "{held:?}");
         let manifest = std::fs::read_to_string(to.join("extension.yaml")).unwrap();
-        std::fs::write(to.join("extension.yaml"), format!("{manifest}bogus: 1\n")).unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            to.join("extension.yaml"),
+            format!("{manifest}bogus: 1\n"),
+        )
+        .unwrap();
         let broken = catalog.snapshot(dir.path());
         let (kept, held) = broken.admitted(Some(&good), &Failed::new());
         assert!(
@@ -945,7 +952,8 @@ mod tests {
             "One"
         );
         // A new modified time is a new parse.
-        std::fs::write(&file, "title: Two\nview: { markdown: hi }\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(&file, "title: Two\nview: { markdown: hi }\n")
+            .unwrap();
         let later = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
         std::fs::File::options()
             .write(true)
@@ -1038,7 +1046,7 @@ mod tests {
         write(side.path(), ".oxplow/extensions/review/extension.yaml", EXT);
         write(
             side.path(),
-            ".oxplow/personal.yaml",
+            ".oxplow/local.yaml",
             "disableExtensions: [oxplow-bundled]\n",
         );
         let catalog = ExtensionCatalog::for_project(main.path());
@@ -1048,11 +1056,11 @@ mod tests {
         ));
         assert!(
             catalog.named(side.path(), "oxplow-bundled").is_ok(),
-            "the working copy's own personal.yaml doesn't count"
+            "the working copy's own local.yaml doesn't count"
         );
         write(
             main.path(),
-            ".oxplow/personal.yaml",
+            ".oxplow/local.yaml",
             "disableExtensions: [oxplow-bundled]\n",
         );
         let err = catalog.named(side.path(), "oxplow-bundled").unwrap_err();
@@ -1081,7 +1089,7 @@ mod tests {
         // Disabling through project.yaml is a config change: a miss.
         write(
             a.path(),
-            ".oxplow/personal.yaml",
+            ".oxplow/local.yaml",
             "disableExtensions: [review]\n",
         );
         let err = catalog.named(a.path(), "review").unwrap_err();

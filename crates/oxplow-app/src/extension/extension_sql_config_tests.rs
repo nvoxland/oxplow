@@ -65,25 +65,12 @@ async fn struggles(fx: &ThreadFixture) -> Value {
 /// A person sets the struggle threshold: the project layer, through the
 /// extension's own command.
 async fn set_threshold(fx: &ThreadFixture, edits: i64) {
-    let read = fx
-        .svc
-        .commands
-        .run(&Actor::Human, "oxplow.settings.read", json!({}), false)
-        .await
-        .unwrap();
-    let expected = read.result["result"]["stamps"]["project"].clone();
     fx.svc
         .commands
         .run(
             &Actor::Human,
-            "oxplow.settings.write",
-            json!({
-                "schema_version": 2,
-                "project": {
-                    "expected": expected,
-                    "values": { "struggle": { "repeatedEdits": edits } }
-                }
-            }),
+            "oxplow.config.set",
+            json!({"key":"oxplow.struggle.repeatedEdits", "value":edits, "level":"project"}),
             false,
         )
         .await
@@ -114,7 +101,11 @@ async fn a_settings_change_republishes_the_datasets_that_read_it() {
     // What the event pump does when the write's `command.executed` arrives.
     fx.svc
         .extension_activation
-        .request_config_refresh(&fx.svc.db)
+        .request_config_refresh(
+            &fx.svc.db,
+            &fx.svc.layout.project_dir,
+            &fx.svc.global_config_dir,
+        )
         .await
         .unwrap();
     tokio::time::timeout(Duration::from_secs(20), async {
@@ -165,7 +156,7 @@ async fn a_query_reads_the_current_setting() {
 fn write(root: &std::path::Path, rel: &str, body: &str) {
     let path = root.join(rel);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(path, body).unwrap();
+    crate::test_fixtures::write_settings_fixture(path, body).unwrap();
 }
 
 const CONFIGURED: &str = "manifest: 2\nname: mine\nintent:\n  purpose: p\n  examples: [{ name: a }]\nconfiguration:\n  version: 1\n  schema:\n    type: object\n    properties:\n      limit: { type: integer }\n      nested: { type: object }\n  defaults: { limit: 7, nested: {} }\ndatasets:\n  - name: limited\n    version: 1\n    description: Limited.\n    fields:\n      - { name: n, type: \"\", doc: The limit. }\n";
@@ -256,8 +247,6 @@ async fn an_own_key_reads_and_a_key_that_is_not_a_scalar_fails_the_load() {
 /// when the setting changes, not left holding the old one until its timer.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_materialized_dataset_is_refilled_when_its_setting_changes() {
-    use oxplow_db::extension_config_store::{self, ConfigNamespace};
-    use oxplow_domain::extension_state::Scope;
     let fx = services_with_thread().await;
     let root = fx.svc.layout.project_dir.clone();
     write(
@@ -297,21 +286,20 @@ async fn a_materialized_dataset_is_refilled_when_its_setting_changes() {
         "the dataset was not refilled with {want}"
     );
 
-    fx.svc
-        .db
-        .transaction(|tx| {
-            extension_config_store::compare_exchange_tx(
-                tx,
-                &ConfigNamespace::new("mine".into(), Scope::Project).unwrap(),
-                None,
-                1,
-                &json!({ "limit": 9 }),
-            )
-            .map(|_| ())
-            .map_err(|e| oxplow_domain::DomainError::Invalid(format!("{e:?}")))
-        })
-        .await
-        .unwrap();
+    let extensions = fx.svc.extension_catalog.live_snapshot(&root);
+    crate::settings::store(
+        &root,
+        &fx.svc.global_config_dir,
+        fx.svc.secrets.clone(),
+        extensions.extensions(),
+    )
+    .unwrap()
+    .set(
+        "mine.limit",
+        json!(9),
+        oxplow_config::settings::Level::Project,
+    )
+    .unwrap();
     crate::test_fixtures::activate_with_problems(&fx.svc).await;
     assets.sync_datasets().await.unwrap();
     assets.quiesce().await;

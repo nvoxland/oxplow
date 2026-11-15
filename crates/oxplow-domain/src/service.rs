@@ -34,6 +34,7 @@ pub const CALLABLE: &[&str] = &[
     "state.read",
     "state.write",
     "extension_config.read",
+    "config.read",
     "jobs.read",
     "ai.discover",
     "store.sql",
@@ -66,9 +67,16 @@ pub const SERVICES: &[ServiceSpec] = &[
         modes: ALL,
     },
     ServiceSpec {
+        scope: "config.read",
+        title: "Read settings",
+        summary: "Read a registered setting with its provenance: scope(\"config.read\", {key, level?}).",
+        builtins: &[],
+        modes: ALL,
+    },
+    ServiceSpec {
         scope: "extension_config.read",
         title: "Read resolved extension configuration",
-        summary: "Read the resolved defaults, project and personal settings with their provenance: \
+        summary: "Read resolved settings with their provenance: \
                   `scope(\"extension_config.read\", {})`.",
         builtins: &[],
         modes: ALL,

@@ -281,7 +281,7 @@ mod tests {
         let svc = &fx.svc;
         svc.config.write().unwrap().extensions = Vec::new();
         std::fs::create_dir_all(svc.layout.project_dir.join(".oxplow")).unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             oxplow_config::config_path(&svc.layout.project_dir),
             "extensions: []\n",
         )
@@ -332,7 +332,7 @@ mod tests {
         let fx = services_with_thread().await;
         let root = fx._dir.path().join(".oxplow/extensions/acme");
         std::fs::create_dir_all(&root).unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             root.join("extension.yaml"),
             "manifest: 2\nname: acme\nintent:\n  purpose: p\ncommands:\n\
              \x20 - name: ask.model\n    summary: Ask the model.\n    scope: ai.compute\n    op: summarize\n\
@@ -357,7 +357,7 @@ mod tests {
         let fx = services_with_thread().await;
         let root = fx._dir.path().join(".oxplow/extensions/acme");
         std::fs::create_dir_all(root.join("pages")).unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             root.join("extension.yaml"),
             "manifest: 2\nname: acme\nintent:\n  purpose: p\ncommands:\n\
              \x20 - name: work.count\n    summary: Count the tasks.\n    scope: sql.read\n    op: query\n\
@@ -366,7 +366,7 @@ mod tests {
              \x20   tool: secret\n",
         )
         .unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             root.join("pages/open.yaml"),
             "title: Open Work\ndescription: The items still open.\n\
              params:\n  - { name: state, label: State, default: todo, options: [{ value: todo, label: To do }, { value: done, label: Done }] }\n\
@@ -377,7 +377,7 @@ mod tests {
         )
         .unwrap();
         std::fs::create_dir_all(root.join("queries")).unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             root.join("queries/owners.yaml"),
             "title: Owners\nloaders:\n  owners:\n    sql: SELECT 'me' AS value, 'Me' AS label\n",
         )
@@ -413,12 +413,12 @@ mod tests {
         let fx = services_with_thread().await;
         let root = fx._dir.path().join(".oxplow/extensions/acme");
         std::fs::create_dir_all(root.join("pages")).unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             root.join("extension.yaml"),
             "manifest: 2\nname: acme\nintent:\n  purpose: p\n",
         )
         .unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             root.join("pages/open.yaml"),
             "title: Open Work\ndescription: The items still open.\n\
              params:\n  - { name: state, label: State, default: todo, options: [{ value: todo, label: To do }, { value: done, label: Done }] }\n\

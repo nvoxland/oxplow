@@ -33,7 +33,7 @@ fn manifest(version: &str) -> String {
 fn write(root: &Path, rel: &str, body: &str) {
     let path = root.join(rel);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(path, body).unwrap();
+    crate::test_fixtures::write_settings_fixture(path, body).unwrap();
 }
 
 /// A program that says it started, waits to be released, then reports a row.
@@ -95,7 +95,8 @@ async fn start(
 }
 
 fn release(fx: &ThreadFixture) {
-    std::fs::write(fx.svc.layout.project_dir.join("release"), "").unwrap();
+    crate::test_fixtures::write_settings_fixture(fx.svc.layout.project_dir.join("release"), "")
+        .unwrap();
 }
 
 async fn seen(fx: &ThreadFixture) -> serde_json::Value {
@@ -227,7 +228,7 @@ async fn a_collector_does_not_publish_after_its_extension_is_disabled() {
 
     write(
         &fx.svc.layout.project_dir,
-        ".oxplow/personal.yaml",
+        ".oxplow/local.yaml",
         "disableExtensions: [acme]\n",
     );
     fx.svc.reload_config_from_disk().unwrap();
@@ -279,11 +280,7 @@ async fn an_effects_run_holds_no_generation_and_ends_with_its_extension() {
     assert_eq!(run.contribution_ref().unwrap().generation, None);
     run.check_authority().expect("its extension is current");
 
-    write(
-        &root,
-        ".oxplow/personal.yaml",
-        "disableExtensions: [acme]\n",
-    );
+    write(&root, ".oxplow/local.yaml", "disableExtensions: [acme]\n");
     fx.svc.reload_config_from_disk().unwrap();
     let error = run
         .check_authority()

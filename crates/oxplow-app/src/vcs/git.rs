@@ -979,7 +979,7 @@ mod tests {
     }
 
     fn write_commit(dir: &Path, contents: &str, message: &str) {
-        std::fs::write(dir.join("cfg.txt"), contents).unwrap();
+        crate::test_fixtures::write_settings_fixture(dir.join("cfg.txt"), contents).unwrap();
         git(dir, &["add", "-A"]);
         git(dir, &["commit", "-q", "-m", message]);
     }
@@ -996,7 +996,11 @@ mod tests {
         write_commit(ws, "a\n", "first");
         assert_eq!(GitProvider.status(ws).await.unwrap().in_progress, None);
         let head = git(ws, &["rev-parse", "HEAD"]);
-        std::fs::write(ws.join(".git/MERGE_HEAD"), format!("{head}\n")).unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            ws.join(".git/MERGE_HEAD"),
+            format!("{head}\n"),
+        )
+        .unwrap();
         let paths = ["cfg.txt".to_string()];
         for status in [
             GitProvider.status(ws).await.unwrap(),

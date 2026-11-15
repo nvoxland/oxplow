@@ -254,7 +254,8 @@ collectors:
 | `needs` | What it gives | Builtins | In a script that composes |
 |---|---|---|---|
 | `jobs.read` | Read this extension's durable job status and result: scope("jobs.read", {id}). |  | yes |
-| `extension_config.read` | Read the resolved defaults, project and personal settings with their provenance: `scope("extension_config.read", {})`. |  | yes |
+| `config.read` | Read a registered setting with its provenance: scope("config.read", {key, level?}). |  | yes |
+| `extension_config.read` | Read resolved settings with their provenance: `scope("extension_config.read", {})`. |  | yes |
 | `state.read` | Read this extension's workflow state or cache: `scope("state.read", {scope, area})` returns a snapshot or null. |  | yes |
 | `store.sql` | Read SQL on this extension's own file (`storage: { sqlite: true }`): `scope("store.sql", {sql, params?})` runs one statement that changes nothing and returns `{rows}`. Writes are the command `oxplow.extension_store.write`. |  | yes |
 | `files.read` | Read files in the folders `files:` declares: `scope("files.read", {path, lossy?})` returns `{body}` (with `lossy: true`, bytes that are not UTF-8 become U+FFFD and `{body, lossy}` says whether any did), `scope("files.list", {path, glob?})` returns `{files: [{path, size, modified_at}]}`. Writes are the commands `oxplow.extension_files.write` and `.delete`. |  | yes |

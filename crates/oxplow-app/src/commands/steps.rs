@@ -76,22 +76,29 @@ pub(super) struct ComposedCall {
 
 impl Composed {
     fn has_private_input(&self) -> bool {
-        self.calls.iter().any(ComposedCall::has_private_input)
+        self.scopes.contains_key("config.secret")
+            || self.calls.iter().any(ComposedCall::has_private_input)
     }
 
     /// Its calls as a confirmation shows them.
     fn preview_input(&self) -> Value {
-        json!({ "calls": self.calls.iter().map(|c| &c.call).collect::<Vec<_>>() })
+        if self.has_private_input() {
+            json!({ "redacted": true })
+        } else {
+            json!({ "calls": self.calls.iter().map(|c| &c.call).collect::<Vec<_>>() })
+        }
     }
 }
 
 impl ComposedCall {
     fn has_private_input(&self) -> bool {
-        self.command
-            .spec
-            .unrecorded
-            .iter()
-            .any(|field| field == "*" || self.call.input.get(field).is_some())
+        self.run.trace().summary().contains_key("config.secret")
+            || self
+                .command
+                .spec
+                .unrecorded
+                .iter()
+                .any(|field| field == "*" || self.call.input.get(field).is_some())
             || self
                 .nested
                 .as_ref()
@@ -99,10 +106,11 @@ impl ComposedCall {
     }
 
     fn recorded_input(&self) -> Value {
-        if self
-            .nested
-            .as_ref()
-            .is_some_and(|nested| nested.has_private_input())
+        if self.run.trace().summary().contains_key("config.secret")
+            || self
+                .nested
+                .as_ref()
+                .is_some_and(|nested| nested.has_private_input())
         {
             // Arbitrary composers can derive a private child from any part of
             // their input. There is no safe field-level reverse mapping.
@@ -230,8 +238,13 @@ impl Router<'_> {
         run.check_authority()
             .map_err(|reason| CommandError::Denied { reason })?;
         let composing = run.child(None, oxplow_domain::run::Mode::Pure);
-        let composition = (compose.compose)(self.composing, &composing, input)?;
-        let (calls, outside) = self.route_calls_for(run, composition.calls, depth, at)?;
+        let composition = (compose.compose)(self.composing, &composing, input);
+        // Read taint survives a composer failure and reaches routing, audit,
+        // previews and every call derived from the returned values.
+        run.trace().add(&composing.trace().summary());
+        let composition = composition?;
+        let routed = self.route_calls_for(run, composition.calls, depth, at);
+        let (calls, outside) = routed?;
         let inverse = match composition.inverse {
             None => None,
             Some(_) if outside.is_none() => {
@@ -258,7 +271,7 @@ impl Router<'_> {
                 result: composition.result,
                 events: composition.events,
                 inverse,
-                scopes: composing.trace().summary(),
+                scopes: run.trace().summary(),
                 input: input.clone(),
                 finish: compose.finish.clone(),
                 reads: self.reads.clone(),
@@ -331,6 +344,9 @@ impl Router<'_> {
                 }
                 None => parent.child(None, mode),
             };
+            if parent.trace().summary().contains_key("config.secret") {
+                run.trace().count("config.secret");
+            }
             run.check_authority()
                 .map_err(|reason| CommandError::Denied { reason })?;
             if let Some(check) = &command.precheck {
@@ -348,7 +364,9 @@ impl Router<'_> {
                 }
                 Handler::Compose(c) => {
                     let inner =
-                        self.route_for(&run, c, &call.input, &call.name, depth + 1, &call_at)?;
+                        self.route_for(&run, c, &call.input, &call.name, depth + 1, &call_at);
+                    parent.trace().add(&run.trace().summary());
+                    let inner = inner?;
                     if inner.outside.is_some() {
                         return Err(CommandError::Invalid {
                             field: Some(name_field),
@@ -562,15 +580,21 @@ fn run_tree(
             trace: ctx.trace,
         };
         let out = match (&c.nested, &c.command.handler) {
-            (Some(nested), _) => run_tree(&inner, &c.call.name, nested)?,
-            (None, Handler::Tx(handler)) => handler(&inner, c.call.input.clone())?,
+            (Some(nested), _) => run_tree(&inner, &c.call.name, nested),
+            (None, Handler::Tx(handler)) => handler(&inner, c.call.input.clone()),
             (None, _) => {
                 return Err(CommandError::Failed {
                     message: format!("`{}` can't run in the transaction", c.call.name),
                 });
             }
         };
-        let mut out = honest(out, &c.call.name)?;
+        ctx.trace.add(&c.run.trace().summary());
+        if ctx.trace.summary().contains_key("config.secret")
+            && !ctx.run.trace().summary().contains_key("config.secret")
+        {
+            ctx.run.trace().count("config.secret");
+        }
+        let mut out = honest(out?, &c.call.name)?;
         if let Some(after) = out.after_commit.take() {
             afters.push(after);
         }
@@ -603,8 +627,10 @@ fn run_tree(
         let reading = ctx.run.child(None, oxplow_domain::run::Mode::Pure);
         // The transaction holds the database: a read through the gateway
         // would wait on it, so `finish` has no reads here.
-        let done = finish(None, &reading, &composed.input, &answers)?;
+        let done = finish(None, &reading, &composed.input, &answers);
         ctx.trace.add(&reading.trace().summary());
+        ctx.run.trace().add(&reading.trace().summary());
+        let done = done?;
         if done.inverse.is_some() {
             return Err(CommandError::Invalid {
                 field: Some("/inverse".into()),
@@ -751,8 +777,10 @@ impl CommandBus {
         .await
         .map_err(|e| CommandError::Failed {
             message: format!("finish failed: {e}"),
-        })??;
+        });
         oxplow_domain::scope::add_counts(scopes, reading.trace().summary());
+        run.trace().add(&reading.trace().summary());
+        let done = done??;
         let inverse = match done.inverse {
             None => None,
             Some(calls) => {
@@ -904,19 +932,21 @@ impl CommandBus {
                         origin.invocation(&step.run, index, &step.call.name, &step.call.input);
                     let key = invocation.idempotency_key.clone();
                     let called = invocation.run.clone();
-                    handler(invocation, step.call.input.clone())
-                        .await
-                        .map(|out| {
-                            (
-                                same_events_once(out, key.as_deref()),
-                                called.trace().summary(),
-                            )
-                        })
+                    let answer = handler(invocation, step.call.input.clone()).await;
+                    step.run.trace().add(&called.trace().summary());
+                    answer.map(|out| {
+                        (
+                            same_events_once(out, key.as_deref()),
+                            called.trace().summary(),
+                        )
+                    })
                 }
                 (None, _) => Err(CommandError::Failed {
                     message: format!("`{}` has no handler to run", step.call.name),
                 }),
             };
+            run.trace().add(&step.run.trace().summary());
+            oxplow_domain::scope::add_counts(&mut scopes, step.run.trace().summary());
             let ran = ran.and_then(|(out, used)| Ok((honest(out, &step.call.name)?, used)));
             match ran {
                 Ok((mut out, used)) => {
@@ -1007,9 +1037,17 @@ impl CommandBus {
                 finish_stopped(&spec.id, &landed, err)
             })
         });
-        let failed = stop.as_ref().map(ToString::to_string);
+        let sensitive = scopes.contains_key("config.secret")
+            || run.trace().summary().contains_key("config.secret");
+        let failed = stop.as_ref().map(|err| {
+            if sensitive {
+                "command using private configuration failed".to_owned()
+            } else {
+                err.to_string()
+            }
+        });
         // The script's inverse is the undo of a run that all landed.
-        let inverse = plan_inverse.filter(|_| stop.is_none());
+        let inverse = plan_inverse.filter(|_| stop.is_none() && !sensitive);
         let out = HandlerOutput {
             result: result.clone(),
             inverse: inverse.clone(),
@@ -1119,7 +1157,9 @@ impl CommandBus {
                     depth: 1,
                     trace: &trace,
                 };
-                match handler(&ctx, input.clone()) {
+                let answer = handler(&ctx, input.clone());
+                run.trace().add(&trace.summary());
+                match answer {
                     Ok(out) => Ok((out, trace.summary())),
                     Err(CommandError::Busy { message }) => {
                         Err(TxError::Storage(oxplow_domain::DomainError::Busy(message)))

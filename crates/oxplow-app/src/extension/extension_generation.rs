@@ -96,7 +96,8 @@ pub fn reads_configuration(extension: &crate::extension::extensions::Extension) 
 /// its own ([`reads_configuration`]), as it is stored now. A configuration that can't be resolved
 /// signs as its failure, so repairing it republishes too.
 pub fn config_signature_tx(
-    conn: &rusqlite::Connection,
+    project: &std::path::Path,
+    global: &std::path::Path,
     extensions: &[crate::extension::extensions::Extension],
 ) -> ConfigSignature {
     extensions
@@ -105,7 +106,8 @@ pub fn config_signature_tx(
         .filter_map(|extension| {
             let declaration = extension.configuration.as_ref()?;
             let signed = match crate::extension::extension_configuration::effective_values(
-                conn,
+                project,
+                global,
                 &extension.namespace,
                 declaration,
             ) {
@@ -136,6 +138,23 @@ impl PreparedExtensionDatabase {
         let conflicts = crate::models::ModelRegistry::conflicts(snapshot.extensions());
         if !conflicts.is_empty() {
             return Err(conflicts);
+        }
+        let mut registry = oxplow_config::settings::SettingsRegistry::default();
+        let settings_valid = registry
+            .register_many(oxplow_config::core_settings::definitions(""))
+            .map_err(|error| error.to_string())
+            .and_then(|_| {
+                crate::extension::extension_settings::replace_extensions(
+                    &mut registry,
+                    snapshot.extensions(),
+                )
+                .map_err(|error| error.to_string())
+            });
+        if let Err(error) = settings_valid {
+            return Err(VocabularyErrors::from([(
+                "<settings>".to_owned(),
+                vec![Diagnostic::error("activation.settings_registry", error)],
+            )]));
         }
         let vocabulary = PreparedVocabulary::prepare(snapshot)?;
         Ok(Self::with_vocabulary(
@@ -172,13 +191,30 @@ impl PreparedExtensionDatabase {
             page_rows(extension, &mut pages, &mut page_answers, &mut page_params);
         }
         let listed = snapshot.extensions().iter().map(extension_row).collect();
-        let config_keys = oxplow_config::keys::config_keys()
+        let mut settings = std::collections::BTreeMap::new();
+        for definition in oxplow_config::core_settings::definitions("")
             .into_iter()
-            .map(|k| oxplow_db::catalog_listing_store::ConfigKeyRow {
-                schema_json: json_text(&k.schema),
-                key: k.key,
-                doc: k.doc,
-            })
+            .chain(
+                snapshot
+                    .extensions()
+                    .iter()
+                    .filter(|e| e.enabled)
+                    .flat_map(|e| {
+                        crate::extension::extension_settings::definitions(e).unwrap_or_default()
+                    }),
+            )
+        {
+            settings.insert(definition.key.clone(), definition);
+        }
+        let config_keys = settings
+            .into_values()
+            .map(
+                |definition| oxplow_db::catalog_listing_store::ConfigKeyRow {
+                    key: definition.key,
+                    doc: definition.description,
+                    schema_json: definition.schema.to_string(),
+                },
+            )
             .collect();
         let configurations = snapshot
             .extensions()
@@ -268,6 +304,8 @@ impl PreparedExtensionDatabase {
         &self,
         tx: &rusqlite::Transaction<'_>,
         now: Timestamp,
+        project: &std::path::Path,
+        global: &std::path::Path,
     ) -> Result<Vocabulary, TxError<VocabularyErrors>> {
         tx.execute_batch("SAVEPOINT candidate_extension_database")
             .map_err(oxplow_db::map_sql_err)?;
@@ -283,7 +321,8 @@ impl PreparedExtensionDatabase {
             let mut candidate = self.datasets.clone();
             for (extension, namespace, declaration) in &self.configurations {
                 let values = crate::extension::extension_configuration::effective_values(
-                    tx,
+                    project,
+                    global,
                     namespace,
                     declaration,
                 )

@@ -101,10 +101,10 @@ loaders:
              (:is_local AND NOT f.is_dir) AS is_local_file,
              CASE WHEN f.is_dir THEN f.path || '/' ELSE rtrim(f.path, replace(f.path, '/', '')) END || 'new-file.txt' AS new_file_path,
              CASE WHEN f.is_dir THEN f.path || '/' ELSE rtrim(f.path, replace(f.path, '/', '')) END || 'new-folder' AS new_folder_path,
-             (:is_local AND NOT EXISTS (SELECT 1 FROM v_config_value g, json_each(json_extract(g.value, '$.exclude')) e
-                     WHERE g.key = 'generated' AND e.value = substr(f.path, length(rtrim(f.path, replace(f.path, '/', ''))) + 1))) AS can_mark,
-             (:is_local AND EXISTS (SELECT 1 FROM v_config_value g, json_each(json_extract(g.value, '$.exclude')) e
-                     WHERE g.key = 'generated' AND e.value = substr(f.path, length(rtrim(f.path, replace(f.path, '/', ''))) + 1))) AS marked,
+             (:is_local AND NOT EXISTS (SELECT 1 FROM v_config_value g, json_each(g.value) e
+                     WHERE g.key = 'oxplow.generated.exclude' AND e.value = substr(f.path, length(rtrim(f.path, replace(f.path, '/', ''))) + 1))) AS can_mark,
+             (:is_local AND EXISTS (SELECT 1 FROM v_config_value g, json_each(g.value) e
+                     WHERE g.key = 'oxplow.generated.exclude' AND e.value = substr(f.path, length(rtrim(f.path, replace(f.path, '/', ''))) + 1))) AS marked,
              uri('oxplow/page', 'page', 'file-history', 'path', f.path) AS history_uri
       FROM files f
       ORDER BY f.is_dir DESC, f.path

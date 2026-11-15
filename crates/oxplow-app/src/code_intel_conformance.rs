@@ -256,7 +256,7 @@ mod tests {
     async fn the_language_servers_are_a_conforming_provider() {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             dir.path().join("w.py"),
             "\n\nclass Widget:\n    def spin(self): pass\n",
         )

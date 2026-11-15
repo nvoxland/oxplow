@@ -178,7 +178,7 @@ mod tests {
         crate::test_fixtures::init_git_repo(dir.path());
         let ext = dir.path().join(".oxplow/extensions/alpha");
         std::fs::create_dir_all(&ext).unwrap();
-        std::fs::write(
+        crate::test_fixtures::write_settings_fixture(
             ext.join("extension.yaml"),
             "manifest: 2\nname: alpha\nintent:\n  purpose: p\n",
         )

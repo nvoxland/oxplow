@@ -31,7 +31,7 @@ steps:
   # What new threads start with: `config.set` asks first; a page action's
   # click is the person's yes.
   - given:
-      - { command: oxplow.config.set, input: { key: newThreadSession, value: none, layer: personal }, confirmed: true }
+      - { command: oxplow.config.set, input: { key: oxplow.newThreadSession, value: none, level: local }, confirmed: true }
   - expect:
       loaders:
         agents_new_thread:

@@ -192,7 +192,8 @@ pub(crate) mod tests {
                 .unwrap();
         }
         if let Some((path, body)) = edit {
-            std::fs::write(svc.layout.project_dir.join(path), body).unwrap();
+            crate::test_fixtures::write_settings_fixture(svc.layout.project_dir.join(path), body)
+                .unwrap();
             let stream = svc.streams.list_streams().await.unwrap()[0].id;
             svc.snapshot_captures
                 .get(&stream)
@@ -226,7 +227,11 @@ pub(crate) mod tests {
         let f = services_with_thread().await;
         let stream = f.svc.streams.list_streams().await.unwrap()[0].id;
         let capture = f.svc.snapshot_captures.get(&stream).unwrap();
-        std::fs::write(f.svc.layout.project_dir.join("seed.txt"), "seed").unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            f.svc.layout.project_dir.join("seed.txt"),
+            "seed",
+        )
+        .unwrap();
         capture.enqueue_startup_diff().await.unwrap();
         capture
             .request_snapshot(oxplow_domain::snapshot::SnapshotTrigger::Startup)

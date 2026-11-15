@@ -1,5 +1,5 @@
 //! Oxplow's model calls, by role. Resolves a role to a provider and model
-//! from the user-global `ai.yaml` (plus any project overrides), fetches the
+//! from the user-global `global.yaml` (plus any project overrides), fetches the
 //! provider's key from the keychain, and records every call in `ai_call`
 //! (`v_ai_call`).
 //! See `.context/ai-providers.md`.
@@ -71,7 +71,7 @@ pub struct RoleStatus {
     pub binding: Option<RoleBinding>,
     /// What a call would use now: its binding, else its fallback's.
     pub effective: Option<RoleBinding>,
-    /// The binding comes from the project, not the global `ai.yaml`.
+    /// The binding comes from the project, not the global `global.yaml`.
     pub overridden: bool,
     /// Why a call on it would be refused, when it would be: a profile no
     /// active extension declares, or a model lacking a feature it needs.
@@ -176,8 +176,9 @@ pub struct AiService {
     /// The model providers the extensions declare, by kind.
     providers: ModelProviders,
     secrets: Arc<dyn SecretStore>,
+    settings_store: Option<oxplow_config::settings::SettingsStore>,
     calls: Arc<SqliteAiCallStore>,
-    /// Where `ai.yaml` lives; `None` when there's no config dir, which
+    /// Where `global.yaml` lives; `None` when there's no config dir, which
     /// leaves every role unconfigured.
     config_dir: Option<PathBuf>,
     /// The project's role assignments, read on every resolve so edits to
@@ -211,6 +212,7 @@ impl AiService {
         Self {
             providers,
             secrets,
+            settings_store: None,
             calls,
             config_dir,
             overrides: Arc::new(BTreeMap::new),
@@ -222,21 +224,57 @@ impl AiService {
         }
     }
 
-    /// Layer `source`'s role assignments (the project's) over `ai.yaml`.
-    /// This machine's AI setup: the global `ai.yaml` and the OS keychain
+    /// Layer `source`'s role assignments (the project's) over `global.yaml`.
+    /// This machine's AI setup: the global `global.yaml` and the OS keychain
     /// (read only here), recording calls into `calls` and calling through
     /// `providers`. What a check run outside the app uses
     /// (`OXPLOW_LIVE_ANSWERABILITY`).
     pub fn for_this_machine(
+        project: &std::path::Path,
         calls: Arc<oxplow_db::SqliteAiCallStore>,
         providers: ModelProviders,
-    ) -> Self {
-        Self::new(
-            providers,
-            Arc::new(oxplow_ai::secrets::KeychainSecrets),
-            calls,
-            oxplow_config::global_config_dir(),
-        )
+    ) -> Result<Self, AiServiceError> {
+        let global = oxplow_config::global_config_dir()
+            .ok_or_else(|| AiServiceError::Config("settings directory unavailable".into()))?;
+        let secrets: Arc<dyn SecretStore> = Arc::new(oxplow_ai::secrets::KeychainSecrets);
+        let settings = crate::settings::store(project, &global, secrets.clone(), &[])
+            .map_err(|error| AiServiceError::Config(error.to_string()))?;
+        Ok(Self::new(providers, secrets, calls, Some(global)).with_settings(settings))
+    }
+
+    /// Use the common settings service for both ordinary values and keys.
+    pub fn with_settings(mut self, settings: oxplow_config::settings::SettingsStore) -> Self {
+        self.settings_store = Some(settings);
+        self
+    }
+
+    fn settings_config(
+        &self,
+        level: Option<oxplow_config::settings::Level>,
+    ) -> Result<AiConfig, AiServiceError> {
+        let store = self.settings_store.as_ref().expect("settings installed");
+        let read = |key: &str| -> Result<serde_json::Value, AiServiceError> {
+            Ok(store
+                .get(key, level)
+                .map_err(|e| AiServiceError::Config(e.to_string()))?
+                .value
+                .unwrap_or(serde_json::Value::Null))
+        };
+        let providers = read("oxplow.ai.providers")?;
+        let roles = read("oxplow.ai.roles")?;
+        Ok(AiConfig {
+            providers: if providers.is_null() {
+                Vec::new()
+            } else {
+                serde_json::from_value(providers)
+                    .map_err(|e| AiServiceError::Config(e.to_string()))?
+            },
+            roles: if roles.is_null() {
+                BTreeMap::new()
+            } else {
+                serde_json::from_value(roles).map_err(|e| AiServiceError::Config(e.to_string()))?
+            },
+        })
     }
 
     pub fn with_project_overrides(mut self, source: OverridesSource) -> Self {
@@ -346,7 +384,22 @@ impl AiService {
 
     async fn settings_unpinned(&self) -> Result<AiSettings, AiServiceError> {
         let config = self.config()?;
-        let overrides = (self.overrides)();
+        let overrides = if let Some(store) = &self.settings_store {
+            use oxplow_config::settings::Origin;
+            if matches!(
+                store
+                    .get("oxplow.ai.roles", None)
+                    .map_err(|e| AiServiceError::Config(e.to_string()))?
+                    .origin,
+                Some(Origin::Local | Origin::Project)
+            ) {
+                config.roles.clone()
+            } else {
+                BTreeMap::new()
+            }
+        } else {
+            (self.overrides)()
+        };
         let profiles = self.profiles();
         let providers = config
             .providers
@@ -448,7 +501,7 @@ impl AiService {
         })
     }
 
-    /// Add or replace a provider in the global `ai.yaml`. A non-empty `key`
+    /// Add or replace a provider in the global `global.yaml`. A non-empty `key`
     /// is stored in the keychain; `None` leaves any stored key alone.
     pub fn save_provider(
         &self,
@@ -477,9 +530,7 @@ impl AiService {
         };
         if let Some(key) = key {
             let stored = StoredKey { key, endpoint };
-            self.secrets
-                .set(&id, &stored.encode())
-                .map_err(|e| AiServiceError::Secret(e.to_string()))?;
+            self.write_key(&id, Some(stored.encode()))?;
         }
         Ok(())
     }
@@ -501,12 +552,10 @@ impl AiService {
         }
         global.providers.retain(|p| p.id != id);
         self.save_global(&global)?;
-        self.secrets
-            .delete(id)
-            .map_err(|e| AiServiceError::Secret(e.to_string()))
+        self.write_key(id, None)
     }
 
-    /// Assign a role to a provider + model in the global `ai.yaml`, or
+    /// Assign a role to a provider + model in the global `global.yaml`, or
     /// unassign it with `None`.
     pub fn set_role(
         &self,
@@ -545,7 +594,7 @@ impl AiService {
         Ok(self.provider_of(&provider)?.test(&instance, model).await?)
     }
 
-    /// The effective configuration: global `ai.yaml` plus project overrides.
+    /// The effective configuration: global `global.yaml` plus project overrides.
     pub fn config(&self) -> Result<AiConfig, AiServiceError> {
         if let Some(config) = CONFIG_READERS
             .try_with(|readers| {
@@ -558,6 +607,9 @@ impl AiService {
             .flatten()
         {
             return Ok(config);
+        }
+        if self.settings_store.is_some() {
+            return self.settings_config(None);
         }
         let global = match &self.config_dir {
             Some(dir) => AiConfig::load(dir).map_err(|e| AiServiceError::Config(e.to_string()))?,
@@ -1148,15 +1200,51 @@ impl AiService {
 
     /// The stored key entry, whatever URL it's bound to.
     fn raw_key(&self, provider_id: &str) -> Result<Option<StoredKey>, AiServiceError> {
-        Ok(self
-            .secrets
-            .get(provider_id)
-            .map_err(|e| AiServiceError::Secret(e.to_string()))?
-            .map(|raw| StoredKey::decode(&raw)))
+        let raw = if let Some(store) = &self.settings_store {
+            ensure_provider_key(store, provider_id)?;
+            store
+                .get(&provider_key_setting(provider_id), None)
+                .map_err(|e| AiServiceError::Secret(e.to_string()))?
+                .value
+                .and_then(|v| v.as_str().map(str::to_string))
+        } else {
+            self.secrets
+                .get(provider_id)
+                .map_err(|e| AiServiceError::Secret(e.to_string()))?
+        };
+        if self.settings_store.is_some() {
+            let config = self.config()?;
+            let endpoint = endpoint_of(config.providers.iter().find(|p| p.id == provider_id));
+            Ok(raw.map(|key| StoredKey { key, endpoint }))
+        } else {
+            Ok(raw.map(|raw| StoredKey::decode(&raw)))
+        }
+    }
+
+    fn write_key(&self, provider_id: &str, value: Option<String>) -> Result<(), AiServiceError> {
+        if let Some(store) = &self.settings_store {
+            ensure_provider_key(store, provider_id)?;
+            let key = provider_key_setting(provider_id);
+            match value {
+                Some(value) => store.set(
+                    &key,
+                    serde_json::Value::String(StoredKey::decode(&value).key),
+                    oxplow_config::settings::Level::Global,
+                ),
+                None => store.unset(&key, oxplow_config::settings::Level::Global),
+            }
+            .map_err(|e| AiServiceError::Secret(e.to_string()))
+        } else {
+            match value {
+                Some(value) => self.secrets.set(provider_id, &value),
+                None => self.secrets.delete(provider_id),
+            }
+            .map_err(|e| AiServiceError::Secret(e.to_string()))
+        }
     }
 
     /// The key to send to `provider`: only when it was saved for the
-    /// provider's URL as it is now. `ai.yaml` is a plain file an agent can
+    /// provider's URL as it is now. `global.yaml` is a plain file an agent can
     /// edit; pointing a provider elsewhere must not carry the key along.
     fn key(&self, provider: &ProviderConfig) -> Result<Option<String>, AiServiceError> {
         let Some(stored) = self.raw_key(&provider.id)? else {
@@ -1172,7 +1260,7 @@ impl AiService {
                 }
             };
             return Err(AiServiceError::Config(format!(
-                "the key for `{}` was saved for {}, but ai.yaml now points it at {}. \
+                "the key for `{}` was saved for {}, but global.yaml now points it at {}. \
                  If that's intended, re-save the AI provider in Settings → AI.",
                 provider.id,
                 shown(&stored.endpoint),
@@ -1184,17 +1272,41 @@ impl AiService {
 
     fn config_dir(&self) -> Result<&std::path::Path, AiServiceError> {
         self.config_dir.as_deref().ok_or_else(|| {
-            AiServiceError::Config("there's no config directory to save ai.yaml in".into())
+            AiServiceError::Config("there's no config directory to save global.yaml in".into())
         })
     }
 
-    /// The global `ai.yaml` alone, without project overrides: what the
+    /// The global `global.yaml` alone, without project overrides: what the
     /// settings writers edit.
     fn global(&self) -> Result<AiConfig, AiServiceError> {
+        if self.settings_store.is_some() {
+            return self.settings_config(Some(oxplow_config::settings::Level::Global));
+        }
         AiConfig::load(self.config_dir()?).map_err(|e| AiServiceError::Config(e.to_string()))
     }
 
     fn save_global(&self, config: &AiConfig) -> Result<(), AiServiceError> {
+        if let Some(store) = &self.settings_store {
+            config
+                .validate()
+                .map_err(|e| AiServiceError::Config(e.to_string()))?;
+            for (key, value) in [
+                (
+                    "oxplow.ai.providers",
+                    serde_json::to_value(&config.providers),
+                ),
+                ("oxplow.ai.roles", serde_json::to_value(&config.roles)),
+            ] {
+                store
+                    .set(
+                        key,
+                        value.map_err(|e| AiServiceError::Config(e.to_string()))?,
+                        oxplow_config::settings::Level::Global,
+                    )
+                    .map_err(|e| AiServiceError::Config(e.to_string()))?;
+            }
+            return Ok(());
+        }
         config
             .save(self.config_dir()?)
             .map_err(|e| AiServiceError::Config(e.to_string()))
@@ -1545,7 +1657,7 @@ fn build_built_ins(
     (PreparedModelProviders { providers: built }, errors)
 }
 
-fn endpoint_of(provider: Option<&ProviderConfig>) -> String {
+pub(crate) fn endpoint_of(provider: Option<&ProviderConfig>) -> String {
     provider
         .and_then(|p| p.base_url.as_deref())
         .map(|u| u.trim().trim_end_matches('/').to_string())
@@ -1905,7 +2017,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn providers_and_roles_are_saved_to_ai_yaml_and_keys_to_the_keychain() {
+    async fn providers_and_roles_are_saved_to_global_settings_and_keys_to_the_keychain() {
         let dir = tempfile::tempdir().unwrap();
         let (svc, _) = service("http://x", &dir);
         svc.save_provider(
@@ -1919,7 +2031,7 @@ mod tests {
         .unwrap();
         svc.set_role(&Role::DECIDE, Some(RoleBinding::new("ts", "jev")))
             .unwrap();
-        let yaml = std::fs::read_to_string(dir.path().join("ai.yaml")).unwrap();
+        let yaml = std::fs::read_to_string(dir.path().join("global.yaml")).unwrap();
         assert!(yaml.contains("jev") && !yaml.contains("tk-9"), "{yaml}");
         assert_eq!(
             svc.raw_key("ts").unwrap().map(|k| k.key).as_deref(),
@@ -2072,7 +2184,8 @@ mod tests {
                 "manifest: 2\nname: acme\nintent:\n  purpose: p\npermissions: [ai.compute]\nimplementations:\n  - {{ capability: ai_provider, id: acme, title: Acme, provider: openai_compatible, config: {{ baseUrl: \"{base}\" }} }}\n"
             )
         };
-        std::fs::write(ext.join("extension.yaml"), manifest(&first)).unwrap();
+        crate::test_fixtures::write_settings_fixture(ext.join("extension.yaml"), manifest(&first))
+            .unwrap();
         let svc = crate::Services::in_memory(dir.path()).await.unwrap();
         crate::test_fixtures::activate(&svc).await;
         svc.ai
@@ -2092,7 +2205,8 @@ mod tests {
         assert_eq!(call().await.unwrap().text, "hello");
         assert_eq!(seen.lock().unwrap()[0].1["authorization"], "Bearer sk-1");
 
-        std::fs::write(ext.join("extension.yaml"), manifest(&second)).unwrap();
+        crate::test_fixtures::write_settings_fixture(ext.join("extension.yaml"), manifest(&second))
+            .unwrap();
         crate::test_fixtures::activate(&svc).await;
         assert_eq!(call().await.unwrap().text, "hello");
         assert_eq!(second_seen.lock().unwrap().len(), 1);
@@ -2150,7 +2264,7 @@ mod tests {
         crate::test_fixtures::init_git_repo(dir.path());
         let yaml = |model: &str| {
             std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
-            std::fs::write(
+            crate::test_fixtures::write_settings_fixture(
                 dir.path().join(".oxplow/project.yaml"),
                 format!("ai:\n  roles:\n    summarize: {{ provider: or, model: {model} }}\n"),
             )
@@ -2184,7 +2298,7 @@ mod tests {
         assert_eq!(summarize(&svc).await, (true, Some("tiny".to_string())));
     }
 
-    /// An agent can edit `ai.yaml`. Pointing a provider at another host
+    /// An agent can edit `global.yaml`. Pointing a provider at another host
     /// must not carry the person's key there: the key is bound to the URL
     /// it was saved for, until a person re-saves the provider.
     #[tokio::test]
@@ -2942,4 +3056,47 @@ mod typed_tests {
             (json!(10), json!(5))
         );
     }
+}
+
+/// Stable registry-safe name; provider ids themselves may contain punctuation.
+pub fn provider_key_setting(id: &str) -> String {
+    let suffix: String = id
+        .as_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    format!("oxplow.ai.providerKeys.{suffix}")
+}
+
+pub(crate) fn provider_key_definition(id: &str) -> oxplow_config::settings::SettingDefinition {
+    oxplow_config::settings::SettingDefinition {
+        key: provider_key_setting(id),
+        title: "AI provider key".into(),
+        description: "Endpoint-bound credential for an AI provider".into(),
+        category: "AI".into(),
+        schema: serde_json::json!({"type":"string"}),
+        default: None,
+        secret: true,
+        order: 0,
+        ui: serde_json::json!({}),
+        restart_required: false,
+        owner: "oxplow".into(),
+    }
+}
+
+fn ensure_provider_key(
+    store: &oxplow_config::settings::SettingsStore,
+    id: &str,
+) -> Result<(), AiServiceError> {
+    let mut registry = store
+        .registry
+        .write()
+        .unwrap_or_else(|error| error.into_inner());
+    let definition = provider_key_definition(id);
+    if registry.get(&definition.key).is_none() {
+        registry
+            .register(definition)
+            .map_err(|e| AiServiceError::Config(e.to_string()))?;
+    }
+    Ok(())
 }

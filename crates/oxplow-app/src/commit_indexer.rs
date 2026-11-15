@@ -549,9 +549,9 @@ mod tests {
         let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
-        std::fs::write(root.join("a.txt"), "a\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("a.txt"), "a\n").unwrap();
         let new = crate::test_fixtures::commit_all(&root, "new history");
-        std::fs::write(root.join("b.txt"), "b\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("b.txt"), "b\n").unwrap();
         let gone = crate::test_fixtures::commit_all(&root, "reset away");
         let out = std::process::Command::new("git")
             .args(["reset", "-q", "--hard", &new])
@@ -613,7 +613,7 @@ mod tests {
         let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
-        std::fs::write(root.join("a.txt"), "a\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(root.join("a.txt"), "a\n").unwrap();
         let base = crate::test_fixtures::commit_all(&root, "base");
         let main = svc.vcs.head(&root).await.unwrap().branch.unwrap();
         let git = |dir: &std::path::Path, args: &[&str]| {
@@ -632,7 +632,7 @@ mod tests {
             .unwrap();
         let side_dir = std::path::PathBuf::from(&side.worktree_path);
         let _cleanup = scopeguard(side_dir.clone());
-        std::fs::write(side_dir.join("side.txt"), "s\n").unwrap();
+        crate::test_fixtures::write_settings_fixture(side_dir.join("side.txt"), "s\n").unwrap();
         git(&side_dir, &["add", "-A"]);
         git(
             &side_dir,
@@ -714,7 +714,8 @@ mod tests {
             .current_dir(dir.path())
             .status()
             .unwrap();
-        std::fs::write(dir.path().join("a.rs"), "fn main() {}").unwrap();
+        crate::test_fixtures::write_settings_fixture(dir.path().join("a.rs"), "fn main() {}")
+            .unwrap();
         std::process::Command::new("git")
             .args(["add", "."])
             .current_dir(dir.path())
@@ -810,7 +811,11 @@ mod tests {
         crate::test_fixtures::init_git_repo(dir.path());
         let commit_n = |from: usize, to: usize| {
             for i in from..to {
-                std::fs::write(dir.path().join("n.txt"), i.to_string()).unwrap();
+                crate::test_fixtures::write_settings_fixture(
+                    dir.path().join("n.txt"),
+                    i.to_string(),
+                )
+                .unwrap();
                 crate::test_fixtures::commit_all(dir.path(), "c");
             }
         };
@@ -894,7 +899,7 @@ mod tests {
         git(&["remote", "add", "origin", remote.path().to_str().unwrap()]);
         git(&["fetch", "-q", "origin"]);
         git(&["branch", "-q", "--set-upstream-to=origin/main", "main"]);
-        std::fs::write(ws.join("n.txt"), "1").unwrap();
+        crate::test_fixtures::write_settings_fixture(ws.join("n.txt"), "1").unwrap();
         crate::test_fixtures::commit_all(&ws, "ahead");
         let head = git(&["rev-parse", "HEAD"]);
         refresh(&f.svc).await;

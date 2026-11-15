@@ -71,13 +71,13 @@ replacements and custom components (all mounted, no global name).
 `v_<namespace>_<entity>`), an event type (`<namespace>.<…>`), a command id,
 and every contribution's id — `ContributionId { namespace, kind, local }`,
 `<namespace>/<local>`: pages, panels, effects, collectors, jobs, AI
-profiles (`<namespace>/<profile>` in `ai.yaml`), advisories, agent contexts, custom
+profiles (`<namespace>/<profile>` in `oxplow.ai.roles`), advisories, agent contexts, custom
 components, providers and their instances (`extensionInstances:` keys),
 resources — are named by the manifest's `namespace:` (default: the name,
 `-` → `_`). So is what is stored under them: `contribution_health`
 (`namespace` column), `collector_run.owner` (a collector's owner is its
 namespace), `effect_state`/`effect_run`, jobs, `panel_layout`, settings
-(`extension_config.namespace`), private state (`extension_state.namespace`),
+(namespaced registry keys), private state (`extension_state.namespace`),
 collector and instance credentials and extension secrets (keychain
 accounts). Everything oxplow ships is in `oxplow`, so a user sees
 `v_oxplow_struggle` and `oxplow/collectors`
@@ -91,8 +91,8 @@ refused (`Registry::add`'s id and global-name checks, `descriptor.collision`;
 the "already belongs to" check in `datasets::compile_extensions`), and
 their `configuration:` declarations merge into one document
 (`share_configuration`, `config_schema::merge`: one `version`, no key two
-declare; the later one is refused, `configuration.shared`). Settings and
-state are forgotten only with a namespace's last extension.
+declare; the later one is refused, `configuration.shared`). Settings overrides
+remain in their selected configuration levels when an extension is removed.
 
 What says *who declares* a thing stays the extension: `Descriptor::owner`,
 `v_contribution.extension` (beside `v_contribution.namespace`),
@@ -275,7 +275,7 @@ not by `enabled`.
 
 ## Namespaced configuration declarations
 
-`configuration:` in manifest v2 declares non-secret settings as
+`configuration:` in manifest v2 declares registered settings as
 `{version, schema, defaults}`. The version is a positive integer distinct from
 package, engine and public contract versions. The JSON Schema must declare an
 object root; defaults are an object and default to `{}`. Unknown declaration
@@ -293,109 +293,81 @@ or fixed error code, never library error text, enum choices, unexpected-property
 lists or offending values. At most 32 violations plus a truncation marker are
 returned, sorted and deduplicated.
 
-Defaults are fragments of objects that higher layers can complete. Direct
-`required` and `minProperties` errors on mergeable objects defer to final resolved
-validation. Arrays replace whole values, so required fields inside their objects
-are checked even in defaults. All other schema constraints apply to defaults as
-written; branch constraints such as `anyOf`/`oneOf` are not solved by inventing
-hypothetical user values. Authors must provide defaults satisfying those branch
-constraints. Final resolved validation defers no constraints. JSON Schema
-`default` annotations do not insert values; use the declaration's `defaults`.
+`extension_settings.rs` translates fixed object fields into independent
+`<namespace>.<path>` settings. Arrays, dynamic objects and fields marked
+`x-atomic: true` are single settings. Each setting resolves the first present
+value in local, project, global, then its registered default. Objects and arrays
+are complete values at their setting boundary; they never merge across levels.
+The adapter reconstructs the nested document for JSON-pointer consumers and
+validates authorized complete reads against the declaration. Reset uses
+`config.unset` at an explicit level, exposing the next inherited value.
 
-`extensions/config.rs` supplies pure resolution: recursively merge objects in
-`defaults < project < personal` order; arrays, scalars and explicit null replace
-subtrees. Missing layers inherit; a present null layer fails the object-root
-requirement. Empty overriding objects merge without clearing lower fields.
-Reset/unset is removal of a stored override, never a magic JSON sentinel. Origins
-are per effective leaf JSON pointer, with arrays atomic, empty objects as leaves
-and correct `~`/`/` escaping. Replaced subtrees lose stale origins. Merge/schema
-validation share a bounded byte counter and nesting check; merging avoids
-redundant object clones and origin removal uses the BTreeMap's prefix range.
+Annotations supply registry metadata: `x-category`, `x-ui`, `x-order`,
+`x-restart-required` and `x-secret`. Titles, descriptions, schema and defaults
+come from the declaration. A secret has no default and uses the same config
+APIs and precedence, with its values in the host's secure backend. Ordinary
+values are flat namespaced maps in `.oxplow/local.yaml`, `.oxplow/project.yaml`
+and the machine's `global.yaml`; see [settings.md](./settings.md). Schema
+`version` describes the declaration, not a stored override stamp. There is no
+configuration CAS, layer revision, schema carry-forward or migration runner.
+The older pure nested resolver remains a declaration-validation helper, not
+the runtime storage or precedence contract.
 
-`ConfigurationFile::resolve` connects that resolver to the offline schema adapter:
-validate partial defaults and the final resolved object using the policy above,
-map only pointer/code diagnostics into layer-local issues, and return no resolved
-values on failure. Invalid namespace input is omitted from its diagnostic. The
-resolver caps, sorts and deduplicates issues; the schema adapter's cap remains
-smaller. There is no permissive fallback, external retrieval or secret lookup.
+### Configuration services
 
-### Private configuration services
+Extensions use the shared `config.get`, `config.set` and `config.unset` command
+operations; writes choose an explicit local, project or global level. A script
+can declare `needs: [config.read]` and call
+`scope("config.read", {key, level?})`, which returns the registered setting's
+value, origin and presence. The host checks the current owning contribution
+and declared/live authority before and after access. An extension can read its
+own registered secret settings; a core secret owned by another registry owner
+is refused. Definitions available to this service are core plus its own
+extension. Writes are composed commands, with the normal command permission
+checks, rather than a writable script service.
 
-`extension_configuration::ConfigurationHost` loads the owning extension's
-manifest defaults and private Project/Personal override rows, resolves them in
-that order, validates the effective schema and reports per-leaf origins.
-`extension_config.read` is distinct from core app-settings `config.read`.
-Native operations are `snapshot` (effective values, origins, layer stamps,
-and `layers: { project, personal }`, each layer's values as stored or
-null) and `inspect` (stamps only, including old schema versions). A write
-replaces a whole layer, so a script that changes one key merges it into
-`layers.project` and writes the result back (oxtask's
-`tasks.set_workflow`). Scripts declare
-`needs: [extension_config.read]` and call
-`scope("extension_config.read", {})`. Composers read their existing connection;
-effects, collectors and provider host calls use an owned DB read per call.
-Provider identity is captured at construction, as for private state. No
-extension/owner selector, SQL, credentials or authority comes from settings.
+The retained `extension_config.read` service and native `snapshot` operation
+are nested read projections over that same backend. They return `{values,
+origins}` for the owning namespace; no layer snapshots, stamps or `inspect`
+operation remain. Provider identity is captured at construction, as for private
+state. Settings convey no authority. Disabled, removed or stale owners cannot
+use either host read service. Direct authorized secret reads are excluded from
+audit results; inventories and SQL use redacted metadata/public projections.
 
-A native `scope: extension_config.write`, `op: compare_exchange` takes
-`schema_version` and optional `project`/`personal` objects, each containing
-`expected` (exact prior stamp or null for creation) and `values` (object
-fragment). The host validates the complete candidate before either CAS mutation.
-Both layers can be replaced atomically when the schema version changes. An
-untouched layer must already use the current manifest version; reads of old
-versions fail closed. `inspect` supplies the old stamps the replacing write needs.
-Version decrease is refused. Failure rolls back both layers; storage errors
-abort the outer audited command transaction. The write runs no script and waits
-on nothing external. Writes return stamps and omit both layer inputs from audit;
-private compositions/proposals follow the state rules. `inspect` and `snapshot`
-(and the stamps a write returns) carry `needs_migration: { project, personal }`:
-whether a stored layer is at a schema version other than the declared one.
-Reading such a layer fails closed with a `/schema_version` error, distinct
-from a stale-stamp conflict (`/expected`).
+The registry-backed `v_config_value` inventory lists core and extension settings
+with title, category, schema, secret status, presence and effective origin.
+Categories do not determine ownership. Secret values are NULL in this inventory;
+metric and dimension declarations are not configuration preferences.
 
-**Changing the schema version.** There is no migration runner. When an
-extension raises its configuration schema `version`, each publication
-carries a stored layer at an older version forward when the new schema still
-takes its values (`extension_configuration::carry_forward_tx`, in the
-publication transaction, before datasets compile): the layer is restamped
-at the new version, its values as stored, its revision one higher. "Takes"
-is the new declaration resolving with that layer alone over the defaults
-(and the other layer when that one is already current). A layer the new
-schema doesn't take is left alone and fails closed on every read
-(`/schema_version`) until the extension's own command writes it at the new
-version: a compare-and-swap with the old stamp as `expected`, both layers in
-one audited transaction. A layer at a *newer* version than the declared one
-(after a rollback) is never touched. The host never discards or changes a
-layer's values.
-
-Reset uses an empty override object at a newer revision, retaining stale-token
-rejection. Disable/uninstall retain local rows for explicit recovery/reinstall;
-access is refused while the owner is disabled, missing or stale.
-Both scopes live in the local project's database, with no global identity lookup.
-Raw secrets do not belong in defaults, schema or overrides. Secrets are host-owned
-references (extensions-permissions.md "Host-owned secret references"); this service resolves non-secret
-settings only.
+Declared collector credentials also register secret scalar settings as
+`<namespace>.credentials.<hex UTF-8 credential name>`. Generic config operations
+and collector execution read the same values. The existing
+`oxplow.collector.set_credential` UI wrapper writes local; clearing it removes
+only that override. Collector credential listings expose presence via
+`SettingsStore::inspect`, never the value. Host-owned opaque provider secret
+references and operational OAuth state retain their separate identity contract
+(extensions-permissions.md "Host-owned secret references").
 
 ### Configuration in SQL
 
 An extension's own SQL — its datasets, its pages' `sql` loaders and its
 advisories' queries — reads its own configuration with
 `config('/pointer')`, a JSON pointer into the extension's effective values
-(`defaults < project < personal`, the `ConfigurationHost` resolution above):
+(local, project, global, then defaults, at registered setting boundaries):
 `HAVING count(*) >= config('/struggle/repeatedEdits')`.
 
 - **Resolved, not a function.** Like `ref()` and `source()`, `config()` is
   not a SQL function: where the SQL is compiled or run, each call is
   replaced by the literal of its value (a number as is, a string quoted, a
-  boolean 1 or 0). Nothing registers a global function, so there is no `v_*`
-  view or `oxplow_query_sql` call that reads configuration, and no way to name
-  another extension's: the owner is fixed by where the SQL is declared
+  boolean 1 or 0). Nothing registers an ambient SQL function for private
+  configuration or an arbitrary owner selector: the owner is fixed by where
+  the SQL is declared
   (`ExtensionDatasets.config` for a dataset, the page's or advisory's own
-  extension for those). Core SQL reads none. Settings are non-secret by
-  construction; a literal in a view or a query is no more exposed than they
-  are.
-- **Datasets** are compiled with the values read in the activation's own
-  transaction (`PreparedExtensionDatabase::replace_tx`), so the view carries
+  extension for those). Core SQL reads none. The public projection omits secret
+  settings before any secure-store read, so neither SQL literals nor contribution
+  conditions receive secret bytes.
+- **Datasets** are compiled during activation from the project's current
+  shared settings (`PreparedExtensionDatabase::replace_tx`), so the view carries
   the literal; a stored configuration that can't be resolved holds that
   extension back like a dataset that doesn't compile. **A change republishes:**
   the generation records the configuration it was published with, for every
@@ -403,9 +375,9 @@ advisories' queries — reads its own configuration with
   that call `config()`, skills with `when:`, implementations with `when:`;
   `ConfigSignature`, beside the
   entity signature), the entities consumer
-  checks it after each `command.executed` (`request_config_refresh`; a write
-  through `extension_config.write` is one) and requests an activation when it
-  differs; a changed definition refills a materialized dataset.
+  checks it after `command.executed` (`request_config_refresh`) and requests an
+  activation when it differs. Settings file watchers also request activation;
+  a changed definition refills a materialized dataset.
 - **An implementation offered by a setting** (`implementations:` entry with
   `when: { config, in }`, checked at load like a skill's): the publication
   reads the extension's effective values once
@@ -429,13 +401,9 @@ advisories' queries — reads its own configuration with
   division applies to an integer setting (write `1.0 * config(...)` to divide
   as a real).
 
-oxplow's own extensions share the namespace `oxplow`, so they share one
-configuration (foundation's `oxwiki`, bundled's review-policy constants and
-task workflow, each a key of it, all at one `version`), and one pair of
-commands over the scope above, foundation's (it always runs):
-`oxplow.settings.read` / `.write`.
-The holder (`extensions-bundled.md`) keeps the advisories' settings and
-`oxplow.advisory_policy.read` / `.write`.
+oxplow's own extensions share the namespace `oxplow` and therefore one
+configuration declaration, with independently registered keys. Their settings
+use the same `oxplow.config.get` / `.set` / `.unset` commands as core settings.
 Pinned by `extension_sql_config_tests.rs` and
 `datasets::tests::config_reads_become_the_owners_literals`.
 
@@ -514,8 +482,8 @@ new revision; it does not delete/recreate the namespace. No inverse stores old
 private values. Nested compositions inherit private-input recording and child
 metadata is redacted. Calls that require confirmation cannot retain these inputs
 in a public proposal; a person must invoke them directly with confirmation.
-State has no migration runner, and neither has configuration, and lifecycle cleanup
-beyond retaining rows is unbuilt. Raw secrets do not belong in state payloads.
+State has no migration runner. Its CAS rows are independent of the shared
+settings service; raw secrets do not belong in state payloads.
 
 Current-generation checks use the filesystem catalog, including its stat walk;
 they are conservative on any catalog change. This does not pin DB/runtime

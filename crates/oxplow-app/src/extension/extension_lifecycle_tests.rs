@@ -132,7 +132,7 @@ event_types:
     - {{ type: alpha.noted, v: 1, schema: noted.json, summary: A title was noted. }}
 "
         );
-        std::fs::write(&manifest, text).unwrap();
+        crate::test_fixtures::write_settings_fixture(&manifest, text).unwrap();
         let v = self.v;
         write(root, &format!("{dir}/noted.json"), "{\"type\": \"object\"}");
         write(
@@ -387,9 +387,8 @@ async fn disabling_then_enabling_an_extension_takes_away_and_brings_back_what_it
 }
 
 /// Rolling back brings the earlier version's dataset, command and page
-/// back; what the later version wrote to private state stays readable, and
-/// a configuration layer it wrote at a newer schema version fails closed
-/// until the earlier version's own command writes it again.
+/// back; private state and registered settings written by the later version
+/// stay readable when the earlier declaration accepts their values.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_rollback_restores_the_earlier_version_over_what_the_later_one_stored() {
     let fx = booted().await;
@@ -402,7 +401,7 @@ async fn a_rollback_restores_the_earlier_version_over_what_the_later_one_stored(
         .write(&root);
     deploy(&fx.svc, NAME).await.unwrap();
 
-    // The later version writes its private state and a layer at its schema.
+    // The later version writes private state and a project setting.
     bus(
         &fx.svc,
         "alpha.state.write",
@@ -412,8 +411,8 @@ async fn a_rollback_restores_the_earlier_version_over_what_the_later_one_stored(
     .unwrap();
     bus(
         &fx.svc,
-        "alpha.config.write",
-        json!({"schema_version": 2, "project": {"expected": null, "values": {"limit": 20}}}),
+        "oxplow.config.set",
+        json!({"key":"alpha.limit", "value":20, "level":"project"}),
     )
     .await
     .unwrap();
@@ -434,31 +433,24 @@ async fn a_rollback_restores_the_earlier_version_over_what_the_later_one_stored(
         "private state outlives the version that wrote it"
     );
 
-    // The layer is at schema 2; version 1 declares 1: it fails closed.
-    let refused = bus(&fx.svc, "alpha.config.read", json!({}))
-        .await
-        .expect_err("a layer at another schema version is not read");
-    let CommandError::Invalid { field, .. } = refused else {
-        panic!("{refused:?}")
-    };
-    assert_eq!(field.as_deref(), Some("/schema_version"));
-
-    // The layer stays at schema 2: the store takes no downgrade, so version
-    // 1's own command cannot write it either (see the ignored test below).
-    // Deploying the later version again reads it as it was.
+    // A declaration version change does not stamp or migrate stored settings.
+    let config = bus(&fx.svc, "alpha.config.read", json!({})).await.unwrap();
+    assert_eq!(config["values"]["limit"], json!(20));
+    assert_eq!(config["origins"]["/limit"], json!("project"));
     deploy(&fx.svc, NAME).await.unwrap();
     let config = bus(&fx.svc, "alpha.config.read", json!({})).await.unwrap();
     assert_eq!(config["values"]["limit"], json!(20));
 }
 
-/// What `data-model.md` says of a layer at another schema version: it
-/// fails closed until the extension's own command rewrites it — after a
-/// rollback too, where the layer is newer than the running version.
+/// Rolling back to a stricter declaration rejects an incompatible stored value
+/// until a generic setting write replaces it with one that the running schema
+/// accepts. No stored declaration version or CAS stamp is involved.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_rolled_back_version_rewrites_the_configuration_layer_the_later_one_wrote() {
+async fn a_rolled_back_version_replaces_a_setting_the_earlier_schema_refuses() {
     let fx = booted().await;
     let root = fx.svc.layout.project_dir.clone();
-    Alpha::new(1).configured(CONFIGURATION).write(&root);
+    const STRICT_CONFIGURATION: &str = "configuration:\n  version: 1\n  schema:\n    type: object\n    additionalProperties: false\n    required: [limit]\n    properties:\n      limit: { type: integer, minimum: 1, maximum: 10 }\n  defaults: { limit: 5 }\n";
+    Alpha::new(1).configured(STRICT_CONFIGURATION).write(&root);
     let first = deploy(&fx.svc, NAME).await.unwrap();
     Alpha::new(2)
         .sized()
@@ -467,23 +459,25 @@ async fn a_rolled_back_version_rewrites_the_configuration_layer_the_later_one_wr
     deploy(&fx.svc, NAME).await.unwrap();
     bus(
         &fx.svc,
-        "alpha.config.write",
-        json!({"schema_version": 2, "project": {"expected": null, "values": {"limit": 20}}}),
+        "oxplow.config.set",
+        json!({"key":"alpha.limit", "value":20, "level":"project"}),
     )
     .await
     .unwrap();
     let back = rollback(&fx.svc, NAME).await.unwrap();
     assert_eq!(back["hash"], first["hash"], "{back}");
 
+    assert!(
+        bus(&fx.svc, "alpha.config.read", json!({})).await.is_err(),
+        "the old schema refuses the newer value"
+    );
     bus(
         &fx.svc,
-        "alpha.config.write",
-        json!({"schema_version": 1,
-               "project": {"expected": {"schema_version": 2, "revision": 1},
-                           "values": {"limit": 5}}}),
+        "oxplow.config.set",
+        json!({"key":"alpha.limit", "value":5, "level":"project"}),
     )
     .await
-    .expect("version 1's command rewrites the layer");
+    .expect("a generic write validates against the rolled-back declaration");
     let config = bus(&fx.svc, "alpha.config.read", json!({})).await.unwrap();
     assert_eq!(config["values"]["limit"], json!(5));
 }
