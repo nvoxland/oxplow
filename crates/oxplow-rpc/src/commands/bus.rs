@@ -343,7 +343,7 @@ mod tests {
         };
         let opened = run(
             "oxplow.agent_session.open",
-            json!({ "thread": thread.to_string() }),
+            json!({ "thread": thread.to_string(), "harness": "claude" }),
         )
         .await;
         let session = opened["result"]["id"].as_str().unwrap().to_string();
@@ -413,7 +413,7 @@ mod tests {
                     "run_command",
                     json!({
                         "id": "oxplow.config.set",
-                        "input": { "key": "agentPromptAppend", "value": "Be brief." },
+                        "input": { "key": "oxplow.agentPromptAppend", "value": "Be brief.", "level": "project" },
                         "confirmed": confirmed,
                     }),
                     &svc,

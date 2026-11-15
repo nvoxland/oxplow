@@ -808,10 +808,10 @@ export interface AgentSessionRecord {
 }
 
 /** Open an agent session on a thread: it only adds the slot (the tab
- *  starts its process when it mounts). No harness: the project's default. */
+ *  starts its process when it mounts). The caller chooses the harness. */
 export async function openAgentSession(
   threadId: string,
-  harness?: string,
+  harness: string,
   title?: string,
   /** A saved conversation of the harness (its native id) to start on. */
   resume?: string,
@@ -819,7 +819,7 @@ export async function openAgentSession(
   return (
     await runCommand("oxplow.agent_session.open", {
       thread: threadId,
-      ...(harness ? { harness } : {}),
+      harness,
       ...(title ? { title } : {}),
       ...(resume ? { resume } : {}),
     })

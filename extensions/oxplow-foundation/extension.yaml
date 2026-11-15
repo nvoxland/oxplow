@@ -904,11 +904,6 @@ commands:
     op: open
     ui: { label: "New Agent Session…", group: Tasks, keywords: [agent, session, start], form: "oxplow:oxplow/page?page=new-session", open_after: "oxplow:oxplow/agent_session?id={{result.id}}", when: "threadShown" }
     example: {"thread": "thr3", "harness": "claude", "title": "Review pass"}
-  - name: agent_session.open_slot
-    summary: "Insert an agent-session slot transactionally; native child used by agent_session.open. Does not remember a new-thread preference."
-    scope: agent_sessions.write
-    op: open_slot
-    example: {"thread": "thr3", "harness": "claude"}
   - name: agent_session.open_claude
     summary: "Open a Claude terminal session on the thread shown; its tab starts the agent."
     scope: agent_sessions.write

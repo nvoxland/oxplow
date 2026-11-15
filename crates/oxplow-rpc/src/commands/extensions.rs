@@ -286,8 +286,8 @@ mod tests {
         crate::test_support::publish(&svc).await;
         write(
             &svc.layout.project_dir,
-            ".oxplow/personal.yaml",
-            "disableExtensions: [oxplow-bundled]\n",
+            ".oxplow/local.yaml",
+            "oxplow.extensions.oxplow-bundled.enabled: false\n",
         );
         crate::test_support::publish(&svc).await;
         let parent = tempfile::tempdir().unwrap();

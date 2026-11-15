@@ -187,16 +187,9 @@ fn choose_agent(
 /// a new slot on the thread. It only inserts the row — it never starts a
 /// process and never sends a prompt. Undone by closing it.
 pub fn open_op(config: super::config_commands::ConfigTarget, harnesses: HarnessRegistry) -> Op {
-    let mut op = open_slot_op(config, harnesses);
-    op.name = "open".into();
-    op
-}
-
-/// The database-only child of open: inserts a session slot transactionally.
-fn open_slot_op(config: super::config_commands::ConfigTarget, harnesses: HarnessRegistry) -> Op {
     Op::new(
         "agent_sessions.write",
-        "open_slot",
+        "open",
         schema::<OpenInput>(),
         true,
         Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
@@ -561,7 +554,6 @@ pub fn ops(
 ) -> Vec<Op> {
     vec![
         open_op(config.clone(), harnesses.clone()),
-        open_slot_op(config, harnesses),
         rename_op(chat, capabilities.clone()),
         close_op(processes.clone()),
         reopen_op(),

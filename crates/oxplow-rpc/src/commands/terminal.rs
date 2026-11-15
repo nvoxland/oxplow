@@ -532,6 +532,7 @@ mod tests {
             "run_command",
             json!({ "id": "oxplow.agent_session.open", "input": {
                 "thread": thread.to_string(),
+                "harness": "claude",
             }, "confirmed": false }),
             ctx,
         )

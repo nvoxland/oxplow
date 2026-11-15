@@ -29,12 +29,9 @@ pages are THE shell.
   keeps each open session's tab first and drops a closed one's — a
   session opened later still goes ahead of every other tab. **A new
   thread** (one with no tab list yet; they persist, so it's one never
-  opened here) with no session opens as the person's `newThreadSession`
-  says (`newThreadTabs` in `tabs/sessionTabs.ts`, applied by App's
-  `openNewThread`): `ask` (the default) opens the **session picker**
-  (the `new-session` page), `none` opens nothing, and an
-  agent starts its session — or asks, if it can't start any more. The
-  picker is an ordinary tab after that: its × closes it for good, and
+  opened here) with no session opens the **session picker** (the
+  `new-session` page). The picker is an ordinary tab after that: its ×
+  closes it for good, and
   closing a thread's last session leaves its other tabs (or home), not
   the picker. It also lists the thread's **earlier sessions** (closed
   ones and every agent's saved conversations for the worktree), one
@@ -48,12 +45,9 @@ pages are THE shell.
   activates that session's tab. A closed session's ref (a search hit)
   opens its transcript page, not a missing tab. The picker says nothing
   of the thread's open sessions (its tabs show them) and has no way to
-  decline one (its × closes it); its **Remember this for new threads**
-  checkbox saves the agent started as `newThreadSession`; Settings → Agents has
-  the same choice ("New threads start with",
-  `components/NewThreadSessionSetting.tsx`). The launcher's New Agent
-  Session… opens the picker, and each agent's command starts a session
-  directly. A process survives switches; closing a session's tab closes
+  decline one (its × closes it). The launcher's New Agent Session… opens
+  the picker, and each agent's command starts a session directly. A
+  process survives switches; closing a session's tab closes
   the session.
 - A **page** is anything addressable inside a tab body — file, task,
   knowledge page, finding, dashboard, settings, agent session. Pages share a
@@ -911,8 +905,8 @@ margin; an embed or a slot takes its title from the page it shows):
 
 New Session (the `new-session` page) has two nodes, `start` and
 `earlier`, then a `sections` slot. **Start a new session** is a form over
-`oxplow.agent_session.open`: the agent from `v_agent_harness`, and
-"remember" — the person's `newThreadSession` — folded into the command.
+`oxplow.agent_session.open`: the person chooses a registered, enabled
+harness from `v_agent_harness`; there is no implicit default.
 **Earlier sessions** is a table (a `q` search in the rail; ↑/↓/Enter on the focused table; a row's
 Reopen/Resume action, `then: replace`, or its link to a session already
 open here — `terminal.md` "Earlier sessions"). A diff's `revealLine` is not in its

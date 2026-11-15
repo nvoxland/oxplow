@@ -12,6 +12,7 @@ test("a closed session is listed on the New Session page and picking it reopens 
   // A session that has run (it is bound to a conversation), then closed.
   const opened = await run<Opened>(daemon, "oxplow.agent_session.open", {
     thread: daemon.thread,
+    harness: "scripted",
     resume: "conv-earlier",
     title: "Parser work",
   });
@@ -37,6 +38,7 @@ test("a closed session is listed on the New Session page and picking it reopens 
 test("a closed session found by search opens its transcript, which can reopen it", async ({ page, daemon }) => {
   const opened = await run<Opened>(daemon, "oxplow.agent_session.open", {
     thread: daemon.thread,
+    harness: "scripted",
     resume: "conv-found",
     title: "Zebrafinch review",
   });
@@ -61,6 +63,7 @@ test("a closed session found by search opens its transcript, which can reopen it
 test("picking a session open here shows it and keeps the New Session page", async ({ page, daemon }) => {
   const opened = await run<Opened>(daemon, "oxplow.agent_session.open", {
     thread: daemon.thread,
+    harness: "scripted",
     resume: "conv-open",
     title: "Lexer work",
   });
