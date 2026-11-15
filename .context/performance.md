@@ -1636,3 +1636,16 @@ path).
   container, so it was set back to 1,048,576 after the run).
 - Not measured: a plain Linux host (not a VM on a Mac), ext4, other kernels,
   and `fs.inotify.max_queued_events` overflow.
+
+## Settings read reuse
+
+Settings registry identities exclude ordinary values and unrelated extension
+content (pages, datasets, and other manifest sections). Parsed ordinary documents
+are reused while their file metadata stays unchanged; provider declaration files
+also invalidate registry entries. Callers fork registry metadata while sharing
+compiled validators, so local additions cannot contaminate later operations.
+AI caches its derived declarations by provider kinds/profile IDs and batches
+value reads without a registry write lock. The Settings inventory uses one
+snapshot for every column and reads each secure identity once per level.
+Regression tests cover reuse, invalidation, isolation, and snapshot consistency;
+these are operation-count improvements, not a measured latency claim.

@@ -141,14 +141,25 @@ new file format; there is no such compatibility path in production.
 
 ## Host sharing and ordinary batches
 
-Host settings stores share a bounded cache keyed by project/global paths, secure
-backend identity, extension declarations and configuration content. Values
-are read fresh; file content or declaration changes rebuild dynamic registry
-entries. Declaration-only projections fork their registry so they cannot mutate a
-cached host registry. Compiled offline schema validators are shared by schema
-content in a separate bounded cache. Bulk runtime projections and provider
-credential inventories read the three documents once per related operation;
-provider lists reuse one instance/scope snapshot.
+Host settings stores reuse bounded caches of registry declarations and immutable
+ordinary-document snapshots. File metadata (including inode/change time on Unix)
+invalidates parsed documents; every operation rechecks it. Registry identity uses
+only settings-relevant declarations, dynamic key identities, instance topology,
+and provider-declaration file metadata, not ordinary preference values or whole
+extension manifests. Each caller receives an isolated registry fork; adding local
+provider/test definitions cannot modify the cached base. Compiled offline schema
+validators remain shared by schema content.
+
+AI keeps a declaration-specific fork until provider kinds or profile identities
+change. Its hot configuration reads batch keys from one ordinary snapshot and do
+not acquire the registry's write lock. The Settings inventory derives effective
+values, overrides, and per-level statuses from one snapshot, reading each secure
+identity once per level. Endpoint binding uses those same ordinary documents.
+Showing all three secret levels still requires three distinct keychain queries;
+OS credential access may prompt or fail, in which case only that row/level is
+unavailable. Unknown harness preferences remain stored through bootstrap until
+their schema returns; harness switches and role objects are validated before
+typed runtime projection, with errors naming the setting key.
 
 `config.update {level, set, unset}` writes ordinary settings together: validate
 all keys, lock and edit one document, then atomically replace it once. Domain
@@ -194,7 +205,7 @@ setting. Metric definitions remain extension contributions; metric settings only
 select them and adjust preferences. Change-ranking coefficients are extension
 constants. Session-context injection remains configurable pending a separate decision.
 
-Obsolete aggregate core keys fail with replacement guidance and no value disclosure;
+Obsolete aggregate core keys fail with the file path, replacement guidance and no value disclosure;
 no file is rewritten or migrated. Extension catalogs, including frozen metric
 preparation catalogs, retain their host's injected Global directory. A different
 machine/global directory cannot change feature enablement in an isolated host.
@@ -204,3 +215,8 @@ capability selections emit `capability.switched@2`, including global provenance.
 V40 carries existing core event rows to these versions, renaming the old personal
 level to local without changing values or expired payloads. As with other core
 event bumps, only the newest versions remain registered.
+
+Standalone AI loading also refuses retired provider/role aggregates explicitly.
+The clean break does not migrate or delete legacy keychain entries; re-enter keys
+through the current provider settings. Session opens require an explicit harness;
+`agent_session.open` is the single slot-opening command (no `open_slot` alias).

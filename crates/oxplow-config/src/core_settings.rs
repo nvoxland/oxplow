@@ -262,7 +262,21 @@ pub fn document_from_values(
 /// Resolve explicit overrides and project them into the core runtime shape.
 /// Built-in defaults remain the runtime loader's defaults; absent harness
 /// enablement defaults to true at its registered scalar definition.
-pub fn project_document(store: &SettingsStore) -> Result<serde_yaml::Value, SettingsError> {
+#[derive(Debug)]
+pub struct CoreProjectionError {
+    key: String,
+    source: SettingsError,
+}
+
+impl std::fmt::Display for CoreProjectionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.key, self.source)
+    }
+}
+
+impl std::error::Error for CoreProjectionError {}
+
+pub fn project_document(store: &SettingsStore) -> Result<serde_yaml::Value, CoreProjectionError> {
     let fallback = store
         .project_dir()
         .file_name()
@@ -276,21 +290,72 @@ pub fn project_document(store: &SettingsStore) -> Result<serde_yaml::Value, Sett
         .filter(|definition| !definition.secret && definition.owner == "core")
         .cloned()
         .collect::<Vec<_>>();
+    let mut values = BTreeMap::new();
     let keys = definitions
         .iter()
-        .map(|d| d.key.as_str())
+        .map(|definition| definition.key.as_str())
         .collect::<Vec<_>>();
-    let mut values = BTreeMap::new();
-    for (definition, setting) in definitions.iter().zip(store.get_many(&keys)?) {
+    let settings = store
+        .get_many_results(&keys)
+        .map_err(|source| CoreProjectionError {
+            key: "settings layer".into(),
+            source,
+        })?;
+    for (definition, setting) in definitions.iter().zip(settings) {
+        let setting = setting.map_err(|source| CoreProjectionError {
+            key: definition.key.clone(),
+            source,
+        })?;
         if let Some(value) = setting.value {
             values.insert(definition.key.clone(), value);
         }
     }
     // Boot can project dynamic scalar keys before a provider catalog exists.
     for level in crate::settings::Level::PRECEDENCE.into_iter().rev() {
-        for (key, value) in store.layer(level)? {
-            if key.starts_with("oxplow.agents.") || key.starts_with("oxplow.ai.roles.") {
+        for (key, value) in store.layer(level).map_err(|source| CoreProjectionError {
+            key: "settings layer".into(),
+            source,
+        })? {
+            let is_dynamic_agent = key.starts_with("oxplow.agents.");
+            let role = role_from_key(&key);
+            if !is_dynamic_agent && role.is_none() {
+                continue;
+            }
+            // Registered settings were already resolved and schema-validated
+            // above. Never let a raw layer bypass that value or its schema.
+            if store.definition(&key).is_ok() {
+                continue;
+            }
+            if let Some(role) = role {
+                let mut registry = crate::settings::SettingsRegistry::default();
+                let definition = role_definition(&role);
+                registry
+                    .register(definition.clone())
+                    .map_err(|source| CoreProjectionError {
+                        key: key.clone(),
+                        source,
+                    })?;
+                registry
+                    .validate(&definition.key, &value)
+                    .map_err(|source| CoreProjectionError {
+                        key: key.clone(),
+                        source,
+                    })?;
                 values.insert(key, value);
+                continue;
+            }
+            if let Some(rest) = key.strip_prefix("oxplow.agents.") {
+                if let Some((_, field)) = rest.rsplit_once('.') {
+                    if field == "enabled" && !value.is_boolean() {
+                        return Err(CoreProjectionError {
+                            key,
+                            source: SettingsError::InvalidValue,
+                        });
+                    }
+                    // Unknown preference schemas are unavailable until their
+                    // declaration returns; retain their JSON runtime values.
+                    values.insert(key, value);
+                }
             }
         }
     }
@@ -589,6 +654,19 @@ fn strengthen_schema(path: &str, schema: &mut Value) {
 mod tests {
     use super::*;
 
+    struct TestNoSecrets;
+    impl crate::settings::SecretStore for TestNoSecrets {
+        fn get(&self, _: &str) -> Result<Option<String>, String> {
+            Ok(None)
+        }
+        fn set(&self, _: &str, _: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn delete(&self, _: &str) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
     #[test]
     fn fixed_fields_are_registered_individually_but_dynamic_maps_are_atomic() {
         let all = definitions("demo");
@@ -661,6 +739,119 @@ mod tests {
         assert!(!definitions.iter().any(|d| d.key == "oxplow.agents"
             || d.key == "oxplow.agentConfig"
             || d.key == "oxplow.newThreadSession"));
+    }
+
+    fn projection_store(project: &std::path::Path, global: &std::path::Path) -> SettingsStore {
+        let mut registry = crate::settings::SettingsRegistry::default();
+        registry.register_many(definitions("demo")).unwrap();
+        SettingsStore::new(
+            project.to_path_buf(),
+            global.to_path_buf(),
+            std::sync::Arc::new(std::sync::RwLock::new(registry)),
+            std::sync::Arc::new(TestNoSecrets),
+        )
+    }
+
+    #[test]
+    fn bootstrap_preserves_unknown_harness_preferences_until_declarations_return() {
+        let project = tempfile::tempdir().unwrap();
+        let global = tempfile::tempdir().unwrap();
+        let store = projection_store(project.path(), global.path());
+        let file = crate::settings::level_path(
+            project.path(),
+            global.path(),
+            crate::settings::Level::Project,
+        );
+        crate::settings::write_layer_key(
+            &file,
+            "oxplow.agents.acme.coder.enabled",
+            Some(&json!(false)),
+        )
+        .unwrap();
+        crate::settings::write_layer_key(
+            &file,
+            "oxplow.agents.acme.coder.unregisteredPreference",
+            Some(&json!({"unexpected": ["value"]})),
+        )
+        .unwrap();
+
+        let yaml = project_document(&store).unwrap();
+        let document: Value = serde_yaml::from_value(yaml).unwrap();
+        assert_eq!(document["agentEnabled"]["acme/coder"], false);
+        assert_eq!(
+            document["agentConfig"]["acme/coder"]["unregisteredPreference"],
+            json!({"unexpected":["value"]})
+        );
+        assert_eq!(
+            store.layer(crate::settings::Level::Project).unwrap()
+                ["oxplow.agents.acme.coder.unregisteredPreference"],
+            json!({"unexpected": ["value"]})
+        );
+    }
+
+    #[test]
+    fn bootstrap_dynamic_validation_errors_name_the_setting_key() {
+        let project = tempfile::tempdir().unwrap();
+        let global = tempfile::tempdir().unwrap();
+        let store = projection_store(project.path(), global.path());
+        let file = crate::settings::level_path(
+            project.path(),
+            global.path(),
+            crate::settings::Level::Project,
+        );
+        let key = "oxplow.agents.acme.coder.enabled";
+        crate::settings::write_layer_key(&file, key, Some(&json!("yes"))).unwrap();
+        let error = project_document(&store).unwrap_err().to_string();
+        assert!(error.contains(key), "{error}");
+
+        crate::settings::write_layer_key(&file, key, None).unwrap();
+        let role_key = "oxplow.ai.roles.unregistered";
+        crate::settings::write_layer_key(
+            &file,
+            role_key,
+            Some(&json!({"provider": "local", "model": 42})),
+        )
+        .unwrap();
+        let error = project_document(&store).unwrap_err().to_string();
+        assert!(error.contains(role_key), "{error}");
+    }
+
+    #[test]
+    fn registered_dynamic_value_wins_over_raw_layer_projection() {
+        let project = tempfile::tempdir().unwrap();
+        let global = tempfile::tempdir().unwrap();
+        let key = "oxplow.agents.acme.coder.enabled";
+        let mut registry = crate::settings::SettingsRegistry::default();
+        registry.register_many(definitions("demo")).unwrap();
+        register_dynamic_keys(&mut registry, [key.to_owned()]).unwrap();
+        let store = SettingsStore::new(
+            project.path().to_path_buf(),
+            global.path().to_path_buf(),
+            std::sync::Arc::new(std::sync::RwLock::new(registry)),
+            std::sync::Arc::new(TestNoSecrets),
+        );
+        crate::settings::write_layer_key(
+            &crate::settings::level_path(
+                project.path(),
+                global.path(),
+                crate::settings::Level::Project,
+            ),
+            key,
+            Some(&json!(true)),
+        )
+        .unwrap();
+        crate::settings::write_layer_key(
+            &crate::settings::level_path(
+                project.path(),
+                global.path(),
+                crate::settings::Level::Local,
+            ),
+            key,
+            Some(&json!(false)),
+        )
+        .unwrap();
+        let yaml: Value = serde_yaml::from_value(project_document(&store).unwrap()).unwrap();
+        assert_eq!(yaml["agentEnabled"]["acme/coder"], false);
     }
 
     #[test]

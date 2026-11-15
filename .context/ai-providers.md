@@ -678,3 +678,7 @@ consumer that coalesces by the clock (a job's output rows) sees the same rows
 whatever the load. `asked()` / `asked_typed()` are what it
 was asked. The SDK's throwaway preview binds every role to it, and the
 job tests run on it.
+
+The standalone `AiConfig::load` compatibility reader rejects retired
+`ai.providers` and `ai.roles` keys in `global.yaml`, with current Settings → AI
+key forms in its error. It does not migrate or remove those values or credentials.

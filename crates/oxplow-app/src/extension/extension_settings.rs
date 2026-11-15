@@ -171,9 +171,7 @@ pub(crate) fn origins_for(
 
 /// Preserve ordinary segments, reserving one prefix for reversible UTF-8 hex
 /// escapes. Encoding the entire unusual segment keeps dots distinct from paths.
-fn key_segment(segment: &str) -> String {
-    oxplow_config::settings::key_segment(segment)
-}
+use oxplow_config::settings::key_segment;
 
 fn insert(root: &mut Value, path: &[String], value: Value) -> Result<(), ExtensionSettingsError> {
     let Some((key, parents)) = path.split_last() else {

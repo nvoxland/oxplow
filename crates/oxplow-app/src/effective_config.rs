@@ -23,36 +23,20 @@ pub fn effective_config(
     secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
     extensions: &[Extension],
 ) -> Result<Vec<SettingsRow>, SettingsError> {
-    let store = crate::settings::store(project, global, secrets, extensions)?;
-    let layers = Level::PRECEDENCE
-        .map(|level| store.layer(level))
+    let documents = crate::settings::documents(project, global)?;
+    let store =
+        crate::settings::store_with_documents(project, global, secrets, extensions, &documents)?;
+    let documents = Level::PRECEDENCE
         .into_iter()
-        .collect::<Result<Vec<_>, _>>()?;
-    let inventory = store.inventory()?;
-    let keys = inventory
-        .iter()
-        .map(|row| row.definition.key.clone())
+        .zip(documents.iter().cloned())
         .collect::<Vec<_>>();
-    let levels = store.inspect_levels(&keys)?;
-    Ok(inventory
+    Ok(store
+        .inventory_snapshot_from(&documents)?
         .into_iter()
-        .zip(levels)
-        .map(|(setting, levels)| {
-            let statuses = std::array::from_fn(|index| match &levels[index] {
-                Ok(value) if value.is_set => "set",
-                Ok(_) => "unset",
-                Err(_) => "unavailable",
-            });
-            let overrides = if setting.definition.secret {
-                [None, None, None]
-            } else {
-                std::array::from_fn(|index| layers[index].get(&setting.definition.key).cloned())
-            };
-            SettingsRow {
-                setting,
-                overrides,
-                statuses,
-            }
+        .map(|snapshot| SettingsRow {
+            setting: snapshot.setting,
+            overrides: snapshot.overrides,
+            statuses: snapshot.statuses,
         })
         .collect())
 }

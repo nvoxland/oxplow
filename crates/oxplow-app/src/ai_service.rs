@@ -177,6 +177,10 @@ pub struct AiService {
     providers: ModelProviders,
     secrets: Arc<dyn SecretStore>,
     settings_store: Option<oxplow_config::settings::SettingsStore>,
+    /// Declaration-specific registry fork. Its signature changes only when
+    /// the provider kinds or live AI profile ids change.
+    declaration_store:
+        std::sync::RwLock<Option<(Vec<String>, oxplow_config::settings::SettingsStore)>>,
     calls: Arc<SqliteAiCallStore>,
     /// Where `global.yaml` lives; `None` when there's no config dir, which
     /// leaves every role unconfigured.
@@ -213,6 +217,7 @@ impl AiService {
             providers,
             secrets,
             settings_store: None,
+            declaration_store: std::sync::RwLock::new(None),
             calls,
             config_dir,
             overrides: Arc::new(BTreeMap::new),
@@ -244,41 +249,54 @@ impl AiService {
 
     /// Use the common settings service for both ordinary values and keys.
     pub fn with_settings(mut self, settings: oxplow_config::settings::SettingsStore) -> Self {
-        {
-            let mut registry = settings.registry.write().unwrap_or_else(|e| e.into_inner());
-            for id in self.providers.kinds() {
-                for definition in crate::settings::ai_provider_definitions(&id) {
-                    if registry.get(&definition.key).is_none() {
-                        registry.register(definition).expect("valid AI setting");
-                    }
-                }
-            }
-        }
         self.settings_store = Some(settings);
+        self.declaration_store = std::sync::RwLock::new(None);
         self
     }
 
-    fn settings_config(
+    fn declaration_settings(
         &self,
-        level: Option<oxplow_config::settings::Level>,
-    ) -> Result<AiConfig, AiServiceError> {
-        let store = self.settings_store.as_ref().expect("settings installed");
+    ) -> Result<Option<oxplow_config::settings::SettingsStore>, AiServiceError> {
+        let Some(base) = &self.settings_store else {
+            return Ok(None);
+        };
+        let profiles = self.profiles();
+        let mut signature = self.providers.kinds();
+        signature.extend(
+            profiles
+                .iter()
+                .map(|p| format!("{}/{}", p.namespace, p.name)),
+        );
+        signature.sort();
         {
-            let mut registry = store.registry.write().unwrap_or_else(|e| e.into_inner());
-            for id in self.providers.kinds() {
-                for definition in crate::settings::ai_provider_definitions(&id) {
-                    if registry.get(&definition.key).is_none() {
-                        registry
-                            .register(definition)
-                            .map_err(|e| AiServiceError::Config(e.to_string()))?;
-                    }
+            let cached = self
+                .declaration_store
+                .read()
+                .unwrap_or_else(|e| e.into_inner());
+            if let Some((current, store)) = &*cached {
+                if current == &signature {
+                    return Ok(Some(store.clone()));
                 }
             }
-            for profile in self.profiles() {
-                let definition = crate::settings::ai_role_definition(&format!(
-                    "{}/{}",
-                    profile.namespace, profile.name
-                ));
+        }
+        let candidate = base.fork_registry();
+        let mut definitions = Vec::new();
+        for id in self.providers.kinds() {
+            definitions.extend(crate::settings::ai_provider_definitions(&id));
+            definitions.push(provider_key_definition(&id));
+        }
+        for profile in profiles {
+            definitions.push(crate::settings::ai_role_definition(&format!(
+                "{}/{}",
+                profile.namespace, profile.name
+            )));
+        }
+        {
+            let mut registry = candidate
+                .registry
+                .write()
+                .unwrap_or_else(|e| e.into_inner());
+            for definition in definitions {
                 if registry.get(&definition.key).is_none() {
                     registry
                         .register(definition)
@@ -286,21 +304,51 @@ impl AiService {
                 }
             }
         }
-        let mut config = AiConfig::default();
+        let mut cached = self
+            .declaration_store
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
+        if let Some((current, store)) = &*cached {
+            if current == &signature {
+                return Ok(Some(store.clone()));
+            }
+        }
+        *cached = Some((signature, candidate.clone()));
+        Ok(Some(candidate))
+    }
+
+    fn settings_config(
+        &self,
+        level: Option<oxplow_config::settings::Level>,
+    ) -> Result<AiConfig, AiServiceError> {
+        let store = self.declaration_settings()?.expect("settings installed");
+        let mut keys = Vec::new();
         for id in self.providers.kinds() {
-            let enabled_key = format!("oxplow.ai.{id}.enabled");
-            if store
-                .get(&enabled_key, level)
-                .map_err(|e| AiServiceError::Config(e.to_string()))?
-                .value
-                .and_then(|v| v.as_bool())
-                != Some(true)
-            {
+            keys.push(format!("oxplow.ai.{id}.enabled"));
+            keys.push(format!("oxplow.ai.{id}.baseUrl"));
+        }
+        let role_keys: Vec<String> = store
+            .registry
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .definitions()
+            .filter(|definition| definition.key.starts_with("oxplow.ai.roles."))
+            .map(|definition| definition.key.clone())
+            .collect();
+        keys.extend(role_keys.iter().cloned());
+        let key_refs: Vec<&str> = keys.iter().map(String::as_str).collect();
+        let values = store
+            .get_many_at(&key_refs, level)
+            .map_err(|e| AiServiceError::Config(e.to_string()))?;
+        let mut config = AiConfig::default();
+        let mut values = values.into_iter();
+        for id in self.providers.kinds() {
+            let enabled = values.next().expect("enabled key was requested");
+            let base_url_value = values.next().expect("base URL key was requested");
+            if enabled.value.and_then(|v| v.as_bool()) != Some(true) {
                 continue;
             }
-            let base_url = store
-                .get(&format!("oxplow.ai.{id}.baseUrl"), level)
-                .map_err(|e| AiServiceError::Config(e.to_string()))?
+            let base_url = base_url_value
                 .value
                 .and_then(|v| v.as_str().filter(|s| !s.is_empty()).map(str::to_owned));
             config.providers.push(ProviderConfig {
@@ -309,20 +357,8 @@ impl AiService {
                 base_url,
             });
         }
-        let keys: Vec<String> = store
-            .registry
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .definitions()
-            .filter(|definition| definition.key.starts_with("oxplow.ai.roles."))
-            .map(|definition| definition.key.clone())
-            .collect();
-        for key in keys {
-            if let Some(value) = store
-                .get(&key, level)
-                .map_err(|e| AiServiceError::Config(e.to_string()))?
-                .value
-            {
+        for (key, setting) in role_keys.into_iter().zip(values) {
+            if let Some(value) = setting.value {
                 let role = Role::parse(
                     &key.trim_start_matches("oxplow.ai.roles.")
                         .replacen('.', "/", 1),
@@ -445,7 +481,7 @@ impl AiService {
 
     async fn settings_unpinned(&self) -> Result<AiSettings, AiServiceError> {
         let config = self.config()?;
-        let overrides = if let Some(store) = &self.settings_store {
+        let overrides = if let Some(store) = self.declaration_settings()? {
             use oxplow_config::settings::Origin;
             config
                 .roles
@@ -571,23 +607,13 @@ impl AiService {
         provider: ProviderConfig,
         key: Option<String>,
     ) -> Result<(), AiServiceError> {
-        if let Some(store) = &self.settings_store {
+        if let Some(store) = self.declaration_settings()? {
             if provider.id != provider.kind {
                 return Err(AiServiceError::Config(
                     "AI provider id must be its declared provider id".into(),
                 ));
             }
             self.provider_of(&provider)?;
-            {
-                let mut registry = store.registry.write().unwrap_or_else(|e| e.into_inner());
-                for definition in crate::settings::ai_provider_definitions(&provider.id) {
-                    if registry.get(&definition.key).is_none() {
-                        registry
-                            .register(definition)
-                            .map_err(|e| AiServiceError::Config(e.to_string()))?;
-                    }
-                }
-            }
             store
                 .update(
                     &[
@@ -667,7 +693,7 @@ impl AiService {
                 users.join(", ")
             )));
         }
-        if let Some(store) = &self.settings_store {
+        if let Some(store) = self.declaration_settings()? {
             store
                 .set(
                     &format!("oxplow.ai.{id}.enabled"),
@@ -689,7 +715,7 @@ impl AiService {
         role: &Role,
         binding: Option<RoleBinding>,
     ) -> Result<(), AiServiceError> {
-        if let Some(store) = &self.settings_store {
+        if let Some(store) = self.declaration_settings()? {
             let key = crate::settings::ai_role_key(&role.to_string());
             return match binding {
                 Some(binding) => store.set(
@@ -1340,8 +1366,8 @@ impl AiService {
 
     /// The stored key entry, whatever URL it's bound to.
     fn raw_key(&self, provider_id: &str) -> Result<Option<StoredKey>, AiServiceError> {
-        let raw = if let Some(store) = &self.settings_store {
-            ensure_provider_key(store, provider_id)?;
+        let raw = if let Some(store) = self.declaration_settings()? {
+            ensure_provider_key(&store, provider_id)?;
             store
                 .get(&provider_key_setting(provider_id), None)
                 .map_err(|e| AiServiceError::Secret(e.to_string()))?
@@ -1362,8 +1388,8 @@ impl AiService {
     }
 
     fn write_key(&self, provider_id: &str, value: Option<String>) -> Result<(), AiServiceError> {
-        if let Some(store) = &self.settings_store {
-            ensure_provider_key(store, provider_id)?;
+        if let Some(store) = self.declaration_settings()? {
+            ensure_provider_key(&store, provider_id)?;
             let key = provider_key_setting(provider_id);
             match value {
                 Some(value) => store.set(
@@ -1426,7 +1452,7 @@ impl AiService {
     }
 
     fn save_global(&self, config: &AiConfig) -> Result<(), AiServiceError> {
-        if let Some(store) = &self.settings_store {
+        if let Some(store) = self.declaration_settings()? {
             config
                 .validate()
                 .map_err(|e| AiServiceError::Config(e.to_string()))?;
@@ -2144,6 +2170,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn declaration_registries_are_isolated_and_reused_until_profiles_change() {
+        let project = tempfile::tempdir().unwrap();
+        let global = tempfile::tempdir().unwrap();
+        let backend = Arc::new(MemorySecrets::default());
+        let base =
+            crate::settings::store(project.path(), global.path(), backend.clone(), &[]).unwrap();
+        let svc = AiService::new(
+            test_providers(),
+            backend,
+            Arc::new(SqliteAiCallStore::new(Database::in_memory())),
+            Some(global.path().into()),
+        )
+        .with_settings(base.clone());
+        let first = svc.declaration_settings().unwrap().unwrap();
+        let second = svc.declaration_settings().unwrap().unwrap();
+        assert!(Arc::ptr_eq(&first.registry, &second.registry));
+        assert!(base.definition("oxplow.ai.openrouter.enabled").is_err());
+        svc.set_profiles(Arc::new(|| {
+            vec![AiProfile {
+                namespace: "acme".into(),
+                name: "custom".into(),
+                description: String::new(),
+                fallback: BuiltinRole::Main,
+                features: vec![],
+            }]
+        }));
+        let changed = svc.declaration_settings().unwrap().unwrap();
+        assert!(!Arc::ptr_eq(&first.registry, &changed.registry));
+        assert!(changed.definition("oxplow.ai.roles.acme.custom").is_ok());
+        assert!(base.definition("oxplow.ai.roles.acme.custom").is_err());
+    }
+
+    #[tokio::test]
     async fn settings_keep_provider_and_role_rows_when_a_key_endpoint_changes() {
         use oxplow_config::settings::Level;
         let project = tempfile::tempdir().unwrap();
@@ -2159,6 +2218,8 @@ mod tests {
             Some(global.path().into()),
         )
         .with_settings(settings.clone());
+        assert!(settings.definition("oxplow.ai.openrouter.baseUrl").is_err());
+        let settings = svc.declaration_settings().unwrap().unwrap();
         svc.save_provider(
             ProviderConfig {
                 id: "openrouter".into(),
@@ -3343,15 +3404,11 @@ fn ensure_provider_key(
     store: &oxplow_config::settings::SettingsStore,
     id: &str,
 ) -> Result<(), AiServiceError> {
-    let mut registry = store
-        .registry
-        .write()
-        .unwrap_or_else(|error| error.into_inner());
     let definition = provider_key_definition(id);
-    if registry.get(&definition.key).is_none() {
-        registry
-            .register(definition)
-            .map_err(|e| AiServiceError::Config(e.to_string()))?;
+    if store.definition(&definition.key).is_err() {
+        return Err(AiServiceError::Config(format!(
+            "AI provider `{id}` has no registered credential setting"
+        )));
     }
     Ok(())
 }

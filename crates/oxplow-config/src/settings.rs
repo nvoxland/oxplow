@@ -56,6 +56,9 @@ impl Level {
     pub const PRECEDENCE: [Self; 3] = [Self::Local, Self::Project, Self::Global];
 }
 
+/// One ordinary override document captured at its explicit level.
+pub type LevelDocument = (Level, BTreeMap<String, Value>);
+
 /// The source of one complete effective value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
@@ -115,10 +118,26 @@ pub struct SettingInventory {
     pub unavailable: bool,
 }
 
+/// All Settings columns derived from one ordinary-file and secure-value snapshot.
+#[derive(Debug)]
+pub struct SettingSnapshot {
+    pub setting: SettingInventory,
+    pub overrides: [Option<Value>; 3],
+    pub statuses: [&'static str; 3],
+}
+
 /// Backed by the machine keychain in production and memory in tests. Errors
 /// are deliberately discarded at this boundary; backends may name secrets.
 pub trait SecretStore: Send + Sync {
     fn get(&self, name: &str) -> Result<Option<String>, String>;
+    /// Endpoint-bound backends can use the same ordinary snapshot as the read.
+    fn get_with_documents(
+        &self,
+        name: &str,
+        _documents: &[LevelDocument],
+    ) -> Result<Option<String>, String> {
+        self.get(name)
+    }
     fn set(&self, name: &str, value: &str) -> Result<(), String>;
     fn delete(&self, name: &str) -> Result<(), String>;
 }
@@ -476,7 +495,54 @@ impl SettingsStore {
 
     /// Read related keys against one snapshot of the three override files.
     pub fn get_many(&self, keys: &[&str]) -> Result<Vec<SettingValue>, SettingsError> {
-        self.read_many(keys, false)
+        self.get_many_at(keys, None)
+    }
+
+    pub fn get_many_at(
+        &self,
+        keys: &[&str],
+        level: Option<Level>,
+    ) -> Result<Vec<SettingValue>, SettingsError> {
+        let documents = self.documents()?;
+        let selected: Vec<_> = documents
+            .iter()
+            .filter(|(at, _)| level.is_none_or(|level| level == *at))
+            .cloned()
+            .collect();
+        keys.iter()
+            .map(|key| {
+                self.read_documents_context(
+                    &self.definition(key)?,
+                    &selected,
+                    &documents,
+                    level.is_none(),
+                    false,
+                )
+            })
+            .collect()
+    }
+
+    /// Per-key failures without repeating the ordinary snapshot for each key.
+    pub fn get_many_results(
+        &self,
+        keys: &[&str],
+    ) -> Result<Vec<Result<SettingValue, SettingsError>>, SettingsError> {
+        let documents = self.documents()?;
+        Ok(keys
+            .iter()
+            .map(|key| {
+                self.definition(key).and_then(|definition| {
+                    self.read_documents(&definition, &documents, true, false)
+                })
+            })
+            .collect())
+    }
+
+    fn documents(&self) -> Result<Vec<LevelDocument>, SettingsError> {
+        Level::PRECEDENCE
+            .into_iter()
+            .map(|level| self.layer(level).map(|values| (level, values)))
+            .collect()
     }
 
     pub fn inspect_many(&self, keys: &[&str]) -> Result<Vec<SettingValue>, SettingsError> {
@@ -507,9 +573,10 @@ impl SettingsStore {
             .map(|key| {
                 let definition = self.definition(key)?;
                 Ok(std::array::from_fn(|index| {
-                    self.read_documents(
+                    self.read_documents_context(
                         &definition,
                         std::slice::from_ref(&documents[index]),
+                        &documents,
                         false,
                         true,
                     )
@@ -548,19 +615,30 @@ impl SettingsStore {
         level: Option<Level>,
         redact: bool,
     ) -> Result<SettingValue, SettingsError> {
-        let levels: Vec<_> = level.map_or_else(|| Level::PRECEDENCE.to_vec(), |level| vec![level]);
-        // Reject plaintext even when it is shadowed by a higher secure value.
-        let documents: Vec<_> = levels
+        let documents = self.documents()?;
+        let selected: Vec<_> = documents
             .iter()
-            .map(|level| self.layer(*level).map(|values| (*level, values)))
-            .collect::<Result<_, _>>()?;
-        self.read_documents(definition, &documents, level.is_none(), redact)
+            .filter(|(at, _)| level.is_none_or(|level| level == *at))
+            .cloned()
+            .collect();
+        self.read_documents_context(definition, &selected, &documents, level.is_none(), redact)
     }
 
     fn read_documents(
         &self,
         definition: &SettingDefinition,
-        documents: &[(Level, BTreeMap<String, Value>)],
+        documents: &[LevelDocument],
+        include_default: bool,
+        redact: bool,
+    ) -> Result<SettingValue, SettingsError> {
+        self.read_documents_context(definition, documents, documents, include_default, redact)
+    }
+
+    fn read_documents_context(
+        &self,
+        definition: &SettingDefinition,
+        documents: &[LevelDocument],
+        context: &[LevelDocument],
         include_default: bool,
         redact: bool,
     ) -> Result<SettingValue, SettingsError> {
@@ -574,7 +652,7 @@ impl SettingsStore {
         for (level, values) in documents {
             let value = if definition.secret {
                 self.secrets
-                    .get(&self.secret_identity(&definition.key, *level))
+                    .get_with_documents(&self.secret_identity(&definition.key, *level), context)
                     .map_err(|_| SettingsError::SecureStorage)?
                     .map(|secret| {
                         serde_json::from_str(&secret).map_err(|_| SettingsError::SecureStorage)
@@ -610,6 +688,87 @@ impl SettingsStore {
             value,
             secret: definition.secret,
         })
+    }
+
+    pub fn inventory_snapshot(&self) -> Result<Vec<SettingSnapshot>, SettingsError> {
+        let documents = self.documents()?;
+        self.inventory_snapshot_from(&documents)
+    }
+
+    /// Callers that already captured ordinary documents reuse those exact values.
+    pub fn inventory_snapshot_from(
+        &self,
+        documents: &[LevelDocument],
+    ) -> Result<Vec<SettingSnapshot>, SettingsError> {
+        if documents.len() != 3
+            || documents
+                .iter()
+                .zip(Level::PRECEDENCE)
+                .any(|((level, _), expected)| *level != expected)
+        {
+            return Err(SettingsError::InvalidDocument);
+        }
+        let registry = self
+            .registry
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let rows = registry
+            .definitions()
+            .map(|definition| {
+                let levels: [_; 3] = std::array::from_fn(|index| {
+                    self.read_documents_context(
+                        definition,
+                        std::slice::from_ref(&documents[index]),
+                        documents,
+                        false,
+                        true,
+                    )
+                });
+                let statuses = std::array::from_fn(|index| match &levels[index] {
+                    Ok(value) if value.is_set => "set",
+                    Ok(_) => "unset",
+                    Err(_) => "unavailable",
+                });
+                // A failure in a shadowed level doesn't obscure a valid effective value.
+                let effective = levels
+                    .iter()
+                    .find(|value| !matches!(value, Ok(value) if !value.is_set));
+                let (value, origin, is_set, unavailable) = match effective {
+                    Some(Ok(value)) => (value.value.clone(), value.origin, true, false),
+                    Some(Err(_)) => (None, None, false, true),
+                    None => (
+                        definition.default.clone(),
+                        definition.default.as_ref().map(|_| Origin::Default),
+                        definition.default.is_some(),
+                        false,
+                    ),
+                };
+                // Plaintext secrets are refused even beneath a valid secure override.
+                let plaintext = definition.secret
+                    && documents
+                        .iter()
+                        .any(|(_, values)| values.contains_key(&definition.key));
+                let setting = SettingInventory {
+                    definition: definition.clone(),
+                    value: if plaintext { None } else { value },
+                    origin: if plaintext { None } else { origin },
+                    is_set: !plaintext && is_set,
+                    unavailable: plaintext || unavailable,
+                };
+                let overrides = if definition.secret {
+                    [None, None, None]
+                } else {
+                    std::array::from_fn(|index| documents[index].1.get(&definition.key).cloned())
+                };
+                SettingSnapshot {
+                    setting,
+                    overrides,
+                    statuses,
+                }
+            })
+            .collect::<Vec<_>>();
+        Ok(rows)
     }
 
     pub fn inventory(&self) -> Result<Vec<SettingInventory>, SettingsError> {
@@ -938,6 +1097,58 @@ mod tests {
             json!({ "type": "integer", "minimum": 1 }),
             Some(json!(5)),
         )
+    }
+
+    #[test]
+    fn inventory_snapshot_reads_each_secure_level_once_and_keeps_columns_consistent() {
+        struct ChangingSecrets {
+            reads: std::sync::atomic::AtomicUsize,
+            path: PathBuf,
+        }
+        impl SecretStore for ChangingSecrets {
+            fn get(&self, _: &str) -> Result<Option<String>, String> {
+                self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                std::fs::write(&self.path, "example.limit: 99\n").unwrap();
+                Ok(Some("\"secret-marker\"".into()))
+            }
+            fn set(&self, _: &str, _: &str) -> Result<(), String> {
+                Ok(())
+            }
+            fn delete(&self, _: &str) -> Result<(), String> {
+                Ok(())
+            }
+        }
+        let mut secret = definition("example.aSecret", json!({"type":"string"}), None);
+        secret.secret = true;
+        let (_project, _global, mut store) = store(vec![number_definition(), secret]);
+        store
+            .set("example.limit", json!(7), Level::Project)
+            .unwrap();
+        let secrets = Arc::new(ChangingSecrets {
+            reads: Default::default(),
+            path: store.path(Level::Project),
+        });
+        store.secrets = secrets.clone();
+        let snapshot = store.inventory_snapshot().unwrap();
+        assert_eq!(secrets.reads.load(std::sync::atomic::Ordering::SeqCst), 3);
+        let number = snapshot
+            .iter()
+            .find(|row| row.setting.definition.key == "example.limit")
+            .unwrap();
+        assert_eq!(number.setting.value, Some(json!(7)));
+        assert_eq!(number.overrides, [None, Some(json!(7)), None]);
+        assert_eq!(number.statuses, ["unset", "set", "unset"]);
+        let secret = snapshot
+            .iter()
+            .find(|row| row.setting.definition.secret)
+            .unwrap();
+        assert_eq!(secret.statuses, ["set", "set", "set"]);
+        assert_eq!(secret.overrides, [None, None, None]);
+        assert!(secret.setting.value.is_none());
+        assert_eq!(
+            store.get("example.limit", None).unwrap().value,
+            Some(json!(99))
+        );
     }
 
     #[test]

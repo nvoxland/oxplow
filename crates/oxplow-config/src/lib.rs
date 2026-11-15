@@ -1317,7 +1317,7 @@ pub fn load_project_config_with_global(
             }
             if let Some(replacement) = core_settings::retired_setting(&key) {
                 return Err(ConfigError::Invalid(format!(
-                    "setting `{key}` is retired; remove its obsolete override and {replacement}"
+                    "setting `{key}` in {} is retired; remove its obsolete override and {replacement}", store.path(level).display()
                 )));
             }
             if store.definition(&key).is_ok() {

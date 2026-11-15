@@ -294,6 +294,21 @@ impl AiConfig {
         };
         let values: BTreeMap<String, serde_yaml::Value> =
             serde_yaml::from_str(&text).map_err(|e| ConfigError::Invalid(e.to_string()))?;
+        for key in values.keys() {
+            if key == "ai.providers"
+                || key.starts_with("ai.providers.")
+                || key == "oxplow.ai.providers"
+            {
+                return Err(ConfigError::Invalid(format!(
+                    "`{key}` is retired; configure direct AI connections with `oxplow.ai.<provider>.enabled`, `.baseUrl` and `.apiKey` in Settings → AI. No migration is performed."
+                )));
+            }
+            if key == "ai.roles" || key.starts_with("ai.roles.") || key == "oxplow.ai.roles" {
+                return Err(ConfigError::Invalid(format!(
+                    "`{key}` is retired; assign models with `oxplow.ai.roles.<role>` in Settings → AI. No migration is performed."
+                )));
+            }
+        }
         let mut config = Self::default();
         for (key, value) in &values {
             if let Some(role) = key.strip_prefix("oxplow.ai.roles.") {
@@ -474,6 +489,30 @@ roles:
         .unwrap();
         assert_eq!(values["oxplow.editor.fontSize"].as_i64(), Some(17));
         assert_eq!(AiConfig::load(dir.path()).unwrap(), cfg());
+    }
+
+    #[test]
+    fn retired_provider_and_role_maps_fail_with_replacement_guidance() {
+        let dir = tempfile::tempdir().unwrap();
+        for (key, expected) in [
+            ("ai.providers", "oxplow.ai.<provider>.enabled"),
+            ("ai.roles", "oxplow.ai.roles.<role>"),
+            ("oxplow.ai.providers", "oxplow.ai.<provider>.enabled"),
+            ("oxplow.ai.roles", "oxplow.ai.roles.<role>"),
+        ] {
+            let original = format!("{key}: {{ api_key: sensitive-value }}\n");
+            std::fs::write(dir.path().join(AI_CONFIG_FILE), &original).unwrap();
+            let err = AiConfig::load(dir.path()).unwrap_err().to_string();
+            assert!(err.contains("retired"), "{err}");
+            assert!(err.contains(expected), "{err}");
+            assert!(err.contains("No migration"), "{err}");
+            assert!(!err.contains("sensitive-value"), "{err}");
+            assert_eq!(
+                std::fs::read_to_string(dir.path().join(AI_CONFIG_FILE)).unwrap(),
+                original,
+                "load reports the retired setting without rewriting it"
+            );
+        }
     }
 
     /// A role nothing asked is gone: an `global.yaml` naming one fails saying

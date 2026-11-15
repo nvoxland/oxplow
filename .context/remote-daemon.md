@@ -51,7 +51,7 @@ Logs, tab reports and the socket use the same lightweight `uiClientId.ts` identi
   depends on it (`no_test_double_is_a_production_dependency`), and the
   shipped `oxplow-daemon` always passes `KeychainSecrets` —
   `Services::boot(layout, secrets)` takes the store, no flag skips it.
-  Isolate its global config (`ai.yaml`, instances) with `OXPLOW_HOME`.
+  Isolate its global config (`global.yaml` and secure-setting identities) with `OXPLOW_HOME`.
 - **Facade guard** — `@tauri-apps/*` may only be imported under
   `apps/desktop/src/tauri-bridge/`; everywhere else funnels native
   access through a bridge module (e.g. `nativeDialog.ts` wraps the OS
