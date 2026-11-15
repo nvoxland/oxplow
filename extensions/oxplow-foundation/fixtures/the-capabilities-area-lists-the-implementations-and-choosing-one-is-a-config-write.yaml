@@ -1,28 +1,41 @@
-# Settings → Integrations → Capabilities: each choosable capability's
-# implementations and a default row; choosing writes `activeProviders` in its
-# layer, and the default row resets it.
-when: { page: oxplow/settings, params: { area: integrations } }
+when:
+  page: oxplow/management
+  params:
+    area: integrations
 expect:
   loaders:
     capabilities:
       rows:
         contains:
-          # Every capability has its default row.
-          - { capability: snapshots, provider: "", is_default: 1 }
-          - { capability: snapshots, provider: hashes, can_choose: 1 }
+        - capability: snapshots
+          provider: ''
+          is_default: 1
+        - capability: snapshots
+          provider: hashes
+          can_choose: 1
 steps:
-  - press:
-      action: use-project
-      node: capabilities
-      row: { capability: snapshots, provider: hashes, can_choose: 1, is_default: 0 }
-    expect: { ok: true }
-  - when: { sql: "SELECT provider, chosen_by FROM v_capability_provider WHERE capability = 'snapshots' AND active = 1" }
-    expect: { rows: [{ provider: hashes, chosen_by: project }] }
-  # The default row resets it.
-  - press:
-      action: default-project
-      node: capabilities
-      row: { capability: snapshots, provider: "", can_choose: 0, is_default: 1 }
-    expect: { ok: true }
-  - when: { sql: "SELECT provider, chosen_by FROM v_capability_provider WHERE capability = 'snapshots' AND active = 1" }
-    expect: { rows: [{ provider: oxplow, chosen_by: default }] }
+- given:
+  - command: oxplow.config.set
+    input:
+      key: oxplow.activeProviders.snapshots
+      value: hashes
+      level: project
+- when:
+    sql: SELECT provider, chosen_by FROM v_capability_provider WHERE capability =
+      'snapshots' AND active = 1
+  expect:
+    rows:
+    - provider: hashes
+      chosen_by: project
+- given:
+  - command: oxplow.config.unset
+    input:
+      key: oxplow.activeProviders.snapshots
+      level: project
+- when:
+    sql: SELECT provider, chosen_by FROM v_capability_provider WHERE capability =
+      'snapshots' AND active = 1
+  expect:
+    rows:
+    - provider: oxplow
+      chosen_by: default

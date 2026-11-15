@@ -1204,6 +1204,7 @@ fn inline_problem(page: &Page) -> Option<String> {
             NodeKind::Viz { config: cfg, .. } => match cfg.viz {
                 Viz::Form => Some("a form"),
                 Viz::Approvals => Some("approvals"),
+                Viz::Settings => Some("settings editor"),
                 Viz::Terminal => Some("a terminal"),
                 Viz::Editor => Some("an editor"),
                 Viz::Custom => Some("a component"),

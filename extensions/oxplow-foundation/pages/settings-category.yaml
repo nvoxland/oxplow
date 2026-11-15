@@ -1,0 +1,26 @@
+title: Settings category
+label: 'Settings: {{param.category}}'
+description: Edit any registered setting at an explicit local, project or global level, with effective values and inheritance shown separately.
+icon: settings
+refresh: true
+see_also:
+- { page: oxplow/settings }
+- { page: oxplow/management }
+params:
+- { name: category, default: '' }
+- { name: q, type: search, role: filter, label: Search settings, default: '' }
+- { name: setting, default: '' }
+loaders:
+  settings:
+    sql: |
+      SELECT * FROM v_config_value
+      WHERE (coalesce(:category, '') = '' OR category = :category)
+        AND (coalesce(:setting, '') = '' OR key = :setting)
+        AND (coalesce(:q, '') = '' OR instr(lower(key), lower(:q)) > 0
+          OR instr(lower(coalesce(title, '')), lower(:q)) > 0
+          OR instr(lower(coalesce(doc, '')), lower(:q)) > 0)
+      ORDER BY setting_order, key
+view:
+  id: settings-editor
+  from: settings
+  viz: settings

@@ -4,7 +4,7 @@ import { listAgentHarnesses, onRemoteReconnect, subscribeOxplowEvents } from "./
 import { logUi } from "./logger.js";
 import type { HarnessListing } from "./tauri-bridge/generated/bindings.js";
 
-/// The registered agent harnesses in priority order (`agentKinds.ts`),
+/// The registered agent harnesses alphabetically by title (`agentKinds.ts`),
 /// re-read when the config changes (`agents:` decides which are enabled
 /// and their order) or the extensions do. Empty until loaded.
 export function useAgentHarnesses(): HarnessListing[] {

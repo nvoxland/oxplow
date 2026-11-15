@@ -11,5 +11,10 @@ SELECT CAST(NULL AS TEXT) AS key, CAST(NULL AS TEXT) AS value, CAST(NULL AS TEXT
        CAST(NULL AS TEXT) AS local_value,
        CAST(NULL AS TEXT) AS project_value,
        CAST(NULL AS TEXT) AS global_value,
-       CAST(NULL AS INTEGER) AS unavailable
+       CAST(NULL AS INTEGER) AS unavailable,
+       CAST(NULL AS TEXT) AS default_value,
+       CAST(NULL AS INTEGER) AS setting_order,
+       CAST(NULL AS TEXT) AS local_status,
+       CAST(NULL AS TEXT) AS project_status,
+       CAST(NULL AS TEXT) AS global_status
 WHERE 0

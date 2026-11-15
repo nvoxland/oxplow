@@ -192,20 +192,11 @@ pub(super) fn ops(target: ConfigTarget) -> Vec<Op> {
 }
 
 pub(super) fn validate_change(key: &str, value: Option<&Value>) -> Result<(), CommandError> {
-    if key == "oxplow.ai.providers" {
-        if let Some(providers) = value.and_then(Value::as_array) {
-            let mut ids = std::collections::BTreeSet::new();
-            if providers
-                .iter()
-                .filter_map(|provider| provider.get("id").and_then(Value::as_str))
-                .any(|id| !ids.insert(id))
-            {
-                return Err(CommandError::Invalid {
-                    field: Some("/value".into()),
-                    message: "AI provider IDs must be unique".into(),
-                });
-            }
-        }
+    if key == "oxplow.extensions.oxplow-foundation.enabled" && value == Some(&Value::Bool(false)) {
+        return Err(CommandError::Invalid {
+            field: Some("/value".into()),
+            message: "oxplow-foundation is required and cannot be disabled".into(),
+        });
     }
     Ok(())
 }
@@ -462,14 +453,13 @@ mod ownership_tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn duplicate_ai_provider_ids_are_rejected_before_writing() {
+    async fn aggregate_ai_provider_settings_are_not_registered() {
         let fx = services_with_thread().await;
-        let before = target(&fx)
+        assert!(target(&fx)
             .settings()
             .unwrap()
-            .get("oxplow.ai.providers", Some(Level::Project))
-            .unwrap()
-            .value;
+            .definition("oxplow.ai.providers")
+            .is_err());
         let result = write(
             target(&fx),
             Invocation {
@@ -478,19 +468,10 @@ mod ownership_tests {
                 confirmed: true,
             },
             "oxplow.ai.providers".into(),
-            Some(json!([{"id":"same","kind":"openai"},{"id":"same","kind":"anthropic"}])),
+            Some(json!([])),
             Level::Project,
         );
-        assert!(matches!(result, Err(CommandError::Invalid { .. })));
-        assert_eq!(
-            target(&fx)
-                .settings()
-                .unwrap()
-                .get("oxplow.ai.providers", Some(Level::Project))
-                .unwrap()
-                .value,
-            before
-        );
+        assert!(result.is_err());
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -532,19 +513,9 @@ mod ownership_tests {
             .unwrap()["value"],
             "beta-secret"
         );
-        settings
-            .set(
-                "oxplow.ai.providers",
-                json!([{"id":"fixture","kind":"openai"}]),
-                Level::Project,
-            )
-            .unwrap();
         for (key, value) in [
             ("oxplow.snapshots.retentionDays", json!(7)),
-            (
-                "oxplow.ai.providerKeys.66697874757265",
-                json!("must-not-save"),
-            ),
+            ("oxplow.ai.openai.apiKey", json!("must-not-save")),
         ] {
             for value in [None, Some(value)] {
                 let result = write(

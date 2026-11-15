@@ -12,6 +12,7 @@ use crate::extension::extensions::Extension;
 pub struct SettingsRow {
     pub setting: SettingInventory,
     pub overrides: [Option<Value>; 3],
+    pub statuses: [&'static str; 3],
 }
 
 /// Registry definitions and effective values. Secret values are never exposed;
@@ -27,16 +28,31 @@ pub fn effective_config(
         .map(|level| store.layer(level))
         .into_iter()
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(store
-        .inventory()?
+    let inventory = store.inventory()?;
+    let keys = inventory
+        .iter()
+        .map(|row| row.definition.key.clone())
+        .collect::<Vec<_>>();
+    let levels = store.inspect_levels(&keys)?;
+    Ok(inventory
         .into_iter()
-        .map(|setting| {
+        .zip(levels)
+        .map(|(setting, levels)| {
+            let statuses = std::array::from_fn(|index| match &levels[index] {
+                Ok(value) if value.is_set => "set",
+                Ok(_) => "unset",
+                Err(_) => "unavailable",
+            });
             let overrides = if setting.definition.secret {
                 [None, None, None]
             } else {
                 std::array::from_fn(|index| layers[index].get(&setting.definition.key).cloned())
             };
-            SettingsRow { setting, overrides }
+            SettingsRow {
+                setting,
+                overrides,
+                statuses,
+            }
         })
         .collect())
 }
@@ -98,16 +114,22 @@ mod tests {
         let project = tempfile::tempdir().unwrap();
         let global = tempfile::tempdir().unwrap();
         let secrets = Arc::new(oxplow_ai::secrets::MemorySecrets::default());
+        let extensions = crate::test_fixtures::shipped_extensions();
         let store =
-            crate::settings::store(project.path(), global.path(), secrets.clone(), &[]).unwrap();
-        store.set("oxplow.ai.providers", json!([{"id":"inventory", "kind":"openai_compatible", "baseUrl":"https://inventory.test/v1"}]), Level::Project).unwrap();
-        let store =
-            crate::settings::store(project.path(), global.path(), secrets.clone(), &[]).unwrap();
-        let key = crate::ai_service::provider_key_setting("inventory");
+            crate::settings::store(project.path(), global.path(), secrets.clone(), &extensions)
+                .unwrap();
+        store
+            .set(
+                "oxplow.ai.openai.baseUrl",
+                json!("https://inventory.test/v1"),
+                Level::Project,
+            )
+            .unwrap();
+        let key = crate::ai_service::provider_key_setting("openai");
         store
             .set(&key, json!("inventory-hidden-marker"), Level::Local)
             .unwrap();
-        let rows = effective_config(project.path(), global.path(), secrets, &[]).unwrap();
+        let rows = effective_config(project.path(), global.path(), secrets, &extensions).unwrap();
         let row = rows
             .iter()
             .find(|row| row.setting.definition.key == key)

@@ -500,15 +500,6 @@ configuration:
     type: object
     additionalProperties: false
     properties:
-      changeInterest:
-        type: object
-        additionalProperties: false
-        description: How "Look here first" ranks a changed file.
-        properties:
-          complexityWeight: { type: number, minimum: 0, description: Weight of complexity added in changed bodies. }
-          parameterWeight: { type: number, minimum: 0, description: Weight of parameters added to changed signatures. }
-          longFunctionLines: { type: integer, minimum: 1, description: A new function longer than this many lines raises the file's priority. }
-          longFunctionScale: { type: number, exclusiveMinimum: 0, description: Lines over the limit that double that factor. }
       coChange:
         type: object
         additionalProperties: false
@@ -526,7 +517,6 @@ configuration:
           repeatedEdits: { type: integer, minimum: 1, description: Edits of one file at or above which it counts. }
           failedCommands: { type: integer, minimum: 1, description: Failed shell commands at or above which they count. }
   defaults:
-    changeInterest: { complexityWeight: 0.6, parameterWeight: 0.4, longFunctionLines: 60, longFunctionScale: 40 }
     coChange: { minShared: 3, windowDays: 180, maxFilesPerCommit: 50, dormantDays: 90 }
     struggle: { repeatedEdits: 5, failedCommands: 3 }
 commands:

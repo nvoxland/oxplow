@@ -4,7 +4,6 @@ use std::collections::BTreeSet;
 use std::sync::{Arc, RwLock};
 
 use super::harness::AgentHarness;
-use crate::capability::ActiveSource;
 
 /// A harness key nothing registers.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -24,19 +23,19 @@ pub struct HarnessRegistry {
     harnesses: Arc<RwLock<Vec<Arc<dyn AgentHarness>>>>,
     /// The keys `set_declared` put there.
     declared: Arc<RwLock<BTreeSet<String>>>,
-    /// The key of the one a new session runs when it names none; empty for
-    /// the first registered.
-    default: ActiveSource,
+}
+
+impl Default for HarnessRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl HarnessRegistry {
-    /// A registry whose default harness is what `default` says each time
-    /// it's asked (empty: the first registered).
-    pub fn new(default: ActiveSource) -> Self {
+    pub fn new() -> Self {
         Self {
             harnesses: Arc::default(),
             declared: Arc::default(),
-            default,
         }
     }
 
@@ -109,19 +108,6 @@ impl HarnessRegistry {
                 registered: all.iter().map(|h| h.id().to_string()).collect(),
             })
     }
-
-    /// The harness a session runs when it names none: the project's choice,
-    /// else the first registered.
-    pub fn default(&self) -> Result<Arc<dyn AgentHarness>, UnknownHarness> {
-        let named = (self.default)();
-        if named.is_empty() {
-            return self.all().into_iter().next().ok_or_else(|| UnknownHarness {
-                harness: String::new(),
-                registered: Vec::new(),
-            });
-        }
-        self.get(&named)
-    }
 }
 
 #[cfg(test)]
@@ -150,11 +136,10 @@ mod tests {
         }
     }
 
-    /// An unknown key names the registered ones; the default is read when
-    /// asked.
+    /// An unknown key names the registered ones.
     #[test]
     fn an_unknown_harness_names_the_registered() {
-        let r = HarnessRegistry::new(Arc::new(|| "codex".into()));
+        let r = HarnessRegistry::new();
         r.register(Arc::new(Fake("claude")));
         let err = r.get("codex").err().unwrap();
         assert_eq!(
@@ -166,20 +151,15 @@ mod tests {
         );
         assert!(err.to_string().contains("claude"));
         r.register(Arc::new(Fake("codex")));
-        assert_eq!(r.default().unwrap().id(), "codex");
         r.unregister("codex");
-        assert!(r.default().is_err());
     }
 
-    /// Registration keeps declaration order; with no choice named, the
-    /// default is the first registered.
+    /// Registration keeps declaration order independently of picker sorting.
     #[test]
-    fn the_default_is_the_projects_else_the_first_declared() {
-        let r = HarnessRegistry::new(Arc::new(String::new));
-        assert!(r.default().is_err());
+    fn registration_keeps_declaration_order() {
+        let r = HarnessRegistry::new();
         r.set_declared(vec![Arc::new(Fake("codex")), Arc::new(Fake("claude"))]);
         assert_eq!(r.names(), ["codex", "claude"]);
-        assert_eq!(r.default().unwrap().id(), "codex");
         r.register(Arc::new(Fake("opencode")));
         r.register(Arc::new(Fake("codex")));
         assert_eq!(r.names(), ["codex", "claude", "opencode"]);
@@ -189,7 +169,7 @@ mod tests {
     /// declared goes — and keeps a registered instance after them.
     #[test]
     fn a_reload_restates_the_declared_and_keeps_an_instance() {
-        let r = HarnessRegistry::new(Arc::new(String::new));
+        let r = HarnessRegistry::new();
         r.set_declared(vec![Arc::new(Fake("claude")), Arc::new(Fake("old"))]);
         r.register(Arc::new(Fake("acme")));
         assert_eq!(r.names(), ["claude", "old", "acme"]);

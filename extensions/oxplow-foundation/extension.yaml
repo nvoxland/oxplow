@@ -899,16 +899,11 @@ commands:
     ui: { label: "Reopen Session", group: Tasks, about: oxplow/agent_session, about_when: reopenable, input: { session: "{{uri.id}}" }, open_after: "oxplow:oxplow/agent_session?id={{result.id}}" }
     example: {"session": "ses3"}
   - name: agent_session.open
-    summary: "Open an agent session on a thread (`thr1`): a slot the person's UI starts an agent in. It only adds the slot — nothing is started or typed for it. `harness` (default: the project's first enabled agent), `title`, and `resume`: a saved conversation of the harness to start on (refused when it is open in another session). An agent opens one only in its own stream."
+    summary: "Open an agent session on a thread (`thr1`): a slot the person's UI starts an agent in. It only adds the slot — nothing is started or typed for it. Required `harness`, `title`, and `resume`: a saved conversation of the harness to start on (refused when it is open in another session). An agent opens one only in its own stream."
     scope: agent_sessions.write
     op: open
     ui: { label: "New Agent Session…", group: Tasks, keywords: [agent, session, start], form: "oxplow:oxplow/page?page=new-session", open_after: "oxplow:oxplow/agent_session?id={{result.id}}", when: "threadShown" }
-    example: {"thread": "thr3", "title": "Review pass"}
-  - name: agent_session.remember_default
-    summary: "Remember a registered enabled harness as the local new-thread session preference. Native child of agent_session.open; accepts no setting key or storage level."
-    scope: agent_sessions.write
-    op: remember_default
-    example: {"harness": "claude"}
+    example: {"thread": "thr3", "harness": "claude", "title": "Review pass"}
   - name: agent_session.open_slot
     summary: "Insert an agent-session slot transactionally; native child used by agent_session.open. Does not remember a new-thread preference."
     scope: agent_sessions.write
@@ -1088,11 +1083,6 @@ commands:
     scope: config.write
     op: choose_replacement
     example: {"target": "task.board", "whose": "task-views"}
-  - name: agent.set_agents
-    summary: "Set which agent harnesses are on, by key, in priority order: the first is a new session's default. Each must be registered. Writes `oxplow.agents` at project level (logged as config.changed, undoable)."
-    scope: config.write
-    op: set_agents
-    example: {"agents": ["claude", "codex"]}
   - name: agent.set_setting
     summary: "Set one of an agent harness's declared settings (`oxplow.agentConfig`, what its launch reads); a blank value clears it. Logged as config.changed, undoable."
     scope: config.write

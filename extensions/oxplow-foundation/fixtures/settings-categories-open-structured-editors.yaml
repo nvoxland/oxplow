@@ -1,0 +1,27 @@
+# Registry inventory is the source for both navigation and every structured editor.
+when: { page: settings-category, params: { category: snapshots, setting: oxplow.snapshots.retentionDays } }
+expect:
+  loaders:
+    settings:
+      rows:
+        - key: oxplow.snapshots.retentionDays
+          category: snapshots
+          origin: default
+          local_status: unset
+          project_status: unset
+          global_status: unset
+  nodes:
+    - { id: settings-editor, kind: viz, viz: settings }
+steps:
+  - given:
+      - command: oxplow.config.set
+        input: { key: oxplow.snapshots.retentionDays, value: 14, level: project }
+  - expect:
+      loaders:
+        settings:
+          rows:
+            - key: oxplow.snapshots.retentionDays
+              value: '14'
+              origin: project
+              project_value: '14'
+              project_status: set

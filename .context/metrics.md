@@ -2351,3 +2351,10 @@ acceptance checks and migration execution remain outstanding.
 Paced collector selection and execution retain the same generation reader;
 advisory selection/evaluation also pins before combining runtime declarations
 with queries.
+
+## Settings forms
+
+The registered `oxplow.metrics` preference schema exposes only `use`, `enabled`,
+`target`, `warnAt` and `failAt`. Metric definitions belong to extensions; the
+shared form never offers definition fields from the internal shared MetricEntry
+type. Each preference collection is still an atomic value across config levels.

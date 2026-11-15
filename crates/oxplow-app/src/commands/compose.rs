@@ -144,17 +144,6 @@ impl Compose {
             transparent_result: false,
         }))
     }
-
-    pub(crate) fn handler_finishing_transparent(
-        compose: Arc<Composer>,
-        finish: Arc<Finisher>,
-    ) -> Handler {
-        Handler::Compose(Arc::new(Compose {
-            compose,
-            finish: Some(finish),
-            transparent_result: true,
-        }))
-    }
 }
 
 pub const SEQUENCE: &str = "oxplow.command.sequence";

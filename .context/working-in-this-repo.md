@@ -126,8 +126,8 @@ cargo run -q -p oxplow-dev -- --help
 **What `task` works on.** Only oxtask's own file
 (`.oxplow/extensions-data/oxtask.sqlite`, created and migrated with oxtask's
 migrations, with its first migration built in), and only when the oxtask extension is
-enabled (the registered `oxplow.extensions`, `oxplow.enableExtensions` and
-`oxplow.disableExtensions` settings, resolved from global, project and local files;
+enabled (the registered `oxplow.extensions.oxtask.enabled` scalar, resolved
+from local, project and global files;
 `oxplow_config::extension_settings(..).is_enabled("oxtask")`); with it off
 the command says there is no task tracker to reach. It prints the shapes
 the pages use (`tsk42`, `state:`, the pretty JSON with `id` and `uri`);

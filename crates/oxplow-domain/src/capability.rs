@@ -487,6 +487,7 @@ mod tests {
                 title: "Model".into(),
                 hint: String::new(),
                 placeholder: "m".into(),
+                schema: serde_json::json!({"type":"string"}),
             }],
         };
         check_against(schema, &serde_json::to_value(&data).unwrap(), "data").unwrap();

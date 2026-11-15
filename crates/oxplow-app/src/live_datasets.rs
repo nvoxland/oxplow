@@ -125,6 +125,11 @@ pub fn columns(name: &str) -> &'static [&'static str] {
             "project_value",
             "global_value",
             "unavailable",
+            "default_value",
+            "setting_order",
+            "local_status",
+            "project_status",
+            "global_status",
         ],
         "agent_conversation" => &[
             "stream_id",
@@ -944,6 +949,11 @@ impl LiveSources {
                     project.as_ref().map(json).unwrap_or(SqlCell::Null(())),
                     global.as_ref().map(json).unwrap_or(SqlCell::Null(())),
                     SqlCell::Int(i64::from(s.unavailable)),
+                    d.default.as_ref().map(json).unwrap_or(SqlCell::Null(())),
+                    SqlCell::Int(i64::from(d.order)),
+                    text(row.statuses[0]),
+                    text(row.statuses[1]),
+                    text(row.statuses[2]),
                 ]
             })
             .collect())
@@ -1008,26 +1018,18 @@ impl LiveSources {
         Ok(rows)
     }
 
-    /// The repository's working copies, primary first, each with the stream
-    /// working in it (paths compared as the disk resolves them).
-    /// The registered harnesses in priority order: those `agents:` names, in
-    /// its order (the first is a new session's default), then the rest.
+    /// All registered harnesses alphabetically by title, including disabled ones.
     fn agent_harnesses(&self) -> Vec<Vec<SqlCell>> {
-        let agents = crate::config_service::read_config(&self.config).agents;
+        let enabled = crate::config_service::read_config(&self.config).agent_enabled;
         let mut all = self.harnesses.all();
-        all.sort_by_key(|h| {
-            agents
-                .iter()
-                .position(|a| a == h.id())
-                .unwrap_or(agents.len())
-        });
+        all.sort_by_key(|h| (h.title().to_lowercase(), h.id().to_string()));
         all.iter()
             .enumerate()
             .map(|(position, h)| {
                 vec![
                     text(h.id().to_string()),
                     text(h.title().to_string()),
-                    flag(agents.is_empty() || agents.iter().any(|a| a == h.id())),
+                    flag(enabled.get(h.id()).copied().unwrap_or(true)),
                     SqlCell::Int(position as i64),
                     json(&h.settings()),
                 ]

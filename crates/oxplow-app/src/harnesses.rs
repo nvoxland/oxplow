@@ -63,26 +63,19 @@ pub struct HarnessSettingListing {
     pub placeholder: String,
 }
 
-/// Every registered harness in priority order: the ones `agents:` names,
-/// in its order (the first is a new session's default), then the rest as
-/// declared.
+/// Every registered harness in alphabetical title order, including disabled ones.
 pub fn listing(
     registry: &HarnessRegistry,
     capabilities: &crate::capabilities::CapabilityRegistry,
-    agents: &[String],
+    enabled: &std::collections::BTreeMap<String, bool>,
 ) -> Vec<HarnessListing> {
     let mut all = registry.all();
-    all.sort_by_key(|h| {
-        agents
-            .iter()
-            .position(|a| a == h.id())
-            .unwrap_or(agents.len())
-    });
+    all.sort_by_key(|h| (h.title().to_lowercase(), h.id().to_string()));
     all.iter()
         .map(|h| HarnessListing {
             id: h.id().to_string(),
             title: h.title().to_string(),
-            enabled: agents.is_empty() || agents.iter().any(|a| a == h.id()),
+            enabled: enabled.get(h.id()).copied().unwrap_or(true),
             settings: h
                 .settings()
                 .into_iter()
@@ -144,7 +137,7 @@ mod tests {
     /// what its sessions can do (choosing another conversation).
     #[test]
     fn the_listing_carries_each_harnesss_features() {
-        let r = HarnessRegistry::new(std::sync::Arc::new(String::new));
+        let r = HarnessRegistry::new();
         let claude = declared("agent_harness", "claude", "oxplow:claude-code");
         register(&r, std::slice::from_ref(&claude));
         let capabilities = no_capabilities();
@@ -152,17 +145,21 @@ mod tests {
             features: serde_json::json!({ "resume": true, "conversation_list": true, "transcript": false }),
             ..claude
         }]);
-        let mut features = listing(&r, &capabilities, &[])[0].features.clone();
+        let mut features = listing(&r, &capabilities, &Default::default())[0]
+            .features
+            .clone();
         features.sort();
         assert_eq!(features, ["conversation_list", "resume"]);
-        assert!(listing(&r, &no_capabilities(), &[])[0].features.is_empty());
+        assert!(listing(&r, &no_capabilities(), &Default::default())[0]
+            .features
+            .is_empty());
     }
 
     /// A harness's declared logo rides its listing, as the data URI it
     /// was declared as; one that declares none lists none.
     #[test]
     fn the_listing_carries_each_harnesss_logo() {
-        let r = HarnessRegistry::new(std::sync::Arc::new(String::new));
+        let r = HarnessRegistry::new();
         let claude = declared("agent_harness", "claude", "oxplow:claude-code");
         let codex = declared("agent_harness", "codex", "oxplow:codex-cli");
         register(&r, &[claude.clone(), codex.clone()]);
@@ -174,7 +171,7 @@ mod tests {
             },
             codex,
         ]);
-        let listed = listing(&r, &capabilities, &[]);
+        let listed = listing(&r, &capabilities, &Default::default());
         let icon = |id: &str| listed.iter().find(|h| h.id == id).unwrap().icon.clone();
         assert_eq!(
             icon("claude").as_deref(),
@@ -188,7 +185,7 @@ mod tests {
     #[tokio::test]
     async fn the_built_in_agents_ship_a_logo() {
         let fx = crate::test_fixtures::services_with_thread().await;
-        let listed = listing(&fx.svc.harnesses, &fx.svc.capabilities, &[]);
+        let listed = listing(&fx.svc.harnesses, &fx.svc.capabilities, &Default::default());
         for id in ["claude", "codex", "opencode"] {
             let icon = listed
                 .iter()
@@ -205,7 +202,7 @@ mod tests {
     /// What's declared is registered under its key; what no longer is goes.
     #[test]
     fn the_declared_harnesses_are_registered() {
-        let r = HarnessRegistry::new(std::sync::Arc::new(|| "claude".into()));
+        let r = HarnessRegistry::new();
         register(
             &r,
             &[
@@ -214,7 +211,6 @@ mod tests {
             ],
         );
         assert_eq!(r.names(), ["claude", "codex"]);
-        assert_eq!(r.default().unwrap().id(), "claude");
         register(
             &r,
             &[declared("agent_harness", "codex", "oxplow:codex-cli")],
@@ -226,7 +222,7 @@ mod tests {
     /// order; with no `agents:` every harness is enabled, as declared.
     #[test]
     fn the_listing_says_which_are_enabled() {
-        let r = HarnessRegistry::new(std::sync::Arc::new(String::new));
+        let r = HarnessRegistry::new();
         register(
             &r,
             &[
@@ -237,25 +233,35 @@ mod tests {
         );
         let rows = |agents: &[&str]| {
             let agents: Vec<String> = agents.iter().map(|a| a.to_string()).collect();
-            listing(&r, &no_capabilities(), &agents)
-                .into_iter()
-                .map(|h| (h.id, h.enabled))
-                .collect::<Vec<_>>()
+            listing(
+                &r,
+                &no_capabilities(),
+                &r.names()
+                    .into_iter()
+                    .map(|id| {
+                        let on = agents.contains(&id);
+                        (id, on)
+                    })
+                    .collect(),
+            )
+            .into_iter()
+            .map(|h| (h.id, h.enabled))
+            .collect::<Vec<_>>()
         };
         assert_eq!(
             rows(&[]),
             [
-                ("claude".into(), true),
-                ("codex".into(), true),
-                ("opencode".into(), true)
+                ("claude".into(), false),
+                ("codex".into(), false),
+                ("opencode".into(), false)
             ]
         );
         assert_eq!(
             rows(&["opencode"]),
             [
-                ("opencode".into(), true),
                 ("claude".into(), false),
-                ("codex".into(), false)
+                ("codex".into(), false),
+                ("opencode".into(), true)
             ]
         );
     }
@@ -264,7 +270,7 @@ mod tests {
     /// servers.
     #[test]
     fn the_listing_carries_each_harnesss_settings() {
-        let r = HarnessRegistry::new(std::sync::Arc::new(String::new));
+        let r = HarnessRegistry::new();
         register(
             &r,
             &[
@@ -272,7 +278,7 @@ mod tests {
                 declared("agent_harness", "opencode", "oxplow:opencode"),
             ],
         );
-        let rows = listing(&r, &no_capabilities(), &[]);
+        let rows = listing(&r, &no_capabilities(), &Default::default());
         let keys = |id: &str| -> Vec<String> {
             rows.iter()
                 .find(|h| h.id == id)
@@ -285,4 +291,129 @@ mod tests {
         assert_eq!(keys("opencode"), ["model"]);
         assert_eq!(keys("claude"), ["mcpServers", "model", "effort"]);
     }
+}
+
+/// Independent settings for every declared built-in harness, including disabled ones.
+pub(crate) fn setting_definitions(
+    extensions: &[crate::extension::extensions::Extension],
+) -> Vec<oxplow_config::settings::SettingDefinition> {
+    use oxplow_config::settings::SettingDefinition;
+    let mut definitions = std::collections::BTreeMap::new();
+    for declaration in extensions
+        .iter()
+        .filter(|e| e.enabled)
+        .flat_map(|e| &e.implementations)
+        .filter(|i| i.capability == "agent_harness")
+    {
+        let Some(harness) = declaration.entry.as_deref().and_then(|entry| {
+            oxplow_harnesses::built_in(
+                entry,
+                &declaration.id,
+                declaration.title.as_deref().unwrap_or(&declaration.id),
+            )
+        }) else {
+            continue;
+        };
+        let prefix = format!("oxplow.agents.{}", harness.id());
+        let base = |key: String,
+                    title: String,
+                    description: String,
+                    schema: serde_json::Value,
+                    default| SettingDefinition {
+            key,
+            title,
+            description,
+            category: "agents".into(),
+            schema,
+            default,
+            secret: false,
+            order: 0,
+            ui: serde_json::json!({}),
+            restart_required: false,
+            owner: "core".into(),
+        };
+        let enabled = base(
+            format!("{prefix}.enabled"),
+            format!("Enable {}", harness.title()),
+            "Allow new sessions with this agent".into(),
+            serde_json::json!({"type":"boolean"}),
+            Some(serde_json::json!(true)),
+        );
+        definitions.insert(enabled.key.clone(), enabled);
+        for setting in harness.settings() {
+            let definition = base(
+                format!("{prefix}.{}", setting.key),
+                format!("{} {}", harness.title(), setting.title),
+                setting.hint,
+                setting.schema,
+                None,
+            );
+            definitions.insert(definition.key.clone(), definition);
+        }
+    }
+    definitions.into_values().collect()
+}
+
+pub(crate) fn declared_instance_settings(
+    project: &std::path::Path,
+    extension: &crate::extension::extensions::Extension,
+    provider: &crate::providers::ProviderSpec,
+    instance: &str,
+) -> Vec<oxplow_config::settings::SettingDefinition> {
+    if provider.capability != "agent_harness" {
+        return Vec::new();
+    }
+    let declared = crate::providers::spec::read_declarations(provider, &|rel| {
+        crate::extension::extensions::read_extension_file(project, &extension.path, rel)
+    })
+    .ok();
+    let data = declared
+        .as_ref()
+        .and_then(|d| {
+            d.capabilities
+                .iter()
+                .find(|c| c.capability == "agent_harness")
+        })
+        .and_then(|c| {
+            serde_json::from_value::<oxplow_domain::agent::harness::HarnessData>(c.data.clone())
+                .ok()
+        });
+    let title = declared
+        .as_ref()
+        .map(|d| d.provider.name.as_str())
+        .unwrap_or(instance);
+    let mut fields = vec![(
+        "enabled".to_owned(),
+        format!("Enable {title}"),
+        "Allow new sessions with this agent".to_owned(),
+        serde_json::json!({"type":"boolean"}),
+        Some(serde_json::json!(true)),
+    )];
+    for setting in data.into_iter().flat_map(|d| d.settings) {
+        fields.push((
+            setting.key,
+            format!("{title} {}", setting.title),
+            setting.hint,
+            setting.schema,
+            None,
+        ));
+    }
+    fields
+        .into_iter()
+        .map(|(field, title, description, schema, default)| {
+            oxplow_config::settings::SettingDefinition {
+                key: format!("oxplow.agents.{}.{field}", instance.replace('/', ".")),
+                title,
+                description,
+                category: "agents".into(),
+                schema,
+                default,
+                secret: false,
+                order: 0,
+                ui: serde_json::json!({}),
+                restart_required: false,
+                owner: "core".into(),
+            }
+        })
+        .collect()
 }

@@ -967,18 +967,7 @@ impl Services {
         let models = models::Models::default();
         let config_arc = Arc::new(RwLock::new(config));
         // The agent harnesses, by key; filled from the declarations below.
-        // A new session's default is the project's first enabled agent,
-        // else the first declared.
-        let harnesses = {
-            let config = config_arc.clone();
-            oxplow_domain::agent::registry::HarnessRegistry::new(Arc::new(move || {
-                config_service::read_config(&config)
-                    .agents
-                    .first()
-                    .cloned()
-                    .unwrap_or_default()
-            }))
-        };
+        let harnesses = oxplow_domain::agent::registry::HarnessRegistry::new();
         let folder_roots = Arc::new(folder_roots::FolderRoots::new(
             layout.project_dir.clone(),
             machine.outside.clone(),
@@ -2200,10 +2189,8 @@ mod tests {
                 // Agent reads of live state, each an operation of a read scope
                 // (`commands/agent_reads`): they change no record. A model call
                 // is recorded as the computation it was.
-                "oxplow.agent.set_agents",
                 "oxplow.agent.set_prompt_append",
                 "oxplow.agent.set_setting",
-                "oxplow.agent_session.remember_default",
                 "oxplow.ai.decide",
                 // Settings → AI: the user-global ai.yaml and the keychain,
                 // a person's alone.

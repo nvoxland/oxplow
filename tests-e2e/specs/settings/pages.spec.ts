@@ -1,26 +1,38 @@
 import { expect, test } from "../../support/fixtures.js";
 import { open, shown } from "../../support/ui.js";
 
-// Settings is one page whose view is a switch: an area is the section in
-// view, each a link in the rail every area shares.
-const AREAS: [string, string][] = [
-  ["agents", "Agents"],
-  ["lsp", "Language Servers"],
-  ["data", "Data"],
-  ["integrations", "Integrations"],
-  ["ai", "AI"],
-];
-
-test("every Settings area renders, reached from the rail", async ({ page, daemon }) => {
+test("Settings links to category forms and operational tools", async ({ page, daemon }) => {
   await open(page, daemon, "oxplow:oxplow/page?page=settings");
-  await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toHaveText("Every Setting");
   await expect(shown(page).getByTestId("page-param-q")).toBeVisible();
-  for (const [id, title] of AREAS) {
-    await page.getByTestId(`page-section-${id}`).filter({ visible: true }).click();
-    await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toHaveText(title);
-  }
-  await shown(page).getByTestId("page-section-data").click();
-  await expect(shown(page).getByTestId("page-file").getByRole("heading", { name: "Collectors" })).toBeVisible();
+  await expect(shown(page).getByTestId("settings-viz")).toHaveCount(0);
+  await open(page, daemon, "oxplow:oxplow/page?page=settings-category#category=snapshots");
+  const settings = shown(page).getByTestId("settings-viz");
+  await expect(settings).toBeVisible();
+  await expect(settings.getByLabel(/View\/edit level/).first()).toBeVisible();
+  await expect(settings.getByText("All levels").first()).toBeVisible();
+  await open(page, daemon, "oxplow:oxplow/page?page=management#area=data");
+  await expect(shown(page).getByRole("heading", { name: "Collectors", exact: true })).toBeVisible();
+});
+
+test("a hidden Global override can be edited and inherited after Project reset", async ({ page, daemon }) => {
+  await open(page, daemon, "oxplow:oxplow/page?page=settings-category#category=snapshots&setting=oxplow.snapshots.retentionDays");
+  const setting = shown(page).getByTestId("settings-viz").locator("section").first();
+  await setting.getByRole("button", { name: "Edit project value", exact: true }).click();
+  await setting.getByRole("spinbutton").fill("17");
+  await setting.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(setting.getByText(/Source: project/)).toBeVisible();
+  await setting.getByRole("combobox").selectOption("global");
+  await setting.getByRole("button", { name: "Edit global value", exact: true }).click();
+  await setting.getByRole("spinbutton").fill("29");
+  await setting.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(setting.getByText(/Source: project/)).toBeVisible();
+  await setting.getByText("All levels", { exact: true }).click();
+  await expect(setting.getByRole("row").filter({ hasText: "global" })).toContainText("29");
+  await setting.getByRole("combobox").selectOption("project");
+  await setting.getByRole("button", { name: "Edit project value", exact: true }).click();
+  await setting.getByRole("button", { name: "Reset to inherited value", exact: true }).click();
+  await setting.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(setting.getByText(/Source: global/)).toBeVisible();
 });
 
 // New Stream is the foundation's form over `oxplow.stream.create`: a source

@@ -89,6 +89,8 @@ pub enum Viz {
     /// `thread` (a thread ref) and `setting` (a config key) narrow the
     /// list.
     Approvals,
+    /// Standard registry-backed settings forms.
+    Settings,
     /// A terminal per row (`terminal.of`: an `oxplow/terminal` shell's URI
     /// or an `oxplow/agent_session`'s), kept running while hidden, at full
     /// size; `terminal.title` names it in the strip that picks among

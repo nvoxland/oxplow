@@ -70,8 +70,8 @@ extensions republish when their resolved public settings change.
 labels, categories, schemas, origin and presence. Metric/dimension definitions
 are catalog contributions and are not preferences in that inventory.
 `v_config_key` lists registered core and extension keys with docs and schemas.
-The existing Settings UI consumes the inventory; a visual redesign is separate.
-The `config_value` dataset contract is version 4. For ordinary settings the inventory also exposes `local_value`, `project_value`
+Settings uses a registry-driven category index and standard form editors; operational tools live on linked management pages.
+The `config_value` dataset contract is version 5. For ordinary settings the inventory also exposes `local_value`, `project_value`
 and `global_value`: explicit JSON overrides, SQL NULL when absent. Those columns
 are always SQL NULL for secret definitions. The window decodes them into an
 `overrides` map whose missing properties are distinct from explicit JSON null. `unavailable` distinguishes a secure
@@ -155,3 +155,41 @@ all keys, lock and edit one document, then atomically replace it once. Domain
 settings actions complete this external write before reporting success; errors
 propagate instead of being logged after audit. Secrets do not participate in a
 YAML batch. Multi-key undo uses the same batch API.
+
+## Standard Settings UI and independent features
+
+The Settings index lists categories and searches titles, descriptions and keys.
+Category URLs share one native `settings` visualization, backed by `v_config_value`.
+Every setting shows its effective value/source separately from the View/edit level
+selector. All levels is collapsed initially; it exposes hidden overrides and the
+registered default. Choosing a level is read-only. Save and Discard apply to one
+setting; removing an override differs from saving an empty value or explicit null.
+Ordinary drafts belong to the tab history by key and level. Secret drafts stay in
+memory. Refreshes retain drafts and show when their saved baseline changed.
+The inventory adds `default_value`, `setting_order`, and `local_status`,
+`project_status`, `global_status` (`set`, `unset`, `unavailable`). Secure statuses
+never contain values; failed credentials remain replaceable/removable.
+
+Independent feature switches replace aggregate enable lists:
+`oxplow.agents.<harness>.enabled` and `oxplow.extensions.<name>.enabled`.
+Harness preferences live beneath their harness key. Agents are alphabetical;
+there is no priority or implicit default. A session explicitly names its harness,
+and a new thread opens the picker. Last successful picker choice is UI memory,
+never a config setting or an automatic session start. Existing sessions keep their
+harness when it is disabled for new sessions.
+
+Direct AI connections have one group per declared provider,
+`oxplow.ai.<provider>.enabled`, `.baseUrl` and secret `.apiKey`. There are no
+named AI accounts/instances. These credentials are separate from harness logins.
+Each role has an atomic assignment at `oxplow.ai.roles.<role>`; an extension role
+`namespace/profile` uses `namespace.profile` in the registered key. Objects and
+arrays still replace whole values. External integration provider instances remain
+supported; they are not direct AI connections.
+
+The old agents/agentConfig, extension enable/disable lists, AI provider/role maps,
+and newThreadSession settings are superseded. The snapshot hook timeout is an
+internal default. Development source selection is the debug-only launch environment
+`OXPLOW_EXTENSIONS_FROM_SOURCE=true` (set by `bun run run:dev`), rather than a product
+setting. Metric definitions remain extension contributions; metric settings only
+select them and adjust preferences. Change-ranking coefficients are extension
+constants. Session-context injection remains configurable pending a separate decision.

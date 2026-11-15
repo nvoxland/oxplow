@@ -167,16 +167,19 @@ markdown itself, nor edits it in a `<textarea>`.
   branch rename, file commit) ship as Slideovers. Do not
   add new modal call sites; route new flows through pages or
   slideovers. The page pattern to copy is
-  `apps/desktop/src/pages/PageHost.tsx` (a page file; Settings is a switch page) — full Page tab, no backdrop.
+  `apps/desktop/src/pages/PageHost.tsx` (a page file) — full Page tab, no backdrop.
 - **A long page splits into pages, and a link lands on its section.**
-  Settings is one page (`settings.yaml`, a `switch` over its areas: overview, Agents,
-  Language Servers, Extensions, Data, Integrations, AI), an area the section
-  in view,
-  each its own URI (`settingsRef(area, section)` → `oxplow:oxplow/page?page=settings#area=…`),
-  sharing a rail that lists the areas; the launcher lists each area by
-  name ("Settings: Agents"). A link that means one place opens its area
-  with `section` — one of the area's section ids or an anchor inside one
-  (`settings-data-delivery`) — and the page scrolls there. A page of
+  Settings has a registry-driven category index (`settings.yaml`) with search
+  results linking to `settings-category` with `category` and `setting` view
+  params. A category uses the native `settings` visualization: effective source
+  and value stay separate from its always-visible View/edit level selector;
+  All levels is initially collapsed. Each setting saves or discards explicitly,
+  ordinary drafts live in tab history per key and level, and secret drafts live
+  only in memory. Structured controls edit collections as whole values; there
+  is no raw serialization editor. Operational setup lives on `management`
+  (language servers, AI providers and roles, data delivery and integrations),
+  linked from Settings; old Settings area links remain compatible aliases.
+  A page of
   two sections or more (a `sections` viz's rows count) lists them in its
   rail (Contents; a single section gets none), those whose heading is
   hidden (`hide_title`) too; a `sections` viz's rows are listed under

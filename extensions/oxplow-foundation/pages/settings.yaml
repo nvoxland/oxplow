@@ -3,6 +3,9 @@ description: Registered settings, their effective values and origins, with contr
 icon: settings
 category: System
 keywords: every setting config preferences
+see_also:
+- { page: oxplow/management }
+- { page: oxplow/extensions }
 refresh: true
 params:
 - name: area
@@ -18,96 +21,11 @@ loaders:
       SELECT 1
   settings_values:
     sql: |
-      WITH s AS (
-        SELECT c.key, c.doc, c.origin, c.extension, c.category, c.title, c.unavailable,
-               CASE WHEN c.unavailable THEN 'Unavailable'
-                    WHEN c.secret THEN CASE WHEN c.is_set THEN 'Set' ELSE 'Not set' END
-                    WHEN c.value IS NULL OR c.value = 'null' THEN '—'
-                    WHEN json_type(c.value) = 'text' THEN
-                      CASE WHEN json_extract(c.value, '$') = '' THEN '""' ELSE json_extract(c.value, '$') END
-                    WHEN length(c.value) > 80 THEN substr(c.value, 1, 77) || '…'
-                    ELSE c.value END AS shown,
-               CASE c.category WHEN 'agents' THEN 'agents' WHEN 'ai' THEN 'ai'
-                    WHEN 'languageServers' THEN 'lsp' WHEN 'integrations' THEN 'integrations' END AS area,
-               c.value AS raw
-        FROM v_config_value c
-      )
-      SELECT key, category AS grp, CASE WHEN unavailable THEN 'unavailable' ELSE coalesce(origin, 'default') END AS source,
-             shown AS value, doc,
-             CASE WHEN area IS NULL THEN NULL ELSE 'Change It Here' END AS control,
-             CASE WHEN area IS NULL THEN NULL
-                  ELSE 'oxplow:oxplow/page?page=settings#area=' || area END AS control_page,
-             'Change the setting `' || key || '` — ' || coalesce(doc, '')
-               || ' It is now ' || shown || '. Change it to: ' || char(10)
-               || '(Use oxplow.config.set with an explicit level: local, project, or global; tell me what you changed.)' AS ask
-      FROM s
+      SELECT * FROM v_config_value
       WHERE coalesce(:q, '') = '' OR instr(lower(key), lower(:q)) > 0
          OR instr(lower(coalesce(title, '')), lower(:q)) > 0
          OR instr(lower(coalesce(doc, '')), lower(:q)) > 0
-         OR instr(lower(coalesce(raw, '')), lower(:q)) > 0
-      ORDER BY category, key
-  agents_list:
-    sql: |
-      WITH chosen AS (
-        SELECT coalesce(project_value, global_value,
-          (SELECT json_group_array(id ORDER BY id) FROM v_agent_harness)) AS agents
-        FROM v_config_value WHERE key = 'oxplow.agents'
-      ), h AS (
-        SELECT a.*, j.key IS NOT NULL AS project_enabled,
-               coalesce(j.key, 1000000) AS project_position
-        FROM v_agent_harness a LEFT JOIN json_each((SELECT agents FROM chosen)) j ON j.value = a.id
-      )
-      SELECT h.id, h.title,
-             CASE WHEN h.project_enabled THEN 'on' ELSE 'off' END AS state,
-             CASE WHEN h.project_enabled THEN h.project_position + 1 END AS priority,
-             CASE WHEN h.enabled THEN 'on' ELSE 'off' END AS effective_state,
-             h.project_enabled AND (SELECT count(*) FROM h WHERE project_enabled) > 1 AS can_disable,
-             NOT h.project_enabled AS can_enable,
-             h.project_enabled AND h.project_position > 0 AS can_up,
-             h.project_enabled AND h.project_position < (SELECT count(*) FROM h WHERE project_enabled) - 1 AS can_down,
-             json_insert((SELECT json_group_array(x.id ORDER BY x.project_position) FROM h x WHERE x.project_enabled), '$[#]', h.id) AS with_it,
-             (SELECT json_group_array(x.id ORDER BY x.project_position) FROM h x WHERE x.project_enabled AND x.id <> h.id) AS without_it,
-             (SELECT json_group_array(x.id ORDER BY CASE WHEN x.id = h.id THEN x.project_position - 1.5 ELSE x.project_position END)
-                FROM h x WHERE x.project_enabled) AS moved_up,
-             (SELECT json_group_array(x.id ORDER BY CASE WHEN x.id = h.id THEN x.project_position + 1.5 ELSE x.project_position END)
-                FROM h x WHERE x.project_enabled) AS moved_down
-      FROM h ORDER BY h.project_position, h.id
-  agents_settings:
-    sql: |
-      WITH project_agents AS (
-        SELECT coalesce(project_value, global_value,
-          (SELECT json_group_array(id ORDER BY id) FROM v_agent_harness)) AS agents
-        FROM v_config_value WHERE key = 'oxplow.agents'
-      )
-      SELECT h.id AS agent, json_extract(s.value, '$.key') AS key,
-             h.title || ' — ' || json_extract(s.value, '$.title') AS setting,
-             coalesce(json_extract(coalesce(c.project_value, c.global_value, '{}'), '$.' || h.id || '.' || json_extract(s.value, '$.key')), '') AS value,
-             coalesce(json_extract(c.value, '$.' || h.id || '.' || json_extract(s.value, '$.key')), '') AS effective_value,
-             c.origin,
-             json_extract(s.value, '$.hint') AS hint
-      FROM v_agent_harness h, json_each(h.settings) s
-      LEFT JOIN v_config_value c ON c.key = 'oxplow.agentConfig'
-      WHERE h.id IN (SELECT value FROM json_each((SELECT agents FROM project_agents)))
-      ORDER BY h.position, s.key
-  agents_new_thread:
-    sql: |
-      WITH cur(choice) AS (
-        SELECT coalesce((SELECT json_extract(value, '$') FROM v_config_value WHERE key = 'oxplow.newThreadSession'), 'ask')
-      )
-      SELECT v.value, v.label, (v.value = cur.choice) AS current,
-             (v.value <> cur.choice) AND v.value = 'ask' AS can_ask,
-             (v.value <> cur.choice) AND v.value <> 'ask' AS can_use
-      FROM cur, (
-        SELECT 'ask' AS value, 'Ask (the session picker)' AS label, 0 AS ord
-        UNION ALL SELECT 'none', 'No session', 1
-        UNION ALL SELECT id, title, 2 + position FROM v_agent_harness WHERE enabled = 1
-      ) v
-      ORDER BY v.ord
-  agents_prompt:
-    sql: |
-      SELECT coalesce(json_extract(coalesce(project_value, global_value), '$'), '') AS text,
-             coalesce(json_extract(value, '$'), '') AS effective_text, origin
-      FROM v_config_value WHERE key = 'oxplow.agentPromptAppend'
+      ORDER BY category, setting_order, key
   lsp_servers:
     sql: |
       SELECT s.language_id AS language,
@@ -281,608 +199,76 @@ loaders:
     sql: |
       SELECT provider AS value, coalesce(title, provider) AS label
       FROM v_capability_provider WHERE capability = 'ai_provider' ORDER BY provider
+  search_results:
+    sql: |
+      SELECT title, doc,
+             'oxplow:oxplow/page?page=settings-category#category=' || category || '&setting=' || key AS uri
+      FROM settings_values
+      WHERE coalesce(:q, '') <> ''
+      ORDER BY category, setting_order, key
+  categories:
+    sql: |
+      SELECT category, CASE category WHEN 'ai' THEN 'AI' WHEN 'languageServers' THEN 'Language servers' ELSE upper(substr(category, 1, 1)) || substr(category, 2) END AS title, count(*) AS settings,
+             'oxplow:oxplow/page?page=settings-category#category=' || category AS uri
+      FROM v_config_value
+      GROUP BY category ORDER BY category
+  management_links:
+    rows:
+    - { title: Language servers, description: Install, remove or restart language servers., uri: 'oxplow:oxplow/page?page=management#area=lsp' }
+    - { title: AI providers and roles, description: Test models and inspect AI activity., uri: 'oxplow:oxplow/page?page=management#area=ai' }
+    - { title: Integrations, description: Manage capabilities, stores and connected services., uri: 'oxplow:oxplow/page?page=management#area=integrations' }
+    - { title: Data delivery, description: Inspect collectors, effects and failed deliveries., uri: 'oxplow:oxplow/page?page=management#area=data' }
 view:
   switch:
     param: area
     children:
     - id: overview
-      title: Every Setting
+      title: Settings
       stack:
-      - id: settings-proposals
-        title: Waiting for you
-        from: settings_proposals
-        viz: approvals
-      - id: settings-values
-        title: Every setting
-        from: settings_values
-        viz: list
-        group:
-          by: grp
+      - id: settings-categories
+        title: Categories
+        from: categories
+        viz: table
         columns:
-        - key: key
-          label: Setting
-          highlight: q
-        - key: source
-          label: From
-          width: 170
-        - key: value
-          label: Value
-        - key: doc
-          label: What it does
-        - key: control
-          label: Change
-          width: 120
-          link:
-            kind: page
-            from: control_page
-        empty: No settings match.
-        actions:
-        - id: ask
-          label: Ask the Agent to Change This
-          command: oxplow.agent.draft
-          input:
-            text: '{{row.ask}}'
-          row: true
+        - { key: title, label: Category, link: { kind: page, from: uri } }
+        - { key: settings, label: Settings, format: integer }
+        empty: No settings are registered.
+      - id: settings-search
+        title: Search results
+        from: search_results
+        viz: list
+        columns:
+        - { key: title, label: Setting, link: { kind: page, from: uri } }
+        - { key: doc, label: About }
+        empty: Search by a setting's name, description or key, or choose a category above.
+      - id: settings-management
+        title: Manage services
+        from: management_links
+        viz: list
+        columns:
+        - { key: title, label: Service, link: { kind: page, from: uri } }
+        - { key: description, label: About }
     - id: agents
       title: Agents
       stack:
-      - id: agents-list
-        title: Project agents
-        from: agents_list
-        viz: table
-        columns:
-        - key: title
-          label: Agent
-        - key: state
-          label: State
-          width: 80
-        - key: priority
-          label: Priority
-          width: 90
-        - key: effective_state
-          label: Effective state
-        empty: No agents are registered.
-        actions:
-        - id: enable
-          label: Enable
-          command: oxplow.agent.set_agents
-          input:
-            agents: '{{row.with_it|json}}'
-          row: true
-          when: can_enable
-        - id: disable
-          label: Disable
-          command: oxplow.agent.set_agents
-          input:
-            agents: '{{row.without_it|json}}'
-          row: true
-          when: can_disable
-        - id: up
-          label: Move Up
-          command: oxplow.agent.set_agents
-          input:
-            agents: '{{row.moved_up|json}}'
-          row: true
-          when: can_up
-        - id: down
-          label: Move Down
-          command: oxplow.agent.set_agents
-          input:
-            agents: '{{row.moved_down|json}}'
-          row: true
-          when: can_down
-      - id: agents-settings
-        title: Project agent settings
-        from: agents_settings
-        viz: table
-        columns:
-        - key: setting
-          label: Setting
-        - key: value
-          label: Value
-        - key: effective_value
-          label: Effective value
-        - key: hint
-          label: What it does
-        empty: No enabled agent declares a setting.
-        actions:
-        - id: change
-          label: Change…
-          command: oxplow.agent.set_setting
-          form: true
-          row: true
-          about: setting
-          fixed:
-          - agent
-          - key
-          input:
-            agent: '{{row.agent}}'
-            key: '{{row.key}}'
-            value: '{{row.value}}'
-      - id: agents-new-thread
-        title: New threads
-        from: agents_new_thread
-        viz: table
-        emphasis: current
-        columns:
-        - key: label
-          label: Start with
-        empty: No agent is set up yet.
-        actions:
-        - id: use
-          label: Use This
-          command: oxplow.config.set
-          input:
-            key: oxplow.newThreadSession
-            value: '{{row.value}}'
-            level: local
-          row: true
-          when: can_use
-        - id: ask
-          label: Use This
-          command: oxplow.config.set
-          input:
-            key: oxplow.newThreadSession
-            value: ask
-            level: local
-          row: true
-          when: can_ask
-      - id: agents-prompt
-        title: Project agent prompt additions
-        from: agents_prompt
-        viz: form
-        form:
-          command: oxplow.agent.set_prompt_append
-          mode: edit
-          fields:
-          - text
+      - id: agents-editor
+        title: Agent settings
+        embed:
+          page: oxplow/settings-category
+          params: { category: agents }
     - id: lsp
       title: Language Servers
-      stack:
-      - id: lsp-servers
-        title: Language servers
-        from: lsp_servers
-        viz: table
-        columns:
-        - key: language
-          label: Language
-          width: 130
-        - key: program
-          label: Program
-        - key: source
-          label: From
-          width: 140
-        - key: state
-          label: Running
-          width: 150
-        - key: problem
-          label: Problem
-          width: 110
-        empty: No language servers configured. Install one below, or add an `lsp.servers` entry to `.oxplow/project.yaml`.
-        actions:
-        - id: restart
-          label: Restart
-          command: oxplow.lsp.restart_server
-          input:
-            stream: '{{row.stream}}'
-            language: '{{row.language}}'
-          row: true
-          when: can_restart
-        - id: remove
-          label: Remove…
-          command: oxplow.lsp.remove_server
-          input:
-            package: '{{row.package}}'
-          row: true
-          when: can_remove
-      - id: lsp-install
-        title: Install a language server
-        viz: form
-        form:
-          command: oxplow.lsp.install_server
-          fields:
-          - package
-      - id: lsp-suggestions
-        title: Suggested language servers
-        from: lsp_suggestions
-        viz: table
-        columns:
-        - key: package
-          label: Package
-        - key: languages
-          label: For
-        empty: Every language with a suggested server has one.
-        actions:
-        - id: install
-          label: Install
-          command: oxplow.lsp.install_server
-          input:
-            package: '{{row.package}}'
-          row: true
+      embed: { page: oxplow/management, params: { area: lsp } }
     - id: data
       title: Data
-      stack:
-      - id: data-entities
-        title: Entities
-        from: data_entities
-        viz: table
-        columns:
-        - key: name
-          label: Entity
-          expand: oxplow/data-entity-rows
-        - key: owner
-          label: From
-          width: 140
-        - key: kind
-          label: Kind
-          width: 90
-        - key: description
-          label: What it holds
-        empty: Nothing is published yet.
-      - id: data-sources
-        title: Collectors
-        from: data_sources
-        viz: table
-        columns:
-        - key: collector
-          label: Collector
-        - key: trigger
-          label: Runs
-          width: 100
-        - key: state
-          label: State
-          tone: tone
-          format: badge
-          width: 130
-        - key: last_run_at
-          label: Last run
-          format: relative
-          width: 110
-        - key: rows
-          label: Rows
-        - key: problem
-          label: Problem
-          tone: tone
-        - key: missing
-          label: Credentials
-        empty: No collectors. An extension can declare one to bring in outside data.
-        actions:
-        - id: sync
-          label: Sync Now
-          command: oxplow.collector.sync
-          row: true
-          primary: true
-          input:
-            collector: '{{row.collector}}'
-        - id: enable-again
-          label: Enable Again
-          command: oxplow.contribution.enable
-          row: true
-          when: can_enable_again
-          input:
-            namespace: '{{row.namespace}}'
-            kind: collector
-            contribution: '{{row.id}}'
-        - id: enable-all
-          label: Enable All Disabled
-          command: oxplow.contribution.enable_all
-          input: {}
-          all: true
-      - id: data-effects
-        title: Effects
-        from: data_effects
-        viz: table
-        columns:
-        - key: effect
-          label: Effect
-          expand: oxplow/data-effect-backfill
-        - key: extension
-          label: From
-          width: 160
-        empty: No effects. An extension can declare one to react to what happens.
-      - id: alerts-reactions
-        title: Failed reactions
-        embed:
-          page: oxplow/alerts-reactions
-      - id: alerts-deliveries
-        title: Undelivered events
-        embed:
-          page: oxplow/alerts-deliveries
-      - id: extensions-credentials
-        title: Credentials
-        from: extensions_credentials
-        viz: table
-        group:
-          by: namespace
-        columns:
-        - key: name
-          label: Credential
-        - key: status
-          label: Value
-          width: 160
-        empty: No extension asks for a credential.
-        actions:
-        - id: set
-          label: Set…
-          command: oxplow.collector.set_credential
-          row: true
-          form: true
-          about: name
-          fixed:
-          - collector
-          - name
-          input:
-            collector: '{{row.collector}}'
-            name: '{{row.name}}'
-        - id: clear
-          label: Clear
-          command: oxplow.collector.set_credential
-          row: true
-          when: is_set
-          input:
-            collector: '{{row.collector}}'
-            name: '{{row.name}}'
+      embed: { page: oxplow/management, params: { area: data } }
     - id: integrations
       title: Integrations
       stack:
-      - id: capabilities
-        title: Capabilities
-        from: capabilities
-        viz: table
-        group:
-          by: capability_title
-        columns:
-        - key: title
-          label: Implementation
-        - key: standing
-          label: Standing
-          tone: tone
-        - key: hint
-          label: What it means
-        - key: features
-          label: Features
-        - key: turns_off
-          label: Turns off
-        empty: Nothing to choose here.
-        actions:
-        - id: use-project
-          label: Use for the Project
-          command: oxplow.capability.choose
-          row: true
-          when: can_choose
-          input:
-            capability: '{{row.capability}}'
-            provider: '{{row.provider}}'
-            level: project
-        - id: use-mine
-          label: Use Just for Me
-          command: oxplow.capability.choose
-          row: true
-          when: can_choose
-          input:
-            capability: '{{row.capability}}'
-            provider: '{{row.provider}}'
-            level: local
-        - id: default-project
-          label: Inherit the Choice for the Project
-          command: oxplow.capability.choose
-          row: true
-          when: is_default
-          input:
-            capability: '{{row.capability}}'
-            level: project
-        - id: same-as-project
-          label: Same as the Project for Me
-          command: oxplow.capability.choose
-          row: true
-          when: is_default
-          input:
-            capability: '{{row.capability}}'
-            level: local
-      # Every knowledge store is an extension's, in use while it is on
-      # (turn it off with its extension).
-      - id: knowledge-stores
-        title: Knowledge stores
-        from: knowledge_stores
-        viz: table
-        columns:
-        - key: store
-          label: Store
-        - key: extension
-          label: From
-        empty: No knowledge store is on. Turn on an extension that keeps pages, such as oxwiki.
-      # Where an extension adds its own settings for the project
-      # (oxtask's Task workflow).
+      - id: integrations-management
+        title: Manage integrations
+        embed: { page: oxplow/management, params: { area: integrations } }
       - { slot: integrations, id: integrations-mounts }
-      - id: replacements
-        title: Replaced components
-        from: replacements
-        viz: table
-        group:
-          by: label
-        columns:
-        - key: target
-          label: Component
-        - key: title
-          label: Shows
-        - key: standing
-          label: Standing
-          tone: tone
-        empty: No extension replaces a core component.
-        actions:
-        - id: use
-          label: Use This
-          command: oxplow.replacement.choose
-          row: true
-          when: can_choose
-          input:
-            target: '{{row.target}}'
-            whose: '{{row.whose}}'
-        - id: default
-          label: Use the Default
-          command: oxplow.replacement.choose
-          row: true
-          when: is_default
-          input:
-            target: '{{row.target}}'
-      - id: integrations-integrations
-        title: Integrations
-        from: integrations
-        viz: custom
-        custom:
-          component: integrations
-      - id: extensions-secrets
-        title: Provider secrets
-        from: extensions_secrets
-        viz: table
-        group:
-          by: extension
-        columns:
-        - key: name
-          label: Secret
-        - key: provider
-          label: Provider
-          width: 160
-        - key: status
-          label: Value
-          width: 100
-        empty: No provider keeps a secret.
-        actions:
-        - id: set
-          label: Set…
-          command: oxplow.extension.set_secret
-          row: true
-          form: true
-          about: name
-          fixed:
-          - extension
-          - reference
-          input:
-            extension: '{{row.extension}}'
-            reference: '{{row.reference|json}}'
-        - id: revoke
-          label: Revoke
-          command: oxplow.extension.revoke_secret
-          row: true
-          when: is_set
-          input:
-            extension: '{{row.extension}}'
-            reference: '{{row.reference|json}}'
     - id: ai
       title: AI
-      stack:
-      - id: ai-providers
-        title: AI providers
-        from: ai_providers
-        viz: table
-        columns:
-        - key: id
-          label: Name
-        - key: kind
-          label: Kind
-        - key: base_url
-          label: Base URL
-        - key: key
-          label: Key
-          width: 100
-        empty: No AI providers yet. Add one below — an API key for a hosted service, or the URL of a local server.
-        actions:
-        - id: test
-          label: Test…
-          command: oxplow.ai.test_provider
-          form: true
-          row: true
-          about: id
-          fixed:
-          - id
-          input:
-            id: '{{row.id}}'
-            model: '{{row.test_model}}'
-        - id: remove
-          label: Remove…
-          command: oxplow.ai.remove_provider
-          input:
-            id: '{{row.id}}'
-          row: true
-      - id: ai-provider-form
-        title: Add or update a provider
-        from: ai_provider_form
-        viz: form
-        form:
-          command: oxplow.ai.set_provider
-          fields:
-          - id
-          - kind
-          - base_url
-          - name: key
-            secret: true
-          choices:
-            kind: oxplow/settings#ai_provider_kinds
-      - id: ai-roles
-        title: Roles
-        from: ai_roles
-        viz: table
-        columns:
-        - key: role
-          label: Role
-          width: 160
-        - key: description
-          label: Used for
-        - key: bound
-          label: Bound to
-        - key: problem
-          label: Problem
-        empty: No roles.
-        actions:
-        - id: assign
-          label: Assign…
-          command: oxplow.ai.set_role
-          form: true
-          row: true
-          about: role
-          when: can_assign
-          fixed:
-          - role
-          input:
-            role: '{{row.role}}'
-            provider: '{{row.provider}}'
-            model: '{{row.model}}'
-            restrict: '{{row.restrict|json}}'
-          choices:
-            provider: oxplow/settings#ai_provider_choices
-        - id: unassign
-          label: Unassign
-          command: oxplow.ai.set_role
-          input:
-            role: '{{row.role}}'
-          row: true
-          when: can_unassign
-      - id: ai-calls
-        title: Recent calls
-        from: ai_calls
-        viz: table
-        columns:
-        - key: role
-          label: Role
-          width: 110
-        - key: caller
-          label: Asked by
-        - key: calls
-          label: Calls
-          width: 70
-        - key: failed
-          label: Failed
-          width: 70
-        - key: input_tokens
-          label: In
-          format: integer
-          width: 90
-        - key: output_tokens
-          label: Out
-          format: integer
-          width: 90
-        - key: last_at
-          label: Last
-          format: relative
-          width: 110
-        empty: No calls in the last 7 days.
+      embed: { page: oxplow/management, params: { area: ai } }

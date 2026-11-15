@@ -244,6 +244,16 @@ impl AiService {
 
     /// Use the common settings service for both ordinary values and keys.
     pub fn with_settings(mut self, settings: oxplow_config::settings::SettingsStore) -> Self {
+        {
+            let mut registry = settings.registry.write().unwrap_or_else(|e| e.into_inner());
+            for id in self.providers.kinds() {
+                for definition in crate::settings::ai_provider_definitions(&id) {
+                    if registry.get(&definition.key).is_none() {
+                        registry.register(definition).expect("valid AI setting");
+                    }
+                }
+            }
+        }
         self.settings_store = Some(settings);
         self
     }
@@ -253,28 +263,79 @@ impl AiService {
         level: Option<oxplow_config::settings::Level>,
     ) -> Result<AiConfig, AiServiceError> {
         let store = self.settings_store.as_ref().expect("settings installed");
-        let read = |key: &str| -> Result<serde_json::Value, AiServiceError> {
-            Ok(store
-                .get(key, level)
+        {
+            let mut registry = store.registry.write().unwrap_or_else(|e| e.into_inner());
+            for id in self.providers.kinds() {
+                for definition in crate::settings::ai_provider_definitions(&id) {
+                    if registry.get(&definition.key).is_none() {
+                        registry
+                            .register(definition)
+                            .map_err(|e| AiServiceError::Config(e.to_string()))?;
+                    }
+                }
+            }
+            for profile in self.profiles() {
+                let definition = crate::settings::ai_role_definition(&format!(
+                    "{}/{}",
+                    profile.namespace, profile.name
+                ));
+                if registry.get(&definition.key).is_none() {
+                    registry
+                        .register(definition)
+                        .map_err(|e| AiServiceError::Config(e.to_string()))?;
+                }
+            }
+        }
+        let mut config = AiConfig::default();
+        for id in self.providers.kinds() {
+            let enabled_key = format!("oxplow.ai.{id}.enabled");
+            if store
+                .get(&enabled_key, level)
                 .map_err(|e| AiServiceError::Config(e.to_string()))?
                 .value
-                .unwrap_or(serde_json::Value::Null))
-        };
-        let providers = read("oxplow.ai.providers")?;
-        let roles = read("oxplow.ai.roles")?;
-        Ok(AiConfig {
-            providers: if providers.is_null() {
-                Vec::new()
-            } else {
-                serde_json::from_value(providers)
-                    .map_err(|e| AiServiceError::Config(e.to_string()))?
-            },
-            roles: if roles.is_null() {
-                BTreeMap::new()
-            } else {
-                serde_json::from_value(roles).map_err(|e| AiServiceError::Config(e.to_string()))?
-            },
-        })
+                .and_then(|v| v.as_bool())
+                != Some(true)
+            {
+                continue;
+            }
+            let base_url = store
+                .get(&format!("oxplow.ai.{id}.baseUrl"), level)
+                .map_err(|e| AiServiceError::Config(e.to_string()))?
+                .value
+                .and_then(|v| v.as_str().filter(|s| !s.is_empty()).map(str::to_owned));
+            config.providers.push(ProviderConfig {
+                id: id.clone(),
+                kind: id,
+                base_url,
+            });
+        }
+        let keys: Vec<String> = store
+            .registry
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .definitions()
+            .filter(|definition| definition.key.starts_with("oxplow.ai.roles."))
+            .map(|definition| definition.key.clone())
+            .collect();
+        for key in keys {
+            if let Some(value) = store
+                .get(&key, level)
+                .map_err(|e| AiServiceError::Config(e.to_string()))?
+                .value
+            {
+                let role = Role::parse(
+                    &key.trim_start_matches("oxplow.ai.roles.")
+                        .replacen('.', "/", 1),
+                )
+                .map_err(|e| AiServiceError::Config(e.to_string()))?;
+                config.roles.insert(
+                    role,
+                    serde_json::from_value(value)
+                        .map_err(|e| AiServiceError::Config(e.to_string()))?,
+                );
+            }
+        }
+        Ok(config)
     }
 
     pub fn with_project_overrides(mut self, source: OverridesSource) -> Self {
@@ -386,17 +447,18 @@ impl AiService {
         let config = self.config()?;
         let overrides = if let Some(store) = &self.settings_store {
             use oxplow_config::settings::Origin;
-            if matches!(
-                store
-                    .get("oxplow.ai.roles", None)
-                    .map_err(|e| AiServiceError::Config(e.to_string()))?
-                    .origin,
-                Some(Origin::Local | Origin::Project)
-            ) {
-                config.roles.clone()
-            } else {
-                BTreeMap::new()
-            }
+            config
+                .roles
+                .iter()
+                .filter(|(role, _)| {
+                    store
+                        .get(&crate::settings::ai_role_key(&role.to_string()), None)
+                        .is_ok_and(|value| {
+                            matches!(value.origin, Some(Origin::Local | Origin::Project))
+                        })
+                })
+                .map(|(role, binding)| (role.clone(), binding.clone()))
+                .collect()
         } else {
             (self.overrides)()
         };
@@ -509,12 +571,66 @@ impl AiService {
         provider: ProviderConfig,
         key: Option<String>,
     ) -> Result<(), AiServiceError> {
+        if let Some(store) = &self.settings_store {
+            if provider.id != provider.kind {
+                return Err(AiServiceError::Config(
+                    "AI provider id must be its declared provider id".into(),
+                ));
+            }
+            self.provider_of(&provider)?;
+            {
+                let mut registry = store.registry.write().unwrap_or_else(|e| e.into_inner());
+                for definition in crate::settings::ai_provider_definitions(&provider.id) {
+                    if registry.get(&definition.key).is_none() {
+                        registry
+                            .register(definition)
+                            .map_err(|e| AiServiceError::Config(e.to_string()))?;
+                    }
+                }
+            }
+            store
+                .update(
+                    &[
+                        (
+                            format!("oxplow.ai.{}.enabled", provider.id),
+                            Some(serde_json::json!(true)),
+                        ),
+                        (
+                            format!("oxplow.ai.{}.baseUrl", provider.id),
+                            Some(serde_json::json!(provider
+                                .base_url
+                                .as_deref()
+                                .unwrap_or(""))),
+                        ),
+                    ],
+                    oxplow_config::settings::Level::Global,
+                )
+                .map_err(|e| AiServiceError::Config(e.to_string()))?;
+            if let Some(key) = key.filter(|key| !key.trim().is_empty()) {
+                return self.write_key(
+                    &provider.id,
+                    Some(
+                        StoredKey {
+                            key,
+                            endpoint: endpoint_of(Some(&provider)),
+                        }
+                        .encode(),
+                    ),
+                );
+            }
+            return Ok(());
+        }
         let mut global = self.global()?;
         let id = provider.id.trim().to_string();
         let provider = ProviderConfig {
             id: id.clone(),
             ..provider
         };
+        if provider.id != provider.kind {
+            return Err(AiServiceError::Config(
+                "AI provider id must be its declared provider id".into(),
+            ));
+        }
         self.provider_of(&provider)?;
         match global.providers.iter_mut().find(|p| p.id == id) {
             Some(existing) => *existing = provider,
@@ -551,6 +667,16 @@ impl AiService {
                 users.join(", ")
             )));
         }
+        if let Some(store) = &self.settings_store {
+            store
+                .set(
+                    &format!("oxplow.ai.{id}.enabled"),
+                    serde_json::json!(false),
+                    oxplow_config::settings::Level::Global,
+                )
+                .map_err(|e| AiServiceError::Config(e.to_string()))?;
+            return self.write_key(id, None);
+        }
         global.providers.retain(|p| p.id != id);
         self.save_global(&global)?;
         self.write_key(id, None)
@@ -563,6 +689,19 @@ impl AiService {
         role: &Role,
         binding: Option<RoleBinding>,
     ) -> Result<(), AiServiceError> {
+        if let Some(store) = &self.settings_store {
+            let key = crate::settings::ai_role_key(&role.to_string());
+            return match binding {
+                Some(binding) => store.set(
+                    &key,
+                    serde_json::to_value(binding)
+                        .map_err(|e| AiServiceError::Config(e.to_string()))?,
+                    oxplow_config::settings::Level::Global,
+                ),
+                None => store.unset(&key, oxplow_config::settings::Level::Global),
+            }
+            .map_err(|e| AiServiceError::Config(e.to_string()));
+        }
         let mut global = self.global()?;
         match binding {
             Some(b) => global.roles.insert(role.clone(), b),
@@ -1291,21 +1430,26 @@ impl AiService {
             config
                 .validate()
                 .map_err(|e| AiServiceError::Config(e.to_string()))?;
-            for (key, value) in [
-                (
-                    "oxplow.ai.providers",
-                    serde_json::to_value(&config.providers),
-                ),
-                ("oxplow.ai.roles", serde_json::to_value(&config.roles)),
-            ] {
-                store
-                    .set(
-                        key,
-                        value.map_err(|e| AiServiceError::Config(e.to_string()))?,
-                        oxplow_config::settings::Level::Global,
-                    )
-                    .map_err(|e| AiServiceError::Config(e.to_string()))?;
+            let mut changes = Vec::new();
+            for id in self.providers.kinds() {
+                let provider = config.providers.iter().find(|provider| provider.id == id);
+                changes.push((
+                    format!("oxplow.ai.{id}.enabled"),
+                    Some(serde_json::json!(provider.is_some())),
+                ));
+                if let Some(provider) = provider {
+                    changes.push((
+                        format!("oxplow.ai.{id}.baseUrl"),
+                        Some(serde_json::json!(provider
+                            .base_url
+                            .as_deref()
+                            .unwrap_or(""))),
+                    ));
+                }
             }
+            store
+                .update(&changes, oxplow_config::settings::Level::Global)
+                .map_err(|e| AiServiceError::Config(e.to_string()))?;
             return Ok(());
         }
         config
@@ -1713,11 +1857,11 @@ mod tests {
     fn service(base: &str, dir: &tempfile::TempDir) -> (AiService, Database) {
         let cfg = AiConfig {
             providers: vec![ProviderConfig {
-                id: "or".into(),
+                id: "openrouter".into(),
                 kind: "openrouter".into(),
                 base_url: Some(base.into()),
             }],
-            roles: BTreeMap::from([(Role::SUMMARIZE, RoleBinding::new("or", "m"))]),
+            roles: BTreeMap::from([(Role::SUMMARIZE, RoleBinding::new("openrouter", "m"))]),
         };
         cfg.save(dir.path()).unwrap();
         let secrets = Arc::new(MemorySecrets::default());
@@ -1725,7 +1869,7 @@ mod tests {
             key: "sk-1".into(),
             endpoint: base.into(),
         };
-        secrets.set("or", &bound.encode()).unwrap();
+        secrets.set("openrouter", &bound.encode()).unwrap();
         let db = Database::in_memory();
         let calls = Arc::new(SqliteAiCallStore::new(db.clone()));
         (
@@ -1778,7 +1922,7 @@ mod tests {
         svc.complete(&role, "t", None, "hi", false).await.unwrap();
         let model = |i: usize| seen.lock().unwrap()[i].2["model"].clone();
         assert_eq!(model(0), "m", "the summarize role's model");
-        let bind = |model: &str| RoleBinding::new("or", model);
+        let bind = |model: &str| RoleBinding::new("openrouter", model);
         svc.set_role(&role, Some(bind("big"))).unwrap();
         svc.complete(&role, "t", None, "hi", false).await.unwrap();
         assert_eq!(model(1), "big");
@@ -1825,7 +1969,7 @@ mod tests {
         svc.set_profiles(Arc::new(|| vec![review(vec![])]));
         svc.set_role(
             &Role::parse("gone/old").unwrap(),
-            Some(RoleBinding::new("or", "x")),
+            Some(RoleBinding::new("openrouter", "x")),
         )
         .unwrap();
         let st = svc.settings().await.unwrap();
@@ -1913,7 +2057,7 @@ mod tests {
         let save = |kind: &str, base_url: Option<&str>| {
             svc.save_provider(
                 ProviderConfig {
-                    id: "x".into(),
+                    id: kind.into(),
                     kind: kind.into(),
                     base_url: base_url.map(str::to_string),
                 },
@@ -1928,7 +2072,9 @@ mod tests {
         );
         let err = save("openai_compatible", None).unwrap_err().to_string();
         assert!(
-            err.contains("AI provider `x` is `openai_compatible` and needs a baseUrl"),
+            err.contains(
+                "AI provider `openai_compatible` is `openai_compatible` and needs a baseUrl"
+            ),
             "{err}"
         );
         save("openai_compatible", Some("http://localhost:11434/v1")).unwrap();
@@ -1952,7 +2098,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (svc, _) = service(&base, &dir);
         let svc = svc.with_project_overrides(Arc::new(|| {
-            BTreeMap::from([(Role::MAIN, RoleBinding::new("or", "big"))])
+            BTreeMap::from([(Role::MAIN, RoleBinding::new("openrouter", "big"))])
         }));
         svc.complete(&Role::MAIN, "core", None, "hi", false)
             .await
@@ -2015,19 +2161,19 @@ mod tests {
         .with_settings(settings.clone());
         svc.save_provider(
             ProviderConfig {
-                id: "or".into(),
+                id: "openrouter".into(),
                 kind: "openrouter".into(),
                 base_url: Some("https://old.example/v1".into()),
             },
             Some("private-key".into()),
         )
         .unwrap();
-        svc.set_role(&Role::SUMMARIZE, Some(RoleBinding::new("or", "m")))
+        svc.set_role(&Role::SUMMARIZE, Some(RoleBinding::new("openrouter", "m")))
             .unwrap();
         settings
             .set(
-                "oxplow.ai.providers",
-                json!([{"id":"or","kind":"openrouter","baseUrl":"https://new.example/v1"}]),
+                "oxplow.ai.openrouter.baseUrl",
+                json!("https://new.example/v1"),
                 Level::Global,
             )
             .unwrap();
@@ -2041,7 +2187,9 @@ mod tests {
         assert!(!serde_json::to_string(&status)
             .unwrap()
             .contains("private-key"));
-        assert!(settings.get(&provider_key_setting("or"), None).is_err());
+        assert!(settings
+            .get(&provider_key_setting("openrouter"), None)
+            .is_err());
         assert!(svc.key(&svc.config().unwrap().providers[0]).is_err());
     }
 
@@ -2067,9 +2215,15 @@ mod tests {
         let settings =
             crate::settings::store(project.path(), global.path(), backend.clone(), &[]).unwrap();
         settings
+            .registry
+            .write()
+            .unwrap()
+            .register_many(crate::settings::ai_provider_definitions("openrouter"))
+            .unwrap();
+        settings
             .set(
-                "oxplow.ai.providers",
-                json!([{"id":"or","kind":"openrouter"}]),
+                "oxplow.ai.openrouter.enabled",
+                json!(true),
                 oxplow_config::settings::Level::Global,
             )
             .unwrap();
@@ -2080,7 +2234,7 @@ mod tests {
             Some(global.path().into()),
         )
         .with_settings(settings.clone());
-        svc.set_role(&Role::SUMMARIZE, Some(RoleBinding::new("or", "m")))
+        svc.set_role(&Role::SUMMARIZE, Some(RoleBinding::new("openrouter", "m")))
             .unwrap();
         let status = svc.settings().await.unwrap();
         assert_eq!(status.providers.len(), 1);
@@ -2092,7 +2246,9 @@ mod tests {
         assert!(!serde_json::to_string(&status)
             .unwrap()
             .contains("private backend detail"));
-        assert!(settings.get(&provider_key_setting("or"), None).is_err());
+        assert!(settings
+            .get(&provider_key_setting("openrouter"), None)
+            .is_err());
         assert!(svc.key(&svc.config().unwrap().providers[0]).is_err());
     }
 
@@ -2122,26 +2278,26 @@ mod tests {
         let (svc, _) = service("http://x", &dir);
         svc.save_provider(
             ProviderConfig {
-                id: "ts".into(),
+                id: "typesafe".into(),
                 kind: "typesafe".into(),
                 base_url: None,
             },
             Some("tk-9".into()),
         )
         .unwrap();
-        svc.set_role(&Role::DECIDE, Some(RoleBinding::new("ts", "jev")))
+        svc.set_role(&Role::DECIDE, Some(RoleBinding::new("typesafe", "jev")))
             .unwrap();
         let yaml = std::fs::read_to_string(dir.path().join("global.yaml")).unwrap();
         assert!(yaml.contains("jev") && !yaml.contains("tk-9"), "{yaml}");
         assert_eq!(
-            svc.raw_key("ts").unwrap().map(|k| k.key).as_deref(),
+            svc.raw_key("typesafe").unwrap().map(|k| k.key).as_deref(),
             Some("tk-9")
         );
 
         // Saving again without a key keeps the stored one.
         svc.save_provider(
             ProviderConfig {
-                id: "ts".into(),
+                id: "typesafe".into(),
                 kind: "typesafe".into(),
                 base_url: Some("http://y".into()),
             },
@@ -2149,17 +2305,17 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            svc.raw_key("ts").unwrap().map(|k| k.key).as_deref(),
+            svc.raw_key("typesafe").unwrap().map(|k| k.key).as_deref(),
             Some("tk-9")
         );
         assert_eq!(svc.settings().await.unwrap().providers.len(), 2);
 
         // A provider in use can't be removed; once unassigned, it and its key go.
-        let err = svc.remove_provider("ts").unwrap_err();
+        let err = svc.remove_provider("typesafe").unwrap_err();
         assert!(err.to_string().contains("decide"), "{err}");
         svc.set_role(&Role::DECIDE, None).unwrap();
-        svc.remove_provider("ts").unwrap();
-        assert_eq!(svc.secrets.get("ts").unwrap(), None);
+        svc.remove_provider("typesafe").unwrap();
+        assert_eq!(svc.secrets.get("typesafe").unwrap(), None);
         assert_eq!(svc.settings().await.unwrap().providers.len(), 1);
     }
 
@@ -2186,7 +2342,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (svc, db) = service(&base, &dir);
         assert_eq!(
-            svc.test_provider("or", "other-model").await.unwrap(),
+            svc.test_provider("openrouter", "other-model")
+                .await
+                .unwrap(),
             "hello"
         );
         assert_eq!(seen.lock().unwrap()[0].2["model"], "other-model");
@@ -2199,7 +2357,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (svc, _) = service("http://x", &dir);
         let svc = svc.with_project_overrides(Arc::new(|| {
-            BTreeMap::from([(Role::SUMMARIZE, RoleBinding::new("or", "small"))])
+            BTreeMap::from([(Role::SUMMARIZE, RoleBinding::new("openrouter", "small"))])
         }));
         let st = svc.settings().await.unwrap();
         let summarize = st.roles.iter().find(|r| r.role == Role::SUMMARIZE).unwrap();
@@ -2254,7 +2412,7 @@ mod tests {
         let (svc, _) = service("http://x", &dir);
         svc.save_provider(
             ProviderConfig {
-                id: "ts".into(),
+                id: "typesafe".into(),
                 kind: "typesafe".into(),
                 base_url: Some(base),
             },
@@ -2262,7 +2420,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            svc.test_provider("ts", "jev").await.unwrap(),
+            svc.test_provider("typesafe", "jev").await.unwrap(),
             "Answered (yes: 93%)"
         );
     }
@@ -2291,7 +2449,7 @@ mod tests {
         svc.ai
             .save_provider(
                 ProviderConfig {
-                    id: "a".into(),
+                    id: "acme".into(),
                     kind: "acme".into(),
                     base_url: None,
                 },
@@ -2299,7 +2457,7 @@ mod tests {
             )
             .unwrap();
         svc.ai
-            .set_role(&Role::SUMMARIZE, Some(RoleBinding::new("a", "m")))
+            .set_role(&Role::SUMMARIZE, Some(RoleBinding::new("acme", "m")))
             .unwrap();
         let call = || svc.ai.complete(&Role::SUMMARIZE, "t", None, "hi", false);
         assert_eq!(call().await.unwrap().text, "hello");
@@ -2375,7 +2533,7 @@ mod tests {
         svc.ai
             .save_provider(
                 ProviderConfig {
-                    id: "or".into(),
+                    id: "openrouter".into(),
                     kind: "openrouter".into(),
                     base_url: None,
                 },
@@ -2408,7 +2566,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (svc, _db) = service(&base, &dir);
         let provider = |url: &str| ProviderConfig {
-            id: "or".into(),
+            id: "openrouter".into(),
             kind: "openrouter".into(),
             base_url: Some(url.into()),
         };
@@ -2594,11 +2752,11 @@ mod typed_tests {
         let dir = tempfile::tempdir().unwrap();
         AiConfig {
             providers: vec![ProviderConfig {
-                id: "p".into(),
+                id: kind.into(),
                 kind: kind.into(),
                 base_url: Some(base.clone()),
             }],
-            roles: BTreeMap::from([(Role::SUMMARIZE, RoleBinding::new("p", "m"))]),
+            roles: BTreeMap::from([(Role::SUMMARIZE, RoleBinding::new(kind, "m"))]),
         }
         .save(dir.path())
         .unwrap();
@@ -2607,7 +2765,7 @@ mod typed_tests {
             key: "sk-typed-key".into(),
             endpoint: base,
         };
-        secrets.set("p", &bound.encode()).unwrap();
+        secrets.set(kind, &bound.encode()).unwrap();
         let db = Database::in_memory();
         let calls = Arc::new(SqliteAiCallStore::new(db.clone()));
         let svc = AiService::new(providers, secrets.clone(), calls, Some(dir.path().into()));
@@ -2901,7 +3059,7 @@ mod typed_tests {
                 &Role::SUMMARIZE,
                 Some(RoleBinding {
                     restrict: restrict.iter().copied().collect(),
-                    ..RoleBinding::new("p", "m")
+                    ..RoleBinding::new(fx.svc.config().unwrap().providers[0].id.clone(), "m")
                 }),
             )
             .unwrap();
@@ -2914,7 +3072,7 @@ mod typed_tests {
     async fn a_picked_model_obeys_the_roles_restrictions() {
         use oxplow_domain::ai::AiRestriction;
         let fx = fixture("openai_compatible", None, typed_reply("observed")).await;
-        let pick = RoleBinding::new("p", "other");
+        let pick = RoleBinding::new("openai_compatible", "other");
         let free = fx
             .svc
             .agent_model(BuiltinRole::Assistant, Some(&pick))
@@ -2926,7 +3084,7 @@ mod typed_tests {
                 &Role::ASSISTANT,
                 Some(RoleBinding {
                     restrict: [AiRestriction::Sql].into_iter().collect(),
-                    ..RoleBinding::new("p", "m")
+                    ..RoleBinding::new(fx.svc.config().unwrap().providers[0].id.clone(), "m")
                 }),
             )
             .unwrap();
@@ -3160,12 +3318,7 @@ mod typed_tests {
 
 /// Stable registry-safe name; provider ids themselves may contain punctuation.
 pub fn provider_key_setting(id: &str) -> String {
-    let suffix: String = id
-        .as_bytes()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
-    format!("oxplow.ai.providerKeys.{suffix}")
+    format!("oxplow.ai.{id}.apiKey")
 }
 
 pub(crate) fn provider_key_definition(id: &str) -> oxplow_config::settings::SettingDefinition {

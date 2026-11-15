@@ -1,7 +1,7 @@
 # Settings → Data: the entities, the collectors (by who runs them) and the
 # effects oxplow's own extensions declare
 # (foundation declares none).
-when: { page: settings, params: { area: data } }
+when: { page: management, params: { area: data } }
 expect:
   loaders:
     data_entities:

@@ -641,11 +641,10 @@ pub const ZONE_EXTERNAL: &str = "external";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct OxplowConfig {
-    /// The agent harnesses enabled for this project, by registry key, in
-    /// priority order: the first is a new session's default. Empty (the
-    /// default) enables every registered harness, the first declared one
-    /// the default.
+    /// Legacy runtime projection; enabled state is resolved independently by key.
     pub agents: Vec<String>,
+    #[serde(rename = "agentEnabled", default)]
+    pub agent_enabled: std::collections::BTreeMap<String, bool>,
     /// Human-readable project name. Defaults to the basename of the
     /// project dir when not set in .oxplow/project.yaml.
     #[serde(rename = "projectName")]
@@ -877,9 +876,10 @@ impl ExtensionSettings {
             personal: config.personal_extensions.clone(),
             personal_sources: config.personal_extension_sources.clone(),
             ..Self::bundled(
-                config
-                    .personal_enable_bundled_extensions
-                    .or(config.enable_bundled_extensions),
+                std::env::var("OXPLOW_EXTENSIONS_FROM_SOURCE")
+                    .ok()
+                    .filter(|value| value == "1" || value == "true")
+                    .map(|_| false),
             )
         }
     }
@@ -959,32 +959,42 @@ pub fn extension_settings(project_dir: impl AsRef<Path>) -> ExtensionSettings {
             .iter()
             .find_map(|doc| doc.get(&core_settings::canonical_key(key)).cloned())
     };
-    let list = |key: &str| {
-        value(key)
-            .and_then(|v| serde_json::from_value(v).ok())
-            .unwrap_or_default()
-    };
-    let map = |key: &str| {
-        value(key)
-            .and_then(|v| serde_json::from_value(v).ok())
-            .unwrap_or_default()
-    };
+    let mut enabled = DEFAULT_EXTENSIONS
+        .iter()
+        .map(|name| (name.to_string(), true))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    for document in documents.iter().rev() {
+        for (key, value) in document {
+            if let Some(name) = key
+                .strip_prefix("oxplow.extensions.")
+                .and_then(|key| key.strip_suffix(".enabled"))
+            {
+                if let Some(on) = value.as_bool() {
+                    enabled.insert(name.to_owned(), on);
+                }
+            }
+        }
+    }
     ExtensionSettings {
-        team: value("extensions")
+        team: enabled
+            .iter()
+            .filter(|(_, on)| **on)
+            .map(|(name, _)| name.clone())
+            .collect(),
+        team_disable: enabled
+            .iter()
+            .filter(|(_, on)| !**on)
+            .map(|(name, _)| name.clone())
+            .collect(),
+        team_sources: value("extensionSources")
             .and_then(|v| serde_json::from_value(v).ok())
-            .unwrap_or_else(default_extensions),
-        team_disable: list("disableExtensions"),
-        team_sources: map("extensionSources"),
-        personal: PersonalExtensions {
-            enable: list("enableExtensions"),
-            disable: settings::read_layer(project, &global, settings::Level::Local)
+            .unwrap_or_default(),
+        ..ExtensionSettings::bundled(
+            std::env::var("OXPLOW_EXTENSIONS_FROM_SOURCE")
                 .ok()
-                .and_then(|values| values.get("oxplow.disableExtensions").cloned())
-                .and_then(|value| serde_json::from_value(value).ok())
-                .unwrap_or_default(),
-        },
-        personal_sources: Default::default(),
-        ..ExtensionSettings::bundled(value("enableBundledExtensions").and_then(|v| v.as_bool()))
+                .filter(|value| value == "1" || value == "true")
+                .map(|_| false),
+        )
     }
 }
 
@@ -1095,6 +1105,9 @@ struct RawConfig {
     /// Enabled agent harnesses by key, in priority order; the first is a new session's default. Absent enables every registered one.
     #[serde(default)]
     agents: Option<Vec<String>>,
+    #[serde(rename = "agentEnabled", default)]
+    /// Internal projection of independent harness enablement preferences.
+    agent_enabled: std::collections::BTreeMap<String, bool>,
     /// Display name; defaults to the project directory's basename.
     #[serde(rename = "projectName", default)]
     project_name: Option<String>,
@@ -1274,6 +1287,16 @@ pub fn load_project_config_with_global(
     let global = global_dir
         .map(Path::to_path_buf)
         .unwrap_or_else(|| project_dir.join(".oxplow/no-global-settings"));
+    let keys = settings::Level::PRECEDENCE
+        .into_iter()
+        .map(|level| settings::read_layer(project_dir, &global, level))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| ConfigError::Invalid(e.to_string()))?
+        .into_iter()
+        .flat_map(|doc| doc.into_keys())
+        .collect::<Vec<_>>();
+    core_settings::register_dynamic_keys(&mut registry, keys)
+        .map_err(|e| ConfigError::Invalid(e.to_string()))?;
     let store = SettingsStore::new(
         project_dir.to_path_buf(),
         global,
@@ -1327,27 +1350,6 @@ pub fn load_project_config_with_global(
             }
         }
     }
-    config.personal_new_thread_session = store
-        .get("oxplow.newThreadSession", None)
-        .map_err(|e| ConfigError::Invalid(e.to_string()))?
-        .value
-        .and_then(|v| v.as_str().map(str::to_owned));
-    config.personal_extensions.disable = store
-        .get("oxplow.disableExtensions", Some(settings::Level::Local))
-        .map_err(|e| ConfigError::Invalid(e.to_string()))?
-        .value
-        .map(serde_json::from_value)
-        .transpose()
-        .map_err(|e| ConfigError::Invalid(e.to_string()))?
-        .unwrap_or_default();
-    config.personal_extensions.enable = store
-        .get("oxplow.enableExtensions", None)
-        .map_err(|e| ConfigError::Invalid(e.to_string()))?
-        .value
-        .map(serde_json::from_value)
-        .transpose()
-        .map_err(|e| ConfigError::Invalid(e.to_string()))?
-        .unwrap_or_default();
     Ok(config)
 }
 
@@ -1547,6 +1549,11 @@ pub fn config_entries(config: &OxplowConfig, fallback_name: &str) -> Vec<ConfigE
         out.push(ConfigEntry { key, value, set });
     };
     put("agents", to_yaml(&config.agents), !config.agents.is_empty());
+    put(
+        "agentEnabled",
+        to_yaml(&config.agent_enabled),
+        !config.agent_enabled.is_empty(),
+    );
     put(
         "projectName",
         if config.project_name.is_empty() {
@@ -1793,6 +1800,7 @@ fn minimal_yaml<T: Serialize>(entry: &T) -> serde_yaml::Value {
 fn default_config(project_name: String) -> OxplowConfig {
     OxplowConfig {
         agents: Vec::new(),
+        agent_enabled: Default::default(),
         project_name,
         lsp_servers: Vec::new(),
         agent_prompt_append: String::new(),
@@ -2250,6 +2258,7 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
 
     Ok(OxplowConfig {
         agents,
+        agent_enabled: raw.agent_enabled,
         project_name,
         lsp_servers,
         agent_prompt_append,
@@ -3500,7 +3509,11 @@ fn validate_agent_config(
     raw: std::collections::BTreeMap<String, serde_json::Value>,
 ) -> Result<std::collections::BTreeMap<String, serde_json::Value>, ConfigError> {
     for (agent, config) in &raw {
-        if !is_agent_key(agent) {
+        if !is_agent_key(agent)
+            && !agent.split_once('/').is_some_and(|(namespace, instance)| {
+                is_agent_key(namespace) && is_agent_key(instance)
+            })
+        {
             return Err(ConfigError::Invalid(format!(
                 "agentConfig: `{agent}` isn't an agent key"
             )));
@@ -3632,31 +3645,40 @@ mod tests {
     #[test]
     fn a_reader_never_sees_a_config_file_part_way_through_a_write() {
         let dir = tempfile::tempdir().unwrap();
-        let on = |names: &[&str]| serde_json::json!(names);
-        write_local_key(dir.path(), "enableExtensions", Some(&on(&["acme"]))).unwrap();
-        write_project_key(dir.path(), "extensions", Some(&on(&["team"]))).unwrap();
+        write_project_key(
+            dir.path(),
+            "projectName",
+            Some(&serde_json::json!("stable")),
+        )
+        .unwrap();
+        write_local_key(
+            dir.path(),
+            "agentPromptAppend",
+            Some(&serde_json::json!("test")),
+        )
+        .unwrap();
         let done = std::sync::atomic::AtomicBool::new(false);
         std::thread::scope(|scope| {
             let reader = scope.spawn(|| {
                 let mut torn = 0;
                 while !done.load(std::sync::atomic::Ordering::Acquire) {
-                    let settings = extension_settings(dir.path());
-                    if !settings.personal.enable.iter().any(|name| name == "acme")
-                        || !settings.team.iter().any(|name| name == "team")
-                    {
+                    let config = load_project_config(dir.path()).unwrap();
+                    if config.project_name != "stable" || config.agent_prompt_append.is_empty() {
                         torn += 1;
                     }
                 }
                 torn
             });
-            for i in 0..300 {
-                let extra = format!("other{i}");
-                write_local_key(dir.path(), "enableExtensions", Some(&on(&["acme", &extra])))
-                    .unwrap();
-                write_project_key(dir.path(), "extensions", Some(&on(&["team", &extra]))).unwrap();
+            for i in 0..100 {
+                write_local_key(
+                    dir.path(),
+                    "agentPromptAppend",
+                    Some(&serde_json::json!(format!("test {i}"))),
+                )
+                .unwrap();
             }
             done.store(true, std::sync::atomic::Ordering::Release);
-            assert_eq!(reader.join().unwrap(), 0, "reads saw a file mid-write");
+            assert_eq!(reader.join().unwrap(), 0);
         });
     }
 
@@ -3757,43 +3779,14 @@ mod tests {
     /// `none`, or an agent. It sits beside their capability choices in
     /// `local.yaml`, and setting one leaves the other.
     #[test]
-    fn a_new_thread_session_choice_is_personal() {
+    fn new_thread_session_is_not_a_setting() {
         let dir = tempfile::tempdir().unwrap();
-        write_local_key(
-            dir.path(),
-            "activeProviders",
-            Some(&serde_json::json!({ "snapshots": "hashes" })),
-        )
-        .unwrap();
-        write_local_key(
+        assert!(write_local_key(
             dir.path(),
             "newThreadSession",
-            Some(&serde_json::json!("claude")),
+            Some(&serde_json::json!("claude"))
         )
-        .unwrap();
-        let config = load_project_config(dir.path()).unwrap();
-        assert_eq!(
-            config.personal_new_thread_session.as_deref(),
-            Some("claude")
-        );
-        assert_eq!(config.active_providers.len(), 1);
-        write_local_key(
-            dir.path(),
-            "newThreadSession",
-            Some(&serde_json::json!("none")),
-        )
-        .unwrap();
-        let next = load_project_config(dir.path()).unwrap();
-        assert_eq!(next.personal_new_thread_session.as_deref(), Some("none"));
-        assert_eq!(next.active_providers.len(), 1);
-
-        assert!(
-            write_local_key(dir.path(), "newThreadSession", Some(&serde_json::json!(""))).is_err()
-        );
-        write_local_key(dir.path(), "newThreadSession", None).unwrap();
-        let config = load_project_config(dir.path()).unwrap();
-        assert_eq!(config.personal_new_thread_session.as_deref(), Some("ask"));
-        assert_eq!(config.active_providers.len(), 1);
+        .is_err());
     }
 
     /// `eventRetention` sets a namespace's windows — a person's key.
@@ -4110,7 +4103,7 @@ dimensions:
     fn a_key_write_leaves_the_rest_of_the_file_as_written() {
         let dir = tempdir().unwrap();
         let original = "# The cart project.\n\
-                        oxplow.agents: [claude]\n\
+                        oxplow.agents.claude.enabled: true\n\
                         oxplow.testing.command: bun test   # with reports\n";
         std::fs::write(cfg_path(dir.path()), original).unwrap();
         let metrics = serde_json::json!([{ "use": "oxplow.fn_count" }]);
@@ -4121,7 +4114,13 @@ dimensions:
             raw.ends_with("oxplow.metrics:\n- use: oxplow.fn_count\n"),
             "{raw}"
         );
-        assert_eq!(load_project_config(dir.path()).unwrap().agents, ["claude"]);
+        assert_eq!(
+            load_project_config(dir.path())
+                .unwrap()
+                .agent_enabled
+                .get("claude"),
+            Some(&true)
+        );
     }
 
     /// Setting a key the file has replaces only that key's lines, under its
@@ -4131,7 +4130,7 @@ dimensions:
         let dir = tempdir().unwrap();
         std::fs::write(
             cfg_path(dir.path()),
-            "oxplow.agents: [claude]\n\
+            "oxplow.agents.claude.enabled: true\n\
              # Keep a week of history.\n\
              oxplow.snapshots.retentionDays: 7\n\
              oxplow.zones: []   # none yet\n",
@@ -4145,12 +4144,12 @@ dimensions:
         .unwrap();
         assert_eq!(
             std::fs::read_to_string(cfg_path(dir.path())).unwrap(),
-            "oxplow.agents: [claude]\n# Keep a week of history.\noxplow.snapshots.retentionDays: 14\noxplow.zones: []   # none yet\n"
+            "oxplow.agents.claude.enabled: true\n# Keep a week of history.\noxplow.snapshots.retentionDays: 14\noxplow.zones: []   # none yet\n"
         );
         write_project_key(dir.path(), "snapshotRetentionDays", None).unwrap();
         assert_eq!(
             std::fs::read_to_string(cfg_path(dir.path())).unwrap(),
-            "oxplow.agents: [claude]\noxplow.zones: []   # none yet\n"
+            "oxplow.agents.claude.enabled: true\noxplow.zones: []   # none yet\n"
         );
     }
 
@@ -4249,6 +4248,33 @@ dimensions:
                     return;
                 }
             }
+            if path == ["agents"] {
+                if let Some(agents) = value.as_sequence() {
+                    for agent in agents.iter().filter_map(serde_yaml::Value::as_str) {
+                        out.insert(format!("oxplow.agents.{agent}.enabled").into(), true.into());
+                    }
+                }
+                return;
+            }
+            if path == ["agentConfig"] {
+                if let Some(harnesses) = value.as_mapping() {
+                    for (harness, fields) in harnesses {
+                        if let (Some(harness), Some(fields)) =
+                            (harness.as_str(), fields.as_mapping())
+                        {
+                            for (field, value) in fields {
+                                if let Some(field) = field.as_str() {
+                                    out.insert(
+                                        format!("oxplow.agents.{harness}.{field}").into(),
+                                        value.clone(),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+                return;
+            }
             let joined = path.join(".");
             let key = core_settings::canonical_key(&joined);
             // Unknown legacy fields remain unqualified, so the strict loader
@@ -4302,39 +4328,33 @@ dimensions:
     }
 
     #[test]
-    fn loads_enabled_agents_and_project_name() {
+    fn loads_independent_agent_enablement_and_project_name() {
         let dir = tempdir().unwrap();
-        write_fixture(
-            cfg_path(dir.path()),
-            "agents: [claude, codex]\nprojectName: explicit-name\n",
-        )
-        .unwrap();
+        std::fs::create_dir_all(cfg_path(dir.path()).parent().unwrap()).unwrap();
+        std::fs::write(cfg_path(dir.path()), "oxplow.agents.claude.enabled: false\noxplow.agents.codex.enabled: true\noxplow.projectName: explicit-name\n").unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
-        assert_eq!(cfg.agents, ["claude", "codex"]);
+        assert_eq!(cfg.agent_enabled["claude"], false);
+        assert_eq!(cfg.agent_enabled["codex"], true);
         assert_eq!(cfg.project_name, "explicit-name");
     }
 
     /// `agents` names harness keys, whatever is registered; the shape is
     /// checked here, the keys by the app.
     #[test]
-    fn agents_are_keys_checked_for_shape() {
+    fn independent_agent_preferences_project_to_harness_config() {
         let dir = tempdir().unwrap();
-        let load = |yaml: &str| {
-            write_fixture(cfg_path(dir.path()), yaml).unwrap();
-            load_project_config(dir.path())
-        };
+        std::fs::create_dir_all(cfg_path(dir.path()).parent().unwrap()).unwrap();
+        std::fs::write(
+            cfg_path(dir.path()),
+            "oxplow.agents.claude.model: opus\noxplow.agents.codex.enabled: false\n",
+        )
+        .unwrap();
+        let cfg = load_project_config(dir.path()).unwrap();
         assert_eq!(
-            load("agents: [claude, my-agent_2]\n").unwrap().agents,
-            ["claude", "my-agent_2"]
+            cfg.agent_config["claude"]["model"],
+            serde_json::json!("opus")
         );
-        for (yaml, needle) in [
-            ("agents: []\n", "oxplow.agents"),
-            ("agents: [Claude]\n", "isn't an agent key"),
-            ("agents: [codex, codex]\n", "oxplow.agents"),
-        ] {
-            let err = load(yaml).unwrap_err().to_string();
-            assert!(err.contains(needle), "{yaml}: {err}");
-        }
+        assert!(!cfg.agent_enabled["codex"]);
     }
 
     /// The single-`agent` form is gone: `agents` is the one key.
@@ -4347,19 +4367,21 @@ dimensions:
     }
 
     #[test]
-    fn rejects_empty_agents() {
+    fn all_agent_harnesses_can_be_disabled() {
         let dir = tempdir().unwrap();
-        write_fixture(cfg_path(dir.path()), "agents: []\n").unwrap();
-        let err = load_project_config(dir.path()).unwrap_err();
-        assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("oxplow.agents")));
+        std::fs::create_dir_all(cfg_path(dir.path()).parent().unwrap()).unwrap();
+        std::fs::write(cfg_path(dir.path()), "oxplow.agents.claude.enabled: false\noxplow.agents.codex.enabled: false\noxplow.agents.opencode.enabled: false\n").unwrap();
+        let cfg = load_project_config(dir.path()).unwrap();
+        assert!(cfg.agent_enabled.values().all(|enabled| !enabled));
     }
 
     #[test]
-    fn rejects_duplicate_agents() {
+    fn old_aggregate_agents_is_not_a_setting() {
         let dir = tempdir().unwrap();
-        write_fixture(cfg_path(dir.path()), "agents: [claude, claude]\n").unwrap();
-        let err = load_project_config(dir.path()).unwrap_err();
-        assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("oxplow.agents")));
+        std::fs::create_dir_all(cfg_path(dir.path()).parent().unwrap()).unwrap();
+        std::fs::write(cfg_path(dir.path()), "oxplow.agents: [claude, codex]\n").unwrap();
+        let cfg = load_project_config(dir.path()).unwrap();
+        assert!(cfg.agent_enabled.is_empty());
     }
 
     #[test]
@@ -4649,89 +4671,33 @@ lsp:
     }
 
     #[test]
-    fn the_team_list_and_the_personal_layer_decide_which_extensions_are_on() {
+    fn extension_enablement_uses_independent_scalar_overrides() {
         let dir = tempdir().unwrap();
-        write_fixture(
-            cfg_path(dir.path()),
-            "extensions: [oxplow-bundled, triage]\nextensionSources:\n  triage: tools/triage\n",
-        )
-        .unwrap();
-        write_fixture(
+        std::fs::write(cfg_path(dir.path()), "oxplow.extensions.triage.enabled: true\noxplow.extensions.oxplow-bundled.enabled: false\n").unwrap();
+        std::fs::write(
             local_config_path(dir.path()),
-            "enableExtensions: [mine, triage]\ndisableExtensions: [oxplow-bundled]\n\
-             extensionSources:\n  mine: /abs/mine\n  triage: /abs/triage\n",
+            "oxplow.extensions.triage.enabled: false\noxplow.extensions.mine.enabled: true\n",
         )
         .unwrap();
-        let cfg = load_project_config(dir.path()).unwrap();
-        assert_eq!(cfg.extensions, vec!["oxplow-bundled", "triage"]);
-        assert_eq!(cfg.personal_extensions.enable, vec!["mine", "triage"]);
-        write_rendered(dir.path(), &cfg);
-
-        let settings = extension_settings(dir.path());
-        assert_eq!(
-            settings.enabled(),
-            vec![
-                ("triage".to_string(), EnabledBy::Team),
-                ("mine".to_string(), EnabledBy::Personal),
-            ]
-        );
-        let wt = Path::new("/wt");
-        // The person's source wins over the team's; a relative one is the checkout's.
-        assert_eq!(settings.source(wt, "triage"), Path::new("/abs/triage"));
-        assert_eq!(settings.source(wt, "mine"), Path::new("/abs/mine"));
-        assert_eq!(
-            settings.source(wt, "other"),
-            Path::new("/wt/.oxplow/extensions/other")
-        );
-        let team_only = ExtensionSettings {
-            personal_sources: Default::default(),
-            ..settings.clone()
-        };
-        assert_eq!(team_only.source(wt, "triage"), Path::new("/abs/triage"));
-        // No list: the default extensions are on; an empty one turns them off.
-        assert_eq!(
-            extension_settings(tempdir().unwrap().path()).enabled(),
-            DEFAULT_EXTENSIONS
-                .iter()
-                .map(|name| (name.to_string(), EnabledBy::Team))
-                .collect::<Vec<_>>()
-        );
-        let none = tempdir().unwrap();
-        write_fixture(cfg_path(none.path()), "extensions: []\n").unwrap();
-        let cfg = load_project_config(none.path()).unwrap();
-        assert!(cfg.extensions.is_empty());
-        write_rendered(none.path(), &cfg);
-        assert!(extension_settings(none.path()).enabled().is_empty());
+        let config = load_project_config(dir.path()).unwrap();
+        assert!(config.extensions.contains(&"mine".into()));
+        assert!(!config.extensions.contains(&"triage".into()));
+        assert!(!config.extensions.contains(&"oxplow-bundled".into()));
     }
 
     /// `enableBundledExtensions: false` runs oxplow's own extensions from
     /// their sources, only in a dev build; the person's layer wins.
     #[test]
-    fn bundled_extensions_run_from_their_sources_only_when_a_dev_build_is_asked() {
-        assert!(!bundled_from_sources(None, true));
-        assert!(!bundled_from_sources(Some(true), true));
-        assert!(bundled_from_sources(Some(false), true));
-        assert!(!bundled_from_sources(Some(false), false), "a release build");
+    fn bundled_source_switch_is_not_a_setting() {
         let dir = tempdir().unwrap();
-        write_fixture(cfg_path(dir.path()), "enableBundledExtensions: false\n").unwrap();
-        let cfg = load_project_config(dir.path()).unwrap();
-        assert_eq!(cfg.enable_bundled_extensions, Some(false));
-        write_rendered(dir.path(), &cfg);
-        let settings = extension_settings(dir.path());
-        assert_eq!(settings.bundled_requested, Some(false));
-        assert_eq!(settings.bundled_from_sources, cfg!(debug_assertions));
-        assert_eq!(ExtensionSettings::of(&cfg), settings);
-        write_fixture(
-            local_config_path(dir.path()),
-            "enableBundledExtensions: true\n",
+        assert!(write_project_key(
+            dir.path(),
+            "enableBundledExtensions",
+            Some(&serde_json::json!(false))
         )
-        .unwrap();
-        let cfg = load_project_config(dir.path()).unwrap();
-        assert_eq!(cfg.enable_bundled_extensions, Some(true));
-        let settings = extension_settings(dir.path());
-        assert_eq!(settings.bundled_requested, Some(true));
-        assert!(!settings.bundled_from_sources);
-        assert_eq!(ExtensionSettings::of(&cfg), settings);
+        .is_err());
+        assert!(!bundled_from_sources(None, true));
+        assert!(!bundled_from_sources(Some(false), false));
     }
 
     #[test]
@@ -4760,10 +4726,9 @@ lsp:
     #[test]
     fn ai_roles_round_trip_and_reject_unknown_roles() {
         let dir = tempdir().unwrap();
-        write_fixture(
+        std::fs::write(
             cfg_path(dir.path()),
-            "ai:\n  roles:\n    summarize: { provider: openrouter, model: openai/gpt-5-mini }\n    \
-             acme/review: { provider: openrouter, model: big, restrict: [tools, streaming] }\n",
+            "oxplow.ai.roles.summarize: { provider: openrouter, model: openai/gpt-5-mini }\noxplow.ai.roles.acme.review: { provider: openrouter, model: big, restrict: [tools, streaming] }\n",
         )
         .unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
@@ -4788,7 +4753,22 @@ lsp:
             .into(),
             "what the project forbids the binding"
         );
-        write_rendered(dir.path(), &cfg);
+        let values: std::collections::BTreeMap<String, serde_json::Value> = cfg
+            .ai_roles
+            .iter()
+            .map(|(role, binding)| {
+                let mut value = serde_json::to_value(binding).unwrap();
+                if binding.restrict.is_empty() {
+                    value.as_object_mut().unwrap().remove("restrict");
+                }
+                (crate::core_settings::role_key(role), value)
+            })
+            .collect();
+        std::fs::write(
+            cfg_path(dir.path()),
+            serde_yaml::to_string(&values).unwrap(),
+        )
+        .unwrap();
         let written = std::fs::read_to_string(cfg_path(dir.path())).unwrap();
         assert_eq!(
             written.matches("restrict").count(),
@@ -4800,28 +4780,28 @@ lsp:
 
         for (yaml, needle) in [
             (
-                "ai:\n  roles:\n    thinker: { provider: p, model: m }\n",
+                "oxplow.ai.roles.thinker: { provider: p, model: m }\n",
                 "thinker",
             ),
             (
-                "ai:\n  roles:\n    main: { provider: p, model: \"\" }\n",
+                "oxplow.ai.roles.main: { provider: p, model: \"\" }\n",
                 "main",
             ),
             (
-                "ai:\n  roles:\n    acme/Review: { provider: p, model: m }\n",
-                "acme/Review: unknown role",
+                "oxplow.ai.roles.acme.Review: { provider: p, model: m }\n",
+                "acme/Review",
             ),
             (
-                "ai:\n  roles:\n    main: { provider: p, model: m, restrict: [network] }\n",
+                "oxplow.ai.roles.main: { provider: p, model: m, restrict: [network] }\n",
                 "oxplow.ai.roles",
             ),
             // A role nothing asked is gone: naming one says so.
             (
-                "ai:\n  roles:\n    embed: { provider: p, model: m }\n",
-                "ai.roles.embed: oxplow has no `embed` role",
+                "oxplow.ai.roles.embed: { provider: p, model: m }\n",
+                "embed",
             ),
         ] {
-            write_fixture(cfg_path(dir.path()), yaml).unwrap();
+            std::fs::write(cfg_path(dir.path()), yaml).unwrap();
             let err = load_project_config(dir.path()).unwrap_err().to_string();
             assert!(err.contains(needle), "{err}");
         }
@@ -4830,19 +4810,18 @@ lsp:
     /// `agentModels` is retired: loading it says what replaced it. An
     /// `agentConfig` entry is a map under an agent key.
     #[test]
-    fn agent_models_is_an_error_naming_agent_config() {
+    fn old_agent_config_fields_are_not_disk_settings() {
         let dir = tempdir().unwrap();
-        for (yaml, needle) in [
-            (
-                "agentModels:\n  opencode: some/model\n",
-                "unknown setting `agentModels`",
-            ),
-            ("agentConfig:\n  opencode: some/model\n", "map of settings"),
-            ("agentConfig:\n  Bad: {}\n", "isn't an agent key"),
-        ] {
-            write_fixture(cfg_path(dir.path()), yaml).unwrap();
-            let err = load_project_config(dir.path()).unwrap_err().to_string();
-            assert!(err.contains(needle), "{yaml}: {err}");
+        for field in ["agentModels", "agentConfig"] {
+            std::fs::write(
+                cfg_path(dir.path()),
+                format!("{field}: {{opencode: model}}\n"),
+            )
+            .unwrap();
+            assert!(load_project_config(dir.path())
+                .unwrap_err()
+                .to_string()
+                .contains(field));
         }
     }
 
@@ -5119,7 +5098,7 @@ testing:
         let dir = tempdir().unwrap();
         std::fs::write(
             cfg_path(dir.path()),
-            "oxplow.agents: [claude]\nthirdPartyTool:\n  enabled: true\n  values: [a, b]\n",
+            "oxplow.agents.claude.enabled: true\nthirdPartyTool:\n  enabled: true\n  values: [a, b]\n",
         )
         .unwrap();
 
@@ -5168,7 +5147,7 @@ testing:
         .unwrap_err()
         .to_string();
         assert!(
-            err.contains("the project's metrics are defined in its own extension"),
+            err.contains("oxplow.metrics"),
             "{err}"
         );
         let cfg =
@@ -5598,38 +5577,20 @@ metrics:
     /// team, even one in `.oxplow/extensions/`, and is committed with it. A
     /// person can still turn it on for themselves, and off wins for them.
     #[test]
-    fn the_team_can_turn_off_an_extension_a_person_may_turn_back_on() {
+    fn a_local_extension_scalar_overrides_the_project_choice() {
         let dir = tempdir().unwrap();
-        write_fixture(
+        std::fs::write(
             cfg_path(dir.path()),
-            "extensions: [oxplow-bundled, kept]\ndisableExtensions: [kept, holder]\n",
-        )
-        .unwrap();
-        let settings = extension_settings(dir.path());
-        assert!(settings.turned_off("holder"));
-        assert!(settings.turned_off("kept"), "off beats the team's list");
-        assert!(!settings.is_enabled("kept"));
-        assert!(!settings.turned_off("oxplow-bundled"));
-
-        let cfg = load_project_config(dir.path()).unwrap();
-        assert_eq!(cfg.disable_extensions, vec!["kept", "holder"]);
-        write_rendered(dir.path(), &cfg);
-        assert!(extension_settings(dir.path()).turned_off("holder"));
-
-        write_fixture(
-            local_config_path(dir.path()),
-            "enableExtensions: [holder]\n",
-        )
-        .unwrap();
-        let mine = extension_settings(dir.path());
-        assert!(!mine.turned_off("holder"));
-        assert!(mine.is_enabled("holder"));
-        write_fixture(
-            local_config_path(dir.path()),
-            "enableExtensions: [holder]\ndisableExtensions: [holder]\n",
+            "oxplow.extensions.holder.enabled: false\n",
         )
         .unwrap();
         assert!(extension_settings(dir.path()).turned_off("holder"));
+        std::fs::write(
+            local_config_path(dir.path()),
+            "oxplow.extensions.holder.enabled: true\n",
+        )
+        .unwrap();
+        assert!(extension_settings(dir.path()).is_enabled("holder"));
     }
 
     #[test]

@@ -5,7 +5,6 @@ import { typeOf } from "../uri/uri.js";
  * opened, and a closed one's goes. The rows are the truth — the tabs are
  * never a copy the UI keeps on its own (`.context/pages-and-tabs.md`).
  */
-import type { HarnessListing } from "../tauri-bridge/generated/bindings.js";
 import { agentSessionRef, newSessionRef } from "./pageRefs.js";
 import { refsOf, type Session } from "./session.js";
 import type { TabRef } from "./tabState.js";
@@ -22,19 +21,9 @@ export function reconcileSessionTabs(tabs: TabRef[], openSessions: ReadonlyArray
   return same ? tabs : next;
 }
 
-/** What a new thread opens with, by the person's `newThreadSession`: `ask`
- *  opens the session picker, `none` nothing, and an agent
- *  (a harness's key) starts that agent's session — unless it can't start
- *  any more (disabled, or gone), when it asks instead. */
-export function newThreadTabs(
-  setting: string,
-  harnesses: ReadonlyArray<HarnessListing>,
-): { tabs: TabRef[]; start: { harness: string } | null } {
-  const ask = { tabs: [newSessionRef()], start: null };
-  if (setting === "none") return { tabs: [], start: null };
-  if (setting === "ask") return ask;
-  const harness = harnesses.find((h) => h.id === setting && h.enabled);
-  return harness ? { tabs: [], start: { harness: harness.id } } : ask;
+/** New threads show the picker. Agent processes start only after an explicit selection. */
+export function newThreadTabs(): { tabs: TabRef[]; start: null } {
+  return { tabs: [newSessionRef()], start: null };
 }
 
 /** Whether a thread's stored tabs (`tabs/useTabSessions.ts`) are left from a

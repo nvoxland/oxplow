@@ -1743,7 +1743,7 @@
     - { name: "color", type: "TEXT", doc: "The rule's display colour, if it gave one." }
     - { name: "files", type: "INT", doc: "Files in the worktree this rule claims (none of its earlier siblings did); on `other`, the files no rule matched." }
 - name: config_value
-  version: 4
+  version: 5
   key: [key]
   description: "Registered core and extension settings with redacted effective values, schema and display metadata. Overrides resolve local, project, global, then default; metric and dimension definitions are not settings. Write through oxplow.config.set with an explicit level."
   fields:
@@ -1764,6 +1764,11 @@
     - { name: project_value, type: TEXT, doc: "Explicit shared project override as JSON; SQL NULL when absent or secret." }
     - { name: global_value, type: TEXT, doc: "Explicit machine-global override as JSON; SQL NULL when absent or secret." }
     - { name: unavailable, type: INT, doc: "1 when resolution failed safely. Value, origin and presence are unavailable; no backend error or secret bytes are exposed." }
+    - { name: default_value, type: TEXT, doc: "Registered default as JSON, NULL when absent; secrets have no defaults." }
+    - { name: setting_order, type: INT, doc: "Display order within the category, then title and key." }
+    - { name: local_status, type: TEXT, doc: "Local override presence: set, unset or unavailable. Never contains secret bytes." }
+    - { name: project_status, type: TEXT, doc: "Project override presence: set, unset or unavailable." }
+    - { name: global_status, type: TEXT, doc: "Global override presence: set, unset or unavailable." }
   tests:
     - { not_null: key }
     - { unique: key }
@@ -1782,15 +1787,15 @@
     - { name: "parent", type: "TEXT", doc: "The conversation it was forked from, if any." }
     - { name: "problem", type: "TEXT", doc: "Why the harness couldn't list its conversations now; NULL on a conversation." }
 - name: agent_harness
-  version: 2
+  version: 3
   key: [id]
-  description: "The agent harnesses registered with oxplow (`claude`, `codex`, `opencode`, an extension's), those `agents:` in project.yaml names first, in its order — the first is a new session's default. Read live when a query names it."
+  description: "All registered agent harnesses, alphabetically by title. Enablement is the independent oxplow.agents.<id>.enabled setting (default true); disabled harnesses remain visible. Sessions explicitly name a harness."
   fields:
-    - { name: "id", type: "TEXT", doc: "Its key: what a session's `harness` and `agents:` name." }
+    - { name: "id", type: "TEXT", doc: "Its key: what a session's harness names." }
     - { name: "title", type: "TEXT", doc: "What it is called." }
-    - { name: "enabled", type: "INT", doc: "1 when the project enables it (`agents:` names it, or names none)." }
-    - { name: "position", type: "INT", doc: "Its place in priority order, from 0." }
-    - { name: "settings", type: "TEXT", doc: "The settings it declares for the person to set (`agentConfig.<id>.<key>` in project.yaml), as a JSON array of `{ key, title, hint, placeholder }`; `[]` when it declares none. (v2)" }
+    - { name: "enabled", type: "INT", doc: "1 when oxplow.agents.<id>.enabled resolves to true." }
+    - { name: "position", type: "INT", doc: "Its alphabetical position by title, from 0." }
+    - { name: "settings", type: "TEXT", doc: "Declared preferences registered independently as oxplow.agents.<id>.<key>, as a JSON array of { key, title, hint, placeholder }." }
 - name: extension_secret
   version: 1
   key: [extension, reference]

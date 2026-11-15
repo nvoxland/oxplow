@@ -518,19 +518,16 @@ the key of a registered harness (`HarnessRegistry`: the `agent_harness`
 declarations in declaration order, then provider instances); nothing in
 core names one (`source_guards::only_harness_implementations_name_a_harness`).
 Each activation publishes the declared ones (`harnesses::prepare_built_ins`
-→ `set_declared`) and keeps a registered instance. `agents: [...]` in
-`.oxplow/project.yaml` lists the enabled ones in priority order (the
-first is a new session's default); left out, every registered harness is
-enabled and the first declared is the default. `oxplow.agent.set_agents` and
-`oxplow.agent_session.open` check keys against the registry. A harness's
-own settings are `agentConfig: { <key>: { … } }`, what its `launch`
-reads; it declares the ones a person sets (`AgentHarness::settings`:
-opencode's `model`, Claude's `mcpServers` / `model` / `effort`, Codex's
-`model` / `effort`; a blank value passes nothing, and a value the harness
-refuses is its to refuse), and Settings → Agents renders a field for each,
-saved by `oxplow.agent.set_setting`, which refuses an undeclared one (and
-the order by `oxplow.agent.set_agents`, which refuses an unregistered key;
-`.context/commands.md`). The UI
+→ `set_declared`) and keeps a registered instance. Every harness has an
+independent `oxplow.agents.<id>.enabled` boolean, default true; all may be
+disabled. Each declared preference is registered as
+`oxplow.agents.<id>.<setting>` with its own schema, level and origin.
+External instance ids `namespace/instance` use `namespace.instance` in the setting key.
+The runtime projects these scalars into `agent_config` only for launch.
+`oxplow.agent.set_setting` checks that the harness declares a preference
+and writes only that scalar; blank unsets the project override.
+Sessions explicitly name an enabled harness: there is no default or priority.
+New threads open the picker and never start an agent automatically. The UI
 reads the harnesses through `list_agent_harnesses` (`useAgentHarnesses`,
 `agentKinds.ts`). Each session keeps its own harness, so Claude and Codex
 sessions run side by side.
@@ -555,12 +552,12 @@ one no longer offered is removed, a person's own stay.
   MCP config can't interpolate env). It runs `claude --plugin-dir <abs>
   --append-system-prompt <text> --mcp-config <file>
   [--strict-mcp-config] [--model <m>] [--effort <e>] [--resume <id>]`:
-  `--model` / `--effort` come from `agentConfig.claude.model` / `.effort`
+  `--model` / `--effort` come from `oxplow.agents.claude.model` / `.effort`
   (flags only; the person's `~/.claude/settings.json` is never written).
   Oxplow's server rides beside the
   person's own (local, project, user, plugin servers, claude.ai
   connectors), and `--strict-mcp-config` is added only by the
-  `agentConfig.claude.mcpServers: strict` setting (`all` is the default;
+  `oxplow.agents.claude.mcpServers: strict` setting (`all` is the default;
   anything else is a config error), falling back to `~/.claude/local/claude` when no
   `claude` resolves. Its HTTP hooks (`HOOK_EVENTS`) are `PreToolUse`,
   `PostToolUse` (matcher `"*"`), `UserPromptSubmit`, `SessionStart`,
@@ -576,14 +573,14 @@ one no longer offered is removed, a person's own stay.
   request that opens the session's thread on Codex's shared daemon, its
   MCP server and system prompt in the thread's own config, and the TUI
   that attaches to it ("Codex: its TUI on a thread oxplow observes").
-  `agentConfig.codex.model` is the open request's `model` param and
+  `oxplow.agents.codex.model` is the open request's `model` param and
   `.effort` its `config.model_reasoning_effort` (never the person's
   `~/.codex/config.toml`). Its skills (and
   commands, as skills) go to the worktree's `.agents/skills/`
   (`shared::write_worktree_skills`).
 - **opencode** writes `.oxplow/runtime/opencode-plugin/`
   (`plugin/oxplow-hooks.js`, `skills/`, `prompts/`) and runs `opencode [-m
-  <model>] [-s <id>]`, the model only from `agentConfig.opencode.model`
+  <model>] [-s <id>]`, the model only from `oxplow.agents.opencode.model`
   (blank: no `-m`, opencode's own default). oxplow used to force
   `github-copilot/gpt-5-mini`; GitHub Copilot stopped offering it and
   opencode 1.17.4 gave no error: it ran its most recent other model (a
@@ -1465,7 +1462,7 @@ person's run asks first).
 - **Transports only render.** The route's answer is a neutral
   `HookAnswer` (`Ack`, `Deny { reason }`, `Context { event, text }`)
   rendered by the hook's harness: the session's (`IngestOutcome.harness`),
-  else the default harness's. Every built-in renders Claude Code's shape
+  else an empty acknowledgement. Every built-in renders Claude Code's shape
   (`hookSpecificOutput`, `shared::render`), which opencode's bridge speaks
   too. A chat session's agent (ACP, Codex) gets a permission reject or an
   fs error.
@@ -1818,7 +1815,7 @@ available from outside.
 | Answering from oxplow | — (no interface into an interactive session; a cross-session message can't consent) | — (a request goes to the turn's client) | *HTTP `permission` / `question` reply* — left native |
 | The plan | `ExitPlanMode` PreToolUse `tool_input.plan`, `planFilePath` → `agent.plan.proposed` | the `plan` item's text on `item/completed` → `agent.plan.proposed`; `turn/plan/updated` steps reach only the chat library | — (`plan_exit` carries no text, so none is recorded) |
 | Model / effort | `agent_turn.model` / `effort`: the Stop's `effort.level` and the transcript tail's newest `message.model`; transcript `message.model` → `v_token_usage.model`; *`SessionStart.model`, `PostModelSwitch`* | `agent_turn.model` / `effort`: `Thread.model` / `reasoningEffort` at open, moved by `thread/settings/updated` | `agent_turn.model` / `effort`: the bridge's Stop carries the last assistant message's `modelID` and `variant` |
-| Set at launch | `agentConfig.claude.model` → `--model`, `.effort` → `--effort` | `agentConfig.codex.model` → the open request's `model`, `.effort` → its `config.model_reasoning_effort` | `agentConfig.opencode.model` → `-m` (none when blank) |
+| Set at launch | `oxplow.agents.claude.model` → `--model`, `.effort` → `--effort` | `oxplow.agents.codex.model` → the open request's `model`, `.effort` → its `config.model_reasoning_effort` | `oxplow.agents.opencode.model` → `-m` (none when blank) |
 | Context fill, compaction | `agent_turn.context_tokens` (window NULL): the transcript tail's newest assistant usage; `PostCompact` → `agent.context.compacted` (`trigger`, `compact_summary`); `PreCompact` resets the context baselines | `agent_turn.context_tokens` / `context_window`: `thread/tokenUsage/updated` `last.totalTokens` / `modelContextWindow`; the `contextCompaction` item → `agent.context.compacted` (resets nothing: no prompt channel) | `agent_turn.context_tokens` (window NULL): the Stop's `tokens`; `session.compacted` → `agent.context.compacted` (`trigger` `manual` / `auto` from the preceding `compaction` part) |
 | Tokens | OTLP and the transcript tail | `turn/completed` deltas | — (the bridge sends none) |
 | Skills, commands | shipped (`--plugin-dir`; skills reload live) | shipped (`.agents/skills`) | shipped (plugin dir, inline `command`) |

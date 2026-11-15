@@ -81,12 +81,14 @@ impl AgentHarness for Codex {
                 title: "Model".into(),
                 hint: "The model Codex threads open with. Blank uses your own Codex default; applies to sessions started after Save.".into(),
                 placeholder: "gpt-5.2".into(),
+                schema: serde_json::json!({"type":"string"}),
             },
             HarnessSetting {
                 key: "effort".into(),
                 title: "Reasoning effort".into(),
                 hint: "The reasoning effort Codex threads open with (`minimal`, `low`, `medium`, `high` or `xhigh`; the model decides which it accepts). Blank uses your own Codex default; applies to sessions started after Save.".into(),
                 placeholder: "high".into(),
+                schema: serde_json::json!({"type":"string","enum":["minimal","low","medium","high","xhigh"]}),
             },
         ]
     }

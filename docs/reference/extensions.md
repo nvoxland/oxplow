@@ -43,7 +43,7 @@ until you deploy it.
 
 - The source is `.oxplow/extensions/<name>/`, or the folder that
   `extensionSources: { <name>: <folder> }` names in `.oxplow/project.yaml`
-  or `.oxplow/personal.yaml`. `.oxplow/.gitignore` keeps a source out of
+  or `.oxplow/local.yaml`. `.oxplow/.gitignore` keeps a source out of
   git, so a new extension is personal.
 - `oxplow.extension.deploy { name }` (or `oxplow extension deploy <name>`)
   copies the source into `.oxplow/runtime/extensions/<name>/<hash>/` and
@@ -58,15 +58,13 @@ until you deploy it.
 - Oxplow deploys nothing at start: it runs the deployments recorded on this
   machine. An extension that is on but never deployed here runs nothing
   until someone deploys it.
-- Which extensions are on: `extensions: [..]` in `.oxplow/project.yaml`
-  (absent means `[oxplow-bundled]`), less its `disableExtensions`, plus
-  `enableExtensions` and `disableExtensions` in `.oxplow/personal.yaml`. A
-  source in `.oxplow/extensions/` is on unless one of those turns it off.
-  `oxplow.extension.enable`, `disable` and `remove` change the lists.
-  `remove` never deletes the source.
-- `oxplow.extension.share { name }` un-ignores the source and moves the name
-  to the team list; you commit the files. `oxplow.extension.unshare { name }`
-  reverses it.
+- `oxplow.extensions.<name>.enabled` controls one extension, resolving local,
+  project, global, then default. Foundation is required and always on.
+  `oxplow.extension.enable` and `disable` write a local boolean; `remove`
+  forgets its deployment and state while retaining source files.
+- `oxplow.extension.share { name }` un-ignores source, writes project true
+  and clears the local override; you commit the files. `unshare` writes
+  local true and clears the project override.
 - To use someone else's extension, clone it into
   `.oxplow/extensions/<name>/` (or point `extensionSources` at it), list it
   and deploy it.
@@ -501,7 +499,7 @@ Name it by its id where your extension picks a role: a job request's
 `role: review`, a collector's `ai_classify(text, labels, role = "review")`
 (every `ai_*` builtin takes `role=`). Another extension's profiles aren't
 yours to name. The person binds `<namespace>/<id>` to a model in
-Settings → AI (or a project in `.oxplow/project.yaml`'s `ai.roles`);
+Settings → AI (or a project in the `oxplow.ai.roles.<namespace>.<profile>` setting);
 until they do, the `fallback` role's model serves it. `features` are what
 the bound model must support: a job's typed call on a model that
 reports one unsupported is refused, and Settings shows why. A profile

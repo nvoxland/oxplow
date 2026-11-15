@@ -458,6 +458,31 @@ impl SettingsStore {
             .collect()
     }
 
+    /// Redacted level reads share one file snapshot. Each failure stays local to
+    /// its key and level, including secure storage and schema failures.
+    pub fn inspect_levels(
+        &self,
+        keys: &[String],
+    ) -> Result<Vec<[Result<SettingValue, SettingsError>; 3]>, SettingsError> {
+        let documents = Level::PRECEDENCE
+            .into_iter()
+            .map(|level| self.layer(level).map(|values| (level, values)))
+            .collect::<Result<Vec<_>, _>>()?;
+        keys.iter()
+            .map(|key| {
+                let definition = self.definition(key)?;
+                Ok(std::array::from_fn(|index| {
+                    self.read_documents(
+                        &definition,
+                        std::slice::from_ref(&documents[index]),
+                        false,
+                        true,
+                    )
+                }))
+            })
+            .collect()
+    }
+
     /// Apply ordinary settings to one level with a single locked replacement.
     /// Secrets cannot participate in a YAML transaction.
     pub fn update(

@@ -205,10 +205,7 @@ mod tests {
     /// dropped; the person's own Claude configuration passes.
     #[test]
     fn an_agent_inherits_no_session_markers_but_keeps_configuration() {
-        let harnesses =
-            oxplow_domain::agent::registry::HarnessRegistry::new(std::sync::Arc::new(|| {
-                "claude".into()
-            }));
+        let harnesses = oxplow_domain::agent::registry::HarnessRegistry::new();
         harnesses.register(
             oxplow_harnesses::built_in("oxplow:claude-code", "claude", "Claude").unwrap(),
         );

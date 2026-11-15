@@ -231,7 +231,7 @@ check already reported is not repeated.
   oxplow** (`throwaway::Host`) that is a real one: a temp project with a
   copy of the project's `.oxplow/extensions/` and of which it turned off
   (nothing else of its config — its provider instances would start its
-  programs — except the checkout's `enableBundledExtensions`, so a checkout
+  programs — with source-development mode from `OXPLOW_EXTENSIONS_FROM_SOURCE`, so a checkout
   that runs oxplow's own extensions from their sources is tested that way,
   with no "ignored" warning; the copied sources and the throwaway's
   `.oxplow/` are in `.git/info/exclude`, so they are not untracked files
@@ -399,7 +399,7 @@ tasks or knowledge pages needs nothing extra (`requires:
 replacements), and a provider's conformance suite, which files work,
 runs on an oxplow of its own — deployed in that order,
 what one requires before it (`Host::start`). Never the project's list or
-one person's `enableExtensions` / `disableExtensions`, and never a
+one person's enabled-setting overrides, and never a
 sibling it doesn't name: a fixture passes or fails the same for everyone
 and in CI, and a broken neighbour is no noise in its report. One named
 but neither here nor shipped isn't turned on (an import of it reports it

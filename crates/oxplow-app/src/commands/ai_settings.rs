@@ -245,24 +245,24 @@ mod tests {
             &fx,
             &me,
             super::SET_PROVIDER,
-            json!({ "id": "or", "kind": "openrouter", "key": "sk-secret-123" }),
+            json!({ "id": "openrouter", "kind": "openrouter", "key": "sk-secret-123" }),
         )
         .await
         .unwrap();
         assert_eq!(out.result["key_given"], json!(true));
         let settings = fx.svc.ai.settings().await.unwrap();
-        assert_eq!(settings.providers[0].id, "or");
+        assert_eq!(settings.providers[0].id, "openrouter");
         assert!(settings.providers[0].key_set);
 
         run(
             &fx,
             &me,
             super::SET_ROLE,
-            json!({ "role": "summarize", "provider": "or", "model": "m" }),
+            json!({ "role": "summarize", "provider": "openrouter", "model": "m" }),
         )
         .await
         .unwrap();
-        let err = run(&fx, &me, super::REMOVE_PROVIDER, json!({ "id": "or" }))
+        let err = run(&fx, &me, super::REMOVE_PROVIDER, json!({ "id": "openrouter" }))
             .await
             .unwrap_err();
         assert!(matches!(err, CommandError::Invalid { .. }), "{err:?}");
@@ -270,7 +270,7 @@ mod tests {
         run(&fx, &me, super::SET_ROLE, json!({ "role": "summarize" }))
             .await
             .unwrap();
-        run(&fx, &me, super::REMOVE_PROVIDER, json!({ "id": "or" }))
+        run(&fx, &me, super::REMOVE_PROVIDER, json!({ "id": "openrouter" }))
             .await
             .unwrap();
         assert!(fx.svc.ai.settings().await.unwrap().providers.is_empty());
@@ -311,7 +311,7 @@ mod tests {
             &fx,
             &page(Actor::Human),
             super::SET_PROVIDER,
-            json!({ "id": "viaform", "kind": "openrouter", "key": "sk-form-456" }),
+            json!({ "id": "openrouter", "kind": "openrouter", "key": "sk-form-456" }),
         )
         .await
         .unwrap();
@@ -323,7 +323,7 @@ mod tests {
             .unwrap()
             .providers
             .iter()
-            .any(|p| p.id == "viaform" && p.key_set));
+            .any(|p| p.id == "openrouter" && p.key_set));
         let recorded = fx
             .svc
             .commands
@@ -336,7 +336,7 @@ mod tests {
             .unwrap();
         let input = recorded.input.to_string();
         assert!(
-            input.contains("viaform") && !input.contains("sk-form-456"),
+            input.contains("openrouter") && !input.contains("sk-form-456"),
             "{input}"
         );
         let agent = Actor::Agent {
@@ -349,7 +349,7 @@ mod tests {
             &fx,
             &page(agent),
             super::SET_PROVIDER,
-            json!({ "id": "byagent", "kind": "openrouter", "key": "sk-x" }),
+            json!({ "id": "openrouter", "kind": "openrouter", "key": "sk-x" }),
         )
         .await
         .unwrap();
@@ -361,7 +361,7 @@ mod tests {
             .unwrap()
             .providers
             .iter()
-            .any(|p| p.id == "byagent"));
+            .any(|p| p.id == "openrouter"));
     }
 
     /// A role's binding is config, so changing it announces `ConfigChanged`
@@ -374,7 +374,7 @@ mod tests {
             &fx,
             &Actor::Human,
             super::SET_PROVIDER,
-            json!({ "id": "or", "kind": "openrouter", "key": "k" }),
+            json!({ "id": "openrouter", "kind": "openrouter", "key": "k" }),
         )
         .await
         .unwrap();
@@ -383,7 +383,7 @@ mod tests {
             &fx,
             &Actor::Human,
             super::SET_ROLE,
-            json!({ "role": "summarize", "provider": "or", "model": "m" }),
+            json!({ "role": "summarize", "provider": "openrouter", "model": "m" }),
         )
         .await
         .unwrap();
@@ -404,9 +404,9 @@ mod tests {
         for (command, input) in [
             (
                 super::SET_PROVIDER,
-                json!({ "id": "or", "kind": "openrouter", "key": "k" }),
+                json!({ "id": "openrouter", "kind": "openrouter", "key": "k" }),
             ),
-            (super::REMOVE_PROVIDER, json!({ "id": "or" })),
+            (super::REMOVE_PROVIDER, json!({ "id": "openrouter" })),
         ] {
             run(&fx, &Actor::Human, command, input).await.unwrap();
             let mut saw = false;
@@ -422,8 +422,8 @@ mod tests {
     async fn a_role_binding_is_both_halves_or_neither() {
         let fx = crate::test_fixtures::services_with_thread().await;
         for input in [
-            json!({ "role": "summarize", "provider": "or" }),
-            json!({ "role": "nonsense", "provider": "or", "model": "m" }),
+            json!({ "role": "summarize", "provider": "openrouter" }),
+            json!({ "role": "nonsense", "provider": "openrouter", "model": "m" }),
         ] {
             let err = run(&fx, &Actor::Human, super::SET_ROLE, input)
                 .await
@@ -445,14 +445,14 @@ mod tests {
         for (name, input) in [
             (
                 super::SET_PROVIDER,
-                json!({ "id": "or", "kind": "openrouter", "key": "k" }),
+                json!({ "id": "openrouter", "kind": "openrouter", "key": "k" }),
             ),
             (
                 super::SET_ROLE,
-                json!({ "role": "summarize", "provider": "or", "model": "m" }),
+                json!({ "role": "summarize", "provider": "openrouter", "model": "m" }),
             ),
             (super::SET_ROLE, json!({ "role": "summarize" })),
-            (super::REMOVE_PROVIDER, json!({ "id": "or" })),
+            (super::REMOVE_PROVIDER, json!({ "id": "openrouter" })),
         ] {
             run(&fx, &agent, name, input)
                 .await

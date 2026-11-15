@@ -1,3 +1,5 @@
+import { useAppPreference } from "../prefs/remembered.js";
+import { SettingsViz } from "./SettingsViz.js";
 import { useCollapsedSet, useDraft, type CollapsedSet } from "../tabs/useViewParam.js";
 import { Approvals } from "../kit/Approvals.js";
 import type { PickedRow } from "../pages/railGroups.js";
@@ -1279,6 +1281,8 @@ function Viz({
       );
     case "steps":
       return <StepsViz steps={stepItems(viz, result)} rowMenu={rowMenu} />;
+    case "settings":
+      return <SettingsViz run={run} />;
     case "approvals":
       // The pending proposals are read by the kit component itself; the
       // viz's rows are ignored, its params narrow the list.
@@ -1331,6 +1335,8 @@ function Viz({
  *  goes where the command says (`ui.open_after`) as the form's `then`
  *  says. */
 function FormViz({ run, streamId }: { run: VizRun; streamId: string | null }) {
+  const [lastHarness, setLastHarness] = useAppPreference<string | null>("session-picker.last-harness", null);
+  const submittedHarness = useRef<string | null>(null);
   const [start, setStart] = useState<FormStart | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [round, setRound] = useState(0);
@@ -1355,6 +1361,9 @@ function FormViz({ run, streamId }: { run: VizRun; streamId: string | null }) {
     run.config.title,
     (input, confirmed) => source.submit(run, input, streamId, confirmed),
     (outcome) => {
+      if (start?.command.id === "oxplow.agent_session.open" && submittedHarness.current) {
+        setLastHarness(submittedHarness.current);
+      }
       // A fresh form for the next entry, started again from the current
       // values: an edit form shows what it saved.
       clearDraft();
@@ -1374,7 +1383,15 @@ function FormViz({ run, streamId }: { run: VizRun; streamId: string | null }) {
     source
       .start(run, streamId)
       .then((s) => {
-        if (live) setStart(s);
+        if (live) {
+          // Remembered UI choice is only a preselection, and only while it
+          // remains one of the current enabled harness choices.
+          if (s.command.id === "oxplow.agent_session.open" && lastHarness
+              && s.choices?.harness?.some((choice) => choice.value === lastHarness)) {
+            s = { ...s, values: { ...(s.values as Record<string, unknown>), harness: lastHarness } };
+          }
+          setStart(s);
+        }
       })
       .catch((e) => {
         if (live) setError(e instanceof Error ? e.message : String(e));
@@ -1384,7 +1401,7 @@ function FormViz({ run, streamId }: { run: VizRun; streamId: string | null }) {
     };
     // paramsKey and rowsKey stand in for `run.params` and its rows.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [run.config.id, paramsKey, rowsKey, streamId, round, reload, source]);
+  }, [run.config.id, paramsKey, rowsKey, streamId, round, reload, source, lastHarness]);
   useRerunOnChange(start?.reads ?? NO_READS, () => setReload((n) => n + 1));
   const schema = useMemo(
     () => (start ? withSubfields(start.command.input_schema as Record<string, unknown>, start.subfields ?? {}) : null),
@@ -1419,7 +1436,10 @@ function FormViz({ run, streamId }: { run: VizRun; streamId: string | null }) {
         draft={draft}
         onDraft={setDraft}
         busy={form.busy}
-        onSubmit={(input) => void form.submit(input, false)}
+        onSubmit={(input) => {
+          submittedHarness.current = typeof input.harness === "string" ? input.harness : null;
+          void form.submit(input, false);
+        }}
         again={
           again
             ? {

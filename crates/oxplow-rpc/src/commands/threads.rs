@@ -24,7 +24,7 @@ pub async fn list_agent_harnesses(
     Ok(oxplow_app::harnesses::listing(
         &svc.harnesses,
         &svc.capabilities,
-        &config.agents,
+        &config.agent_enabled,
     ))
 }
 

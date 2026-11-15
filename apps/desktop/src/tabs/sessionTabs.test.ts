@@ -1,7 +1,6 @@
 import { expect, test } from "bun:test";
 
 import { agentSessionRef, newSessionRef, knowledgePageRef } from "./pageRefs.js";
-import type { HarnessListing } from "../tauri-bridge/generated/bindings.js";
 import { emptySession, open, setStrip } from "./session.js";
 import { newThreadTabs, reconcileSessionTabs, storedSessionIsStale } from "./sessionTabs.js";
 
@@ -45,29 +44,8 @@ test("reconciling never brings the picker back", () => {
   expect(reconcileSessionTabs(withPicker, [])).toBe(withPicker);
 });
 
-const harness = (id: string, over: Partial<HarnessListing> = {}): HarnessListing => ({
-  id,
-  title: id,
-  enabled: true,
-  settings: [],
-  ...over,
-});
-const harnesses = [harness("claude"), harness("opencode"), harness("codex", { enabled: false })];
-
-/** A new thread follows the person's `newThreadSession`: ask opens the
- *  picker, none opens nothing, an agent starts it. */
-test("a new thread asks, starts nothing, or starts the chosen agent", () => {
-  expect(newThreadTabs("ask", harnesses)).toEqual({ tabs: [newSessionRef()], start: null });
-  expect(newThreadTabs("none", harnesses)).toEqual({ tabs: [], start: null });
-  expect(newThreadTabs("claude", harnesses)).toEqual({ tabs: [], start: { harness: "claude" } });
-});
-
-/** An agent that can't start any more — disabled, gone, or a setting
- *  naming one that no longer exists (`acp:gemini`) — asks instead. */
-test("an agent that isn't available asks instead", () => {
-  for (const choice of ["codex", "gone", "acp:gemini"]) {
-    expect(newThreadTabs(choice, harnesses)).toEqual({ tabs: [newSessionRef()], start: null });
-  }
+test("a new thread shows the picker without starting an agent", () => {
+  expect(newThreadTabs()).toEqual({ tabs: [newSessionRef()], start: null });
 });
 
 /** A project reset leaves the browser's stored tabs behind, and a new thread

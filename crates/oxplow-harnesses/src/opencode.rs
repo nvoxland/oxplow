@@ -93,6 +93,7 @@ impl AgentHarness for Opencode {
             title: "Model".into(),
             hint: "The model OpenCode launches with (`provider/model`, as `opencode models` lists them). Blank uses your own OpenCode default; applies to sessions started after Save. OpenCode gives no error for a model it doesn't have, and runs another.".into(),
             placeholder: "provider/model".into(),
+                schema: serde_json::json!({"type":"string"}),
         }]
     }
 

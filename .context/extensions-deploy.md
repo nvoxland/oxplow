@@ -31,8 +31,8 @@ Sources and deployments, builds, sharing, disabling and reviewing a change by im
 - **Disabling.** An extension that is off contributes nothing: it has
   `enabled: false` and no pages, slots or sources, so every consumer
   ignores it; `find_page` and `run_page` say it's disabled. Which are
-  on is the team's `extensions:` plus the person's `enableExtensions` /
-  `disableExtensions` ("Sources and deployments"). The Extensions page
+  on is the resolved `oxplow.extensions.<name>.enabled` scalar
+  (local → project → global → default). The Extensions page
   toggles it through `oxplow.extension.enable` / `disable`.
 
 ## Sources and deployments
@@ -41,17 +41,15 @@ An extension has a **source**, the files a person or their agent edits,
 and **deployments**, the immutable copies oxplow runs. Nothing runs a
 source directly: an edit changes nothing until it is deployed.
 
-- **On or off:** a source in `.oxplow/extensions/` is on just by being there, unless
-  it's listed in `disableExtensions`: the team's in `.oxplow/project.yaml`, or a
-  person's in `.oxplow/personal.yaml`. A person's `enableExtensions` beats the
-  team's off, and their own off beats everything
-  (`ExtensionSettings::turned_off`). Bare `oxplow-dev extension test` skips one
-  that's off; naming it still tests it.
+- **On or off:** `oxplow.extensions.<name>.enabled` controls one extension.
+  A local false can disable a project true; resetting the local override exposes
+  the project choice. Foundation is always on. Bare `oxplow-dev extension test`
+  skips one that's off; naming it still tests it.
 - **Source:** `.oxplow/extensions/<name>/` in a checkout, unless
   `extensionSources: { <name>: <folder> }` points the name elsewhere. The
   folder is relative to the checkout or absolute (`~/` is the home folder).
   The team's `extensionSources` is in `.oxplow/project.yaml`; a person's own,
-  which wins, is in `.oxplow/personal.yaml`. This repo points
+  which wins, is in `.oxplow/local.yaml`. This repo points
   `oxplow-foundation` and `oxplow-bundled` at `extensions/…`, so their
   sources are ordinary repo files. A personal source outside every checkout
   (`~/oxplow-extensions/x`) is how an agent in any stream edits it: the write
@@ -134,16 +132,10 @@ source directly: an edit changes nothing until it is deployed.
     therefore holds one entry per name, and `extensions::owner(list,
     name)` is the one lookup by name — none tie-breaks on origin
     (`source_guards::no_lookup_by_name_prefers_an_origin`).
-- **Developing oxplow (`enableBundledExtensions: false`):** in a dev
-  build (`cfg!(debug_assertions)`; a release build logs and ignores it),
-  oxplow's own extensions don't run from the copies built in: they load
-  from their `extensionSources` folders and are deployed like any
-  extension (`bundled_extensions::shipped(name, &settings)` is the one
-  accessor for the shipped files; `find`, `is_required`, `is_reserved`
-  and `origin_of` stay name-based, so the `oxplow` namespace and the other
-  rules for oxplow's own extensions still apply). Set in `project.yaml`
-  (this repo commits it), overridable in `personal.yaml`, read
-  once when the catalog is made (`ExtensionCatalog::settings`): changing
+- **Developing oxplow (`OXPLOW_EXTENSIONS_FROM_SOURCE=true`):** a dev
+  build reads this process environment option when its catalog is made.
+  Oxplow's own extensions load from their `extensionSources` folders and
+  deploy like any extension; release builds use shipped copies. Changing
   it takes a restart. Boot deploys nothing here either: a checkout's first
   run, and a core change that foundation's recorded deployment doesn't
   activate against, need `cargo run -q -p oxplow-dev -- extension deploy`
@@ -165,14 +157,10 @@ source directly: an edit changes nothing until it is deployed.
   and what runs never disagree. The store keeps the active deployment and
   the five newest (`extension_store::KEEP`); deploy prunes the rest.
 
-**Which extensions are on** is two lists: the team's `extensions: [..]` in
-`.oxplow/project.yaml` (absent: `[oxplow-bundled]`; `[]` turns it off) and
-the person's `enableExtensions` / `disableExtensions` in
-`.oxplow/personal.yaml`. On = (team ∪ enable) − disable
-(`oxplow_config::ExtensionSettings::enabled`). `oxplow-foundation` is always
-on and never listed. A listed name with neither a source nor a deployment
-on this machine is listed as `not_here` (`v_extension.deployment`), not an
-error, so a teammate's personal extension in the team list breaks nothing.
+**Which extensions are on** is one scalar per name:
+`oxplow.extensions.<name>.enabled`, resolving local → project → global → default.
+Foundation is required and always on. An enabled name with neither a source nor
+a deployment is listed as `not_here` (`v_extension.deployment`).
 
 **Two ways to load** (`extension_catalog.rs`):
 
@@ -182,8 +170,7 @@ error, so a teammate's personal extension in the team list breaks nothing.
   `extensions::load_deployed`.
 - **Source** (standalone `ExtensionCatalog::new()`, the CLI, the SDK, the
   authoring checks `oxplow_validate_extension` / preview): each source
-  folder in a checkout, every one present on unless `disableExtensions`
-  lists it (`extensions::sources_on`) — what the author's sources would do.
+  folder in a checkout, each governed by its resolved enabled scalar (`extensions::sources_on`) — what the author's sources would do.
   `extensions::load_extensions`.
 
 **Deploy** (`oxplow.extension.deploy { name }`, the agent's
@@ -301,8 +288,7 @@ but `project.yaml`, so a new extension's source is personal.
 `oxplow.extension.share { name }` appends `!extensions/`, `extensions/*`,
 `!extensions/<name>/` and `!extensions/<name>/**` (git can't re-include a
 file under an excluded folder, and `*` matches files at every depth) and
-moves the name from the person's `enableExtensions` to the team's
-`extensions`; the person commits. A built extension's `output` and
+writes project enablement true and removes the local override; the person commits. A built extension's `output` and
 `exclude` folders get their own ignore lines (`extensions/<name>/dist/`)
 after those: they aren't source. `oxplow.extension.unshare` reverses it,
 removing every line under `extensions/<name>/` whatever the manifest says
@@ -538,3 +524,15 @@ those revisions hold them (`extension_tree_at`) and reviews them with
 report's lines and the pages that differ (`page_changes`). A removed extension has no report. The pages'
 before/after text is not shown (the changed file's diff has it). A failed
 review is a row's problems, never a spinner that does not end.
+
+## Independent enablement settings
+
+Each discovered extension has one scalar `oxplow.extensions.<name>.enabled`
+setting. Local overrides project, project overrides global, then the declared
+default applies. Foundation is required and cannot be disabled. The internal
+team/disable sets are a runtime projection, never persisted preference lists.
+Turning an extension on writes a local boolean; a refused deployment restores
+its exact prior local override, including false or absence. Sharing source also
+writes project true and removes the local override; unsharing writes local true
+and removes the project override. Sharing's gitignore rules remain independent
+of how the enablement value resolves.

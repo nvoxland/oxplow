@@ -811,7 +811,7 @@ pub async fn deploy_together(
     confirmed: bool,
 ) -> Vec<(String, Result<Deployed, DeployError>)> {
     let mut results: Vec<(String, Option<Result<Deployed, DeployError>>)> = Vec::new();
-    let mut ready: Vec<(usize, Deployed, Option<String>, bool)> = Vec::new();
+    let mut ready: Vec<(usize, Deployed, Option<String>, Option<Option<bool>>)> = Vec::new();
     for name in names {
         let staged = stage_deploy(svc, name, confirmed).await;
         let at = results.len();
@@ -887,7 +887,7 @@ enum Staged {
     Ready {
         deployed: Deployed,
         target: Option<String>,
-        enabled_now: bool,
+        enabled_now: Option<Option<bool>>,
     },
 }
 
@@ -1239,20 +1239,42 @@ async fn prune(svc: &Arc<Services>, name: &str) -> Result<(), DomainError> {
 
 // --- the enabled list ---------------------------------------------------
 
-fn personal_list(names: &[String]) -> Option<serde_json::Value> {
-    (!names.is_empty()).then(|| serde_json::json!(names))
-}
-
-/// Write the person's lists, then reload the config.
-fn write_personal(svc: &Services, settings: &ExtensionSettings) -> Result<(), DomainError> {
-    let project = &svc.layout.project_dir;
-    for (key, names) in [
-        ("enableExtensions", &settings.personal.enable),
-        ("disableExtensions", &settings.personal.disable),
-    ] {
-        oxplow_config::write_local_key(project, key, personal_list(names).as_ref())
+fn enablement_store(
+    svc: &Services,
+    name: &str,
+) -> Result<oxplow_config::settings::SettingsStore, DomainError> {
+    let store = crate::settings::store(
+        &svc.layout.project_dir,
+        &svc.global_config_dir,
+        svc.secrets.clone(),
+        &[],
+    )
+    .map_err(storage)?;
+    let definition = oxplow_config::core_settings::extension_definition(name);
+    if store.definition(&definition.key).is_err() {
+        store
+            .registry
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .register(definition)
             .map_err(storage)?;
     }
+    Ok(store)
+}
+
+fn write_enabled(
+    svc: &Services,
+    name: &str,
+    value: Option<bool>,
+    level: oxplow_config::settings::Level,
+) -> Result<(), DomainError> {
+    let store = enablement_store(svc, name)?;
+    let key = format!("oxplow.extensions.{name}.enabled");
+    match value {
+        Some(value) => store.set(&key, serde_json::json!(value), level),
+        None => store.unset(&key, level),
+    }
+    .map_err(storage)?;
     svc.reload_config_from_disk().map_err(storage)
 }
 
@@ -1268,24 +1290,26 @@ fn turned_off(svc: &Services, name: &str) -> bool {
 
 /// Turn `name` on in the person's layer unless it is on already. True when
 /// it wrote something (a failed deploy takes it back).
-fn turn_on(svc: &Services, name: &str) -> Result<bool, DomainError> {
-    let mut settings = oxplow_config::extension_settings(&svc.layout.project_dir);
+fn turn_on(svc: &Services, name: &str) -> Result<Option<Option<bool>>, DomainError> {
+    let settings = oxplow_config::extension_settings(&svc.layout.project_dir);
     if settings.is_enabled(name) || crate::bundled_extensions::is_required(name) {
-        return Ok(false);
+        return Ok(None);
     }
-    settings.personal.disable.retain(|n| n != name);
-    if !settings.is_enabled(name) {
-        settings.personal.enable.push(name.to_string());
-    }
-    write_personal(svc, &settings)?;
-    Ok(true)
+    let previous = enablement_store(svc, name)?
+        .get(
+            &format!("oxplow.extensions.{name}.enabled"),
+            Some(oxplow_config::settings::Level::Local),
+        )
+        .map_err(storage)?
+        .value
+        .and_then(|value| value.as_bool());
+    write_enabled(svc, name, Some(true), oxplow_config::settings::Level::Local)?;
+    Ok(Some(previous))
 }
 
-fn undo_turn_on(svc: &Services, name: &str, wrote: bool) {
-    if wrote {
-        let mut settings = oxplow_config::extension_settings(&svc.layout.project_dir);
-        settings.personal.enable.retain(|n| n != name);
-        let _ = write_personal(svc, &settings);
+fn undo_turn_on(svc: &Services, name: &str, previous: Option<Option<bool>>) {
+    if let Some(previous) = previous {
+        let _ = write_enabled(svc, name, previous, oxplow_config::settings::Level::Local);
     }
 }
 
@@ -1301,7 +1325,7 @@ pub async fn set_enabled(
     if crate::bundled_extensions::is_required(name) {
         return Err(invalid(format!("`{name}` is part of oxplow; it is always on")).into());
     }
-    let mut settings = oxplow_config::extension_settings(&svc.layout.project_dir);
+    let settings = oxplow_config::extension_settings(&svc.layout.project_dir);
     if enabled {
         if let Some(running) = active_entry(svc, name) {
             requirements_met(&settings, name, &running.requires)?;
@@ -1309,18 +1333,12 @@ pub async fn set_enabled(
     } else {
         not_required(svc, name)?;
     }
-    if enabled {
-        settings.personal.disable.retain(|n| n != name);
-        if !settings.is_enabled(name) {
-            settings.personal.enable.push(name.to_string());
-        }
-    } else {
-        settings.personal.enable.retain(|n| n != name);
-        if settings.is_enabled(name) {
-            settings.personal.disable.push(name.to_string());
-        }
-    }
-    write_personal(svc, &settings)?;
+    write_enabled(
+        svc,
+        name,
+        Some(enabled),
+        oxplow_config::settings::Level::Local,
+    )?;
     let undeployed = enabled
         && shipped_of(svc, name).is_none()
         && !svc.extension_catalog.live().contains_key(name);
@@ -1358,19 +1376,8 @@ pub async fn remove(svc: &Arc<Services>, name: &str) -> Result<(), DomainError> 
     let last_in_namespace = !catalog
         .iter()
         .any(|e| e.name != name && e.namespace == namespace);
-    let mut settings = oxplow_config::extension_settings(&project);
-    settings.personal.enable.retain(|n| n != name);
-    settings.personal.disable.retain(|n| n != name);
-    write_personal(svc, &settings)?;
-    if settings.team.iter().any(|n| n == name) {
-        let team: Vec<String> = settings
-            .team
-            .iter()
-            .filter(|n| *n != name)
-            .cloned()
-            .collect();
-        write_team(svc, &team)?;
-    }
+    write_enabled(svc, name, None, oxplow_config::settings::Level::Local)?;
+    write_enabled(svc, name, None, oxplow_config::settings::Level::Project)?;
     activate(svc, &LiveChanges::from([(name.to_string(), None)])).await?;
     extension_store::remove_all(&project, name);
     crate::extension::extension_services::remove_store_file(&project, name);
@@ -1385,16 +1392,6 @@ pub async fn remove(svc: &Arc<Services>, name: &str) -> Result<(), DomainError> 
             Ok(())
         })
         .await
-}
-
-fn write_team(svc: &Services, team: &[String]) -> Result<(), DomainError> {
-    oxplow_config::write_project_key(
-        &svc.layout.project_dir,
-        "extensions",
-        Some(&serde_json::json!(team)),
-    )
-    .map_err(storage)?;
-    svc.reload_config_from_disk().map_err(storage)
 }
 
 // --- sharing ------------------------------------------------------------
@@ -1424,7 +1421,7 @@ fn share_lines(name: &str, inputs: &extension_store::Inputs) -> Vec<String> {
 pub fn share(svc: &Services, name: &str) -> Result<(), DomainError> {
     valid(name)?;
     let project = &svc.layout.project_dir;
-    let mut settings = oxplow_config::extension_settings(project);
+    let settings = oxplow_config::extension_settings(project);
     let source = settings.source(project, name);
     if source
         != project
@@ -1445,13 +1442,13 @@ pub fn share(svc: &Services, name: &str) -> Result<(), DomainError> {
         }
     }
     std::fs::write(&ignore, lines.join("\n") + "\n").map_err(storage)?;
-    if !settings.team.iter().any(|n| n == name) {
-        let mut team = settings.team.clone();
-        team.push(name.to_string());
-        write_team(svc, &team)?;
-    }
-    settings.personal.enable.retain(|n| n != name);
-    write_personal(svc, &settings)
+    write_enabled(
+        svc,
+        name,
+        Some(true),
+        oxplow_config::settings::Level::Project,
+    )?;
+    write_enabled(svc, name, None, oxplow_config::settings::Level::Local)
 }
 
 /// Undo [`share`]: git stops seeing `name`'s source and it moves back to
@@ -1472,20 +1469,8 @@ pub fn unshare(svc: &Services, name: &str) -> Result<(), DomainError> {
         .filter(|l| *l != folder && *l != files && !l.starts_with(&inside))
         .collect();
     std::fs::write(&ignore, lines.join("\n") + "\n").map_err(storage)?;
-    let mut settings = oxplow_config::extension_settings(project);
-    if settings.team.iter().any(|n| n == name) {
-        let team: Vec<String> = settings
-            .team
-            .iter()
-            .filter(|n| *n != name)
-            .cloned()
-            .collect();
-        write_team(svc, &team)?;
-    }
-    if !settings.personal.enable.iter().any(|n| n == name) {
-        settings.personal.enable.push(name.to_string());
-    }
-    write_personal(svc, &settings)
+    write_enabled(svc, name, Some(true), oxplow_config::settings::Level::Local)?;
+    write_enabled(svc, name, None, oxplow_config::settings::Level::Project)
 }
 
 // --- startup ------------------------------------------------------------
@@ -1629,19 +1614,15 @@ pub async fn next_boot(project: &Path, rows: &[DeploymentRow]) -> Result<NextBoo
         .iter()
         .map(|n| (n.clone(), settings.source(project, n).display().to_string()))
         .collect();
-    let mut config = serde_json::json!({ "oxplow.extensions": settings.team, "oxplow.extensionSources": sources });
-    if let Some(requested) = settings.bundled_requested {
-        config["oxplow.enableBundledExtensions"] = requested.into();
+    let mut config = serde_json::json!({ "oxplow.extensionSources": sources });
+    for name in &names {
+        config[format!("oxplow.extensions.{name}.enabled")] = serde_json::json!(
+            settings.is_enabled(name) || crate::bundled_extensions::is_required(name)
+        );
     }
-    let personal = serde_json::json!({
-        "oxplow.enableExtensions": settings.personal.enable,
-        "oxplow.disableExtensions": settings.team_disable,
-    });
     std::fs::create_dir_all(root.join(".oxplow")).map_err(|e| e.to_string())?;
-    for (file, value) in [("project.yaml", config), ("local.yaml", personal)] {
-        let yaml = serde_yaml::to_string(&value).map_err(|e| e.to_string())?;
-        std::fs::write(root.join(".oxplow").join(file), yaml).map_err(|e| e.to_string())?;
-    }
+    let yaml = serde_yaml::to_string(&config).map_err(|e| e.to_string())?;
+    std::fs::write(root.join(".oxplow/project.yaml"), yaml).map_err(|e| e.to_string())?;
     let svc = Services::on_machine_inactive(
         &root,
         root.join(".global"),
@@ -1739,9 +1720,8 @@ pub async fn next_boot(project: &Path, rows: &[DeploymentRow]) -> Result<NextBoo
 #[cfg(test)]
 pub(crate) async fn stage_sources(svc: &Arc<Services>) -> LiveChanges {
     let project = svc.layout.project_dir.clone();
-    let mut settings = oxplow_config::extension_settings(&project);
+    let settings = oxplow_config::extension_settings(&project);
     let mut changes = LiveChanges::new();
-    let mut turned_on = false;
     for name in crate::extension::extensions::known_names(&project, &settings) {
         let source = settings.source(&project, &name);
         if !source.join("extension.yaml").is_file() || settings.turned_off(&name) {
@@ -1755,12 +1735,14 @@ pub(crate) async fn stage_sources(svc: &Arc<Services>) -> LiveChanges {
             changes.insert(name.clone(), target);
         }
         if !settings.is_enabled(&name) && !crate::bundled_extensions::is_reserved(&name) {
-            settings.personal.enable.push(name);
-            turned_on = true;
+            write_enabled(
+                svc,
+                &name,
+                Some(true),
+                oxplow_config::settings::Level::Local,
+            )
+            .expect("the person's layer is written");
         }
-    }
-    if turned_on {
-        write_personal(svc, &settings).expect("the person's layer is written");
     }
     changes
 }
@@ -1771,6 +1753,26 @@ mod tests {
     use crate::extension::extensions::Deployment;
     use oxplow_domain::Actor;
     use serde_json::json;
+
+    #[tokio::test]
+    async fn refused_deployment_restores_prior_local_enablement() {
+        use oxplow_config::settings::Level;
+        let project = tempfile::tempdir().unwrap();
+        crate::test_fixtures::init_git_repo(project.path());
+        let svc = Services::in_memory(project.path()).await.unwrap();
+        for prior in [None, Some(false)] {
+            write_enabled(&svc, "acme", prior, Level::Local).unwrap();
+            let previous = turn_on(&svc, "acme").unwrap();
+            assert_eq!(previous, Some(prior));
+            undo_turn_on(&svc, "acme", previous);
+            let restored = enablement_store(&svc, "acme")
+                .unwrap()
+                .get("oxplow.extensions.acme.enabled", Some(Level::Local))
+                .unwrap()
+                .value;
+            assert_eq!(restored, prior.map(|value| json!(value)));
+        }
+    }
 
     fn write(dir: &Path, rel: &str, text: &str) {
         let path = dir.join(rel);

@@ -1,64 +1,74 @@
-# Settings → AI: a provider lists with its kind and whether it has a key
-# (never the key: no column holds it), a role bound to it shows its binding
-# and hands `set_role` its current values, and a role bound to nothing says
-# what it falls back to. The throwaway oxplow has a `fixture` provider.
 given:
-  - { command: oxplow.ai.set_provider, input: { id: or, kind: openrouter, key: sk-secret-123 } }
-  - { command: oxplow.ai.set_role, input: { role: summarize, provider: or, model: m1, restrict: [tools] } }
-when: { page: settings, params: { area: ai } }
+- command: oxplow.config.set
+  input:
+    key: oxplow.ai.openrouter.enabled
+    value: true
+    level: global
+- command: oxplow.config.set
+  input:
+    key: oxplow.ai.openrouter.apiKey
+    value: sk-secret-123
+    level: global
+- command: oxplow.config.set
+  input:
+    key: oxplow.ai.roles.summarize
+    value:
+      provider: openrouter
+      model: m1
+      restrict:
+      - tools
+    level: project
+when:
+  page: management
+  params:
+    area: ai
 expect:
   loaders:
     ai_providers:
-      columns: [id, kind, base_url, key, test_model]
+      columns:
+      - id
+      - kind
+      - base_url
+      - key
+      - test_model
       rows:
-        - { id: fixture }
-        # The test action starts from the model a role already uses on it.
-        - { id: or, kind: OpenRouter, key: Key saved, test_model: m1 }
+      - id: fixture
+      - id: openrouter
+        kind: OpenRouter
+        key: Key saved
+        test_model: m1
     ai_roles:
-      columns: [role, description, bound, problem, provider, model, restrict, can_assign, can_unassign]
+      columns:
+      - role
+      - description
+      - bound
+      - problem
+      - provider
+      - model
+      - restrict
+      - can_assign
+      - can_unassign
       rows:
-        - { role: main }
-        - { role: summarize, bound: or · m1, restrict: '["tools"]', can_assign: 1, can_unassign: 1 }
-        - { role: decide }
-        - { role: assistant }
-    ai_calls: { rows: 0 }
+      - role: main
+      - role: summarize
+        bound: openrouter · m1
+        restrict: '["tools"]'
+        can_assign: 1
+        can_unassign: 1
+      - role: decide
+      - role: assistant
+    ai_calls:
+      rows: 0
 steps:
-  # A role is unbound from its row, then bound again through Assign…'s form.
-  - press: { action: unassign, node: ai-roles, row: { role: summarize } }
-    expect: { ok: true }
-  - expect:
-      loaders:
-        ai_roles:
-          rows:
-            contains: [{ role: summarize, bound: Not assigned, can_assign: 1, can_unassign: 0 }]
-  - press:
-      action: assign
-      node: ai-roles
-      row: { role: summarize }
-      input: { provider: or, model: openai/gpt-5-mini }
-    expect: { ok: true }
-  - expect:
-      loaders:
-        ai_roles:
-          rows:
-            contains: [{ role: summarize, bound: or · openai/gpt-5-mini, can_unassign: 1 }]
-  # A provider can't go while a role uses it; unbound, Remove takes it.
-  - press: { action: remove, node: ai-providers, row: { id: or } }
-    expect: { ok: false, refused: summarize }
-  - press: { action: unassign, node: ai-roles, row: { role: summarize } }
-    expect: { ok: true }
-  - press: { action: remove, node: ai-providers, row: { id: or } }
-    expect: { ok: true }
-  - expect:
-      loaders:
-        ai_providers:
-          rows: [{ id: fixture }]
-  # The add form: its key is kept, and no column of the list holds it.
-  - submit: { node: ai-provider-form, input: { id: or2, kind: openrouter, key: sk-e2e-secret } }
-    expect: { ok: true }
-  - expect:
-      loaders:
-        ai_providers:
-          columns: [id, kind, base_url, key, test_model]
-          rows:
-            contains: [{ id: or2, kind: OpenRouter, key: Key saved }]
+- given:
+  - command: oxplow.config.unset
+    input:
+      key: oxplow.ai.roles.summarize
+      level: project
+- expect:
+    loaders:
+      ai_roles:
+        rows:
+          contains:
+          - role: summarize
+            bound: Not assigned

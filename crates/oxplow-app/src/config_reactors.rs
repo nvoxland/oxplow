@@ -160,12 +160,7 @@ pub fn register(state: &Arc<crate::Services>) {
     };
     state.event_pump.register_async(reactor(
         EXTENSIONS,
-        &[
-            "oxplow.extensions",
-            "oxplow.enableExtensions",
-            "oxplow.disableExtensions",
-            "oxplow.extensionSources",
-        ],
+        &["oxplow.extensions.*", "oxplow.extensionSources"],
         Box::new(|svc| Box::pin(async move { svc.extension_catalog.changed() })),
     ));
     state.event_pump.register_async(reactor(

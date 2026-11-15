@@ -1,29 +1,54 @@
-# Per-capability scalar overrides retain the project choice while a local
-# preference wins, and resetting local exposes it again.
 given:
-  - command: oxplow.capability.choose
-    input: { capability: snapshots, provider: hashes, level: project }
-  - command: oxplow.capability.choose
-    input: { capability: snapshots, provider: oxplow, level: local }
-when: { page: settings, params: { area: integrations } }
+- command: oxplow.capability.choose
+  input:
+    capability: snapshots
+    provider: hashes
+    level: project
+- command: oxplow.capability.choose
+  input:
+    capability: snapshots
+    provider: oxplow
+    level: local
+when:
+  page: management
+  params:
+    area: integrations
 expect:
   loaders:
     capabilities:
       rows:
         contains:
-          - { capability: snapshots, provider: hashes, project_choice: hashes, local_choice: oxplow }
-          - { capability: snapshots, provider: oxplow, project_choice: hashes, local_choice: oxplow }
+        - capability: snapshots
+          provider: hashes
+          project_choice: hashes
+          local_choice: oxplow
+        - capability: snapshots
+          provider: oxplow
+          project_choice: hashes
+          local_choice: oxplow
 steps:
-  - press:
-      action: same-as-project
-      node: capabilities
-      row: { capability: snapshots, provider: '', is_default: 1 }
-    expect: { ok: true }
-  - when: { sql: "SELECT provider, chosen_by FROM v_capability_provider WHERE capability = 'snapshots' AND active = 1" }
-    expect: { rows: [{ provider: hashes, chosen_by: project }] }
-  - when: { page: settings, params: { area: integrations } }
-    expect:
-      loaders:
-        capabilities:
-          rows:
-            contains: [{ capability: snapshots, provider: hashes, project_choice: hashes, local_choice: null }]
+- given:
+  - command: oxplow.config.unset
+    input:
+      key: oxplow.activeProviders.snapshots
+      level: local
+- when:
+    sql: SELECT provider, chosen_by FROM v_capability_provider WHERE capability =
+      'snapshots' AND active = 1
+  expect:
+    rows:
+    - provider: hashes
+      chosen_by: project
+- when:
+    page: management
+    params:
+      area: integrations
+  expect:
+    loaders:
+      capabilities:
+        rows:
+          contains:
+          - capability: snapshots
+            provider: hashes
+            project_choice: hashes
+            local_choice: null

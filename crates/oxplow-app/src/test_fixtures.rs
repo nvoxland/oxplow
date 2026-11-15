@@ -13,7 +13,10 @@ pub(crate) fn write_settings_fixture(
     let path = path.as_ref();
     let data = data.as_ref();
     let settings_file = path.file_name().and_then(|name| name.to_str());
-    if !matches!(settings_file, Some("project.yaml" | "local.yaml")) {
+    if !matches!(
+        settings_file,
+        Some("project.yaml" | "local.yaml" | "global.yaml")
+    ) {
         return std::fs::write(path, data);
     }
     let converted = (|| {
@@ -21,7 +24,17 @@ pub(crate) fn write_settings_fixture(
         let object =
             serde_json::from_str::<serde_json::Value>(&serde_json::to_string(&yaml).ok()?).ok()?;
         let object = object.as_object()?;
-        if object.keys().all(|key| key.contains('.')) {
+        if object.keys().all(|key| {
+            key.contains('.')
+                && !matches!(
+                    key.as_str(),
+                    "oxplow.ai.providers"
+                        | "oxplow.ai.roles"
+                        | "oxplow.extensions"
+                        | "oxplow.enableExtensions"
+                        | "oxplow.disableExtensions"
+                )
+        }) {
             return None;
         }
         let bindings = oxplow_config::core_settings::bindings("test");
@@ -29,6 +42,13 @@ pub(crate) fn write_settings_fixture(
             .iter()
             .filter(|(key, _)| {
                 !key.contains('.')
+                    && !matches!(
+                        key.as_str(),
+                        "ai" | "extensions"
+                            | "enableExtensions"
+                            | "disableExtensions"
+                            | "enableBundledExtensions"
+                    )
                     && !bindings.iter().any(|binding| {
                         binding.path.is_empty()
                             && binding.definition.key
@@ -41,7 +61,88 @@ pub(crate) fn write_settings_fixture(
             serde_yaml::from_str(&serde_json::to_string(&legacy).ok()?).ok()?;
         oxplow_config::parse_project_config(legacy_yaml, "test").ok()?;
         let mut flat = serde_json::Map::new();
+        let mut provider_aliases = std::collections::BTreeMap::new();
+        let providers = object
+            .get("oxplow.ai.providers")
+            .or_else(|| object.get("ai").and_then(|ai| ai.get("providers")));
+        if let Some(providers) = providers.and_then(serde_json::Value::as_array) {
+            for provider in providers {
+                if let (Some(id), Some(kind)) = (provider["id"].as_str(), provider["kind"].as_str())
+                {
+                    provider_aliases.insert(id.to_owned(), kind.to_owned());
+                }
+            }
+        }
         for (key, value) in object {
+            if matches!(
+                key.as_str(),
+                "extensions"
+                    | "enableExtensions"
+                    | "disableExtensions"
+                    | "oxplow.extensions"
+                    | "oxplow.enableExtensions"
+                    | "oxplow.disableExtensions"
+            ) {
+                let enabled = !key.ends_with("disableExtensions");
+                if matches!(key.as_str(), "extensions" | "oxplow.extensions") {
+                    for name in oxplow_config::DEFAULT_EXTENSIONS {
+                        flat.insert(format!("oxplow.extensions.{name}.enabled"), serde_json::json!(false));
+                    }
+                }
+                for name in value.as_array()? {
+                    flat.insert(
+                        format!("oxplow.extensions.{}.enabled", name.as_str()?),
+                        serde_json::json!(enabled),
+                    );
+                }
+                continue;
+            }
+            if matches!(key.as_str(), "enableBundledExtensions" | "oxplow.enableBundledExtensions") {
+                // Source selection is a launch concern; it never enables or disables extensions.
+                continue;
+            }
+            if matches!(
+                key.as_str(),
+                "ai" | "oxplow.ai.providers" | "oxplow.ai.roles"
+            ) {
+                let providers = if key == "ai" {
+                    value.get("providers")
+                } else if key.ends_with("providers") {
+                    Some(value)
+                } else {
+                    None
+                };
+                if let Some(providers) = providers.and_then(serde_json::Value::as_array) {
+                    for provider in providers {
+                        let id = provider["kind"].as_str()?;
+                        flat.insert(format!("oxplow.ai.{id}.enabled"), serde_json::json!(true));
+                        if let Some(url) = provider.get("baseUrl") {
+                            flat.insert(format!("oxplow.ai.{id}.baseUrl"), url.clone());
+                        }
+                    }
+                }
+                let roles = if key == "ai" {
+                    value.get("roles")
+                } else if key.ends_with("roles") {
+                    Some(value)
+                } else {
+                    None
+                };
+                if let Some(roles) = roles.and_then(serde_json::Value::as_object) {
+                    for (role, binding) in roles {
+                        let mut binding = binding.clone();
+                        if let Some(provider) = binding
+                            .get("provider")
+                            .and_then(serde_json::Value::as_str)
+                            .and_then(|id| provider_aliases.get(id))
+                        {
+                            binding["provider"] = serde_json::json!(provider);
+                        }
+                        flat.insert(crate::settings::ai_role_key(role), binding);
+                    }
+                }
+                continue;
+            }
             if key.contains('.') {
                 flat.insert(key.clone(), value.clone());
                 continue;
@@ -863,9 +964,9 @@ fn settings_fixture_writes_flat_keys_and_preserves_other_inputs() {
         assert_eq!(std::fs::read_to_string(&project).unwrap(), original);
     }
     let local = root.path().join("local.yaml");
-    write_settings_fixture(&local, "newThreadSession: none\n").unwrap();
+    write_settings_fixture(&local, "oxplow.agents.codex.enabled: false\n").unwrap();
     let saved: serde_yaml::Value = serde_yaml::from_slice(&std::fs::read(local).unwrap()).unwrap();
-    assert_eq!(saved["oxplow.newThreadSession"].as_str(), Some("none"));
+    assert_eq!(saved["oxplow.agents.codex.enabled"].as_bool(), Some(false));
     let other = root.path().join("extension.yaml");
     write_settings_fixture(&other, "projectName: leave alone\n").unwrap();
     assert_eq!(

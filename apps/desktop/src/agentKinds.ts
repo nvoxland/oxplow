@@ -1,7 +1,7 @@
 import type { HarnessListing } from "./tauri-bridge/generated/bindings.js";
 
 /// The agent harnesses come from the backend (`listAgentHarnesses`): the
-/// ones the project's extensions declare, in priority order, each with its
+/// ones the project's extensions declare, alphabetically by title, each with its
 /// title and whether the project enables it. Nothing here names a harness.
 
 /// A harness as a person reads it: its title, else its key.
@@ -20,7 +20,7 @@ export interface AgentChoice {
   label: string;
 }
 
-/// The session picker's choices: each enabled harness, in priority order.
+/// The session picker's choices: each enabled harness, alphabetically by title.
 export function agentChoices(harnesses: HarnessListing[]): AgentChoice[] {
   return harnesses.filter((h) => h.enabled).map((h) => ({ value: h.id, label: h.title }));
 }

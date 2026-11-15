@@ -369,7 +369,7 @@ pub(crate) mod tests {
 
     /// Claude registered, as foundation declares it.
     fn harnesses() -> HarnessRegistry {
-        let r = HarnessRegistry::new(std::sync::Arc::new(|| "claude".into()));
+        let r = HarnessRegistry::new();
         for (entry, id) in [
             ("oxplow:claude-code", "claude"),
             ("oxplow:codex-cli", "codex"),
@@ -436,7 +436,7 @@ pub(crate) mod tests {
     #[test]
     fn each_harness_reads_an_export_in_one_call() {
         let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let r = HarnessRegistry::new(std::sync::Arc::new(String::new));
+        let r = HarnessRegistry::new();
         r.register(std::sync::Arc::new(Counting(calls.clone())));
         let export = decode(&encoded_claude_export("m", 100, 20), &r).unwrap();
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
@@ -572,7 +572,7 @@ pub(crate) mod tests {
     /// No harness registered reads no counts.
     #[test]
     fn with_no_harness_an_export_reads_as_none() {
-        let none = HarnessRegistry::new(std::sync::Arc::new(String::new));
+        let none = HarnessRegistry::new();
         assert_eq!(decode(&encoded_claude_export("m", 100, 20), &none), None);
     }
 

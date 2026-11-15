@@ -6,7 +6,7 @@ risky?". You pick which model does which job in **Settings → AI**.
 
 ## Providers
 
-Add one per service you want to use:
+Enable the declared service you want to use. Each provider has one connection:
 
 | Kind | What you need |
 |---|---|
@@ -20,8 +20,13 @@ Add one per service you want to use:
 | TypeSafe (Jev) | an API key |
 
 Keys go to your OS keychain, never to a file. Oxplow only shows whether a
-key is saved. Providers and roles live in `ai.yaml` in oxplow's config
-directory and apply to all your projects.
+key is saved. Provider preferences and role bindings use the shared settings levels: local,
+project and global. Global preferences live in `global.yaml` in oxplow's
+configuration directory; on macOS this is
+`~/Library/Application Support/net.voxland.oxplow/`, unless `OXPLOW_HOME` overrides it.
+Each provider has independent `oxplow.ai.<provider>.enabled`, `.baseUrl` and
+secret `.apiKey` settings. Changing the endpoint requires saving a key for the
+new destination.
 
 **Test** makes one small call with the model you name, so you can check
 the key, URL and model name before using them.
@@ -54,13 +59,11 @@ says so.
 A project can set roles for everyone working on it in `.oxplow/project.yaml`:
 
 ```yaml
-ai:
-  roles:
-    summarize: { provider: openrouter, model: openai/gpt-5-mini }
+oxplow.ai.roles.summarize: { provider: openrouter, model: openai/gpt-5-mini }
 ```
 
-The provider name refers to each person's own providers, so everyone needs
-one with that name. Settings → AI marks these roles "Set by this project".
+The provider id names a declared service, so each person enables that service
+and supplies their own credential. Settings → AI marks these roles "Set by this project".
 
 ### Restricting what a model may do
 
@@ -69,9 +72,7 @@ input, whatever asks it. In Settings → AI, uncheck what the role's model
 **Allows**; in a file, list what it may not do:
 
 ```yaml
-ai:
-  roles:
-    summarize: { provider: openrouter, model: openai/gpt-5-mini, restrict: [tools, sql] }
+oxplow.ai.roles.summarize: { provider: openrouter, model: openai/gpt-5-mini, restrict: [tools, sql] }
 ```
 
 A request that needs something the model is restricted from fails before

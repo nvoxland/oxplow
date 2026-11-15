@@ -294,17 +294,37 @@ impl AiConfig {
         };
         let values: BTreeMap<String, serde_yaml::Value> =
             serde_yaml::from_str(&text).map_err(|e| ConfigError::Invalid(e.to_string()))?;
-        let mut config = serde_yaml::Mapping::new();
-        for field in ["providers", "roles"] {
-            if let Some(value) = values.get(&format!("oxplow.ai.{field}")) {
-                config.insert(field.into(), value.clone());
+        let mut config = Self::default();
+        for (key, value) in &values {
+            if let Some(role) = key.strip_prefix("oxplow.ai.roles.") {
+                config.roles.insert(
+                    Role::parse(&role.replacen('.', "/", 1)).map_err(ConfigError::Invalid)?,
+                    serde_yaml::from_value(value.clone())
+                        .map_err(|e| ConfigError::Invalid(e.to_string()))?,
+                );
+            } else if let Some(id) = key
+                .strip_prefix("oxplow.ai.")
+                .and_then(|key| key.strip_suffix(".enabled"))
+            {
+                if value.as_bool() == Some(true) {
+                    let base_url = values
+                        .get(&format!("oxplow.ai.{id}.baseUrl"))
+                        .and_then(serde_yaml::Value::as_str)
+                        .filter(|url| !url.is_empty())
+                        .map(str::to_owned);
+                    config.providers.push(ProviderConfig {
+                        id: id.into(),
+                        kind: id.into(),
+                        base_url,
+                    });
+                }
             }
         }
-        serde_yaml::from_value(serde_yaml::Value::Mapping(config))
-            .map_err(|e| ConfigError::Invalid(e.to_string()))
+        config.validate()?;
+        Ok(config)
     }
 
-    /// Write the standalone global AI settings, preserving unrelated settings.
+    /// Write standalone AI preferences while preserving unrelated settings.
     pub fn save(&self, dir: &Path) -> Result<(), ConfigError> {
         self.validate()?;
         let path = dir.join(AI_CONFIG_FILE);
@@ -315,22 +335,32 @@ impl AiConfig {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
             Err(e) => return Err(ConfigError::Io(e.to_string())),
         };
-        let mut config = serde_yaml::to_value(self).map_err(|e| ConfigError::Io(e.to_string()))?;
-        if let Some(serde_yaml::Value::Mapping(roles)) = config.get_mut("roles") {
-            for (_, role) in roles.iter_mut() {
-                if let serde_yaml::Value::Mapping(role) = role {
-                    if role
-                        .get("restrict")
-                        .and_then(serde_yaml::Value::as_sequence)
-                        .is_some_and(Vec::is_empty)
-                    {
-                        role.remove("restrict");
-                    }
-                }
+        values.retain(|key, _| {
+            !key.starts_with("oxplow.ai.roles.")
+                && !(key.starts_with("oxplow.ai.")
+                    && (key.ends_with(".enabled") || key.ends_with(".baseUrl")))
+        });
+        for provider in &self.providers {
+            values.insert(format!("oxplow.ai.{}.enabled", provider.id), true.into());
+            if let Some(url) = &provider.base_url {
+                values.insert(
+                    format!("oxplow.ai.{}.baseUrl", provider.id),
+                    url.clone().into(),
+                );
             }
         }
-        for field in ["providers", "roles"] {
-            values.insert(format!("oxplow.ai.{field}"), config[field].clone());
+        for (role, binding) in &self.roles {
+            let mut value =
+                serde_yaml::to_value(binding).map_err(|e| ConfigError::Io(e.to_string()))?;
+            if binding.restrict.is_empty() {
+                if let serde_yaml::Value::Mapping(fields) = &mut value {
+                    fields.remove("restrict");
+                }
+            }
+            values.insert(
+                format!("oxplow.ai.roles.{}", role.to_string().replace('/', ".")),
+                value,
+            );
         }
         let text = serde_yaml::to_string(&values).map_err(|e| ConfigError::Io(e.to_string()))?;
         std::fs::create_dir_all(dir).map_err(|e| ConfigError::Io(e.to_string()))?;
@@ -403,12 +433,12 @@ mod tests {
     const YAML: &str = r#"
 providers:
   - { id: anthropic, kind: anthropic }
-  - { id: local, kind: openai_compatible, baseUrl: "http://localhost:11434/v1" }
-  - { id: jev, kind: typesafe }
+  - { id: openai_compatible, kind: openai_compatible, baseUrl: "http://localhost:11434/v1" }
+  - { id: typesafe, kind: typesafe }
 roles:
   main: { provider: anthropic, model: claude-opus-5-5 }
-  summarize: { provider: local, model: qwen3:14b }
-  decide: { provider: jev, model: jev-latest }
+  summarize: { provider: openai_compatible, model: qwen3:14b }
+  decide: { provider: typesafe, model: jev-latest }
 "#;
 
     fn cfg() -> AiConfig {
@@ -453,7 +483,7 @@ roles:
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join(AI_CONFIG_FILE),
-            "oxplow.ai.providers: [{ id: p, kind: openai }]\noxplow.ai.roles:\n  fast: { provider: p, model: m }\n",
+            "oxplow.ai.openai.enabled: true\noxplow.ai.roles.fast: { provider: openai, model: m }\n",
         )
         .unwrap();
         let err = AiConfig::load(dir.path()).unwrap_err().to_string();
@@ -468,7 +498,7 @@ roles:
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join(AI_CONFIG_FILE),
-            "oxplow.ai.providers: [{ id: p, kind: openai }]\noxplow.ai.roles:\n  summarize: { provider: p, model: m, restrict: [tools, sql] }\n  main: { provider: p, model: m }\n",
+            "oxplow.ai.openai.enabled: true\noxplow.ai.roles.summarize: { provider: openai, model: m, restrict: [tools, sql] }\noxplow.ai.roles.main: { provider: openai, model: m }\n",
         )
         .unwrap();
         let loaded = AiConfig::load(dir.path()).unwrap();
@@ -486,7 +516,7 @@ roles:
         assert_eq!(AiConfig::load(dir.path()).unwrap(), loaded);
         std::fs::write(
             dir.path().join(AI_CONFIG_FILE),
-            "oxplow.ai.providers: [{ id: p, kind: openai }]\noxplow.ai.roles:\n  main: { provider: p, model: m, restrict: [network] }\n",
+            "oxplow.ai.openai.enabled: true\noxplow.ai.roles.main: { provider: openai, model: m, restrict: [network] }\n",
         )
         .unwrap();
         let err = AiConfig::load(dir.path()).unwrap_err().to_string();
@@ -510,8 +540,10 @@ roles:
         let (_, b) = c.resolve(&Role::ASSISTANT, &[]).unwrap();
         assert_eq!(b.model, "claude-opus-5-5", "Main's binding");
         let mut own = cfg();
-        own.roles
-            .insert(Role::ASSISTANT, RoleBinding::new("local", "qwen3:14b"));
+        own.roles.insert(
+            Role::ASSISTANT,
+            RoleBinding::new("openai_compatible", "qwen3:14b"),
+        );
         assert_eq!(
             own.resolve(&Role::ASSISTANT, &[]).unwrap().1.model,
             "qwen3:14b"
@@ -531,7 +563,7 @@ roles:
     #[test]
     fn project_overrides_win() {
         let mut o = BTreeMap::new();
-        o.insert(Role::MAIN, RoleBinding::new("local", "llama"));
+        o.insert(Role::MAIN, RoleBinding::new("openai_compatible", "llama"));
         let c = cfg().with_overrides(&o);
         assert_eq!(c.resolve(&Role::MAIN, &[]).unwrap().1.model, "llama");
         assert_eq!(

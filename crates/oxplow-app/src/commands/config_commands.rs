@@ -200,16 +200,19 @@ pub(super) fn preflight(
         .to_string_lossy();
     let validate_projection = |precedence: &[Level]| -> Result<(), CommandError> {
         let mut effective = std::collections::BTreeMap::new();
-        for binding in oxplow_config::core_settings::bindings(&fallback) {
-            if binding.path.is_empty() {
-                continue;
-            }
+        let definitions = store
+            .registry
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .definitions()
+            .filter(|definition| definition.owner == "core" && !definition.secret)
+            .cloned()
+            .collect::<Vec<_>>();
+        for definition in definitions {
             for at in precedence {
-                if let Some(value) = layers[&format!("{at:?}")].get(&binding.definition.key) {
-                    store
-                        .validate(&binding.definition.key, value)
-                        .map_err(fail)?;
-                    effective.insert(binding.definition.key, value.clone());
+                if let Some(value) = layers[&format!("{at:?}")].get(&definition.key) {
+                    store.validate(&definition.key, value).map_err(fail)?;
+                    effective.insert(definition.key, value.clone());
                     break;
                 }
             }
@@ -258,10 +261,7 @@ pub(crate) fn change(
     } else {
         oxplow_config::core_settings::canonical_key(field)
     };
-    let changes = if bindings
-        .iter()
-        .any(|binding| binding.definition.key == canonical)
-    {
+    let changes = if store.definition(&canonical).is_ok() {
         // A registered key (including a dotted runtime leaf) changes only
         // that setting. Sibling options retain their own level and origin.
         vec![(canonical, value)]
@@ -524,7 +524,9 @@ mod tests {
         let target = ConfigTarget {
             global_dir: dir.path().join("global"),
             secrets: Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
-            catalog: None,
+            catalog: Some(Arc::new(
+                crate::extension::extension_catalog::ExtensionCatalog::for_project(dir.path()),
+            )),
             config: Arc::new(RwLock::new(
                 oxplow_config::load_project_config_with_global(dir.path(), None).unwrap(),
             )),
@@ -675,8 +677,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn secret_settings_share_the_api_without_plaintext_or_audit_values() {
         let (dir, target, bus) = setup();
-        bus.run(&Actor::Human, SET, json!({"key":"oxplow.ai.providers","value":[{"id":"test","kind":"openai_compatible","baseUrl":"https://example.test/v1"}],"level":"project"}), false).await.unwrap();
-        let key = crate::ai_service::provider_key_setting("test");
+        bus.run(&Actor::Human, SET, json!({"key":"oxplow.ai.openai.baseUrl","value":"https://example.test/v1","level":"project"}), false).await.unwrap();
+        let key = crate::ai_service::provider_key_setting("openai");
         let marker = "fixture-sensitive-token";
         let out = bus
             .run(
@@ -716,7 +718,7 @@ mod tests {
         }).await.unwrap();
         assert!(audits.iter().all(|row| !row.contains(marker)));
         // Changing a destination cannot carry an existing token to that host.
-        bus.run(&Actor::Human, SET, json!({"key":"oxplow.ai.providers","value":[{"id":"test","kind":"openai_compatible","baseUrl":"https://other.test/v1"}],"level":"project"}), false).await.unwrap();
+        bus.run(&Actor::Human, SET, json!({"key":"oxplow.ai.openai.baseUrl","value":"https://other.test/v1","level":"project"}), false).await.unwrap();
         assert!(bus
             .run(&Actor::Human, GET, json!({"key":key}), false)
             .await

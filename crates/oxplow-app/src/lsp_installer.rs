@@ -261,6 +261,7 @@ mod tests {
             metrics: Default::default(),
             zones: Default::default(),
             agent_config: Default::default(),
+            agent_enabled: Default::default(),
             extension_instances: Default::default(),
             active_providers: Default::default(),
             active_provider_origins: Default::default(),

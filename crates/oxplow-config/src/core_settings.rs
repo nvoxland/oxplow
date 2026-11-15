@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 use serde_json::{json, Value};
 
-use crate::settings::{Origin, SettingDefinition, SettingsError, SettingsStore};
+use crate::settings::{SettingDefinition, SettingsError, SettingsStore};
 
 /// A core setting and its path in the runtime configuration document.
 /// Settings with no runtime path are consumed directly through the service.
@@ -97,43 +97,86 @@ pub fn bindings(fallback_name: &str) -> Vec<CoreBinding> {
             path: vec!["activeProviders".into(), capability.id.into()],
         });
     }
-    out.push(extra(
-        "newThreadSession",
-        "New thread session",
-        "What a new thread starts with: ask, none, or an agent harness key.",
-        "agents",
-        json!({ "type": "string", "minLength": 1 }),
-        Some(json!("ask")),
-    ));
-    out.push(extra(
-        "enableExtensions",
-        "Additional extensions",
-        "Extensions enabled in addition to the configured extension list.",
-        "extensions",
-        json!({ "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }),
-        Some(json!([])),
-    ));
-    out.push(extra(
-        "ai.providers",
-        "AI providers",
-        "Connections to model providers. API keys are separate secret settings.",
-        "ai",
-        json!({
-            "type": "array",
-            "items": {
-                "type": "object", "additionalProperties": false,
-                "required": ["id", "kind"],
-                "properties": {
-                    "id": { "type": "string", "minLength": 1 },
-                    "kind": { "type": "string", "minLength": 1 },
-                    "baseUrl": { "type": ["string", "null"] }
-                }
-            }
-        }),
-        Some(json!([])),
-    ));
+    // Independent features use ordinary settings, without list-specific precedence.
+    out.retain(|binding| {
+        !matches!(
+            binding.path.first().map(String::as_str),
+            Some(
+                "agents"
+                    | "agentEnabled"
+                    | "agentConfig"
+                    | "extensions"
+                    | "disableExtensions"
+                    | "enableBundledExtensions"
+                    | "ai"
+                    | "snapshotTurnBudgetMs"
+            )
+        )
+    });
+    for role in crate::AI_ROLE_NAMES {
+        out.push(CoreBinding {
+            definition: role_definition(role),
+            path: vec![],
+        });
+    }
+    for name in crate::DEFAULT_EXTENSIONS {
+        out.push(CoreBinding {
+            definition: extension_definition(name),
+            path: vec![],
+        });
+    }
     out.sort_by(|a, b| a.definition.key.cmp(&b.definition.key));
     out
+}
+
+/// One independently inherited feature switch. Enabling does not deploy code.
+pub fn extension_definition(name: &str) -> SettingDefinition {
+    extra(
+        &format!("extensions.{name}.enabled"),
+        &format!("Enable {name}"),
+        "Whether this extension is enabled. Deployment and permission approval are separate.",
+        "extensions",
+        json!({"type":"boolean"}),
+        Some(json!(true)),
+    )
+    .definition
+}
+
+pub fn role_key(role: &str) -> String {
+    format!("oxplow.ai.roles.{}", role.replace('/', "."))
+}
+
+pub fn role_from_key(key: &str) -> Option<String> {
+    Some(key.strip_prefix("oxplow.ai.roles.")?.replacen('.', "/", 1))
+}
+
+pub fn role_definition(role: &str) -> SettingDefinition {
+    extra(role_key(role).strip_prefix("oxplow.").expect("role key"), &format!("AI role {role}"),
+        "Provider and model used for this role. Remove the override to inherit.", "ai",
+        json!({"type":"object", "additionalProperties":false,
+            "required":["provider","model"], "properties":{
+                "provider":{"type":"string","minLength":1},
+                "model":{"type":"string","minLength":1},
+                "restrict":{"type":"array","uniqueItems":true,"items":{"type":"string","enum":["tools","sql","streaming","images"]}}
+            }}), None).definition
+}
+
+/// Dynamic feature names can be discovered before extension activation.
+pub fn register_dynamic_keys(
+    registry: &mut crate::settings::SettingsRegistry,
+    keys: impl IntoIterator<Item = String>,
+) -> Result<(), SettingsError> {
+    for key in keys {
+        if let Some(name) = key
+            .strip_prefix("oxplow.extensions.")
+            .and_then(|s| s.strip_suffix(".enabled"))
+        {
+            if !name.is_empty() && registry.get(&key).is_none() {
+                registry.register(extension_definition(name))?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Build the internal runtime document from resolved non-default values.
@@ -152,31 +195,75 @@ pub fn document_from_values(
             insert_path(&mut document, &binding.path, value.clone());
         }
     }
+    let mut enabled = crate::DEFAULT_EXTENSIONS
+        .iter()
+        .map(|name| (name.to_string(), true))
+        .collect::<BTreeMap<_, _>>();
+    for (key, value) in values {
+        if let Some(name) = key
+            .strip_prefix("oxplow.extensions.")
+            .and_then(|s| s.strip_suffix(".enabled"))
+        {
+            if let Some(value) = value.as_bool() {
+                enabled.insert(name.to_owned(), value);
+            }
+        } else if let Some(role) = role_from_key(key) {
+            document["ai"]["roles"][&role] = value.clone();
+        } else if let Some(rest) = key.strip_prefix("oxplow.agents.") {
+            if let Some((harness, field)) = rest.rsplit_once('.') {
+                if field == "enabled" {
+                    document["agentEnabled"][harness.replace('.', "/")] = value.clone();
+                } else {
+                    document["agentConfig"][harness.replace('.', "/")][field] = value.clone();
+                }
+            }
+        }
+    }
+    document["extensions"] = json!(enabled
+        .iter()
+        .filter(|(_, on)| **on)
+        .map(|(name, _)| name)
+        .collect::<Vec<_>>());
+    document["disableExtensions"] = json!(enabled
+        .iter()
+        .filter(|(_, on)| !**on)
+        .map(|(name, _)| name)
+        .collect::<Vec<_>>());
     crate::to_yaml(&document)
 }
 
 /// Resolve explicit overrides and project them into the core runtime shape.
-/// Built-in defaults remain the runtime loader's defaults: notably, an absent
-/// agents list enables registered harnesses, whereas an explicit [] is invalid.
+/// Built-in defaults remain the runtime loader's defaults; absent harness
+/// enablement defaults to true at its registered scalar definition.
 pub fn project_document(store: &SettingsStore) -> Result<serde_yaml::Value, SettingsError> {
     let fallback = store
         .project_dir()
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let bindings: Vec<_> = bindings(&fallback)
-        .into_iter()
-        .filter(|binding| !binding.path.is_empty())
-        .collect();
-    let keys: Vec<_> = bindings
+    let definitions = store
+        .registry
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .definitions()
+        .filter(|definition| !definition.secret && definition.owner == "core")
+        .cloned()
+        .collect::<Vec<_>>();
+    let keys = definitions
         .iter()
-        .map(|binding| binding.definition.key.as_str())
-        .collect();
+        .map(|d| d.key.as_str())
+        .collect::<Vec<_>>();
     let mut values = BTreeMap::new();
-    for (binding, setting) in bindings.iter().zip(store.get_many(&keys)?) {
-        if setting.origin != Some(Origin::Default) {
-            if let Some(value) = setting.value {
-                values.insert(binding.definition.key.clone(), value);
+    for (definition, setting) in definitions.iter().zip(store.get_many(&keys)?) {
+        if let Some(value) = setting.value {
+            values.insert(definition.key.clone(), value);
+        }
+    }
+    // Boot can project dynamic scalar keys before a provider catalog exists.
+    for level in crate::settings::Level::PRECEDENCE.into_iter().rev() {
+        for (key, value) in store.layer(level)? {
+            if key.starts_with("oxplow.agents.") || key.starts_with("oxplow.ai.roles.") {
+                values.insert(key, value);
             }
         }
     }
@@ -422,6 +509,15 @@ fn strengthen_schema(path: &str, schema: &mut Value) {
         *schema = json!({ "type": "integer", "minimum": minimum });
     } else if path == "agents" {
         *schema = json!({ "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } });
+    } else if path == "metrics" {
+        *schema = json!({"type":"array", "items":{"type":"object", "additionalProperties":false,
+        "required":["use"], "properties":{
+            "use":{"type":"string","minLength":1,"title":"Metric"},
+            "enabled":{"type":["boolean","null"]},
+            "target":{"type":["number","null"]},
+            "warnAt":{"type":["number","null"]},
+            "failAt":{"type":["number","null"]}
+        }}});
     } else if path == "projectName" {
         *schema = json!({ "type": "string", "minLength": 1, "pattern": "\\S" });
     } else if path == "iconTint" {
@@ -444,8 +540,8 @@ mod tests {
         );
         assert_eq!(find("oxplow.scripts.memoryMb").default, Some(json!(512)));
         assert_eq!(find("oxplow.generated.exclude").default, Some(json!([])));
-        assert_eq!(find("oxplow.ai.roles").default, Some(json!({})));
-        assert_eq!(find("oxplow.ai.roles").category, "ai");
+        assert_eq!(find("oxplow.ai.roles.main").default, None);
+        assert_eq!(find("oxplow.ai.roles.main").category, "ai");
         assert!(all
             .iter()
             .all(|definition| definition.key != "oxplow.scripts"));
@@ -462,8 +558,8 @@ mod tests {
             ("oxplow.testing.runPatterns".into(), json!(["pytest"])),
             ("oxplow.scripts.memoryMb".into(), json!(256)),
             (
-                "oxplow.ai.roles".into(),
-                json!({"main": {"provider": "local", "model": "a"}}),
+                "oxplow.ai.roles.main".into(),
+                json!({"provider": "local", "model": "a"}),
             ),
             ("oxtask.tasks.workflow".into(), json!("agent_tracks")),
         ]);
@@ -474,7 +570,27 @@ mod tests {
         assert_eq!(config.testing.run_patterns, ["pytest"]);
         assert_eq!(config.scripts.memory_bytes, 256 * 1024 * 1024);
         assert_eq!(config.ai_roles["main"].model, "a");
-        assert!(config.agents.is_empty());
+        assert!(config.agent_enabled.is_empty());
+    }
+
+    #[test]
+    fn agent_scalar_keys_project_independently_for_builtin_and_external_harnesses() {
+        let values = BTreeMap::from([
+            ("oxplow.agents.claude.enabled".into(), json!(false)),
+            ("oxplow.agents.claude.model".into(), json!("opus")),
+            ("oxplow.agents.acme.coder.enabled".into(), json!(false)),
+            ("oxplow.agents.acme.coder.model".into(), json!("custom")),
+        ]);
+        let config =
+            crate::parse_project_config(document_from_values("demo", &values), "demo").unwrap();
+        assert!(!config.agent_enabled["claude"]);
+        assert!(!config.agent_enabled["acme/coder"]);
+        assert_eq!(config.agent_config["claude"]["model"], json!("opus"));
+        assert_eq!(config.agent_config["acme/coder"]["model"], json!("custom"));
+        let definitions = definitions("demo");
+        assert!(!definitions.iter().any(|d| d.key == "oxplow.agents"
+            || d.key == "oxplow.agentConfig"
+            || d.key == "oxplow.newThreadSession"));
     }
 
     #[test]
@@ -497,6 +613,19 @@ mod tests {
     fn every_project_schema_property_has_a_projection_binding() {
         let all = bindings("demo");
         for key in crate::keys::config_keys() {
+            if matches!(
+                key.key.as_str(),
+                "agents"
+                    | "agentEnabled"
+                    | "agentConfig"
+                    | "extensions"
+                    | "disableExtensions"
+                    | "enableBundledExtensions"
+                    | "ai"
+                    | "snapshotTurnBudgetMs"
+            ) {
+                continue;
+            }
             assert!(
                 all.iter()
                     .any(|binding| binding.path.first() == Some(&key.key)),

@@ -139,18 +139,21 @@ impl AgentHarness for Claude {
                 title: "MCP servers".into(),
                 hint: "`all` (the default) runs oxplow's MCP server beside your own (local, project, user and plugin servers, claude.ai connectors); `strict` runs only oxplow's. Applies to sessions started after Save.".into(),
                 placeholder: "all".into(),
+                schema: serde_json::json!({"type":"string","enum":["all","strict"]}),
             },
             HarnessSetting {
                 key: "model".into(),
                 title: "Model".into(),
                 hint: "The model Claude Code launches with (`--model`: an alias such as `opus`, or a full name). Blank uses your own Claude Code default; applies to sessions started after Save.".into(),
                 placeholder: "opus".into(),
+                schema: serde_json::json!({"type":"string"}),
             },
             HarnessSetting {
                 key: "effort".into(),
                 title: "Effort".into(),
                 hint: "The effort level Claude Code launches with (`--effort`: `low`, `medium`, `high`, `xhigh` or `max`). Blank uses your own Claude Code default; applies to sessions started after Save.".into(),
                 placeholder: "high".into(),
+                schema: serde_json::json!({"type":"string","enum":["low","medium","high","xhigh","max"]}),
             },
         ]
     }

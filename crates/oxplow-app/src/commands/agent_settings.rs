@@ -1,11 +1,4 @@
-//! Settings → Agents as commands: which agent harnesses are on and in what
-//! order (`oxplow.agent.set_agents`), and one harness's declared setting
-//! (`oxplow.agent.set_setting`). Each checks what only the harness registry
-//! knows — a key is registered, a setting is declared — then writes its
-//! key through the one config write (`config_commands::change`): validated
-//! against the key's schema, logged as `config.changed`, undoable, applied
-//! before success is recorded. The prompt addition is one key,
-//! `agentPromptAppend`, written with `oxplow.config.set`.
+//! Harness preference adapters write each declared scalar through the shared settings service.
 
 use oxplow_domain::agent::registry::HarnessRegistry;
 use oxplow_domain::CommandError;
@@ -18,17 +11,8 @@ use super::config_commands::{change, ConfigTarget, Layer};
 use super::ops::Op;
 use super::util::{parse, schema};
 
-pub const SET_AGENTS: &str = "oxplow.agent.set_agents";
 pub const SET_SETTING: &str = "oxplow.agent.set_setting";
 pub const SET_PROMPT_APPEND: &str = "oxplow.agent.set_prompt_append";
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct SetAgentsInput {
-    /// The enabled agent harnesses, by key, in priority order: the first
-    /// is a new session's default. At least one.
-    pub agents: Vec<String>,
-}
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -58,78 +42,8 @@ fn invalid(field: &str, message: impl Into<String>) -> CommandError {
     }
 }
 
-/// `agents` as the value of the `agents` key, each registered.
-fn agents_value(harnesses: &HarnessRegistry, agents: &[String]) -> Result<Value, CommandError> {
-    if agents.is_empty() {
-        return Err(invalid("/agents", "enable at least one agent"));
-    }
-    for (i, agent) in agents.iter().enumerate() {
-        harnesses
-            .get(agent)
-            .map_err(|e| invalid(&format!("/agents/{i}"), e.to_string()))?;
-    }
-    Ok(json!(agents))
-}
-
-/// The `agentConfig` value with `agent`'s `key` set to `value` (or
-/// removed, blank), an emptied entry dropped. An empty map remains an
-/// explicit override so clearing an inherited entry does not restore it.
-fn agent_config_value(
-    harnesses: &HarnessRegistry,
-    current: &std::collections::BTreeMap<String, Value>,
-    input: SetSettingInput,
-) -> Result<Value, CommandError> {
-    let harness = harnesses
-        .get(&input.agent)
-        .map_err(|e| invalid("/agent", e.to_string()))?;
-    if !harness.settings().iter().any(|s| s.key == input.key) {
-        return Err(invalid(
-            "/key",
-            format!("agent `{}` has no setting `{}`", input.agent, input.key),
-        ));
-    }
-    let mut all = current.clone();
-    let mut entry = all.remove(&input.agent).unwrap_or_else(|| json!({}));
-    let Some(fields) = entry.as_object_mut() else {
-        return Err(invalid(
-            "/agent",
-            format!("agentConfig.{} isn't a map of settings", input.agent),
-        ));
-    };
-    match input
-        .value
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-    {
-        Some(v) => {
-            fields.insert(input.key, Value::String(v));
-        }
-        None => {
-            fields.remove(&input.key);
-        }
-    }
-    if !fields.is_empty() {
-        all.insert(input.agent, entry);
-    }
-    Ok(json!(all))
-}
-
 /// The two `agent.*` settings commands, over the project's config.
 pub fn ops(target: ConfigTarget, harnesses: HarnessRegistry) -> Vec<Op> {
-    let set_agents = {
-        let (t, h) = (target.clone(), harnesses.clone());
-        Op::new(
-            "config.write",
-            "set_agents",
-            schema::<SetAgentsInput>(),
-            true,
-            settings_handler(move |actor, input| {
-                let input: SetAgentsInput = parse(input)?;
-                let value = agents_value(&h, &input.agents)?;
-                change(&t, actor, "agents", Some(value), Layer::Project)
-            }),
-        )
-    };
     let prompt_target = target.clone();
     let set_setting = {
         let t = target;
@@ -140,14 +54,26 @@ pub fn ops(target: ConfigTarget, harnesses: HarnessRegistry) -> Vec<Op> {
             true,
             settings_handler(move |actor, input| {
                 let input: SetSettingInput = parse(input)?;
-                let current = Layer::Project
-                    .value(&t.settings()?, "agentConfig")?
-                    .map(serde_json::from_value)
-                    .transpose()
-                    .map_err(|error| invalid("/agent", error.to_string()))?
-                    .unwrap_or_default();
-                let value = agent_config_value(&harnesses, &current, input)?;
-                change(&t, actor, "agentConfig", Some(value), Layer::Project)
+                let harness = harnesses
+                    .get(&input.agent)
+                    .map_err(|e| invalid("/agent", e.to_string()))?;
+                if !harness.settings().iter().any(|s| s.key == input.key) {
+                    return Err(invalid(
+                        "/key",
+                        format!("agent `{}` has no setting `{}`", input.agent, input.key),
+                    ));
+                }
+                let key = format!(
+                    "oxplow.agents.{}.{}",
+                    input.agent.replace('/', "."),
+                    input.key
+                );
+                let value = input
+                    .value
+                    .map(|v| v.trim().to_string())
+                    .filter(|v| !v.is_empty())
+                    .map(Value::String);
+                change(&t, actor, &key, value, Layer::Project)
             }),
         )
     };
@@ -168,7 +94,7 @@ pub fn ops(target: ConfigTarget, harnesses: HarnessRegistry) -> Vec<Op> {
             )
         }),
     );
-    vec![set_agents, set_setting, set_prompt_append]
+    vec![set_setting, set_prompt_append]
 }
 
 #[cfg(test)]
@@ -176,81 +102,26 @@ mod tests {
     use super::*;
     use oxplow_domain::Actor;
 
-    fn agents_of(svc: &crate::Services) -> Vec<String> {
-        crate::config_service::read_config(&svc.config).agents
-    }
-
-    /// A person sets which agents are on, in order: written as the
-    /// `agents` key (logged, audited, undoable); an unregistered one is
-    /// refused at its place in the list; none at all is refused; an agent
-    /// can't, nor can a page it presses; the person's page can.
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_person_sets_the_agents_in_order() {
+    async fn independent_agent_enablement_allows_disabling_every_harness() {
         let fx = crate::test_fixtures::services_with_thread().await;
-        let svc = &fx.svc;
-        let ids: Vec<String> = svc
-            .harnesses
-            .all()
-            .iter()
-            .map(|h| h.id().to_string())
-            .collect();
-        assert!(ids.len() >= 2, "{ids:?}");
-        let order = vec![ids[1].clone(), ids[0].clone()];
-        let out = svc
-            .commands
-            .run(&Actor::Human, SET_AGENTS, json!({ "agents": order }), false)
-            .await
-            .unwrap();
-        assert_eq!(agents_of(svc), order);
-
-        for (input, field) in [
-            (json!({ "agents": [ids[0], "no-such-agent"] }), "/agents/1"),
-            (json!({ "agents": [] }), "/agents"),
-        ] {
-            let err = svc
-                .commands
-                .run(&Actor::Human, SET_AGENTS, input, false)
-                .await
-                .unwrap_err();
-            assert!(
-                matches!(&err, CommandError::Invalid { field: Some(f), .. } if f == field),
-                "{err:?}"
-            );
+        for agent in fx.svc.harnesses.names() {
+            fx.svc.commands.run(&Actor::Human, "oxplow.config.set", json!({"key":format!("oxplow.agents.{agent}.enabled"),"value":false,"level":"project"}), false).await.unwrap();
         }
-        let agent = Actor::Agent {
-            session_id: None,
-            thread_id: Some(fx.thread),
-            stream_id: None,
-        };
-        let page = |presser: Actor| Actor::Page {
-            page_id: "oxplow/agents".into(),
-            on_behalf_of: Box::new(presser),
-        };
-        for actor in [agent.clone(), page(agent)] {
-            // An agent, or a page it pressed, may set the order too.
-            svc.commands
-                .run(&actor, SET_AGENTS, json!({ "agents": [ids[0]] }), false)
-                .await
-                .unwrap();
-            assert_eq!(agents_of(svc), vec![ids[0].clone()]);
-        }
-        svc.commands
-            .run(
-                &page(Actor::Human),
-                SET_AGENTS,
-                json!({ "agents": [ids[0]] }),
-                false,
-            )
-            .await
-            .unwrap();
-        assert_eq!(agents_of(svc), vec![ids[0].clone()]);
-
-        // Undoing the first run puts back what was there before it.
-        svc.commands
-            .undo(&Actor::Human, out.audit_id.unwrap(), true)
-            .await
-            .unwrap();
-        assert_ne!(agents_of(svc), order);
+        assert!(crate::config_service::read_config(&fx.svc.config)
+            .agent_enabled
+            .values()
+            .all(|enabled| !enabled));
+        let listed = crate::harnesses::listing(
+            &fx.svc.harnesses,
+            &fx.svc.capabilities,
+            &crate::config_service::read_config(&fx.svc.config).agent_enabled,
+        );
+        assert!(!listed.is_empty());
+        assert!(listed.iter().all(|h| !h.enabled));
+        assert!(listed
+            .windows(2)
+            .all(|pair| pair[0].title.to_lowercase() <= pair[1].title.to_lowercase()));
     }
 
     /// The prompt addition is written as `agentPromptAppend` (blank removes
@@ -298,79 +169,6 @@ mod tests {
         assert_eq!(prompt(), "");
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn project_agent_setting_edits_do_not_copy_local_overrides() {
-        use oxplow_config::settings::Level;
-        let fx = crate::test_fixtures::services_with_thread().await;
-        let svc = &fx.svc;
-        let harness = svc
-            .harnesses
-            .all()
-            .into_iter()
-            .find(|harness| !harness.settings().is_empty())
-            .unwrap();
-        let agent = harness.id().to_string();
-        let setting = harness.settings()[0].key.clone();
-        let global = svc.layout.state_dir.join("global-config");
-        let store =
-            crate::settings::store(&svc.layout.project_dir, &global, svc.secrets.clone(), &[])
-                .unwrap();
-        let key = "oxplow.agentConfig";
-        store
-            .set(
-                key,
-                json!({(agent.clone()):{(setting.clone()):"global"}}),
-                Level::Global,
-            )
-            .unwrap();
-        store
-            .set(
-                key,
-                json!({(agent.clone()):{(setting.clone()):"project","projectOnly":"shared"}}),
-                Level::Project,
-            )
-            .unwrap();
-        store
-            .set(
-                key,
-                json!({(agent.clone()):{(setting.clone()):"local","localOnly":"private"}}),
-                Level::Local,
-            )
-            .unwrap();
-        svc.reload_config_from_disk().unwrap();
-        svc.commands
-            .run(
-                &Actor::Human,
-                SET_SETTING,
-                json!({"agent":agent,"key":setting,"value":"edited"}),
-                false,
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            store.get(key, Some(Level::Project)).unwrap().value,
-            Some(json!({(agent.clone()):{(setting.clone()):"edited","projectOnly":"shared"}}))
-        );
-        assert_eq!(
-            store.get(key, Some(Level::Local)).unwrap().value,
-            Some(json!({(agent.clone()):{(setting.clone()):"local","localOnly":"private"}}))
-        );
-        store.unset(key, Level::Project).unwrap();
-        svc.commands
-            .run(
-                &Actor::Human,
-                SET_SETTING,
-                json!({"agent":agent,"key":setting,"value":""}),
-                false,
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            store.get(key, Some(Level::Project)).unwrap().value,
-            Some(json!({}))
-        );
-    }
-
     /// A person sets one of a harness's declared settings; a blank value
     /// clears it and an emptied entry goes; an undeclared setting or an
     /// unregistered agent is refused at its field.
@@ -390,12 +188,12 @@ mod tests {
             .run(
                 &Actor::Human,
                 SET_SETTING,
-                json!({ "agent": agent, "key": key, "value": " v1 " }),
+                json!({ "agent": agent, "key": key, "value": " opus " }),
                 false,
             )
             .await
             .unwrap();
-        assert_eq!(config()[&agent][&key], json!("v1"));
+        assert_eq!(config()[&agent][&key], json!("opus"));
         svc.commands
             .run(
                 &Actor::Human,

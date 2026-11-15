@@ -1,7 +1,3 @@
-oxplow.agents:
-- claude
-- codex
-- opencode
 # Tints this checkout's app icon so an oxplow-on-oxplow window is tellable
 # apart from the oxplow you're using to work on something else. macOS only.
 oxplow.iconTint: "#c2410c"
@@ -113,22 +109,13 @@ oxplow.metrics:
 - use: oxplow.tests.red_runs
 - use: oxplow.analysis.errors
   target: 10.0
-oxplow.extensions:
-- oxplow-bundled
-- oxtask
-- oxwiki
-- project
+oxplow.extensions.project.enabled: true
 # What hasn't moved into oxplow-bundled yet: kept here, off.
-oxplow.disableExtensions:
-- oxplow-bundled-todo
+oxplow.extensions.oxplow-bundled-todo.enabled: false
 # This repo works on oxplow's own extensions: their sources are the repo's.
 oxplow.extensionSources:
   oxplow-foundation: extensions/oxplow-foundation
   oxplow-bundled: extensions/oxplow-bundled
   oxtask: extensions/oxtask
   oxwiki: extensions/oxwiki
-# And runs them from those sources, deployed like any extension, instead of
-# the copies built into oxplow (a dev build only): editing foundation and
-# deploying it takes effect without rebuilding oxplow. Set it to true in
-# your own .oxplow/personal.yaml to run the built-in copies.
-oxplow.enableBundledExtensions: false
+# bun run run:dev selects extension sources through its launch environment.

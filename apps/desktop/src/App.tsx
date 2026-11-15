@@ -8,7 +8,6 @@ import {
   closeThread,
   markThread,
   createThread,
-  openAgentSession,
   getThreadState,
   type AgentStatus,
   type AgentStatusEntry,
@@ -1162,8 +1161,7 @@ export function App() {
   // A thread's agent-session tabs follow its open sessions (their rows):
   // each open one's tab leads, a closed one's goes. A thread seen here for
   // the first time (no tab list yet — they persist) with no session opens
-  // the way the person's `newThreadSession` says: the session picker, no
-  // session, or that agent's session.
+  // the session picker, where the person chooses which agent to start.
   // The thread whose first tabs are still being opened: the window isn't
   // ready for a navigate until they are, or they would push it aside.
   const [openingThread, setOpeningThread] = useState<string | null>(null);
@@ -1200,11 +1198,7 @@ export function App() {
           refsOf(session).some((t) => isPage(t, "new-session")) ? session : setStrip(session, [...opening.tabs, ...refsOf(session)]),
         );
       }
-      if (opening.start) {
-        const opened = await openAgentSession(threadId, opening.start.harness);
-        const ref = agentSessionRef(opened.id);
-        updateSession(threadId, (session) => sessionOpen(session, { ref }, { pinned: true }));
-      }
+
     } catch (error) {
       // Couldn't read the choice or start the agent: ask instead.
       logUi("warn", "opening a new thread failed; showing the session picker", { error: String(error) });

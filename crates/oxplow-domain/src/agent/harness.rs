@@ -151,6 +151,13 @@ pub struct HarnessSetting {
     /// An example value, in the empty field.
     #[serde(default)]
     pub placeholder: String,
+    /// Offline JSON Schema for the independent preference.
+    #[serde(default = "setting_string_schema")]
+    pub schema: serde_json::Value,
+}
+
+fn setting_string_schema() -> serde_json::Value {
+    serde_json::json!({"type":"string"})
 }
 
 /// What a harness provider declares of itself beyond its features (its

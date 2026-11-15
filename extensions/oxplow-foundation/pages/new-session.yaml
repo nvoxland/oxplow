@@ -9,12 +9,12 @@ params:
   label: Find an earlier session
   type: search
 answers:
-- {"question":"Which agents does the project enable, and which is a new session's default?","params":{},"skill":"oxplow-extension"}
+- {"question":"Which agents can I open in a session?","params":{},"skill":"oxplow-extension"}
 loaders:
   start:
     sql: |
       SELECT uri_param(t.uri, 'id') AS thread,
-             (SELECT h.id FROM v_agent_harness h WHERE h.enabled = 1 ORDER BY h.position LIMIT 1) AS harness
+             (SELECT h.id FROM v_agent_harness h WHERE h.enabled = 1 ORDER BY h.title COLLATE NOCASE, h.id LIMIT 1) AS harness
       FROM v_thread t
       WHERE t.id = :thread_id
   earlier:
@@ -116,7 +116,7 @@ loaders:
       SELECT h.id AS value, h.title AS label
       FROM v_agent_harness h
       WHERE h.enabled = 1
-      ORDER BY h.position
+      ORDER BY h.title COLLATE NOCASE, h.id
 view:
   stack:
   - id: start
@@ -128,7 +128,6 @@ view:
       then: replace
       fields:
       - harness
-      - remember
       choices:
         harness: oxplow/new-session#new_session_harnesses
   - id: earlier

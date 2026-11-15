@@ -217,8 +217,8 @@ Analysis, the request's tests and coverage, the review packet, and the token
 panels. With it off, oxplow is the plain workbench: the pages keep their
 file lists and diffs, and the Metrics pages and dashboards still work.
 Turning it off in Settings → Extensions changes your own choice
-(`disableExtensions` in `.oxplow/personal.yaml`). To turn it off for your
-team, remove it from `extensions:` in `.oxplow/project.yaml` and commit that.
+(`oxplow.extensions.<name>.enabled: false` in `.oxplow/local.yaml`). To turn
+it off for your team, set that key to false in `.oxplow/project.yaml` and commit it.
 
 Problems show under Settings → Extensions. Agents check their work with
 `oxplow_validate_extension`.

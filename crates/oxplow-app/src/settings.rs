@@ -9,6 +9,40 @@ use oxplow_config::settings::{SecretStore, SettingsError, SettingsRegistry, Sett
 
 use crate::extension::extensions::Extension;
 
+pub(crate) fn ai_provider_definitions(id: &str) -> Vec<oxplow_config::settings::SettingDefinition> {
+    use serde_json::json;
+    let mut key = crate::ai_service::provider_key_definition(id);
+    key.title = format!("{id} API key");
+    let mut enabled = key.clone();
+    enabled.key = format!("oxplow.ai.{id}.enabled");
+    enabled.title = format!("Enable {id}");
+    enabled.schema = json!({"type":"boolean"});
+    enabled.default = Some(json!(false));
+    enabled.secret = false;
+    let mut url = enabled.clone();
+    url.key = format!("oxplow.ai.{id}.baseUrl");
+    url.title = format!("{id} base URL");
+    url.schema = json!({"type":"string"});
+    url.default = Some(json!(""));
+    vec![enabled, key, url]
+}
+
+pub(crate) fn ai_role_key(role: &str) -> String {
+    format!("oxplow.ai.roles.{}", role.replace('/', "."))
+}
+
+pub(crate) fn ai_role_definition(role: &str) -> oxplow_config::settings::SettingDefinition {
+    let mut definition = crate::ai_service::provider_key_definition(role);
+    definition.key = ai_role_key(role);
+    definition.title = format!("AI role {role}");
+    definition.secret = false;
+    definition.schema = serde_json::json!({"type":"object", "additionalProperties":false,
+        "required":["provider","model"], "properties":{
+        "provider":{"type":"string","minLength":1}, "model":{"type":"string","minLength":1},
+        "restrict":{"type":"array","uniqueItems":true,"items":{"enum":["tools","sql","streaming","images"]}}}});
+    definition
+}
+
 struct SecureSettings {
     backend: Arc<dyn oxplow_ai::secrets::SecretStore>,
     project: std::path::PathBuf,
@@ -25,23 +59,22 @@ impl SecureSettings {
         let Some(key) = identity.get(3).and_then(serde_json::Value::as_str) else {
             return Err("invalid secure setting".into());
         };
-        if !key.starts_with("oxplow.ai.providerKeys.") {
+        let Some(provider) = key
+            .strip_prefix("oxplow.ai.")
+            .and_then(|key| key.strip_suffix(".apiKey"))
+        else {
             return Ok(None);
-        }
+        };
+        let endpoint_key = format!("oxplow.ai.{provider}.baseUrl");
         for level in oxplow_config::settings::Level::PRECEDENCE {
             let values = oxplow_config::settings::read_layer(&self.project, &self.global, level)
                 .map_err(|_| "settings unavailable")?;
-            if let Some(providers) = values.get("oxplow.ai.providers") {
-                let providers: Vec<oxplow_ai::config::ProviderConfig> =
-                    serde_json::from_value(providers.clone()).map_err(|_| "invalid providers")?;
-                let provider = providers
-                    .iter()
-                    .find(|p| crate::ai_service::provider_key_setting(&p.id) == key)
-                    .ok_or("unknown provider")?;
-                return Ok(Some(crate::ai_service::endpoint_of(Some(provider))));
+            if let Some(value) = values.get(&endpoint_key) {
+                let endpoint = value.as_str().ok_or("invalid endpoint")?;
+                return Ok(Some(endpoint.trim().trim_end_matches('/').to_owned()));
             }
         }
-        Err("unknown provider".into())
+        Ok(Some(String::new()))
     }
 }
 
@@ -134,6 +167,19 @@ pub(crate) fn store(
             .map(|v| v.to_string_lossy().into_owned())
             .unwrap_or_default(),
     ))?;
+    registry.register_many(crate::harnesses::setting_definitions(extensions))?;
+    oxplow_config::core_settings::register_dynamic_keys(
+        &mut registry,
+        documents
+            .iter()
+            .flat_map(|document| document.keys().cloned()),
+    )?;
+    for extension in extensions {
+        let definition = oxplow_config::core_settings::extension_definition(&extension.name);
+        if registry.get(&definition.key).is_none() {
+            registry.register(definition)?;
+        }
+    }
     crate::extension::extension_settings::replace_extensions(&mut registry, extensions)
         .map_err(|_| SettingsError::InvalidDefinition)?;
     for extension in extensions.iter().filter(|e| e.enabled) {
@@ -151,6 +197,31 @@ pub(crate) fn store(
             }
         }
     }
+    for extension in extensions.iter().filter(|extension| extension.enabled) {
+        for provider in extension
+            .implementations
+            .iter()
+            .filter(|implementation| implementation.capability == "ai_provider")
+        {
+            for definition in ai_provider_definitions(&provider.id) {
+                if registry.get(&definition.key).is_none() {
+                    registry.register(definition)?;
+                }
+            }
+        }
+        for profile in &extension.ai_profiles {
+            let definition = ai_role_definition(&format!("{}/{}", extension.namespace, profile.id));
+            if registry.get(&definition.key).is_none() {
+                registry.register(definition)?;
+            }
+        }
+    }
+    for role in oxplow_ai::config::BuiltinRole::ALL {
+        let definition = ai_role_definition(role.name());
+        if registry.get(&definition.key).is_none() {
+            registry.register(definition)?;
+        }
+    }
     let store = SettingsStore::new(
         project.to_path_buf(),
         global.to_path_buf(),
@@ -164,25 +235,6 @@ pub(crate) fn store(
     // Registry discovery tolerates invalid dynamic values so registered
     // setters can repair them. Direct consumers still validate every value.
     let configured = |key: &str| documents.iter().find_map(|document| document.get(key));
-    if let Some(serde_json::Value::Array(providers)) = configured("oxplow.ai.providers") {
-        let mut ids = std::collections::BTreeSet::new();
-        for provider in providers {
-            if let Some(id) = provider
-                .get("id")
-                .and_then(serde_json::Value::as_str)
-                .filter(|id| {
-                    !id.is_empty() && crate::ai_service::provider_key_setting(id).len() <= 256
-                })
-                .filter(|id| ids.insert((*id).to_owned()))
-            {
-                store
-                    .registry
-                    .write()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .register(crate::ai_service::provider_key_definition(id))?;
-            }
-        }
-    }
     let instances = configured("oxplow.extensionInstances")
         .and_then(|value| value.as_object())
         .cloned()
@@ -207,6 +259,15 @@ pub(crate) fn store(
             ids.sort();
             ids.dedup();
             for id in ids {
+                let instance = format!("{}/{}", extension.namespace, id);
+                for definition in crate::harnesses::declared_instance_settings(
+                    project, extension, provider, &instance,
+                ) {
+                    let mut registry = store.registry.write().unwrap_or_else(|e| e.into_inner());
+                    if registry.get(&definition.key).is_none() {
+                        registry.register(definition)?;
+                    }
+                }
                 for credential in &provider.credentials {
                     if credential.oauth.is_some() || credential.secret_ref.is_some() {
                         continue;
@@ -256,99 +317,10 @@ mod registry_tests {
     use serde_json::json;
 
     #[test]
-    fn host_stores_are_shared_and_dynamic_definitions_refresh_after_a_write() {
+    fn each_role_inherits_and_resets_independently() {
+        use oxplow_config::settings::Level;
         let project = tempfile::tempdir().unwrap();
         let global = tempfile::tempdir().unwrap();
-        let secrets: Arc<dyn oxplow_ai::secrets::SecretStore> =
-            Arc::new(oxplow_ai::secrets::MemorySecrets::default());
-        let first = store(project.path(), global.path(), secrets.clone(), &[]).unwrap();
-        let second = store(project.path(), global.path(), secrets.clone(), &[]).unwrap();
-        assert!(Arc::ptr_eq(&first.registry, &second.registry));
-        first
-            .set(
-                "oxplow.ai.providers",
-                json!([{"id":"new","kind":"openai"}]),
-                oxplow_config::settings::Level::Project,
-            )
-            .unwrap();
-        let changed = store(project.path(), global.path(), secrets.clone(), &[]).unwrap();
-        assert!(changed
-            .definition(&crate::ai_service::provider_key_setting("new"))
-            .is_ok());
-        assert!(!Arc::ptr_eq(&first.registry, &changed.registry));
-        let path = project.path().join(".oxplow/project.yaml");
-        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
-        let text = std::fs::read_to_string(&path).unwrap();
-        std::fs::write(&path, text.replace("new", "old")).unwrap();
-        std::fs::OpenOptions::new()
-            .write(true)
-            .open(&path)
-            .unwrap()
-            .set_times(std::fs::FileTimes::new().set_modified(modified))
-            .unwrap();
-        let replaced = store(project.path(), global.path(), secrets.clone(), &[]).unwrap();
-        assert!(replaced
-            .definition(&crate::ai_service::provider_key_setting("old"))
-            .is_ok());
-        assert!(replaced
-            .definition(&crate::ai_service::provider_key_setting("new"))
-            .is_err());
-
-        let isolated = store(
-            project.path(),
-            global.path(),
-            Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
-            &[],
-        )
-        .unwrap();
-        assert!(!Arc::ptr_eq(&changed.registry, &isolated.registry));
-    }
-
-    #[test]
-    fn malformed_dynamic_configuration_can_be_repaired_through_registered_keys() {
-        for (key, value, replacement) in [
-            ("oxplow.ai.providers", json!({"not":"an array"}), json!([])),
-            (
-                "oxplow.ai.providers",
-                json!([{"id":"", "kind":"openai"}]),
-                json!([]),
-            ),
-            (
-                "oxplow.ai.providers",
-                json!([{"id":"x".repeat(256), "kind":"openai"}]),
-                json!([]),
-            ),
-            ("oxplow.extensionInstances", json!(["not a map"]), json!({})),
-        ] {
-            let project = tempfile::tempdir().unwrap();
-            let global = tempfile::tempdir().unwrap();
-            std::fs::create_dir_all(project.path().join(".oxplow")).unwrap();
-            let text = serde_yaml::to_string(&serde_json::json!({(key):value})).unwrap();
-            std::fs::write(project.path().join(".oxplow/project.yaml"), text).unwrap();
-            let settings = store(
-                project.path(),
-                global.path(),
-                Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
-                &[],
-            )
-            .unwrap();
-            settings
-                .set(
-                    key,
-                    replacement.clone(),
-                    oxplow_config::settings::Level::Project,
-                )
-                .unwrap();
-            assert_eq!(settings.get(key, None).unwrap().value, Some(replacement));
-        }
-    }
-
-    #[test]
-    fn duplicate_provider_ids_keep_registry_available_for_repair() {
-        let project = tempfile::tempdir().unwrap();
-        let global = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(project.path().join(".oxplow")).unwrap();
-        std::fs::write(project.path().join(".oxplow/project.yaml"), "oxplow.ai.providers:\n  - {id: duplicate, kind: openai}\n  - {id: duplicate, kind: openai}\n").unwrap();
         let settings = store(
             project.path(),
             global.path(),
@@ -356,19 +328,110 @@ mod registry_tests {
             &[],
         )
         .unwrap();
-        assert!(settings
-            .definition(&crate::ai_service::provider_key_setting("duplicate"))
-            .is_ok());
+        let main = json!({"provider":"openai", "model":"main"});
+        let summarize = json!({"provider":"openai", "model":"small"});
+        settings
+            .set("oxplow.ai.roles.main", main.clone(), Level::Global)
+            .unwrap();
         settings
             .set(
-                "oxplow.ai.providers",
-                json!([]),
-                oxplow_config::settings::Level::Project,
+                "oxplow.ai.roles.summarize",
+                summarize.clone(),
+                Level::Global,
+            )
+            .unwrap();
+        settings
+            .set(
+                "oxplow.ai.roles.summarize",
+                json!({"provider":"openai", "model":"project"}),
+                Level::Project,
             )
             .unwrap();
         assert_eq!(
-            settings.get("oxplow.ai.providers", None).unwrap().value,
-            Some(json!([]))
+            settings.get("oxplow.ai.roles.main", None).unwrap().value,
+            Some(main)
+        );
+        settings
+            .unset("oxplow.ai.roles.summarize", Level::Project)
+            .unwrap();
+        assert_eq!(
+            settings
+                .get("oxplow.ai.roles.summarize", None)
+                .unwrap()
+                .value,
+            Some(summarize)
+        );
+        settings
+            .unset("oxplow.ai.roles.summarize", Level::Global)
+            .unwrap();
+        assert_eq!(
+            settings
+                .get("oxplow.ai.roles.summarize", None)
+                .unwrap()
+                .value,
+            None
+        );
+    }
+
+    #[test]
+    fn ai_provider_settings_exist_before_configuration_and_are_independent() {
+        let project = tempfile::tempdir().unwrap();
+        let global = tempfile::tempdir().unwrap();
+        let settings = store(
+            project.path(),
+            global.path(),
+            Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
+            &[],
+        )
+        .unwrap();
+        settings
+            .registry
+            .write()
+            .unwrap()
+            .register_many(ai_provider_definitions("openai"))
+            .unwrap();
+        assert!(
+            settings
+                .definition("oxplow.ai.openai.apiKey")
+                .unwrap()
+                .secret
+        );
+        assert!(settings.definition("oxplow.ai.providers").is_err());
+        settings
+            .set(
+                "oxplow.ai.openai.enabled",
+                json!(true),
+                oxplow_config::settings::Level::Global,
+            )
+            .unwrap();
+        settings
+            .set(
+                "oxplow.ai.openai.baseUrl",
+                json!("https://one.example/v1"),
+                oxplow_config::settings::Level::Project,
+            )
+            .unwrap();
+        settings
+            .set(
+                "oxplow.ai.openai.apiKey",
+                json!("private"),
+                oxplow_config::settings::Level::Global,
+            )
+            .unwrap();
+        settings
+            .set(
+                "oxplow.ai.openai.baseUrl",
+                json!("https://two.example/v1"),
+                oxplow_config::settings::Level::Project,
+            )
+            .unwrap();
+        assert!(settings.get("oxplow.ai.openai.apiKey", None).is_err());
+        assert_eq!(
+            settings
+                .get("oxplow.ai.openai.enabled", None)
+                .unwrap()
+                .value,
+            Some(json!(true))
         );
     }
 }

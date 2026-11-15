@@ -3567,7 +3567,8 @@ async fn a_harness_provider_is_a_registered_harness() {
     assert_eq!(h.settings()[0].key, "model");
     assert!(crate::agent_path::not_inherited(&fx.svc.harnesses)
         .contains(&"OXPLOW_FAKE_HARNESS_SESSION".to_string()));
-    let listed = crate::harnesses::listing(&fx.svc.harnesses, &fx.svc.capabilities, &[]);
+    let listed =
+        crate::harnesses::listing(&fx.svc.harnesses, &fx.svc.capabilities, &Default::default());
     assert!(listed
         .iter()
         .any(|l| l.id == "fake" && l.settings[0].key == "model"));

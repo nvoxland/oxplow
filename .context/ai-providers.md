@@ -35,34 +35,24 @@ What can be called, as of 2026-09:
 
 ## Providers
 
-- Provider connections and role bindings are registered settings:
-  `oxplow.ai.providers` (an atomic array) and `oxplow.ai.roles` (an atomic map).
-  They support local, project and global overrides with the shared precedence
-  in [settings.md](./settings.md). Specialized Settings → AI controls write the
-  global level through the same service; generic `config.*` writes can choose
-  any level. `AiConfig` is a typed projection, not a separate file format.
+- Each declared `ai_provider` id has one connection. Its independent settings
+  are `oxplow.ai.<id>.enabled` (false by default), `.baseUrl` (empty for the
+  declared default endpoint), and `.apiKey` (a secret string without a default).
+  Definitions come from the enabled extension capability catalog before any key
+  or connection is saved. User-named duplicate connections are not supported.
+  Every setting resolves local → project → global → default independently.
 
   ```yaml
-  # global.yaml, or a project/local override file
-  oxplow.ai.providers:
-    - { id: or, kind: openrouter }
-    - { id: local, kind: openai_compatible, baseUrl: http://localhost:11434/v1 }
-    - { id: ts, kind: typesafe }
-  oxplow.ai.roles:
-    summarize: { provider: or, model: openai/gpt-5-mini }
-    decide: { provider: ts, model: jev-latest }
+  oxplow.ai.openrouter.enabled: true
+  oxplow.ai.openai_compatible.enabled: true
+  oxplow.ai.openai_compatible.baseUrl: http://localhost:11434/v1
+  oxplow.ai.roles.summarize: { provider: openrouter, model: openai/gpt-5-mini }
   ```
 
-- Provider keys are secret registry settings, registered dynamically by
-  `ai_service::provider_key_definition`: `oxplow.ai.providerKeys.<hex provider id>`.
-  Their registry owner is `core` and their display category is `ai`; an extension
-  composer cannot write them. Duplicate provider IDs in a file do not prevent
-  registry construction or repair, while generic provider-list writes reject
-  duplicate IDs before mutation.
-  They use the shared keychain backend, with local/project identity including
-  the project and global identity independent of it. Tests use `MemorySecrets`.
-  A provider with no key can call a local server without authentication. No key
-  value is stored in YAML, inventory SQL, events, audit or undo payloads.
+- API keys use the shared secure settings service, with local/project identity
+  including the project and global identity independent of it. Registry ownership
+  is core, so extension composers cannot read or write these credentials.
+  No key value is stored in YAML, inventory SQL, events, audit or undo payloads.
   macOS may prompt again after an unsigned development build changes identity.
 - **A key is bound to the URL it was saved for.** Its secure value carries the
   key and normalized endpoint (empty for the kind's default). A connection
@@ -88,18 +78,17 @@ What can be called, as of 2026-09:
 
 ## Roles
 
-Extensions and core refer to **roles, never to models**. Each role maps to
-`{provider, model}`. The `oxplow.ai.roles` setting resolves the same way as
-other settings. A project-level map replaces the whole global map; a local map
-replaces the project's. Role fallback happens after that atomic resolution.
+Extensions and core refer to **roles, never to models**. Each built-in role and
+active extension profile has its own atomic object setting,
+`oxplow.ai.roles.<role>`, with `provider`, `model`, and optional `restrict`.
+It has no default: absence enables role fallback. Local, project and global
+precedence applies separately to each role, so overriding summarize preserves
+an inherited main binding. Provider ids name declared implementations.
 
 ```yaml
-oxplow.ai.roles:
-  summarize: { provider: openrouter, model: openai/gpt-5-mini }
+oxplow.ai.roles.summarize: { provider: openrouter, model: openai/gpt-5-mini }
 ```
 
-- Provider ids name entries in the effective `oxplow.ai.providers` array. A role
-  naming an unavailable provider shows “AI provider X isn't set up.”
 - `OxplowConfig.ai_roles` is the typed runtime projection. Core roles are from
   `AI_ROLE_NAMES`; extension profiles use `<namespace>/<name>`.
 - `AiService.with_settings` reads through the shared store. Settings → AI keeps
@@ -135,7 +124,7 @@ an id, a description, a required `fallback` built-in role and optional
 `oxplow_ai::config::Role` is open: `Builtin(BuiltinRole)` or
 `Profile { extension, name }`, written as one string (`summarize`,
 `review/review`) wherever a person sees it — `global.yaml`,
-`project.yaml`'s `oxplow.ai.roles`, Settings, `ai_call.role`, `ai_result.role`.
+`project.yaml`'s independent role keys, Settings, `ai_call.role`, `ai_result.role`.
 
 - **Naming.** Inside its own extension an author writes the bare id (a
   job request's `role`, a collector's `role=`); the host qualifies it

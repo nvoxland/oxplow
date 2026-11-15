@@ -712,8 +712,7 @@ async fn handle_hook_inner(
 }
 
 /// `answer` as the hook's harness renders it (`AgentHarness::render`): its
-/// session's, else the default harness's; an empty object with none
-/// registered. Always `200` — Claude Code's HTTP hooks treat any other
+/// session's, else an empty acknowledgement. Always `200` — Claude Code's HTTP hooks treat any other
 /// status (including an empty 202) as a failure and print a "Failed with
 /// non-blocking status code" warning into the user's terminal, which fills
 /// the xterm with noise on Edit/Write-heavy turns. See
@@ -723,10 +722,7 @@ async fn respond(
     harness: Option<&str>,
     answer: &HookAnswer,
 ) -> Response {
-    let body = match harness
-        .and_then(|h| harnesses.get(h).ok())
-        .or_else(|| harnesses.default().ok())
-    {
+    let body = match harness.and_then(|h| harnesses.get(h).ok()) {
         Some(h) => h.render(answer).await,
         None => serde_json::json!({}),
     };
@@ -784,7 +780,7 @@ mod tests {
 
     #[tokio::test]
     async fn bounded_hook_response_falls_back_to_ack_on_timeout() {
-        let none = HarnessRegistry::new(std::sync::Arc::new(String::new));
+        let none = HarnessRegistry::new();
         let resp = bounded_hook_response(
             std::time::Duration::from_millis(10),
             "PreToolUse",

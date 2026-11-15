@@ -376,7 +376,18 @@ the text came from, a file whose folder its relative links and images
 resolve against; with an `edit` action it is
 that component's editor, saving through the action), `bar`, `line`,
 `treemap`, `tree`, `timeline`, `detail`, `sections` (a subsection per
-row: **`sections`**, below), `steps`, `hunks`, `board` (the
+row: **`settings`** is the native registry editor, fed full `v_config_value` rows
+(`from: settings`) including schema/UI metadata, default, effective origin,
+ordinary overrides and redacted per-level statuses. Settings' index links to
+`settings-category`; its `category`, `q` and `setting` params narrow inventory.
+The desktop uses structured recursive fields (local JSON Schema references,
+nullable/typed unions, objects/maps and ordered arrays) and explicit per-setting
+Save/Discard through `oxplow.config.set` / `unset`. A reset previews the lower
+level/default inheritance before Save. The native visualization grants no
+command exception; ordinary drafts use `useDraft` by setting/level, secrets stay
+in memory, and a refreshed changed baseline warns without replacing the draft.
+
+**`sections`**, below), `steps`, `hunks`, `board` (the
 groups as columns of cards, each a list row; needs `group`, whose
 `values: [..]` fix the columns' order and keep empty ones as drop
 targets), `terminal` (a terminal per row, `terminal: { of, title?,
@@ -392,7 +403,7 @@ an image or a PDF, from its bytes: `media: { path, filesystem?, revision?
 vizes"), `approvals` (core's consent component:
 it reads `v_command_proposal` itself and decides through the approve and
 decline commands; params `thread` and `setting` narrow the list), `form`
-and `custom` (below). `terminal`, `editor`, `embed`, `form`, `approvals`
+and `custom` (below), plus `settings` (the registry editor below). `terminal`, `editor`, `embed`, `form`, `approvals`
 and `custom` are refused in an inline page. A viz that fills its page
 (`code`, `diff`, `editor`, `terminal`, `embed`, `media`) draws no in-body title.
 
@@ -822,3 +833,12 @@ checks a page before deploy, and `$OXPLOW_BIN extension test <name>` runs
 its fixtures.
 `v_page`, `v_page_answer` and `v_page_param` list the loaded pages
 for SQL.
+
+## Registry settings forms
+
+`viz: settings` draws the standard registry editor from `v_config_value` rows.
+The foundation Settings index links to `settings-category` with `category`, `q`
+and optional `setting` parameters. The visualization edits through the public
+config commands and uses per-level inventory statuses; it never reads secret
+plaintext. Inline read-only page specs reject this acting visualization, as they
+reject forms. The `management` page holds operational tools formerly in Settings.

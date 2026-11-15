@@ -71,7 +71,7 @@ replacements and custom components (all mounted, no global name).
 `v_<namespace>_<entity>`), an event type (`<namespace>.<…>`), a command id,
 and every contribution's id — `ContributionId { namespace, kind, local }`,
 `<namespace>/<local>`: pages, panels, effects, collectors, jobs, AI
-profiles (`<namespace>/<profile>` in `oxplow.ai.roles`), advisories, agent contexts, custom
+profiles (`oxplow.ai.roles.<namespace>.<profile>` for the `<namespace>/<profile>` role), advisories, agent contexts, custom
 components, providers and their instances (`extensionInstances:` keys),
 resources — are named by the manifest's `namespace:` (default: the name,
 `-` → `_`). So is what is stored under them: `contribution_health`

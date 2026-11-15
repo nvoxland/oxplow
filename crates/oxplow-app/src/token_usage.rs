@@ -181,16 +181,14 @@ impl TokenUsageService {
     }
 
     /// The harness that ran a turn: its agent session's; a turn no session
-    /// claims reads as the default harness's.
+    /// claims has no harness attribution.
     async fn harness_of(&self, rec: &TurnRecord) -> Result<String, DomainError> {
         use oxplow_domain::stores::AgentSessionStore as _;
         let session = match rec.agent_session {
             Some(id) => self.sessions.get(&id).await?.map(|s| s.harness),
             None => None,
         };
-        Ok(session
-            .or_else(|| self.harnesses.default().ok().map(|h| h.id().to_string()))
-            .unwrap_or_default())
+        Ok(session.unwrap_or_default())
     }
 
     /// On Stop: parse the transcript tail since the last cursor, sum usage,

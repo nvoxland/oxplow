@@ -37,7 +37,7 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
 - **The four shipped extensions.** Two more ship beside the two above, as
   plumbing only, so later work has a place to land. They are in `BUNDLED`
   and `build.rs`'s list like the others, are not in `DEFAULT_EXTENSIONS`
-  (off by default; turn one on in `extensions:`), and each is a minimal
+  (off by default; set its `oxplow.extensions.<name>.enabled` scalar to true), and each is a minimal
   manifest (`manifest: 2`, name, namespace, `intent`, README) with
   `requires: [oxplow-bundled]`. `requires:` is by extension name, so it
   crosses namespaces (`oxtask` and `oxwiki` are not in `oxplow`'s). With
@@ -195,7 +195,7 @@ reviewed and kept.
 A contribution moves from it to `oxplow-bundled` one piece at a time, as it is
 accepted, and the holder goes away when it is empty. Add nothing new there.
 
-- **It's off, and can't run.** `disableExtensions` in `.oxplow/project.yaml` keeps it
+- **It's off, and can't run.** `oxplow.extensions.oxplow-bundled-todo.enabled: false` in `.oxplow/project.yaml` keeps it
   off while it sits in `.oxplow/extensions/`, so nothing loads it or tests it. It
   keeps `namespace: oxplow` so what moves needs no rename, and that namespace is
   reserved for shipped extensions. Its fixtures stop running too,

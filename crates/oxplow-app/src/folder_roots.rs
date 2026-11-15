@@ -71,7 +71,7 @@ mod tests {
     use super::*;
 
     fn registry() -> HarnessRegistry {
-        let r = HarnessRegistry::new(std::sync::Arc::new(String::new));
+        let r = HarnessRegistry::new();
         r.set_declared(vec![oxplow_harnesses::built_in(
             "oxplow:claude-code",
             "claude",

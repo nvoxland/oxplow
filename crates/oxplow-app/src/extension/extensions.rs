@@ -3585,7 +3585,7 @@ pub(crate) fn shape_problem(cfg: &VizConfig, components: &[String]) -> Option<St
         | Viz::Markdown
         | Viz::Detail
         | Viz::Board
-        | Viz::Approvals => None,
+        | Viz::Approvals | Viz::Settings => None,
     }
 }
 

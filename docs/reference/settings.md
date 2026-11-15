@@ -1,7 +1,8 @@
 # Settings
 
-Settings → Every setting lists registered core and extension settings with their
-current values, categories and origins. The agent can change them through the
+Settings groups registered core and extension preferences by category. Each
+category uses forms for its values and shows their origins. Operational pages
+for agents, providers and extensions manage their running resources. The agent can change them through the
 same commands as the app.
 
 ## Levels and storage
@@ -82,41 +83,18 @@ never edit").
 
 ### Agents
 
-`oxplow.agents` controls which agent implementations are offered
-when an agent session is opened. Configure it from the project Settings page
-or in `.oxplow/project.yaml`:
+Open **Settings → Agents** to enable or disable each registered harness and edit
+its declared launch preferences. For example, `oxplow.agents.codex.enabled`
+controls whether Codex is offered for new sessions, and
+`oxplow.agents.codex.effort` controls its declared effort preference.
 
-```yaml
-oxplow.agents:
-  - claude
-  - codex
-```
+Agent choices are alphabetical. A new thread opens the session picker, which
+remembers your last successful selection without starting an agent automatically.
+You can disable every harness. Existing sessions keep their selected harness.
 
-Built-in terminal harness keys:
-
-| Value | CLI Oxplow launches |
-| --- | --- |
-| `claude` | Claude Code (`claude`) |
-| `codex` | Codex (`codex`) |
-| `opencode` | OpenCode (`opencode`) |
-
-The list order matters: the first available entry is the default for new
-sessions. The Settings page's **Up** and **Down** buttons change that
-order. Extension implementations add other registered keys.
-
-The setting must contain at least one value and cannot contain
-duplicates. Omitting it offers the registered harnesses. Names are
-registry keys rather than a fixed enum; an unavailable implementation
-cannot launch a session. Empty explicit lists and duplicates are rejected.
-
-Sessions store their selected harness and resume identity. A thread can
-have none or several, including different harnesses. Reordering the
-project list does not rewrite existing sessions. A local `oxplow.newThreadSession`
-preference can choose a default session or show the session picker.
-
-The selected CLI must be installed, authenticated, and available on
-`PATH`. See [Agents](../guide/agents.md) for session selection, runtime
-integration, and concurrent operation.
+Built-in harnesses launch Claude Code, Codex, or OpenCode. Each uses its own
+login; oxplow's direct AI API keys are separate. The CLI must be installed and
+available on `PATH`. See [Agents](../guide/agents.md).
 
 ### Snapshot retention
 
@@ -158,14 +136,21 @@ Some frequently used settings and defaults (all support local, project and globa
 | `oxplow.scripts.memoryMb` | `512` | The memory one script worker may use, in MiB, before it is stopped. Minimum `64`. |
 | `oxplow.injectSessionContext` | `true` | Whether oxplow prepends the session-context block (stream / worktree / branch / thread) to the agent's prompt. |
 | `oxplow.agentPromptAppend` | *empty* | Free text appended to every agent system prompt for this project. |
-| `oxplow.agentConfig` | *empty* | Per-harness declared settings, such as `opencode: { model: github-copilot/gpt-5-mini }`. |
-| `oxplow.ai.roles` | *empty* | This project's [AI role](../guide/ai-models.md) assignments, over your own, e.g. `summarize: { provider: openrouter, model: openai/gpt-5-mini }`. Add `restrict: [tools, sql, streaming, images]` to forbid a role's model any of those. |
+| `oxplow.agents.<harness>.<option>` | declared by the harness | One independent agent preference, such as `oxplow.agents.opencode.model`. |
+| `oxplow.ai.roles.<role>` | *unset* | One atomic [AI role](../guide/ai-models.md) binding: `{ provider: openrouter, model: openai/gpt-5-mini }`, with optional `restrict: [tools, sql, streaming, images]`. Each role inherits independently. Extension profile keys end in `<namespace>.<profile>`. |
+| `oxplow.ai.<provider>.enabled` | `false` | Enable the one connection for a declared AI provider. |
+| `oxplow.ai.<provider>.baseUrl` | empty | Override that provider's default endpoint. |
+| `oxplow.ai.<provider>.apiKey` | *unset* | Secret API key, bound to the endpoint where it was saved. |
 | `oxplow.lsp.servers` | *empty* | Per-project language-server pins. |
 | `oxplow.iconTint` | *unset* | Hex colour composited behind this project's app icon, so concurrent windows are tellable apart. See below. |
-| `oxplow.extensions` | `[oxplow-bundled]` | The extensions on for the whole team. `oxplow-foundation` is always on and never listed. |
-| `oxplow.disableExtensions` | *empty* | Extensions off for the whole team, even one sitting in `.oxplow/extensions/`. A person's `oxplow.enableExtensions` turns one back on for them. |
+| `oxplow.extensions.<name>.enabled` | declared per extension | Enable one extension. Foundation is required and always on. |
 | `oxplow.extensionSources` | *empty* | Where an extension's source is when it isn't `.oxplow/extensions/<name>/`: `{ <name>: <folder> }`. |
-| `oxplow.enableBundledExtensions` | `true` | `false` runs oxplow's own extensions from their `oxplow.extensionSources` folders, deployed like any extension, instead of the copies built into oxplow — how oxplow develops itself. Honored only by a development build; read when oxplow starts. A local override may set it too. |
+
+Development builds use `OXPLOW_EXTENSIONS_FROM_SOURCE=true` to read oxplow's
+own extension sources. This is a process environment option.
+
+The old aggregate provider, role, agent and extension-list keys are unregistered.
+There is no automatic migration: choose each replacement preference explicitly.
 
 #### `oxplow.iconTint`
 

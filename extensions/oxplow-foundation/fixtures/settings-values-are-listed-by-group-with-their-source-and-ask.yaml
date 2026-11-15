@@ -1,12 +1,12 @@
-# Registry metadata supplies the category and every row names an explicit write level.
+# The full registry inventory supplies metadata, effective source and level overrides.
 when: { page: settings, params: { q: oxplow.snapshots.retentionDays } }
 expect:
   loaders:
     settings_values:
       rows:
         - key: oxplow.snapshots.retentionDays
-          grp: snapshots
-          source: default
+          category: snapshots
+          origin: default
 steps:
   - given:
       - command: oxplow.config.set
@@ -15,6 +15,6 @@ steps:
   - expect:
       loaders:
         settings_values:
-          rows: [{ key: oxplow.snapshots.retentionDays, source: local, value: '14' }]
+          rows: [{ key: oxplow.snapshots.retentionDays, origin: local, value: '14', local_status: set }]
   - params: { q: no such setting anywhere }
     expect: { loaders: { settings_values: { rows: 0 } } }
