@@ -20,6 +20,8 @@ pub enum ChosenBy {
     Personal,
     /// The project's `activeProviders`.
     Project,
+    /// The machine-global preference.
+    Global,
     /// Nothing chose: the capability's default.
     Default,
     /// The choice isn't available (its extension is disabled, its
@@ -32,6 +34,7 @@ impl ChosenBy {
         match self {
             ChosenBy::Personal => "personal",
             ChosenBy::Project => "project",
+            ChosenBy::Global => "global",
             ChosenBy::Default => "default",
             ChosenBy::Fallback => "fallback",
         }

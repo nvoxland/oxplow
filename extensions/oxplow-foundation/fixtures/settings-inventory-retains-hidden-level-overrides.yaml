@@ -1,0 +1,14 @@
+given:
+  - command: oxplow.config.set
+    input: { key: oxplow.snapshots.retentionDays, value: 30, level: global }
+  - command: oxplow.config.set
+    input: { key: oxplow.snapshots.retentionDays, value: 14, level: project }
+  - command: oxplow.config.set
+    input: { key: oxplow.snapshots.retentionDays, value: 3, level: local }
+when:
+  sql: |
+    SELECT value, origin, local_value, project_value, global_value, unavailable
+    FROM v_config_value WHERE key = 'oxplow.snapshots.retentionDays'
+expect:
+  rows:
+    - { value: '3', origin: local, local_value: '3', project_value: '14', global_value: '30', unavailable: 0 }

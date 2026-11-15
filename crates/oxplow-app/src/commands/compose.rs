@@ -122,6 +122,8 @@ pub struct Compose {
     pub compose: Arc<Composer>,
     /// Called after all its steps landed (an extension script's `finish`).
     pub finish: Option<Arc<Finisher>>,
+    /// Native API result: keep child details in audit, return only the finished value.
+    pub(crate) transparent_result: bool,
 }
 
 impl Compose {
@@ -130,12 +132,28 @@ impl Compose {
         Handler::Compose(Arc::new(Compose {
             compose,
             finish: None,
+            transparent_result: false,
         }))
     }
 
     /// The composite over `compose`, whose run `finish` answers.
     pub fn handler_finishing(compose: Arc<Composer>, finish: Option<Arc<Finisher>>) -> Handler {
-        Handler::Compose(Arc::new(Compose { compose, finish }))
+        Handler::Compose(Arc::new(Compose {
+            compose,
+            finish,
+            transparent_result: false,
+        }))
+    }
+
+    pub(crate) fn handler_finishing_transparent(
+        compose: Arc<Composer>,
+        finish: Arc<Finisher>,
+    ) -> Handler {
+        Handler::Compose(Arc::new(Compose {
+            compose,
+            finish: Some(finish),
+            transparent_result: true,
+        }))
     }
 }
 

@@ -171,10 +171,10 @@ impl ConfigTarget {
 /// Validate the whole typed core projection before any file write.
 pub(super) fn preflight(
     target: &ConfigTarget,
+    store: &oxplow_config::settings::SettingsStore,
     changes: &[(String, Option<Value>)],
     level: Level,
 ) -> Result<(), CommandError> {
-    let store = target.settings()?;
     let fail = |e: oxplow_config::settings::SettingsError| CommandError::Invalid {
         field: Some("/value".into()),
         message: e.to_string(),
@@ -299,7 +299,7 @@ pub(crate) fn change(
             store.validate(key, v).map_err(fail)?;
         }
     }
-    preflight(target, &changes, layer.level())?;
+    preflight(target, &store, &changes, layer.level())?;
     let mut inverses = Vec::new();
     let mut events = Vec::new();
     let mut writes = Vec::new();
@@ -342,33 +342,44 @@ pub(crate) fn change(
     let inverse = if inverses.len() == 1 {
         inverses.pop()
     } else {
+        let mut set = serde_json::Map::new();
+        let mut unset = Vec::new();
+        for inverse in inverses {
+            let key = inverse.input["key"]
+                .as_str()
+                .expect("setting key")
+                .to_owned();
+            if inverse.name == SET {
+                set.insert(key, inverse.input["value"].clone());
+            } else {
+                unset.push(key);
+            }
+        }
         Some(CommandCall {
-            name: "oxplow.command.sequence".into(),
-            input: json!({"calls":inverses}),
+            name: "oxplow.config.update".into(),
+            input: json!({"set":set,"unset":unset,"level":layer.level()}),
         })
     };
-    let target = target.clone();
+    // The file is an external system: complete its one atomic replacement
+    // before the bus records success, events or undo.
+    store.update(&writes, layer.level()).map_err(fail)?;
+    target.refresh()?;
     Ok(HandlerOutput {
         result: json!({"changed":true}),
         inverse,
         events,
-        after_commit: Some(Box::new(move || {
-            for (key, value) in writes {
-                let result = match value {
-                    Some(value) => store.set(&key, value, layer.level()),
-                    None => store.unset(&key, layer.level()),
-                };
-                if let Err(error) = result {
-                    tracing::error!(%error, "committed domain settings could not be stored");
-                    return;
-                }
-            }
-            if let Err(error) = target.refresh() {
-                tracing::error!(%error, "committed domain settings could not be applied");
-            }
-        })),
         ..Default::default()
     })
+}
+
+pub(super) fn settings_handler(
+    action: impl Fn(&Actor, Value) -> Result<HandlerOutput, CommandError> + Send + Sync + 'static,
+) -> Handler {
+    let action = Arc::new(action);
+    Handler::External(Arc::new(move |invocation, input| {
+        let action = action.clone();
+        Box::pin(async move { action(invocation.actor(), input) })
+    }))
 }
 
 /// The four `config.*` commands over `target`.
@@ -381,7 +392,7 @@ pub fn ops(target: ConfigTarget) -> Vec<Op> {
             "mark_generated",
             schema::<MarkGeneratedInput>(),
             true,
-            Handler::Tx(Arc::new(move |ctx: &super::TxCtx<'_>, input| {
+            settings_handler(move |actor, input| {
                 let input: MarkGeneratedInput = parse(input)?;
                 let entry = input.entry.trim().trim_matches('/').to_string();
                 if entry.is_empty() {
@@ -406,12 +417,12 @@ pub fn ops(target: ConfigTarget) -> Vec<Op> {
                 }
                 change(
                     &t,
-                    ctx.actor(),
+                    actor,
                     "generated.exclude",
                     Some(json!(exclude)),
                     Layer::Project,
                 )
-            })),
+            }),
         )
     };
     let choose_provider = {
@@ -421,7 +432,7 @@ pub fn ops(target: ConfigTarget) -> Vec<Op> {
             "choose_provider",
             schema::<ChooseProviderInput>(),
             true,
-            Handler::Tx(Arc::new(move |ctx: &super::TxCtx<'_>, input| {
+            settings_handler(move |actor, input| {
                 let input: ChooseProviderInput = parse(input)?;
                 let capability = input.capability.trim().to_string();
                 if capability.is_empty() {
@@ -430,32 +441,28 @@ pub fn ops(target: ConfigTarget) -> Vec<Op> {
                         message: "name a capability".into(),
                     });
                 }
-                let mut chosen: serde_json::Map<String, Value> = input
-                    .level
-                    .value(&t.settings()?, "activeProviders")?
-                    .and_then(|v| v.as_object().cloned())
-                    .unwrap_or_default();
-                match input
+                if !oxplow_domain::capability::spec(&capability).is_some_and(|spec| spec.choosable)
+                {
+                    return Err(CommandError::Invalid {
+                        field: Some("/capability".into()),
+                        message: "name a choosable capability".into(),
+                    });
+                }
+                let provider = input
                     .provider
                     .as_deref()
                     .map(str::trim)
-                    .filter(|p| !p.is_empty())
-                {
-                    Some(provider) => {
-                        chosen.insert(capability, Value::String(provider.to_string()));
-                    }
-                    None => {
-                        chosen.remove(&capability);
-                    }
-                }
+                    .filter(|provider| !provider.is_empty());
+                // Each capability is independent. Reset removes just this
+                // scalar override and exposes its inherited choice.
                 change(
                     &t,
-                    ctx.actor(),
-                    "activeProviders",
-                    Some(Value::Object(chosen)),
+                    actor,
+                    &format!("activeProviders.{capability}"),
+                    provider.map(|provider| json!(provider)),
                     input.level,
                 )
-            })),
+            }),
         )
     };
     let choose_replacement = {
@@ -465,7 +472,7 @@ pub fn ops(target: ConfigTarget) -> Vec<Op> {
             "choose_replacement",
             schema::<ChooseReplacementInput>(),
             true,
-            Handler::Tx(Arc::new(move |ctx: &super::TxCtx<'_>, input| {
+            settings_handler(move |actor, input| {
                 let input: ChooseReplacementInput = parse(input)?;
                 let target = input.target.trim().to_string();
                 if target.is_empty() {
@@ -493,12 +500,12 @@ pub fn ops(target: ConfigTarget) -> Vec<Op> {
                 }
                 change(
                     &t,
-                    ctx.actor(),
+                    actor,
                     "replacements",
                     Some(Value::Object(chosen)),
                     Layer::Project,
                 )
-            })),
+            }),
         )
     };
     let mut ops = super::settings_commands::ops(target_for_settings);
@@ -593,10 +600,10 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn higher_overrides_cannot_hide_invalid_shared_writes() {
         let (_dir, target, bus) = setup();
-        let key = "oxplow.activeProviders";
+        let key = "oxplow.replacements";
         let store = target.settings().unwrap();
         store
-            .set(key, json!({"snapshots":"hashes"}), Level::Local)
+            .set(key, json!({"task.board":"oxplow"}), Level::Local)
             .unwrap();
         target.refresh().unwrap();
         for (level, label) in [(Level::Project, "project"), (Level::Global, "global")] {
@@ -606,7 +613,7 @@ mod tests {
                 .run(
                     &Actor::Human,
                     SET,
-                    json!({"key":key,"value":{"vcs":"invalid"},"level":label}),
+                    json!({"key":key,"value":{"unknown.target":"invalid"},"level":label}),
                     false
                 )
                 .await
@@ -616,8 +623,8 @@ mod tests {
             assert!(bus
                 .run(
                     &Actor::Human,
-                    "oxplow.capability.choose",
-                    json!({"capability":"vcs","provider":"invalid","level":label}),
+                    "oxplow.replacement.choose",
+                    json!({"target":"unknown.target","whose":"invalid"}),
                     false
                 )
                 .await
@@ -626,18 +633,18 @@ mod tests {
         }
         assert_eq!(
             store.get(key, Some(Level::Local)).unwrap().value,
-            Some(json!({"snapshots":"hashes"}))
+            Some(json!({"task.board":"oxplow"}))
         );
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn settings_whole_maps_replace_and_canonical_undo_restores_the_layer() {
         let (_, target, bus) = setup();
-        let key = "oxplow.activeProviders";
+        let key = "oxplow.replacements";
         bus.run(
             &Actor::Human,
             SET,
-            json!({"key":key,"value":{"snapshots":"hashes"},"level":"global"}),
+            json!({"key":key,"value":{"task.board":"oxplow"},"level":"global"}),
             false,
         )
         .await
@@ -651,7 +658,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(target.config.read().unwrap().active_providers.is_empty());
+        assert!(target.config.read().unwrap().replacements.is_empty());
         let inverse = out.inverse.unwrap();
         assert_eq!(inverse.input["level"], "local");
         bus.run(&Actor::Human, &inverse.name, inverse.input, false)
@@ -661,8 +668,8 @@ mod tests {
             .config
             .read()
             .unwrap()
-            .active_providers
-            .contains_key("snapshots"));
+            .replacements
+            .contains_key("task.board"));
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -864,40 +871,33 @@ mod tests {
         );
     }
 
-    #[test]
-    fn domain_settings_are_retry_safe_and_use_registered_leaf_storage() {
+    #[tokio::test]
+    async fn domain_settings_complete_external_writes_before_reporting_success() {
         let (dir, target, _) = setup();
-        let run = oxplow_domain::run::RunContext::core(
-            Actor::Human,
-            oxplow_domain::run::Mode::Transactional,
-        );
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        let vocabulary = oxplow_domain::vocabulary::Vocabulary::core();
-        let ctx = super::super::TxCtx {
-            conn: &conn,
-            run: &run,
-            events: oxplow_db::EventCtx::system(&vocabulary, "test"),
-            confirmed: true,
-            may_write: None,
-            depth: 0,
-            trace: &Default::default(),
-        };
+        let run =
+            oxplow_domain::run::RunContext::core(Actor::Human, oxplow_domain::run::Mode::External);
         let op = ops(target)
             .into_iter()
             .find(|op| op.name == "mark_generated")
             .unwrap();
-        let Handler::Tx(handler) = op.handler else {
-            panic!("domain action must be pure until commit")
+        let Handler::External(handler) = op.handler else {
+            panic!("settings writes must run outside the database transaction")
         };
-        let first = handler(&ctx, json!({"entry":"dist"})).unwrap();
-        drop(first);
-        assert!(!dir.path().join(".oxplow/project.yaml").exists());
-        let second = handler(&ctx, json!({"entry":"dist"})).unwrap();
-        (second.after_commit.unwrap())();
-        assert!(
-            std::fs::read_to_string(dir.path().join(".oxplow/project.yaml"))
-                .unwrap()
-                .contains("oxplow.generated.exclude:")
-        );
+        let invocation = super::super::Invocation {
+            run,
+            idempotency_key: None,
+            confirmed: true,
+        };
+        let first = handler(invocation.clone(), json!({"entry":"dist"}))
+            .await
+            .unwrap();
+        assert!(first.after_commit.is_none());
+        assert!(first.inverse.is_some());
+        let path = dir.path().join(".oxplow/project.yaml");
+        let before = std::fs::read_to_string(&path).unwrap();
+        assert!(before.contains("oxplow.generated.exclude:"));
+        let second = handler(invocation, json!({"entry":"dist"})).await.unwrap();
+        assert_eq!(second.result["changed"], false);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
     }
 }

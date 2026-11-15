@@ -1,0 +1,27 @@
+given:
+  - command: oxplow.config.set
+    input: { key: oxplow.agents, value: [claude, codex, opencode], level: project }
+  - command: oxplow.config.set
+    input: { key: oxplow.agents, value: [codex], level: local }
+  - command: oxplow.config.set
+    input: { key: oxplow.agentPromptAppend, value: Shared prompt., level: project }
+  - command: oxplow.config.set
+    input: { key: oxplow.agentPromptAppend, value: Private prompt., level: local }
+  - command: oxplow.config.set
+    input: { key: oxplow.agentConfig, value: { opencode: { model: shared-model } }, level: project }
+  - command: oxplow.config.set
+    input: { key: oxplow.agentConfig, value: { opencode: { model: private-model } }, level: local }
+when: { page: settings, params: { area: agents } }
+expect:
+  loaders:
+    agents_list:
+      rows:
+        contains:
+          - { id: claude, state: on, effective_state: off, priority: 1 }
+          - { id: codex, state: on, effective_state: on, priority: 2 }
+          - { id: opencode, state: on, effective_state: off, priority: 3 }
+    agents_prompt:
+      rows: [{ text: Shared prompt., effective_text: Private prompt., origin: local }]
+    agents_settings:
+      rows:
+        contains: [{ agent: opencode, key: model, value: shared-model, effective_value: private-model, origin: local }]

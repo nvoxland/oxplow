@@ -522,6 +522,13 @@ extension's `source:<project>:<ext>:<name>` accounts. An extension's
 command declared over its provider's operation runs on the instance its
 input names (`instance`, else its `uri`'s, else the default).
 
+Capability preferences are independent scalar settings
+`oxplow.activeProviders.<capability>`, not an atomic map. Local reset exposes the
+project/global choice for that capability. Runtime resolution records whether
+the winning preference was local, project or global. Removing an instance clears
+only scalar choices at its own configuration level that name that instance;
+other levels and capabilities remain intact.
+
 **Scope**. Instance definitions are the ordinary atomic setting
 `oxplow.extensionInstances`, stored in local/project/global YAML through the
 shared settings service. A local map wins over a project map, then a global map;
@@ -765,7 +772,7 @@ deployment, credentials, health). The config object is the provider's
 instances matching the config. Extension activation is the only thing that
 starts or replaces them: `initialize` at boot, then a generation on the
 extension catalog's change signal and on an `extensionInstances` /
-`activeProviders` change (the `config.providers` reactor on `config.changed`).
+`oxplow.activeProviders.*` change (the `config.providers` reactor on `config.changed`).
 `ProviderRegistry::reconcile()` is only the request for a generation. A
 generation starts every enabled instance that isn't already running unchanged
 and stops the rest. A running instance whose identity is the same in the new

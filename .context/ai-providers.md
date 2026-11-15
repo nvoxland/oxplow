@@ -55,6 +55,10 @@ What can be called, as of 2026-09:
 
 - Provider keys are secret registry settings, registered dynamically by
   `ai_service::provider_key_definition`: `oxplow.ai.providerKeys.<hex provider id>`.
+  Their registry owner is `core` and their display category is `ai`; an extension
+  composer cannot write them. Duplicate provider IDs in a file do not prevent
+  registry construction or repair, while generic provider-list writes reject
+  duplicate IDs before mutation.
   They use the shared keychain backend, with local/project identity including
   the project and global identity independent of it. Tests use `MemorySecrets`.
   A provider with no key can call a local server without authentication. No key
@@ -64,6 +68,11 @@ What can be called, as of 2026-09:
   key and normalized endpoint (empty for the kind's default). A connection
   pointed at another host gets no key; the call asks to re-save the provider in
   Settings → AI. Saving a provider rebinds a kept key to its current URL.
+  Provider/role display rows remain readable when a binding is obsolete or the
+  secure backend is unavailable; `key_set` means a usable key is available and
+  is false on these failures. This display fallback does not apply to actual
+  authentication or direct config reads, which still refuse the failure. The
+  shared settings inventory separately marks unavailable credential rows.
 - **A provider's `kind:` is a declared model provider**: an
   `ai_provider` implementation an extension declares, registered in
   `ModelProviders` under its declared id. `oxplow-foundation` declares one

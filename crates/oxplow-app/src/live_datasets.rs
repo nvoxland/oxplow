@@ -121,6 +121,10 @@ pub fn columns(name: &str) -> &'static [&'static str] {
             "owner",
             "restart_required",
             "ui",
+            "local_value",
+            "project_value",
+            "global_value",
+            "unavailable",
         ],
         "agent_conversation" => &[
             "stream_id",
@@ -911,14 +915,17 @@ impl LiveSources {
         .map_err(|error| DomainError::Storage(error.to_string()))?;
         Ok(inventory
             .into_iter()
-            .map(|s| {
+            .map(|row| {
+                let [local, project, global] = row.overrides;
+                let s = row.setting;
                 let d = s.definition;
                 vec![
                     text(d.key),
                     s.value.as_ref().map(json).unwrap_or(SqlCell::Null(())),
-                    text(wire_name(
-                        &s.origin.unwrap_or(oxplow_config::settings::Origin::Default),
-                    )),
+                    s.origin
+                        .as_ref()
+                        .map(|origin| text(wire_name(origin)))
+                        .unwrap_or(SqlCell::Null(())),
                     if d.owner == "core" {
                         SqlCell::Null(())
                     } else {
@@ -933,6 +940,10 @@ impl LiveSources {
                     text(d.owner),
                     SqlCell::Int(i64::from(d.restart_required)),
                     json(&d.ui),
+                    local.as_ref().map(json).unwrap_or(SqlCell::Null(())),
+                    project.as_ref().map(json).unwrap_or(SqlCell::Null(())),
+                    global.as_ref().map(json).unwrap_or(SqlCell::Null(())),
+                    SqlCell::Int(i64::from(s.unavailable)),
                 ]
             })
             .collect())

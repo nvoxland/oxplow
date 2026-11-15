@@ -60,6 +60,7 @@ async fn a_busy_tx_handler_is_retried_then_reported_as_busy() {
             )));
         }
         Ok(HandlerOutput {
+            caller_result: None,
             result: json!({ "attempt": n }),
             inverse: None,
             events: Vec::new(),
@@ -148,6 +149,7 @@ fn kv_set() -> Handler {
             });
         }
         Ok(HandlerOutput {
+            caller_result: None,
             result: json!({ "k": k, "v": v }),
             inverse: Some(CommandCall {
                 name: "oxplow.kv.set".into(),
@@ -629,6 +631,7 @@ fn kv_unchanged() -> Handler {
             Vec::new()
         };
         Ok(HandlerOutput {
+            caller_result: None,
             result: json!({ "k": k }),
             inverse: None,
             events,

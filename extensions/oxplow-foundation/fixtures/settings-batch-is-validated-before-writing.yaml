@@ -1,0 +1,21 @@
+when:
+  command: oxplow.config.update
+  input:
+    level: project
+    set:
+      oxplow.snapshots.retentionDays: 14
+      oxplow.generated.exclude: [build]
+expect: { ok: true }
+steps:
+  - when:
+      command: oxplow.config.update
+      input:
+        level: project
+        set:
+          oxplow.snapshots.retentionDays: 3
+          oxplow.generated.exclude: invalid
+    expect: { ok: false }
+  - when:
+      command: oxplow.config.get
+      input: { key: oxplow.snapshots.retentionDays, level: project }
+    expect: { ok: true, result: { value: 14 } }

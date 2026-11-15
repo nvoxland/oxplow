@@ -19,8 +19,9 @@ loaders:
   settings_values:
     sql: |
       WITH s AS (
-        SELECT c.key, c.doc, c.origin, c.extension, c.category, c.title,
-               CASE WHEN c.secret THEN CASE WHEN c.is_set THEN 'Set' ELSE 'Not set' END
+        SELECT c.key, c.doc, c.origin, c.extension, c.category, c.title, c.unavailable,
+               CASE WHEN c.unavailable THEN 'Unavailable'
+                    WHEN c.secret THEN CASE WHEN c.is_set THEN 'Set' ELSE 'Not set' END
                     WHEN c.value IS NULL OR c.value = 'null' THEN '—'
                     WHEN json_type(c.value) = 'text' THEN
                       CASE WHEN json_extract(c.value, '$') = '' THEN '""' ELSE json_extract(c.value, '$') END
@@ -31,7 +32,7 @@ loaders:
                c.value AS raw
         FROM v_config_value c
       )
-      SELECT key, category AS grp, coalesce(origin, 'default') AS source,
+      SELECT key, category AS grp, CASE WHEN unavailable THEN 'unavailable' ELSE coalesce(origin, 'default') END AS source,
              shown AS value, doc,
              CASE WHEN area IS NULL THEN NULL ELSE 'Change It Here' END AS control,
              CASE WHEN area IS NULL THEN NULL
@@ -47,30 +48,46 @@ loaders:
       ORDER BY category, key
   agents_list:
     sql: |
+      WITH chosen AS (
+        SELECT coalesce(project_value, global_value,
+          (SELECT json_group_array(id ORDER BY id) FROM v_agent_harness)) AS agents
+        FROM v_config_value WHERE key = 'oxplow.agents'
+      ), h AS (
+        SELECT a.*, j.key IS NOT NULL AS project_enabled,
+               coalesce(j.key, 1000000) AS project_position
+        FROM v_agent_harness a LEFT JOIN json_each((SELECT agents FROM chosen)) j ON j.value = a.id
+      )
       SELECT h.id, h.title,
-             CASE WHEN h.enabled THEN 'on' ELSE 'off' END AS state,
-             CASE WHEN h.enabled THEN h.position + 1 END AS priority,
-             h.enabled AND (SELECT count(*) FROM v_agent_harness WHERE enabled = 1) > 1 AS can_disable,
-             NOT h.enabled AS can_enable,
-             h.enabled AND h.position > 0 AS can_up,
-             h.enabled AND h.position < (SELECT count(*) FROM v_agent_harness WHERE enabled = 1) - 1 AS can_down,
-             json_insert((SELECT json_group_array(x.id ORDER BY x.position) FROM v_agent_harness x WHERE x.enabled = 1), '$[#]', h.id) AS with_it,
-             (SELECT json_group_array(x.id ORDER BY x.position) FROM v_agent_harness x WHERE x.enabled = 1 AND x.id <> h.id) AS without_it,
-             (SELECT json_group_array(x.id ORDER BY CASE WHEN x.id = h.id THEN x.position - 1.5 ELSE x.position END)
-                FROM v_agent_harness x WHERE x.enabled = 1) AS moved_up,
-             (SELECT json_group_array(x.id ORDER BY CASE WHEN x.id = h.id THEN x.position + 1.5 ELSE x.position END)
-                FROM v_agent_harness x WHERE x.enabled = 1) AS moved_down
-      FROM v_agent_harness h
-      ORDER BY h.position
+             CASE WHEN h.project_enabled THEN 'on' ELSE 'off' END AS state,
+             CASE WHEN h.project_enabled THEN h.project_position + 1 END AS priority,
+             CASE WHEN h.enabled THEN 'on' ELSE 'off' END AS effective_state,
+             h.project_enabled AND (SELECT count(*) FROM h WHERE project_enabled) > 1 AS can_disable,
+             NOT h.project_enabled AS can_enable,
+             h.project_enabled AND h.project_position > 0 AS can_up,
+             h.project_enabled AND h.project_position < (SELECT count(*) FROM h WHERE project_enabled) - 1 AS can_down,
+             json_insert((SELECT json_group_array(x.id ORDER BY x.project_position) FROM h x WHERE x.project_enabled), '$[#]', h.id) AS with_it,
+             (SELECT json_group_array(x.id ORDER BY x.project_position) FROM h x WHERE x.project_enabled AND x.id <> h.id) AS without_it,
+             (SELECT json_group_array(x.id ORDER BY CASE WHEN x.id = h.id THEN x.project_position - 1.5 ELSE x.project_position END)
+                FROM h x WHERE x.project_enabled) AS moved_up,
+             (SELECT json_group_array(x.id ORDER BY CASE WHEN x.id = h.id THEN x.project_position + 1.5 ELSE x.project_position END)
+                FROM h x WHERE x.project_enabled) AS moved_down
+      FROM h ORDER BY h.project_position, h.id
   agents_settings:
     sql: |
+      WITH project_agents AS (
+        SELECT coalesce(project_value, global_value,
+          (SELECT json_group_array(id ORDER BY id) FROM v_agent_harness)) AS agents
+        FROM v_config_value WHERE key = 'oxplow.agents'
+      )
       SELECT h.id AS agent, json_extract(s.value, '$.key') AS key,
              h.title || ' — ' || json_extract(s.value, '$.title') AS setting,
-             coalesce(json_extract(json_extract(c.value, '$'), '$.' || h.id || '.' || json_extract(s.value, '$.key')), '') AS value,
+             coalesce(json_extract(coalesce(c.project_value, c.global_value, '{}'), '$.' || h.id || '.' || json_extract(s.value, '$.key')), '') AS value,
+             coalesce(json_extract(c.value, '$.' || h.id || '.' || json_extract(s.value, '$.key')), '') AS effective_value,
+             c.origin,
              json_extract(s.value, '$.hint') AS hint
       FROM v_agent_harness h, json_each(h.settings) s
       LEFT JOIN v_config_value c ON c.key = 'oxplow.agentConfig'
-      WHERE h.enabled = 1
+      WHERE h.id IN (SELECT value FROM json_each((SELECT agents FROM project_agents)))
       ORDER BY h.position, s.key
   agents_new_thread:
     sql: |
@@ -88,7 +105,9 @@ loaders:
       ORDER BY v.ord
   agents_prompt:
     sql: |
-      SELECT coalesce((SELECT json_extract(value, '$') FROM v_config_value WHERE key = 'oxplow.agentPromptAppend'), '') AS text
+      SELECT coalesce(json_extract(coalesce(project_value, global_value), '$'), '') AS text,
+             coalesce(json_extract(value, '$'), '') AS effective_text, origin
+      FROM v_config_value WHERE key = 'oxplow.agentPromptAppend'
   lsp_servers:
     sql: |
       SELECT s.language_id AS language,
@@ -156,9 +175,13 @@ loaders:
       SELECT namespace || '/' || local AS effect, extension FROM v_contribution WHERE kind = 'effect' ORDER BY 1
   capabilities:
     sql: |
-      WITH proj AS (SELECT coalesce((SELECT value FROM v_config_value WHERE key = 'oxplow.activeProviders' AND origin = 'project'), '{}') AS j),
-           me AS (SELECT coalesce((SELECT value FROM v_config_value WHERE key = 'oxplow.activeProviders' AND origin = 'local'), '{}') AS j),
-           p AS (SELECT * FROM v_capability_provider WHERE choosable = 1)
+      WITH p AS (SELECT * FROM v_capability_provider WHERE choosable = 1),
+           choices AS (
+             SELECT substr(key, length('oxplow.activeProviders.') + 1) AS capability,
+                    json_extract(coalesce(project_value, global_value), '$') AS project_choice,
+                    json_extract(local_value, '$') AS local_choice, origin
+             FROM v_config_value WHERE key LIKE 'oxplow.activeProviders.%'
+           )
       SELECT p.capability, p.capability_title AS capability_title, p.provider, p.title,
              CASE
                WHEN p.capability = 'snapshots' AND json_extract(p.features, '$.contents') = 1 THEN 'reads any file at any point; grows the blob store'
@@ -169,17 +192,18 @@ loaders:
                (SELECT group_concat(l.title, ', ') FROM v_page l WHERE EXISTS
                   (SELECT 1 FROM json_each(l.needs) n WHERE n.value = p.capability OR n.value LIKE p.capability || '.%'))
              END AS turns_off,
-             trim(CASE WHEN p.active = 1 THEN 'Active. ' || CASE p.chosen_by WHEN 'personal' THEN 'Your own choice.' WHEN 'project' THEN 'The project''s choice.'
-                         WHEN 'fallback' THEN 'The chosen one isn''t available (its extension is disabled or its instance isn''t running).' ELSE 'The default.' END
+             trim(CASE WHEN p.active = 1 THEN 'Active. ' || CASE WHEN p.chosen_by = 'fallback' THEN 'The chosen one is unavailable.'
+                         WHEN choices.origin = 'local' THEN 'Your own choice.' WHEN choices.origin = 'project' THEN 'The project''s choice.' WHEN choices.origin = 'global' THEN 'Your global choice.'
+                         ELSE 'The default.' END
                        ELSE '' END
-                  || CASE WHEN json_extract((SELECT j FROM proj), '$.' || p.capability) = p.provider THEN ' The project uses it.' ELSE '' END
-                  || CASE WHEN json_extract((SELECT j FROM me), '$.' || p.capability) = p.provider THEN ' You use it.' ELSE '' END) AS standing,
+                  || CASE WHEN choices.project_choice = p.provider THEN ' The project uses it.' ELSE '' END
+                  || CASE WHEN choices.local_choice = p.provider THEN ' You use it.' ELSE '' END) AS standing,
              CASE WHEN p.active = 1 THEN 'success' END AS tone,
-             1 AS can_choose, 0 AS is_default
-      FROM p WHERE p.available = 1
+             1 AS can_choose, 0 AS is_default, choices.project_choice, choices.local_choice
+      FROM p LEFT JOIN choices ON choices.capability = p.capability WHERE p.available = 1
       UNION ALL
       SELECT d.capability, d.capability_title, '', 'The default', NULL, NULL, NULL,
-             'Resets a choice.', NULL, 0, 1
+             'Inherits the choice from the next level.', NULL, 0, 1, NULL, NULL
       FROM (SELECT DISTINCT capability, capability_title FROM p) d
       ORDER BY 1, 11 DESC, 4
   knowledge_stores:
@@ -303,7 +327,7 @@ view:
       title: Agents
       stack:
       - id: agents-list
-        title: Agents
+        title: Project agents
         from: agents_list
         viz: table
         columns:
@@ -315,6 +339,8 @@ view:
         - key: priority
           label: Priority
           width: 90
+        - key: effective_state
+          label: Effective state
         empty: No agents are registered.
         actions:
         - id: enable
@@ -346,7 +372,7 @@ view:
           row: true
           when: can_down
       - id: agents-settings
-        title: Agent settings
+        title: Project agent settings
         from: agents_settings
         viz: table
         columns:
@@ -354,6 +380,8 @@ view:
           label: Setting
         - key: value
           label: Value
+        - key: effective_value
+          label: Effective value
         - key: hint
           label: What it does
         empty: No enabled agent declares a setting.
@@ -392,14 +420,15 @@ view:
           when: can_use
         - id: ask
           label: Use This
-          command: oxplow.config.unset
+          command: oxplow.config.set
           input:
             key: oxplow.newThreadSession
+            value: ask
             level: local
           row: true
           when: can_ask
       - id: agents-prompt
-        title: Agent prompt additions
+        title: Project agent prompt additions
         from: agents_prompt
         viz: form
         form:
@@ -635,7 +664,7 @@ view:
             provider: '{{row.provider}}'
             level: local
         - id: default-project
-          label: Use the Default for the Project
+          label: Inherit the Choice for the Project
           command: oxplow.capability.choose
           row: true
           when: is_default

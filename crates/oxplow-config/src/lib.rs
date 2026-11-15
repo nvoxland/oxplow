@@ -752,6 +752,9 @@ pub struct OxplowConfig {
     /// `.oxplow/local.yaml`), over the project's.
     #[serde(rename = "personalActiveProviders")]
     pub personal_active_providers: std::collections::BTreeMap<String, String>,
+    /// Resolved origin of each independently registered capability preference.
+    #[serde(rename = "activeProviderOrigins", default)]
+    pub active_provider_origins: std::collections::BTreeMap<String, String>,
     /// What a new thread starts with, a person's own (`newThreadSession`
     /// in `.oxplow/local.yaml`): `ask` (the session picker), `none`, or
     /// an agent (a harness's key). Unset means `ask`.
@@ -1295,6 +1298,35 @@ pub fn load_project_config_with_global(
     let doc =
         core_settings::project_document(&store).map_err(|e| ConfigError::Invalid(e.to_string()))?;
     let mut config = parse_project_config(doc, &fallback)?;
+    for capability in oxplow_domain::capability::choosable() {
+        let setting = store
+            .get(
+                &core_settings::canonical_key(&format!("activeProviders.{}", capability.id)),
+                None,
+            )
+            .map_err(|error| ConfigError::Invalid(error.to_string()))?;
+        if let Some(origin) = setting.origin {
+            let origin = match origin {
+                settings::Origin::Local => "local",
+                settings::Origin::Project => "project",
+                settings::Origin::Global => "global",
+                settings::Origin::Default => "default",
+            };
+            config
+                .active_provider_origins
+                .insert(capability.id.into(), origin.into());
+            if origin == "local" {
+                if let Some(provider) = setting
+                    .value
+                    .and_then(|value| value.as_str().map(str::to_owned))
+                {
+                    config
+                        .personal_active_providers
+                        .insert(capability.id.into(), provider);
+                }
+            }
+        }
+    }
     config.personal_new_thread_session = store
         .get("oxplow.newThreadSession", None)
         .map_err(|e| ConfigError::Invalid(e.to_string()))?
@@ -1781,6 +1813,7 @@ fn default_config(project_name: String) -> OxplowConfig {
         extension_instances: std::collections::BTreeMap::new(),
         active_providers: std::collections::BTreeMap::new(),
         personal_active_providers: std::collections::BTreeMap::new(),
+        active_provider_origins: std::collections::BTreeMap::new(),
         personal_new_thread_session: None,
         replacements: std::collections::BTreeMap::new(),
         event_retention: std::collections::BTreeMap::new(),
@@ -2237,6 +2270,7 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         extension_instances,
         active_providers,
         personal_active_providers: std::collections::BTreeMap::new(),
+        active_provider_origins: std::collections::BTreeMap::new(),
         personal_new_thread_session: None,
         replacements,
         event_retention,

@@ -784,7 +784,18 @@ impl CapabilityRegistry {
         } else if let Some(id) = config.personal_active_providers.get(capability) {
             (id.clone(), ChosenBy::Personal)
         } else if let Some(id) = config.active_providers.get(capability) {
-            (id.clone(), ChosenBy::Project)
+            (
+                id.clone(),
+                if config
+                    .active_provider_origins
+                    .get(capability)
+                    .is_some_and(|origin| origin == "global")
+                {
+                    ChosenBy::Global
+                } else {
+                    ChosenBy::Project
+                },
+            )
         } else {
             (spec.default.to_string(), ChosenBy::Default)
         };

@@ -119,7 +119,14 @@ impl AsyncEventConsumer for KeyReactor {
                 return Ok(());
             }
         }
-        if !self.keys.is_empty() && !self.keys.contains(&change.key.as_str()) {
+        if !self.keys.is_empty()
+            && !self.keys.iter().any(|key| {
+                change.key == *key
+                    || key
+                        .strip_suffix(".*")
+                        .is_some_and(|prefix| change.key.starts_with(&format!("{prefix}.")))
+            })
+        {
             return Ok(());
         }
         let Some(svc) = self.svc.upgrade() else {
@@ -163,7 +170,7 @@ pub fn register(state: &Arc<crate::Services>) {
     ));
     state.event_pump.register_async(reactor(
         PROVIDERS,
-        &["oxplow.extensionInstances", "oxplow.activeProviders"],
+        &["oxplow.extensionInstances", "oxplow.activeProviders.*"],
         Box::new(|svc| Box::pin(async move { svc.extension_activation.request() })),
     ));
     state.event_pump.register_async(reactor(

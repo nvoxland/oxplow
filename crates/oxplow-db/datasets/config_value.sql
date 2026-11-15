@@ -7,5 +7,9 @@ SELECT CAST(NULL AS TEXT) AS key, CAST(NULL AS TEXT) AS value, CAST(NULL AS TEXT
        CAST(NULL AS INTEGER) AS is_set,
        CAST(NULL AS TEXT) AS owner,
        CAST(NULL AS INTEGER) AS restart_required,
-       CAST(NULL AS TEXT) AS ui
+       CAST(NULL AS TEXT) AS ui,
+       CAST(NULL AS TEXT) AS local_value,
+       CAST(NULL AS TEXT) AS project_value,
+       CAST(NULL AS TEXT) AS global_value,
+       CAST(NULL AS INTEGER) AS unavailable
 WHERE 0

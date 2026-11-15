@@ -294,7 +294,12 @@ lists or offending values. At most 32 violations plus a truncation marker are
 returned, sorted and deduplicated.
 
 `extension_settings.rs` translates fixed object fields into independent
-`<namespace>.<path>` settings. Arrays, dynamic objects and fields marked
+`<namespace>.<path>` settings. Ordinary ASCII alphanumeric, underscore and dash
+property segments retain their spelling. Other whole segments use `__hex_` plus
+lowercase UTF-8 hex; a literal segment beginning `__hex_` is encoded too. This
+keeps keys such as `api/url`, `my key` and `a.b` distinct from nested paths while
+nested projections and JSON-pointer origins keep the original property names.
+Arrays, dynamic objects and fields marked
 `x-atomic: true` are single settings. Each setting resolves the first present
 value in local, project, global, then its registered default. Objects and arrays
 are complete values at their setting boundary; they never merge across levels.
@@ -324,7 +329,9 @@ and declared/live authority before and after access. An extension can read its
 own registered secret settings; a core secret owned by another registry owner
 is refused. Definitions available to this service are core plus its own
 extension. Writes are composed commands, with the normal command permission
-checks, rather than a writable script service.
+checks, rather than a writable script service. A composed write must target a
+setting owned by that extension; broad command permission does not authorize
+writes to core settings or another extension's settings.
 
 The retained `extension_config.read` service and native `snapshot` operation
 are nested read projections over that same backend. They return `{values,

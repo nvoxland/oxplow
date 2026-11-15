@@ -31,8 +31,18 @@ Ordinary overrides are flat maps of registered keys:
 in the daemon's main worktree, never a parent directory or another stream's copy.
 The core loader projects resolved settings into `OxplowConfig`; that typed struct
 is a runtime view, not another storage layer. Independent processes lock a stable
-sidecar, re-read under the lock and atomically replace only the changed YAML key,
+sidecar, re-read under the lock and atomically replace all keys in one write,
 preserving unrelated values and comments.
+
+Capability choices are independently registered scalar settings, generated from
+`capability::choosable()`: `oxplow.activeProviders.<capability>` (currently
+`snapshots`). The old aggregate `oxplow.activeProviders` map is not registered.
+An extension supplies an implementation value, not new capability-definition
+keys; unknown or non-choosable capabilities are refused. The typed
+`active_providers` map is assembled from resolved scalars for runtime consumers.
+Its origin metadata distinguishes local, project, global and default choices.
+`capability.choose` resets just one scalar override, exposing inheritance; it
+never writes an empty map that masks a project's choices.
 
 ## APIs and consumers
 
@@ -47,8 +57,9 @@ invalidated by an extension schema change can still be replaced or removed;
 undo is withheld when it would restore that invalid value.
 
 Extension scripts declare `needs: [config.read]` and call
-`scope("config.read", {"key": "acme.limit"})`. Their secret reads are limited to
-the owning namespace. Scripts write by composing the ordinary config commands.
+`scope("config.read", {"key": "acme.limit"})`. Their secret reads and all composed config writes are limited to
+the owning namespace, including refusal of core settings and core credentials.
+Scripts write by composing the ordinary config commands.
 The retained `extension_config.read` snapshot is a nested read projection over
 the same settings, not separate storage; it has values and origins, no stamps,
 CAS or migration protocol. SQL `config('/pointer')` and conditions receive a
@@ -60,6 +71,16 @@ labels, categories, schemas, origin and presence. Metric/dimension definitions
 are catalog contributions and are not preferences in that inventory.
 `v_config_key` lists registered core and extension keys with docs and schemas.
 The existing Settings UI consumes the inventory; a visual redesign is separate.
+The `config_value` dataset contract is version 4. For ordinary settings the inventory also exposes `local_value`, `project_value`
+and `global_value`: explicit JSON overrides, SQL NULL when absent. Those columns
+are always SQL NULL for secret definitions. The window decodes them into an
+`overrides` map whose missing properties are distinct from explicit JSON null. `unavailable` distinguishes a secure
+backend or invalid-value failure from an unset preference without exposing an
+error message or claiming an origin. Project editing controls read project then
+global overrides; they do not prefill from a winning local value and copy it into
+shared config. Effective values remain available alongside the editing values.
+The capability chooser can therefore show a hidden project choice while a local
+choice wins, and its local reset exposes that retained choice.
 
 ## Secrets
 
@@ -72,7 +93,9 @@ plaintext YAML secret overrides are refused. Secure storage failures return safe
 errors and never fall back to files or an inherited value.
 
 Authorized reads return the actual value; inventories expose only presence and
-origin. Settings values are omitted from write audit inputs. Secret-derived
+origin. A failed individual resolution retains its definition with
+`unavailable: true` and unknown value/origin, allowing Settings to load and
+repair credentials. Direct reads still fail closed. Settings values are omitted from write audit inputs. Secret-derived
 command reads propagate the internal `config.secret` trace marker through
 composition, failures and rehearsal; recording redacts derived inputs, results
 and errors, withholds undo payloads and payload events, and refuses to persist a
@@ -96,8 +119,13 @@ rows are no longer runtime configuration. Applied migrations remain historical.
 
 Core bootstrap definitions are available before extension discovery. Extension
 registration checks ownership, duplicate keys, offline schemas and defaults.
-Configuration files are watched, including the global file in every open
-project. Inventory queries use the same injected global directory as the host
+Configuration files are watched by exact path, including the global file in
+every open project. The global directory has a nonrecursive watch; only its
+`metrics/` library is recursive. Missing global directories are discovered by
+polling the configured paths, never by recursively watching an ancestor (which
+could be the person's home). Creation, deletion and replacement rearm the bounded
+registrations; unrelated files named `project.yaml`, `local.yaml` or `global.yaml`
+do not reload settings. Inventory queries use the same injected global directory as the host
 service, including isolated test and fixture hosts. Secret consumers read the secure backend; provider credential changes
 restart the corresponding instances. Runtime state such as health, token refresh
 state, command history, recents and sessions stays outside configuration files.
@@ -110,3 +138,20 @@ canonical undo, extension reads/SQL, secret audit boundaries and provider/collec
 consumers. Extension fixtures cover the Settings inventory and task workflow
 commands. Test-only fixture writers translate typed runtime documents into the
 new file format; there is no such compatibility path in production.
+
+## Host sharing and ordinary batches
+
+Host settings stores share a bounded cache keyed by project/global paths, secure
+backend identity, extension declarations and configuration content. Values
+are read fresh; file content or declaration changes rebuild dynamic registry
+entries. Declaration-only projections fork their registry so they cannot mutate a
+cached host registry. Compiled offline schema validators are shared by schema
+content in a separate bounded cache. Bulk runtime projections and provider
+credential inventories read the three documents once per related operation;
+provider lists reuse one instance/scope snapshot.
+
+`config.update {level, set, unset}` writes ordinary settings together: validate
+all keys, lock and edit one document, then atomically replace it once. Domain
+settings actions complete this external write before reporting success; errors
+propagate instead of being logged after audit. Secrets do not participate in a
+YAML batch. Multi-key undo uses the same batch API.

@@ -1788,27 +1788,21 @@ impl ProviderRegistry {
     fn scoped_instances(
         &self,
     ) -> BTreeMap<String, (Scope, oxplow_config::ExtensionInstanceConfig)> {
-        // Maps are atomic settings: a local/project map replaces the entire
-        // global map, including entries with different names.
-        let project = self.project_instances();
-        let has_override = self.instance_settings().ok().is_some_and(|store| {
-            [
-                oxplow_config::settings::Level::Local,
-                oxplow_config::settings::Level::Project,
-            ]
-            .into_iter()
-            .any(|level| {
-                store
-                    .get("oxplow.extensionInstances", Some(level))
-                    .ok()
-                    .is_some_and(|value| value.value.is_some())
-            })
-        });
-        let (scope, all) = if has_override {
-            (Scope::Project, project)
-        } else {
-            (Scope::Global, self.global_instances())
+        let Ok(store) = self.instance_settings() else {
+            return BTreeMap::new();
         };
+        let Ok(setting) = store.get("oxplow.extensionInstances", None) else {
+            return BTreeMap::new();
+        };
+        let scope = if setting.origin == Some(oxplow_config::settings::Origin::Global) {
+            Scope::Global
+        } else {
+            Scope::Project
+        };
+        let all: BTreeMap<String, oxplow_config::ExtensionInstanceConfig> = setting
+            .value
+            .and_then(|value| serde_json::from_value(value).ok())
+            .unwrap_or_default();
         all.into_iter()
             .map(|(name, config)| (name, (scope, config)))
             .collect()
@@ -1937,9 +1931,10 @@ impl ProviderRegistry {
         spec: &ProviderSpec,
         id: &str,
         cfg: Option<&oxplow_config::ExtensionInstanceConfig>,
+        (scope, overridden): (Scope, bool),
+        credential_presence: &BTreeMap<String, bool>,
     ) -> ProviderInstanceView {
         let instance = spec::instance_name(&ext.namespace, id);
-        let (scope, overridden) = self.scope_of(&instance);
         let dir = host::ext_dir(&self.deps.project_dir, ext);
         let declared =
             spec::read_declarations(spec, &|rel| std::fs::read_to_string(dir.join(rel)).ok()).ok();
@@ -2000,20 +1995,10 @@ impl ProviderRegistry {
                             None if c.secret_ref.is_some() => {
                                 secrets.get(&account).ok().flatten().is_some()
                             }
-                            None => credential_settings(&self.deps)
-                                .and_then(|store| {
-                                    store
-                                        .inspect(
-                                            &provider_credential_key(&ext.namespace, id, &c.name),
-                                            None,
-                                        )
-                                        .map_err(|_| {
-                                            DomainError::Storage(
-                                                "credential storage unavailable".into(),
-                                            )
-                                        })
-                                })
-                                .is_ok_and(|value| value.is_set),
+                            None => credential_presence
+                                .get(&provider_credential_key(&ext.namespace, id, &c.name))
+                                .copied()
+                                .unwrap_or(false),
                         },
                         sign_in,
                         redirect_port: c.oauth.as_ref().and_then(|o| o.redirect_port),
@@ -2031,9 +2016,56 @@ impl ProviderRegistry {
     /// Every declared provider's default instance and every configured
     /// instance, with health.
     pub async fn list(&self) -> Vec<ProviderInstanceView> {
-        let configured = self.instances_config();
+        let scoped = self.scoped_instances();
+        let configured: BTreeMap<_, _> = scoped
+            .iter()
+            .map(|(name, (_, config))| (name.clone(), config.clone()))
+            .collect();
+        let extensions = self.extensions();
+        let settings = self.instance_settings().ok();
+        let credential_presence: BTreeMap<String, bool> = settings
+            .as_ref()
+            .and_then(|store| {
+                let keys = store
+                    .registry
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .definitions()
+                    .filter(|definition| definition.key.contains(".providerCredentials."))
+                    .map(|definition| definition.key.clone())
+                    .collect::<Vec<_>>();
+                store.inventory_for(&keys).ok()
+            })
+            .unwrap_or_default()
+            .into_iter()
+            .map(|row| (row.definition.key, row.is_set))
+            .collect();
+        let scope_of = |instance: &str| {
+            scoped
+                .get(instance)
+                .map_or(Scope::Project, |(scope, _)| *scope)
+        };
+        // Maps replace whole levels; determine shadowing once for the list.
+        let global = settings
+            .as_ref()
+            .and_then(|store| {
+                store
+                    .get(
+                        "oxplow.extensionInstances",
+                        Some(oxplow_config::settings::Level::Global),
+                    )
+                    .ok()
+            })
+            .and_then(|value| value.value)
+            .and_then(|value| value.as_object().cloned())
+            .unwrap_or_default();
+        let overridden = |instance: &str| {
+            scope_of(instance) == Scope::Project
+                && configured.contains_key(instance)
+                && global.contains_key(instance)
+        };
         let mut out: BTreeMap<String, ProviderInstanceView> = BTreeMap::new();
-        for ext in self.extensions().iter().filter(|e| e.enabled) {
+        for ext in extensions.iter().filter(|e| e.enabled) {
             for spec in &ext.providers {
                 let instance = spec::instance_name(&ext.namespace, &spec.id);
                 // A config entry under a provider's own id that names
@@ -2044,7 +2076,14 @@ impl ProviderRegistry {
                 {
                     continue;
                 }
-                let view = self.view_of(ext, spec, &spec.id, configured.get(&instance));
+                let view = self.view_of(
+                    ext,
+                    spec,
+                    &spec.id,
+                    configured.get(&instance),
+                    (scope_of(&instance), overridden(&instance)),
+                    &credential_presence,
+                );
                 out.insert(instance, view);
             }
         }
@@ -2052,8 +2091,20 @@ impl ProviderRegistry {
             if out.contains_key(instance) {
                 continue;
             }
-            let view = match self.resolve(instance) {
-                Ok(r) => self.view_of(&r.ext, &r.spec, &r.id, Some(cfg)),
+            let view = match Self::resolve_in(
+                &extensions,
+                instance,
+                cfg.provider.as_deref(),
+                scope_of(instance),
+            ) {
+                Ok(r) => self.view_of(
+                    &r.ext,
+                    &r.spec,
+                    &r.id,
+                    Some(cfg),
+                    (scope_of(instance), overridden(instance)),
+                    &credential_presence,
+                ),
                 Err(reason) => {
                     let (extension, id) = instance.split_once('/').unwrap_or((instance, ""));
                     // A global instance of an extension this project
@@ -2061,9 +2112,8 @@ impl ProviderRegistry {
                     // project's to list. One of an extension it has that
                     // doesn't resolve is listed, so it can be seen and
                     // removed.
-                    let (scope, overridden) = self.scope_of(instance);
-                    let here = self
-                        .extensions()
+                    let (scope, overridden) = (scope_of(instance), overridden(instance));
+                    let here = extensions
                         .iter()
                         .any(|e| e.enabled && e.namespace == extension);
                     if scope == Scope::Global && !here {
@@ -2368,6 +2418,7 @@ impl ProviderRegistry {
             }
         };
         Ok(HandlerOutput {
+            caller_result: None,
             result: out.result,
             inverse,
             events,
@@ -2735,18 +2786,34 @@ impl ProviderRegistry {
         {
             tracing::warn!(%instance, error = %e, "forgetting an instance's reads failed");
         }
-        // No capability's active provider is one that's gone.
-        let config = crate::config_service::read_config(&self.deps.config);
-        let mut active = config.active_providers.clone();
-        active.retain(|_, id| *id != gone.id);
-        if active != config.active_providers {
+        // Clear only preferences at the removed instance's own level.
+        // Other capabilities and higher-level overrides inherit independently.
+        let store = self
+            .instance_settings()
+            .map_err(|error| CommandError::Failed {
+                message: error.to_string(),
+            })?;
+        for capability in oxplow_domain::capability::choosable() {
+            let key = oxplow_config::core_settings::canonical_key(&format!(
+                "activeProviders.{}",
+                capability.id
+            ));
+            let chosen =
+                store
+                    .get(&key, Some(credential_level))
+                    .map_err(|error| CommandError::Failed {
+                        message: error.to_string(),
+                    })?;
+            if chosen.value.as_ref().and_then(serde_json::Value::as_str) != Some(gone.id.as_str()) {
+                continue;
+            }
             let bus = self.bus.upgrade().ok_or_else(|| CommandError::Failed {
                 message: "the command bus is gone".into(),
             })?;
             bus.run(
                 actor,
-                crate::commands::config_commands::SET,
-                json!({ "key": "oxplow.activeProviders", "value": active, "level": credential_level }),
+                crate::commands::config_commands::UNSET,
+                json!({ "key": key, "level": credential_level }),
                 matches!(actor, Actor::Human),
             )
             .await?;

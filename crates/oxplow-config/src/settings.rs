@@ -110,6 +110,9 @@ pub struct SettingInventory {
     pub value: Option<Value>,
     pub origin: Option<Origin>,
     pub is_set: bool,
+    /// Resolution failed; presence/origin are unknown, never reported as an
+    /// inherited value or accompanied by secure-backend details.
+    pub unavailable: bool,
 }
 
 /// Backed by the machine keychain in production and memory in tests. Errors
@@ -262,16 +265,40 @@ fn compile_definition(definition: SettingDefinition) -> Result<RegisteredSetting
     }
     bounded(&definition.schema)?;
     bounded(&definition.ui)?;
-    let validator = jsonschema::options()
-        .offline()
-        .build(&definition.schema)
-        .map_err(|_| SettingsError::InvalidSchema)?;
+    // Schemas are immutable; registries for projects and extension generations
+    // share compiled validators without sharing values or owner metadata.
+    static VALIDATORS: std::sync::OnceLock<
+        std::sync::Mutex<BTreeMap<String, Arc<jsonschema::Validator>>>,
+    > = std::sync::OnceLock::new();
+    let schema_key = definition.schema.to_string();
+    let mut cache = VALIDATORS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let validator = match cache.get(&schema_key) {
+        Some(validator) => validator.clone(),
+        None => {
+            let validator = Arc::new(
+                jsonschema::options()
+                    .offline()
+                    .build(&definition.schema)
+                    .map_err(|_| SettingsError::InvalidSchema)?,
+            );
+            // Bound retained schemas even when many extension generations run.
+            if cache.len() >= 512 {
+                cache.clear();
+            }
+            cache.insert(schema_key, validator.clone());
+            validator
+        }
+    };
+    drop(cache);
     if let Some(default) = &definition.default {
         validate_value(&validator, default)?;
     }
     Ok(RegisteredSetting {
         definition,
-        validator: Arc::new(validator),
+        validator,
     })
 }
 
@@ -400,8 +427,56 @@ impl SettingsStore {
         self.read(&definition, level, false)
     }
 
-    /// Metadata has the same origin and presence as a direct get, but never
-    /// includes secret bytes. The UI and semantic layer must use this read.
+    /// Make an isolated registry for a declaration-specific projection.
+    pub fn fork_registry(&self) -> Self {
+        let mut fork = self.clone();
+        fork.registry = Arc::new(RwLock::new(
+            self.registry
+                .read()
+                .unwrap_or_else(|error| error.into_inner())
+                .clone(),
+        ));
+        fork
+    }
+
+    /// Read related keys against one snapshot of the three override files.
+    pub fn get_many(&self, keys: &[&str]) -> Result<Vec<SettingValue>, SettingsError> {
+        self.read_many(keys, false)
+    }
+
+    pub fn inspect_many(&self, keys: &[&str]) -> Result<Vec<SettingValue>, SettingsError> {
+        self.read_many(keys, true)
+    }
+
+    fn read_many(&self, keys: &[&str], redact: bool) -> Result<Vec<SettingValue>, SettingsError> {
+        let documents = Level::PRECEDENCE
+            .into_iter()
+            .map(|level| self.layer(level).map(|values| (level, values)))
+            .collect::<Result<Vec<_>, _>>()?;
+        keys.iter()
+            .map(|key| self.read_documents(&self.definition(key)?, &documents, true, redact))
+            .collect()
+    }
+
+    /// Apply ordinary settings to one level with a single locked replacement.
+    /// Secrets cannot participate in a YAML transaction.
+    pub fn update(
+        &self,
+        changes: &[(String, Option<Value>)],
+        level: Level,
+    ) -> Result<(), SettingsError> {
+        for (key, value) in changes {
+            if self.definition(key)?.secret {
+                return Err(SettingsError::PlaintextSecret);
+            }
+            if let Some(value) = value {
+                self.validate(key, value)?;
+            }
+        }
+        write_layer_keys(&self.path(level), changes)
+    }
+
+    /// Read redacted presence and origin.
     pub fn inspect(&self, key: &str, level: Option<Level>) -> Result<SettingValue, SettingsError> {
         let definition = self.definition(key)?;
         self.read(&definition, level, true)
@@ -478,28 +553,47 @@ impl SettingsStore {
     }
 
     pub fn inventory(&self) -> Result<Vec<SettingInventory>, SettingsError> {
-        let definitions: Vec<_> = self
+        let keys: Vec<_> = self
             .registry
             .read()
-            .unwrap_or_else(|error| error.into_inner())
+            .unwrap_or_else(|e| e.into_inner())
             .definitions()
-            .cloned()
+            .map(|definition| definition.key.clone())
             .collect();
+        self.inventory_for(&keys)
+    }
+
+    /// Resolve a related inventory using one file snapshot; failures stay local
+    /// to each row, so a broken credential cannot hide other settings.
+    pub fn inventory_for(&self, keys: &[String]) -> Result<Vec<SettingInventory>, SettingsError> {
+        let definitions = keys
+            .iter()
+            .map(|key| self.definition(key))
+            .collect::<Result<Vec<_>, _>>()?;
         let documents = Level::PRECEDENCE
             .into_iter()
             .map(|level| self.layer(level).map(|values| (level, values)))
             .collect::<Result<Vec<_>, _>>()?;
         definitions
             .into_iter()
-            .map(|definition| {
-                let value = self.read_documents(&definition, &documents, true, true)?;
-                Ok(SettingInventory {
-                    definition,
-                    value: value.value,
-                    origin: value.origin,
-                    is_set: value.is_set,
-                })
-            })
+            .map(
+                |definition| match self.read_documents(&definition, &documents, true, true) {
+                    Ok(value) => Ok(SettingInventory {
+                        definition,
+                        value: value.value,
+                        origin: value.origin,
+                        is_set: value.is_set,
+                        unavailable: false,
+                    }),
+                    Err(_) => Ok(SettingInventory {
+                        definition,
+                        value: None,
+                        origin: None,
+                        is_set: false,
+                        unavailable: true,
+                    }),
+                },
+            )
             .collect()
     }
 
@@ -653,6 +747,14 @@ fn parse_layer(text: &str) -> Result<BTreeMap<String, Value>, SettingsError> {
 /// Lock a stable sidecar rather than the document's replaceable inode. Re-read
 /// under that lock, so independent processes cannot overwrite each other's keys.
 pub fn write_layer_key(path: &Path, key: &str, value: Option<&Value>) -> Result<(), SettingsError> {
+    write_layer_keys(path, &[(key.to_owned(), value.cloned())])
+}
+
+/// Edit all keys before replacing the file, so failures leave the old document.
+pub fn write_layer_keys(
+    path: &Path,
+    changes: &[(String, Option<Value>)],
+) -> Result<(), SettingsError> {
     let parent = path.parent().ok_or(SettingsError::Storage)?;
     std::fs::create_dir_all(parent).map_err(|_| SettingsError::Storage)?;
     let lock = OpenOptions::new()
@@ -665,25 +767,29 @@ pub fn write_layer_key(path: &Path, key: &str, value: Option<&Value>) -> Result<
     lock.lock_exclusive().map_err(|_| SettingsError::Storage)?;
     let original = read_text(path)?;
     let mut expected = parse_layer(&original)?;
-    match value {
-        Some(value) => {
-            expected.insert(key.to_string(), value.clone());
+    let mut edited = original;
+    for (key, value) in changes {
+        match value {
+            Some(value) => {
+                expected.insert(key.clone(), value.clone());
+            }
+            None => {
+                expected.remove(key);
+            }
         }
-        None => {
-            expected.remove(key);
-        }
+        let block = value
+            .as_ref()
+            .map(|value| {
+                let mut map = serde_yaml::Mapping::new();
+                map.insert(
+                    serde_yaml::Value::String(key.clone()),
+                    crate::to_yaml(value),
+                );
+                serde_yaml::to_string(&map).map_err(|_| SettingsError::InvalidValue)
+            })
+            .transpose()?;
+        edited = crate::edit_top_level_key(&edited, key, block.as_deref());
     }
-    let block = value
-        .map(|value| {
-            let mut map = serde_yaml::Mapping::new();
-            map.insert(
-                serde_yaml::Value::String(key.to_string()),
-                crate::to_yaml(value),
-            );
-            serde_yaml::to_string(&map).map_err(|_| SettingsError::InvalidValue)
-        })
-        .transpose()?;
-    let edited = crate::edit_top_level_key(&original, key, block.as_deref());
     if parse_layer(&edited)? != expected {
         return Err(SettingsError::UnsafeEdit);
     }
@@ -772,6 +878,89 @@ mod tests {
             json!({ "type": "integer", "minimum": 1 }),
             Some(json!(5)),
         )
+    }
+
+    #[test]
+    fn ordinary_batches_validate_every_key_before_one_replacement() {
+        let (_project, _global, store) = store(vec![
+            number_definition(),
+            definition("example.name", json!({"type":"string"}), None),
+        ]);
+        store
+            .set("example.limit", json!(5), Level::Project)
+            .unwrap();
+        let original = std::fs::read(store.path(Level::Project)).unwrap();
+        assert!(store
+            .update(
+                &[
+                    ("example.limit".into(), Some(json!(8))),
+                    ("example.name".into(), Some(json!(9))),
+                ],
+                Level::Project
+            )
+            .is_err());
+        assert_eq!(std::fs::read(store.path(Level::Project)).unwrap(), original);
+        store
+            .update(
+                &[
+                    ("example.limit".into(), Some(json!(8))),
+                    ("example.name".into(), Some(json!("valid"))),
+                ],
+                Level::Project,
+            )
+            .unwrap();
+        let values = store.get_many(&["example.limit", "example.name"]).unwrap();
+        assert_eq!(values[0].value, Some(json!(8)));
+        assert_eq!(values[1].value, Some(json!("valid")));
+    }
+
+    #[test]
+    fn identical_schemas_share_compilation_across_registry_instances() {
+        let mut first = SettingsRegistry::default();
+        let mut second = SettingsRegistry::default();
+        first.register(number_definition()).unwrap();
+        second.register(number_definition()).unwrap();
+        assert!(Arc::ptr_eq(
+            &first.settings["example.limit"].validator,
+            &second.settings["example.limit"].validator
+        ));
+    }
+
+    #[test]
+    fn inventory_retains_ordinary_settings_when_secure_storage_is_unavailable() {
+        let mut secret = definition("example.token", json!({"type":"string"}), None);
+        secret.secret = true;
+        let (project, global, original) = store(vec![number_definition(), secret]);
+        let settings = SettingsStore::new(
+            project.path().into(),
+            global.path().into(),
+            original.registry.clone(),
+            Arc::new(MemorySecrets {
+                fail: true,
+                ..Default::default()
+            }),
+        );
+        let inventory = settings.inventory().unwrap();
+        let public = inventory
+            .iter()
+            .find(|item| item.definition.key == "example.limit")
+            .unwrap();
+        assert_eq!(public.value, Some(json!(5)));
+        assert!(!public.unavailable);
+        let secret = inventory
+            .iter()
+            .find(|item| item.definition.key == "example.token")
+            .unwrap();
+        assert!(secret.unavailable);
+        assert_eq!(secret.origin, None);
+        assert_eq!(secret.value, None);
+        assert!(!serde_json::to_string(&inventory)
+            .unwrap()
+            .contains("token-sensitive-value"));
+        assert!(matches!(
+            settings.get("example.token", None),
+            Err(SettingsError::SecureStorage)
+        ));
     }
 
     #[test]

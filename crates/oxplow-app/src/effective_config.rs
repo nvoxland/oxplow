@@ -2,9 +2,17 @@
 
 use std::{path::Path, sync::Arc};
 
-use oxplow_config::settings::{SettingInventory, SettingsError};
+use oxplow_config::settings::{Level, SettingInventory, SettingsError};
+use serde_json::Value;
 
 use crate::extension::extensions::Extension;
+
+/// Effective inventory and explicit ordinary overrides, in local/project/global
+/// order. Secret values are absent from every override column.
+pub struct SettingsRow {
+    pub setting: SettingInventory,
+    pub overrides: [Option<Value>; 3],
+}
 
 /// Registry definitions and effective values. Secret values are never exposed;
 /// their inventory rows retain only presence and origin metadata.
@@ -13,8 +21,24 @@ pub fn effective_config(
     global: &Path,
     secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
     extensions: &[Extension],
-) -> Result<Vec<SettingInventory>, SettingsError> {
-    crate::settings::store(project, global, secrets, extensions)?.inventory()
+) -> Result<Vec<SettingsRow>, SettingsError> {
+    let store = crate::settings::store(project, global, secrets, extensions)?;
+    let layers = Level::PRECEDENCE
+        .map(|level| store.layer(level))
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(store
+        .inventory()?
+        .into_iter()
+        .map(|setting| {
+            let overrides = if setting.definition.secret {
+                [None, None, None]
+            } else {
+                std::array::from_fn(|index| layers[index].get(&setting.definition.key).cloned())
+            };
+            SettingsRow { setting, overrides }
+        })
+        .collect())
 }
 
 #[cfg(test)]
@@ -33,6 +57,16 @@ mod tests {
             "oxplow.snapshots.retentionDays: 14\n",
         )
         .unwrap();
+        crate::test_fixtures::write_settings_fixture(
+            project.path().join(".oxplow/project.yaml"),
+            "oxplow.snapshots.retentionDays: 20\n",
+        )
+        .unwrap();
+        std::fs::write(
+            global.path().join("global.yaml"),
+            "oxplow.snapshots.retentionDays: 30\n",
+        )
+        .unwrap();
         let mut extension = crate::extension::extensions::empty_extension("gh", "gh", "project");
         extension.metrics = vec![serde_json::from_value(json!({"key": "gh.prs.open"})).unwrap()];
         let rows = effective_config(
@@ -44,15 +78,42 @@ mod tests {
         .unwrap();
         let retention = rows
             .iter()
-            .find(|row| row.definition.key == "oxplow.snapshots.retentionDays")
+            .find(|row| row.setting.definition.key == "oxplow.snapshots.retentionDays")
             .unwrap();
-        assert_eq!(retention.origin, Some(Origin::Local));
-        assert_eq!(retention.value, Some(json!(14)));
-        assert_eq!(retention.definition.category, "snapshots");
-        assert!(!retention.definition.title.is_empty());
-        assert!(!retention.definition.schema.is_null());
+        assert_eq!(retention.setting.origin, Some(Origin::Local));
+        assert_eq!(retention.setting.value, Some(json!(14)));
+        assert_eq!(
+            retention.overrides,
+            [Some(json!(14)), Some(json!(20)), Some(json!(30))]
+        );
+        assert_eq!(retention.setting.definition.category, "snapshots");
+        assert!(!retention.setting.definition.title.is_empty());
+        assert!(!retention.setting.definition.schema.is_null());
         assert!(!rows
             .iter()
-            .any(|row| row.definition.key == "metrics.gh.prs.open"));
+            .any(|row| row.setting.definition.key == "metrics.gh.prs.open"));
+    }
+    #[test]
+    fn explicit_level_columns_never_contain_secure_values() {
+        let project = tempfile::tempdir().unwrap();
+        let global = tempfile::tempdir().unwrap();
+        let secrets = Arc::new(oxplow_ai::secrets::MemorySecrets::default());
+        let store =
+            crate::settings::store(project.path(), global.path(), secrets.clone(), &[]).unwrap();
+        store.set("oxplow.ai.providers", json!([{"id":"inventory", "kind":"openai_compatible", "baseUrl":"https://inventory.test/v1"}]), Level::Project).unwrap();
+        let store =
+            crate::settings::store(project.path(), global.path(), secrets.clone(), &[]).unwrap();
+        let key = crate::ai_service::provider_key_setting("inventory");
+        store
+            .set(&key, json!("inventory-hidden-marker"), Level::Local)
+            .unwrap();
+        let rows = effective_config(project.path(), global.path(), secrets, &[]).unwrap();
+        let row = rows
+            .iter()
+            .find(|row| row.setting.definition.key == key)
+            .unwrap();
+        assert!(row.setting.is_set && !row.setting.unavailable);
+        assert!(row.setting.value.is_none());
+        assert_eq!(row.overrides, [None, None, None]);
     }
 }

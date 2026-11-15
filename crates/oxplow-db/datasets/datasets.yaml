@@ -1743,13 +1743,13 @@
     - { name: "color", type: "TEXT", doc: "The rule's display colour, if it gave one." }
     - { name: "files", type: "INT", doc: "Files in the worktree this rule claims (none of its earlier siblings did); on `other`, the files no rule matched." }
 - name: config_value
-  version: 3
+  version: 4
   key: [key]
   description: "Registered core and extension settings with redacted effective values, schema and display metadata. Overrides resolve local, project, global, then default; metric and dimension definitions are not settings. Write through oxplow.config.set with an explicit level."
   fields:
     - { name: key, type: TEXT, doc: "The registered fully qualified setting key." }
     - { name: value, type: TEXT, doc: "Effective value as JSON; NULL for secrets or absent values." }
-    - { name: origin, type: TEXT, doc: "Effective origin: local, project, global, or default." }
+    - { name: origin, type: TEXT, doc: "Effective origin: local, project, global, or default; NULL when unavailable or absent." }
     - { name: extension, type: TEXT, doc: "Owning extension, or NULL for core." }
     - { name: doc, type: TEXT, doc: "Setting description." }
     - { name: schema, type: TEXT, doc: "Value validation schema as JSON." }
@@ -1760,6 +1760,10 @@
     - { name: owner, type: TEXT, doc: "Registry owner: core or extension namespace." }
     - { name: restart_required, type: INT, doc: "1 when a change requires restart." }
     - { name: ui, type: TEXT, doc: "Display hints as JSON." }
+    - { name: local_value, type: TEXT, doc: "Explicit local override as JSON; SQL NULL when absent or secret. JSON null remains the text null." }
+    - { name: project_value, type: TEXT, doc: "Explicit shared project override as JSON; SQL NULL when absent or secret." }
+    - { name: global_value, type: TEXT, doc: "Explicit machine-global override as JSON; SQL NULL when absent or secret." }
+    - { name: unavailable, type: INT, doc: "1 when resolution failed safely. Value, origin and presence are unavailable; no backend error or secret bytes are exposed." }
   tests:
     - { not_null: key }
     - { unique: key }

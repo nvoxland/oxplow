@@ -54,3 +54,20 @@ steps:
       loaders:
         agents_settings:
           rows: { contains: [{ agent: opencode, key: model, value: github-copilot/gpt-5 }] }
+
+  # Ask is an explicit local choice, even when the shared project default
+  # names another session. Removing the override would keep that project choice.
+  - given:
+      - command: oxplow.config.set
+        input: { key: oxplow.newThreadSession, value: none, level: project }
+      - command: oxplow.config.unset
+        input: { key: oxplow.newThreadSession, level: local }
+  - press:
+      action: ask
+      node: agents-new-thread
+      row: { value: ask, can_ask: 1 }
+    expect: { ok: true }
+  - expect:
+      loaders:
+        agents_new_thread:
+          rows: { contains: [{ value: ask, current: 1 }] }

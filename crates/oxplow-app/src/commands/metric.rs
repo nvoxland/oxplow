@@ -18,8 +18,8 @@
 //! metric — a bundled code metric is off until a `use:` names it, a producer or
 //! extension metric is on until an `enabled: false` marker turns it off — so
 //! the command computes the new `metrics:` list with the metrics service's
-//! rule and hands it to `oxplow.config.set`'s core: validated, written after
-//! commit, logged as `config.changed`, undone by restoring the old list. The
+//! rule and hands it to `oxplow.config.set`'s core: validated, written before
+//! success is recorded, logged as `config.changed`, undone by restoring the old list. The
 //! reseed (and `v_metric_catalog`) follows `ConfigChanged` as for any
 //! config edit.
 
@@ -329,43 +329,40 @@ pub fn ops(target: MetricTarget) -> Vec<Op> {
         "enable",
         schema::<EnableInput>(),
         true,
-        Handler::Tx(Arc::new(move |ctx: &super::TxCtx<'_>, input| {
-            let input: EnableInput = parse(input)?;
-            for key in &input.keys {
-                let known: bool = ctx
-                    .conn
-                    .query_row(
-                        "SELECT EXISTS (SELECT 1 FROM metric_catalog WHERE key = ?1)",
-                        [key],
-                        |r| r.get(0),
-                    )
-                    .map_err(sql)?;
-                if !known {
-                    return Err(CommandError::Invalid {
-                        field: Some("/keys".into()),
-                        message: format!("no metric `{key}` (see v_metric_catalog)"),
-                    });
+        Handler::External(Arc::new(move |invocation, input| {
+            let metrics = metrics.clone();
+            let target = target.clone();
+            Box::pin(async move {
+                let input: EnableInput = parse(input)?;
+                let catalog = metrics.catalog().await;
+                for key in &input.keys {
+                    if !catalog.iter().any(|entry| entry.key == *key) {
+                        return Err(CommandError::Invalid {
+                            field: Some("/keys".into()),
+                            message: format!("no metric `{key}` (see v_metric_catalog)"),
+                        });
+                    }
                 }
-            }
-            let mut list = target
-                .config
-                .read()
-                .unwrap_or_else(|e| e.into_inner())
-                .metrics
-                .clone();
-            for key in &input.keys {
-                metrics.apply_metric_enabled(&mut list, key, input.enabled);
-            }
-            let value = serde_json::to_value(&list).map_err(|e| CommandError::Failed {
-                message: e.to_string(),
-            })?;
-            change(
-                &target,
-                ctx.actor(),
-                "metrics",
-                Some(value),
-                super::config_commands::Layer::Project,
-            )
+                let mut list = target
+                    .config
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .metrics
+                    .clone();
+                for key in &input.keys {
+                    metrics.apply_metric_enabled(&mut list, key, input.enabled);
+                }
+                let value = serde_json::to_value(&list).map_err(|e| CommandError::Failed {
+                    message: e.to_string(),
+                })?;
+                change(
+                    &target,
+                    invocation.actor(),
+                    "metrics",
+                    Some(value),
+                    super::config_commands::Layer::Project,
+                )
+            })
         })),
     );
     vec![enable, record, rebuild, scaffold]
@@ -742,5 +739,31 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("reserved"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn enable_storage_failure_does_not_report_a_configuration_change() {
+        let (svc, _dir) = services().await;
+        let catalog = svc.metrics.catalog().await;
+        let key = &catalog.first().expect("built-in metric catalog").key;
+        let before = serde_json::to_value(&svc.config.read().unwrap().metrics).unwrap();
+        let path = svc.layout.state_dir.join("project.yaml");
+        if path.exists() {
+            std::fs::remove_file(&path).unwrap();
+        }
+        std::fs::create_dir(&path).unwrap();
+        svc.commands
+            .run(
+                &Actor::Human,
+                ENABLE,
+                json!({"keys":[key],"enabled":false}),
+                true,
+            )
+            .await
+            .expect_err("the settings file cannot be written");
+        assert_eq!(
+            serde_json::to_value(&svc.config.read().unwrap().metrics).unwrap(),
+            before
+        );
     }
 }

@@ -4,5 +4,5 @@ answers:
 - {"question":"Which settings does this project set itself, rather than leaving them at their default?","params":{},"skill":"oxplow-extension"}
 loaders:
   settings:
-    sql: "SELECT key, value FROM v_config_value WHERE origin = 'project' ORDER BY key"
+    sql: "SELECT key, project_value AS value FROM v_config_value WHERE project_value IS NOT NULL ORDER BY key"
 view: { viz: table, from: settings }

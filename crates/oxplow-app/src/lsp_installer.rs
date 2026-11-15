@@ -263,6 +263,7 @@ mod tests {
             agent_config: Default::default(),
             extension_instances: Default::default(),
             active_providers: Default::default(),
+            active_provider_origins: Default::default(),
             personal_active_providers: Default::default(),
             personal_new_thread_session: None,
             replacements: Default::default(),

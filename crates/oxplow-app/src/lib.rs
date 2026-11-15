@@ -2200,6 +2200,10 @@ mod tests {
                 // Agent reads of live state, each an operation of a read scope
                 // (`commands/agent_reads`): they change no record. A model call
                 // is recorded as the computation it was.
+                "oxplow.agent.set_agents",
+                "oxplow.agent.set_prompt_append",
+                "oxplow.agent.set_setting",
+                "oxplow.agent_session.remember_default",
                 "oxplow.ai.decide",
                 // Settings → AI: the user-global ai.yaml and the keychain,
                 // a person's alone.
@@ -2208,6 +2212,7 @@ mod tests {
                 "oxplow.ai.set_role",
                 "oxplow.ai.summarize",
                 "oxplow.ai.test_provider",
+                "oxplow.capability.choose",
                 "oxplow.change.ensure",
                 "oxplow.code.call_hierarchy",
                 "oxplow.code.definition",
@@ -2225,6 +2230,7 @@ mod tests {
                 // Shared settings use files/keychain outside the DB transaction.
                 "oxplow.config.set",
                 "oxplow.config.unset",
+                "oxplow.config.update",
                 // A provider's process restarts (P7.C1; was provider.enable).
                 "oxplow.contribution.enable",
                 "oxplow.contribution.enable_all",
@@ -2260,6 +2266,7 @@ mod tests {
                 "oxplow.file.create",
                 "oxplow.file.create_directory",
                 "oxplow.file.delete",
+                "oxplow.file.mark_generated",
                 "oxplow.file.rename",
                 "oxplow.file.save",
                 "oxplow.git.cherry_pick",
@@ -2272,6 +2279,7 @@ mod tests {
                 "oxplow.lsp.remove_server",
                 // The language server is a process on this machine.
                 "oxplow.lsp.restart_server",
+                "oxplow.metric.enable",
                 "oxplow.metric.rebuild",
                 // The agent's reads of live state are read-scope operations
                 // (`commands/agent_reads`): they change no record.
@@ -2301,6 +2309,7 @@ mod tests {
                 "oxplow.provider.turn_off_here",
                 "oxplow.records.read",
                 "oxplow.refs.drift",
+                "oxplow.replacement.choose",
                 "oxplow.search.find",
                 "oxplow.skill.read",
                 // Overwrites a worktree file (P8.A9).
@@ -2345,6 +2354,10 @@ mod tests {
         assert_eq!(
             services.commands.composite_commands(),
             [
+                "oxplow.agent_session.open",
+                "oxplow.agent_session.open_claude",
+                "oxplow.agent_session.open_codex",
+                "oxplow.agent_session.open_opencode",
                 "oxplow.command.sequence",
                 // The bundled extension's script commands compose their
                 // calls per input.

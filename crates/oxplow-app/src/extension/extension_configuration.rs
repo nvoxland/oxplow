@@ -184,10 +184,14 @@ pub(crate) fn effective_values(
     namespace: &str,
     declaration: &ConfigurationFile,
 ) -> Result<Value, ConfigurationError> {
+    static PUBLIC_SECRETS: std::sync::OnceLock<Arc<dyn oxplow_ai::secrets::SecretStore>> =
+        std::sync::OnceLock::new();
     let store = crate::settings::store_for_declaration(
         project,
         global,
-        Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
+        PUBLIC_SECRETS
+            .get_or_init(|| Arc::new(oxplow_ai::secrets::MemorySecrets::default()))
+            .clone(),
         namespace,
         declaration,
     )

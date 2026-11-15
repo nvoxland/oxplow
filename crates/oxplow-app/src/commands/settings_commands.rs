@@ -39,6 +39,16 @@ struct UnsetInput {
     level: Level,
 }
 
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct UpdateInput {
+    level: Level,
+    #[serde(default)]
+    set: std::collections::BTreeMap<String, Value>,
+    #[serde(default)]
+    unset: Vec<String>,
+}
+
 fn error(error: SettingsError) -> CommandError {
     CommandError::Invalid {
         field: Some("/key".into()),
@@ -49,19 +59,13 @@ fn error(error: SettingsError) -> CommandError {
 /// Native config operations retain the live script owner's namespace when
 /// composed. A command's broad config scope cannot widen the composing
 /// extension's access to another extension's secrets or private preferences.
-fn authorize_composer(
+pub(super) fn authorize_composer(
     target: &ConfigTarget,
     run: &oxplow_domain::run::RunContext,
     definition: &oxplow_config::settings::SettingDefinition,
     writing: bool,
 ) -> Result<(), CommandError> {
-    if run.composed_by().is_none()
-        || !(if writing {
-            definition.owner.starts_with("extension/")
-        } else {
-            definition.secret
-        })
-    {
+    if run.composed_by().is_none() || (!writing && !definition.secret) {
         return Ok(());
     }
     let denied = || CommandError::Denied {
@@ -150,20 +154,60 @@ pub(super) fn ops(target: ConfigTarget) -> Vec<Op> {
         })),
     )
     .with_unrecorded(&["value"]);
+    let unset_target = target.clone();
     let unset = Op::new(
         "config.write",
         "unset",
         schema::<UnsetInput>(),
         true,
         Handler::External(Arc::new(move |invocation, input| {
-            let target = target.clone();
+            let target = unset_target.clone();
             Box::pin(async move {
                 let input: UnsetInput = parse(input)?;
                 write(target, invocation, input.key, None, input.level)
             })
         })),
     );
-    vec![list, get, set, unset]
+    let update = Op::new(
+        "config.write",
+        "update",
+        schema::<UpdateInput>(),
+        true,
+        Handler::External(Arc::new(move |invocation, input| {
+            let target = target.clone();
+            Box::pin(async move {
+                let input: UpdateInput = parse(input)?;
+                let mut changes: Vec<_> = input
+                    .set
+                    .into_iter()
+                    .map(|(key, value)| (key, Some(value)))
+                    .collect();
+                changes.extend(input.unset.into_iter().map(|key| (key, None)));
+                write_changes(target, invocation, changes, input.level)
+            })
+        })),
+    )
+    .with_unrecorded(&["set"]);
+    vec![list, get, set, unset, update]
+}
+
+pub(super) fn validate_change(key: &str, value: Option<&Value>) -> Result<(), CommandError> {
+    if key == "oxplow.ai.providers" {
+        if let Some(providers) = value.and_then(Value::as_array) {
+            let mut ids = std::collections::BTreeSet::new();
+            if providers
+                .iter()
+                .filter_map(|provider| provider.get("id").and_then(Value::as_str))
+                .any(|id| !ids.insert(id))
+            {
+                return Err(CommandError::Invalid {
+                    field: Some("/value".into()),
+                    message: "AI provider IDs must be unique".into(),
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 fn write(
@@ -173,65 +217,114 @@ fn write(
     value: Option<Value>,
     level: Level,
 ) -> Result<HandlerOutput, CommandError> {
+    let mut output = write_changes(target, invocation, vec![(key.clone(), value)], level)?;
+    output.result["key"] = json!(key);
+    Ok(output)
+}
+
+fn write_changes(
+    target: ConfigTarget,
+    invocation: Invocation,
+    changes: Vec<(String, Option<Value>)>,
+    level: Level,
+) -> Result<HandlerOutput, CommandError> {
     let settings = target.settings()?;
-    let definition = settings.definition(&key).map_err(error)?;
-    authorize_composer(&target, &invocation.run, &definition, true)?;
-    // A replacement or removal must not need to decrypt the old value (which
-    // may have an obsolete endpoint binding). Secret writes have no inverse.
-    let before = if definition.secret {
-        None
-    } else {
-        settings.layer(level).map_err(error)?.remove(&key)
-    };
-    // A schema change can leave an existing override invalid. It must still
-    // be replaceable or removable, but undo must not restore invalid data.
-    let inverse = if definition.secret
-        || before
+    let mut keys = std::collections::BTreeSet::new();
+    let mut before_values = Vec::new();
+    let layer_values = settings.layer(level).map_err(error)?;
+    let mut has_secret = false;
+    let mut undoable = true;
+    for (key, value) in &changes {
+        if !keys.insert(key.clone()) {
+            return Err(error(SettingsError::DuplicateKey));
+        }
+        validate_change(key, value.as_ref())?;
+        let definition = settings.definition(key).map_err(error)?;
+        authorize_composer(&target, &invocation.run, &definition, true)?;
+        has_secret |= definition.secret;
+        let before = if definition.secret {
+            undoable = false;
+            None
+        } else {
+            layer_values.get(key).cloned()
+        };
+        if before
             .as_ref()
-            .is_some_and(|value| settings.validate(&key, value).is_err())
-    {
-        None
-    } else {
-        Some(match before.as_ref() {
-            Some(value) => CommandCall {
-                name: "oxplow.config.set".into(),
-                input: json!({"key":key,"value":value,"level":level}),
-            },
-            None => CommandCall {
-                name: "oxplow.config.unset".into(),
-                input: json!({"key":key,"level":level}),
-            },
-        })
-    };
-    super::config_commands::preflight(&target, &[(key.clone(), value.clone())], level)?;
-    match &value {
-        Some(value) => settings.set(&key, value.clone(), level),
-        None => settings.unset(&key, level),
+            .is_some_and(|value| settings.validate(key, value).is_err())
+        {
+            undoable = false;
+        }
+        before_values.push(before);
     }
-    .map_err(error)?;
+    if has_secret && changes.len() != 1 {
+        return Err(error(SettingsError::PlaintextSecret));
+    }
+    super::config_commands::preflight(&target, &settings, &changes, level)?;
+    if has_secret {
+        let (key, value) = &changes[0];
+        match value {
+            Some(value) => settings.set(key, value.clone(), level),
+            None => settings.unset(key, level),
+        }
+        .map_err(error)?;
+    } else {
+        settings.update(&changes, level).map_err(error)?;
+    }
     target.refresh()?;
-    let event = Envelope::typed::<ConfigChanged>(
-        invocation.run.actor().source(),
-        &ConfigChangedV2 {
-            key: key.clone(),
-            before: before.unwrap_or(Value::Null),
-            after: if definition.secret {
-                Value::Null
-            } else {
-                value.unwrap_or(Value::Null)
-            },
-            layer: match level {
-                Level::Local => ConfigLayer::Local,
-                Level::Project => ConfigLayer::Project,
-                Level::Global => ConfigLayer::Global,
-            },
-        },
-    )
-    .with_subject([oxplow_domain::uri::build::config_uri(&key)]);
+    let mut restore = serde_json::Map::new();
+    let mut unset = Vec::new();
+    let mut events = Vec::new();
+    for ((key, value), before) in changes.iter().zip(before_values) {
+        if let Some(value) = &before {
+            restore.insert(key.clone(), value.clone());
+        } else {
+            unset.push(key.clone());
+        }
+        events.push(
+            Envelope::typed::<ConfigChanged>(
+                invocation.run.actor().source(),
+                &ConfigChangedV2 {
+                    key: key.clone(),
+                    before: before.unwrap_or(Value::Null),
+                    after: if has_secret {
+                        Value::Null
+                    } else {
+                        value.clone().unwrap_or(Value::Null)
+                    },
+                    layer: match level {
+                        Level::Local => ConfigLayer::Local,
+                        Level::Project => ConfigLayer::Project,
+                        Level::Global => ConfigLayer::Global,
+                    },
+                },
+            )
+            .with_subject([oxplow_domain::uri::build::config_uri(key)]),
+        );
+    }
+    let inverse = undoable.then(|| {
+        if changes.len() == 1 {
+            let key = &changes[0].0;
+            match restore.get(key) {
+                Some(value) => CommandCall {
+                    name: "oxplow.config.set".into(),
+                    input: json!({"key":key,"value":value,"level":level}),
+                },
+                None => CommandCall {
+                    name: "oxplow.config.unset".into(),
+                    input: json!({"key":key,"level":level}),
+                },
+            }
+        } else {
+            CommandCall {
+                name: "oxplow.config.update".into(),
+                input: json!({"set":restore,"unset":unset,"level":level}),
+            }
+        }
+    });
     Ok(HandlerOutput {
-        result: json!({"key":key,"level":level,"secret":definition.secret,"changed":true}),
+        result: json!({"level":level,"secret":has_secret,"changed":true}),
         inverse,
-        events: vec![event],
+        events,
         ..Default::default()
     })
 }
@@ -244,6 +337,42 @@ mod ownership_tests {
     use crate::test_fixtures::{services_with_thread, ThreadFixture};
     use oxplow_domain::run::{ContributionRef, Mode, RunContext};
     use oxplow_domain::Actor;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn failed_batch_replacement_leaves_all_keys_and_success_history_unchanged() {
+        use std::os::unix::fs::PermissionsExt;
+        let fx = services_with_thread().await;
+        let values =
+            json!({"oxplow.snapshots.retentionDays":14,"oxplow.generated.exclude":["first"]});
+        fx.svc
+            .commands
+            .run(
+                &Actor::Human,
+                "oxplow.config.update",
+                json!({"level":"project","set":values}),
+                false,
+            )
+            .await
+            .unwrap();
+        let path = fx._dir.path().join(".oxplow/project.yaml");
+        let before = std::fs::read(&path).unwrap();
+        let directory = path.parent().unwrap();
+        let permissions = std::fs::metadata(directory).unwrap().permissions();
+        std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let result=fx.svc.commands.run(&Actor::Human,"oxplow.config.update",json!({"level":"project","set":{"oxplow.snapshots.retentionDays":3,"oxplow.generated.exclude":["second"]}}),false).await;
+        std::fs::set_permissions(directory, permissions).unwrap();
+        assert!(
+            result.is_err(),
+            "a failed replacement is returned to the caller"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        let successful=fx.svc.db.read(|tx|tx.query_row("SELECT count(*) FROM command_audit WHERE command='oxplow.config.update' AND outcome='ok'",[],|row|row.get::<_,i64>(0)).map_err(oxplow_db::map_sql_err)).await.unwrap();
+        assert_eq!(
+            successful, 1,
+            "the failed batch must not gain a successful audit"
+        );
+    }
 
     const CONFIGURATION: &str = "configuration:
   version: 1
@@ -333,6 +462,38 @@ mod ownership_tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn duplicate_ai_provider_ids_are_rejected_before_writing() {
+        let fx = services_with_thread().await;
+        let before = target(&fx)
+            .settings()
+            .unwrap()
+            .get("oxplow.ai.providers", Some(Level::Project))
+            .unwrap()
+            .value;
+        let result = write(
+            target(&fx),
+            Invocation {
+                run: RunContext::core(Actor::Human, Mode::External),
+                idempotency_key: None,
+                confirmed: true,
+            },
+            "oxplow.ai.providers".into(),
+            Some(json!([{"id":"same","kind":"openai"},{"id":"same","kind":"anthropic"}])),
+            Level::Project,
+        );
+        assert!(matches!(result, Err(CommandError::Invalid { .. })));
+        assert_eq!(
+            target(&fx)
+                .settings()
+                .unwrap()
+                .get("oxplow.ai.providers", Some(Level::Project))
+                .unwrap()
+                .value,
+            before
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn composed_native_settings_operations_cannot_cross_extension_ownership() {
         let fx = services_with_thread().await;
         declare(fx._dir.path(), "alpha", CONFIGURATION);
@@ -371,6 +532,46 @@ mod ownership_tests {
             .unwrap()["value"],
             "beta-secret"
         );
+        settings
+            .set(
+                "oxplow.ai.providers",
+                json!([{"id":"fixture","kind":"openai"}]),
+                Level::Project,
+            )
+            .unwrap();
+        for (key, value) in [
+            ("oxplow.snapshots.retentionDays", json!(7)),
+            (
+                "oxplow.ai.providerKeys.66697874757265",
+                json!("must-not-save"),
+            ),
+        ] {
+            for value in [None, Some(value)] {
+                let result = write(
+                    target(&fx),
+                    Invocation {
+                        run: composed_run(&fx),
+                        idempotency_key: None,
+                        confirmed: true,
+                    },
+                    key.into(),
+                    value,
+                    Level::Project,
+                );
+                assert!(
+                    matches!(result, Err(CommandError::Denied { .. })),
+                    "composed write to {key} must be denied"
+                );
+            }
+            assert!(
+                !target(&fx)
+                    .settings()
+                    .unwrap()
+                    .inspect(key, Some(Level::Project))
+                    .unwrap()
+                    .is_set
+            );
+        }
         for value in [None, Some(json!(7))] {
             let result = write(
                 target(&fx),

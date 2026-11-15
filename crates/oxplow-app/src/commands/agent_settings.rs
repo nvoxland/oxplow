@@ -4,10 +4,8 @@
 //! knows — a key is registered, a setting is declared — then writes its
 //! key through the one config write (`config_commands::change`): validated
 //! against the key's schema, logged as `config.changed`, undoable, applied
-//! after commit. The prompt addition is one key,
+//! before success is recorded. The prompt addition is one key,
 //! `agentPromptAppend`, written with `oxplow.config.set`.
-
-use std::sync::Arc;
 
 use oxplow_domain::agent::registry::HarnessRegistry;
 use oxplow_domain::CommandError;
@@ -15,10 +13,10 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use super::config_commands::settings_handler;
 use super::config_commands::{change, ConfigTarget, Layer};
 use super::ops::Op;
 use super::util::{parse, schema};
-use super::{Handler, TxCtx};
 
 pub const SET_AGENTS: &str = "oxplow.agent.set_agents";
 pub const SET_SETTING: &str = "oxplow.agent.set_setting";
@@ -125,11 +123,11 @@ pub fn ops(target: ConfigTarget, harnesses: HarnessRegistry) -> Vec<Op> {
             "set_agents",
             schema::<SetAgentsInput>(),
             true,
-            Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
+            settings_handler(move |actor, input| {
                 let input: SetAgentsInput = parse(input)?;
                 let value = agents_value(&h, &input.agents)?;
-                change(&t, ctx.actor(), "agents", Some(value), Layer::Project)
-            })),
+                change(&t, actor, "agents", Some(value), Layer::Project)
+            }),
         )
     };
     let prompt_target = target.clone();
@@ -140,7 +138,7 @@ pub fn ops(target: ConfigTarget, harnesses: HarnessRegistry) -> Vec<Op> {
             "set_agent_setting",
             schema::<SetSettingInput>(),
             true,
-            Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
+            settings_handler(move |actor, input| {
                 let input: SetSettingInput = parse(input)?;
                 let current = Layer::Project
                     .value(&t.settings()?, "agentConfig")?
@@ -149,8 +147,8 @@ pub fn ops(target: ConfigTarget, harnesses: HarnessRegistry) -> Vec<Op> {
                     .map_err(|error| invalid("/agent", error.to_string()))?
                     .unwrap_or_default();
                 let value = agent_config_value(&harnesses, &current, input)?;
-                change(&t, ctx.actor(), "agentConfig", Some(value), Layer::Project)
-            })),
+                change(&t, actor, "agentConfig", Some(value), Layer::Project)
+            }),
         )
     };
     let set_prompt_append = Op::new(
@@ -158,17 +156,17 @@ pub fn ops(target: ConfigTarget, harnesses: HarnessRegistry) -> Vec<Op> {
         "set_prompt_append",
         schema::<SetPromptAppendInput>(),
         true,
-        Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
+        settings_handler(move |actor, input| {
             let input: SetPromptAppendInput = parse(input)?;
             let value = (!input.text.trim().is_empty()).then(|| json!(input.text.trim()));
             change(
                 &prompt_target,
-                ctx.actor(),
+                actor,
                 "agentPromptAppend",
                 value,
                 Layer::Project,
             )
-        })),
+        }),
     );
     vec![set_agents, set_setting, set_prompt_append]
 }

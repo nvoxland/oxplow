@@ -113,6 +113,7 @@ impl CommandBus {
         let run_c = run.clone();
         let vocabulary = self.log.vocabulary().clone();
         let shadow = HandlerOutput {
+            caller_result: None,
             result: out.result.clone(),
             inverse: out.inverse.clone(),
             events: out.events.clone(),
@@ -173,7 +174,7 @@ impl CommandBus {
                     after();
                 }
                 CommandOutcome {
-                    result: out.result,
+                    result: out.caller_result.unwrap_or(out.result),
                     audit_id: None,
                     event_id: None,
                     inverse: None,
@@ -219,7 +220,7 @@ pub(super) fn unrecorded(mut out: HandlerOutput) -> CommandOutcome {
         after();
     }
     CommandOutcome {
-        result: out.result,
+        result: out.caller_result.unwrap_or(out.result),
         audit_id: None,
         event_id: None,
         inverse: None,
@@ -231,7 +232,7 @@ pub(super) fn finish(mut out: HandlerOutput, recorded: Recorded) -> CommandOutco
         after();
     }
     CommandOutcome {
-        result: out.result,
+        result: out.caller_result.unwrap_or(out.result),
         audit_id: Some(recorded.audit_id),
         event_id: Some(recorded.event_id),
         inverse: out.inverse.filter(|_| recorded.inverse_recorded),

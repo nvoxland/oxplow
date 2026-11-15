@@ -1,0 +1,11 @@
+given:
+  - command: oxplow.config.set
+    input: { key: oxplow.snapshots.retentionDays, value: 14, level: project }
+  - command: oxplow.config.set
+    input: { key: oxplow.snapshots.retentionDays, value: 3, level: local }
+when: { page: project-settings }
+expect:
+  loaders:
+    settings:
+      rows:
+        contains: [{ key: oxplow.snapshots.retentionDays, value: '14' }]

@@ -50,7 +50,8 @@ pub fn bindings(fallback_name: &str) -> Vec<CoreBinding> {
     } else {
         fallback_name
     };
-    let root_schema = crate::keys::project_config_schema();
+    static ROOT_SCHEMA: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
+    let root_schema = ROOT_SCHEMA.get_or_init(crate::keys::project_config_schema);
     let defaults = default_document(fallback_name);
     let mut out = Vec::new();
     for (name, schema) in root_schema["properties"]
@@ -58,13 +59,43 @@ pub fn bindings(fallback_name: &str) -> Vec<CoreBinding> {
         .expect("the core schema has properties")
     {
         collect(
-            &root_schema,
+            root_schema,
             schema,
             &defaults,
             vec![name.clone()],
             None,
             &mut out,
         );
+    }
+    // Capability identities are declared by the core capability registry;
+    // implementations supplied by extensions remain ordinary scalar values.
+    // Independent choices inherit independently rather than merging a map.
+    out.retain(|binding| {
+        binding
+            .path
+            .first()
+            .is_none_or(|path| path != "activeProviders")
+    });
+    for capability in oxplow_domain::capability::choosable() {
+        out.push(CoreBinding {
+            definition: SettingDefinition {
+                key: canonical_key(&format!("activeProviders.{}", capability.id)),
+                title: format!("{} implementation", capability.title),
+                description: format!(
+                    "The implementation used for {}. Unset to inherit the choice.",
+                    capability.title.to_lowercase()
+                ),
+                category: "integrations".into(),
+                schema: json!({"type":"string","pattern":"^[a-z][a-z0-9_]*$"}),
+                default: None,
+                secret: false,
+                order: 0,
+                ui: json!({}),
+                restart_required: false,
+                owner: "core".into(),
+            },
+            path: vec!["activeProviders".into(), capability.id.into()],
+        });
     }
     out.push(extra(
         "newThreadSession",
@@ -133,15 +164,19 @@ pub fn project_document(store: &SettingsStore) -> Result<serde_yaml::Value, Sett
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default();
+    let bindings: Vec<_> = bindings(&fallback)
+        .into_iter()
+        .filter(|binding| !binding.path.is_empty())
+        .collect();
+    let keys: Vec<_> = bindings
+        .iter()
+        .map(|binding| binding.definition.key.as_str())
+        .collect();
     let mut values = BTreeMap::new();
-    for binding in bindings(&fallback) {
-        if binding.path.is_empty() {
-            continue;
-        }
-        let setting = store.get(&binding.definition.key, None)?;
+    for (binding, setting) in bindings.iter().zip(store.get_many(&keys)?) {
         if setting.origin != Some(Origin::Default) {
             if let Some(value) = setting.value {
-                values.insert(binding.definition.key, value);
+                values.insert(binding.definition.key.clone(), value);
             }
         }
     }
@@ -455,10 +490,7 @@ mod tests {
         let maps =
             values_for_runtime_field("demo", "activeProviders", &json!({"snapshots":"hashes"}));
         assert_eq!(maps.len(), 1);
-        assert_eq!(
-            maps["oxplow.activeProviders"],
-            json!({"snapshots":"hashes"})
-        );
+        assert_eq!(maps["oxplow.activeProviders.snapshots"], json!("hashes"));
     }
 
     #[test]
@@ -475,6 +507,41 @@ mod tests {
         let unique: std::collections::BTreeSet<_> =
             all.iter().map(|binding| &binding.definition.key).collect();
         assert_eq!(unique.len(), all.len());
+    }
+
+    #[test]
+    fn capability_preferences_inherit_as_independent_scalar_settings() {
+        let project = tempfile::tempdir().unwrap();
+        let global = tempfile::tempdir().unwrap();
+        let key = "oxplow.activeProviders.snapshots";
+        let write = |level, value: Option<&Value>| {
+            crate::settings::write_layer_key(
+                &crate::settings::level_path(project.path(), global.path(), level),
+                key,
+                value,
+            )
+            .unwrap()
+        };
+        use crate::settings::Level;
+        write(Level::Global, Some(&json!("none")));
+        write(Level::Project, Some(&json!("hashes")));
+        write(Level::Local, Some(&json!("oxplow")));
+        let load =
+            || crate::load_project_config_with_global(project.path(), Some(global.path())).unwrap();
+        let local = load();
+        assert_eq!(local.active_providers["snapshots"], "oxplow");
+        assert_eq!(local.personal_active_providers["snapshots"], "oxplow");
+        assert_eq!(local.active_provider_origins["snapshots"], "local");
+        write(Level::Local, None);
+        let inherited = load();
+        assert_eq!(inherited.active_providers["snapshots"], "hashes");
+        assert!(inherited.personal_active_providers.is_empty());
+        assert_eq!(inherited.active_provider_origins["snapshots"], "project");
+        write(Level::Project, None);
+        assert_eq!(load().active_provider_origins["snapshots"], "global");
+        assert!(!definitions("demo")
+            .iter()
+            .any(|definition| definition.key == "oxplow.activeProviders"));
     }
 
     #[test]

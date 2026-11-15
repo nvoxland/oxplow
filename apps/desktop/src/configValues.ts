@@ -23,16 +23,24 @@ export interface EffectiveSetting {
   owner: string;
   restartRequired: boolean;
   ui: unknown;
+  /** Explicit ordinary overrides; absent properties inherit. Secrets are omitted. */
+  overrides: Partial<Record<"local" | "project" | "global", unknown>>;
+  /** Resolution failed; value/origin/presence must not be interpreted as unset. */
+  unavailable: boolean;
 }
 
-const COLUMNS = "key, value, origin, extension, doc, schema, title, category, secret, is_set, owner, restart_required, ui";
+const COLUMNS = "key, value, origin, extension, doc, schema, title, category, secret, is_set, owner, restart_required, ui, local_value, project_value, global_value, unavailable";
 
 function parsed(cell: SqlCell): unknown {
   return typeof cell === "string" ? JSON.parse(cell) : null;
 }
 
 function settingOf(row: SqlCell[]): EffectiveSetting {
-  const [key, value, origin, extension, doc, schema, title, category, secret, isSet, owner, restartRequired, ui] = row;
+  const [key, value, origin, extension, doc, schema, title, category, secret, isSet, owner, restartRequired, ui, local, project, global, unavailable] = row;
+  const overrides: EffectiveSetting["overrides"] = {};
+  for (const [level, value] of [["local", local], ["project", project], ["global", global]] as const) {
+    if (typeof value === "string") overrides[level] = parsed(value);
+  }
   return {
     key: String(key),
     value: parsed(value),
@@ -47,6 +55,8 @@ function settingOf(row: SqlCell[]): EffectiveSetting {
     owner: typeof owner === "string" ? owner : "",
     restartRequired: restartRequired === 1,
     ui: parsed(ui),
+    overrides,
+    unavailable: unavailable === 1,
   };
 }
 

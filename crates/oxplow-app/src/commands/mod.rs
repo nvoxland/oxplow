@@ -96,6 +96,8 @@ use undo::{finish_undo_claim_tx, lost_race};
 pub struct HandlerOutput {
     /// Returned to the caller (`run_command`'s result).
     pub result: Value,
+    /// Native composite response; the full result above is still audited.
+    pub caller_result: Option<Value>,
     /// The call that undoes this run; `None` for a command that declares
     /// `undoable: false`, or when there is nothing to undo.
     pub inverse: Option<CommandCall>,
@@ -105,7 +107,7 @@ pub struct HandlerOutput {
     pub events: Vec<Envelope>,
     /// Runs once the run has committed: the in-memory broadcast that wakes
     /// the UI (`OxplowEvent`), and side effects outside the database that
-    /// mirror the committed change (`oxplow.config.set` writes project.yaml here).
+    /// mirror the committed change (for example, notifying an in-memory observer).
     /// Never a database write, and it must tolerate failure — the run is
     /// already recorded. The handler itself must stay pure: it can run
     /// more than once (`Database::transaction` retries on SQLITE_BUSY).
@@ -1854,7 +1856,7 @@ impl CommandBus {
             }
         };
         Ok(CommandOutcome {
-            result: out.result,
+            result: out.caller_result.unwrap_or(out.result),
             audit_id: None,
             event_id: None,
             inverse: None,

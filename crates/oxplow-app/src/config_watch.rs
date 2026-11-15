@@ -23,22 +23,21 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use oxplow_config::OXPLOW_CONFIG_FILE;
-use oxplow_fs_watch::{Batch, FsWatcher, Scope, Subscription};
+use oxplow_fs_watch::{Batch, FsWatcher, RecursiveMode, Scope, Subscription};
 use tracing::{debug, warn};
 
 use crate::Services;
 
 /// Holds the watch of what is outside the project. Drop to stop watching.
 pub struct ConfigWatcher {
-    _global: Option<FsWatcher>,
+    _global: tokio::task::JoinHandle<()>,
 }
 
 impl ConfigWatcher {
     /// Follow the config. What is in the project comes through the primary
-    /// stream's watch. The user-global metric library
-    /// (`<global_config_dir>/metrics/`), which hot-reloads the three-scope
-    /// catalog, has a watch of its own, when it exists:
-    /// watching a missing dir errors on some platforms.
+    /// stream's watch. Global settings follow their exact directory without
+    /// recursion; only the metric library has a recursive watch. Missing
+    /// directories are discovered by bounded polling of those known paths.
     pub fn spawn(services: Arc<Services>) -> Option<Self> {
         let layout = &services.layout;
         let sources_dir = layout
@@ -55,28 +54,16 @@ impl ConfigWatcher {
                 .file(state_dir.join("local.yaml"))
                 .dir(oxplow_config::EXTENSION_SOURCES_DIR),
         );
-        // Each project's watcher subscribes to the common global directory,
-        // so a global setting change is projected into every open project.
-        // Follow the closest existing ancestor so first creation also works.
-        let global_dir = Some(services.global_config_dir.clone());
-        let global_metrics_dir = global_dir.as_ref().map(|dir| dir.join("metrics"));
-        let global = global_dir.as_ref().and_then(|dir| {
-            let watch_dir = dir.ancestors().find(|ancestor| ancestor.is_dir())?;
-            FsWatcher::watch(watch_dir)
-                .inspect_err(
-                    |e| warn!(error = %e, ?watch_dir, "global settings watcher failed to start"),
-                )
-                .ok()
-        });
-        let global_changes = global.as_ref().map(FsWatcher::subscribe);
+        let global_dir = services.global_config_dir.clone();
+        let project_dir = layout.state_dir.clone();
         let follow = move |mut changes: Subscription, services: Arc<Services>| {
             let sources_dir = sources_dir.clone();
-            let global_metrics_dir = global_metrics_dir.clone();
+            let project_dir = project_dir.clone();
             tokio::spawn(async move {
                 // A save can fire create+modify; we only need to settle on the
                 // final content.
                 while let Some(batch) = changes.next_batch_after(Duration::from_millis(300)).await {
-                    let says = what_changed(&batch, &sources_dir, global_metrics_dir.as_deref());
+                    let says = what_changed(&batch, &sources_dir, &project_dir, None);
                     if says.sources {
                         if let Err(e) = services
                             .extension_activation
@@ -102,10 +89,95 @@ impl ConfigWatcher {
             });
         };
         follow(changes, services.clone());
-        if let Some(changes) = global_changes {
-            follow(changes, services.clone());
+        let task = tokio::spawn(follow_global(services, global_dir));
+        Some(Self { _global: task })
+    }
+}
+
+impl Drop for ConfigWatcher {
+    fn drop(&mut self) {
+        self._global.abort();
+    }
+}
+
+/// Only existing, explicitly configured folders are watched. Missing folders
+/// are discovered by polling their exact paths, never by watching an ancestor.
+fn global_watch_paths(dir: &Path) -> Vec<(std::path::PathBuf, RecursiveMode)> {
+    let mut paths = Vec::new();
+    if dir.is_dir() {
+        paths.push((dir.to_path_buf(), RecursiveMode::NonRecursive));
+    }
+    let metrics = dir.join("metrics");
+    if metrics.is_dir() {
+        paths.push((metrics, RecursiveMode::Recursive));
+    }
+    paths
+}
+
+fn config_stamp(path: &Path) -> Option<(std::time::SystemTime, u64)> {
+    let metadata = std::fs::metadata(path).ok()?;
+    Some((metadata.modified().ok()?, metadata.len()))
+}
+
+async fn follow_global(services: Arc<Services>, dir: std::path::PathBuf) {
+    let config = dir.join("global.yaml");
+    let metrics = dir.join("metrics");
+    // Re-read once when the task first polls, including a file created
+    // between spawn and the first OS registration.
+    let mut stamp = None;
+    let mut paths: Vec<(std::path::PathBuf, RecursiveMode)> = Vec::new();
+    let mut watcher = None;
+    let mut subscription: Option<Subscription> = None;
+    let mut poll = tokio::time::interval(Duration::from_millis(300));
+    loop {
+        poll.tick().await;
+        let batch = subscription.as_mut().and_then(Subscription::try_batch);
+        let wanted = global_watch_paths(&dir);
+        let metrics_created = !paths.iter().any(|(path, _)| path == &metrics)
+            && wanted.iter().any(|(path, _)| path == &metrics);
+        // A folder replaced between polls needs a fresh OS registration too.
+        let replaced = batch.as_ref().is_some_and(|batch| {
+            batch
+                .paths
+                .iter()
+                .any(|(path, _)| path == &dir || path == &metrics)
+        });
+        if wanted != paths || replaced || (watcher.is_none() && !wanted.is_empty()) {
+            watcher = if wanted.is_empty() {
+                None
+            } else {
+                FsWatcher::watch_paths(wanted.clone())
+                    .inspect_err(|e| warn!(error = %e, "global settings watcher failed to start"))
+                    .ok()
+            };
+            subscription = watcher.as_ref().map(FsWatcher::subscribe);
+            paths = wanted;
         }
-        Some(Self { _global: global })
+        let next_stamp = config_stamp(&config);
+        let says = batch
+            .as_ref()
+            .map(|batch| {
+                what_changed(
+                    batch,
+                    &services
+                        .layout
+                        .project_dir
+                        .join(oxplow_config::EXTENSION_SOURCES_DIR),
+                    &services.layout.state_dir,
+                    Some(&dir),
+                )
+            })
+            .unwrap_or_default();
+        if says.config || next_stamp != stamp {
+            match services.reload_config_from_disk() {
+                Ok(()) => services.extension_activation.request(),
+                Err(e) => warn!(error = %e, "failed to reload global settings"),
+            }
+        }
+        stamp = next_stamp;
+        if says.global_metrics || metrics_created {
+            services.global_metrics_changed();
+        }
     }
 }
 
@@ -123,11 +195,30 @@ struct Says {
 
 /// Changes it lost could be any of them, so a rescan asks for all of them
 /// (the global metrics only when it covers their folder).
-fn what_changed(batch: &Batch, sources_dir: &Path, global_metrics: Option<&Path>) -> Says {
+fn what_changed(
+    batch: &Batch,
+    sources_dir: &Path,
+    project_state: &Path,
+    global: Option<&Path>,
+) -> Says {
+    let global_metrics = global.map(|dir| dir.join("metrics"));
+    let config_paths = [
+        project_state.join(OXPLOW_CONFIG_FILE),
+        project_state.join("local.yaml"),
+    ]
+    .into_iter()
+    .chain(global.map(|dir| dir.join("global.yaml")))
+    .collect::<Vec<_>>();
+    let touches = |path: &Path| {
+        batch
+            .rescans
+            .iter()
+            .any(|root| path.starts_with(root) || root.starts_with(path))
+    };
     let mut says = Says {
-        sources: !batch.rescans.is_empty(),
-        config: !batch.rescans.is_empty(),
-        global_metrics: global_metrics.is_some_and(|dir| {
+        sources: touches(sources_dir),
+        config: config_paths.iter().any(|path| touches(path)),
+        global_metrics: global_metrics.as_deref().is_some_and(|dir| {
             batch
                 .rescans
                 .iter()
@@ -139,12 +230,10 @@ fn what_changed(batch: &Batch, sources_dir: &Path, global_metrics: Option<&Path>
             says.sources = true;
             continue;
         }
-        let is_config = path
-            .file_name()
-            .is_some_and(|n| n == OXPLOW_CONFIG_FILE || n == "local.yaml" || n == "global.yaml");
+        let is_config = config_paths.iter().any(|config| config == path);
         // A `.yaml`/`.yml` change under the global metrics dir is announced:
         // the runner re-reads the global scope on `ConfigChanged`.
-        let is_global_metric = global_metrics.is_some_and(|dir| {
+        let is_global_metric = global_metrics.as_deref().is_some_and(|dir| {
             path.starts_with(dir)
                 && matches!(
                     path.extension().and_then(|x| x.to_str()),
@@ -174,7 +263,8 @@ mod tests {
         what_changed(
             &batch,
             Path::new("/p/.oxplow/extensions"),
-            Some(Path::new("/g/metrics")),
+            Path::new("/p/.oxplow"),
+            Some(Path::new("/g")),
         )
     }
 
@@ -185,7 +275,7 @@ mod tests {
         assert!(says(&["/p/.oxplow/local.yaml"], &[]).config);
         assert!(says(&["/g/global.yaml"], &[]).config);
         assert!(says(&["/p/.oxplow/local.yaml"], &[]).config);
-        assert!(says(&["/global/global.yaml"], &[]).config);
+        assert!(!says(&["/global/global.yaml"], &[]).config);
         assert!(!says(&["/p/.oxplow/unrelated.yaml"], &[]).config);
         // A global metric isn't project.yaml: reloading it would read the
         // same config and announce nothing, so it is its own ask.
@@ -203,5 +293,62 @@ mod tests {
         assert!(lost.sources && lost.config && !lost.global_metrics);
         assert!(says(&[], &["/g/metrics"]).global_metrics);
         assert!(says(&[], &["/g"]).global_metrics);
+    }
+
+    #[test]
+    fn unrelated_settings_and_rescans_do_not_reload_this_project() {
+        for path in [
+            "/g/project.yaml",
+            "/g/local.yaml",
+            "/other/project.yaml",
+            "/p/nested/local.yaml",
+        ] {
+            assert_eq!(says(&[path], &[]), Says::default(), "{path}");
+        }
+        assert_eq!(says(&[], &["/other"]), Says::default());
+    }
+
+    #[test]
+    fn global_watches_never_expand_to_an_existing_ancestor() {
+        let root = tempfile::tempdir().unwrap();
+        let global = root.path().join("missing/deep/config");
+        assert!(global_watch_paths(&global).is_empty());
+        std::fs::create_dir_all(&global).unwrap();
+        assert_eq!(
+            global_watch_paths(&global),
+            vec![(global.clone(), RecursiveMode::NonRecursive)]
+        );
+        std::fs::create_dir(global.join("metrics")).unwrap();
+        assert_eq!(
+            global_watch_paths(&global),
+            vec![
+                (global.clone(), RecursiveMode::NonRecursive),
+                (global.join("metrics"), RecursiveMode::Recursive),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_global_directory_created_after_start_is_discovered_without_parent_watches() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let global = fx.svc.global_config_dir.clone();
+        if global.exists() {
+            std::fs::remove_dir_all(&global).unwrap();
+        }
+        let _watcher = ConfigWatcher {
+            _global: tokio::spawn(follow_global(fx.svc.clone(), global.clone())),
+        };
+        assert!(global_watch_paths(&global).is_empty());
+        std::fs::create_dir_all(&global).unwrap();
+        std::fs::write(
+            global.join("global.yaml"),
+            "oxplow.snapshots.retentionDays: 23\n",
+        )
+        .unwrap();
+        let changed = crate::test_fixtures::until_some(Duration::from_secs(3), || async {
+            (fx.svc.config.read().unwrap().snapshot_retention_days == 23).then_some(())
+        })
+        .await;
+        assert!(changed.is_some(), "the new global file was not loaded");
     }
 }

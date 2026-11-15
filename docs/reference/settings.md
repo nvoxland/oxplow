@@ -33,10 +33,20 @@ Use `oxplow.config.get { key }` for the effective value, or add
 `oxplow.config.set { key, value, level }`; remove with
 `oxplow.config.unset { key, level }`. Writes require an explicit level and
 validate the setting's schema. `oxplow.config.list_keys` lists definitions.
+For several ordinary settings at one level, `oxplow.config.update { level, set,
+unset }` validates the whole batch and replaces the YAML file once. Secret
+settings are changed individually.
+
+Capability choices use scalar keys such as `oxplow.activeProviders.snapshots`.
+Clearing a local choice restores the project or global choice for that capability.
+Settings shows project overrides even when local values take precedence.
+
 
 Secret settings use these same levels and commands, but values live in the OS
 keychain. Settings lists only whether a secret is set and where it comes from.
-A project-level secret is specific to this project on this machine; committing
+If a secure value cannot be read, Settings marks it unavailable and keeps the
+other settings visible. Direct secret reads and authentication fail until it can
+be read or replaced. A project-level secret is specific to this project on this machine; committing
 `project.yaml` does not share it. Secure-store failures do not write secrets to
 YAML.
 

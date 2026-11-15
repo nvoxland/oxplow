@@ -28,7 +28,7 @@ use oxplow_domain::agent_session::{
 use oxplow_domain::uri::build::{stream_uri, thread_uri};
 use oxplow_domain::{AgentSessionId, CommandCall, CommandError, Confirm, ThreadId, Timestamp};
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::util::{bare_id, invalid, parse, schema, sql};
@@ -41,7 +41,7 @@ pub const REOPEN: &str = "oxplow.agent_session.reopen";
 pub const START_FRESH: &str = "oxplow.agent_session.start_fresh";
 pub const FORK_CONVERSATION: &str = "oxplow.agent_session.fork_conversation";
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct OpenInput {
     /// The thread (`thr1`).
@@ -191,10 +191,120 @@ fn choose_agent(
 /// a new slot on the thread. It only inserts the row — it never starts a
 /// process and never sends a prompt. Undone by closing it.
 pub fn open_op(config: super::config_commands::ConfigTarget, harnesses: HarnessRegistry) -> Op {
+    use super::compose::{Compose, Composer, Composition, Finished, Finisher};
+    let composer: Arc<Composer> = Arc::new(move |_, _, raw| {
+        let mut input: OpenInput = parse(raw.clone())?;
+        let cfg = crate::config_service::read_config(&config.config);
+        let (harness, _) = choose_agent(&cfg, &harnesses, &input)?;
+        let remember = input.remember;
+        input.remember = false;
+        input.harness = Some(harness.clone());
+        let mut child = serde_json::to_value(&input).expect("session input serializes");
+        child
+            .as_object_mut()
+            .expect("session input is an object")
+            .remove("remember");
+        let mut calls = vec![CommandCall {
+            name: "oxplow.agent_session.open_slot".into(),
+            input: child,
+        }];
+        if remember {
+            calls.push(CommandCall {
+                name: "oxplow.agent_session.remember_default".into(),
+                input: json!({"harness":harness}),
+            });
+        }
+        Ok(Composition {
+            calls,
+            ..Default::default()
+        })
+    });
+    let finisher: Arc<Finisher> = Arc::new(|_, _, raw, answers| {
+        let input: OpenInput = parse(raw.clone())?;
+        let session = answers
+            .first()
+            .ok_or_else(|| invalid("/thread", "session open returned no answer"))?
+            .result
+            .clone();
+        let inverse = if input.remember {
+            let id = session
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| invalid("/thread", "session open returned no id"))?;
+            Some(vec![CommandCall {
+                name: CLOSE.into(),
+                input: json!({"session":id}),
+            }])
+        } else {
+            None
+        };
+        Ok(Finished {
+            result: Some(session),
+            inverse,
+        })
+    });
     Op::new(
         "agent_sessions.write",
         "open",
         schema::<OpenInput>(),
+        true,
+        Compose::handler_finishing_transparent(composer, finisher),
+    )
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct RememberDefaultInput {
+    harness: String,
+}
+
+/// An explicit session preference operation, with no caller-selected key or level.
+fn remember_default_op(
+    config: super::config_commands::ConfigTarget,
+    harnesses: HarnessRegistry,
+) -> Op {
+    Op::new(
+        "agent_sessions.write",
+        "remember_default",
+        schema::<RememberDefaultInput>(),
+        false,
+        super::config_commands::settings_handler(move |actor, raw| {
+            let input: RememberDefaultInput = parse(raw)?;
+            let cfg = crate::config_service::read_config(&config.config);
+            let (harness, _) = choose_agent(
+                &cfg,
+                &harnesses,
+                &OpenInput {
+                    thread: String::new(),
+                    kind: None,
+                    harness: Some(input.harness),
+                    title: None,
+                    resume: None,
+                    remember: false,
+                },
+            )?;
+            super::config_commands::change(
+                &config,
+                actor,
+                "newThreadSession",
+                Some(json!(harness)),
+                super::config_commands::Layer::Local,
+            )
+        }),
+    )
+}
+
+/// The database-only child of open: inserts a session slot transactionally.
+fn open_slot_op(config: super::config_commands::ConfigTarget, harnesses: HarnessRegistry) -> Op {
+    let mut slot_schema = schema::<OpenInput>();
+    slot_schema["properties"]
+        .as_object_mut()
+        .expect("input has properties")
+        .remove("remember");
+    Op::new(
+        "agent_sessions.write",
+        "open_slot",
+        slot_schema,
         true,
         Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
             let input: OpenInput = parse(input)?;
@@ -206,17 +316,12 @@ pub fn open_op(config: super::config_commands::ConfigTarget, harnesses: HarnessR
             open_thread(ctx, thread)?;
             let cfg = crate::config_service::read_config(&config.config);
             let (harness, kind) = choose_agent(&cfg, &harnesses, &input)?;
-            let remembered = if input.remember {
-                Some(super::config_commands::change(
-                    &config,
-                    ctx.actor(),
-                    "newThreadSession",
-                    Some(json!(harness)),
-                    super::config_commands::Layer::Local,
-                )?)
-            } else {
-                None
-            };
+            if input.remember {
+                return Err(invalid(
+                    "/remember",
+                    "remember is handled by agent_session.open",
+                ));
+            }
             let now = Timestamp::now();
             let session = insert_tx(
                 ctx.conn,
@@ -246,17 +351,10 @@ pub fn open_op(config: super::config_commands::ConfigTarget, harnesses: HarnessR
                         .ok_or_else(|| invalid("/resume", "the session vanished"))?
                 }
             };
-            let mut out = HandlerOutput {
+            Ok(HandlerOutput {
                 inverse: call(CLOSE, json!({ "session": session.id.to_string() })),
                 ..result(&session)
-            };
-            // Remembering what new threads start with lands with the open
-            // (its event, its file write after commit).
-            if let Some(remembered) = remembered {
-                out.events.extend(remembered.events);
-                out.after_commit = remembered.after_commit;
-            }
-            Ok(out)
+            })
         })),
     )
 }
@@ -575,7 +673,9 @@ pub fn ops(
     capabilities: Arc<crate::capabilities::CapabilityRegistry>,
 ) -> Vec<Op> {
     vec![
-        open_op(config, harnesses),
+        open_op(config.clone(), harnesses.clone()),
+        remember_default_op(config.clone(), harnesses.clone()),
+        open_slot_op(config, harnesses),
         rename_op(chat, capabilities.clone()),
         close_op(processes.clone()),
         reopen_op(),
@@ -1295,5 +1395,106 @@ mod tests {
         .await
         .unwrap();
         assert!(fx.svc.session_auth.authenticate(&token).is_none());
+    }
+
+    #[tokio::test]
+    async fn remembering_storage_failure_is_reported_after_the_session_slot_lands() {
+        let fx = services_with_thread().await;
+        let local = fx.svc.layout.state_dir.join("local.yaml");
+        if local.exists() {
+            std::fs::remove_file(&local).unwrap();
+        }
+        std::fs::create_dir(&local).unwrap();
+        let before = fx
+            .svc
+            .agent_session_store
+            .list_open_for_thread(&fx.thread)
+            .await
+            .unwrap()
+            .len();
+        let error = run(
+            &fx,
+            &Actor::Human,
+            OPEN,
+            json!({"thread":fx.thread.to_string(),"harness":"claude","remember":true}),
+            true,
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("oxplow.agent_session.remember_default"),
+            "{error}"
+        );
+        assert_eq!(
+            fx.svc
+                .agent_session_store
+                .list_open_for_thread(&fx.thread)
+                .await
+                .unwrap()
+                .len(),
+            before + 1,
+            "the database-only child commits before the failed external settings step"
+        );
+        assert_ne!(
+            crate::config_service::read_config(&fx.svc.config)
+                .personal_new_thread_session
+                .as_deref(),
+            Some("claude")
+        );
+    }
+
+    #[tokio::test]
+    async fn undoing_a_remembered_open_closes_only_the_session() {
+        let fx = services_with_thread().await;
+        let opened = run(
+            &fx,
+            &Actor::Human,
+            OPEN,
+            json!({"thread":fx.thread.to_string(),"harness":"claude","remember":true}),
+            true,
+        )
+        .await
+        .unwrap();
+        let session: AgentSession = serde_json::from_value(opened.result).unwrap();
+        fx.svc
+            .commands
+            .undo(&Actor::Human, opened.audit_id.unwrap(), true)
+            .await
+            .unwrap();
+        assert!(!get(&fx, session.id).await.is_open());
+        assert_eq!(
+            crate::config_service::read_config(&fx.svc.config)
+                .personal_new_thread_session
+                .as_deref(),
+            Some("claude")
+        );
+    }
+
+    #[tokio::test]
+    async fn remember_default_cannot_select_another_setting_or_level() {
+        let fx = services_with_thread().await;
+        for input in [
+            json!({"harness":"claude","key":"oxplow.projectName"}),
+            json!({"harness":"claude","level":"global"}),
+            json!({"harness":"unregistered"}),
+        ] {
+            run(
+                &fx,
+                &Actor::Human,
+                "oxplow.agent_session.remember_default",
+                input,
+                true,
+            )
+            .await
+            .expect_err("the narrow session preference operation rejects extra authority");
+        }
+        assert_ne!(
+            crate::config_service::read_config(&fx.svc.config)
+                .personal_new_thread_session
+                .as_deref(),
+            Some("claude")
+        );
     }
 }

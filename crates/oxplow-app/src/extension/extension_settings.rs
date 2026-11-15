@@ -114,13 +114,18 @@ pub(crate) fn values_for(
     public: bool,
 ) -> Result<Value, ExtensionSettingsError> {
     let mut root = Value::Object(Map::new());
-    for binding in bindings_for(namespace, declaration)? {
-        if public && binding.definition.secret {
-            continue;
-        }
-        let setting = store
-            .get(&binding.definition.key, None)
-            .map_err(|_| ExtensionSettingsError::Resolution)?;
+    let bindings: Vec<_> = bindings_for(namespace, declaration)?
+        .into_iter()
+        .filter(|binding| !(public && binding.definition.secret))
+        .collect();
+    let keys: Vec<_> = bindings
+        .iter()
+        .map(|binding| binding.definition.key.as_str())
+        .collect();
+    let settings = store
+        .get_many(&keys)
+        .map_err(|_| ExtensionSettingsError::Resolution)?;
+    for (binding, setting) in bindings.iter().zip(settings) {
         if let Some(value) = setting.value {
             insert(&mut root, &binding.path, value)?;
         }
@@ -145,18 +150,38 @@ pub(crate) fn origins_for(
     public: bool,
 ) -> Result<BTreeMap<String, Origin>, ExtensionSettingsError> {
     let mut origins = BTreeMap::new();
-    for binding in bindings_for(namespace, declaration)? {
-        if public && binding.definition.secret {
-            continue;
-        }
-        let setting = store
-            .inspect(&binding.definition.key, None)
-            .map_err(|_| ExtensionSettingsError::Resolution)?;
+    let bindings: Vec<_> = bindings_for(namespace, declaration)?
+        .into_iter()
+        .filter(|binding| !(public && binding.definition.secret))
+        .collect();
+    let keys: Vec<_> = bindings
+        .iter()
+        .map(|binding| binding.definition.key.as_str())
+        .collect();
+    let settings = store
+        .inspect_many(&keys)
+        .map_err(|_| ExtensionSettingsError::Resolution)?;
+    for (binding, setting) in bindings.iter().zip(settings) {
         if let Some(origin) = setting.origin {
             origins.insert(pointer(&binding.path), origin);
         }
     }
     Ok(origins)
+}
+
+/// Preserve ordinary segments, reserving one prefix for reversible UTF-8 hex
+/// escapes. Encoding the entire unusual segment keeps dots distinct from paths.
+fn key_segment(segment: &str) -> String {
+    if !segment.is_empty()
+        && !segment.starts_with("__hex_")
+        && segment
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+    {
+        segment.to_owned()
+    } else {
+        format!("__hex_{}", hex::encode(segment))
+    }
 }
 
 fn insert(root: &mut Value, path: &[String], value: Value) -> Result<(), ExtensionSettingsError> {
@@ -212,11 +237,6 @@ fn collect(
 ) -> Result<(), ExtensionSettingsError> {
     if path.len() > MAX_DEPTH {
         return Err(ExtensionSettingsError::Declaration("nesting limit"));
-    }
-    if path.iter().any(|segment| {
-        segment.is_empty() || segment.contains('.') || segment.chars().any(char::is_control)
-    }) {
-        return Err(ExtensionSettingsError::Declaration("invalid key segment"));
     }
     let schema = dereference(&declaration.schema, schema)?;
     let category = text(&schema, "x-category").or(category);
@@ -277,7 +297,14 @@ fn collect(
     }
     out.push(Binding {
         definition: SettingDefinition {
-            key: format!("{}.{}", namespace, path.join(".")),
+            key: format!(
+                "{}.{}",
+                namespace,
+                path.iter()
+                    .map(|segment| key_segment(segment))
+                    .collect::<Vec<_>>()
+                    .join(".")
+            ),
             title,
             description: text(&schema, "description").unwrap_or_default().to_owned(),
             category: category.unwrap_or(namespace).to_owned(),
@@ -467,12 +494,54 @@ mod tests {
     }
 
     #[test]
-    fn ambiguous_dotted_schema_segments_are_rejected() {
+    fn unusual_property_names_have_distinct_canonical_keys_and_original_pointers() {
         let extension = extension(
-            json!({"type":"object","properties":{"a.b":{"type":"integer"}}}),
-            json!({}),
+            json!({"type":"object","properties": {
+                "api/url":{"type":"string"}, "my key":{"type":"integer"},
+                "a.b":{"type":"string"}, "a":{"type":"object","properties":{"b":{"type":"string"}}},
+                "__hex_612e62":{"type":"string"}
+            }}),
+            json!({"api/url":"old", "my key":1, "a.b":"flat", "a":{"b":"nested"}, "__hex_612e62":"literal"}),
         );
-        assert!(definitions(&extension).is_err());
+        let project = tempfile::tempdir().unwrap();
+        let global = tempfile::tempdir().unwrap();
+        let mut registry = SettingsRegistry::default();
+        replace_extensions(&mut registry, std::slice::from_ref(&extension)).unwrap();
+        let store = SettingsStore::new(
+            project.path().into(),
+            global.path().into(),
+            Arc::new(RwLock::new(registry)),
+            Arc::new(NoSecrets),
+        );
+        store
+            .set(
+                "example.__hex_6170692f75726c",
+                json!("new"),
+                oxplow_config::settings::Level::Project,
+            )
+            .unwrap();
+        store
+            .set(
+                "example.__hex_6d79206b6579",
+                json!(9),
+                oxplow_config::settings::Level::Local,
+            )
+            .unwrap();
+        let values = projected(&extension, &store, false);
+        assert_eq!(values["api/url"], "new");
+        assert_eq!(values["my key"], 9);
+        assert_eq!(values["a.b"], "flat");
+        assert_eq!(values["a"]["b"], "nested");
+        assert_eq!(values["__hex_612e62"], "literal");
+        let origins = origins_for(
+            &extension.namespace,
+            extension.configuration.as_ref().unwrap(),
+            &store,
+            false,
+        )
+        .unwrap();
+        assert_eq!(origins["/api~1url"], Origin::Project);
+        assert_eq!(origins["/my key"], Origin::Local);
     }
 
     #[test]

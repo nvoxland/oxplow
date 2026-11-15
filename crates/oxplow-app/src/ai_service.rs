@@ -404,15 +404,16 @@ impl AiService {
         let providers = config
             .providers
             .iter()
-            .map(|p| {
-                Ok(ProviderStatus {
-                    id: p.id.clone(),
-                    kind: p.kind.clone(),
-                    base_url: p.base_url.clone(),
-                    key_set: self.raw_key(&p.id)?.is_some(),
-                })
+            .map(|p| ProviderStatus {
+                id: p.id.clone(),
+                kind: p.kind.clone(),
+                base_url: p.base_url.clone(),
+                // Display whether a usable key is available. A locked backend or
+                // obsolete endpoint binding must not hide the Settings page;
+                // actual auth/direct reads continue to propagate the failure.
+                key_set: self.key(p).ok().flatten().is_some(),
             })
-            .collect::<Result<_, AiServiceError>>()?;
+            .collect();
         let status = |role: Role, description: String, profile: Option<&AiProfile>| {
             let effective = config.resolve(&role, &profiles).map(|(_, b)| b.clone());
             RoleStatus {
@@ -1997,6 +1998,105 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn settings_keep_provider_and_role_rows_when_a_key_endpoint_changes() {
+        use oxplow_config::settings::Level;
+        let project = tempfile::tempdir().unwrap();
+        let global = tempfile::tempdir().unwrap();
+        let backend = Arc::new(MemorySecrets::default());
+        let settings =
+            crate::settings::store(project.path(), global.path(), backend.clone(), &[]).unwrap();
+        let db = Database::in_memory();
+        let svc = AiService::new(
+            test_providers(),
+            backend,
+            Arc::new(SqliteAiCallStore::new(db)),
+            Some(global.path().into()),
+        )
+        .with_settings(settings.clone());
+        svc.save_provider(
+            ProviderConfig {
+                id: "or".into(),
+                kind: "openrouter".into(),
+                base_url: Some("https://old.example/v1".into()),
+            },
+            Some("private-key".into()),
+        )
+        .unwrap();
+        svc.set_role(&Role::SUMMARIZE, Some(RoleBinding::new("or", "m")))
+            .unwrap();
+        settings
+            .set(
+                "oxplow.ai.providers",
+                json!([{"id":"or","kind":"openrouter","baseUrl":"https://new.example/v1"}]),
+                Level::Global,
+            )
+            .unwrap();
+        let status = svc.settings().await.unwrap();
+        assert_eq!(status.providers.len(), 1);
+        assert!(!status.providers[0].key_set);
+        assert!(status
+            .roles
+            .iter()
+            .any(|role| role.role == Role::SUMMARIZE && role.binding.is_some()));
+        assert!(!serde_json::to_string(&status)
+            .unwrap()
+            .contains("private-key"));
+        assert!(settings.get(&provider_key_setting("or"), None).is_err());
+        assert!(svc.key(&svc.config().unwrap().providers[0]).is_err());
+    }
+
+    #[tokio::test]
+    async fn settings_remain_readable_when_the_secure_backend_is_unavailable() {
+        struct Locked;
+        impl SecretStore for Locked {
+            fn get(&self, _: &str) -> Result<Option<String>, oxplow_ai::secrets::SecretError> {
+                Err(oxplow_ai::secrets::SecretError::Unavailable(
+                    "private backend detail".into(),
+                ))
+            }
+            fn set(&self, _: &str, _: &str) -> Result<(), oxplow_ai::secrets::SecretError> {
+                unreachable!()
+            }
+            fn delete(&self, _: &str) -> Result<(), oxplow_ai::secrets::SecretError> {
+                unreachable!()
+            }
+        }
+        let project = tempfile::tempdir().unwrap();
+        let global = tempfile::tempdir().unwrap();
+        let backend = Arc::new(Locked);
+        let settings =
+            crate::settings::store(project.path(), global.path(), backend.clone(), &[]).unwrap();
+        settings
+            .set(
+                "oxplow.ai.providers",
+                json!([{"id":"or","kind":"openrouter"}]),
+                oxplow_config::settings::Level::Global,
+            )
+            .unwrap();
+        let svc = AiService::new(
+            test_providers(),
+            backend,
+            Arc::new(SqliteAiCallStore::new(Database::in_memory())),
+            Some(global.path().into()),
+        )
+        .with_settings(settings.clone());
+        svc.set_role(&Role::SUMMARIZE, Some(RoleBinding::new("or", "m")))
+            .unwrap();
+        let status = svc.settings().await.unwrap();
+        assert_eq!(status.providers.len(), 1);
+        assert!(!status.providers[0].key_set);
+        assert!(status
+            .roles
+            .iter()
+            .any(|role| role.role == Role::SUMMARIZE && role.binding.is_some()));
+        assert!(!serde_json::to_string(&status)
+            .unwrap()
+            .contains("private backend detail"));
+        assert!(settings.get(&provider_key_setting("or"), None).is_err());
+        assert!(svc.key(&svc.config().unwrap().providers[0]).is_err());
+    }
+
+    #[tokio::test]
     async fn settings_list_every_role_and_whether_keys_are_set_never_the_key() {
         let dir = tempfile::tempdir().unwrap();
         let (svc, _) = service("http://x", &dir);
@@ -3073,14 +3173,14 @@ pub(crate) fn provider_key_definition(id: &str) -> oxplow_config::settings::Sett
         key: provider_key_setting(id),
         title: "AI provider key".into(),
         description: "Endpoint-bound credential for an AI provider".into(),
-        category: "AI".into(),
+        category: "ai".into(),
         schema: serde_json::json!({"type":"string"}),
         default: None,
         secret: true,
         order: 0,
         ui: serde_json::json!({}),
         restart_required: false,
-        owner: "oxplow".into(),
+        owner: "core".into(),
     }
 }
 
@@ -3099,4 +3199,15 @@ fn ensure_provider_key(
             .map_err(|e| AiServiceError::Config(e.to_string()))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod provider_key_metadata_tests {
+    #[test]
+    fn provider_credentials_belong_to_core_and_the_ai_category() {
+        let definition = super::provider_key_definition("primary");
+        assert_eq!(definition.owner, "core");
+        assert_eq!(definition.category, "ai");
+        assert!(definition.secret);
+    }
 }

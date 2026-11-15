@@ -59,6 +59,7 @@ pub(super) struct Composed {
     /// Its `finish`, called once every call landed: it sets the run's
     /// result and (for steps) its undo.
     finish: Option<Arc<super::compose::Finisher>>,
+    transparent_result: bool,
     /// What `finish` reads through.
     reads: super::compose::Reads,
 }
@@ -274,6 +275,7 @@ impl Router<'_> {
                 scopes: run.trace().summary(),
                 input: input.clone(),
                 finish: compose.finish.clone(),
+                transparent_result: compose.transparent_result,
                 reads: self.reads.clone(),
             },
             outside,
@@ -562,6 +564,8 @@ fn run_tree(
 ) -> Result<HandlerOutput, CommandError> {
     ctx.trace.add(&composed.scopes);
     let mut children = Vec::with_capacity(composed.calls.len());
+    let mut caller_children = Vec::with_capacity(composed.calls.len());
+    let mut has_caller_result = false;
     let mut events = Vec::new();
     let mut afters: Vec<Box<dyn FnOnce() + Send + Sync>> = Vec::new();
     let mut inverses: Vec<Option<CommandCall>> = Vec::new();
@@ -599,11 +603,17 @@ fn run_tree(
             afters.push(after);
         }
         events.extend(out.events);
+        has_caller_result |= out.caller_result.is_some();
+        let child_result = out
+            .caller_result
+            .clone()
+            .unwrap_or_else(|| out.result.clone());
+        caller_children.push(json!({"name":c.call.name,"result":child_result}));
         if composed.finish.is_some() {
             answers.push(StepAnswer {
                 name: c.call.name.clone(),
                 input: c.call.input.clone(),
-                result: out.result.clone(),
+                result: child_result,
             });
         }
         children.push(json!({ "name": c.call.name, "result": out.result }));
@@ -646,6 +656,13 @@ fn run_tree(
         }
     }
     Ok(HandlerOutput {
+        caller_result: if composed.transparent_result {
+            Some(result.clone().unwrap_or(Value::Null))
+        } else if has_caller_result {
+            Some(json!({"result":result,"children":caller_children}))
+        } else {
+            None
+        },
         result: json!({ "result": result, "children": children }),
         inverse,
         events,
@@ -1015,6 +1032,9 @@ impl CommandBus {
         if failure.is_none() && finish_failure.is_none() {
             events.extend(plan.events.iter().cloned());
         }
+        let caller_result = plan
+            .transparent_result
+            .then(|| plan_result.clone().unwrap_or(Value::Null));
         let mut result = json!({ "result": plan_result, "children": &landed });
         let stop = failure.as_ref().map(|(step, err)| {
             result["failed"] = json!({
@@ -1049,6 +1069,7 @@ impl CommandBus {
         // The script's inverse is the undo of a run that all landed.
         let inverse = plan_inverse.filter(|_| stop.is_none() && !sensitive);
         let out = HandlerOutput {
+            caller_result: None,
             result: result.clone(),
             inverse: inverse.clone(),
             events,
@@ -1119,7 +1140,7 @@ impl CommandBus {
         match stop {
             Some(err) => Err(err),
             None => Ok(CommandOutcome {
-                result,
+                result: caller_result.unwrap_or(result),
                 audit_id: recorded.as_ref().map(|r| r.audit_id),
                 event_id: recorded.map(|r| r.event_id),
                 inverse,
