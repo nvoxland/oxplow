@@ -11,8 +11,8 @@
 #      (the SDK's throwaway oxplow activates foundation and bundled from
 #      the copies embedded in the binary);
 #   3. `oxplow-daemon --project <sample> --init` starts, and its extension
-#      listing has oxplow-foundation and oxplow-bundled enabled with no errors,
-#      and oxtask and oxwiki listed with no errors but off (off by default).
+#      listing has oxplow-foundation, oxplow-bundled, oxtask and oxwiki
+#      enabled with no errors (all four are on by default).
 # Nothing here reads the oxplow checkout. Exit 0 when every step holds.
 set -euo pipefail
 
@@ -100,20 +100,13 @@ try:
     if reply.get("status") != "ok":
         sys.exit("list_extensions: " + json.dumps(reply))
     by_name = {e["name"]: e for e in reply["data"]}
-    for name in ("oxplow-foundation", "oxplow-bundled"):
+    for name in ("oxplow-foundation", "oxplow-bundled", "oxtask", "oxwiki"):
         e = by_name.get(name)
         if e is None:
             sys.exit(f"{name} is not listed: {sorted(by_name)}")
         if not e.get("enabled") or e.get("errors"):
             sys.exit(f"{name} should be enabled with no errors: {json.dumps(e)[:600]}")
         print(f"   {name}: enabled, no errors")
-    for name in ("oxtask", "oxwiki"):
-        e = by_name.get(name)
-        if e is None:
-            sys.exit(f"{name} is not listed: {sorted(by_name)}")
-        if e.get("enabled") or e.get("errors"):
-            sys.exit(f"{name} should be listed off with no errors: {json.dumps(e)[:600]}")
-        print(f"   {name}: listed, off, no errors")
 finally:
     proc.terminate()
     try:
