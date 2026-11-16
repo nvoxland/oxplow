@@ -1,7 +1,14 @@
 import { ipc, run } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { installExtension } from "../../support/pages.js";
-import { newSessionPage, searchLauncher, load, reload } from "../../support/ui.js";
+import { newSessionPage, searchLauncher, load, reload, shown } from "../../support/ui.js";
+
+/** Turn the built-in agents on or off for the project, one
+ *  `oxplow.agents.<harness>.enabled` each; the scripted test agent stays on. */
+function setAgents(daemon: import("../../support/daemon.js").Daemon, on: string[]) {
+  const set = Object.fromEntries(["claude", "codex", "opencode"].map((h) => [`oxplow.agents.${h}.enabled`, on.includes(h)]));
+  return run(daemon, "oxplow.config.update", { level: "project", set });
+}
 
 test("an agent terminal has usable height when opened and restored", async ({ page }) => {
   await load(page);
@@ -39,7 +46,7 @@ test("search offers a new agent session, which opens the picker", async ({ page 
 /// bin dirs — so its launch shell exits at once)
 /// shows "Session ended", and its tab still closes the session.
 test("an ended terminal session says so and its tab closes it", async ({ page, daemon }) => {
-  await run(daemon, "oxplow.agent.set_agents", { agents: ["scripted", "claude"] });
+  await setAgents(daemon, ["scripted", "claude"]);
   await load(page);
   await expect(newSessionPage(page)).toBeVisible();
   await newSessionPage(page).locator('[data-node="start"]').getByTestId("viz-form-fields-harness").selectOption("claude");
@@ -57,7 +64,7 @@ test("an ended terminal session says so and its tab closes it", async ({ page, d
 /// PATH can't find) says why where "Session ended" shows, with a retry — not
 /// a blank pane.
 test("a session that can't launch shows why and offers a retry", async ({ page, daemon }) => {
-  await run(daemon, "oxplow.agent.set_agents", { agents: ["scripted", "codex"] });
+  await setAgents(daemon, ["scripted", "codex"]);
   await load(page);
   await expect(newSessionPage(page)).toBeVisible();
   await newSessionPage(page).locator('[data-node="start"]').getByTestId("viz-form-fields-harness").selectOption("codex");
@@ -71,7 +78,7 @@ test("a session that can't launch shows why and offers a retry", async ({ page, 
 /// Extensions reloading (a deploy, here) says nothing against an open tab: its
 /// page and terminal stay mounted, so a menu open on it stays open.
 test("an open tab stays drawn while the extensions reload", async ({ page, daemon }) => {
-  await run(daemon, "oxplow.agent.set_agents", { agents: ["scripted", "claude", "codex"] });
+  await setAgents(daemon, ["scripted", "claude", "codex"]);
   await load(page);
   await expect(newSessionPage(page)).toBeVisible();
   await newSessionPage(page).locator('[data-node="start"]').getByTestId("viz-form-fields-harness").selectOption("claude");
@@ -97,7 +104,7 @@ test("an open tab stays drawn while the extensions reload", async ({ page, daemo
 /// the harness's name for the conversation, else the harness and the day.
 /// Clearing the alias gives the fallback back.
 test("a session's tab shows its alias, and its fallback once the alias is cleared", async ({ page, daemon }) => {
-  await run(daemon, "oxplow.agent.set_agents", { agents: ["scripted", "claude", "codex"] });
+  await setAgents(daemon, ["scripted", "claude", "codex"]);
   await load(page);
   await expect(newSessionPage(page)).toBeVisible();
   await newSessionPage(page).locator('[data-node="start"]').getByTestId("viz-form-fields-harness").selectOption("claude");
@@ -157,7 +164,7 @@ test("a session's tab shows its alias, and its fallback once the alias is cleare
 /// Search offers a command per enabled agent that starts it directly — the
 /// project's agents decide which: Codex once enabled, never Claude here.
 test("search starts an enabled agent's session directly", async ({ page, daemon }) => {
-  await run(daemon, "oxplow.agent.set_agents", { agents: ["scripted", "codex"] });
+  await setAgents(daemon, ["scripted", "codex"]);
   await load(page);
   await expect(newSessionPage(page)).toBeVisible();
   await searchLauncher(page, "new claude session");
@@ -193,18 +200,24 @@ test("the picker closes, and stays closed", async ({ page, daemon }) => {
   await expect(page.getByTestId(PICKER_CLOSE)).not.toBeVisible();
 });
 
-/// Remember This makes the agent chosen what new threads start with.
-test("a remembered choice is what new threads start with", async ({ page, daemon }) => {
-  await run(daemon, "oxplow.agent.set_agents", { agents: ["scripted", "claude"] });
+/// A new thread opens the picker; the agent last started there is chosen in
+/// it already (the app's memory, never a setting), and nothing starts by itself.
+test("a new thread opens the picker with the last choice selected", async ({ page, daemon }) => {
+  await setAgents(daemon, ["scripted", "claude"]);
   await load(page);
   await expect(newSessionPage(page)).toBeVisible();
   await newSessionPage(page).locator('[data-node="start"]').getByTestId("viz-form-fields-harness").selectOption("claude");
-  await newSessionPage(page).locator('[data-node="start"]').getByTestId("viz-form-fields-remember").check();
   await newSessionPage(page).locator('[data-node="start"]').getByRole("button", { name: "Start a new session", exact: true }).click();
   await expect(page.locator('[data-testid^="center-tab-oxplow:oxplow/agent_session?"]')).toHaveCount(1);
 
   await addThread(page, daemon, "Busy");
-  await expect(page.locator('[data-testid^="center-tab-oxplow:oxplow/agent_session?"]')).toHaveCount(1);
-  await expect(page.getByTestId(PICKER_CLOSE)).not.toBeVisible();
-  await expect(page.getByTestId("terminal-ended")).toBeVisible();
+  const [stream] = await ipc<{ id: string }[]>(daemon, "list_streams");
+  const threads = await ipc<{ id: string; title: string }[]>(daemon, "list_threads", { streamId: stream!.id });
+  const busy = threads.find((t) => t.title === "Busy")!;
+  // Adding it leaves the navigator open over the rail: its row selects it.
+  await page.getByTestId(`navigator-thread-row-${busy.id}`).click();
+  await expect(newSessionPage(page)).toBeVisible();
+  await expect(newSessionPage(page).locator('[data-node="start"]').getByTestId("viz-form-fields-harness")).toHaveValue("claude");
+  // The new thread shows the picker, not a session of the earlier one.
+  await expect(shown(page, "oxplow:oxplow/agent_session?")).toHaveCount(0);
 });

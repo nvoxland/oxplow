@@ -30,8 +30,8 @@ test("a written page renders, and a task link in it opens the task", async ({ pa
 });
 
 // The index's filter is a row in the page's rail: its value opens it. What
-// it lists is a fixture; the match marked in the title and the text is the
-// shell's.
+// it lists is a fixture; the match marked in the title is the shell's (the
+// index shows no page text).
 test("the Knowledge index marks the filter's match", async ({ page, daemon }) => {
   await run(daemon, "oxwiki.page.write", {
     title: "Kiwi notes",
@@ -45,11 +45,11 @@ test("the Knowledge index marks the filter's match", async ({ page, daemon }) =>
   const index = page.locator('[data-section="pages"]:visible');
   await expect(index).toContainText("Kiwi notes");
   await page.getByTestId("page-param-filter-value").filter({ visible: true }).click();
-  await page.getByTestId("page-param-filter-edit").fill("quokka");
+  await page.getByTestId("page-param-filter-edit").fill("kiwi");
   await page.keyboard.press("Enter");
   await expect(index).toContainText("Kiwi notes");
   await expect(index).not.toContainText("Other notes");
-  await expect(index.locator("mark.ox-mark")).toContainText("quokka");
+  await expect(index.locator("mark.ox-mark")).toContainText("Kiwi");
 });
 
 // The page's body is the markdown editor (Save only when changed).

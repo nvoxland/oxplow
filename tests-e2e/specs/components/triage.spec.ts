@@ -84,8 +84,8 @@ test("the decisions made survive a reload on the board", async ({ page, daemon }
   try {
     await install(daemon);
     // The model: a TypeSafe provider at the stand-in for Jev.
-    await run(daemon, "oxplow.ai.set_provider", { id: "sorter", kind: "typesafe", base_url: model.url });
-    await run(daemon, "oxplow.ai.set_role", { role: "decide", provider: "sorter", model: "jev" });
+    await run(daemon, "oxplow.ai.set_provider", { id: "typesafe", kind: "typesafe", base_url: model.url });
+    await run(daemon, "oxplow.ai.set_role", { role: "decide", provider: "typesafe", model: "jev" });
     await until("the todos collector to be listed", 20_000, async () => {
       const collectors = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", {
         sql: "SELECT 1 FROM v_collector WHERE extension = 'triage' AND id = 'todos'",

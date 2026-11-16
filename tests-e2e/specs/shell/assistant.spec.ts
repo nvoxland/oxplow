@@ -34,8 +34,8 @@ async function model(answer: string): Promise<{ url: string; close(): Promise<vo
 test("ask the Assistant about a page and an answer appears in the panel", async ({ page, daemon }) => {
   const stub = await model("Suite Home is a page of the test extension.");
   try {
-    await run(daemon, "oxplow.ai.set_provider", { id: "stand-in", kind: "openai_compatible", base_url: stub.url, key: "sk-e2e" });
-    await run(daemon, "oxplow.ai.set_role", { role: "assistant", provider: "stand-in", model: "m" });
+    await run(daemon, "oxplow.ai.set_provider", { id: "openai_compatible", kind: "openai_compatible", base_url: stub.url, key: "sk-e2e" });
+    await run(daemon, "oxplow.ai.set_role", { role: "assistant", provider: "openai_compatible", model: "m" });
     await open(page, daemon, "oxplow:oxplow/page?page=e2e/home");
     await page.locator('[data-testid="page-nav-menu"]:visible').click();
     await page.getByTestId("menu-item-page-ask-assistant").click();
