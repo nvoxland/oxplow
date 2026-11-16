@@ -10,7 +10,7 @@ categories:
 
 <!-- more -->
 
-Back in 0.5 I called the goal an "Integrated Understanding Environment". Through 0.7, Oxplow still had opinions about your process baked in: efforts that wanted work declared up front, a built-in task list, a built-in wiki. 0.8 takes those out of the core:
+The goal has been the same since 0.5: help you understand and steer what your agents are doing. Through 0.7, though, Oxplow still had opinions about your process baked in: efforts that wanted work declared up front, a built-in task list, a built-in wiki. 0.8 takes those out of the core:
 
 - Oxplow records what happened (requests, turns, files, tests) instead of asking you or the agent to declare it.
 - Tasks and knowledge are models that any extension can fill. Oxplow's own tracker and wiki are two such extensions, and you can replace either one with whatever you already use.
