@@ -358,8 +358,10 @@ mod tests {
         dir
     }
 
-    /// Develop oxplow: its extensions run from their sources. Each test is
-    /// its own process, so the variable reaches only this test.
+    /// Develop oxplow: its extensions run from their sources. Under nextest
+    /// each test is its own process; under `cargo test` (CI) the variable
+    /// stays set for this binary's other tests, none of which depends on
+    /// source mode being off.
     fn from_source() {
         std::env::set_var("OXPLOW_EXTENSIONS_FROM_SOURCE", "true");
     }

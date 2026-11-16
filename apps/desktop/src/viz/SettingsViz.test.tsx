@@ -16,7 +16,9 @@ mock.module("../api.js", () => ({ ...realApi, runCommand: async (name: string, i
 } }));
 const { SettingsViz } = await import("./SettingsViz.js");
 afterEach(() => { cleanup(); calls.length = 0; });
-afterAll(() => mock.module("../api.js", () => realApi));
+afterAll(() => {
+  mock.module("../api.js", () => realApi);
+});
 function run(overrides: Record<string, unknown> = {}, params = {}): VizRun {
   const row = { key: "oxplow.example", title: "Example", doc: "", category: "General", schema: JSON.stringify({ type: "string", default: "default" }), value: '"local saved"', origin: "local", local_value: '"local saved"', project_value: '"shared"', global_value: null, local_status: "set", project_status: "set", global_status: "unset", ...overrides };
   return { config: { id: "settings" }, params, result: { columns: Object.keys(row), rows: [Object.values(row)] } } as unknown as VizRun;

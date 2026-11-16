@@ -133,6 +133,12 @@ function appStore(): RememberedStore {
   return shared;
 }
 
+/** Test reset: the next use makes a fresh app store, so what one test
+ *  remembers (an open Quick Open section) can't reach the next. */
+export function resetAppRememberedStore(): void {
+  shared = null;
+}
+
 /** The store hooks read; the app's own unless a provider (a test) says. */
 export const RememberedContext = createContext<RememberedStore | null>(null);
 

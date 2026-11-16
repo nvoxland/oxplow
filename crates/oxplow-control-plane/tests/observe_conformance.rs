@@ -28,37 +28,33 @@ use oxplow_harness_fake::{FakeHarness, BIN, EDITED, TOKENS};
 
 /// The fake's binary, built on demand into this test's target dir.
 fn fake_bin() -> std::path::PathBuf {
-    let exe = std::env::current_exe().unwrap();
-    let dir = exe.parent().unwrap().parent().unwrap();
-    let bin = dir.join(BIN);
-    if !bin.exists() {
-        let ok = Proc::new(env!("CARGO"))
-            .args(["build", "-q", "-p", "oxplow-harness-fake", "--bin", BIN])
-            .env("CARGO_TARGET_DIR", dir.parent().unwrap())
-            .status()
-            .unwrap()
-            .success();
-        assert!(ok, "building {BIN} failed");
+    if let Some(bin) = oxplow_domain::built::built(BIN) {
+        return bin;
     }
-    bin
+    // The test's own cargo builds it into the same target dir.
+    let ok = Proc::new(env!("CARGO"))
+        .args(["build", "-q", "-p", "oxplow-harness-fake", "--bin", BIN])
+        .status()
+        .unwrap()
+        .success();
+    assert!(ok, "building {BIN} failed");
+    oxplow_domain::built::built(BIN).expect("the built fake harness")
 }
 
 /// The fake provider's binary, built on demand into this test's target
 /// dir: run in harness mode, it answers the fake harness's verbs.
 fn provider_bin() -> std::path::PathBuf {
-    let exe = std::env::current_exe().unwrap();
-    let dir = exe.parent().unwrap().parent().unwrap();
-    let bin = dir.join("oxplow-provider-fake");
-    if !bin.exists() {
-        let ok = Proc::new(env!("CARGO"))
-            .args(["build", "-q", "-p", "oxplow-provider-fake"])
-            .env("CARGO_TARGET_DIR", dir.parent().unwrap())
-            .status()
-            .unwrap()
-            .success();
-        assert!(ok, "building oxplow-provider-fake failed");
+    let name = "oxplow-provider-fake";
+    if let Some(bin) = oxplow_domain::built::built(name) {
+        return bin;
     }
-    bin
+    let ok = Proc::new(env!("CARGO"))
+        .args(["build", "-q", "-p", name])
+        .status()
+        .unwrap()
+        .success();
+    assert!(ok, "building {name} failed");
+    oxplow_domain::built::built(name).expect("the built fake provider")
 }
 
 /// A session of `harness` (a registered harness's key) on a fresh thread:
@@ -242,15 +238,21 @@ async fn a_provider_launched_session_is_recorded_canonically() {
     oxplow_app::extension::extension_deploy::deploy(&svc, "relay", true)
         .await
         .expect("the extension deploys");
-    svc.config.write().unwrap().extension_instances.insert(
-        "relay/relay".into(),
-        oxplow_config::ExtensionInstanceConfig {
-            enabled: true,
-            config: serde_json::json!({ "team": "core" }),
-            sync_minutes: None,
-            provider: None,
-        },
-    );
+    // Instances are settings, read from the project's local.yaml.
+    oxplow_config::settings::write_layer_key(
+        &root.join(".oxplow/local.yaml"),
+        "oxplow.extensionInstances",
+        Some(&serde_json::json!({
+            "relay/relay": serde_json::to_value(oxplow_config::ExtensionInstanceConfig {
+                enabled: true,
+                config: serde_json::json!({ "team": "core" }),
+                sync_minutes: None,
+                provider: None,
+            })
+            .unwrap()
+        })),
+    )
+    .unwrap();
     svc.extension_activation
         .activate(svc.clone())
         .await

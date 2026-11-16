@@ -9,6 +9,7 @@ pub mod agent;
 pub mod agent_session;
 pub mod ai;
 pub mod ai_context;
+pub mod built;
 pub mod capability;
 pub mod code_intel;
 pub mod commands;

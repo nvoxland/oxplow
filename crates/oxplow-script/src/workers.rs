@@ -256,21 +256,11 @@ impl ScriptWorkers {
 
     /// Workers from the binary beside this executable: the app's sidecar,
     /// `target/<profile>/` in development, and the same directory for a
-    /// test binary in `target/<profile>/deps/`.
+    /// test binary below it ([`worker_beside`]).
     pub fn beside_current_exe(limits: Limits) -> Self {
         let exe = std::env::current_exe()
             .ok()
-            .and_then(|e| e.parent().map(std::path::Path::to_path_buf))
-            .map(|dir| {
-                if dir.file_name().is_some_and(|n| n == "deps") {
-                    dir.parent()
-                        .map(std::path::Path::to_path_buf)
-                        .unwrap_or(dir)
-                } else {
-                    dir
-                }
-            })
-            .map(|dir| dir.join(WORKER))
+            .and_then(|e| e.parent().map(worker_beside))
             .unwrap_or_else(|| PathBuf::from(WORKER));
         Self::new(exe, limits)
     }
@@ -655,5 +645,44 @@ impl Worker<'_> {
 impl Drop for Worker<'_> {
     fn drop(&mut self) {
         self.stop();
+    }
+}
+
+/// The worker for an executable in `dir`: beside it (the app's sidecar,
+/// `target/<profile>/`), else in the nearest folder above it that has one
+/// — a test binary runs from `target/<profile>/deps/` or, with newer
+/// cargo, `target/<profile>/build/<pkg>/<hash>/out/`, while the worker is
+/// built in `target/<profile>/`. Found nowhere: beside it, so the error
+/// names the expected place.
+fn worker_beside(dir: &std::path::Path) -> PathBuf {
+    oxplow_domain::built::beside_or_above(dir, WORKER).unwrap_or_else(|| dir.join(WORKER))
+}
+
+#[cfg(test)]
+mod worker_path_tests {
+    use super::*;
+
+    /// A test binary in `target/<profile>/deps/` (older cargo) and one in
+    /// `target/<profile>/build/<pkg>/<hash>/out/` (newer cargo) both find
+    /// the worker built in `target/<profile>/`; the app's sidecar sits
+    /// beside its executable.
+    #[test]
+    fn the_worker_is_found_beside_the_executable_or_above_a_test_binary() {
+        let target = tempfile::tempdir().unwrap();
+        let profile = target.path().join("debug");
+        let deps = profile.join("deps");
+        let out = profile.join("build/oxplow-app/abc123/out");
+        std::fs::create_dir_all(&deps).unwrap();
+        std::fs::create_dir_all(&out).unwrap();
+        std::fs::write(profile.join(WORKER), "").unwrap();
+        assert_eq!(worker_beside(&deps), profile.join(WORKER));
+        assert_eq!(worker_beside(&out), profile.join(WORKER));
+        assert_eq!(worker_beside(&profile), profile.join(WORKER));
+        let app = tempfile::tempdir().unwrap();
+        assert_eq!(
+            worker_beside(app.path()),
+            app.path().join(WORKER),
+            "not found: beside the exe"
+        );
     }
 }

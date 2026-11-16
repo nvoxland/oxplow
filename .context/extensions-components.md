@@ -338,7 +338,9 @@ around it** (`component_harness.rs`, `PageAt::ui`):
   library so the CSP allows it) put first in its `index.html`.
 - **The host** (`apps/desktop/src/viz/harnessHost.ts`, built by `bun run
   build:harness`; `harnessBuild.test.ts` fails when the committed build is
-  stale or pulls in React) mounts the frame with the app's own
+  stale or pulls in React; the comparison is byte for byte, so CI runs the
+  Bun of `.bun-version` and a Bun upgrade rebuilds the file and bumps that
+  version together) mounts the frame with the app's own
   `createBridgeHost` / `initMessage` / `pageData`. What the core answers —
   `invoke` (`invoke_component_command`, as the person), `invokePoint`
   (`invoke_component_point`; recorded in `invoked` with `point` and

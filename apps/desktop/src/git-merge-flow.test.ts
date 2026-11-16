@@ -32,6 +32,7 @@ interface BgRow {
 }
 
 const realTransport = { ...(await import("./tauri-bridge/transport.js")) }; // a copy: `mock.module` patches a loaded module in place
+const realApi = { ...(await import("./api.js")) }; // a copy: `mock.module` patches a loaded module in place
 const realBindings = { ...(await import("./tauri-bridge/generated/bindings.js")) }; // a copy: `mock.module` patches a loaded module in place
 
 describe("vcsMerge — UI-initiated background VCS op", () => {
@@ -166,4 +167,5 @@ describe("vcsMerge — UI-initiated background VCS op", () => {
 afterAll(() => {
   mock.module("./tauri-bridge/transport.js", () => realTransport);
   mock.module("./tauri-bridge/generated/bindings.js", () => realBindings);
+  mock.module("./api.js", () => realApi);
 });

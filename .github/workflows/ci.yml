@@ -32,7 +32,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version-file: .bun-version
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -170,7 +170,7 @@ jobs:
         # Building oxplow builds its own extensions (crates/oxplow-app/build.rs).
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version-file: .bun-version
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -207,7 +207,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version-file: .bun-version
 
       # Playwright's runner is Node.
       - name: Setup Node
@@ -297,7 +297,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version-file: .bun-version
 
       - name: Install JS deps
         run: bun install --frozen-lockfile
@@ -326,7 +326,7 @@ jobs:
         # Building oxplow builds its own extensions (crates/oxplow-app/build.rs).
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version-file: .bun-version
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -420,7 +420,7 @@ jobs:
         # Building oxplow builds its own extensions (crates/oxplow-app/build.rs).
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version-file: .bun-version
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -461,7 +461,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version-file: .bun-version
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable

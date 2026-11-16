@@ -98,7 +98,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version-file: .bun-version
       - uses: dtolnay/rust-toolchain@stable
       - name: Install Linux Tauri deps
         if: matrix.os == 'ubuntu-latest'

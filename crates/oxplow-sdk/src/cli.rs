@@ -896,18 +896,10 @@ mod tests {
     /// The fake provider's binary, built beside this test binary (the
     /// workspace build builds every crate's bins).
     fn fake_bin() -> PathBuf {
-        let exe = std::env::current_exe().expect("test exe");
-        let bin = exe
-            .parent()
-            .and_then(Path::parent)
-            .expect("target/<profile>/deps")
-            .join("oxplow-provider-fake");
-        assert!(
-            bin.is_file(),
-            "{} is missing; build it with `cargo build -p oxplow-provider-fake`",
-            bin.display()
-        );
-        bin
+        let name = "oxplow-provider-fake";
+        oxplow_domain::built::built(name).unwrap_or_else(|| {
+            panic!("{name} is missing; build it with `cargo build -p oxplow-provider-fake`")
+        })
     }
 
     /// `extension test` against a fake service with nothing in it: its

@@ -1,4 +1,4 @@
-import { afterAll, afterEach, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, expect, mock, test } from "bun:test";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 
 // One title cache for a link to any resource's row: the title comes from
@@ -46,6 +46,10 @@ const resource = (name: string, resolve: string | null, title: string | null): R
 });
 
 afterEach(cleanup);
+// A test that changes a title doesn't change the next one's.
+beforeEach(() => {
+  titles = { "AC-7": "Fix the parser" };
+});
 
 const TICKET = resourceUri("acme/ticket", { id: "AC-7" });
 

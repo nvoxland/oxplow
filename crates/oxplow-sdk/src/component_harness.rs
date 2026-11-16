@@ -50,12 +50,7 @@ pub(crate) fn shell() -> Option<PathBuf> {
         return Some(PathBuf::from(path));
     }
     let name = format!("oxplow{}", std::env::consts::EXE_SUFFIX);
-    let exe = std::env::current_exe().ok()?;
-    exe.ancestors()
-        .skip(1)
-        .take(3)
-        .map(|dir| dir.join(&name))
-        .find(|candidate| candidate.is_file())
+    oxplow_domain::built::built(&name)
 }
 
 /// How long a window gets to start and say whether it draws: a process

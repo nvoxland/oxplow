@@ -244,6 +244,16 @@ impl AppServer {
         Self::connect_for(socket, program, OBSERVER).await
     }
 
+    /// See the unix `connect_for` below.
+    #[cfg(not(unix))]
+    pub async fn connect_for(
+        _socket: &Path,
+        _program: Option<&Path>,
+        _purpose: &'static str,
+    ) -> Result<(Self, mpsc::UnboundedReceiver<ServerMessage>), String> {
+        Err(NOT_ON_WINDOWS.into())
+    }
+
     /// [`Self::connect`] for a `purpose` ([`OBSERVER`], [`LISTING`]): what
     /// its lines in a recording are tagged with.
     #[cfg(unix)]

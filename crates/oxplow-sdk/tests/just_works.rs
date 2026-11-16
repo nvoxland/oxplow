@@ -360,18 +360,10 @@ async fn a_scaffolded_component_checks_tests_and_uses_the_client_library() {
 
 /// The fake provider's binary, built beside this test binary.
 fn fake_bin() -> PathBuf {
-    let exe = std::env::current_exe().unwrap();
-    let bin = exe
-        .parent()
-        .and_then(Path::parent)
-        .expect("target/<profile>/deps")
-        .join("oxplow-provider-fake");
-    assert!(
-        bin.is_file(),
-        "{} is missing; build it with `cargo build -p oxplow-provider-fake`",
-        bin.display()
-    );
-    bin
+    let name = "oxplow-provider-fake";
+    oxplow_domain::built::built(name).unwrap_or_else(|| {
+        panic!("{name} is missing; build it with `cargo build -p oxplow-provider-fake`")
+    })
 }
 
 /// A provider script running the fake with `hooks`; its service's state

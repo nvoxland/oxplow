@@ -8,7 +8,9 @@ const realApi = { ...(await import("../api.js")) };
 mock.module("../api.js", () => ({ ...realApi, commandOpenAfter: async () => null }));
 const { VizView } = await import("./VizView.js");
 afterEach(cleanup);
-afterAll(() => mock.module("../api.js", () => realApi));
+afterAll(() => {
+  mock.module("../api.js", () => realApi);
+});
 const run = { config: { id: "session-picker", title: "Start a new session", empty: null, viz: "form", columns: [], actions: [], params: [], form: { command: "oxplow.agent_session.open", mode: "create", then: "stay" } }, params: {}, result: { columns: [], rows: [] } } as unknown as VizRun;
 const choices = [{ value: "claude", label: "Claude", group: null }, { value: "codex", label: "Codex", group: null }];
 function source(submitted: unknown[], enabled = choices): FormSource {
