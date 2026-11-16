@@ -318,3 +318,19 @@ mod test_launch {
         })
     }
 }
+
+#[cfg(test)]
+mod settings_tests {
+    /// `oxplow.agents.<harness>.enabled` is the host's switch for a harness;
+    /// no built-in harness may declare a preference of the same name, or the
+    /// two would collide in one setting.
+    #[test]
+    fn no_built_in_harness_declares_a_preference_named_enabled() {
+        for entry in ["oxplow:claude-code", "oxplow:codex-cli", "oxplow:opencode"] {
+            let harness = super::built_in(entry, "h", "H").expect(entry);
+            for setting in harness.settings() {
+                assert_ne!(setting.key, "enabled", "{entry} declares `enabled`");
+            }
+        }
+    }
+}

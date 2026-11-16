@@ -267,7 +267,7 @@ async fn a_disabled_extension_is_denied_while_its_rows_are_kept() {
     write(
         fx._dir.path(),
         ".oxplow/local.yaml",
-        "oxplow.disableExtensions: [alpha]\n",
+        "oxplow.extensions.alpha.enabled: false\n",
     );
     reconcile(&fx).await;
     assert!(fx.svc.commands.spec("alpha.state.read").is_none());

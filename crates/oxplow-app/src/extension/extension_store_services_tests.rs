@@ -287,7 +287,7 @@ async fn disabling_keeps_the_file_and_removing_deletes_it() {
     write(
         fx._dir.path(),
         ".oxplow/local.yaml",
-        "disableExtensions: [alpha]\n",
+        "oxplow.extensions.alpha.enabled: false\n",
     );
     reconcile(&fx).await;
     assert!(fx.svc.commands.spec("alpha.book.peek").is_none());

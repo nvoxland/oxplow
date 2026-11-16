@@ -255,8 +255,8 @@ async fn waiting_permissions_are_a_problem_only_for_an_extension_that_is_on() {
         .expect("the bell's SQL");
     let in_bell = format!("SELECT count(*) FROM ({bell}) WHERE name = 'acme'");
     for (personal, problems) in [
-        ("enableExtensions: [acme]\n", 1),
-        ("disableExtensions: [acme]\n", 0),
+        ("oxplow.extensions.acme.enabled: true\n", 1),
+        ("oxplow.extensions.acme.enabled: false\n", 0),
     ] {
         let fx = services_with_thread().await;
         let root = fx.svc.layout.project_dir.clone();

@@ -2373,7 +2373,11 @@ mod tests {
             );
             assert!(ext.commands.is_empty(), "{name}");
         }
-        write(d.path(), ".oxplow/local.yaml", "disableExtensions: [ab]\n");
+        write(
+            d.path(),
+            ".oxplow/local.yaml",
+            "oxplow.extensions.ab.enabled: false\n",
+        );
         let ext = project(d.path(), "a-b");
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         assert_eq!(ext.commands.len(), 1);
@@ -3999,7 +4003,7 @@ def finish(x):
         write(
             fx._dir.path(),
             ".oxplow/local.yaml",
-            "disableExtensions: [my-review]\n",
+            "oxplow.extensions.my-review.enabled: false\n",
         );
         crate::test_fixtures::activate_with_problems(&fx.svc).await;
         assert!(

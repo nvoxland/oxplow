@@ -133,8 +133,7 @@ impl Host {
     /// checkout, or a worktree holding drafts) with `testing` on too,
     /// activated. Which are on: the required foundation, `testing` and what
     /// each of those requires or imports — never the default extensions, the
-    /// project's list or one person's `enableExtensions` /
-    /// `disableExtensions`, so a test runs the same for everyone, and oxplow's
+    /// project's, global or local `oxplow.extensions.<name>.enabled` settings, so a test runs the same for everyone, and oxplow's
     /// own pages run as they do with nothing added to them; where their sources are is the
     /// project's settings (its main checkout's), read in `checkout`. Its
     /// programs see `env`, and `extra` are more extensions to turn on (a
@@ -638,7 +637,7 @@ mod tests {
     /// A test runs an extension with what it declares and what a fresh
     /// oxplow has, whoever runs it: its `requires:` (and theirs) are on, a
     /// sibling source it doesn't name is not — so a broken one is no noise
-    /// in its report — and the person's own `disableExtensions` (here in
+    /// in its report — and the person's own `oxplow.extensions.<name>.enabled: false` (here in
     /// the main checkout, as a worktree has no `local.yaml`) turns
     /// nothing off.
     #[tokio::test]
@@ -651,7 +650,7 @@ mod tests {
         write(
             main.path(),
             ".oxplow/local.yaml",
-            "oxplow.disableExtensions: [dep]\n",
+            "oxplow.extensions.dep.enabled: false\n",
         );
         let parent = tempfile::tempdir().unwrap();
         let wt = parent.path().join("wt");

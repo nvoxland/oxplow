@@ -49,9 +49,8 @@ pub struct OpenInput {
     /// `terminal` (the default); an `action` session isn't built yet.
     #[serde(default)]
     pub kind: Option<SessionKind>,
-    /// What runs in it: explicitly select a registered, enabled harness.
-    #[serde(default)]
-    pub harness: Option<String>,
+    /// What runs in it: a registered, enabled harness, always named.
+    pub harness: String,
     /// What to call it.
     #[serde(default)]
     pub title: Option<String>,
@@ -160,12 +159,11 @@ fn choose_agent(
     harnesses: &HarnessRegistry,
     input: &OpenInput,
 ) -> Result<(String, SessionKind), CommandError> {
-    let key = input
-        .harness
-        .as_ref()
-        .ok_or_else(|| invalid("/harness", "select an agent harness"))?;
+    if input.harness.trim().is_empty() {
+        return Err(invalid("/harness", "select an agent harness"));
+    }
     let harness = harnesses
-        .get(key)
+        .get(&input.harness)
         .map_err(|e| invalid("/harness", e.to_string()))?;
     let key = harness.id().to_string();
     if !config.agent_enabled.get(&key).copied().unwrap_or(true) {
@@ -183,7 +181,7 @@ fn choose_agent(
     }
 }
 
-/// `agent_session.open { thread, kind?, harness?, title?, resume? }`:
+/// `agent_session.open { thread, harness, kind?, title?, resume? }`:
 /// a new slot on the thread. It only inserts the row — it never starts a
 /// process and never sends a prompt. Undone by closing it.
 pub fn open_op(config: super::config_commands::ConfigTarget, harnesses: HarnessRegistry) -> Op {
@@ -568,6 +566,18 @@ mod tests {
     use crate::test_fixtures::{services_with_thread, ThreadFixture};
     use oxplow_domain::stores::AgentSessionStore as _;
     use oxplow_domain::Actor;
+
+    /// The command's schema says what `choose_agent` enforces: a session
+    /// names its harness.
+    #[test]
+    fn open_requires_a_harness_in_its_schema() {
+        let schema = serde_json::to_value(schemars::schema_for!(OpenInput)).unwrap();
+        let required = schema["required"].as_array().cloned().unwrap_or_default();
+        assert!(required.contains(&serde_json::json!("harness")), "{schema}");
+        assert!(
+            serde_json::from_value::<OpenInput>(serde_json::json!({"thread": "thr1"})).is_err()
+        );
+    }
 
     fn agent(fx: &ThreadFixture) -> Actor {
         Actor::Agent {

@@ -358,11 +358,17 @@ mod tests {
         dir
     }
 
+    /// Develop oxplow: its extensions run from their sources. Each test is
+    /// its own process, so the variable reaches only this test.
+    fn from_source() {
+        std::env::set_var("OXPLOW_EXTENSIONS_FROM_SOURCE", "true");
+    }
+
     /// Turn oxtask on for the project: the `task` subcommands reach its file.
     fn with_oxtask(dir: &Path) {
         std::fs::write(
-            dir.join(".oxplow/personal.yaml"),
-            "enableExtensions: [oxtask]\n",
+            dir.join(".oxplow/local.yaml"),
+            "oxplow.extensions.oxtask.enabled: true\n",
         )
         .unwrap();
     }
@@ -466,7 +472,7 @@ mod tests {
         assert!(err.contains("tsk"), "{err}");
     }
 
-    /// A project developing oxplow (`enableBundledExtensions: false`):
+    /// A project developing oxplow (`OXPLOW_EXTENSIONS_FROM_SOURCE=true`):
     /// foundation's source as it ships (it has no build step), set up by the app, and an older
     /// foundation recorded as its active deployment that no longer loads.
     async fn developing_oxplow_with_a_stale_foundation() -> tempfile::TempDir {
@@ -494,11 +500,7 @@ mod tests {
             }
         };
         write_files(&p.join(".oxplow/extensions/oxplow-foundation"), &|t| t);
-        std::fs::write(
-            p.join(".oxplow/project.yaml"),
-            "enableBundledExtensions: false\n",
-        )
-        .unwrap();
+        from_source();
         let svc = oxplow_app::Services::boot(
             oxplow_app::AppLayout::for_project(p),
             Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
@@ -598,9 +600,10 @@ mod tests {
             "title: One\nloaders:\n  q: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: q }\n",
         )
         .unwrap();
+        from_source();
         std::fs::write(
             p.join(".oxplow/project.yaml"),
-            "enableBundledExtensions: false\nextensions: [acme]\n",
+            "oxplow.extensions.acme.enabled: true\n",
         )
         .unwrap();
         let first = dev(p, &["extension", "deploy"]).await.unwrap();
@@ -642,9 +645,10 @@ mod tests {
             )
         };
         std::fs::write(&bundled, bundled_at(2)).unwrap();
+        from_source();
         std::fs::write(
             p.join(".oxplow/project.yaml"),
-            "enableBundledExtensions: false\nextensions: [oxplow-bundled]\n",
+            "oxplow.extensions.oxplow-bundled.enabled: true\n",
         )
         .unwrap();
         let first = dev(p, &["extension", "deploy"]).await.unwrap();
@@ -685,9 +689,10 @@ mod tests {
             "manifest: 2\nname: old\nintent:\n  purpose: test\n",
         )
         .unwrap();
+        from_source();
         std::fs::write(
             p.join(".oxplow/project.yaml"),
-            "enableBundledExtensions: false\nextensions: [old]\n",
+            "oxplow.extensions.old.enabled: true\n",
         )
         .unwrap();
         let out = dev(p, &["extension", "deploy"]).await.unwrap();
@@ -798,8 +803,8 @@ mod tests {
     async fn with_oxtask_off_there_is_no_tracker_and_its_file_is_not_made() {
         let dir = project().await;
         std::fs::write(
-            dir.path().join(".oxplow/personal.yaml"),
-            "disableExtensions: [oxtask]\n",
+            dir.path().join(".oxplow/local.yaml"),
+            "oxplow.extensions.oxtask.enabled: false\n",
         )
         .unwrap();
         let err = dev(dir.path(), &["task", "create", "Nowhere"])
@@ -816,8 +821,8 @@ mod tests {
         let dir = project().await;
         let p = dir.path();
         std::fs::write(
-            p.join(".oxplow/personal.yaml"),
-            "enableExtensions: [oxtask]\n",
+            p.join(".oxplow/local.yaml"),
+            "oxplow.extensions.oxtask.enabled: true\n",
         )
         .unwrap();
         let created: Value = serde_json::from_str(
@@ -929,8 +934,8 @@ mod tests {
         let dir = project().await;
         let p = dir.path();
         std::fs::write(
-            p.join(".oxplow/personal.yaml"),
-            "enableExtensions: [oxtask]\n",
+            p.join(".oxplow/local.yaml"),
+            "oxplow.extensions.oxtask.enabled: true\n",
         )
         .unwrap();
         dev(p, &["--thread", "thr1", "task", "create", "By the agent"])

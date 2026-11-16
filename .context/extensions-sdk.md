@@ -362,7 +362,7 @@ page that hosts it.
   (`ran: answers`).
 - **Live** (`OXPLOW_LIVE_ANSWERABILITY=1`): `answerability::live_pages` asks
   this machine's `decide` dataset (`AiService::for_this_machine`: the global
-  `ai.yaml`, keychain read only), given only the skill text and the catalog
+  `global.yaml`, keychain read only), given only the skill text and the catalog
   (every `v_dataset` view, every command an agent may run and every tool it
   is offered), what it would reach for first; it must pick the page's first
   loader's dataset or command.

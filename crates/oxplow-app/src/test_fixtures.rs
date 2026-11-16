@@ -28,11 +28,7 @@ pub(crate) fn write_settings_fixture(
             key.contains('.')
                 && !matches!(
                     key.as_str(),
-                    "oxplow.ai.providers"
-                        | "oxplow.ai.roles"
-                        | "oxplow.extensions"
-                        | "oxplow.enableExtensions"
-                        | "oxplow.disableExtensions"
+                    "oxplow.ai.providers" | "oxplow.ai.roles" | "oxplow.extensions"
                 )
         }) {
             return None;
@@ -44,10 +40,7 @@ pub(crate) fn write_settings_fixture(
                 !key.contains('.')
                     && !matches!(
                         key.as_str(),
-                        "ai" | "extensions"
-                            | "enableExtensions"
-                            | "disableExtensions"
-                            | "enableBundledExtensions"
+                        "ai" | "extensions" | "enableBundledExtensions"
                     )
                     && !bindings.iter().any(|binding| {
                         binding.path.is_empty()
@@ -74,16 +67,7 @@ pub(crate) fn write_settings_fixture(
             }
         }
         for (key, value) in object {
-            if matches!(
-                key.as_str(),
-                "extensions"
-                    | "enableExtensions"
-                    | "disableExtensions"
-                    | "oxplow.extensions"
-                    | "oxplow.enableExtensions"
-                    | "oxplow.disableExtensions"
-            ) {
-                let enabled = !key.ends_with("disableExtensions");
+            if matches!(key.as_str(), "extensions" | "oxplow.extensions") {
                 if matches!(key.as_str(), "extensions" | "oxplow.extensions") {
                     for name in oxplow_config::DEFAULT_EXTENSIONS {
                         flat.insert(
@@ -95,7 +79,7 @@ pub(crate) fn write_settings_fixture(
                 for name in value.as_array()? {
                     flat.insert(
                         format!("oxplow.extensions.{}.enabled", name.as_str()?),
-                        serde_json::json!(enabled),
+                        serde_json::json!(true),
                     );
                 }
                 continue;
@@ -179,13 +163,12 @@ pub(crate) fn write_settings_fixture(
 
 /// Every shipped extension a project may turn off, for a test of what runs
 /// without them, as a YAML list's items.
-pub(crate) fn optional_shipped() -> String {
+pub(crate) fn optional_shipped_disabled() -> String {
     crate::bundled_extensions::BUNDLED
         .iter()
         .filter(|b| !b.required)
-        .map(|b| b.name)
-        .collect::<Vec<_>>()
-        .join(", ")
+        .map(|b| format!("oxplow.extensions.{}.enabled: false\n", b.name))
+        .collect()
 }
 
 /// An extension's errors as the lines a person reads.

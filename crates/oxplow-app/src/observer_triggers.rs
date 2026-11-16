@@ -1101,7 +1101,7 @@ mod tests {
         // Only this test's collector; bundled also observes Claude memories.
         crate::test_fixtures::write_settings_fixture(
             fx._dir.path().join(".oxplow/local.yaml"),
-            "oxplow.disableExtensions: [oxtask, oxwiki, oxplow-bundled]\n",
+            "oxplow.extensions.oxtask.enabled: false\noxplow.extensions.oxwiki.enabled: false\noxplow.extensions.oxplow-bundled.enabled: false\n",
         )
         .unwrap();
         declare(&fx.svc).await;

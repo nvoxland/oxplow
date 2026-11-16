@@ -1281,7 +1281,7 @@ mod ordering_tests {
         std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
         crate::test_fixtures::write_settings_fixture(
             dir.path().join(".oxplow/local.yaml"),
-            "disableExtensions: [first]\n",
+            "oxplow.extensions.first.enabled: false\n",
         )
         .unwrap();
         let exts = load_extensions(dir.path());

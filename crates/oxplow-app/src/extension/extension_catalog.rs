@@ -1083,7 +1083,7 @@ mod tests {
         write(
             side.path(),
             ".oxplow/local.yaml",
-            "disableExtensions: [oxplow-bundled]\n",
+            "oxplow.extensions.oxplow-bundled.enabled: false\n",
         );
         let catalog = ExtensionCatalog::for_project(main.path());
         assert!(matches!(
@@ -1097,7 +1097,7 @@ mod tests {
         write(
             main.path(),
             ".oxplow/local.yaml",
-            "disableExtensions: [oxplow-bundled]\n",
+            "oxplow.extensions.oxplow-bundled.enabled: false\n",
         );
         let err = catalog.named(side.path(), "oxplow-bundled").unwrap_err();
         assert!(err.to_string().contains("disabled"), "{err}");
@@ -1126,7 +1126,7 @@ mod tests {
         write(
             a.path(),
             ".oxplow/local.yaml",
-            "disableExtensions: [review]\n",
+            "oxplow.extensions.review.enabled: false\n",
         );
         let err = catalog.named(a.path(), "review").unwrap_err();
         assert!(err.to_string().contains("disabled"), "{err}");

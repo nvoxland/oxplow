@@ -229,7 +229,7 @@ async fn a_collector_does_not_publish_after_its_extension_is_disabled() {
     write(
         &fx.svc.layout.project_dir,
         ".oxplow/local.yaml",
-        "disableExtensions: [acme]\n",
+        "oxplow.extensions.acme.enabled: false\n",
     );
     fx.svc.reload_config_from_disk().unwrap();
     crate::test_fixtures::activate_with_problems(&fx.svc).await;
@@ -280,7 +280,11 @@ async fn an_effects_run_holds_no_generation_and_ends_with_its_extension() {
     assert_eq!(run.contribution_ref().unwrap().generation, None);
     run.check_authority().expect("its extension is current");
 
-    write(&root, ".oxplow/local.yaml", "disableExtensions: [acme]\n");
+    write(
+        &root,
+        ".oxplow/local.yaml",
+        "oxplow.extensions.acme.enabled: false\n",
+    );
     fx.svc.reload_config_from_disk().unwrap();
     let error = run
         .check_authority()

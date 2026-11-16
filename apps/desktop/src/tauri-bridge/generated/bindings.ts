@@ -4375,7 +4375,7 @@ export type Owner = {
 };
 
 export type OxplowConfig = {
-	/**  Legacy runtime projection; enabled state is resolved independently by key. */
+	/**  Runtime projection; enabled state is resolved independently by key. */
 	agents: string[],
 	agentEnabled?: { [key in string]: boolean },
 	/**
@@ -4496,12 +4496,6 @@ export type OxplowConfig = {
 	/**  Resolved origin of each independently registered capability preference. */
 	activeProviderOrigins?: { [key in string]: string },
 	/**
-	 *  What a new thread starts with, a person's own (`newThreadSession`
-	 *  in `.oxplow/local.yaml`): `ask` (the session picker), `none`, or
-	 *  an agent (a harness's key). Unset means `ask`.
-	 */
-	personalNewThreadSession: string | null,
-	/**
 	 *  Whose component shows for a replaceable core sub-component, by
 	 *  target (`replacements: { task.board: task-views,
 	 *  vcs.history.graph: oxplow }`): an extension replacing it, or
@@ -4530,9 +4524,8 @@ export type OxplowConfig = {
 	 */
 	extensions: string[],
 	/**
-	 *  Extensions off for the whole team (`disableExtensions: [...]`), even
-	 *  one sitting in `.oxplow/extensions/`, which is otherwise on. Committed.
-	 *  A person's `enableExtensions` turns one back on for them.
+	 *  Extensions whose effective `oxplow.extensions.<name>.enabled` is
+	 *  false, even one sitting in `.oxplow/extensions/`, which is otherwise on.
 	 */
 	disableExtensions: string[],
 	/**
@@ -4542,8 +4535,8 @@ export type OxplowConfig = {
 	 */
 	extensionSources: { [key in string]: string },
 	/**
-	 *  A person's own turning on and off over the team's list
-	 *  (`enableExtensions`, `disableExtensions` in `.oxplow/local.yaml`).
+	 *  Runtime-only: enablement is resolved per extension across local,
+	 *  project and global before projection, so this layer stays empty.
 	 */
 	personalExtensions: PersonalExtensions,
 	/**
@@ -5727,7 +5720,10 @@ export type PermissionOption = {
  */
 export type Permissions = string[];
 
-/**  A person's `enableExtensions` and `disableExtensions`. */
+/**
+ *  Per-person enable and disable lists of the runtime view (see
+ *  [`OxplowConfig::personal_extensions`]).
+ */
 export type PersonalExtensions = {
 	/**  Turned on for this person, beside the team's list. */
 	enable: string[],

@@ -754,11 +754,6 @@ pub struct OxplowConfig {
     /// Resolved origin of each independently registered capability preference.
     #[serde(rename = "activeProviderOrigins", default)]
     pub active_provider_origins: std::collections::BTreeMap<String, String>,
-    /// What a new thread starts with, a person's own (`newThreadSession`
-    /// in `.oxplow/local.yaml`): `ask` (the session picker), `none`, or
-    /// an agent (a harness's key). Unset means `ask`.
-    #[serde(rename = "personalNewThreadSession")]
-    pub personal_new_thread_session: Option<String>,
     /// Whose component shows for a replaceable core sub-component, by
     /// target (`replacements: { task.board: task-views,
     /// vcs.history.graph: oxplow }`): an extension replacing it, or
@@ -784,9 +779,8 @@ pub struct OxplowConfig {
     /// always on and never listed.
     #[serde(rename = "extensions")]
     pub extensions: Vec<String>,
-    /// Extensions off for the whole team (`disableExtensions: [...]`), even
-    /// one sitting in `.oxplow/extensions/`, which is otherwise on. Committed.
-    /// A person's `enableExtensions` turns one back on for them.
+    /// Extensions whose effective `oxplow.extensions.<name>.enabled` is
+    /// false, even one sitting in `.oxplow/extensions/`, which is otherwise on.
     #[serde(rename = "disableExtensions")]
     pub disable_extensions: Vec<String>,
     /// Where an extension's source is when it isn't
@@ -794,8 +788,8 @@ pub struct OxplowConfig {
     /// relative to the checkout or absolute.
     #[serde(rename = "extensionSources")]
     pub extension_sources: std::collections::BTreeMap<String, String>,
-    /// A person's own turning on and off over the team's list
-    /// (`enableExtensions`, `disableExtensions` in `.oxplow/local.yaml`).
+    /// Runtime-only: enablement is resolved per extension across local,
+    /// project and global before projection, so this layer stays empty.
     #[serde(rename = "personalExtensions")]
     pub personal_extensions: PersonalExtensions,
     /// A person's own sources (`extensionSources` in
@@ -812,7 +806,8 @@ pub struct OxplowConfig {
     pub personal_enable_bundled_extensions: Option<bool>,
 }
 
-/// A person's `enableExtensions` and `disableExtensions`.
+/// Per-person enable and disable lists of the runtime view (see
+/// [`OxplowConfig::personal_extensions`]).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Type)]
 pub struct PersonalExtensions {
     /// Turned on for this person, beside the team's list.
@@ -827,7 +822,7 @@ pub struct PersonalExtensions {
 pub enum EnabledBy {
     /// `.oxplow/project.yaml`'s `extensions`.
     Team,
-    /// `.oxplow/local.yaml`'s `enableExtensions`.
+    /// A per-person layer of the runtime view.
     Personal,
 }
 
@@ -1196,10 +1191,10 @@ struct RawConfig {
     /// AI role assignments by role name. Stored as the atomic `oxplow.ai.roles` setting.
     #[serde(default)]
     ai: Option<RawAiBlock>,
-    /// The extensions on for the whole team: `[names]`; absent, `[oxplow-bundled]`. Enables code. oxplow-foundation is always on and never listed; a person turns others on or off for themselves in `.oxplow/local.yaml` (`enableExtensions`, `disableExtensions`).
+    /// Projected from the effective `oxplow.extensions.<name>.enabled` switches: the extensions on. oxplow-foundation is always on and never listed.
     #[serde(default)]
     extensions: Option<Vec<String>>,
-    /// Extensions off for the whole team, even one sitting in `.oxplow/extensions/`: `[names]`. A person's `enableExtensions` turns one back on for them.
+    /// Projected from the effective `oxplow.extensions.<name>.enabled` switches: the extensions off, even one sitting in `.oxplow/extensions/`.
     #[serde(rename = "disableExtensions", default)]
     disable_extensions: Option<Vec<String>>,
     /// Where an extension's source is when it isn't `.oxplow/extensions/<name>/`: `{ <name>: <folder> }`, relative to the checkout or absolute (`~/` is the home folder). Enables code.
@@ -1307,11 +1302,15 @@ pub fn load_project_config_with_global(
         Arc::new(RwLock::new(registry)),
         Arc::new(NoSecrets),
     );
+    // Every level must be well formed; only a key's effective value (the
+    // first level that sets it) must satisfy its schema.
+    let mut seen = std::collections::BTreeSet::new();
     for level in settings::Level::PRECEDENCE {
         for (key, value) in store
             .layer(level)
             .map_err(|e| ConfigError::Invalid(e.to_string()))?
         {
+            let effective = seen.insert(key.clone());
             if !key.contains('.') {
                 return Err(ConfigError::Invalid(format!("unknown setting `{key}`")));
             }
@@ -1320,7 +1319,7 @@ pub fn load_project_config_with_global(
                     "setting `{key}` in {} is retired; remove its obsolete override and {replacement}", store.path(level).display()
                 )));
             }
-            if store.definition(&key).is_ok() {
+            if effective && store.definition(&key).is_ok() {
                 store
                     .validate(&key, &value)
                     .map_err(|e| ConfigError::Invalid(format!("{key}: {e}")))?;
@@ -1410,11 +1409,9 @@ fn write_runtime_field(
 ) -> Result<(), ConfigError> {
     let fallback = basename(project);
     if let Some(value) = value {
-        if !matches!(field, "newThreadSession" | "enableExtensions") {
-            let mut document = serde_yaml::Mapping::new();
-            document.insert(field.into(), to_yaml(value));
-            parse_project_config(serde_yaml::Value::Mapping(document), &fallback)?;
-        }
+        let mut document = serde_yaml::Mapping::new();
+        document.insert(field.into(), to_yaml(value));
+        parse_project_config(serde_yaml::Value::Mapping(document), &fallback)?;
     }
 
     let definitions = core_settings::bindings(&fallback);
@@ -1438,11 +1435,7 @@ fn write_runtime_field(
         .register_many(core_settings::definitions(&fallback))
         .map_err(|e| ConfigError::Invalid(e.to_string()))?;
     for key in &keys {
-        let setting = if matches!(field, "newThreadSession" | "enableExtensions") {
-            value
-        } else {
-            values.get(key)
-        };
+        let setting = values.get(key);
         if let Some(setting) = setting {
             registry
                 .validate(key, setting)
@@ -1451,11 +1444,7 @@ fn write_runtime_field(
     }
     let global = global_config_dir().unwrap_or_else(|| project.join(".oxplow/no-global-settings"));
     for key in keys {
-        let setting = if matches!(field, "newThreadSession" | "enableExtensions") {
-            value
-        } else {
-            values.get(&key)
-        };
+        let setting = values.get(&key);
         settings::write_layer_key(
             &settings::level_path(project, &global, level),
             &key,
@@ -1831,7 +1820,6 @@ fn default_config(project_name: String) -> OxplowConfig {
         active_providers: std::collections::BTreeMap::new(),
         personal_active_providers: std::collections::BTreeMap::new(),
         active_provider_origins: std::collections::BTreeMap::new(),
-        personal_new_thread_session: None,
         replacements: std::collections::BTreeMap::new(),
         event_retention: std::collections::BTreeMap::new(),
         ai_roles: Default::default(),
@@ -2289,7 +2277,6 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         active_providers,
         personal_active_providers: std::collections::BTreeMap::new(),
         active_provider_origins: std::collections::BTreeMap::new(),
-        personal_new_thread_session: None,
         replacements,
         event_retention,
         ai_roles: validate_ai_roles(raw.ai)?,
@@ -3784,9 +3771,8 @@ mod tests {
         write_local_key(dir.path(), "zones", None).unwrap();
     }
 
-    /// What a new thread starts with is a person's own choice: `ask`,
-    /// `none`, or an agent. It sits beside their capability choices in
-    /// `local.yaml`, and setting one leaves the other.
+    /// A new thread always opens the session picker; what it starts with
+    /// is no setting at any level.
     #[test]
     fn new_thread_session_is_not_a_setting() {
         let dir = tempfile::tempdir().unwrap();
@@ -5676,6 +5662,47 @@ metrics:
         );
         assert!(!error.contains("private-marker"));
         assert_eq!(std::fs::read_to_string(path).unwrap(), original);
+    }
+
+    /// Only the effective value of a setting must be valid: a bad override
+    /// at a level a higher level shadows doesn't stop the config loading,
+    /// and the winning value is the one used.
+    #[test]
+    fn a_bad_shadowed_override_does_not_stop_the_config_loading() {
+        let dir = tempfile::tempdir().unwrap();
+        let global = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".oxplow")).unwrap();
+        std::fs::write(
+            global.path().join("global.yaml"),
+            "oxplow.testing.command: 42\noxplow.ai.roles.main: { provider: local, model: 42 }\noxplow.agents.acme.coder.enabled: \"yes\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join(".oxplow/project.yaml"),
+            "oxplow.ai.roles.acme.review: { provider: local }\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join(".oxplow/local.yaml"),
+            "oxplow.testing.command: make test\noxplow.ai.roles.main: { provider: local, model: m }\noxplow.ai.roles.acme.review: { provider: local, model: r }\noxplow.agents.acme.coder.enabled: false\n",
+        )
+        .unwrap();
+        let config = load_project_config_with_global(dir.path(), Some(global.path()))
+            .expect("shadowed overrides are not validated");
+        let yaml = serde_json::to_value(&config).unwrap();
+        assert_eq!(yaml["testing"]["command"], "make test", "{yaml}");
+        assert_eq!(yaml["aiRoles"]["main"]["model"], "m", "{yaml}");
+        assert_eq!(yaml["aiRoles"]["acme/review"]["model"], "r", "{yaml}");
+        assert_eq!(yaml["agentEnabled"]["acme/coder"], false, "{yaml}");
+
+        std::fs::remove_file(dir.path().join(".oxplow/local.yaml")).unwrap();
+        let error = load_project_config_with_global(dir.path(), Some(global.path()))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("oxplow."),
+            "an effective bad value still fails: {error}"
+        );
     }
 
     #[test]

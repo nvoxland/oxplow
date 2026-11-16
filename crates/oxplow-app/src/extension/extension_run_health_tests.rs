@@ -296,7 +296,7 @@ async fn disabling_an_extension_stops_a_collector_script_that_is_computing() {
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     crate::test_fixtures::write_settings_fixture(
         root.join(".oxplow/local.yaml"),
-        "disableExtensions: [acme]\n",
+        "oxplow.extensions.acme.enabled: false\n",
     )
     .unwrap();
     fx.svc.reload_config_from_disk().unwrap();

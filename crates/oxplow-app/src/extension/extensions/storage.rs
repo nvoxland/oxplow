@@ -354,7 +354,7 @@ mod tests {
         assert!(!filter.ignore(page, false), "declared, so watched");
         crate::test_fixtures::write_settings_fixture(
             dir.path().join(".oxplow/local.yaml"),
-            "disableExtensions: [acme]\n",
+            "oxplow.extensions.acme.enabled: false\n",
         )
         .unwrap();
         crate::test_fixtures::activate(&svc).await;

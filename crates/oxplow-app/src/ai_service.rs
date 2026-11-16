@@ -261,7 +261,8 @@ impl AiService {
             return Ok(None);
         };
         let profiles = self.profiles();
-        let mut signature = self.providers.kinds();
+        let kinds = self.providers.kinds();
+        let mut signature = kinds.clone();
         signature.extend(
             profiles
                 .iter()
@@ -281,9 +282,8 @@ impl AiService {
         }
         let candidate = base.fork_registry();
         let mut definitions = Vec::new();
-        for id in self.providers.kinds() {
-            definitions.extend(crate::settings::ai_provider_definitions(&id));
-            definitions.push(provider_key_definition(&id));
+        for id in &kinds {
+            definitions.extend(crate::settings::ai_provider_definitions(id));
         }
         for profile in profiles {
             definitions.push(crate::settings::ai_role_definition(&format!(
@@ -360,8 +360,7 @@ impl AiService {
         for (key, setting) in role_keys.into_iter().zip(values) {
             if let Some(value) = setting.value {
                 let role = Role::parse(
-                    &key.trim_start_matches("oxplow.ai.roles.")
-                        .replacen('.', "/", 1),
+                    &oxplow_domain::ai::role_from_setting_key(&key).unwrap_or_default(),
                 )
                 .map_err(|e| AiServiceError::Config(e.to_string()))?;
                 config.roles.insert(
@@ -481,7 +480,8 @@ impl AiService {
 
     async fn settings_unpinned(&self) -> Result<AiSettings, AiServiceError> {
         let config = self.config()?;
-        let overrides = if let Some(store) = self.declaration_settings()? {
+        let store = self.declaration_settings()?;
+        let overrides = if let Some(store) = &store {
             use oxplow_config::settings::Origin;
             config
                 .roles
@@ -509,7 +509,11 @@ impl AiService {
                 // Display whether a usable key is available. A locked backend or
                 // obsolete endpoint binding must not hide the Settings page;
                 // actual auth/direct reads continue to propagate the failure.
-                key_set: self.key(p).ok().flatten().is_some(),
+                key_set: self
+                    .key_in(store.as_ref(), store.as_ref().map(|_| &config), p)
+                    .ok()
+                    .flatten()
+                    .is_some(),
             })
             .collect();
         let status = |role: Role, description: String, profile: Option<&AiProfile>| {
@@ -1366,8 +1370,25 @@ impl AiService {
 
     /// The stored key entry, whatever URL it's bound to.
     fn raw_key(&self, provider_id: &str) -> Result<Option<StoredKey>, AiServiceError> {
-        let raw = if let Some(store) = self.declaration_settings()? {
-            ensure_provider_key(&store, provider_id)?;
+        let store = self.declaration_settings()?;
+        let config = match store {
+            Some(_) => Some(self.config()?),
+            None => None,
+        };
+        self.raw_key_in(store.as_ref(), config.as_ref(), provider_id)
+    }
+
+    /// [`Self::raw_key`] over a settings store and configuration the caller
+    /// already resolved (both present with the settings service, both
+    /// absent without), so a listing resolves them once, not per provider.
+    fn raw_key_in(
+        &self,
+        store: Option<&oxplow_config::settings::SettingsStore>,
+        config: Option<&AiConfig>,
+        provider_id: &str,
+    ) -> Result<Option<StoredKey>, AiServiceError> {
+        let raw = if let Some(store) = store {
+            ensure_provider_key(store, provider_id)?;
             store
                 .get(&provider_key_setting(provider_id), None)
                 .map_err(|e| AiServiceError::Secret(e.to_string()))?
@@ -1378,8 +1399,7 @@ impl AiService {
                 .get(provider_id)
                 .map_err(|e| AiServiceError::Secret(e.to_string()))?
         };
-        if self.settings_store.is_some() {
-            let config = self.config()?;
+        if let Some(config) = config {
             let endpoint = endpoint_of(config.providers.iter().find(|p| p.id == provider_id));
             Ok(raw.map(|key| StoredKey { key, endpoint }))
         } else {
@@ -1413,7 +1433,22 @@ impl AiService {
     /// provider's URL as it is now. `global.yaml` is a plain file an agent can
     /// edit; pointing a provider elsewhere must not carry the key along.
     fn key(&self, provider: &ProviderConfig) -> Result<Option<String>, AiServiceError> {
-        let Some(stored) = self.raw_key(&provider.id)? else {
+        let store = self.declaration_settings()?;
+        let config = match store {
+            Some(_) => Some(self.config()?),
+            None => None,
+        };
+        self.key_in(store.as_ref(), config.as_ref(), provider)
+    }
+
+    /// [`Self::key`] over a store and configuration already resolved.
+    fn key_in(
+        &self,
+        store: Option<&oxplow_config::settings::SettingsStore>,
+        config: Option<&AiConfig>,
+        provider: &ProviderConfig,
+    ) -> Result<Option<String>, AiServiceError> {
+        let Some(stored) = self.raw_key_in(store, config, &provider.id)? else {
             return Ok(None);
         };
         let now = endpoint_of(Some(provider));

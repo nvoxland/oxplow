@@ -788,42 +788,12 @@ export async function getThreadState(streamId: string): Promise<ThreadState> {
 }
 
 
-/** A new thread on the stream: it has no agent session (open one with
- *  `openAgentSession`). The thread and the stream's state after. */
+/** A new thread on the stream: it has no agent session (the session
+ *  picker opens one with `oxplow.agent_session.open`). The thread and the
+ *  stream's state after. */
 export async function createThread(streamId: string, title: string): Promise<{ thread: Thread; state: ThreadState }> {
   const thread = (await runCommand("oxplow.thread.create", { stream: streamId, title })).result as Thread;
   return { thread, state: await getThreadState(streamId) };
-}
-
-/** What `oxplow.agent_session.open` answers: the new session's row. */
-export interface AgentSessionRecord {
-  /** `ses3`. */
-  id: string;
-  /** `thr1`. */
-  thread_id: string;
-  kind: string;
-  /** The harness's key. */
-  harness: string;
-  title: string;
-}
-
-/** Open an agent session on a thread: it only adds the slot (the tab
- *  starts its process when it mounts). The caller chooses the harness. */
-export async function openAgentSession(
-  threadId: string,
-  harness: string,
-  title?: string,
-  /** A saved conversation of the harness (its native id) to start on. */
-  resume?: string,
-): Promise<AgentSessionRecord> {
-  return (
-    await runCommand("oxplow.agent_session.open", {
-      thread: threadId,
-      harness,
-      ...(title ? { title } : {}),
-      ...(resume ? { resume } : {}),
-    })
-  ).result as AgentSessionRecord;
 }
 
 /** The person gives an agent a new conversation, dropping the saved one.

@@ -581,7 +581,7 @@ so the query quotes it.)
 
 A few published datasets hold state that has **no change hook** to restate it
 from: whether a key is in the keychain (`v_ai_provider.key_set`,
-`v_ai_role.key_set`), `ai.yaml` and `project.yaml` (a person edits them by
+`v_ai_role.key_set`), `global.yaml` and `project.yaml` (a person edits them by
 hand), which language servers run and whose binary is on disk
 (`v_lsp_server`), and a machine's collector standing and credentials
 (`v_collector_state`, `v_collector_credential`; per machine, outside the

@@ -314,7 +314,11 @@ mod program_collectors {
         assert!(super::run(&fx, "acme.read.all").await.is_ok());
         go(&fx).await.unwrap();
 
-        write(&root, ".oxplow/local.yaml", "disableExtensions: [acme]\n");
+        write(
+            &root,
+            ".oxplow/local.yaml",
+            "oxplow.extensions.acme.enabled: false\n",
+        );
         crate::test_fixtures::activate(&fx.svc).await;
         assert!(
             super::run(&fx, "acme.read.all").await.is_err(),

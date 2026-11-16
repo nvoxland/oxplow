@@ -14,8 +14,9 @@
 //! - **provider instances** while they run.
 //!
 //! [`CapabilityRegistry::resolve`] picks the active one: a person's own
-//! choice (`.oxplow/personal.yaml`), else the project's
-//! (`activeProviders`), else the capability's default. A choice that isn't
+//! choice (`oxplow.activeProviders.<capability>` in `.oxplow/local.yaml`),
+//! else the project's (the same key in `.oxplow/project.yaml`), else the
+//! capability's default. A choice that isn't
 //! available falls back: an optional capability to [`NONE`], a required
 //! one to its default built-in, which core always has. The registry
 //! writes what it holds, with the active row and why, to

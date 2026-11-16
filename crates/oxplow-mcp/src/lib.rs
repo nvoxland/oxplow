@@ -701,8 +701,8 @@ mod tests {
         // the oxwiki extension is on.
         std::fs::create_dir_all(project.path().join(".oxplow")).unwrap();
         std::fs::write(
-            project.path().join(".oxplow/personal.yaml"),
-            "disableExtensions: [oxwiki]\n",
+            project.path().join(".oxplow/local.yaml"),
+            "oxplow.extensions.oxwiki.enabled: false\n",
         )
         .unwrap();
         let services = Services::in_memory(project.path()).await.unwrap();
@@ -1613,8 +1613,9 @@ mod tests {
                 Parameters(RunCommandParams {
                     id: "oxplow.config.set".into(),
                     input: serde_json::json!({
-                        "key": "zones",
-                        "value": [{"match": "src/**", "zone": "core"}]
+                        "key": "oxplow.zones",
+                        "value": [{"match": "src/**", "zone": "core"}],
+                        "level": "project"
                     }),
                 }),
             )
@@ -1646,7 +1647,7 @@ mod tests {
                 },
                 RunCommandParams {
                     id: "oxplow.config.set".into(),
-                    input: serde_json::json!({"key": "agentPromptAppend", "value": "be brief"}),
+                    input: serde_json::json!({"key": "oxplow.agentPromptAppend", "value": "be brief", "level": "project"}),
                 },
             )
             .await
@@ -1869,7 +1870,7 @@ mod tests {
             .ai
             .save_provider(
                 ProviderConfig {
-                    id: "mock".into(),
+                    id: "openai_compatible".into(),
                     kind: "openai_compatible".into(),
                     base_url: Some(base),
                 },
@@ -1879,7 +1880,7 @@ mod tests {
         let role: Role = serde_json::from_value(serde_json::json!(role)).unwrap();
         services
             .ai
-            .set_role(&role, Some(RoleBinding::new("mock", "m")))
+            .set_role(&role, Some(RoleBinding::new("openai_compatible", "m")))
             .unwrap();
     }
 

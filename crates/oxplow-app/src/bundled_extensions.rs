@@ -224,14 +224,18 @@ mod tests {
         assert!(runs(&svc, "oxtask") && runs(&svc, "oxwiki"));
 
         // Listed, with bundled on: both activate with nothing held.
-        let dir = project("extensions: [oxplow-bundled, oxtask, oxwiki]\n");
+        let dir = project(
+            "oxplow.extensions.oxplow-bundled.enabled: true\noxplow.extensions.oxtask.enabled: true\noxplow.extensions.oxwiki.enabled: true\n",
+        );
         let svc = crate::Services::in_memory(dir.path()).await.unwrap();
         svc.streams.ensure_primary().await.unwrap();
         crate::test_fixtures::activate(&svc).await;
         assert!(runs(&svc, "oxtask") && runs(&svc, "oxwiki"));
 
         // On, with bundled off: held, and oxplow still boots.
-        let dir = project("extensions: [oxtask, oxwiki]\ndisableExtensions: [oxplow-bundled]\n");
+        let dir = project(
+            "oxplow.extensions.oxtask.enabled: true\noxplow.extensions.oxwiki.enabled: true\noxplow.extensions.oxplow-bundled.enabled: false\n",
+        );
         let svc = crate::Services::in_memory(dir.path()).await.unwrap();
         svc.streams.ensure_primary().await.unwrap();
         let problems = crate::test_fixtures::activate_with_problems(&svc).await;
@@ -341,10 +345,7 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
         crate::test_fixtures::write_settings_fixture(
             dir.path().join(".oxplow/local.yaml"),
-            format!(
-                "disableExtensions: [{}]\n",
-                crate::test_fixtures::optional_shipped()
-            ),
+            crate::test_fixtures::optional_shipped_disabled(),
         )
         .unwrap();
         let svc = crate::Services::in_memory(dir.path()).await.unwrap();

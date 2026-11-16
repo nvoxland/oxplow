@@ -602,8 +602,9 @@ pub(super) fn load_sources_with_settings(
 }
 
 /// `settings` for a source load: every project source loaded is on unless
-/// it was turned off (`disableExtensions`, the team's or the person's); for the extensions that
-/// ship with oxplow, the lists decide as always.
+/// it was turned off (`oxplow.extensions.<name>.enabled: false`, at the local,
+/// project or global level); for the extensions that ship with oxplow, the
+/// settings decide as always.
 pub(crate) fn sources_on(
     mut settings: oxplow_config::ExtensionSettings,
     sources: &[Extension],
@@ -3729,7 +3730,7 @@ pub(crate) fn clear_contributions(ext: &mut Extension) {
 
 pub(crate) fn disabled_error(name: &str) -> DomainError {
     DomainError::Invalid(format!(
-        "extension `{name}` is disabled (`disableExtensions` in .oxplow/personal.yaml, or left off the project's `extensions` list); enable it in Settings → Extensions"
+        "extension `{name}` is disabled (`oxplow.extensions.{name}.enabled` is false at the local, project or global level); enable it in Settings → Extensions"
     ))
 }
 
@@ -6952,7 +6953,7 @@ commands:
         write(
             dir.path(),
             ".oxplow/project.yaml",
-            "disableExtensions: [holder]\n",
+            "oxplow.extensions.holder.enabled: false\n",
         );
         let exts = load_extensions(dir.path());
         let holder = exts.iter().find(|e| e.name == "holder").unwrap();
@@ -10121,8 +10122,8 @@ commands:
             dir.path(),
             ".oxplow/local.yaml",
             &format!(
-                "disableExtensions: [review, {}]\n",
-                crate::test_fixtures::optional_shipped()
+                "oxplow.extensions.review.enabled: false\n{}",
+                crate::test_fixtures::optional_shipped_disabled()
             ),
         );
         let exts = load_extensions(dir.path());

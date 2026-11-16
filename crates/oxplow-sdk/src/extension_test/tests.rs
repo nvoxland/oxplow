@@ -263,7 +263,7 @@ async fn extension_test_reports_how_each_import_resolved() {
     write(
         dir.path(),
         ".oxplow/local.yaml",
-        "oxplow.disableExtensions: [maker]\n",
+        "oxplow.extensions.maker.enabled: false\n",
     );
     let report = test_extension(dir.path(), "reader", false).await.unwrap();
     assert_eq!(
@@ -3366,8 +3366,8 @@ alert: { min_rows: 1, label: Configured }
             "viewed",
             "view: { stream: str1, thread: thr1 }
 given:
-  - { command: oxplow.ai.set_provider, input: { id: spare, kind: anthropic, key: sk-ant-test } }
-  - { command: oxplow.ai.remove_provider, input: { id: spare }, confirmed: true }
+  - { command: oxplow.ai.set_provider, input: { id: anthropic, kind: anthropic, key: sk-ant-test } }
+  - { command: oxplow.ai.remove_provider, input: { id: anthropic }, confirmed: true }
 when: { page: items }
 expect:
   loaders: { items: { rows: [{ thread: 1 }] } }
@@ -3384,8 +3384,8 @@ expect:
         &[(
             "viewed",
             "given:
-  - { command: oxplow.ai.set_provider, input: { id: spare, kind: anthropic, key: sk-ant-test } }
-  - { command: oxplow.ai.remove_provider, input: { id: spare } }
+  - { command: oxplow.ai.set_provider, input: { id: anthropic, kind: anthropic, key: sk-ant-test } }
+  - { command: oxplow.ai.remove_provider, input: { id: anthropic } }
 when: { page: items }
 ",
         )],

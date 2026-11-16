@@ -433,7 +433,8 @@ pub(crate) fn store_for_declaration(
     namespace: &str,
     declaration: &crate::extension::extensions::config_schema::ConfigurationFile,
 ) -> Result<SettingsStore, SettingsError> {
-    let store = store(project, global, secrets, &[])?.fork_registry();
+    // `store` already hands each caller its own registry fork.
+    let store = store(project, global, secrets, &[])?;
     let definitions = crate::extension::extension_settings::definitions_for(namespace, declaration)
         .map_err(|_| SettingsError::InvalidDefinition)?;
     store

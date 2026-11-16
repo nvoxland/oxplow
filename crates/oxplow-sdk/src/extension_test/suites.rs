@@ -604,19 +604,35 @@ pub(super) async fn suite(
                 )
                 .map_err(|e| e.to_string())?;
         }
-        svc.config
-            .write()
-            .map_err(|e| e.to_string())?
-            .extension_instances
-            .insert(
-                format!("{}/{}", ext.namespace, spec.id),
-                oxplow_config::ExtensionInstanceConfig {
-                    enabled: true,
-                    config,
-                    sync_minutes: None,
-                    provider: None,
-                },
-            );
+        // Instances are settings: the registry reads them from the fork's
+        // own local.yaml, never from the in-memory runtime view.
+        let local = fork.root.join(".oxplow/local.yaml");
+        let key = "oxplow.extensionInstances";
+        let mut instances = oxplow_config::settings::read_layer(
+            &fork.root,
+            &fork.root,
+            oxplow_config::settings::Level::Local,
+        )
+        .map_err(|e| e.to_string())?
+        .remove(key)
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_default();
+        instances.insert(
+            format!("{}/{}", ext.namespace, spec.id),
+            serde_json::to_value(oxplow_config::ExtensionInstanceConfig {
+                enabled: true,
+                config,
+                sync_minutes: None,
+                provider: None,
+            })
+            .map_err(|e| e.to_string())?,
+        );
+        oxplow_config::settings::write_layer_key(
+            &local,
+            key,
+            Some(&serde_json::Value::Object(instances)),
+        )
+        .map_err(|e| e.to_string())?;
         publish_generation(&svc).await?;
         match svc
             .providers

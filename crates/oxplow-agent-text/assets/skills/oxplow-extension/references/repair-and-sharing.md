@@ -52,12 +52,13 @@ bundled's `v_oxplow_contribution_repair` has the open `repair_item`). Each colle
   [<name>]`. Deploying refuses while it is off.
 - **Team:** a new extension's source is personal. `.oxplow/.gitignore` keeps
   it out of git. `oxplow.extension.share { name }` un-ignores it and moves
-  the name to the team list in `.oxplow/project.yaml`; the person then
+  sets `oxplow.extensions.<name>.enabled: true` in `.oxplow/project.yaml` (and
+  clears the person's own `local.yaml` entry); the person then
   commits. `oxplow.extension.unshare { name }` reverses it.
 - **Use someone else's extension:** only when the user asks. Clone it into
   `.oxplow/extensions/<name>/` (or point `oxplow.extensionSources` at the clone),
-  add its name to `oxplow.enableExtensions` with `oxplow.config.set` at the
-  `project` level, and deploy it. Read its
+  set `oxplow.extensions.<name>.enabled` to `true` with `oxplow.config.set` at
+  the `project` level, and deploy it. Read its
   `permissions:` first (the programs it runs, the hosts it reaches, the
   secrets it reads): the deploy asks the person to approve them.
   Do not hand-edit a clone you want to update

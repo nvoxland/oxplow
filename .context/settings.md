@@ -17,6 +17,9 @@ Extension schema annotations are `title`, `description`, `x-category`, `x-ui`,
 
 An effective setting is the first value present at **local → project → global →
 default**. Objects and arrays replace whole values; nothing merges across levels.
+Loading checks every level is well formed (no bare or retired keys) but checks
+only a key's effective value against its schema: a bad override that a higher
+level shadows never stops the config loading.
 Every setting supports every level. `unset` removes only the chosen override.
 Absent values are distinct from an explicit null, when a schema permits null.
 
@@ -112,7 +115,7 @@ state and opaque host secret-reference identities remain operational state.
 ## Compatibility and lifecycle
 
 This is a clean break, with no automatic migration. Legacy unqualified project
-keys and personal.yaml/ai.yaml/instances.yaml configuration are not read. Registry
+keys and personal.yaml/ai.yaml/instances.yaml configuration are not read (a present `ai.yaml` is reported, below). Registry
 commands reject undeclared keys; namespaced file values for an absent extension
 are retained and validated when its definitions return. Old database configuration
 rows are no longer runtime configuration. Applied migrations remain historical.
@@ -158,8 +161,10 @@ identity once per level. Endpoint binding uses those same ordinary documents.
 Showing all three secret levels still requires three distinct keychain queries;
 OS credential access may prompt or fail, in which case only that row/level is
 unavailable. Unknown harness preferences remain stored through bootstrap until
-their schema returns; harness switches and role objects are validated before
-typed runtime projection, with errors naming the setting key.
+their schema returns (the runtime keeps them as plain JSON per harness); harness
+switches and role objects are validated before typed runtime projection, with
+errors naming the setting key. `enabled` is reserved under every harness key:
+provider declarations are refused for it, and a test holds built-in harnesses to it.
 
 `config.update {level, set, unset}` writes ordinary settings together: validate
 all keys, lock and edit one document, then atomically replace it once. Domain
@@ -202,7 +207,9 @@ Direct AI connections have one group per declared provider,
 `oxplow.ai.<provider>.enabled`, `.baseUrl` and secret `.apiKey`. There are no
 named AI accounts/instances. These credentials are separate from harness logins.
 Each role has an atomic assignment at `oxplow.ai.roles.<role>`; an extension role
-`namespace/profile` uses `namespace.profile` in the registered key. Objects and
+`namespace/profile` uses `namespace.profile` in the registered key. That encoding
+is `oxplow_domain::ai::role_setting_key` / `role_from_setting_key`, the one copy
+the AI loader, core settings and the AI service share. Objects and
 arrays still replace whole values. External integration provider instances remain
 supported; they are not direct AI connections.
 
@@ -225,7 +232,9 @@ V40 carries existing core event rows to these versions, renaming the old persona
 level to local without changing values or expired payloads. As with other core
 event bumps, only the newest versions remain registered.
 
-Standalone AI loading also refuses retired provider/role aggregates explicitly.
+Standalone AI loading also refuses retired provider/role aggregates explicitly,
+and refuses while the old `ai.yaml` sits in the global directory, naming the file
+(never its values) and what replaced it.
 The clean break does not migrate or delete legacy keychain entries; re-enter keys
-through the current provider settings. Session opens require an explicit harness;
+through the current provider settings. Session opens require an explicit harness (a required field of the command's schema);
 `agent_session.open` is the single slot-opening command (no `open_slot` alias).

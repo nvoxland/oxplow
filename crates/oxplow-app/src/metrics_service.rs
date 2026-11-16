@@ -5674,7 +5674,7 @@ def transform(input):
         std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
         crate::test_fixtures::write_settings_fixture(
             dir.path().join(".oxplow/local.yaml"),
-            "disableExtensions: [acme]\n",
+            "oxplow.extensions.acme.enabled: false\n",
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();
@@ -5928,7 +5928,7 @@ def transform(input):
         std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
         crate::test_fixtures::write_settings_fixture(
             dir.path().join(".oxplow/local.yaml"),
-            "disableExtensions: [acme]\n",
+            "oxplow.extensions.acme.enabled: false\n",
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();

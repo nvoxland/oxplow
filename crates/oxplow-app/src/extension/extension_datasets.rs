@@ -154,7 +154,11 @@ mod tests {
             shaky.errors
         );
         // Off: its views go.
-        write(&root, ".oxplow/local.yaml", "disableExtensions: [late]\n");
+        write(
+            &root,
+            ".oxplow/local.yaml",
+            "oxplow.extensions.late.enabled: false\n",
+        );
         crate::test_fixtures::activate_with_problems(svc).await;
         assert!(svc
             .sql

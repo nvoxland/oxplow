@@ -254,7 +254,7 @@ async fn a_disabled_extension_exposes_nothing() {
 
     crate::test_fixtures::write_settings_fixture(
         dir.path().join(".oxplow/local.yaml"),
-        "disableExtensions: [beta]\n",
+        "oxplow.extensions.beta.enabled: false\n",
     )
     .unwrap();
     svc.reload_config_from_disk().unwrap();
@@ -449,7 +449,7 @@ async fn an_edit_during_activation_rejects_it_and_the_next_carries_the_edit() {
     // A change to which extensions are on overtakes the candidate.
     crate::test_fixtures::write_settings_fixture(
         dir.path().join(".oxplow/local.yaml"),
-        "enableExtensions: [alpha]\ndisableExtensions: [elsewhere]\n",
+        "oxplow.extensions.alpha.enabled: true\noxplow.extensions.elsewhere.enabled: false\n",
     )
     .unwrap();
     svc.reload_config_from_disk().unwrap();

@@ -560,7 +560,7 @@ async fn a_model_need_is_met_while_the_model_has_a_live_store() {
     write(
         fx._dir.path(),
         ".oxplow/local.yaml",
-        "disableExtensions: [oxtask]\n",
+        "oxplow.extensions.oxtask.enabled: false\n",
     );
     crate::test_fixtures::activate(&fx.svc).await;
     assert_eq!(active().unmet(&need), need, "no store fills it yet");

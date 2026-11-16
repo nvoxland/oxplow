@@ -254,7 +254,10 @@ fn disable(root: &Path, names: &str) {
     write(
         root,
         ".oxplow/local.yaml",
-        &format!("disableExtensions: [{names}]\n"),
+        &names
+            .split(',')
+            .map(|name| format!("oxplow.extensions.{}.enabled: false\n", name.trim()))
+            .collect::<String>(),
     );
 }
 

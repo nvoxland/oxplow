@@ -142,13 +142,7 @@ pub fn extension_definition(name: &str) -> SettingDefinition {
     .definition
 }
 
-pub fn role_key(role: &str) -> String {
-    format!("oxplow.ai.roles.{}", role.replace('/', "."))
-}
-
-pub fn role_from_key(key: &str) -> Option<String> {
-    Some(key.strip_prefix("oxplow.ai.roles.")?.replacen('.', "/", 1))
-}
+pub use oxplow_domain::ai::{role_from_setting_key as role_from_key, role_setting_key as role_key};
 
 pub fn role_definition(role: &str) -> SettingDefinition {
     extra(role_key(role).strip_prefix("oxplow.").expect("role key"), &format!("AI role {role}"),
@@ -311,11 +305,18 @@ pub fn project_document(store: &SettingsStore) -> Result<serde_yaml::Value, Core
         }
     }
     // Boot can project dynamic scalar keys before a provider catalog exists.
-    for level in crate::settings::Level::PRECEDENCE.into_iter().rev() {
+    // Only a key's effective value (the first level that sets it) is
+    // projected and checked: a shadowed override never fails the load.
+    let mut seen = std::collections::BTreeSet::new();
+    let mut roles = crate::settings::SettingsRegistry::default();
+    for level in crate::settings::Level::PRECEDENCE {
         for (key, value) in store.layer(level).map_err(|source| CoreProjectionError {
             key: "settings layer".into(),
             source,
         })? {
+            if !seen.insert(key.clone()) {
+                continue;
+            }
             let is_dynamic_agent = key.starts_with("oxplow.agents.");
             let role = role_from_key(&key);
             if !is_dynamic_agent && role.is_none() {
@@ -327,20 +328,14 @@ pub fn project_document(store: &SettingsStore) -> Result<serde_yaml::Value, Core
                 continue;
             }
             if let Some(role) = role {
-                let mut registry = crate::settings::SettingsRegistry::default();
-                let definition = role_definition(&role);
-                registry
-                    .register(definition.clone())
-                    .map_err(|source| CoreProjectionError {
-                        key: key.clone(),
-                        source,
-                    })?;
-                registry
-                    .validate(&definition.key, &value)
-                    .map_err(|source| CoreProjectionError {
-                        key: key.clone(),
-                        source,
-                    })?;
+                let error = |source| CoreProjectionError {
+                    key: key.clone(),
+                    source,
+                };
+                if roles.get(&key).is_none() {
+                    roles.register(role_definition(&role)).map_err(error)?;
+                }
+                roles.validate(&key, &value).map_err(error)?;
                 values.insert(key, value);
                 continue;
             }

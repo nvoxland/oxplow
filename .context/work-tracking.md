@@ -266,8 +266,8 @@ own — heavier ones included (beads as a task tracker).
   may be none, snapshots may not, `vcs` isn't chosen, and knowledge is
   not chosen either: it is a "many" capability, every declared store is
   active (`choosable = 0`, no `none`, no `capability.switched`). A
-  person's override is `activeProviders` in `.oxplow/personal.yaml`
-  (`oxplow.config.set { layer: personal }`).
+  person's override is `oxplow.activeProviders.<capability>` in `.oxplow/local.yaml`
+  (`oxplow.config.set` at the `local` level).
 - **One active, or many at once.** Most capabilities have one active
   implementation, chosen (the task tracker, snapshots) or
   fixed (`vcs`). A **many-capability** (`CapabilitySpec.many`:
@@ -350,7 +350,7 @@ The three in progress:
   gone, and a retired skill leaves installed runtimes on their next
   write.
 - Capability framework, first commits: core declares the capabilities
-  (`oxplow_domain::capability`), `.oxplow/personal.yaml` layers a
+  (`oxplow_domain::capability`), `.oxplow/local.yaml` layers a
   person's choices over the project's, extensions declare
   implementations (`implementations:`, built-ins by entry), and one
   `CapabilityRegistry` resolves the active one (personal → project →

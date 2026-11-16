@@ -6,11 +6,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use oxplow_domain::ai::AiRestriction;
+use oxplow_domain::ai::{role_from_setting_key, role_setting_key, AiRestriction};
 use serde::{Deserialize, Serialize};
 
 /// File name inside the global config dir.
 pub const AI_CONFIG_FILE: &str = "global.yaml";
+/// The retired standalone AI file; its presence is reported, never read.
+const RETIRED_AI_FILE: &str = "ai.yaml";
 
 /// The jobs oxplow itself gives models. Every extension can name them,
 /// and each extension AI profile falls back to one.
@@ -287,6 +289,13 @@ pub enum ConfigError {
 impl AiConfig {
     /// Load AI keys from `dir/global.yaml`; a missing file is an empty config.
     pub fn load(dir: &Path) -> Result<AiConfig, ConfigError> {
+        let retired = dir.join(RETIRED_AI_FILE);
+        if retired.exists() {
+            return Err(ConfigError::Invalid(format!(
+                "{} is retired and not read; remove it, then configure direct AI connections with `oxplow.ai.<provider>.enabled`, `.baseUrl` and `.apiKey` and assign models with `oxplow.ai.roles.<role>` in Settings → AI. No migration is performed.",
+                retired.display()
+            )));
+        }
         let text = match std::fs::read_to_string(dir.join(AI_CONFIG_FILE)) {
             Ok(text) => text,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Self::default()),
@@ -295,15 +304,12 @@ impl AiConfig {
         let values: BTreeMap<String, serde_yaml::Value> =
             serde_yaml::from_str(&text).map_err(|e| ConfigError::Invalid(e.to_string()))?;
         for key in values.keys() {
-            if key == "ai.providers"
-                || key.starts_with("ai.providers.")
-                || key == "oxplow.ai.providers"
-            {
+            if key == "oxplow.ai.providers" {
                 return Err(ConfigError::Invalid(format!(
                     "`{key}` is retired; configure direct AI connections with `oxplow.ai.<provider>.enabled`, `.baseUrl` and `.apiKey` in Settings → AI. No migration is performed."
                 )));
             }
-            if key == "ai.roles" || key.starts_with("ai.roles.") || key == "oxplow.ai.roles" {
+            if key == "oxplow.ai.roles" {
                 return Err(ConfigError::Invalid(format!(
                     "`{key}` is retired; assign models with `oxplow.ai.roles.<role>` in Settings → AI. No migration is performed."
                 )));
@@ -311,9 +317,9 @@ impl AiConfig {
         }
         let mut config = Self::default();
         for (key, value) in &values {
-            if let Some(role) = key.strip_prefix("oxplow.ai.roles.") {
+            if let Some(role) = role_from_setting_key(key) {
                 config.roles.insert(
-                    Role::parse(&role.replacen('.', "/", 1)).map_err(ConfigError::Invalid)?,
+                    Role::parse(&role).map_err(ConfigError::Invalid)?,
                     serde_yaml::from_value(value.clone())
                         .map_err(|e| ConfigError::Invalid(e.to_string()))?,
                 );
@@ -351,7 +357,7 @@ impl AiConfig {
             Err(e) => return Err(ConfigError::Io(e.to_string())),
         };
         values.retain(|key, _| {
-            !key.starts_with("oxplow.ai.roles.")
+            role_from_setting_key(key).is_none()
                 && !(key.starts_with("oxplow.ai.")
                     && (key.ends_with(".enabled") || key.ends_with(".baseUrl")))
         });
@@ -372,10 +378,7 @@ impl AiConfig {
                     fields.remove("restrict");
                 }
             }
-            values.insert(
-                format!("oxplow.ai.roles.{}", role.to_string().replace('/', ".")),
-                value,
-            );
+            values.insert(role_setting_key(&role.to_string()), value);
         }
         let text = serde_yaml::to_string(&values).map_err(|e| ConfigError::Io(e.to_string()))?;
         std::fs::create_dir_all(dir).map_err(|e| ConfigError::Io(e.to_string()))?;
@@ -473,10 +476,8 @@ roles:
     }
 
     #[test]
-    fn global_settings_preserve_other_keys_and_ignore_legacy_ai_file() {
+    fn global_settings_preserve_other_keys() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("ai.yaml"), YAML).unwrap();
-        assert_eq!(AiConfig::load(dir.path()).unwrap(), AiConfig::default());
         std::fs::write(
             dir.path().join(AI_CONFIG_FILE),
             "oxplow.editor.fontSize: 17\n",
@@ -491,12 +492,34 @@ roles:
         assert_eq!(AiConfig::load(dir.path()).unwrap(), cfg());
     }
 
+    /// The old `ai.yaml` (top-level `providers:` / `roles:`) is not read;
+    /// loading says so, naming the file and what replaced it, never a value.
+    #[test]
+    fn a_legacy_ai_file_fails_naming_it_and_its_replacement() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy =
+            "providers:\n  - { id: openai, kind: openai, api_key: sensitive-value }\nroles: {}\n";
+        std::fs::write(dir.path().join("ai.yaml"), legacy).unwrap();
+        let err = AiConfig::load(dir.path()).unwrap_err().to_string();
+        assert!(
+            err.contains(&dir.path().join("ai.yaml").display().to_string()),
+            "{err}"
+        );
+        assert!(err.contains("oxplow.ai.<provider>.enabled"), "{err}");
+        assert!(err.contains("oxplow.ai.roles.<role>"), "{err}");
+        assert!(err.contains("No migration"), "{err}");
+        assert!(!err.contains("sensitive-value"), "{err}");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("ai.yaml")).unwrap(),
+            legacy,
+            "load reports the legacy file without rewriting it"
+        );
+    }
+
     #[test]
     fn retired_provider_and_role_maps_fail_with_replacement_guidance() {
         let dir = tempfile::tempdir().unwrap();
         for (key, expected) in [
-            ("ai.providers", "oxplow.ai.<provider>.enabled"),
-            ("ai.roles", "oxplow.ai.roles.<role>"),
             ("oxplow.ai.providers", "oxplow.ai.<provider>.enabled"),
             ("oxplow.ai.roles", "oxplow.ai.roles.<role>"),
         ] {

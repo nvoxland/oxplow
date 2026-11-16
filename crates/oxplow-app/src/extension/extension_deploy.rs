@@ -2595,7 +2595,11 @@ mod tests {
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         source_built(svc, "One", BUILD);
-        write(&root, ".oxplow/local.yaml", "enableExtensions: [acme]\n");
+        write(
+            &root,
+            ".oxplow/local.yaml",
+            "oxplow.extensions.acme.enabled: true\n",
+        );
         svc.reload_config_from_disk().unwrap();
         svc.extension_activation
             .initialize(svc.clone())
@@ -2615,7 +2619,11 @@ mod tests {
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         source_with(svc, "One", AI);
-        write(&root, ".oxplow/local.yaml", "enableExtensions: [acme]\n");
+        write(
+            &root,
+            ".oxplow/local.yaml",
+            "oxplow.extensions.acme.enabled: true\n",
+        );
         svc.reload_config_from_disk().unwrap();
         svc.extension_activation
             .initialize(svc.clone())
@@ -3068,7 +3076,7 @@ mod tests {
         write(
             &root,
             ".oxplow/local.yaml",
-            "enableExtensions: [acme, ghost]\n",
+            "oxplow.extensions.acme.enabled: true\noxplow.extensions.ghost.enabled: true\n",
         );
         svc.reload_config_from_disk().unwrap();
         svc.extension_activation
