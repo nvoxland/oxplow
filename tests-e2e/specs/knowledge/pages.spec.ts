@@ -103,9 +103,11 @@ test("[[ completes a link to a knowledge page", async ({ page, daemon }) => {
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.type(" See [[badger se");
   const href = uriOf("badger-sett");
-  // The page's row is the first and its own file isn't offered: Enter picks it.
-  await expect(shown(page).getByTestId("ref-completion-row-" + href)).toBeVisible();
-  await expect(shown(page).getByTestId("ref-completion").getByRole("option").first()).toHaveAttribute("data-testid", `ref-completion-row-${href}`);
+  // The page's row is the first and its own file isn't offered: Enter picks
+  // it. The list floats over the page, outside the tab's body.
+  const list = page.getByTestId("ref-completion");
+  await expect(list.getByTestId(`ref-completion-row-${href}`)).toBeVisible();
+  await expect(list.getByRole("option").first()).toHaveAttribute("data-testid", `ref-completion-row-${href}`);
   await page.keyboard.press("Enter");
   await expect(shown(page).getByTestId("ref-completion")).toHaveCount(0);
   await expect(body.locator(`[data-ref-title][href="${href}"]`)).toHaveText("Badger sett");
