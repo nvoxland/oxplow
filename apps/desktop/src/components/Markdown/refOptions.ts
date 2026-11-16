@@ -21,12 +21,19 @@ export type RefSearch = (query: string, signal: AbortSignal) => Promise<RefOptio
 
 /** The files whose path holds every word of `query`: a name starting with
  *  one of the words first, then a name holding one, then the rest; a
- *  shorter path first within each. */
-export function fileOptions(paths: readonly string[], query: string, limit: number): RefOption[] {
+ *  shorter path first within each. A path `excluded` returns true for is
+ *  not offered (a store row's own file: the row is the thing to link). */
+export function fileOptions(
+  paths: readonly string[],
+  query: string,
+  limit: number,
+  excluded: (path: string) => boolean = () => false,
+): RefOption[] {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (words.length === 0) return [];
   const scored: Array<{ path: string; score: number }> = [];
   for (const path of paths) {
+    if (excluded(path)) continue;
     const lower = path.toLowerCase();
     if (!words.every((w) => lower.includes(w))) continue;
     const name = lower.slice(lower.lastIndexOf("/") + 1);

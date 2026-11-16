@@ -231,7 +231,9 @@ fills:
   project) is a read of the row (`record.read`, "Reads of rows"). Only a
   project folder is write-guarded. The folder is a watched folder when the extension
   declares it so in `files:` (`extensions-permissions.md` "Declared
-  folders").
+  folders"). The fill's first
+  store carries it in `v_model_store` (`files_root`, `files_folder`,
+  `files_suffix`), so a reader (the `[[` list) can tell a row's own file.
 - A store id is owned by one extension. Two extensions naming the same
   store id is a load error. A provider instance's store id is its
   instance id.

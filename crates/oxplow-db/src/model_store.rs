@@ -579,8 +579,9 @@ pub fn replace_store_decls_tx(
     for d in decls {
         conn.execute(
             "INSERT OR IGNORE INTO model_store_decl
-               (model, store, extension, id_pattern, resource, store_param, record_key, loose)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+               (model, store, extension, id_pattern, resource, store_param, record_key, loose,
+                files_root, files_folder, files_suffix)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 d.model,
                 d.store,
@@ -590,6 +591,9 @@ pub fn replace_store_decls_tx(
                 d.store_param,
                 d.key,
                 d.loose,
+                d.files.as_ref().map(|f| f.root.as_str()),
+                d.files.as_ref().map(|f| f.folder.as_str()),
+                d.files.as_ref().map(|f| f.suffix.as_str()),
             ],
         )
         .map_err(map_sql_err)?;
@@ -614,6 +618,18 @@ pub struct StoreDecl {
     pub id_pattern: Option<String>,
     /// Its ids count in running text, not only inside `[[…]]`.
     pub loose: bool,
+    /// Where it keeps each row as a file, when it does (the fill's first
+    /// store only: `<folder>/<id><suffix>` is that row).
+    pub files: Option<StoreFiles>,
+}
+
+/// The files a store keeps its rows in (`fills.files`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoreFiles {
+    /// The root the folder is relative to, as text (`project`, `agent:claude`).
+    pub root: String,
+    pub folder: String,
+    pub suffix: String,
 }
 
 /// Restate every store's declared stages (`model_stage_decl`):

@@ -1988,7 +1988,7 @@
     - { name: "values", type: "TEXT", doc: "An enum's values, as a JSON list; NULL otherwise." }
     - { name: "read_only", type: "INT", doc: "1 when screens show it but don't edit it." }
 - name: model_store
-  version: 3
+  version: 4
   description: "Each live store of a shared model, as the enabled extensions fill it: who fills it, and how a reader links its records without knowing the model (a record's URI is `oxplow:<resource>?<key>=<id>&<store_param>=<store>`; a loose `tsk12` in text is a link to its item)."
   fields:
     - { name: "model", type: "TEXT", doc: "The model (`<owner namespace>/<model>`)." }
@@ -1999,6 +1999,9 @@
     - { name: "store_param", type: "TEXT", doc: "The URI param that names the store (`provider`, `store`)." }
     - { name: "key", type: "TEXT", doc: "The URI param that names the record (`id`)." }
     - { name: "loose", type: "INTEGER", doc: "1 when its ids count in running text (`tsk12`), 0 when only inside `[[…]]`." }
+    - { name: "files_root", type: "TEXT", doc: "Where its rows' files are rooted when it keeps rows as files (`project`, `agent:claude`); NULL when it keeps none." }
+    - { name: "files_folder", type: "TEXT", doc: "The folder in that root holding one file per row, `<folder>/<id><suffix>`; NULL when it keeps none." }
+    - { name: "files_suffix", type: "TEXT", doc: "The file suffix of a row's file (`.md`); NULL when it keeps none." }
 - name: model_stage
   version: 1
   description: "Each store's workflow on a shared model, in order, as the enabled extensions declare it (`fills.stages`) and the running provider instances state it: what a shared screen draws a store's columns from without knowing the store."

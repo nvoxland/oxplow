@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 
-import { recordLabel, recordLinkText, recordOf, recordOfAnyBareId, recordOfBareId, recordOfStoreId, recordStores, setRecordStores, type RecordStore } from "./recordStores.js";
+import { isStoreFile, recordLabel, recordLinkText, recordOf, recordOfAnyBareId, recordOfBareId, recordOfStoreId, recordStores, setRecordStores, type RecordStore } from "./recordStores.js";
 import { resourceUri } from "./uri/uri.js";
 
 // What a store's declared ids name, for any model: no store, resource or id
@@ -17,6 +17,7 @@ const store = (over: Partial<RecordStore>): RecordStore => ({
   key: "id",
   idPattern: "AC-[0-9]+",
   loose: true,
+  files: null,
   ...over,
 });
 
@@ -49,4 +50,13 @@ test("a URI is a record when its store is one, and is written as its id or store
   expect(recordLabel(uri)).toBe("AC-7");
   expect(recordLinkText(uri)).toBe("AC-7");
   expect(recordLinkText(resourceUri("acme/ticket", { id: "x", team: "odd" }))).toBe("odd:x");
+});
+
+test("a file is a store's when it is <folder>/<id><suffix> of a store that keeps rows as files", () => {
+  setRecordStores([store({ store: "wiki", files: { folder: ".oxplow/wiki", suffix: ".md" } }), store({ store: "plain" })]);
+  expect(isStoreFile(".oxplow/wiki/kiwi.md")).toBe(true);
+  expect(isStoreFile(".oxplow/wiki/sub/kiwi.md")).toBe(false);
+  expect(isStoreFile(".oxplow/wiki/kiwi.txt")).toBe(false);
+  expect(isStoreFile(".oxplow/other/kiwi.md")).toBe(false);
+  expect(isStoreFile("kiwi.md")).toBe(false);
 });

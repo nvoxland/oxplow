@@ -20,6 +20,12 @@ export function recordStoresFromResult(result: SqlQueryResult): RecordStore[] {
     const v = row[col(name)];
     return v === null || v === undefined || v === "" ? null : String(v);
   };
+  // Only a folder of the project is a path a file list holds.
+  const files = (row: SqlQueryResult["rows"][number]): RecordStore["files"] => {
+    const folder = text(row, "files_folder");
+    const suffix = text(row, "files_suffix");
+    return folder && suffix && text(row, "files_root") === "project" ? { folder, suffix } : null;
+  };
   const out: RecordStore[] = [];
   for (const row of result.rows) {
     const resource = text(row, "resource");
@@ -33,6 +39,7 @@ export function recordStoresFromResult(result: SqlQueryResult): RecordStore[] {
       key: text(row, "key") ?? "id",
       idPattern: text(row, "id_pattern"),
       loose: Number(row[col("loose")] ?? 0) === 1 || row[col("loose")] === true,
+      files: files(row),
     });
   }
   return out;
@@ -40,7 +47,7 @@ export function recordStoresFromResult(result: SqlQueryResult): RecordStore[] {
 
 export async function readRecordStores(): Promise<{ stores: RecordStore[]; reads: Reads }> {
   const res = await querySql(
-    "SELECT model, store, resource, store_param, key, id_pattern, loose FROM v_model_store ORDER BY model, store",
+    "SELECT model, store, resource, store_param, key, id_pattern, loose, files_root, files_folder, files_suffix FROM v_model_store ORDER BY model, store",
     [],
     500,
   );

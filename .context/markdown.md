@@ -26,8 +26,10 @@ set**, and a surface never builds its own:
 - **`[[` completes** (the editor): typing `[[` lists what it could link
   to under the caret, filtered as the person types — the site search's
   hits (knowledge pages, tasks, commits, extensions' resources; not file
-  content matches) and, on a page of a stream, its files by name
-  (`refOptions.ts`; the owner's search is `useRefSearch` in
+  content matches) and, on a page of a stream, its files by name, but
+  not a store row's own file (`isStoreFile`: `<folder>/<id><suffix>` of a
+  store's `files:` in `v_model_store`, as a page's markdown file: the row
+  is what to link) (`refOptions.ts`; the owner's search is `useRefSearch` in
   `Markdown.tsx`). ↑/↓ move, Enter or Tab picks, Escape closes the list
   and keeps the text (the owner's Escape waits while it shows). The pick
   goes in as its link, saved as the wikilink a person would type

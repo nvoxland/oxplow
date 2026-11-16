@@ -26,6 +26,8 @@ export interface RecordStore {
   idPattern: string | null;
   /** Its ids count in running text, not only inside `[[…]]`: they win over a path or a sha. */
   loose: boolean;
+  /** Where the store keeps each row as a project file, `<folder>/<id><suffix>` (the fill's `files:`); null: it keeps none there. */
+  files: { folder: string; suffix: string } | null;
 }
 
 let stores: RecordStore[] = [];
@@ -107,4 +109,18 @@ export function recordLinkText(uri: string): string {
   const rec = recordOf(uri);
   if (!rec) return uri;
   return recordOfAnyBareId(rec.id) === (identityOf(uri) ?? uri) ? rec.id : `${rec.store}:${rec.id}`;
+}
+
+/** A project file that IS a store's row (`<folder>/<id><suffix>` of a store's
+ *  `files:`, the row's own file, as a knowledge page's markdown): a surface
+ *  that offers the row has no use for the file too. */
+export function isStoreFile(path: string): boolean {
+  for (const s of stores) {
+    if (!s.files) continue;
+    const prefix = `${s.files.folder.replace(/\/+$/, "")}/`;
+    if (!path.startsWith(prefix) || !path.endsWith(s.files.suffix)) continue;
+    const id = path.slice(prefix.length, path.length - s.files.suffix.length);
+    if (id && !id.includes("/")) return true;
+  }
+  return false;
 }

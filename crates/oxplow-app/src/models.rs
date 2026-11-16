@@ -277,9 +277,8 @@ impl ModelRegistry {
             .iter()
             .filter_map(|f| self.models.get(&f.model).map(|m| (f, m)))
             .flat_map(|(f, m)| {
-                f.stores
-                    .iter()
-                    .map(move |store| oxplow_db::model_store::StoreDecl {
+                f.stores.iter().enumerate().map(move |(i, store)| {
+                    oxplow_db::model_store::StoreDecl {
                         model: f.model.clone(),
                         store: store.clone(),
                         extension: f.extension.clone(),
@@ -288,7 +287,16 @@ impl ModelRegistry {
                         key: m.decl.key.clone(),
                         id_pattern: f.id_pattern.clone(),
                         loose: f.loose,
-                    })
+                        // A fill's files are its first store's rows.
+                        files: f.files.as_ref().filter(|_| i == 0).map(|files| {
+                            oxplow_db::model_store::StoreFiles {
+                                root: files.root.to_string(),
+                                folder: files.folder.clone(),
+                                suffix: files.suffix.clone(),
+                            }
+                        }),
+                    }
+                })
             })
             .collect()
     }
@@ -757,6 +765,32 @@ mod tests {
             anchors: Anchors::default(),
             why,
         }
+    }
+
+    /// A fill's `files` reaches the store declaration of its first store
+    /// only (`v_model_store`), so a reader can tell a row's own file.
+    #[test]
+    fn a_fills_files_are_declared_on_its_first_store() {
+        let mut r = registry();
+        r.fills[0].files = Some(FillFiles {
+            root: Default::default(),
+            folder: ".oxplow/shelves".into(),
+            suffix: ".md".into(),
+        });
+        let decls = r.store_decls();
+        let of_fill: Vec<_> = decls
+            .iter()
+            .filter(|d| d.extension == r.fills[0].extension && d.model == r.fills[0].model)
+            .collect();
+        assert_eq!(
+            of_fill[0].files,
+            Some(oxplow_db::model_store::StoreFiles {
+                root: "project".into(),
+                folder: ".oxplow/shelves".into(),
+                suffix: ".md".into(),
+            })
+        );
+        assert!(of_fill[1..].iter().all(|d| d.files.is_none()));
     }
 
     /// A task model's stores that declare an id pattern recognize their

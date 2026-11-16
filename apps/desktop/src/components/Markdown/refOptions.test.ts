@@ -25,3 +25,10 @@ test("search hits come first, without file content matches, then files", () => {
     ["file", "src/notes.ts"],
   ]);
 });
+
+test("files that are a store's rows (the pages' own files) are not offered", () => {
+  const files = [".oxplow/wiki/kiwi.md", "docs/kiwi.md"];
+  const backs = (p: string) => p.startsWith(".oxplow/wiki/");
+  expect(fileOptions(files, "kiwi", 10, backs).map((o) => o.title)).toEqual(["docs/kiwi.md"]);
+  expect(fileOptions(files, "kiwi", 10).map((o) => o.title)).toEqual(["docs/kiwi.md", ".oxplow/wiki/kiwi.md"]);
+});

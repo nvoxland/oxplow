@@ -28,6 +28,7 @@ import { useRecordStores } from "../../recordStoresLoader.js";
 import { MarkdownView } from "./MarkdownView.js";
 import { postprocessWikilinks, preprocessWikilinks } from "./markdownLinks.js";
 import { RichTextField, type RichTextCommentConfig } from "./RichTextField.js";
+import { isStoreFile } from "../../recordStores.js";
 import { fileOptions, mergeRefOptions, type RefSearch } from "./refOptions.js";
 
 /** Comments on the editor's text: the page they are on (`target`, a URI),
@@ -314,6 +315,6 @@ function useRefSearch(): RefSearch {
       streamId && files.current ? files.current.paths : Promise.resolve([]),
     ]);
     if (signal.aborted) return [];
-    return mergeRefOptions(hits, fileOptions(paths, q, REF_LIMIT), REF_LIMIT);
+    return mergeRefOptions(hits, fileOptions(paths, q, REF_LIMIT, isStoreFile), REF_LIMIT);
   }, []);
 }
