@@ -215,9 +215,13 @@ supported; they are not direct AI connections.
 
 The old agents/agentConfig, extension enable/disable lists, AI provider/role maps,
 and newThreadSession settings are superseded. The snapshot hook timeout is an
-internal default. Development source selection is the debug-only launch environment
-`OXPLOW_EXTENSIONS_FROM_SOURCE=true` (set by `bun run run:dev`), rather than a product
-setting. Metric definitions remain extension contributions; metric settings only
+internal default. Where oxplow's own extensions run from is no setting: a dev
+build runs each one whose source the project has (an `extensionSources` entry or
+`.oxplow/extensions/<name>/` with a manifest) from that source; a release build
+never does (`ExtensionSettings::from_source`). Extension switches resolve to one
+effective `oxplow.extensions.<name>.enabled` per extension (`ExtensionSettings::switches`),
+and a capability's choice records the level it came from (`chosen_by`: `local`,
+`project`, `global`); there are no separate team and personal layers. Metric definitions remain extension contributions; metric settings only
 select them and adjust preferences. Change-ranking coefficients are extension
 constants. Session-context injection remains configurable pending a separate decision.
 
@@ -227,8 +231,9 @@ preparation catalogs, retain their host's injected Global directory. A different
 machine/global directory cannot change feature enablement in an isolated host.
 
 Settings writes emit `config.changed@3` with local/project/global levels;
-capability selections emit `capability.switched@2`, including global provenance.
-V40 carries existing core event rows to these versions, renaming the old personal
+capability selections emit `capability.switched@3`, whose `chosen_by` is the
+level that chose (`local`, `project`, `global`), `default` or `fallback`.
+V40 and V42 carry existing core event rows to these versions, renaming the old personal
 level to local without changing values or expired payloads. As with other core
 event bumps, only the newest versions remain registered.
 

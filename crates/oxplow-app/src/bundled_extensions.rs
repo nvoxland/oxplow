@@ -3,8 +3,8 @@
 //! process by a debug build (and its tests), so editing one never
 //! recompiles this crate. They load exactly like project extensions (same
 //! format, same loader) and their names are reserved. Their shipped copies
-//! run unless a dev build is asked to run them from their sources
-//! (`enableBundledExtensions: false`, [`shipped`]). See
+//! run, except that a dev build runs each one whose source the project has
+//! from that source (`ExtensionSettings::from_source`, [`shipped`]). See
 //! `.context/extensions-bundled.md`.
 
 /// A bundled extension's files, as `(path inside its folder, bytes)`.
@@ -129,13 +129,13 @@ pub fn find(name: &str) -> Option<&'static BundledExtension> {
 }
 
 /// The copy of `name` built into oxplow, when it runs from that copy: not
-/// when `settings` run oxplow's own extensions from their sources
-/// (`enableBundledExtensions: false`, a dev build). `find` is the name.
+/// when `settings` run it from its source (a dev build with the source
+/// here, `ExtensionSettings::from_source`). `find` is the name.
 pub fn shipped(
     name: &str,
     settings: &oxplow_config::ExtensionSettings,
 ) -> Option<&'static BundledExtension> {
-    (!settings.bundled_from_sources)
+    (!settings.from_source.contains(name))
         .then(|| find(name))
         .flatten()
 }

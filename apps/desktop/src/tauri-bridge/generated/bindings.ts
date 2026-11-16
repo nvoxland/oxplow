@@ -4488,11 +4488,6 @@ export type OxplowConfig = {
 	 *  capability absent here keeps its default.
 	 */
 	activeProviders: { [key in string]: string },
-	/**
-	 *  A person's own choices (`activeProviders` in
-	 *  `.oxplow/local.yaml`), over the project's.
-	 */
-	personalActiveProviders: { [key in string]: string },
 	/**  Resolved origin of each independently registered capability preference. */
 	activeProviderOrigins?: { [key in string]: string },
 	/**
@@ -4518,40 +4513,11 @@ export type OxplowConfig = {
 	 */
 	aiRoles: { [key in string]: AiRoleOverride },
 	/**
-	 *  The extensions on for the whole team (`extensions: [...]`;
-	 *  [`DEFAULT_EXTENSIONS`] when absent). Committed. oxplow-foundation is
-	 *  always on and never listed.
-	 */
-	extensions: string[],
-	/**
-	 *  Extensions whose effective `oxplow.extensions.<name>.enabled` is
-	 *  false, even one sitting in `.oxplow/extensions/`, which is otherwise on.
-	 */
-	disableExtensions: string[],
-	/**
 	 *  Where an extension's source is when it isn't
 	 *  `.oxplow/extensions/<name>/` (`extensionSources: { <name>: <folder> }`),
 	 *  relative to the checkout or absolute.
 	 */
 	extensionSources: { [key in string]: string },
-	/**
-	 *  Runtime-only: enablement is resolved per extension across local,
-	 *  project and global before projection, so this layer stays empty.
-	 */
-	personalExtensions: PersonalExtensions,
-	/**
-	 *  A person's own sources (`extensionSources` in
-	 *  `.oxplow/local.yaml`), over the team's.
-	 */
-	personalExtensionSources: { [key in string]: string },
-	/**
-	 *  `enableBundledExtensions`: `false` asks a dev build to run oxplow's
-	 *  own extensions from their `extensionSources` folders, not the
-	 *  copies built in ([`bundled_from_sources`]).
-	 */
-	enableBundledExtensions: boolean | null,
-	/**  The person's own `enableBundledExtensions`, over the project's. */
-	personalEnableBundledExtensions: boolean | null,
 };
 
 /**
@@ -5719,17 +5685,6 @@ export type PermissionOption = {
  *  grants.
  */
 export type Permissions = string[];
-
-/**
- *  Per-person enable and disable lists of the runtime view (see
- *  [`OxplowConfig::personal_extensions`]).
- */
-export type PersonalExtensions = {
-	/**  Turned on for this person, beside the team's list. */
-	enable: string[],
-	/**  Turned off for this person, whoever listed them. */
-	disable: string[],
-};
 
 export type PlanEntry = {
 	content: string,

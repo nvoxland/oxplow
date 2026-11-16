@@ -384,14 +384,14 @@ pub(crate) mod test_support {
         // (but not ones the person turned off; one that doesn't load is
         // left out, as an activation holds it back).
         let root = ctx.services.layout.project_dir.clone();
-        let off = oxplow_config::extension_settings(&root).personal.disable;
+        let settings = oxplow_config::extension_settings(&root);
         let mut names: Vec<String> = std::fs::read_dir(root.join(".oxplow/extensions"))
             .into_iter()
             .flatten()
             .flatten()
             .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
             .filter_map(|e| e.file_name().into_string().ok())
-            .filter(|n| !off.contains(n))
+            .filter(|n| !settings.turned_off(n))
             .collect();
         names.sort();
         for name in names {

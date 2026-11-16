@@ -918,20 +918,10 @@ mod tests {
             extension_instances: Default::default(),
             active_providers: Default::default(),
             active_provider_origins: Default::default(),
-            personal_active_providers: Default::default(),
             replacements: Default::default(),
             event_retention: Default::default(),
             ai_roles: Default::default(),
-            disable_extensions: Default::default(),
-            extensions: oxplow_config::DEFAULT_EXTENSIONS
-                .iter()
-                .map(|s| s.to_string())
-                .collect(),
             extension_sources: Default::default(),
-            personal_extensions: Default::default(),
-            personal_extension_sources: Default::default(),
-            enable_bundled_extensions: None,
-            personal_enable_bundled_extensions: None,
         }))
     }
 

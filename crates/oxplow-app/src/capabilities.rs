@@ -31,7 +31,7 @@ use oxplow_db::capability_store::{list_tx, reset_tx};
 use oxplow_db::CapabilityProvider;
 pub use oxplow_domain::capability::ChosenBy;
 use oxplow_domain::capability::{self, NONE};
-use oxplow_domain::events::schema::{CapabilitySwitched, CapabilitySwitchedV2, EventType as _};
+use oxplow_domain::events::schema::{CapabilitySwitched, CapabilitySwitchedV3, EventType as _};
 use oxplow_domain::events::Envelope;
 use oxplow_domain::stores::StreamStore as _;
 use oxplow_domain::vocabulary::VocabularyHandle;
@@ -782,19 +782,17 @@ impl CapabilityRegistry {
         }
         let (wanted, chosen_by) = if !spec.choosable {
             (spec.default.to_string(), ChosenBy::Default)
-        } else if let Some(id) = config.personal_active_providers.get(capability) {
-            (id.clone(), ChosenBy::Personal)
         } else if let Some(id) = config.active_providers.get(capability) {
             (
                 id.clone(),
-                if config
+                match config
                     .active_provider_origins
                     .get(capability)
-                    .is_some_and(|origin| origin == "global")
+                    .map(String::as_str)
                 {
-                    ChosenBy::Global
-                } else {
-                    ChosenBy::Project
+                    Some("local") => ChosenBy::Local,
+                    Some("global") => ChosenBy::Global,
+                    _ => ChosenBy::Project,
                 },
             )
         } else {
@@ -1053,7 +1051,7 @@ fn restate(
 /// The capabilities whose active implementation in `before` (the rows as
 /// they were) isn't the one `now` resolves; one with no active row before
 /// (the first statement) isn't a switch.
-fn switches(before: &[CapabilityProvider], now: &[(&str, Resolved)]) -> Vec<CapabilitySwitchedV2> {
+fn switches(before: &[CapabilityProvider], now: &[(&str, Resolved)]) -> Vec<CapabilitySwitchedV3> {
     now.iter()
         // Many serve at once: nothing is chosen, so nothing switches.
         .filter(|(capability, _)| !capability::spec(capability).is_some_and(|s| s.many))
@@ -1061,7 +1059,7 @@ fn switches(before: &[CapabilityProvider], now: &[(&str, Resolved)]) -> Vec<Capa
             let from = before
                 .iter()
                 .find(|r| r.active && r.capability == *capability)?;
-            (from.provider != resolved.id).then(|| CapabilitySwitchedV2 {
+            (from.provider != resolved.id).then(|| CapabilitySwitchedV3 {
                 capability: capability.to_string(),
                 from: from.provider.clone(),
                 to: resolved.id.clone(),
@@ -1436,23 +1434,25 @@ mod tests {
         r
     }
 
-    fn config(project: &[(&str, &str)], personal: &[(&str, &str)]) -> OxplowConfig {
+    /// A config whose effective choices are `project`'s, then `local`'s
+    /// over them, each with the level it came from.
+    fn config(project: &[(&str, &str)], local: &[(&str, &str)]) -> OxplowConfig {
         let mut c =
             oxplow_config::load_project_config(tempfile::tempdir().unwrap().path()).unwrap();
-        let map = |pairs: &[(&str, &str)]| {
-            pairs
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect()
-        };
-        c.active_providers = map(project);
-        c.personal_active_providers = map(personal);
+        for (level, pairs) in [("project", project), ("local", local)] {
+            for (capability, id) in pairs {
+                c.active_providers
+                    .insert(capability.to_string(), id.to_string());
+                c.active_provider_origins
+                    .insert(capability.to_string(), level.to_string());
+            }
+        }
         c
     }
 
-    /// A person's choice over the project's over the default.
+    /// The effective choice names its level; no choice is the default.
     #[test]
-    fn a_choice_is_the_persons_then_the_projects_then_the_default() {
+    fn a_choice_is_the_effective_levels_then_the_default() {
         let r = registry(true);
         let res = |c: &OxplowConfig| r.resolve(c, "snapshots");
         assert_eq!(
@@ -1470,7 +1470,7 @@ mod tests {
         let both = config(&[("snapshots", "hashes")], &[("snapshots", "oxplow")]);
         assert_eq!(
             (res(&both).id.as_str(), res(&both).chosen_by),
-            ("oxplow", ChosenBy::Personal)
+            ("oxplow", ChosenBy::Local)
         );
     }
 
@@ -1621,11 +1621,10 @@ mod tests {
     async fn disabling_the_bundled_extension_leaves_core_usable() {
         let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
-        svc.config.write().unwrap().extensions = Vec::new();
         std::fs::create_dir_all(svc.layout.project_dir.join(".oxplow")).unwrap();
         crate::test_fixtures::write_settings_fixture(
             oxplow_config::config_path(&svc.layout.project_dir),
-            "extensions: []\n",
+            crate::test_fixtures::optional_shipped_disabled(),
         )
         .unwrap();
         svc.extension_catalog.changed();

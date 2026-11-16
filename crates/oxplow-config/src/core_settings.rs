@@ -101,16 +101,7 @@ pub fn bindings(fallback_name: &str) -> Vec<CoreBinding> {
     out.retain(|binding| {
         !matches!(
             binding.path.first().map(String::as_str),
-            Some(
-                "agents"
-                    | "agentEnabled"
-                    | "agentConfig"
-                    | "extensions"
-                    | "disableExtensions"
-                    | "enableBundledExtensions"
-                    | "ai"
-                    | "snapshotTurnBudgetMs"
-            )
+            Some("agents" | "agentEnabled" | "agentConfig" | "ai" | "snapshotTurnBudgetMs")
         )
     });
     for role in crate::AI_ROLE_NAMES {
@@ -172,9 +163,9 @@ pub fn retired_setting(key: &str) -> Option<&'static str> {
         "oxplow.newThreadSession" => {
             Some("new threads open the picker; its last choice is remembered in UI state")
         }
-        "oxplow.enableBundledExtensions" => {
-            Some("use OXPLOW_EXTENSIONS_FROM_SOURCE=true when launching a development build")
-        }
+        "oxplow.enableBundledExtensions" => Some(
+            "a development build runs oxplow's own extensions from the sources the project names in oxplow.extensionSources",
+        ),
         "oxplow.snapshotTurnBudgetMs" => Some("the hook wait timeout is now managed internally"),
         _ => None,
     }
@@ -214,19 +205,8 @@ pub fn document_from_values(
             insert_path(&mut document, &binding.path, value.clone());
         }
     }
-    let mut enabled = crate::DEFAULT_EXTENSIONS
-        .iter()
-        .map(|name| (name.to_string(), true))
-        .collect::<BTreeMap<_, _>>();
     for (key, value) in values {
-        if let Some(name) = key
-            .strip_prefix("oxplow.extensions.")
-            .and_then(|s| s.strip_suffix(".enabled"))
-        {
-            if let Some(value) = value.as_bool() {
-                enabled.insert(name.to_owned(), value);
-            }
-        } else if let Some(role) = role_from_key(key) {
+        if let Some(role) = role_from_key(key) {
             document["ai"]["roles"][&role] = value.clone();
         } else if let Some(rest) = key.strip_prefix("oxplow.agents.") {
             if let Some((harness, field)) = rest.rsplit_once('.') {
@@ -240,16 +220,6 @@ pub fn document_from_values(
             }
         }
     }
-    document["extensions"] = json!(enabled
-        .iter()
-        .filter(|(_, on)| **on)
-        .map(|(name, _)| name)
-        .collect::<Vec<_>>());
-    document["disableExtensions"] = json!(enabled
-        .iter()
-        .filter(|(_, on)| !**on)
-        .map(|(name, _)| name)
-        .collect::<Vec<_>>());
     crate::to_yaml(&document)
 }
 
@@ -500,7 +470,7 @@ fn collect(
             } else {
                 json!({})
             },
-            restart_required: joined == "enableBundledExtensions",
+            restart_required: false,
             owner: "core".into(),
         },
         path,
@@ -583,11 +553,7 @@ fn category(path: &str) -> &'static str {
         "lsp" => "languageServers",
         "testing" => "testing",
         "scripts" => "scripts",
-        "extensions"
-        | "enableExtensions"
-        | "disableExtensions"
-        | "extensionSources"
-        | "enableBundledExtensions" => "extensions",
+        "extensionSources" => "extensions",
         "activeProviders" | "extensionInstances" | "replacements" => "integrations",
         "eventRetention" => "data",
         key if key.starts_with("snapshot") => "snapshots",
@@ -871,14 +837,7 @@ mod tests {
         for key in crate::keys::config_keys() {
             if matches!(
                 key.key.as_str(),
-                "agents"
-                    | "agentEnabled"
-                    | "agentConfig"
-                    | "extensions"
-                    | "disableExtensions"
-                    | "enableBundledExtensions"
-                    | "ai"
-                    | "snapshotTurnBudgetMs"
+                "agents" | "agentEnabled" | "agentConfig" | "ai" | "snapshotTurnBudgetMs"
             ) {
                 continue;
             }
@@ -915,12 +874,10 @@ mod tests {
             || crate::load_project_config_with_global(project.path(), Some(global.path())).unwrap();
         let local = load();
         assert_eq!(local.active_providers["snapshots"], "oxplow");
-        assert_eq!(local.personal_active_providers["snapshots"], "oxplow");
         assert_eq!(local.active_provider_origins["snapshots"], "local");
         write(Level::Local, None);
         let inherited = load();
         assert_eq!(inherited.active_providers["snapshots"], "hashes");
-        assert!(inherited.personal_active_providers.is_empty());
         assert_eq!(inherited.active_provider_origins["snapshots"], "project");
         write(Level::Project, None);
         assert_eq!(load().active_provider_origins["snapshots"], "global");

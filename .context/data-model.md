@@ -2275,8 +2275,9 @@ redacted values and provenance rather than a separate configuration model.
 
 V40 advances recorded configuration changes to `config.changed@3` (personal
 becomes local) and capability switches to `capability.switched@2` (global
-provenance is supported). Expired payloads remain expired and untouched; only
-their version advances. Core registers the newest shapes, as for other core
+provenance is supported); V42 advances those to `capability.switched@3`
+(`chosen_by: personal` becomes `local`). Expired payloads remain expired and
+untouched; only their version advances. Core registers the newest shapes, as for other core
 event migrations.
 
 The old `extension_config` database schema/store is historical persistence only:

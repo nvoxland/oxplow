@@ -25,11 +25,7 @@ pub(crate) fn write_settings_fixture(
             serde_json::from_str::<serde_json::Value>(&serde_json::to_string(&yaml).ok()?).ok()?;
         let object = object.as_object()?;
         if object.keys().all(|key| {
-            key.contains('.')
-                && !matches!(
-                    key.as_str(),
-                    "oxplow.ai.providers" | "oxplow.ai.roles" | "oxplow.extensions"
-                )
+            key.contains('.') && !matches!(key.as_str(), "oxplow.ai.providers" | "oxplow.ai.roles")
         }) {
             return None;
         }
@@ -38,10 +34,7 @@ pub(crate) fn write_settings_fixture(
             .iter()
             .filter(|(key, _)| {
                 !key.contains('.')
-                    && !matches!(
-                        key.as_str(),
-                        "ai" | "extensions" | "enableBundledExtensions"
-                    )
+                    && *key != "ai"
                     && !bindings.iter().any(|binding| {
                         binding.path.is_empty()
                             && binding.definition.key
@@ -67,30 +60,6 @@ pub(crate) fn write_settings_fixture(
             }
         }
         for (key, value) in object {
-            if matches!(key.as_str(), "extensions" | "oxplow.extensions") {
-                if matches!(key.as_str(), "extensions" | "oxplow.extensions") {
-                    for name in oxplow_config::DEFAULT_EXTENSIONS {
-                        flat.insert(
-                            format!("oxplow.extensions.{name}.enabled"),
-                            serde_json::json!(false),
-                        );
-                    }
-                }
-                for name in value.as_array()? {
-                    flat.insert(
-                        format!("oxplow.extensions.{}.enabled", name.as_str()?),
-                        serde_json::json!(true),
-                    );
-                }
-                continue;
-            }
-            if matches!(
-                key.as_str(),
-                "enableBundledExtensions" | "oxplow.enableBundledExtensions"
-            ) {
-                // Source selection is a launch concern; it never enables or disables extensions.
-                continue;
-            }
             if matches!(
                 key.as_str(),
                 "ai" | "oxplow.ai.providers" | "oxplow.ai.roles"
@@ -403,7 +372,7 @@ pub async fn services_with_thread_in(dir: tempfile::TempDir) -> ThreadFixture {
 }
 
 /// [`services_with_thread`] while developing oxplow: oxplow's own
-/// extensions run from their sources (`enableBundledExtensions: false`),
+/// extensions run from their sources (a dev build with them here),
 /// each a copy of the repo's folder in the project's
 /// `.oxplow/extensions/`. Boot deploys nothing, so foundation is deployed
 /// once booted, as `oxplow-dev extension deploy` does for a checkout.
@@ -425,7 +394,7 @@ async fn developing_oxplow() -> (tempfile::TempDir, Arc<crate::Services>) {
             crate::test_fixtures::write_settings_fixture(file, bytes).unwrap();
         }
     }
-    let svc = crate::Services::in_memory_inactive_from_sources(dir.path()).unwrap();
+    let svc = crate::Services::in_memory_inactive(dir.path()).unwrap();
     svc.initialize_extensions().await.unwrap();
     crate::extension::extension_deploy::deploy(&svc, "oxplow-foundation", true)
         .await

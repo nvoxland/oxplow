@@ -747,10 +747,6 @@ pub struct OxplowConfig {
     /// capability absent here keeps its default.
     #[serde(rename = "activeProviders")]
     pub active_providers: std::collections::BTreeMap<String, String>,
-    /// A person's own choices (`activeProviders` in
-    /// `.oxplow/local.yaml`), over the project's.
-    #[serde(rename = "personalActiveProviders")]
-    pub personal_active_providers: std::collections::BTreeMap<String, String>,
     /// Resolved origin of each independently registered capability preference.
     #[serde(rename = "activeProviderOrigins", default)]
     pub active_provider_origins: std::collections::BTreeMap<String, String>,
@@ -774,162 +770,61 @@ pub struct OxplowConfig {
     /// [`AI_ROLE_NAMES`]). Provider ids refer to `oxplow.ai.providers`.
     #[serde(rename = "aiRoles")]
     pub ai_roles: std::collections::BTreeMap<String, AiRoleOverride>,
-    /// The extensions on for the whole team (`extensions: [...]`;
-    /// [`DEFAULT_EXTENSIONS`] when absent). Committed. oxplow-foundation is
-    /// always on and never listed.
-    #[serde(rename = "extensions")]
-    pub extensions: Vec<String>,
-    /// Extensions whose effective `oxplow.extensions.<name>.enabled` is
-    /// false, even one sitting in `.oxplow/extensions/`, which is otherwise on.
-    #[serde(rename = "disableExtensions")]
-    pub disable_extensions: Vec<String>,
     /// Where an extension's source is when it isn't
     /// `.oxplow/extensions/<name>/` (`extensionSources: { <name>: <folder> }`),
     /// relative to the checkout or absolute.
     #[serde(rename = "extensionSources")]
     pub extension_sources: std::collections::BTreeMap<String, String>,
-    /// Runtime-only: enablement is resolved per extension across local,
-    /// project and global before projection, so this layer stays empty.
-    #[serde(rename = "personalExtensions")]
-    pub personal_extensions: PersonalExtensions,
-    /// A person's own sources (`extensionSources` in
-    /// `.oxplow/local.yaml`), over the team's.
-    #[serde(rename = "personalExtensionSources")]
-    pub personal_extension_sources: std::collections::BTreeMap<String, String>,
-    /// `enableBundledExtensions`: `false` asks a dev build to run oxplow's
-    /// own extensions from their `extensionSources` folders, not the
-    /// copies built in ([`bundled_from_sources`]).
-    #[serde(rename = "enableBundledExtensions")]
-    pub enable_bundled_extensions: Option<bool>,
-    /// The person's own `enableBundledExtensions`, over the project's.
-    #[serde(rename = "personalEnableBundledExtensions")]
-    pub personal_enable_bundled_extensions: Option<bool>,
 }
 
-/// Per-person enable and disable lists of the runtime view (see
-/// [`OxplowConfig::personal_extensions`]).
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Type)]
-pub struct PersonalExtensions {
-    /// Turned on for this person, beside the team's list.
-    pub enable: Vec<String>,
-    /// Turned off for this person, whoever listed them.
-    pub disable: Vec<String>,
-}
-
-/// Which layer turned an extension on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "lowercase")]
-pub enum EnabledBy {
-    /// `.oxplow/project.yaml`'s `extensions`.
-    Team,
-    /// A per-person layer of the runtime view.
-    Personal,
-}
-
-/// What decides which extensions are on and where their sources are: the
-/// team's list and sources in `.oxplow/project.yaml`, and a person's
-/// overrides in `.oxplow/local.yaml`.
+/// Which extensions are on and where their sources are, from the effective
+/// `oxplow.extensions.<name>.enabled` switches and `extensionSources`.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ExtensionSettings {
-    pub team: Vec<String>,
-    /// Off for the team (`disableExtensions` in project.yaml).
-    pub team_disable: Vec<String>,
-    pub team_sources: std::collections::BTreeMap<String, String>,
-    pub personal: PersonalExtensions,
-    pub personal_sources: std::collections::BTreeMap<String, String>,
-    /// `enableBundledExtensions` as asked (the person's, else the team's).
-    pub bundled_requested: Option<bool>,
-    /// oxplow's own extensions run from their sources like any extension,
-    /// not from the copies built in ([`bundled_from_sources`]).
-    pub bundled_from_sources: bool,
-}
-
-/// Whether oxplow's own extensions run from their source folders: asked
-/// (`enableBundledExtensions: false`) and a dev build. A shipped oxplow
-/// always runs the copies built into it, so a cloned repo can't replace
-/// oxplow's own commands.
-pub fn bundled_from_sources(requested: Option<bool>, dev_build: bool) -> bool {
-    dev_build && requested == Some(false)
+    /// Each extension's effective switch: the first level (local, project,
+    /// global) that sets it, else on for the [`DEFAULT_EXTENSIONS`].
+    pub switches: std::collections::BTreeMap<String, bool>,
+    /// The effective `extensionSources`.
+    pub sources: std::collections::BTreeMap<String, String>,
+    /// The extensions whose source this project has, in a dev build (empty
+    /// in a release one): a manifest where `extensionSources` names, or in
+    /// `.oxplow/extensions/<name>/`. oxplow's own extensions among them run from
+    /// that source instead of the copy built in — how oxplow develops
+    /// itself. A release build always runs its own copies, so a cloned repo
+    /// can't replace oxplow's own commands.
+    pub from_source: std::collections::BTreeSet<String>,
 }
 
 /// The folder that holds extension sources by default, under a checkout.
 pub const EXTENSION_SOURCES_DIR: &str = ".oxplow/extensions";
 
-/// The team's list when `.oxplow/project.yaml` has no `extensions` key.
+/// The extensions on when nothing sets their switch.
 pub const DEFAULT_EXTENSIONS: &[&str] = &["oxplow-bundled", "oxtask", "oxwiki"];
 
-fn default_extensions() -> Vec<String> {
-    DEFAULT_EXTENSIONS.iter().map(|s| s.to_string()).collect()
-}
-
 impl ExtensionSettings {
-    pub fn of(config: &OxplowConfig) -> Self {
-        Self {
-            team: config.extensions.clone(),
-            team_disable: config.disable_extensions.clone(),
-            team_sources: config.extension_sources.clone(),
-            personal: config.personal_extensions.clone(),
-            personal_sources: config.personal_extension_sources.clone(),
-            ..Self::bundled(
-                std::env::var("OXPLOW_EXTENSIONS_FROM_SOURCE")
-                    .ok()
-                    .filter(|value| value == "1" || value == "true")
-                    .map(|_| false),
-            )
-        }
-    }
-
-    /// The settings `requested` (`enableBundledExtensions`) makes, in
-    /// this build.
-    fn bundled(requested: Option<bool>) -> Self {
-        Self {
-            bundled_requested: requested,
-            bundled_from_sources: bundled_from_sources(requested, cfg!(debug_assertions)),
-            ..Self::default()
-        }
-    }
-
-    /// Whether `name` was turned off on purpose: by this person, or by the
-    /// team unless this person turned it on.
+    /// Whether `name`'s switch was turned off on purpose.
     pub fn turned_off(&self, name: &str) -> bool {
-        let listed = |names: &[String]| names.iter().any(|n| n == name);
-        listed(&self.personal.disable)
-            || (listed(&self.team_disable) && !listed(&self.personal.enable))
+        self.switches.get(name) == Some(&false)
     }
 
-    /// The extensions on: (team ∪ personal enable) − what's [turned
-    /// off](Self::turned_off), in that order, each with the layer that turned
-    /// it on.
-    pub fn enabled(&self) -> Vec<(String, EnabledBy)> {
-        let mut out: Vec<(String, EnabledBy)> = Vec::new();
-        let layers = self.team.iter().map(|n| (n, EnabledBy::Team)).chain(
-            self.personal
-                .enable
-                .iter()
-                .map(|n| (n, EnabledBy::Personal)),
-        );
-        for (name, layer) in layers {
-            if !self.turned_off(name) && !out.iter().any(|(n, _)| n == name) {
-                out.push((name.clone(), layer));
-            }
-        }
-        out
+    /// The extensions whose switch is on, by name.
+    pub fn enabled(&self) -> Vec<String> {
+        self.switches
+            .iter()
+            .filter(|(_, on)| **on)
+            .map(|(name, _)| name.clone())
+            .collect()
     }
 
     pub fn is_enabled(&self, name: &str) -> bool {
-        self.enabled().iter().any(|(n, _)| n == name)
+        self.switches.get(name) == Some(&true)
     }
 
-    /// Where `name`'s source is, in the checkout at `worktree`: the
-    /// person's `extensionSources` entry, then the team's, then
-    /// `.oxplow/extensions/<name>/`. A relative entry is the checkout's; `~/`
-    /// is the home folder.
+    /// Where `name`'s source is, in the checkout at `worktree`: its
+    /// `extensionSources` entry, else `.oxplow/extensions/<name>/`. A
+    /// relative entry is the checkout's; `~/` is the home folder.
     pub fn source(&self, worktree: &Path, name: &str) -> std::path::PathBuf {
-        let entry = self
-            .personal_sources
-            .get(name)
-            .or_else(|| self.team_sources.get(name));
-        match entry {
+        match self.sources.get(name) {
             Some(raw) => match raw.strip_prefix("~/") {
                 Some(rest) => dirs::home_dir().unwrap_or_default().join(rest),
                 None => worktree.join(raw),
@@ -940,7 +835,7 @@ impl ExtensionSettings {
 }
 
 /// [`ExtensionSettings`] for `project_dir`, without loading (or failing on)
-/// the rest of either file: an unreadable or invalid block reads as empty.
+/// the rest of either file: an unreadable or invalid level reads as empty.
 /// The extension loader calls this on every load.
 pub fn extension_settings(project_dir: impl AsRef<Path>) -> ExtensionSettings {
     let project = project_dir.as_ref();
@@ -953,15 +848,11 @@ pub fn extension_settings_with_global(project: &Path, global: &Path) -> Extensio
         .into_iter()
         .filter_map(|level| settings::read_layer(project, global, level).ok())
         .collect();
-    let value = |key: &str| {
-        documents
-            .iter()
-            .find_map(|doc| doc.get(&core_settings::canonical_key(key)).cloned())
-    };
-    let mut enabled = DEFAULT_EXTENSIONS
+    let mut switches = DEFAULT_EXTENSIONS
         .iter()
         .map(|name| (name.to_string(), true))
         .collect::<std::collections::BTreeMap<_, _>>();
+    // Lowest precedence first, so the effective level is written last.
     for document in documents.iter().rev() {
         for (key, value) in document {
             if let Some(name) = key
@@ -969,32 +860,57 @@ pub fn extension_settings_with_global(project: &Path, global: &Path) -> Extensio
                 .and_then(|key| key.strip_suffix(".enabled"))
             {
                 if let Some(on) = value.as_bool() {
-                    enabled.insert(name.to_owned(), on);
+                    switches.insert(name.to_owned(), on);
                 }
             }
         }
     }
+    let sources: std::collections::BTreeMap<String, String> = documents
+        .iter()
+        .find_map(|doc| {
+            doc.get(&core_settings::canonical_key("extensionSources"))
+                .cloned()
+        })
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default();
+    let from_source = if cfg!(debug_assertions) {
+        sources_here(project, &sources)
+    } else {
+        Default::default()
+    };
     ExtensionSettings {
-        team: enabled
-            .iter()
-            .filter(|(_, on)| **on)
-            .map(|(name, _)| name.clone())
-            .collect(),
-        team_disable: enabled
-            .iter()
-            .filter(|(_, on)| !**on)
-            .map(|(name, _)| name.clone())
-            .collect(),
-        team_sources: value("extensionSources")
-            .and_then(|v| serde_json::from_value(v).ok())
-            .unwrap_or_default(),
-        ..ExtensionSettings::bundled(
-            std::env::var("OXPLOW_EXTENSIONS_FROM_SOURCE")
-                .ok()
-                .filter(|value| value == "1" || value == "true")
-                .map(|_| false),
-        )
+        switches,
+        sources,
+        from_source,
     }
+}
+
+/// The extensions `project` has a source for: each one named in
+/// `extensionSources` or with a folder in `.oxplow/extensions/`, whose
+/// source has a manifest.
+fn sources_here(
+    project: &Path,
+    sources: &std::collections::BTreeMap<String, String>,
+) -> std::collections::BTreeSet<String> {
+    let mut names: std::collections::BTreeSet<String> = sources.keys().cloned().collect();
+    if let Ok(entries) = std::fs::read_dir(project.join(EXTENSION_SOURCES_DIR)) {
+        names.extend(
+            entries
+                .flatten()
+                .filter_map(|entry| entry.file_name().to_str().map(str::to_owned)),
+        );
+    }
+    let settings = ExtensionSettings {
+        sources: sources.clone(),
+        ..Default::default()
+    };
+    names.retain(|name| {
+        settings
+            .source(project, name)
+            .join("extension.yaml")
+            .is_file()
+    });
+    names
 }
 
 /// The built-in role names `ai.roles` accepts beside extension AI
@@ -1191,18 +1107,9 @@ struct RawConfig {
     /// AI role assignments by role name. Stored as the atomic `oxplow.ai.roles` setting.
     #[serde(default)]
     ai: Option<RawAiBlock>,
-    /// Projected from the effective `oxplow.extensions.<name>.enabled` switches: the extensions on. oxplow-foundation is always on and never listed.
-    #[serde(default)]
-    extensions: Option<Vec<String>>,
-    /// Projected from the effective `oxplow.extensions.<name>.enabled` switches: the extensions off, even one sitting in `.oxplow/extensions/`.
-    #[serde(rename = "disableExtensions", default)]
-    disable_extensions: Option<Vec<String>>,
     /// Where an extension's source is when it isn't `.oxplow/extensions/<name>/`: `{ <name>: <folder> }`, relative to the checkout or absolute (`~/` is the home folder). Enables code.
     #[serde(rename = "extensionSources", default)]
     extension_sources: Option<std::collections::BTreeMap<String, String>>,
-    /// Run oxplow's own extensions (oxplow-foundation, oxplow-bundled) from the copies built into it: the default. `false`, honored only by a dev build, runs them from their `extensionSources` folders and deploys them like any extension — how oxplow develops itself. Read when oxplow starts. Enables code.
-    #[serde(rename = "enableBundledExtensions", default)]
-    enable_bundled_extensions: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
@@ -1346,16 +1253,6 @@ pub fn load_project_config_with_global(
             config
                 .active_provider_origins
                 .insert(capability.id.into(), origin.into());
-            if origin == "local" {
-                if let Some(provider) = setting
-                    .value
-                    .and_then(|value| value.as_str().map(str::to_owned))
-                {
-                    config
-                        .personal_active_providers
-                        .insert(capability.id.into(), provider);
-                }
-            }
         }
     }
     Ok(config)
@@ -1708,24 +1605,9 @@ pub fn config_entries(config: &OxplowConfig, fallback_name: &str) -> Vec<ConfigE
         !config.event_retention.is_empty(),
     );
     put(
-        "extensions",
-        to_yaml(&config.extensions),
-        config.extensions != default_extensions(),
-    );
-    put(
-        "disableExtensions",
-        to_yaml(&config.disable_extensions),
-        !config.disable_extensions.is_empty(),
-    );
-    put(
         "extensionSources",
         to_yaml(&config.extension_sources),
         !config.extension_sources.is_empty(),
-    );
-    put(
-        "enableBundledExtensions",
-        to_yaml(&config.enable_bundled_extensions),
-        config.enable_bundled_extensions.is_some(),
     );
     {
         let mut ai = serde_yaml::Mapping::new();
@@ -1818,18 +1700,11 @@ fn default_config(project_name: String) -> OxplowConfig {
         agent_config: Default::default(),
         extension_instances: std::collections::BTreeMap::new(),
         active_providers: std::collections::BTreeMap::new(),
-        personal_active_providers: std::collections::BTreeMap::new(),
         active_provider_origins: std::collections::BTreeMap::new(),
         replacements: std::collections::BTreeMap::new(),
         event_retention: std::collections::BTreeMap::new(),
         ai_roles: Default::default(),
-        extensions: default_extensions(),
-        disable_extensions: Default::default(),
         extension_sources: Default::default(),
-        personal_extensions: Default::default(),
-        personal_extension_sources: Default::default(),
-        enable_bundled_extensions: None,
-        personal_enable_bundled_extensions: None,
     }
 }
 
@@ -2275,18 +2150,11 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
         agent_config,
         extension_instances,
         active_providers,
-        personal_active_providers: std::collections::BTreeMap::new(),
         active_provider_origins: std::collections::BTreeMap::new(),
         replacements,
         event_retention,
         ai_roles: validate_ai_roles(raw.ai)?,
-        extensions: raw.extensions.unwrap_or_else(default_extensions),
-        disable_extensions: raw.disable_extensions.unwrap_or_default(),
         extension_sources: raw.extension_sources.unwrap_or_default(),
-        personal_extensions: Default::default(),
-        personal_extension_sources: Default::default(),
-        enable_bundled_extensions: raw.enable_bundled_extensions,
-        personal_enable_bundled_extensions: None,
     })
 }
 
@@ -3766,7 +3634,7 @@ mod tests {
         write_local_key(dir.path(), "activeProviders", None).unwrap();
         assert!(load_project_config(dir.path())
             .unwrap()
-            .personal_active_providers
+            .active_providers
             .is_empty());
         write_local_key(dir.path(), "zones", None).unwrap();
     }
@@ -4677,16 +4545,17 @@ lsp:
             "oxplow.extensions.triage.enabled: false\noxplow.extensions.mine.enabled: true\n",
         )
         .unwrap();
-        let config = load_project_config(dir.path()).unwrap();
-        assert!(config.extensions.contains(&"mine".into()));
-        assert!(!config.extensions.contains(&"triage".into()));
-        assert!(!config.extensions.contains(&"oxplow-bundled".into()));
+        let settings = extension_settings(dir.path());
+        assert_eq!(settings.enabled(), ["mine", "oxtask", "oxwiki"]);
+        assert!(settings.turned_off("triage"));
+        assert!(settings.turned_off("oxplow-bundled"));
+        assert!(!settings.turned_off("oxtask"));
     }
 
-    /// `enableBundledExtensions: false` runs oxplow's own extensions from
-    /// their sources, only in a dev build; the person's layer wins.
+    /// Where oxplow's own extensions run from is no setting: a dev build
+    /// runs each one whose source the project has from that source.
     #[test]
-    fn bundled_source_switch_is_not_a_setting() {
+    fn a_dev_build_runs_from_the_sources_a_project_has() {
         let dir = tempdir().unwrap();
         assert!(write_project_key(
             dir.path(),
@@ -4694,14 +4563,36 @@ lsp:
             Some(&serde_json::json!(false))
         )
         .is_err());
-        assert!(!bundled_from_sources(None, true));
-        assert!(!bundled_from_sources(Some(false), false));
+        assert!(extension_settings(dir.path()).from_source.is_empty());
+        std::fs::write(
+            cfg_path(dir.path()),
+            "oxplow.extensionSources:\n  oxwiki: extensions/oxwiki\n  gone: extensions/gone\n",
+        )
+        .unwrap();
+        // A named source with no manifest there is no source.
+        let named = dir.path().join("extensions/oxwiki");
+        std::fs::create_dir_all(&named).unwrap();
+        std::fs::write(named.join("extension.yaml"), "manifest: 2\n").unwrap();
+        let folder = dir.path().join(".oxplow/extensions/oxtask");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("extension.yaml"), "manifest: 2\n").unwrap();
+        // A folder with no manifest is no source.
+        std::fs::create_dir_all(dir.path().join(".oxplow/extensions/empty")).unwrap();
+        let from_source: Vec<String> = extension_settings(dir.path())
+            .from_source
+            .into_iter()
+            .collect();
+        if cfg!(debug_assertions) {
+            assert_eq!(from_source, ["oxtask", "oxwiki"]);
+        } else {
+            assert!(from_source.is_empty());
+        }
     }
 
     #[test]
     fn a_home_relative_source_expands() {
         let settings = ExtensionSettings {
-            personal_sources: [("mine".to_string(), "~/exts/mine".to_string())].into(),
+            sources: [("mine".to_string(), "~/exts/mine".to_string())].into(),
             ..Default::default()
         };
         assert_eq!(
@@ -5568,9 +5459,8 @@ metrics:
         assert!(resolve_metrics(&[], &[], &[], &project).is_empty());
     }
 
-    /// `disableExtensions` in project.yaml turns an extension off for the
-    /// team, even one in `.oxplow/extensions/`, and is committed with it. A
-    /// person can still turn it on for themselves, and off wins for them.
+    /// An extension's switch at the local level overrides the project's,
+    /// either way.
     #[test]
     fn a_local_extension_scalar_overrides_the_project_choice() {
         let dir = tempdir().unwrap();

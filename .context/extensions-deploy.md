@@ -132,11 +132,13 @@ source directly: an edit changes nothing until it is deployed.
     therefore holds one entry per name, and `extensions::owner(list,
     name)` is the one lookup by name — none tie-breaks on origin
     (`source_guards::no_lookup_by_name_prefers_an_origin`).
-- **Developing oxplow (`OXPLOW_EXTENSIONS_FROM_SOURCE=true`):** a dev
-  build reads this process environment option when its catalog is made.
-  Oxplow's own extensions load from their `extensionSources` folders and
-  deploy like any extension; release builds use shipped copies. Changing
-  it takes a restart. Boot deploys nothing here either: a checkout's first
+- **Developing oxplow (a dev build with their sources here):** a dev
+  build runs each of oxplow's own extensions whose source the project has
+  — a manifest where `extensionSources` names, or in
+  `.oxplow/extensions/<name>/` (`ExtensionSettings::from_source`) — from
+  that source, deployed like any extension; release builds always use
+  shipped copies. The set is read when the catalog is made: changing it
+  takes a restart. Boot deploys nothing here either: a checkout's first
   run, and a core change that foundation's recorded deployment doesn't
   activate against, need `cargo run -q -p oxplow-dev -- extension deploy`
   with oxplow quit (`extension_deploy::DEPLOY_FROM_OUTSIDE`; it deploys

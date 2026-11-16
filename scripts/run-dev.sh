@@ -21,8 +21,6 @@
 # An extension change alone needs none of this: deploy it in the running
 # app (`oxplow.extension.deploy`, or Settings → Extensions).
 set -e
-# Source selection is development-launch behavior, never project configuration.
-export OXPLOW_EXTENSIONS_FROM_SOURCE="${OXPLOW_EXTENSIONS_FROM_SOURCE:-true}"
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 
 deploy=1

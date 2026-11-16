@@ -16,11 +16,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ChosenBy {
-    /// The person's own layer.
-    Personal,
-    /// The project's `activeProviders`.
+    /// The local level (`.oxplow/local.yaml`).
+    Local,
+    /// The project level (`.oxplow/project.yaml`).
     Project,
-    /// The machine-global preference.
+    /// The global level.
     Global,
     /// Nothing chose: the capability's default.
     Default,
@@ -32,7 +32,7 @@ pub enum ChosenBy {
 impl ChosenBy {
     pub fn as_str(self) -> &'static str {
         match self {
-            ChosenBy::Personal => "personal",
+            ChosenBy::Local => "local",
             ChosenBy::Project => "project",
             ChosenBy::Global => "global",
             ChosenBy::Default => "default",

@@ -1204,11 +1204,9 @@ impl Services {
         // only (never `Arc<Services>`); the `collector.triggers` consumer
         // hands it events, and its catalog loop is spawned in `boot.rs`.
         let extension_catalog = Arc::new(
-            extension::extension_catalog::ExtensionCatalog::for_project_with_source_mode(
+            extension::extension_catalog::ExtensionCatalog::for_project_with_global(
                 &layout.project_dir,
                 machine.config_dir.clone(),
-                (machine.host_env)("OXPLOW_EXTENSIONS_FROM_SOURCE")
-                    .is_some_and(|value| value == "true" || value == "1"),
             ),
         );
         let temp = Arc::new(filesystems::temp::TempFs::new(&layout.project_dir));
@@ -1909,26 +1907,6 @@ impl Services {
             global,
             Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
             providers::host::process_env(),
-            Database::in_memory(),
-        )
-    }
-
-    #[cfg(test)]
-    pub(crate) fn in_memory_inactive_from_sources(
-        project_dir: impl Into<PathBuf>,
-    ) -> Result<Arc<Self>, AppInitError> {
-        let project = project_dir.into();
-        Self::on_machine_inactive(
-            &project,
-            project.join(".oxplow/global-config"),
-            Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
-            Arc::new(|name| {
-                if name == "OXPLOW_EXTENSIONS_FROM_SOURCE" {
-                    Some("true".into())
-                } else {
-                    std::env::var(name).ok()
-                }
-            }),
             Database::in_memory(),
         )
     }

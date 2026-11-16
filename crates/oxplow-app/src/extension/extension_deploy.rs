@@ -1604,24 +1604,8 @@ pub struct NextBoot {
 /// oxplow recorded that no longer activates against this one is found
 /// before anyone starts it (`oxplow-dev extension status`).
 pub async fn next_boot(project: &Path, rows: &[DeploymentRow]) -> Result<NextBoot, String> {
-    next_boot_with_source_mode(
-        project,
-        rows,
-        oxplow_config::extension_settings(project).bundled_from_sources,
-    )
-    .await
-}
-
-async fn next_boot_with_source_mode(
-    project: &Path,
-    rows: &[DeploymentRow],
-    from_sources: bool,
-) -> Result<NextBoot, String> {
-    let settings = ExtensionSettings {
-        bundled_from_sources: from_sources,
-        ..oxplow_config::extension_settings(project)
-    };
-    let mut names: Vec<String> = settings.enabled().into_iter().map(|(n, _)| n).collect();
+    let settings = oxplow_config::extension_settings(project);
+    let mut names: Vec<String> = settings.enabled();
     for b in crate::bundled_extensions::BUNDLED
         .iter()
         .filter(|b| b.required)
@@ -1654,13 +1638,7 @@ async fn next_boot_with_source_mode(
         &root,
         root.join(".global"),
         Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
-        Arc::new(move |name: &str| {
-            if name == "OXPLOW_EXTENSIONS_FROM_SOURCE" && from_sources {
-                Some("true".into())
-            } else {
-                None
-            }
-        }),
+        Arc::new(|_: &str| None),
         oxplow_db::Database::in_memory(),
     )
     .map_err(|e| e.to_string())?;
@@ -3037,9 +3015,13 @@ mod tests {
         assert!(!ignored(".oxplow/extensions/acme/extension.yaml"));
         assert!(ignored(".oxplow/extensions/other/extension.yaml"));
         assert!(ignored(".oxplow/local.sqlite"));
-        let settings = oxplow_config::extension_settings(&root);
-        assert!(settings.team.contains(&"acme".to_string()));
-        assert!(!settings.personal.enable.contains(&"acme".to_string()));
+        let layer = |level| oxplow_config::settings::read_layer(&root, &root, level).unwrap();
+        assert_eq!(
+            layer(oxplow_config::settings::Level::Project).get("oxplow.extensions.acme.enabled"),
+            Some(&serde_json::json!(true))
+        );
+        assert!(!layer(oxplow_config::settings::Level::Local)
+            .contains_key("oxplow.extensions.acme.enabled"));
 
         unshare(svc, "acme").unwrap();
         assert!(ignored(".oxplow/extensions/acme/extension.yaml"));
@@ -3097,7 +3079,7 @@ mod tests {
         assert!(!ghost.enabled && ghost.errors.is_empty());
     }
 
-    /// While developing oxplow (`enableBundledExtensions: false`) its own
+    /// While developing oxplow (a dev build with their sources here) its own
     /// extensions run from their sources, deployed like any extension's
     /// (the fixture deploys foundation, as `oxplow-dev extension deploy`
     /// does); `oxplow-bundled`, never deployed, is listed undeployed with
@@ -3420,7 +3402,7 @@ mod tests {
         write(
             dir.path(),
             ".oxplow/project.yaml",
-            "enableBundledExtensions: false\nextensions: [acme]\n",
+            "oxplow.extensions.acme.enabled: true\n",
         );
         write(
             dir.path(),
@@ -3435,7 +3417,7 @@ mod tests {
         // Built after the files: the mode is read when it is made.
         let svc = {
             drop(svc);
-            Services::in_memory_inactive_from_sources(dir.path()).unwrap()
+            Services::in_memory_inactive(dir.path()).unwrap()
         };
         svc.extension_activation
             .initialize(svc.clone())
@@ -3477,11 +3459,6 @@ mod tests {
         for (rel, text) in shipped_with("oxplow-foundation", |t| t) {
             write(&source, rel, &text);
         }
-        write(
-            project,
-            ".oxplow/project.yaml",
-            "enableBundledExtensions: false\n",
-        );
         if !cfg!(debug_assertions) {
             return;
         }
@@ -3503,7 +3480,7 @@ mod tests {
         for (rel, text) in shipped_with("oxplow-foundation", |t| format!("{t}not_a_key: 1\n")) {
             write(&stale, rel, &text);
         }
-        let next = next_boot_with_source_mode(project, &[row("00000000000000ba")], true)
+        let next = next_boot(project, &[row("00000000000000ba")])
             .await
             .unwrap();
         let why = next
@@ -3575,15 +3552,10 @@ mod tests {
         for (rel, text) in shipped_with("oxplow-foundation", |t| t) {
             write(&source, rel, &text);
         }
-        write(
-            dir.path(),
-            ".oxplow/project.yaml",
-            "enableBundledExtensions: false\n",
-        );
         // Built after the files: the mode is read when it is made.
         let svc = {
             drop(svc);
-            Services::in_memory_inactive_from_sources(dir.path()).unwrap()
+            Services::in_memory_inactive(dir.path()).unwrap()
         };
         active_deployment(
             &svc,
@@ -3627,7 +3599,14 @@ mod tests {
     #[tokio::test]
     async fn a_held_extension_is_listed_with_why() {
         let (dir, svc) = unbooted();
-        write(dir.path(), ".oxplow/project.yaml", "extensions: [acme]\n");
+        write(
+            dir.path(),
+            ".oxplow/project.yaml",
+            &format!(
+                "{}oxplow.extensions.acme.enabled: true\n",
+                crate::test_fixtures::optional_shipped_disabled()
+            ),
+        );
         write(
             dir.path(),
             ".oxplow/extensions/acme/extension.yaml",
@@ -3676,7 +3655,14 @@ mod tests {
     #[tokio::test]
     async fn a_deployment_held_at_boot_stays_recorded_and_is_reported_again() {
         let (dir, svc) = unbooted();
-        write(dir.path(), ".oxplow/project.yaml", "extensions: [acme]\n");
+        write(
+            dir.path(),
+            ".oxplow/project.yaml",
+            &format!(
+                "{}oxplow.extensions.acme.enabled: true\n",
+                crate::test_fixtures::optional_shipped_disabled()
+            ),
+        );
         let broken = "manifest: 2\nname: acme\nnot_a_key: 1\nintent:\n  purpose: test\n";
         active_deployment(
             &svc,

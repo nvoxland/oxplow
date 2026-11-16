@@ -231,9 +231,10 @@ check already reported is not repeated.
   oxplow** (`throwaway::Host`) that is a real one: a temp project with a
   copy of the project's `.oxplow/extensions/` and of which it turned off
   (nothing else of its config — its provider instances would start its
-  programs — with source-development mode from `OXPLOW_EXTENSIONS_FROM_SOURCE`, so a checkout
-  that runs oxplow's own extensions from their sources is tested that way,
-  with no "ignored" warning; the copied sources and the throwaway's
+  programs — each source copied where the checkout keeps it, so a dev
+  build runs oxplow's own extensions the checkout has from those copies,
+  as it runs the checkout's (`ExtensionSettings::from_source`), with no
+  "ignored" warning; the copied sources and the throwaway's
   `.oxplow/` are in `.git/info/exclude`, so they are not untracked files
   of the example's worktree), `Services::in_memory_on_machine` with an in-memory keychain,
   its own global config and the environment it is given, activated by

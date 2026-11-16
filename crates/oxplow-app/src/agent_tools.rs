@@ -279,11 +279,10 @@ mod tests {
     async fn without_bundled_the_agent_has_no_task_tools() {
         let fx = services_with_thread().await;
         let svc = &fx.svc;
-        svc.config.write().unwrap().extensions = Vec::new();
         std::fs::create_dir_all(svc.layout.project_dir.join(".oxplow")).unwrap();
         crate::test_fixtures::write_settings_fixture(
             oxplow_config::config_path(&svc.layout.project_dir),
-            "extensions: []\n",
+            crate::test_fixtures::optional_shipped_disabled(),
         )
         .unwrap();
         svc.extension_catalog.changed();

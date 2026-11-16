@@ -139,7 +139,7 @@ async fn deploy_from_outside(project: &Path, name: Option<&String>) -> Result<St
                 .filter(|b| b.required)
                 .map(|b| b.name.to_string())
                 .collect();
-            names.extend(settings.enabled().into_iter().map(|(n, _)| n));
+            names.extend(settings.enabled());
             let mut seen = std::collections::BTreeSet::new();
             names.retain(|n| {
                 seen.insert(n.clone())
@@ -358,14 +358,6 @@ mod tests {
         dir
     }
 
-    /// Develop oxplow: its extensions run from their sources. Under nextest
-    /// each test is its own process; under `cargo test` (CI) the variable
-    /// stays set for this binary's other tests, none of which depends on
-    /// source mode being off.
-    fn from_source() {
-        std::env::set_var("OXPLOW_EXTENSIONS_FROM_SOURCE", "true");
-    }
-
     /// Turn oxtask on for the project: the `task` subcommands reach its file.
     fn with_oxtask(dir: &Path) {
         std::fs::write(
@@ -474,8 +466,8 @@ mod tests {
         assert!(err.contains("tsk"), "{err}");
     }
 
-    /// A project developing oxplow (`OXPLOW_EXTENSIONS_FROM_SOURCE=true`):
-    /// foundation's source as it ships (it has no build step), set up by the app, and an older
+    /// A project developing oxplow (a dev build with foundation's source
+    /// here): foundation's source as it ships (it has no build step), set up by the app, and an older
     /// foundation recorded as its active deployment that no longer loads.
     async fn developing_oxplow_with_a_stale_foundation() -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
@@ -502,7 +494,6 @@ mod tests {
             }
         };
         write_files(&p.join(".oxplow/extensions/oxplow-foundation"), &|t| t);
-        from_source();
         let svc = oxplow_app::Services::boot(
             oxplow_app::AppLayout::for_project(p),
             Arc::new(oxplow_ai::secrets::MemorySecrets::default()),
@@ -602,7 +593,6 @@ mod tests {
             "title: One\nloaders:\n  q: { sql: \"SELECT 1 AS n\" }\nview: { viz: table, from: q }\n",
         )
         .unwrap();
-        from_source();
         std::fs::write(
             p.join(".oxplow/project.yaml"),
             "oxplow.extensions.acme.enabled: true\n",
@@ -647,7 +637,6 @@ mod tests {
             )
         };
         std::fs::write(&bundled, bundled_at(2)).unwrap();
-        from_source();
         std::fs::write(
             p.join(".oxplow/project.yaml"),
             "oxplow.extensions.oxplow-bundled.enabled: true\n",
@@ -691,7 +680,6 @@ mod tests {
             "manifest: 2\nname: old\nintent:\n  purpose: test\n",
         )
         .unwrap();
-        from_source();
         std::fs::write(
             p.join(".oxplow/project.yaml"),
             "oxplow.extensions.old.enabled: true\n",

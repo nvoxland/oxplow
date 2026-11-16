@@ -146,8 +146,10 @@ Some frequently used settings and defaults (all support local, project and globa
 | `oxplow.extensions.<name>.enabled` | declared per extension | Enable one extension. Foundation is required and always on. |
 | `oxplow.extensionSources` | *empty* | Where an extension's source is when it isn't `.oxplow/extensions/<name>/`: `{ <name>: <folder> }`. |
 
-Development builds use `OXPLOW_EXTENSIONS_FROM_SOURCE=true` to read oxplow's
-own extension sources. This is a process environment option.
+A development build runs each of oxplow's own extensions whose source the
+project has (named in `oxplow.extensionSources`, or in
+`.oxplow/extensions/<name>/`) from that source. A release build always runs
+the copies built into it.
 
 The old aggregate provider, role, agent and extension-list keys are unregistered.
 There is no automatic migration: choose each replacement preference explicitly.

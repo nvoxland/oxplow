@@ -284,11 +284,11 @@ pub struct ExtensionCatalog {
     /// The primary worktree's extensions may have changed.
     changes: tokio::sync::broadcast::Sender<()>,
     runtime_changes: tokio::sync::broadcast::Sender<()>,
-    /// oxplow's own extensions run from their sources
-    /// (`enableBundledExtensions: false` in a dev build), as read when it
-    /// was made: changing it takes a restart, since flipping it under a
-    /// running foundation would take foundation away.
-    bundled_from_sources: bool,
+    /// The extensions whose source this project had when it was made, in a
+    /// dev build (`ExtensionSettings::from_source`): oxplow's own among
+    /// them run from it. Changing it takes a restart, since flipping it
+    /// under a running foundation would take foundation away.
+    from_source: std::collections::BTreeSet<String>,
     /// A private catalog holding one candidate for staging: it is no
     /// generation a reader could straddle, so reading it needs no pin. Only
     /// the pin assertion reads it.
@@ -310,7 +310,7 @@ impl Default for ExtensionCatalog {
             temp_pages: Mutex::default(),
             changes: tokio::sync::broadcast::channel(64).0,
             runtime_changes: tokio::sync::broadcast::channel(64).0,
-            bundled_from_sources: false,
+            from_source: Default::default(),
             #[cfg(test)]
             staged: false,
         }
@@ -326,22 +326,18 @@ impl ExtensionCatalog {
     /// The daemon's: whatever root it is asked about, it loads
     /// `project_dir`'s live set.
     pub fn for_project(project_dir: &Path) -> Self {
-        Self::for_project_with_source_mode(
-            project_dir,
-            oxplow_config::global_config_dir(),
-            oxplow_config::extension_settings(project_dir).bundled_from_sources,
-        )
+        Self::for_project_with_global(project_dir, oxplow_config::global_config_dir())
     }
 
-    pub(crate) fn for_project_with_source_mode(
-        project_dir: &Path,
-        global: Option<PathBuf>,
-        from_sources: bool,
-    ) -> Self {
+    pub(crate) fn for_project_with_global(project_dir: &Path, global: Option<PathBuf>) -> Self {
+        let settings = match &global {
+            Some(global) => oxplow_config::extension_settings_with_global(project_dir, global),
+            None => oxplow_config::extension_settings(project_dir),
+        };
         Self {
             project: Some(project_dir.to_path_buf()),
             global,
-            bundled_from_sources: cfg!(debug_assertions) && from_sources,
+            from_source: settings.from_source,
             ..Self::default()
         }
     }
@@ -350,7 +346,7 @@ impl ExtensionCatalog {
     /// come from as it was when this catalog was made.
     pub fn settings(&self, project: &Path) -> oxplow_config::ExtensionSettings {
         oxplow_config::ExtensionSettings {
-            bundled_from_sources: self.bundled_from_sources,
+            from_source: self.from_source.clone(),
             ..match &self.global {
                 Some(global) => oxplow_config::extension_settings_with_global(project, global),
                 None => oxplow_config::extension_settings(project),
@@ -364,7 +360,7 @@ impl ExtensionCatalog {
         let catalog = Self {
             project: Some(project_dir.to_path_buf()),
             global: self.global.clone(),
-            bundled_from_sources: self.bundled_from_sources,
+            from_source: self.from_source.clone(),
             #[cfg(test)]
             staged: true,
             ..Self::default()
@@ -866,26 +862,20 @@ mod tests {
 
     /// oxplow's own required extension is held like any other: a broken
     /// one keeps its last working version, or is out when it has none.
-    /// Its source only runs while developing oxplow
-    /// (`enableBundledExtensions: false`); a shipped oxplow runs its copy.
+    /// Its source only runs while developing oxplow (a dev build with the
+    /// source here); a shipped oxplow runs its copy.
     #[test]
     fn a_required_extension_that_cant_load_is_held_like_any_other() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
-        crate::test_fixtures::write_settings_fixture(
-            dir.path().join(".oxplow/project.yaml"),
-            "enableBundledExtensions: false\n",
-        )
-        .unwrap();
         let foundation = crate::bundled_extensions::find("oxplow-foundation").unwrap();
         let to = dir.path().join(".oxplow/extensions/oxplow-foundation");
         for (rel, bytes) in foundation.files() {
             let file = to.join(rel);
             std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-            crate::test_fixtures::write_settings_fixture(file, bytes).unwrap();
+            std::fs::write(file, bytes).unwrap();
         }
         let catalog = ExtensionCatalog {
-            bundled_from_sources: true,
+            from_source: ["oxplow-foundation".to_string()].into(),
             ..ExtensionCatalog::default()
         };
         let (good, held) = catalog.snapshot(dir.path()).admitted(None, &Failed::new());

@@ -815,10 +815,11 @@ impl EventType for FileDeleted {
     type Payload = FileDeletedV1;
 }
 
-/// `capability.switched@2`: a switch, including a global preference.
+/// `capability.switched@3`: a switch, with the level the choice came from
+/// (`local`, `project`, `global`) or why none did.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct CapabilitySwitchedV2 {
+pub struct CapabilitySwitchedV3 {
     pub capability: String,
     pub from: String,
     pub to: String,
@@ -827,16 +828,19 @@ pub struct CapabilitySwitchedV2 {
 pub struct CapabilitySwitched;
 impl EventType for CapabilitySwitched {
     const TYPE: &'static str = "capability.switched";
-    const V: u32 = 2;
-    type Payload = CapabilitySwitchedV2;
-    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
-        if from_v == 1 {
-            Ok(payload)
-        } else {
-            Err(DomainError::Invalid(format!(
+    const V: u32 = 3;
+    type Payload = CapabilitySwitchedV3;
+    /// @1 and @2 named the local level `personal`.
+    fn upcast(from_v: u32, mut payload: Value) -> Result<Value, DomainError> {
+        if !matches!(from_v, 1 | 2) {
+            return Err(DomainError::Invalid(format!(
                 "capability.switched@{from_v} has no upcast"
-            )))
+            )));
         }
+        if payload.get("chosen_by").and_then(Value::as_str) == Some("personal") {
+            payload["chosen_by"] = Value::String("local".into());
+        }
+        Ok(payload)
     }
 }
 
@@ -2005,7 +2009,7 @@ mod tests {
                 ("agent.tool.requested", 4),
                 ("agent.turn.ended", 5),
                 ("agent.turn.started", 3),
-                ("capability.switched", 2),
+                ("capability.switched", 3),
                 ("code.diagnostics.changed", 2),
                 ("collector.synced", 2),
                 ("command.approved", 2),
@@ -2064,6 +2068,24 @@ mod tests {
         assert_eq!(v, 3);
         assert_eq!(payload["about"], "oxplow:acme/t?id=1");
         assert!(payload.get("task").is_none());
+    }
+
+    /// A switch logged when the local level was called `personal` reads
+    /// as `local`.
+    #[test]
+    fn an_older_capability_switch_upcasts_personal_to_local() {
+        let r = EventSchemaRegistry::core();
+        for from in [1, 2] {
+            let (v, payload) = r
+                .upcast_to_latest(
+                    "capability.switched",
+                    from,
+                    serde_json::json!({ "capability": "snapshots", "from": "oxplow", "to": "hashes", "chosen_by": "personal" }),
+                )
+                .unwrap();
+            assert_eq!(v, 3);
+            assert_eq!(payload["chosen_by"], "local");
+        }
     }
 
     #[test]

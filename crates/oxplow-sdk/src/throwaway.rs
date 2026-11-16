@@ -79,13 +79,8 @@ fn producer_named(
         .flatten()
         .flatten()
         .filter_map(|e| e.file_name().into_string().ok());
-    let sources: std::collections::BTreeSet<String> = settings
-        .team_sources
-        .keys()
-        .chain(settings.personal_sources.keys())
-        .cloned()
-        .chain(listed)
-        .collect();
+    let sources: std::collections::BTreeSet<String> =
+        settings.sources.keys().cloned().chain(listed).collect();
     sources
         .into_iter()
         .find(|name| {
@@ -233,9 +228,9 @@ impl Host {
         }
         let config = root.join(".oxplow/project.yaml");
         std::fs::create_dir_all(config.parent().expect("a folder")).map_err(|e| e.to_string())?;
-        // The checkout's choice of where oxplow's own extensions run from
-        // (their built-in copies, or their sources) is the throwaway's too:
-        // otherwise each copied source would be ignored with a warning.
+        // Each copied source is where the checkout keeps it, so a dev build
+        // runs oxplow's own extensions the checkout has from those copies,
+        // as it does the checkout's (`ExtensionSettings::from_source`).
         let mut project = serde_json::json!({"oxplow.extensionSources": sources});
         for extension in oxplow_app::bundled_extensions::BUNDLED
             .iter()
@@ -247,18 +242,6 @@ impl Host {
         for name in &on {
             project[format!("oxplow.extensions.{name}.enabled")] = true.into();
         }
-        let source_mode = on
-            .iter()
-            .filter(|name| oxplow_app::bundled_extensions::find(name).is_some())
-            .all(|name| copied.contains_key(name));
-        let original_env = env.clone();
-        let env: HostEnv = Arc::new(move |name| {
-            if name == "OXPLOW_EXTENSIONS_FROM_SOURCE" {
-                Some(source_mode.to_string())
-            } else {
-                original_env(name)
-            }
-        });
         let yaml = serde_yaml::to_string(&project).map_err(|e| e.to_string())?;
         std::fs::write(config, yaml).map_err(|e| e.to_string())?;
         Self::boot(dir, root, checkout.to_path_buf(), on, copied, env, builds).await

@@ -84,8 +84,8 @@ means the extension's **running** deployment. Read-only.
   `Deployment::hash`, the same value `locate` writes to
   `PageProvenance.deployment`), for a deployed or shipped copy.
 - An extension that runs no deployment — read from its source folder (an
-  authoring check, the CLI, a dev build's own extensions under
-  `OXPLOW_EXTENSIONS_FROM_SOURCE=true`), undeployed, or not here — has **no
+  authoring check, the CLI, a dev build's own extensions whose source the
+  project has), undeployed, or not here — has **no
   running files**: with no `rev` its paths are `None`/empty and it isn't
   in the root listing, exactly as `v_page.running_uri` is NULL for it. Name
   one of its stored deployments by hash to read that. The source folder is

@@ -4,18 +4,18 @@
       "description": "Why a capability's active implementation is the one it is.",
       "oneOf": [
         {
-          "const": "personal",
-          "description": "The person's own layer.",
+          "const": "local",
+          "description": "The local level (`.oxplow/local.yaml`).",
           "type": "string"
         },
         {
           "const": "project",
-          "description": "The project's `activeProviders`.",
+          "description": "The project level (`.oxplow/project.yaml`).",
           "type": "string"
         },
         {
           "const": "global",
-          "description": "The machine-global preference.",
+          "description": "The global level.",
           "type": "string"
         },
         {
@@ -33,7 +33,7 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`capability.switched@2`: a switch, including a global preference.",
+  "description": "`capability.switched@3`: a switch, with the level the choice came from\n(`local`, `project`, `global`) or why none did.",
   "properties": {
     "capability": {
       "type": "string"
@@ -54,6 +54,6 @@
     "to",
     "chosen_by"
   ],
-  "title": "CapabilitySwitchedV2",
+  "title": "CapabilitySwitchedV3",
   "type": "object"
 }

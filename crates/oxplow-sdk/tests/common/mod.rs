@@ -19,8 +19,8 @@ pub async fn deploy_sources(svc: &Arc<oxplow_app::Services>, root: &Path) {
         .collect();
     names.sort();
     // One the person turned off stays off (deploying it would turn it on).
-    let off = oxplow_config::extension_settings(root).personal.disable;
-    for name in names.into_iter().filter(|n| !off.contains(n)) {
+    let settings = oxplow_config::extension_settings(root);
+    for name in names.into_iter().filter(|n| !settings.turned_off(n)) {
         oxplow_app::extension::extension_deploy::deploy(svc, &name, true)
             .await
             .unwrap_or_else(|e| panic!("deploy `{name}`: {e}"));

@@ -159,7 +159,7 @@ mod tests {
             "iconTint",
             "zones",
             "ai",
-            "extensions",
+            "extensionSources",
         ] {
             assert!(
                 names.contains(&expected),

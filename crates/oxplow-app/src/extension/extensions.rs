@@ -612,7 +612,7 @@ pub(crate) fn sources_on(
     for ext in sources {
         let present = ext.origin == "project" && ext.deployment == Deployment::Source;
         if present && !settings.turned_off(&ext.name) && !settings.is_enabled(&ext.name) {
-            settings.personal.enable.push(ext.name.clone());
+            settings.switches.insert(ext.name.clone(), true);
         }
     }
     settings
@@ -637,9 +637,8 @@ pub fn known_names(root: &Path, settings: &oxplow_config::ExtensionSettings) -> 
         .filter_map(|e| e.file_name().into_string().ok())
         .filter(|n| !n.starts_with('.'))
         .collect();
-    names.extend(settings.team_sources.keys().cloned());
-    names.extend(settings.personal_sources.keys().cloned());
-    names.extend(settings.enabled().into_iter().map(|(name, _)| name));
+    names.extend(settings.sources.keys().cloned());
+    names.extend(settings.enabled());
     let bundled = crate::bundled_extensions::BUNDLED
         .iter()
         .map(|b| b.name.to_string());
@@ -720,13 +719,7 @@ pub fn source_declaring_page(project: &Path, checkout: &Path, id: &str) -> Optio
         .flatten()
         .flatten()
         .filter_map(|e| e.file_name().into_string().ok());
-    let names: BTreeSet<String> = settings
-        .team_sources
-        .keys()
-        .chain(settings.personal_sources.keys())
-        .cloned()
-        .chain(listed)
-        .collect();
+    let names: BTreeSet<String> = settings.sources.keys().cloned().chain(listed).collect();
     names.into_iter().find(|name| {
         let dir = settings.source(checkout, name);
         namespace_in(&dir, name) == namespace
@@ -5033,18 +5026,23 @@ mod tests {
     }
 
     /// A shipped oxplow runs the copy of its own extensions built into it:
-    /// a project folder with a shipped name loads nothing in its place —
-    /// not as a source, not for a preview — and says it is ignored. Each
-    /// name is one entry, so a lookup by name needs no tie-break.
+    /// a project folder with a shipped name loads nothing in its place and
+    /// says it is ignored (settings with nothing from source, as a release
+    /// build's always are). Each name is one entry, so a lookup by name
+    /// needs no tie-break. A dev build runs that folder as the source.
     #[test]
-    fn a_project_folder_never_stands_in_for_a_shipped_extension() {
+    fn a_project_folder_stands_in_for_a_shipped_extension_only_in_a_dev_build() {
         let dir = tempfile::tempdir().unwrap();
         write(
             dir.path(),
             ".oxplow/extensions/oxplow-bundled/extension.yaml",
             "manifest: 2\nname: oxplow-bundled\nintent:\n  purpose: p\n",
         );
-        let all = load_extensions(dir.path());
+        let released = oxplow_config::ExtensionSettings {
+            from_source: Default::default(),
+            ..oxplow_config::extension_settings(dir.path())
+        };
+        let all = load_sources_with_settings(dir.path(), released);
         let named: Vec<&Extension> = all.iter().filter(|e| e.name == "oxplow-bundled").collect();
         assert_eq!(named.len(), 1, "{named:#?}");
         let ext = named[0];
@@ -5061,12 +5059,22 @@ mod tests {
             "{:?}",
             ext.warnings
         );
-        let preview = source_or_shipped(dir.path(), dir.path(), "oxplow-bundled");
-        assert!(!preview.starts_with(".oxplow/extensions"), "{preview}");
         assert_eq!(
             owner(&all, "oxplow-bundled").map(|e| &e.deployment),
             Some(&ext.deployment)
         );
+
+        let preview = source_or_shipped(dir.path(), dir.path(), "oxplow-bundled");
+        let dev = load_extensions(dir.path());
+        let named: Vec<&Extension> = dev.iter().filter(|e| e.name == "oxplow-bundled").collect();
+        assert_eq!(named.len(), 1, "{named:#?}");
+        if cfg!(debug_assertions) {
+            assert_eq!(named[0].deployment, Deployment::Source);
+            assert_eq!(preview, ".oxplow/extensions/oxplow-bundled");
+        } else {
+            assert!(matches!(named[0].deployment, Deployment::Shipped { .. }));
+            assert!(!preview.starts_with(".oxplow/extensions"), "{preview}");
+        }
     }
 
     /// `when` names a column a row action is offered on; it means nothing
@@ -8481,7 +8489,7 @@ commands:
         let hash = crate::extension::extension_store::source_hash(&source).unwrap();
         crate::extension::extension_store::copy_into_store(d.path(), "x", &source, &hash).unwrap();
         let mut settings = oxplow_config::extension_settings(d.path());
-        settings.personal.enable.push("x".into());
+        settings.switches.insert("x".into(), true);
         let live = BTreeMap::from([("x".to_string(), hash.clone())]);
         let ext = load_deployed(d.path(), &settings, &live)
             .into_iter()
@@ -8646,7 +8654,7 @@ commands:
         let hash = crate::extension::extension_store::source_hash(&source).unwrap();
         crate::extension::extension_store::copy_into_store(d.path(), "x", &source, &hash).unwrap();
         let mut settings = oxplow_config::extension_settings(d.path());
-        settings.personal.enable.push("x".into());
+        settings.switches.insert("x".into(), true);
         let live = BTreeMap::from([("x".to_string(), hash.clone())]);
         let ext = load_deployed(d.path(), &settings, &live)
             .into_iter()

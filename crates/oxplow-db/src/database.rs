@@ -2229,7 +2229,7 @@ mod tests {
     }
 
     #[test]
-    fn v40_preserves_settings_events_at_the_new_level_versions() {
+    fn v40_and_v42_preserve_settings_events_at_the_new_level_versions() {
         let mut conn = Connection::open_in_memory().unwrap();
         embedded::migrations::runner()
             .set_target(refinery::Target::Version(39))
@@ -2265,6 +2265,13 @@ mod tests {
                 r#"{"capability":"snapshots","from":"a","to":"b","chosen_by":"project"}"#,
                 None,
             ),
+            (
+                "capability-personal",
+                "capability.switched",
+                1,
+                r#"{"capability":"snapshots","from":"a","to":"b","chosen_by":"personal"}"#,
+                None,
+            ),
         ] {
             conn.execute(
                 "INSERT INTO event_log (id, type, v, at, source, subject, payload, payload_expired_at)
@@ -2290,7 +2297,7 @@ mod tests {
             .unwrap();
         for row in rows {
             let (id, ty, version, raw, expired) = row.unwrap();
-            assert_eq!(version, if ty == "config.changed" { 3 } else { 2 });
+            assert_eq!(version, 3);
             let payload: serde_json::Value = serde_json::from_str(&raw).unwrap();
             if expired.is_some() {
                 assert_eq!(payload, serde_json::json!({}));
@@ -2300,6 +2307,9 @@ mod tests {
                     assert_eq!(payload["layer"], "local");
                     assert_eq!(payload["before"], 1);
                     assert_eq!(payload["after"], 2);
+                }
+                if id == "capability-personal" {
+                    assert_eq!(payload["chosen_by"], "local");
                 }
             }
         }

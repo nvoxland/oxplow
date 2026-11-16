@@ -41,11 +41,7 @@ pub(crate) fn build(root: &Path, project: &Path, mut candidate: Extension) -> Ca
         sources.push(candidate);
     }
     let mut preview = settings;
-    preview
-        .personal
-        .disable
-        .retain(|disabled| disabled != &name);
-    preview.personal.enable.push(name.clone());
+    preview.switches.insert(name.clone(), true);
     let mut extensions = super::resolve_catalog(sources, &preview);
     let target = extensions
         .iter()
