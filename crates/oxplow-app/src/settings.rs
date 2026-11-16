@@ -16,12 +16,14 @@ pub(crate) fn ai_provider_definitions(id: &str) -> Vec<oxplow_config::settings::
     let mut enabled = key.clone();
     enabled.key = format!("oxplow.ai.{id}.enabled");
     enabled.title = format!("Enable {id}");
+    enabled.description = format!("Allow direct AI calls through {id}");
     enabled.schema = json!({"type":"boolean"});
     enabled.default = Some(json!(false));
     enabled.secret = false;
     let mut url = enabled.clone();
     url.key = format!("oxplow.ai.{id}.baseUrl");
     url.title = format!("{id} base URL");
+    url.description = format!("Endpoint {id} is called at; empty uses its default");
     url.schema = json!({"type":"string"});
     url.default = Some(json!(""));
     vec![enabled, key, url]
@@ -449,6 +451,31 @@ pub(crate) fn store_for_declaration(
 mod registry_tests {
     use super::*;
     use serde_json::json;
+
+    /// Each provider setting says what it is: only the key is a credential.
+    #[test]
+    fn provider_settings_each_describe_themselves() {
+        let definitions = ai_provider_definitions("openai");
+        let described = |suffix: &str| {
+            definitions
+                .iter()
+                .find(|d| d.key.ends_with(suffix))
+                .unwrap()
+                .description
+                .clone()
+        };
+        assert!(described(".apiKey").contains("credential"));
+        assert!(
+            !described(".enabled").contains("credential"),
+            "{}",
+            described(".enabled")
+        );
+        assert!(
+            !described(".baseUrl").contains("credential"),
+            "{}",
+            described(".baseUrl")
+        );
+    }
 
     #[test]
     fn provider_declaration_file_edits_invalidate_registry_identity() {
