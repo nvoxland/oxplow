@@ -1226,7 +1226,9 @@ fn collector_context(
     owner: &str,
     id: &str,
 ) -> Result<RunContext, RunCollectorError> {
-    // The collector's run: a child of what ran it, named for the collector.
+    // The collector's run: a child of what ran it, named for the collector,
+    // carrying the pin of a read it starts under (its host calls reuse it).
+    let parent = &ctx.layer.with_current_pin(parent.clone());
     let (ext, spec) = find_collector(ctx, owner, id)?;
     // What it may do: its declaration, within its extension's permissions.
     let script = (spec.runtime == CollectorRuntime::Starlark)

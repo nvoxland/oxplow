@@ -250,6 +250,15 @@ commands:
   `a_collector_does_not_publish_across_a_change_to_its_extension`,
   `a_collector_does_not_publish_after_its_extension_is_disabled` and
   `an_effects_run_holds_no_generation_and_ends_with_its_extension`.
+  Two callers still read under one pin for a whole run: a fact collector's
+  sync (`MetricsService::run_collector_by_key`) and the event trigger
+  handler (`CollectorTriggers::handle`). A collector's run built there
+  carries that pin (`SqlGateway::with_current_pin`), because its host calls
+  (`sql.read`, its `ai_*` oracle) run on the script worker's thread, where
+  the task's pin isn't visible. A fresh read there queued behind a waiting
+  activation, which waited on the outer read: the daemon hung until the
+  sync timed out (the triage e2e spec, once an AI settings write had
+  requested an activation).
 - An extension has at most 256 queued or running jobs (a
   repeat of an intent it already has is not a new one). No database
   transaction is held while a model streams (`Database::write_transactions_open`

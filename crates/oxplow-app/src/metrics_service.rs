@@ -1998,6 +1998,11 @@ impl MetricsService {
         parent: &RunContext,
         mode: Mode,
     ) -> RunContext {
+        // Built under its caller's read: its host calls reuse that pin.
+        let parent = &match &self.run_log {
+            Some(log) => log.layer.with_current_pin(parent.clone()),
+            None => parent.clone(),
+        };
         let root = &self.project_dir;
         let extensions = self
             .extensions_cache

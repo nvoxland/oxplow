@@ -103,8 +103,9 @@ test("[[ completes a link to a knowledge page", async ({ page, daemon }) => {
   await page.keyboard.press("ControlOrMeta+End");
   await page.keyboard.type(" See [[badger se");
   const href = uriOf("badger-sett");
-  await expect(page.getByTestId(`ref-completion-row-${href}`)).toBeVisible();
-  await page.keyboard.press("Enter");
+  // The page's row, picked: the list also offers its file in .oxplow/oxwiki/,
+  // whose rank against the page isn't this spec's concern.
+  await page.getByTestId(`ref-completion-row-${href}`).click();
   await expect(shown(page).getByTestId("ref-completion")).toHaveCount(0);
   await expect(body.locator(`[data-ref-title][href="${href}"]`)).toHaveText("Badger sett");
   const save = body.getByRole("button", { name: "Save" });

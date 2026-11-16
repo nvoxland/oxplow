@@ -154,6 +154,25 @@ impl SqlGateway {
         self.activation.read(future)
     }
 
+    /// `run`, carrying the generation this task already reads under when it
+    /// carries none. A collector's host calls run on its script worker's
+    /// thread, where the task's pin isn't visible: with the pin in the run
+    /// they reuse it, where a fresh read would queue behind a waiting
+    /// activation that waits on this task's read.
+    pub(crate) fn with_current_pin(
+        &self,
+        run: oxplow_domain::run::RunContext,
+    ) -> oxplow_domain::run::RunContext {
+        use crate::extension::extension_activation::GenerationPin;
+        if run.host_generation::<GenerationPin>().is_some() {
+            return run;
+        }
+        match self.activation.current_pin() {
+            Some(pin) => run.with_host_generation(std::sync::Arc::new(pin)),
+            None => run,
+        }
+    }
+
     pub(crate) async fn pin_run(
         &self,
         run: &oxplow_domain::run::RunContext,
@@ -483,5 +502,27 @@ impl SqlGateway {
 
     async fn view_names_unpinned(&self) -> Result<std::collections::HashSet<String>, DomainError> {
         self.layer.view_names().await
+    }
+}
+
+#[cfg(test)]
+mod pin_tests {
+    use super::*;
+    use crate::extension::extension_activation::GenerationPin;
+    use oxplow_domain::run::{Mode, RunContext};
+
+    /// A run built while its task reads the generation carries that read's
+    /// pin; outside a read it carries none.
+    #[tokio::test]
+    async fn a_run_built_under_a_read_carries_its_pin() {
+        let gateway = SqlGateway::new(oxplow_db::Database::in_memory());
+        let run = RunContext::core(oxplow_domain::Actor::System, Mode::External);
+        let inside = gateway
+            .read_generation(async { gateway.with_current_pin(run.clone()) })
+            .await
+            .unwrap();
+        assert!(inside.host_generation::<GenerationPin>().is_some());
+        let outside = gateway.with_current_pin(run.clone());
+        assert!(outside.host_generation::<GenerationPin>().is_none());
     }
 }
