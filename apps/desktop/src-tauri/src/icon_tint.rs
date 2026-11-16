@@ -103,7 +103,9 @@ pub fn apply(_tint: Option<&str>) {}
 const BUNDLE_ICON: &[u8] = include_bytes!("../icons/icon.icns");
 
 /// Whether the main bundle at `bundle_path` is an `.app`: one has its own
-/// icon; an unbundled binary's main bundle is just its folder.
+/// icon; an unbundled binary's main bundle is just its folder. Only macOS
+/// asks; its tests run everywhere.
+#[cfg(any(target_os = "macos", test))]
 pub fn is_app_bundle(bundle_path: &str) -> bool {
     std::path::Path::new(bundle_path)
         .extension()
