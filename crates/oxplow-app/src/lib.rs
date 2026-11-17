@@ -1664,19 +1664,6 @@ impl Services {
                     layout.project_dir.clone(),
                 ),
             ))
-            .chain(commands::extension_configuration::ops(
-                extension::extension_configuration::ConfigurationHost::new(
-                    extension_catalog.clone(),
-                    layout.project_dir.clone(),
-                )
-                .with_settings(
-                    machine
-                        .config_dir
-                        .clone()
-                        .unwrap_or_else(|| layout.state_dir.join("global")),
-                    machine.secrets.clone(),
-                ),
-            ))
             .chain(commands::effect::ops(services_slot.clone()))
             .chain(commands::delivery::ops(services_slot.clone()))
             .chain(commands::ai_settings::ops(services_slot.clone()))

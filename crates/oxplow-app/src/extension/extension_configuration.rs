@@ -1,31 +1,21 @@
 //! Authorized nested projections of the shared settings service.
 use crate::{
-    extension::extension_catalog::ExtensionCatalog,
-    extension::extension_state::{StateHost, StateHostError},
+    extension::extension_catalog::ExtensionCatalog, extension::extension_state::StateHost,
     extension::extensions::config_schema::ConfigurationFile,
 };
 use oxplow_domain::run::RunContext;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 use std::{
-    collections::BTreeMap,
     path::{Path, PathBuf},
     sync::Arc,
 };
-#[derive(Clone, Default, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct ReadInput {}
 #[derive(Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct GetInput {
     pub key: String,
     pub level: Option<oxplow_config::settings::Level>,
-}
-#[derive(Clone, Serialize)]
-pub struct ConfigurationSnapshot {
-    pub values: Value,
-    pub origins: BTreeMap<String, oxplow_config::settings::Origin>,
 }
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigurationError {
@@ -57,12 +47,6 @@ impl ConfigurationSource {
         input: GetInput,
     ) -> Result<oxplow_config::settings::SettingValue, ConfigurationError> {
         self.host.get(run, input)
-    }
-    pub async fn snapshot(
-        &self,
-        run: RunContext,
-    ) -> Result<ConfigurationSnapshot, ConfigurationError> {
-        self.host.snapshot(&run)
     }
 }
 impl ConfigurationHost {
@@ -127,55 +111,6 @@ impl ConfigurationHost {
             run.trace().count("config.secret");
         }
         Ok(setting)
-    }
-    pub fn snapshot(&self, run: &RunContext) -> Result<ConfigurationSnapshot, ConfigurationError> {
-        let (namespace, declaration) = self.declaration(run, "extension_config.read")?;
-        let store = crate::settings::store_for_declaration(
-            &self.project,
-            &self.global,
-            self.secrets.clone(),
-            &namespace,
-            &declaration,
-        )
-        .map_err(|_| ConfigurationError::Invalid)?;
-        let values = super::extension_settings::values_for(&namespace, &declaration, &store, false)
-            .map_err(|_| ConfigurationError::Invalid)?;
-        let origins =
-            super::extension_settings::origins_for(&namespace, &declaration, &store, false)
-                .map_err(|_| ConfigurationError::Invalid)?;
-        self.declaration(run, "extension_config.read")?;
-        if super::extension_settings::definitions_for(&namespace, &declaration)
-            .map_err(|_| ConfigurationError::Invalid)?
-            .iter()
-            .any(|definition| definition.secret)
-        {
-            run.trace().count("config.secret");
-        }
-        run.trace().count("extension_config.read");
-        run.used_scope("extension_config.read");
-        run.used_scope("config.read");
-        run.trace().count("config.read");
-        Ok(ConfigurationSnapshot { values, origins })
-    }
-    fn declaration(
-        &self,
-        run: &RunContext,
-        service: &str,
-    ) -> Result<(String, ConfigurationFile), ConfigurationError> {
-        let (extension, declaration) = self
-            .owner
-            // The namespace's settings: one document its extensions share.
-            .with_owner(run, service, |extension| {
-                (extension.namespace.clone(), extension.configuration.clone())
-            })
-            .map_err(|error| match error {
-                StateHostError::Denied(_) => ConfigurationError::Denied,
-                StateHostError::State(_) => ConfigurationError::Invalid,
-            })?;
-        Ok((
-            extension,
-            declaration.ok_or(ConfigurationError::Undeclared)?,
-        ))
     }
 }
 /// Public settings projection for SQL and conditions; secret keys are omitted.

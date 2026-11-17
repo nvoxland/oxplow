@@ -341,12 +341,12 @@ checks, rather than a writable script service. A composed write must target a
 setting owned by that extension; broad command permission does not authorize
 writes to core settings or another extension's settings.
 
-The retained `extension_config.read` service and native `snapshot` operation
-are nested read projections over that same backend. They return `{values,
-origins}` for the owning namespace; no layer snapshots, stamps or `inspect`
-operation remain. Provider identity is captured at construction, as for private
+Settings have three read paths over that backend: `scope("config.read", {key,
+level?})` for scripts and providers, `config('/pointer')` in SQL, and
+`v_config_value` for pages and agents. No layer snapshots, stamps or `inspect`
+operation exist. Provider identity is captured at construction, as for private
 state. Settings convey no authority. Disabled, removed or stale owners cannot
-use either host read service. Direct authorized secret reads are excluded from
+use the host read service. Direct authorized secret reads are excluded from
 audit results; inventories and SQL use redacted metadata/public projections.
 
 The registry-backed `v_config_value` inventory lists core and extension settings

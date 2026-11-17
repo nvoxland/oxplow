@@ -398,9 +398,9 @@ async fn a_provider_reads_the_host_through_what_it_needs() {
     }
 }
 
-/// A provider reads its own extension's configuration over `host/call`
-/// (`extension_config.read`): the effective values and origins, with its
-/// project layer applied. One that doesn't list the scope in `needs` is
+/// A provider reads one of its own extension's settings over `host/call`
+/// (`config.read`): the effective value and its origin, with its project
+/// layer applied. One that doesn't list the scope in `needs` is
 /// refused at load, so it can't ask.
 #[cfg(unix)]
 #[tokio::test]
@@ -414,11 +414,7 @@ async fn a_provider_reads_its_extensions_configuration_through_host_call() {
         "intent:\n",
         "configuration:\n  version: 1\n  schema:\n    type: object\n    additionalProperties: false\n    properties:\n      limit: { type: integer, default: 4 }\nintent:\n",
     );
-    std::fs::write(
-        &manifest,
-        format!("{text}    needs: [extension_config.read]\n"),
-    )
-    .unwrap();
+    std::fs::write(&manifest, format!("{text}    needs: [config.read]\n")).unwrap();
     let ext = extension(&root);
     assert!(ext.errors.is_empty(), "{:?}", ext.errors);
     deploy(&fx, &ext).await;
@@ -448,8 +444,8 @@ async fn a_provider_reads_its_extensions_configuration_through_host_call() {
     )
     .await
     .unwrap();
-    assert_eq!(out.result["read"]["values"], json!({ "limit": 9 }));
-    assert_eq!(out.result["read"]["origins"]["/limit"], json!("project"));
+    assert_eq!(out.result["read"]["value"], json!(9));
+    assert_eq!(out.result["read"]["origin"], json!("project"));
 }
 /// A provider's command is declared in its extension's manifest over an
 /// operation its declarations list (`provider:` + `op:`): its input is the

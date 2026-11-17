@@ -134,7 +134,7 @@ shows only on invoke and read — a service whose check doesn't validate the
 token), `lose-reply` (the next invoke lands and is never answered),
 `host-read` (an invoke first reads the host, `host/call` `sql.read`, and
 answers what it read beside its result) and `config-read` (the same for the
-extension's own configuration, `extension_config.read`). The hooks that act on a `read` need a
+extension's own setting, `config.read` with a `{key}`). The hooks that act on a `read` need a
 collector, which only the snapshots mode has (its marks): `progress` (a read sends
 `$/progress` before each record, then takes 100 ms over it),
 `read-fail-after:<n>` (a read fails after `n` checkpointed records),

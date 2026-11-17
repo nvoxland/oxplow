@@ -100,8 +100,7 @@ are adapters over it, not independent files or keychain account formats.
 
 `ConfigurationHost` derives the current owning contribution and checks its
 declared/live authority around extension script reads. `config.read` takes
-`{key, level?}`; the retained `extension_config.read`/`snapshot` alias returns a
-nested `{values, origins}` projection. It exposes no arbitrary owner selector,
+`{key, level?}`. It exposes no arbitrary owner selector,
 layer revisions, `inspect`, CAS writes or schema migration. Public SQL and
 contribution conditions omit secret settings before secure lookup. Historical
 `extension_config` tables may remain in applied schemas; runtime configuration

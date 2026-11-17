@@ -345,29 +345,19 @@ mod tests {
         )
         .unwrap();
         let svc = crate::Services::in_memory(dir.path()).await.unwrap();
-        svc.db
-            .transaction(|tx| {
-                tx.execute(
-                    "INSERT INTO extension_config (namespace, scope, schema_version, revision, values_json)
-                     VALUES ('oxplow', 'project', 2, 1, '{\"struggle\":{\"repeatedEdits\":9}}')",
-                    [],
-                )
-                .map_err(oxplow_db::map_sql_err)
-            })
-            .await
-            .unwrap();
         svc.streams.ensure_primary().await.unwrap();
         crate::test_fixtures::activate(&svc).await;
         let read = svc
-            .commands
-            .run(
-                &oxplow_domain::Actor::Human,
-                "oxplow.settings.read",
-                serde_json::json!({}),
-                false,
+            .sql
+            .query_sql(
+                "SELECT value, origin FROM v_config_value WHERE key = 'oxplow.struggle.repeatedEdits'",
+                vec![],
+                None,
             )
             .await
             .expect("the settings read with bundled off");
-        assert!(read.result["values"].is_object(), "{}", read.result);
+        let rows = serde_json::to_value(&read.rows).unwrap();
+        assert_eq!(rows.as_array().map(Vec::len), Some(1), "{rows}");
+        assert_eq!(rows[0][1], serde_json::json!("default"), "{rows}");
     }
 }

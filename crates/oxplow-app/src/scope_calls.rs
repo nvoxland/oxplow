@@ -108,11 +108,6 @@ pub type StateWriter<'a> = dyn FnMut(
         crate::extension::extension_state::StateHostError,
     > + 'a;
 
-pub type ConfigurationReader<'a> = dyn FnMut() -> Result<
-        crate::extension::extension_configuration::ConfigurationSnapshot,
-        crate::extension::extension_configuration::ConfigurationError,
-    > + 'a;
-
 pub type SettingsReader<'a> = dyn FnMut(
         crate::extension::extension_configuration::GetInput,
     ) -> Result<
@@ -171,7 +166,6 @@ pub struct Calls<'a> {
     state: Option<Box<StateReader<'a>>>,
     /// Only a capability implementation's script is given one.
     state_write: Option<Box<StateWriter<'a>>>,
-    configuration: Option<Box<ConfigurationReader<'a>>>,
     settings: Option<Box<SettingsReader<'a>>>,
     jobs: Option<Box<JobReader<'a>>>,
     ai: Option<Box<AiReader<'a>>>,
@@ -191,7 +185,6 @@ impl<'a> Calls<'a> {
             read,
             state: None,
             state_write: None,
-            configuration: None,
             settings: None,
             jobs: None,
             ai: None,
@@ -251,14 +244,6 @@ impl<'a> Calls<'a> {
         }
     }
 
-    pub fn with_configuration_reader(
-        mut self,
-        configuration: Box<ConfigurationReader<'a>>,
-    ) -> Self {
-        self.configuration = Some(configuration);
-        self
-    }
-
     pub fn with_settings_reader(mut self, settings: Box<SettingsReader<'a>>) -> Self {
         self.settings = Some(settings);
         self
@@ -267,18 +252,11 @@ impl<'a> Calls<'a> {
     fn with_configuration_source(
         self,
         source: Option<crate::extension::extension_configuration::ConfigurationSource>,
-        runtime: &tokio::runtime::Handle,
     ) -> Self {
         match source {
             Some(source) => {
-                let (run, runtime) = (self.run.clone(), runtime.clone());
-                let (settings_run, settings_source) = (run.clone(), source.clone());
-                self.with_configuration_reader(Box::new(move || {
-                    runtime.block_on(source.snapshot(run.clone()))
-                }))
-                .with_settings_reader(Box::new(move |input| {
-                    settings_source.get(&settings_run, input)
-                }))
+                let run = self.run.clone();
+                self.with_settings_reader(Box::new(move |input| source.get(&run, input)))
             }
             None => self,
         }
@@ -354,7 +332,7 @@ impl<'a> Calls<'a> {
         };
         self.with_extension_services(layer.extension_services())
             .with_state_source(layer.state_source(), runtime)
-            .with_configuration_source(layer.configuration_source(), runtime)
+            .with_configuration_source(layer.configuration_source())
             .with_jobs_source(layer.jobs_source(), runtime)
             .with_ai_source(layer.ai_source())
     }
@@ -399,10 +377,6 @@ impl<'a> Calls<'a> {
         } else {
             None
         };
-        if id == "extension_config.read" {
-            crate::extension::extension_configuration::ReadInput::deserialize(&args)
-                .map_err(|_| "`extension_config.read` takes {}".to_string())?;
-        }
         let settings_input = if id == "config.read" {
             Some(
                 crate::extension::extension_configuration::GetInput::deserialize(&args)
@@ -444,9 +418,7 @@ impl<'a> Calls<'a> {
         } else {
             None
         };
-        if !matches!(id, "state.read" | "extension_config.read" | "config.read")
-            || self.answers.contains_key(id)
-        {
+        if !matches!(id, "state.read" | "config.read") || self.answers.contains_key(id) {
             self.run.trace().count(id);
             self.run.used_scope(id);
         }
@@ -457,7 +429,6 @@ impl<'a> Calls<'a> {
         }
         match id {
             "sql.read" => self.sql_read(args),
-            "extension_config.read" => self.configuration_read(),
             "config.read" => {
                 let reader = self
                     .settings
@@ -556,18 +527,6 @@ impl<'a> Calls<'a> {
                     .into(),
             ),
             Err(error) => Err(format!("`state.write`: {error}")),
-        }
-    }
-
-    fn configuration_read(&mut self) -> Result<Value, String> {
-        let reader = self
-            .configuration
-            .as_mut()
-            .ok_or("`extension_config.read` isn't available where this script runs")?;
-        match reader() {
-            Ok(snapshot) => serde_json::to_value(snapshot)
-                .map_err(|_| "extension configuration could not be encoded".into()),
-            Err(error) => Err(error.to_string()),
         }
     }
 
@@ -991,7 +950,6 @@ mod tests {
                 json!({ "job_run": "oxplow:oxplow/job_run?id=1" }),
             ),
             ("state.read", json!({ "scope": "project", "area": "state" })),
-            ("extension_config.read", json!({})),
             ("config.read", json!({ "key": "oxplow.projectName" })),
             ("ai.discover", json!({ "role": "main" })),
         ] {

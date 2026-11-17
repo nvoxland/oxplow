@@ -546,7 +546,6 @@ impl HostCalls {
                         grant,
                         enforcement: crate::grants::enforcement(),
                     });
-                let configuration_run = state_run.clone();
                 let settings_run = state_run.clone();
                 let settings_source = configuration.clone();
                 let (state_runtime, parent) = (runtime.clone(), &run);
@@ -565,24 +564,6 @@ impl HostCalls {
                     }
                     if result.is_ok() {
                         parent.trace().count("config.read");
-                        parent.used_scope("config.read");
-                    }
-                    result
-                }));
-                let configuration_runtime = runtime.clone();
-                calls = calls.with_configuration_reader(Box::new(move || {
-                    let result = configuration_runtime
-                        .block_on(configuration.snapshot(configuration_run.clone()));
-                    if configuration_run
-                        .trace()
-                        .summary()
-                        .contains_key("config.secret")
-                    {
-                        parent.trace().count("config.secret");
-                    }
-                    if result.is_ok() {
-                        parent.trace().count("extension_config.read");
-                        parent.used_scope("extension_config.read");
                         parent.used_scope("config.read");
                     }
                     result

@@ -139,12 +139,6 @@ collectors:
     needs: [store.sql]
     on: [start, { sqlite: own }]
 commands:
-  # oxtask's settings (`configuration:` above): read as a nested projection of the shared registry.
-  - name: settings.read
-    summary: The effective settings of oxtask (the task workflow and the definition of done), where each came from.
-    scope: extension_config.read
-    op: snapshot
-    example: {}
   - name: tasks.set_workflow
     summary: "Choose how this project's agents use tasks (off, person files and the agent works them, the agent tracks everything, or the project's own way) and what \"done\" means here, for the project. The task state and the reminder follow at the next prompt; the skills offered change for agent sessions started after it. A local setting of the workflow, when there is one, still wins for them (the result says so)."
     input_schema:

@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use oxplow_config::settings::{Origin, SettingDefinition, SettingsRegistry, SettingsStore};
+use oxplow_config::settings::{SettingDefinition, SettingsRegistry, SettingsStore};
 use serde_json::{Map, Value};
 
 use super::extensions::{config_schema::ConfigurationFile, Extension};
@@ -163,39 +163,6 @@ pub(crate) fn values_for(
         }
     }
     Ok(root)
-}
-
-/// Origins use the declaration's JSON pointers, matching the public SQL and
-/// condition projection. Objects/arrays have one origin at their setting root.
-pub(crate) fn origins_for(
-    namespace: &str,
-    declaration: &ConfigurationFile,
-    store: &SettingsStore,
-    public: bool,
-) -> Result<BTreeMap<String, Origin>, ExtensionSettingsError> {
-    let mut origins = BTreeMap::new();
-    let bindings: Vec<_> = bindings_for(namespace, declaration)?
-        .into_iter()
-        .filter(|binding| !(public && binding.definition.secret))
-        .collect();
-    let keys: Vec<_> = bindings
-        .iter()
-        .map(|binding| binding.definition.key.as_str())
-        .collect();
-    let snapshot = store
-        .snapshot()
-        .map_err(|_| ExtensionSettingsError::Resolution)?;
-    let settings = keys
-        .iter()
-        .map(|key| snapshot.inspect(key, None))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| ExtensionSettingsError::Resolution)?;
-    for (binding, setting) in bindings.iter().zip(settings) {
-        if let Some(origin) = setting.origin {
-            origins.insert(pointer(&binding.path), origin);
-        }
-    }
-    Ok(origins)
 }
 
 /// Preserve ordinary segments, reserving one prefix for reversible UTF-8 hex
@@ -553,15 +520,6 @@ mod tests {
         assert_eq!(values["a.b"], "flat");
         assert_eq!(values["a"]["b"], "nested");
         assert_eq!(values["__hex_612e62"], "literal");
-        let origins = origins_for(
-            &extension.namespace,
-            extension.configuration.as_ref().unwrap(),
-            &store,
-            false,
-        )
-        .unwrap();
-        assert_eq!(origins["/api~1url"], Origin::Project);
-        assert_eq!(origins["/my key"], Origin::Local);
     }
 
     #[test]
@@ -596,20 +554,10 @@ mod tests {
             Arc::new(NoSecrets),
         );
         assert_eq!(projected(&extension, &store, true), json!({"enabled":true}));
-        assert_eq!(
-            origins_for(
-                "example",
-                extension.configuration.as_ref().unwrap(),
-                &store,
-                true
-            )
-            .unwrap(),
-            BTreeMap::from([("/enabled".into(), Origin::Default)])
-        );
     }
 
     #[test]
-    fn projections_keep_atomic_objects_and_per_setting_origins() {
+    fn projections_keep_atomic_objects() {
         let extension = extension(
             json!({"type":"object","additionalProperties":false,"properties":{
                 "tasks":{"type":"object","additionalProperties":false,"properties":{
@@ -640,20 +588,6 @@ mod tests {
             json!({
                 "tasks":{"enabled":true,"limit":9},"headers":{"local":"only"}
             })
-        );
-        assert_eq!(
-            origins_for(
-                "example",
-                extension.configuration.as_ref().unwrap(),
-                &store,
-                false
-            )
-            .unwrap(),
-            BTreeMap::from([
-                ("/headers".into(), Origin::Local),
-                ("/tasks/enabled".into(), Origin::Default),
-                ("/tasks/limit".into(), Origin::Global),
-            ])
         );
     }
 

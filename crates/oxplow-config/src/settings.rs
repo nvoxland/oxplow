@@ -1313,7 +1313,10 @@ mod tests {
         let (_project, _global, store) = store(vec![secret]);
         match store.validate("example.tokens", &json!({"hunter2-host": 5})) {
             Err(SettingsError::ValueRefused(problems)) => {
-                assert!(problems.iter().all(|p| p.pointer.is_empty()), "{problems:?}");
+                assert!(
+                    problems.iter().all(|p| p.pointer.is_empty()),
+                    "{problems:?}"
+                );
                 let text = SettingsError::ValueRefused(problems).to_string();
                 assert!(!text.contains("hunter2"), "{text}");
             }

@@ -11,7 +11,7 @@ declaration: pages, panels, slots, decorators, replacements; its
 own datasets; a collector's `input:` query (declared and reviewable); its
 own commands and the effects, jobs and commands whose scripts compose them;
 components that query their own datasets; Starlark and jaq collectors that
-don't ask a model; `state.read`, `config.read`, `extension_config.read`, `jobs.read`.
+don't ask a model; `state.read`, `config.read`, `jobs.read`.
 
 ```yaml
 # A list, in a script's `needs:` grammar (a scope id, or `<scope>:<qualifier>`);
@@ -257,7 +257,6 @@ uses):
 | Service | Builtins | Needs permission | Modes |
 |---|---|---|---|
 | `config.read` | `scope("config.read", {key, level?})` | no; current owner and secret ownership checked | any |
-| `extension_config.read` | `scope("extension_config.read", {})` (nested read alias) | no; current owner checked | any |
 | `sql.read` | `scope("sql.read", …)` | no | any |
 | `tree.read` | `files`, `source_files`, `duplicate_blocks` | no | any |
 | `ai.compute` | `ai_classify`, `ai_score`, `ai_summarize`, `ai_extract`, `ai_complete` | `ai` | external only |
@@ -271,8 +270,7 @@ and use a non-secure reader because they omit secrets before resolution. `config
 then exposes core definitions plus its extension's definitions. A secret owned
 by another registry owner is refused. An authorized direct read can return the
 owning extension's secret; the host marks the read so audit results are redacted.
-The nested `extension_config.read` alias returns `{values, origins}` from the
-same backend, with no layer snapshots, revisions, inspect or CAS operation.
+There are no layer snapshots, revisions, inspect or CAS operations.
 Scripts write by composing the generic config set/unset/update commands with
 explicit levels; there is no writable settings service. A script's compose of
 those three needs no `commands:` permission (`permissions::OWN_SETTINGS_WRITES`,

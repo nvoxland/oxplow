@@ -869,12 +869,6 @@ resources:
     params: { custom_component: { required: true, pattern: '^[a-z][a-z0-9_]*/[a-z][a-z0-9_.-]*$' } }
     icon: box
 commands:
-  # Foundation's own settings (`configuration:`): read as a nested projection of the shared registry.
-  - name: settings.read
-    summary: The effective settings of oxplow's own extensions (they share the namespace's one configuration — how changed files are ranked, which files change together, when a request counts as a struggle), where each came from.
-    scope: extension_config.read
-    op: snapshot
-    example: {}
   - name: agent.draft
     summary: "Put text in the shown thread's agent input, unsent."
     scope: agent_input.write

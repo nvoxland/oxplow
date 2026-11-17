@@ -61,7 +61,7 @@
 //!   `sql.read`, `SELECT 7 AS n`, naming the call's idempotency key) and
 //!   answers what it read beside its result (`read`);
 //! - `config-read` — as `host-read`, but the read is of the provider's own
-//!   extension configuration (`host/call` `extension_config.read`);
+//!   extension's `tracker.limit` setting (`host/call` `config.read`);
 //! - on a snapshots `read`: `checkpoint-at-end` (one `$/state`, after the
 //!   last record), `progress` (`$/progress` before each record, then 100 ms
 //!   over it), `read-fail-after:<n>` (`Internal` after streaming and
@@ -222,7 +222,7 @@ pub struct Hooks {
     /// read beside its result (`read`).
     pub host_read: bool,
     /// `config-read`: as `host-read`, but the read is of the provider's own
-    /// extension configuration (`host/call` `extension_config.read`).
+    /// extension's `tracker.limit` setting (`host/call` `config.read`).
     pub config_read: bool,
     /// `shutdown-file:<path>`: a `shutdown` writes `<path>` before it
     /// answers — a graceful stop, which a kill never is.
@@ -680,7 +680,7 @@ async fn handle(
             }
             let read = if hooks.host_read || hooks.config_read {
                 let (scope, args) = if hooks.config_read {
-                    ("extension_config.read", json!({}))
+                    ("config.read", json!({ "key": "tracker.limit" }))
                 } else {
                     ("sql.read", json!({ "sql": "SELECT 7 AS n" }))
                 };

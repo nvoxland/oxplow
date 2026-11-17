@@ -890,8 +890,8 @@ payload; ordinary writes restore or unset the chosen override through canonical
 `scope("config.read", {key, level?})` gives a command script an authorized read
 of the same service. A script composes `oxplow.config.set` per independent leaf;
 it does not rewrite an extension's whole configuration or use revision stamps.
-The `extension_config.read/snapshot` alias remains for a nested projection of
-one namespace. Extension private runtime state still uses `state.read` and
+Pages and agents read settings from `v_config_value`, and SQL from
+`config('/pointer')`. Extension private runtime state still uses `state.read` and
 `state.write/compare_exchange`; settings do not use the state protocol.
 
 **Settings is a registry inventory** (`effective_config.rs`, live dataset

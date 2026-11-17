@@ -54,7 +54,7 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
       (namespace `oxtask`, not `oxplow`'s). `oxtask.tasks.set_workflow
       { workflow?, definition_of_done? }` (a script: it merges into the
       project layer) writes it through oxtask's `oxtask.settings.write`
-      (`oxtask.settings.read` reads it with the stamps). Dataset
+      (read it with `v_config_value`). Dataset
       `v_oxtask_task_workflow` (one row: `workflow`, `definition_of_done`);
       Settings → Integrations shows it as **Task workflow** (the part
       `task-workflow-settings`, mounted at `oxplow/settings.integrations`):
@@ -125,8 +125,8 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
 oxplow-foundation holds the data of core's built-in knowledge (until it goes): its
 datasets, the bus commands (with no `ui:`), skills and metrics. oxplow's own
 extensions share the namespace `oxplow`, so they share one configuration
-(at one `version`) and one pair of commands over it, foundation's
-`oxplow.settings.read` / `.write`. It has
+(at one `version`) and one write command over it, foundation's
+`oxplow.settings.write`. It has
 no page that a person uses to read or edit them. Core and foundation have
 no tasks: the task model `oxplow/task_record`, its datasets (`v_oxplow_task`
 …), the `task` resource, the store-agnostic `tasks` skill (`needs:

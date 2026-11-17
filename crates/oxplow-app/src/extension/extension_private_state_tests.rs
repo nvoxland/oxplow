@@ -39,15 +39,6 @@ pub(crate) fn declare(root: &Path, name: &str, configuration: &str) {
     input_schema: {{ type: object }}
     entry: handlers/config_get.star
     needs: [config.read]
-  - name: config.peek
-    summary: Read the configuration from a script.
-    input_schema: {{ type: object }}
-    entry: handlers/config_peek.star
-    needs: [extension_config.read]
-  - name: config.read
-    summary: The effective configuration.
-    scope: extension_config.read
-    op: snapshot
 
 "
     );
@@ -60,11 +51,6 @@ pub(crate) fn declare(root: &Path, name: &str, configuration: &str) {
         root,
         &format!(".oxplow/extensions/{name}/handlers/config_get.star"),
         "def transform(x):\n    return {\"commands\": [], \"result\": scope(\"config.read\", x[\"input\"])}\n",
-    );
-    write(
-        root,
-        &format!(".oxplow/extensions/{name}/handlers/config_peek.star"),
-        "def transform(x):\n    return {\"commands\": [], \"result\": scope(\"extension_config.read\", {})}\n",
     );
     write(
         root,
@@ -274,7 +260,9 @@ async fn a_disabled_extension_is_denied_while_its_rows_are_kept() {
     )
     .await
     .is_err());
-    assert!(run(&fx, "alpha.config.read", json!({})).await.is_err());
+    assert!(run(&fx, "alpha.config.get", json!({"key": "alpha.limit"}))
+        .await
+        .is_err());
 
     // The rows are still there for the extension's return.
     let rows = SqliteExtensionStateStore::new(fx.svc.db.clone())
@@ -298,8 +286,10 @@ async fn a_disabled_extension_is_denied_while_its_rows_are_kept() {
     .await
     .unwrap();
     assert_eq!(read["values"], json!({"kept": true}));
-    let config = run(&fx, "alpha.config.read", json!({})).await.unwrap();
-    assert_eq!(config["values"]["limit"], json!(7));
+    let config = run(&fx, "alpha.config.get", json!({"key": "alpha.limit"}))
+        .await
+        .unwrap();
+    assert_eq!(config["result"]["value"], json!(7));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -318,9 +308,11 @@ async fn configuration_resolves_defaults_project_and_local() {
         snapshot.extensions(),
     )
     .unwrap();
-    let config = run(&fx, "alpha.config.read", json!({})).await.unwrap();
-    assert_eq!(config["values"]["limit"], json!(10));
-    assert_eq!(config["origins"]["/limit"], json!("default"));
+    let config = run(&fx, "alpha.config.get", json!({"key": "alpha.limit"}))
+        .await
+        .unwrap();
+    assert_eq!(config["result"]["value"], json!(10));
+    assert_eq!(config["result"]["origin"], json!("default"));
     store
         .set(
             "alpha.limit",
@@ -335,14 +327,18 @@ async fn configuration_resolves_defaults_project_and_local() {
             oxplow_config::settings::Level::Local,
         )
         .unwrap();
-    let config = run(&fx, "alpha.config.read", json!({})).await.unwrap();
-    assert_eq!(config["values"]["limit"], json!(30));
-    assert_eq!(config["origins"]["/limit"], json!("local"));
+    let config = run(&fx, "alpha.config.get", json!({"key": "alpha.limit"}))
+        .await
+        .unwrap();
+    assert_eq!(config["result"]["value"], json!(30));
+    assert_eq!(config["result"]["origin"], json!("local"));
     store
         .unset("alpha.limit", oxplow_config::settings::Level::Local)
         .unwrap();
-    let config = run(&fx, "alpha.config.read", json!({})).await.unwrap();
-    assert_eq!(config["values"]["limit"], json!(20));
+    let config = run(&fx, "alpha.config.get", json!({"key": "alpha.limit"}))
+        .await
+        .unwrap();
+    assert_eq!(config["result"]["value"], json!(20));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -365,8 +361,10 @@ async fn a_setting_failing_the_schema_is_refused_without_echoing_it() {
             "{message}"
         );
     }
-    let config = run(&fx, "alpha.config.read", json!({})).await.unwrap();
-    assert_eq!(config["values"]["limit"], json!(10));
+    let config = run(&fx, "alpha.config.get", json!({"key": "alpha.limit"}))
+        .await
+        .unwrap();
+    assert_eq!(config["result"]["value"], json!(10));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -426,10 +424,15 @@ async fn state_and_configuration_survive_a_restart() {
     assert_eq!(read["stamp"]["revision"], json!(1));
     let config = second
         .commands
-        .run(&Actor::Human, "alpha.config.read", json!({}), false)
+        .run(
+            &Actor::Human,
+            "alpha.config.get",
+            json!({"key": "alpha.limit"}),
+            false,
+        )
         .await
         .unwrap()
         .result;
-    assert_eq!(config["values"]["limit"], json!(42));
-    assert_eq!(config["origins"]["/limit"], json!("project"));
+    assert_eq!(config["result"]["value"], json!(42));
+    assert_eq!(config["result"]["origin"], json!("project"));
 }

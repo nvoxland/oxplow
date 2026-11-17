@@ -218,8 +218,8 @@ custom component that invokes `oxplow.config.set`, or an `inverse` that
 composes it, still needs `commands:oxplow.config.set`. Write
 each independent field separately so changing one preserves the others.
 Settings do not use revision stamps, compare-and-swap, or whole-namespace
-writes. Namespace `settings.read` aliases may return a nested read projection;
-they are not a separate settings store. Private runtime state still uses the
+writes. Read a setting with `scope("config.read", {key, level?})` in a script,
+`config('/pointer')` in SQL, or `v_config_value` in a page. Private runtime state still uses the
 `state.read` / `state.write` protocol above.
 
 Ordinary overrides are flat fully qualified keys in `.oxplow/local.yaml`,

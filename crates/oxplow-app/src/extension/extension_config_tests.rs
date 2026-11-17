@@ -1,5 +1,5 @@
 //! Shared settings projections preserve extension host ownership.
-use crate::extension::extension_configuration::ConfigurationHost;
+use crate::extension::extension_configuration::{ConfigurationHost, GetInput};
 use crate::extension::extension_private_state_tests::{declare, reconcile, run, CONFIGURATION};
 use crate::test_fixtures::{services_with_thread, ThreadFixture};
 use oxplow_domain::run::{Authority, ContributionRef, Mode, RunContext};
@@ -27,9 +27,9 @@ fn owner(fx: &ThreadFixture, generation: Option<String>) -> ContributionRef {
         .iter()
         .find(|item| {
             item.id.kind == oxplow_domain::contribution::ContributionKind::Command
-                && item.id.local.ends_with("config.read")
+                && item.id.local.ends_with("config.get")
         })
-        .expect("alpha declares config.read")
+        .expect("alpha declares config.get")
         .id
         .clone();
     let mut owner = ContributionRef {
@@ -56,15 +56,21 @@ fn declaring(scope: &str, run: RunContext) -> RunContext {
     })
 }
 
-async fn denied_snapshot(fx: &ThreadFixture, run: RunContext) -> String {
+async fn denied_read(fx: &ThreadFixture, run: RunContext) -> String {
     let host = host(fx);
     let refused = fx
         .svc
         .db
         .read_or(move |_conn| {
-            host.snapshot(&run)
-                .map(|_| ())
-                .map_err(oxplow_db::TxError::Aborted)
+            host.get(
+                &run,
+                GetInput {
+                    key: "alpha.limit".into(),
+                    level: None,
+                },
+            )
+            .map(|_| ())
+            .map_err(oxplow_db::TxError::Aborted)
         })
         .await
         .expect_err("the host refuses this run");
@@ -81,7 +87,7 @@ async fn the_host_refuses_runs_that_do_not_own_the_service() {
     reconcile(&fx).await;
     let read = || {
         declaring(
-            "extension_config.read",
+            "config.read",
             RunContext::contribution(owner(&fx, None), Actor::Human, Mode::External),
         )
     };
@@ -91,33 +97,43 @@ async fn the_host_refuses_runs_that_do_not_own_the_service() {
     let ok = read();
     fx.svc
         .db
-        .read_or(move |_conn| host_ok.snapshot(&ok).map_err(oxplow_db::TxError::Aborted))
+        .read_or(move |_conn| {
+            host_ok
+                .get(
+                    &ok,
+                    GetInput {
+                        key: "alpha.limit".into(),
+                        level: None,
+                    },
+                )
+                .map_err(oxplow_db::TxError::Aborted)
+        })
         .await
         .expect("a declared, current run reads");
 
     // A generation the catalog has moved past.
     let stale = declaring(
-        "extension_config.read",
+        "config.read",
         RunContext::contribution(
             owner(&fx, Some("a-generation-long-gone".into())),
             Actor::Human,
             Mode::External,
         ),
     );
-    assert!(denied_snapshot(&fx, stale).await.contains("denied"));
+    assert!(denied_read(&fx, stale).await.contains("denied"));
 
     // A grant revoked while the run was under way.
     let revoked = read().guarded(Arc::new(|| Err("approval revoked".into())));
-    assert!(denied_snapshot(&fx, revoked).await.contains("denied"));
+    assert!(denied_read(&fx, revoked).await.contains("denied"));
 
     // No declaration of the scope, and core's own run (no owner).
     let undeclared = declaring(
         "state.read",
         RunContext::contribution(owner(&fx, None), Actor::Human, Mode::External),
     );
-    assert!(denied_snapshot(&fx, undeclared).await.contains("denied"));
+    assert!(denied_read(&fx, undeclared).await.contains("denied"));
     let core = RunContext::core(Actor::Human, Mode::External);
-    assert!(denied_snapshot(&fx, core).await.contains("denied"));
+    assert!(denied_read(&fx, core).await.contains("denied"));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -143,9 +159,11 @@ async fn a_script_reads_shared_settings_with_atomic_precedence() {
             oxplow_config::settings::Level::Project,
         )
         .unwrap();
-    let peeked = run(&fx, "alpha.config.peek", json!({})).await.unwrap();
-    assert_eq!(peeked["result"]["values"]["limit"], json!(12));
-    assert_eq!(peeked["result"]["origins"]["/limit"], json!("project"));
+    let peeked = run(&fx, "alpha.config.get", json!({"key":"alpha.limit"}))
+        .await
+        .unwrap();
+    assert_eq!(peeked["result"]["value"], json!(12));
+    assert_eq!(peeked["result"]["origin"], json!("project"));
     store
         .set(
             "alpha.limit",
@@ -153,9 +171,11 @@ async fn a_script_reads_shared_settings_with_atomic_precedence() {
             oxplow_config::settings::Level::Local,
         )
         .unwrap();
-    let peeked = run(&fx, "alpha.config.peek", json!({})).await.unwrap();
-    assert_eq!(peeked["result"]["values"]["limit"], json!(17));
-    assert_eq!(peeked["result"]["origins"]["/limit"], json!("local"));
+    let peeked = run(&fx, "alpha.config.get", json!({"key":"alpha.limit"}))
+        .await
+        .unwrap();
+    assert_eq!(peeked["result"]["value"], json!(17));
+    assert_eq!(peeked["result"]["origin"], json!("local"));
     assert!(peeked["result"].get("layers").is_none());
 }
 
@@ -218,12 +238,6 @@ async fn extension_reads_use_the_services_global_directory_and_fake_secrets() {
         .await
         .unwrap();
     assert_eq!(token["result"]["value"], json!("fake-backend-secret"));
-    let snapshot = run(&fx, "alpha.config.peek", json!({})).await.unwrap();
-    assert_eq!(snapshot["result"]["values"]["limit"], json!(24));
-    assert_eq!(
-        snapshot["result"]["values"]["token"],
-        json!("fake-backend-secret")
-    );
     let catalog = fx
         .svc
         .extension_catalog

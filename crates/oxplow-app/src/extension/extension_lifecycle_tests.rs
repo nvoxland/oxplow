@@ -434,12 +434,16 @@ async fn a_rollback_restores_the_earlier_version_over_what_the_later_one_stored(
     );
 
     // A declaration version change does not stamp or migrate stored settings.
-    let config = bus(&fx.svc, "alpha.config.read", json!({})).await.unwrap();
-    assert_eq!(config["values"]["limit"], json!(20));
-    assert_eq!(config["origins"]["/limit"], json!("project"));
+    let config = bus(&fx.svc, "alpha.config.get", json!({"key": "alpha.limit"}))
+        .await
+        .unwrap();
+    assert_eq!(config["result"]["value"], json!(20));
+    assert_eq!(config["result"]["origin"], json!("project"));
     deploy(&fx.svc, NAME).await.unwrap();
-    let config = bus(&fx.svc, "alpha.config.read", json!({})).await.unwrap();
-    assert_eq!(config["values"]["limit"], json!(20));
+    let config = bus(&fx.svc, "alpha.config.get", json!({"key": "alpha.limit"}))
+        .await
+        .unwrap();
+    assert_eq!(config["result"]["value"], json!(20));
 }
 
 /// Rolling back to a stricter declaration rejects an incompatible stored value
@@ -468,7 +472,9 @@ async fn a_rolled_back_version_replaces_a_setting_the_earlier_schema_refuses() {
     assert_eq!(back["hash"], first["hash"], "{back}");
 
     assert!(
-        bus(&fx.svc, "alpha.config.read", json!({})).await.is_err(),
+        bus(&fx.svc, "alpha.config.get", json!({"key": "alpha.limit"}))
+            .await
+            .is_err(),
         "the old schema refuses the newer value"
     );
     bus(
@@ -478,8 +484,10 @@ async fn a_rolled_back_version_replaces_a_setting_the_earlier_schema_refuses() {
     )
     .await
     .expect("a generic write validates against the rolled-back declaration");
-    let config = bus(&fx.svc, "alpha.config.read", json!({})).await.unwrap();
-    assert_eq!(config["values"]["limit"], json!(5));
+    let config = bus(&fx.svc, "alpha.config.get", json!({"key": "alpha.limit"}))
+        .await
+        .unwrap();
+    assert_eq!(config["result"]["value"], json!(5));
 }
 
 /// A version whose dataset does not compile loads but does not activate:

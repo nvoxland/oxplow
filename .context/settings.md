@@ -133,8 +133,9 @@ Extension scripts declare `needs: [config.read]` and call
 `scope("config.read", {"key": "acme.limit"})`. Their secret reads and all composed config writes are limited to
 the owning namespace, including refusal of core settings and core credentials.
 Scripts write by composing the ordinary config commands.
-The retained `extension_config.read` snapshot is a nested read projection over
-the same settings, not separate storage; it has values and origins, no stamps,
+Settings have three read paths. Scripts and providers use
+`scope("config.read", {key, level?})`. SQL uses `config('/pointer')`. Pages and
+agents use `v_config_value`. There is no nested snapshot read, and no stamps,
 CAS or migration protocol. SQL `config('/pointer')` and conditions receive a
 public projection that omits secrets before any secure read. Configuration-aware
 extensions republish when their resolved public settings change.
