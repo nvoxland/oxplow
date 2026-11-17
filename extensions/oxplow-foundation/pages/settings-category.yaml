@@ -9,6 +9,12 @@ see_also:
 params:
 - { name: category, role: view, default: '' }
 - { name: q, type: search, role: filter, label: Search settings, default: '' }
+- name: show
+  type: choice
+  role: filter
+  label: Show
+  options: [{ value: all, label: All }, { value: changed, label: Changed }]
+  default: all
 - { name: setting, role: view, default: '' }
 loaders:
   settings:
@@ -18,7 +24,14 @@ loaders:
         AND (coalesce(:setting, '') = '' OR key = :setting)
         AND (coalesce(:q, '') = '' OR instr(lower(key), lower(:q)) > 0
           OR instr(lower(coalesce(title, '')), lower(:q)) > 0
-          OR instr(lower(coalesce(doc, '')), lower(:q)) > 0)
+          OR instr(lower(coalesce(doc, '')), lower(:q)) > 0
+          OR instr(lower(coalesce(value, '')), lower(:q)) > 0
+          OR instr(lower(coalesce(local_value, '')), lower(:q)) > 0
+          OR instr(lower(coalesce(project_value, '')), lower(:q)) > 0
+          OR instr(lower(coalesce(global_value, '')), lower(:q)) > 0)
+        -- Changed: some level overrides it.
+        AND (coalesce(:show, 'all') <> 'changed'
+          OR 'set' IN (local_status, project_status, global_status))
       ORDER BY category_order, category_title, setting_order, key
 view:
   id: settings-editor

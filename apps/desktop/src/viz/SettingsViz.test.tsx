@@ -228,3 +228,27 @@ test("levels read as a person knows them, the same everywhere", () => {
   expect(text).not.toMatch(/\b(local|global)\b/);
   expect(ui.getByText("Edit value: Just me in this project")).toBeTruthy();
 });
+
+test("a setting says where it is changed, and its schema reads as JSON", () => {
+  const ui = render(<SettingsViz run={run({ restart_required: 1 })} />);
+  expect(ui.getByText("Changed for: Just me in this project, This project")).toBeTruthy();
+  expect(ui.getByText("Takes effect after oxplow restarts.")).toBeTruthy();
+  const schema = ui.container.querySelector("pre code");
+  expect(schema?.textContent).toBe(JSON.stringify({ type: "string", default: "default" }, null, 2));
+  ui.unmount();
+  const unchanged = render(<SettingsViz run={run({ local_value: null, local_status: "unset", project_value: null, project_status: "unset", origin: "default", value: '"default"' })} />);
+  expect(unchanged.queryByText(/Changed for:/)).toBeNull();
+});
+
+test("the page's query is the filter: the visualization shows every row it is given", () => {
+  const ui = render(<SettingsViz run={run({}, { q: "matches only a value" })} />);
+  expect(ui.getByRole("heading", { name: "Example" })).toBeTruthy();
+});
+
+test("a list item moves down as well as up", () => {
+  let value: unknown = ["a", "b", "c"];
+  const ui = render(<SettingField schema={{ type: "array", items: { type: "string" } }} value={value} label="Items" onChange={(next) => { value = next; }} />);
+  fireEvent.click(ui.getAllByText("Move down")[0]!);
+  expect(value).toEqual(["b", "a", "c"]);
+  expect(ui.getAllByText("Move down").length).toBe(2);
+});

@@ -22,6 +22,10 @@ loaders:
       WHERE coalesce(:q, '') = '' OR instr(lower(key), lower(:q)) > 0
          OR instr(lower(coalesce(title, '')), lower(:q)) > 0
          OR instr(lower(coalesce(doc, '')), lower(:q)) > 0
+         OR instr(lower(coalesce(value, '')), lower(:q)) > 0
+         OR instr(lower(coalesce(local_value, '')), lower(:q)) > 0
+         OR instr(lower(coalesce(project_value, '')), lower(:q)) > 0
+         OR instr(lower(coalesce(global_value, '')), lower(:q)) > 0
       ORDER BY category_order, category_title, setting_order, key
   search_results:
     sql: |
@@ -38,6 +42,13 @@ loaders:
       FROM v_config_value
       GROUP BY category, category_title, category_description, category_order
       ORDER BY category_order, category_title
+  # The settings some level overrides, across every category.
+  changed:
+    sql: |
+      SELECT 'Changed settings' AS title, count(*) AS settings,
+             uri_view(uri('oxplow/page', 'page', 'settings-category'), 'show', 'changed') AS uri
+      FROM v_config_value
+      WHERE 'set' IN (local_status, project_status, global_status)
   management_links:
     rows:
     - { title: Language servers, description: Install, remove or restart language servers., uri: 'oxplow:oxplow/page?page=management#area=lsp' }
@@ -60,6 +71,13 @@ view:
         - { key: description, label: About }
         - { key: settings, label: Settings, format: integer }
         empty: No settings are registered.
+      - id: settings-changed
+        title: Changed
+        from: changed
+        viz: list
+        columns:
+        - { key: title, label: Settings, link: { kind: page, from: uri } }
+        - { key: settings, label: Count, format: integer }
       - id: settings-search
         title: Search results
         from: search_results

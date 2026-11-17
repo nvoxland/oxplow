@@ -7,17 +7,10 @@ import { Section } from "../kit/Section.js";
 import { SettingEditor } from "./SettingEditor.js";
 import { displayValue, editsInline, inventory, levelName, LEVELS, type Level, type Setting } from "./settingsModel.js";
 
-/** Registry-driven settings composed from the same sections and kit as other pages. */
+/** Registry-driven settings composed from the same sections and kit as other
+ *  pages. The page's query chooses the rows (category, search, changed). */
 export function SettingsViz({ run }: { run: VizRun }) {
-  const category = String(run.params.category ?? "");
-  const q = String(run.params.q ?? "").trim().toLowerCase();
-  const selected = String(run.params.setting ?? "");
-  const rows = inventory(run).filter(
-    (s) =>
-      (!category || category === "all" || s.category === category) &&
-      (!q || `${s.title} ${s.doc} ${s.key}`.toLowerCase().includes(q)) &&
-      (!selected || s.key === selected),
-  );
+  const rows = inventory(run);
   return (
     <div data-testid="settings-viz">
       {!rows.length && <p className="ox-muted">No settings match these filters.</p>}
@@ -66,12 +59,14 @@ function SettingSection({ setting, id }: { setting: Setting; id: string }) {
       ))}
     </select>
   );
+  const changedFor = LEVELS.filter((l) => setting.statuses[l] === "set").map(levelName);
   const originIndex = setting.origin ? LEVELS.indexOf(setting.origin as Level) : -1;
   return (
     <Section id={id} title={setting.title}>
       <div className="ox-form">
         {setting.doc && <Markdown value={setting.doc} />}
-        {setting.restartRequired && <p className="ox-muted">Restart required</p>}
+        {setting.restartRequired && <p className="ox-muted">Takes effect after oxplow restarts.</p>}
+        {changedFor.length > 0 && <p className="ox-muted">Changed for: {changedFor.join(", ")}</p>}
         <Facts
           facts={[
             {
@@ -137,7 +132,15 @@ function SettingSection({ setting, id }: { setting: Setting; id: string }) {
               { key: "key", label: "Key", value: <code>{setting.key}</code> },
               { key: "owner", label: "Owner", value: setting.owner },
               { key: "category", label: "Category", value: setting.category },
-              { key: "schema", label: "Schema", value: displayValue(setting.schema) },
+              {
+                key: "schema",
+                label: "Schema",
+                value: (
+                  <pre>
+                    <code>{JSON.stringify(setting.schema, null, 2)}</code>
+                  </pre>
+                ),
+              },
             ]}
           />
         </details>

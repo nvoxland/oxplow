@@ -1,0 +1,15 @@
+# "Changed" lists only the settings some level overrides, across every
+# category when none is chosen. Of the two snapshot settings, only the one
+# set here is listed; with All, both are.
+given:
+  - { command: oxplow.config.set, input: { key: oxplow.snapshots.retentionDays, value: 9, level: local } }
+when: { page: settings-category, params: { show: changed, q: oxplow.snapshots } }
+expect:
+  loaders:
+    settings: { rows: [{ key: oxplow.snapshots.retentionDays, local_status: set }] }
+steps:
+  - params: { show: all, q: oxplow.snapshots }
+    expect: { loaders: { settings: { rows: [{ key: oxplow.snapshots.maxFileBytes }, { key: oxplow.snapshots.retentionDays }] } } }
+  # The index links to them, with how many there are.
+  - when: { page: settings }
+    expect: { loaders: { changed: { rows: [{ title: Changed settings }] } } }

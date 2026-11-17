@@ -178,7 +178,11 @@ markdown itself, nor edits it in a `<textarea>`.
   anything else has a View/edit level selector and "Edit value: <level>".
   Levels read the same everywhere (`levelName`): "Just me in this project",
   "This project", "All my projects", "The default" — never `local`/`global`.
-  All levels is initially collapsed. Each setting saves or discards explicitly,
+  All levels is initially collapsed. A search matches a setting's key, title,
+  description and values (effective and per level; secret values are never in
+  the dataset); `show: changed` lists the settings some level overrides, which
+  the index links to with their count, and a changed setting says "Changed for:
+  <levels>". The page's query is the one filter (the viz shows every row). Each setting saves or discards explicitly,
   ordinary drafts live in tab history per key and level, and secret drafts live
   only in memory. Structured controls edit collections as whole values; there
   is no raw serialization editor. Operational setup lives on `management`

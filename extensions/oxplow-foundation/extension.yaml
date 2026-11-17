@@ -50,6 +50,9 @@ intent:
     - name: settings-values-are-listed-by-group-with-their-source-and-ask
       input: { page: settings, params: { q: snapshotRetentionDays } }
       expect: a setting under its group with its source, its control's page and its Ask request
+    - name: settings-show-only-the-changed-ones
+      input: { page: settings-category, params: { show: changed } }
+      expect: only the settings some level overrides, across every category
     - name: settings-search-narrows-by-key-doc-or-value
       input: { page: settings, params: { q: snapshotretention } }
       expect: a search narrows the settings; one matching nothing leaves none

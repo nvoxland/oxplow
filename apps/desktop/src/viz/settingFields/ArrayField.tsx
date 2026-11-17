@@ -4,12 +4,13 @@ import type { ControlProps } from "./types.js";
 
 const DEFAULT_ITEM: Schema = { type: "string" };
 
-/** A list with one control per item, plus remove, move up and add. */
+/** A list with one control per item, plus remove, move up or down and add. */
 export function ArrayField({ info, value, onChange, label, secret }: ControlProps) {
   const { schema, rootSchema } = info;
   const items = Array.isArray(value) ? value : [];
   const itemSchema = schema.items ?? DEFAULT_ITEM;
-  const moveUp = (i: number) => {
+  /** Swap item `i` with the one before it. */
+  const swapWithPrevious = (i: number) => {
     const next = [...items];
     [next[i - 1], next[i]] = [next[i], next[i - 1]];
     onChange(next);
@@ -36,8 +37,13 @@ export function ArrayField({ info, value, onChange, label, secret }: ControlProp
             Remove item {i + 1}
           </button>
           {i > 0 && (
-            <button type="button" className="ox-button" onClick={() => moveUp(i)}>
+            <button type="button" className="ox-button" onClick={() => swapWithPrevious(i)}>
               Move up
+            </button>
+          )}
+          {i < items.length - 1 && (
+            <button type="button" className="ox-button" onClick={() => swapWithPrevious(i + 1)}>
+              Move down
             </button>
           )}
         </div>

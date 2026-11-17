@@ -1,5 +1,5 @@
-# A search matches a setting's key, its doc or its whole value; with none
-# it lists them all.
+# A search matches a setting's key, its doc or its value (the effective one or
+# any level's); with none it lists them all.
 when: { page: settings, params: { q: oxplow.snapshots.retentionDays } }
 expect:
   loaders:
@@ -7,3 +7,7 @@ expect:
 steps:
   - params: { q: no such setting anywhere }
     expect: { loaders: { settings_values: { rows: 0 } } }
+  - given:
+      - { command: oxplow.config.set, input: { key: oxplow.testing.command, value: make check-everything, level: project } }
+    params: { q: check-everything }
+    expect: { loaders: { settings_values: { rows: [{ key: oxplow.testing.command }] } } }
