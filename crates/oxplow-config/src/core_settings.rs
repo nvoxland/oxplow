@@ -685,7 +685,7 @@ pub fn metric_preferences(value: &Value) -> Value {
 /// does not own (extension settings) are ignored.
 pub fn config_from(
     fallback_name: &str,
-    values: &BTreeMap<String, (Value, Origin)>,
+    values: &BTreeMap<String, (Value, Level)>,
 ) -> Result<OxplowConfig, ConfigError> {
     let invalid = |key: &str, message: String| ConfigError::Invalid(format!("{key}: {message}"));
     let mut config = crate::blank_config(fallback_name);
@@ -716,7 +716,7 @@ pub fn check(key: &str, value: &Value) -> Result<(), ConfigError> {
         .find(|setting| setting.definition.key == key)
     {
         Some(setting) => (setting.apply)(&mut config, value.clone()).map_err(invalid),
-        None => apply_family(&mut config, key, value.clone(), Origin::Default).map_err(invalid),
+        None => apply_family(&mut config, key, value.clone(), Level::Project).map_err(invalid),
     }
 }
 
@@ -724,7 +724,7 @@ fn apply_family(
     config: &mut OxplowConfig,
     key: &str,
     value: Value,
-    origin: Origin,
+    origin: Level,
 ) -> Result<(), String> {
     if let Some(capability) = key.strip_prefix(keys::ACTIVE_PROVIDERS_PREFIX) {
         let provider: String = de(value)?;
@@ -734,7 +734,7 @@ fn apply_family(
             .insert(capability.to_owned(), provider);
         config
             .active_provider_origins
-            .insert(capability.to_owned(), origin_name(origin).to_owned());
+            .insert(capability.to_owned(), origin);
     } else if let Some(role) = role_from_key(key) {
         let assignment: crate::AiRoleOverride = de(value)?;
         crate::validate_ai_role(&role, &assignment).map_err(message)?;
@@ -762,15 +762,6 @@ fn apply_family(
     Ok(())
 }
 
-pub fn origin_name(origin: Origin) -> &'static str {
-    match origin {
-        Origin::Local => "local",
-        Origin::Project => "project",
-        Origin::Global => "global",
-        Origin::Default => "default",
-    }
-}
-
 /// A resolved core value that failed, naming the setting key.
 #[derive(Debug)]
 pub struct CoreProjectionError {
@@ -796,7 +787,7 @@ impl std::error::Error for CoreProjectionError {}
 /// A shadowed override never fails the load.
 pub fn effective_values(
     store: &SettingsStore,
-) -> Result<BTreeMap<String, (Value, Origin)>, CoreProjectionError> {
+) -> Result<BTreeMap<String, (Value, Level)>, CoreProjectionError> {
     let layer_error = |source| CoreProjectionError {
         key: "settings layer".into(),
         source,
@@ -819,8 +810,10 @@ pub fn effective_values(
             key: definition.key.clone(),
             source,
         })?;
-        if let (Some(value), Some(origin)) = (setting.value, setting.origin) {
-            values.insert(definition.key.clone(), (value, origin));
+        // A default is not a set value: `config_from` applies defaults itself.
+        if let (Some(value), Some(level)) = (setting.value, setting.origin.and_then(Origin::level))
+        {
+            values.insert(definition.key.clone(), (value, level));
         }
     }
     let mut seen = std::collections::BTreeSet::new();
@@ -849,7 +842,7 @@ pub fn effective_values(
             } else {
                 continue;
             }
-            values.insert(key, (value, level.into()));
+            values.insert(key, (value, level));
         }
     }
     Ok(values)
@@ -872,10 +865,10 @@ mod tests {
         }
     }
 
-    fn values(pairs: &[(&str, Value)]) -> BTreeMap<String, (Value, Origin)> {
+    fn values(pairs: &[(&str, Value)]) -> BTreeMap<String, (Value, Level)> {
         pairs
             .iter()
-            .map(|(key, value)| ((*key).to_owned(), (value.clone(), Origin::Project)))
+            .map(|(key, value)| ((*key).to_owned(), (value.clone(), Level::Project)))
             .collect()
     }
 
@@ -1050,7 +1043,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(config.active_providers["snapshots"], "hashes");
-        assert_eq!(config.active_provider_origins["snapshots"], "project");
+        assert_eq!(config.active_provider_origins["snapshots"], Level::Project);
         assert_eq!(config.ai_roles["main"].model, "a");
         assert!(!config.agent_enabled["claude"]);
         assert!(!config.agent_enabled["acme/coder"]);
@@ -1160,13 +1153,16 @@ mod tests {
         let load = || crate::load_project_config_with_global(p, Some(g)).unwrap();
         let local = load();
         assert_eq!(local.active_providers["snapshots"], "oxplow");
-        assert_eq!(local.active_provider_origins["snapshots"], "local");
+        assert_eq!(local.active_provider_origins["snapshots"], Level::Local);
         write(p, g, Level::Local, key, None);
         let inherited = load();
         assert_eq!(inherited.active_providers["snapshots"], "hashes");
-        assert_eq!(inherited.active_provider_origins["snapshots"], "project");
+        assert_eq!(
+            inherited.active_provider_origins["snapshots"],
+            Level::Project
+        );
         write(p, g, Level::Project, key, None);
-        assert_eq!(load().active_provider_origins["snapshots"], "global");
+        assert_eq!(load().active_provider_origins["snapshots"], Level::Global);
         assert!(!definitions("demo")
             .iter()
             .any(|definition| definition.key == "oxplow.activeProviders"));

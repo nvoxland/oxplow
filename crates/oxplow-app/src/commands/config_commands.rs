@@ -63,10 +63,11 @@ pub struct ChooseProviderInput {
     /// project's, for a personal choice).
     #[serde(default)]
     pub provider: Option<String>,
-    /// `project` (the default: shared in `.oxplow/project.yaml`) or
-    /// `personal` (just for this person).
-    #[serde(default)]
-    pub level: Layer,
+    /// `project` (the default: shared in `.oxplow/project.yaml`), `local`
+    /// (just for this person, in this project) or `global` (this person's
+    /// default for every project).
+    #[serde(default = "project")]
+    pub level: Level,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -80,47 +81,28 @@ pub struct ChooseReplacementInput {
     pub whose: Option<String>,
 }
 
-/// Which layer a config write goes to.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum Layer {
-    #[default]
-    Project,
-    Local,
-    Global,
+fn project() -> Level {
+    Level::Project
 }
 
-impl Layer {
-    fn level(self) -> Level {
-        match self {
-            Self::Project => Level::Project,
-            Self::Local => Level::Local,
-            Self::Global => Level::Global,
+/// A domain action's starting value: the first set at `level` or below,
+/// else the default. Editing a shared map must never copy a local override
+/// into Git.
+pub(super) fn inherited(
+    store: &oxplow_config::settings::SettingsStore,
+    key: &str,
+    level: Level,
+) -> Result<Option<Value>, CommandError> {
+    let failed = |error: oxplow_config::settings::SettingsError| CommandError::Invalid {
+        field: Some("/key".into()),
+        message: error.to_string(),
+    };
+    for at in Level::PRECEDENCE.into_iter().skip_while(|at| *at != level) {
+        if let Some(value) = store.get(key, Some(at)).map_err(failed)?.value {
+            return Ok(Some(value));
         }
     }
-    /// Resolve an action's starting value at its chosen level or below.
-    /// Editing a shared map must never copy a local override into Git.
-    pub(super) fn value(
-        self,
-        store: &oxplow_config::settings::SettingsStore,
-        key: &str,
-    ) -> Result<Option<Value>, CommandError> {
-        let levels: &[Level] = match self {
-            Self::Local => &Level::PRECEDENCE,
-            Self::Project => &[Level::Project, Level::Global],
-            Self::Global => &[Level::Global],
-        };
-        let failed = |error: oxplow_config::settings::SettingsError| CommandError::Invalid {
-            field: Some("/key".into()),
-            message: error.to_string(),
-        };
-        for level in levels {
-            if let Some(value) = store.get(key, Some(*level)).map_err(failed)?.value {
-                return Ok(Some(value));
-            }
-        }
-        Ok(store.definition(key).map_err(failed)?.default)
-    }
+    Ok(store.definition(key).map_err(failed)?.default)
 }
 
 impl ConfigTarget {
@@ -153,24 +135,6 @@ impl ConfigTarget {
     }
 }
 
-/// Change one registered setting at one level through the one settings
-/// write. The domain actions (mark generated, choose a provider, …) compose
-/// this.
-pub(crate) fn change(
-    target: &ConfigTarget,
-    actor: &Actor,
-    key: &str,
-    value: Option<Value>,
-    layer: Layer,
-) -> Result<HandlerOutput, CommandError> {
-    super::settings_commands::write_changes(
-        target,
-        actor,
-        vec![(key.to_owned(), value)],
-        layer.level(),
-    )
-}
-
 pub(super) fn settings_handler(
     action: impl Fn(&Actor, Value) -> Result<HandlerOutput, CommandError> + Send + Sync + 'static,
 ) -> Handler {
@@ -200,29 +164,31 @@ pub fn ops(target: ConfigTarget) -> Vec<Op> {
                         message: "name a file or folder".into(),
                     });
                 }
-                let mut exclude: Vec<String> = Layer::Project
-                    .value(
-                        &t.settings()?,
-                        oxplow_config::core_settings::keys::GENERATED_EXCLUDE,
-                    )?
-                    .map(serde_json::from_value)
-                    .transpose()
-                    .map_err(|error| CommandError::Invalid {
-                        field: Some("/entry".into()),
-                        message: error.to_string(),
-                    })?
-                    .unwrap_or_default();
+                let mut exclude: Vec<String> = inherited(
+                    &t.settings()?,
+                    oxplow_config::core_settings::keys::GENERATED_EXCLUDE,
+                    Level::Project,
+                )?
+                .map(serde_json::from_value)
+                .transpose()
+                .map_err(|error| CommandError::Invalid {
+                    field: Some("/entry".into()),
+                    message: error.to_string(),
+                })?
+                .unwrap_or_default();
                 exclude.retain(|excluded| excluded != &entry);
                 if input.generated {
                     exclude.push(entry);
                     exclude.sort();
                 }
-                change(
+                super::settings_commands::write_changes(
                     &t,
                     actor,
-                    oxplow_config::core_settings::keys::GENERATED_EXCLUDE,
-                    Some(json!(exclude)),
-                    Layer::Project,
+                    vec![(
+                        oxplow_config::core_settings::keys::GENERATED_EXCLUDE.to_owned(),
+                        Some(json!(exclude)),
+                    )],
+                    Level::Project,
                 )
             }),
         )
@@ -257,11 +223,13 @@ pub fn ops(target: ConfigTarget) -> Vec<Op> {
                     .filter(|provider| !provider.is_empty());
                 // Each capability is independent. Reset removes just this
                 // scalar override and exposes its inherited choice.
-                change(
+                super::settings_commands::write_changes(
                     &t,
                     actor,
-                    &oxplow_config::core_settings::active_provider_key(&capability),
-                    provider.map(|provider| json!(provider)),
+                    vec![(
+                        oxplow_config::core_settings::active_provider_key(&capability),
+                        provider.map(|provider| json!(provider)),
+                    )],
                     input.level,
                 )
             }),
@@ -283,13 +251,13 @@ pub fn ops(target: ConfigTarget) -> Vec<Op> {
                         message: "name the component".into(),
                     });
                 }
-                let mut chosen: serde_json::Map<String, Value> = Layer::Project
-                    .value(
-                        &t.settings()?,
-                        oxplow_config::core_settings::keys::REPLACEMENTS,
-                    )?
-                    .and_then(|v| v.as_object().cloned())
-                    .unwrap_or_default();
+                let mut chosen: serde_json::Map<String, Value> = inherited(
+                    &t.settings()?,
+                    oxplow_config::core_settings::keys::REPLACEMENTS,
+                    Level::Project,
+                )?
+                .and_then(|v| v.as_object().cloned())
+                .unwrap_or_default();
                 match input
                     .whose
                     .as_deref()
@@ -303,12 +271,14 @@ pub fn ops(target: ConfigTarget) -> Vec<Op> {
                         chosen.remove(&target);
                     }
                 }
-                change(
+                super::settings_commands::write_changes(
                     &t,
                     actor,
-                    oxplow_config::core_settings::keys::REPLACEMENTS,
-                    Some(Value::Object(chosen)),
-                    Layer::Project,
+                    vec![(
+                        oxplow_config::core_settings::keys::REPLACEMENTS.to_owned(),
+                        Some(Value::Object(chosen)),
+                    )],
+                    Level::Project,
                 )
             }),
         )
@@ -587,15 +557,15 @@ mod tests {
         }
         target.refresh().unwrap();
         assert_eq!(
-            Layer::Global.value(&store, key).unwrap(),
+            inherited(&store, key, Level::Global).unwrap(),
             Some(json!({"task.board":"global_view"}))
         );
         assert_eq!(
-            Layer::Project.value(&store, key).unwrap(),
+            inherited(&store, key, Level::Project).unwrap(),
             Some(json!({"task.list":"project_view"}))
         );
         assert_eq!(
-            Layer::Local.value(&store, key).unwrap(),
+            inherited(&store, key, Level::Local).unwrap(),
             Some(json!({"task.detail":"local_view"}))
         );
         bus.run(

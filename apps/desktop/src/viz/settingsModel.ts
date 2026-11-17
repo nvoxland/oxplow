@@ -1,6 +1,7 @@
 import type { VizRun } from "../api.js";
+import type { Level } from "../tauri-bridge/generated/bindings.js";
 
-export type Level = "local" | "project" | "global";
+export type { Level };
 export const LEVELS: Level[] = ["local", "project", "global"];
 export type Schema = { $ref?: string; $defs?: Record<string, Schema>; definitions?: Record<string, Schema>; uniqueItems?: boolean; type?: string | string[]; const?: unknown; title?: string; description?: string; default?: unknown; enum?: unknown[]; properties?: Record<string, Schema>; required?: string[]; additionalProperties?: boolean | Schema; items?: Schema; minimum?: number; maximum?: number; minItems?: number; maxItems?: number; minLength?: number; contentMediaType?: string; oneOf?: Schema[]; anyOf?: Schema[] };
 export interface Setting {

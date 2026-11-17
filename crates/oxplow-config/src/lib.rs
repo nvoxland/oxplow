@@ -742,7 +742,7 @@ pub struct OxplowConfig {
     pub active_providers: std::collections::BTreeMap<String, String>,
     /// Resolved origin of each independently registered capability preference.
     #[serde(rename = "activeProviderOrigins", default)]
-    pub active_provider_origins: std::collections::BTreeMap<String, String>,
+    pub active_provider_origins: std::collections::BTreeMap<String, settings::Level>,
     /// Whose component shows for a replaceable core sub-component, by
     /// target (`replacements: { task.board: task-views,
     /// vcs.history.graph: oxplow }`): an extension replacing it, or
@@ -2730,7 +2730,7 @@ mod tests {
             serde_yaml::from_str(yaml).unwrap();
         let values = values
             .into_iter()
-            .map(|(key, value)| (key, (value, settings::Origin::Project)))
+            .map(|(key, value)| (key, (value, settings::Level::Project)))
             .collect();
         core_settings::config_from("demo", &values)
     }

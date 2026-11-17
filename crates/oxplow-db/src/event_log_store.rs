@@ -574,7 +574,7 @@ mod tests {
                 key: "zones".into(),
                 before: Value::Null,
                 after: json!([]),
-                layer: oxplow_domain::events::schema::ConfigLayer::Project,
+                layer: oxplow_domain::settings::Level::Project,
             },
         );
         match key {

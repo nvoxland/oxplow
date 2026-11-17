@@ -37,6 +37,7 @@ pub mod row_ids;
 pub mod run;
 pub mod scope;
 pub mod service;
+pub mod settings;
 pub mod snapshot;
 pub mod stores;
 pub mod stream;

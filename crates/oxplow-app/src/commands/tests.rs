@@ -161,7 +161,7 @@ fn kv_set() -> Handler {
                     key: k.clone(),
                     before: before.map(Value::String).unwrap_or(Value::Null),
                     after: Value::String(v),
-                    layer: oxplow_domain::events::schema::ConfigLayer::Project,
+                    layer: oxplow_domain::settings::Level::Project,
                 },
             )],
             after_commit: None,
@@ -624,7 +624,7 @@ fn kv_unchanged() -> Handler {
                     key: k.clone(),
                     before: Value::Null,
                     after: Value::String(v.clone()),
-                    layer: oxplow_domain::events::schema::ConfigLayer::Project,
+                    layer: oxplow_domain::settings::Level::Project,
                 },
             )]
         } else {
@@ -1654,7 +1654,7 @@ async fn a_composites_own_events_land_with_its_steps_only_when_all_landed() {
                     key: "announced".into(),
                     before: Value::Null,
                     after: input["v"].clone(),
-                    layer: oxplow_domain::events::schema::ConfigLayer::Project,
+                    layer: oxplow_domain::settings::Level::Project,
                 },
             )],
             inverse: None,

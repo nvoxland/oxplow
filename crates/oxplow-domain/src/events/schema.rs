@@ -623,18 +623,6 @@ impl EventType for CommandDeclined {
     type Payload = CommandDeclinedV2;
 }
 
-/// Which level of the shared settings service changed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ConfigLayer {
-    /// The local project override.
-    Local,
-    /// The person's defaults across projects.
-    Global,
-    /// The project's shared preferences.
-    Project,
-}
-
 /// `config.changed@3`: one registered setting changed at an explicit level.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -642,7 +630,7 @@ pub struct ConfigChangedV3 {
     pub key: String,
     pub before: Value,
     pub after: Value,
-    pub layer: ConfigLayer,
+    pub layer: crate::settings::Level,
 }
 
 pub struct ConfigChanged;

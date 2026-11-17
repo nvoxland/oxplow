@@ -1,21 +1,21 @@
 {
   "$defs": {
-    "ConfigLayer": {
-      "description": "Which level of the shared settings service changed.",
+    "Level": {
+      "description": "One settings level: which override file (or its secure-store entry) a\nvalue lives in. The one level type for storage, commands and events.",
       "oneOf": [
         {
           "const": "local",
-          "description": "The local project override.",
-          "type": "string"
-        },
-        {
-          "const": "global",
-          "description": "The person's defaults across projects.",
+          "description": "This person's override for this project (`.oxplow/local.yaml`).",
           "type": "string"
         },
         {
           "const": "project",
-          "description": "The project's shared preferences.",
+          "description": "The project's shared value (`.oxplow/project.yaml`).",
+          "type": "string"
+        },
+        {
+          "const": "global",
+          "description": "The person's default across projects (`global.yaml`).",
           "type": "string"
         }
       ]
@@ -31,7 +31,7 @@
       "type": "string"
     },
     "layer": {
-      "$ref": "#/$defs/ConfigLayer"
+      "$ref": "#/$defs/Level"
     }
   },
   "required": [

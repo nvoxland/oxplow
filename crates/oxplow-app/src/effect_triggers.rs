@@ -1495,7 +1495,7 @@ mod tests {
                                 key: "probe.noted".into(),
                                 before: Value::Null,
                                 after: json!(1),
-                                layer: oxplow_domain::events::schema::ConfigLayer::Project,
+                                layer: oxplow_domain::settings::Level::Project,
                             },
                         )],
                         ..HandlerOutput::default()

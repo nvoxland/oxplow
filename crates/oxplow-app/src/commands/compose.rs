@@ -342,7 +342,7 @@ mod secret_recording_tests {
                     key: "test.secret-derived".into(),
                     before: Value::Null,
                     after: input,
-                    layer: oxplow_domain::events::schema::ConfigLayer::Project,
+                    layer: oxplow_domain::settings::Level::Project,
                 },
             )],
             ..Default::default()

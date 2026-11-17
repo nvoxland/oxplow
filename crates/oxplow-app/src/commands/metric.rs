@@ -34,11 +34,12 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use super::config_commands::{change, ConfigTarget};
+use super::config_commands::ConfigTarget;
 use super::util::{bare_id, invalid, parse, schema, sql};
 use super::{Handler, HandlerOutput, Invocation, TxCtx};
 use crate::metric_engine::FactFilter;
 use crate::metrics_service::MetricsService;
+use oxplow_config::settings::Level;
 
 pub const ENABLE: &str = "oxplow.metric.enable";
 pub const RECORD: &str = "oxplow.metric.record";
@@ -355,12 +356,14 @@ pub fn ops(target: MetricTarget) -> Vec<Op> {
                 let value = serde_json::to_value(&list).map_err(|e| CommandError::Failed {
                     message: e.to_string(),
                 })?;
-                change(
+                super::settings_commands::write_changes(
                     &target,
                     invocation.actor(),
-                    oxplow_config::core_settings::keys::METRICS,
-                    Some(oxplow_config::core_settings::metric_preferences(&value)),
-                    super::config_commands::Layer::Project,
+                    vec![(
+                        oxplow_config::core_settings::keys::METRICS.to_owned(),
+                        Some(oxplow_config::core_settings::metric_preferences(&value)),
+                    )],
+                    Level::Project,
                 )
             })
         })),

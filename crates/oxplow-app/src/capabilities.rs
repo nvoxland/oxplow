@@ -785,15 +785,10 @@ impl CapabilityRegistry {
         } else if let Some(id) = config.active_providers.get(capability) {
             (
                 id.clone(),
-                match config
+                config
                     .active_provider_origins
                     .get(capability)
-                    .map(String::as_str)
-                {
-                    Some("local") => ChosenBy::Local,
-                    Some("global") => ChosenBy::Global,
-                    _ => ChosenBy::Project,
-                },
+                    .map_or(ChosenBy::Project, |level| ChosenBy::from(*level)),
             )
         } else {
             (spec.default.to_string(), ChosenBy::Default)
@@ -1439,12 +1434,13 @@ mod tests {
     fn config(project: &[(&str, &str)], local: &[(&str, &str)]) -> OxplowConfig {
         let mut c =
             oxplow_config::load_project_config(tempfile::tempdir().unwrap().path()).unwrap();
-        for (level, pairs) in [("project", project), ("local", local)] {
+        use oxplow_config::settings::Level;
+        for (level, pairs) in [(Level::Project, project), (Level::Local, local)] {
             for (capability, id) in pairs {
                 c.active_providers
                     .insert(capability.to_string(), id.to_string());
                 c.active_provider_origins
-                    .insert(capability.to_string(), level.to_string());
+                    .insert(capability.to_string(), level);
             }
         }
         c

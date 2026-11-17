@@ -3698,6 +3698,18 @@ export type JobTool = {
  */
 export type LauncherCategory = "Work" | "Code" | "Git" | "Activity" | "Knowledge" | "Data" | "Dashboards" | "System";
 
+/**
+ *  One settings level: which override file (or its secure-store entry) a
+ *  value lives in. The one level type for storage, commands and events.
+ */
+export type Level =
+/**  This person's override for this project (`.oxplow/local.yaml`). */
+"local" |
+/**  The project's shared value (`.oxplow/project.yaml`). */
+"project" |
+/**  The person's default across projects (`global.yaml`). */
+"global";
+
 export type Lifecycle = "stable" | "experimental";
 
 /**  A page a column value can link to. */
@@ -4485,7 +4497,7 @@ export type OxplowConfig = {
 	 */
 	activeProviders: { [key in string]: string },
 	/**  Resolved origin of each independently registered capability preference. */
-	activeProviderOrigins?: { [key in string]: string },
+	activeProviderOrigins?: { [key in string]: Level },
 	/**
 	 *  Whose component shows for a replaceable core sub-component, by
 	 *  target (`replacements: { task.board: task-views,

@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use oxplow_config::settings::{Level, SettingsError};
-use oxplow_domain::events::schema::{ConfigChanged, ConfigChangedV3, ConfigLayer};
+use oxplow_domain::events::schema::{ConfigChanged, ConfigChangedV3};
 use oxplow_domain::{Actor, CommandCall, CommandError, Envelope};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -318,11 +318,6 @@ pub(crate) fn write_changes(
         settings.update(&changes, level).map_err(error)?;
     }
     target.refresh()?;
-    let layer = match level {
-        Level::Local => ConfigLayer::Local,
-        Level::Project => ConfigLayer::Project,
-        Level::Global => ConfigLayer::Global,
-    };
     let mut restore = serde_json::Map::new();
     let mut unset = Vec::new();
     let mut events = Vec::new();
@@ -344,7 +339,7 @@ pub(crate) fn write_changes(
                     } else {
                         value.clone().unwrap_or(Value::Null)
                     },
-                    layer,
+                    layer: level,
                 },
             )
             .with_subject([oxplow_domain::uri::build::config_uri(key)]),

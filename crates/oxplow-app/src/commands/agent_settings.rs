@@ -7,9 +7,10 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::config_commands::settings_handler;
-use super::config_commands::{change, ConfigTarget, Layer};
+use super::config_commands::ConfigTarget;
 use super::ops::Op;
 use super::util::{parse, schema};
+use oxplow_config::settings::Level;
 
 pub const SET_SETTING: &str = "oxplow.agent.set_setting";
 pub const SET_PROMPT_APPEND: &str = "oxplow.agent.set_prompt_append";
@@ -73,7 +74,12 @@ pub fn ops(target: ConfigTarget, harnesses: HarnessRegistry) -> Vec<Op> {
                     .map(|v| v.trim().to_string())
                     .filter(|v| !v.is_empty())
                     .map(Value::String);
-                change(&t, actor, &key, value, Layer::Project)
+                super::settings_commands::write_changes(
+                    &t,
+                    actor,
+                    vec![(key, value)],
+                    Level::Project,
+                )
             }),
         )
     };
@@ -85,12 +91,14 @@ pub fn ops(target: ConfigTarget, harnesses: HarnessRegistry) -> Vec<Op> {
         settings_handler(move |actor, input| {
             let input: SetPromptAppendInput = parse(input)?;
             let value = (!input.text.trim().is_empty()).then(|| json!(input.text.trim()));
-            change(
+            super::settings_commands::write_changes(
                 &prompt_target,
                 actor,
-                oxplow_config::core_settings::keys::AGENT_PROMPT_APPEND,
-                value,
-                Layer::Project,
+                vec![(
+                    oxplow_config::core_settings::keys::AGENT_PROMPT_APPEND.to_owned(),
+                    value,
+                )],
+                Level::Project,
             )
         }),
     );

@@ -13,6 +13,12 @@ properties become independent settings; arrays, dynamic maps and explicit
 `x-atomic` objects are one setting. Prefer scalar options wherever they can be
 edited independently.
 
+**One level type.** `oxplow_domain::settings::Level` (`local`, `project`,
+`global`) is the level for storage, the `config.*` and domain commands, the
+`config.changed` event and `OxplowConfig.active_provider_origins`;
+`oxplow-config` re-exports it. `settings::Origin` is a level or `default`
+(`Origin::level()`, `From<Level>`). The frontend uses the generated `Level`.
+
 Core declares its settings directly in `oxplow-config/src/core_settings.rs`:
 `table()` holds one entry per fixed key (key, title, description, category,
 schema, default, UI hint) with the function that applies its value to

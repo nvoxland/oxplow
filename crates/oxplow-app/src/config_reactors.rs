@@ -63,7 +63,7 @@ impl AsyncEventConsumer for KeyReactor {
                 if let (Some(svc), Ok(bytes)) = (self.svc.upgrade(), hex::decode(instance)) {
                     if let Ok(instance) = String::from_utf8(bytes) {
                         let instance = format!("{namespace}/{instance}");
-                        if change.layer == oxplow_domain::events::schema::ConfigLayer::Global {
+                        if change.layer == oxplow_domain::settings::Level::Global {
                             oxplow_config::CredentialGenerations::bump(
                                 &svc.global_config_dir,
                                 &instance,

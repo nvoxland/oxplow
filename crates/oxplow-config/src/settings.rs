@@ -43,23 +43,12 @@ pub struct SettingDefinition {
     pub owner: String,
 }
 
-/// Which override file (or corresponding secure-store entry) a write targets.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum Level {
-    Local,
-    Project,
-    Global,
-}
-
-impl Level {
-    pub const PRECEDENCE: [Self; 3] = [Self::Local, Self::Project, Self::Global];
-}
+pub use oxplow_domain::settings::Level;
 
 /// One ordinary override document captured at its explicit level.
 pub type LevelDocument = (Level, BTreeMap<String, Value>);
 
-/// The source of one complete effective value.
+/// The source of one complete effective value: a level, or the default.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Origin {
@@ -67,6 +56,18 @@ pub enum Origin {
     Local,
     Project,
     Global,
+}
+
+impl Origin {
+    /// The level that set the value; `None` for the default.
+    pub fn level(self) -> Option<Level> {
+        match self {
+            Self::Default => None,
+            Self::Local => Some(Level::Local),
+            Self::Project => Some(Level::Project),
+            Self::Global => Some(Level::Global),
+        }
+    }
 }
 
 impl From<Level> for Origin {

@@ -41,6 +41,16 @@ impl ChosenBy {
     }
 }
 
+impl From<crate::settings::Level> for ChosenBy {
+    fn from(level: crate::settings::Level) -> Self {
+        match level {
+            crate::settings::Level::Local => Self::Local,
+            crate::settings::Level::Project => Self::Project,
+            crate::settings::Level::Global => Self::Global,
+        }
+    }
+}
+
 /// One capability, as core declares it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CapabilitySpec {
