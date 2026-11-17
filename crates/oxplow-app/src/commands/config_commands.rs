@@ -497,6 +497,44 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn files_that_already_fail_to_load_can_be_repaired_one_key_at_a_time() {
+        let (dir, _target, bus) = setup();
+        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
+        // Two hand-edited values no setting accepts.
+        std::fs::write(
+            dir.path().join(".oxplow/project.yaml"),
+            "oxplow.snapshots.retentionDays: soon\noxplow.metrics.retentionDays: later\n",
+        )
+        .unwrap();
+        let first = bus
+            .run(
+                &Actor::Human,
+                SET,
+                json!({"key":"oxplow.snapshots.retentionDays","value":5,"level":"project"}),
+                false,
+            )
+            .await
+            .unwrap();
+        // Written; the project still doesn't load, and the answer says why.
+        assert_eq!(first.result["changed"], true);
+        assert_eq!(first.result["loads"], false);
+        assert!(first.result["problem"]
+            .as_str()
+            .unwrap()
+            .contains("oxplow.metrics.retentionDays"));
+        let second = bus
+            .run(
+                &Actor::Human,
+                SET,
+                json!({"key":"oxplow.metrics.retentionDays","value":30,"level":"project"}),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(second.result["loads"], true);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn a_refused_value_names_the_field_and_the_reason() {
         let (_dir, _target, bus) = setup();
         let refused = bus

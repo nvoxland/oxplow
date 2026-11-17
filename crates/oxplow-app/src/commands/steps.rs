@@ -313,13 +313,20 @@ impl Router<'_> {
                     })?;
             super::offered(self.active, &command.spec, &name_field)?;
             // A script composes its own extension's commands freely; any
-            // other one a `commands:<pattern>` permission must name.
-            if let oxplow_domain::grant::Decision::Denied(why) =
-                parent.decide(oxplow_domain::grant::Need::Command(call.name.clone()))
-            {
-                return Err(CommandError::Denied {
-                    reason: format!("composing `{}`: {why}", call.name),
-                });
+            // other one a `commands:<pattern>` permission must name. A
+            // settings write is waived only once its run is known to carry
+            // the composer, which limits it to the composer's own keys.
+            let own_settings =
+                oxplow_domain::permissions::OWN_SETTINGS_WRITES.contains(&call.name.as_str());
+            let decide =
+                || match parent.decide(oxplow_domain::grant::Need::Command(call.name.clone())) {
+                    oxplow_domain::grant::Decision::Denied(why) => Err(CommandError::Denied {
+                        reason: format!("composing `{}`: {why}", call.name),
+                    }),
+                    _ => Ok(()),
+                };
+            if !own_settings {
+                decide()?;
             }
             if command.spec.access.reads_only() {
                 return Err(CommandError::Invalid {
@@ -346,6 +353,9 @@ impl Router<'_> {
                 }
                 None => parent.child(None, mode),
             };
+            if own_settings && run.composed_by().is_none() {
+                decide()?;
+            }
             if parent.trace().summary().contains_key("config.secret") {
                 run.trace().count("config.secret");
             }

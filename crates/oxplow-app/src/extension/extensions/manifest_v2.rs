@@ -773,7 +773,29 @@ pub fn configuration_of(
                     )],
                 );
             }
-            match crate::extension::extension_settings::definitions_for(&namespace, &declaration) {
+            // The registry's own rules too (a title, a category): what it
+            // would refuse at the next settings read is refused here.
+            let registered =
+                crate::extension::extension_settings::definitions_for(&namespace, &declaration)
+                    .map_err(|error| error.to_string())
+                    .and_then(|definitions| {
+                        let mut registry = oxplow_config::settings::SettingsRegistry::default();
+                        registry
+                            .register_many(definitions)
+                            .map_err(|error| format!("a setting: {error}"))?;
+                        registry
+                            .register_categories(declaration.categories.iter().map(
+                                |(id, category)| oxplow_config::settings::SettingCategory {
+                                    id: id.clone(),
+                                    title: category.title.clone(),
+                                    description: category.description.clone(),
+                                    order: category.order,
+                                    owner: format!("extension/{namespace}"),
+                                },
+                            ))
+                            .map_err(|error| format!("a category: {error}"))
+                    });
+            match registered {
                 Ok(_) => (Some(declaration), Vec::new()),
                 Err(error) => (
                     None,
@@ -943,6 +965,20 @@ mod tests {
         let own = manifest("notes");
         let errors = check(&parse(&own), "e/extension.yaml", &own);
         assert!(errors.is_empty(), "{errors:?}");
+        // What the registry refuses is refused at check, not at the next
+        // settings read (where it would break Settings for the project).
+        let blank = own.replace("title: Notes", "title: ''");
+        let errors = check(&parse(&blank), "e/extension.yaml", &blank);
+        assert!(
+            errors.iter().any(|e| e.message.contains("configuration:")),
+            "{errors:?}"
+        );
+        let untitled = own.replace("x-category: notes", "x-category: notes, title: ''");
+        let errors = check(&parse(&untitled), "e/extension.yaml", &untitled);
+        assert!(
+            errors.iter().any(|e| e.message.contains("configuration:")),
+            "{errors:?}"
+        );
         let core = manifest("ai");
         let errors = check(&parse(&core), "e/extension.yaml", &core);
         assert!(

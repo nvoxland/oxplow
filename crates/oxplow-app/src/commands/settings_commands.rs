@@ -302,10 +302,25 @@ pub(crate) fn write_changes(
             ..Default::default()
         });
     }
-    // The typed config the files would make: a write that would leave the
-    // project unloadable (an unset exposing a bad hand-edited value, another
-    // key already invalid) is refused before the file changes.
-    if !secret {
+    // The typed config the files would make: a write that would leave a
+    // project that loads unloadable (an unset exposing a bad hand-edited
+    // value) is refused before the file changes. Files that already fail to
+    // load are repaired one key at a time, so then nothing is refused here.
+    let fallback = target
+        .project_dir
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
+    let loads = |snapshot: &oxplow_config::settings::SettingsSnapshot| -> Result<(), String> {
+        let values =
+            oxplow_config::core_settings::effective_values(snapshot).map_err(|e| e.to_string())?;
+        oxplow_config::core_settings::config_from(&fallback, &values)
+            .map(drop)
+            .map_err(|e| e.to_string())
+    };
+    let loaded = loads(&snapshot).is_ok();
+    if !secret && loaded {
         let mut levels = Level::PRECEDENCE.map(|at| snapshot.documents().at(at).clone());
         let edited = &mut levels[Level::PRECEDENCE
             .iter()
@@ -318,17 +333,7 @@ pub(crate) fn write_changes(
             };
         }
         let after = settings.snapshot_of(oxplow_config::settings::Documents::new(levels));
-        let fallback = target
-            .project_dir
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy();
-        oxplow_config::core_settings::effective_values(&after)
-            .map_err(|e| refused(e.to_string()))
-            .and_then(|values| {
-                oxplow_config::core_settings::config_from(&fallback, &values)
-                    .map_err(|e| refused(e.to_string()))
-            })?;
+        loads(&after).map_err(refused)?;
     }
     // The file is an external system: complete its one atomic replacement
     // before the bus records success, events or undo.
@@ -346,7 +351,13 @@ pub(crate) fn write_changes(
             .collect();
         settings.update(&changes, level).map_err(error)?;
     }
-    target.refresh()?;
+    // A repair of files that already failed to load can leave them still
+    // failing (another key is bad): the write stands, and the answer says why.
+    let problem = match target.refresh() {
+        Ok(()) => None,
+        Err(error) if !loaded => Some(error.to_string()),
+        Err(error) => return Err(error),
+    };
     let mut restore = serde_json::Map::new();
     let mut unset = Vec::new();
     let mut events = Vec::new();
@@ -391,7 +402,12 @@ pub(crate) fn write_changes(
         },
     });
     Ok(HandlerOutput {
-        result: json!({"level":level,"secret":secret,"changed":true}),
+        result: match &problem {
+            None => json!({"level":level,"secret":secret,"changed":true,"loads":true}),
+            Some(problem) => json!({
+                "level":level,"secret":secret,"changed":true,"loads":false,"problem":problem
+            }),
+        },
         inverse,
         events,
         ..Default::default()

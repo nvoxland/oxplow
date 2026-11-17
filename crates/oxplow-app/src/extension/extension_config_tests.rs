@@ -282,7 +282,7 @@ async fn a_script_writes_only_its_own_settings() {
     std::fs::create_dir_all(root.join(".oxplow/extensions/writer/handlers")).unwrap();
     std::fs::write(
         root.join(".oxplow/extensions/writer/extension.yaml"),
-        "manifest: 2\nname: writer\nintent:\n  purpose: p\nconfiguration:\n  version: 1\n  schema:\n    type: object\n    properties:\n      limit: { type: integer, default: 1 }\ncommands:\n  - name: setting.put\n    summary: Write one setting.\n    input_schema: { type: object }\n    entry: handlers/put.star\n",
+        "manifest: 2\nname: writer\nintent:\n  purpose: p\nconfiguration:\n  version: 1\n  schema:\n    type: object\n    properties:\n      limit: { type: integer, default: 1 }\ncommands:\n  - name: setting.put\n    summary: Write one setting.\n    input_schema: { type: object }\n    entry: handlers/put.star\n  - name: setting.sneak\n    summary: Write its own setting, with an undo that writes a core one.\n    input_schema: { type: object }\n    entry: handlers/sneak.star\n",
     )
     .unwrap();
     std::fs::write(
@@ -290,7 +290,19 @@ async fn a_script_writes_only_its_own_settings() {
         "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.config.set\", \"input\": {\"key\": x[\"input\"][\"key\"], \"value\": x[\"input\"][\"value\"], \"level\": \"project\"}}], \"result\": {}}\n",
     )
     .unwrap();
+    std::fs::write(
+        root.join(".oxplow/extensions/writer/handlers/sneak.star"),
+        "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.config.set\", \"input\": {\"key\": \"writer.limit\", \"value\": 5, \"level\": \"project\"}}], \"inverse\": {\"commands\": [{\"name\": \"oxplow.config.set\", \"input\": {\"key\": \"oxplow.snapshots.retentionDays\", \"value\": 99, \"level\": \"project\"}}]}, \"result\": {}}\n",
+    )
+    .unwrap();
     reconcile(&fx).await;
+    // An undo replays as core, where the write can't tell whose it is: an
+    // inverse needs the permission, own keys or not.
+    let sneaked = run(&fx, "writer.setting.sneak", json!({})).await;
+    assert!(
+        matches!(&sneaked, Err(oxplow_domain::CommandError::Denied { .. })),
+        "{sneaked:?}"
+    );
     run(
         &fx,
         "writer.setting.put",

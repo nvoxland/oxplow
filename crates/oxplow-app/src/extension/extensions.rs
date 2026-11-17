@@ -781,6 +781,39 @@ fn share_configuration(extensions: &mut [Extension]) {
             );
         }
     }
+    // A Settings category id is one namespace's: the first by name keeps it.
+    let mut order: Vec<usize> = (0..extensions.len()).collect();
+    order.sort_by(|&a, &b| extensions[a].namespace.cmp(&extensions[b].namespace));
+    let mut owners: BTreeMap<String, String> = BTreeMap::new();
+    for i in order {
+        let namespace = extensions[i].namespace.clone();
+        let Some(declaration) = extensions[i].configuration.as_mut() else {
+            continue;
+        };
+        let mut taken = Vec::new();
+        declaration.categories.retain(|id, _| match owners.get(id) {
+            Some(owner) if *owner != namespace => {
+                taken.push((id.clone(), owner.clone()));
+                false
+            }
+            _ => {
+                owners.insert(id.clone(), namespace.clone());
+                true
+            }
+        });
+        for (id, owner) in taken {
+            extensions[i].errors.push(
+                Diagnostic::error(
+                    "configuration.shared",
+                    format!(
+                        "Settings category `{id}` is also `{owner}`'s, which declares it first"
+                    ),
+                )
+                .at("extension.yaml", None)
+                .fix("name your own category, or use theirs in `x-category` without declaring it"),
+            );
+        }
+    }
 }
 
 /// The extension among `extensions` that declares `id`: the one in its
@@ -4858,6 +4891,50 @@ pub fn scaffold_manifest(m: &ManifestScaffold<'_>) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    /// A Settings category id is one namespace's: the first by name keeps
+    /// it; a later one's declaration of it is dropped, with a load error.
+    #[test]
+    fn a_category_id_is_one_namespaces() {
+        let with_notes = |name: &str| {
+            let mut e = empty_extension(name, "", "project");
+            e.configuration = Some(config_schema::ConfigurationFile {
+                version: 1,
+                schema: serde_json::json!({"type":"object","properties":{}}),
+                categories: [(
+                    "notes".to_owned(),
+                    config_schema::CategoryDeclaration {
+                        title: format!("{name} notes"),
+                        description: String::new(),
+                        order: 0,
+                    },
+                )]
+                .into(),
+            });
+            e
+        };
+        let mut extensions = vec![with_notes("zeta"), with_notes("alpha")];
+        share_configuration(&mut extensions);
+        let alpha = extensions.iter().find(|e| e.name == "alpha").unwrap();
+        let zeta = extensions.iter().find(|e| e.name == "zeta").unwrap();
+        assert!(alpha
+            .configuration
+            .as_ref()
+            .unwrap()
+            .categories
+            .contains_key("notes"));
+        assert!(!zeta
+            .configuration
+            .as_ref()
+            .unwrap()
+            .categories
+            .contains_key("notes"));
+        assert!(
+            zeta.errors.iter().any(|d| d.message.contains("`notes`")),
+            "{:?}",
+            zeta.errors
+        );
+    }
     /// An undeclared type in an extension's own namespace is no type,
     /// except in `oxplow`, which everything oxplow ships shares: there it
     /// is a sibling's, known when that one is here.

@@ -384,12 +384,10 @@ impl Permissions {
     }
 
     /// May an extension whose namespace is `own_namespace` run command
-    /// `id`: one of its own, a write of its own settings
-    /// ([`OWN_SETTINGS_WRITES`]), or one a `commands` pattern names.
+    /// `id`: one of its own, or one a `commands` pattern names.
     pub fn command_allowed(&self, own_namespace: &str, id: &str) -> bool {
         id.strip_prefix(own_namespace)
             .is_some_and(|rest| rest.starts_with('.'))
-            || OWN_SETTINGS_WRITES.contains(&id)
             || self.commands.iter().any(|p| pattern_covers(p, id))
     }
 
@@ -399,9 +397,12 @@ impl Permissions {
     }
 }
 
-/// The generic settings writes. An extension may always compose them: the
-/// write refuses every key its namespace does not own, so a `commands:`
-/// permission for them would grant nothing more.
+/// The generic settings writes. A script may compose them with no
+/// `commands:` permission: the command's run then carries the composing
+/// extension (`RunContext::composed_by`), and the write refuses every key
+/// its namespace doesn't own. Nowhere else is the permission waived (a
+/// component's invoke, an undo's replay of a script's inverse): those run
+/// as core, where the write can't tell whose they are.
 pub const OWN_SETTINGS_WRITES: [&str; 3] = [
     "oxplow.config.set",
     "oxplow.config.unset",
@@ -492,6 +493,12 @@ mod tests {
         assert!(!p.command_allowed("mine", "oxplow.task.link.add"));
         assert!(!p.command_allowed("mine", "oxplow.thread.close"));
         assert!(p.command_allowed("mine", "acme_pr.review.approve"));
+        // A settings write is not waived here: a component's invoke and an
+        // undo's replay run as core, where the write can't tell whose run it
+        // is. Only a script's compose waives it (`commands::steps`).
+        for write in OWN_SETTINGS_WRITES {
+            assert!(!Permissions::default().command_allowed("mine", write));
+        }
         assert!(p.covers(&parse("[commands:oxplow.task.transition]")));
     }
 

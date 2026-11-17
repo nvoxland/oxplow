@@ -121,9 +121,12 @@ It checks each value (a required extension's switch is registered `const: true`
 before the switches the files name, so it can't be turned off), skips a key
 whose stored value is the same (no write, no `config.changed`, no undo; nothing
 changed answers `changed: false`), builds the typed config the files would make
-and refuses a write that would leave the project unloadable (an unset exposing
-a bad hand-edited value), writes once, refreshes the typed config and builds
-the undo. The composed-run ownership rule is on the generic `config.*`
+and refuses a write that would leave a project that loads unloadable (an unset
+exposing a bad hand-edited value; files that already fail to load are repaired
+one key at a time, and the answer says `loads: false` with the problem until
+they load), writes once, refreshes the typed config and builds the undo. A
+refused secret's problems have no pointer: a pointer into an object would name
+its keys. The composed-run ownership rule is on the generic `config.*`
 commands only: a domain action is its own grant.
 
 Extension scripts declare `needs: [config.read]` and call
@@ -141,7 +144,7 @@ labels, categories, schemas, origin and presence. Metric/dimension definitions
 are catalog contributions and are not preferences in that inventory.
 `v_config_key` lists registered core and extension keys with docs and schemas.
 Settings uses a registry-driven category index and standard form editors; operational tools live on linked management pages.
-The `config_value` dataset contract is version 5. For ordinary settings the inventory also exposes `local_value`, `project_value`
+The `config_value` dataset contract is version 6. For ordinary settings the inventory also exposes `local_value`, `project_value`
 and `global_value`: explicit JSON overrides, SQL NULL when absent. Those columns
 are always SQL NULL for secret definitions. The window decodes them into an
 `overrides` map whose missing properties are distinct from explicit JSON null. `unavailable` distinguishes a secure
@@ -240,7 +243,7 @@ YAML batch. Multi-key undo uses the same batch API.
 
 ## Standard Settings UI and independent features
 
-The Settings index lists categories and searches titles, descriptions and keys.
+The Settings index lists categories (by their registered order, with titles and descriptions), links to the changed settings, and searches keys, titles, descriptions and values.
 Category URLs share one native `settings` visualization, backed by `v_config_value`.
 The visualization composes the shared `Section`, `Facts` and `DataTable` kit
 components rather than defining its own page chrome. Each setting has a stable
@@ -251,8 +254,9 @@ Contents, including pages that have no filters or other rail content. All-level 
 metadata stay native disclosures within the section, outside the outline.
 `SettingEditor` owns only the level-specific draft/save/reset behavior, while
 `SettingField` supplies structured schema controls styled by the standard form kit.
-Every setting shows its effective value/source separately from the View/edit level
-selector. All levels is collapsed initially; it exposes hidden overrides and the
+Every setting shows its effective value/source separately from the level a
+change goes to: a scalar's "Saves to" beneath its inline control, any other
+setting's View/edit level selector (`.context/usability.md` Settings). All levels is collapsed initially; it exposes hidden overrides and the
 registered default. Choosing a level is read-only. Save and Discard apply to one
 setting; removing an override differs from saving an empty value or explicit null.
 Ordinary drafts belong to the tab history by key and level. Secret drafts stay in

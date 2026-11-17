@@ -212,8 +212,10 @@ override. Omit the level to resolve local → project → global → default.
 
 To write, compose `oxplow.config.set` with `{key, value, level}` or
 `oxplow.config.unset` with `{key, level}`; the level is always explicit. Your
-extension's own settings need no `commands:` permission for this; a key of
-another extension, or a core one, is refused. Write
+extension's own settings need no `commands:` permission when a script
+composes the write; a key of another extension, or a core one, is refused. A
+custom component that invokes `oxplow.config.set`, or an `inverse` that
+composes it, still needs `commands:oxplow.config.set`. Write
 each independent field separately so changing one preserves the others.
 Settings do not use revision stamps, compare-and-swap, or whole-namespace
 writes. Namespace `settings.read` aliases may return a nested read projection;

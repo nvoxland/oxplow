@@ -521,7 +521,17 @@ impl SettingsRegistry {
             .settings
             .get(key)
             .ok_or(SettingsError::UnknownSetting)?;
-        validate_value(&setting.validator, value)
+        match validate_value(&setting.validator, value) {
+            // A pointer into a secret names its own keys: say only why.
+            Err(SettingsError::ValueRefused(mut problems)) if setting.definition.secret => {
+                for problem in &mut problems {
+                    problem.pointer.clear();
+                }
+                problems.dedup();
+                Err(SettingsError::ValueRefused(problems))
+            }
+            other => other,
+        }
     }
 }
 
@@ -1290,6 +1300,25 @@ mod tests {
                 .value,
             Some(json!(99))
         );
+    }
+
+    #[test]
+    fn a_refused_secret_says_why_without_its_keys() {
+        let mut secret = definition(
+            "example.tokens",
+            json!({"type":"object","additionalProperties":{"type":"string"}}),
+            None,
+        );
+        secret.secret = true;
+        let (_project, _global, store) = store(vec![secret]);
+        match store.validate("example.tokens", &json!({"hunter2-host": 5})) {
+            Err(SettingsError::ValueRefused(problems)) => {
+                assert!(problems.iter().all(|p| p.pointer.is_empty()), "{problems:?}");
+                let text = SettingsError::ValueRefused(problems).to_string();
+                assert!(!text.contains("hunter2"), "{text}");
+            }
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]
