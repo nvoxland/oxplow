@@ -892,7 +892,7 @@ one namespace. Extension private runtime state still uses `state.read` and
 `state.write/compare_exchange`; settings do not use the state protocol.
 
 **Settings is a registry inventory** (`effective_config.rs`, live dataset
-`v_config_value` v4, desktop `configValues.ts`). Each row has the fully qualified
+`v_config_value` v4, desktop `viz/settingsModel.ts`). Each row has the fully qualified
 key, redacted effective value, origin, owner, extension, title, category,
 description (`doc`), schema, secret presence, restart requirement and UI hints.
 Ordinary values have explicit local/project/global columns independent of the
