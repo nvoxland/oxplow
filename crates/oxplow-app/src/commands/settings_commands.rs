@@ -123,7 +123,6 @@ pub(super) fn ops(target: ConfigTarget) -> Vec<Op> {
                 .snapshot()
                 .and_then(|snapshot| snapshot.get(&input.key, input.level))
                 .map_err(error)?;
-            authorize_composer(&read_target, ctx.run, &definition, false)?;
             ctx.run.used_scope("config.read");
             ctx.trace.count("config.read");
             if value.secret {
@@ -195,21 +194,6 @@ pub(super) fn ops(target: ConfigTarget) -> Vec<Op> {
     vec![list, get, set, unset, update]
 }
 
-pub(super) fn validate_change(key: &str, value: Option<&Value>) -> Result<(), CommandError> {
-    if key
-        .strip_prefix("oxplow.extensions.")
-        .and_then(|key| key.strip_suffix(".enabled"))
-        .is_some_and(crate::bundled_extensions::is_required)
-        && value == Some(&Value::Bool(false))
-    {
-        return Err(CommandError::Invalid {
-            field: Some("/value".into()),
-            message: "This extension is required and cannot be disabled".into(),
-        });
-    }
-    Ok(())
-}
-
 fn write(
     target: ConfigTarget,
     invocation: Invocation,
@@ -243,7 +227,8 @@ fn authorize_writes(
 /// The one write of registered settings at one level: `config.set`,
 /// `config.unset`, `config.update` and every domain action (mark a file
 /// generated, choose a provider, …) come here. Each value is checked by its
-/// schema and by its own core rule before the file changes. A key whose
+/// schema (a required extension's switch is `const: true`) and by its own
+/// core rule before the file changes. A key whose
 /// stored value is the same is not written, logged or undone.
 pub(crate) fn write_changes(
     target: &ConfigTarget,
@@ -267,7 +252,6 @@ pub(crate) fn write_changes(
         if !keys.insert(key.clone()) {
             return Err(error(SettingsError::DuplicateKey));
         }
-        validate_change(&key, value.as_ref())?;
         let definition = settings.definition(&key).map_err(error)?;
         if let Some(value) = &value {
             settings
@@ -381,6 +365,38 @@ mod ownership_tests {
     use crate::test_fixtures::{services_with_thread, ThreadFixture};
     use oxplow_domain::run::{ContributionRef, Mode, RunContext};
     use oxplow_domain::Actor;
+
+    #[tokio::test]
+    async fn a_required_extension_cannot_be_turned_off() {
+        let fx = services_with_thread().await;
+        let key = "oxplow.extensions.oxplow-foundation.enabled";
+        let refused = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                "oxplow.config.set",
+                json!({"key":key,"value":false,"level":"project"}),
+                false,
+            )
+            .await;
+        assert!(refused.is_err(), "{refused:?}");
+        let project = fx._dir.path().join(".oxplow/project.yaml");
+        assert!(!std::fs::read_to_string(&project)
+            .unwrap_or_default()
+            .contains(key));
+        // The switch is registered: its schema, not an unknown key, refused it.
+        fx.svc
+            .commands
+            .run(
+                &Actor::Human,
+                "oxplow.config.set",
+                json!({"key":key,"value":true,"level":"project"}),
+                false,
+            )
+            .await
+            .unwrap();
+    }
 
     #[cfg(unix)]
     #[tokio::test]

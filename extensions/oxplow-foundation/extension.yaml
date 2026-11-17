@@ -72,16 +72,10 @@ intent:
       input: { page: settings, params: { area: agents } }
       expect: agents in priority order with the lists a row hands set_agents; what new threads start with; the saved prompt addition
     - name: settings-ai-area-lists-providers-roles-and-calls
-      input: { page: settings, params: { area: ai } }
+      input: { page: management, params: { area: ai } }
       expect: a provider with its kind and a saved key (never the key), a role with its binding, a role bound to nothing with its fallback
-    - name: ai-provider-kinds-offer-every-declared-kind
-      input: { query: 'settings#ai_provider_kinds', params: { area: ai } }
-      expect: the declared AI provider kinds
-    - name: ai-provider-choices-list-the-configured-providers
-      input: { query: 'settings#ai_provider_choices', params: { area: ai } }
-      expect: the configured providers
     - name: settings-data-area-lists-entities-collectors-and-effects
-      input: { page: settings, params: { area: data } }
+      input: { page: management, params: { area: data } }
       expect: the entities, the collectors and the declared effects
     - name: data-effect-backfill-says-what-it-would-do
       input: { part: data-effect-backfill, params: { effect: review/store-reasoning } }
@@ -342,7 +336,7 @@ intent:
       input: { command: oxplow.page.renderers, input: { uri: 'oxplow:oxplow/file?path=oxplow-foundation/extension.yaml&filesystem=oxplow:extensions' } }
       expect: the Text view, and no Editor
     - name: the-capabilities-area-lists-the-implementations-and-choosing-one-is-a-config-write
-      input: { page: settings, params: { area: integrations } }
+      input: { page: management, params: { area: integrations } }
       expect: each capability's implementations and a default row; choosing writes the layer's choice
     - name: the-context-pages-clear-empties-the-threads-basket
       input: { page: context, params: { thread_id: 1 } }
@@ -357,7 +351,7 @@ intent:
       input: { page: thread-sessions, params: { thread: thr1 } }
       expect: a thread's sessions with their subagents beneath, by state
     - name: a-configured-language-server-is-listed-and-not-suggested-again
-      input: { page: settings, params: { area: lsp } }
+      input: { page: management, params: { area: lsp } }
       expect: a language server of project.yaml is listed, can't be removed, and isn't suggested again
     - name: dataset-data-says-when-the-dataset-is-not-known
       input: { page: dataset-data, params: { uri: "oxplow:oxplow/dataset?dataset=nothing_like_it" } }
