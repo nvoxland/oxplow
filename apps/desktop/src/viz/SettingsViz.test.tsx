@@ -7,15 +7,19 @@ import { Contents } from "./Contents.js";
 import { Section } from "../kit/Section.js";
 import { SettingField } from "./SettingField.js";
 import { inventory, validate } from "./settingsModel.js";
+import { IpcCallError } from "../ipc-error.js";
 
 const realApi = { ...(await import("../api.js")) };
 const calls: { name: string; input: unknown }[] = [];
+// The next command's refusal, when a test wants one.
+let refuse: Error | null = null;
 mock.module("../api.js", () => ({ ...realApi, runCommand: async (name: string, input: unknown) => {
   calls.push({ name, input });
+  if (refuse) throw refuse;
   return { result: null, audit_id: null, event_id: null, inverse: null };
 } }));
 const { SettingsViz } = await import("./SettingsViz.js");
-afterEach(() => { cleanup(); calls.length = 0; });
+afterEach(() => { cleanup(); calls.length = 0; refuse = null; });
 afterAll(() => {
   mock.module("../api.js", () => realApi);
 });
@@ -183,4 +187,14 @@ test("settings use standard nested sections and Contents links without listing e
   fireEvent.click(ui.getAllByText("Edit local value", { selector: "button" })[0]!);
   expect(contents.textContent).not.toContain("All levels");
   expect(contents.textContent).not.toContain("Technical details");
+});
+
+test("a value the setting refuses shows the reason the save gave, once", async () => {
+  refuse = new IpcCallError("`/1` must be a string", "INVALID", "/value/1");
+  const ui = render(<SettingsViz run={run()} />);
+  fireEvent.click(ui.getByText("Edit local value"));
+  fireEvent.change(ui.getByLabelText("Example", { selector: "input" }), { target: { value: "draft" } });
+  fireEvent.click(ui.getByText("Save"));
+  const alert = await waitFor(() => ui.getByText("`/1` must be a string"));
+  expect(alert.getAttribute("role")).toBe("alert");
 });

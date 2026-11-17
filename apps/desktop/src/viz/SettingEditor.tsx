@@ -123,10 +123,11 @@ export function SettingEditor({ setting, level }: { setting: Setting; level: Lev
           {error}
         </p>
       ))}
+      {/* A refusal's message says where in the value and why. */}
       {form.serverErrors &&
         Object.entries(form.serverErrors).map(([field, error]) => (
           <p key={field} className="ox-error" role="alert">
-            {field}: {error}
+            {error}
           </p>
         ))}
       <div className="ox-actions">

@@ -86,7 +86,11 @@ keeps only the definition, validation and write methods.
 origin. Without a level it resolves inheritance; with a level it reads only that
 override. `oxplow.config.set {key, value, level}` and `.unset {key, level}` require
 an explicit `local`, `project` or `global`. `list_keys` returns definitions from
-the registry. Values are validated by registered offline schemas before storage;
+the registry. Values are validated by registered offline schemas before storage
+(a refusal is `SettingsError::ValueRefused`: each problem's JSON pointer in the
+value and a reason in words from the schema alone, never the value, so a refused
+secret stays secret; the command's error field is `/value<pointer>` and the
+Settings editor shows the message);
 a core value is also checked by its own rule (`core_settings::check`, the rule
 `config_from` applies; no core rule reads another setting), and the write then
 builds the typed config once over the files as they would be. An override invalidated by an extension schema change

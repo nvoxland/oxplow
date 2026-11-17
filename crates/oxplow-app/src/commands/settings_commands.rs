@@ -49,6 +49,21 @@ struct UpdateInput {
     unset: Vec<String>,
 }
 
+/// A value its schema refused: the field is where in the value (the first
+/// problem), the message every problem in words.
+fn value_error(error: SettingsError) -> CommandError {
+    let field = match &error {
+        SettingsError::ValueRefused(problems) => problems
+            .first()
+            .map_or("/value".to_owned(), |p| format!("/value{}", p.pointer)),
+        _ => "/value".to_owned(),
+    };
+    CommandError::Invalid {
+        field: Some(field),
+        message: error.to_string(),
+    }
+}
+
 fn error(error: SettingsError) -> CommandError {
     CommandError::Invalid {
         field: Some("/key".into()),
@@ -254,9 +269,7 @@ pub(crate) fn write_changes(
         }
         let definition = settings.definition(&key).map_err(error)?;
         if let Some(value) = &value {
-            settings
-                .validate(&key, value)
-                .map_err(|e| refused(e.to_string()))?;
+            settings.validate(&key, value).map_err(value_error)?;
             oxplow_config::core_settings::check(&key, value).map_err(|e| refused(e.to_string()))?;
         }
         if definition.secret {

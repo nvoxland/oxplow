@@ -497,6 +497,27 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn a_refused_value_names_the_field_and_the_reason() {
+        let (_dir, _target, bus) = setup();
+        let refused = bus
+            .run(
+                &Actor::Human,
+                SET,
+                json!({"key":"oxplow.generated.exclude","value":["dist", 7],"level":"project"}),
+                false,
+            )
+            .await
+            .unwrap_err();
+        match refused {
+            CommandError::Invalid { field, message } => {
+                assert_eq!(field.as_deref(), Some("/value/1"));
+                assert!(message.contains("`/1` must be a string"), "{message}");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn writing_the_stored_value_again_changes_nothing() {
         let (_dir, _target, bus) = setup();
         let set = json!({"key":"oxplow.snapshots.retentionDays","value":9,"level":"project"});

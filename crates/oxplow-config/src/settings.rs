@@ -212,6 +212,9 @@ pub enum SettingsError {
     InvalidSchema,
     #[error("setting value does not satisfy its schema")]
     InvalidValue,
+    /// The value's schema refused it: where, and why.
+    #[error("{}", refused_text(.0))]
+    ValueRefused(Vec<ValueProblem>),
     #[error("settings document is invalid")]
     InvalidDocument,
     #[error("secret settings cannot be stored in YAML")]
@@ -222,6 +225,88 @@ pub enum SettingsError {
     Storage,
     #[error("settings YAML cannot be edited without changing unrelated values")]
     UnsafeEdit,
+}
+
+/// One reason a schema refused a value: where in the value (a JSON pointer,
+/// empty for the whole value) and why, in words taken from the schema alone.
+/// The value itself is never repeated, so a refused secret stays secret.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ValueProblem {
+    pub pointer: String,
+    pub reason: String,
+}
+
+/// At most this many problems are reported for one value.
+const MAX_PROBLEMS: usize = 8;
+
+fn refused_text(problems: &[ValueProblem]) -> String {
+    let parts: Vec<_> = problems
+        .iter()
+        .map(|problem| match problem.pointer.as_str() {
+            "" => format!("the value {}", problem.reason),
+            pointer => format!("`{pointer}` {}", problem.reason),
+        })
+        .collect();
+    parts.join("; ")
+}
+
+fn listed(values: &[Value]) -> String {
+    values
+        .iter()
+        .map(Value::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn article(kind: &str) -> &'static str {
+    if matches!(kind.chars().next(), Some('a' | 'e' | 'i' | 'o' | 'u')) {
+        "an"
+    } else {
+        "a"
+    }
+}
+
+/// Why, from the schema's side of the error only: limits, choices and
+/// field names the schema declares; never the value or its keys.
+fn reason(kind: &jsonschema::error::ValidationErrorKind, keyword: &str) -> String {
+    use jsonschema::error::{TypeKind, ValidationErrorKind as K};
+    match kind {
+        K::Type {
+            kind: TypeKind::Single(kind),
+        } => {
+            let kind = kind.to_string();
+            format!("must be {} {kind}", article(&kind))
+        }
+        K::Type { .. } => "has the wrong type".into(),
+        K::Minimum { limit } => format!("is below the minimum {limit}"),
+        K::Maximum { limit } => format!("is above the maximum {limit}"),
+        K::ExclusiveMinimum { limit } => format!("must be more than {limit}"),
+        K::ExclusiveMaximum { limit } => format!("must be less than {limit}"),
+        K::MinLength { limit } => format!("is shorter than {limit} characters"),
+        K::MaxLength { limit } => format!("is longer than {limit} characters"),
+        K::MinItems { limit } => format!("has fewer than {limit} items"),
+        K::MaxItems { limit } => format!("has more than {limit} items"),
+        K::MinProperties { limit } => format!("has fewer than {limit} entries"),
+        K::MaxProperties { limit } => format!("has more than {limit} entries"),
+        K::Enum { options } => match options.as_array() {
+            Some(options) => format!("must be one of: {}", listed(options)),
+            None => "isn't one of the choices".into(),
+        },
+        K::Constant { expected_value } => format!("must be {expected_value}"),
+        K::Required { property } => match property.as_str() {
+            Some(name) => format!("misses the field `{name}`"),
+            None => "misses a required field".into(),
+        },
+        K::AdditionalProperties { .. } => "has a field the setting doesn't have".into(),
+        K::Pattern { pattern } => format!("doesn't match the pattern `{pattern}`"),
+        K::Format { format } => format!("isn't a valid {format}"),
+        K::UniqueItems => "has the same item twice".into(),
+        K::AnyOf { .. } | K::OneOfNotValid { .. } => {
+            "doesn't match any of the allowed forms".into()
+        }
+        K::OneOfMultipleValid { .. } => "matches more than one allowed form".into(),
+        _ => format!("doesn't satisfy `{keyword}`"),
+    }
 }
 
 #[derive(Clone)]
@@ -475,10 +560,19 @@ fn bounded(value: &Value) -> Result<(), SettingsError> {
 fn validate_value(validator: &jsonschema::Validator, value: &Value) -> Result<(), SettingsError> {
     bounded(value)?;
     if validator.is_valid(value) {
-        Ok(())
-    } else {
-        Err(SettingsError::InvalidValue)
+        return Ok(());
     }
+    let mut problems: Vec<_> = validator
+        .iter_errors(value)
+        .map(|error| ValueProblem {
+            pointer: error.instance_path().to_string(),
+            reason: reason(error.kind(), error.kind().keyword()),
+        })
+        .collect();
+    problems.sort_by(|a, b| a.pointer.cmp(&b.pointer));
+    problems.dedup();
+    problems.truncate(MAX_PROBLEMS);
+    Err(SettingsError::ValueRefused(problems))
 }
 
 /// The one storage interface. Files are read afresh for every operation, so a
@@ -1083,6 +1177,38 @@ mod tests {
     }
 
     #[test]
+    fn a_refused_value_says_where_and_why_without_the_value() {
+        let (_project, _global, store) = store(vec![
+            number_definition(),
+            definition(
+                "example.names",
+                json!({"type":"array","items":{"type":"string","maxLength":3}}),
+                None,
+            ),
+            definition("example.mode", json!({"enum":["fast","safe"]}), None),
+        ]);
+        let refused = |key: &str, value: Value| match store.validate(key, &value) {
+            Err(SettingsError::ValueRefused(problems)) => problems,
+            other => panic!("{other:?}"),
+        };
+        let problems = refused("example.limit", json!(0));
+        assert_eq!(problems[0].pointer, "");
+        assert_eq!(problems[0].reason, "is below the minimum 1");
+        let problems = refused("example.names", json!(["ok", 7, "hunter2"]));
+        let pointers: Vec<_> = problems.iter().map(|p| p.pointer.as_str()).collect();
+        assert_eq!(pointers, ["/1", "/2"]);
+        assert_eq!(problems[0].reason, "must be a string");
+        assert_eq!(problems[1].reason, "is longer than 3 characters");
+        let text = SettingsError::ValueRefused(problems).to_string();
+        assert!(text.contains("`/1` must be a string"), "{text}");
+        assert!(!text.contains("hunter2"), "{text}");
+        assert_eq!(
+            refused("example.mode", json!("slow"))[0].reason,
+            "must be one of: \"fast\", \"safe\""
+        );
+    }
+
+    #[test]
     fn one_snapshot_answers_every_read_from_the_files_it_read() {
         let (_project, _global, store) = store(vec![
             number_definition(),
@@ -1360,7 +1486,7 @@ mod tests {
         let before = std::fs::read(store.path(Level::Project)).unwrap();
         assert!(matches!(
             store.set("example.limit", json!(0), Level::Project),
-            Err(SettingsError::InvalidValue)
+            Err(SettingsError::ValueRefused(_))
         ));
         assert!(matches!(
             store.set("example.missing", json!(10), Level::Project),
@@ -1390,7 +1516,7 @@ mod tests {
         );
         assert!(matches!(
             registry.register_many([first, bad]),
-            Err(SettingsError::InvalidValue)
+            Err(SettingsError::ValueRefused(_))
         ));
         assert_eq!(registry.definitions().count(), 1);
     }
@@ -1821,7 +1947,8 @@ mod tests {
             .unwrap()
             .get("example.token", None)
             .unwrap_err();
-        assert!(matches!(error, SettingsError::InvalidValue));
+        assert!(matches!(error, SettingsError::ValueRefused(_)));
         assert!(!format!("{error:?}").contains("token-sensitive-value"));
+        assert!(!error.to_string().contains("token-sensitive-value"));
     }
 }
