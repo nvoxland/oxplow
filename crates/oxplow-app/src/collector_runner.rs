@@ -210,7 +210,8 @@ pub(crate) fn credential_value(
         .map_err(|_| DomainError::Storage("collector settings unavailable".into()))?;
     let key = crate::extension::extension_settings::credential_definition(namespace, name).key;
     let setting = store
-        .get(&key, None)
+        .snapshot()
+        .and_then(|snapshot| snapshot.get(&key, None))
         .map_err(|_| DomainError::Storage("collector credential unavailable".into()))?;
     setting
         .value
@@ -240,7 +241,8 @@ pub(crate) fn credential_is_set(
     .map_err(|_| DomainError::Storage("collector settings unavailable".into()))?;
     let key = crate::extension::extension_settings::credential_definition(namespace, name).key;
     store
-        .inspect(&key, None)
+        .snapshot()
+        .and_then(|snapshot| snapshot.inspect(&key, None))
         .map(|setting| setting.is_set)
         .map_err(|_| DomainError::Storage("collector credential unavailable".into()))
 }
@@ -308,6 +310,8 @@ pub async fn list_with(ctx: &Listing<'_>) -> Result<Vec<CollectorListing>, Domai
         ctx.secrets.clone(),
         &extensions,
     )
+    .map_err(|_| DomainError::Storage("collector settings unavailable".into()))?
+    .snapshot()
     .map_err(|_| DomainError::Storage("collector settings unavailable".into()))?;
     for ext in extensions.iter().cloned() {
         for spec in ext.collectors.clone() {

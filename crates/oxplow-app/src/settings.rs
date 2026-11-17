@@ -41,22 +41,12 @@ struct SecureSettings {
 
 impl SecureSettings {
     fn endpoint(&self, name: &str) -> Result<Option<String>, String> {
-        let documents = oxplow_config::settings::Level::PRECEDENCE
-            .into_iter()
-            .map(|level| {
-                oxplow_config::settings::read_layer(&self.project, &self.global, level)
-                    .map(|values| (level, values))
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| "settings unavailable")?;
+        let documents =
+            Documents::read(&self.project, &self.global).map_err(|_| "settings unavailable")?;
         self.endpoint_from(name, &documents)
     }
 
-    fn endpoint_from(
-        &self,
-        name: &str,
-        documents: &[oxplow_config::settings::LevelDocument],
-    ) -> Result<Option<String>, String> {
+    fn endpoint_from(&self, name: &str, documents: &Documents) -> Result<Option<String>, String> {
         let Some(identity) = name.strip_prefix("settings:v1:") else {
             return Ok(None);
         };
@@ -72,22 +62,18 @@ impl SecureSettings {
             return Ok(None);
         };
         let endpoint_key = format!("oxplow.ai.{provider}.baseUrl");
-        for (_, values) in documents {
-            if let Some(value) = values.get(&endpoint_key) {
+        match documents.first(&endpoint_key) {
+            Some((_, value)) => {
                 let endpoint = value.as_str().ok_or("invalid endpoint")?;
-                return Ok(Some(endpoint.trim().trim_end_matches('/').to_owned()));
+                Ok(Some(endpoint.trim().trim_end_matches('/').to_owned()))
             }
+            None => Ok(Some(String::new())),
         }
-        Ok(Some(String::new()))
     }
 }
 
 impl SecureSettings {
-    fn read(
-        &self,
-        name: &str,
-        documents: Option<&[oxplow_config::settings::LevelDocument]>,
-    ) -> Result<Option<String>, String> {
+    fn read(&self, name: &str, documents: Option<&Documents>) -> Result<Option<String>, String> {
         let raw = self
             .backend
             .get(name)
@@ -121,7 +107,7 @@ impl SecretStore for SecureSettings {
     fn get_with_documents(
         &self,
         name: &str,
-        documents: &[oxplow_config::settings::LevelDocument],
+        documents: &Documents,
     ) -> Result<Option<String>, String> {
         self.read(name, Some(documents))
     }
@@ -141,7 +127,7 @@ impl SecretStore for SecureSettings {
     }
 }
 
-type Documents = Vec<std::collections::BTreeMap<String, serde_json::Value>>;
+use oxplow_config::settings::Documents;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct FileStamp {
@@ -174,8 +160,8 @@ fn file_stamp(path: &Path) -> Result<Option<FileStamp>, SettingsError> {
 
 /// Unchanged files need metadata checks only. Retain immutable parsed documents,
 /// never secrets; a new inode, timestamp, size or permission change invalidates.
-pub(crate) fn documents(project: &Path, global: &Path) -> Result<Arc<Documents>, SettingsError> {
-    type CachedDocuments = ([Option<FileStamp>; 3], Arc<Documents>);
+pub(crate) fn documents(project: &Path, global: &Path) -> Result<Documents, SettingsError> {
+    type CachedDocuments = ([Option<FileStamp>; 3], Documents);
     type DocumentCache = std::sync::Mutex<
         std::collections::BTreeMap<(std::path::PathBuf, std::path::PathBuf), CachedDocuments>,
     >;
@@ -195,12 +181,7 @@ pub(crate) fn documents(project: &Path, global: &Path) -> Result<Arc<Documents>,
             return Ok(documents.clone());
         }
     }
-    let documents = Arc::new(
-        oxplow_config::settings::Level::PRECEDENCE
-            .into_iter()
-            .map(|level| oxplow_config::settings::read_layer(project, global, level))
-            .collect::<Result<Documents, _>>()?,
-    );
+    let documents = Documents::read(project, global)?;
     let mut cache = cache.lock().unwrap_or_else(|e| e.into_inner());
     if cache.len() >= 32 {
         cache.clear();
@@ -216,7 +197,7 @@ fn cache_key(
     global: &Path,
     secrets: &Arc<dyn oxplow_ai::secrets::SecretStore>,
     extensions: &[Extension],
-    documents: &[std::collections::BTreeMap<String, serde_json::Value>],
+    documents: &Documents,
 ) -> Result<String, SettingsError> {
     use sha2::{Digest, Sha256};
     let mut digest = Sha256::new();
@@ -250,14 +231,14 @@ fn cache_key(
         }
     }
     let keys = documents
-        .iter()
-        .flat_map(|document| document.keys())
+        .levels()
+        .flat_map(|(_, document)| document.keys())
         .filter(|key| key.starts_with("oxplow.extensions.") && key.ends_with(".enabled"))
         .collect::<std::collections::BTreeSet<_>>();
     digest.update(serde_json::to_vec(&keys).map_err(|_| SettingsError::InvalidDocument)?);
     let instances = documents
-        .iter()
-        .find_map(|document| document.get("oxplow.extensionInstances"));
+        .first("oxplow.extensionInstances")
+        .map(|(_, value)| value);
     digest.update(serde_json::to_vec(&instances).map_err(|_| SettingsError::InvalidDocument)?);
     Ok(hex::encode(digest.finalize()))
 }
@@ -277,7 +258,7 @@ pub(crate) fn store_with_documents(
     global: &Path,
     secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
     extensions: &[Extension],
-    documents: &[std::collections::BTreeMap<String, serde_json::Value>],
+    documents: &Documents,
 ) -> Result<SettingsStore, SettingsError> {
     static STORES: std::sync::OnceLock<
         std::sync::Mutex<std::collections::BTreeMap<String, SettingsStore>>,
@@ -303,8 +284,8 @@ pub(crate) fn store_with_documents(
     oxplow_config::core_settings::register_dynamic_keys(
         &mut registry,
         documents
-            .iter()
-            .flat_map(|document| document.keys().cloned()),
+            .levels()
+            .flat_map(|(_, document)| document.keys().cloned()),
     )?;
     for extension in extensions {
         let mut definition = oxplow_config::core_settings::extension_definition(&extension.name);
@@ -369,7 +350,7 @@ pub(crate) fn store_with_documents(
     );
     // Registry discovery tolerates invalid dynamic values so registered
     // setters can repair them. Direct consumers still validate every value.
-    let configured = |key: &str| documents.iter().find_map(|document| document.get(key));
+    let configured = |key: &str| documents.first(key).map(|(_, value)| value);
     let instances = configured("oxplow.extensionInstances")
         .and_then(|value| value.as_object())
         .cloned()
@@ -538,22 +519,20 @@ mod registry_tests {
             .unwrap();
         let second = store(project.path(), global.path(), secrets.clone(), &[]).unwrap();
         assert!(second.definition("oxplow.ai.caller_only.enabled").is_err());
-        assert!(Arc::ptr_eq(
-            &before,
-            &documents(project.path(), global.path()).unwrap()
-        ));
+        assert!(before.shares(&documents(project.path(), global.path()).unwrap()));
         second
             .set("oxplow.snapshots.retentionDays", json!(11), Level::Project)
             .unwrap();
         let after = documents(project.path(), global.path()).unwrap();
-        assert!(!Arc::ptr_eq(&before, &after));
+        assert!(!before.shares(&after));
         assert_eq!(
             key_before,
             cache_key(project.path(), global.path(), &secrets, &[], &after).unwrap()
         );
         assert_eq!(
             second
-                .get("oxplow.snapshots.retentionDays", None)
+                .snapshot()
+                .and_then(|snapshot| snapshot.get("oxplow.snapshots.retentionDays", None))
                 .unwrap()
                 .value,
             Some(json!(11))
@@ -592,7 +571,11 @@ mod registry_tests {
             )
             .unwrap();
         assert_eq!(
-            settings.get("oxplow.ai.roles.main", None).unwrap().value,
+            settings
+                .snapshot()
+                .and_then(|snapshot| snapshot.get("oxplow.ai.roles.main", None))
+                .unwrap()
+                .value,
             Some(main)
         );
         settings
@@ -600,7 +583,8 @@ mod registry_tests {
             .unwrap();
         assert_eq!(
             settings
-                .get("oxplow.ai.roles.summarize", None)
+                .snapshot()
+                .and_then(|snapshot| snapshot.get("oxplow.ai.roles.summarize", None))
                 .unwrap()
                 .value,
             Some(summarize)
@@ -610,7 +594,8 @@ mod registry_tests {
             .unwrap();
         assert_eq!(
             settings
-                .get("oxplow.ai.roles.summarize", None)
+                .snapshot()
+                .and_then(|snapshot| snapshot.get("oxplow.ai.roles.summarize", None))
                 .unwrap()
                 .value,
             None
@@ -669,10 +654,14 @@ mod registry_tests {
                 oxplow_config::settings::Level::Project,
             )
             .unwrap();
-        assert!(settings.get("oxplow.ai.openai.apiKey", None).is_err());
+        assert!(settings
+            .snapshot()
+            .and_then(|snapshot| snapshot.get("oxplow.ai.openai.apiKey", None))
+            .is_err());
         assert_eq!(
             settings
-                .get("oxplow.ai.openai.enabled", None)
+                .snapshot()
+                .and_then(|snapshot| snapshot.get("oxplow.ai.openai.enabled", None))
                 .unwrap()
                 .value,
             Some(json!(true))

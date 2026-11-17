@@ -2,49 +2,29 @@
 
 use std::{path::Path, sync::Arc};
 
-use oxplow_config::settings::{Level, SettingInventory, SettingsError};
-use serde_json::Value;
+use oxplow_config::settings::{SettingRow, SettingsError};
 
 use crate::extension::extensions::Extension;
 
-/// Effective inventory and explicit ordinary overrides, in local/project/global
-/// order. Secret values are absent from every override column.
-pub struct SettingsRow {
-    pub setting: SettingInventory,
-    pub overrides: [Option<Value>; 3],
-    pub statuses: [&'static str; 3],
-}
-
-/// Registry definitions and effective values. Secret values are never exposed;
-/// their inventory rows retain only presence and origin metadata.
+/// Every registered setting's Settings row: definition, redacted effective
+/// value and the per-level overrides. Secret values are never exposed; their
+/// rows retain only presence and origin metadata.
 pub fn effective_config(
     project: &Path,
     global: &Path,
     secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
     extensions: &[Extension],
-) -> Result<Vec<SettingsRow>, SettingsError> {
+) -> Result<Vec<SettingRow>, SettingsError> {
     let documents = crate::settings::documents(project, global)?;
     let store =
         crate::settings::store_with_documents(project, global, secrets, extensions, &documents)?;
-    let documents = Level::PRECEDENCE
-        .into_iter()
-        .zip(documents.iter().cloned())
-        .collect::<Vec<_>>();
-    Ok(store
-        .inventory_snapshot_from(&documents)?
-        .into_iter()
-        .map(|snapshot| SettingsRow {
-            setting: snapshot.setting,
-            overrides: snapshot.overrides,
-            statuses: snapshot.statuses,
-        })
-        .collect())
+    Ok(store.snapshot_of(documents).inventory())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_config::settings::Origin;
+    use oxplow_config::settings::{Level, Origin};
     use serde_json::json;
 
     #[test]

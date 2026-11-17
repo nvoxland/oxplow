@@ -111,7 +111,10 @@ fn pasted_credential(
     name: &str,
 ) -> Result<Option<String>, DomainError> {
     let value = credential_settings(deps)?
-        .get(&provider_credential_key(namespace, instance, name), None)
+        .snapshot()
+        .and_then(|snapshot| {
+            snapshot.get(&provider_credential_key(namespace, instance, name), None)
+        })
         .map_err(|_| DomainError::Storage("credential storage unavailable".into()))?;
     Ok(value
         .value
@@ -1791,7 +1794,10 @@ impl ProviderRegistry {
         let Ok(store) = self.instance_settings() else {
             return BTreeMap::new();
         };
-        let Ok(setting) = store.get("oxplow.extensionInstances", None) else {
+        let Ok(setting) = store
+            .snapshot()
+            .and_then(|snapshot| snapshot.get("oxplow.extensionInstances", None))
+        else {
             return BTreeMap::new();
         };
         let scope = if setting.origin == Some(oxplow_config::settings::Origin::Global) {
@@ -1832,7 +1838,10 @@ impl ProviderRegistry {
             .ok()
             .and_then(|store| {
                 store
-                    .get("oxplow.extensionInstances", Some(Level::Local))
+                    .snapshot()
+                    .and_then(|snapshot| {
+                        snapshot.get("oxplow.extensionInstances", Some(Level::Local))
+                    })
                     .ok()
             })
             .is_some_and(|value| value.value.is_some())
@@ -1853,7 +1862,11 @@ impl ProviderRegistry {
         level: oxplow_config::settings::Level,
     ) -> BTreeMap<String, oxplow_config::ExtensionInstanceConfig> {
         self.instance_settings()
-            .and_then(|store| store.get("oxplow.extensionInstances", Some(level)))
+            .and_then(|store| {
+                store
+                    .snapshot()
+                    .and_then(|snapshot| snapshot.get("oxplow.extensionInstances", Some(level)))
+            })
             .ok()
             .and_then(|value| value.value)
             .and_then(|value| serde_json::from_value(value).ok())
@@ -2034,11 +2047,15 @@ impl ProviderRegistry {
                     .filter(|definition| definition.key.contains(".providerCredentials."))
                     .map(|definition| definition.key.clone())
                     .collect::<Vec<_>>();
-                store.inventory_for(&keys).ok()
+                let snapshot = store.snapshot().ok()?;
+                keys.iter()
+                    .map(|key| snapshot.row(key))
+                    .collect::<Result<Vec<_>, _>>()
+                    .ok()
             })
             .unwrap_or_default()
             .into_iter()
-            .map(|row| (row.definition.key, row.is_set))
+            .map(|row| (row.setting.definition.key, row.setting.is_set))
             .collect();
         let scope_of = |instance: &str| {
             scoped
@@ -2050,10 +2067,13 @@ impl ProviderRegistry {
             .as_ref()
             .and_then(|store| {
                 store
-                    .get(
-                        "oxplow.extensionInstances",
-                        Some(oxplow_config::settings::Level::Global),
-                    )
+                    .snapshot()
+                    .and_then(|snapshot| {
+                        snapshot.get(
+                            "oxplow.extensionInstances",
+                            Some(oxplow_config::settings::Level::Global),
+                        )
+                    })
                     .ok()
             })
             .and_then(|value| value.value)
@@ -2795,12 +2815,12 @@ impl ProviderRegistry {
             })?;
         for capability in oxplow_domain::capability::choosable() {
             let key = oxplow_config::core_settings::active_provider_key(capability.id);
-            let chosen =
-                store
-                    .get(&key, Some(credential_level))
-                    .map_err(|error| CommandError::Failed {
-                        message: error.to_string(),
-                    })?;
+            let chosen = store
+                .snapshot()
+                .and_then(|snapshot| snapshot.get(&key, Some(credential_level)))
+                .map_err(|error| CommandError::Failed {
+                    message: error.to_string(),
+                })?;
             if chosen.value.as_ref().and_then(serde_json::Value::as_str) != Some(gone.id.as_str()) {
                 continue;
             }

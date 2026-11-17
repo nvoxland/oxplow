@@ -420,7 +420,10 @@ mod secret_recording_tests {
             .unwrap();
             let compose = Arc::new(
                 move |_: &Composing<'_>, run: &oxplow_domain::run::RunContext, _: &Value| {
-                    let setting = store.get(&key, None).unwrap();
+                    let setting = store
+                        .snapshot()
+                        .and_then(|snapshot| snapshot.get(&key, None))
+                        .unwrap();
                     assert!(setting.secret);
                     run.trace().count("config.secret");
                     let derived = json!({"arbitrary":{"nested":[format!("prefix:{}", setting.value.unwrap().as_str().unwrap())]}});

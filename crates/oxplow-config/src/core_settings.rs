@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 
-use crate::settings::{Level, Origin, SettingDefinition, SettingsError, SettingsStore};
+use crate::settings::{Level, Origin, SettingDefinition, SettingsError};
 use crate::{ConfigError, OxplowConfig};
 
 /// The registered keys core code names directly.
@@ -786,12 +786,9 @@ impl std::error::Error for CoreProjectionError {}
 /// role schema, an unknown preference kept as plain JSON for its harness.
 /// A shadowed override never fails the load.
 pub fn effective_values(
-    store: &SettingsStore,
+    snapshot: &crate::settings::SettingsSnapshot,
 ) -> Result<BTreeMap<String, (Value, Level)>, CoreProjectionError> {
-    let layer_error = |source| CoreProjectionError {
-        key: "settings layer".into(),
-        source,
-    };
+    let store = snapshot.store();
     let definitions: Vec<_> = store
         .registry
         .read()
@@ -800,16 +797,15 @@ pub fn effective_values(
         .filter(|definition| !definition.secret && definition.owner == "core")
         .cloned()
         .collect();
-    let keys: Vec<_> = definitions.iter().map(|d| d.key.as_str()).collect();
     let mut values = BTreeMap::new();
-    for (definition, setting) in definitions
-        .iter()
-        .zip(store.get_many_results(&keys).map_err(layer_error)?)
-    {
-        let setting = setting.map_err(|source| CoreProjectionError {
-            key: definition.key.clone(),
-            source,
-        })?;
+    for definition in &definitions {
+        let setting =
+            snapshot
+                .get(&definition.key, None)
+                .map_err(|source| CoreProjectionError {
+                    key: definition.key.clone(),
+                    source,
+                })?;
         // A default is not a set value: `config_from` applies defaults itself.
         if let (Some(value), Some(level)) = (setting.value, setting.origin.and_then(Origin::level))
         {
@@ -818,8 +814,8 @@ pub fn effective_values(
     }
     let mut seen = std::collections::BTreeSet::new();
     let mut roles = crate::settings::SettingsRegistry::default();
-    for level in Level::PRECEDENCE {
-        for (key, value) in store.layer(level).map_err(layer_error)? {
+    for (level, document) in snapshot.documents().levels() {
+        for (key, value) in document.clone() {
             if !seen.insert(key.clone()) || store.definition(&key).is_ok() {
                 continue;
             }
@@ -1054,10 +1050,13 @@ mod tests {
         );
     }
 
-    fn projection_store(project: &std::path::Path, global: &std::path::Path) -> SettingsStore {
+    fn projection_store(
+        project: &std::path::Path,
+        global: &std::path::Path,
+    ) -> crate::settings::SettingsStore {
         let mut registry = crate::settings::SettingsRegistry::default();
         registry.register_many(definitions("demo")).unwrap();
-        SettingsStore::new(
+        crate::settings::SettingsStore::new(
             project.to_path_buf(),
             global.to_path_buf(),
             std::sync::Arc::new(std::sync::RwLock::new(registry)),
@@ -1100,7 +1099,11 @@ mod tests {
             "oxplow.agents.acme.coder.model",
             Some(json!({"name": "custom"})),
         );
-        let config = config_from("demo", &effective_values(&store).unwrap()).unwrap();
+        let config = config_from(
+            "demo",
+            &effective_values(&store.snapshot().unwrap()).unwrap(),
+        )
+        .unwrap();
         assert!(!config.agent_enabled["acme/coder"]);
         assert_eq!(config.agent_config["acme/coder"]["model"]["name"], "custom");
     }
@@ -1113,7 +1116,9 @@ mod tests {
         let (p, g) = (project.path(), global.path());
         let key = "oxplow.agents.acme.coder.enabled";
         write(p, g, Level::Project, key, Some(json!("yes")));
-        let error = effective_values(&store).unwrap_err().to_string();
+        let error = effective_values(&store.snapshot().unwrap())
+            .unwrap_err()
+            .to_string();
         assert!(error.contains(key), "{error}");
         write(p, g, Level::Project, key, None);
         let role_key = "oxplow.ai.roles.unregistered";
@@ -1124,7 +1129,9 @@ mod tests {
             role_key,
             Some(json!({"provider": "local", "model": 42})),
         );
-        let error = effective_values(&store).unwrap_err().to_string();
+        let error = effective_values(&store.snapshot().unwrap())
+            .unwrap_err()
+            .to_string();
         assert!(error.contains(role_key), "{error}");
     }
 
@@ -1137,7 +1144,11 @@ mod tests {
         let (p, g) = (project.path(), global.path());
         write(p, g, Level::Project, key, Some(json!(true)));
         write(p, g, Level::Local, key, Some(json!(false)));
-        let config = config_from("demo", &effective_values(&store).unwrap()).unwrap();
+        let config = config_from(
+            "demo",
+            &effective_values(&store.snapshot().unwrap()).unwrap(),
+        )
+        .unwrap();
         assert!(!config.agent_enabled["acme/coder"]);
     }
 

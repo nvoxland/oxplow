@@ -115,7 +115,8 @@ impl ConfigurationHost {
             }
         }
         let setting = store
-            .get(&input.key, input.level)
+            .snapshot()
+            .and_then(|snapshot| snapshot.get(&input.key, input.level))
             .map_err(|_| ConfigurationError::Invalid)?;
         self.owner
             .with_owner(run, "config.read", |_| ())

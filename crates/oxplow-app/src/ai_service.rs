@@ -336,9 +336,13 @@ impl AiService {
             .map(|definition| definition.key.clone())
             .collect();
         keys.extend(role_keys.iter().cloned());
-        let key_refs: Vec<&str> = keys.iter().map(String::as_str).collect();
-        let values = store
-            .get_many_at(&key_refs, level)
+        let snapshot = store
+            .snapshot()
+            .map_err(|e| AiServiceError::Config(e.to_string()))?;
+        let values = keys
+            .iter()
+            .map(|key| snapshot.get(key, level))
+            .collect::<Result<Vec<_>, _>>()
             .map_err(|e| AiServiceError::Config(e.to_string()))?;
         let mut config = AiConfig::default();
         let mut values = values.into_iter();
@@ -488,7 +492,10 @@ impl AiService {
                 .iter()
                 .filter(|(role, _)| {
                     store
-                        .get(&crate::settings::ai_role_key(&role.to_string()), None)
+                        .snapshot()
+                        .and_then(|snapshot| {
+                            snapshot.get(&crate::settings::ai_role_key(&role.to_string()), None)
+                        })
                         .is_ok_and(|value| {
                             matches!(value.origin, Some(Origin::Local | Origin::Project))
                         })
@@ -1390,7 +1397,8 @@ impl AiService {
         let raw = if let Some(store) = store {
             ensure_provider_key(store, provider_id)?;
             store
-                .get(&provider_key_setting(provider_id), None)
+                .snapshot()
+                .and_then(|snapshot| snapshot.get(&provider_key_setting(provider_id), None))
                 .map_err(|e| AiServiceError::Secret(e.to_string()))?
                 .value
                 .and_then(|v| v.as_str().map(str::to_string))
@@ -2284,7 +2292,8 @@ mod tests {
             .unwrap()
             .contains("private-key"));
         assert!(settings
-            .get(&provider_key_setting("openrouter"), None)
+            .snapshot()
+            .and_then(|snapshot| snapshot.get(&provider_key_setting("openrouter"), None))
             .is_err());
         assert!(svc.key(&svc.config().unwrap().providers[0]).is_err());
     }
@@ -2343,7 +2352,8 @@ mod tests {
             .unwrap()
             .contains("private backend detail"));
         assert!(settings
-            .get(&provider_key_setting("openrouter"), None)
+            .snapshot()
+            .and_then(|snapshot| snapshot.get(&provider_key_setting("openrouter"), None))
             .is_err());
         assert!(svc.key(&svc.config().unwrap().providers[0]).is_err());
     }

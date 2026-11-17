@@ -81,7 +81,8 @@ fn insert_instance(
     )
     .unwrap();
     let mut all: std::collections::BTreeMap<String, oxplow_config::ExtensionInstanceConfig> = store
-        .get("oxplow.extensionInstances", Some(Level::Project))
+        .snapshot()
+        .and_then(|snapshot| snapshot.get("oxplow.extensionInstances", Some(Level::Project)))
         .unwrap()
         .value
         .map(serde_json::from_value)
@@ -1761,7 +1762,7 @@ async fn a_global_instance_is_turned_off_in_one_project() {
         &[],
     )
     .unwrap();
-    assert!(!settings.get("oxplow.extensionInstances", Some(oxplow_config::settings::Level::Project)).unwrap().is_set,
+    assert!(!settings.snapshot().and_then(|snapshot| snapshot.get("oxplow.extensionInstances", Some(oxplow_config::settings::Level::Project))).unwrap().is_set,
         "removing the last project instance restores inheritance rather than writing an empty override");
     assert_eq!(state_of(&other, SHARED).await, Some(InstanceState::Ready));
 }
@@ -1878,13 +1879,19 @@ async fn a_project_instance_keeps_its_credentials_beside_a_global_one() {
     )
     .unwrap();
     assert_eq!(
-        credential_store.get(&credential_key, None).unwrap().value,
+        credential_store
+            .snapshot()
+            .and_then(|snapshot| snapshot.get(&credential_key, None))
+            .unwrap()
+            .value,
         Some(json!("local token"))
     );
     assert!(credential_store
-        .inventory()
+        .snapshot()
         .unwrap()
+        .inventory()
         .iter()
+        .map(|row| &row.setting)
         .any(|row| row.definition.key == credential_key && row.value.is_none() && row.is_set));
     fx.svc
         .commands
@@ -1898,7 +1905,11 @@ async fn a_project_instance_keeps_its_credentials_beside_a_global_one() {
         .unwrap();
 
     assert_eq!(
-        credential_store.get(&credential_key, None).unwrap().value,
+        credential_store
+            .snapshot()
+            .and_then(|snapshot| snapshot.get(&credential_key, None))
+            .unwrap()
+            .value,
         Some(json!("the project's")),
         "unsetting local inherits the project secret"
     );
@@ -1915,7 +1926,11 @@ async fn a_project_instance_keeps_its_credentials_beside_a_global_one() {
         )
         .unwrap();
     assert_eq!(
-        credential_store.get(&credential_key, None).unwrap().value,
+        credential_store
+            .snapshot()
+            .and_then(|snapshot| snapshot.get(&credential_key, None))
+            .unwrap()
+            .value,
         Some(json!("the project's")),
         "creating global.yaml must not change secret identity"
     );
@@ -1943,7 +1958,11 @@ async fn a_project_instance_keeps_its_credentials_beside_a_global_one() {
     let view = here(providers.list().await);
     assert_eq!((view.scope, view.overridden), (Scope::Project, false));
     assert_eq!(
-        credential_store.get(&credential_key, None).unwrap().value,
+        credential_store
+            .snapshot()
+            .and_then(|snapshot| snapshot.get(&credential_key, None))
+            .unwrap()
+            .value,
         Some(json!("the project's"))
     );
 }

@@ -837,16 +837,13 @@ pub fn extension_settings(project_dir: impl AsRef<Path>) -> ExtensionSettings {
 }
 
 pub fn extension_settings_with_global(project: &Path, global: &Path) -> ExtensionSettings {
-    let documents: Vec<_> = settings::Level::PRECEDENCE
-        .into_iter()
-        .filter_map(|level| settings::read_layer(project, global, level).ok())
-        .collect();
+    let documents = settings::Documents::read_or_empty(project, global);
     let mut switches = DEFAULT_EXTENSIONS
         .iter()
         .map(|name| (name.to_string(), true))
         .collect::<std::collections::BTreeMap<_, _>>();
     // Lowest precedence first, so the effective level is written last.
-    for document in documents.iter().rev() {
+    for (_, document) in documents.levels().collect::<Vec<_>>().into_iter().rev() {
         for (key, value) in document {
             if let Some(name) = key
                 .strip_prefix("oxplow.extensions.")
@@ -859,8 +856,8 @@ pub fn extension_settings_with_global(project: &Path, global: &Path) -> Extensio
         }
     }
     let sources: std::collections::BTreeMap<String, String> = documents
-        .iter()
-        .find_map(|doc| doc.get(core_settings::keys::EXTENSION_SOURCES).cloned())
+        .first(core_settings::keys::EXTENSION_SOURCES)
+        .map(|(_, value)| value.clone())
         .and_then(|v| serde_json::from_value(v).ok())
         .unwrap_or_default();
     let from_source = if cfg!(debug_assertions) {
@@ -1033,13 +1030,11 @@ pub fn load_project_config_with_global(
     let global = global_dir
         .map(Path::to_path_buf)
         .unwrap_or_else(|| project_dir.join(".oxplow/no-global-settings"));
-    let keys = settings::Level::PRECEDENCE
-        .into_iter()
-        .map(|level| settings::read_layer(project_dir, &global, level))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| ConfigError::Invalid(e.to_string()))?
-        .into_iter()
-        .flat_map(|doc| doc.into_keys())
+    let documents = settings::Documents::read(project_dir, &global)
+        .map_err(|e| ConfigError::Invalid(e.to_string()))?;
+    let keys = documents
+        .levels()
+        .flat_map(|(_, values)| values.keys().cloned())
         .collect::<Vec<_>>();
     core_settings::register_dynamic_keys(&mut registry, keys)
         .map_err(|e| ConfigError::Invalid(e.to_string()))?;
@@ -1052,29 +1047,27 @@ pub fn load_project_config_with_global(
     // Every level must be well formed; only a key's effective value (the
     // first level that sets it) must satisfy its schema.
     let mut seen = std::collections::BTreeSet::new();
-    for level in settings::Level::PRECEDENCE {
-        for (key, value) in store
-            .layer(level)
-            .map_err(|e| ConfigError::Invalid(e.to_string()))?
-        {
+    let snapshot = store.snapshot_of(documents);
+    for (level, values) in snapshot.documents().levels() {
+        for (key, value) in values {
             let effective = seen.insert(key.clone());
             if !key.contains('.') {
                 return Err(ConfigError::Invalid(format!("unknown setting `{key}`")));
             }
-            if let Some(replacement) = core_settings::retired_setting(&key) {
+            if let Some(replacement) = core_settings::retired_setting(key) {
                 return Err(ConfigError::Invalid(format!(
                     "setting `{key}` in {} is retired; remove its obsolete override and {replacement}", store.path(level).display()
                 )));
             }
-            if effective && store.definition(&key).is_ok() {
+            if effective && store.definition(key).is_ok() {
                 store
-                    .validate(&key, &value)
+                    .validate(key, value)
                     .map_err(|e| ConfigError::Invalid(format!("{key}: {e}")))?;
             }
         }
     }
-    let values =
-        core_settings::effective_values(&store).map_err(|e| ConfigError::Invalid(e.to_string()))?;
+    let values = core_settings::effective_values(&snapshot)
+        .map_err(|e| ConfigError::Invalid(e.to_string()))?;
     core_settings::config_from(&fallback, &values)
 }
 

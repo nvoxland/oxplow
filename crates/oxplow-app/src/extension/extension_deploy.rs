@@ -1307,10 +1307,13 @@ fn turn_on(svc: &Services, name: &str) -> Result<Option<Option<bool>>, DomainErr
         return Ok(None);
     }
     let previous = enablement_store(svc, name)?
-        .get(
-            &format!("oxplow.extensions.{name}.enabled"),
-            Some(oxplow_config::settings::Level::Local),
-        )
+        .snapshot()
+        .and_then(|snapshot| {
+            snapshot.get(
+                &format!("oxplow.extensions.{name}.enabled"),
+                Some(oxplow_config::settings::Level::Local),
+            )
+        })
         .map_err(storage)?
         .value
         .and_then(|value| value.as_bool());
@@ -1778,7 +1781,10 @@ mod tests {
             undo_turn_on(&svc, "acme", previous);
             let restored = enablement_store(&svc, "acme")
                 .unwrap()
-                .get("oxplow.extensions.acme.enabled", Some(Level::Local))
+                .snapshot()
+                .and_then(|snapshot| {
+                    snapshot.get("oxplow.extensions.acme.enabled", Some(Level::Local))
+                })
                 .unwrap()
                 .value;
             assert_eq!(restored, prior.map(|value| json!(value)));

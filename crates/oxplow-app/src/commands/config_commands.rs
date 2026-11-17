@@ -97,8 +97,9 @@ pub(super) fn inherited(
         field: Some("/key".into()),
         message: error.to_string(),
     };
+    let snapshot = store.snapshot().map_err(failed)?;
     for at in Level::PRECEDENCE.into_iter().skip_while(|at| *at != level) {
-        if let Some(value) = store.get(key, Some(at)).map_err(failed)?.value {
+        if let Some(value) = snapshot.get(key, Some(at)).map_err(failed)?.value {
             return Ok(Some(value));
         }
     }
@@ -394,7 +395,12 @@ mod tests {
                 )
                 .await
                 .is_err());
-            assert!(store.get(key, Some(level)).unwrap().value.is_none());
+            assert!(store
+                .snapshot()
+                .and_then(|snapshot| snapshot.get(key, Some(level)))
+                .unwrap()
+                .value
+                .is_none());
             // Convenience domain actions share the same preflight path.
             assert!(bus
                 .run(
@@ -405,10 +411,19 @@ mod tests {
                 )
                 .await
                 .is_err());
-            assert!(store.get(key, Some(level)).unwrap().value.is_none());
+            assert!(store
+                .snapshot()
+                .and_then(|snapshot| snapshot.get(key, Some(level)))
+                .unwrap()
+                .value
+                .is_none());
         }
         assert_eq!(
-            store.get(key, Some(Level::Local)).unwrap().value,
+            store
+                .snapshot()
+                .and_then(|snapshot| snapshot.get(key, Some(Level::Local)))
+                .unwrap()
+                .value,
             Some(json!({"task.board":"oxplow"}))
         );
     }
@@ -501,11 +516,14 @@ mod tests {
             .unwrap();
         assert_eq!(read.result["value"], marker);
         assert_eq!(read.result["origin"], "local");
-        let inventory = target.settings().unwrap().inventory().unwrap();
-        let secret = inventory
-            .iter()
-            .find(|entry| entry.definition.key == key)
-            .unwrap();
+        let secret = target
+            .settings()
+            .unwrap()
+            .snapshot()
+            .unwrap()
+            .row(&key)
+            .unwrap()
+            .setting;
         assert!(secret.is_set && secret.value.is_none());
         for path in [
             dir.path().join(".oxplow/project.yaml"),
@@ -577,11 +595,19 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            store.get(key, Some(Level::Project)).unwrap().value,
+            store
+                .snapshot()
+                .and_then(|snapshot| snapshot.get(key, Some(Level::Project)))
+                .unwrap()
+                .value,
             Some(json!({"task.list":"project_view","task.board":"project_new"}))
         );
         assert_eq!(
-            store.get(key, Some(Level::Local)).unwrap().value,
+            store
+                .snapshot()
+                .and_then(|snapshot| snapshot.get(key, Some(Level::Local)))
+                .unwrap()
+                .value,
             Some(json!({"task.detail":"local_view"}))
         );
         // Clearing an inherited final entry masks it with an empty map.
@@ -595,7 +621,11 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            store.get(key, Some(Level::Project)).unwrap().value,
+            store
+                .snapshot()
+                .and_then(|snapshot| snapshot.get(key, Some(Level::Project)))
+                .unwrap()
+                .value,
             Some(json!({}))
         );
     }
@@ -634,7 +664,8 @@ mod tests {
         .unwrap();
         assert_eq!(
             store
-                .get("oxplow.generated.exclude", Some(Level::Project))
+                .snapshot()
+                .and_then(|snapshot| snapshot.get("oxplow.generated.exclude", Some(Level::Project)))
                 .unwrap()
                 .value,
             Some(json!(["dist", "inherited"]))
@@ -646,7 +677,8 @@ mod tests {
         ] {
             assert_eq!(
                 store
-                    .get("oxplow.generated.include", Some(level))
+                    .snapshot()
+                    .and_then(|snapshot| snapshot.get("oxplow.generated.include", Some(level)))
                     .unwrap()
                     .value,
                 Some(json!([include]))
@@ -664,14 +696,16 @@ mod tests {
         }
         assert_eq!(
             store
-                .get("oxplow.generated.exclude", Some(Level::Project))
+                .snapshot()
+                .and_then(|snapshot| snapshot.get("oxplow.generated.exclude", Some(Level::Project)))
                 .unwrap()
                 .value,
             Some(json!([]))
         );
         assert_eq!(
             store
-                .get("oxplow.generated.exclude", Some(Level::Local))
+                .snapshot()
+                .and_then(|snapshot| snapshot.get("oxplow.generated.exclude", Some(Level::Local)))
                 .unwrap()
                 .value,
             Some(json!(["private"]))

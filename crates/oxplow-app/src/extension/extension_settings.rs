@@ -122,8 +122,13 @@ pub(crate) fn values_for(
         .iter()
         .map(|binding| binding.definition.key.as_str())
         .collect();
-    let settings = store
-        .get_many(&keys)
+    let snapshot = store
+        .snapshot()
+        .map_err(|_| ExtensionSettingsError::Resolution)?;
+    let settings = keys
+        .iter()
+        .map(|key| snapshot.get(key, None))
+        .collect::<Result<Vec<_>, _>>()
         .map_err(|_| ExtensionSettingsError::Resolution)?;
     for (binding, setting) in bindings.iter().zip(settings) {
         if let Some(value) = setting.value {
@@ -158,8 +163,13 @@ pub(crate) fn origins_for(
         .iter()
         .map(|binding| binding.definition.key.as_str())
         .collect();
-    let settings = store
-        .inspect_many(&keys)
+    let snapshot = store
+        .snapshot()
+        .map_err(|_| ExtensionSettingsError::Resolution)?;
+    let settings = keys
+        .iter()
+        .map(|key| snapshot.inspect(key, None))
+        .collect::<Result<Vec<_>, _>>()
         .map_err(|_| ExtensionSettingsError::Resolution)?;
     for (binding, setting) in bindings.iter().zip(settings) {
         if let Some(origin) = setting.origin {

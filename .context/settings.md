@@ -71,6 +71,17 @@ never writes an empty map that masks a project's choices.
 
 ## APIs and consumers
 
+**Reads go through one snapshot.** `SettingsStore::snapshot()` reads the three
+files once into `Documents` (cheap to clone; `snapshot_of(documents)` reuses a
+capture, such as the app's metadata-checked cache in `settings::documents`).
+`SettingsSnapshot` answers every read from that capture: `get(key, level)`
+(effective with the default, or one level only; secrets included), `inspect`
+(the same, secret value left out), `row(key)` and `inventory()` (the Settings
+row: redacted effective value, per-level overrides and statuses, a failure kept
+in its row) and `documents()` (raw levels, unknown keys included). Reading
+several keys takes one snapshot, so they agree with each other. The store
+keeps only the definition, validation and write methods.
+
 `oxplow.config.get {key, level?}` returns value, presence, secret metadata and
 origin. Without a level it resolves inheritance; with a level it reads only that
 override. `oxplow.config.set {key, value, level}` and `.unset {key, level}` require

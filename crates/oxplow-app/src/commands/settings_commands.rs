@@ -119,7 +119,10 @@ pub(super) fn ops(target: ConfigTarget) -> Vec<Op> {
             let settings = read_target.settings()?;
             let definition = settings.definition(&input.key).map_err(error)?;
             authorize_composer(&read_target, ctx.run, &definition, false)?;
-            let value = settings.get(&input.key, input.level).map_err(error)?;
+            let value = settings
+                .snapshot()
+                .and_then(|snapshot| snapshot.get(&input.key, input.level))
+                .map_err(error)?;
             authorize_composer(&read_target, ctx.run, &definition, false)?;
             ctx.run.used_scope("config.read");
             ctx.trace.count("config.read");
@@ -249,7 +252,8 @@ pub(crate) fn write_changes(
     level: Level,
 ) -> Result<HandlerOutput, CommandError> {
     let settings = target.settings()?;
-    let layer_values = settings.layer(level).map_err(error)?;
+    let snapshot = settings.snapshot().map_err(error)?;
+    let layer_values = snapshot.documents().at(level);
     let refused = |message: String| CommandError::Invalid {
         field: Some("/value".into()),
         message,
@@ -586,7 +590,8 @@ mod ownership_tests {
                 !target(&fx)
                     .settings()
                     .unwrap()
-                    .inspect(key, Some(Level::Project))
+                    .snapshot()
+                    .and_then(|snapshot| snapshot.inspect(key, Some(Level::Project)))
                     .unwrap()
                     .is_set
             );
@@ -606,7 +611,11 @@ mod ownership_tests {
             assert!(matches!(result, Err(CommandError::Denied { .. })));
         }
         assert_eq!(
-            settings.get("beta.limit", None).unwrap().value,
+            settings
+                .snapshot()
+                .and_then(|snapshot| snapshot.get("beta.limit", None))
+                .unwrap()
+                .value,
             Some(json!(1))
         );
         write(
@@ -622,7 +631,11 @@ mod ownership_tests {
         )
         .unwrap();
         assert_eq!(
-            settings.get("alpha.limit", None).unwrap().value,
+            settings
+                .snapshot()
+                .and_then(|snapshot| snapshot.get("alpha.limit", None))
+                .unwrap()
+                .value,
             Some(json!(7))
         );
     }
