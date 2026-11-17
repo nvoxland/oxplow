@@ -358,7 +358,7 @@ mod tests {
     fn write(dir: &Path, rel: &str, text: &str) {
         let file = dir.join(rel);
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-        crate::test_fixtures::write_settings_fixture(file, text).unwrap();
+        std::fs::write(file, text).unwrap();
     }
 
     /// An agent on a new thread of `stream`.
@@ -472,7 +472,10 @@ mod tests {
         write(
             dir.path(),
             ".oxplow/local.yaml",
-            &format!("extensionSources:\n  mine: {}\n", outside.path().display()),
+            &format!(
+                "oxplow.extensionSources:\n  mine: {}\n",
+                outside.path().display()
+            ),
         );
         let out = deploy(
             &svc,

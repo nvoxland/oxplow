@@ -98,12 +98,12 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let ext = root.path().join(".oxplow/extensions/my-gh");
         std::fs::create_dir_all(&ext).unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             ext.join("extension.yaml"),
             "manifest: 2\nname: my-gh\nintent:\n  purpose: test\ncollectors:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, doc: A pull request., key: number, columns: { number: int } }\n",
         )
         .unwrap();
-        crate::test_fixtures::write_settings_fixture(ext.join("sync.sh"), "#!/bin/sh\n").unwrap();
+        std::fs::write(ext.join("sync.sh"), "#!/bin/sh\n").unwrap();
         let db = Database::in_memory();
         let layer = crate::sql_gateway::SqlGateway::new(db.clone());
         let catalog = crate::extension::extension_catalog::ExtensionCatalog::new();

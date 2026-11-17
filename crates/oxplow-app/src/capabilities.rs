@@ -1622,7 +1622,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         std::fs::create_dir_all(svc.layout.project_dir.join(".oxplow")).unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             oxplow_config::config_path(&svc.layout.project_dir),
             crate::test_fixtures::optional_shipped_disabled(),
         )
@@ -1789,11 +1789,7 @@ mod tests {
         let (skills, commands) = (plugin.join("skills"), plugin.join("commands"));
         std::fs::create_dir_all(skills.join("oxplow-extension")).unwrap();
         std::fs::create_dir_all(&commands).unwrap();
-        crate::test_fixtures::write_settings_fixture(
-            skills.join("oxplow-extension/SKILL.md"),
-            "stale",
-        )
-        .unwrap();
+        std::fs::write(skills.join("oxplow-extension/SKILL.md"), "stale").unwrap();
         // A harness that keeps its skills beside a stream's worktree
         // (Codex) has them refreshed there.
         let stream = svc.stream_store.list().await.unwrap().remove(0);
@@ -1801,9 +1797,8 @@ mod tests {
             crate::worktrees::workspace_path(&svc.layout.project_dir, &stream.worktree_path)
                 .join(".agents/skills/oxplow-extension");
         std::fs::create_dir_all(&in_worktree).unwrap();
-        crate::test_fixtures::write_settings_fixture(in_worktree.join("SKILL.md"), "stale")
-            .unwrap();
-        crate::test_fixtures::write_settings_fixture(in_worktree.join(".oxplow"), "").unwrap();
+        std::fs::write(in_worktree.join("SKILL.md"), "stale").unwrap();
+        std::fs::write(in_worktree.join(".oxplow"), "").unwrap();
         refresh_agent_text(svc).await;
         let current = oxplow_agent_text::core_text()
             .skill_body("oxplow-extension")
@@ -1829,12 +1824,12 @@ mod contribution_tests {
         let fx = crate::test_fixtures::services_with_thread().await;
         let dir = fx.svc.layout.project_dir.join(".oxplow/extensions/acme");
         std::fs::create_dir_all(dir.join("skills")).unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             dir.join("extension.yaml"),
             "manifest: 2\nname: acme\nversion: 1.2.0\nintent:\n  purpose: p\n  examples: [{ name: a }]\npermissions: [agent.write]\nskills:\n  - { name: deploy, file: skills/deploy.md }\n",
         )
         .unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             dir.join("skills/deploy.md"),
             "---\nname: deploy\ndescription: d\n---\nShip it.\n",
         )
@@ -1943,7 +1938,7 @@ mod setting_tests {
     fn declare(fx: &ThreadFixture) {
         let dir = fx.svc.layout.project_dir.join(".oxplow/extensions/acme");
         std::fs::create_dir_all(dir.join("skills")).unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             dir.join("extension.yaml"),
             "manifest: 2
 name: acme
@@ -1967,7 +1962,7 @@ skills:
         )
         .unwrap();
         for name in ["on-a", "on-b", "always"] {
-            crate::test_fixtures::write_settings_fixture(
+            std::fs::write(
                 dir.join(format!("skills/{name}.md")),
                 format!("---\nname: {name}\ndescription: d\n---\nGo.\n"),
             )

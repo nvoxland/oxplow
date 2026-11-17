@@ -132,7 +132,7 @@ event_types:
     - {{ type: alpha.noted, v: 1, schema: noted.json, summary: A title was noted. }}
 "
         );
-        crate::test_fixtures::write_settings_fixture(&manifest, text).unwrap();
+        std::fs::write(&manifest, text).unwrap();
         let v = self.v;
         write(root, &format!("{dir}/noted.json"), "{\"type\": \"object\"}");
         write(

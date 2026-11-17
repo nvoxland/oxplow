@@ -389,7 +389,6 @@ mod ownership_tests {
             secrets: fx.svc.secrets.clone(),
             catalog: Some(fx.svc.extension_catalog.clone()),
             events: fx.svc.events.clone(),
-            applied: fx.svc.config_applied.clone(),
         }
     }
 

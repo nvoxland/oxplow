@@ -209,7 +209,7 @@ mod tests {
         let fx = services_with_thread().await;
         let bin = tempfile::tempdir().unwrap();
         for program in ["claude", "codex", "opencode"] {
-            crate::test_fixtures::write_settings_fixture(bin.path().join(program), "").unwrap();
+            std::fs::write(bin.path().join(program), "").unwrap();
         }
         let search_path = [bin.path().to_path_buf()];
         for id in ["claude", "codex", "opencode"] {

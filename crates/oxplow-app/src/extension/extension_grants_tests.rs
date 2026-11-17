@@ -13,7 +13,7 @@ use crate::test_fixtures::{services_with_thread, ThreadFixture};
 fn write(root: &Path, rel: &str, body: &str) {
     let path = root.join(rel);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    crate::test_fixtures::write_settings_fixture(path, body).unwrap();
+    std::fs::write(path, body).unwrap();
 }
 
 /// A command `read.<name>` whose script is `<name>.star`.
@@ -259,7 +259,7 @@ mod program_collectors {
     fn script(root: &Path, rel: &str, body: &str) {
         let path = root.join(".oxplow/extensions/acme").join(rel);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        crate::test_fixtures::write_settings_fixture(&path, body).unwrap();
+        std::fs::write(&path, body).unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
 

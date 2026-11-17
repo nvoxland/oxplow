@@ -62,24 +62,19 @@ async fn what_changes_on_disk_reaches_what_follows_it_with_no_restart() {
     let primary_id: i64 = primary.id.value();
 
     // An edit reaches the working-files list.
-    crate::test_fixtures::write_settings_fixture(project.join("edited.txt"), "hop\n").unwrap();
+    std::fs::write(project.join("edited.txt"), "hop\n").unwrap();
     listed(&svc, primary_id, "edited.txt").await;
 
     // A folder made after the watch started: `mkdir d && write d/f` races any
     // new watch, and the file is in a snapshot all the same.
     std::fs::create_dir_all(project.join("made-later/deep")).unwrap();
-    crate::test_fixtures::write_settings_fixture(project.join("made-later/deep/f.txt"), "x\n")
-        .unwrap();
+    std::fs::write(project.join("made-later/deep/f.txt"), "x\n").unwrap();
     snapshotted(&svc, "made-later/deep/f.txt").await;
 
     // A burst larger than anything could queue path by path: all of it lands.
     std::fs::create_dir(project.join("burst")).unwrap();
     for i in 0..3000 {
-        crate::test_fixtures::write_settings_fixture(
-            project.join(format!("burst/f{i}.txt")),
-            format!("{i}\n"),
-        )
-        .unwrap();
+        std::fs::write(project.join(format!("burst/f{i}.txt")), format!("{i}\n")).unwrap();
     }
     let burst = format!(
         "SELECT count(*) FROM v_change_file f JOIN v_change c ON c.id = f.change_id \
@@ -98,23 +93,21 @@ async fn what_changes_on_disk_reaches_what_follows_it_with_no_restart() {
     // what it excludes leaves the file list, and goes out of the next snapshot.
     let left_out = "SELECT count(*) FROM v_file WHERE path = 'left-out/before.txt'";
     std::fs::create_dir(project.join("left-out")).unwrap();
-    crate::test_fixtures::write_settings_fixture(project.join("left-out/before.txt"), "x\n")
-        .unwrap();
+    std::fs::write(project.join("left-out/before.txt"), "x\n").unwrap();
     assert!(
         until(WAIT, || async { count(&svc, left_out).await == 1 }).await,
         "the folder never reached the file list"
     );
     let config = project.join(".oxplow/project.yaml");
     let mut text = std::fs::read_to_string(&config).unwrap_or_default();
-    text.push_str("\ngenerated:\n  exclude:\n    - left-out\n");
-    crate::test_fixtures::write_settings_fixture(&config, text).unwrap();
+    text.push_str("\noxplow.generated.exclude:\n  - left-out\n");
+    std::fs::write(&config, text).unwrap();
     assert!(
         until(WAIT, || async { count(&svc, left_out).await == 0 }).await,
         "the hand edit of the config never applied"
     );
-    crate::test_fixtures::write_settings_fixture(project.join("left-out/no.txt"), "no\n").unwrap();
-    crate::test_fixtures::write_settings_fixture(project.join("after-generated.txt"), "yes\n")
-        .unwrap();
+    std::fs::write(project.join("left-out/no.txt"), "no\n").unwrap();
+    std::fs::write(project.join("after-generated.txt"), "yes\n").unwrap();
     snapshotted(&svc, "after-generated.txt").await;
     assert_eq!(
         count(
@@ -154,10 +147,9 @@ async fn what_changes_on_disk_reaches_what_follows_it_with_no_restart() {
     let ignore = tree.join(".gitignore");
     let mut rules = std::fs::read_to_string(&ignore).unwrap_or_default();
     rules.push_str("only-here.txt\n");
-    crate::test_fixtures::write_settings_fixture(&ignore, rules).unwrap();
-    crate::test_fixtures::write_settings_fixture(tree.join("only-here.txt"), "ignored here\n")
-        .unwrap();
-    crate::test_fixtures::write_settings_fixture(tree.join("in-the-worktree.txt"), "x\n").unwrap();
+    std::fs::write(&ignore, rules).unwrap();
+    std::fs::write(tree.join("only-here.txt"), "ignored here\n").unwrap();
+    std::fs::write(tree.join("in-the-worktree.txt"), "x\n").unwrap();
     listed(&svc, later.id.value(), "in-the-worktree.txt").await;
     snapshotted(&svc, "in-the-worktree.txt").await;
     assert_eq!(

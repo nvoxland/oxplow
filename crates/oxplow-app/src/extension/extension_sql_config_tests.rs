@@ -156,7 +156,7 @@ async fn a_query_reads_the_current_setting() {
 fn write(root: &std::path::Path, rel: &str, body: &str) {
     let path = root.join(rel);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    crate::test_fixtures::write_settings_fixture(path, body).unwrap();
+    std::fs::write(path, body).unwrap();
 }
 
 const CONFIGURED: &str = "manifest: 2\nname: mine\nintent:\n  purpose: p\n  examples: [{ name: a }]\nconfiguration:\n  version: 1\n  schema:\n    type: object\n    properties:\n      limit: { type: integer }\n      nested: { type: object }\n  defaults: { limit: 7, nested: {} }\ndatasets:\n  - name: limited\n    version: 1\n    description: Limited.\n    fields:\n      - { name: n, type: \"\", doc: The limit. }\n";

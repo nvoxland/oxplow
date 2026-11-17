@@ -1290,7 +1290,7 @@ mod tests {
     fn write_context(svc: &Services, name: &str, permissions: &str, context: &str) {
         let dir = svc.layout.project_dir.join(".oxplow/extensions").join(name);
         std::fs::create_dir_all(&dir).unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             dir.join("extension.yaml"),
             format!(
                 "manifest: 2\nname: {name}\nintent:\n  purpose: test\n{permissions}context:\n{context}"

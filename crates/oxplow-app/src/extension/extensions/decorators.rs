@@ -190,7 +190,7 @@ mod tests {
     fn write(root: &Path, rel: &str, body: &str) {
         let p = root.join(rel);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-        crate::test_fixtures::write_settings_fixture(p, body).unwrap();
+        std::fs::write(p, body).unwrap();
     }
 
     /// Extension `flags` with a `flags` dataset and `decorators`.

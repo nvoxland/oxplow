@@ -2794,10 +2794,7 @@ impl ProviderRegistry {
                 message: error.to_string(),
             })?;
         for capability in oxplow_domain::capability::choosable() {
-            let key = oxplow_config::core_settings::canonical_key(&format!(
-                "activeProviders.{}",
-                capability.id
-            ));
+            let key = oxplow_config::core_settings::active_provider_key(capability.id);
             let chosen =
                 store
                     .get(&key, Some(credential_level))

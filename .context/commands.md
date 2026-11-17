@@ -872,7 +872,7 @@ metadata. Every setting supports all three levels.
 `global` level. YAML overrides are flat maps of fully qualified keys in
 `.oxplow/local.yaml` (ignored), `.oxplow/project.yaml` (shared), and
 `global_config_dir()/global.yaml` (`OXPLOW_HOME` applies). Writes validate the
-registered schema and typed runtime projection before mutation, preserve other
+registered schema and the typed view (`core_settings::config_from`) before mutation, preserve other
 keys and comments, and replace files atomically. Unsetting removes only that
 level's override. There is no personal-only key list, nested legacy format,
 legacy settings-file fallback or automatic migration.

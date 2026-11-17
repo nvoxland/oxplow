@@ -387,7 +387,7 @@ mod tests {
     fn write(dir: &Path, rel: &str, text: &str) {
         let path = dir.join(rel);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        crate::test_fixtures::write_settings_fixture(path, text).unwrap();
+        std::fs::write(path, text).unwrap();
     }
 
     #[test]
@@ -525,15 +525,8 @@ mod tests {
         write(source.path(), "bin/run.sh", "#!/bin/sh\n");
         let hash = source_hash(source.path()).unwrap();
         let dir = copy_into_store(project.path(), "x", source.path(), &hash).unwrap();
-        assert!(
-            crate::test_fixtures::write_settings_fixture(dir.join("bin/run.sh"), "changed")
-                .is_err()
-        );
-        assert!(crate::test_fixtures::write_settings_fixture(
-            dir.join("extension.yaml"),
-            "changed"
-        )
-        .is_err());
+        assert!(std::fs::write(dir.join("bin/run.sh"), "changed").is_err());
+        assert!(std::fs::write(dir.join("extension.yaml"), "changed").is_err());
         remove(project.path(), "x", &[hash]);
         assert!(!dir.exists());
     }

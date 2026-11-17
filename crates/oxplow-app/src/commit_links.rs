@@ -173,7 +173,7 @@ mod tests {
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         std::fs::create_dir_all(root.join("src")).unwrap();
-        crate::test_fixtures::write_settings_fixture(root.join("src/a.rs"), "fn a() {}\n").unwrap();
+        std::fs::write(root.join("src/a.rs"), "fn a() {}\n").unwrap();
         commit_all(&root, "base");
         capture(svc, &["src/a.rs"]).await;
 
@@ -186,8 +186,7 @@ mod tests {
             ))
             .await
             .unwrap();
-        crate::test_fixtures::write_settings_fixture(root.join("src/a.rs"), "fn a() { 1 }\n")
-            .unwrap();
+        std::fs::write(root.join("src/a.rs"), "fn a() { 1 }\n").unwrap();
         capture(svc, &["src/a.rs"]).await;
         svc.hook_ingest
             .ingest(hook(
@@ -216,8 +215,7 @@ mod tests {
             )]
         );
         // Edited outside oxplow and committed: no snapshot row holds it.
-        crate::test_fixtures::write_settings_fixture(root.join("src/a.rs"), "fn a() { 2 }\n")
-            .unwrap();
+        std::fs::write(root.join("src/a.rs"), "fn a() { 2 }\n").unwrap();
         let other = commit_all(&root, "something else");
         index_and_link(svc, &other).await;
         assert_eq!(links(svc, &other).await, vec![]);

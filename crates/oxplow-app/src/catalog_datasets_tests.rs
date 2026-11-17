@@ -23,7 +23,7 @@ async fn rows(fx: &ThreadFixture, sql: &str) -> Vec<Vec<Value>> {
 fn write(root: &std::path::Path, rel: &str, body: &str) {
     let path = root.join(".oxplow/extensions/acme").join(rel);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    crate::test_fixtures::write_settings_fixture(path, body).unwrap();
+    std::fs::write(path, body).unwrap();
 }
 
 /// A project extension is a row once it activates, and the row follows
@@ -265,8 +265,7 @@ async fn waiting_permissions_are_a_problem_only_for_an_extension_that_is_on() {
             "extension.yaml",
             &format!("{MANIFEST}permissions: [ai.compute]\n"),
         );
-        crate::test_fixtures::write_settings_fixture(root.join(".oxplow/local.yaml"), personal)
-            .unwrap();
+        std::fs::write(root.join(".oxplow/local.yaml"), personal).unwrap();
         fx.svc.reload_config_from_disk().unwrap();
         fx.svc
             .extension_activation

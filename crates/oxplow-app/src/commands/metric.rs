@@ -358,7 +358,7 @@ pub fn ops(target: MetricTarget) -> Vec<Op> {
                 change(
                     &target,
                     invocation.actor(),
-                    "metrics",
+                    oxplow_config::core_settings::keys::METRICS,
                     Some(oxplow_config::core_settings::metric_preferences(&value)),
                     super::config_commands::Layer::Project,
                 )
@@ -632,12 +632,12 @@ mod tests {
         let (svc, dir) = services().await;
         let ext = dir.path().join(".oxplow/extensions/project");
         std::fs::create_dir_all(&ext).unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             ext.join("count.star"),
             "def transform(input):\n    return {\"facts\": [{\"measure\": \"oxplow.ast_hit\", \"value\": 42, \"rule\": \"answer\", \"subject\": uri.build(\"oxplow/dir\", path = \".\")}]}\n",
         )
         .unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             ext.join("extension.yaml"),
             "manifest: 2\nname: project\nintent:\n  purpose: test\npermissions: [files.read]\ncollectors:\n  - { id: repo.answer, doc: answer, runtime: starlark, entry: count.star, facts: [oxplow.ast_hit] }\n",
         )
@@ -683,12 +683,12 @@ mod tests {
         let (svc, dir) = services().await;
         let ext = dir.path().join(".oxplow/extensions/project");
         std::fs::create_dir_all(&ext).unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             ext.join("bad.star"),
             "def transform(input):\n    return 1 // 0\n",
         )
         .unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             ext.join("extension.yaml"),
             "manifest: 2\nname: project\nintent:\n  purpose: test\npermissions: [files.read]\ncollectors:\n  - { id: repo.bad, runtime: starlark, entry: bad.star, facts: [oxplow.ast_hit] }\n",
         )

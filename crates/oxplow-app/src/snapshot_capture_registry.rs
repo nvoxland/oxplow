@@ -355,16 +355,8 @@ mod tests {
     async fn each_stream_has_its_own_filter_and_all_follow_generated() {
         let main = tempfile::tempdir().unwrap();
         let tree = tempfile::tempdir().unwrap();
-        crate::test_fixtures::write_settings_fixture(
-            main.path().join(".gitignore"),
-            "only-in-main\n",
-        )
-        .unwrap();
-        crate::test_fixtures::write_settings_fixture(
-            tree.path().join(".gitignore"),
-            "only-in-tree\n",
-        )
-        .unwrap();
+        std::fs::write(main.path().join(".gitignore"), "only-in-main\n").unwrap();
+        std::fs::write(tree.path().join(".gitignore"), "only-in-tree\n").unwrap();
         let reg = SnapshotCaptureRegistry::new(config_for(main.path()));
         let of = |svc: &SnapshotCaptureService, path: &str| {
             svc.workspace_filter()

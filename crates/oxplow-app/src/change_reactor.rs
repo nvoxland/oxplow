@@ -526,13 +526,9 @@ mod tests {
     /// A repo with one committed file and an uncommitted edit.
     fn repo(root: &std::path::Path) {
         std::fs::create_dir_all(root.join("src")).unwrap();
-        crate::test_fixtures::write_settings_fixture(root.join("src/lib.rs"), BEFORE).unwrap();
+        std::fs::write(root.join("src/lib.rs"), BEFORE).unwrap();
         crate::test_fixtures::commit_all(root, "base");
-        crate::test_fixtures::write_settings_fixture(
-            root.join("src/lib.rs"),
-            "fn a() -> i32 {\n    2\n}\n",
-        )
-        .unwrap();
+        std::fs::write(root.join("src/lib.rs"), "fn a() -> i32 {\n    2\n}\n").unwrap();
     }
 
     /// A take refreshes the requests live on its stream: one with a turn
@@ -647,11 +643,7 @@ mod tests {
             ref other => panic!("{other:?}"),
         };
         crate::change_analysis::hold_running_for_tests(&f.svc, id);
-        crate::test_fixtures::write_settings_fixture(
-            f.svc.layout.project_dir.join("src/other.rs"),
-            "fn x() {}\n",
-        )
-        .unwrap();
+        std::fs::write(f.svc.layout.project_dir.join("src/other.rs"), "fn x() {}\n").unwrap();
         let ev = log(&f.svc, taken(false, 1)).await;
         reactor.handle(&ev).await.unwrap();
         assert_eq!(
@@ -667,10 +659,8 @@ mod tests {
         let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
         repo(&root);
-        crate::test_fixtures::write_settings_fixture(root.join("src/staged.rs"), "fn s() {}\n")
-            .unwrap();
-        crate::test_fixtures::write_settings_fixture(root.join("src/loose.rs"), "fn l() {}\n")
-            .unwrap();
+        std::fs::write(root.join("src/staged.rs"), "fn s() {}\n").unwrap();
+        std::fs::write(root.join("src/loose.rs"), "fn l() {}\n").unwrap();
         let out = std::process::Command::new("git")
             .args(["add", "src/staged.rs"])
             .current_dir(&root)
@@ -742,7 +732,7 @@ mod tests {
         let write = |rel: &str, text: &str| {
             let path = root.join(rel);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            crate::test_fixtures::write_settings_fixture(path, text).unwrap();
+            std::fs::write(path, text).unwrap();
         };
         write(".gitignore", "ignored.txt\n");
         for path in [
@@ -856,7 +846,7 @@ mod tests {
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         repo(&root);
-        crate::test_fixtures::write_settings_fixture(root.join("a.txt"), "a\n").unwrap();
+        std::fs::write(root.join("a.txt"), "a\n").unwrap();
         crate::test_fixtures::commit_all(&root, "a");
         let stream = svc.streams.list_streams().await.unwrap()[0].id.to_string();
         let target = || ChangeTarget::Working {
@@ -870,7 +860,7 @@ mod tests {
         refresh_files(svc, target()).await.unwrap();
         assert!(refresh_paths(svc, target(), &paths).await.unwrap());
 
-        crate::test_fixtures::write_settings_fixture(root.join("a.txt"), "b\n").unwrap();
+        std::fs::write(root.join("a.txt"), "b\n").unwrap();
         crate::test_fixtures::commit_all(&root, "b");
         assert!(
             !refresh_paths(svc, target(), &paths).await.unwrap(),
@@ -879,7 +869,7 @@ mod tests {
         refresh_files(svc, target()).await.unwrap();
 
         let git_dir = git2::Repository::open(&root).unwrap().path().to_path_buf();
-        crate::test_fixtures::write_settings_fixture(git_dir.join("MERGE_HEAD"), "0\n").unwrap();
+        std::fs::write(git_dir.join("MERGE_HEAD"), "0\n").unwrap();
         assert!(
             !refresh_paths(svc, target(), &paths).await.unwrap(),
             "a merge under way"
@@ -895,7 +885,7 @@ mod tests {
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         repo(&root);
-        crate::test_fixtures::write_settings_fixture(root.join("a.txt"), "a\n").unwrap();
+        std::fs::write(root.join("a.txt"), "a\n").unwrap();
         let base = crate::test_fixtures::commit_all(&root, "a");
         let stream = svc.streams.list_streams().await.unwrap()[0].id.to_string();
         let target = || ChangeTarget::Range {
@@ -904,7 +894,7 @@ mod tests {
             head: "working".into(),
         };
         refresh_files(svc, target()).await.unwrap();
-        crate::test_fixtures::write_settings_fixture(root.join("a.txt"), "changed\n").unwrap();
+        std::fs::write(root.join("a.txt"), "changed\n").unwrap();
         let paths: std::collections::BTreeSet<String> = ["a.txt".to_string()].into();
         assert!(refresh_paths(svc, target(), &paths).await.unwrap());
         let rows = svc
@@ -932,8 +922,8 @@ mod tests {
         let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
         repo(&root);
-        crate::test_fixtures::write_settings_fixture(root.join("heard.txt"), "1\n").unwrap();
-        crate::test_fixtures::write_settings_fixture(root.join("added.txt"), "1\n").unwrap();
+        std::fs::write(root.join("heard.txt"), "1\n").unwrap();
+        std::fs::write(root.join("added.txt"), "1\n").unwrap();
         tokio::spawn(follow_working_files(
             f.svc.clone(),
             Duration::from_millis(400),
@@ -988,8 +978,7 @@ mod tests {
         let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
         repo(&root);
-        crate::test_fixtures::write_settings_fixture(root.join("src/new.rs"), "fn n() {}\n")
-            .unwrap();
+        std::fs::write(root.join("src/new.rs"), "fn n() {}\n").unwrap();
         tokio::spawn(watch_working_files(f.svc.clone()));
         let staged = |path: &'static str| {
             let svc = f.svc.clone();
@@ -1182,13 +1171,9 @@ mod tests {
         let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
         std::fs::create_dir_all(root.join("src")).unwrap();
-        crate::test_fixtures::write_settings_fixture(root.join("src/lib.rs"), BEFORE).unwrap();
+        std::fs::write(root.join("src/lib.rs"), BEFORE).unwrap();
         let base = crate::test_fixtures::commit_all(&root, "base");
-        crate::test_fixtures::write_settings_fixture(
-            root.join("src/lib.rs"),
-            "fn a() -> i32 {\n    2\n}\n",
-        )
-        .unwrap();
+        std::fs::write(root.join("src/lib.rs"), "fn a() -> i32 {\n    2\n}\n").unwrap();
         let head = crate::test_fixtures::commit_all(&root, "change");
         let range = |head: &str| ChangeTarget::Range {
             stream_id: Some("str1".into()),
@@ -1201,8 +1186,7 @@ mod tests {
         let fixed = crate::change_analysis::ensure_change(&f.svc, range(&format!("git:{head}")))
             .await
             .unwrap();
-        crate::test_fixtures::write_settings_fixture(root.join("src/new.rs"), "fn n() {}\n")
-            .unwrap();
+        std::fs::write(root.join("src/new.rs"), "fn n() {}\n").unwrap();
         let reactor = ChangeReactor::new(Arc::downgrade(&f.svc));
         reactor
             .handle(&log(&f.svc, head_moved()).await)

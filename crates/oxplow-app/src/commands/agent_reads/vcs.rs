@@ -257,8 +257,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
         let svc = crate::Services::in_memory(dir.path()).await.unwrap();
-        crate::test_fixtures::write_settings_fixture(dir.path().join("b.txt"), "one\ntwo\n")
-            .unwrap();
+        std::fs::write(dir.path().join("b.txt"), "one\ntwo\n").unwrap();
         let repo = git2::Repository::open(dir.path()).unwrap();
         let mut idx = repo.index().unwrap();
         idx.add_path(std::path::Path::new("b.txt")).unwrap();
@@ -269,8 +268,7 @@ mod tests {
         let commit = repo
             .commit(Some("HEAD"), &sig, &sig, "add b", &tree, &[&parent])
             .unwrap();
-        crate::test_fixtures::write_settings_fixture(dir.path().join("b.txt"), "one\ntwo\nthree\n")
-            .unwrap();
+        std::fs::write(dir.path().join("b.txt"), "one\ntwo\nthree\n").unwrap();
 
         let lines = svc
             .commands
@@ -342,7 +340,7 @@ mod tests {
     }
 
     fn commit_file(dir: &std::path::Path, path: &str, body: &str, message: &str) -> String {
-        crate::test_fixtures::write_settings_fixture(dir.join(path), body).unwrap();
+        std::fs::write(dir.join(path), body).unwrap();
         let repo = git2::Repository::open(dir).unwrap();
         let mut idx = repo.index().unwrap();
         idx.add_path(std::path::Path::new(path)).unwrap();
@@ -428,7 +426,7 @@ mod tests {
             "{err:?}"
         );
 
-        crate::test_fixtures::write_settings_fixture(dir.path().join("a.txt"), "3\n").unwrap();
+        std::fs::write(dir.path().join("a.txt"), "3\n").unwrap();
         let status = run("oxplow.vcs.status", json!({})).await.unwrap().result;
         assert!(status["entries"].to_string().contains("a.txt"), "{status}");
         let branches = run("oxplow.vcs.branches", json!({})).await.unwrap().result;

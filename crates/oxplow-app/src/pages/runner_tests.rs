@@ -205,8 +205,7 @@ async fn a_page_whose_needs_are_unmet_says_so_and_runs_nothing() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_resource_page_reads_its_content() {
     let (dir, svc) = fixture().await;
-    crate::test_fixtures::write_settings_fixture(dir.path().join("notes.txt"), "0123456789")
-        .unwrap();
+    std::fs::write(dir.path().join("notes.txt"), "0123456789").unwrap();
     let uri = |path: &str| SqlCell::Text(format!("oxplow:oxplow/file?path={path}"));
     let r = run(&svc, "acme/file-look", &[("uri", uri("notes.txt"))]).await;
     for name in ["content", "shown", "bare"] {
@@ -490,7 +489,7 @@ async fn a_replaceable_node_runs_the_replacement_that_stands_in_for_it() {
     let write = |rel: &str, body: &str| {
         let p = dir.path().join(rel);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-        crate::test_fixtures::write_settings_fixture(p, body).unwrap();
+        std::fs::write(p, body).unwrap();
     };
     write(
         ".oxplow/extensions/acme/extension.yaml",
@@ -543,7 +542,7 @@ async fn a_model_bound_target_is_replaced_by_the_items_own_store() {
     let write = |rel: &str, body: &str| {
         let p = dir.path().join(rel);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-        crate::test_fixtures::write_settings_fixture(p, body).unwrap();
+        std::fs::write(p, body).unwrap();
     };
     write(
         ".oxplow/extensions/acme/extension.yaml",
@@ -586,7 +585,7 @@ async fn a_knowledge_body_is_replaced_by_the_pages_own_store() {
     let write = |rel: &str, body: &str| {
         let p = dir.path().join(rel);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-        crate::test_fixtures::write_settings_fixture(p, body).unwrap();
+        std::fs::write(p, body).unwrap();
     };
     write(
         ".oxplow/extensions/acme/extension.yaml",

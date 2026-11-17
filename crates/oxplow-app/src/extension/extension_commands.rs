@@ -1909,7 +1909,7 @@ mod tests {
     fn write(root: &Path, rel: &str, body: &str) {
         let p = root.join(rel);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-        crate::test_fixtures::write_settings_fixture(p, body).unwrap();
+        std::fs::write(p, body).unwrap();
     }
 
     /// Renames a thread to done.
@@ -2357,7 +2357,7 @@ mod tests {
         write_ext(d.path(), "ab", GOOD, &files);
         let manifest = d.path().join(".oxplow/extensions/ab/extension.yaml");
         let text = std::fs::read_to_string(&manifest).unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             &manifest,
             text.replace("name: ab\n", "name: ab\nnamespace: a_b\n"),
         )

@@ -13,7 +13,7 @@ use crate::test_fixtures::{services_with_thread, ThreadFixture};
 pub(crate) fn write(root: &Path, rel: &str, body: &str) {
     let path = root.join(rel);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    crate::test_fixtures::write_settings_fixture(path, body).unwrap();
+    std::fs::write(path, body).unwrap();
 }
 
 /// An extension whose commands read and write its own private state and

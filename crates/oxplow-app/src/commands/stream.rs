@@ -754,7 +754,7 @@ mod tests {
     async fn archiving_closes_its_terminals() {
         let fx = services_with_thread().await;
         let root = fx.svc.layout.project_dir.clone();
-        crate::test_fixtures::write_settings_fixture(root.join("base.txt"), "b\n").unwrap();
+        std::fs::write(root.join("base.txt"), "b\n").unwrap();
         crate::test_fixtures::commit_all(&root, "base");
         let main = fx.svc.vcs.head(&root).await.unwrap().branch.unwrap();
         let out = fx
@@ -830,7 +830,7 @@ mod tests {
     async fn archiving_logs_stream_archived_with_its_threads() {
         let fx = services_with_thread().await;
         let root = fx.svc.layout.project_dir.clone();
-        crate::test_fixtures::write_settings_fixture(root.join("base.txt"), "b\n").unwrap();
+        std::fs::write(root.join("base.txt"), "b\n").unwrap();
         crate::test_fixtures::commit_all(&root, "base");
         let main = fx.svc.vcs.head(&root).await.unwrap().branch.unwrap();
         let out = fx

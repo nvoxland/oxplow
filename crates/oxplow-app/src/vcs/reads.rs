@@ -173,7 +173,7 @@ mod tests {
         let f = services_with_thread().await;
         let svc = &f.svc;
         let ws = svc.layout.project_dir.clone();
-        crate::test_fixtures::write_settings_fixture(ws.join("a.txt"), "one\n").unwrap();
+        std::fs::write(ws.join("a.txt"), "one\n").unwrap();
         let sha = commit_all(&ws, "c1");
         let rev = Revision::git(sha.clone());
         let detail = revision(svc, None, &Revision::git("HEAD"))
@@ -182,7 +182,7 @@ mod tests {
             .unwrap();
         assert_eq!(detail.info.id, sha);
         assert!(revision(svc, None, &Revision::Working).await.is_err());
-        crate::test_fixtures::write_settings_fixture(ws.join("a.txt"), "one\nnew\n").unwrap();
+        std::fs::write(ws.join("a.txt"), "one\nnew\n").unwrap();
         let lines = blame(svc, None, "a.txt", &Revision::Working).await.unwrap();
         assert_eq!(
             lines.iter().map(|l| l.revision.clone()).collect::<Vec<_>>(),

@@ -3050,7 +3050,7 @@ mod tests {
         } else {
             "permissions: [files.read]\n"
         };
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             manifest,
             format!("manifest: 2\nname: project\nintent:\n  purpose: test\n{permissions}{blocks}"),
         )
@@ -3078,7 +3078,7 @@ mod tests {
     #[tokio::test]
     async fn a_snapshot_runs_each_enabled_collector_exactly_once() {
         let (svc, dir) = fixture().await;
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             project_ext_file(dir.path(), "once.star"),
             "def transform(input):\n    return {\"facts\": [{\"measure\": \"code_metrics.ast_hit\", \"value\": 1, \"rule\": \"once\", \"subject\": \"oxplow:oxplow/dir?path=.\"}]}\n",
         )
@@ -3119,7 +3119,7 @@ mod tests {
     #[tokio::test]
     async fn a_fact_collector_gets_the_event_envelope() {
         let (svc, dir) = fixture().await;
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             project_ext_file(dir.path(), "seen.star"),
             "def transform(input):\n    return {\"facts\": [{\"measure\": \"code_metrics.ast_hit\", \"value\": 1, \"rule\": json.encode(input[\"event\"]), \"subject\": \"oxplow:oxplow/dir?path=.\"}]}\n",
         )
@@ -3163,7 +3163,7 @@ mod tests {
     #[tokio::test]
     async fn a_deferred_snapshot_run_covers_every_skipped_snapshot() {
         let (svc, dir) = fixture().await;
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             project_ext_file(dir.path(), "seen.star"),
             "def transform(input):\n    return {\"facts\": [{\"measure\": \"code_metrics.ast_hit\", \"value\": 1, \"rule\": \"seen\", \"subject\": uri.build(\"oxplow/file\", path = f[\"path\"]), \"path\": f[\"path\"]} for f in files(\"**\")]}\n",
         )
@@ -3535,7 +3535,7 @@ mod tests {
     #[tokio::test]
     async fn a_fact_collectors_capture_and_run_record_commit_together() {
         let (svc, dir) = fixture().await;
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             project_ext_file(dir.path(), "once.star"),
             "def transform(input):\n    return {\"facts\": [{\"measure\": \"code_metrics.ast_hit\", \"value\": 1, \"rule\": \"once\", \"subject\": \"oxplow:oxplow/dir?path=.\"}]}\n",
         )
@@ -3606,7 +3606,7 @@ mod tests {
     #[tokio::test]
     async fn a_run_whose_facts_are_refused_is_a_failed_run() {
         let (svc, dir) = fixture().await;
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             project_ext_file(dir.path(), "bare.star"),
             "def transform(input):\n    return {\"facts\": [{\"measure\": \"code_metrics.ast_hit\", \"value\": 1, \"rule\": \"bare\", \"subject\": \"oxplow:oxplow/dir?path=.\", \"dims\": {\"language\": \"rust\"}}]}\n",
         )
@@ -3668,7 +3668,7 @@ mod tests {
         measure: &str,
         measures: &str,
     ) -> (String, Option<String>, i64) {
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             project_ext_file(dir.path(), &format!("{id}.star")),
             format!(
                 "def transform(input):\n    return {{\"facts\": [{{\"measure\": \"{measure}\", \"value\": 1, \"subject\": \"oxplow:oxplow/file?path=src/a.rs\"}}]}}\n"
@@ -3834,7 +3834,7 @@ mod tests {
     async fn run_one_collector_records_facts_with_version_and_branch() {
         let (svc, dir) = fixture().await;
         // A tree-derived collector emitting a per-file `code_metrics.ast_hit` FACT.
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             project_ext_file(dir.path(), "metrics/unsafe.star"),
             r#"
 def transform(input):
@@ -4024,7 +4024,7 @@ def transform(input):
         let write = |rel: &str, body: &str| {
             let p = dir.path().join(rel);
             std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-            crate::test_fixtures::write_settings_fixture(p, body).unwrap();
+            std::fs::write(p, body).unwrap();
         };
         write(
             "src/a.rs",
@@ -4110,11 +4110,7 @@ def transform(input):
                 .unwrap()
         };
         std::fs::create_dir_all(dir.path().join("src")).unwrap();
-        crate::test_fixtures::write_settings_fixture(
-            dir.path().join("src/a.rs"),
-            "fn a() { unsafe { x(); } }\n",
-        )
-        .unwrap();
+        std::fs::write(dir.path().join("src/a.rs"), "fn a() { unsafe { x(); } }\n").unwrap();
         let out = sync().await.unwrap();
         assert_eq!(
             out.result["facts"], 1,
@@ -4142,11 +4138,7 @@ def transform(input):
         let (svc, dir) = fixture().await;
         enable(&svc, &["code_metrics.rust.unsafe_blocks".into()], true).await;
         std::fs::create_dir_all(dir.path().join("src")).unwrap();
-        crate::test_fixtures::write_settings_fixture(
-            dir.path().join("src/a.rs"),
-            "fn a() { unsafe { x(); } }\n",
-        )
-        .unwrap();
+        std::fs::write(dir.path().join("src/a.rs"), "fn a() { unsafe { x(); } }\n").unwrap();
 
         let first = svc.metrics.rebuild_baseline(true).await.unwrap();
         assert!(first.ran);
@@ -4257,9 +4249,9 @@ def transform(input):
     #[tokio::test]
     async fn collectors_do_not_run_without_snapshot_contents() {
         let (svc, dir) = fixture().await;
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             oxplow_config::config_path(dir.path()),
-            "metrics:\n  - use: code_metrics.rust.unsafe_blocks\n",
+            "oxplow.metrics:\n  - use: code_metrics.rust.unsafe_blocks\n",
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();
@@ -4346,11 +4338,7 @@ def transform(input):
 
         let script = project_ext_file(dir.path(), "metrics/boom.star");
         std::fs::create_dir_all(script.parent().unwrap()).unwrap();
-        crate::test_fixtures::write_settings_fixture(
-            &script,
-            "def transform(input):\n    fail(\"boom\")\n",
-        )
-        .unwrap();
+        std::fs::write(&script, "def transform(input):\n    fail(\"boom\")\n").unwrap();
         let collector = starlark_collector_emits(
             "acme.boom",
             "metrics/boom.star",
@@ -4392,8 +4380,7 @@ def transform(input):
 
         let script = project_ext_file(dir.path(), "metrics/g.star");
         std::fs::create_dir_all(script.parent().unwrap()).unwrap();
-        let write =
-            |body: &str| crate::test_fixtures::write_settings_fixture(&script, body).unwrap();
+        let write = |body: &str| std::fs::write(&script, body).unwrap();
         write(
             "def transform(input):\n    \
              return {\"facts\": [{\"measure\": \"code_metrics.todo\", \"value\": 1.0, \
@@ -4596,7 +4583,7 @@ def transform(input):
             .await
             .unwrap();
 
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             project_ext_file(dir.path(), "metrics/eff.star"),
             r#"
 def transform(input):
@@ -4650,7 +4637,7 @@ def transform(input):
         let (svc, dir) = fixture().await;
         // A collector emitting a per-function `oxplow.fn_length` FACT — the located
         // items behind the metric (the drill-in reads them via findings_for_spec).
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             project_ext_file(dir.path(), "metrics/longfns.star"),
             r#"
 def transform(input):
@@ -4840,7 +4827,7 @@ def transform(input):
         // measures. A fact on an undefined one fails the run (it was
         // dropped behind an "ok"), so nothing of that run is written.
         let (svc, dir) = fixture().await;
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             project_ext_file(dir.path(), "metrics/mixed.star"),
             r#"
 def transform(input):
@@ -4904,7 +4891,7 @@ def transform(input):
         // (it was dropped behind an "ok"). Here it declares only
         // `oxplow.complexity` and emits `oxplow.fn_length` too.
         let (svc, dir) = fixture().await;
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             project_ext_file(dir.path(), "collectors/emits.star"),
             r#"
 def transform(input):
@@ -4976,7 +4963,7 @@ def transform(input):
         // re-derives Σnum/Σden exactly (coverage %, pass rate) rather than
         // averaging pre-divided values. Prove they round-trip onto the fact row.
         let (svc, dir) = fixture().await;
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             project_ext_file(dir.path(), "collectors/ratio.star"),
             r#"
 def transform(input):
@@ -5345,9 +5332,9 @@ def transform(input):
         // built-in skip: the Detail page target, delta_vs_target, and the
         // warn/fail findings all read the spec row.
         let (svc, dir) = fixture().await;
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             oxplow_config::config_path(dir.path()),
-            "metrics:\n  - use: code_metrics.todos\n    target: 5\n    warnAt: 8\n    failAt: 13\n",
+            "oxplow.metrics:\n  - use: code_metrics.todos\n    target: 5\n    warnAt: 8\n    failAt: 13\n",
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();
@@ -5535,9 +5522,9 @@ def transform(input):
     async fn used_builtin_resolves_at_builtin_scope_and_runs_embedded() {
         let (svc, dir) = fixture().await;
         // A user enables a bundled built-in by `use:` — no project script.
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             oxplow_config::config_path(dir.path()),
-            "metrics:\n  - use: code_metrics.rust.unsafe_blocks\n    target: 3\n",
+            "oxplow.metrics:\n  - use: code_metrics.rust.unsafe_blocks\n    target: 3\n",
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();
@@ -5624,7 +5611,7 @@ def transform(input):
         let (svc, dir) = fixture().await;
         let ext = dir.path().join(".oxplow/extensions/acme");
         std::fs::create_dir_all(ext.join("collectors")).unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             ext.join("extension.yaml"),
             "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [files.read]\n\
              measures:\n  - { key: acme.todo, title: TODOs, fold: last }\n\
@@ -5632,7 +5619,7 @@ def transform(input):
              collectors:\n  - { id: acme.todo_scan, runtime: starlark, entry: collectors/todo.star, facts: [acme.todo] }\n",
         )
         .unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             ext.join("collectors/todo.star"),
             "def transform(input):\n    return {\"facts\": [{\"measure\": \"acme.todo\", \"value\": 3}]}\n",
         )
@@ -5677,7 +5664,7 @@ def transform(input):
         // Disabling the extension takes its metric out of the catalog; the
         // measure (and its facts) stay for when it's turned back on.
         std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             dir.path().join(".oxplow/local.yaml"),
             "oxplow.extensions.acme.enabled: false\n",
         )
@@ -5719,7 +5706,7 @@ def transform(input):
         for (name, measure) in [("alpha", "alpha.todo"), ("beta", "beta.todo")] {
             let ext = dir.path().join(".oxplow/extensions").join(name);
             std::fs::create_dir_all(&ext).unwrap();
-            crate::test_fixtures::write_settings_fixture(
+            std::fs::write(
                 ext.join("extension.yaml"),
                 format!(
                     "manifest: 2\nname: {name}\nintent:\n  purpose: test\n\
@@ -5765,7 +5752,7 @@ def transform(input):
             let (svc, dir) = fixture().await;
             let ext = dir.path().join(".oxplow/extensions/acme");
             std::fs::create_dir_all(&ext).unwrap();
-            crate::test_fixtures::write_settings_fixture(
+            std::fs::write(
                 ext.join("extension.yaml"),
                 format!(
                     "manifest: 2\nname: acme\nintent:\n  purpose: test\n\
@@ -5815,9 +5802,9 @@ def transform(input):
             .iter()
             .any(|c| c.key == "code_metrics.duplicate_lines"));
 
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             dir.path().join(".oxplow/project.yaml"),
-            "metrics:\n  - use: code_metrics.duplicate_lines\n",
+            "oxplow.metrics:\n  - use: code_metrics.duplicate_lines\n",
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();
@@ -5845,7 +5832,7 @@ def transform(input):
         let (svc, dir) = fixture().await;
         let ext = dir.path().join(".oxplow/extensions/acme");
         std::fs::create_dir_all(ext.join("collectors")).unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             ext.join("extension.yaml"),
             "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [files.read]\n\
              measures:\n  - { key: acme.todo, title: TODOs, fold: last }\n\
@@ -5854,7 +5841,7 @@ def transform(input):
              - { id: acme.always, runtime: starlark, entry: collectors/todo.star, facts: [acme.todo] }\n",
         )
         .unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             ext.join("collectors/todo.star"),
             "def transform(input):\n    return {\"facts\": []}\n",
         )
@@ -5885,9 +5872,9 @@ def transform(input):
 
         // The project turns it on: its collector runs.
         std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             dir.path().join(".oxplow/project.yaml"),
-            "metrics:\n  - use: acme.todos\n",
+            "oxplow.metrics:\n  - use: acme.todos\n",
         )
         .unwrap();
         svc.reload_config_from_disk().unwrap();
@@ -5903,7 +5890,7 @@ def transform(input):
         let (svc, dir) = fixture().await;
         let ext = dir.path().join(".oxplow/extensions/acme");
         std::fs::create_dir_all(&ext).unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             ext.join("extension.yaml"),
             "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [files.read]\n\
              dimensions:\n  - { key: acme.status, label: Status, entity: v_thread, expr: e.mark }\n\
@@ -5931,7 +5918,7 @@ def transform(input):
         );
         // Disabling the extension removes its dimension too.
         std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             dir.path().join(".oxplow/local.yaml"),
             "oxplow.extensions.acme.enabled: false\n",
         )
@@ -5953,7 +5940,7 @@ def transform(input):
         use std::os::unix::fs::PermissionsExt;
         let (svc, dir) = fixture().await;
         let script = project_ext_file(dir.path(), "tools/count.sh");
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             &script,
             "#!/bin/sh\necho '{\"facts\":[{\"measure\":\"repo.n\",\"value\":2}]}'\n",
         )
@@ -6282,7 +6269,7 @@ def transform(input):
         for f in &t.files {
             let path = dir.path().join(&f.path);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            crate::test_fixtures::write_settings_fixture(path, &f.content).unwrap();
+            std::fs::write(path, &f.content).unwrap();
         }
         crate::test_fixtures::activate_with_problems(&svc).await;
         let spec = svc

@@ -243,7 +243,6 @@ mod tests {
 
     fn empty_session_mgr() -> LspSessionManager {
         let cfg = Arc::new(RwLock::new(oxplow_config::OxplowConfig {
-            agents: vec![],
             project_name: "p".into(),
             lsp_servers: vec![],
             agent_prompt_append: String::new(),

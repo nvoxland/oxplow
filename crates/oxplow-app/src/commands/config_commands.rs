@@ -32,8 +32,6 @@ pub struct ConfigTarget {
     pub catalog: Option<Arc<crate::extension::extension_catalog::ExtensionCatalog>>,
     pub project_dir: PathBuf,
     pub events: EventBus,
-    /// Woken after each swap of the in-memory config.
-    pub applied: Arc<tokio::sync::Notify>,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -114,11 +112,6 @@ impl Layer {
         store: &oxplow_config::settings::SettingsStore,
         key: &str,
     ) -> Result<Option<Value>, CommandError> {
-        let key = if key.starts_with("oxplow.") {
-            key.to_owned()
-        } else {
-            oxplow_config::core_settings::canonical_key(key)
-        };
         let levels: &[Level] = match self {
             Self::Local => &Level::PRECEDENCE,
             Self::Project => &[Level::Project, Level::Global],
@@ -129,11 +122,11 @@ impl Layer {
             message: error.to_string(),
         };
         for level in levels {
-            if let Some(value) = store.get(&key, Some(*level)).map_err(failed)?.value {
+            if let Some(value) = store.get(key, Some(*level)).map_err(failed)?.value {
                 return Ok(Some(value));
             }
         }
-        Ok(store.definition(&key).map_err(failed)?.default)
+        Ok(store.definition(key).map_err(failed)?.default)
     }
 }
 
@@ -162,7 +155,6 @@ impl ConfigTarget {
             message: e.to_string(),
         })?;
         *self.config.write().unwrap_or_else(|e| e.into_inner()) = fresh;
-        self.applied.notify_waiters();
         self.events.emit(OxplowEvent::ConfigChanged);
         Ok(())
     }
@@ -179,7 +171,7 @@ pub(super) fn preflight(
         field: Some("/value".into()),
         message: e.to_string(),
     };
-    let mut layers = std::collections::BTreeMap::new();
+    let mut layers = std::collections::HashMap::new();
     for at in Level::PRECEDENCE {
         let mut values = store.layer(at).map_err(fail)?;
         if at == level {
@@ -191,7 +183,7 @@ pub(super) fn preflight(
                 }
             }
         }
-        layers.insert(format!("{at:?}"), values);
+        layers.insert(at, values);
     }
     let fallback = target
         .project_dir
@@ -210,20 +202,18 @@ pub(super) fn preflight(
             .collect::<Vec<_>>();
         for definition in definitions {
             for at in precedence {
-                if let Some(value) = layers[&format!("{at:?}")].get(&definition.key) {
+                if let Some(value) = layers[at].get(&definition.key) {
                     store.validate(&definition.key, value).map_err(fail)?;
-                    effective.insert(definition.key, value.clone());
+                    effective.insert(definition.key, (value.clone(), (*at).into()));
                     break;
                 }
             }
         }
-        oxplow_config::parse_project_config(
-            oxplow_config::core_settings::document_from_values(&fallback, &effective),
-            &fallback,
-        )
-        .map_err(|error| CommandError::Invalid {
-            field: Some("/value".into()),
-            message: error.to_string(),
+        oxplow_config::core_settings::config_from(&fallback, &effective).map_err(|error| {
+            CommandError::Invalid {
+                field: Some("/value".into()),
+                message: error.to_string(),
+            }
         })?;
         Ok(())
     };
@@ -241,55 +231,23 @@ pub(super) fn preflight(
     Ok(())
 }
 
-/// Translate a domain action into registered settings, preserving canonical undo.
+/// Change one registered setting at one level, preserving canonical undo.
+/// The domain actions (mark generated, choose a provider, …) compose this.
 pub(crate) fn change(
     target: &ConfigTarget,
     actor: &Actor,
-    field: &str,
+    key: &str,
     value: Option<Value>,
     layer: Layer,
 ) -> Result<HandlerOutput, CommandError> {
     let store = target.settings()?;
-    let fallback = target
-        .project_dir
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy();
-    let bindings = oxplow_config::core_settings::bindings(&fallback);
-    let canonical = if field.starts_with("oxplow.") {
-        field.to_owned()
-    } else {
-        oxplow_config::core_settings::canonical_key(field)
-    };
-    let changes = if store.definition(&canonical).is_ok() {
-        // A registered key (including a dotted runtime leaf) changes only
-        // that setting. Sibling options retain their own level and origin.
-        vec![(canonical, value)]
-    } else {
-        let keys: Vec<_> = bindings
-            .iter()
-            .filter(|binding| binding.path.first().is_some_and(|path| path == field))
-            .map(|binding| binding.definition.key.clone())
-            .collect();
-        if keys.is_empty() {
-            return Err(CommandError::Invalid {
-                field: Some("/key".into()),
-                message: "unknown setting".into(),
-            });
-        }
-        let values = value
-            .as_ref()
-            .map(|value| {
-                oxplow_config::core_settings::values_for_runtime_field(&fallback, field, value)
-            })
-            .unwrap_or_default();
-        keys.into_iter()
-            .map(|key| {
-                let value = values.get(&key).cloned();
-                (key, value)
-            })
-            .collect()
-    };
+    if store.definition(key).is_err() {
+        return Err(CommandError::Invalid {
+            field: Some("/key".into()),
+            message: "unknown setting".into(),
+        });
+    }
+    let changes = vec![(key.to_owned(), value)];
     let fail = |e: oxplow_config::settings::SettingsError| CommandError::Invalid {
         field: Some("/value".into()),
         message: e.to_string(),
@@ -402,7 +360,10 @@ pub fn ops(target: ConfigTarget) -> Vec<Op> {
                     });
                 }
                 let mut exclude: Vec<String> = Layer::Project
-                    .value(&t.settings()?, "generated.exclude")?
+                    .value(
+                        &t.settings()?,
+                        oxplow_config::core_settings::keys::GENERATED_EXCLUDE,
+                    )?
                     .map(serde_json::from_value)
                     .transpose()
                     .map_err(|error| CommandError::Invalid {
@@ -418,7 +379,7 @@ pub fn ops(target: ConfigTarget) -> Vec<Op> {
                 change(
                     &t,
                     actor,
-                    "generated.exclude",
+                    oxplow_config::core_settings::keys::GENERATED_EXCLUDE,
                     Some(json!(exclude)),
                     Layer::Project,
                 )
@@ -458,7 +419,7 @@ pub fn ops(target: ConfigTarget) -> Vec<Op> {
                 change(
                     &t,
                     actor,
-                    &format!("activeProviders.{capability}"),
+                    &oxplow_config::core_settings::active_provider_key(&capability),
                     provider.map(|provider| json!(provider)),
                     input.level,
                 )
@@ -482,7 +443,10 @@ pub fn ops(target: ConfigTarget) -> Vec<Op> {
                     });
                 }
                 let mut chosen: serde_json::Map<String, Value> = Layer::Project
-                    .value(&t.settings()?, "replacements")?
+                    .value(
+                        &t.settings()?,
+                        oxplow_config::core_settings::keys::REPLACEMENTS,
+                    )?
                     .and_then(|v| v.as_object().cloned())
                     .unwrap_or_default();
                 match input
@@ -501,7 +465,7 @@ pub fn ops(target: ConfigTarget) -> Vec<Op> {
                 change(
                     &t,
                     actor,
-                    "replacements",
+                    oxplow_config::core_settings::keys::REPLACEMENTS,
                     Some(Value::Object(chosen)),
                     Layer::Project,
                 )
@@ -532,7 +496,6 @@ mod tests {
             )),
             project_dir: dir.path().to_path_buf(),
             events: EventBus::new(),
-            applied: Arc::new(tokio::sync::Notify::new()),
         };
         let db = Database::in_memory();
         let log = SqliteEventLogStore::new(

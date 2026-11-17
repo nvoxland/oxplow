@@ -268,7 +268,7 @@ mod tests {
         for (path, content) in fixture() {
             let file = ws.join(&path);
             std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-            crate::test_fixtures::write_settings_fixture(file, content).unwrap();
+            std::fs::write(file, content).unwrap();
         }
     }
 
@@ -331,7 +331,7 @@ mod tests {
         write_fixture(&ws);
         commit_all(&ws, "the fixture");
         // The disk moves on; the revision doesn't.
-        crate::test_fixtures::write_settings_fixture(ws.join(at("a.txt")), "changed\n").unwrap();
+        std::fs::write(ws.join(at("a.txt")), "changed\n").unwrap();
         let (fs, cx) = local(&f).await;
         run_all(&*fs, &cx, Some("git:HEAD")).await;
     }

@@ -56,7 +56,7 @@ mod tests {
         let text = serde_json::to_string_pretty(generated).expect("serializes") + "\n";
         if std::env::var_os("OXPLOW_BLESS").is_some() {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            crate::test_fixtures::write_settings_fixture(&path, text).unwrap();
+            std::fs::write(&path, text).unwrap();
             return;
         }
         let on_disk = std::fs::read_to_string(&path).unwrap_or_default();

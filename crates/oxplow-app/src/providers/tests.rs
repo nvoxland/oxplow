@@ -373,11 +373,7 @@ async fn a_provider_reads_the_host_through_what_it_needs() {
                 "permissions: [sql.read, process.run]",
                 1,
             );
-            crate::test_fixtures::write_settings_fixture(
-                &manifest,
-                format!("{text}    needs: [sql.read]\n"),
-            )
-            .unwrap();
+            std::fs::write(&manifest, format!("{text}    needs: [sql.read]\n")).unwrap();
         }
         let ext = extension(&root);
         assert_eq!(ext.providers[0].needs.is_empty(), !needs);
@@ -417,7 +413,7 @@ async fn a_provider_reads_its_extensions_configuration_through_host_call() {
         "intent:\n",
         "configuration:\n  version: 1\n  schema:\n    type: object\n    additionalProperties: false\n    properties:\n      limit: { type: integer }\n  defaults: { limit: 4 }\nintent:\n",
     );
-    crate::test_fixtures::write_settings_fixture(
+    std::fs::write(
         &manifest,
         format!("{text}    needs: [extension_config.read]\n"),
     )
@@ -483,7 +479,7 @@ async fn a_provider_command_is_declared_over_an_operation_it_lists_and_no_verb()
             "`mark` is a snapshots verb: core calls it",
         ),
     ] {
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             &manifest,
             base.replacen(
                 "permissions:",
@@ -523,7 +519,7 @@ async fn provider_args_stay_inside_the_extension_folder() {
     write_extension(&project, "");
     let manifest = project.join(".oxplow/extensions/tracker/extension.yaml");
     let text = std::fs::read_to_string(&manifest).unwrap();
-    crate::test_fixtures::write_settings_fixture(
+    std::fs::write(
         &manifest,
         text.replace(
             "    entry: bin/provider\n",
@@ -553,10 +549,9 @@ const PROGRAM_MANIFEST: &str = "manifest: 2\nname: tracker\nintent:\n  purpose: 
 fn write_program_extension(project: &Path) -> PathBuf {
     let dir = project.join(".oxplow/extensions").join(EXT);
     std::fs::create_dir_all(dir.join("bin")).unwrap();
-    crate::test_fixtures::write_settings_fixture(dir.join("extension.yaml"), PROGRAM_MANIFEST)
-        .unwrap();
-    crate::test_fixtures::write_settings_fixture(dir.join("bin/server"), "#!/bin/sh\n").unwrap();
-    crate::test_fixtures::write_settings_fixture(
+    std::fs::write(dir.join("extension.yaml"), PROGRAM_MANIFEST).unwrap();
+    std::fs::write(dir.join("bin/server"), "#!/bin/sh\n").unwrap();
+    std::fs::write(
         dir.join("provider.json"),
         serde_json::to_string_pretty(&oxplow_provider_fake::declarations()).unwrap(),
     )
@@ -567,7 +562,7 @@ fn write_program_extension(project: &Path) -> PathBuf {
 /// `manifest` loaded as the tracker extension, whose providers are empty
 /// and whose errors name `says`.
 fn assert_refused(project: &Path, dir: &Path, manifest: &str, says: &str) {
-    crate::test_fixtures::write_settings_fixture(dir.join("extension.yaml"), manifest).unwrap();
+    std::fs::write(dir.join("extension.yaml"), manifest).unwrap();
     let loaded = crate::extension::extensions::load_extensions(project)
         .into_iter()
         .find(|e| e.name == EXT)
@@ -647,7 +642,7 @@ async fn a_providers_credentials_are_declared_and_checked() {
         assert_refused(&project, &dir, &manifest, says);
     }
     // On loopback, plain http is what a local service speaks.
-    crate::test_fixtures::write_settings_fixture(
+    std::fs::write(
         dir.join("extension.yaml"),
         signed_in("http://127.0.0.1:8123/authorize", "NOTES_TOKEN"),
     )
@@ -666,7 +661,7 @@ async fn a_provider_runs_from_its_deployment() {
     let script = project.join(".oxplow/extensions/tracker/bin/provider");
     let seen = tempfile::tempdir().unwrap();
     let cwd_file = seen.path().join("cwd");
-    crate::test_fixtures::write_settings_fixture(
+    std::fs::write(
         &script,
         format!(
             "#!/bin/sh\npwd > '{}'\nexec '{}' \"$@\"\n",
@@ -717,7 +712,7 @@ async fn a_provider_cannot_declare_another_core_event_type() {
                 oxplow_domain::events::schema::ContributionEnabled,
             >(),
         });
-    crate::test_fixtures::write_settings_fixture(
+    std::fs::write(
         project.join(".oxplow/extensions/tracker/provider.json"),
         serde_json::to_string(&declared).unwrap(),
     )
@@ -847,7 +842,7 @@ async fn deploying_updated_declarations_restarts_the_instance() {
     // The provider updates: new behaviour and new declarations.
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, "bad-declarations");
-    crate::test_fixtures::write_settings_fixture(
+    std::fs::write(
         project.join(".oxplow/extensions/tracker/provider.json"),
         serde_json::to_string_pretty(&oxplow_provider_fake::bad_declarations(
             oxplow_provider_fake::declarations(),
@@ -888,7 +883,7 @@ async fn deploying_updated_declarations_restarts_the_instance() {
 #[tokio::test]
 async fn unreadable_declarations_are_held_back_naming_the_file() {
     let (fx, _ext) = deployed("").await;
-    crate::test_fixtures::write_settings_fixture(
+    std::fs::write(
         fx.svc
             .layout
             .project_dir
@@ -1466,7 +1461,7 @@ async fn an_instance_credential_is_its_own() {
         .join(EXT)
         .join("extension.yaml");
     let text = std::fs::read_to_string(&manifest).unwrap();
-    crate::test_fixtures::write_settings_fixture(
+    std::fs::write(
         &manifest,
         format!(
             "{}    credentials: [FAKE_TOKEN]\n",
@@ -1634,7 +1629,7 @@ fn declare_token(root: &Path) {
         .join(EXT)
         .join("extension.yaml");
     let text = std::fs::read_to_string(&manifest).unwrap();
-    crate::test_fixtures::write_settings_fixture(
+    std::fs::write(
         &manifest,
         format!(
             "{}    credentials: [FAKE_TOKEN]\n",
@@ -1839,7 +1834,7 @@ async fn a_project_instance_keeps_its_credentials_beside_a_global_one() {
         .join(EXT)
         .join("extension.yaml");
     let text = std::fs::read_to_string(&manifest).unwrap();
-    crate::test_fixtures::write_settings_fixture(
+    std::fs::write(
         &manifest,
         format!(
             "{}    credentials: [FAKE_TOKEN]\n",
@@ -1966,7 +1961,7 @@ async fn a_global_instances_credential_is_shared_across_projects() {
             .join(EXT)
             .join("extension.yaml");
         let text = std::fs::read_to_string(&manifest).unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             &manifest,
             format!(
                 "{}    credentials: [FAKE_TOKEN]\n",
@@ -2161,7 +2156,7 @@ async fn a_generation_restarts_only_the_instances_it_changed() {
     // Another extension is added: nothing of the provider changed.
     let other = fx.svc.layout.project_dir.join(".oxplow/extensions/other");
     std::fs::create_dir_all(&other).unwrap();
-    crate::test_fixtures::write_settings_fixture(
+    std::fs::write(
         other.join("extension.yaml"),
         "manifest: 2\nname: other\nintent:\n  purpose: unrelated\n",
     )
@@ -2216,7 +2211,7 @@ async fn a_generation_restarts_only_the_instances_it_changed() {
         .project_dir
         .join(".oxplow/extensions/tracker/bin/provider");
     let text = std::fs::read_to_string(&script).unwrap();
-    crate::test_fixtures::write_settings_fixture(&script, format!("{text}\n# edited\n")).unwrap();
+    std::fs::write(&script, format!("{text}\n# edited\n")).unwrap();
     deploy(&fx, &extension(&fx.svc.layout.project_dir)).await;
     let edited = fx.svc.providers.get(INSTANCE).await.expect("running");
     assert!(
@@ -2246,7 +2241,7 @@ fn write_oauth_extension(project: &Path, hooks: &str, authorize: &str, token: &s
         }
     }
     let text = permit_secrets(&text, &names.iter().map(String::as_str).collect::<Vec<_>>());
-    crate::test_fixtures::write_settings_fixture(
+    std::fs::write(
         &manifest,
         format!(
             "{text}    credentials:\n      - name: FAKE_TOKEN\n        oauth:\n          authorize_url: {authorize}\n          token_url: {token}\n          client_id: oxplow-test\n          scopes: [read, write]\n{more}"
@@ -3464,11 +3459,7 @@ async fn a_provider_needs_only_scopes_host_call_serves() {
         .path()
         .join(".oxplow/extensions/tracker/extension.yaml");
     let text = std::fs::read_to_string(&manifest).unwrap();
-    crate::test_fixtures::write_settings_fixture(
-        &manifest,
-        format!("{text}    needs: [config.read]\n"),
-    )
-    .unwrap();
+    std::fs::write(&manifest, format!("{text}    needs: [config.read]\n")).unwrap();
     let loaded = crate::extension::extensions::load_extensions(root.path())
         .into_iter()
         .find(|e| e.name == EXT)
@@ -3483,11 +3474,7 @@ async fn a_provider_needs_only_scopes_host_call_serves() {
         errs.is_empty(),
         "registered settings reads are a host service: {errs}"
     );
-    crate::test_fixtures::write_settings_fixture(
-        &manifest,
-        format!("{text}    needs: [config.write]\n"),
-    )
-    .unwrap();
+    std::fs::write(&manifest, format!("{text}    needs: [config.write]\n")).unwrap();
     let loaded = crate::extension::extensions::load_extensions(root.path())
         .into_iter()
         .find(|e| e.name == EXT)
@@ -3512,13 +3499,13 @@ const HARNESS: &str = "conductor/fake";
 fn write_harness_extension(project: &Path, hooks: &str) {
     let dir = project.join(".oxplow/extensions/conductor");
     std::fs::create_dir_all(dir.join("bin")).unwrap();
-    crate::test_fixtures::write_settings_fixture(
+    std::fs::write(
         dir.join("extension.yaml"),
         "manifest: 2\nname: conductor\nintent:\n  purpose: the fake agent harness\n  examples: [{ name: a }]\npermissions: [process.run]\nproviders:\n  - id: fake\n    capability: agent_harness\n    entry: bin/provider\n    declarations: provider.json\n",
     )
     .unwrap();
     let script = dir.join("bin/provider");
-    crate::test_fixtures::write_settings_fixture(
+    std::fs::write(
         &script,
         format!(
             "#!/bin/sh\nOXPLOW_FAKE_CAPABILITY=agent_harness OXPLOW_FAKE_HOOKS='{hooks}' OXPLOW_FAKE_STATE=\"{}/fake-harness-$OXPLOW_PROVIDER_ID.json\" exec '{}' \"$@\"\n",
@@ -3529,7 +3516,7 @@ fn write_harness_extension(project: &Path, hooks: &str) {
     .unwrap();
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-    crate::test_fixtures::write_settings_fixture(
+    std::fs::write(
         dir.join("provider.json"),
         serde_json::to_string_pretty(&oxplow_provider_fake::harness_declarations()).unwrap(),
     )
@@ -3623,8 +3610,7 @@ async fn a_harness_providers_verbs_are_its_process() {
     assert!(h.turns("anything").await.is_empty());
 
     let bin_dir = tempfile::tempdir().unwrap();
-    crate::test_fixtures::write_settings_fixture(bin_dir.path().join(oxplow_harness_fake::BIN), "")
-        .unwrap();
+    std::fs::write(bin_dir.path().join(oxplow_harness_fake::BIN), "").unwrap();
     let launch = h
         .launch(&launch_input(&fx, vec![bin_dir.path().to_path_buf()]))
         .await
@@ -3645,8 +3631,7 @@ async fn a_harness_providers_verbs_are_its_process() {
 async fn a_harness_provider_passes_the_harness_suite() {
     let (fx, _ext) = running_harness("").await;
     let bin_dir = tempfile::tempdir().unwrap();
-    crate::test_fixtures::write_settings_fixture(bin_dir.path().join(oxplow_harness_fake::BIN), "")
-        .unwrap();
+    std::fs::write(bin_dir.path().join(oxplow_harness_fake::BIN), "").unwrap();
     let run = crate::harness_conformance::suite(
         &fx.svc,
         "fake",
@@ -3727,14 +3712,14 @@ fn launch_input(
 fn write_snapshots_extension(project: &Path, contents: bool) {
     let dir = project.join(".oxplow/extensions/shutter");
     std::fs::create_dir_all(dir.join("bin")).unwrap();
-    crate::test_fixtures::write_settings_fixture(
+    std::fs::write(
         dir.join("extension.yaml"),
         "manifest: 2\nname: shutter\nintent:\n  purpose: the fake snapshots provider\n  examples: [{ name: a }]\npermissions: [process.run]\nproviders:\n  - id: shutter\n    capability: snapshots\n    entry: bin/provider\n    declarations: provider.json\n",
     )
     .unwrap();
     let script = dir.join("bin/provider");
     let features = if contents { "contents" } else { "" };
-    crate::test_fixtures::write_settings_fixture(
+    std::fs::write(
         &script,
         format!(
             "#!/bin/sh\nOXPLOW_FAKE_CAPABILITY=snapshots OXPLOW_FAKE_FEATURES='{features}' exec '{}' \"$@\"\n",
@@ -3744,7 +3729,7 @@ fn write_snapshots_extension(project: &Path, contents: bool) {
     .unwrap();
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-    crate::test_fixtures::write_settings_fixture(
+    std::fs::write(
         dir.join("provider.json"),
         serde_json::to_string_pretty(&oxplow_provider_fake::snapshots_declarations(contents))
             .unwrap(),
@@ -3840,7 +3825,7 @@ async fn a_snapshots_provider_marks_and_core_records_and_reads_it() {
     let (fx, stream, capture) = running_snapshots(true).await;
     assert!(capture.is_idle(), "core's capture idles");
     let project = fx.svc.layout.project_dir.clone();
-    crate::test_fixtures::write_settings_fixture(project.join("a.txt"), "alpha").unwrap();
+    std::fs::write(project.join("a.txt"), "alpha").unwrap();
 
     let first = mark_turn(&fx, stream).await;
     let op = fx
@@ -3866,7 +3851,7 @@ async fn a_snapshots_provider_marks_and_core_records_and_reads_it() {
     assert!(again.unchanged);
     assert_eq!(again.snapshot, first.snapshot);
 
-    crate::test_fixtures::write_settings_fixture(project.join("a.txt"), "beta").unwrap();
+    std::fs::write(project.join("a.txt"), "beta").unwrap();
     let edited = mark_turn(&fx, stream).await;
     assert_ne!(edited.snapshot, first.snapshot);
     let changed = active
@@ -3905,8 +3890,7 @@ async fn a_snapshots_provider_marks_and_core_records_and_reads_it() {
 #[tokio::test]
 async fn a_snapshots_provider_without_contents_records_identities_only() {
     let (fx, stream, _capture) = running_snapshots(false).await;
-    crate::test_fixtures::write_settings_fixture(fx.svc.layout.project_dir.join("a.txt"), "alpha")
-        .unwrap();
+    std::fs::write(fx.svc.layout.project_dir.join("a.txt"), "alpha").unwrap();
     let marked = mark_turn(&fx, stream).await;
     let active = fx.svc.snapshots.active().unwrap();
     assert!(!active.contents());
@@ -3972,7 +3956,7 @@ fn write_filesystem_extension(
     use base64::Engine as _;
     let dir = project.join(".oxplow/extensions").join(name);
     std::fs::create_dir_all(dir.join("bin")).unwrap();
-    crate::test_fixtures::write_settings_fixture(
+    std::fs::write(
         dir.join("extension.yaml"),
         format!("manifest: 2\nname: {name}\nintent:\n  purpose: the fake filesystem provider\n  examples: [{{ name: a }}]\npermissions: [process.run]\nproviders:\n  - id: store\n    capability: filesystem\n    entry: bin/provider\n    declarations: provider.json\n"),
     )
@@ -3987,7 +3971,7 @@ fn write_filesystem_extension(
         })
         .collect();
     let script = dir.join("bin/provider");
-    crate::test_fixtures::write_settings_fixture(
+    std::fs::write(
         &script,
         format!(
             "#!/bin/sh\nOXPLOW_FAKE_CAPABILITY=filesystem OXPLOW_FAKE_FEATURES='{}' OXPLOW_FAKE_FILES='{}' exec '{}' \"$@\"\n",
@@ -3999,7 +3983,7 @@ fn write_filesystem_extension(
     .unwrap();
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-    crate::test_fixtures::write_settings_fixture(
+    std::fs::write(
         dir.join("provider.json"),
         serde_json::to_string_pretty(&oxplow_provider_fake::filesystem_declarations(writable))
             .unwrap(),

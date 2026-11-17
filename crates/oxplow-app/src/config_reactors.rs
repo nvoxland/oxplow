@@ -3,20 +3,16 @@
 //! log, so a change made by anyone — the person's Settings page, an
 //! agent's `oxplow.config.set`, an undo — takes effect the same way.
 //!
-//! The new value comes from the event's own `after`, never from the
-//! in-memory config: the pump can see the committed event before the
-//! command's after-commit swap lands. A reactor that reads the whole
-//! config (a reconcile, a reseed) first waits for that swap
-//! ([`applied`]).
+//! A config command writes the file and swaps the in-memory config
+//! before it returns its events, so a reactor that reads the whole config
+//! (a reconcile, a reseed) sees the change.
 //!
 //! These are how config reaches the backend (P7.B6): nothing there
 //! listens to the in-memory `ConfigChanged`, which is the renderer's.
 
-use std::sync::{Arc, Weak};
-use std::time::Duration;
-
 use oxplow_domain::events::schema::ConfigChangedV3;
 use oxplow_domain::{DomainError, StoredEvent};
+use std::sync::{Arc, Weak};
 
 use crate::event_pump::AsyncEventConsumer;
 use crate::snapshot_capture_registry::SnapshotCaptureRegistry;
@@ -32,52 +28,13 @@ pub const METRICS: &str = "config.metrics";
 /// `scripts` changed: the script workers take the new bounds.
 pub const SCRIPTS: &str = "config.scripts";
 
-/// How long a reactor waits for `oxplow.config.set`'s after-commit swap.
-const APPLY_WAIT: Duration = Duration::from_secs(5);
-
-/// Wait until the in-memory config has `change` applied — its key no
-/// longer reads `before` (it reads `after`, or a later change's value) —
-/// or [`APPLY_WAIT`] passes. `oxplow.config.set` swaps it right after the commit
-/// the pump may already have seen.
-pub async fn applied(svc: &crate::Services, change: &ConfigChangedV3) {
-    let deadline = tokio::time::Instant::now() + APPLY_WAIT;
-    loop {
-        // Registered before the check, so a swap between the two wakes it.
-        let swapped = svc.config_applied.notified();
-        let config = crate::config_service::read_config(&svc.config);
-        let field = change
-            .key
-            .strip_prefix("oxplow.")
-            .unwrap_or(&change.key)
-            .split('.')
-            .next()
-            .unwrap_or_default();
-        let field_value = oxplow_config::keys::key_value(&config, &svc.layout.project_dir, field)
-            .unwrap_or(serde_json::Value::Null);
-        let values =
-            oxplow_config::core_settings::values_for_runtime_field("", field, &field_value);
-        let Some(now) = values.get(&change.key) else {
-            // Extension-only settings have no typed core projection to await.
-            return;
-        };
-        if *now != change.before || change.before == change.after {
-            return;
-        }
-        if tokio::time::timeout_at(deadline, swapped).await.is_err() {
-            tracing::warn!(key = %change.key, "config.changed: the in-memory config never applied it");
-            return;
-        }
-    }
-}
-
 type Act = Box<
     dyn Fn(Arc<crate::Services>) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
         + Send
         + Sync,
 >;
 
-/// A reaction to some config keys (`keys`; empty: every key), once the
-/// change has applied.
+/// A reaction to some config keys (`keys`; empty: every key).
 pub struct KeyReactor {
     name: &'static str,
     keys: &'static [&'static str],
@@ -132,7 +89,6 @@ impl AsyncEventConsumer for KeyReactor {
         let Some(svc) = self.svc.upgrade() else {
             return Ok(());
         };
-        applied(&svc, &change).await;
         (self.act)(svc).await;
         Ok(())
     }
@@ -299,7 +255,7 @@ mod tests {
         // The project's own extension defines the metric, off by default.
         let ext = svc.layout.project_dir.join(".oxplow/extensions/project");
         std::fs::create_dir_all(&ext).unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             ext.join("extension.yaml"),
             "manifest: 2\nname: project\nintent:\n  purpose: test\nmetrics:\n  - { key: work.ready_now, entity: v_thread, where: \"closed_at IS NULL\", default: off }\n",
         )

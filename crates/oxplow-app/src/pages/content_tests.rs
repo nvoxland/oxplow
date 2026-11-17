@@ -18,10 +18,8 @@ async fn project() -> (tempfile::TempDir, std::sync::Arc<crate::Services>) {
     let dir = tempfile::tempdir().unwrap();
     crate::test_fixtures::init_git_repo(dir.path());
     std::fs::create_dir_all(dir.path().join("src")).unwrap();
-    crate::test_fixtures::write_settings_fixture(dir.path().join("src/a.txt"), "one\ntwo\n")
-        .unwrap();
-    crate::test_fixtures::write_settings_fixture(dir.path().join("src/blob.bin"), [0u8, 1, 2, 3])
-        .unwrap();
+    std::fs::write(dir.path().join("src/a.txt"), "one\ntwo\n").unwrap();
+    std::fs::write(dir.path().join("src/blob.bin"), [0u8, 1, 2, 3]).unwrap();
     crate::test_fixtures::commit_all(dir.path(), "first");
     let svc = crate::Services::in_memory(dir.path()).await.unwrap();
     (dir, svc)
@@ -114,8 +112,7 @@ async fn a_file_is_read_on_the_filesystem_and_revision_its_uri_names() {
     assert_eq!(text(cell(&r, "text")), "title: One\n");
     assert_eq!(text(cell(&r, "language")), "yaml");
 
-    crate::test_fixtures::write_settings_fixture(_dir.path().join("src/a.txt"), "changed\n")
-        .unwrap();
+    std::fs::write(_dir.path().join("src/a.txt"), "changed\n").unwrap();
     let r = resolve_content(
         &svc,
         "oxplow:oxplow/file?path=src/a.txt&rev=git:HEAD",

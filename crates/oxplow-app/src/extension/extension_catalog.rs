@@ -775,7 +775,7 @@ mod tests {
     fn write(root: &Path, rel: &str, body: &str) {
         let p = root.join(rel);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-        crate::test_fixtures::write_settings_fixture(p, body).unwrap();
+        std::fs::write(p, body).unwrap();
     }
 
     const EXT: &str =
@@ -881,11 +881,7 @@ mod tests {
         let (good, held) = catalog.snapshot(dir.path()).admitted(None, &Failed::new());
         assert!(held.is_empty(), "{held:?}");
         let manifest = std::fs::read_to_string(to.join("extension.yaml")).unwrap();
-        crate::test_fixtures::write_settings_fixture(
-            to.join("extension.yaml"),
-            format!("{manifest}bogus: 1\n"),
-        )
-        .unwrap();
+        std::fs::write(to.join("extension.yaml"), format!("{manifest}bogus: 1\n")).unwrap();
         let broken = catalog.snapshot(dir.path());
         let (kept, held) = broken.admitted(Some(&good), &Failed::new());
         assert!(
@@ -978,8 +974,7 @@ mod tests {
             "One"
         );
         // A new modified time is a new parse.
-        crate::test_fixtures::write_settings_fixture(&file, "title: Two\nview: { markdown: hi }\n")
-            .unwrap();
+        std::fs::write(&file, "title: Two\nview: { markdown: hi }\n").unwrap();
         let later = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
         std::fs::File::options()
             .write(true)

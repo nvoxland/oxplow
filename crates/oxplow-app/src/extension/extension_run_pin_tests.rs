@@ -33,7 +33,7 @@ fn manifest(version: &str) -> String {
 fn write(root: &Path, rel: &str, body: &str) {
     let path = root.join(rel);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    crate::test_fixtures::write_settings_fixture(path, body).unwrap();
+    std::fs::write(path, body).unwrap();
 }
 
 /// A program that says it started, waits to be released, then reports a row.
@@ -95,8 +95,7 @@ async fn start(
 }
 
 fn release(fx: &ThreadFixture) {
-    crate::test_fixtures::write_settings_fixture(fx.svc.layout.project_dir.join("release"), "")
-        .unwrap();
+    std::fs::write(fx.svc.layout.project_dir.join("release"), "").unwrap();
 }
 
 async fn seen(fx: &ThreadFixture) -> serde_json::Value {

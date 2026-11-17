@@ -2053,7 +2053,7 @@ mod tests {
     fn write(root: &std::path::Path, rel: &str, body: &str) {
         let p = root.join(rel);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-        crate::test_fixtures::write_settings_fixture(p, body).unwrap();
+        std::fs::write(p, body).unwrap();
     }
 
     /// Extension `x` with `pages` (slug, body), loaded from its own folder.
@@ -2403,7 +2403,7 @@ mod tests {
         let w = |rel: &str, body: &str| {
             let p = dir.join(rel);
             std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-            crate::test_fixtures::write_settings_fixture(p, body).unwrap();
+            std::fs::write(p, body).unwrap();
         };
         w(
             "extension.yaml",
@@ -2442,12 +2442,12 @@ mod tests {
         let write = |root: &std::path::Path, label: &str| {
             let dir = root.join(".oxplow/extensions/acme");
             std::fs::create_dir_all(dir.join("collectors")).unwrap();
-            crate::test_fixtures::write_settings_fixture(
+            std::fs::write(
                 dir.join("extension.yaml"),
                 "manifest: 2\nname: acme\nintent:\n  purpose: Things.\n  origin: thread:thr1\n  examples: []\ncollectors:\n  - id: things\n    runtime: starlark\n    entry: collectors/things.star\n    input: \"SELECT id FROM v_acme_src\"\n    entities:\n      - { name: thing, key: id, columns: { id: int, label: text } }\n",
             )
             .unwrap();
-            crate::test_fixtures::write_settings_fixture(
+            std::fs::write(
                 dir.join("collectors/things.star"),
                 format!("def transform(input):\n    return {{\"entities\": {{\"thing\": [{{\"id\": r[\"id\"], \"label\": \"{label}\"}} for r in input[\"rows\"]]}}}}\n"),
             )
@@ -2514,12 +2514,12 @@ mod tests {
         let write = |root: &std::path::Path, label: &str| {
             let dir = root.join(".oxplow/extensions/acme");
             std::fs::create_dir_all(dir.join("collectors")).unwrap();
-            crate::test_fixtures::write_settings_fixture(
+            std::fs::write(
                 dir.join("extension.yaml"),
                 "manifest: 2\nname: acme\nintent:\n  purpose: Things.\n  origin: thread:thr1\n  examples: []\ncollectors:\n  - id: things\n    runtime: starlark\n    entry: collectors/things.star\n    entities:\n      - { name: thing, key: id, columns: { id: int, label: text } }\n",
             )
             .unwrap();
-            crate::test_fixtures::write_settings_fixture(
+            std::fs::write(
                 dir.join("collectors/things.star"),
                 format!("def transform(input):\n    return {{\"entities\": {{\"thing\": [{{\"id\": 1, \"label\": \"{label}\"}}]}}}}\n"),
             )
@@ -2577,18 +2577,18 @@ mod tests {
         let dir = root.path().join(".oxplow/extensions/acme");
         std::fs::create_dir_all(dir.join("collectors")).unwrap();
         std::fs::create_dir_all(dir.join("fixtures")).unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             dir.join("extension.yaml"),
             "manifest: 2\nname: acme\nintent:\n  purpose: Things.\n  origin: thread:thr1\n  examples:\n    - { name: one, input: { collector: things }, expect: x }\n    - { name: two, input: { collector: things }, expect: x }\ncollectors:\n  - id: things\n    runtime: starlark\n    entry: collectors/things.star\n    entities:\n      - { name: thing, key: id, columns: { id: int } }\n",
         )
         .unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             dir.join("collectors/things.star"),
             "def transform(input):\n    n = 0\n    for i in range(100000):\n        for j in range(100000):\n            n = j\n    return {\"entities\": {\"thing\": []}}\n",
         )
         .unwrap();
         for f in ["one", "two"] {
-            crate::test_fixtures::write_settings_fixture(
+            std::fs::write(
                 dir.join(format!("fixtures/{f}.yaml")),
                 "when:\n  collector: things\n  rows: []\n",
             )
@@ -2667,15 +2667,15 @@ mod tests {
         let write = |root: &std::path::Path, filter: &str, script: &str| {
             let dir = root.join(".oxplow/extensions/acme");
             std::fs::create_dir_all(dir.join("fixtures")).unwrap();
-            crate::test_fixtures::write_settings_fixture(
+            std::fs::write(
                 dir.join("extension.yaml"),
                 format!(
                     "manifest: 2\nname: acme\nintent:\n  purpose: p\n  examples:\n    - {{ name: basic, input: x, expect: y }}\neffects:\n  - {{ id: on-done, summary: s, on: [thread.closed]{filter}, entry: e.star }}\n"
                 ),
             )
             .unwrap();
-            crate::test_fixtures::write_settings_fixture(dir.join("e.star"), script).unwrap();
-            crate::test_fixtures::write_settings_fixture(
+            std::fs::write(dir.join("e.star"), script).unwrap();
+            std::fs::write(
                 dir.join("fixtures/basic.yaml"),
                 "when: { effect: on-done, event: { type: thread.closed, payload: { thread: thr1 } } }\nexpect: { commands: [oxplow.task.comment] }\n",
             )
@@ -2745,37 +2745,37 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let dir = root.path().join(".oxplow/extensions/acme");
         std::fs::create_dir_all(dir.join("fixtures")).unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             dir.join("extension.yaml"),
             "manifest: 2\nname: acme\nintent:\n  purpose: p\n  examples:\n    - { name: old, input: x, expect: y }\n    - { name: bad, input: x, expect: y }\nevent_types:\n  types:\n    - { type: acme.merged, v: 1, schema: m1.json, summary: A merge. }\n    - { type: acme.merged, v: 2, schema: m2.json, summary: A merge by someone., upcast: m.star }\neffects:\n  - { id: note, summary: s, on: [acme.merged], entry: e.star }\n",
         )
         .unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             dir.join("m1.json"),
             r#"{"type": "object", "required": ["number"], "properties": {"number": {"type": "integer"}}}"#,
         )
         .unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             dir.join("m2.json"),
             r#"{"type": "object", "required": ["number", "by"], "properties": {"number": {"type": "integer"}, "by": {"type": "string"}}}"#,
         )
         .unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             dir.join("m.star"),
             "def transform(x):\n    p = dict(x[\"payload\"])\n    p[\"by\"] = \"unknown\"\n    return p\n",
         )
         .unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             dir.join("e.star"),
             "def transform(x):\n    return {\"skip\": \"v%d by %s\" % (x[\"event\"][\"v\"], x[\"event\"][\"payload\"][\"by\"])}\n",
         )
         .unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             dir.join("fixtures/old.yaml"),
             "when: { effect: note, event: { type: acme.merged, v: 1, payload: { number: 3 } } }\nexpect: { skip: $any }\n",
         )
         .unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             dir.join("fixtures/bad.yaml"),
             "when: { effect: note, event: { type: acme.merged, v: 7, payload: { number: 3 } } }\nexpect: { skip: $any }\n",
         )

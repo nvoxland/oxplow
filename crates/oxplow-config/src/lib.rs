@@ -1,8 +1,8 @@
-//! Config file load + validation for oxplow.
+//! oxplow's settings and the typed configuration built from them.
 //!
-//! Replaces the TS `src/config/**` module. Schema validation is
-//! enforced at deserialization; errors carry typed variants so the
-//! UI can surface them precisely.
+//! [`settings`] is the shared registry and its three override levels;
+//! [`core_settings`] declares core's settings and builds [`OxplowConfig`]
+//! from their resolved values ([`load_project_config`]).
 
 use std::path::{Path, PathBuf};
 
@@ -13,7 +13,6 @@ use thiserror::Error;
 
 pub mod collectors;
 pub mod core_settings;
-pub mod keys;
 pub mod list_edit;
 pub mod settings;
 pub use list_edit::append_list_entry;
@@ -109,8 +108,6 @@ const DEFAULT_METRIC_DETAIL_RETENTION_DAYS: u32 = 30;
 const DEFAULT_SNAPSHOT_MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
 /// How long a turn-end snapshot may hold up the Stop hook (P2.3).
 pub const DEFAULT_SNAPSHOT_TURN_BUDGET_MS: u64 = 2000;
-/// The smallest budget accepted: the capture's own predrain wait is 300 ms.
-const MIN_SNAPSHOT_TURN_BUDGET_MS: u64 = 100;
 /// The most script workers that run at once, by default (capped by the
 /// machine's parallelism).
 const DEFAULT_SCRIPTS_MAX_CONCURRENT_CAP: usize = 4;
@@ -641,8 +638,6 @@ pub const ZONE_EXTERNAL: &str = "external";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct OxplowConfig {
-    /// Runtime projection; enabled state is resolved independently by key.
-    pub agents: Vec<String>,
     #[serde(rename = "agentEnabled", default)]
     pub agent_enabled: std::collections::BTreeMap<String, bool>,
     /// Human-readable project name. Defaults to the basename of the
@@ -711,9 +706,7 @@ pub struct OxplowConfig {
     /// it. Consumed on macOS only — see the desktop shell's `icon_tint`.
     ///
     /// No `skip_serializing_if`: this type is a command result, and specta
-    /// rejects conditional omission in unified mode. Absence from the written
-    /// YAML is handled by `render_project_config`, which builds its mapping by
-    /// hand rather than through this derive.
+    /// rejects conditional omission in unified mode.
     #[serde(rename = "iconTint")]
     pub icon_tint: Option<String>,
     /// How the project's tests run (the `testing:` block).
@@ -867,10 +860,7 @@ pub fn extension_settings_with_global(project: &Path, global: &Path) -> Extensio
     }
     let sources: std::collections::BTreeMap<String, String> = documents
         .iter()
-        .find_map(|doc| {
-            doc.get(&core_settings::canonical_key("extensionSources"))
-                .cloned()
-        })
+        .find_map(|doc| doc.get(core_settings::keys::EXTENSION_SOURCES).cloned())
         .and_then(|v| serde_json::from_value(v).ok())
         .unwrap_or_default();
     let from_source = if cfg!(debug_assertions) {
@@ -934,13 +924,6 @@ pub struct AiRoleOverride {
     pub restrict: std::collections::BTreeSet<oxplow_domain::ai::AiRestriction>,
 }
 
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct RawAiBlock {
-    #[serde(default)]
-    roles: std::collections::BTreeMap<String, AiRoleOverride>,
-}
-
 #[derive(Debug, Error)]
 pub enum ConfigError {
     #[error("config IO error: {0}")]
@@ -984,16 +967,6 @@ impl StringOrList {
     }
 }
 
-/// Raw `generated:` block — `{ exclude: [...], include: [...] }`.
-#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct RawGenerated {
-    #[serde(default)]
-    exclude: Vec<String>,
-    #[serde(default)]
-    include: Vec<String>,
-}
-
 /// Split a hex colour into 8-bit RGB channels. Accepts `#rrggbb`, the
 /// `#rgb` shorthand (expanded the way CSS does, so `#abc` == `#aabbcc`), and
 /// either spelling without the leading `#`. `None` for anything else, which is
@@ -1010,139 +983,6 @@ pub fn parse_hex_rgb(s: &str) -> Option<(u8, u8, u8)> {
     }
     let channel = |i: usize| u8::from_str_radix(&expanded[i..i + 2], 16).ok();
     Some((channel(0)?, channel(2)?, channel(4)?))
-}
-
-/// Internal raw shape, used to validate before promoting to
-/// `OxplowConfig`. Mirrors the TS `ParsedOxplowConfig` interface.
-#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct RawConfig {
-    /// Enabled agent harnesses by key, in priority order; the first is a new session's default. Absent enables every registered one.
-    #[serde(default)]
-    agents: Option<Vec<String>>,
-    #[serde(rename = "agentEnabled", default)]
-    /// Internal projection of independent harness enablement preferences.
-    agent_enabled: std::collections::BTreeMap<String, bool>,
-    /// Display name; defaults to the project directory's basename.
-    #[serde(rename = "projectName", default)]
-    project_name: Option<String>,
-    /// Extra language servers: `{ servers: [{ languageId, extensions, command, args }] }`. Runs programs.
-    #[serde(default)]
-    lsp: Option<RawLspBlock>,
-    /// Text appended verbatim to every agent's system prompt. Steers every agent.
-    #[serde(rename = "agentPromptAppend", default)]
-    agent_prompt_append: Option<String>,
-    /// File-snapshot retention in days; 0 disables pruning.
-    #[serde(rename = "snapshotRetentionDays", default)]
-    snapshot_retention_days: Option<f64>,
-    /// Metric-capture retention in days; 0 (default) keeps everything.
-    #[serde(rename = "metricRetentionDays", default)]
-    metric_retention_days: Option<f64>,
-    /// Keep per-run detail for only the newest N captures per producer; 0 disables the cap.
-    #[serde(rename = "metricDetailMaxPerProducer", default)]
-    metric_detail_max_per_producer: Option<f64>,
-    /// Compact per-run detail older than this many days; 0 disables.
-    #[serde(rename = "metricDetailRetentionDays", default)]
-    metric_detail_retention_days: Option<f64>,
-    /// Extra `exclude` / `include` paths layered over .gitignore for watching, snapshots and scans.
-    #[serde(rename = "generated", default)]
-    generated: Option<RawGenerated>,
-    /// Largest file snapshotted by content; bigger files get a stat-only entry.
-    #[serde(rename = "snapshotMaxFileBytes", default)]
-    snapshot_max_file_bytes: Option<f64>,
-    /// How long (ms) the Stop hook waits for the turn-end snapshot before moving on; the take keeps going and is recorded as over budget. Default 2000, minimum 100.
-    #[serde(rename = "snapshotTurnBudgetMs", default)]
-    snapshot_turn_budget_ms: Option<f64>,
-    /// Inject the session-context block into every agent prompt.
-    #[serde(rename = "injectSessionContext", default)]
-    inject_session_context: Option<bool>,
-    /// Hex colour composited behind the app icon so windows are tellable apart (macOS).
-    #[serde(rename = "iconTint", default)]
-    icon_tint: Option<String>,
-    /// How the project's tests run: its test commands, the extra command patterns that count as a test or analysis run, and a hint injected into every agent prompt. Steers agents.
-    #[serde(default)]
-    testing: Option<RawTestingBlock>,
-    /// Limits on the processes that run scripts: `maxConcurrent` (workers at once, minimum 1) and `memoryMb` (one worker's memory cap, minimum 64). Defaults: min(4, cores) and 512.
-    #[serde(default)]
-    scripts: Option<RawScriptsBlock>,
-    /// Which metrics are on: `use` turns one on (with optional target/warnAt/failAt), `enabled: false` turns an on-by-default one off. Metrics are defined in extensions.
-    #[serde(default)]
-    metrics: Option<Vec<MetricEntry>>,
-    /// Retired: read as an error naming the project's extension.
-    #[serde(default)]
-    #[schemars(skip)]
-    collectors: Option<serde_yaml::Value>,
-    /// Retired: read as an error naming the project's extension.
-    #[serde(default)]
-    #[schemars(skip)]
-    measures: Option<serde_yaml::Value>,
-    /// Retired: read as an error naming the project's extension.
-    #[serde(default)]
-    #[schemars(skip)]
-    dimensions: Option<serde_yaml::Value>,
-    /// Architectural zones: an ORDERED rule table, first match wins; `other`/`external` are reserved labels.
-    #[serde(default)]
-    zones: Option<Vec<RawZoneRule>>,
-    /// Each agent harness's configuration by its key, e.g. `{ opencode: { model: "github-copilot/gpt-5-mini" } }`. Runs programs.
-    #[serde(rename = "agentConfig", default)]
-    agent_config: Option<std::collections::BTreeMap<String, serde_json::Value>>,
-    /// Retired: read as an error naming `agentConfig`.
-    #[serde(rename = "agentModels", default)]
-    #[schemars(skip)]
-    agent_models: Option<serde_yaml::Value>,
-    /// Instances of extension providers, by `<extension>/<instance id>`: `{ enabled, config, provider? }` (the provider's instance config; `provider` names which of the extension's providers an instance with its own id is). Enabling one runs its program once this machine approved it.
-    #[serde(rename = "extensionInstances", default)]
-    extension_instances: Option<std::collections::BTreeMap<String, ExtensionInstanceConfig>>,
-    /// Each capability's active provider, by instance id: `{ snapshots: hashes }` (a provider's default instance has the provider's id). Absent, the capability's default. A provider that isn't running is a failure, never a fallback.
-    #[serde(rename = "activeProviders", default)]
-    active_providers: Option<std::collections::BTreeMap<String, String>>,
-    /// Whose component shows for a replaceable core sub-component, by target: `{ task.board: task-views, vcs.history.graph: oxplow }` — an extension replacing it, or `oxplow` for oxplow's own. Unlisted, the only extension replacing it shows (several: oxplow's own); a bound target (`task.detail.state`) shows its provider's extension's, and may only be set to `oxplow`.
-    #[serde(rename = "replacements", default)]
-    replacements: Option<std::collections::BTreeMap<String, String>>,
-    /// How long each event namespace's payloads and large content are kept, in days: `{ agent: { payloadDays: 60, contentDays: 14 } }`, over core's defaults (agent 30/14; test, code, collector, effect 90/30). An extension's namespace is kept no longer than its window; core state (snapshot, vcs, effort, …) is kept whole.
-    #[serde(rename = "eventRetention", default)]
-    event_retention: Option<
-        std::collections::BTreeMap<String, oxplow_domain::events::retention::RetentionWindow>,
-    >,
-    /// AI role assignments by role name. Stored as the atomic `oxplow.ai.roles` setting.
-    #[serde(default)]
-    ai: Option<RawAiBlock>,
-    /// Where an extension's source is when it isn't `.oxplow/extensions/<name>/`: `{ <name>: <folder> }`, relative to the checkout or absolute (`~/` is the home folder). Enables code.
-    #[serde(rename = "extensionSources", default)]
-    extension_sources: Option<std::collections::BTreeMap<String, String>>,
-}
-
-#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct RawScriptsBlock {
-    #[serde(rename = "maxConcurrent", default)]
-    max_concurrent: Option<f64>,
-    #[serde(rename = "memoryMb", default)]
-    memory_mb: Option<f64>,
-}
-
-#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct RawTestingBlock {
-    #[serde(default)]
-    command: Option<String>,
-    #[serde(rename = "fastCommand", default)]
-    fast_command: Option<String>,
-    #[serde(rename = "runPatterns", default)]
-    run_patterns: Option<Vec<String>>,
-    #[serde(rename = "analysisPatterns", default)]
-    analysis_patterns: Option<Vec<String>>,
-    #[serde(rename = "testPaths", default)]
-    test_paths: Option<Vec<String>>,
-    #[serde(rename = "agentHint", default)]
-    agent_hint: Option<String>,
-}
-
-#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct RawLspBlock {
-    #[serde(default)]
-    servers: Option<Vec<RawLspServer>>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -1233,123 +1073,146 @@ pub fn load_project_config_with_global(
             }
         }
     }
-    let doc =
-        core_settings::project_document(&store).map_err(|e| ConfigError::Invalid(e.to_string()))?;
-    let mut config = parse_project_config(doc, &fallback)?;
-    for capability in oxplow_domain::capability::choosable() {
-        let setting = store
-            .get(
-                &core_settings::canonical_key(&format!("activeProviders.{}", capability.id)),
-                None,
-            )
-            .map_err(|error| ConfigError::Invalid(error.to_string()))?;
-        if let Some(origin) = setting.origin {
-            let origin = match origin {
-                settings::Origin::Local => "local",
-                settings::Origin::Project => "project",
-                settings::Origin::Global => "global",
-                settings::Origin::Default => "default",
-            };
-            config
-                .active_provider_origins
-                .insert(capability.id.into(), origin.into());
+    let values =
+        core_settings::effective_values(&store).map_err(|e| ConfigError::Invalid(e.to_string()))?;
+    core_settings::config_from(&fallback, &values)
+}
+
+/// The typed view before any setting applies: empty collections, zero
+/// numbers and the internal defaults that are not settings.
+fn blank_config(project_name: &str) -> OxplowConfig {
+    OxplowConfig {
+        agent_enabled: Default::default(),
+        project_name: project_name.to_owned(),
+        lsp_servers: Vec::new(),
+        agent_prompt_append: String::new(),
+        snapshot_retention_days: 0,
+        metric_retention_days: 0,
+        metric_detail_max_per_producer: 0,
+        metric_detail_retention_days: 0,
+        generated: GeneratedConfig::default(),
+        snapshot_max_file_bytes: 0,
+        snapshot_turn_budget_ms: DEFAULT_SNAPSHOT_TURN_BUDGET_MS,
+        inject_session_context: false,
+        icon_tint: None,
+        testing: TestingConfig::default(),
+        scripts: ScriptsConfig::default(),
+        metrics: Vec::new(),
+        zones: Vec::new(),
+        agent_config: Default::default(),
+        extension_instances: Default::default(),
+        active_providers: Default::default(),
+        active_provider_origins: Default::default(),
+        replacements: Default::default(),
+        event_retention: Default::default(),
+        ai_roles: Default::default(),
+        extension_sources: Default::default(),
+    }
+}
+
+/// Every setting at its default, for a project named `project_name`.
+pub fn default_config(project_name: &str) -> OxplowConfig {
+    core_settings::config_from(project_name, &Default::default())
+        .expect("every core default applies")
+}
+
+fn validate_lsp_servers(servers: Vec<RawLspServer>) -> Result<Vec<LspServerConfig>, ConfigError> {
+    let mut out = Vec::with_capacity(servers.len());
+    for (i, s) in servers.into_iter().enumerate() {
+        let n = i + 1;
+        if s.language_id.trim().is_empty() {
+            return Err(ConfigError::Invalid(format!(
+                "server {n}: languageId must be a non-empty string"
+            )));
         }
-    }
-    Ok(config)
-}
-
-/// Write or unset a runtime field in the local settings layer.
-pub fn write_local_key(
-    project_dir: impl AsRef<Path>,
-    key: &str,
-    value: Option<&serde_json::Value>,
-) -> Result<(), ConfigError> {
-    write_runtime_field(project_dir.as_ref(), key, value, settings::Level::Local)
-}
-
-/// Validate an internal typed runtime document. Persisted settings use
-/// namespaced keys and are projected into this document by the shared service.
-pub fn parse_project_config(
-    doc: serde_yaml::Value,
-    fallback_name: &str,
-) -> Result<OxplowConfig, ConfigError> {
-    let parsed: RawConfig = serde_yaml::from_value(doc)?;
-    validate(parsed, fallback_name)
-}
-
-/// Write `key` into `.oxplow/project.yaml` as `value`, or remove it when
-/// `None` — editing only that key's lines. Every other line of
-/// the file is kept byte for byte: the person's formatting, comments, flow
-/// style, and keys that happen to equal their default. A key's block is its
-/// line at column 0 through the line before the next one, with the comment
-/// lines directly above it; a new key is appended. The key's own value is
-/// written block style, and comments inside it are not kept.
-///
-/// The adapter validates the typed field and every registered leaf before
-/// writing. The shared backend preserves unrelated lines and refuses YAML whose
-/// anchors or document structure prevent a safe single-key edit.
-pub fn write_project_key(
-    project_dir: impl AsRef<Path>,
-    key: &str,
-    value: Option<&serde_json::Value>,
-) -> Result<(), ConfigError> {
-    write_runtime_field(project_dir.as_ref(), key, value, settings::Level::Project)
-}
-
-/// Internal domain adapters still use runtime field names. Storage always uses
-/// registered namespaced leaf keys through the shared file backend.
-fn write_runtime_field(
-    project: &Path,
-    field: &str,
-    value: Option<&serde_json::Value>,
-    level: settings::Level,
-) -> Result<(), ConfigError> {
-    let fallback = basename(project);
-    if let Some(value) = value {
-        let mut document = serde_yaml::Mapping::new();
-        document.insert(field.into(), to_yaml(value));
-        parse_project_config(serde_yaml::Value::Mapping(document), &fallback)?;
-    }
-
-    let definitions = core_settings::bindings(&fallback);
-    let mut keys: Vec<_> = definitions
-        .iter()
-        .filter(|b| b.path.first().is_some_and(|p| p == field))
-        .map(|b| b.definition.key.clone())
-        .collect();
-    let values = value
-        .map(|v| core_settings::values_for_runtime_field(&fallback, field, v))
-        .unwrap_or_default();
-    if keys.is_empty() {
-        let canonical = core_settings::canonical_key(field);
-        if !definitions.iter().any(|b| b.definition.key == canonical) {
-            return Err(ConfigError::Invalid("unknown setting".into()));
+        if s.command.trim().is_empty() {
+            return Err(ConfigError::Invalid(format!(
+                "server {n}: command must be a non-empty string"
+            )));
         }
-        keys.push(canonical);
-    }
-    let mut registry = settings::SettingsRegistry::default();
-    registry
-        .register_many(core_settings::definitions(&fallback))
-        .map_err(|e| ConfigError::Invalid(e.to_string()))?;
-    for key in &keys {
-        let setting = values.get(key);
-        if let Some(setting) = setting {
-            registry
-                .validate(key, setting)
-                .map_err(|e| ConfigError::Invalid(e.to_string()))?;
+        if s.extensions.is_empty() {
+            return Err(ConfigError::Invalid(format!(
+                "server {n}: extensions must be a non-empty list"
+            )));
         }
+        let mut extensions = Vec::with_capacity(s.extensions.len());
+        for ext in s.extensions {
+            if !ext.starts_with('.') {
+                return Err(ConfigError::Invalid(format!(
+                    "server {n}: extension `{ext}` must start with '.'"
+                )));
+            }
+            extensions.push(ext.to_lowercase());
+        }
+        out.push(LspServerConfig {
+            language_id: s.language_id,
+            extensions,
+            command: s.command,
+            args: s.args,
+        });
     }
-    let global = global_config_dir().unwrap_or_else(|| project.join(".oxplow/no-global-settings"));
-    for key in keys {
-        let setting = values.get(&key);
-        settings::write_layer_key(
-            &settings::level_path(project, &global, level),
-            &key,
-            setting,
-        )
-        .map_err(|e| ConfigError::Invalid(e.to_string()))?;
+    Ok(out)
+}
+
+/// One capability's chosen implementation: a choosable capability and an
+/// instance id.
+fn validate_active_provider(capability: &str, provider: &str) -> Result<(), ConfigError> {
+    use oxplow_domain::capability;
+    if !capability::spec(capability).is_some_and(|c| c.choosable) {
+        return Err(ConfigError::Invalid(format!(
+            "`{capability}` isn't a capability whose implementation can be chosen ({})",
+            capability::choosable()
+                .map(|c| c.id)
+                .collect::<Vec<_>>()
+                .join(", ")
+        )));
+    }
+    if !is_instance_id(provider) {
+        return Err(ConfigError::Invalid(format!(
+            "`{provider}` isn't an instance id (lowercase snake_case; a provider's default \
+             instance has the provider's id)"
+        )));
     }
     Ok(())
+}
+
+/// One AI role assignment: a known role or an extension's profile, with a
+/// provider and a model.
+fn validate_ai_role(role: &str, assignment: &AiRoleOverride) -> Result<(), ConfigError> {
+    if DROPPED_AI_ROLES.contains(&role) {
+        return Err(ConfigError::Invalid(format!(
+            "oxplow has no `{role}` role: nothing asked it; remove it (use one of {})",
+            AI_ROLE_NAMES.join(", ")
+        )));
+    }
+    if !AI_ROLE_NAMES.contains(&role) && !is_ai_profile_name(role) {
+        return Err(ConfigError::Invalid(format!(
+            "`{role}` is an unknown role (use one of {}, or an extension's AI profile as \
+             `<extension>/<profile>`)",
+            AI_ROLE_NAMES.join(", ")
+        )));
+    }
+    if assignment.provider.trim().is_empty() || assignment.model.trim().is_empty() {
+        return Err(ConfigError::Invalid(
+            "a role needs a provider and a model".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// A harness key: `claude`, or an extension's `<namespace>/<instance>`.
+fn validate_agent_key(agent: &str) -> Result<(), ConfigError> {
+    let ok = is_agent_key(agent)
+        || agent
+            .split_once('/')
+            .is_some_and(|(namespace, instance)| is_agent_key(namespace) && is_agent_key(instance));
+    if ok {
+        Ok(())
+    } else {
+        Err(ConfigError::Invalid(format!(
+            "`{agent}` isn't an agent key"
+        )))
+    }
 }
 
 /// The top-level key a `.oxplow/project.yaml` line starts, if it does: a
@@ -1364,7 +1227,8 @@ fn top_key(line: &str) -> Option<&str> {
 }
 
 /// `text` with top-level `key`'s block replaced by `block` (or removed when
-/// `None`; appended when the key is new). See [`write_project_key`].
+/// `None`; appended when the key is new). Every other line is kept byte for
+/// byte, comments included ([`settings::write_layer_keys`]).
 fn edit_top_level_key(text: &str, key: &str, block: Option<&str>) -> String {
     let lines: Vec<&str> = text.split_inclusive('\n').collect();
     let Some(at) = lines.iter().position(|l| top_key(l) == Some(key)) else {
@@ -1401,28 +1265,6 @@ fn edit_top_level_key(text: &str, key: &str, block: Option<&str>) -> String {
     out
 }
 
-/// The `.oxplow/project.yaml` document for `config`: only keys whose
-/// value differs from the default, so a hand-edited file stays minimal.
-/// `fallback_name` is the project name that needs no `projectName` key.
-/// Pure: what `keys::with_key` validates a change through; the file itself
-/// is written one key at a time (`write_project_key`).
-pub fn render_project_config(config: &OxplowConfig, fallback_name: &str) -> serde_yaml::Mapping {
-    config_entries(config, fallback_name)
-        .into_iter()
-        .filter(|e| e.set)
-        .map(|e| (serde_yaml::Value::String(e.key.into()), e.value))
-        .collect()
-}
-
-/// One project key's value in `config`, and whether the file sets it
-/// (else it is the default — and `value` is what that default is).
-#[derive(Debug, Clone, PartialEq)]
-pub struct ConfigEntry {
-    pub key: &'static str,
-    pub value: serde_yaml::Value,
-    pub set: bool,
-}
-
 /// `v` as a YAML value, by way of JSON text. The one bridge from a config
 /// type to YAML: serde_json's `arbitrary_precision` makes a number inside
 /// a `serde_json::Value` a private struct when anything but serde_json
@@ -1432,208 +1274,6 @@ pub struct ConfigEntry {
 pub(crate) fn to_yaml<T: serde::Serialize>(v: &T) -> serde_yaml::Value {
     let text = serde_json::to_string(v).expect("config values serialize as json");
     serde_yaml::from_str(&text).expect("json text is yaml")
-}
-
-/// Every key the project file can hold, with the value `config` gives it —
-/// the file's, or the default — and whether that differs from the default
-/// (P6.H1: the effective-config view shows both). `render_project_config`
-/// is the set ones.
-pub fn config_entries(config: &OxplowConfig, fallback_name: &str) -> Vec<ConfigEntry> {
-    let mut out = Vec::new();
-    let mut put = |key: &'static str, value: serde_yaml::Value, set: bool| {
-        out.push(ConfigEntry { key, value, set });
-    };
-    put("agents", to_yaml(&config.agents), !config.agents.is_empty());
-    put(
-        "agentEnabled",
-        to_yaml(&config.agent_enabled),
-        !config.agent_enabled.is_empty(),
-    );
-    put(
-        "projectName",
-        if config.project_name.is_empty() {
-            fallback_name.into()
-        } else {
-            config.project_name.clone().into()
-        },
-        !config.project_name.is_empty() && config.project_name != fallback_name,
-    );
-    put(
-        "agentPromptAppend",
-        config.agent_prompt_append.clone().into(),
-        !config.agent_prompt_append.is_empty(),
-    );
-    put(
-        "snapshotRetentionDays",
-        config.snapshot_retention_days.into(),
-        config.snapshot_retention_days != DEFAULT_SNAPSHOT_RETENTION_DAYS,
-    );
-    put(
-        "metricRetentionDays",
-        config.metric_retention_days.into(),
-        config.metric_retention_days != DEFAULT_METRIC_RETENTION_DAYS,
-    );
-    put(
-        "metricDetailMaxPerProducer",
-        config.metric_detail_max_per_producer.into(),
-        config.metric_detail_max_per_producer != DEFAULT_METRIC_DETAIL_MAX_PER_PRODUCER,
-    );
-    put(
-        "metricDetailRetentionDays",
-        config.metric_detail_retention_days.into(),
-        config.metric_detail_retention_days != DEFAULT_METRIC_DETAIL_RETENTION_DAYS,
-    );
-    put(
-        "generated",
-        to_yaml(&config.generated),
-        !config.generated.exclude.is_empty() || !config.generated.include.is_empty(),
-    );
-    put(
-        "snapshotMaxFileBytes",
-        config.snapshot_max_file_bytes.into(),
-        config.snapshot_max_file_bytes != DEFAULT_SNAPSHOT_MAX_FILE_BYTES,
-    );
-    put(
-        "snapshotTurnBudgetMs",
-        config.snapshot_turn_budget_ms.into(),
-        config.snapshot_turn_budget_ms != DEFAULT_SNAPSHOT_TURN_BUDGET_MS,
-    );
-    put(
-        "injectSessionContext",
-        config.inject_session_context.into(),
-        config.inject_session_context != DEFAULT_INJECT_SESSION_CONTEXT,
-    );
-    put(
-        "iconTint",
-        config
-            .icon_tint
-            .as_ref()
-            .map_or(serde_yaml::Value::Null, |t| t.as_str().into()),
-        config.icon_tint.is_some(),
-    );
-    {
-        let mut lsp = serde_yaml::Mapping::new();
-        let servers: Vec<_> = config
-            .lsp_servers
-            .iter()
-            .map(|s| {
-                let mut m = serde_yaml::Mapping::new();
-                m.insert("languageId".into(), s.language_id.clone().into());
-                m.insert("extensions".into(), to_yaml(&s.extensions));
-                m.insert("command".into(), s.command.clone().into());
-                if !s.args.is_empty() {
-                    m.insert("args".into(), to_yaml(&s.args));
-                }
-                serde_yaml::Value::Mapping(m)
-            })
-            .collect();
-        lsp.insert("servers".into(), serde_yaml::Value::Sequence(servers));
-        put(
-            "lsp",
-            serde_yaml::Value::Mapping(lsp),
-            !config.lsp_servers.is_empty(),
-        );
-    }
-    {
-        let c = &config.testing;
-        let mut m = serde_yaml::Mapping::new();
-        if let Some(v) = &c.command {
-            m.insert("command".into(), v.clone().into());
-        }
-        if let Some(v) = &c.fast_command {
-            m.insert("fastCommand".into(), v.clone().into());
-        }
-        if !c.run_patterns.is_empty() {
-            m.insert("runPatterns".into(), to_yaml(&c.run_patterns));
-        }
-        if !c.analysis_patterns.is_empty() {
-            m.insert("analysisPatterns".into(), to_yaml(&c.analysis_patterns));
-        }
-        if !c.test_paths.is_empty() {
-            m.insert("testPaths".into(), to_yaml(&c.test_paths));
-        }
-        if let Some(v) = &c.agent_hint {
-            m.insert("agentHint".into(), v.clone().into());
-        }
-        let set = !m.is_empty();
-        put("testing", serde_yaml::Value::Mapping(m), set);
-    }
-    {
-        let defaults = ScriptsConfig::default();
-        let mut m = serde_yaml::Mapping::new();
-        if config.scripts.max_concurrent != defaults.max_concurrent {
-            m.insert("maxConcurrent".into(), config.scripts.max_concurrent.into());
-        }
-        if config.scripts.memory_bytes != defaults.memory_bytes {
-            m.insert(
-                "memoryMb".into(),
-                (config.scripts.memory_bytes / (1024 * 1024)).into(),
-            );
-        }
-        let set = !m.is_empty();
-        put("scripts", serde_yaml::Value::Mapping(m), set);
-    }
-    put(
-        "metrics",
-        serde_yaml::Value::Sequence(config.metrics.iter().map(minimal_yaml).collect()),
-        !config.metrics.is_empty(),
-    );
-    put("zones", to_yaml(&config.zones), !config.zones.is_empty());
-    put(
-        "agentConfig",
-        to_yaml(&config.agent_config),
-        !config.agent_config.is_empty(),
-    );
-    put(
-        "extensionInstances",
-        to_yaml(&instances_as_written(&config.extension_instances)),
-        !config.extension_instances.is_empty(),
-    );
-    put(
-        "activeProviders",
-        to_yaml(&config.active_providers),
-        !config.active_providers.is_empty(),
-    );
-    put(
-        "replacements",
-        to_yaml(&config.replacements),
-        !config.replacements.is_empty(),
-    );
-    put(
-        "eventRetention",
-        to_yaml(&config.event_retention),
-        !config.event_retention.is_empty(),
-    );
-    put(
-        "extensionSources",
-        to_yaml(&config.extension_sources),
-        !config.extension_sources.is_empty(),
-    );
-    {
-        let mut ai = serde_yaml::Mapping::new();
-        // A role restricted from nothing is written without `restrict`.
-        let mut roles = to_yaml(&config.ai_roles);
-        if let serde_yaml::Value::Mapping(roles) = &mut roles {
-            for (_, role) in roles.iter_mut() {
-                if let serde_yaml::Value::Mapping(role) = role {
-                    if role
-                        .get("restrict")
-                        .and_then(serde_yaml::Value::as_sequence)
-                        .is_some_and(Vec::is_empty)
-                    {
-                        role.remove("restrict");
-                    }
-                }
-            }
-        }
-        ai.insert("roles".into(), roles);
-        put(
-            "ai",
-            serde_yaml::Value::Mapping(ai),
-            !config.ai_roles.is_empty(),
-        );
-    }
-    out
 }
 
 /// Write a **global** metrics manifest (`global_config_dir()/metrics/<name>.yaml`)
@@ -1677,37 +1317,6 @@ fn minimal_yaml<T: Serialize>(entry: &T) -> serde_yaml::Value {
     prune(to_yaml(entry)).unwrap_or_else(|| serde_yaml::Value::Mapping(serde_yaml::Mapping::new()))
 }
 
-fn default_config(project_name: String) -> OxplowConfig {
-    OxplowConfig {
-        agents: Vec::new(),
-        agent_enabled: Default::default(),
-        project_name,
-        lsp_servers: Vec::new(),
-        agent_prompt_append: String::new(),
-        snapshot_retention_days: DEFAULT_SNAPSHOT_RETENTION_DAYS,
-        metric_retention_days: DEFAULT_METRIC_RETENTION_DAYS,
-        metric_detail_max_per_producer: DEFAULT_METRIC_DETAIL_MAX_PER_PRODUCER,
-        metric_detail_retention_days: DEFAULT_METRIC_DETAIL_RETENTION_DAYS,
-        generated: GeneratedConfig::default(),
-        snapshot_max_file_bytes: DEFAULT_SNAPSHOT_MAX_FILE_BYTES,
-        snapshot_turn_budget_ms: DEFAULT_SNAPSHOT_TURN_BUDGET_MS,
-        inject_session_context: DEFAULT_INJECT_SESSION_CONTEXT,
-        icon_tint: None,
-        testing: TestingConfig::default(),
-        scripts: ScriptsConfig::default(),
-        metrics: Vec::new(),
-        zones: Vec::new(),
-        agent_config: Default::default(),
-        extension_instances: std::collections::BTreeMap::new(),
-        active_providers: std::collections::BTreeMap::new(),
-        active_provider_origins: std::collections::BTreeMap::new(),
-        replacements: std::collections::BTreeMap::new(),
-        event_retention: std::collections::BTreeMap::new(),
-        ai_roles: Default::default(),
-        extension_sources: Default::default(),
-    }
-}
-
 /// One instance of an extension's provider (`extensionInstances`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -1722,8 +1331,7 @@ pub struct ExtensionInstanceConfig {
     /// How often its collectors are read, in minutes (absent:
     /// [`DEFAULT_SYNC_MINUTES`]; `0`: only when someone runs
     /// `oxplow.provider.sync`).
-    // No `skip_serializing_if` (specta's unified mode can't express it):
-    // `render_project_config` leaves an absent one out of the file.
+    // No `skip_serializing_if`: specta's unified mode can't express it.
     #[serde(rename = "syncMinutes", default)]
     pub sync_minutes: Option<u32>,
     /// Which of the extension's providers this is an instance of, for an
@@ -1814,23 +1422,6 @@ impl ExtensionInstanceConfig {
 
 fn empty_object() -> serde_json::Value {
     serde_json::Value::Object(serde_json::Map::new())
-}
-
-/// `extensionInstances` as the file holds it: an instance's absent
-/// `syncMinutes` is left out, not written `null`.
-fn instances_as_written(
-    instances: &std::collections::BTreeMap<String, ExtensionInstanceConfig>,
-) -> serde_json::Value {
-    let mut value = serde_json::to_value(instances).expect("instances serialize");
-    if let Some(all) = value.as_object_mut() {
-        for instance in all
-            .values_mut()
-            .filter_map(serde_json::Value::as_object_mut)
-        {
-            instance.retain(|_, v| !v.is_null());
-        }
-    }
-    value
 }
 
 /// A provider or instance id: lowercase snake_case, starting with a
@@ -1932,232 +1523,6 @@ fn validate_event_retention(
     Ok(raw)
 }
 
-/// Validate `activeProviders:`: a choosable capability each
-/// ([`oxplow_domain::capability`]), naming an implementation by its id (a
-/// provider's default instance has the provider's).
-fn validate_active_providers(
-    raw: std::collections::BTreeMap<String, String>,
-) -> Result<std::collections::BTreeMap<String, String>, ConfigError> {
-    use oxplow_domain::capability;
-    for (capability, provider) in &raw {
-        if !capability::spec(capability).is_some_and(|c| c.choosable) {
-            return Err(ConfigError::Invalid(format!(
-                "activeProviders: `{capability}` isn't a capability whose implementation can be \
-                 chosen ({})",
-                capability::choosable()
-                    .map(|c| c.id)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )));
-        }
-        if !is_instance_id(provider) {
-            return Err(ConfigError::Invalid(format!(
-                "activeProviders.{capability}: `{provider}` isn't an instance id (lowercase \
-                 snake_case; a provider's default instance has the provider's id)"
-            )));
-        }
-    }
-    Ok(raw)
-}
-
-fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigError> {
-    let agents = validate_agents(raw.agents)?;
-
-    let project_name = match raw.project_name {
-        Some(name) => {
-            let trimmed = name.trim().to_string();
-            if trimmed.is_empty() {
-                return Err(ConfigError::Invalid(
-                    "projectName must be a non-empty string".into(),
-                ));
-            }
-            trimmed
-        }
-        None => fallback_name.to_string(),
-    };
-
-    let agent_prompt_append = raw.agent_prompt_append.unwrap_or_default();
-
-    let snapshot_retention_days = match raw.snapshot_retention_days {
-        Some(n) if !n.is_finite() || n < 0.0 => {
-            return Err(ConfigError::Invalid(
-                "snapshotRetentionDays must be a non-negative number".into(),
-            ));
-        }
-        Some(n) => n as u32,
-        None => DEFAULT_SNAPSHOT_RETENTION_DAYS,
-    };
-    let metric_retention_days = match raw.metric_retention_days {
-        Some(n) if !n.is_finite() || n < 0.0 => {
-            return Err(ConfigError::Invalid(
-                "metricRetentionDays must be a non-negative number".into(),
-            ));
-        }
-        Some(n) => n as u32,
-        None => DEFAULT_METRIC_RETENTION_DAYS,
-    };
-    let metric_detail_max_per_producer = match raw.metric_detail_max_per_producer {
-        Some(n) if !n.is_finite() || n < 0.0 => {
-            return Err(ConfigError::Invalid(
-                "metricDetailMaxPerProducer must be a non-negative number".into(),
-            ));
-        }
-        Some(n) => n as u32,
-        None => DEFAULT_METRIC_DETAIL_MAX_PER_PRODUCER,
-    };
-    let metric_detail_retention_days = match raw.metric_detail_retention_days {
-        Some(n) if !n.is_finite() || n < 0.0 => {
-            return Err(ConfigError::Invalid(
-                "metricDetailRetentionDays must be a non-negative number".into(),
-            ));
-        }
-        Some(n) => n as u32,
-        None => DEFAULT_METRIC_DETAIL_RETENTION_DAYS,
-    };
-
-    let generated = match raw.generated {
-        Some(g) => GeneratedConfig {
-            exclude: validate_generated_list(g.exclude, "generated.exclude")?,
-            include: validate_generated_list(g.include, "generated.include")?,
-        },
-        None => GeneratedConfig::default(),
-    };
-
-    let zones = validate_zones(raw.zones.unwrap_or_default())?;
-
-    let snapshot_max_file_bytes = match raw.snapshot_max_file_bytes {
-        Some(n) if !n.is_finite() || n < 1024.0 => {
-            return Err(ConfigError::Invalid(
-                "snapshotMaxFileBytes must be a number >= 1024".into(),
-            ));
-        }
-        Some(n) => n.floor() as u64,
-        None => DEFAULT_SNAPSHOT_MAX_FILE_BYTES,
-    };
-
-    let snapshot_turn_budget_ms = match raw.snapshot_turn_budget_ms {
-        Some(n) if !n.is_finite() || n < MIN_SNAPSHOT_TURN_BUDGET_MS as f64 => {
-            return Err(ConfigError::Invalid(format!(
-                "snapshotTurnBudgetMs must be a number >= {MIN_SNAPSHOT_TURN_BUDGET_MS}"
-            )));
-        }
-        Some(n) => n.floor() as u64,
-        None => DEFAULT_SNAPSHOT_TURN_BUDGET_MS,
-    };
-
-    let inject_session_context = raw
-        .inject_session_context
-        .unwrap_or(DEFAULT_INJECT_SESSION_CONTEXT);
-
-    let icon_tint = match raw.icon_tint {
-        Some(t) if parse_hex_rgb(&t).is_none() => {
-            return Err(ConfigError::Invalid(format!(
-                "iconTint must be a hex colour like \"#c2410c\" or \"#abc\"; got {t:?}"
-            )));
-        }
-        other => other,
-    };
-
-    let testing = validate_testing(raw.testing)?;
-    let scripts = validate_scripts(raw.scripts)?;
-    let metrics = validate_metrics(raw.metrics, CatalogLayer::Project)?;
-    for (key, moved) in [
-        ("collectors", raw.collectors.is_some()),
-        ("measures", raw.measures.is_some()),
-        ("dimensions", raw.dimensions.is_some()),
-    ] {
-        if moved {
-            return Err(ConfigError::Invalid(format!(
-                "`{key}:` is an extension's: declare the project's in its own extension \
-                 (`.oxplow/extensions/project/extension.yaml`)"
-            )));
-        }
-    }
-
-    if raw.agent_models.is_some() {
-        return Err(ConfigError::Invalid(
-            "agentModels is now agentConfig: write `agentConfig: { <agent>: { model: <model> } }`"
-                .into(),
-        ));
-    }
-    let agent_config = validate_agent_config(raw.agent_config.unwrap_or_default())?;
-
-    let extension_instances =
-        validate_extension_instances(raw.extension_instances.unwrap_or_default())?;
-    let active_providers = validate_active_providers(raw.active_providers.unwrap_or_default())?;
-    let replacements = validate_replacements(raw.replacements.unwrap_or_default())?;
-    let event_retention = validate_event_retention(raw.event_retention.unwrap_or_default())?;
-
-    let lsp_servers = match raw.lsp.and_then(|l| l.servers) {
-        Some(servers) => {
-            let mut out = Vec::with_capacity(servers.len());
-            for (i, s) in servers.into_iter().enumerate() {
-                if s.language_id.trim().is_empty() {
-                    return Err(ConfigError::Invalid(format!(
-                        "lsp.servers[{i}].languageId must be a non-empty string"
-                    )));
-                }
-                if s.command.trim().is_empty() {
-                    return Err(ConfigError::Invalid(format!(
-                        "lsp.servers[{i}].command must be a non-empty string"
-                    )));
-                }
-                if s.extensions.is_empty() {
-                    return Err(ConfigError::Invalid(format!(
-                        "lsp.servers[{i}].extensions must be a non-empty array"
-                    )));
-                }
-                let mut exts = Vec::with_capacity(s.extensions.len());
-                for (j, ext) in s.extensions.into_iter().enumerate() {
-                    if !ext.starts_with('.') {
-                        return Err(ConfigError::Invalid(format!(
-                            "lsp.servers[{i}].extensions[{j}] must start with '.'"
-                        )));
-                    }
-                    exts.push(ext.to_lowercase());
-                }
-                out.push(LspServerConfig {
-                    language_id: s.language_id,
-                    extensions: exts,
-                    command: s.command,
-                    args: s.args,
-                });
-            }
-            out
-        }
-        None => Vec::new(),
-    };
-
-    Ok(OxplowConfig {
-        agents,
-        agent_enabled: raw.agent_enabled,
-        project_name,
-        lsp_servers,
-        agent_prompt_append,
-        snapshot_retention_days,
-        metric_retention_days,
-        metric_detail_max_per_producer,
-        metric_detail_retention_days,
-        generated,
-        snapshot_max_file_bytes,
-        snapshot_turn_budget_ms,
-        inject_session_context,
-        icon_tint,
-        testing,
-        scripts,
-        metrics,
-        zones,
-        agent_config,
-        extension_instances,
-        active_providers,
-        active_provider_origins: std::collections::BTreeMap::new(),
-        replacements,
-        event_retention,
-        ai_roles: validate_ai_roles(raw.ai)?,
-        extension_sources: raw.extension_sources.unwrap_or_default(),
-    })
-}
-
 /// Validate `ai.roles`: known role names, non-empty provider and model.
 /// `<namespace>/<profile>`: the shape only. Whether an active extension
 /// declares it is known at run time, where an unknown one goes unused.
@@ -2169,34 +1534,6 @@ fn is_ai_profile_name(role: &str) -> bool {
                 .chars()
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
     })
-}
-
-fn validate_ai_roles(
-    raw: Option<RawAiBlock>,
-) -> Result<std::collections::BTreeMap<String, AiRoleOverride>, ConfigError> {
-    let roles = raw.map(|b| b.roles).unwrap_or_default();
-    for (role, o) in &roles {
-        if DROPPED_AI_ROLES.contains(&role.as_str()) {
-            return Err(ConfigError::Invalid(format!(
-                "ai.roles.{role}: oxplow has no `{role}` role: nothing asked it; remove it \
-                 (use one of {})",
-                AI_ROLE_NAMES.join(", ")
-            )));
-        }
-        if !AI_ROLE_NAMES.contains(&role.as_str()) && !is_ai_profile_name(role) {
-            return Err(ConfigError::Invalid(format!(
-                "ai.roles.{role}: unknown role (use one of {}, or an extension's AI profile as \
-                 `<extension>/<profile>`)",
-                AI_ROLE_NAMES.join(", ")
-            )));
-        }
-        if o.provider.trim().is_empty() || o.model.trim().is_empty() {
-            return Err(ConfigError::Invalid(format!(
-                "ai.roles.{role} needs a provider and a model"
-            )));
-        }
-    }
-    Ok(roles)
 }
 
 /// Validate the `zones:` table. Each row needs at least one non-empty,
@@ -3341,123 +2678,6 @@ fn is_agent_key(key: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
 }
 
-fn validate_agents(raw: Option<Vec<String>>) -> Result<Vec<String>, ConfigError> {
-    let Some(agents) = raw else {
-        return Ok(Vec::new());
-    };
-    if agents.is_empty() {
-        return Err(ConfigError::Invalid(
-            "agents must list at least one enabled agent (leave it out to enable every one)".into(),
-        ));
-    }
-    let mut seen: Vec<String> = Vec::new();
-    for agent in agents {
-        if !is_agent_key(&agent) {
-            return Err(ConfigError::Invalid(format!(
-                "agents: `{agent}` isn't an agent key (lowercase letters, digits, `_`, `-`)"
-            )));
-        }
-        if seen.contains(&agent) {
-            return Err(ConfigError::Invalid(format!(
-                "agents must not contain duplicates (got `{agent}`)"
-            )));
-        }
-        seen.push(agent);
-    }
-    Ok(seen)
-}
-
-/// `agentConfig`: an object per harness key. Its fields are the harness's
-/// to check.
-fn validate_agent_config(
-    raw: std::collections::BTreeMap<String, serde_json::Value>,
-) -> Result<std::collections::BTreeMap<String, serde_json::Value>, ConfigError> {
-    for (agent, config) in &raw {
-        if !is_agent_key(agent)
-            && !agent.split_once('/').is_some_and(|(namespace, instance)| {
-                is_agent_key(namespace) && is_agent_key(instance)
-            })
-        {
-            return Err(ConfigError::Invalid(format!(
-                "agentConfig: `{agent}` isn't an agent key"
-            )));
-        }
-        if !config.is_object() {
-            return Err(ConfigError::Invalid(format!(
-                "agentConfig.{agent} must be a map of settings"
-            )));
-        }
-    }
-    Ok(raw)
-}
-
-fn validate_scripts(raw: Option<RawScriptsBlock>) -> Result<ScriptsConfig, ConfigError> {
-    let mut out = ScriptsConfig::default();
-    let Some(raw) = raw else {
-        return Ok(out);
-    };
-    let whole = |field: &str, n: f64, min: u64| {
-        if n.is_finite() && n >= min as f64 {
-            Ok(n.floor() as u64)
-        } else {
-            Err(ConfigError::Invalid(format!(
-                "scripts.{field} must be a number >= {min}"
-            )))
-        }
-    };
-    if let Some(n) = raw.max_concurrent {
-        out.max_concurrent = whole("maxConcurrent", n, 1)? as usize;
-    }
-    if let Some(n) = raw.memory_mb {
-        out.memory_bytes = whole("memoryMb", n, MIN_SCRIPTS_MEMORY_MB)? * 1024 * 1024;
-    }
-    Ok(out)
-}
-
-fn validate_testing(raw: Option<RawTestingBlock>) -> Result<TestingConfig, ConfigError> {
-    let Some(raw) = raw else {
-        return Ok(TestingConfig::default());
-    };
-    let opt_trimmed = |v: Option<String>| v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-    let patterns = |field: &str, list: Option<Vec<String>>| {
-        let mut out = Vec::new();
-        for (i, p) in list.into_iter().flatten().enumerate() {
-            let trimmed = p.trim().to_string();
-            if trimmed.is_empty() {
-                return Err(ConfigError::Invalid(format!(
-                    "testing.{field}[{i}] must be a non-empty string"
-                )));
-            }
-            out.push(trimmed);
-        }
-        Ok(out)
-    };
-    // Globs are checked here, so a bad one fails the load rather than
-    // silently marking nothing as a test.
-    let globs = |field: &str, list: Option<Vec<String>>| {
-        let list = patterns(field, list)?;
-        for (i, glob) in list.iter().enumerate() {
-            if let Err(e) = globset::GlobBuilder::new(glob)
-                .literal_separator(true)
-                .build()
-            {
-                return Err(ConfigError::Invalid(format!(
-                    "testing.{field}[{i}] `{glob}` isn't a valid glob: {e}"
-                )));
-            }
-        }
-        Ok(list)
-    };
-    Ok(TestingConfig {
-        command: opt_trimmed(raw.command),
-        fast_command: opt_trimmed(raw.fast_command),
-        run_patterns: patterns("runPatterns", raw.run_patterns)?,
-        analysis_patterns: patterns("analysisPatterns", raw.analysis_patterns)?,
-        test_paths: globs("testPaths", raw.test_paths)?,
-        agent_hint: opt_trimmed(raw.agent_hint),
-    })
-}
-
 pub(crate) fn basename(path: &Path) -> String {
     let resolved: PathBuf = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     resolved
@@ -3503,21 +2723,41 @@ mod global_config_dir_tests {
 mod tests {
     use super::*;
 
+    /// Flat settings YAML (`oxplow.zones: …`) as the typed config, with no
+    /// file and no layering: what a single level's values make.
+    fn config_from_yaml(yaml: &str) -> Result<OxplowConfig, ConfigError> {
+        let values: std::collections::BTreeMap<String, serde_json::Value> =
+            serde_yaml::from_str(yaml).unwrap();
+        let values = values
+            .into_iter()
+            .map(|(key, value)| (key, (value, settings::Origin::Project)))
+            .collect();
+        core_settings::config_from("demo", &values)
+    }
+
+    fn project_file(dir: &Path) -> PathBuf {
+        settings::level_path(dir, dir, settings::Level::Project)
+    }
+
+    fn local_file(dir: &Path) -> PathBuf {
+        settings::level_path(dir, dir, settings::Level::Local)
+    }
+
     /// A running collector asks whether its extension is still on many times a
     /// second. A write that truncates the file first looks to that reader like
     /// "nothing is enabled", and the run is stopped for good.
     #[test]
     fn a_reader_never_sees_a_config_file_part_way_through_a_write() {
         let dir = tempfile::tempdir().unwrap();
-        write_project_key(
-            dir.path(),
-            "projectName",
+        settings::write_layer_key(
+            &project_file(dir.path()),
+            core_settings::keys::PROJECT_NAME,
             Some(&serde_json::json!("stable")),
         )
         .unwrap();
-        write_local_key(
-            dir.path(),
-            "agentPromptAppend",
+        settings::write_layer_key(
+            &local_file(dir.path()),
+            core_settings::keys::AGENT_PROMPT_APPEND,
             Some(&serde_json::json!("test")),
         )
         .unwrap();
@@ -3534,9 +2774,9 @@ mod tests {
                 torn
             });
             for i in 0..100 {
-                write_local_key(
-                    dir.path(),
-                    "agentPromptAppend",
+                settings::write_layer_key(
+                    &local_file(dir.path()),
+                    core_settings::keys::AGENT_PROMPT_APPEND,
                     Some(&serde_json::json!(format!("test {i}"))),
                 )
                 .unwrap();
@@ -3546,33 +2786,21 @@ mod tests {
         });
     }
 
-    /// An instance's config is a `serde_json::Value`, and serde_json's
-    /// `arbitrary_precision` makes a number a private struct when it's
-    /// serialized by anything but serde_json — straight into
-    /// `project.yaml` as `{$serde_json::private::Number: '5'}`. Every
-    /// entry goes through JSON text, so the file holds the number.
-    /// P7.A2: `activeProviders` names one provider per swappable
-    /// capability, round-trips through the file, and refuses another
-    /// capability or a malformed id.
+    /// P7.A2: `oxplow.activeProviders.<capability>` names one provider per
+    /// swappable capability, and refuses another capability or a malformed id.
     #[test]
     fn active_providers_name_one_provider_per_capability() {
-        let parse = |yaml: &str| parse_project_config(serde_yaml::from_str(yaml).unwrap(), "demo");
-        let config = parse("activeProviders: { snapshots: issues }\n").unwrap();
+        let parse = config_from_yaml;
+        let config = parse("oxplow.activeProviders.snapshots: issues\n").unwrap();
         assert_eq!(config.active_providers["snapshots"], "issues");
-        let doc = render_project_config(&config, "demo");
-        let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(doc)).unwrap();
+        let err = parse("oxplow.activeProviders.vcs: jj\n").unwrap_err();
         assert!(
-            yaml.contains("activeProviders:\n  snapshots: issues"),
-            "{yaml}"
+            err.to_string().contains("oxplow.activeProviders.vcs"),
+            "{err}"
         );
-        let err = parse("activeProviders: { vcs: jj }\n").unwrap_err();
-        assert!(err.to_string().contains("snapshots"), "{err}");
-        let err = parse("activeProviders: { snapshots: Issues-App }\n").unwrap_err();
+        let err = parse("oxplow.activeProviders.snapshots: Issues-App\n").unwrap_err();
         assert!(err.to_string().contains("instance id"), "{err}");
-        assert!(parse("agents: [claude]\n")
-            .unwrap()
-            .active_providers
-            .is_empty());
+        assert!(parse("").unwrap().active_providers.is_empty());
     }
 
     /// A person's own choice (`.oxplow/local.yaml`, which git ignores)
@@ -3584,14 +2812,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let oxplow = dir.path().join(".oxplow");
         std::fs::create_dir_all(&oxplow).unwrap();
-        write_fixture(
+        std::fs::write(
             oxplow.join("project.yaml"),
-            "activeProviders: { snapshots: issues }\n",
+            "oxplow.activeProviders.snapshots: issues\n",
         )
         .unwrap();
-        write_fixture(
+        std::fs::write(
             oxplow.join("local.yaml"),
-            "activeProviders: { snapshots: hashes }\n",
+            "oxplow.activeProviders.snapshots: hashes\n",
         )
         .unwrap();
         let config = load_project_config(dir.path()).unwrap();
@@ -3599,19 +2827,14 @@ mod tests {
             config.active_providers.get("snapshots").map(String::as_str),
             Some("hashes")
         );
-        assert_eq!(
-            config.active_providers.get("snapshots").map(String::as_str),
-            Some("hashes")
-        );
-        write_fixture(oxplow.join("local.yaml"), "zones: []\n").unwrap();
+        std::fs::write(oxplow.join("local.yaml"), "oxplow.zones: []\n").unwrap();
         assert!(load_project_config(dir.path()).unwrap().zones.is_empty());
 
-        let parse = |yaml: &str| parse_project_config(serde_yaml::from_str(yaml).unwrap(), "demo");
-        assert!(parse("activeProviders: { snapshots: hashes }\n").is_ok());
-        let err = parse("activeProviders: { vcs: jj }\n")
+        assert!(config_from_yaml("oxplow.activeProviders.snapshots: hashes\n").is_ok());
+        let err = config_from_yaml("oxplow.activeProviders.vcs: jj\n")
             .unwrap_err()
             .to_string();
-        assert!(err.contains("snapshots"), "{err}");
+        assert!(err.contains("oxplow.activeProviders.vcs"), "{err}");
     }
 
     /// A personal choice is written to, and removed from, `local.yaml`
@@ -3619,10 +2842,10 @@ mod tests {
     #[test]
     fn a_personal_choice_is_written_and_removed() {
         let dir = tempfile::tempdir().unwrap();
-        write_local_key(
-            dir.path(),
-            "activeProviders",
-            Some(&serde_json::json!({ "snapshots": "hashes" })),
+        settings::write_layer_key(
+            &local_file(dir.path()),
+            "oxplow.activeProviders.snapshots",
+            Some(&serde_json::json!("hashes")),
         )
         .unwrap();
         let config = load_project_config(dir.path()).unwrap();
@@ -3631,35 +2854,28 @@ mod tests {
             Some("hashes")
         );
         assert!(!config_path(dir.path()).exists(), "project.yaml untouched");
-        write_local_key(dir.path(), "activeProviders", None).unwrap();
+        settings::write_layer_key(
+            &local_file(dir.path()),
+            "oxplow.activeProviders.snapshots",
+            None,
+        )
+        .unwrap();
         assert!(load_project_config(dir.path())
             .unwrap()
             .active_providers
             .is_empty());
-        write_local_key(dir.path(), "zones", None).unwrap();
+        settings::write_layer_key(&local_file(dir.path()), core_settings::keys::ZONES, None)
+            .unwrap();
     }
 
-    /// A new thread always opens the session picker; what it starts with
-    /// is no setting at any level.
-    #[test]
-    fn new_thread_session_is_not_a_setting() {
-        let dir = tempfile::tempdir().unwrap();
-        assert!(write_local_key(
-            dir.path(),
-            "newThreadSession",
-            Some(&serde_json::json!("claude"))
-        )
-        .is_err());
-    }
-
-    /// `eventRetention` sets a namespace's windows — a person's key.
+    /// `oxplow.eventRetention` sets a namespace's windows — a person's key.
     /// Core state (kept whole) and a window under a day are refused.
     #[test]
     fn event_retention_sets_a_namespaces_windows() {
         use oxplow_domain::events::retention::RetentionWindow;
-        let parse = |yaml: &str| parse_project_config(serde_yaml::from_str(yaml).unwrap(), "demo");
+        let parse = config_from_yaml;
         let config = parse(
-            "eventRetention:\n  agent: { payloadDays: 60, contentDays: 14 }\n  acme_pr: { payloadDays: 7, contentDays: 3 }\n",
+            "oxplow.eventRetention:\n  agent: { payloadDays: 60, contentDays: 14 }\n  acme_pr: { payloadDays: 7, contentDays: 3 }\n",
         )
         .unwrap();
         assert_eq!(
@@ -3670,10 +2886,7 @@ mod tests {
             config.event_retention.get("acme_pr"),
             Some(&RetentionWindow::new(7, 3))
         );
-        let doc = render_project_config(&config, "demo");
-        let again = parse_project_config(serde_yaml::Value::Mapping(doc), "demo").unwrap();
-        assert_eq!(again.event_retention, config.event_retention);
-        let err = parse("eventRetention:\n  snapshot: { payloadDays: 7, contentDays: 3 }\n")
+        let err = parse("oxplow.eventRetention:\n  snapshot: { payloadDays: 7, contentDays: 3 }\n")
             .unwrap_err()
             .to_string();
         assert!(
@@ -3705,20 +2918,16 @@ mod tests {
                 "contentDays can't be longer than payloadDays",
             ),
         ] {
-            let err = parse(&format!("eventRetention:\n  {yaml}\n"))
+            let err = parse(&format!("oxplow.eventRetention:\n  {yaml}\n"))
                 .unwrap_err()
                 .to_string();
             assert!(err.contains(says), "{yaml}: {err}");
         }
-        assert!(
-            parse("eventRetention:\n  agent: { payloadDays: 36500, contentDays: 36500 }\n").is_ok()
-        );
-        let plain = parse("agents: [claude]\n").unwrap();
-        let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(render_project_config(
-            &plain, "demo",
-        )))
-        .unwrap();
-        assert!(!yaml.contains("eventRetention"), "{yaml}");
+        assert!(parse(
+            "oxplow.eventRetention:\n  agent: { payloadDays: 36500, contentDays: 36500 }\n"
+        )
+        .is_ok());
+        assert!(parse("").unwrap().event_retention.is_empty());
         // How long a project keeps its agents' activity is a person's call.
     }
 
@@ -3728,9 +2937,9 @@ mod tests {
     /// decides otherwise — and an unknown target is an error listing them.
     #[test]
     fn replacements_chooses_whose_component_shows() {
-        let parse = |yaml: &str| parse_project_config(serde_yaml::from_str(yaml).unwrap(), "demo");
+        let parse = config_from_yaml;
         let config = parse(
-            "replacements: { vcs.history.graph: oxplow-bundled, task.board: task-views, task.detail.state: oxplow }\n",
+            "oxplow.replacements: { vcs.history.graph: oxplow-bundled, task.board: task-views, task.detail.state: oxplow }\n",
         )
         .unwrap();
         assert_eq!(
@@ -3744,21 +2953,18 @@ mod tests {
                 .map(String::as_str),
             Some("oxplow")
         );
-        let doc = render_project_config(&config, "demo");
-        let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(doc)).unwrap();
-        assert!(yaml.contains("vcs.history.graph: oxplow-bundled"), "{yaml}");
-        let bound = parse("replacements: { task.detail.state: beads }\n").unwrap_err();
+        let bound = parse("oxplow.replacements: { task.detail.state: beads }\n").unwrap_err();
         assert!(
             bound
                 .to_string()
                 .contains("no other extension can be chosen"),
             "{bound}"
         );
-        let unknown = parse("replacements: { vcs.conflict.resolver: x }\n").unwrap_err();
+        let unknown = parse("oxplow.replacements: { vcs.conflict.resolver: x }\n").unwrap_err();
         assert!(unknown.to_string().contains("task.list"), "{unknown}");
-        assert!(parse("agents: [claude]\n").unwrap().replacements.is_empty());
+        assert!(parse("").unwrap().replacements.is_empty());
         assert!(
-            parse("replacementsOff: [task.board]\n").is_err(),
+            load_from_yaml("replacementsOff: [task.board]\n").is_err(),
             "the old key is gone"
         );
     }
@@ -3768,9 +2974,9 @@ mod tests {
     /// provider it is.
     #[test]
     fn an_instance_key_is_a_namespace_and_a_snake_case_instance_id() {
-        let parse = |yaml: &str| parse_project_config(serde_yaml::from_str(yaml).unwrap(), "demo");
+        let parse = config_from_yaml;
         let config = parse(
-            "extensionInstances:\n  my_tracker/issues: { enabled: true }\n  my_tracker/issues_acme: { enabled: true, provider: issues }\n",
+            "oxplow.extensionInstances:\n  my_tracker/issues: { enabled: true }\n  my_tracker/issues_acme: { enabled: true, provider: issues }\n",
         )
         .unwrap();
         assert_eq!(
@@ -3782,14 +2988,6 @@ mod tests {
                 .provider
                 .as_deref(),
             Some("issues")
-        );
-        let doc = render_project_config(&config, "demo");
-        let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(doc)).unwrap();
-        assert!(yaml.contains("provider: issues"), "{yaml}");
-        assert_eq!(
-            yaml.matches("provider:").count(),
-            1,
-            "absent, it isn't written: {yaml}"
         );
         for bad in [
             "tracker/Issues",
@@ -3803,13 +3001,13 @@ mod tests {
             "acme-tools/issues",
         ] {
             let err = parse(&format!(
-                "extensionInstances:\n  \"{bad}\": {{ enabled: true }}\n"
+                "oxplow.extensionInstances:\n  \"{bad}\": {{ enabled: true }}\n"
             ))
             .unwrap_err()
             .to_string();
             assert!(err.contains("<namespace>/<instance id>"), "{bad}: {err}");
         }
-        let err = parse("extensionInstances:\n  tracker/acme: { provider: Lin-ear }\n")
+        let err = parse("oxplow.extensionInstances:\n  tracker/acme: { provider: Lin-ear }\n")
             .unwrap_err()
             .to_string();
         assert!(
@@ -3818,8 +3016,20 @@ mod tests {
         );
     }
 
-    /// P9.B2: the user-global instances file — the same entries as a
-    /// project's `extensionInstances`, for every project of this machine.
+    /// An instance's config is a `serde_json::Value`; a number in it reads
+    /// back as the number the file holds.
+    #[test]
+    fn an_instance_config_keeps_plain_numbers() {
+        let config = config_from_yaml(
+            "oxplow.extensionInstances:\n  acme/github: { enabled: true, config: { pollMinutes: 5, ratio: 0.5 } }\n",
+        )
+        .unwrap();
+        assert_eq!(
+            config.extension_instances["acme/github"].config,
+            serde_json::json!({ "pollMinutes": 5, "ratio": 0.5 })
+        );
+        assert_eq!(config.extension_instances["acme/github"].sync_minutes, None);
+    }
 
     #[test]
     fn an_instance_id_may_not_be_oxplows_own() {
@@ -3838,39 +3048,6 @@ mod tests {
                 "{err}"
             );
         }
-    }
-
-    /// each change to the machine's instances is one
-    /// read-modify-write of the file as it is then, under a lock other
-    /// processes take too — so writers at once never drop each other's
-    /// entry.
-
-    #[test]
-    fn rendered_config_holds_plain_numbers_from_json_values() {
-        let mut config = default_config("demo".into());
-        config.extension_instances.insert(
-            "acme/github".into(),
-            ExtensionInstanceConfig {
-                enabled: true,
-                config: serde_json::json!({ "pollMinutes": 5, "ratio": 0.5 }),
-                sync_minutes: None,
-                provider: None,
-            },
-        );
-        let doc = render_project_config(&config, "demo");
-        let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(doc)).unwrap();
-        assert!(yaml.contains("pollMinutes: 5\n"), "{yaml}");
-        assert!(
-            !yaml.contains("syncMinutes"),
-            "an absent schedule isn't written: {yaml}"
-        );
-        assert!(yaml.contains("ratio: 0.5\n"), "{yaml}");
-        assert!(!yaml.contains("serde_json"), "{yaml}");
-        let back = parse_project_config(serde_yaml::from_str(&yaml).unwrap(), "demo").unwrap();
-        assert_eq!(
-            back.extension_instances["acme/github"].config,
-            serde_json::json!({ "pollMinutes": 5, "ratio": 0.5 })
-        );
     }
 
     #[test]
@@ -3956,12 +3133,8 @@ dimensions:
     }
     use tempfile::tempdir;
 
-    /// Resolve the project config path under `<dir>/.oxplow/`, creating the
-    /// `.oxplow` parent so a subsequent write succeeds. Used by tests that
-    /// author a config file directly (simulating a user-edited file).
-    /// a command's write changes only its key. The person's
-    /// formatting, comments and default-valued keys (`agents: [claude]`)
-    /// stay as written.
+    /// a key write changes only its key. The person's
+    /// formatting, comments and default-valued keys stay as written.
     #[test]
     fn a_key_write_leaves_the_rest_of_the_file_as_written() {
         let dir = tempdir().unwrap();
@@ -3970,7 +3143,12 @@ dimensions:
                         oxplow.testing.command: bun test   # with reports\n";
         std::fs::write(cfg_path(dir.path()), original).unwrap();
         let metrics = serde_json::json!([{ "use": "oxplow.fn_count" }]);
-        write_project_key(dir.path(), "metrics", Some(&metrics)).unwrap();
+        settings::write_layer_key(
+            &project_file(dir.path()),
+            core_settings::keys::METRICS,
+            Some(&metrics),
+        )
+        .unwrap();
         let raw = std::fs::read_to_string(cfg_path(dir.path())).unwrap();
         assert!(raw.starts_with(original), "the rest moved:\n{raw}");
         assert!(
@@ -3999,9 +3177,9 @@ dimensions:
              oxplow.zones: []   # none yet\n",
         )
         .unwrap();
-        write_project_key(
-            dir.path(),
-            "snapshotRetentionDays",
+        settings::write_layer_key(
+            &project_file(dir.path()),
+            core_settings::keys::SNAPSHOT_RETENTION_DAYS,
             Some(&serde_json::json!(14)),
         )
         .unwrap();
@@ -4009,7 +3187,12 @@ dimensions:
             std::fs::read_to_string(cfg_path(dir.path())).unwrap(),
             "oxplow.agents.claude.enabled: true\n# Keep a week of history.\noxplow.snapshots.retentionDays: 14\noxplow.zones: []   # none yet\n"
         );
-        write_project_key(dir.path(), "snapshotRetentionDays", None).unwrap();
+        settings::write_layer_key(
+            &project_file(dir.path()),
+            core_settings::keys::SNAPSHOT_RETENTION_DAYS,
+            None,
+        )
+        .unwrap();
         assert_eq!(
             std::fs::read_to_string(cfg_path(dir.path())).unwrap(),
             "oxplow.agents.claude.enabled: true\noxplow.zones: []   # none yet\n"
@@ -4020,9 +3203,9 @@ dimensions:
     #[test]
     fn a_key_write_creates_the_file() {
         let dir = tempdir().unwrap();
-        write_project_key(
-            dir.path(),
-            "snapshotRetentionDays",
+        settings::write_layer_key(
+            &project_file(dir.path()),
+            core_settings::keys::SNAPSHOT_RETENTION_DAYS,
             Some(&serde_json::json!(3)),
         )
         .unwrap();
@@ -4030,39 +3213,6 @@ dimensions:
             std::fs::read_to_string(config_path(dir.path())).unwrap(),
             "oxplow.snapshots.retentionDays: 3\n"
         );
-    }
-
-    /// `cfg` as the renderer writes it: the round trip `keys::with_key`
-    /// validates a change through.
-    fn write_rendered(project_dir: &Path, cfg: &OxplowConfig) {
-        let doc = render_project_config(cfg, &basename(project_dir));
-        write_fixture(
-            cfg_path(project_dir),
-            serde_yaml::to_string(&serde_yaml::Value::Mapping(doc)).unwrap(),
-        )
-        .unwrap();
-    }
-
-    #[test]
-    fn invalid_runtime_field_writes_leave_the_settings_file_unchanged() {
-        let dir = tempdir().unwrap();
-        let original = "# Keep this comment.\noxplow.testing.command: cargo test\n";
-        std::fs::write(cfg_path(dir.path()), original).unwrap();
-        for value in [
-            serde_json::json!("wrong type"),
-            serde_json::json!({"command": 3}),
-            serde_json::json!({"unknown": true}),
-        ] {
-            assert!(write_project_key(dir.path(), "testing", Some(&value)).is_err());
-            assert_eq!(
-                std::fs::read_to_string(cfg_path(dir.path())).unwrap(),
-                original
-            );
-        }
-        assert!(
-            write_local_key(dir.path(), "newThreadSession", Some(&serde_json::json!(""))).is_err()
-        );
-        assert!(!local_config_path(dir.path()).exists());
     }
 
     #[test]
@@ -4075,86 +3225,6 @@ dimensions:
             std::fs::read_to_string(cfg_path(dir.path())).unwrap(),
             original
         );
-    }
-
-    /// Author canonical disk fixtures from the typed documents used by parser
-    /// tests. This is test data preparation, never a production fallback.
-    fn write_fixture(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> std::io::Result<()> {
-        let path = path.as_ref();
-        let bytes = contents.as_ref();
-        if !matches!(
-            path.file_name().and_then(|name| name.to_str()),
-            Some("project.yaml" | "local.yaml")
-        ) {
-            return std::fs::write(path, bytes);
-        }
-        let Ok(serde_yaml::Value::Mapping(document)) = serde_yaml::from_slice(bytes) else {
-            return std::fs::write(path, bytes);
-        };
-        let bindings = core_settings::bindings("fixture");
-        fn flatten(
-            path: Vec<String>,
-            value: serde_yaml::Value,
-            bindings: &[core_settings::CoreBinding],
-            out: &mut serde_yaml::Mapping,
-        ) {
-            let descend = bindings
-                .iter()
-                .any(|binding| binding.path.starts_with(&path) && binding.path.len() > path.len());
-            if descend {
-                if let serde_yaml::Value::Mapping(children) = value {
-                    for (key, value) in children {
-                        let mut next = path.clone();
-                        next.push(key.as_str().unwrap_or("invalid").to_owned());
-                        flatten(next, value, bindings, out);
-                    }
-                    return;
-                }
-            }
-            if path == ["agents"] {
-                if let Some(agents) = value.as_sequence() {
-                    for agent in agents.iter().filter_map(serde_yaml::Value::as_str) {
-                        out.insert(format!("oxplow.agents.{agent}.enabled").into(), true.into());
-                    }
-                }
-                return;
-            }
-            if path == ["agentConfig"] {
-                if let Some(harnesses) = value.as_mapping() {
-                    for (harness, fields) in harnesses {
-                        if let (Some(harness), Some(fields)) =
-                            (harness.as_str(), fields.as_mapping())
-                        {
-                            for (field, value) in fields {
-                                if let Some(field) = field.as_str() {
-                                    out.insert(
-                                        format!("oxplow.agents.{harness}.{field}").into(),
-                                        value.clone(),
-                                    );
-                                }
-                            }
-                        }
-                    }
-                }
-                return;
-            }
-            let joined = path.join(".");
-            let key = core_settings::canonical_key(&joined);
-            // Unknown legacy fields remain unqualified, so the strict loader
-            // rejects them; unknown namespaced keys may belong to an extension.
-            let known = bindings.iter().any(|b| b.definition.key == key);
-            out.insert(if known { key } else { path[0].clone() }.into(), value);
-        }
-        let mut canonical = serde_yaml::Mapping::new();
-        for (key, value) in document {
-            let name = key.as_str().unwrap_or("invalid");
-            if name.contains('.') {
-                canonical.insert(key, value);
-            } else {
-                flatten(vec![name.to_owned()], value, &bindings, &mut canonical);
-            }
-        }
-        std::fs::write(path, serde_yaml::to_string(&canonical).unwrap())
     }
 
     fn cfg_path(project_dir: &Path) -> std::path::PathBuf {
@@ -4170,7 +3240,6 @@ dimensions:
     fn an_empty_project_is_every_default() {
         let dir = tempdir().unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
-        assert!(cfg.agents.is_empty(), "every registered harness");
         assert_eq!(
             cfg.project_name,
             dir.path().file_name().unwrap().to_string_lossy(),
@@ -4224,7 +3293,7 @@ dimensions:
     #[test]
     fn the_old_single_agent_key_is_refused() {
         let dir = tempdir().unwrap();
-        write_fixture(cfg_path(dir.path()), "agent: codex\n").unwrap();
+        std::fs::write(cfg_path(dir.path()), "agent: codex\n").unwrap();
         let err = load_project_config(dir.path()).unwrap_err().to_string();
         assert!(err.contains("agent"), "{err}");
     }
@@ -4253,7 +3322,7 @@ dimensions:
     #[test]
     fn rejects_unknown_keys() {
         let dir = tempdir().unwrap();
-        write_fixture(cfg_path(dir.path()), "bogusKey: 1\n").unwrap();
+        std::fs::write(cfg_path(dir.path()), "bogusKey: 1\n").unwrap();
         let err = load_project_config(dir.path()).unwrap_err();
         assert!(matches!(err, ConfigError::Invalid(_)));
     }
@@ -4261,7 +3330,7 @@ dimensions:
     #[test]
     fn rejects_empty_project_name() {
         let dir = tempdir().unwrap();
-        write_fixture(cfg_path(dir.path()), "projectName: \"   \"\n").unwrap();
+        std::fs::write(cfg_path(dir.path()), "oxplow.projectName: \"   \"\n").unwrap();
         let err = load_project_config(dir.path()).unwrap_err();
         assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("projectName")));
     }
@@ -4269,15 +3338,14 @@ dimensions:
     #[test]
     fn parses_lsp_servers() {
         let dir = tempdir().unwrap();
-        write_fixture(
+        std::fs::write(
             cfg_path(dir.path()),
             r#"
-lsp:
-  servers:
-    - languageId: rust
-      extensions: [.rs]
-      command: rust-analyzer
-      args: ["--quiet"]
+oxplow.lsp.servers:
+  - languageId: rust
+    extensions: [.rs]
+    command: rust-analyzer
+    args: ["--quiet"]
 "#,
         )
         .unwrap();
@@ -4291,14 +3359,13 @@ lsp:
     #[test]
     fn rejects_lsp_extensions_without_dot() {
         let dir = tempdir().unwrap();
-        write_fixture(
+        std::fs::write(
             cfg_path(dir.path()),
             r#"
-lsp:
-  servers:
-    - languageId: rust
-      extensions: [rs]
-      command: rust-analyzer
+oxplow.lsp.servers:
+  - languageId: rust
+    extensions: [rs]
+    command: rust-analyzer
 "#,
         )
         .unwrap();
@@ -4309,9 +3376,9 @@ lsp:
     #[test]
     fn generated_accepts_exclude_and_include_entries() {
         let dir = tempdir().unwrap();
-        write_fixture(
+        std::fs::write(
             cfg_path(dir.path()),
-            "generated:\n  exclude:\n    - target\n    - apps/desktop/dist\n  include:\n    - dist/keep.json\n",
+            "oxplow.generated.exclude:\n  - target\n  - apps/desktop/dist\noxplow.generated.include:\n  - dist/keep.json\n",
         )
         .unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
@@ -4325,9 +3392,9 @@ lsp:
     #[test]
     fn rejects_generated_absolute_path() {
         let dir = tempdir().unwrap();
-        write_fixture(
+        std::fs::write(
             cfg_path(dir.path()),
-            "generated:\n  exclude: [\"/etc/passwd\"]\n",
+            "oxplow.generated.exclude: [\"/etc/passwd\"]\n",
         )
         .unwrap();
         let err = load_project_config(dir.path()).unwrap_err();
@@ -4337,31 +3404,13 @@ lsp:
     #[test]
     fn rejects_generated_include_parent_escape() {
         let dir = tempdir().unwrap();
-        write_fixture(
+        std::fs::write(
             cfg_path(dir.path()),
-            "generated:\n  include: [\"../sibling\"]\n",
+            "oxplow.generated.include: [\"../sibling\"]\n",
         )
         .unwrap();
         let err = load_project_config(dir.path()).unwrap_err();
         assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("..")));
-    }
-
-    #[test]
-    fn write_round_trips_generated_exclude_include() {
-        let dir = tempdir().unwrap();
-        write_fixture(
-            cfg_path(dir.path()),
-            "generated:\n  exclude: [target]\n  include: [dist/keep.json]\n",
-        )
-        .unwrap();
-        let cfg = load_project_config(dir.path()).unwrap();
-        write_rendered(dir.path(), &cfg);
-        let reloaded = load_project_config(dir.path()).unwrap();
-        assert_eq!(reloaded.generated.exclude, vec!["target".to_string()]);
-        assert_eq!(
-            reloaded.generated.include,
-            vec!["dist/keep.json".to_string()]
-        );
     }
 
     /// `zones:` is an ORDERED table — first match wins — so the
@@ -4370,9 +3419,9 @@ lsp:
     #[test]
     fn zones_parse_in_order_with_scalar_or_list_match() {
         let dir = tempdir().unwrap();
-        write_fixture(
+        std::fs::write(
             cfg_path(dir.path()),
-            "zones:\n\
+            "oxplow.zones:\n\
              - match: [\"**/*_test.rs\", \"**/tests/**\"]\n  zone: test\n\
              - match: crates/oxplow-db/**\n  zone: store\n  color: \"#ea580c\"\n",
         )
@@ -4400,9 +3449,9 @@ lsp:
     fn zones_reject_reserved_labels() {
         for label in ["other", "external"] {
             let dir = tempdir().unwrap();
-            write_fixture(
+            std::fs::write(
                 cfg_path(dir.path()),
-                format!("zones:\n- match: src/**\n  zone: {label}\n"),
+                format!("oxplow.zones:\n- match: src/**\n  zone: {label}\n"),
             )
             .unwrap();
             let err = load_project_config(dir.path()).unwrap_err();
@@ -4416,17 +3465,17 @@ lsp:
     #[test]
     fn zones_reject_empty_and_unparseable_rules() {
         let cases = [
-            ("zones:\n- match: src/**\n  zone: \"  \"\n", "zone"),
-            ("zones:\n- match: \"\"\n  zone: ui\n", "match"),
-            ("zones:\n- match: \"src/[\"\n  zone: ui\n", "glob"),
+            ("oxplow.zones:\n- match: src/**\n  zone: \"  \"\n", "zone"),
+            ("oxplow.zones:\n- match: \"\"\n  zone: ui\n", "match"),
+            ("oxplow.zones:\n- match: \"src/[\"\n  zone: ui\n", "glob"),
             (
-                "zones:\n- match: src/**\n  zone: ui\n  color: nope\n",
+                "oxplow.zones:\n- match: src/**\n  zone: ui\n  color: nope\n",
                 "color",
             ),
         ];
         for (yaml, needle) in cases {
             let dir = tempdir().unwrap();
-            write_fixture(cfg_path(dir.path()), yaml).unwrap();
+            std::fs::write(cfg_path(dir.path()), yaml).unwrap();
             let err = load_project_config(dir.path()).unwrap_err();
             assert!(
                 matches!(&err, ConfigError::Invalid(msg) if msg.contains(needle)),
@@ -4435,37 +3484,15 @@ lsp:
         }
     }
 
-    /// Every settings write rewrites `metrics:` and `dimensions:` from the
-    /// parsed entries, so a field the writer forgets is silently dropped;
-    /// an entity metric without its entity no longer validates and the
-    /// whole config stops loading.
     #[test]
-    fn write_round_trips_zones_preserving_order() {
-        let dir = tempdir().unwrap();
-        write_fixture(
-            cfg_path(dir.path()),
-            "zones:\n\
-             - match: \"**/*_test.rs\"\n  zone: test\n\
-             - match: crates/**\n  zone: backend\n  color: \"#abc\"\n",
-        )
-        .unwrap();
-        let cfg = load_project_config(dir.path()).unwrap();
-        write_rendered(dir.path(), &cfg);
-        let reloaded = load_project_config(dir.path()).unwrap();
-        assert_eq!(reloaded.zones, cfg.zones);
-        assert_eq!(reloaded.zones[0].zone, "test");
-        assert_eq!(reloaded.zones[1].color.as_deref(), Some("#abc"));
-    }
-
-    #[test]
-    fn fast_test_command_round_trips() {
+    fn fast_test_command_loads_beside_the_full_command() {
         // the coverage-free counterpart to `testCommand`, used for the
         // red/green loop so those runs still emit a report instead of being
         // dropped because the full instrumented run is too slow to repeat.
         let dir = tempdir().unwrap();
-        write_fixture(
+        std::fs::write(
             cfg_path(dir.path()),
-            "testing:\n  command: bun run test:collect\n  fastCommand: bun run test:fast\n",
+            "oxplow.testing.command: bun run test:collect\noxplow.testing.fastCommand: bun run test:fast\n",
         )
         .unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
@@ -4473,66 +3500,25 @@ lsp:
             cfg.testing.fast_command.as_deref(),
             Some("bun run test:fast")
         );
-        write_rendered(dir.path(), &cfg);
-        let reloaded = load_project_config(dir.path()).unwrap();
         assert_eq!(
-            reloaded.testing.fast_command.as_deref(),
-            Some("bun run test:fast"),
-            "survives a write/reload round-trip"
-        );
-        assert_eq!(
-            reloaded.testing.command.as_deref(),
+            cfg.testing.command.as_deref(),
             Some("bun run test:collect"),
             "and doesn't displace the full command"
         );
     }
 
     #[test]
-    fn managed_keys_covers_every_block_the_writer_emits() {
-        // Every top-level key the renderer emits reads back the same: what
-        // `keys::with_key` validates a command's change through.
+    fn agent_config_loads_from_the_harness_keys() {
         let dir = tempdir().unwrap();
-        write_fixture(
+        std::fs::write(
             cfg_path(dir.path()),
-            "projectName: demo\n\
-             snapshotRetentionDays: 3\n",
-        )
-        .unwrap();
-        let cfg = load_project_config(dir.path()).unwrap();
-        write_rendered(dir.path(), &cfg);
-        let raw = std::fs::read_to_string(cfg_path(dir.path())).unwrap();
-        let doc: serde_yaml::Value = serde_yaml::from_str(&raw).unwrap();
-        let serde_yaml::Value::Mapping(map) = doc else {
-            panic!("config is a mapping");
-        };
-        // Every key present after a write must round-trip through a reload,
-        // which is what being MANAGED buys.
-        let reloaded = load_project_config(dir.path()).unwrap();
-        assert_eq!(reloaded.project_name, "demo");
-        assert_eq!(reloaded.snapshot_retention_days, 3);
-        assert!(
-            map.contains_key(serde_yaml::Value::String("oxplow.projectName".into())),
-            "projectName written, got:\n{raw}"
-        );
-    }
-
-    #[test]
-    fn agent_config_round_trips() {
-        let dir = tempdir().unwrap();
-        write_fixture(
-            cfg_path(dir.path()),
-            "agentConfig:\n  opencode:\n    model: github-copilot/gpt-5-mini\n",
+            "oxplow.agents.opencode.model: github-copilot/gpt-5-mini\n",
         )
         .unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
         assert_eq!(
             cfg.agent_config["opencode"]["model"],
             "github-copilot/gpt-5-mini"
-        );
-        write_rendered(dir.path(), &cfg);
-        assert_eq!(
-            load_project_config(dir.path()).unwrap().agent_config,
-            cfg.agent_config
         );
     }
 
@@ -4557,12 +3543,6 @@ lsp:
     #[test]
     fn a_dev_build_runs_from_the_sources_a_project_has() {
         let dir = tempdir().unwrap();
-        assert!(write_project_key(
-            dir.path(),
-            "enableBundledExtensions",
-            Some(&serde_json::json!(false))
-        )
-        .is_err());
         assert!(extension_settings(dir.path()).from_source.is_empty());
         std::fs::write(
             cfg_path(dir.path()),
@@ -4604,7 +3584,7 @@ lsp:
     #[test]
     fn the_old_disabled_block_is_refused() {
         let dir = tempdir().unwrap();
-        write_fixture(
+        std::fs::write(
             cfg_path(dir.path()),
             "extensions:\n  disabled: [oxplow-bundled]\n",
         )
@@ -4717,13 +3697,12 @@ lsp:
     #[test]
     fn rejects_lsp_missing_required_fields() {
         let dir = tempdir().unwrap();
-        write_fixture(
+        std::fs::write(
             cfg_path(dir.path()),
             r#"
-lsp:
-  servers:
-    - languageId: rust
-      command: rust-analyzer
+oxplow.lsp.servers:
+  - languageId: rust
+    command: rust-analyzer
 "#,
         )
         .unwrap();
@@ -4732,27 +3711,23 @@ lsp:
     }
 
     #[test]
-    fn inject_session_context_round_trips() {
+    fn inject_session_context_loads_and_defaults_on() {
         let dir = tempdir().unwrap();
-        let cfg = OxplowConfig {
-            inject_session_context: false,
-            ..default_config("test".into())
-        };
-        write_rendered(dir.path(), &cfg);
+        assert!(
+            load_project_config(dir.path())
+                .unwrap()
+                .inject_session_context
+        );
+        std::fs::write(cfg_path(dir.path()), "oxplow.injectSessionContext: false\n").unwrap();
         let loaded = load_project_config(dir.path()).unwrap();
         assert!(!loaded.inject_session_context);
     }
 
     #[test]
-    fn icon_tint_round_trips_and_defaults_to_unset() {
+    fn icon_tint_loads_and_defaults_to_unset() {
         let dir = tempdir().unwrap();
         assert_eq!(load_project_config(dir.path()).unwrap().icon_tint, None);
-
-        let cfg = OxplowConfig {
-            icon_tint: Some("#c2410c".into()),
-            ..default_config("test".into())
-        };
-        write_rendered(dir.path(), &cfg);
+        std::fs::write(cfg_path(dir.path()), "oxplow.iconTint: \"#c2410c\"\n").unwrap();
         let loaded = load_project_config(dir.path()).unwrap();
         assert_eq!(loaded.icon_tint.as_deref(), Some("#c2410c"));
     }
@@ -4761,7 +3736,11 @@ lsp:
     fn icon_tint_accepts_the_common_hex_spellings() {
         for spelling in ["#c2410c", "#C2410C", "#abc", "c2410c"] {
             let dir = tempdir().unwrap();
-            write_fixture(cfg_path(dir.path()), format!("iconTint: \"{spelling}\"\n")).unwrap();
+            std::fs::write(
+                cfg_path(dir.path()),
+                format!("oxplow.iconTint: \"{spelling}\"\n"),
+            )
+            .unwrap();
             assert_eq!(
                 load_project_config(dir.path())
                     .unwrap()
@@ -4780,7 +3759,11 @@ lsp:
         // read as "the feature is broken".
         for bad in ["", "#12", "#12345", "nope", "#gggggg", "rgb(1,2,3)"] {
             let dir = tempdir().unwrap();
-            write_fixture(cfg_path(dir.path()), format!("iconTint: \"{bad}\"\n")).unwrap();
+            std::fs::write(
+                cfg_path(dir.path()),
+                format!("oxplow.iconTint: \"{bad}\"\n"),
+            )
+            .unwrap();
             let err = load_project_config(dir.path()).unwrap_err();
             assert!(
                 matches!(err, ConfigError::Invalid(ref m) if m.contains("iconTint")),
@@ -4799,39 +3782,42 @@ lsp:
     }
 
     #[test]
-    fn test_paths_are_globs_that_round_trip_and_a_bad_one_fails_the_load() {
+    fn test_paths_are_globs_and_a_bad_one_fails_the_load() {
         let dir = tempdir().unwrap();
-        write_fixture(
+        std::fs::write(
             cfg_path(dir.path()),
-            "testing:\n  testPaths: [\"spec/**\", \"**/it/**\"]\n",
+            "oxplow.testing.testPaths: [\"spec/**\", \"**/it/**\"]\n",
         )
         .unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
         assert_eq!(cfg.testing.test_paths, vec!["spec/**", "**/it/**"]);
 
-        write_fixture(cfg_path(dir.path()), "testing:\n  testPaths: [\"a{b\"]\n").unwrap();
+        std::fs::write(
+            cfg_path(dir.path()),
+            "oxplow.testing.testPaths: [\"a{b\"]\n",
+        )
+        .unwrap();
         let err = load_project_config(dir.path()).unwrap_err();
         assert!(
-            matches!(err, ConfigError::Invalid(ref m) if m.contains("testPaths[0]")),
+            matches!(err, ConfigError::Invalid(ref m) if m.contains("oxplow.testing.testPaths") && m.contains("item 1")),
             "{err:?}"
         );
-        write_fixture(cfg_path(dir.path()), "testing:\n  testPaths: [\" \"]\n").unwrap();
+        std::fs::write(cfg_path(dir.path()), "oxplow.testing.testPaths: [\" \"]\n").unwrap();
         assert!(load_project_config(dir.path()).is_err());
     }
 
     #[test]
     fn parses_testing_block() {
         let dir = tempdir().unwrap();
-        write_fixture(
+        std::fs::write(
             cfg_path(dir.path()),
             r#"
-testing:
-  command: cargo cov
-  agentHint: "Run tests with cargo cov"
-  runPatterns:
-    - cargo cov
-    - bun test
-  analysisPatterns: [lint:collect]
+oxplow.testing.command: cargo cov
+oxplow.testing.agentHint: "Run tests with cargo cov"
+oxplow.testing.runPatterns:
+  - cargo cov
+  - bun test
+oxplow.testing.analysisPatterns: [lint:collect]
 "#,
         )
         .unwrap();
@@ -4848,9 +3834,9 @@ testing:
     #[test]
     fn scripts_block_sets_both_limits() {
         let dir = tempdir().unwrap();
-        write_fixture(
+        std::fs::write(
             cfg_path(dir.path()),
-            "scripts:\n  maxConcurrent: 2\n  memoryMb: 256\n",
+            "oxplow.scripts.maxConcurrent: 2\noxplow.scripts.memoryMb: 256\n",
         )
         .unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
@@ -4861,7 +3847,7 @@ testing:
     #[test]
     fn scripts_keys_are_independent() {
         let dir = tempdir().unwrap();
-        write_fixture(cfg_path(dir.path()), "scripts:\n  memoryMb: 128\n").unwrap();
+        std::fs::write(cfg_path(dir.path()), "oxplow.scripts.memoryMb: 128\n").unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
         assert_eq!(cfg.scripts.memory_bytes, 128 * 1024 * 1024);
         assert_eq!(
@@ -4873,19 +3859,19 @@ testing:
     #[test]
     fn scripts_minimums_are_one_slot_and_64_mib() {
         let dir = tempdir().unwrap();
-        write_fixture(
+        std::fs::write(
             cfg_path(dir.path()),
-            "scripts:\n  maxConcurrent: 1\n  memoryMb: 64\n",
+            "oxplow.scripts.maxConcurrent: 1\noxplow.scripts.memoryMb: 64\n",
         )
         .unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
         assert_eq!(cfg.scripts.max_concurrent, 1);
         assert_eq!(cfg.scripts.memory_bytes, 64 * 1024 * 1024);
         for (text, key) in [
-            ("scripts:\n  maxConcurrent: 0\n", "maxConcurrent"),
-            ("scripts:\n  memoryMb: 63\n", "memoryMb"),
+            ("oxplow.scripts.maxConcurrent: 0\n", "maxConcurrent"),
+            ("oxplow.scripts.memoryMb: 63\n", "memoryMb"),
         ] {
-            write_fixture(cfg_path(dir.path()), text).unwrap();
+            std::fs::write(cfg_path(dir.path()), text).unwrap();
             let err = load_project_config(dir.path()).unwrap_err().to_string();
             assert!(err.contains(key) && err.contains("scripts."), "got: {err}");
         }
@@ -4895,40 +3881,13 @@ testing:
     fn scripts_bad_values_are_refused() {
         let dir = tempdir().unwrap();
         for text in [
-            "scripts:\n  maxConcurrent: -1\n",
-            "scripts:\n  maxConcurrent: lots\n",
-            "scripts:\n  memoryMb: .nan\n",
-            "scripts:\n  threads: 3\n",
+            "oxplow.scripts.maxConcurrent: -1\n",
+            "oxplow.scripts.maxConcurrent: lots\n",
+            "oxplow.scripts.memoryMb: .nan\n",
         ] {
-            write_fixture(cfg_path(dir.path()), text).unwrap();
+            std::fs::write(cfg_path(dir.path()), text).unwrap();
             assert!(load_project_config(dir.path()).is_err(), "accepted: {text}");
         }
-    }
-
-    #[test]
-    fn scripts_round_trip_writes_only_what_differs() {
-        let dir = tempdir().unwrap();
-        let cfg = OxplowConfig {
-            scripts: ScriptsConfig {
-                max_concurrent: 3,
-                memory_bytes: 128 * 1024 * 1024,
-            },
-            ..default_config("test".into())
-        };
-        write_rendered(dir.path(), &cfg);
-        let raw = std::fs::read_to_string(cfg_path(dir.path())).unwrap();
-        assert!(
-            raw.contains("maxConcurrent: 3") && raw.contains("memoryMb: 128"),
-            "{raw}"
-        );
-        assert_eq!(
-            load_project_config(dir.path()).unwrap().scripts,
-            cfg.scripts
-        );
-
-        write_rendered(dir.path(), &default_config("test".into()));
-        let raw = std::fs::read_to_string(cfg_path(dir.path())).unwrap();
-        assert!(!raw.contains("scripts"), "defaults are not written:\n{raw}");
     }
 
     /// reports are read by collectors (`records:`) now; the old
@@ -4936,7 +3895,7 @@ testing:
     #[test]
     fn a_collection_block_is_an_unknown_key() {
         let dir = tempdir().unwrap();
-        write_fixture(
+        std::fs::write(
             cfg_path(dir.path()),
             "collection:\n  testCommand: cargo test\n",
         )
@@ -4951,30 +3910,13 @@ testing:
     #[test]
     fn rejects_an_empty_run_pattern() {
         let dir = tempdir().unwrap();
-        write_fixture(cfg_path(dir.path()), "testing:\n  runPatterns: [\"  \"]\n").unwrap();
+        std::fs::write(
+            cfg_path(dir.path()),
+            "oxplow.testing.runPatterns: [\"  \"]\n",
+        )
+        .unwrap();
         let err = load_project_config(dir.path()).unwrap_err();
         assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("runPatterns")));
-    }
-
-    #[test]
-    fn testing_round_trips_through_write() {
-        let dir = tempdir().unwrap();
-        let cfg = OxplowConfig {
-            testing: TestingConfig {
-                command: Some("pytest".into()),
-                fast_command: None,
-                run_patterns: vec!["tox".into()],
-                analysis_patterns: vec!["cargo clippy".into()],
-                test_paths: vec!["spec/**".into()],
-                agent_hint: Some("Run pytest, not bare python -m pytest".into()),
-            },
-            ..default_config("test".into())
-        };
-        write_rendered(dir.path(), &cfg);
-        let raw = std::fs::read_to_string(cfg_path(dir.path())).unwrap();
-        assert!(raw.contains("oxplow.testing.command:"), "got:\n{raw}");
-        let loaded = load_project_config(dir.path()).unwrap();
-        assert_eq!(loaded.testing, cfg.testing);
     }
 
     /// Third-party keys that aren't part of oxplow's schema should
@@ -4991,9 +3933,9 @@ testing:
         )
         .unwrap();
 
-        write_project_key(
-            dir.path(),
-            "snapshotRetentionDays",
+        settings::write_layer_key(
+            &project_file(dir.path()),
+            core_settings::keys::SNAPSHOT_RETENTION_DAYS,
             Some(&serde_json::json!(14)),
         )
         .unwrap();
@@ -5011,7 +3953,7 @@ testing:
 
     fn load_from_yaml(yaml: &str) -> Result<OxplowConfig, ConfigError> {
         let dir = tempdir().unwrap();
-        write_fixture(cfg_path(dir.path()), yaml).unwrap();
+        std::fs::write(cfg_path(dir.path()), yaml).unwrap();
         load_project_config(dir.path())
     }
 
@@ -5031,13 +3973,14 @@ testing:
     #[test]
     fn a_project_metric_definition_is_refused_but_a_use_loads() {
         let err = load_from_yaml(
-            "metrics:\n  - key: acme.loc\n    measure: acme.m\n    expression: \"COUNT(*)\"\n",
+            "oxplow.metrics:\n  - key: acme.loc\n    measure: acme.m\n    expression: \"COUNT(*)\"\n",
         )
         .unwrap_err()
         .to_string();
         assert!(err.contains("oxplow.metrics"), "{err}");
         let cfg =
-            load_from_yaml("metrics:\n  - use: acme.loc\n    target: 5\n    warnAt: 7\n").unwrap();
+            load_from_yaml("oxplow.metrics:\n  - use: acme.loc\n    target: 5\n    warnAt: 7\n")
+                .unwrap();
         assert_eq!(cfg.metrics.len(), 1);
         assert_eq!(cfg.metrics[0].use_key.as_deref(), Some("acme.loc"));
         assert_eq!(cfg.metrics[0].target, Some(5.0));
@@ -5479,55 +4422,17 @@ metrics:
     }
 
     #[test]
-    fn disabled_marker_round_trips_through_write() {
-        let dir = tempdir().unwrap();
-        let cfg = OxplowConfig {
-            metrics: vec![MetricEntry {
-                use_key: Some("agent.tokens.total".into()),
-                enabled: Some(false),
-                ..Default::default()
-            }],
-            ..default_config("test".into())
-        };
-        write_rendered(dir.path(), &cfg);
-        let raw = std::fs::read_to_string(cfg_path(dir.path())).unwrap();
-        assert!(raw.contains("enabled: false"), "got:\n{raw}");
-        let loaded = load_project_config(dir.path()).unwrap();
-        assert_eq!(loaded.metrics, cfg.metrics);
-    }
-
-    #[test]
-    fn metrics_round_trip_through_write() {
-        let dir = tempdir().unwrap();
-        let cfg = OxplowConfig {
-            metrics: vec![MetricEntry {
-                use_key: Some("acme.loc".into()),
-                target: Some(2.0),
-                ..Default::default()
-            }],
-            ..default_config("test".into())
-        };
-        write_rendered(dir.path(), &cfg);
-        let raw = std::fs::read_to_string(cfg_path(dir.path())).unwrap();
-        assert!(raw.contains("metrics:"), "got:\n{raw}");
-        // No null fields written for unset options.
-        assert!(!raw.contains("null"), "minimal write, got:\n{raw}");
-        let loaded = load_project_config(dir.path()).unwrap();
-        assert_eq!(loaded.metrics, cfg.metrics);
-    }
-
-    #[test]
     fn loads_global_metric_entries_from_dir() {
         let dir = tempdir().unwrap();
         let metrics_dir = dir.path().join("metrics");
         std::fs::create_dir_all(&metrics_dir).unwrap();
-        write_fixture(
+        std::fs::write(
             metrics_dir.join("a.yaml"),
             "metrics:\n  - key: myglobal.todo\n    measure: myglobal.m\n    expression: \"COUNT(*)\"\n",
         )
         .unwrap();
         // A malformed file is skipped, not fatal.
-        write_fixture(metrics_dir.join("bad.yaml"), "metrics:\n  - key: nodot\n").unwrap();
+        std::fs::write(metrics_dir.join("bad.yaml"), "metrics:\n  - key: nodot\n").unwrap();
         let entries = load_global_metric_entries(dir.path());
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].key.as_deref(), Some("myglobal.todo"));
@@ -5873,14 +4778,14 @@ metrics:
         let dims_dir = dir.path().join("dimensions");
         std::fs::create_dir_all(&measures_dir).unwrap();
         std::fs::create_dir_all(&dims_dir).unwrap();
-        write_fixture(
+        std::fs::write(
             measures_dir.join("a.yaml"),
             "measures:\n  - key: myglobal.loc\n    unit: lines\n",
         )
         .unwrap();
         // A malformed file is skipped, not fatal.
-        write_fixture(measures_dir.join("bad.yaml"), "measures:\n  - key: nodot\n").unwrap();
-        write_fixture(
+        std::fs::write(measures_dir.join("bad.yaml"), "measures:\n  - key: nodot\n").unwrap();
+        std::fs::write(
             dims_dir.join("d.yaml"),
             "dimensions:\n  - key: myglobal.license\n    label: License\n",
         )

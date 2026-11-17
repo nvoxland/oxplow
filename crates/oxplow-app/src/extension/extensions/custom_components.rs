@@ -691,7 +691,7 @@ mod tests {
     fn write(root: &Path, rel: &str, body: &str) {
         let p = root.join(rel);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-        crate::test_fixtures::write_settings_fixture(p, body).unwrap();
+        std::fs::write(p, body).unwrap();
     }
 
     const PAGE: &str = "title: Burn\nloaders:\n  burn: { sql: \"SELECT 1 AS day, 3 AS remaining\" }\n\

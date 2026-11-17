@@ -235,12 +235,12 @@ mod tests {
     fn extension(root: &std::path::Path) {
         let ext = root.join(".oxplow/extensions/acme");
         std::fs::create_dir_all(&ext).unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             ext.join("extension.yaml"),
             "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [process.run, secrets:TOKEN]\ncollectors:\n  - id: s\n    runtime: exec\n    entry: sync.sh\n    credentials: [TOKEN]\n    entities:\n      - { name: row, key: id, columns: { id: int } }\n",
         )
         .unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             ext.join("sync.sh"),
             "#!/bin/sh\necho '{\"entities\":{\"row\":[]}}'\n",
         )
@@ -459,16 +459,15 @@ mod tests {
             .as_str()
             .unwrap()
             .to_string();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             ext.join("extension.yaml"),
             format!(
                 "manifest: 2\nname: tracker\nintent:\n  purpose: the fake provider\n  examples: [{{ name: a }}]\npermissions: [process.run, secrets:PROVIDER_TOKEN]\nproviders:\n  - id: notes\n    capability: snapshots\n    entry: bin/provider\n    credentials:\n      - {{ name: PROVIDER_TOKEN, secretRef: {{ schemaVersion: 1, id: \"{id}\" }} }}\n    declarations: provider.json\n"
             ),
         )
         .unwrap();
-        crate::test_fixtures::write_settings_fixture(ext.join("bin/provider"), "#!/bin/sh\n")
-            .unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(ext.join("bin/provider"), "#!/bin/sh\n").unwrap();
+        std::fs::write(
             ext.join("provider.json"),
             serde_json::to_string_pretty(&oxplow_provider_fake::declarations()).unwrap(),
         )

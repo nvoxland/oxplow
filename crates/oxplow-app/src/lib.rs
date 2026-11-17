@@ -433,8 +433,7 @@ mod instance_lock_tests {
         let dir = tempfile::tempdir().unwrap();
         let state_dir = dir.path().join(".oxplow");
         std::fs::create_dir_all(&state_dir).unwrap();
-        crate::test_fixtures::write_settings_fixture(state_dir.join(".gitignore"), "custom\n")
-            .unwrap();
+        std::fs::write(state_dir.join(".gitignore"), "custom\n").unwrap();
 
         ensure_state_dir(&state_dir).unwrap();
 
@@ -482,9 +481,6 @@ struct MachineEnv {
 pub struct Services {
     pub(crate) global_config_dir: PathBuf,
     pub config: Arc<RwLock<OxplowConfig>>,
-    /// Woken each time the in-memory config is swapped (`oxplow.config.set`'s
-    /// after-commit apply) — what a `config.changed` reactor waits on.
-    pub config_applied: Arc<tokio::sync::Notify>,
     pub db: Database,
     pub layout: AppLayout,
     pub streams: StreamService,
@@ -915,7 +911,7 @@ impl Services {
     ) -> Result<Self, AppInitError> {
         ensure_state_dir(&layout.state_dir)?;
         let config = oxplow_config::load_project_config(&layout.project_dir)?;
-        info!(project = %layout.project_dir.display(), agents = ?config.agents, "config loaded");
+        info!(project = %layout.project_dir.display(), "config loaded");
 
         let db = Database::open(&layout.state_db_path)?;
         let machine = MachineEnv {
@@ -1430,7 +1426,6 @@ impl Services {
             registry: snapshots.clone(),
             captures: snapshot_captures.clone(),
         }));
-        let config_applied = Arc::new(tokio::sync::Notify::new());
         let config_target = commands::config_commands::ConfigTarget {
             global_dir: machine
                 .config_dir
@@ -1441,7 +1436,6 @@ impl Services {
             config: config_arc.clone(),
             project_dir: layout.project_dir.clone(),
             events: event_bus.clone(),
-            applied: config_applied.clone(),
         };
         for command in commands::vcs::ops(commands::vcs::VcsTarget {
             vcs: vcs.clone(),
@@ -1773,7 +1767,6 @@ impl Services {
             extension_activation,
             jobs,
             config: config_arc,
-            config_applied,
             db,
             layout,
             streams,
@@ -2015,7 +2008,6 @@ impl Services {
             let mut guard = self.config.write().unwrap_or_else(|e| e.into_inner());
             *guard = fresh;
         }
-        self.config_applied.notify_waiters();
         self.events.emit(OxplowEvent::ConfigChanged);
         Ok(())
     }
@@ -2135,14 +2127,14 @@ mod tests {
         init_git(project.path());
         let services = Services::in_memory(project.path()).await.unwrap();
         let path = oxplow_config::config_path(project.path());
-        crate::test_fixtures::write_settings_fixture(&path, "snapshotRetentionDays: 3\n").unwrap();
+        std::fs::write(&path, "oxplow.snapshots.retentionDays: 3\n").unwrap();
         services.reload_config_from_disk().unwrap();
         let mut rx = services.events.subscribe_ui();
         services.reload_config_from_disk().unwrap();
         let heard = std::iter::from_fn(|| rx.try_recv().ok())
             .any(|e| matches!(e, OxplowEvent::ConfigChanged));
         assert!(!heard, "an unchanged reload announced ConfigChanged");
-        crate::test_fixtures::write_settings_fixture(&path, "snapshotRetentionDays: 4\n").unwrap();
+        std::fs::write(&path, "oxplow.snapshots.retentionDays: 4\n").unwrap();
         services.reload_config_from_disk().unwrap();
         let heard = std::iter::from_fn(|| rx.try_recv().ok())
             .any(|e| matches!(e, OxplowEvent::ConfigChanged));
@@ -2161,9 +2153,9 @@ mod tests {
             .is_none());
 
         // Simulate `/oxplow:configure` writing the file out-of-band.
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             oxplow_config::config_path(project.path()),
-            "testing:\n  command: cargo test\n",
+            "oxplow.testing.command: cargo test\n",
         )
         .unwrap();
 

@@ -667,7 +667,7 @@ mod tests {
         let f = services_with_thread().await;
         let (trees, ws) = (&f.svc.trees, f.svc.layout.project_dir.clone());
         let snap = snapshot(&f, &[("a.rs", Some("fn a() {}\n")), ("b.txt", Some("b\n"))]).await;
-        crate::test_fixtures::write_settings_fixture(ws.join("a.rs"), "changed\n").unwrap();
+        std::fs::write(ws.join("a.rs"), "changed\n").unwrap();
         let rev = Revision::Snapshot(snap);
         assert_eq!(
             trees.files_at(&ws, &rev).await.unwrap(),
@@ -698,7 +698,7 @@ mod tests {
         use oxplow_domain::snapshot::SnapshotTrigger;
         let f = services_with_thread().await;
         let (trees, ws) = (&f.svc.trees, f.svc.layout.project_dir.clone());
-        crate::test_fixtures::write_settings_fixture(ws.join("a.txt"), "one\n").unwrap();
+        std::fs::write(ws.join("a.txt"), "one\n").unwrap();
         let head = commit_all(&ws, "c1");
         let capture = SnapshotCaptureService::new(
             f.svc.snapshot_store.clone(),
@@ -740,7 +740,7 @@ mod tests {
             .unwrap();
         assert!(d.is_empty(), "{d:?}");
 
-        crate::test_fixtures::write_settings_fixture(ws.join("a.txt"), "two\n").unwrap();
+        std::fs::write(ws.join("a.txt"), "two\n").unwrap();
         let dirty = take(capture).await;
         assert_ne!(dirty, clean);
         assert_eq!(trees.revision_of(dirty).await.unwrap(), None);
@@ -807,10 +807,10 @@ mod tests {
     async fn two_commits_diff_with_line_counts() {
         let f = services_with_thread().await;
         let ws = f.svc.layout.project_dir.clone();
-        crate::test_fixtures::write_settings_fixture(ws.join("keep.txt"), "k\n").unwrap();
-        crate::test_fixtures::write_settings_fixture(ws.join("m.txt"), "a\nb\nc\n").unwrap();
+        std::fs::write(ws.join("keep.txt"), "k\n").unwrap();
+        std::fs::write(ws.join("m.txt"), "a\nb\nc\n").unwrap();
         let c1 = commit_all(&ws, "c1");
-        crate::test_fixtures::write_settings_fixture(ws.join("m.txt"), "a\nB\nc\nd\n").unwrap();
+        std::fs::write(ws.join("m.txt"), "a\nB\nc\nd\n").unwrap();
         let c2 = commit_all(&ws, "c2");
         let d = f
             .svc
@@ -830,7 +830,7 @@ mod tests {
     async fn a_snapshot_and_a_commit_compare_by_content() {
         let f = services_with_thread().await;
         let ws = f.svc.layout.project_dir.clone();
-        crate::test_fixtures::write_settings_fixture(ws.join("a.txt"), "one\ntwo\n").unwrap();
+        std::fs::write(ws.join("a.txt"), "one\ntwo\n").unwrap();
         let c1 = commit_all(&ws, "c1");
         let snap = Revision::Snapshot(snapshot(&f, &[("a.txt", Some("one\ntwo\n"))]).await);
         let same = f
@@ -840,7 +840,7 @@ mod tests {
             .await
             .unwrap();
         assert!(!same.iter().any(|e| e.path == "a.txt"), "{same:?}");
-        crate::test_fixtures::write_settings_fixture(ws.join("a.txt"), "one\nCHANGED\n").unwrap();
+        std::fs::write(ws.join("a.txt"), "one\nCHANGED\n").unwrap();
         let c2 = commit_all(&ws, "c2");
         let changed = f
             .svc
@@ -858,10 +858,9 @@ mod tests {
     async fn the_working_tree_diffs_against_its_head() {
         let f = services_with_thread().await;
         let ws = f.svc.layout.project_dir.clone();
-        crate::test_fixtures::write_settings_fixture(ws.join("tracked.txt"), "t\n").unwrap();
+        std::fs::write(ws.join("tracked.txt"), "t\n").unwrap();
         let head = commit_all(&ws, "c1");
-        crate::test_fixtures::write_settings_fixture(ws.join("w.txt"), "alpha\nbeta\ngamma\n")
-            .unwrap();
+        std::fs::write(ws.join("w.txt"), "alpha\nbeta\ngamma\n").unwrap();
         let d = f
             .svc
             .trees
@@ -880,20 +879,17 @@ mod tests {
     async fn a_diff_of_some_paths_is_what_the_whole_diff_says_of_them() {
         let f = services_with_thread().await;
         let ws = f.svc.layout.project_dir.clone();
-        crate::test_fixtures::write_settings_fixture(ws.join(".gitignore"), "ignored.txt\n")
-            .unwrap();
+        std::fs::write(ws.join(".gitignore"), "ignored.txt\n").unwrap();
         for path in ["edit.txt", "gone.txt", "same.txt", "elsewhere.txt"] {
-            crate::test_fixtures::write_settings_fixture(ws.join(path), "one\ntwo\n").unwrap();
+            std::fs::write(ws.join(path), "one\ntwo\n").unwrap();
         }
         let head = commit_all(&ws, "c1");
-        crate::test_fixtures::write_settings_fixture(ws.join("edit.txt"), "one\nchanged\n")
-            .unwrap();
+        std::fs::write(ws.join("edit.txt"), "one\nchanged\n").unwrap();
         std::fs::remove_file(ws.join("gone.txt")).unwrap();
-        crate::test_fixtures::write_settings_fixture(ws.join("same.txt"), "one\ntwo\n").unwrap();
-        crate::test_fixtures::write_settings_fixture(ws.join("new.txt"), "new\n").unwrap();
-        crate::test_fixtures::write_settings_fixture(ws.join("ignored.txt"), "x\n").unwrap();
-        crate::test_fixtures::write_settings_fixture(ws.join("elsewhere.txt"), "not asked about\n")
-            .unwrap();
+        std::fs::write(ws.join("same.txt"), "one\ntwo\n").unwrap();
+        std::fs::write(ws.join("new.txt"), "new\n").unwrap();
+        std::fs::write(ws.join("ignored.txt"), "x\n").unwrap();
+        std::fs::write(ws.join("elsewhere.txt"), "not asked about\n").unwrap();
         let asked: Vec<String> = [
             "edit.txt",
             "gone.txt",
@@ -934,7 +930,7 @@ mod tests {
         let write = |rel: &str, text: &[u8]| {
             let path = ws.join(rel);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            crate::test_fixtures::write_settings_fixture(path, text).unwrap();
+            std::fs::write(path, text).unwrap();
         };
         write(".gitignore", b"ignored.txt\n");
         for path in [
@@ -1021,12 +1017,12 @@ mod tests {
     async fn changes_names_paths_and_statuses_without_counting() {
         let f = services_with_thread().await;
         let ws = f.svc.layout.project_dir.clone();
-        crate::test_fixtures::write_settings_fixture(ws.join("gone.txt"), "g\n").unwrap();
-        crate::test_fixtures::write_settings_fixture(ws.join("m.txt"), "a\n").unwrap();
+        std::fs::write(ws.join("gone.txt"), "g\n").unwrap();
+        std::fs::write(ws.join("m.txt"), "a\n").unwrap();
         let head = commit_all(&ws, "c1");
         std::fs::remove_file(ws.join("gone.txt")).unwrap();
-        crate::test_fixtures::write_settings_fixture(ws.join("m.txt"), "b\n").unwrap();
-        crate::test_fixtures::write_settings_fixture(ws.join("new.txt"), "n\n").unwrap();
+        std::fs::write(ws.join("m.txt"), "b\n").unwrap();
+        std::fs::write(ws.join("new.txt"), "n\n").unwrap();
         let c = f
             .svc
             .trees
@@ -1059,17 +1055,17 @@ mod tests {
         let f = services_with_thread().await;
         let ws = f.svc.layout.project_dir.clone();
         std::fs::create_dir_all(ws.join(".oxplow")).unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             ws.join(".oxplow/.gitignore"),
             "*\n!.gitignore\n!project.yaml\n",
         )
         .unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             ws.join(".oxplow/project.yaml"),
-            "testing:\n  command: x\n",
+            "oxplow.testing.command: x\n",
         )
         .unwrap();
-        crate::test_fixtures::write_settings_fixture(ws.join("normal.txt"), "x\n").unwrap();
+        std::fs::write(ws.join("normal.txt"), "x\n").unwrap();
         let c1 = commit_all(&ws, "c1");
         let d = f
             .svc
@@ -1091,20 +1087,16 @@ mod tests {
         let f = services_with_thread().await;
         let ws = f.svc.layout.project_dir.clone();
         std::fs::create_dir_all(ws.join(".oxplow/oxwiki")).unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             ws.join(".oxplow/.gitignore"),
             "*\n!.gitignore\n!project.yaml\n",
         )
         .unwrap();
         let c1 = commit_all(&ws, "c1");
-        crate::test_fixtures::write_settings_fixture(
-            ws.join(".oxplow/oxwiki/notes.md"),
-            "# Notes\n",
-        )
-        .unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(ws.join(".oxplow/oxwiki/notes.md"), "# Notes\n").unwrap();
+        std::fs::write(
             ws.join(".oxplow/project.yaml"),
-            "testing:\n  command: x\n",
+            "oxplow.testing.command: x\n",
         )
         .unwrap();
         let d = f
@@ -1126,11 +1118,11 @@ mod tests {
         let ws = f.svc.layout.project_dir.clone();
         f.svc.config.write().unwrap().generated.exclude = vec!["dist".into()];
         std::fs::create_dir_all(ws.join("dist")).unwrap();
-        crate::test_fixtures::write_settings_fixture(ws.join("dist/app.js"), "v1\n").unwrap();
-        crate::test_fixtures::write_settings_fixture(ws.join("src.txt"), "a\n").unwrap();
+        std::fs::write(ws.join("dist/app.js"), "v1\n").unwrap();
+        std::fs::write(ws.join("src.txt"), "a\n").unwrap();
         let c1 = commit_all(&ws, "c1");
-        crate::test_fixtures::write_settings_fixture(ws.join("dist/app.js"), "v2\n").unwrap();
-        crate::test_fixtures::write_settings_fixture(ws.join("src.txt"), "b\n").unwrap();
+        std::fs::write(ws.join("dist/app.js"), "v2\n").unwrap();
+        std::fs::write(ws.join("src.txt"), "b\n").unwrap();
         let c2 = commit_all(&ws, "c2");
         let d = f
             .svc

@@ -382,11 +382,7 @@ pub(crate) mod tests {
         let f = services_with_thread().await;
         let stream = stream_of(&f, Duration::from_millis(300));
         let active = f.svc.snapshots.active().unwrap();
-        crate::test_fixtures::write_settings_fixture(
-            f.svc.layout.project_dir.join("slow.txt"),
-            "slow",
-        )
-        .unwrap();
+        std::fs::write(f.svc.layout.project_dir.join("slow.txt"), "slow").unwrap();
         f.svc.snapshot_captures.get(&stream).unwrap().mark_dirty(
             f.svc.layout.project_dir.join("slow.txt"),
             oxplow_fs_watch::WatchEventKind::Other,

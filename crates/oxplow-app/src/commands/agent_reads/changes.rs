@@ -89,8 +89,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
         let svc = crate::Services::in_memory(dir.path()).await.unwrap();
-        crate::test_fixtures::write_settings_fixture(dir.path().join("a.rs"), "fn a() {}\n")
-            .unwrap();
+        std::fs::write(dir.path().join("a.rs"), "fn a() {}\n").unwrap();
         let repo = git2::Repository::open(dir.path()).unwrap();
         let mut idx = repo.index().unwrap();
         idx.add_path(std::path::Path::new("a.rs")).unwrap();

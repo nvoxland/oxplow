@@ -235,7 +235,7 @@ mod tests {
         for (path, body) in files {
             let p = dir.path().join(path);
             std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-            crate::test_fixtures::write_settings_fixture(p, body).unwrap();
+            std::fs::write(p, body).unwrap();
         }
         let manifest = format!("skills:\n{yaml}");
         let doc: Value = serde_yaml::from_str(&manifest).unwrap();

@@ -357,7 +357,7 @@ mod tests {
     fn write(root: &Path, rel: &str, body: &str) {
         let p = root.join(rel);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-        crate::test_fixtures::write_settings_fixture(p, body).unwrap();
+        std::fs::write(p, body).unwrap();
     }
 
     const MANIFEST: &str = "manifest: 2\nname: acme-pr\nintent: { purpose: PRs., origin: null, examples: [] }\nevent_types:\n  types:\n    - type: acme_pr.merged\n      v: 1\n      schema: merged.json\n      summary: A pull request merged.\n";
@@ -629,8 +629,8 @@ resources:
     fn write_ext(root: &Path, name: &str, manifest: &str) {
         let dir = root.join(".oxplow/extensions").join(name);
         std::fs::create_dir_all(dir.join("datasets")).unwrap();
-        crate::test_fixtures::write_settings_fixture(dir.join("extension.yaml"), manifest).unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(dir.join("extension.yaml"), manifest).unwrap();
+        std::fs::write(
             dir.join("datasets/prs.sql"),
             "SELECT CAST('oxplow:acme/pr?id=1' AS TEXT) AS uri, CAST('One' AS TEXT) AS title",
         )

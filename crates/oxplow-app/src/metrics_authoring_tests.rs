@@ -33,7 +33,7 @@ fn rust(functions: &[(&str, usize)]) -> (String, Vec<usize>) {
 fn write(root: &Path, rel: &str, body: &str) {
     let path = root.join(rel);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    crate::test_fixtures::write_settings_fixture(path, body).unwrap();
+    std::fs::write(path, body).unwrap();
 }
 
 /// The corpus: two folders, four files.
@@ -694,15 +694,11 @@ async fn an_oversized_file_is_reported_as_excluded_not_silently_dropped() {
     huge.push_str(&"// padding\n".repeat(1100));
     write(dir.path(), "engine/huge.rs", &huge);
     // A binary file is not text a collector can read either.
-    crate::test_fixtures::write_settings_fixture(
-        dir.path().join("ui/icon.rs"),
-        [0u8, 159, 146, 150],
-    )
-    .unwrap();
+    std::fs::write(dir.path().join("ui/icon.rs"), [0u8, 159, 146, 150]).unwrap();
     write(
         dir.path(),
         ".oxplow/project.yaml",
-        "snapshotMaxFileBytes: 8000\n",
+        "oxplow.snapshots.maxFileBytes: 8000\n",
     );
     assert!(huge.len() > 8000);
     for f in extension_files(NAME, None, &MetricStarter::default()) {
@@ -744,7 +740,7 @@ async fn limited_project(max: usize) -> (Project, Lines) {
     write(
         dir.path(),
         ".oxplow/project.yaml",
-        &format!("snapshotMaxFileBytes: {max}\n"),
+        &format!("oxplow.snapshots.maxFileBytes: {max}\n"),
     );
     for f in extension_files(NAME, None, &MetricStarter::default()) {
         write(dir.path(), &f.path, &f.content);

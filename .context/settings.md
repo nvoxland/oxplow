@@ -7,11 +7,27 @@ never select a storage implementation: a definition's `secret` flag does.
 
 Each definition has a fully qualified key, title, description, category, JSON
 Schema, optional default, UI hints, ordering, and restart requirement. The host
-assigns ownership. Categories are independent of ownership. Core definitions
-come from `oxplow-config/src/core_settings.rs`; extension declarations are
-translated by `extension/extension_settings.rs`. Fixed object properties become
-independent settings; arrays, dynamic maps and explicit `x-atomic` objects are
-one setting. Prefer scalar options wherever they can be edited independently.
+assigns ownership. Categories are independent of ownership. Extension
+declarations are translated by `extension/extension_settings.rs`. Fixed object
+properties become independent settings; arrays, dynamic maps and explicit
+`x-atomic` objects are one setting. Prefer scalar options wherever they can be
+edited independently.
+
+Core declares its settings directly in `oxplow-config/src/core_settings.rs`:
+`table()` holds one entry per fixed key (key, title, description, category,
+schema, default, UI hint) with the function that applies its value to
+`OxplowConfig`; `core_settings::keys` names the keys core code uses. A few
+families have one setting per member and are applied by their key's shape:
+`oxplow.activeProviders.<capability>`, `oxplow.agents.<harness>.enabled` and
+`.<preference>`, `oxplow.ai.roles.<role>`, and `oxplow.extensions.<name>.enabled`.
+`OxplowConfig` is a typed view, never a storage format: `config_from` builds it
+from resolved values, each fixed setting's value or else its default (the
+definition's default is the only one), so a new core setting is one table entry.
+A structured value's schema comes from its Rust type (`schema_of::<T>()` on the
+whole value, so nested definitions resolve). A test pins every core definition's
+metadata and the sample values its schema accepts
+(`oxplow-config/testdata/core_settings.json`; `OXPLOW_PIN_UPDATE=1` rewrites it),
+so a change to either shows in review.
 Extension schema annotations are `title`, `description`, `x-category`, `x-ui`,
 `x-order`, `x-secret`, `x-restart-required` and `x-atomic`.
 
@@ -54,7 +70,7 @@ origin. Without a level it resolves inheritance; with a level it reads only that
 override. `oxplow.config.set {key, value, level}` and `.unset {key, level}` require
 an explicit `local`, `project` or `global`. `list_keys` returns definitions from
 the registry. Values are validated by registered offline schemas before storage;
-core writes also validate the typed runtime projection before changing files,
+core writes also build the typed view (`config_from`) before changing files,
 both at the selected level and with higher overrides applied. An override
 invalidated by an extension schema change can still be replaced or removed;
 undo is withheld when it would restore that invalid value.
@@ -139,8 +155,7 @@ Pure registry, schema, inheritance, file safety and secure-backend cases are in
 `oxplow-config` settings tests. App tests cover generic APIs, typed preflight,
 canonical undo, extension reads/SQL, secret audit boundaries and provider/collector
 consumers. Extension fixtures cover the Settings inventory and task workflow
-commands. Test-only fixture writers translate typed runtime documents into the
-new file format; there is no such compatibility path in production.
+commands. Tests write the real file format: flat registered keys.
 
 ## Host sharing and ordinary batches
 
@@ -162,7 +177,7 @@ Showing all three secret levels still requires three distinct keychain queries;
 OS credential access may prompt or fail, in which case only that row/level is
 unavailable. Unknown harness preferences remain stored through bootstrap until
 their schema returns (the runtime keeps them as plain JSON per harness); harness
-switches and role objects are validated before typed runtime projection, with
+switches and role objects are validated before the typed view is built, with
 errors naming the setting key. `enabled` is reserved under every harness key:
 provider declarations are refused for it, and a test holds built-in harnesses to it.
 

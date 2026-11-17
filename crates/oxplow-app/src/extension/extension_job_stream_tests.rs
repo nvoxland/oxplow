@@ -99,8 +99,8 @@ pub(super) async fn fixture_idle(manifest: &str, replies: Vec<FixtureReply>) -> 
     crate::test_fixtures::init_git_repo(dir.path());
     let ext = dir.path().join(".oxplow/extensions/triage");
     std::fs::create_dir_all(ext.join("commands")).unwrap();
-    crate::test_fixtures::write_settings_fixture(ext.join("extension.yaml"), manifest).unwrap();
-    crate::test_fixtures::write_settings_fixture(ext.join("commands/lookup.star"), LOOKUP).unwrap();
+    std::fs::write(ext.join("extension.yaml"), manifest).unwrap();
+    std::fs::write(ext.join("commands/lookup.star"), LOOKUP).unwrap();
     let svc = crate::Services::in_memory(dir.path()).await.unwrap();
     let model = prepare(&svc, replies).await;
     Fixture {
@@ -488,7 +488,7 @@ async fn a_tool_that_does_not_admit_a_job_is_a_load_error() {
     crate::test_fixtures::init_git_repo(dir.path());
     let ext = dir.path().join(".oxplow/extensions/triage");
     std::fs::create_dir_all(ext.join("commands")).unwrap();
-    crate::test_fixtures::write_settings_fixture(ext.join("commands/lookup.star"), LOOKUP).unwrap();
+    std::fs::write(ext.join("commands/lookup.star"), LOOKUP).unwrap();
     for (manifest, says) in [
         (
             MANIFEST.replace("    job: true\n", ""),
@@ -510,8 +510,7 @@ async fn a_tool_that_does_not_admit_a_job_is_a_load_error() {
             "job needs are",
         ),
     ] {
-        crate::test_fixtures::write_settings_fixture(ext.join("extension.yaml"), &manifest)
-            .unwrap();
+        std::fs::write(ext.join("extension.yaml"), &manifest).unwrap();
         let errors =
             crate::extension::extensions::load_project_extension(dir.path(), "triage").errors;
         assert!(

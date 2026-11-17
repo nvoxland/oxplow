@@ -44,7 +44,7 @@ pub struct SettingDefinition {
 }
 
 /// Which override file (or corresponding secure-store entry) a write targets.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Level {
     Local,

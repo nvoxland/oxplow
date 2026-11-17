@@ -2538,8 +2538,7 @@ mod tests {
                 "manifest: 2\nname: acme\nintent:\n  purpose: p\npermissions: [ai.compute]\nimplementations:\n  - {{ capability: ai_provider, id: acme, title: Acme, provider: openai_compatible, config: {{ baseUrl: \"{base}\" }} }}\n"
             )
         };
-        crate::test_fixtures::write_settings_fixture(ext.join("extension.yaml"), manifest(&first))
-            .unwrap();
+        std::fs::write(ext.join("extension.yaml"), manifest(&first)).unwrap();
         let svc = crate::Services::in_memory(dir.path()).await.unwrap();
         crate::test_fixtures::activate(&svc).await;
         svc.ai
@@ -2559,8 +2558,7 @@ mod tests {
         assert_eq!(call().await.unwrap().text, "hello");
         assert_eq!(seen.lock().unwrap()[0].1["authorization"], "Bearer sk-1");
 
-        crate::test_fixtures::write_settings_fixture(ext.join("extension.yaml"), manifest(&second))
-            .unwrap();
+        std::fs::write(ext.join("extension.yaml"), manifest(&second)).unwrap();
         crate::test_fixtures::activate(&svc).await;
         assert_eq!(call().await.unwrap().text, "hello");
         assert_eq!(second_seen.lock().unwrap().len(), 1);
@@ -2618,9 +2616,9 @@ mod tests {
         crate::test_fixtures::init_git_repo(dir.path());
         let yaml = |model: &str| {
             std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
-            crate::test_fixtures::write_settings_fixture(
+            std::fs::write(
                 dir.path().join(".oxplow/project.yaml"),
-                format!("ai:\n  roles:\n    summarize: {{ provider: or, model: {model} }}\n"),
+                format!("oxplow.ai.roles.summarize: {{ provider: or, model: {model} }}\n"),
             )
             .unwrap();
         };

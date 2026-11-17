@@ -896,7 +896,6 @@ mod tests {
 
     fn empty_config() -> Arc<std::sync::RwLock<OxplowConfig>> {
         Arc::new(std::sync::RwLock::new(OxplowConfig {
-            agents: vec![],
             project_name: "p".into(),
             lsp_servers: vec![],
             agent_prompt_append: String::new(),

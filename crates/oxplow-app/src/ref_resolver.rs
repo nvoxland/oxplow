@@ -280,8 +280,7 @@ mod tests {
         let mut config = repo.config().unwrap();
         config.set_str("user.name", "test").unwrap();
         config.set_str("user.email", "test@example.com").unwrap();
-        crate::test_fixtures::write_settings_fixture(dir.path().join("a.rs"), "fn main() {}\n")
-            .unwrap();
+        std::fs::write(dir.path().join("a.rs"), "fn main() {}\n").unwrap();
         let sig = repo.signature().unwrap();
         let tree_id = {
             let mut idx = repo.index().unwrap();
@@ -386,7 +385,7 @@ mod tests {
         let put = |rel: &str, text: &str| {
             let path = root.join(rel);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            crate::test_fixtures::write_settings_fixture(path, text).unwrap();
+            std::fs::write(path, text).unwrap();
         };
         put(
             ".oxplow/extensions/acme/extension.yaml",
@@ -441,8 +440,8 @@ mod tests {
     async fn resolves_directory_entry_count_and_names() {
         let dir = git_repo_with_commit("init", "");
         std::fs::create_dir(dir.path().join("sub")).unwrap();
-        crate::test_fixtures::write_settings_fixture(dir.path().join("sub/x.rs"), "x").unwrap();
-        crate::test_fixtures::write_settings_fixture(dir.path().join("sub/y.rs"), "y").unwrap();
+        std::fs::write(dir.path().join("sub/x.rs"), "x").unwrap();
+        std::fs::write(dir.path().join("sub/y.rs"), "y").unwrap();
         let services = Services::in_memory(dir.path()).await.unwrap();
         let summary = resolve_ref(&services, &build::dir_uri("sub")).await;
         assert_eq!(summary.detail.as_deref(), Some("2 entries"));

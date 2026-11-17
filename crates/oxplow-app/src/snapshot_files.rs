@@ -253,7 +253,7 @@ mod tests {
         .with_settle_duration(Duration::ZERO)
         .with_predrain_delay(Duration::ZERO);
         let file = worktree.path().join("notes.txt");
-        crate::test_fixtures::write_settings_fixture(&file, "original").unwrap();
+        std::fs::write(&file, "original").unwrap();
         capture.mark_dirty(file.clone(), oxplow_fs_watch::WatchEventKind::Other);
         let snapshot = capture
             .request_snapshot(crate::snapshot_capture::TakeRequest {
@@ -276,7 +276,7 @@ mod tests {
             .find(|r| r.path == "notes.txt")
             .unwrap();
 
-        crate::test_fixtures::write_settings_fixture(&file, "clobbered").unwrap();
+        std::fs::write(&file, "clobbered").unwrap();
         let files = f.svc.snapshot_files();
         let restored = files.restore_file_snapshot(row.id).await.unwrap();
         assert_eq!(restored.file, file);

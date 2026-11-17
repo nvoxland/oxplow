@@ -418,8 +418,7 @@ mod tests {
     async fn a_pinned_file_is_checked_at_its_revision() {
         let dir = git_repo();
         std::fs::create_dir_all(dir.path().join("src")).unwrap();
-        crate::test_fixtures::write_settings_fixture(dir.path().join("src/a.rs"), "fn a() {}\n")
-            .unwrap();
+        std::fs::write(dir.path().join("src/a.rs"), "fn a() {}\n").unwrap();
         let repo = git2::Repository::open(dir.path()).unwrap();
         let mut index = repo.index().unwrap();
         index.add_path(std::path::Path::new("src/a.rs")).unwrap();

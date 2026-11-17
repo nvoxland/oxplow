@@ -635,7 +635,7 @@ mod tests {
         let f = services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
-        crate::test_fixtures::write_settings_fixture(root.join("a.txt"), "one\n").unwrap();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
         commit_all(&root, "base");
         let stream = svc.stream_store.list().await.unwrap()[0].id.to_string();
         let err = svc
@@ -696,14 +696,14 @@ mod tests {
         let f = services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
-        crate::test_fixtures::write_settings_fixture(root.join("a.txt"), "one\n").unwrap();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
         commit_all(&root, "base");
         let stream = svc.stream_store.list().await.unwrap()[0].id.to_string();
         let page = Actor::Page {
             page_id: "oxplow/uncommitted".into(),
             on_behalf_of: Box::new(Actor::Human),
         };
-        crate::test_fixtures::write_settings_fixture(root.join("a.txt"), "two\n").unwrap();
+        std::fs::write(root.join("a.txt"), "two\n").unwrap();
         svc.commands
             .run(
                 &page,
@@ -722,7 +722,7 @@ mod tests {
             )
             .await
             .expect("a page commits for the person");
-        crate::test_fixtures::write_settings_fixture(root.join("a.txt"), "three\n").unwrap();
+        std::fs::write(root.join("a.txt"), "three\n").unwrap();
         let discard = json!({ "stream": stream, "paths": ["a.txt"] });
         let err = svc
             .commands
@@ -734,7 +734,7 @@ mod tests {
             .run(&page, "oxplow.vcs.discard", discard, true)
             .await
             .expect("confirmed, a page discards for the person");
-        crate::test_fixtures::write_settings_fixture(root.join("a.txt"), "four\n").unwrap();
+        std::fs::write(root.join("a.txt"), "four\n").unwrap();
         let for_agent = Actor::Page {
             page_id: "oxplow/uncommitted".into(),
             on_behalf_of: Box::new(Actor::Agent {
@@ -767,7 +767,7 @@ mod tests {
         let f = services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
-        crate::test_fixtures::write_settings_fixture(root.join("a.txt"), "one\n").unwrap();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
         commit_all(&root, "base");
         let own = svc.stream_store.list().await.unwrap()[0].id;
         let stream = own.to_string();
@@ -777,7 +777,7 @@ mod tests {
             thread_id: Some(f.thread),
             stream_id,
         };
-        crate::test_fixtures::write_settings_fixture(root.join("a.txt"), "by an agent\n").unwrap();
+        std::fs::write(root.join("a.txt"), "by an agent\n").unwrap();
         svc.commands
             .run(
                 &agent(Some(own)),
@@ -819,9 +819,9 @@ mod tests {
                 .unwrap_err();
             assert!(format!("{err:?}").contains("Denied"), "{err:?}");
         }
-        crate::test_fixtures::write_settings_fixture(root.join("a.txt"), "one\n").unwrap();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
         commit_all(&root, "base again");
-        crate::test_fixtures::write_settings_fixture(root.join("a.txt"), "two\n").unwrap();
+        std::fs::write(root.join("a.txt"), "two\n").unwrap();
 
         let discard = json!({ "stream": stream, "paths": ["a.txt"] });
         let err = svc
@@ -903,11 +903,11 @@ mod tests {
         let f = services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
-        crate::test_fixtures::write_settings_fixture(root.join("a.txt"), "one\n").unwrap();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
         let base = commit_all(&root, "base");
         let stream = svc.stream_store.list().await.unwrap()[0].id.to_string();
-        crate::test_fixtures::write_settings_fixture(root.join("a.txt"), "two\n").unwrap();
-        crate::test_fixtures::write_settings_fixture(root.join("new.txt"), "new\n").unwrap();
+        std::fs::write(root.join("a.txt"), "two\n").unwrap();
+        std::fs::write(root.join("new.txt"), "new\n").unwrap();
         let out = svc
             .commands
             .run(
@@ -948,10 +948,10 @@ mod tests {
         let f = services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
-        crate::test_fixtures::write_settings_fixture(root.join("a.txt"), "one\n").unwrap();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
         let base = commit_all(&root, "base");
         let stream = svc.stream_store.list().await.unwrap()[0].id.to_string();
-        crate::test_fixtures::write_settings_fixture(root.join("a.txt"), "two\n").unwrap();
+        std::fs::write(root.join("a.txt"), "two\n").unwrap();
         let page = Actor::Page {
             page_id: "oxplow/uncommitted-changes#commit".into(),
             on_behalf_of: Box::new(Actor::Human),
@@ -982,7 +982,7 @@ mod tests {
         let stream = svc.stream_store.list().await.unwrap()[0].id.to_string();
         // A repository with no commit yet.
         git(&root, &["update-ref", "-d", "HEAD"]);
-        crate::test_fixtures::write_settings_fixture(root.join("a.txt"), "one\n").unwrap();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
         let out = svc
             .commands
             .run(
@@ -1004,13 +1004,13 @@ mod tests {
         let f = services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
-        crate::test_fixtures::write_settings_fixture(root.join("a.txt"), "one\n").unwrap();
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
         commit_all(&root, "base");
         let stream = svc.stream_store.list().await.unwrap()[0].id.to_string();
         let commit = |body: &'static str| {
             let (svc, root, stream) = (svc.clone(), root.clone(), stream.clone());
             async move {
-                crate::test_fixtures::write_settings_fixture(root.join("a.txt"), body).unwrap();
+                std::fs::write(root.join("a.txt"), body).unwrap();
                 svc.commands
                     .run(
                         &Actor::Human,
@@ -1048,17 +1048,13 @@ mod tests {
         // Changes in the tree since: a soft reset would mix them with the
         // commit's own in the index.
         let dirty = commit("four and a half\n").await;
-        crate::test_fixtures::write_settings_fixture(root.join("other.txt"), "mine\n").unwrap();
+        std::fs::write(root.join("other.txt"), "mine\n").unwrap();
         refused(dirty, "has changes").await;
         std::fs::remove_file(root.join("other.txt")).unwrap();
         // Mid-merge.
         let fourth = commit("five\n").await;
         let head = git(&root, &["rev-parse", "HEAD"]);
-        crate::test_fixtures::write_settings_fixture(
-            root.join(".git/MERGE_HEAD"),
-            format!("{head}\n"),
-        )
-        .unwrap();
+        std::fs::write(root.join(".git/MERGE_HEAD"), format!("{head}\n")).unwrap();
         refused(fourth, "in progress").await;
     }
 }

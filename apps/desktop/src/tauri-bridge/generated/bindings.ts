@@ -4375,8 +4375,6 @@ export type Owner = {
 };
 
 export type OxplowConfig = {
-	/**  Runtime projection; enabled state is resolved independently by key. */
-	agents: string[],
 	agentEnabled?: { [key in string]: boolean },
 	/**
 	 *  Human-readable project name. Defaults to the basename of the
@@ -4448,9 +4446,7 @@ export type OxplowConfig = {
 	 *  it. Consumed on macOS only — see the desktop shell's `icon_tint`.
 	 *
 	 *  No `skip_serializing_if`: this type is a command result, and specta
-	 *  rejects conditional omission in unified mode. Absence from the written
-	 *  YAML is handled by `render_project_config`, which builds its mapping by
-	 *  hand rather than through this derive.
+	 *  rejects conditional omission in unified mode.
 	 */
 	iconTint: string | null,
 	/**  How the project's tests run (the `testing:` block). */

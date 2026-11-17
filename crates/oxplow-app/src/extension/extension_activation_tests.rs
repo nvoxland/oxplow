@@ -11,14 +11,14 @@ use std::{path::Path, sync::Arc, time::Duration};
 fn write_ext(root: &Path, name: &str, v: u32, extra: &str) {
     let dir = root.join(format!(".oxplow/extensions/{name}"));
     std::fs::create_dir_all(dir.join("handlers")).unwrap();
-    crate::test_fixtures::write_settings_fixture(
+    std::fs::write(
         dir.join("extension.yaml"),
         format!(
             "manifest: 2\nname: {name}\nintent:\n  purpose: p\ncommands:\n  - name: answer.get\n    summary: Answer.\n    input_schema: {{ type: object }}\n    entry: handlers/get.star\n    access: read\n{extra}"
         ),
     )
     .unwrap();
-    crate::test_fixtures::write_settings_fixture(
+    std::fs::write(
         dir.join("handlers/get.star"),
         format!("def transform(x):\n    return {{\"commands\": [], \"result\": {{\"v\": {v}}}}}\n"),
     )
@@ -252,7 +252,7 @@ async fn a_disabled_extension_exposes_nothing() {
     crate::test_fixtures::activate_with_problems(&svc).await;
     assert_eq!(answer(&svc, "beta").await, Ok(json!(7)));
 
-    crate::test_fixtures::write_settings_fixture(
+    std::fs::write(
         dir.path().join(".oxplow/local.yaml"),
         "oxplow.extensions.beta.enabled: false\n",
     )
@@ -276,7 +276,7 @@ async fn a_dataset_that_does_not_compile_holds_back_only_its_extension() {
         "datasets:\n  - name: blocked\n    version: 1\n    description: Blocked tasks.\n    fields:\n      - { name: uri, type: TEXT, doc: Task ref. }\n",
     );
     std::fs::create_dir_all(dir.path().join(".oxplow/extensions/late/datasets")).unwrap();
-    crate::test_fixtures::write_settings_fixture(
+    std::fs::write(
         dir.path()
             .join(".oxplow/extensions/late/datasets/blocked.sql"),
         "SELECT no_such_column AS uri FROM ref('thread')",
@@ -298,7 +298,7 @@ async fn the_documented_examples_activate() {
     // Some examples build on oxplow-bundled's models and oxtask, which are
     // on by default; oxwiki isn't needed.
     std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
-    crate::test_fixtures::write_settings_fixture(
+    std::fs::write(
         dir.path().join(".oxplow/project.yaml"),
         "oxplow.extensions.oxwiki.enabled: false\n",
     )
@@ -447,7 +447,7 @@ async fn an_edit_during_activation_rejects_it_and_the_next_carries_the_edit() {
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert!(!activating.is_finished());
     // A change to which extensions are on overtakes the candidate.
-    crate::test_fixtures::write_settings_fixture(
+    std::fs::write(
         dir.path().join(".oxplow/local.yaml"),
         "oxplow.extensions.alpha.enabled: true\noxplow.extensions.elsewhere.enabled: false\n",
     )

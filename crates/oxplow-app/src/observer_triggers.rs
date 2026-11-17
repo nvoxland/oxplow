@@ -806,8 +806,8 @@ mod tests {
     fn a_rescan_reports_the_matching_files_on_disk() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("shelf")).unwrap();
-        crate::test_fixtures::write_settings_fixture(dir.path().join("shelf/a.md"), "x").unwrap();
-        crate::test_fixtures::write_settings_fixture(dir.path().join("shelf/a.txt"), "x").unwrap();
+        std::fs::write(dir.path().join("shelf/a.md"), "x").unwrap();
+        std::fs::write(dir.path().join("shelf/a.txt"), "x").unwrap();
         let batch = Batch {
             paths: Vec::new(),
             rescans: vec![dir.path().join("shelf")],
@@ -874,8 +874,8 @@ mod tests {
         assert!(matches!(first, Some(RunTrigger::Start)), "{first:?}");
         // Let the watch settle before the write it must hear.
         tokio::time::sleep(Duration::from_millis(200)).await;
-        crate::test_fixtures::write_settings_fixture(base.join("memory/a.md"), "x").unwrap();
-        crate::test_fixtures::write_settings_fixture(base.join("memory/notes.txt"), "x").unwrap();
+        std::fs::write(base.join("memory/a.md"), "x").unwrap();
+        std::fs::write(base.join("memory/notes.txt"), "x").unwrap();
         let changed = loop {
             match tokio::time::timeout(Duration::from_secs(5), receive.recv())
                 .await
@@ -899,8 +899,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().canonicalize().unwrap();
         std::fs::create_dir_all(root.join(".oxplow/oxwiki")).unwrap();
-        crate::test_fixtures::write_settings_fixture(root.join(".oxplow/.gitignore"), "*\n")
-            .unwrap();
+        std::fs::write(root.join(".oxplow/.gitignore"), "*\n").unwrap();
         let watch = oxplow_fs_watch::FsWatcher::watch_workspace(
             &root,
             oxplow_fs_watch::WorkspaceFilter::for_project(
@@ -920,8 +919,7 @@ mod tests {
         ));
         // Let the watch settle before the first write.
         tokio::time::sleep(Duration::from_millis(500)).await;
-        crate::test_fixtures::write_settings_fixture(root.join(".oxplow/oxwiki/home.md"), "# Home")
-            .unwrap();
+        std::fs::write(root.join(".oxplow/oxwiki/home.md"), "# Home").unwrap();
         let heard = tokio::time::timeout(Duration::from_secs(15), receive.recv())
             .await
             .expect("a page in the existing folder is heard");
@@ -958,17 +956,17 @@ mod tests {
     async fn declare(svc: &Arc<Services>) {
         let dir = svc.layout.project_dir.join(".oxplow/extensions/shelf");
         std::fs::create_dir_all(dir.join("storage/migrations")).unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             dir.join("extension.yaml"),
             format!("{HEAD}storage: {{ sqlite: true }}\ncollectors:\n{COLLECTOR}"),
         )
         .unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             dir.join("storage/migrations/V1__t.sql"),
             "CREATE TABLE t (x);",
         )
         .unwrap();
-        crate::test_fixtures::write_settings_fixture(dir.join("seen.star"), SCRIPT).unwrap();
+        std::fs::write(dir.join("seen.star"), SCRIPT).unwrap();
         crate::test_fixtures::activate(svc).await;
     }
 
@@ -1099,7 +1097,7 @@ mod tests {
     async fn start_runs_on_boot_and_on_enable_and_never_while_off() {
         let fx = crate::test_fixtures::services_with_thread().await;
         // Only this test's collector; bundled also observes Claude memories.
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             fx._dir.path().join(".oxplow/local.yaml"),
             "oxplow.extensions.oxtask.enabled: false\noxplow.extensions.oxwiki.enabled: false\noxplow.extensions.oxplow-bundled.enabled: false\n",
         )

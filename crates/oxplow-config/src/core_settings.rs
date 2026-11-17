@@ -1,149 +1,612 @@
-//! Core's declarations in the shared settings registry.
+//! Core's declarations in the shared settings registry, and the typed
+//! runtime view built from them.
 //!
-//! Persisted documents use registered, fully qualified keys. `RawConfig`
-//! remains the runtime projection of those values, not a storage format.
-//! Fixed object fields are independent settings; maps and arrays remain
-//! indivisible values, so an override never accidentally merges two levels.
+//! [`table`] declares each fixed core setting once: its registered key,
+//! metadata, schema, default and how its value applies to [`OxplowConfig`].
+//! A few key families (a capability's choice, a harness's switch and
+//! preferences, an AI role) have one setting per member and are applied by
+//! [`config_from`] by their key's shape. Values are atomic: objects and
+//! arrays replace whole values, nothing merges between levels.
 
 use std::collections::BTreeMap;
 
+use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 
-use crate::settings::{SettingDefinition, SettingsError, SettingsStore};
+use crate::settings::{Level, Origin, SettingDefinition, SettingsError, SettingsStore};
+use crate::{ConfigError, OxplowConfig};
 
-/// A core setting and its path in the runtime configuration document.
-/// Settings with no runtime path are consumed directly through the service.
-#[derive(Clone, Debug)]
-pub struct CoreBinding {
+/// The registered keys core code names directly.
+pub mod keys {
+    pub const PROJECT_NAME: &str = "oxplow.projectName";
+    pub const AGENT_PROMPT_APPEND: &str = "oxplow.agentPromptAppend";
+    pub const INJECT_SESSION_CONTEXT: &str = "oxplow.injectSessionContext";
+    pub const ICON_TINT: &str = "oxplow.iconTint";
+    pub const SNAPSHOT_RETENTION_DAYS: &str = "oxplow.snapshots.retentionDays";
+    pub const SNAPSHOT_MAX_FILE_BYTES: &str = "oxplow.snapshots.maxFileBytes";
+    pub const METRICS: &str = "oxplow.metrics";
+    pub const METRIC_RETENTION_DAYS: &str = "oxplow.metrics.retentionDays";
+    pub const METRIC_DETAIL_MAX_PER_PRODUCER: &str = "oxplow.metrics.detailMaxPerProducer";
+    pub const METRIC_DETAIL_RETENTION_DAYS: &str = "oxplow.metrics.detailRetentionDays";
+    pub const GENERATED_EXCLUDE: &str = "oxplow.generated.exclude";
+    pub const GENERATED_INCLUDE: &str = "oxplow.generated.include";
+    pub const TESTING_COMMAND: &str = "oxplow.testing.command";
+    pub const TESTING_FAST_COMMAND: &str = "oxplow.testing.fastCommand";
+    pub const TESTING_RUN_PATTERNS: &str = "oxplow.testing.runPatterns";
+    pub const TESTING_ANALYSIS_PATTERNS: &str = "oxplow.testing.analysisPatterns";
+    pub const TESTING_TEST_PATHS: &str = "oxplow.testing.testPaths";
+    pub const TESTING_AGENT_HINT: &str = "oxplow.testing.agentHint";
+    pub const SCRIPTS_MAX_CONCURRENT: &str = "oxplow.scripts.maxConcurrent";
+    pub const SCRIPTS_MEMORY_MB: &str = "oxplow.scripts.memoryMb";
+    pub const LSP_SERVERS: &str = "oxplow.lsp.servers";
+    pub const ZONES: &str = "oxplow.zones";
+    pub const EXTENSION_INSTANCES: &str = "oxplow.extensionInstances";
+    pub const REPLACEMENTS: &str = "oxplow.replacements";
+    pub const EVENT_RETENTION: &str = "oxplow.eventRetention";
+    pub const EXTENSION_SOURCES: &str = "oxplow.extensionSources";
+    /// `oxplow.activeProviders.<capability>`: [`super::active_provider_key`].
+    pub const ACTIVE_PROVIDERS_PREFIX: &str = "oxplow.activeProviders.";
+    /// `oxplow.agents.<harness>.enabled` and `.<preference>`.
+    pub const AGENTS_PREFIX: &str = "oxplow.agents.";
+}
+
+type Apply = fn(&mut OxplowConfig, Value) -> Result<(), String>;
+
+/// One fixed core setting: its registered definition and how its effective
+/// value (or its default) applies to the typed runtime view.
+pub struct CoreSetting {
     pub definition: SettingDefinition,
-    pub path: Vec<String>,
+    apply: Apply,
 }
 
-/// The namespaced key corresponding to an old runtime-document path.
-/// This is a projection helper, not an alias accepted by config commands.
-pub fn canonical_key(path: &str) -> String {
-    let suffix = match path {
-        "snapshotRetentionDays" => "snapshots.retentionDays",
-        "snapshotMaxFileBytes" => "snapshots.maxFileBytes",
-        "snapshotTurnBudgetMs" => "snapshots.turnBudgetMs",
-        "metricRetentionDays" => "metrics.retentionDays",
-        "metricDetailMaxPerProducer" => "metrics.detailMaxPerProducer",
-        "metricDetailRetentionDays" => "metrics.detailRetentionDays",
-        other => other,
-    };
-    format!("oxplow.{suffix}")
+fn setting(
+    key: &str,
+    title: &str,
+    category: &str,
+    description: &str,
+    schema: Value,
+    default: Option<Value>,
+    apply: Apply,
+) -> CoreSetting {
+    CoreSetting {
+        definition: SettingDefinition {
+            key: key.into(),
+            title: title.into(),
+            description: description.into(),
+            category: category.into(),
+            schema,
+            default,
+            secret: false,
+            order: 0,
+            ui: json!({}),
+            restart_required: false,
+            owner: "core".into(),
+        },
+        apply,
+    }
 }
 
-/// All core definitions, with defaults evaluated for this project's name.
-pub fn definitions(fallback_name: &str) -> Vec<SettingDefinition> {
-    bindings(fallback_name)
+impl CoreSetting {
+    fn multiline(mut self) -> Self {
+        self.definition.ui = json!({ "editor": "multiline" });
+        self
+    }
+}
+
+/// A whole value's JSON Schema from its Rust type. Nested types stay in the
+/// root's own definitions, so their references resolve.
+fn schema_of<T: schemars::JsonSchema>() -> Value {
+    let mut schema = serde_json::to_value(schemars::schema_for!(T)).expect("schema serializes");
+    if let Some(object) = schema.as_object_mut() {
+        object.remove("$schema");
+        object.remove("title");
+    }
+    schema
+}
+
+fn de<T: DeserializeOwned>(value: Value) -> Result<T, String> {
+    serde_json::from_value(value).map_err(|error| error.to_string())
+}
+
+fn whole(value: Value) -> Result<u64, String> {
+    value
+        .as_u64()
+        .ok_or_else(|| "must be a whole number".to_owned())
+}
+
+fn u32_of(value: Value) -> Result<u32, String> {
+    u32::try_from(whole(value)?).map_err(|_| "is too large".to_owned())
+}
+
+fn text(value: Value) -> Result<Option<String>, String> {
+    Ok(de::<Option<String>>(value)?
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty()))
+}
+
+fn string_list(value: Value) -> Result<Vec<String>, String> {
+    let mut out = Vec::new();
+    for (index, item) in de::<Option<Vec<String>>>(value)?
         .into_iter()
-        .map(|binding| binding.definition)
-        .collect()
+        .flatten()
+        .enumerate()
+    {
+        let trimmed = item.trim().to_owned();
+        if trimmed.is_empty() {
+            return Err(format!("item {} must be a non-empty string", index + 1));
+        }
+        out.push(trimmed);
+    }
+    Ok(out)
 }
 
-/// Core fields and their declaration metadata, generated from the runtime
-/// schema so a new field cannot silently become an unregistered setting.
-pub fn bindings(fallback_name: &str) -> Vec<CoreBinding> {
+fn glob_list(value: Value) -> Result<Vec<String>, String> {
+    let list = string_list(value)?;
+    for (index, glob) in list.iter().enumerate() {
+        globset::GlobBuilder::new(glob)
+            .literal_separator(true)
+            .build()
+            .map_err(|e| format!("item {} `{glob}` isn't a valid glob: {e}", index + 1))?;
+    }
+    Ok(list)
+}
+
+fn generated(value: Value, key: &str) -> Result<Vec<String>, String> {
+    crate::validate_generated_list(de::<Vec<String>>(value)?, key).map_err(message)
+}
+
+fn message(error: ConfigError) -> String {
+    match error {
+        ConfigError::Invalid(message) => message,
+        other => other.to_string(),
+    }
+}
+
+/// Every fixed core setting, with defaults evaluated for this project's name.
+pub fn table(fallback_name: &str) -> Vec<CoreSetting> {
+    use crate::*;
     let fallback_name = if fallback_name.trim().is_empty() {
         "Project"
     } else {
         fallback_name
     };
-    static ROOT_SCHEMA: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
-    let root_schema = ROOT_SCHEMA.get_or_init(crate::keys::project_config_schema);
-    let defaults = default_document(fallback_name);
-    let mut out = Vec::new();
-    for (name, schema) in root_schema["properties"]
-        .as_object()
-        .expect("the core schema has properties")
-    {
-        collect(
-            root_schema,
-            schema,
-            &defaults,
-            vec![name.clone()],
-            None,
-            &mut out,
-        );
-    }
-    // Capability identities are declared by the core capability registry;
-    // implementations supplied by extensions remain ordinary scalar values.
-    // Independent choices inherit independently rather than merging a map.
-    out.retain(|binding| {
-        binding
-            .path
-            .first()
-            .is_none_or(|path| path != "activeProviders")
-    });
-    for capability in oxplow_domain::capability::choosable() {
-        out.push(CoreBinding {
-            definition: SettingDefinition {
-                key: canonical_key(&format!("activeProviders.{}", capability.id)),
-                title: format!("{} implementation", capability.title),
-                description: format!(
-                    "The implementation used for {}. Unset to inherit the choice.",
-                    capability.title.to_lowercase()
-                ),
-                category: "integrations".into(),
-                schema: json!({"type":"string","pattern":"^[a-z][a-z0-9_]*$"}),
-                default: None,
-                secret: false,
-                order: 0,
-                ui: json!({}),
-                restart_required: false,
-                owner: "core".into(),
+    let nullable_text = || json!({"type": ["string", "null"]});
+    let nullable_list = || json!({"type": ["array", "null"], "items": {"type": "string"}});
+    let count = |minimum: u64| json!({"type": "integer", "minimum": minimum});
+    vec![
+        setting(
+            keys::PROJECT_NAME,
+            "Project name",
+            "project",
+            "Display name; defaults to the project directory's basename.",
+            json!({"type": "string", "minLength": 1, "pattern": "\\S"}),
+            Some(json!(fallback_name)),
+            |c, v| {
+                c.project_name = text(v)?.ok_or("must be a non-empty name")?;
+                Ok(())
             },
-            path: vec!["activeProviders".into(), capability.id.into()],
-        });
-    }
-    // Independent features use ordinary settings, without list-specific precedence.
-    out.retain(|binding| {
-        !matches!(
-            binding.path.first().map(String::as_str),
-            Some("agents" | "agentEnabled" | "agentConfig" | "ai" | "snapshotTurnBudgetMs")
+        ),
+        setting(
+            keys::ICON_TINT,
+            "Icon tint",
+            "project",
+            "Hex colour composited behind the app icon so windows are tellable apart (macOS).",
+            json!({"type": ["string", "null"], "pattern": "^#?([a-fA-F0-9]{3}|[a-fA-F0-9]{6})$"}),
+            None,
+            |c, v| {
+                c.icon_tint = de::<Option<String>>(v)?;
+                if let Some(tint) = c.icon_tint.as_deref().filter(|t| parse_hex_rgb(t).is_none())
+                {
+                    return Err(format!(
+                        "must be a hex colour like \"#c2410c\" or \"#abc\"; got {tint:?}"
+                    ));
+                }
+                Ok(())
+            },
+        ),
+        setting(
+            keys::ZONES,
+            "Zones",
+            "project",
+            "Architectural zones: an ORDERED rule table, first match wins; `other`/`external` are reserved labels.",
+            schema_of::<Option<Vec<RawZoneRule>>>(),
+            Some(json!([])),
+            |c, v| {
+                c.zones = validate_zones(de::<Option<Vec<RawZoneRule>>>(v)?.unwrap_or_default())
+                    .map_err(message)?;
+                Ok(())
+            },
+        ),
+        setting(
+            keys::AGENT_PROMPT_APPEND,
+            "Agent prompt append",
+            "agents",
+            "Text appended verbatim to every agent's system prompt. Steers every agent.",
+            nullable_text(),
+            Some(json!("")),
+            |c, v| {
+                c.agent_prompt_append = de::<Option<String>>(v)?.unwrap_or_default();
+                Ok(())
+            },
         )
-    });
-    for role in crate::AI_ROLE_NAMES {
-        out.push(CoreBinding {
-            definition: role_definition(role),
-            path: vec![],
-        });
-    }
-    for name in crate::DEFAULT_EXTENSIONS {
-        out.push(CoreBinding {
-            definition: extension_definition(name),
-            path: vec![],
-        });
-    }
-    out.sort_by(|a, b| a.definition.key.cmp(&b.definition.key));
+        .multiline(),
+        setting(
+            keys::INJECT_SESSION_CONTEXT,
+            "Inject session context",
+            "agents",
+            "Inject the session-context block into every agent prompt.",
+            json!({"type": ["boolean", "null"]}),
+            Some(json!(DEFAULT_INJECT_SESSION_CONTEXT)),
+            |c, v| {
+                c.inject_session_context =
+                    de::<Option<bool>>(v)?.unwrap_or(DEFAULT_INJECT_SESSION_CONTEXT);
+                Ok(())
+            },
+        ),
+        setting(
+            keys::SNAPSHOT_RETENTION_DAYS,
+            "Snapshot retention days",
+            "snapshots",
+            "File-snapshot retention in days; 0 disables pruning.",
+            count(0),
+            Some(json!(DEFAULT_SNAPSHOT_RETENTION_DAYS)),
+            |c, v| {
+                c.snapshot_retention_days = u32_of(v)?;
+                Ok(())
+            },
+        ),
+        setting(
+            keys::SNAPSHOT_MAX_FILE_BYTES,
+            "Snapshot max file bytes",
+            "snapshots",
+            "Largest file snapshotted by content; bigger files get a stat-only entry.",
+            count(1024),
+            Some(json!(DEFAULT_SNAPSHOT_MAX_FILE_BYTES)),
+            |c, v| {
+                c.snapshot_max_file_bytes = whole(v)?;
+                Ok(())
+            },
+        ),
+        setting(
+            keys::METRICS,
+            "Metrics",
+            "metrics",
+            "Which metrics are on: `use` turns one on (with optional target/warnAt/failAt), `enabled: false` turns an on-by-default one off. Metrics are defined in extensions.",
+            json!({"type": "array", "items": {"type": "object", "additionalProperties": false,
+                "required": ["use"], "properties": {
+                    "use": {"type": "string", "minLength": 1, "title": "Metric"},
+                    "enabled": {"type": ["boolean", "null"]},
+                    "target": {"type": ["number", "null"]},
+                    "warnAt": {"type": ["number", "null"]},
+                    "failAt": {"type": ["number", "null"]}
+                }}}),
+            Some(json!([])),
+            |c, v| {
+                c.metrics = validate_metrics(Some(de(v)?), CatalogLayer::Project).map_err(message)?;
+                Ok(())
+            },
+        ),
+        setting(
+            keys::METRIC_RETENTION_DAYS,
+            "Metric retention days",
+            "metrics",
+            "Metric-capture retention in days; 0 (default) keeps everything.",
+            count(0),
+            Some(json!(DEFAULT_METRIC_RETENTION_DAYS)),
+            |c, v| {
+                c.metric_retention_days = u32_of(v)?;
+                Ok(())
+            },
+        ),
+        setting(
+            keys::METRIC_DETAIL_MAX_PER_PRODUCER,
+            "Metric detail max per producer",
+            "metrics",
+            "Keep per-run detail for only the newest N captures per producer; 0 disables the cap.",
+            count(0),
+            Some(json!(DEFAULT_METRIC_DETAIL_MAX_PER_PRODUCER)),
+            |c, v| {
+                c.metric_detail_max_per_producer = u32_of(v)?;
+                Ok(())
+            },
+        ),
+        setting(
+            keys::METRIC_DETAIL_RETENTION_DAYS,
+            "Metric detail retention days",
+            "metrics",
+            "Compact per-run detail older than this many days; 0 disables.",
+            count(0),
+            Some(json!(DEFAULT_METRIC_DETAIL_RETENTION_DAYS)),
+            |c, v| {
+                c.metric_detail_retention_days = u32_of(v)?;
+                Ok(())
+            },
+        ),
+        setting(
+            keys::GENERATED_EXCLUDE,
+            "Generated: exclude",
+            "files",
+            "Paths oxplow ignores even when `.gitignore` doesn't (watching, snapshots and scans): a single segment (`target`) matches any path component; a repo-relative path (`apps/desktop/dist`) matches that path and what is under it.",
+            json!({"type": "array", "items": {"type": "string"}}),
+            Some(json!([])),
+            |c, v| {
+                c.generated.exclude = generated(v, keys::GENERATED_EXCLUDE)?;
+                Ok(())
+            },
+        ),
+        setting(
+            keys::GENERATED_INCLUDE,
+            "Generated: include",
+            "files",
+            "Paths `.gitignore` ignores that oxplow still watches, snapshots and scans, written as for the exclude list.",
+            json!({"type": "array", "items": {"type": "string"}}),
+            Some(json!([])),
+            |c, v| {
+                c.generated.include = generated(v, keys::GENERATED_INCLUDE)?;
+                Ok(())
+            },
+        ),
+        setting(
+            keys::TESTING_COMMAND,
+            "Test command",
+            "testing",
+            "The command that runs the project's whole test suite.",
+            nullable_text(),
+            None,
+            |c, v| {
+                c.testing.command = text(v)?;
+                Ok(())
+            },
+        ),
+        setting(
+            keys::TESTING_FAST_COMMAND,
+            "Fast test command",
+            "testing",
+            "A quicker test command for the inner loop, when the project has one.",
+            nullable_text(),
+            None,
+            |c, v| {
+                c.testing.fast_command = text(v)?;
+                Ok(())
+            },
+        ),
+        setting(
+            keys::TESTING_RUN_PATTERNS,
+            "Test run patterns",
+            "testing",
+            "Extra command substrings that count as a test run, on top of the built-in ones (pytest, cargo test, jest, …).",
+            nullable_list(),
+            Some(json!([])),
+            |c, v| {
+                c.testing.run_patterns = string_list(v)?;
+                Ok(())
+            },
+        ),
+        setting(
+            keys::TESTING_ANALYSIS_PATTERNS,
+            "Analysis run patterns",
+            "testing",
+            "Extra command substrings that count as a static-analysis run, on top of the built-in ones (cargo clippy, eslint, ruff, …).",
+            nullable_list(),
+            Some(json!([])),
+            |c, v| {
+                c.testing.analysis_patterns = string_list(v)?;
+                Ok(())
+            },
+        ),
+        setting(
+            keys::TESTING_TEST_PATHS,
+            "Test paths",
+            "testing",
+            "Globs (repo-relative) naming test files, on top of the built-in conventions (`.test.` and `.spec.` files, `tests/` folders, …): `spec/**`.",
+            nullable_list(),
+            Some(json!([])),
+            |c, v| {
+                c.testing.test_paths = glob_list(v)?;
+                Ok(())
+            },
+        ),
+        setting(
+            keys::TESTING_AGENT_HINT,
+            "Testing hint for agents",
+            "testing",
+            "Text added to every agent's system prompt about testing: which command to run, what coverage to meet.",
+            nullable_text(),
+            None,
+            |c, v| {
+                c.testing.agent_hint = text(v)?;
+                Ok(())
+            },
+        )
+        .multiline(),
+        setting(
+            keys::SCRIPTS_MAX_CONCURRENT,
+            "Script workers at once",
+            "scripts",
+            "How many script workers run at once, across the host; a run past it waits for a slot. Default: 4, or fewer on a machine with fewer cores.",
+            count(1),
+            Some(json!(ScriptsConfig::default().max_concurrent)),
+            |c, v| {
+                c.scripts.max_concurrent = usize::try_from(whole(v)?).map_err(|e| e.to_string())?;
+                Ok(())
+            },
+        ),
+        setting(
+            keys::SCRIPTS_MEMORY_MB,
+            "Script worker memory (MiB)",
+            "scripts",
+            "The most memory one script worker may use before it is stopped, in MiB.",
+            count(MIN_SCRIPTS_MEMORY_MB),
+            Some(json!(DEFAULT_SCRIPTS_MEMORY_MB)),
+            |c, v| {
+                c.scripts.memory_bytes = whole(v)? * 1024 * 1024;
+                Ok(())
+            },
+        ),
+        setting(
+            keys::LSP_SERVERS,
+            "Language servers",
+            "languageServers",
+            "Extra language servers, each `{ languageId, extensions, command, args }`. Runs programs.",
+            schema_of::<Option<Vec<RawLspServer>>>(),
+            Some(json!([])),
+            |c, v| {
+                c.lsp_servers = validate_lsp_servers(de::<Option<Vec<RawLspServer>>>(v)?.unwrap_or_default())
+                    .map_err(message)?;
+                Ok(())
+            },
+        ),
+        setting(
+            keys::EXTENSION_INSTANCES,
+            "Extension instances",
+            "integrations",
+            "Instances of extension providers, by `<extension>/<instance id>`: `{ enabled, config, provider? }` (the provider's instance config; `provider` names which of the extension's providers an instance with its own id is). Enabling one runs its program once this machine approved it.",
+            schema_of::<Option<BTreeMap<String, ExtensionInstanceConfig>>>(),
+            Some(json!({})),
+            |c, v| {
+                c.extension_instances =
+                    validate_extension_instances(de::<Option<_>>(v)?.unwrap_or_default())
+                        .map_err(message)?;
+                Ok(())
+            },
+        ),
+        setting(
+            keys::REPLACEMENTS,
+            "Replacements",
+            "integrations",
+            "Whose component shows for a replaceable core sub-component, by target: `{ task.board: task-views, vcs.history.graph: oxplow }` — an extension replacing it, or `oxplow` for oxplow's own. Unlisted, the only extension replacing it shows (several: oxplow's own); a bound target (`task.detail.state`) shows its provider's extension's, and may only be set to `oxplow`.",
+            json!({"type": ["object", "null"], "additionalProperties": {"type": "string"}}),
+            Some(json!({})),
+            |c, v| {
+                c.replacements =
+                    validate_replacements(de::<Option<_>>(v)?.unwrap_or_default()).map_err(message)?;
+                Ok(())
+            },
+        ),
+        setting(
+            keys::EVENT_RETENTION,
+            "Event retention",
+            "data",
+            "How long each event namespace's payloads and large content are kept, in days: `{ agent: { payloadDays: 60, contentDays: 14 } }`, over core's defaults (agent 30/14; test, code, collector, effect 90/30). An extension's namespace is kept no longer than its window; core state (snapshot, vcs, effort, …) is kept whole.",
+            schema_of::<Option<BTreeMap<String, oxplow_domain::events::retention::RetentionWindow>>>(),
+            Some(json!({})),
+            |c, v| {
+                c.event_retention =
+                    validate_event_retention(de::<Option<_>>(v)?.unwrap_or_default())
+                        .map_err(message)?;
+                Ok(())
+            },
+        ),
+        setting(
+            keys::EXTENSION_SOURCES,
+            "Extension sources",
+            "extensions",
+            "Where an extension's source is when it isn't `.oxplow/extensions/<name>/`: `{ <name>: <folder> }`, relative to the checkout or absolute (`~/` is the home folder). Enables code.",
+            json!({"type": ["object", "null"], "additionalProperties": {"type": "string"}}),
+            Some(json!({})),
+            |c, v| {
+                c.extension_sources = de::<Option<_>>(v)?.unwrap_or_default();
+                Ok(())
+            },
+        ),
+    ]
+}
+
+/// All core definitions: the fixed table and each family's current members.
+pub fn definitions(fallback_name: &str) -> Vec<SettingDefinition> {
+    let mut out: Vec<_> = table(fallback_name)
+        .into_iter()
+        .map(|setting| setting.definition)
+        .collect();
+    out.extend(
+        oxplow_domain::capability::choosable().map(|capability| SettingDefinition {
+            key: active_provider_key(capability.id),
+            title: format!("{} implementation", capability.title),
+            description: format!(
+                "The implementation used for {}. Unset to inherit the choice.",
+                capability.title.to_lowercase()
+            ),
+            category: "integrations".into(),
+            schema: json!({"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}),
+            default: None,
+            secret: false,
+            order: 0,
+            ui: json!({}),
+            restart_required: false,
+            owner: "core".into(),
+        }),
+    );
+    out.extend(
+        crate::AI_ROLE_NAMES
+            .iter()
+            .map(|role| role_definition(role)),
+    );
+    out.extend(
+        crate::DEFAULT_EXTENSIONS
+            .iter()
+            .map(|name| extension_definition(name)),
+    );
+    out.sort_by(|a, b| a.key.cmp(&b.key));
     out
+}
+
+/// The setting that chooses a capability's implementation.
+pub fn active_provider_key(capability: &str) -> String {
+    format!("{}{capability}", keys::ACTIVE_PROVIDERS_PREFIX)
+}
+
+fn core_definition(
+    key: String,
+    title: String,
+    description: &str,
+    category: &str,
+    schema: Value,
+    default: Option<Value>,
+) -> SettingDefinition {
+    SettingDefinition {
+        key,
+        title,
+        description: description.into(),
+        category: category.into(),
+        schema,
+        default,
+        secret: false,
+        order: 0,
+        ui: json!({}),
+        restart_required: false,
+        owner: "core".into(),
+    }
 }
 
 /// One independently inherited feature switch. Enabling does not deploy code.
 pub fn extension_definition(name: &str) -> SettingDefinition {
-    extra(
-        &format!("extensions.{name}.enabled"),
-        &format!("Enable {name}"),
+    core_definition(
+        format!("oxplow.extensions.{name}.enabled"),
+        format!("Enable {name}"),
         "Whether this extension is enabled. Deployment and permission approval are separate.",
         "extensions",
-        json!({"type":"boolean"}),
+        json!({"type": "boolean"}),
         Some(json!(true)),
     )
-    .definition
 }
 
 pub use oxplow_domain::ai::{role_from_setting_key as role_from_key, role_setting_key as role_key};
 
 pub fn role_definition(role: &str) -> SettingDefinition {
-    extra(role_key(role).strip_prefix("oxplow.").expect("role key"), &format!("AI role {role}"),
-        "Provider and model used for this role. Remove the override to inherit.", "ai",
-        json!({"type":"object", "additionalProperties":false,
-            "required":["provider","model"], "properties":{
-                "provider":{"type":"string","minLength":1},
-                "model":{"type":"string","minLength":1},
-                "restrict":{"type":"array","uniqueItems":true,"items":{"type":"string","enum":["tools","sql","streaming","images"]}}
-            }}), None).definition
+    core_definition(
+        role_key(role),
+        format!("AI role {role}"),
+        "Provider and model used for this role. Remove the override to inherit.",
+        "ai",
+        json!({"type": "object", "additionalProperties": false,
+        "required": ["provider", "model"], "properties": {
+            "provider": {"type": "string", "minLength": 1},
+            "model": {"type": "string", "minLength": 1},
+            "restrict": {"type": "array", "uniqueItems": true,
+                "items": {"type": "string", "enum": ["tools", "sql", "streaming", "images"]}}
+        }}),
+        None,
+    )
 }
 
 /// A clean break reports obsolete core keys rather than silently ignoring a
@@ -189,144 +652,6 @@ pub fn register_dynamic_keys(
     Ok(())
 }
 
-/// Build the internal runtime document from resolved non-default values.
-/// Unknown and extension keys are ignored by this core-only projection.
-/// The caller must first validate values through the shared registry.
-pub fn document_from_values(
-    fallback_name: &str,
-    values: &BTreeMap<String, Value>,
-) -> serde_yaml::Value {
-    let mut document = json!({});
-    for binding in bindings(fallback_name) {
-        if binding.path.is_empty() {
-            continue;
-        }
-        if let Some(value) = values.get(&binding.definition.key) {
-            insert_path(&mut document, &binding.path, value.clone());
-        }
-    }
-    for (key, value) in values {
-        if let Some(role) = role_from_key(key) {
-            document["ai"]["roles"][&role] = value.clone();
-        } else if let Some(rest) = key.strip_prefix("oxplow.agents.") {
-            if let Some((harness, field)) = rest.rsplit_once('.') {
-                if field == "enabled" {
-                    document["agentEnabled"][harness.replace('.', "/")] = value.clone();
-                } else {
-                    document["agentConfig"][harness.replace('.', "/")]
-                        [crate::settings::decoded_segment(field)
-                            .unwrap_or_else(|| field.to_owned())] = value.clone();
-                }
-            }
-        }
-    }
-    crate::to_yaml(&document)
-}
-
-/// Resolve explicit overrides and project them into the core runtime shape.
-/// Built-in defaults remain the runtime loader's defaults; absent harness
-/// enablement defaults to true at its registered scalar definition.
-#[derive(Debug)]
-pub struct CoreProjectionError {
-    key: String,
-    source: SettingsError,
-}
-
-impl std::fmt::Display for CoreProjectionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}: {}", self.key, self.source)
-    }
-}
-
-impl std::error::Error for CoreProjectionError {}
-
-pub fn project_document(store: &SettingsStore) -> Result<serde_yaml::Value, CoreProjectionError> {
-    let fallback = store
-        .project_dir()
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let definitions = store
-        .registry
-        .read()
-        .unwrap_or_else(|e| e.into_inner())
-        .definitions()
-        .filter(|definition| !definition.secret && definition.owner == "core")
-        .cloned()
-        .collect::<Vec<_>>();
-    let mut values = BTreeMap::new();
-    let keys = definitions
-        .iter()
-        .map(|definition| definition.key.as_str())
-        .collect::<Vec<_>>();
-    let settings = store
-        .get_many_results(&keys)
-        .map_err(|source| CoreProjectionError {
-            key: "settings layer".into(),
-            source,
-        })?;
-    for (definition, setting) in definitions.iter().zip(settings) {
-        let setting = setting.map_err(|source| CoreProjectionError {
-            key: definition.key.clone(),
-            source,
-        })?;
-        if let Some(value) = setting.value {
-            values.insert(definition.key.clone(), value);
-        }
-    }
-    // Boot can project dynamic scalar keys before a provider catalog exists.
-    // Only a key's effective value (the first level that sets it) is
-    // projected and checked: a shadowed override never fails the load.
-    let mut seen = std::collections::BTreeSet::new();
-    let mut roles = crate::settings::SettingsRegistry::default();
-    for level in crate::settings::Level::PRECEDENCE {
-        for (key, value) in store.layer(level).map_err(|source| CoreProjectionError {
-            key: "settings layer".into(),
-            source,
-        })? {
-            if !seen.insert(key.clone()) {
-                continue;
-            }
-            let is_dynamic_agent = key.starts_with("oxplow.agents.");
-            let role = role_from_key(&key);
-            if !is_dynamic_agent && role.is_none() {
-                continue;
-            }
-            // Registered settings were already resolved and schema-validated
-            // above. Never let a raw layer bypass that value or its schema.
-            if store.definition(&key).is_ok() {
-                continue;
-            }
-            if let Some(role) = role {
-                let error = |source| CoreProjectionError {
-                    key: key.clone(),
-                    source,
-                };
-                if roles.get(&key).is_none() {
-                    roles.register(role_definition(&role)).map_err(error)?;
-                }
-                roles.validate(&key, &value).map_err(error)?;
-                values.insert(key, value);
-                continue;
-            }
-            if let Some(rest) = key.strip_prefix("oxplow.agents.") {
-                if let Some((_, field)) = rest.rsplit_once('.') {
-                    if field == "enabled" && !value.is_boolean() {
-                        return Err(CoreProjectionError {
-                            key,
-                            source: SettingsError::InvalidValue,
-                        });
-                    }
-                    // Unknown preference schemas are unavailable until their
-                    // declaration returns; retain their JSON runtime values.
-                    values.insert(key, value);
-                }
-            }
-        }
-    }
-    Ok(document_from_values(&fallback, &values))
-}
-
 /// Internal metric entries share a type with extension definitions; persisted
 /// preferences contain only the fields users can configure.
 pub fn metric_preferences(value: &Value) -> Value {
@@ -355,260 +680,164 @@ pub fn metric_preferences(value: &Value) -> Value {
     )
 }
 
-/// Split an internal runtime-document field into its registered values.
-/// This lets existing domain operations write their individual settings
-/// through the shared service without persisting an old-format object.
-pub fn values_for_runtime_field(
+/// The typed runtime view of resolved settings: every fixed setting's value
+/// (else its default), then each family member that has a value. Keys core
+/// does not own (extension settings) are ignored.
+pub fn config_from(
     fallback_name: &str,
-    field: &str,
-    value: &Value,
-) -> BTreeMap<String, Value> {
-    let mut document = json!({});
-    document[field] = if field == "metrics" {
-        metric_preferences(value)
-    } else {
-        value.clone()
-    };
-    bindings(fallback_name)
-        .into_iter()
-        .filter(|binding| binding.path.first().is_some_and(|first| first == field))
-        .filter_map(|binding| {
-            value_at(&document, &binding.path)
-                .cloned()
-                .map(|value| (binding.definition.key, value))
-        })
-        .collect()
+    values: &BTreeMap<String, (Value, Origin)>,
+) -> Result<OxplowConfig, ConfigError> {
+    let invalid = |key: &str, message: String| ConfigError::Invalid(format!("{key}: {message}"));
+    let mut config = crate::blank_config(fallback_name);
+    for setting in table(fallback_name) {
+        let key = &setting.definition.key;
+        let value = values
+            .get(key)
+            .map(|(value, _)| value.clone())
+            .or_else(|| setting.definition.default.clone())
+            .unwrap_or(Value::Null);
+        (setting.apply)(&mut config, value).map_err(|message| invalid(key, message))?;
+    }
+    for (key, (value, origin)) in values {
+        apply_family(&mut config, key, value.clone(), *origin)
+            .map_err(|message| invalid(key, message))?;
+    }
+    Ok(config)
 }
 
-fn default_document(fallback_name: &str) -> Value {
-    let config = crate::default_config(fallback_name.to_string());
-    let mut document = json!({});
-    for entry in crate::config_entries(&config, fallback_name) {
-        document[entry.key] = serde_json::from_str(
-            &serde_json::to_string(&entry.value).expect("a config value serializes"),
-        )
-        .expect("a config value is JSON");
-    }
-    // config_entries intentionally omits default-valued fields inside these
-    // objects when rendering YAML. Declarations still need their real defaults.
-    document["scripts"] = json!({
-        "maxConcurrent": config.scripts.max_concurrent,
-        "memoryMb": config.scripts.memory_bytes / (1024 * 1024),
-    });
-    document["generated"] = json!({"include": [], "exclude": []});
-    document["lsp"] = json!({"servers":[]});
-    document["testing"] = json!({
-        "runPatterns": [], "analysisPatterns": [], "testPaths": [],
-    });
-    document
-}
-
-fn collect(
-    root_schema: &Value,
-    schema: &Value,
-    defaults: &Value,
-    path: Vec<String>,
-    parent_description: Option<&str>,
-    out: &mut Vec<CoreBinding>,
-) {
-    let schema = resolved_schema(root_schema, schema);
-    let description = schema
-        .get("description")
-        .and_then(Value::as_str)
-        .or(parent_description)
-        .unwrap_or("");
-    if let Some(properties) = schema.get("properties").and_then(Value::as_object) {
-        if !properties.is_empty() {
-            for (name, property) in properties {
-                let mut child_path = path.clone();
-                child_path.push(name.clone());
-                collect(
-                    root_schema,
-                    property,
-                    defaults,
-                    child_path,
-                    Some(description),
-                    out,
-                );
-            }
-            return;
-        }
-    }
-
-    let joined = path.join(".");
-    let mut default = value_at(defaults, &path).filter(|v| !v.is_null()).cloned();
-    // An absent agents list means all registered harnesses. [] as an explicit
-    // value would disable all of them and is rejected by the runtime contract.
-    if joined == "agents" {
-        default = None;
-    }
-    let mut value_schema = schema.clone();
-    if let Some(object) = value_schema.as_object_mut() {
-        object.remove("description");
-        object.remove("default");
-        if let Some(defs) = root_schema.get("$defs") {
-            object.insert("$defs".into(), defs.clone());
-        }
-    }
-    strengthen_schema(&joined, &mut value_schema);
-    out.push(CoreBinding {
-        definition: SettingDefinition {
-            key: canonical_key(&joined),
-            title: title(&joined),
-            description: if description.is_empty() {
-                title(&joined)
-            } else {
-                description.to_string()
-            },
-            category: category(&joined).to_string(),
-            schema: value_schema,
-            default,
-            secret: false,
-            order: 0,
-            ui: if matches!(joined.as_str(), "agentPromptAppend" | "testing.agentHint") {
-                json!({ "editor": "multiline" })
-            } else {
-                json!({})
-            },
-            restart_required: false,
-            owner: "core".into(),
-        },
-        path,
-    });
-}
-
-fn resolved_schema<'a>(root: &'a Value, schema: &'a Value) -> &'a Value {
-    if let Some(reference) = schema.get("$ref").and_then(Value::as_str) {
-        if let Some(pointer) = reference.strip_prefix('#') {
-            if let Some(resolved) = root.pointer(pointer) {
-                return resolved_schema(root, resolved);
-            }
-        }
-    }
-    // RawConfig's optional fields use anyOf(T, null). An optional fixed
-    // object is flattened into its independent fields; scalar optional
-    // schemas retain null as a valid value.
-    if let Some(variants) = schema.get("anyOf").and_then(Value::as_array) {
-        if let Some(object) = variants
-            .iter()
-            .map(|variant| resolved_schema(root, variant))
-            .find(|variant| variant.get("properties").is_some())
-        {
-            return object;
-        }
-    }
-    schema
-}
-
-fn value_at<'a>(root: &'a Value, path: &[String]) -> Option<&'a Value> {
-    path.iter().try_fold(root, |value, key| value.get(key))
-}
-
-fn insert_path(root: &mut Value, path: &[String], value: Value) {
-    let Some((last, parents)) = path.split_last() else {
-        return;
-    };
-    let mut current = root;
-    for parent in parents {
-        current = current
-            .as_object_mut()
-            .expect("runtime config paths contain objects")
-            .entry(parent)
-            .or_insert_with(|| json!({}));
-    }
-    current[last] = value;
-}
-
-fn extra(
-    suffix: &str,
-    title: &str,
-    description: &str,
-    category: &str,
-    schema: Value,
-    default: Option<Value>,
-) -> CoreBinding {
-    CoreBinding {
-        definition: SettingDefinition {
-            key: canonical_key(suffix),
-            title: title.into(),
-            description: description.into(),
-            category: category.into(),
-            schema,
-            default,
-            secret: false,
-            order: 0,
-            ui: json!({}),
-            restart_required: false,
-            owner: "core".into(),
-        },
-        path: Vec::new(),
-    }
-}
-
-fn category(path: &str) -> &'static str {
-    match path.split('.').next().unwrap_or(path) {
-        "agents" | "agentConfig" | "agentPromptAppend" | "injectSessionContext" => "agents",
-        "ai" => "ai",
-        "generated" => "files",
-        "lsp" => "languageServers",
-        "testing" => "testing",
-        "scripts" => "scripts",
-        "extensionSources" => "extensions",
-        "activeProviders" | "extensionInstances" | "replacements" => "integrations",
-        "eventRetention" => "data",
-        key if key.starts_with("snapshot") => "snapshots",
-        key if key.starts_with("metric") => "metrics",
-        _ => "project",
-    }
-}
-
-fn title(path: &str) -> String {
-    let field = path.rsplit('.').next().unwrap_or(path);
-    let mut out = String::new();
-    for (index, ch) in field.chars().enumerate() {
-        if index == 0 {
-            out.extend(ch.to_uppercase());
-        } else if ch.is_uppercase() {
-            out.push(' ');
-            out.extend(ch.to_lowercase());
+fn apply_family(
+    config: &mut OxplowConfig,
+    key: &str,
+    value: Value,
+    origin: Origin,
+) -> Result<(), String> {
+    if let Some(capability) = key.strip_prefix(keys::ACTIVE_PROVIDERS_PREFIX) {
+        let provider: String = de(value)?;
+        crate::validate_active_provider(capability, &provider).map_err(message)?;
+        config
+            .active_providers
+            .insert(capability.to_owned(), provider);
+        config
+            .active_provider_origins
+            .insert(capability.to_owned(), origin_name(origin).to_owned());
+    } else if let Some(role) = role_from_key(key) {
+        let assignment: crate::AiRoleOverride = de(value)?;
+        crate::validate_ai_role(&role, &assignment).map_err(message)?;
+        config.ai_roles.insert(role, assignment);
+    } else if let Some(rest) = key.strip_prefix(keys::AGENTS_PREFIX) {
+        let Some((harness, field)) = rest.rsplit_once('.') else {
+            return Ok(());
+        };
+        let harness = harness.replace('.', "/");
+        crate::validate_agent_key(&harness).map_err(message)?;
+        if field == "enabled" {
+            config.agent_enabled.insert(harness, de(value)?);
         } else {
-            out.push(ch);
+            // A harness's preferences are its own to check.
+            let field = crate::settings::decoded_segment(field).unwrap_or_else(|| field.to_owned());
+            config
+                .agent_config
+                .entry(harness)
+                .or_insert_with(|| json!({}))
+                .as_object_mut()
+                .expect("a harness's preferences are an object")
+                .insert(field, value);
         }
     }
-    out
+    Ok(())
 }
 
-fn strengthen_schema(path: &str, schema: &mut Value) {
-    let integer_minimum = match path {
-        "snapshotRetentionDays"
-        | "metricRetentionDays"
-        | "metricDetailMaxPerProducer"
-        | "metricDetailRetentionDays" => Some(0),
-        "snapshotMaxFileBytes" => Some(1024),
-        "snapshotTurnBudgetMs" => Some(crate::MIN_SNAPSHOT_TURN_BUDGET_MS),
-        "scripts.maxConcurrent" => Some(1),
-        "scripts.memoryMb" => Some(64),
-        _ => None,
-    };
-    if let Some(minimum) = integer_minimum {
-        *schema = json!({ "type": "integer", "minimum": minimum });
-    } else if path == "agents" {
-        *schema = json!({ "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } });
-    } else if path == "metrics" {
-        *schema = json!({"type":"array", "items":{"type":"object", "additionalProperties":false,
-        "required":["use"], "properties":{
-            "use":{"type":"string","minLength":1,"title":"Metric"},
-            "enabled":{"type":["boolean","null"]},
-            "target":{"type":["number","null"]},
-            "warnAt":{"type":["number","null"]},
-            "failAt":{"type":["number","null"]}
-        }}});
-    } else if path == "projectName" {
-        *schema = json!({ "type": "string", "minLength": 1, "pattern": "\\S" });
-    } else if path == "iconTint" {
-        *schema =
-            json!({ "type": ["string", "null"], "pattern": "^#?([a-fA-F0-9]{3}|[a-fA-F0-9]{6})$" });
+pub fn origin_name(origin: Origin) -> &'static str {
+    match origin {
+        Origin::Local => "local",
+        Origin::Project => "project",
+        Origin::Global => "global",
+        Origin::Default => "default",
     }
+}
+
+/// A resolved core value that failed, naming the setting key.
+#[derive(Debug)]
+pub struct CoreProjectionError {
+    key: String,
+    source: SettingsError,
+}
+
+impl std::fmt::Display for CoreProjectionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.key, self.source)
+    }
+}
+
+impl std::error::Error for CoreProjectionError {}
+
+/// The effective value and origin of every core setting that has one.
+///
+/// Registered keys resolve through the store (their schema checked). At
+/// boot, a harness's preferences and an extension's AI role can be in a
+/// level before their declaration is loaded: such a family key is carried
+/// from the first level that sets it, an unknown role checked against the
+/// role schema, an unknown preference kept as plain JSON for its harness.
+/// A shadowed override never fails the load.
+pub fn effective_values(
+    store: &SettingsStore,
+) -> Result<BTreeMap<String, (Value, Origin)>, CoreProjectionError> {
+    let layer_error = |source| CoreProjectionError {
+        key: "settings layer".into(),
+        source,
+    };
+    let definitions: Vec<_> = store
+        .registry
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .definitions()
+        .filter(|definition| !definition.secret && definition.owner == "core")
+        .cloned()
+        .collect();
+    let keys: Vec<_> = definitions.iter().map(|d| d.key.as_str()).collect();
+    let mut values = BTreeMap::new();
+    for (definition, setting) in definitions
+        .iter()
+        .zip(store.get_many_results(&keys).map_err(layer_error)?)
+    {
+        let setting = setting.map_err(|source| CoreProjectionError {
+            key: definition.key.clone(),
+            source,
+        })?;
+        if let (Some(value), Some(origin)) = (setting.value, setting.origin) {
+            values.insert(definition.key.clone(), (value, origin));
+        }
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    let mut roles = crate::settings::SettingsRegistry::default();
+    for level in Level::PRECEDENCE {
+        for (key, value) in store.layer(level).map_err(layer_error)? {
+            if !seen.insert(key.clone()) || store.definition(&key).is_ok() {
+                continue;
+            }
+            let error = |source| CoreProjectionError {
+                key: key.clone(),
+                source,
+            };
+            if let Some(role) = role_from_key(&key) {
+                if roles.get(&key).is_none() {
+                    roles.register(role_definition(&role)).map_err(error)?;
+                }
+                roles.validate(&key, &value).map_err(error)?;
+            } else if let Some((_, field)) = key
+                .strip_prefix(keys::AGENTS_PREFIX)
+                .and_then(|rest| rest.rsplit_once('.'))
+            {
+                if field == "enabled" && !value.is_boolean() {
+                    return Err(error(SettingsError::InvalidValue));
+                }
+            } else {
+                continue;
+            }
+            values.insert(key, (value, level.into()));
+        }
+    }
+    Ok(values)
 }
 
 #[cfg(test)]
@@ -626,6 +855,13 @@ mod tests {
         fn delete(&self, _: &str) -> Result<(), String> {
             Ok(())
         }
+    }
+
+    fn values(pairs: &[(&str, Value)]) -> BTreeMap<String, (Value, Origin)> {
+        pairs
+            .iter()
+            .map(|(key, value)| ((*key).to_owned(), (value.clone(), Origin::Project)))
+            .collect()
     }
 
     #[test]
@@ -646,60 +882,148 @@ mod tests {
         assert!(all.iter().all(|definition| definition.key != "oxplow.ai"));
         assert!(all.iter().all(|definition| !definition.title.is_empty()));
         assert!(all.iter().all(|definition| !definition.category.is_empty()));
+        let unique: std::collections::BTreeSet<_> = all.iter().map(|d| &d.key).collect();
+        assert_eq!(unique.len(), all.len());
     }
 
     #[test]
-    fn runtime_projection_reconstitutes_independent_fields_without_merging_values() {
-        let values = BTreeMap::from([
-            ("oxplow.snapshots.retentionDays".into(), json!(14)),
-            ("oxplow.testing.command".into(), json!("make test")),
-            ("oxplow.testing.runPatterns".into(), json!(["pytest"])),
-            ("oxplow.scripts.memoryMb".into(), json!(256)),
-            (
-                "oxplow.ai.roles.main".into(),
-                json!({"provider": "local", "model": "a"}),
-            ),
-            ("oxtask.tasks.workflow".into(), json!("agent_tracks")),
-        ]);
-        let document = document_from_values("demo", &values);
-        let config = crate::parse_project_config(document, "demo").unwrap();
-        assert_eq!(config.snapshot_retention_days, 14);
-        assert_eq!(config.testing.command.as_deref(), Some("make test"));
-        assert_eq!(config.testing.run_patterns, ["pytest"]);
-        assert_eq!(config.scripts.memory_bytes, 256 * 1024 * 1024);
-        assert_eq!(config.ai_roles["main"].model, "a");
-        assert!(config.agent_enabled.is_empty());
+    fn nothing_set_is_every_default() {
+        let config = config_from("demo", &BTreeMap::new()).unwrap();
+        assert_eq!(config.project_name, "demo");
+        assert_eq!(config.snapshot_retention_days, 7);
+        assert_eq!(config.snapshot_max_file_bytes, 5 * 1024 * 1024);
+        assert_eq!(config.metric_detail_max_per_producer, 100);
+        assert_eq!(config.metric_detail_retention_days, 30);
+        assert!(config.inject_session_context);
+        assert_eq!(config.scripts, crate::ScriptsConfig::default());
+        assert_eq!(config.testing, crate::TestingConfig::default());
+        assert_eq!(
+            config.snapshot_turn_budget_ms,
+            crate::DEFAULT_SNAPSHOT_TURN_BUDGET_MS
+        );
+        assert!(config.agent_enabled.is_empty() && config.active_providers.is_empty());
     }
 
     #[test]
-    fn agent_scalar_keys_project_independently_for_builtin_and_external_harnesses() {
-        let values = BTreeMap::from([
-            ("oxplow.agents.claude.enabled".into(), json!(false)),
-            ("oxplow.agents.claude.model".into(), json!("opus")),
-            ("oxplow.agents.acme.coder.enabled".into(), json!(false)),
-            ("oxplow.agents.acme.coder.model".into(), json!("custom")),
-            (
-                format!(
-                    "oxplow.agents.acme.coder.{}",
-                    super::super::settings::key_segment("api/url")
+    fn each_fixed_setting_applies_to_its_own_field() {
+        let config = config_from(
+            "demo",
+            &values(&[
+                (keys::PROJECT_NAME, json!("  named ")),
+                (keys::ICON_TINT, json!("#abc")),
+                (keys::AGENT_PROMPT_APPEND, json!("extra")),
+                (keys::INJECT_SESSION_CONTEXT, json!(false)),
+                (keys::SNAPSHOT_RETENTION_DAYS, json!(14)),
+                (keys::SNAPSHOT_MAX_FILE_BYTES, json!(2048)),
+                (keys::METRIC_RETENTION_DAYS, json!(3)),
+                (keys::GENERATED_EXCLUDE, json!(["dist/"])),
+                (keys::GENERATED_INCLUDE, json!(["vendor"])),
+                (keys::TESTING_COMMAND, json!(" make test ")),
+                (keys::TESTING_FAST_COMMAND, json!("")),
+                (keys::TESTING_RUN_PATTERNS, json!(["pytest"])),
+                (keys::TESTING_TEST_PATHS, json!(["spec/**"])),
+                (keys::SCRIPTS_MAX_CONCURRENT, json!(2)),
+                (keys::SCRIPTS_MEMORY_MB, json!(256)),
+                (keys::METRICS, json!([{"use": "oxplow.loc", "target": 3}])),
+                (
+                    keys::LSP_SERVERS,
+                    json!([{"languageId": "rust", "extensions": [".RS"], "command": "ra"}]),
                 ),
-                json!("https://example.test"),
+                (keys::ZONES, json!([{"match": "src/**", "zone": "core"}])),
+                (keys::REPLACEMENTS, json!({"task.board": "oxplow"})),
+                (keys::EXTENSION_SOURCES, json!({"oxtask": "../oxtask"})),
+                (
+                    keys::EXTENSION_INSTANCES,
+                    json!({"acme/one": {"enabled": true, "config": {}}}),
+                ),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(config.project_name, "named");
+        assert_eq!(config.icon_tint.as_deref(), Some("#abc"));
+        assert_eq!(config.agent_prompt_append, "extra");
+        assert!(!config.inject_session_context);
+        assert_eq!(config.snapshot_retention_days, 14);
+        assert_eq!(config.snapshot_max_file_bytes, 2048);
+        assert_eq!(config.metric_retention_days, 3);
+        assert_eq!(config.generated.exclude, ["dist"]);
+        assert_eq!(config.generated.include, ["vendor"]);
+        assert_eq!(config.testing.command.as_deref(), Some("make test"));
+        assert_eq!(config.testing.fast_command, None);
+        assert_eq!(config.testing.run_patterns, ["pytest"]);
+        assert_eq!(config.testing.test_paths, ["spec/**"]);
+        assert_eq!(config.scripts.max_concurrent, 2);
+        assert_eq!(config.scripts.memory_bytes, 256 * 1024 * 1024);
+        assert_eq!(config.metrics[0].use_key.as_deref(), Some("oxplow.loc"));
+        assert_eq!(config.lsp_servers[0].extensions, [".rs"]);
+        assert_eq!(config.zones[0].patterns, ["src/**"]);
+        assert_eq!(config.replacements["task.board"], "oxplow");
+        assert_eq!(config.extension_sources["oxtask"], "../oxtask");
+        assert!(config.extension_instances["acme/one"].enabled);
+    }
+
+    #[test]
+    fn a_refused_value_names_its_setting_key() {
+        for (key, value) in [
+            (keys::PROJECT_NAME, json!("   ")),
+            (keys::ICON_TINT, json!("blue")),
+            (keys::GENERATED_EXCLUDE, json!(["/abs"])),
+            (keys::TESTING_TEST_PATHS, json!(["[bad"])),
+            (keys::TESTING_RUN_PATTERNS, json!([" "])),
+            (keys::ZONES, json!([{"match": "src/**", "zone": "other"}])),
+            (keys::REPLACEMENTS, json!({"nope": "oxplow"})),
+            (
+                keys::LSP_SERVERS,
+                json!([{"languageId": "rust", "extensions": ["rs"], "command": "ra"}]),
             ),
-        ]);
-        let config =
-            crate::parse_project_config(document_from_values("demo", &values), "demo").unwrap();
+            ("oxplow.activeProviders.nope", json!("hashes")),
+            (
+                "oxplow.ai.roles.fast",
+                json!({"provider": "p", "model": "m"}),
+            ),
+            ("oxplow.agents.Bad.enabled", json!(true)),
+        ] {
+            let error = config_from("demo", &values(&[(key, value)]))
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains(key), "{key}: {error}");
+        }
+    }
+
+    #[test]
+    fn family_keys_apply_to_their_member() {
+        let config = config_from(
+            "demo",
+            &values(&[
+                ("oxplow.activeProviders.snapshots", json!("hashes")),
+                (
+                    "oxplow.ai.roles.main",
+                    json!({"provider": "local", "model": "a"}),
+                ),
+                ("oxplow.agents.claude.enabled", json!(false)),
+                ("oxplow.agents.claude.model", json!("opus")),
+                ("oxplow.agents.acme.coder.enabled", json!(false)),
+                (
+                    &format!(
+                        "oxplow.agents.acme.coder.{}",
+                        crate::settings::key_segment("api/url")
+                    ),
+                    json!("https://example.test"),
+                ),
+                ("oxtask.tasks.workflow", json!("agent_tracks")),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(config.active_providers["snapshots"], "hashes");
+        assert_eq!(config.active_provider_origins["snapshots"], "project");
+        assert_eq!(config.ai_roles["main"].model, "a");
         assert!(!config.agent_enabled["claude"]);
         assert!(!config.agent_enabled["acme/coder"]);
         assert_eq!(config.agent_config["claude"]["model"], json!("opus"));
-        assert_eq!(config.agent_config["acme/coder"]["model"], json!("custom"));
         assert_eq!(
             config.agent_config["acme/coder"]["api/url"],
             json!("https://example.test")
         );
-        let definitions = definitions("demo");
-        assert!(!definitions.iter().any(|d| d.key == "oxplow.agents"
-            || d.key == "oxplow.agentConfig"
-            || d.key == "oxplow.newThreadSession"));
     }
 
     fn projection_store(project: &std::path::Path, global: &std::path::Path) -> SettingsStore {
@@ -713,144 +1037,80 @@ mod tests {
         )
     }
 
+    fn write(
+        project: &std::path::Path,
+        global: &std::path::Path,
+        level: Level,
+        key: &str,
+        value: Option<Value>,
+    ) {
+        crate::settings::write_layer_key(
+            &crate::settings::level_path(project, global, level),
+            key,
+            value.as_ref(),
+        )
+        .unwrap();
+    }
+
     #[test]
     fn bootstrap_preserves_unknown_harness_preferences_until_declarations_return() {
         let project = tempfile::tempdir().unwrap();
         let global = tempfile::tempdir().unwrap();
         let store = projection_store(project.path(), global.path());
-        let file = crate::settings::level_path(
-            project.path(),
-            global.path(),
-            crate::settings::Level::Project,
-        );
-        crate::settings::write_layer_key(
-            &file,
+        let (p, g) = (project.path(), global.path());
+        write(
+            p,
+            g,
+            Level::Project,
             "oxplow.agents.acme.coder.enabled",
-            Some(&json!(false)),
-        )
-        .unwrap();
-        crate::settings::write_layer_key(
-            &file,
-            "oxplow.agents.acme.coder.unregisteredPreference",
-            Some(&json!({"unexpected": ["value"]})),
-        )
-        .unwrap();
-
-        let yaml = project_document(&store).unwrap();
-        let document: Value = serde_yaml::from_value(yaml).unwrap();
-        assert_eq!(document["agentEnabled"]["acme/coder"], false);
-        assert_eq!(
-            document["agentConfig"]["acme/coder"]["unregisteredPreference"],
-            json!({"unexpected":["value"]})
+            Some(json!(false)),
         );
-        assert_eq!(
-            store.layer(crate::settings::Level::Project).unwrap()
-                ["oxplow.agents.acme.coder.unregisteredPreference"],
-            json!({"unexpected": ["value"]})
+        write(
+            p,
+            g,
+            Level::Project,
+            "oxplow.agents.acme.coder.model",
+            Some(json!({"name": "custom"})),
         );
+        let config = config_from("demo", &effective_values(&store).unwrap()).unwrap();
+        assert!(!config.agent_enabled["acme/coder"]);
+        assert_eq!(config.agent_config["acme/coder"]["model"]["name"], "custom");
     }
 
     #[test]
-    fn bootstrap_dynamic_validation_errors_name_the_setting_key() {
+    fn bootstrap_validation_errors_name_the_setting_key() {
         let project = tempfile::tempdir().unwrap();
         let global = tempfile::tempdir().unwrap();
         let store = projection_store(project.path(), global.path());
-        let file = crate::settings::level_path(
-            project.path(),
-            global.path(),
-            crate::settings::Level::Project,
-        );
+        let (p, g) = (project.path(), global.path());
         let key = "oxplow.agents.acme.coder.enabled";
-        crate::settings::write_layer_key(&file, key, Some(&json!("yes"))).unwrap();
-        let error = project_document(&store).unwrap_err().to_string();
+        write(p, g, Level::Project, key, Some(json!("yes")));
+        let error = effective_values(&store).unwrap_err().to_string();
         assert!(error.contains(key), "{error}");
-
-        crate::settings::write_layer_key(&file, key, None).unwrap();
+        write(p, g, Level::Project, key, None);
         let role_key = "oxplow.ai.roles.unregistered";
-        crate::settings::write_layer_key(
-            &file,
+        write(
+            p,
+            g,
+            Level::Project,
             role_key,
-            Some(&json!({"provider": "local", "model": 42})),
-        )
-        .unwrap();
-        let error = project_document(&store).unwrap_err().to_string();
+            Some(json!({"provider": "local", "model": 42})),
+        );
+        let error = effective_values(&store).unwrap_err().to_string();
         assert!(error.contains(role_key), "{error}");
     }
 
     #[test]
-    fn registered_dynamic_value_wins_over_raw_layer_projection() {
+    fn registered_dynamic_value_wins_over_a_lower_level() {
         let project = tempfile::tempdir().unwrap();
         let global = tempfile::tempdir().unwrap();
         let key = "oxplow.agents.acme.coder.enabled";
-        let mut registry = crate::settings::SettingsRegistry::default();
-        registry.register_many(definitions("demo")).unwrap();
-        register_dynamic_keys(&mut registry, [key.to_owned()]).unwrap();
-        let store = SettingsStore::new(
-            project.path().to_path_buf(),
-            global.path().to_path_buf(),
-            std::sync::Arc::new(std::sync::RwLock::new(registry)),
-            std::sync::Arc::new(TestNoSecrets),
-        );
-        crate::settings::write_layer_key(
-            &crate::settings::level_path(
-                project.path(),
-                global.path(),
-                crate::settings::Level::Project,
-            ),
-            key,
-            Some(&json!(true)),
-        )
-        .unwrap();
-        crate::settings::write_layer_key(
-            &crate::settings::level_path(
-                project.path(),
-                global.path(),
-                crate::settings::Level::Local,
-            ),
-            key,
-            Some(&json!(false)),
-        )
-        .unwrap();
-        let yaml: Value = serde_yaml::from_value(project_document(&store).unwrap()).unwrap();
-        assert_eq!(yaml["agentEnabled"]["acme/coder"], false);
-    }
-
-    #[test]
-    fn existing_runtime_objects_split_into_their_registered_options() {
-        let values = values_for_runtime_field(
-            "demo",
-            "testing",
-            &json!({ "command": "make test", "runPatterns": ["pytest"] }),
-        );
-        assert_eq!(values.len(), 2);
-        assert_eq!(values["oxplow.testing.command"], "make test");
-        assert_eq!(values["oxplow.testing.runPatterns"], json!(["pytest"]));
-        let maps =
-            values_for_runtime_field("demo", "activeProviders", &json!({"snapshots":"hashes"}));
-        assert_eq!(maps.len(), 1);
-        assert_eq!(maps["oxplow.activeProviders.snapshots"], json!("hashes"));
-    }
-
-    #[test]
-    fn every_project_schema_property_has_a_projection_binding() {
-        let all = bindings("demo");
-        for key in crate::keys::config_keys() {
-            if matches!(
-                key.key.as_str(),
-                "agents" | "agentEnabled" | "agentConfig" | "ai" | "snapshotTurnBudgetMs"
-            ) {
-                continue;
-            }
-            assert!(
-                all.iter()
-                    .any(|binding| binding.path.first() == Some(&key.key)),
-                "{}",
-                key.key
-            );
-        }
-        let unique: std::collections::BTreeSet<_> =
-            all.iter().map(|binding| &binding.definition.key).collect();
-        assert_eq!(unique.len(), all.len());
+        let store = projection_store(project.path(), global.path());
+        let (p, g) = (project.path(), global.path());
+        write(p, g, Level::Project, key, Some(json!(true)));
+        write(p, g, Level::Local, key, Some(json!(false)));
+        let config = config_from("demo", &effective_values(&store).unwrap()).unwrap();
+        assert!(!config.agent_enabled["acme/coder"]);
     }
 
     #[test]
@@ -858,28 +1118,19 @@ mod tests {
         let project = tempfile::tempdir().unwrap();
         let global = tempfile::tempdir().unwrap();
         let key = "oxplow.activeProviders.snapshots";
-        let write = |level, value: Option<&Value>| {
-            crate::settings::write_layer_key(
-                &crate::settings::level_path(project.path(), global.path(), level),
-                key,
-                value,
-            )
-            .unwrap()
-        };
-        use crate::settings::Level;
-        write(Level::Global, Some(&json!("none")));
-        write(Level::Project, Some(&json!("hashes")));
-        write(Level::Local, Some(&json!("oxplow")));
-        let load =
-            || crate::load_project_config_with_global(project.path(), Some(global.path())).unwrap();
+        let (p, g) = (project.path(), global.path());
+        write(p, g, Level::Global, key, Some(json!("none")));
+        write(p, g, Level::Project, key, Some(json!("hashes")));
+        write(p, g, Level::Local, key, Some(json!("oxplow")));
+        let load = || crate::load_project_config_with_global(p, Some(g)).unwrap();
         let local = load();
         assert_eq!(local.active_providers["snapshots"], "oxplow");
         assert_eq!(local.active_provider_origins["snapshots"], "local");
-        write(Level::Local, None);
+        write(p, g, Level::Local, key, None);
         let inherited = load();
         assert_eq!(inherited.active_providers["snapshots"], "hashes");
         assert_eq!(inherited.active_provider_origins["snapshots"], "project");
-        write(Level::Project, None);
+        write(p, g, Level::Project, key, None);
         assert_eq!(load().active_provider_origins["snapshots"], "global");
         assert!(!definitions("demo")
             .iter()
@@ -970,8 +1221,9 @@ mod tests {
     }
 
     #[test]
-    fn every_core_default_validates_against_its_registered_schema() {
+    fn every_core_default_validates_and_applies() {
         let mut registry = crate::settings::SettingsRegistry::default();
         registry.register_many(definitions("demo")).unwrap();
+        config_from("demo", &BTreeMap::new()).unwrap();
     }
 }

@@ -1806,7 +1806,7 @@ mod tests {
     fn write(dir: &Path, rel: &str, text: &str) {
         let path = dir.join(rel);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        crate::test_fixtures::write_settings_fixture(path, text).unwrap();
+        std::fs::write(path, text).unwrap();
     }
 
     /// `acme`'s source in the project, with one page titled `title`.
@@ -2731,7 +2731,7 @@ mod tests {
         {
             let path = dir.join(rel);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            crate::test_fixtures::write_settings_fixture(path, bytes).unwrap();
+            std::fs::write(path, bytes).unwrap();
         }
         write(
             &dir,
@@ -3125,7 +3125,7 @@ mod tests {
         // An edit deploys like any extension's, and rolls back.
         let manifest =
             std::fs::read_to_string(source("oxplow-foundation").join("extension.yaml")).unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             source("oxplow-foundation").join("extension.yaml"),
             manifest.replacen("\ncommands:\n", "\ncommands:\n  - name: test.draft_again\n    summary: \"A second draft command.\"\n    scope: agent_input.write\n    op: draft\n", 1),
         )
@@ -3162,12 +3162,12 @@ mod tests {
         for (rel, bytes) in shipped.files() {
             let to = dir.join(rel);
             std::fs::create_dir_all(to.parent().unwrap()).unwrap();
-            crate::test_fixtures::write_settings_fixture(to, bytes).unwrap();
+            std::fs::write(to, bytes).unwrap();
         }
         let manifest = std::fs::read_to_string(dir.join("extension.yaml")).unwrap();
         let added = "commands:\n  - name: test.draft_again\n    summary: \"A second draft command.\"\n    scope: agent_input.write\n    op: draft\n";
         assert!(manifest.contains("\ncommands:\n"));
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             dir.join("extension.yaml"),
             manifest.replacen("\ncommands:\n", &format!("\n{added}"), 1),
         )
@@ -3396,7 +3396,7 @@ mod tests {
             for (rel, bytes) in b.files() {
                 let file = to.join(rel);
                 std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-                crate::test_fixtures::write_settings_fixture(file, bytes).unwrap();
+                std::fs::write(file, bytes).unwrap();
             }
         }
         write(
@@ -3699,11 +3699,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let dir = source(svc, "One");
-        crate::test_fixtures::write_settings_fixture(
-            dir.join("data.bin"),
-            vec![0u8; 26 * 1024 * 1024],
-        )
-        .unwrap();
+        std::fs::write(dir.join("data.bin"), vec![0u8; 26 * 1024 * 1024]).unwrap();
         let deployed = deploy(svc, "acme", true).await.unwrap();
         assert!(
             deployed

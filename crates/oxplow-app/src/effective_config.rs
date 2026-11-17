@@ -52,12 +52,12 @@ mod tests {
         let project = tempfile::tempdir().unwrap();
         let global = tempfile::tempdir().unwrap();
         std::fs::create_dir(project.path().join(".oxplow")).unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             project.path().join(".oxplow/local.yaml"),
             "oxplow.snapshots.retentionDays: 14\n",
         )
         .unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             project.path().join(".oxplow/project.yaml"),
             "oxplow.snapshots.retentionDays: 20\n",
         )

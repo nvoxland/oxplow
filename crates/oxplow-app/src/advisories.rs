@@ -702,7 +702,7 @@ mod tests {
         let f = crate::test_fixtures::services_with_thread().await;
         let dir = f.svc.layout.project_dir.join(".oxplow/extensions/guide");
         std::fs::create_dir_all(&dir).unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             dir.join("extension.yaml"),
             "manifest: 2\nname: guide\nintent:\n  purpose: test\npermissions: [agent.write]\nadvisories:\n  - id: hello\n    on: post-tool-use\n    once_per: thread\n    query: SELECT 'thread ' || :thread_id AS message\n",
         )
@@ -781,7 +781,7 @@ mod tests {
     async fn approved(svc: &std::sync::Arc<crate::Services>, name: &str, advisories: &str) {
         let dir = svc.layout.project_dir.join(".oxplow/extensions").join(name);
         std::fs::create_dir_all(&dir).unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             dir.join("extension.yaml"),
             format!(
                 "manifest: 2\nname: {name}\nintent:\n  purpose: test\npermissions: [agent.write]\nadvisories:\n{advisories}"

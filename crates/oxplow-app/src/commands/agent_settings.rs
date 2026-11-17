@@ -88,7 +88,7 @@ pub fn ops(target: ConfigTarget, harnesses: HarnessRegistry) -> Vec<Op> {
             change(
                 &prompt_target,
                 actor,
-                "agentPromptAppend",
+                oxplow_config::core_settings::keys::AGENT_PROMPT_APPEND,
                 value,
                 Layer::Project,
             )

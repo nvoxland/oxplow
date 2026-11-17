@@ -582,7 +582,7 @@ mod tests {
         let write = |rel: &str, body: &str| {
             let p = dir.path().join(rel);
             std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-            crate::test_fixtures::write_settings_fixture(p, body).unwrap();
+            std::fs::write(p, body).unwrap();
         };
         write(
             ".oxplow/extensions/acme/extension.yaml",
@@ -683,14 +683,10 @@ mod tests {
         let outside = tempfile::tempdir().unwrap();
         let memory = outside.path().join("agent-claude/memory");
         std::fs::create_dir_all(&memory).unwrap();
-        crate::test_fixtures::write_settings_fixture(memory.join("a.md"), "remembered").unwrap();
+        std::fs::write(memory.join("a.md"), "remembered").unwrap();
         // The same path in the project is another folder.
         std::fs::create_dir_all(project.path().join("memory")).unwrap();
-        crate::test_fixtures::write_settings_fixture(
-            project.path().join("memory/b.md"),
-            "project's",
-        )
-        .unwrap();
+        std::fs::write(project.path().join("memory/b.md"), "project's").unwrap();
         let bases = Bases {
             project: project.path().to_path_buf(),
             outside: outside.path().to_path_buf(),
@@ -760,7 +756,7 @@ mod tests {
     fn a_symbolic_link_does_not_lead_out_of_a_folder() {
         let dir = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
-        crate::test_fixtures::write_settings_fixture(outside.path().join("secret"), "s").unwrap();
+        std::fs::write(outside.path().join("secret"), "s").unwrap();
         std::os::unix::fs::symlink(outside.path(), dir.path().join("shelf")).unwrap();
         let error = files(
             dir.path(),

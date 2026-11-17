@@ -434,22 +434,14 @@ mod tests {
         config.set_str("user.name", "test").unwrap();
         config.set_str("user.email", "test@example.com").unwrap();
         std::fs::create_dir_all(dir.path().join("src")).unwrap();
-        crate::test_fixtures::write_settings_fixture(
-            dir.path().join("src/a.txt"),
-            "one\ntwo\nthree\n",
-        )
-        .unwrap();
+        std::fs::write(dir.path().join("src/a.txt"), "one\ntwo\nthree\n").unwrap();
         let mut index = repo.index().unwrap();
         index.add_path(std::path::Path::new("src/a.txt")).unwrap();
         let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
         let sig = repo.signature().unwrap();
         repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
             .unwrap();
-        crate::test_fixtures::write_settings_fixture(
-            dir.path().join("src/a.txt"),
-            "one\nTWO\nthree\n",
-        )
-        .unwrap();
+        std::fs::write(dir.path().join("src/a.txt"), "one\nTWO\nthree\n").unwrap();
         let services = Services::in_memory(dir.path()).await.unwrap();
         (dir, services)
     }
@@ -481,7 +473,7 @@ mod tests {
             let file = crate::extension::extension_store::deployment_dir(dir.path(), "acme", hash)
                 .join("pages/p.yaml");
             std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-            crate::test_fixtures::write_settings_fixture(file, text).unwrap();
+            std::fs::write(file, text).unwrap();
         }
         let ext = |rev| file_uri_at("acme/pages/p.yaml", Some(EXTENSIONS), rev, None);
         assert_eq!(
@@ -660,8 +652,7 @@ mod tests {
         let primary = svc.stream_store.list().await.unwrap().pop().unwrap();
         let elsewhere = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(elsewhere.path().join("src")).unwrap();
-        crate::test_fixtures::write_settings_fixture(elsewhere.path().join("src/a.txt"), "theirs")
-            .unwrap();
+        std::fs::write(elsewhere.path().join("src/a.txt"), "theirs").unwrap();
         let mut other = primary.clone();
         other.id = StreamId::placeholder();
         other.title = "other".into();

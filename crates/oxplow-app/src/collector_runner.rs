@@ -2650,7 +2650,7 @@ pub(crate) mod tests {
         use std::os::unix::fs::PermissionsExt;
         let p = dir.join(name);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-        crate::test_fixtures::write_settings_fixture(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
         std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
 
@@ -2661,12 +2661,12 @@ pub(crate) mod tests {
         let dir = tempfile::tempdir().unwrap();
         let ext_dir = dir.path().join(".oxplow/extensions/my-gh");
         std::fs::create_dir_all(&ext_dir).unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             ext_dir.join("extension.yaml"),
             "manifest: 2\nname: my-gh\nintent:\n  purpose: p\ncollectors:\n  - id: gh\n    runtime: starlark\n    entry: gh.star\n    entities:\n      - name: pr\n        key: number\n        columns: { number: int, title: text }\n",
         )
         .unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             ext_dir.join("gh.star"),
             "def transform(x):\n    return {}\n",
         )
@@ -2848,7 +2848,7 @@ pub(crate) mod tests {
         let root = tempfile::tempdir().unwrap();
         let ext = root.path().join(".oxplow/extensions/my-gh");
         std::fs::create_dir_all(&ext).unwrap();
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             ext.join("extension.yaml"),
             "manifest: 2\nname: my-gh\nintent:\n  purpose: test\npermissions: [process.run]\ncollectors:\n  - id: gh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: pr, key: number, columns: { number: int, title: text } }\n",
         )
@@ -3000,7 +3000,7 @@ pub(crate) mod tests {
         for name in ["one", "two"] {
             let ext = root.join(format!(".oxplow/extensions/{name}"));
             std::fs::create_dir_all(&ext).unwrap();
-            crate::test_fixtures::write_settings_fixture(
+            std::fs::write(
                 ext.join("extension.yaml"),
                 format!("manifest: 2\nname: {name}\nintent:\n  purpose: test\npermissions: [process.run, secrets:TOKEN]\ncollectors:\n  - id: s\n    runtime: exec\n    entry: sync.sh\n    credentials: [TOKEN]\n    entities:\n      - {{ name: row, key: id, columns: {{ id: int, token: text }} }}\n"),
             )
@@ -3120,11 +3120,11 @@ pub(crate) mod tests {
     fn extension(root: &Path, name: &str, manifest: &str, files: &[(&str, &str)]) {
         let ext = root.join(format!(".oxplow/extensions/{name}"));
         std::fs::create_dir_all(&ext).unwrap();
-        crate::test_fixtures::write_settings_fixture(ext.join("extension.yaml"), manifest).unwrap();
+        std::fs::write(ext.join("extension.yaml"), manifest).unwrap();
         for (path, body) in files {
             let p = ext.join(path);
             std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-            crate::test_fixtures::write_settings_fixture(p, body).unwrap();
+            std::fs::write(p, body).unwrap();
         }
     }
 

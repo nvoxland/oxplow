@@ -368,7 +368,7 @@ mod tests {
             let (name, inside) = path.split_once('/').unwrap();
             let file = deployment_dir(dir.path(), name, HASH).join(inside);
             std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-            crate::test_fixtures::write_settings_fixture(file, content).unwrap();
+            std::fs::write(file, content).unwrap();
         }
         let catalog = Arc::new(ExtensionCatalog::for_project(dir.path()));
         catalog.set_live([(ROOT.to_string(), HASH.to_string())].into());
@@ -383,7 +383,7 @@ mod tests {
     fn write_deployment(dir: &Path, name: &str, hash: &str, file: &str, content: &str) {
         let path = deployment_dir(dir, name, hash).join(file);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        crate::test_fixtures::write_settings_fixture(path, content).unwrap();
+        std::fs::write(path, content).unwrap();
     }
 
     async fn run_all(fs: &dyn FileSystem, rev: Option<&str>) {
@@ -473,7 +473,7 @@ mod tests {
     async fn a_symlink_out_of_a_deployment_is_refused() {
         let (dir, fs) = project();
         let outside = dir.path().join("secret.txt");
-        crate::test_fixtures::write_settings_fixture(&outside, "secret").unwrap();
+        std::fs::write(&outside, "secret").unwrap();
         let deployment = deployment_dir(dir.path(), ROOT, HASH);
         std::os::unix::fs::symlink(&outside, deployment.join("link.txt")).unwrap();
         std::os::unix::fs::symlink(dir.path(), deployment.join("up")).unwrap();

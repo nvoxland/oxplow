@@ -4365,7 +4365,7 @@ mod tests {
         // The worktree holds `src/a.rs`; `@types/node` is no file of it.
         let worktree = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(worktree.path().join("src")).unwrap();
-        crate::test_fixtures::write_settings_fixture(worktree.path().join("src/a.rs"), "").unwrap();
+        std::fs::write(worktree.path().join("src/a.rs"), "").unwrap();
         let wt = worktree.path().to_string_lossy().to_string();
         svc.db
             .transaction(move |c| {

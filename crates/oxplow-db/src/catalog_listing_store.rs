@@ -88,7 +88,7 @@ pub struct ExtensionRow {
     pub shared: bool,
 }
 
-/// One project.yaml key, as `v_config_key` lists it.
+/// One registered setting, as `v_config_key` lists it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConfigKeyRow {
     pub key: String,

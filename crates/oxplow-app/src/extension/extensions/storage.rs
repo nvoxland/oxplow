@@ -340,7 +340,7 @@ mod tests {
         let write = |rel: &str, body: &str| {
             let p = dir.path().join(rel);
             std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-            crate::test_fixtures::write_settings_fixture(p, body).unwrap();
+            std::fs::write(p, body).unwrap();
         };
         write(
             ".oxplow/extensions/acme/extension.yaml",
@@ -352,7 +352,7 @@ mod tests {
         let filter = oxplow_fs_watch::WorkspaceFilter::with_user_entries(Vec::<String>::new());
         let page = std::path::Path::new(".oxplow/jotter/a.md");
         assert!(!filter.ignore(page, false), "declared, so watched");
-        crate::test_fixtures::write_settings_fixture(
+        std::fs::write(
             dir.path().join(".oxplow/local.yaml"),
             "oxplow.extensions.acme.enabled: false\n",
         )
