@@ -57,7 +57,6 @@ export interface Setting {
   defaultValue: unknown;
   overrides: Partial<Record<Level, unknown>>;
   statuses: Record<Level, string>;
-  restartRequired: boolean;
 }
 const decode = (v: unknown): unknown => {
   if (typeof v !== "string") return v;
@@ -97,7 +96,6 @@ export function inventory(run: VizRun): Setting[] {
       defaultValue: r.default_value == null ? schema.default : decode(r.default_value),
       overrides,
       statuses,
-      restartRequired: isTrue(r.restart_required),
     };
   });
 }

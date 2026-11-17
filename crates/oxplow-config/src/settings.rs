@@ -33,8 +33,6 @@ pub struct SettingDefinition {
     pub order: i32,
     #[serde(default)]
     pub ui: SettingUi,
-    #[serde(default)]
-    pub restart_required: bool,
     /// Assigned by the registry host, never accepted as caller authority.
     pub owner: String,
 }
@@ -1218,7 +1216,6 @@ mod tests {
             secret: false,
             order: 0,
             ui: Default::default(),
-            restart_required: false,
             owner: "example".into(),
         }
     }

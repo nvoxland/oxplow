@@ -173,7 +173,8 @@ Fixed object fields become independent fully qualified keys, such as
 your category a title in `configuration: categories:`
 (`tasks: { title: Tasks, description: …, order: 15 }`; core's categories
 `project`, `agents`, `ai`, … are core's to declare, a field may still name one). Optional
-annotations are `x-ui`, `x-order`, `x-restart-required`, `x-secret` and `x-atomic`.
+annotations are `x-ui`, `x-order`, `x-secret` and `x-atomic`; any other `x-`
+annotation is an error at `extension check`.
 `x-ui` has one hint: `x-ui: { editor: multiline }` makes a string field a text
 area. A choice comes from `enum`, or, to label each choice, from `oneOf` of
 `{ const, title, description }` (the Settings editor shows the titles and the

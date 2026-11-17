@@ -3440,7 +3440,6 @@ pub(crate) fn provider_key_definition(id: &str) -> oxplow_config::settings::Sett
         secret: true,
         order: 0,
         ui: Default::default(),
-        restart_required: false,
         owner: "core".into(),
     }
 }

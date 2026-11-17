@@ -79,7 +79,6 @@ fn setting(
             secret: false,
             order: 0,
             ui: Default::default(),
-            restart_required: false,
             owner: "core".into(),
         },
         apply,
@@ -569,7 +568,6 @@ pub fn definitions(fallback_name: &str) -> Vec<SettingDefinition> {
             secret: false,
             order: 0,
             ui: Default::default(),
-            restart_required: false,
             owner: "core".into(),
         }),
     );
@@ -610,7 +608,6 @@ fn core_definition(
         secret: false,
         order: 0,
         ui: Default::default(),
-        restart_required: false,
         owner: "core".into(),
     }
 }
@@ -1304,7 +1301,7 @@ mod tests {
                 json!({
                     "key": d.key, "title": d.title, "description": d.description,
                     "category": d.category, "default": default, "secret": d.secret,
-                    "order": d.order, "ui": d.ui, "restartRequired": d.restart_required,
+                    "order": d.order, "ui": d.ui,
                     "owner": d.owner, "accepts": accepts,
                 })
             })

@@ -12,8 +12,8 @@ export interface FakeSetting {
 
 export function configValueResult(settings: FakeSetting[]) {
   return {
-    columns: ["key", "value", "origin", "extension", "doc", "schema", "title", "category", "secret", "is_set", "owner", "restart_required", "ui", "local_value", "project_value", "global_value", "unavailable"],
-    rows: settings.map((s) => [s.key, s.secret || s.unavailable ? null : JSON.stringify(s.value ?? null), s.unavailable ? null : s.origin === undefined ? "default" : s.origin, null, "", null, s.key, "", Number(s.secret ?? false), s.unavailable ? 0 : Number(s.isSet ?? (s.value != null)), "core", 0, "{}",
+    columns: ["key", "value", "origin", "extension", "doc", "schema", "title", "category", "secret", "is_set", "owner", "ui", "local_value", "project_value", "global_value", "unavailable"],
+    rows: settings.map((s) => [s.key, s.secret || s.unavailable ? null : JSON.stringify(s.value ?? null), s.unavailable ? null : s.origin === undefined ? "default" : s.origin, null, "", null, s.key, "", Number(s.secret ?? false), s.unavailable ? 0 : Number(s.isSet ?? (s.value != null)), "core", "{}",
       ...(["local", "project", "global"] as const).map(level =>
         !s.secret && Object.prototype.hasOwnProperty.call(s.overrides ?? {}, level) ? JSON.stringify(s.overrides![level] ?? null) : null),
       Number(s.unavailable ?? false)]),

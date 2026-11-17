@@ -139,7 +139,6 @@ pub(crate) fn setting_definitions(
             secret: false,
             order: 0,
             ui: Default::default(),
-            restart_required: false,
             owner: "core".into(),
         };
         let enabled = base(
@@ -228,7 +227,6 @@ pub(crate) fn declared_instance_settings(
                 secret: false,
                 order: 0,
                 ui: Default::default(),
-                restart_required: false,
                 owner: "core".into(),
             }
         })

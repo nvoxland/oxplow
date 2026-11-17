@@ -8,7 +8,6 @@
     "secret": false,
     "order": 0,
     "ui": {},
-    "restartRequired": false,
     "owner": "core",
     "accepts": [
       13,
@@ -27,7 +26,6 @@
     "ui": {
       "editor": "multiline"
     },
-    "restartRequired": false,
     "owner": "core",
     "accepts": [
       0,
@@ -48,7 +46,6 @@
     "secret": false,
     "order": 0,
     "ui": {},
-    "restartRequired": false,
     "owner": "core",
     "accepts": [
       25,
@@ -64,7 +61,6 @@
     "secret": false,
     "order": 0,
     "ui": {},
-    "restartRequired": false,
     "owner": "core",
     "accepts": [
       25,
@@ -80,7 +76,6 @@
     "secret": false,
     "order": 0,
     "ui": {},
-    "restartRequired": false,
     "owner": "core",
     "accepts": [
       25,
@@ -96,7 +91,6 @@
     "secret": false,
     "order": 0,
     "ui": {},
-    "restartRequired": false,
     "owner": "core",
     "accepts": [
       25,
@@ -112,7 +106,6 @@
     "secret": false,
     "order": 0,
     "ui": {},
-    "restartRequired": false,
     "owner": "core",
     "accepts": [
       0,
@@ -129,7 +122,6 @@
     "secret": false,
     "order": 0,
     "ui": {},
-    "restartRequired": false,
     "owner": "core",
     "accepts": [
       0,
@@ -146,7 +138,6 @@
     "secret": false,
     "order": 0,
     "ui": {},
-    "restartRequired": false,
     "owner": "core",
     "accepts": [
       0,
@@ -166,7 +157,6 @@
     "secret": false,
     "order": 0,
     "ui": {},
-    "restartRequired": false,
     "owner": "core",
     "accepts": [
       1,
@@ -182,7 +172,6 @@
     "secret": false,
     "order": 0,
     "ui": {},
-    "restartRequired": false,
     "owner": "core",
     "accepts": [
       1,
@@ -198,7 +187,6 @@
     "secret": false,
     "order": 0,
     "ui": {},
-    "restartRequired": false,
     "owner": "core",
     "accepts": [
       1,
@@ -214,7 +202,6 @@
     "secret": false,
     "order": 0,
     "ui": {},
-    "restartRequired": false,
     "owner": "core",
     "accepts": [
       17,
@@ -234,7 +221,6 @@
     "secret": false,
     "order": 0,
     "ui": {},
-    "restartRequired": false,
     "owner": "core",
     "accepts": [
       17,
@@ -254,7 +240,6 @@
     "secret": false,
     "order": 0,
     "ui": {},
-    "restartRequired": false,
     "owner": "core",
     "accepts": [
       0,
@@ -271,7 +256,6 @@
     "secret": false,
     "order": 0,
     "ui": {},
-    "restartRequired": false,
     "owner": "core",
     "accepts": [
       0,
@@ -288,7 +272,6 @@
     "secret": false,
     "order": 0,
     "ui": {},
-    "restartRequired": false,
     "owner": "core",
     "accepts": [
       0,
@@ -305,7 +288,6 @@
     "secret": false,
     "order": 0,
     "ui": {},
-    "restartRequired": false,
     "owner": "core",
     "accepts": [
       17,
@@ -322,7 +304,6 @@
     "secret": false,
     "order": 0,
     "ui": {},
-    "restartRequired": false,
     "owner": "core",
     "accepts": [
       3,
@@ -342,7 +323,6 @@
     "secret": false,
     "order": 0,
     "ui": {},
-    "restartRequired": false,
     "owner": "core",
     "accepts": [
       3,
@@ -362,7 +342,6 @@
     "secret": false,
     "order": 0,
     "ui": {},
-    "restartRequired": false,
     "owner": "core",
     "accepts": [
       3,
@@ -382,7 +361,6 @@
     "secret": false,
     "order": 0,
     "ui": {},
-    "restartRequired": false,
     "owner": "core",
     "accepts": [
       13,
@@ -400,7 +378,6 @@
     "secret": false,
     "order": 0,
     "ui": {},
-    "restartRequired": false,
     "owner": "core",
     "accepts": [
       0,
@@ -420,7 +397,6 @@
     "secret": false,
     "order": 0,
     "ui": {},
-    "restartRequired": false,
     "owner": "core",
     "accepts": [
       4,
@@ -439,7 +415,6 @@
     "secret": false,
     "order": 0,
     "ui": {},
-    "restartRequired": false,
     "owner": "core",
     "accepts": [
       7,
@@ -456,7 +431,6 @@
     "secret": false,
     "order": 0,
     "ui": {},
-    "restartRequired": false,
     "owner": "core",
     "accepts": [
       9
@@ -471,7 +445,6 @@
     "secret": false,
     "order": 0,
     "ui": {},
-    "restartRequired": false,
     "owner": "core",
     "accepts": [
       3,
@@ -493,7 +466,6 @@
     "ui": {
       "editor": "multiline"
     },
-    "restartRequired": false,
     "owner": "core",
     "accepts": [
       0,
@@ -514,7 +486,6 @@
     "secret": false,
     "order": 0,
     "ui": {},
-    "restartRequired": false,
     "owner": "core",
     "accepts": [
       0,
@@ -535,7 +506,6 @@
     "secret": false,
     "order": 0,
     "ui": {},
-    "restartRequired": false,
     "owner": "core",
     "accepts": [
       0,
@@ -556,7 +526,6 @@
     "secret": false,
     "order": 0,
     "ui": {},
-    "restartRequired": false,
     "owner": "core",
     "accepts": [
       0,
@@ -577,7 +546,6 @@
     "secret": false,
     "order": 0,
     "ui": {},
-    "restartRequired": false,
     "owner": "core",
     "accepts": [
       0,
@@ -598,7 +566,6 @@
     "secret": false,
     "order": 0,
     "ui": {},
-    "restartRequired": false,
     "owner": "core",
     "accepts": [
       0,
@@ -619,7 +586,6 @@
     "secret": false,
     "order": 0,
     "ui": {},
-    "restartRequired": false,
     "owner": "core",
     "accepts": [
       0,

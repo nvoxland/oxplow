@@ -6,7 +6,7 @@ never select a storage implementation: a definition's `secret` flag does.
 ## Definitions and resolution
 
 Each definition has a fully qualified key, title, description, category, JSON
-Schema, optional default, UI hints, ordering, and restart requirement. The host
+Schema, optional default, UI hints and ordering. The host
 assigns ownership. Categories are independent of ownership. Extension
 declarations are translated by `extension/extension_settings.rs`. Fixed object
 properties become independent settings; arrays, dynamic maps and explicit
@@ -44,7 +44,8 @@ title from its id and order 1000. `v_config_value` carries `category_title`,
 category pages sort and title by them.
 
 Extension schema annotations are `title`, `description`, `x-category`, `x-ui`,
-`x-order`, `x-secret`, `x-restart-required` and `x-atomic`. `x-ui` (the
+`x-order`, `x-secret` and `x-atomic`; any other `x-` key is refused at check
+(`extension_settings::ANNOTATIONS`). `x-ui` (the
 definition's `ui`, `settings::SettingUi`) is one fixed vocabulary:
 `{ editor: multiline }` for a text area. A labeled choice is the schema's own:
 `oneOf` of `{ const, title, description }` (the editor's select shows the titles

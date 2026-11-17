@@ -449,7 +449,6 @@ fn check_harness_settings(data: &oxplow_domain::agent::harness::HarnessData) -> 
                 secret: false,
                 order: 0,
                 ui: Default::default(),
-                restart_required: false,
                 owner: "core".into(),
             })
             .map_err(|_| {

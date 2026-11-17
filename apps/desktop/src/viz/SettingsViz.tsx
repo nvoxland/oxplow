@@ -76,7 +76,6 @@ function SettingSection({ setting, id, fixedLevel }: { setting: Setting; id: str
     <Section id={id} title={setting.title}>
       <div className="ox-form">
         {setting.doc && <Markdown value={setting.doc} />}
-        {setting.restartRequired && <p className="ox-muted">Takes effect after oxplow restarts.</p>}
         {changedFor.length > 0 && <p className="ox-muted">Changed for: {changedFor.join(", ")}</p>}
         <Facts
           facts={[

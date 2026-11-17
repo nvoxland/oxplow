@@ -1743,7 +1743,7 @@
     - { name: "color", type: "TEXT", doc: "The rule's display colour, if it gave one." }
     - { name: "files", type: "INT", doc: "Files in the worktree this rule claims (none of its earlier siblings did); on `other`, the files no rule matched." }
 - name: config_value
-  version: 6
+  version: 7
   key: [key]
   description: "Registered core and extension settings with redacted effective values, schema and display metadata. Overrides resolve local, project, global, then default; metric and dimension definitions are not settings. Write through oxplow.config.set with an explicit level."
   fields:
@@ -1758,7 +1758,6 @@
     - { name: secret, type: INT, doc: "1 when the value is stored securely." }
     - { name: is_set, type: INT, doc: "1 when an effective value is present, including secrets." }
     - { name: owner, type: TEXT, doc: "Registry owner: core or extension namespace." }
-    - { name: restart_required, type: INT, doc: "1 when a change requires restart." }
     - { name: ui, type: TEXT, doc: "Display hints as JSON." }
     - { name: local_value, type: TEXT, doc: "Explicit local override as JSON; SQL NULL when absent or secret. JSON null remains the text null." }
     - { name: project_value, type: TEXT, doc: "Explicit shared project override as JSON; SQL NULL when absent or secret." }

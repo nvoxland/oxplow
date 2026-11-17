@@ -18,6 +18,8 @@ const OWNER_PREFIX: &str = "extension/";
 pub(crate) enum ExtensionSettingsError {
     #[error("invalid extension setting declaration: {0}")]
     Declaration(&'static str),
+    #[error("settings schema annotation `{0}` is unknown; the annotations are {ANNOTATIONS:?}")]
+    UnknownAnnotation(String),
     #[error("extension settings could not be resolved")]
     Resolution,
     #[error("extension settings conflict with another registered definition")]
@@ -36,10 +38,12 @@ pub(crate) fn credential_definition(namespace: &str, name: &str) -> SettingDefin
         secret: true,
         order: 0,
         ui: Default::default(),
-        restart_required: false,
         owner: format!("{OWNER_PREFIX}{namespace}"),
     }
 }
+
+/// The `x-` annotations a settings schema may carry.
+const ANNOTATIONS: [&str; 5] = ["x-category", "x-secret", "x-atomic", "x-order", "x-ui"];
 
 struct Binding {
     definition: SettingDefinition,
@@ -224,6 +228,12 @@ fn collect(
         return Err(ExtensionSettingsError::Declaration("nesting limit"));
     }
     let schema = dereference(&declaration.schema, schema)?;
+    if let Some(unknown) = schema.as_object().and_then(|node| {
+        node.keys()
+            .find(|key| key.starts_with("x-") && !ANNOTATIONS.contains(&key.as_str()))
+    }) {
+        return Err(ExtensionSettingsError::UnknownAnnotation(unknown.clone()));
+    }
     let category = text(&schema, "x-category").or(category);
     let secret = flag(&schema, "x-secret")?;
     let properties = schema.get("properties").and_then(Value::as_object);
@@ -297,7 +307,6 @@ fn collect(
             secret,
             order,
             ui,
-            restart_required: flag(&schema, "x-restart-required")?,
             owner: format!("{OWNER_PREFIX}{namespace}"),
         },
         path: path.clone(),
@@ -589,6 +598,15 @@ mod tests {
                 "tasks":{"enabled":true,"limit":9},"headers":{"local":"only"}
             })
         );
+    }
+
+    #[test]
+    fn an_annotation_oxplow_does_not_know_is_refused() {
+        let extension = extension(json!({"type":"object","properties":{
+            "limit":{"type":"integer","default":3,"x-restart-required":true}
+        }}));
+        let error = definitions(&extension).unwrap_err().to_string();
+        assert!(error.contains("x-restart-required"), "{error}");
     }
 
     #[test]
