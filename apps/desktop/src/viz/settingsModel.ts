@@ -3,6 +3,20 @@ import type { Level } from "../tauri-bridge/generated/bindings.js";
 
 export type { Level };
 export const LEVELS: Level[] = ["local", "project", "global"];
+
+/** A level as a person knows it: the one wording for every place a level shows. */
+export function levelName(level: Level | "default"): string {
+  switch (level) {
+    case "local":
+      return "Just me in this project";
+    case "project":
+      return "This project";
+    case "global":
+      return "All my projects";
+    default:
+      return "The default";
+  }
+}
 export type Schema = {
   $ref?: string;
   $defs?: Record<string, Schema>;
@@ -215,4 +229,14 @@ export function displayValue(value: unknown): string {
     return entries.length ? entries.map(([k, v]) => `${k}: ${displayValue(v)}`).join(" · ") : "Empty object";
   }
   return String(value);
+}
+
+/** A setting edited in its own section, with no editor to open first: a
+ *  non-secret boolean, choice, number or one-line text. */
+export function editsInline(setting: Setting): boolean {
+  if (setting.secret || setting.ui.editor === "multiline" || setting.schema.contentMediaType) return false;
+  if (choices(setting.schema)) return true;
+  const schema = concreteSchema(setting.schema);
+  if (alternatives(schema).filter((s) => s.type !== "null").length > 1) return false;
+  return ["boolean", "number", "integer", "string"].includes(firstType(schema) ?? "");
 }

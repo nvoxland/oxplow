@@ -8,7 +8,8 @@ test("Settings links to category forms and operational tools", async ({ page, da
   await open(page, daemon, "oxplow:oxplow/page?page=settings-category#category=snapshots");
   const settings = shown(page).getByTestId("settings-viz");
   await expect(settings).toBeVisible();
-  await expect(settings.getByLabel(/View\/edit level/).first()).toBeVisible();
+  // Snapshot settings are numbers: edited in their section, the level under "Saves to".
+  await expect(settings.getByLabel(/Saves to/).first()).toBeVisible();
   await expect(settings.getByText("All levels").first()).toBeVisible();
   const titles = await settings.getByRole("heading").allTextContents();
   expect(titles.length).toBeGreaterThan(1);
@@ -25,22 +26,21 @@ test("Settings links to category forms and operational tools", async ({ page, da
 test("a hidden Global override can be edited and inherited after Project reset", async ({ page, daemon }) => {
   await open(page, daemon, "oxplow:oxplow/page?page=settings-category#category=snapshots&setting=oxplow.snapshots.retentionDays");
   const setting = shown(page).getByTestId("settings-viz").locator("section").first();
-  await setting.getByRole("button", { name: "Edit project value", exact: true }).click();
+  // A number is edited in its section; it saves to This project until another level is chosen.
+  await expect(setting.getByRole("combobox")).toHaveValue("project");
   await setting.getByRole("spinbutton").fill("17");
   await setting.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(setting.getByText(/Source: project/)).toBeVisible();
+  await expect(setting.getByText(/Source: This project/)).toBeVisible();
   await setting.getByRole("combobox").selectOption("global");
-  await setting.getByRole("button", { name: "Edit global value", exact: true }).click();
   await setting.getByRole("spinbutton").fill("29");
   await setting.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(setting.getByText(/Source: project/)).toBeVisible();
+  await expect(setting.getByText(/Source: This project/)).toBeVisible();
   await setting.getByText("All levels", { exact: true }).click();
-  await expect(setting.getByRole("row").filter({ hasText: "global" })).toContainText("29");
+  await expect(setting.getByRole("row").filter({ hasText: "All my projects" })).toContainText("29");
   await setting.getByRole("combobox").selectOption("project");
-  await setting.getByRole("button", { name: "Edit project value", exact: true }).click();
   await setting.getByRole("button", { name: "Reset to inherited value", exact: true }).click();
   await setting.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(setting.getByText(/Source: global/)).toBeVisible();
+  await expect(setting.getByText(/Source: All my projects/)).toBeVisible();
 });
 
 // New Stream is the foundation's form over `oxplow.stream.create`: a source

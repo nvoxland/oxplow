@@ -5,7 +5,7 @@ import { InlineError } from "../kit/InlineError.js";
 import { useDraft } from "../tabs/useViewParam.js";
 import { useFormSubmit } from "./useFormSubmit.js";
 import { SettingField } from "./SettingField.js";
-import { displayValue, emptyValue, LEVELS, same, validate, type Level, type Setting } from "./settingsModel.js";
+import { displayValue, emptyValue, levelName, LEVELS, same, validate, type Level, type Setting } from "./settingsModel.js";
 
 type Draft = { value: unknown; remove: boolean; baseline: string };
 
@@ -95,7 +95,7 @@ export function SettingEditor({ setting, level }: { setting: Setting; level: Lev
       onKeyDown={onKeyDown}
     >
       <p className="ox-muted">
-        Editing {level}. {hasOverride ? "An override is saved here." : "This level inherits its value. Saving creates an override."}
+        Editing {levelName(level)}. {hasOverride ? "An override is saved here." : "This level inherits its value. Saving creates an override."}
         {setting.secret && " Leave blank to keep the saved secret."}
       </p>
       {remove ? (
@@ -112,7 +112,7 @@ export function SettingEditor({ setting, level }: { setting: Setting; level: Lev
       )}
       {conflict && (
         <p role="alert" className="ox-warning">
-          The saved value changed while you were editing. Your draft is kept. Save replaces the current {level} value; Discard loads the latest value.
+          The saved value changed while you were editing. Your draft is kept. Save replaces the value for {levelName(level)}; Discard loads the latest value.
         </p>
       )}
       {errors.map((error) => (

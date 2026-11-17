@@ -172,7 +172,12 @@ markdown itself, nor edits it in a `<textarea>`.
   Settings has a registry-driven category index (`settings.yaml`) with search
   results linking to `settings-category` with `category` and `setting` view
   params. A category uses the native `settings` visualization: effective source
-  and value stay separate from its always-visible View/edit level selector;
+  and value stay separate from the level a change goes to. A non-secret
+  boolean, choice, number or one-line text is edited in its section (no editor
+  to open; Save writes it), with "Saves to" beneath as the secondary choice;
+  anything else has a View/edit level selector and "Edit value: <level>".
+  Levels read the same everywhere (`levelName`): "Just me in this project",
+  "This project", "All my projects", "The default" — never `local`/`global`.
   All levels is initially collapsed. Each setting saves or discards explicitly,
   ordinary drafts live in tab history per key and level, and secret drafts live
   only in memory. Structured controls edit collections as whole values; there

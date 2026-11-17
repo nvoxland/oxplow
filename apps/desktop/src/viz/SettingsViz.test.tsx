@@ -30,12 +30,11 @@ function run(overrides: Record<string, unknown> = {}, params = {}): VizRun {
 
 test("level selector is independent of effective source and save explicitly targets it", async () => {
   const ui = render(<SettingsViz run={run()} />);
-  const level = ui.getByLabelText("View/edit level for Example");
+  const level = ui.getByLabelText("Saves to for Example");
   expect((level as HTMLSelectElement).value).toBe("local");
   expect(ui.container.querySelectorAll("details[open]").length).toBe(0);
   fireEvent.change(level, { target: { value: "project" } });
-  expect(ui.getByText(/Source: local/)).toBeTruthy();
-  fireEvent.click(ui.getByText("Edit project value"));
+  expect(ui.getByText(/Source: Just me in this project/)).toBeTruthy();
   const input = ui.getByLabelText("Example", { selector: "input" });
   expect((input as HTMLInputElement).value).toBe("shared");
   expect((ui.getByText("Save") as HTMLButtonElement).disabled).toBe(true);
@@ -46,7 +45,6 @@ test("level selector is independent of effective source and save explicitly targ
 
 test("refresh preserves draft and reports a conflicting change; discard follows latest", () => {
   const ui = render(<SettingsViz run={run()} />);
-  fireEvent.click(ui.getByText("Edit local value"));
   fireEvent.change(ui.getByLabelText("Example", { selector: "input" }), { target: { value: "draft" } });
   ui.rerender(<SettingsViz run={run({ local_value: '"external"', value: '"external"' })} />);
   expect((ui.getByLabelText("Example", { selector: "input" }) as HTMLInputElement).value).toBe("draft");
@@ -57,7 +55,6 @@ test("refresh preserves draft and reports a conflicting change; discard follows 
 
 test("reset previews inheritance and runs unset only on Save", async () => {
   const ui = render(<SettingsViz run={run()} />);
-  fireEvent.click(ui.getByText("Edit local value"));
   fireEvent.click(ui.getByText("Reset to inherited value"));
   expect(ui.getByRole("status").textContent).toContain("shared");
   expect(calls.length).toBe(0);
@@ -69,7 +66,7 @@ test("null, empty and inherited have distinct values; secret statuses disclose n
   expect(inventory(run({ project_value: "null", global_value: '""' }))[0]!.overrides).toEqual({ local: "local saved", project: null, global: "" });
   const ui = render(<SettingsViz run={run({ secret: 1, value: null, local_value: null })} />);
   expect(ui.container.textContent).not.toContain("local saved");
-  fireEvent.click(ui.getByText("Edit local value"));
+  fireEvent.click(ui.getByText("Edit value: Just me in this project"));
   expect(ui.getByLabelText("Example", { selector: "input" }).getAttribute("type")).toBe("password");
   expect((ui.getByText("Save") as HTMLButtonElement).disabled).toBe(true);
 });
@@ -103,14 +100,13 @@ test("a oneOf of titled consts is one labeled choice, with the chosen one's desc
 
 test("editing global starts with its own inherited default, never a higher-priority local value", () => {
   const ui = render(<SettingsViz run={run()} />);
-  fireEvent.change(ui.getByLabelText("View/edit level for Example"), { target: { value: "global" } });
-  fireEvent.click(ui.getByText("Edit global value"));
+  fireEvent.change(ui.getByLabelText("Saves to for Example"), { target: { value: "global" } });
   expect((ui.getByLabelText("Example", { selector: "input" }) as HTMLInputElement).value).toBe("default");
 });
 
 test("an unavailable secret can be repaired or removed at the explicitly selected level", async () => {
   const ui = render(<SettingsViz run={run({ secret: 1, value: null, origin: null, unavailable: 1, project_status: "unavailable", project_value: null })} />);
-  fireEvent.click(ui.getByText("Edit project value"));
+  fireEvent.click(ui.getByText("Edit value: This project"));
   fireEvent.change(ui.getByLabelText("Example", { selector: "input" }), { target: { value: "replacement" } });
   fireEvent.click(ui.getByText("Save"));
   await waitFor(() => expect(calls[0]).toEqual({ name: "oxplow.config.set", input: { key: "oxplow.example", level: "project", value: "replacement" } }));
@@ -156,17 +152,15 @@ test("ordinary drafts survive changing levels in tab history; secrets never ente
     return <PageNavigationContext.Provider value={navigation}><SettingsViz run={run(secret ? { secret: 1, value: null, local_value: null } : {})} /></PageNavigationContext.Provider>;
   }
   const ui = render(<InTab />);
-  fireEvent.click(ui.getByText("Edit local value"));
   fireEvent.change(ui.getByLabelText("Example", { selector: "input" }), { target: { value: "ordinary draft" } });
-  fireEvent.change(ui.getByLabelText("View/edit level for Example"), { target: { value: "global" } });
-  fireEvent.change(ui.getByLabelText("View/edit level for Example"), { target: { value: "local" } });
-  fireEvent.click(ui.getByText("Edit local value"));
+  fireEvent.change(ui.getByLabelText("Saves to for Example"), { target: { value: "global" } });
+  fireEvent.change(ui.getByLabelText("Saves to for Example"), { target: { value: "local" } });
   expect((ui.getByLabelText("Example", { selector: "input" }) as HTMLInputElement).value).toBe("ordinary draft");
   expect(JSON.stringify(persisted)).toContain("ordinary draft");
   ui.unmount();
   persisted = {};
   const secrets = render(<InTab secret />);
-  fireEvent.click(secrets.getByText("Edit local value"));
+  fireEvent.click(secrets.getByText("Edit value: Just me in this project"));
   fireEvent.change(secrets.getByLabelText("Example", { selector: "input" }), { target: { value: "private-token" } });
   expect(JSON.stringify(persisted)).not.toContain("private-token");
 });
@@ -174,14 +168,14 @@ test("ordinary drafts survive changing levels in tab history; secrets never ente
 
 test("saving or closing a secret editor clears its input rather than retaining the submitted value", async () => {
   const ui = render(<SettingsViz run={run({ secret: 1, value: null, local_value: null, is_set: 1 })} />);
-  fireEvent.click(ui.getByText("Edit local value"));
+  fireEvent.click(ui.getByText("Edit value: Just me in this project"));
   const input = ui.getByLabelText("Example", { selector: "input" }) as HTMLInputElement;
   fireEvent.change(input, { target: { value: "private-secret-draft" } });
   fireEvent.click(ui.getByText("Save"));
   await waitFor(() => expect(input.value).toBe(""));
   fireEvent.change(input, { target: { value: "another-private-draft" } });
   fireEvent.click(ui.getByText("Collapse editor"));
-  fireEvent.click(ui.getByText("Edit local value"));
+  fireEvent.click(ui.getByText("Edit value: Just me in this project"));
   expect((ui.getByLabelText("Example", { selector: "input" }) as HTMLInputElement).value).toBe("");
 });
 
@@ -202,7 +196,6 @@ test("settings use standard nested sections and Contents links without listing e
   fireEvent.click(ui.getByRole("button", { name: "Second setting" }));
   expect(scrolled).toBe(true);
   expect(heading.closest("section")?.getAttribute("data-section")).toBe("settings/oxplow.second");
-  fireEvent.click(ui.getAllByText("Edit local value", { selector: "button" })[0]!);
   expect(contents.textContent).not.toContain("All levels");
   expect(contents.textContent).not.toContain("Technical details");
 });
@@ -210,9 +203,28 @@ test("settings use standard nested sections and Contents links without listing e
 test("a value the setting refuses shows the reason the save gave, once", async () => {
   refuse = new IpcCallError("`/1` must be a string", "INVALID", "/value/1");
   const ui = render(<SettingsViz run={run()} />);
-  fireEvent.click(ui.getByText("Edit local value"));
   fireEvent.change(ui.getByLabelText("Example", { selector: "input" }), { target: { value: "draft" } });
   fireEvent.click(ui.getByText("Save"));
   const alert = await waitFor(() => ui.getByText("`/1` must be a string"));
   expect(alert.getAttribute("role")).toBe("alert");
+});
+
+test("a scalar is edited in its section: change it and Save, the level is secondary", async () => {
+  const ui = render(<SettingsViz run={run({ schema: JSON.stringify({ type: "boolean", default: false }), value: "true", origin: "project", local_value: null, local_status: "unset", project_value: "true" })} />);
+  // No Edit button to press first: the control is there.
+  expect(ui.queryByText(/^Edit .* value$/)).toBeNull();
+  const box = ui.getByLabelText("Example", { selector: "input" }) as HTMLInputElement;
+  expect(box.checked).toBe(true);
+  expect((ui.getByLabelText("Saves to for Example") as HTMLSelectElement).value).toBe("project");
+  fireEvent.click(box);
+  fireEvent.click(ui.getByText("Save"));
+  await waitFor(() => expect(calls).toEqual([{ name: "oxplow.config.set", input: { key: "oxplow.example", level: "project", value: false } }]));
+});
+
+test("levels read as a person knows them, the same everywhere", () => {
+  const ui = render(<SettingsViz run={run({ schema: JSON.stringify({ type: "array", items: { type: "string" } }), value: '["a"]', local_value: '["a"]', project_value: '["b"]' })} />);
+  const text = ui.container.textContent ?? "";
+  expect(text).toContain("Source: Just me in this project");
+  expect(text).not.toMatch(/\b(local|global)\b/);
+  expect(ui.getByText("Edit value: Just me in this project")).toBeTruthy();
 });

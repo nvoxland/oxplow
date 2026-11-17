@@ -5,7 +5,7 @@ import { DataTable } from "../kit/DataTable.js";
 import { Facts } from "../kit/Facts.js";
 import { Section } from "../kit/Section.js";
 import { SettingEditor } from "./SettingEditor.js";
-import { displayValue, inventory, LEVELS, type Level, type Setting } from "./settingsModel.js";
+import { displayValue, editsInline, inventory, levelName, LEVELS, type Level, type Setting } from "./settingsModel.js";
 
 /** Registry-driven settings composed from the same sections and kit as other pages. */
 export function SettingsViz({ run }: { run: VizRun }) {
@@ -33,7 +33,9 @@ function SettingSection({ setting, id }: { setting: Setting; id: string }) {
   const [level, setLevel] = useState<Level>(
     LEVELS.includes(setting.origin as Level) ? (setting.origin as Level) : "project",
   );
-  const [editing, setEditing] = useState(false);
+  // A scalar is edited in its section; anything else opens its editor.
+  const inline = editsInline(setting);
+  const [editing, setEditing] = useState(inline);
   const effective = setting.unavailable ? "Unavailable" : setting.secret ? setting.isSet ? "•••••••• (set)" : "Not set" : displayValue(setting.value);
   const levelValue = (at: Level | "default") => {
     if (at === "default") return setting.secret ? "Not displayed" : displayValue(setting.defaultValue);
@@ -41,8 +43,29 @@ function SettingSection({ setting, id }: { setting: Setting; id: string }) {
     if (setting.statuses[at] !== "set") return "Inherited";
     return setting.secret ? "•••••••• (set)" : displayValue(setting.overrides[at]);
   };
-  const levelLabel = (l: Level) =>
-    l === "local" ? "Just me in this project" : l === "project" ? "This project" : "All my projects";
+  const source = setting.unavailable
+    ? "unavailable"
+    : setting.origin
+      ? levelName(setting.origin as Level | "default")
+      : "not set";
+  const levelSelect = (label: string) => (
+    <select
+      id={levelId}
+      className="ox-select"
+      aria-label={`${label} for ${setting.title}`}
+      value={level}
+      onChange={(e) => {
+        setLevel(e.target.value as Level);
+        setEditing(inline);
+      }}
+    >
+      {LEVELS.map((l) => (
+        <option key={l} value={l}>
+          {levelName(l)}
+        </option>
+      ))}
+    </select>
+  );
   const originIndex = setting.origin ? LEVELS.indexOf(setting.origin as Level) : -1;
   return (
     <Section id={id} title={setting.title}>
@@ -57,37 +80,25 @@ function SettingSection({ setting, id }: { setting: Setting; id: string }) {
               value: (
                 <>
                   {effective}
-                  <span className="ox-muted"> · Source: {setting.unavailable ? "unavailable" : setting.origin ?? "not set"}</span>
+                  <span className="ox-muted"> · Source: {source}</span>
                 </>
               ),
             },
-            {
-              key: "level",
-              label: <label htmlFor={levelId}>View/edit level</label>,
-              value: (
-                <select
-                  id={levelId}
-                  className="ox-select"
-                  aria-label={`View/edit level for ${setting.title}`}
-                  value={level}
-                  onChange={(e) => {
-                    setLevel(e.target.value as Level);
-                    setEditing(false);
-                  }}
-                >
-                  {LEVELS.map((l) => (
-                    <option key={l} value={l}>
-                      {levelLabel(l)}
-                    </option>
-                  ))}
-                </select>
-              ),
-            },
+            ...(inline
+              ? []
+              : [
+                  {
+                    key: "level",
+                    label: <label htmlFor={levelId}>View/edit level</label>,
+                    value: levelSelect("View/edit level"),
+                  },
+                ]),
           ]}
         />
         {originIndex >= 0 && originIndex < LEVELS.indexOf(level) && (
           <p className="ox-muted">
-            The {setting.origin} override remains in use here. Changes at {level} apply wherever that value is inherited.
+            The value for {levelName(setting.origin as Level)} stays in use here. A change for {levelName(level)} applies
+            wherever that value is inherited.
           </p>
         )}
         <details>
@@ -101,7 +112,7 @@ function SettingSection({ setting, id }: { setting: Setting; id: string }) {
                 label: "Level",
                 render: (at) =>
                   at === "default" ? (
-                    "Default"
+                    levelName("default")
                   ) : (
                     <button
                       type="button"
@@ -111,7 +122,7 @@ function SettingSection({ setting, id }: { setting: Setting; id: string }) {
                         setEditing(true);
                       }}
                     >
-                      {at}
+                      {levelName(at)}
                     </button>
                   ),
               },
@@ -130,11 +141,13 @@ function SettingSection({ setting, id }: { setting: Setting; id: string }) {
             ]}
           />
         </details>
-        <div className="ox-actions">
-          <button className="ox-button" type="button" onClick={() => setEditing((v) => !v)}>
-            {editing ? "Collapse editor" : `Edit ${level} value`}
-          </button>
-        </div>
+        {!inline && (
+          <div className="ox-actions">
+            <button className="ox-button" type="button" onClick={() => setEditing((v) => !v)}>
+              {editing ? "Collapse editor" : `Edit value: ${levelName(level)}`}
+            </button>
+          </div>
+        )}
         {/* Ordinary drafts stay mounted; secret drafts are dropped on collapse. */}
         <div hidden={!editing}>
           {(!setting.secret || editing) && (
@@ -143,6 +156,11 @@ function SettingSection({ setting, id }: { setting: Setting; id: string }) {
               setting={setting}
               level={level}
             />
+          )}
+          {inline && (
+            <label htmlFor={levelId} className="ox-muted">
+              Saves to {levelSelect("Saves to")}
+            </label>
           )}
         </div>
       </div>
