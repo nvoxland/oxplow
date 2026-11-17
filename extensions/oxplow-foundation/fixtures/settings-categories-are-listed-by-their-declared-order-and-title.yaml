@@ -1,0 +1,21 @@
+# The Settings index lists the categories core and the extensions declare
+# (oxplow-bundled's Review), in their order, each with its title and what
+# it is for (no title made up in SQL).
+when: { page: settings }
+expect:
+  loaders:
+    categories:
+      rows:
+        - { category: project, title: Project }
+        - { category: agents, title: Agents }
+        - { category: ai, title: AI }
+        - { category: files, title: Files }
+        - { category: snapshots, title: Snapshots }
+        - { category: testing, title: Testing }
+        - { category: metrics, title: Metrics }
+        - { category: scripts, title: Scripts }
+        - { category: languageServers, title: Language servers, description: The language servers this project runs. }
+        - { category: review, title: Review }
+        - { category: integrations, title: Integrations }
+        - { category: data, title: Data }
+        - { category: extensions, title: Extensions }

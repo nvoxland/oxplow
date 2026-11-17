@@ -76,7 +76,21 @@ pub(crate) fn replace_extensions(
     extensions: &[Extension],
 ) -> Result<(), ExtensionSettingsError> {
     let mut entries = BTreeMap::new();
+    let mut categories = BTreeMap::new();
     for extension in extensions.iter().filter(|extension| extension.enabled) {
+        if let Some(declaration) = &extension.configuration {
+            for (id, category) in &declaration.categories {
+                categories.entry(id.clone()).or_insert_with(|| {
+                    oxplow_config::settings::SettingCategory {
+                        id: id.clone(),
+                        title: category.title.clone(),
+                        description: category.description.clone(),
+                        order: category.order,
+                        owner: format!("{OWNER_PREFIX}{}", extension.namespace),
+                    }
+                });
+            }
+        }
         for definition in definitions(extension)? {
             if let Some(previous) = entries.get(&definition.key) {
                 if serde_json::to_value(previous).ok() != serde_json::to_value(&definition).ok() {
@@ -90,14 +104,19 @@ pub(crate) fn replace_extensions(
     let mut candidate = registry.clone();
     let owners: Vec<String> = candidate
         .definitions()
-        .filter(|definition| definition.owner.starts_with(OWNER_PREFIX))
-        .map(|definition| definition.owner.clone())
+        .map(|definition| &definition.owner)
+        .chain(candidate.categories().map(|category| &category.owner))
+        .filter(|owner| owner.starts_with(OWNER_PREFIX))
+        .cloned()
         .collect();
     for owner in owners {
         candidate.remove_owner(&owner);
     }
     candidate
         .register_many(entries.into_values())
+        .map_err(|_| ExtensionSettingsError::Registry)?;
+    candidate
+        .register_categories(categories.into_values())
         .map_err(|_| ExtensionSettingsError::Registry)?;
     *registry = candidate;
     Ok(())
@@ -413,7 +432,11 @@ mod tests {
     fn extension(schema: Value) -> Extension {
         let mut extension = super::super::extensions::empty_extension("example", "", "project");
         extension.enabled = true;
-        extension.configuration = Some(ConfigurationFile { version: 1, schema });
+        extension.configuration = Some(ConfigurationFile {
+            version: 1,
+            schema,
+            categories: Default::default(),
+        });
         extension
     }
 
@@ -632,6 +655,29 @@ mod tests {
                 ("/tasks/limit".into(), Origin::Global),
             ])
         );
+    }
+
+    #[test]
+    fn an_extensions_categories_are_registered_as_its_own() {
+        let mut extension = extension(json!({"type":"object","properties":{
+            "note":{"type":"string","x-category":"notes"}
+        }}));
+        extension.configuration.as_mut().unwrap().categories = BTreeMap::from([(
+            "notes".to_owned(),
+            crate::extension::extensions::config_schema::CategoryDeclaration {
+                title: "Notes".into(),
+                description: "What notes keep.".into(),
+                order: 15,
+            },
+        )]);
+        let mut registry = SettingsRegistry::default();
+        replace_extensions(&mut registry, std::slice::from_ref(&extension)).unwrap();
+        let notes = registry.category("notes");
+        assert_eq!((notes.title.as_str(), notes.order), ("Notes", 15));
+        assert_eq!(notes.owner, "extension/example");
+        replace_extensions(&mut registry, &[]).unwrap();
+        assert_eq!(registry.category("notes").title, "Notes");
+        assert!(registry.categories().next().is_none());
     }
 
     #[test]

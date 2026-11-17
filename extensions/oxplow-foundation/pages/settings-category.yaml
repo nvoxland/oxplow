@@ -19,7 +19,7 @@ loaders:
         AND (coalesce(:q, '') = '' OR instr(lower(key), lower(:q)) > 0
           OR instr(lower(coalesce(title, '')), lower(:q)) > 0
           OR instr(lower(coalesce(doc, '')), lower(:q)) > 0)
-      ORDER BY setting_order, key
+      ORDER BY category_order, category_title, setting_order, key
 view:
   id: settings-editor
   from: settings

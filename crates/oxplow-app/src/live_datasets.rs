@@ -130,6 +130,9 @@ pub fn columns(name: &str) -> &'static [&'static str] {
             "local_status",
             "project_status",
             "global_status",
+            "category_title",
+            "category_description",
+            "category_order",
         ],
         "agent_conversation" => &[
             "stream_id",
@@ -954,6 +957,9 @@ impl LiveSources {
                     text(row.statuses[0]),
                     text(row.statuses[1]),
                     text(row.statuses[2]),
+                    text(row.category.title),
+                    text(row.category.description),
+                    SqlCell::Int(i64::from(row.category.order)),
                 ]
             })
             .collect())

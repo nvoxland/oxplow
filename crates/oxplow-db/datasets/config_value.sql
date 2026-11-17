@@ -16,5 +16,8 @@ SELECT CAST(NULL AS TEXT) AS key, CAST(NULL AS TEXT) AS value, CAST(NULL AS TEXT
        CAST(NULL AS INTEGER) AS setting_order,
        CAST(NULL AS TEXT) AS local_status,
        CAST(NULL AS TEXT) AS project_status,
-       CAST(NULL AS TEXT) AS global_status
+       CAST(NULL AS TEXT) AS global_status,
+       CAST(NULL AS TEXT) AS category_title,
+       CAST(NULL AS TEXT) AS category_description,
+       CAST(NULL AS INTEGER) AS category_order
 WHERE 0

@@ -39,6 +39,65 @@ pub struct SettingDefinition {
     pub owner: String,
 }
 
+/// A Settings category: what a group of settings is called, what it is for,
+/// and where it sits among the others. Core declares its own; an extension
+/// declares its own in `configuration: categories:`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SettingCategory {
+    pub id: String,
+    pub title: String,
+    #[serde(default)]
+    pub description: String,
+    /// Lower first; then title.
+    #[serde(default)]
+    pub order: i32,
+    /// `core` or `extension/<namespace>`; empty for an undeclared one.
+    #[serde(default)]
+    pub owner: String,
+}
+
+/// Where a category nobody declared sits: after the declared ones.
+pub const UNDECLARED_CATEGORY_ORDER: i32 = 1000;
+
+impl SettingCategory {
+    /// A category a setting names but nobody declared: its title from its id
+    /// (`languageServers` is "Language servers").
+    pub fn undeclared(id: &str) -> Self {
+        Self {
+            id: id.to_owned(),
+            title: words_of(id),
+            description: String::new(),
+            order: UNDECLARED_CATEGORY_ORDER,
+            owner: String::new(),
+        }
+    }
+}
+
+/// `languageServers.extra_tools` as "Language servers extra tools".
+fn words_of(id: &str) -> String {
+    let mut words: Vec<String> = Vec::new();
+    for part in id
+        .split(['.', '_', '-', ' '])
+        .filter(|part| !part.is_empty())
+    {
+        let mut word = String::new();
+        for c in part.chars() {
+            if c.is_uppercase() && !word.is_empty() {
+                words.push(std::mem::take(&mut word));
+            }
+            word.extend(c.to_lowercase());
+        }
+        words.push(word);
+    }
+    let text = words.join(" ");
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::new(),
+    }
+}
+
 /// How the Settings editor draws a setting beyond what its schema says:
 /// one fixed vocabulary (an extension's `x-ui`), so a hint is never a silent
 /// no-op. A choice comes from the schema (`enum`, `boolean`), a secret is
@@ -194,6 +253,8 @@ pub struct SettingInventory {
 /// in [`Level::PRECEDENCE`] order, its ordinary override and status.
 #[derive(Debug)]
 pub struct SettingRow {
+    /// The setting's category, declared or [`SettingCategory::undeclared`].
+    pub category: SettingCategory,
     pub setting: SettingInventory,
     pub overrides: [Option<Value>; 3],
     pub statuses: [&'static str; 3],
@@ -334,9 +395,42 @@ struct RegisteredSetting {
 #[derive(Clone, Default)]
 pub struct SettingsRegistry {
     settings: BTreeMap<String, RegisteredSetting>,
+    categories: BTreeMap<String, SettingCategory>,
 }
 
 impl SettingsRegistry {
+    /// Declare categories all-or-nothing. An id is one owner's.
+    pub fn register_categories(
+        &mut self,
+        categories: impl IntoIterator<Item = SettingCategory>,
+    ) -> Result<(), SettingsError> {
+        let mut additions = BTreeMap::new();
+        for category in categories {
+            if category.id.trim().is_empty() || category.title.trim().is_empty() {
+                return Err(SettingsError::InvalidDefinition);
+            }
+            if self.categories.contains_key(&category.id) || additions.contains_key(&category.id) {
+                return Err(SettingsError::DuplicateKey);
+            }
+            additions.insert(category.id.clone(), category);
+        }
+        self.categories.extend(additions);
+        Ok(())
+    }
+
+    /// The category `id`: as declared, or [`SettingCategory::undeclared`].
+    pub fn category(&self, id: &str) -> SettingCategory {
+        self.categories
+            .get(id)
+            .cloned()
+            .unwrap_or_else(|| SettingCategory::undeclared(id))
+    }
+
+    /// The declared categories.
+    pub fn categories(&self) -> impl Iterator<Item = &SettingCategory> {
+        self.categories.values()
+    }
+
     pub fn register(&mut self, definition: SettingDefinition) -> Result<(), SettingsError> {
         self.register_many([definition])
     }
@@ -387,6 +481,8 @@ impl SettingsRegistry {
     pub fn remove_owner(&mut self, owner: &str) {
         self.settings
             .retain(|_, setting| setting.definition.owner != owner);
+        self.categories
+            .retain(|_, category| category.owner != owner);
     }
 
     /// Replace participating owners together, so declarations can move between
@@ -893,7 +989,14 @@ impl SettingsSnapshot {
         } else {
             Level::PRECEDENCE.map(|level| self.documents.at(level).get(&definition.key).cloned())
         };
+        let category = self
+            .store
+            .registry
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .category(&definition.category);
         SettingRow {
+            category,
             setting: SettingInventory {
                 definition: definition.clone(),
                 value: if plaintext { None } else { value },
@@ -1219,6 +1322,46 @@ mod tests {
             refused("example.mode", json!("slow"))[0].reason,
             "must be one of: \"fast\", \"safe\""
         );
+    }
+
+    #[test]
+    fn a_category_is_registered_with_its_title_or_gets_one_from_its_id() {
+        let mut registry = SettingsRegistry::default();
+        registry
+            .register_categories([SettingCategory {
+                id: "example".into(),
+                title: "Examples".into(),
+                description: "Settings the tests use.".into(),
+                order: 5,
+                owner: "example".into(),
+            }])
+            .unwrap();
+        assert_eq!(registry.category("example").title, "Examples");
+        // Another owner can't take an id that is registered.
+        assert!(matches!(
+            registry.register_categories([SettingCategory::undeclared("example")]),
+            Err(SettingsError::DuplicateKey)
+        ));
+        let undeclared = registry.category("languageServers.extra_tools");
+        assert_eq!(undeclared.title, "Language servers extra tools");
+        assert_eq!(undeclared.order, UNDECLARED_CATEGORY_ORDER);
+        registry.remove_owner("example");
+        assert_eq!(registry.category("example").title, "Example");
+        let (_project, _global, store) = store(vec![number_definition()]);
+        store
+            .registry
+            .write()
+            .unwrap()
+            .register_categories([SettingCategory {
+                id: "example".into(),
+                title: "Examples".into(),
+                description: String::new(),
+                order: 1,
+                owner: "example".into(),
+            }])
+            .unwrap();
+        let row = store.snapshot().unwrap().row("example.limit").unwrap();
+        assert_eq!(row.category.title, "Examples");
     }
 
     #[test]

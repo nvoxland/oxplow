@@ -514,12 +514,42 @@
           "format": "uint32",
           "minimum": 1
         },
-        "schema": true
+        "schema": true,
+        "categories": {
+          "description": "The Settings categories its fields' `x-category` names (by id): what\neach is called, what it is for, where it sits. A category it names\nwithout declaring gets a title from its id; core's ids are core's.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/CategoryDeclaration"
+          }
+        }
       },
       "additionalProperties": false,
       "required": [
         "version",
         "schema"
+      ]
+    },
+    "CategoryDeclaration": {
+      "description": "One Settings category an extension declares.",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string",
+          "default": ""
+        },
+        "order": {
+          "description": "Lower first among all categories (core's run 0 to 110).",
+          "type": "integer",
+          "format": "int32",
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "title"
       ]
     },
     "Build": {

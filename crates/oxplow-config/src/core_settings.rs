@@ -171,6 +171,34 @@ fn message(error: ConfigError) -> String {
     }
 }
 
+/// Core's Settings categories, in the order the Settings index lists them.
+pub fn categories() -> Vec<crate::settings::SettingCategory> {
+    [
+        ("project", "Project", "The project's name, icon colour and code zones."),
+        ("agents", "Agents", "Which agent harnesses run, how each one is set up, and what every agent is told."),
+        ("ai", "AI", "AI providers, and which model each role uses."),
+        ("files", "Files", "Which files are generated and left out of snapshots and changes."),
+        ("snapshots", "Snapshots", "How long snapshots are kept and which files they hold."),
+        ("testing", "Testing", "How tests run and which files are tests."),
+        ("metrics", "Metrics", "Which metrics are on and how long their facts are kept."),
+        ("scripts", "Scripts", "Limits for extension scripts."),
+        ("languageServers", "Language servers", "The language servers this project runs."),
+        ("integrations", "Integrations", "Which implementation each capability uses, provider instances and component replacements."),
+        ("data", "Data", "How long events are kept."),
+        ("extensions", "Extensions", "Which extensions are on, and where they come from."),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(index, (id, title, description))| crate::settings::SettingCategory {
+        id: id.into(),
+        title: title.into(),
+        description: description.into(),
+        order: i32::try_from(index).expect("few categories") * 10,
+        owner: "core".into(),
+    })
+    .collect()
+}
+
 /// Every fixed core setting, with defaults evaluated for this project's name.
 pub fn table(fallback_name: &str) -> Vec<CoreSetting> {
     use crate::*;
@@ -875,6 +903,19 @@ mod tests {
             .iter()
             .map(|(key, value)| ((*key).to_owned(), (value.clone(), Level::Project)))
             .collect()
+    }
+
+    #[test]
+    fn every_core_setting_is_in_a_category_core_declares() {
+        let declared: Vec<_> = categories().into_iter().map(|c| c.id).collect();
+        for definition in definitions("demo") {
+            assert!(
+                declared.contains(&definition.category),
+                "{} is in `{}`, which core doesn't declare",
+                definition.key,
+                definition.category
+            );
+        }
     }
 
     #[test]

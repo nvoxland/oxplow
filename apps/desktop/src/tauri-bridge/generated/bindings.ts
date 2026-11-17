@@ -1320,6 +1320,14 @@ export type BuiltinRole = "main" | "summarize" | "decide" | "assistant";
 /**  A size in bytes (the blob store's total, say). */
 export type ByteSize = number;
 
+/**  One Settings category an extension declares. */
+export type CategoryDeclaration = {
+	title: string,
+	description?: string,
+	/**  Lower first among all categories (core's run 0 to 110). */
+	order?: number,
+};
+
 /**
  *  One choice for a form field: the value it submits, what the person
  *  reads, and the heading it sits under.
@@ -1931,9 +1939,38 @@ export type ConfigCondition = {
  *  credential reference. Stored overrides and host services are separate.
  *  A field's default is the `default` keyword on its schema.
  */
-export type ConfigurationFile = {
+export type ConfigurationFile = ConfigurationFile_Serialize | ConfigurationFile_Deserialize;
+
+/**
+ *  A versioned declaration of settings. This is data, not consent or a
+ *  credential reference. Stored overrides and host services are separate.
+ *  A field's default is the `default` keyword on its schema.
+ */
+export type ConfigurationFile_Deserialize = {
 	version: number,
 	schema: unknown,
+	/**
+	 *  The Settings categories its fields' `x-category` names (by id): what
+	 *  each is called, what it is for, where it sits. A category it names
+	 *  without declaring gets a title from its id; core's ids are core's.
+	 */
+	categories?: { [key in string]: CategoryDeclaration },
+};
+
+/**
+ *  A versioned declaration of settings. This is data, not consent or a
+ *  credential reference. Stored overrides and host services are separate.
+ *  A field's default is the `default` keyword on its schema.
+ */
+export type ConfigurationFile_Serialize = {
+	version: number,
+	schema: unknown,
+	/**
+	 *  The Settings categories its fields' `x-category` names (by id): what
+	 *  each is called, what it is for, where it sits. A category it names
+	 *  without declaring gets a title from its id; core's ids are core's.
+	 */
+	categories?: { [key in string]: CategoryDeclaration },
 };
 
 /**
@@ -2792,7 +2829,7 @@ export type Extension_Deserialize = {
 	 */
 	contributions: Descriptor[],
 	/**  Validated non-secret settings declaration, not resolved values or grants. */
-	configuration?: ConfigurationFile | null,
+	configuration?: ConfigurationFile_Deserialize | null,
 	publicContracts?: PublicContracts,
 	/**  Where its files came from. */
 	deployment?: Deployment,
@@ -2960,7 +2997,7 @@ export type Extension_Serialize = {
 	 */
 	contributions: Descriptor[],
 	/**  Validated non-secret settings declaration, not resolved values or grants. */
-	configuration: ConfigurationFile | null,
+	configuration: ConfigurationFile_Serialize | null,
 	publicContracts: PublicContracts,
 	/**  Where its files came from. */
 	deployment: Deployment,

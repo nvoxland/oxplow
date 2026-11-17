@@ -22,20 +22,22 @@ loaders:
       WHERE coalesce(:q, '') = '' OR instr(lower(key), lower(:q)) > 0
          OR instr(lower(coalesce(title, '')), lower(:q)) > 0
          OR instr(lower(coalesce(doc, '')), lower(:q)) > 0
-      ORDER BY category, setting_order, key
+      ORDER BY category_order, category_title, setting_order, key
   search_results:
     sql: |
       SELECT title, doc,
              uri_view(uri('oxplow/page', 'page', 'settings-category'), 'category', category, 'setting', key) AS uri
       FROM settings_values
       WHERE coalesce(:q, '') <> ''
-      ORDER BY category, setting_order, key
+      ORDER BY category_order, category_title, setting_order, key
   categories:
     sql: |
-      SELECT category, CASE category WHEN 'ai' THEN 'AI' WHEN 'languageServers' THEN 'Language servers' ELSE upper(substr(category, 1, 1)) || substr(category, 2) END AS title, count(*) AS settings,
+      SELECT category, category_title AS title, category_description AS description,
+             count(*) AS settings,
              uri_view(uri('oxplow/page', 'page', 'settings-category'), 'category', category) AS uri
       FROM v_config_value
-      GROUP BY category ORDER BY category
+      GROUP BY category, category_title, category_description, category_order
+      ORDER BY category_order, category_title
   management_links:
     rows:
     - { title: Language servers, description: Install, remove or restart language servers., uri: 'oxplow:oxplow/page?page=management#area=lsp' }
@@ -55,6 +57,7 @@ view:
         viz: table
         columns:
         - { key: title, label: Category, link: { kind: page, from: uri } }
+        - { key: description, label: About }
         - { key: settings, label: Settings, format: integer }
         empty: No settings are registered.
       - id: settings-search

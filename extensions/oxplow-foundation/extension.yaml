@@ -68,6 +68,9 @@ intent:
     - name: alerts-reactions-list-nothing-over-a-quiet-project
       input: { part: alerts-reactions }
       expect: nothing listed over a quiet project
+    - name: settings-categories-are-listed-by-their-declared-order-and-title
+      input: { page: settings }
+      expect: core's categories in core's order, each with its title and what it is for
     - name: settings-agents-area-hands-set-agents-each-new-order
       input: { page: settings-category, params: { category: agents } }
       expect: agents in priority order with the lists a row hands set_agents; what new threads start with; the saved prompt addition

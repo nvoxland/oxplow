@@ -755,6 +755,24 @@ pub fn configuration_of(
                 .namespace
                 .clone()
                 .unwrap_or_else(|| oxplow_domain::contribution::extension_namespace(&m.name));
+            let core: Vec<_> = oxplow_config::core_settings::categories()
+                .into_iter()
+                .map(|category| category.id)
+                .collect();
+            if let Some(id) = declaration.categories.keys().find(|id| core.contains(id)) {
+                return (
+                    None,
+                    vec![at(
+                        "config.invalid_declaration",
+                        file,
+                        line,
+                        format!(
+                            "configuration: category `{id}` is core's; a field can name it in \
+                             `x-category`, but only core declares it"
+                        ),
+                    )],
+                );
+            }
             match crate::extension::extension_settings::definitions_for(&namespace, &declaration) {
                 Ok(_) => (Some(declaration), Vec::new()),
                 Err(error) => (
@@ -914,6 +932,23 @@ mod tests {
                 "{bad}: {errors:?}"
             );
         }
+    }
+
+    /// An extension names its own Settings categories; core's are core's.
+    #[test]
+    fn an_extension_declares_its_own_categories_only() {
+        let manifest = |id: &str| {
+            format!("{OK}configuration:\n  version: 1\n  schema:\n    type: object\n    properties:\n      note: {{ type: string, x-category: {id} }}\n  categories:\n    {id}: {{ title: Notes, description: What notes keep., order: 15 }}\n")
+        };
+        let own = manifest("notes");
+        let errors = check(&parse(&own), "e/extension.yaml", &own);
+        assert!(errors.is_empty(), "{errors:?}");
+        let core = manifest("ai");
+        let errors = check(&parse(&core), "e/extension.yaml", &core);
+        assert!(
+            errors.iter().any(|e| e.message.contains("`ai` is core's")),
+            "{errors:?}"
+        );
     }
 
     /// `intent` is required. Its examples may be empty here: fixture files

@@ -312,7 +312,10 @@ validates authorized complete reads against the declaration. Reset uses
 `config.unset` at an explicit level, exposing the next inherited value.
 
 Annotations supply registry metadata: `x-category`, `x-ui`, `x-order`,
-`x-restart-required` and `x-secret`. `x-ui` has one hint, `{ editor: multiline }`
+`x-restart-required` and `x-secret`. A category that `x-category` names (the
+namespace when none) can be declared beside the schema:
+`categories: { review: { title: Review, description: …, order: 85 } }`; core's
+category ids are core's. `x-ui` has one hint, `{ editor: multiline }`
 (a text area for a string); any other key or value is an error at check. Titles, descriptions, schema and defaults
 come from the declaration. A secret has no default and uses the same config
 APIs and precedence, with its values in the host's secure backend. Ordinary

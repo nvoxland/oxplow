@@ -34,6 +34,15 @@ whole value, so nested definitions resolve). A test pins every core definition's
 metadata and the sample values its schema accepts
 (`oxplow-config/testdata/core_settings.json`; `OXPLOW_PIN_UPDATE=1` rewrites it),
 so a change to either shows in review.
+**Categories** are registered like settings (`SettingCategory`: id, title,
+description, order, owner). Core declares its twelve in
+`core_settings::categories()` (order 0 to 110); an extension declares its own in
+`configuration: categories: { <id>: { title, description, order } }` (a core id
+is an error at check); a category a setting names without a declaration gets a
+title from its id and order 1000. `v_config_value` carries `category_title`,
+`category_description` and `category_order`, and the Settings index and
+category pages sort and title by them.
+
 Extension schema annotations are `title`, `description`, `x-category`, `x-ui`,
 `x-order`, `x-secret`, `x-restart-required` and `x-atomic`. `x-ui` (the
 definition's `ui`, `settings::SettingUi`) is one fixed vocabulary:

@@ -22,6 +22,23 @@ pub struct ConfigurationFile {
     pub version: u32,
     #[specta(type = oxplow_domain::Json)]
     pub schema: Value,
+    /// The Settings categories its fields' `x-category` names (by id): what
+    /// each is called, what it is for, where it sits. A category it names
+    /// without declaring gets a title from its id; core's ids are core's.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub categories: std::collections::BTreeMap<String, CategoryDeclaration>,
+}
+
+/// One Settings category an extension declares.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CategoryDeclaration {
+    pub title: String,
+    #[serde(default)]
+    pub description: String,
+    /// Lower first among all categories (core's run 0 to 110).
+    #[serde(default)]
+    pub order: i32,
 }
 
 /// How deep a schema's references and nested objects are followed for
@@ -443,6 +460,22 @@ pub fn merge(declarations: &[(&str, &ConfigurationFile)]) -> Merged {
                 }
             }
         }
+        // Categories are the namespace's too: one declaration of each id.
+        for (id, category) in &decl.categories {
+            match merged.categories.get(id) {
+                Some(existing) if existing != category => out.problems.push((
+                    i,
+                    format!(
+                        "`configuration` category `{id}` is declared differently by another \
+                         extension in its namespace"
+                    ),
+                )),
+                Some(_) => {}
+                None => {
+                    merged.categories.insert(id.clone(), category.clone());
+                }
+            }
+        }
     }
     out
 }
@@ -460,6 +493,7 @@ mod namespace_tests {
                 "additionalProperties": false,
                 "properties": { key: { "type": "integer", "default": default } },
             }),
+            categories: Default::default(),
         }
     }
 

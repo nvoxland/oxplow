@@ -503,6 +503,7 @@ configuration:
       coChange:
         type: object
         additionalProperties: false
+        x-category: review
         description: Which files count as usually committed together, and when one is dormant.
         properties:
           minShared: { type: integer, minimum: 1, default: 3, description: Commits two files must share to be a pair. }
@@ -512,10 +513,16 @@ configuration:
       struggle:
         type: object
         additionalProperties: false
+        x-category: review
         description: When the agent is said to have struggled in a request.
         properties:
           repeatedEdits: { type: integer, minimum: 1, default: 5, description: Edits of one file at or above which it counts. }
           failedCommands: { type: integer, minimum: 1, default: 3, description: Failed shell commands at or above which they count. }
+  categories:
+    review:
+      title: Review
+      description: When the review views count two files as usually committed together, a file as dormant, or the agent as struggling.
+      order: 85
 commands:
   # This extension's review-policy settings (`configuration:` above), through
   # the host's configuration scope. A person sets them; a change republishes

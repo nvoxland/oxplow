@@ -102,6 +102,11 @@ configuration:
             maxLength: 1000
             default: ""
             description: "What done means here, one item per line (tests pass, committed, …); the agent checks it before closing a task. Empty for none."
+  categories:
+    tasks:
+      title: Tasks
+      description: How this project's agents use tasks, and what done means here.
+      order: 15
 fills:
   - model: oxplow/task_record
     stores: [oxtask]

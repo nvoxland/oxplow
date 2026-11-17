@@ -1743,7 +1743,7 @@
     - { name: "color", type: "TEXT", doc: "The rule's display colour, if it gave one." }
     - { name: "files", type: "INT", doc: "Files in the worktree this rule claims (none of its earlier siblings did); on `other`, the files no rule matched." }
 - name: config_value
-  version: 5
+  version: 6
   key: [key]
   description: "Registered core and extension settings with redacted effective values, schema and display metadata. Overrides resolve local, project, global, then default; metric and dimension definitions are not settings. Write through oxplow.config.set with an explicit level."
   fields:
@@ -1769,6 +1769,9 @@
     - { name: local_status, type: TEXT, doc: "Local override presence: set, unset or unavailable. Never contains secret bytes." }
     - { name: project_status, type: TEXT, doc: "Project override presence: set, unset or unavailable." }
     - { name: global_status, type: TEXT, doc: "Global override presence: set, unset or unavailable." }
+    - { name: category_title, type: TEXT, doc: "The category's title, as core or the extension declares it (`configuration: categories:`); one from its id when nobody does." }
+    - { name: category_description, type: TEXT, doc: "What the category is for; empty when not declared." }
+    - { name: category_order, type: INT, doc: "Where the category sits, lower first (core's run 0 to 110; an undeclared one is 1000), then its title." }
   tests:
     - { not_null: key }
     - { unique: key }

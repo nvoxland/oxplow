@@ -169,7 +169,10 @@
 An extension's `configuration.schema` declares settings in the shared registry.
 Fixed object fields become independent fully qualified keys, such as
 `oxtask.tasks.workflow`; arrays and open maps are atomic settings. Put `title`,
-`description` and `x-category` on fields for the Settings inventory. Optional
+`description` and `x-category` on fields for the Settings inventory, and give
+your category a title in `configuration: categories:`
+(`tasks: { title: Tasks, description: …, order: 15 }`; core's categories
+`project`, `agents`, `ai`, … are core's to declare, a field may still name one). Optional
 annotations are `x-ui`, `x-order`, `x-restart-required`, `x-secret` and `x-atomic`.
 `x-ui` has one hint: `x-ui: { editor: multiline }` makes a string field a text
 area. A choice comes from `enum`, or, to label each choice, from `oneOf` of

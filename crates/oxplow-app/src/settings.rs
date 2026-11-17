@@ -280,6 +280,7 @@ pub(crate) fn store_with_documents(
             .map(|v| v.to_string_lossy().into_owned())
             .unwrap_or_default(),
     ))?;
+    registry.register_categories(oxplow_config::core_settings::categories())?;
     registry.register_many(crate::harnesses::setting_definitions(extensions))?;
     // A loaded extension's own switch first (a required one is `const:
     // true`); the switches the files name for other extensions after.
