@@ -1,0 +1,629 @@
+[
+  {
+    "key": "oxplow.activeProviders.snapshots",
+    "title": "Snapshots implementation",
+    "description": "The implementation used for snapshots. Unset to inherit the choice.",
+    "category": "integrations",
+    "default": null,
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "restartRequired": false,
+    "owner": "core",
+    "accepts": [
+      13,
+      14,
+      16
+    ]
+  },
+  {
+    "key": "oxplow.agentPromptAppend",
+    "title": "Agent prompt append",
+    "description": "Text appended verbatim to every agent's system prompt. Steers every agent.",
+    "category": "agents",
+    "default": "",
+    "secret": false,
+    "order": 0,
+    "ui": {
+      "editor": "multiline"
+    },
+    "restartRequired": false,
+    "owner": "core",
+    "accepts": [
+      0,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16
+    ]
+  },
+  {
+    "key": "oxplow.ai.roles.assistant",
+    "title": "AI role assistant",
+    "description": "Provider and model used for this role. Remove the override to inherit.",
+    "category": "ai",
+    "default": null,
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "restartRequired": false,
+    "owner": "core",
+    "accepts": [
+      25,
+      26
+    ]
+  },
+  {
+    "key": "oxplow.ai.roles.decide",
+    "title": "AI role decide",
+    "description": "Provider and model used for this role. Remove the override to inherit.",
+    "category": "ai",
+    "default": null,
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "restartRequired": false,
+    "owner": "core",
+    "accepts": [
+      25,
+      26
+    ]
+  },
+  {
+    "key": "oxplow.ai.roles.main",
+    "title": "AI role main",
+    "description": "Provider and model used for this role. Remove the override to inherit.",
+    "category": "ai",
+    "default": null,
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "restartRequired": false,
+    "owner": "core",
+    "accepts": [
+      25,
+      26
+    ]
+  },
+  {
+    "key": "oxplow.ai.roles.summarize",
+    "title": "AI role summarize",
+    "description": "Provider and model used for this role. Remove the override to inherit.",
+    "category": "ai",
+    "default": null,
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "restartRequired": false,
+    "owner": "core",
+    "accepts": [
+      25,
+      26
+    ]
+  },
+  {
+    "key": "oxplow.eventRetention",
+    "title": "Event retention",
+    "description": "How long each event namespace's payloads and large content are kept, in days: `{ agent: { payloadDays: 60, contentDays: 14 } }`, over core's defaults (agent 30/14; test, code, collector, effect 90/30). An extension's namespace is kept no longer than its window; core state (snapshot, vcs, effort, …) is kept whole.",
+    "category": "data",
+    "default": {},
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "restartRequired": false,
+    "owner": "core",
+    "accepts": [
+      0,
+      23,
+      32
+    ]
+  },
+  {
+    "key": "oxplow.extensionInstances",
+    "title": "Extension instances",
+    "description": "Instances of extension providers, by `<extension>/<instance id>`: `{ enabled, config, provider? }` (the provider's instance config; `provider` names which of the extension's providers an instance with its own id is). Enabling one runs its program once this machine approved it.",
+    "category": "integrations",
+    "default": {},
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "restartRequired": false,
+    "owner": "core",
+    "accepts": [
+      0,
+      23,
+      31
+    ]
+  },
+  {
+    "key": "oxplow.extensionSources",
+    "title": "Extension sources",
+    "description": "Where an extension's source is when it isn't `.oxplow/extensions/<name>/`: `{ <name>: <folder> }`, relative to the checkout or absolute (`~/` is the home folder). Enables code.",
+    "category": "extensions",
+    "default": {},
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "restartRequired": false,
+    "owner": "core",
+    "accepts": [
+      0,
+      23,
+      24,
+      25,
+      33,
+      34
+    ]
+  },
+  {
+    "key": "oxplow.extensions.oxplow-bundled.enabled",
+    "title": "Enable oxplow-bundled",
+    "description": "Whether this extension is enabled. Deployment and permission approval are separate.",
+    "category": "extensions",
+    "default": true,
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "restartRequired": false,
+    "owner": "core",
+    "accepts": [
+      1,
+      2
+    ]
+  },
+  {
+    "key": "oxplow.extensions.oxtask.enabled",
+    "title": "Enable oxtask",
+    "description": "Whether this extension is enabled. Deployment and permission approval are separate.",
+    "category": "extensions",
+    "default": true,
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "restartRequired": false,
+    "owner": "core",
+    "accepts": [
+      1,
+      2
+    ]
+  },
+  {
+    "key": "oxplow.extensions.oxwiki.enabled",
+    "title": "Enable oxwiki",
+    "description": "Whether this extension is enabled. Deployment and permission approval are separate.",
+    "category": "extensions",
+    "default": true,
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "restartRequired": false,
+    "owner": "core",
+    "accepts": [
+      1,
+      2
+    ]
+  },
+  {
+    "key": "oxplow.generated.exclude",
+    "title": "Exclude",
+    "description": "Raw `generated:` block — `{ exclude: [...], include: [...] }`.",
+    "category": "files",
+    "default": [],
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "restartRequired": false,
+    "owner": "core",
+    "accepts": [
+      17,
+      18,
+      19,
+      20,
+      21,
+      22
+    ]
+  },
+  {
+    "key": "oxplow.generated.include",
+    "title": "Include",
+    "description": "Raw `generated:` block — `{ exclude: [...], include: [...] }`.",
+    "category": "files",
+    "default": [],
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "restartRequired": false,
+    "owner": "core",
+    "accepts": [
+      17,
+      18,
+      19,
+      20,
+      21,
+      22
+    ]
+  },
+  {
+    "key": "oxplow.iconTint",
+    "title": "Icon tint",
+    "description": "Hex colour composited behind the app icon so windows are tellable apart (macOS).",
+    "category": "project",
+    "default": null,
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "restartRequired": false,
+    "owner": "core",
+    "accepts": [
+      0,
+      15,
+      16
+    ]
+  },
+  {
+    "key": "oxplow.injectSessionContext",
+    "title": "Inject session context",
+    "description": "Inject the session-context block into every agent prompt.",
+    "category": "agents",
+    "default": true,
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "restartRequired": false,
+    "owner": "core",
+    "accepts": [
+      0,
+      1,
+      2
+    ]
+  },
+  {
+    "key": "oxplow.lsp.servers",
+    "title": "Servers",
+    "description": "Servers",
+    "category": "languageServers",
+    "default": [],
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "restartRequired": false,
+    "owner": "core",
+    "accepts": [
+      0,
+      17,
+      29
+    ]
+  },
+  {
+    "key": "oxplow.metrics",
+    "title": "Metrics",
+    "description": "Which metrics are on: `use` turns one on (with optional target/warnAt/failAt), `enabled: false` turns an on-by-default one off. Metrics are defined in extensions.",
+    "category": "metrics",
+    "default": [],
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "restartRequired": false,
+    "owner": "core",
+    "accepts": [
+      17,
+      27,
+      28
+    ]
+  },
+  {
+    "key": "oxplow.metrics.detailMaxPerProducer",
+    "title": "Metric detail max per producer",
+    "description": "Keep per-run detail for only the newest N captures per producer; 0 disables the cap.",
+    "category": "metrics",
+    "default": 100,
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "restartRequired": false,
+    "owner": "core",
+    "accepts": [
+      3,
+      4,
+      6,
+      7,
+      8,
+      9
+    ]
+  },
+  {
+    "key": "oxplow.metrics.detailRetentionDays",
+    "title": "Metric detail retention days",
+    "description": "Compact per-run detail older than this many days; 0 disables.",
+    "category": "metrics",
+    "default": 30,
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "restartRequired": false,
+    "owner": "core",
+    "accepts": [
+      3,
+      4,
+      6,
+      7,
+      8,
+      9
+    ]
+  },
+  {
+    "key": "oxplow.metrics.retentionDays",
+    "title": "Metric retention days",
+    "description": "Metric-capture retention in days; 0 (default) keeps everything.",
+    "category": "metrics",
+    "default": 0,
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "restartRequired": false,
+    "owner": "core",
+    "accepts": [
+      3,
+      4,
+      6,
+      7,
+      8,
+      9
+    ]
+  },
+  {
+    "key": "oxplow.projectName",
+    "title": "Project name",
+    "description": "Display name; defaults to the project directory's basename.",
+    "category": "project",
+    "default": "demo",
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "restartRequired": false,
+    "owner": "core",
+    "accepts": [
+      13,
+      14,
+      15,
+      16
+    ]
+  },
+  {
+    "key": "oxplow.replacements",
+    "title": "Replacements",
+    "description": "Whose component shows for a replaceable core sub-component, by target: `{ task.board: task-views, vcs.history.graph: oxplow }` — an extension replacing it, or `oxplow` for oxplow's own. Unlisted, the only extension replacing it shows (several: oxplow's own); a bound target (`task.detail.state`) shows its provider's extension's, and may only be set to `oxplow`.",
+    "category": "integrations",
+    "default": {},
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "restartRequired": false,
+    "owner": "core",
+    "accepts": [
+      0,
+      23,
+      24,
+      25,
+      33,
+      34
+    ]
+  },
+  {
+    "key": "oxplow.scripts.maxConcurrent",
+    "title": "Max concurrent",
+    "description": "Max concurrent",
+    "category": "scripts",
+    "default": "<min(4, cores)>",
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "restartRequired": false,
+    "owner": "core",
+    "accepts": [
+      4,
+      6,
+      7,
+      8,
+      9
+    ]
+  },
+  {
+    "key": "oxplow.scripts.memoryMb",
+    "title": "Memory mb",
+    "description": "Memory mb",
+    "category": "scripts",
+    "default": 512,
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "restartRequired": false,
+    "owner": "core",
+    "accepts": [
+      7,
+      8,
+      9
+    ]
+  },
+  {
+    "key": "oxplow.snapshots.maxFileBytes",
+    "title": "Snapshot max file bytes",
+    "description": "Largest file snapshotted by content; bigger files get a stat-only entry.",
+    "category": "snapshots",
+    "default": 5242880,
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "restartRequired": false,
+    "owner": "core",
+    "accepts": [
+      9
+    ]
+  },
+  {
+    "key": "oxplow.snapshots.retentionDays",
+    "title": "Snapshot retention days",
+    "description": "File-snapshot retention in days; 0 disables pruning.",
+    "category": "snapshots",
+    "default": 7,
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "restartRequired": false,
+    "owner": "core",
+    "accepts": [
+      3,
+      4,
+      6,
+      7,
+      8,
+      9
+    ]
+  },
+  {
+    "key": "oxplow.testing.agentHint",
+    "title": "Agent hint",
+    "description": "Agent hint",
+    "category": "testing",
+    "default": null,
+    "secret": false,
+    "order": 0,
+    "ui": {
+      "editor": "multiline"
+    },
+    "restartRequired": false,
+    "owner": "core",
+    "accepts": [
+      0,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16
+    ]
+  },
+  {
+    "key": "oxplow.testing.analysisPatterns",
+    "title": "Analysis patterns",
+    "description": "Analysis patterns",
+    "category": "testing",
+    "default": [],
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "restartRequired": false,
+    "owner": "core",
+    "accepts": [
+      0,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22
+    ]
+  },
+  {
+    "key": "oxplow.testing.command",
+    "title": "Command",
+    "description": "Command",
+    "category": "testing",
+    "default": null,
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "restartRequired": false,
+    "owner": "core",
+    "accepts": [
+      0,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16
+    ]
+  },
+  {
+    "key": "oxplow.testing.fastCommand",
+    "title": "Fast command",
+    "description": "Fast command",
+    "category": "testing",
+    "default": null,
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "restartRequired": false,
+    "owner": "core",
+    "accepts": [
+      0,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16
+    ]
+  },
+  {
+    "key": "oxplow.testing.runPatterns",
+    "title": "Run patterns",
+    "description": "Run patterns",
+    "category": "testing",
+    "default": [],
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "restartRequired": false,
+    "owner": "core",
+    "accepts": [
+      0,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22
+    ]
+  },
+  {
+    "key": "oxplow.testing.testPaths",
+    "title": "Test paths",
+    "description": "Test paths",
+    "category": "testing",
+    "default": [],
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "restartRequired": false,
+    "owner": "core",
+    "accepts": [
+      0,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22
+    ]
+  },
+  {
+    "key": "oxplow.zones",
+    "title": "Zones",
+    "description": "Architectural zones: an ORDERED rule table, first match wins; `other`/`external` are reserved labels.",
+    "category": "project",
+    "default": [],
+    "secret": false,
+    "order": 0,
+    "ui": {},
+    "restartRequired": false,
+    "owner": "core",
+    "accepts": [
+      0,
+      17
+    ]
+  }
+]

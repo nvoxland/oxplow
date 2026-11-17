@@ -886,6 +886,89 @@ mod tests {
             .any(|definition| definition.key == "oxplow.activeProviders"));
     }
 
+    /// Every core definition's metadata, and which sample values its schema
+    /// accepts, as checked in. Rebuilding how core declares its settings must
+    /// keep both. `OXPLOW_PIN_UPDATE=1` rewrites the file.
+    #[test]
+    fn core_definitions_and_accepted_values_are_pinned() {
+        let samples = [
+            json!(null),
+            json!(true),
+            json!(false),
+            json!(0),
+            json!(1),
+            json!(-1),
+            json!(7),
+            json!(64),
+            json!(100),
+            json!(1024),
+            json!(1.5),
+            json!(""),
+            json!(" "),
+            json!("x"),
+            json!("hashes"),
+            json!("#abc"),
+            json!("c2410c"),
+            json!([]),
+            json!(["a"]),
+            json!(["a", "a"]),
+            json!(["dist"]),
+            json!(["/abs"]),
+            json!(["../up"]),
+            json!({}),
+            json!({"a": "b"}),
+            json!({"provider": "p", "model": "m"}),
+            json!({"provider": "p", "model": "m", "restrict": ["tools"]}),
+            json!([{"use": "oxplow.loc"}]),
+            json!([{"use": "oxplow.loc", "target": 3, "enabled": false}]),
+            json!([{"languageId": "rust", "extensions": [".rs"], "command": "ra"}]),
+            json!([{"label": "core", "match": "src/**"}]),
+            json!({"acme/one": {"enabled": true, "config": {}}}),
+            json!({"agent": {"payloadDays": 60, "contentDays": 14}}),
+            json!({"task.board": "oxplow"}),
+            json!({"oxtask": "../oxtask"}),
+        ];
+        let mut registry = crate::settings::SettingsRegistry::default();
+        registry.register_many(definitions("demo")).unwrap();
+        let pinned: Vec<Value> = registry
+            .definitions()
+            .map(|d| {
+                let accepts: Vec<usize> = samples
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, sample)| registry.validate(&d.key, sample).is_ok())
+                    .map(|(index, _)| index)
+                    .collect();
+                // The default concurrency depends on the machine's cores.
+                let default = if d.key == "oxplow.scripts.maxConcurrent" {
+                    json!("<min(4, cores)>")
+                } else {
+                    json!(d.default)
+                };
+                json!({
+                    "key": d.key, "title": d.title, "description": d.description,
+                    "category": d.category, "default": default, "secret": d.secret,
+                    "order": d.order, "ui": d.ui, "restartRequired": d.restart_required,
+                    "owner": d.owner, "accepts": accepts,
+                })
+            })
+            .collect();
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/core_settings.json");
+        let text = serde_json::to_string_pretty(&pinned).unwrap() + "\n";
+        if std::env::var_os("OXPLOW_PIN_UPDATE").is_some() {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, &text).unwrap();
+        }
+        let expected = std::fs::read_to_string(&path).expect("the pinned core settings file");
+        assert_eq!(
+            text,
+            expected,
+            "core settings changed; see {}",
+            path.display()
+        );
+    }
+
     #[test]
     fn every_core_default_validates_against_its_registered_schema() {
         let mut registry = crate::settings::SettingsRegistry::default();
