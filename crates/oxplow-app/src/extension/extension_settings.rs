@@ -269,7 +269,7 @@ fn collect(
             .insert("$defs".into(), definitions.clone());
     }
     let pointer = pointer(path);
-    let default = declaration.defaults.pointer(&pointer).cloned();
+    let default = declaration.defaults().pointer(&pointer).cloned();
     if secret && default.is_some() {
         return Err(ExtensionSettingsError::Declaration(
             "secret defaults are forbidden",
@@ -411,14 +411,10 @@ mod tests {
         }
     }
 
-    fn extension(schema: Value, defaults: Value) -> Extension {
+    fn extension(schema: Value) -> Extension {
         let mut extension = super::super::extensions::empty_extension("example", "", "project");
         extension.enabled = true;
-        extension.configuration = Some(ConfigurationFile {
-            version: 1,
-            schema,
-            defaults,
-        });
+        extension.configuration = Some(ConfigurationFile { version: 1, schema });
         extension
     }
 
@@ -434,23 +430,20 @@ mod tests {
 
     #[test]
     fn fixed_fields_are_independent_but_structured_values_remain_atomic() {
-        let extension = extension(
-            json!({"type":"object", "properties": {
-                "tasks": {"type":"object", "additionalProperties":false,
-                    "x-category":"tasks.workflow", "properties": {
-                        "workflow": {"type":"string", "enum":["off","agent_tracks"],
-                            "title":"Task workflow", "description":"How tasks are tracked.",
-                            "x-order":4,"x-ui":{"editor":"select"}},
-                        "done": {"type":"string", "x-ui":{"multiline":true}}
-                    }},
-                "ordered": {"type":"array", "items":{"type":"string"}},
-                "servers": {"type":"object", "additionalProperties":{"type":"string"}},
-                "point": {"type":"object", "x-atomic":true,"properties": {
-                    "x":{"type":"number"},"y":{"type":"number"}
-                }}
-            }}),
-            json!({"tasks":{"workflow":"agent_tracks","done":""},"ordered":[],"servers":{},"point":{"x":0,"y":0}}),
-        );
+        let extension = extension(json!({"type":"object", "properties": {
+            "tasks": {"type":"object", "additionalProperties":false,
+                "x-category":"tasks.workflow", "properties": {
+                    "workflow": {"type":"string", "enum":["off","agent_tracks"],
+                        "title":"Task workflow", "description":"How tasks are tracked.",
+                        "x-order":4,"x-ui":{"editor":"select"}, "default":"agent_tracks"},
+                    "done": {"type":"string", "x-ui":{"multiline":true}, "default":""}
+                }},
+            "ordered": {"type":"array", "items":{"type":"string"}, "default":[]},
+            "servers": {"type":"object", "additionalProperties":{"type":"string"}, "default":{}},
+            "point": {"type":"object", "x-atomic":true, "default":{"x":0,"y":0}, "properties": {
+                "x":{"type":"number"},"y":{"type":"number"}
+            }}
+        }}));
         let definitions = definitions(&extension).unwrap();
         assert_eq!(definitions.len(), 5);
         let workflow = definitions
@@ -471,8 +464,7 @@ mod tests {
     fn local_schema_references_keep_metadata_and_nested_defaults() {
         let extension = extension(
             json!({"type":"object", "$defs":{"choice":{"type":"string","enum":["a","b"]}},
-                "properties":{"choice":{"$ref":"#/$defs/choice", "title":"Choose"}}}),
-            json!({"choice":"b"}),
+                "properties":{"choice":{"$ref":"#/$defs/choice", "title":"Choose", "default":"b"}}}),
         );
         let definition = definitions(&extension).unwrap().remove(0);
         assert_eq!(definition.title, "Choose");
@@ -485,23 +477,22 @@ mod tests {
         let declaration = json!({"type":"object","properties":{
             "token":{"type":"string","x-secret":true}
         }});
-        let extension = extension(declaration.clone(), json!({}));
+        let extension = extension(declaration.clone());
         assert!(definitions(&extension).unwrap()[0].secret);
         let mut invalid = extension;
-        invalid.configuration.as_mut().unwrap().defaults = json!({"token":"do not retain"});
+        invalid.configuration.as_mut().unwrap().schema["properties"]["token"]["default"] =
+            json!("do not retain");
         assert!(definitions(&invalid).is_err());
     }
 
     #[test]
     fn unusual_property_names_have_distinct_canonical_keys_and_original_pointers() {
-        let extension = extension(
-            json!({"type":"object","properties": {
-                "api/url":{"type":"string"}, "my key":{"type":"integer"},
-                "a.b":{"type":"string"}, "a":{"type":"object","properties":{"b":{"type":"string"}}},
-                "__hex_612e62":{"type":"string"}
-            }}),
-            json!({"api/url":"old", "my key":1, "a.b":"flat", "a":{"b":"nested"}, "__hex_612e62":"literal"}),
-        );
+        let extension = extension(json!({"type":"object","properties": {
+            "api/url":{"type":"string","default":"old"}, "my key":{"type":"integer","default":1},
+            "a.b":{"type":"string","default":"flat"},
+            "a":{"type":"object","properties":{"b":{"type":"string","default":"nested"}}},
+            "__hex_612e62":{"type":"string","default":"literal"}
+        }}));
         let project = tempfile::tempdir().unwrap();
         let global = tempfile::tempdir().unwrap();
         let mut registry = SettingsRegistry::default();
@@ -545,10 +536,8 @@ mod tests {
 
     #[test]
     fn pointer_projection_escapes_names_without_splitting_stored_keys() {
-        let extension = extension(
-            json!({"type":"object","properties":{"a/b":{"type":"integer"}}}),
-            json!({"a/b":3}),
-        );
+        let extension =
+            extension(json!({"type":"object","properties":{"a/b":{"type":"integer","default":3}}}));
         let bindings = bindings_for(
             &extension.namespace,
             extension.configuration.as_ref().unwrap(),
@@ -562,13 +551,10 @@ mod tests {
 
     #[test]
     fn public_projection_never_reads_secret_settings() {
-        let extension = extension(
-            json!({"type":"object","properties":{
-                "token":{"type":"string","x-secret":true},
-                "enabled":{"type":"boolean"}
-            }}),
-            json!({"enabled":true}),
-        );
+        let extension = extension(json!({"type":"object","properties":{
+            "token":{"type":"string","x-secret":true},
+            "enabled":{"type":"boolean","default":true}
+        }}));
         let mut registry = SettingsRegistry::default();
         replace_extensions(&mut registry, std::slice::from_ref(&extension)).unwrap();
         let project = tempfile::tempdir().unwrap();
@@ -597,11 +583,11 @@ mod tests {
         let extension = extension(
             json!({"type":"object","additionalProperties":false,"properties":{
                 "tasks":{"type":"object","additionalProperties":false,"properties":{
-                    "enabled":{"type":"boolean"},"limit":{"type":"integer"}
+                    "enabled":{"type":"boolean","default":true},"limit":{"type":"integer","default":5}
                 }},
-                "headers":{"type":"object","additionalProperties":{"type":"string"}}
+                "headers":{"type":"object","additionalProperties":{"type":"string"},
+                    "default":{"first":"a","second":"b"}}
             }}),
-            json!({"tasks":{"enabled":true,"limit":5},"headers":{"first":"a","second":"b"}}),
         );
         let mut registry = SettingsRegistry::default();
         replace_extensions(&mut registry, std::slice::from_ref(&extension)).unwrap();
@@ -644,8 +630,7 @@ mod tests {
     #[test]
     fn shared_namespace_registration_deduplicates_without_dropping_core() {
         let extension = extension(
-            json!({"type":"object","properties":{"enabled":{"type":"boolean"}}}),
-            json!({"enabled":true}),
+            json!({"type":"object","properties":{"enabled":{"type":"boolean","default":true}}}),
         );
         let mut sibling = extension.clone();
         sibling.name = "sibling".into();

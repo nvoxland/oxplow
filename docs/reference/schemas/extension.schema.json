@@ -506,7 +506,7 @@
       ]
     },
     "ConfigurationFile": {
-      "description": "A versioned declaration of non-secret settings. This is data, not consent\nor a credential reference. Stored overrides and host services are separate.",
+      "description": "A versioned declaration of settings. This is data, not consent or a\ncredential reference. Stored overrides and host services are separate.\nA field's default is the `default` keyword on its schema.",
       "type": "object",
       "properties": {
         "version": {
@@ -514,10 +514,7 @@
           "format": "uint32",
           "minimum": 1
         },
-        "schema": true,
-        "defaults": {
-          "default": {}
-        }
+        "schema": true
       },
       "additionalProperties": false,
       "required": [

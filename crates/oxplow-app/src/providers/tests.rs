@@ -412,7 +412,7 @@ async fn a_provider_reads_its_extensions_configuration_through_host_call() {
     let text = std::fs::read_to_string(&manifest).unwrap();
     let text = text.replace(
         "intent:\n",
-        "configuration:\n  version: 1\n  schema:\n    type: object\n    additionalProperties: false\n    properties:\n      limit: { type: integer }\n  defaults: { limit: 4 }\nintent:\n",
+        "configuration:\n  version: 1\n  schema:\n    type: object\n    additionalProperties: false\n    properties:\n      limit: { type: integer, default: 4 }\nintent:\n",
     );
     std::fs::write(
         &manifest,

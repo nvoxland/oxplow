@@ -1448,7 +1448,7 @@ mod tests {
         write_context(
             &fx.svc,
             "state",
-            "permissions: [agent.write]\nconfiguration:\n  version: 1\n  schema: { type: object, additionalProperties: false, properties: { mode: { type: string, enum: [alpha, beta] } } }\n  defaults: { mode: alpha }\n",
+            "permissions: [agent.write]\nconfiguration:\n  version: 1\n  schema: { type: object, additionalProperties: false, properties: { mode: { type: string, enum: [alpha, beta], default: alpha } } }\n",
             "  - id: shown\n    doc: Said in alpha.\n    when: { config: /mode, in: [alpha] }\n    query: SELECT 'alpha says' AS text\n  - id: hidden\n    doc: Said in beta.\n    when: { config: /mode, in: [beta] }\n    query: SELECT 'beta says' AS text\n",
         );
         crate::test_fixtures::activate(&fx.svc).await;
@@ -1466,7 +1466,7 @@ mod tests {
         write_context(
             &fx.svc,
             "state",
-            "permissions: [agent.write]\nconfiguration:\n  version: 1\n  schema: { type: object, additionalProperties: false, properties: { mode: { type: string, enum: [alpha, beta] } } }\n  defaults: { mode: alpha }\n",
+            "permissions: [agent.write]\nconfiguration:\n  version: 1\n  schema: { type: object, additionalProperties: false, properties: { mode: { type: string, enum: [alpha, beta], default: alpha } } }\n",
             "  - id: shown\n    doc: Said in alpha.\n    when: { config: /mode, in: [alpha] }\n    query: SELECT 'alpha says' AS text\n  - id: snaps\n    doc: Said with snapshots.\n    needs: [snapshots.contents]\n    query: SELECT 'snapped' AS text\n",
         );
         crate::test_fixtures::activate(&fx.svc).await;

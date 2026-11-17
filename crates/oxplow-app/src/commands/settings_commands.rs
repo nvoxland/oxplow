@@ -439,10 +439,8 @@ mod ownership_tests {
   schema:
     type: object
     properties:
-      limit: { type: integer }
+      limit: { type: integer, default: 1 }
       token: { type: string, x-secret: true }
-  defaults:
-    limit: 1
 ";
 
     fn target(fx: &ThreadFixture) -> ConfigTarget {

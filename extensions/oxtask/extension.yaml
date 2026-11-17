@@ -79,15 +79,15 @@ configuration:
             x-category: tasks
             type: string
             enum: [off, person_files, agent_tracks, custom]
+            default: agent_tracks
             description: "off: oxtask tells agents nothing about tasks (the tracker's own commands stay); person_files: the agent works the tasks people file and assign; agent_tracks: the agent takes or files a task for each piece of work; custom: the project's own extension says how."
           definitionOfDone:
             title: Definition of done
             x-category: tasks
             type: string
             maxLength: 1000
+            default: ""
             description: "What done means here, one item per line (tests pass, committed, …); the agent checks it before closing a task. Empty for none."
-  defaults:
-    tasks: { workflow: agent_tracks, definitionOfDone: "" }
 fills:
   - model: oxplow/task_record
     stores: [oxtask]

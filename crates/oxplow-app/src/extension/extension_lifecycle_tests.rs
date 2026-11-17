@@ -449,7 +449,7 @@ async fn a_rollback_restores_the_earlier_version_over_what_the_later_one_stored(
 async fn a_rolled_back_version_replaces_a_setting_the_earlier_schema_refuses() {
     let fx = booted().await;
     let root = fx.svc.layout.project_dir.clone();
-    const STRICT_CONFIGURATION: &str = "configuration:\n  version: 1\n  schema:\n    type: object\n    additionalProperties: false\n    required: [limit]\n    properties:\n      limit: { type: integer, minimum: 1, maximum: 10 }\n  defaults: { limit: 5 }\n";
+    const STRICT_CONFIGURATION: &str = "configuration:\n  version: 1\n  schema:\n    type: object\n    additionalProperties: false\n    required: [limit]\n    properties:\n      limit: { type: integer, minimum: 1, maximum: 10, default: 5 }\n";
     Alpha::new(1).configured(STRICT_CONFIGURATION).write(&root);
     let first = deploy(&fx.svc, NAME).await.unwrap();
     Alpha::new(2)

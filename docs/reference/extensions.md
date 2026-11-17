@@ -170,18 +170,17 @@ configuration:
     type: object
     properties:
       label: {type: string}
-      pageSize: {type: integer, minimum: 1, maximum: 100}
+      pageSize: {type: integer, minimum: 1, maximum: 100, default: 20}
     required: [label]
     additionalProperties: false
-  defaults:
-    pageSize: 20
 ```
 
-`version` is a positive settings schema version. Defaults can omit required
-object fields; resolved settings must satisfy the whole schema. Arrays are
-complete replacement values, so their objects must include required fields.
-Branch constraints such as `anyOf` still apply to defaults as written. Schema
-`default` annotations do not supply values.
+`version` is a positive settings schema version. A field's `default` is its
+default value; a field without one has none, and a secret field cannot have
+one. Defaults can omit required object fields; resolved settings must satisfy
+the whole schema. Arrays are complete replacement values, so their objects
+must include required fields. Branch constraints such as `anyOf` still apply
+to defaults as written.
 
 ### Changing the settings schema
 

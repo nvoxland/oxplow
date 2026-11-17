@@ -772,7 +772,7 @@ mod tests {
     #[test]
     fn a_when_is_checked_against_the_extensions_configuration() {
         let configuration: super::super::config_schema::ConfigurationFile = serde_yaml::from_str(
-            "version: 1\nschema: { type: object, properties: { store: { type: boolean } } }\ndefaults: { store: true }\n",
+            "version: 1\nschema: { type: object, properties: { store: { type: boolean, default: true } } }\n",
         )
         .unwrap();
         let yaml = |pointer: &str| {

@@ -159,7 +159,7 @@ fn write(root: &std::path::Path, rel: &str, body: &str) {
     std::fs::write(path, body).unwrap();
 }
 
-const CONFIGURED: &str = "manifest: 2\nname: mine\nintent:\n  purpose: p\n  examples: [{ name: a }]\nconfiguration:\n  version: 1\n  schema:\n    type: object\n    properties:\n      limit: { type: integer }\n      nested: { type: object }\n  defaults: { limit: 7, nested: {} }\ndatasets:\n  - name: limited\n    version: 1\n    description: Limited.\n    fields:\n      - { name: n, type: \"\", doc: The limit. }\n";
+const CONFIGURED: &str = "manifest: 2\nname: mine\nintent:\n  purpose: p\n  examples: [{ name: a }]\nconfiguration:\n  version: 1\n  schema:\n    type: object\n    properties:\n      limit: { type: integer, default: 7 }\n      nested: { type: object, default: {} }\ndatasets:\n  - name: limited\n    version: 1\n    description: Limited.\n    fields:\n      - { name: n, type: \"\", doc: The limit. }\n";
 
 /// Another extension's settings are not readable: `config()` is the owner's,
 /// so a key the owner's schema doesn't declare fails the load — naming the
@@ -187,7 +187,7 @@ async fn an_extension_reads_only_its_own_settings() {
         &root,
         ".oxplow/extensions/mine/extension.yaml",
         &CONFIGURED.replace("configuration:", "unused_marker_removed:").replace(
-            "unused_marker_removed:\n  version: 1\n  schema:\n    type: object\n    properties:\n      limit: { type: integer }\n      nested: { type: object }\n  defaults: { limit: 7, nested: {} }\n",
+            "unused_marker_removed:\n  version: 1\n  schema:\n    type: object\n    properties:\n      limit: { type: integer, default: 7 }\n      nested: { type: object, default: {} }\n",
             "",
         ),
     );

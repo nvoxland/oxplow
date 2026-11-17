@@ -259,14 +259,13 @@ mod tests {
                     "tasks": {
                         "type": "object",
                         "properties": {
-                            "workflow": { "type": "string", "enum": ["off", "agent_tracks"] },
+                            "workflow": { "type": "string", "enum": ["off", "agent_tracks"], "default": "agent_tracks" },
                             "note": { "type": "string" }
                         }
                     },
                     "limit": { "type": "integer" }
                 }
-            },
-            "defaults": { "tasks": { "workflow": "agent_tracks" } }
+            }
         }))
         .unwrap()
     }

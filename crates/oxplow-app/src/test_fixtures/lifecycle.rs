@@ -128,9 +128,8 @@ pub(crate) const CONFIGURATION_V2: &str = "configuration:
     required: [limit]
     additionalProperties: false
     properties:
-      limit: { type: integer, minimum: 1, maximum: 100 }
+      limit: { type: integer, minimum: 1, maximum: 100, default: 10 }
       label: { type: string }
-  defaults: { limit: 10 }
 ";
 
 /// `services_with_thread` with the pump's reactors a running oxplow has for

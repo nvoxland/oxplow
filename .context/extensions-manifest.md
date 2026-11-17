@@ -276,10 +276,14 @@ not by `enabled`.
 ## Namespaced configuration declarations
 
 `configuration:` in manifest v2 declares registered settings as
-`{version, schema, defaults}`. The version is a positive integer distinct from
+`{version, schema}`. The version is a positive integer distinct from
 package, engine and public contract versions. The JSON Schema must declare an
-object root; defaults are an object and default to `{}`. Unknown declaration
-keys and explicit `configuration: null` are invalid. The loader retains only
+object root. A field's default is the `default` keyword on its own schema
+(`limit: { type: integer, default: 10 }`); a local `$ref`'s target can supply
+it, a nested object collects its fields' defaults
+(`ConfigurationFile::defaults()`), and a secret field has none. There is no
+separate `defaults:` tree. Unknown declaration keys and explicit
+`configuration: null` are invalid. The loader retains only
 validated declarations in `Extension.configuration`; errors remain source
 located. The existing top-level `config:` key is still invalid. Provider
 instance configuration remains its own contract.
@@ -397,7 +401,7 @@ advisories' queries — reads its own configuration with
 - **Pages and advisories** read the values stored now each time they run
   (`SqlGateway::with_extension_config`), so a change applies to the next
   run with no republish. A check (`oxplow extension check`, the effect report)
-  reads no stored settings and compiles against the declared `defaults`.
+  reads no stored settings and compiles against the schema's defaults.
 - **Errors at load.** A read must name a key of the extension's own
   `configuration.schema` (under `properties`) whose `type` is a number,
   string or boolean: an unknown key, an object or array, a read in an

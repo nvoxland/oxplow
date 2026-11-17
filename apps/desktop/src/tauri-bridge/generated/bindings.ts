@@ -1927,13 +1927,13 @@ export type ConfigCondition = {
 };
 
 /**
- *  A versioned declaration of non-secret settings. This is data, not consent
- *  or a credential reference. Stored overrides and host services are separate.
+ *  A versioned declaration of settings. This is data, not consent or a
+ *  credential reference. Stored overrides and host services are separate.
+ *  A field's default is the `default` keyword on its schema.
  */
 export type ConfigurationFile = {
 	version: number,
 	schema: unknown,
-	defaults?: unknown,
 };
 
 /**

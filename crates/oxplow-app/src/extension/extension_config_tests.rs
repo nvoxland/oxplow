@@ -192,8 +192,8 @@ async fn a_script_reads_a_registered_key_and_validates_its_request() {
 async fn extension_reads_use_the_services_global_directory_and_fake_secrets() {
     let fx = services_with_thread().await;
     let declaration = CONFIGURATION.replace(
-        "      label: { type: string }",
-        "      token: { type: string, x-secret: true }\n      label: { type: string }",
+        "      label: { type: string, default: default }",
+        "      token: { type: string, x-secret: true }\n      label: { type: string, default: default }",
     );
     declare(fx._dir.path(), "alpha", &declaration);
     reconcile(&fx).await;

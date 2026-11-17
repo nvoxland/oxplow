@@ -1948,8 +1948,7 @@ configuration:
     type: object
     additionalProperties: false
     properties:
-      mode: { type: string, enum: [a, b] }
-  defaults: { mode: a }
+      mode: { type: string, enum: [a, b], default: a }
 skills:
   - { name: on-a, file: skills/on-a.md, when: { config: /mode, in: [a] } }
   - { name: on-b, file: skills/on-b.md, when: { config: /mode, in: [b] } }

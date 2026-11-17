@@ -80,17 +80,13 @@ pub(crate) const CONFIGURATION: &str = "configuration:
     required: [limit]
     additionalProperties: false
     properties:
-      limit: { type: integer, minimum: 1, maximum: 100 }
-      label: { type: string }
+      limit: { type: integer, minimum: 1, maximum: 100, default: 10 }
+      label: { type: string, default: default }
       nested:
         type: object
         properties:
-          a: { type: integer }
-          b: { type: integer }
-  defaults:
-    limit: 10
-    label: default
-    nested: { a: 1, b: 1 }
+          a: { type: integer, default: 1 }
+          b: { type: integer, default: 1 }
 ";
 
 pub(crate) async fn run(

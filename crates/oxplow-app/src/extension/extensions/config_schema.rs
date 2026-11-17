@@ -12,8 +12,9 @@ use serde_json::Value;
 
 const MAX_ISSUES: usize = 32;
 
-/// A versioned declaration of non-secret settings. This is data, not consent
-/// or a credential reference. Stored overrides and host services are separate.
+/// A versioned declaration of settings. This is data, not consent or a
+/// credential reference. Stored overrides and host services are separate.
+/// A field's default is the `default` keyword on its schema.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ConfigurationFile {
@@ -21,13 +22,44 @@ pub struct ConfigurationFile {
     pub version: u32,
     #[specta(type = oxplow_domain::Json)]
     pub schema: Value,
-    #[serde(default = "empty_object")]
-    #[specta(type = oxplow_domain::Json)]
-    pub defaults: Value,
 }
 
-fn empty_object() -> Value {
-    Value::Object(Default::default())
+/// How deep a schema's references and nested objects are followed for
+/// defaults. Deeper declarations are refused elsewhere.
+const MAX_DEFAULT_DEPTH: usize = 32;
+
+impl ConfigurationFile {
+    /// The defaults tree: each field's `default` keyword (a local `$ref`'s
+    /// target supplies one the reference does not state), nested objects
+    /// collecting their fields' defaults. A field without one is absent.
+    pub fn defaults(&self) -> Value {
+        default_of(&self.schema, &self.schema, 0)
+            .filter(Value::is_object)
+            .unwrap_or_else(|| Value::Object(Default::default()))
+    }
+}
+
+fn default_of(root: &Value, node: &Value, depth: usize) -> Option<Value> {
+    if depth > MAX_DEFAULT_DEPTH {
+        return None;
+    }
+    if let Some(default) = node.get("default") {
+        return Some(default.clone());
+    }
+    if let Some(target) = node
+        .get("$ref")
+        .and_then(Value::as_str)
+        .and_then(|reference| reference.strip_prefix('#'))
+        .and_then(|pointer| root.pointer(pointer))
+    {
+        return default_of(root, target, depth + 1);
+    }
+    let properties = node.get("properties")?.as_object()?;
+    let fields: serde_json::Map<_, _> = properties
+        .iter()
+        .filter_map(|(key, field)| default_of(root, field, depth + 1).map(|d| (key.clone(), d)))
+        .collect();
+    (!fields.is_empty()).then_some(Value::Object(fields))
 }
 
 /// `when: { config: <pointer>, in: [<values>] }`: a contribution that is
@@ -171,7 +203,7 @@ impl ConfigurationFile {
             ConfigSchema::compile(&self.schema).map_err(|issue| vec![declaration_error(issue)])?;
         super::config::resolve_extension_config(
             extension,
-            &self.defaults,
+            &self.defaults(),
             project,
             personal,
             |layer, value| {
@@ -201,7 +233,7 @@ impl ConfigurationFile {
             return Err(vec![violation("invalid_version")]);
         }
         let schema = ConfigSchema::compile(&self.schema).map_err(|issue| vec![issue])?;
-        let issues = schema.validate_defaults(&self.defaults);
+        let issues = schema.validate_defaults(&self.defaults());
         if issues.is_empty() {
             Ok(schema)
         } else {
@@ -396,11 +428,6 @@ pub fn merge(declarations: &[(&str, &ConfigurationFile)]) -> Merged {
                 }
             }
         }
-        if let (Some(into), Some(from)) =
-            (merged.defaults.as_object_mut(), decl.defaults.as_object())
-        {
-            into.extend(from.iter().map(|(k, v)| (k.clone(), v.clone())));
-        }
     }
     out
 }
@@ -416,9 +443,8 @@ mod namespace_tests {
             schema: json!({
                 "type": "object",
                 "additionalProperties": false,
-                "properties": { key: { "type": "integer" } },
+                "properties": { key: { "type": "integer", "default": default } },
             }),
-            defaults: json!({ key: default }),
         }
     }
 
@@ -432,10 +458,10 @@ mod namespace_tests {
         assert_eq!(merged.problems, Vec::<(usize, String)>::new());
         let one = merged.declaration.unwrap();
         assert_eq!(one.version, 1);
-        assert_eq!(one.defaults, json!({ "a": 1, "b": 2 }));
+        assert_eq!(one.defaults(), json!({ "a": 1, "b": 2 }));
         assert_eq!(
             one.schema["properties"],
-            json!({ "a": { "type": "integer" }, "b": { "type": "integer" } })
+            json!({ "a": { "type": "integer", "default": 1 }, "b": { "type": "integer", "default": 2 } })
         );
         assert_eq!(one.schema["additionalProperties"], json!(false));
 
@@ -444,7 +470,7 @@ mod namespace_tests {
             ("second", &decl(1, "a", 2)),
             ("third", &decl(2, "c", 3)),
         ]);
-        assert_eq!(clash.declaration.unwrap().defaults, json!({ "a": 1 }));
+        assert_eq!(clash.declaration.unwrap().defaults(), json!({ "a": 1 }));
         let said: Vec<(usize, &str)> = clash
             .problems
             .iter()
@@ -473,13 +499,45 @@ mod tests {
                 "required": ["limit"],
                 "additionalProperties": false,
                 "properties": {
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 10},
                     "mode": {"enum": ["fast", "safe-hunter2"]}
                 }
-            },
-            "defaults": {"limit": 10}
+            }
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn defaults_are_the_schema_fields_defaults() {
+        let declaration: ConfigurationFile = serde_json::from_value(json!({
+            "version": 1,
+            "schema": {
+                "type": "object",
+                "$defs": {"mode": {"enum": ["fast", "safe"], "default": "safe"}},
+                "properties": {
+                    "limit": {"type": "integer", "default": 10},
+                    "mode": {"$ref": "#/$defs/mode"},
+                    "picked": {"$ref": "#/$defs/mode", "default": "fast"},
+                    "nested": {"type": "object", "properties": {
+                        "a": {"type": "integer", "default": 1},
+                        "b": {"type": "integer"}
+                    }},
+                    "none": {"type": "string"}
+                }
+            }
+        }))
+        .unwrap();
+        assert_eq!(
+            declaration.defaults(),
+            json!({"limit": 10, "mode": "safe", "picked": "fast", "nested": {"a": 1}})
+        );
+        // The old separate tree is not part of a declaration any more.
+        assert!(serde_json::from_value::<ConfigurationFile>(json!({
+            "version": 1,
+            "schema": {"type": "object"},
+            "defaults": {}
+        }))
+        .is_err());
     }
 
     #[test]
@@ -521,7 +579,10 @@ mod tests {
     #[test]
     fn required_fields_are_checked_on_the_resolved_object() {
         let mut declaration = declaration();
-        declaration.defaults = json!({});
+        declaration.schema["properties"]["limit"]
+            .as_object_mut()
+            .unwrap()
+            .remove("default");
         // Defaults alone are a fragment: fine to declare, not to resolve.
         assert!(declaration.prepare().is_ok());
         assert!(declaration.resolve("alpha", None, None).is_err());
@@ -541,7 +602,7 @@ mod tests {
         assert!(declaration.prepare().is_err());
 
         let mut declaration = self::declaration();
-        declaration.defaults = json!({"limit": 1000});
+        declaration.schema["properties"]["limit"]["default"] = json!(1000);
         assert!(declaration.prepare().is_err());
     }
 

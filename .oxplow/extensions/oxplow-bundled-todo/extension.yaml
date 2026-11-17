@@ -297,9 +297,7 @@ configuration:
         additionalProperties: false
         description: The shared-files advisories.
         properties:
-          windowMinutes: { type: integer, minimum: 1, description: How recent an edit is for two threads' work on the same file to count as overlapping. }
-  defaults:
-    sharedFiles: { windowMinutes: 60 }
+          windowMinutes: { type: integer, minimum: 1, default: 60, description: How recent an edit is for two threads' work on the same file to count as overlapping. }
 commands:
   - name: advisory_policy.read
     summary: The advisories' effective settings, where each came from, and the stamps a write needs.

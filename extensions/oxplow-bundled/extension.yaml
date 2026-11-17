@@ -505,20 +505,17 @@ configuration:
         additionalProperties: false
         description: Which files count as usually committed together, and when one is dormant.
         properties:
-          minShared: { type: integer, minimum: 1, description: Commits two files must share to be a pair. }
-          windowDays: { type: integer, minimum: 1, description: How far back commits count. }
-          maxFilesPerCommit: { type: integer, minimum: 1, description: Commits touching more files than this are ignored (mass renames). }
-          dormantDays: { type: integer, minimum: 1, description: A file no commit touched in this many days is dormant. }
+          minShared: { type: integer, minimum: 1, default: 3, description: Commits two files must share to be a pair. }
+          windowDays: { type: integer, minimum: 1, default: 180, description: How far back commits count. }
+          maxFilesPerCommit: { type: integer, minimum: 1, default: 50, description: Commits touching more files than this are ignored (mass renames). }
+          dormantDays: { type: integer, minimum: 1, default: 90, description: A file no commit touched in this many days is dormant. }
       struggle:
         type: object
         additionalProperties: false
         description: When the agent is said to have struggled in a request.
         properties:
-          repeatedEdits: { type: integer, minimum: 1, description: Edits of one file at or above which it counts. }
-          failedCommands: { type: integer, minimum: 1, description: Failed shell commands at or above which they count. }
-  defaults:
-    coChange: { minShared: 3, windowDays: 180, maxFilesPerCommit: 50, dormantDays: 90 }
-    struggle: { repeatedEdits: 5, failedCommands: 3 }
+          repeatedEdits: { type: integer, minimum: 1, default: 5, description: Edits of one file at or above which it counts. }
+          failedCommands: { type: integer, minimum: 1, default: 3, description: Failed shell commands at or above which they count. }
 commands:
   # This extension's review-policy settings (`configuration:` above), through
   # the host's configuration scope. A person sets them; a change republishes
