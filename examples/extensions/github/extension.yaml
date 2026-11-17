@@ -28,7 +28,7 @@ intent:
       input: { page: oxplow/extension-problems, params: { extension: github } }
       expect: a collector disabled after failures says why, under its extension
     - name: settings-data-area-lists-a-credential-and-whether-it-is-kept
-      input: { page: oxplow/settings, params: { area: data } }
+      input: { page: oxplow/management, params: { area: data } }
       expect: a declared credential is listed once, never its value
 permissions: [process.run, network:api.github.com, secrets:GITHUB_TOKEN, commands:oxplow.collector.sync]
 collectors:
