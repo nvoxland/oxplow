@@ -2048,14 +2048,18 @@ impl ProviderRegistry {
                     .map(|definition| definition.key.clone())
                     .collect::<Vec<_>>();
                 let snapshot = store.snapshot().ok()?;
-                keys.iter()
-                    .map(|key| snapshot.row(key))
-                    .collect::<Result<Vec<_>, _>>()
-                    .ok()
+                // A credential that can't be read counts as not set.
+                Some(
+                    keys.into_iter()
+                        .map(|key| {
+                            let set = snapshot.inspect(&key, None).is_ok_and(|v| v.is_set);
+                            (key, set)
+                        })
+                        .collect::<Vec<_>>(),
+                )
             })
             .unwrap_or_default()
             .into_iter()
-            .map(|row| (row.setting.definition.key, row.setting.is_set))
             .collect();
         let scope_of = |instance: &str| {
             scoped

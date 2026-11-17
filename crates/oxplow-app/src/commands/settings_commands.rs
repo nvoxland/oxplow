@@ -289,6 +289,34 @@ pub(crate) fn write_changes(
             ..Default::default()
         });
     }
+    // The typed config the files would make: a write that would leave the
+    // project unloadable (an unset exposing a bad hand-edited value, another
+    // key already invalid) is refused before the file changes.
+    if !secret {
+        let mut levels = Level::PRECEDENCE.map(|at| snapshot.documents().at(at).clone());
+        let edited = &mut levels[Level::PRECEDENCE
+            .iter()
+            .position(|at| *at == level)
+            .expect("a level is in the precedence")];
+        for (key, value, _) in &writes {
+            match value {
+                Some(value) => edited.insert(key.clone(), value.clone()),
+                None => edited.remove(key),
+            };
+        }
+        let after = settings.snapshot_of(oxplow_config::settings::Documents::new(levels));
+        let fallback = target
+            .project_dir
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy();
+        oxplow_config::core_settings::effective_values(&after)
+            .map_err(|e| refused(e.to_string()))
+            .and_then(|values| {
+                oxplow_config::core_settings::config_from(&fallback, &values)
+                    .map_err(|e| refused(e.to_string()))
+            })?;
+    }
     // The file is an external system: complete its one atomic replacement
     // before the bus records success, events or undo.
     if secret {
@@ -396,6 +424,18 @@ mod ownership_tests {
             )
             .await
             .unwrap();
+        // Once the switch is in a file it is still the required one.
+        let again = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                "oxplow.config.set",
+                json!({"key":key,"value":false,"level":"local"}),
+                false,
+            )
+            .await;
+        assert!(again.is_err(), "{again:?}");
     }
 
     #[cfg(unix)]

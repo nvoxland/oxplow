@@ -281,12 +281,8 @@ pub(crate) fn store_with_documents(
             .unwrap_or_default(),
     ))?;
     registry.register_many(crate::harnesses::setting_definitions(extensions))?;
-    oxplow_config::core_settings::register_dynamic_keys(
-        &mut registry,
-        documents
-            .levels()
-            .flat_map(|(_, document)| document.keys().cloned()),
-    )?;
+    // A loaded extension's own switch first (a required one is `const:
+    // true`); the switches the files name for other extensions after.
     for extension in extensions {
         let mut definition = oxplow_config::core_settings::extension_definition(&extension.name);
         if crate::bundled_extensions::is_required(&extension.name) {
@@ -296,6 +292,12 @@ pub(crate) fn store_with_documents(
             registry.register(definition)?;
         }
     }
+    oxplow_config::core_settings::register_dynamic_keys(
+        &mut registry,
+        documents
+            .levels()
+            .flat_map(|(_, document)| document.keys().cloned()),
+    )?;
     crate::extension::extension_settings::replace_extensions(&mut registry, extensions)
         .map_err(|_| SettingsError::InvalidDefinition)?;
     for extension in extensions.iter().filter(|e| e.enabled) {

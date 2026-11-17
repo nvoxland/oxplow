@@ -69,7 +69,7 @@ intent:
       input: { part: alerts-reactions }
       expect: nothing listed over a quiet project
     - name: settings-agents-area-hands-set-agents-each-new-order
-      input: { page: settings, params: { area: agents } }
+      input: { page: settings-category, params: { category: agents } }
       expect: agents in priority order with the lists a row hands set_agents; what new threads start with; the saved prompt addition
     - name: settings-ai-area-lists-providers-roles-and-calls
       input: { page: management, params: { area: ai } }

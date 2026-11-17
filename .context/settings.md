@@ -88,18 +88,21 @@ override. `oxplow.config.set {key, value, level}` and `.unset {key, level}` requ
 an explicit `local`, `project` or `global`. `list_keys` returns definitions from
 the registry. Values are validated by registered offline schemas before storage;
 a core value is also checked by its own rule (`core_settings::check`, the rule
-`config_from` applies). No core rule reads another setting, so a write checks
-only the keys it changes. An override invalidated by an extension schema change
+`config_from` applies; no core rule reads another setting), and the write then
+builds the typed config once over the files as they would be. An override invalidated by an extension schema change
 can still be replaced or removed; undo is withheld when it would restore that
 invalid value.
 
 **One write.** `config.set`, `config.unset`, `config.update` and every domain
 action (`file.mark_generated`, `capability.choose`, `replacement.choose`, the
 agent settings, `metric.enable`) go through `settings_commands::write_changes`.
-It checks each value, refuses disabling a required extension, skips a key whose
-stored value is the same (no write, no `config.changed`, no undo; nothing
-changed answers `changed: false`), writes once, refreshes the typed config and
-builds the undo. The composed-run ownership rule is on the generic `config.*`
+It checks each value (a required extension's switch is registered `const: true`
+before the switches the files name, so it can't be turned off), skips a key
+whose stored value is the same (no write, no `config.changed`, no undo; nothing
+changed answers `changed: false`), builds the typed config the files would make
+and refuses a write that would leave the project unloadable (an unset exposing
+a bad hand-edited value), writes once, refreshes the typed config and builds
+the undo. The composed-run ownership rule is on the generic `config.*`
 commands only: a domain action is its own grant.
 
 Extension scripts declare `needs: [config.read]` and call

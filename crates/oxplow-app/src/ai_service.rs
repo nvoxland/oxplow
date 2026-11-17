@@ -487,12 +487,14 @@ impl AiService {
         let store = self.declaration_settings()?;
         let overrides = if let Some(store) = &store {
             use oxplow_config::settings::Origin;
+            let snapshot = store.snapshot().ok();
             config
                 .roles
                 .iter()
                 .filter(|(role, _)| {
-                    store
-                        .snapshot()
+                    snapshot
+                        .as_ref()
+                        .ok_or(oxplow_config::settings::SettingsError::Storage)
                         .and_then(|snapshot| {
                             snapshot.get(&crate::settings::ai_role_key(&role.to_string()), None)
                         })

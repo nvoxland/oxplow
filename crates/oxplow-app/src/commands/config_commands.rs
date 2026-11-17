@@ -464,6 +464,39 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn a_write_that_would_expose_an_invalid_value_is_refused_before_the_file_changes() {
+        let (dir, target, bus) = setup();
+        let key = "oxplow.snapshots.retentionDays";
+        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
+        // A hand-edited shared value no setting accepts, hidden by a local one.
+        std::fs::write(
+            dir.path().join(".oxplow/project.yaml"),
+            format!("{key}: soon\n"),
+        )
+        .unwrap();
+        std::fs::write(dir.path().join(".oxplow/local.yaml"), format!("{key}: 3\n")).unwrap();
+        target.refresh().unwrap();
+        let local = std::fs::read_to_string(dir.path().join(".oxplow/local.yaml")).unwrap();
+        let refused = bus
+            .run(
+                &Actor::Human,
+                UNSET,
+                json!({"key":key,"level":"local"}),
+                false,
+            )
+            .await;
+        assert!(
+            matches!(refused, Err(ref e) if e.to_string().contains(key)),
+            "{refused:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join(".oxplow/local.yaml")).unwrap(),
+            local
+        );
+        assert_eq!(target.config.read().unwrap().snapshot_retention_days, 3);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn writing_the_stored_value_again_changes_nothing() {
         let (_dir, _target, bus) = setup();
         let set = json!({"key":"oxplow.snapshots.retentionDays","value":9,"level":"project"});

@@ -344,12 +344,19 @@ pub fn ops(target: MetricTarget) -> Vec<Op> {
                         });
                     }
                 }
-                let mut list = target
-                    .config
-                    .read()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .metrics
-                    .clone();
+                // The project's list (or the global one it inherits), never
+                // a person's local choices: the write goes to the shared file.
+                let mut list: Vec<oxplow_config::MetricEntry> = super::config_commands::inherited(
+                    &target.settings()?,
+                    oxplow_config::core_settings::keys::METRICS,
+                    Level::Project,
+                )?
+                .map(serde_json::from_value)
+                .transpose()
+                .map_err(|e| CommandError::Failed {
+                    message: e.to_string(),
+                })?
+                .unwrap_or_default();
                 for key in &input.keys {
                     metrics.apply_metric_enabled(&mut list, key, input.enabled);
                 }
@@ -742,6 +749,37 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("reserved"), "{err}");
+    }
+
+    /// Switching a metric for the project never copies a person's own
+    /// (local) metric choices into the shared file.
+    #[tokio::test]
+    async fn enable_keeps_a_local_choice_out_of_the_project_file() {
+        let (svc, _dir) = services().await;
+        let catalog = svc.metrics.catalog().await;
+        let mine = &catalog[0].key;
+        // Another metric whose key doesn't contain this one's, or the
+        // other way round.
+        let shared = &catalog
+            .iter()
+            .find(|entry| !entry.key.contains(mine.as_str()) && !mine.contains(entry.key.as_str()))
+            .unwrap()
+            .key;
+        svc.commands
+            .run(
+                &Actor::Human,
+                "oxplow.config.set",
+                json!({"key":"oxplow.metrics","value":[{"use":mine,"enabled":false}],"level":"local"}),
+                false,
+            )
+            .await
+            .unwrap();
+        run(&svc, ENABLE, json!({"keys":[shared],"enabled":false}))
+            .await
+            .unwrap();
+        let project =
+            std::fs::read_to_string(svc.layout.state_dir.join("project.yaml")).unwrap_or_default();
+        assert!(!project.contains(mine.as_str()), "{project}");
     }
 
     #[tokio::test]

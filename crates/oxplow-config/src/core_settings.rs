@@ -109,8 +109,15 @@ fn de<T: DeserializeOwned>(value: Value) -> Result<T, String> {
 }
 
 fn whole(value: Value) -> Result<u64, String> {
+    // YAML can write a whole number as `7.0`; JSON Schema's `integer` takes it.
     value
         .as_u64()
+        .or_else(|| {
+            value
+                .as_f64()
+                .filter(|n| n.fract() == 0.0 && *n >= 0.0 && *n <= u64::MAX as f64)
+                .map(|n| n as u64)
+        })
         .ok_or_else(|| "must be a whole number".to_owned())
 }
 
@@ -866,6 +873,19 @@ mod tests {
             .iter()
             .map(|(key, value)| ((*key).to_owned(), (value.clone(), Level::Project)))
             .collect()
+    }
+
+    #[test]
+    fn a_whole_number_written_with_a_zero_fraction_is_that_number() {
+        // The schema's `integer` accepts 7.0; so does the typed view.
+        let config = config_from(
+            "demo",
+            &values(&[("oxplow.snapshots.retentionDays", json!(7.0))]),
+        )
+        .unwrap();
+        assert_eq!(config.snapshot_retention_days, 7);
+        assert!(check("oxplow.snapshots.retentionDays", &json!(7.5)).is_err());
+        assert!(check("oxplow.snapshots.retentionDays", &json!(-1.0)).is_err());
     }
 
     #[test]

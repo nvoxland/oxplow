@@ -311,8 +311,9 @@ pub async fn list_with(ctx: &Listing<'_>) -> Result<Vec<CollectorListing>, Domai
         &extensions,
     )
     .map_err(|_| DomainError::Storage("collector settings unavailable".into()))?
+    // A settings file that can't be read hides only the credentials' state.
     .snapshot()
-    .map_err(|_| DomainError::Storage("collector settings unavailable".into()))?;
+    .ok();
     for ext in extensions.iter().cloned() {
         for spec in ext.collectors.clone() {
             let run = runs
@@ -324,17 +325,18 @@ pub async fn list_with(ctx: &Listing<'_>) -> Result<Vec<CollectorListing>, Domai
                 .iter()
                 .map(|name| CredentialStatus {
                     name: name.clone(),
-                    set: settings
-                        .inspect(
-                            &crate::extension::extension_settings::credential_definition(
-                                &ext.namespace,
-                                name,
+                    set: settings.as_ref().is_some_and(|settings| {
+                        settings
+                            .inspect(
+                                &crate::extension::extension_settings::credential_definition(
+                                    &ext.namespace,
+                                    name,
+                                )
+                                .key,
+                                None,
                             )
-                            .key,
-                            None,
-                        )
-                        .map(|setting| setting.is_set)
-                        .unwrap_or(false),
+                            .is_ok_and(|setting| setting.is_set)
+                    }),
                 })
                 .collect();
             let disabled = health
