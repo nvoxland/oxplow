@@ -384,10 +384,12 @@ impl Permissions {
     }
 
     /// May an extension whose namespace is `own_namespace` run command
-    /// `id`: one of its own, or one a `commands` pattern names.
+    /// `id`: one of its own, a write of its own settings
+    /// ([`OWN_SETTINGS_WRITES`]), or one a `commands` pattern names.
     pub fn command_allowed(&self, own_namespace: &str, id: &str) -> bool {
         id.strip_prefix(own_namespace)
             .is_some_and(|rest| rest.starts_with('.'))
+            || OWN_SETTINGS_WRITES.contains(&id)
             || self.commands.iter().any(|p| pattern_covers(p, id))
     }
 
@@ -396,6 +398,15 @@ impl Permissions {
         self.network.iter().any(|p| host_covers(p, host))
     }
 }
+
+/// The generic settings writes. An extension may always compose them: the
+/// write refuses every key its namespace does not own, so a `commands:`
+/// permission for them would grant nothing more.
+pub const OWN_SETTINGS_WRITES: [&str; 3] = [
+    "oxplow.config.set",
+    "oxplow.config.unset",
+    "oxplow.config.update",
+];
 
 /// Does command pattern `pattern` cover `name` (itself a name or a
 /// pattern): segment by segment, `*` one segment, `**` every one left.

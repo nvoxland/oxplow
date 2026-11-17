@@ -44,7 +44,7 @@ intent:
     - name: task-state-tells-the-agent-its-task-whats-next-and-what-done-means
       input: { context: task-state }
       expect: the thread's task in progress, the next three and the definition of done
-permissions: ['commands:oxplow.extension_store.write', 'commands:oxplow.config.set', sql.read, agent.write]
+permissions: ['commands:oxplow.extension_store.write', sql.read, agent.write]
 storage: { sqlite: true }
 datasets:
   - name: ready_queue

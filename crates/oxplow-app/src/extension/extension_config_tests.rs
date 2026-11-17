@@ -272,3 +272,40 @@ async fn extension_reads_use_the_services_global_directory_and_fake_secrets() {
     )
     .contains("fake-backend-secret"));
 }
+
+/// An extension writes its own settings by composing `oxplow.config.set`;
+/// a key it doesn't own is refused, whatever it may compose.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_script_writes_only_its_own_settings() {
+    let fx = services_with_thread().await;
+    let root = fx._dir.path();
+    std::fs::create_dir_all(root.join(".oxplow/extensions/writer/handlers")).unwrap();
+    std::fs::write(
+        root.join(".oxplow/extensions/writer/extension.yaml"),
+        "manifest: 2\nname: writer\nintent:\n  purpose: p\nconfiguration:\n  version: 1\n  schema:\n    type: object\n    properties:\n      limit: { type: integer, default: 1 }\ncommands:\n  - name: setting.put\n    summary: Write one setting.\n    input_schema: { type: object }\n    entry: handlers/put.star\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join(".oxplow/extensions/writer/handlers/put.star"),
+        "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.config.set\", \"input\": {\"key\": x[\"input\"][\"key\"], \"value\": x[\"input\"][\"value\"], \"level\": \"project\"}}], \"result\": {}}\n",
+    )
+    .unwrap();
+    reconcile(&fx).await;
+    run(
+        &fx,
+        "writer.setting.put",
+        json!({"key":"writer.limit","value":4}),
+    )
+    .await
+    .unwrap();
+    let refused = run(
+        &fx,
+        "writer.setting.put",
+        json!({"key":"oxplow.snapshots.retentionDays","value":99}),
+    )
+    .await;
+    assert!(refused.is_err(), "{refused:?}");
+    let project = std::fs::read_to_string(root.join(".oxplow/project.yaml")).unwrap();
+    assert!(project.contains("writer.limit: 4"), "{project}");
+    assert!(!project.contains("retentionDays"), "{project}");
+}

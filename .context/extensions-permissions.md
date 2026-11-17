@@ -273,8 +273,11 @@ by another registry owner is refused. An authorized direct read can return the
 owning extension's secret; the host marks the read so audit results are redacted.
 The nested `extension_config.read` alias returns `{values, origins}` from the
 same backend, with no layer snapshots, revisions, inspect or CAS operation.
-Scripts write by composing the generic config set/unset commands with explicit
-levels and normal command permissions; there is no writable settings service.
+Scripts write by composing the generic config set/unset/update commands with
+explicit levels; there is no writable settings service. Those three need no
+`commands:` permission (`permissions::OWN_SETTINGS_WRITES`): the write refuses
+every key the composing extension's namespace does not own, so the permission
+would grant nothing more.
 SQL `config('/pointer')` and contribution conditions use a public projection
 that omits secrets before secure lookup.
 
