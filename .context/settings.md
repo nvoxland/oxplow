@@ -37,7 +37,11 @@ so a change to either shows in review.
 Extension schema annotations are `title`, `description`, `x-category`, `x-ui`,
 `x-order`, `x-secret`, `x-restart-required` and `x-atomic`. `x-ui` (the
 definition's `ui`, `settings::SettingUi`) is one fixed vocabulary:
-`{ editor: multiline }` for a text area. Anything else is an error at
+`{ editor: multiline }` for a text area. A labeled choice is the schema's own:
+`oneOf` of `{ const, title, description }` (the editor's select shows the titles
+and the chosen one's description; a `when: { config, in }` checks its values
+against the consts as it does an `enum`; oxtask's task workflow part reads the
+labels from `v_config_value.schema`). Anything else is an error at
 `extension check` (`manifest_v2::configuration_of` runs the settings bindings,
 so `x-order`, secret defaults and `x-ui` all show there).
 

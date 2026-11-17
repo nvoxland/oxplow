@@ -260,6 +260,10 @@ mod tests {
                         "type": "object",
                         "properties": {
                             "workflow": { "type": "string", "enum": ["off", "agent_tracks"], "default": "agent_tracks" },
+                            "labeled": { "type": "string", "oneOf": [
+                                { "const": "off", "title": "Off" },
+                                { "const": "on", "title": "On" }
+                            ] },
                             "note": { "type": "string" }
                         }
                     },
@@ -398,6 +402,14 @@ mod tests {
         assert!(
             outside.contains("when.not_in_enum") && outside.contains("sometimes"),
             "{outside}"
+        );
+        let labeled = refused(
+            "{ config: /tasks/labeled, in: [on, sometimes] }",
+            Some(&settings),
+        );
+        assert!(
+            labeled.contains("when.not_in_enum") && labeled.contains("sometimes"),
+            "{labeled}"
         );
         let wrong_type = refused("{ config: /limit, in: [many] }", Some(&settings));
         assert!(wrong_type.contains("when.wrong_type"), "{wrong_type}");

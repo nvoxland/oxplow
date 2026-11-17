@@ -3,24 +3,18 @@ description: "How this project's agents use tasks, and what done means here. For
 needs:
 - model:oxplow/task_record
 loaders:
-  # The four workflows (the setting is oxtask's), the current one marked.
+  # The workflows are the setting's own labeled choices (its `oneOf` in
+  # extension.yaml), the current one marked.
   workflows:
     sql: |
-      WITH cur(choice) AS (SELECT workflow FROM v_oxtask_task_workflow)
-      SELECT w.value, w.label, w.says,
-             (w.value = cur.choice) AS current,
-             (w.value <> cur.choice) AS can_use
-      FROM cur, (
-        SELECT 'agent_tracks' AS value, 'The agent tracks everything' AS label,
-               'The agent takes or files a task for new work, moves it to in progress before it edits and to done when it is fully done; it is reminded when it edits with no task.' AS says, 0 AS ord
-        UNION ALL SELECT 'person_files', 'You file, the agent works them',
-               'The agent works the tasks assigned or queued to its thread and files only follow-ups; what you ask it directly needs no task.', 1
-        UNION ALL SELECT 'custom', 'The project''s own way',
-               'oxtask offers only the next-task command; the project''s own extension tells the agent the rest.', 2
-        UNION ALL SELECT 'off', 'Off',
-               'oxtask tells the agent nothing about tasks.', 3
-      ) w
-      ORDER BY w.ord
+      SELECT json_extract(choice.value, '$.const') AS value,
+             json_extract(choice.value, '$.title') AS label,
+             json_extract(choice.value, '$.description') AS says,
+             (json_extract(choice.value, '$.const') = cur.workflow) AS current,
+             (json_extract(choice.value, '$.const') <> cur.workflow) AS can_use
+      FROM v_config_value setting, json_each(setting.schema, '$.oneOf') choice, v_oxtask_task_workflow cur
+      WHERE setting.key = 'oxtask.tasks.workflow'
+      ORDER BY choice.key
   done_means:
     sql: SELECT definition_of_done FROM v_oxtask_task_workflow
 view:

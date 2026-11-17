@@ -9,7 +9,7 @@ import {
   type FieldInfo,
   type FieldProps,
 } from "./settingFields/index.js";
-import { alternatives, concreteSchema, resolveSchema } from "./settingsModel.js";
+import { alternatives, choices, concreteSchema, resolveSchema } from "./settingsModel.js";
 
 /** Structured controls retain JSON types; collections are edited as one value. */
 export function SettingField({ schema: original, rootSchema = original, ...rest }: FieldProps) {
@@ -29,8 +29,9 @@ export function SettingField({ schema: original, rootSchema = original, ...rest 
   const info: FieldInfo = { schema, resolved, branches, type, rootSchema };
   const props = { ...rest, info };
   if (nullable) return <NullableField {...props} />;
+  const options = choices(original, rootSchema);
+  if (options) return <EnumField {...props} choices={options} />;
   if (branches.length > 1) return <AlternativesField {...props} />;
-  if (schema.enum) return <EnumField {...props} />;
   if (type === "boolean") return <BooleanField {...props} />;
   if (type === "array") return <ArrayField {...props} />;
   if (type === "object" || schema.properties) return <ObjectField {...props} />;

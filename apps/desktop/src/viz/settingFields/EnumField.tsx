@@ -1,27 +1,31 @@
-import { same } from "../settingsModel.js";
+import { same, type Choice } from "../settingsModel.js";
 import type { ControlProps } from "./types.js";
 
-/** A select over the schema's `enum` values. */
-export function EnumField({ info, value, onChange, label }: ControlProps) {
-  const options = info.schema.enum!;
+/** A select over the setting's choices (`enum` values, or titled `const`
+ *  branches), with the chosen one's description beneath. */
+export function EnumField({ info, value, onChange, label, choices }: ControlProps & { choices: Choice[] }) {
+  void info;
+  const chosen = choices.findIndex((choice) => same(choice.value, value));
+  const description = choices[chosen]?.description;
   return (
     <label>
       {label}
       <select
         className="ox-input"
         aria-label={label}
-        value={options.findIndex((v) => same(v, value))}
-        onChange={(e) => onChange(options[Number(e.target.value)])}
+        value={chosen}
+        onChange={(e) => onChange(choices[Number(e.target.value)]!.value)}
       >
         <option value={-1} disabled>
           Choose a value
         </option>
-        {options.map((v, i) => (
+        {choices.map((choice, i) => (
           <option key={i} value={i}>
-            {v === null ? "Null" : String(v)}
+            {choice.title}
           </option>
         ))}
       </select>
+      {description && <span className="ox-muted">{description}</span>}
     </label>
   );
 }

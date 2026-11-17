@@ -78,9 +78,23 @@ configuration:
             title: Task workflow
             x-category: tasks
             type: string
-            enum: [off, person_files, agent_tracks, custom]
             default: agent_tracks
-            description: "off: oxtask tells agents nothing about tasks (the tracker's own commands stay); person_files: the agent works the tasks people file and assign; agent_tracks: the agent takes or files a task for each piece of work; custom: the project's own extension says how."
+            description: How this project's agents use tasks. It applies to agent sessions started after a change.
+            # The choices, in the order the Settings editor and the task
+            # workflow part list them.
+            oneOf:
+              - const: agent_tracks
+                title: The agent tracks everything
+                description: The agent takes or files a task for new work, moves it to in progress before it edits and to done when it is fully done; it is reminded when it edits with no task.
+              - const: person_files
+                title: You file, the agent works them
+                description: The agent works the tasks assigned or queued to its thread and files only follow-ups; what you ask it directly needs no task.
+              - const: custom
+                title: The project's own way
+                description: oxtask offers only the next-task command; the project's own extension tells the agent the rest.
+              - const: "off"
+                title: "Off"
+                description: oxtask tells the agent nothing about tasks (the tracker's own commands stay).
           definitionOfDone:
             title: Definition of done
             x-category: tasks

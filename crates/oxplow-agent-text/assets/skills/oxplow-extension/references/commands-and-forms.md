@@ -172,8 +172,10 @@ Fixed object fields become independent fully qualified keys, such as
 `description` and `x-category` on fields for the Settings inventory. Optional
 annotations are `x-ui`, `x-order`, `x-restart-required`, `x-secret` and `x-atomic`.
 `x-ui` has one hint: `x-ui: { editor: multiline }` makes a string field a text
-area. A choice comes from `enum`, a secret from `x-secret`, Markdown from
-`contentMediaType: text/markdown`; `extension check` refuses anything else in
+area. A choice comes from `enum`, or, to label each choice, from `oneOf` of
+`{ const, title, description }` (the Settings editor shows the titles and the
+chosen one's description; a page can read them from `v_config_value.schema`).
+A secret comes from `x-secret`, Markdown from `contentMediaType: text/markdown`; `extension check` refuses anything else in
 `x-ui`. Secret defaults are prohibited.
 
 A command script reads a setting with

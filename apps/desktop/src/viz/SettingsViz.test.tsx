@@ -83,6 +83,24 @@ test("structured enums retain numeric and boolean types; collections validate ne
   expect(validate({ type: ["string", "null"] }, null)).toEqual([]);
 });
 
+test("a oneOf of titled consts is one labeled choice, with the chosen one's description", () => {
+  const values: unknown[] = [];
+  const schema = {
+    type: "string",
+    oneOf: [
+      { const: "off", title: "Off", description: "Agents hear nothing about tasks." },
+      { const: "agent_tracks", title: "The agent tracks its work", description: "The agent files a task for each piece of work." },
+    ],
+  };
+  const ui = render(<SettingField schema={schema} value="agent_tracks" label="Workflow" onChange={(v) => values.push(v)} />);
+  const select = ui.getByLabelText("Workflow") as HTMLSelectElement;
+  expect([...select.options].map((o) => o.textContent)).toEqual(["Choose a value", "Off", "The agent tracks its work"]);
+  expect(ui.getByText("The agent files a task for each piece of work.")).toBeTruthy();
+  expect(ui.queryByLabelText("Workflow format")).toBeNull();
+  fireEvent.change(select, { target: { value: "0" } });
+  expect(values).toEqual(["off"]);
+});
+
 test("editing global starts with its own inherited default, never a higher-priority local value", () => {
   const ui = render(<SettingsViz run={run()} />);
   fireEvent.change(ui.getByLabelText("View/edit level for Example"), { target: { value: "global" } });

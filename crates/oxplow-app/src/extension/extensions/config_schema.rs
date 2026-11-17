@@ -141,7 +141,7 @@ impl ConfigCondition {
                 format!("`when` on `{pointer}` lists {value}, which isn't a `{kind}`"),
             ));
         }
-        let choices = key.get("enum").and_then(Value::as_array)?;
+        let choices = choices_of(key)?;
         let outside: Vec<String> = self
             .values
             .iter()
@@ -152,12 +152,27 @@ impl ConfigCondition {
             (
                 "when.not_in_enum",
                 format!(
-                    "`when` on `{pointer}` lists {}, which its `enum` doesn't allow",
+                    "`when` on `{pointer}` lists {}, which its choices don't allow",
                     outside.join(", ")
                 ),
             )
         })
     }
+}
+
+/// A setting's choices: its `enum`, or the `const` of each `oneOf`/`anyOf`
+/// branch when every branch is one (a labeled choice).
+pub(crate) fn choices_of(key: &Value) -> Option<Vec<Value>> {
+    if let Some(values) = key.get("enum").and_then(Value::as_array) {
+        return Some(values.clone());
+    }
+    key.get("oneOf")
+        .or_else(|| key.get("anyOf"))
+        .and_then(Value::as_array)
+        .filter(|branches| !branches.is_empty())?
+        .iter()
+        .map(|branch| branch.get("const").cloned())
+        .collect()
 }
 
 /// The schema of the property at JSON pointer `pointer` in `schema`,

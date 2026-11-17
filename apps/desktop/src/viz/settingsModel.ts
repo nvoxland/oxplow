@@ -111,6 +111,27 @@ export function alternatives(schema: Schema, root: Schema = schema): Schema[] {
   const typeBranches = Array.isArray(schema.type) ? schema.type.map((type) => ({ ...schema, type })) : [];
   return (schema.anyOf ?? schema.oneOf ?? typeBranches).map((s) => resolveSchema(s, root));
 }
+/** One choice a setting offers: its value, how it reads, what it means. */
+export type Choice = { value: unknown; title: string; description?: string };
+
+/** The setting's choices: its `enum` values, or a `oneOf`/`anyOf` whose
+ *  every branch is a `const` (labeled by its `title`). Null otherwise. */
+export function choices(schema: Schema, root: Schema = schema): Choice[] | null {
+  const resolved = resolveSchema(schema, root);
+  if (resolved.enum) {
+    return resolved.enum.map((value) => ({ value, title: value === null ? "Null" : String(value) }));
+  }
+  const branches = resolved.anyOf ?? resolved.oneOf;
+  if (!branches?.length) return null;
+  const consts = branches.map((branch) => resolveSchema(branch, root));
+  if (!consts.every((branch) => branch.const !== undefined)) return null;
+  return consts.map((branch) => ({
+    value: branch.const,
+    title: branch.title ?? (branch.const === null ? "Null" : String(branch.const)),
+    description: branch.description,
+  }));
+}
+
 export function concreteSchema(schema: Schema, root: Schema = schema): Schema {
   schema = resolveSchema(schema, root);
   const branches = alternatives(schema, root).filter((s) => s.type !== "null");
