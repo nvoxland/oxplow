@@ -35,7 +35,7 @@ pub(crate) fn credential_definition(namespace: &str, name: &str) -> SettingDefin
         default: None,
         secret: true,
         order: 0,
-        ui: serde_json::json!({}),
+        ui: Default::default(),
         restart_required: false,
         owner: format!("{OWNER_PREFIX}{namespace}"),
     }
@@ -285,15 +285,14 @@ fn collect(
             .and_then(|number| i32::try_from(number).ok())
             .ok_or(ExtensionSettingsError::Declaration("invalid ordering"))?,
     };
-    let ui = schema
-        .get("x-ui")
-        .cloned()
-        .unwrap_or_else(|| Value::Object(Map::new()));
-    if !ui.is_object() {
-        return Err(ExtensionSettingsError::Declaration(
-            "UI metadata must be an object",
-        ));
-    }
+    let ui: oxplow_config::settings::SettingUi = match schema.get("x-ui") {
+        None => Default::default(),
+        Some(ui) => serde_json::from_value(ui.clone()).map_err(|_| {
+            ExtensionSettingsError::Declaration(
+                "x-ui knows one hint, `editor: multiline` (a text area)",
+            )
+        })?,
+    };
     out.push(Binding {
         definition: SettingDefinition {
             key: format!(
@@ -435,8 +434,8 @@ mod tests {
                 "x-category":"tasks.workflow", "properties": {
                     "workflow": {"type":"string", "enum":["off","agent_tracks"],
                         "title":"Task workflow", "description":"How tasks are tracked.",
-                        "x-order":4,"x-ui":{"editor":"select"}, "default":"agent_tracks"},
-                    "done": {"type":"string", "x-ui":{"multiline":true}, "default":""}
+                        "x-order":4, "default":"agent_tracks"},
+                    "done": {"type":"string", "x-ui":{"editor":"multiline"}, "default":""}
                 }},
             "ordered": {"type":"array", "items":{"type":"string"}, "default":[]},
             "servers": {"type":"object", "additionalProperties":{"type":"string"}, "default":{}},
@@ -454,7 +453,15 @@ mod tests {
         assert_eq!(workflow.category, "tasks.workflow");
         assert_eq!(workflow.default, Some(json!("agent_tracks")));
         assert_eq!(workflow.order, 4);
-        assert_eq!(workflow.ui, json!({"editor":"select"}));
+        assert_eq!(workflow.ui, Default::default());
+        let done = definitions
+            .iter()
+            .find(|setting| setting.key == "example.tasks.done")
+            .unwrap();
+        assert_eq!(
+            done.ui.editor,
+            Some(oxplow_config::settings::SettingEditor::Multiline)
+        );
         assert!(definitions
             .iter()
             .any(|setting| setting.key == "example.point"));

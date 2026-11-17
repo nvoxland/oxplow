@@ -78,7 +78,7 @@ fn setting(
             default,
             secret: false,
             order: 0,
-            ui: json!({}),
+            ui: Default::default(),
             restart_required: false,
             owner: "core".into(),
         },
@@ -88,7 +88,9 @@ fn setting(
 
 impl CoreSetting {
     fn multiline(mut self) -> Self {
-        self.definition.ui = json!({ "editor": "multiline" });
+        self.definition.ui = crate::settings::SettingUi {
+            editor: Some(crate::settings::SettingEditor::Multiline),
+        };
         self
     }
 }
@@ -538,7 +540,7 @@ pub fn definitions(fallback_name: &str) -> Vec<SettingDefinition> {
             default: None,
             secret: false,
             order: 0,
-            ui: json!({}),
+            ui: Default::default(),
             restart_required: false,
             owner: "core".into(),
         }),
@@ -579,7 +581,7 @@ fn core_definition(
         default,
         secret: false,
         order: 0,
-        ui: json!({}),
+        ui: Default::default(),
         restart_required: false,
         owner: "core".into(),
     }

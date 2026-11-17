@@ -748,7 +748,26 @@ pub fn configuration_of(
         }
     };
     match declaration.prepare() {
-        Ok(_) => (Some(declaration), Vec::new()),
+        // The settings it registers: annotations (`x-ui`, `x-order`, …) and
+        // secret defaults, checked here so a mistake shows at check.
+        Ok(_) => {
+            let namespace = m
+                .namespace
+                .clone()
+                .unwrap_or_else(|| oxplow_domain::contribution::extension_namespace(&m.name));
+            match crate::extension::extension_settings::definitions_for(&namespace, &declaration) {
+                Ok(_) => (Some(declaration), Vec::new()),
+                Err(error) => (
+                    None,
+                    vec![at(
+                        "config.invalid_declaration",
+                        file,
+                        line,
+                        format!("configuration: {error}"),
+                    )],
+                ),
+            }
+        }
         Err(issues) => (
             None,
             issues
@@ -871,6 +890,30 @@ mod tests {
         let m = parse(OK);
         let errors = check(&m, "ext/extension.yaml", OK);
         assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    /// A setting's `x-ui` is one fixed vocabulary (`editor: multiline`);
+    /// anything else is an error at check, not a silent no-op.
+    #[test]
+    fn an_unknown_setting_ui_hint_is_an_error() {
+        let manifest = |ui: &str| {
+            format!("{OK}configuration:\n  version: 1\n  schema:\n    type: object\n    properties:\n      note: {{ type: string, x-ui: {ui} }}\n")
+        };
+        let good = manifest("{ editor: multiline }");
+        let errors = check(&parse(&good), "e/extension.yaml", &good);
+        assert!(errors.is_empty(), "{errors:?}");
+        for bad in [
+            "{ editor: select }",
+            "{ widget: textarea }",
+            "{ multiline: true }",
+        ] {
+            let text = manifest(bad);
+            let errors = check(&parse(&text), "e/extension.yaml", &text);
+            assert!(
+                errors.iter().any(|e| e.message.contains("x-ui")),
+                "{bad}: {errors:?}"
+            );
+        }
     }
 
     /// `intent` is required. Its examples may be empty here: fixture files

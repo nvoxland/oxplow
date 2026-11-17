@@ -35,7 +35,11 @@ metadata and the sample values its schema accepts
 (`oxplow-config/testdata/core_settings.json`; `OXPLOW_PIN_UPDATE=1` rewrites it),
 so a change to either shows in review.
 Extension schema annotations are `title`, `description`, `x-category`, `x-ui`,
-`x-order`, `x-secret`, `x-restart-required` and `x-atomic`.
+`x-order`, `x-secret`, `x-restart-required` and `x-atomic`. `x-ui` (the
+definition's `ui`, `settings::SettingUi`) is one fixed vocabulary:
+`{ editor: multiline }` for a text area. Anything else is an error at
+`extension check` (`manifest_v2::configuration_of` runs the settings bindings,
+so `x-order`, secret defaults and `x-ui` all show there).
 
 An effective setting is the first value present at **local → project → global →
 default**. Objects and arrays replace whole values; nothing merges across levels.

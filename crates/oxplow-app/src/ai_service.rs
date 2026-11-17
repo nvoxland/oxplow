@@ -3439,7 +3439,7 @@ pub(crate) fn provider_key_definition(id: &str) -> oxplow_config::settings::Sett
         default: None,
         secret: true,
         order: 0,
-        ui: serde_json::json!({}),
+        ui: Default::default(),
         restart_required: false,
         owner: "core".into(),
     }

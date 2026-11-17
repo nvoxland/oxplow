@@ -171,7 +171,10 @@ Fixed object fields become independent fully qualified keys, such as
 `oxtask.tasks.workflow`; arrays and open maps are atomic settings. Put `title`,
 `description` and `x-category` on fields for the Settings inventory. Optional
 annotations are `x-ui`, `x-order`, `x-restart-required`, `x-secret` and `x-atomic`.
-Secret defaults are prohibited.
+`x-ui` has one hint: `x-ui: { editor: multiline }` makes a string field a text
+area. A choice comes from `enum`, a secret from `x-secret`, Markdown from
+`contentMediaType: text/markdown`; `extension check` refuses anything else in
+`x-ui`. Secret defaults are prohibited.
 
 A command script reads a setting with
 `scope("config.read", {"key": "oxtask.tasks.workflow"})` (declare

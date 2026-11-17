@@ -63,11 +63,8 @@ export function SettingEditor({ setting, level }: { setting: Setting; level: Lev
     }
     return setting.defaultValue;
   };
-  const multiline =
-    setting.ui.multiline === true ||
-    setting.ui.editor === "multiline" ||
-    setting.ui.widget === "textarea" ||
-    setting.schema.contentMediaType === "text/markdown";
+  // `ui` is the registry's one vocabulary (`SettingUi`): `editor: multiline`.
+  const multiline = setting.ui.editor === "multiline" || setting.schema.contentMediaType === "text/markdown";
   const inheritedText = setting.secret
     ? setting.statuses[level] === "unavailable"
       ? "Unavailable"

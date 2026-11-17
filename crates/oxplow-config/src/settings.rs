@@ -16,10 +16,6 @@ use serde_json::Value;
 const MAX_BYTES: u64 = 1024 * 1024;
 const MAX_DEPTH: usize = 64;
 
-fn empty_object() -> Value {
-    Value::Object(Default::default())
-}
-
 /// The registry definition is identical for core and extension settings.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -35,12 +31,31 @@ pub struct SettingDefinition {
     pub secret: bool,
     #[serde(default)]
     pub order: i32,
-    #[serde(default = "empty_object")]
-    pub ui: Value,
+    #[serde(default)]
+    pub ui: SettingUi,
     #[serde(default)]
     pub restart_required: bool,
     /// Assigned by the registry host, never accepted as caller authority.
     pub owner: String,
+}
+
+/// How the Settings editor draws a setting beyond what its schema says:
+/// one fixed vocabulary (an extension's `x-ui`), so a hint is never a silent
+/// no-op. A choice comes from the schema (`enum`, `boolean`), a secret is
+/// `x-secret`, Markdown is `contentMediaType: text/markdown`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SettingUi {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub editor: Option<SettingEditor>,
+}
+
+/// A text control other than the one-line input.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum SettingEditor {
+    /// A text area: prompt text, one item per line.
+    Multiline,
 }
 
 pub use oxplow_domain::settings::Level;
@@ -419,14 +434,12 @@ fn compile_definition(definition: SettingDefinition) -> Result<RegisteredSetting
         || definition.title.trim().is_empty()
         || definition.category.trim().is_empty()
         || definition.owner.trim().is_empty()
-        || !definition.ui.is_object()
         || (definition.secret
             && (definition.default.is_some() || contains_default(&definition.schema)))
     {
         return Err(SettingsError::InvalidDefinition);
     }
     bounded(&definition.schema)?;
-    bounded(&definition.ui)?;
     // Schemas are immutable; registries for projects and extension generations
     // share compiled validators without sharing values or owner metadata.
     static VALIDATORS: std::sync::OnceLock<
@@ -1091,7 +1104,7 @@ mod tests {
             default,
             secret: false,
             order: 0,
-            ui: json!({}),
+            ui: Default::default(),
             restart_required: false,
             owner: "example".into(),
         }

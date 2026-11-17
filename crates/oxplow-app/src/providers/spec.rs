@@ -448,7 +448,7 @@ fn check_harness_settings(data: &oxplow_domain::agent::harness::HarnessData) -> 
                 default: None,
                 secret: false,
                 order: 0,
-                ui: serde_json::json!({}),
+                ui: Default::default(),
                 restart_required: false,
                 owner: "core".into(),
             })

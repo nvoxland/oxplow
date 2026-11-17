@@ -138,7 +138,7 @@ pub(crate) fn setting_definitions(
             default,
             secret: false,
             order: 0,
-            ui: serde_json::json!({}),
+            ui: Default::default(),
             restart_required: false,
             owner: "core".into(),
         };
@@ -227,7 +227,7 @@ pub(crate) fn declared_instance_settings(
                 default,
                 secret: false,
                 order: 0,
-                ui: serde_json::json!({}),
+                ui: Default::default(),
                 restart_required: false,
                 owner: "core".into(),
             }
