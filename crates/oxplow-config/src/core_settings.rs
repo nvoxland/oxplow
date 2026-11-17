@@ -705,6 +705,21 @@ pub fn config_from(
     Ok(config)
 }
 
+/// Check one value by its own core rule, the rule `config_from` applies.
+/// No rule reads another setting, so a write checks only the keys it
+/// changes. A key that core does not own has no core rule.
+pub fn check(key: &str, value: &Value) -> Result<(), ConfigError> {
+    let invalid = |message: String| ConfigError::Invalid(format!("{key}: {message}"));
+    let mut config = crate::blank_config("Project");
+    match table("Project")
+        .into_iter()
+        .find(|setting| setting.definition.key == key)
+    {
+        Some(setting) => (setting.apply)(&mut config, value.clone()).map_err(invalid),
+        None => apply_family(&mut config, key, value.clone(), Origin::Default).map_err(invalid),
+    }
+}
+
 fn apply_family(
     config: &mut OxplowConfig,
     key: &str,
@@ -862,6 +877,26 @@ mod tests {
             .iter()
             .map(|(key, value)| ((*key).to_owned(), (value.clone(), Origin::Project)))
             .collect()
+    }
+
+    #[test]
+    fn one_value_is_checked_by_its_own_rule() {
+        check(keys::REPLACEMENTS, &json!({"task.board": "oxplow"})).unwrap();
+        let refused = check(keys::REPLACEMENTS, &json!({"unknown.target": "x"}))
+            .unwrap_err()
+            .to_string();
+        assert!(refused.contains(keys::REPLACEMENTS), "{refused}");
+        check("oxplow.activeProviders.snapshots", &json!("oxplow")).unwrap();
+        let refused = check("oxplow.activeProviders.nothing", &json!("oxplow"))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            refused.contains("oxplow.activeProviders.nothing"),
+            "{refused}"
+        );
+        // A key core does not own has no core rule.
+        check("oxplow.extensions.someone.enabled", &json!(false)).unwrap();
+        check("other.limit", &json!("anything")).unwrap();
     }
 
     #[test]

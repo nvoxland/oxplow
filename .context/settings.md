@@ -70,10 +70,20 @@ origin. Without a level it resolves inheritance; with a level it reads only that
 override. `oxplow.config.set {key, value, level}` and `.unset {key, level}` require
 an explicit `local`, `project` or `global`. `list_keys` returns definitions from
 the registry. Values are validated by registered offline schemas before storage;
-core writes also build the typed view (`config_from`) before changing files,
-both at the selected level and with higher overrides applied. An override
-invalidated by an extension schema change can still be replaced or removed;
-undo is withheld when it would restore that invalid value.
+a core value is also checked by its own rule (`core_settings::check`, the rule
+`config_from` applies). No core rule reads another setting, so a write checks
+only the keys it changes. An override invalidated by an extension schema change
+can still be replaced or removed; undo is withheld when it would restore that
+invalid value.
+
+**One write.** `config.set`, `config.unset`, `config.update` and every domain
+action (`file.mark_generated`, `capability.choose`, `replacement.choose`, the
+agent settings, `metric.enable`) go through `settings_commands::write_changes`.
+It checks each value, refuses disabling a required extension, skips a key whose
+stored value is the same (no write, no `config.changed`, no undo; nothing
+changed answers `changed: false`), writes once, refreshes the typed config and
+builds the undo. The composed-run ownership rule is on the generic `config.*`
+commands only: a domain action is its own grant.
 
 Extension scripts declare `needs: [config.read]` and call
 `scope("config.read", {"key": "acme.limit"})`. Their secret reads and all composed config writes are limited to
@@ -152,7 +162,7 @@ state, command history, recents and sessions stays outside configuration files.
 ## Development verification
 
 Pure registry, schema, inheritance, file safety and secure-backend cases are in
-`oxplow-config` settings tests. App tests cover generic APIs, typed preflight,
+`oxplow-config` settings tests. App tests cover generic APIs, per-key core checks, unchanged writes,
 canonical undo, extension reads/SQL, secret audit boundaries and provider/collector
 consumers. Extension fixtures cover the Settings inventory and task workflow
 commands. Tests write the real file format: flat registered keys.

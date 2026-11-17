@@ -1,5 +1,6 @@
-//! Domain settings actions compose the same registered storage used by config.*.
-//! Runtime document fields are translated to independently registered keys.
+//! The domain settings actions (mark a file generated, choose a provider or
+//! a replacement). Each writes registered keys through the one settings
+//! write that `config.*` uses.
 
 use crate::commands::ops::Op;
 use std::path::PathBuf;
@@ -7,8 +8,7 @@ use std::sync::{Arc, RwLock};
 
 use oxplow_config::settings::Level;
 use oxplow_config::OxplowConfig;
-use oxplow_domain::events::schema::{ConfigChanged, ConfigChangedV3, ConfigLayer};
-use oxplow_domain::{Actor, CommandCall, CommandError, Envelope};
+use oxplow_domain::{Actor, CommandError};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -98,13 +98,6 @@ impl Layer {
             Self::Global => Level::Global,
         }
     }
-    fn logged(self) -> ConfigLayer {
-        match self {
-            Self::Project => ConfigLayer::Project,
-            Self::Local => ConfigLayer::Local,
-            Self::Global => ConfigLayer::Global,
-        }
-    }
     /// Resolve an action's starting value at its chosen level or below.
     /// Editing a shared map must never copy a local override into Git.
     pub(super) fn value(
@@ -160,79 +153,9 @@ impl ConfigTarget {
     }
 }
 
-/// Validate the whole typed core projection before any file write.
-pub(super) fn preflight(
-    target: &ConfigTarget,
-    store: &oxplow_config::settings::SettingsStore,
-    changes: &[(String, Option<Value>)],
-    level: Level,
-) -> Result<(), CommandError> {
-    let fail = |e: oxplow_config::settings::SettingsError| CommandError::Invalid {
-        field: Some("/value".into()),
-        message: e.to_string(),
-    };
-    let mut layers = std::collections::HashMap::new();
-    for at in Level::PRECEDENCE {
-        let mut values = store.layer(at).map_err(fail)?;
-        if at == level {
-            for (key, value) in changes {
-                if let Some(value) = value {
-                    values.insert(key.clone(), value.clone());
-                } else {
-                    values.remove(key);
-                }
-            }
-        }
-        layers.insert(at, values);
-    }
-    let fallback = target
-        .project_dir
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy();
-    let validate_projection = |precedence: &[Level]| -> Result<(), CommandError> {
-        let mut effective = std::collections::BTreeMap::new();
-        let definitions = store
-            .registry
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .definitions()
-            .filter(|definition| definition.owner == "core" && !definition.secret)
-            .cloned()
-            .collect::<Vec<_>>();
-        for definition in definitions {
-            for at in precedence {
-                if let Some(value) = layers[at].get(&definition.key) {
-                    store.validate(&definition.key, value).map_err(fail)?;
-                    effective.insert(definition.key, (value.clone(), (*at).into()));
-                    break;
-                }
-            }
-        }
-        oxplow_config::core_settings::config_from(&fallback, &effective).map_err(|error| {
-            CommandError::Invalid {
-                field: Some("/value".into()),
-                message: error.to_string(),
-            }
-        })?;
-        Ok(())
-    };
-    // A valid local value must not hide an invalid shared override. Validate
-    // what the edited level would expose without higher overrides, as well
-    // as the effective combination the running project will use.
-    if level != Level::Local {
-        let selected: Vec<_> = Level::PRECEDENCE
-            .into_iter()
-            .skip_while(|at| *at != level)
-            .collect();
-        validate_projection(&selected)?;
-    }
-    validate_projection(&Level::PRECEDENCE)?;
-    Ok(())
-}
-
-/// Change one registered setting at one level, preserving canonical undo.
-/// The domain actions (mark generated, choose a provider, …) compose this.
+/// Change one registered setting at one level through the one settings
+/// write. The domain actions (mark generated, choose a provider, …) compose
+/// this.
 pub(crate) fn change(
     target: &ConfigTarget,
     actor: &Actor,
@@ -240,94 +163,12 @@ pub(crate) fn change(
     value: Option<Value>,
     layer: Layer,
 ) -> Result<HandlerOutput, CommandError> {
-    let store = target.settings()?;
-    if store.definition(key).is_err() {
-        return Err(CommandError::Invalid {
-            field: Some("/key".into()),
-            message: "unknown setting".into(),
-        });
-    }
-    let changes = vec![(key.to_owned(), value)];
-    let fail = |e: oxplow_config::settings::SettingsError| CommandError::Invalid {
-        field: Some("/value".into()),
-        message: e.to_string(),
-    };
-    for (key, value) in &changes {
-        if let Some(v) = value {
-            store.validate(key, v).map_err(fail)?;
-        }
-    }
-    preflight(target, &store, &changes, layer.level())?;
-    let mut inverses = Vec::new();
-    let mut events = Vec::new();
-    let mut writes = Vec::new();
-    for (key, value) in changes {
-        let before = store.get(&key, Some(layer.level())).map_err(fail)?.value;
-        if before == value {
-            continue;
-        }
-        inverses.push(match &before {
-            Some(v) => CommandCall {
-                name: SET.into(),
-                input: json!({"key":key,"value":v,"level":layer.level()}),
-            },
-            None => CommandCall {
-                name: UNSET.into(),
-                input: json!({"key":key,"level":layer.level()}),
-            },
-        });
-        events.push(
-            Envelope::typed::<ConfigChanged>(
-                actor.source(),
-                &ConfigChangedV3 {
-                    key: key.clone(),
-                    before: before.unwrap_or(Value::Null),
-                    after: value.clone().unwrap_or(Value::Null),
-                    layer: layer.logged(),
-                },
-            )
-            .with_subject([oxplow_domain::uri::build::config_uri(&key)]),
-        );
-        writes.push((key, value));
-    }
-    if writes.is_empty() {
-        return Ok(HandlerOutput {
-            result: json!({"changed":false}),
-            unchanged: true,
-            ..Default::default()
-        });
-    }
-    let inverse = if inverses.len() == 1 {
-        inverses.pop()
-    } else {
-        let mut set = serde_json::Map::new();
-        let mut unset = Vec::new();
-        for inverse in inverses {
-            let key = inverse.input["key"]
-                .as_str()
-                .expect("setting key")
-                .to_owned();
-            if inverse.name == SET {
-                set.insert(key, inverse.input["value"].clone());
-            } else {
-                unset.push(key);
-            }
-        }
-        Some(CommandCall {
-            name: "oxplow.config.update".into(),
-            input: json!({"set":set,"unset":unset,"level":layer.level()}),
-        })
-    };
-    // The file is an external system: complete its one atomic replacement
-    // before the bus records success, events or undo.
-    store.update(&writes, layer.level()).map_err(fail)?;
-    target.refresh()?;
-    Ok(HandlerOutput {
-        result: json!({"changed":true}),
-        inverse,
-        events,
-        ..Default::default()
-    })
+    super::settings_commands::write_changes(
+        target,
+        actor,
+        vec![(key.to_owned(), value)],
+        layer.level(),
+    )
 }
 
 pub(super) fn settings_handler(
@@ -635,6 +476,37 @@ mod tests {
             .unwrap()
             .replacements
             .contains_key("task.board"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn writing_the_stored_value_again_changes_nothing() {
+        let (_dir, _target, bus) = setup();
+        let set = json!({"key":"oxplow.snapshots.retentionDays","value":9,"level":"project"});
+        let first = bus
+            .run(&Actor::Human, SET, set.clone(), false)
+            .await
+            .unwrap();
+        assert_eq!(first.result["changed"], true);
+        let again = bus.run(&Actor::Human, SET, set, false).await.unwrap();
+        assert_eq!(again.result["changed"], false);
+        assert!(again.inverse.is_none());
+        // A domain action answers the same way as the generic write.
+        let mark = json!({"entry":"dist"});
+        let first = bus
+            .run(
+                &Actor::Human,
+                "oxplow.file.mark_generated",
+                mark.clone(),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(first.result["level"], "project");
+        let again = bus
+            .run(&Actor::Human, "oxplow.file.mark_generated", mark, false)
+            .await
+            .unwrap();
+        assert_eq!(again.result["changed"], false);
     }
 
     #[tokio::test(flavor = "multi_thread")]

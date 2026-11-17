@@ -1079,7 +1079,7 @@ commands:
     op: choose_replacement
     example: {"target": "task.board", "whose": "task-views"}
   - name: agent.set_setting
-    summary: "Set one of an agent harness's declared settings (`oxplow.agentConfig`, what its launch reads); a blank value clears it. Logged as config.changed, undoable."
+    summary: "Set one of an agent harness's declared settings (`oxplow.agents.<harness>.<setting>` at project level, what its launch reads); a blank value clears it. Logged as config.changed, undoable."
     scope: config.write
     op: set_agent_setting
     example: {"agent": "claude", "key": "model", "value": "opus"}

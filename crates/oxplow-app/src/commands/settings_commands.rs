@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use oxplow_config::settings::{Level, SettingsError};
 use oxplow_domain::events::schema::{ConfigChanged, ConfigChangedV3, ConfigLayer};
-use oxplow_domain::{CommandCall, CommandError, Envelope};
+use oxplow_domain::{Actor, CommandCall, CommandError, Envelope};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -183,7 +183,8 @@ pub(super) fn ops(target: ConfigTarget) -> Vec<Op> {
                     .map(|(key, value)| (key, Some(value)))
                     .collect();
                 changes.extend(input.unset.into_iter().map(|key| (key, None)));
-                write_changes(target, invocation, changes, input.level)
+                authorize_writes(&target, &invocation.run, &changes)?;
+                write_changes(&target, invocation.actor(), changes, input.level)
             })
         })),
     )
@@ -213,112 +214,160 @@ fn write(
     value: Option<Value>,
     level: Level,
 ) -> Result<HandlerOutput, CommandError> {
-    let mut output = write_changes(target, invocation, vec![(key.clone(), value)], level)?;
+    let changes = vec![(key.clone(), value)];
+    authorize_writes(&target, &invocation.run, &changes)?;
+    let mut output = write_changes(&target, invocation.actor(), changes, level)?;
     output.result["key"] = json!(key);
     Ok(output)
 }
 
-fn write_changes(
-    target: ConfigTarget,
-    invocation: Invocation,
+/// A composed run writes only its own extension's settings through the
+/// generic commands. A domain action is its own grant, so it has no such
+/// check.
+fn authorize_writes(
+    target: &ConfigTarget,
+    run: &oxplow_domain::run::RunContext,
+    changes: &[(String, Option<Value>)],
+) -> Result<(), CommandError> {
+    let settings = target.settings()?;
+    for (key, _) in changes {
+        let definition = settings.definition(key).map_err(error)?;
+        authorize_composer(target, run, &definition, true)?;
+    }
+    Ok(())
+}
+
+/// The one write of registered settings at one level: `config.set`,
+/// `config.unset`, `config.update` and every domain action (mark a file
+/// generated, choose a provider, …) come here. Each value is checked by its
+/// schema and by its own core rule before the file changes. A key whose
+/// stored value is the same is not written, logged or undone.
+pub(crate) fn write_changes(
+    target: &ConfigTarget,
+    actor: &Actor,
     changes: Vec<(String, Option<Value>)>,
     level: Level,
 ) -> Result<HandlerOutput, CommandError> {
     let settings = target.settings()?;
-    let mut keys = std::collections::BTreeSet::new();
-    let mut before_values = Vec::new();
     let layer_values = settings.layer(level).map_err(error)?;
-    let mut has_secret = false;
+    let refused = |message: String| CommandError::Invalid {
+        field: Some("/value".into()),
+        message,
+    };
+    let count = changes.len();
+    let mut keys = std::collections::BTreeSet::new();
+    let mut writes = Vec::new();
+    let mut secret = false;
     let mut undoable = true;
-    for (key, value) in &changes {
+    for (key, value) in changes {
         if !keys.insert(key.clone()) {
             return Err(error(SettingsError::DuplicateKey));
         }
-        validate_change(key, value.as_ref())?;
-        let definition = settings.definition(key).map_err(error)?;
-        authorize_composer(&target, &invocation.run, &definition, true)?;
-        has_secret |= definition.secret;
-        let before = if definition.secret {
+        validate_change(&key, value.as_ref())?;
+        let definition = settings.definition(&key).map_err(error)?;
+        if let Some(value) = &value {
+            settings
+                .validate(&key, value)
+                .map_err(|e| refused(e.to_string()))?;
+            oxplow_config::core_settings::check(&key, value).map_err(|e| refused(e.to_string()))?;
+        }
+        if definition.secret {
+            // A secret's stored value is never read back, so it is always
+            // written and has no undo.
+            secret = true;
             undoable = false;
-            None
-        } else {
-            layer_values.get(key).cloned()
-        };
+            writes.push((key, value, None));
+            continue;
+        }
+        let before = layer_values.get(&key).cloned();
+        if before == value {
+            continue;
+        }
         if before
             .as_ref()
-            .is_some_and(|value| settings.validate(key, value).is_err())
+            .is_some_and(|value| settings.validate(&key, value).is_err())
         {
             undoable = false;
         }
-        before_values.push(before);
+        writes.push((key, value, before));
     }
-    if has_secret && changes.len() != 1 {
+    if secret && count != 1 {
         return Err(error(SettingsError::PlaintextSecret));
     }
-    super::config_commands::preflight(&target, &settings, &changes, level)?;
-    if has_secret {
-        let (key, value) = &changes[0];
+    if writes.is_empty() {
+        return Ok(HandlerOutput {
+            result: json!({"level":level,"secret":false,"changed":false}),
+            unchanged: true,
+            ..Default::default()
+        });
+    }
+    // The file is an external system: complete its one atomic replacement
+    // before the bus records success, events or undo.
+    if secret {
+        let (key, value, _) = &writes[0];
         match value {
             Some(value) => settings.set(key, value.clone(), level),
             None => settings.unset(key, level),
         }
         .map_err(error)?;
     } else {
+        let changes: Vec<_> = writes
+            .iter()
+            .map(|(key, value, _)| (key.clone(), value.clone()))
+            .collect();
         settings.update(&changes, level).map_err(error)?;
     }
     target.refresh()?;
+    let layer = match level {
+        Level::Local => ConfigLayer::Local,
+        Level::Project => ConfigLayer::Project,
+        Level::Global => ConfigLayer::Global,
+    };
     let mut restore = serde_json::Map::new();
     let mut unset = Vec::new();
     let mut events = Vec::new();
-    for ((key, value), before) in changes.iter().zip(before_values) {
-        if let Some(value) = &before {
-            restore.insert(key.clone(), value.clone());
-        } else {
-            unset.push(key.clone());
+    for (key, value, before) in &writes {
+        match before {
+            Some(before) => {
+                restore.insert(key.clone(), before.clone());
+            }
+            None => unset.push(key.clone()),
         }
         events.push(
             Envelope::typed::<ConfigChanged>(
-                invocation.run.actor().source(),
+                actor.source(),
                 &ConfigChangedV3 {
                     key: key.clone(),
-                    before: before.unwrap_or(Value::Null),
-                    after: if has_secret {
+                    before: before.clone().unwrap_or(Value::Null),
+                    after: if secret {
                         Value::Null
                     } else {
                         value.clone().unwrap_or(Value::Null)
                     },
-                    layer: match level {
-                        Level::Local => ConfigLayer::Local,
-                        Level::Project => ConfigLayer::Project,
-                        Level::Global => ConfigLayer::Global,
-                    },
+                    layer,
                 },
             )
             .with_subject([oxplow_domain::uri::build::config_uri(key)]),
         );
     }
-    let inverse = undoable.then(|| {
-        if changes.len() == 1 {
-            let key = &changes[0].0;
-            match restore.get(key) {
-                Some(value) => CommandCall {
-                    name: "oxplow.config.set".into(),
-                    input: json!({"key":key,"value":value,"level":level}),
-                },
-                None => CommandCall {
-                    name: "oxplow.config.unset".into(),
-                    input: json!({"key":key,"level":level}),
-                },
-            }
-        } else {
-            CommandCall {
-                name: "oxplow.config.update".into(),
-                input: json!({"set":restore,"unset":unset,"level":level}),
-            }
-        }
+    let inverse = undoable.then(|| match writes.as_slice() {
+        [(key, _, before)] => match before {
+            Some(value) => CommandCall {
+                name: "oxplow.config.set".into(),
+                input: json!({"key":key,"value":value,"level":level}),
+            },
+            None => CommandCall {
+                name: "oxplow.config.unset".into(),
+                input: json!({"key":key,"level":level}),
+            },
+        },
+        _ => CommandCall {
+            name: "oxplow.config.update".into(),
+            input: json!({"set":restore,"unset":unset,"level":level}),
+        },
     });
     Ok(HandlerOutput {
-        result: json!({"level":level,"secret":has_secret,"changed":true}),
+        result: json!({"level":level,"secret":secret,"changed":true}),
         inverse,
         events,
         ..Default::default()
