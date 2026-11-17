@@ -728,6 +728,8 @@ struct VizFile {
     #[serde(default)]
     markdown: Option<VizMarkdown>,
     #[serde(default)]
+    settings: Option<crate::pages::spec::VizSettings>,
+    #[serde(default)]
     form: Option<FormSpec>,
     #[serde(default)]
     custom: Option<VizCustom>,
@@ -1826,6 +1828,7 @@ fn leaf_viz(
         embed: f.embed,
         terminal: f.terminal,
         markdown: f.markdown,
+        settings: f.settings,
         form: f.form,
         custom: f.custom,
         group: f.group,

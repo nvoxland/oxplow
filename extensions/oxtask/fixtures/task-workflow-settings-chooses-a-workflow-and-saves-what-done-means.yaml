@@ -1,24 +1,20 @@
-# Settings → Integrations → Task workflow: the four workflows, each with
-# what the agent will do, the current one marked (the default, agent
-# tracks everything). Use This picks another for the project; the form
-# saves the definition of done, and the workflow chosen stays.
+# Settings → Integrations → Task workflow: oxtask's two settings in the
+# settings editor at project level (the workflow's choices labeled by its
+# schema), the default workflow until the project chooses another.
 requires: [oxplow-bundled, oxtask]
 when: { part: task-workflow-settings }
 expect:
   loaders:
-    workflows:
+    settings:
       rows:
-        - { value: agent_tracks, current: 1 }
-        - { value: person_files, current: 0 }
-        - { value: custom, current: 0 }
-        - { value: "off", current: 0 }
-    done_means: { rows: [{ definition_of_done: "" }] }
+        - { key: oxtask.tasks.definitionOfDone, value: '""', origin: default }
+        - { key: oxtask.tasks.workflow, value: '"agent_tracks"', origin: default }
 steps:
-  - press: { action: use, node: workflows, row: { value: person_files } }
-    expect: { ok: true }
-  - submit: { node: done_means, input: { definition_of_done: "- Tests pass.\n- Committed." } }
-    expect: { ok: true }
-  - expect:
+  - given:
+      - { command: oxplow.config.set, input: { key: oxtask.tasks.workflow, value: person_files, level: project } }
+    expect:
       loaders:
-        workflows: { rows: { contains: [{ value: person_files, current: 1, can_use: 0 }, { value: agent_tracks, current: 0, can_use: 1 }] } }
-        done_means: { rows: [{ definition_of_done: "- Tests pass.\n- Committed." }] }
+        settings:
+          rows:
+            - { key: oxtask.tasks.definitionOfDone }
+            - { key: oxtask.tasks.workflow, value: '"person_files"', origin: project }

@@ -7086,6 +7086,7 @@ export type VizConfig_Deserialize = {
 	embed: VizEmbed | null,
 	terminal: VizTerminal | null,
 	markdown: VizMarkdown | null,
+	settings: VizSettings | null,
 	form: FormSpec_Deserialize | null,
 	/**  For `custom`: the component and its props. */
 	custom: VizCustom_Deserialize | null,
@@ -7158,6 +7159,7 @@ export type VizConfig_Serialize = {
 	embed: VizEmbed | null,
 	terminal: VizTerminal | null,
 	markdown: VizMarkdown | null,
+	settings: VizSettings | null,
 	form: FormSpec_Serialize | null,
 	/**  For `custom`: the component and its props. */
 	custom: VizCustom_Serialize | null,
@@ -7372,6 +7374,15 @@ export type VizSections = {
 	 *  the group's first row).
 	 */
 	group_link?: string | null,
+};
+
+/**
+ *  `settings` viz: with `level`, every change it saves goes to that level
+ *  (an extension page's "for this project" settings) and it offers no level
+ *  choice; without, a person chooses per setting.
+ */
+export type VizSettings = {
+	level?: Level | null,
 };
 
 /**  `steps` viz: each step's text and status. */

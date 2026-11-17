@@ -836,7 +836,11 @@ for SQL.
 
 ## Registry settings forms
 
-`viz: settings` draws the standard registry editor from `v_config_value` rows.
+`viz: settings` draws the standard registry editor from `v_config_value` rows
+(the page's query chooses them; the viz shows every row). `settings: { level }`
+(`VizSettings`) saves every change at that level and drops the level choice:
+how an extension page edits its own settings (oxtask's task workflow part), with
+label, control and validation from the registry and no command of its own.
 The foundation Settings index links to `settings-category` with `category`, `q`
 and optional `setting` parameters. The visualization edits through the public
 config commands and uses per-level inventory statuses; it never reads secret

@@ -3,46 +3,16 @@ description: "How this project's agents use tasks, and what done means here. For
 needs:
 - model:oxplow/task_record
 loaders:
-  # The workflows are the setting's own labeled choices (its `oneOf` in
-  # extension.yaml), the current one marked.
-  workflows:
+  # oxtask's own settings, as the registry has them: title, choices (the
+  # workflow's labeled `oneOf`), value and where it comes from.
+  settings:
     sql: |
-      SELECT json_extract(choice.value, '$.const') AS value,
-             json_extract(choice.value, '$.title') AS label,
-             json_extract(choice.value, '$.description') AS says,
-             (json_extract(choice.value, '$.const') = cur.workflow) AS current,
-             (json_extract(choice.value, '$.const') <> cur.workflow) AS can_use
-      FROM v_config_value setting, json_each(setting.schema, '$.oneOf') choice, v_oxtask_task_workflow cur
-      WHERE setting.key = 'oxtask.tasks.workflow'
-      ORDER BY choice.key
-  done_means:
-    sql: SELECT definition_of_done FROM v_oxtask_task_workflow
+      SELECT * FROM v_config_value
+      WHERE key IN ('oxtask.tasks.workflow', 'oxtask.tasks.definitionOfDone')
+      ORDER BY setting_order, key
 view:
-  stack:
-  - id: workflows
-    title: How agents use tasks
-    from: workflows
-    viz: table
-    emphasis: current
-    columns:
-    - key: label
-      label: Workflow
-    - key: says
-      label: What the agent does
-    actions:
-    - id: use
-      label: Use This
-      command: oxtask.tasks.set_workflow
-      row: true
-      when: can_use
-      input:
-        workflow: '{{row.value}}'
-  - id: done_means
-    title: What done means
-    from: done_means
-    viz: form
-    form:
-      command: oxtask.tasks.set_workflow
-      mode: edit
-      fields:
-      - definition_of_done
+  id: task-workflow-settings
+  from: settings
+  viz: settings
+  # The project's choice: every change is the project's.
+  settings: { level: project }

@@ -11,21 +11,29 @@ import { displayValue, editsInline, inventory, levelName, LEVELS, type Level, ty
  *  pages. The page's query chooses the rows (category, search, changed). */
 export function SettingsViz({ run }: { run: VizRun }) {
   const rows = inventory(run);
+  // A page that states the level (`settings: { level }`) saves every change there.
+  const fixedLevel = (run.config.settings?.level ?? null) as Level | null;
   return (
     <div data-testid="settings-viz">
       {!rows.length && <p className="ox-muted">No settings match these filters.</p>}
       {rows.map((setting) => (
-        <SettingSection key={setting.key} id={`${run.config.id}/${setting.key}`} setting={setting} />
+        <SettingSection
+          key={setting.key}
+          id={`${run.config.id}/${setting.key}`}
+          setting={setting}
+          fixedLevel={fixedLevel}
+        />
       ))}
     </div>
   );
 }
 
-function SettingSection({ setting, id }: { setting: Setting; id: string }) {
+function SettingSection({ setting, id, fixedLevel }: { setting: Setting; id: string; fixedLevel: Level | null }) {
   const levelId = useId();
-  const [level, setLevel] = useState<Level>(
+  const [chosenLevel, setLevel] = useState<Level>(
     LEVELS.includes(setting.origin as Level) ? (setting.origin as Level) : "project",
   );
+  const level = fixedLevel ?? chosenLevel;
   // A scalar is edited in its section; anything else opens its editor.
   const inline = editsInline(setting);
   const [editing, setEditing] = useState(inline);
@@ -41,7 +49,10 @@ function SettingSection({ setting, id }: { setting: Setting; id: string }) {
     : setting.origin
       ? levelName(setting.origin as Level | "default")
       : "not set";
-  const levelSelect = (label: string) => (
+  const levelSelect = (label: string) =>
+    fixedLevel ? (
+      <span>{levelName(fixedLevel)}</span>
+    ) : (
     <select
       id={levelId}
       className="ox-select"
@@ -58,7 +69,7 @@ function SettingSection({ setting, id }: { setting: Setting; id: string }) {
         </option>
       ))}
     </select>
-  );
+    );
   const changedFor = LEVELS.filter((l) => setting.statuses[l] === "set").map(levelName);
   const originIndex = setting.origin ? LEVELS.indexOf(setting.origin as Level) : -1;
   return (
@@ -79,7 +90,7 @@ function SettingSection({ setting, id }: { setting: Setting; id: string }) {
                 </>
               ),
             },
-            ...(inline
+            ...(inline || fixedLevel
               ? []
               : [
                   {
@@ -106,8 +117,8 @@ function SettingSection({ setting, id }: { setting: Setting; id: string }) {
                 key: "level",
                 label: "Level",
                 render: (at) =>
-                  at === "default" ? (
-                    levelName("default")
+                  at === "default" || fixedLevel ? (
+                    levelName(at)
                   ) : (
                     <button
                       type="button"
@@ -160,10 +171,14 @@ function SettingSection({ setting, id }: { setting: Setting; id: string }) {
               level={level}
             />
           )}
-          {inline && (
-            <label htmlFor={levelId} className="ox-muted">
-              Saves to {levelSelect("Saves to")}
-            </label>
+          {fixedLevel ? (
+            <p className="ox-muted">Saves to {levelName(fixedLevel)}</p>
+          ) : (
+            inline && (
+              <label htmlFor={levelId} className="ox-muted">
+                Saves to {levelSelect("Saves to")}
+              </label>
+            )
           )}
         </div>
       </div>

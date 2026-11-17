@@ -150,6 +150,13 @@ under the node's heading, above its viz: what a thing is, above its facts
 - `embed`: the first row's web page (`http`/`https`) in a sandboxed window:
   `embed: { url: <column> }`. `terminal`: a terminal.
 - `form`: one command's input (`commands-and-forms.md`).
+- `settings`: the Settings editor over rows of `v_config_value` (its
+  columns; select `*`): each setting's title, control from its schema,
+  value, where it comes from, and Save. `settings: { level: project }`
+  saves every change at that level and offers no level choice; without it
+  a person chooses. The way for a page to let a person edit your
+  extension's settings (`commands-and-forms.md` "Editing your settings on
+  a page").
 - `custom`: `custom: { component: <id>, props }`, a sandboxed component;
   reach for it only when no built-in viz fits.
 

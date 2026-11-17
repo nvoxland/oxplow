@@ -1346,6 +1346,7 @@ mod tests {
                 embed: None,
                 terminal: None,
                 markdown: None,
+                settings: None,
                 form: None,
                 custom: None,
                 group: None,

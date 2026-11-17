@@ -715,6 +715,18 @@ pub struct VizMarkdown {
     pub base: Option<String>,
 }
 
+/// `settings` viz: with `level`, every change it saves goes to that level
+/// (an extension page's "for this project" settings) and it offers no level
+/// choice; without, a person chooses per setting.
+#[derive(
+    Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct VizSettings {
+    #[serde(default)]
+    pub level: Option<oxplow_domain::settings::Level>,
+}
+
 /// `hunks` viz: the file and the two revisions each row diffs.
 #[derive(
     Debug, Clone, Default, PartialEq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
@@ -2127,6 +2139,7 @@ pub struct VizConfig {
     pub embed: Option<VizEmbed>,
     pub terminal: Option<VizTerminal>,
     pub markdown: Option<VizMarkdown>,
+    pub settings: Option<VizSettings>,
     pub form: Option<FormSpec>,
     /// For `custom`: the component and its props.
     pub custom: Option<VizCustom>,

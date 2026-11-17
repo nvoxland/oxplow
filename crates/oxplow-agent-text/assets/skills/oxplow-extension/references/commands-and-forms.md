@@ -181,6 +181,29 @@ chosen one's description; a page can read them from `v_config_value.schema`).
 A secret comes from `x-secret`, Markdown from `contentMediaType: text/markdown`; `extension check` refuses anything else in
 `x-ui`. Secret defaults are prohibited.
 
+### Editing your settings on a page
+
+A page lets a person edit your settings with the `settings` viz over your
+keys. The label, control (a labeled choice, a number, a text area) and
+validation come from your `configuration:` declaration, and a change is an
+`oxplow.config.set`. No dataset, command, handler or form is needed:
+
+```yaml
+loaders:
+  settings:
+    sql: |
+      SELECT * FROM v_config_value
+      WHERE key IN ('oxtask.tasks.workflow', 'oxtask.tasks.definitionOfDone')
+      ORDER BY setting_order, key
+view:
+  from: settings
+  viz: settings
+  settings: { level: project }   # every change is the project's
+```
+
+Leave `settings:` out to let the person choose the level per setting. Your
+settings are also on Settings, under their category.
+
 A command script reads a setting with
 `scope("config.read", {"key": "oxtask.tasks.workflow"})` (declare
 `needs: [config.read]`). The result has `key`, `value`, `origin`, `isSet` and

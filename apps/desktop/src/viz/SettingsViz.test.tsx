@@ -252,3 +252,14 @@ test("a list item moves down as well as up", () => {
   expect(value).toEqual(["b", "a", "c"]);
   expect(ui.getAllByText("Move down").length).toBe(2);
 });
+
+test("a page that states the level offers no level choice and saves there", async () => {
+  const data = run({ schema: JSON.stringify({ type: "string" }), value: '"shared"', origin: "project", local_value: null, local_status: "unset" });
+  (data.config as unknown as { settings: { level: string } }).settings = { level: "project" };
+  const ui = render(<SettingsViz run={data} />);
+  expect(ui.queryByRole("combobox")).toBeNull();
+  expect(ui.getByText("Saves to This project")).toBeTruthy();
+  fireEvent.change(ui.getByLabelText("Example", { selector: "input" }), { target: { value: "changed" } });
+  fireEvent.click(ui.getByText("Save"));
+  await waitFor(() => expect(calls).toEqual([{ name: "oxplow.config.set", input: { key: "oxplow.example", level: "project", value: "changed" } }]));
+});
