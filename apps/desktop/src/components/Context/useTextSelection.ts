@@ -8,8 +8,8 @@
 // Monaco is that surface's own, with its own menu — the same carve-out as
 // the native context menu (`context-menu.ts`). So is a terminal's: xterm
 // draws its rows as text, but what the browser selects there is not what
-// the person highlighted; the terminal's own button adds that
-// (`TerminalSurface`). Escape forgets it.
+// the person highlighted; the terminal's right-click menu adds that
+// (`terminalMenu.ts`). Escape forgets it.
 
 import { useCallback, useEffect, useState } from "react";
 

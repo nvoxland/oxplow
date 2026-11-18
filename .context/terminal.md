@@ -302,15 +302,16 @@ selection with the word under the pointer when it judges the press outside
 the selection (it misjudged presses inside one in the app), so the menu
 added a single word.
 
-A selection also floats **Add to Context** where the press that made it
-let go (`SelectionContextButton`, the page toolbar's own button), adding
-the same thing. The page's selection toolbar (`useTextSelection`) skips
-`.xterm`: xterm draws its rows as DOM text, but what the browser selects
-there is not the terminal's selection (it once added a stray word). The
-scrollback has no address an agent can read back, so a terminal selection
-always carries the rows around it (`linesAround`: three either side, a
-wrapped row joined to the row it continues, blank edges dropped) as the
-item's `around`.
+Add to Context in the terminal is only this menu entry: no button floats
+over a terminal selection (a drag there is mostly a copy). The page's
+selection toolbar (`useTextSelection`) skips `.xterm`: xterm draws its rows
+as DOM text, but what the browser selects there is not the terminal's
+selection (it once added a stray word). The scrollback has no address an
+agent can read back, so a terminal selection always carries the rows around
+it (`terminalSelection.ts` `linesAround`: three either side, a wrapped row
+joined to the row it continues, blank edges dropped) as the item's
+`around`. `getSelectionPosition` gives 0-based buffer rows, whatever xterm's
+typings say.
 
 ## Paste path and input ordering
 

@@ -135,10 +135,10 @@ test("a second terminal from the strip is picked, renamed and closed", async ({ 
   await expect(shown(page).getByTestId("terminal-tab-strip")).toHaveCount(0);
 });
 
-// A selection in the terminal floats Add to Context over it: the basket
-// gets the terminal's own selection (not what the browser selected in
-// xterm's rows) and the lines around it, which the scrollback can't give
-// back later.
+// A selection in the terminal goes in the basket from its right-click
+// menu, never a floating button: the terminal's own selection (not what
+// the browser selected in xterm's rows) and the lines around it, which the
+// scrollback can't give back later.
 test("a terminal selection goes in the basket with the lines around it", async ({ page, daemon }) => {
   await open(page, daemon, "oxplow:oxplow/page?page=terminal");
   const terminal = page.locator(".xterm");
@@ -152,7 +152,9 @@ test("a terminal selection goes in the basket with the lines around it", async (
   // xterm takes the mouse on a layer over its rows: press where the row is.
   const box = (await row.boundingBox())!;
   await page.mouse.dblclick(box.x + 10, box.y + box.height / 2);
-  await page.getByTestId("selection-context-button").click();
+  await expect(shown(page).getByTestId("selection-context-button")).toHaveCount(0);
+  await page.mouse.click(box.x + 10, box.y + box.height / 2, { button: "right" });
+  await page.getByTestId("menu-item-add-to-context").click();
   await page.getByTestId("context-note-add").click();
   await expect(page.getByTestId("dock-context-badge")).toHaveText("1");
   const item = async () =>

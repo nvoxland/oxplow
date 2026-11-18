@@ -99,8 +99,8 @@ test("no toolbar over an editor's text, or text outside the page", async () => {
 });
 
 // A terminal keeps its own selection (xterm draws rows as text, but what
-// the browser selects there is not what the person highlighted): its own
-// button adds it (`TerminalSurface`), never this one.
+// the browser selects there is not what the person highlighted): its
+// right-click menu adds it, never this toolbar.
 test("no toolbar over a terminal's rows", async () => {
   const view = setup(
     <div className="xterm">

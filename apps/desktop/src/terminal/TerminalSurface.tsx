@@ -1,12 +1,11 @@
 /// The terminal's surface (`.context/terminal.md` "The terminal viz and
 /// its host"): the one xterm.js host — the screen, the font it opens in,
 /// the keys and gestures oxplow adds (Cmd+V, Shift+Enter, Page Up/Down,
-/// Escape, paste, the agent input bus, file-path links, Add to Context
-/// floating over a selection) —
+/// Escape, paste, the agent input bus, file-path links) —
 /// and nothing about a session. What the person types comes out through
 /// `onData` / `onBinary`, a fit through `onResize`; `onOpened` hands the
 /// opened terminal to whoever writes to it (`useTerminalSession`).
-import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useRef, type MouseEvent } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 
@@ -17,8 +16,6 @@ import { addToContext } from "../contextBasket.js";
 import { useContextMenu } from "../components/useRowContextMenu.js";
 import { terminalMenuItems } from "./terminalMenu.js";
 import { terminalSelectionWhat } from "./terminalSelection.js";
-import { SelectionContextButton } from "../components/Context/SelectionContextToolbar.js";
-import { SELECTION_UI_ATTR } from "../components/Context/useTextSelection.js";
 import { subscribeAgentInput } from "../agent-input-bus.js";
 import { installFilePathLinkProvider, type FilePathLinkActivation } from "../terminal-link-provider.js";
 import { typingElsewhere } from "../typingElsewhere.js";
@@ -340,51 +337,12 @@ export function TerminalSurface({
     };
   }, []);
 
-  // Add to Context over the terminal's own selection, where the press that
-  // made it let go: the page's toolbar reads the browser's selection, which
-  // in xterm's rows is not what the person highlighted (`useTextSelection`).
-  const [floating, setFloating] = useState<{ left: number; top: number } | null>(null);
-  useEffect(() => {
-    const host = hostRef.current;
-    const term = termRef.current;
-    if (!host || !term) return;
-    let pressedHere = false;
-    const onDown = (e: globalThis.MouseEvent) => {
-      if ((e.target as Element | null)?.closest?.(`[${SELECTION_UI_ATTR}]`)) return;
-      pressedHere = host.contains(e.target as Node) && e.button === 0;
-    };
-    const onUp = (e: globalThis.MouseEvent) => {
-      if (!pressedHere) return;
-      pressedHere = false;
-      const at = { left: e.clientX, top: e.clientY };
-      // A tick later: xterm finishes the selection on the same mouseup.
-      window.setTimeout(() => setFloating(term.hasSelection() ? at : null), 0);
-    };
-    const selectionDisp = term.onSelectionChange(() => {
-      if (!term.hasSelection()) setFloating(null);
-    });
-    document.addEventListener("mousedown", onDown, true);
-    document.addEventListener("mouseup", onUp);
-    return () => {
-      selectionDisp.dispose();
-      document.removeEventListener("mousedown", onDown, true);
-      document.removeEventListener("mouseup", onUp);
-    };
-  }, []);
-  const addSelection = () => {
-    const term = termRef.current;
-    const what = term ? terminalSelectionWhat(term, uri) : null;
-    if (what) void addToContext(what);
-    setFloating(null);
-  };
-
   return (
     <div
       style={{ position: "relative", width: "100%", flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}
       onContextMenu={openMenu}
     >
       {menu.menu}
-      {floating ? <SelectionContextButton left={floating.left} top={floating.top} onAdd={addSelection} /> : null}
       {/* The gutter is on this wrapper, never the mount: FitAddon measures
           the mount, and padding it makes the row count oscillate. */}
       <div
