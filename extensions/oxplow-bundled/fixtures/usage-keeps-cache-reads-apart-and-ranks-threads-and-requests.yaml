@@ -1,7 +1,8 @@
 # Usage over a range: the agents' fresh tokens (input, output, cache
 # writes) with cache reads apart and the cache hit ratio, then the same by
 # model, by thread and by request, each with its turns; and the pages the
-# person opened most.
+# person opened most, with how long each was shown (a visit still open
+# has no length).
 given:
   - command: oxplow.thread.create
     input: { stream: str1, title: Second }
@@ -10,8 +11,8 @@ given:
   - observe: { token_usage: { turn: 1, model: big, input_tokens: 100, output_tokens: 900, cache_creation_input_tokens: 1000, cache_read_input_tokens: 8000 } }
   - observe: { token_usage: { turn: 1, model: big, input_tokens: 100, output_tokens: 100, cache_read_input_tokens: 0 } }
   - observe: { token_usage: { turn: 2, thread: thr2, agent: codex, model: small, input_tokens: 50, output_tokens: 50 } }
-  - observe: { visit: { page: "oxplow:oxplow/page?page=alerts", kind: alerts, label: Alerts } }
-  - observe: { visit: { page: "oxplow:oxplow/page?page=alerts", kind: alerts, label: Alerts } }
+  - observe: { visit: { page: "oxplow:oxplow/page?page=alerts", kind: alerts, label: Alerts, duration_ms: 4000 } }
+  - observe: { visit: { page: "oxplow:oxplow/page?page=alerts", kind: alerts, label: Alerts, duration_ms: 1000 } }
   - observe: { visit: { page: "oxplow:oxplow/page?page=files", kind: files, label: Files } }
 when: { page: oxplow/usage, params: { range: 30d } }
 expect:
@@ -33,5 +34,5 @@ expect:
         - { prompt: write docs, fresh: 100 }
     top_pages:
       rows:
-        - { page: Alerts, visits: 2 }
-        - { page: Files, visits: 1 }
+        - { page: Alerts, visits: 2, shown_ms: 5000 }
+        - { page: Files, visits: 1, shown_ms: null }

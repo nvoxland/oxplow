@@ -107,7 +107,7 @@ loaders:
   top_pages:
     sql: |
       SELECT page_id, max(label) AS page, page_kind AS kind, count(*) AS visits,
-             max(visited_at) AS last_visited
+             sum(duration_ms) AS shown_ms, max(visited_at) AS last_visited
       FROM v_page_visit
       WHERE (:range_from IS NULL OR visited_at >= :range_from)
         AND (:range_to IS NULL OR visited_at <= :range_to)
@@ -190,5 +190,6 @@ view:
     - { key: page, label: Page, link: { kind: page, from: page_id } }
     - { key: kind, label: Kind }
     - { key: visits, label: Opens, format: integer }
+    - { key: shown_ms, label: Time shown, format: duration }
     - { key: last_visited, label: Last opened, format: relative }
     empty: You opened no pages in this range.

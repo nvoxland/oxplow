@@ -280,7 +280,8 @@ macro_rules! oxplow_command_table {
                 list_comments_for_target => $crate::commands::comments::list_comments_for_target { target: String } -> Vec<::oxplow_domain::CommentThread>,
                 list_comments_for_stream => $crate::commands::comments::list_comments_for_stream { stream_id: ::oxplow_domain::StreamId } -> Vec<::oxplow_domain::CommentThread>,
                 // page_visit
-                record_page_visit => $crate::commands::page_visit::record_page_visit { page_kind: String, page_id: String, label: Option<String>, duration_ms: Option<u32>, thread_id: Option<String> } -> ::oxplow_db::PageVisit,
+                record_page_visit => $crate::commands::page_visit::record_page_visit { page_kind: String, page_id: String, label: Option<String>, thread_id: Option<String> } -> ::oxplow_db::PageVisit,
+                finish_page_visit => $crate::commands::page_visit::finish_page_visit { id: String, duration_ms: u32 } -> (),
                 list_recent_page_visits => $crate::commands::page_visit::list_recent_page_visits { limit: u32, thread_id: Option<String> } -> Vec<::oxplow_db::PageVisit>,
                 top_visited_pages => $crate::commands::page_visit::top_visited_pages { limit: u32, thread_id: Option<String> } -> Vec<$crate::commands::page_visit::VisitedPage>,
                 forget_page => $crate::commands::page_visit::forget_page { page_kind: String, page_id: String } -> (),

@@ -54,14 +54,17 @@ impl SqlitePageVisitStore {
 
 #[async_trait]
 pub trait PageVisitStore: Send + Sync {
+    /// A visit starts when its page is shown; its length is unknown until
+    /// it ends (`finish`), so `duration_ms` starts NULL.
     async fn record(
         &self,
         page_kind: &str,
         page_id: &str,
         label: Option<&str>,
-        duration_ms: Option<i64>,
         thread_id: Option<&str>,
     ) -> Result<PageVisit, DomainError>;
+    /// The visit (`pv12`) ended after `duration_ms` of being shown.
+    async fn finish(&self, id: &str, duration_ms: i64) -> Result<(), DomainError>;
     /// Recent visits, optionally scoped to one thread. `None` returns
     /// every visit across threads (the global view).
     async fn list_recent(
@@ -89,7 +92,6 @@ impl PageVisitStore for SqlitePageVisitStore {
         page_kind: &str,
         page_id: &str,
         label: Option<&str>,
-        duration_ms: Option<i64>,
         thread_id: Option<&str>,
     ) -> Result<PageVisit, DomainError> {
         let page_kind = page_kind.to_string();
@@ -106,9 +108,9 @@ impl PageVisitStore for SqlitePageVisitStore {
                     .and_then(ThreadId::try_from_str)
                     .map(|t| t.value());
                 conn.execute(
-                    "INSERT INTO page_visit (page_kind, page_id, label, visited_at, duration_ms, thread_id)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    params![page_kind, page_id, label, ts_to_string(now), duration_ms, thread_id_val],
+                    "INSERT INTO page_visit (page_kind, page_id, label, visited_at, thread_id)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![page_kind, page_id, label, ts_to_string(now), thread_id_val],
                 )?;
                 let id = PageVisitId::new(conn.last_insert_rowid()).to_string();
                 Ok(PageVisit {
@@ -117,9 +119,23 @@ impl PageVisitStore for SqlitePageVisitStore {
                     page_id,
                     label,
                     visited_at: now,
-                    duration_ms,
+                    duration_ms: None,
                     thread_id,
                 })
+            })
+            .await
+    }
+
+    async fn finish(&self, id: &str, duration_ms: i64) -> Result<(), DomainError> {
+        let id = PageVisitId::try_from_str(id)
+            .ok_or_else(|| DomainError::Invalid(format!("`{id}` is not a page visit id")))?;
+        self.db
+            .call(move |conn| {
+                conn.execute(
+                    "UPDATE page_visit SET duration_ms = ?2 WHERE id = ?1",
+                    params![id.value(), duration_ms],
+                )?;
+                Ok(())
             })
             .await
     }
@@ -3822,13 +3838,10 @@ mod tests {
     async fn page_visit_record_then_recent() {
         let store = SqlitePageVisitStore::new(Database::in_memory());
         store
-            .record("oxplow/knowledge", "abc", None, Some(1234), None)
+            .record("oxplow/knowledge", "abc", None, None)
             .await
             .unwrap();
-        store
-            .record("task", "wi-1", None, None, None)
-            .await
-            .unwrap();
+        store.record("task", "wi-1", None, None).await.unwrap();
         let recent = store.list_recent(10, None).await.unwrap();
         assert_eq!(recent.len(), 2);
         // newest first
@@ -3836,18 +3849,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn page_visit_is_recorded_open_and_finishing_it_stores_how_long_it_lasted() {
+        let store = SqlitePageVisitStore::new(Database::in_memory());
+        let shown = store
+            .record("oxplow/knowledge", "a", None, None)
+            .await
+            .unwrap();
+        let other = store.record("task", "b", None, None).await.unwrap();
+        assert_eq!(shown.duration_ms, None, "a visit starts with no length");
+        store.finish(&shown.id, 4200).await.unwrap();
+        let recent = store.list_recent(10, None).await.unwrap();
+        let length = |id: &str| recent.iter().find(|v| v.id == id).unwrap().duration_ms;
+        assert_eq!(length(&shown.id), Some(4200));
+        assert_eq!(length(&other.id), None, "only the visit named is finished");
+        assert!(
+            store.finish("not-a-visit", 1).await.is_err(),
+            "a visit id that doesn't parse is an error"
+        );
+    }
+
+    #[tokio::test]
     async fn page_visit_top_groups_correctly() {
         let store = SqlitePageVisitStore::new(Database::in_memory());
         store
-            .record("oxplow/knowledge", "a", None, None, None)
+            .record("oxplow/knowledge", "a", None, None)
             .await
             .unwrap();
         store
-            .record("oxplow/knowledge", "a", None, None, None)
+            .record("oxplow/knowledge", "a", None, None)
             .await
             .unwrap();
         store
-            .record("oxplow/knowledge", "b", None, None, None)
+            .record("oxplow/knowledge", "b", None, None)
             .await
             .unwrap();
         let top = store.list_top(10, None).await.unwrap();
@@ -3859,11 +3892,11 @@ mod tests {
     async fn page_visit_forget_clears_only_target() {
         let store = SqlitePageVisitStore::new(Database::in_memory());
         store
-            .record("oxplow/knowledge", "a", None, None, None)
+            .record("oxplow/knowledge", "a", None, None)
             .await
             .unwrap();
         store
-            .record("oxplow/knowledge", "b", None, None, None)
+            .record("oxplow/knowledge", "b", None, None)
             .await
             .unwrap();
         store.forget_page("oxplow/knowledge", "a").await.unwrap();
@@ -3876,15 +3909,15 @@ mod tests {
     async fn page_visit_recent_filters_by_thread() {
         let store = SqlitePageVisitStore::new(Database::in_memory());
         store
-            .record("oxplow/knowledge", "a", None, None, Some("thr1"))
+            .record("oxplow/knowledge", "a", None, Some("thr1"))
             .await
             .unwrap();
         store
-            .record("oxplow/knowledge", "b", None, None, Some("thr2"))
+            .record("oxplow/knowledge", "b", None, Some("thr2"))
             .await
             .unwrap();
         store
-            .record("oxplow/knowledge", "c", None, None, None)
+            .record("oxplow/knowledge", "c", None, None)
             .await
             .unwrap();
         let in_thread = store.list_recent(10, Some("thr1")).await.unwrap();
@@ -3898,19 +3931,19 @@ mod tests {
     async fn page_visit_top_filters_by_thread() {
         let store = SqlitePageVisitStore::new(Database::in_memory());
         store
-            .record("oxplow/knowledge", "a", None, None, Some("thr1"))
+            .record("oxplow/knowledge", "a", None, Some("thr1"))
             .await
             .unwrap();
         store
-            .record("oxplow/knowledge", "a", None, None, Some("thr1"))
+            .record("oxplow/knowledge", "a", None, Some("thr1"))
             .await
             .unwrap();
         store
-            .record("oxplow/knowledge", "a", None, None, Some("thr2"))
+            .record("oxplow/knowledge", "a", None, Some("thr2"))
             .await
             .unwrap();
         store
-            .record("oxplow/knowledge", "b", None, None, Some("thr1"))
+            .record("oxplow/knowledge", "b", None, Some("thr1"))
             .await
             .unwrap();
         let in_thread = store.list_top(10, Some("thr1")).await.unwrap();

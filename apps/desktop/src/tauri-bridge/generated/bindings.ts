@@ -386,7 +386,12 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	recordPageVisit: (pageKind: string, pageId: string, label: string | null, durationMs: number | null, threadId: string | null) => typedError<PageVisit, IpcError_Serialize>(__TAURI_INVOKE("record_page_visit", { pageKind, pageId, label, durationMs, threadId })),
+	recordPageVisit: (pageKind: string, pageId: string, label: string | null, threadId: string | null) => typedError<PageVisit, IpcError_Serialize>(__TAURI_INVOKE("record_page_visit", { pageKind, pageId, label, threadId })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	finishPageVisit: (id: string, durationMs: number) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("finish_page_visit", { id, durationMs })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.

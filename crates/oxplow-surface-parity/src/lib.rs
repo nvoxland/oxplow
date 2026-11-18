@@ -399,6 +399,10 @@ pub const MANIFEST: &[Capability] = &[
         "record_page_visit",
         "records the pages the person opens, as they browse",
     ),
+    ui(
+        "finish_page_visit",
+        "records how long the person had a page shown, as they browse",
+    ),
     dataset("list_recent_page_visits", &["v_page_visit"]),
     dataset("top_visited_pages", &["v_page_visit"]),
     ui(

@@ -753,7 +753,7 @@
     - { name: ai_context, type: TEXT, doc: "Guidance for an agent reading the metric, as JSON `{\"instructions\", \"synonyms\", \"examples\"}`; NULL when none. Not part of the contract. (v2)" }
     - { name: expression, type: TEXT, doc: "How a measure or formula metric reads its facts, in its canonical `expression:` text (`COUNT(*) FILTER (WHERE value >= 11)`, `METRIC('a') / METRIC('b')`); NULL for an entity metric. (v3)" }
 - name: page_visit
-  version: 3
+  version: 4
   description: "Pages the human opened in oxplow, and for how long — what they've been looking at."
   fields:
     - { name: "id", type: "INTEGER", doc: "Visit id." }
@@ -762,7 +762,7 @@
     - { name: "page_id", type: "TEXT", doc: "Page id (`task:42`, `oxplow:oxplow/file?path=src/a.rs`, …)." }
     - { name: "label", type: "TEXT", doc: "Title shown at the time." }
     - { name: "visited_at", type: "TEXT", doc: "RFC 3339 timestamp." }
-    - { name: "duration_ms", type: "INTEGER", doc: "Time on the page, when known." }
+    - { name: "duration_ms", type: "INTEGER", doc: "How long the page was shown, in milliseconds, counting only time with the window visible; NULL while the visit is open and for one whose end the app missed (it quit). (v4: recorded when the visit ends)" }
   tests:
     - { not_null: id }
     - { unique: id }

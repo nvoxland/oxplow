@@ -100,10 +100,10 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
   person's attention went over a `range` (default 30 days): fresh tokens
   (input, output, cache writes) with cache reads and the hit ratio apart, by
   day, model, thread and request, oxplow's own model calls (`v_ai_call`) and
-  the most opened pages. Cache reads are kept out of every "fresh" sum: on a
-  long session they are most of the prompt, and a sum with them hides where
-  tokens really went. `v_page_visit.duration_ms` is never recorded today, so
-  the page counts opens, not time. Fixtures: `dashboards-*`, `usage-*`.
+  the most opened pages with how long each was shown
+  (`v_page_visit.duration_ms`). Cache reads are kept out of every "fresh"
+  sum: on a long session they are most of the prompt, and a sum with them
+  hides where tokens really went. Fixtures: `dashboards-*`, `usage-*`.
 - **The review packet**. Its pages, mounted in
   the `sections` slots of `oxplow/diff-view` (the Changes
   page), `commit` and `uncommitted-changes`. What deviated and Struggled

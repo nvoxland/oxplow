@@ -788,18 +788,24 @@ pub(super) async fn observe_visit(host: &Host, body: &Value) -> Result<(), Strin
     use oxplow_db::analytics_stores::PageVisitStore as _;
     let text = |key: &str| body.get(key).and_then(Value::as_str);
     let page = text("page").ok_or("`visit.page` is the page's ref")?;
-    host.svc
-        .page_visit_store
+    let store = &host.svc.page_visit_store;
+    let visit = store
         .record(
             text("kind").unwrap_or("page"),
             page,
             text("label"),
-            body.get("duration_ms").and_then(Value::as_i64),
             text("thread"),
         )
         .await
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    // A visit the shell has finished: shown that long.
+    if let Some(ms) = body.get("duration_ms").and_then(Value::as_i64) {
+        store
+            .finish(&visit.id, ms)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 /// `facts: { measure, producer?, items?: [{ value?, path?, line?, rule?,

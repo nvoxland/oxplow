@@ -22,21 +22,27 @@ pub async fn record_page_visit(
     page_kind: String,
     page_id: String,
     label: Option<String>,
-    duration_ms: Option<u32>,
     thread_id: Option<String>,
 ) -> Result<PageVisit, IpcError> {
     #[expect(clippy::disallowed_methods, reason = "off the bus: page visits")]
     let visit = svc
         .page_visit_store
-        .record(
-            &page_kind,
-            &page_id,
-            label.as_deref(),
-            duration_ms.map(i64::from),
-            thread_id.as_deref(),
-        )
+        .record(&page_kind, &page_id, label.as_deref(), thread_id.as_deref())
         .await?;
     Ok(visit)
+}
+
+/// The visit `record_page_visit` returned ended, after `duration_ms` shown.
+pub async fn finish_page_visit(
+    svc: &Services,
+    id: String,
+    duration_ms: u32,
+) -> Result<(), IpcError> {
+    #[expect(clippy::disallowed_methods, reason = "off the bus: page visits")]
+    svc.page_visit_store
+        .finish(&id, i64::from(duration_ms))
+        .await?;
+    Ok(())
 }
 
 pub async fn list_recent_page_visits(
@@ -83,6 +89,33 @@ pub async fn forget_page(
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn a_recorded_visit_is_finished_with_how_long_it_was_shown() {
+        let (svc, _dir) = crate::test_support::services().await;
+        let visit = crate::dispatch(
+            "record_page_visit",
+            serde_json::json!({"pageKind": "alerts", "pageId": "oxplow:oxplow/page?page=alerts", "label": "Alerts", "threadId": null}),
+            &svc,
+        )
+        .await
+        .unwrap();
+        crate::dispatch(
+            "finish_page_visit",
+            serde_json::json!({"id": visit["id"], "durationMs": 1500}),
+            &svc,
+        )
+        .await
+        .unwrap();
+        let recent = crate::dispatch(
+            "list_recent_page_visits",
+            serde_json::json!({"limit": 10, "threadId": null}),
+            &svc,
+        )
+        .await
+        .unwrap();
+        assert_eq!(recent[0]["duration_ms"], 1500, "{recent}");
+    }
+
     #[tokio::test]
     async fn list_recent_page_visits_dispatches() {
         let (svc, _dir) = crate::test_support::services().await;

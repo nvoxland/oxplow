@@ -2029,7 +2029,12 @@ recorded by `App.handleOpenPage` (skipping `agent`, `new-stream`,
 Rows carry canonical tab ids ([resources.md](./resources.md)); V93 wiped the
 pre-canonical ones, and V102 emptied the table again when a visit became the page's identity (the id without its `#`), so no row holds a view. Columns: `id`, `page_kind`, `page_id`, `visited_at` (ISO),
 `duration_ms?`, `thread_id?` (added in v3 — nullable so legacy rows and
-boot-screen visits with no selected thread still record). Indexes on
+boot-screen visits with no selected thread still record). A visit is
+recorded open when its page is shown (`record_page_visit`, no length) and
+finished by `finish_page_visit { id, duration_ms }` when it ends: another
+page shown, the thread changed, or the window's `pagehide`. The length is
+time with the window visible (`apps/desktop/src/pageVisitTimer.ts`); a
+visit whose end the app missed (it quit) keeps NULL. Indexes on
 `visited_at DESC`, `(page_kind, page_id)`, and
 `(thread_id, visited_at DESC)`. Aggregates derived by query:
 

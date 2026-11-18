@@ -1451,16 +1451,22 @@ export interface CountByDayRowApi {
   count: number;
 }
 
-export async function recordPageVisit(input: PageVisitInputApi): Promise<void> {
-  unwrap(
+/** Records a visit as it begins; returns its id, for `finishPageVisit`. */
+export async function recordPageVisit(input: PageVisitInputApi): Promise<string> {
+  const visit = unwrap(
     await commands.recordPageVisit(
       input.refKind,
       input.refId,
       input.label,
-      null,
       input.threadId ?? null,
     ),
   );
+  return visit.id;
+}
+
+/** The visit ended after `durationMs` shown. */
+export async function finishPageVisit(id: string, durationMs: number): Promise<void> {
+  unwrap(await commands.finishPageVisit(id, durationMs));
 }
 
 export async function listRecentPageVisits(opts: {

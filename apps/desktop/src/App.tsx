@@ -129,7 +129,8 @@ import type { CommandOutcome, Page as PageFile, RecentProjectView } from "./taur
 import { pickFolder } from "./tauri-bridge/nativeDialog.js";
 import { isDirty } from "./editor/buffers.js";
 import { buffers } from "./editor/openFiles.js";
-import { recordPageVisit, reportTabs, resolveSymbol } from "./api.js";
+import { finishPageVisit, recordPageVisit, reportTabs, resolveSymbol } from "./api.js";
+import { PageVisitTimer } from "./pageVisitTimer.js";
 import { advanceDaemonProbeState, INITIAL_DAEMON_PROBE_STATE } from "./daemon-recovery.js";
 import { offerForShortcut } from "./keybindings.js";
 import { commandOffers, type OfferDeps } from "./commandOffers.js";
@@ -1007,6 +1008,19 @@ export function App() {
   // What was last recorded: a page whose view changed (a filter, a row
   // picked) is the same visit, so Recents lists the page once.
   const lastVisitRef = useRef<string | null>(null);
+  // How long each recorded visit was shown (pageVisitTimer.ts): it ends when
+  // another page is shown, the thread changes or the window goes away.
+  const visitTimerRef = useRef<PageVisitTimer | null>(null);
+  visitTimerRef.current ??= new PageVisitTimer(
+    (id, ms) => void finishPageVisit(id, ms).catch(() => {}),
+    undefined,
+    document.visibilityState === "visible",
+  );
+  useEffect(() => {
+    const end = () => visitTimerRef.current?.end();
+    window.addEventListener("pagehide", end);
+    return () => window.removeEventListener("pagehide", end);
+  }, []);
   useEffect(() => {
     const shownRef = visitContextRef.current.pageTabs.find((t) => t.id === effectiveCenterActive);
     const visit = `${selectedThreadId}|${pageIdentityOf(shownRef?.id ?? effectiveCenterActive)}`;
@@ -1016,16 +1030,20 @@ export function App() {
       hydratedHistoryRef.current = true;
       return;
     }
-    if (!selectedThreadId || same) return;
+    if (same) return;
+    const timer = visitTimerRef.current;
+    timer?.end();
+    if (!selectedThreadId) return;
     const ctx = visitContextRef.current;
     const ref = ctx.pageTabs.find((t) => t.id === effectiveCenterActive) ?? null;
     if (!ref || NON_TRACKED_KINDS.has(recordedPageKind(ref))) return;
+    const shown = timer?.begin();
     // Defer briefly so the freshly-activated page's `usePageTitle`
     // effect fires and the centerTabs memo applies it before we
     // snapshot the label. tabLabelByIdRef is what the tab strip
     // currently displays — reading from it keeps the two surfaces
     // consistent; there is no separate fallback derivation.
-    const timer = setTimeout(() => {
+    const deferred = setTimeout(() => {
       const ctxAfter = visitContextRef.current;
       const label = tabLabelByIdRef.current[effectiveCenterActive] ?? ref.id;
       // A visit that couldn't be recorded (the window reloading, the daemon
@@ -1037,9 +1055,11 @@ export function App() {
         label,
         streamId: ctxAfter.streamId,
         threadId: selectedThreadId,
-      }).catch(() => {});
+      })
+        .then((id) => shown?.identify(id))
+        .catch(() => {});
     }, 250);
-    return () => clearTimeout(timer);
+    return () => clearTimeout(deferred);
   }, [effectiveCenterActive, selectedThreadId]);
 
   // Report what this window shows — every thread's tabs and the one
@@ -1053,6 +1073,7 @@ export function App() {
   useEffect(() => windowPageRuns().subscribeRunIds(() => setPageRunsTick((t) => t + 1)), []);
   const [windowFocused, setWindowFocused] = useState(() => document.hasFocus());
   const [windowVisible, setWindowVisible] = useState(() => document.visibilityState === "visible");
+  useEffect(() => visitTimerRef.current?.setVisible(windowVisible), [windowVisible]);
   useEffect(() => {
     const focus = () => setWindowFocused(true);
     const blur = () => setWindowFocused(false);

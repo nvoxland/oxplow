@@ -887,7 +887,6 @@ mod tests {
                 "oxplow:oxplow/knowledge?id=home&store=oxwiki",
                 None,
                 None,
-                None,
             )
             .await
             .unwrap();

@@ -176,6 +176,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::list_outbound,
             // page visit
             commands::generated::record_page_visit,
+            commands::generated::finish_page_visit,
             commands::generated::list_recent_page_visits,
             commands::generated::top_visited_pages,
             commands::generated::forget_page,
