@@ -144,7 +144,7 @@ export interface QuickOpenBuild {
 /// (already BM25-ranked), minus file hits whose path matched by name
 /// above, and minus file hits from other streams (project-wide search
 /// returns every stream's files, but another worktree's aren't openable
-/// here — tasks/knowledge pages/notes/comments stay project-wide).
+/// here — tasks/knowledge pages/notes stay project-wide).
 export function buildQuickOpenResults(input: {
   query: string;
   /** The page directory; null while the extensions load — then nothing
@@ -175,7 +175,7 @@ export function buildQuickOpenResults(input: {
   const matchedFilesAll = input.files.filter((file) => matchesAllTokens(file.path.toLowerCase(), tokens));
   const matchedPathsAll = new Set(matchedFilesAll.map((f) => f.path));
   // Keep file hits only from the current stream (+ global); tasks/knowledge/
-  // notes/comments are project-wide. A null/undefined stream disables
+  // notes are project-wide. A null/undefined stream disables
   // the filter (keep everything).
   const streamScopedHits =
     input.currentStreamId == null

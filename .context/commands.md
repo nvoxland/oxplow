@@ -20,7 +20,7 @@ A command is a typed operation identified by its **command id**,
 `oxplow.config.set`, `acme_pr.issue.close`; `CommandSpec::validate_id`).
 The id is the machine name; what a person reads is the command's label.
 **An input field named for one resource takes a bare id** (`{"thread":
-"thr3"}`, `"stream": "str1"`, `"request": "req12"`, `"comment": "cmt4"`,
+"thr3"}`, `"stream": "str1"`, `"request": "req12"`,
 `"note": "not7"`, `"snapshot": 7`; an integer id is a JSON number; "Bare ids"
 in [resources.md](./resources.md)), parsed by `commands::util::bare_id`
 (it replaced `ref_id`) — a URI is refused at its field, saying the id it
@@ -288,7 +288,7 @@ URI's content), `sql.read/query` (`oxplow.sql.query`), `search.read/search`
 `vcs.read/{diff,blame,log,status,branches}` (`oxplow.vcs.log` pages history
 from any revision, past what `v_commit` indexes), `lsp.read/*` (`oxplow.code.*`),
 `changes.read/ensure` (`oxplow.change.ensure`: it writes only the derived
-change cache, so it stays a read), `comment.read/list`, `knowledge.read` (none today),
+change cache, so it stays a read), `knowledge.read` (none today),
 `records.read/read` of a model row by an agent (it appends `record.read`
 to the log itself — a read's returned events go nowhere — and stays a read;
 `.context/models.md` "Reads of rows"),
@@ -554,8 +554,7 @@ skipping.
    own. A handler that found **nothing to change** and wrote nothing
    returns `HandlerOutput::unchanged`: a plain call then leaves
    no record — no audit row, no `command.executed`, `audit_id: None` —
-   like a read (`oxplow.comment.relocate` re-run on a settled
-   document is the case). The bus enforces it: an unchanged call's
+   like a read (a re-run that finds the state already as asked is the case). The bus enforces it: an unchanged call's
    transaction is **rolled back**, so nothing it wrote lands unaudited,
    and one that also returns events or an inverse is refused (audited as
    `error`). An undo, an approval or an effect's reaction is recorded
@@ -987,7 +986,6 @@ its area falls under (`threads.write`, `vcs.write`, …; `SCOPES`); "Handler" de
 | `oxplow.context.add { thread, uri?, label?, text?, note? }`, `oxplow.context.note { item, note? }`, `oxplow.context.remove { item }`, `oxplow.context.clear { thread }` (`Tx`) | `commands/context_basket.rs` over `thread_context_store::*_tx` | `Record` (scope `context.write`): the person's context basket for a thread's agents (`agent-model.md` "The context basket"). An agent's run is refused. `add` undoes to `remove`, `note` to the note before (a delivered item's is refused), `remove` to an `add` of the same content (its note too), `clear` to a sequence of `add`s; `clear` leaves delivered items |
 | `oxplow.bookmark.set`, `oxplow.bookmark.remove` (`Tx`) | `commands/bookmark.rs` over `bookmark_store::*_tx` | `Record` (bookmarks are the person's navigation). The viewer is `thread` (its stream implied) or `stream`; `set` moves a page's bookmark to its `scope`. Both undo to what the viewer saw before |
 | `oxplow.terminal.open { stream, title? }`, `oxplow.terminal.rename { terminal, title }` (`Tx`); `oxplow.terminal.close { terminal }` (`External`) | `commands/terminal.rs` over `terminal_store::*_tx` and the PTY registry (scope `terminals.write`) | Opening and renaming run for a person, a page or an agent (an agent only in its own stream); `open` answers `{ id, uri, title }` and titles "Terminal N" when none is given; `rename` undoes. `close` ends the shell the registry keeps under the terminal's URI, then deletes the row — a person's (an agent is refused), `Confirm::Destructive`, the last one may close. Events `terminal.opened@1` / `renamed@1` / `closed@1`. [terminal.md](./terminal.md) "Terminals are rows" |
-| `oxplow.comment.add { stream, thread?, target, quote, selectors_json, context_chain?, referenced?, intent, body }`, `oxplow.comment.reply { comment, body }`, `oxplow.comment.update { comment, intent?, status?, quote? + selectors_json? }`, `oxplow.comment.delete { comment }` | `Tx` over `comment_store::*_tx` (`commands/comment.rs`, P8.A6) | `Record`, logging the `comment.written` / `comment.deleted` events caused by the run. The author is the actor (`user` for a person, `agent`, the person a page acts for) — never an input. An agent comments only in its own stream and thread. `update` undoes to the intent/status/quote it replaced (a relink is `quote` + `selectors_json`, which anchors it — `orphaned: false` unless it says otherwise — and its undo restores the old quote, anchor and `orphaned`; a half-named relink is refused before anything is written); `add`/`reply` aren't undoable; `delete` is `Confirm::Destructive`. `oxplow.comment.relocate { comment, selectors_json, orphaned }` is the renderer's re-anchor after it re-finds the quote — not undoable; one already where it was is `unchanged` and leaves no record. Views re-read on `DatasetsChanged` naming `v_comment` |
 | `oxplow.handoff.send { to_thread, body, about?, from_thread? }`, `oxplow.handoff.settle { handoff, state, note? }` (`Tx`); `oxplow.handoff.resolve { handoff, outcome, note? }` (a native composite) | `commands/handoff.rs` over `oxplow_db::handoff_store::{send_tx, settle_tx}`, scope `handoffs.write` | `Record`. `send`: from the actor's thread (an agent's own, an effect's event's, the one a person names) to another open thread, any stream's; `about`, when given, is the URI of a record of any resource that its resource's own `resolve` dataset holds; logs `handoff.sent@3`; not undoable. `settle`: `taken` / `declined` by the recipient thread, `withdrawn` by the sender, each only while open; `open` again by whoever settled it; logs `handoff.settled@2`; undone by the state it replaced. `resolve`: checks the same rule against the run's actor before composing, then the settle, in one transaction, undone as one; moving a taken handoff's task to the recipient is bundled's reaction to `handoff.settled`. See [agent-model.md](./agent-model.md) "Handoffs and native messaging" |
 | `oxplow.config.list_keys {}` / `oxplow.config.get { key }` | `Tx` (read-only) over the key registry (`commands/config_commands.rs`) | every `.oxplow/project.yaml` key with doc, value schema, current value |
 | `oxplow.config.set { key, value, level }` / `oxplow.config.unset { key, level }` | `External` (`settings_commands::write_changes`, the one settings write): validate the registry schema and the core rule of each changed key, skip a key whose stored value is the same, write the explicit local/project/global override through `SettingsStore`, refresh runtime configuration | Ordinary values are undoable at the same level; secret values are redacted from audit/events and have no plaintext inverse. Emits `config.changed` with a canonical key and `ConfigChanged` for the UI. |

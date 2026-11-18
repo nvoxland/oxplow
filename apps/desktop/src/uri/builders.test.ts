@@ -3,7 +3,6 @@ import { expect, test } from "bun:test";
 import {
   agentSessionUri,
   collectorUri,
-  commentUri,
   commitUri,
   configUri,
   contributionOf,
@@ -28,7 +27,6 @@ import {
 test("each record is named by its URI", () => {
   expect(threadUri("thr3")).toBe("oxplow:oxplow/thread?id=thr3");
   expect(streamUri("str1")).toBe("oxplow:oxplow/stream?id=str1");
-  expect(commentUri("cmt4")).toBe("oxplow:oxplow/comment?id=cmt4");
   expect(agentSessionUri("ses3")).toBe("oxplow:oxplow/agent_session?id=ses3");
   expect(knowledgeUri("oxwiki", "architecture")).toBe("oxplow:oxplow/knowledge?id=architecture&store=oxwiki");
   expect(eventUri("0190")).toBe("oxplow:oxplow/event?id=0190");

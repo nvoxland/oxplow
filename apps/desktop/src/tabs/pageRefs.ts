@@ -420,11 +420,6 @@ export function metricsIndexRef(): TabRef {
   return pageTabRef("metrics-recorded");
 }
 
-/** The global Comments inbox: every comment in the current stream. */
-export function commentsRef(): TabRef {
-  return pageTabRef("comments");
-}
-
 /** The Terminal page: a plain interactive shell rooted at the worktree dir. */
 export function terminalRef(): TabRef {
   return pageTabRef("terminal");

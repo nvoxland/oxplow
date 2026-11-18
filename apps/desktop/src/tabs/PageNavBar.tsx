@@ -77,10 +77,6 @@ export interface PageNavBarProps {
     count: number;
     body: ReactNode;
   };
-  /** Optional self-contained comment navigator (count + prev/next jump
-   *  + orphaned list) for comment-bearing pages. Rendered before the
-   *  backlinks dropdown. */
-  comments?: ReactNode;
   /** The page's actions, drawn here, never by the page: the primary and
    *  prominent ones as buttons, the rest in the ☰ menu. */
   actions?: readonly PageAction[];
@@ -100,8 +96,8 @@ export interface PageNavBarProps {
 
 /**
  * Browser-style navigation bar rendered inside `Page` chrome: how the page
- * is navigated (back/forward, its list, its title), its bookmark and
- * comments, its primary action, and one ☰ menu (`PageMenu`) with
+ * is navigated (back/forward, its list, its title), its bookmark, its
+ * primary action, and one ☰ menu (`PageMenu`) with
  * everything else it can be acted on with. Kept dumb and props-driven —
  * the host wires it to the real navigation/bookmark/backlinks state.
  */
@@ -119,7 +115,6 @@ export function PageNavBar({
   bookmark,
   backlinks,
   outbound,
-  comments,
   actions,
   pin,
   ask,
@@ -483,8 +478,6 @@ export function PageNavBar({
           ) : null}
         </div>
       ) : null}
-
-      {comments ?? null}
 
       {openWith ? <PageModes openWith={openWith} buttonStyle={navButtonStyle(true)} /> : null}
       {barActions(actions).length > 0 ? <ActionButtons actions={barActions(actions)} buttonStyle={navButtonStyle(true)} /> : null}

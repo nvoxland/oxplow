@@ -2,8 +2,8 @@
 
 What this doc covers: `Markdown` (`apps/desktop/src/components/Markdown/`),
 the one component every surface draws or edits markdown with, its two
-modes and their one feature set, who owns saving, how wikilinks, mermaid
-and comments survive the editor's round-trip, and where it is used.
+modes and their one feature set, who owns saving, how wikilinks and
+mermaid survive the editor's round-trip, and where it is used.
 
 ## One component, two modes
 
@@ -37,10 +37,9 @@ set**, and a surface never builds its own:
   form as `[title](uri)`), and shows its title.
 - **A format toolbar on a selection** (the editor, `SelectionToolbar.tsx`):
   Bold, Italic, Code, Link, Heading / Subheading (not in an `inlineOnly`
-  field), and Add comment where the text takes comments. It floats at the
-  selection's end after a mouse selection (on the mouseup) or a keyboard
-  one; it hides when the selection collapses, a comment popover opens, or
-  the focus leaves for anything but the toolbar. Buttons act on the press
+  field). It floats at the selection's end after a mouse selection (on the
+  mouseup) or a keyboard one; it hides when the selection collapses or the
+  focus leaves for anything but the toolbar. Buttons act on the press
   (a click would collapse the selection) and say whether they are on.
   Link opens a box: a web URL or an oxplow URI as typed, anything else
   read as a wikilink's target (`linkHref`: `local-snapshots`,
@@ -55,8 +54,7 @@ set**, and a surface never builds its own:
   the text as stored — `[[…]]` and all — in a plain monospace box, and
   back. The owner hears the same `onChange` / `onCommit` from either view
   (the box commits as the editor does: 300 ms after typing, on blur, on
-  unmount) and the same keys reach it; comments show only in the rich
-  view. The mode is the field's own, not saved. A one-line field
+  unmount) and the same keys reach it. The mode is the field's own, not saved. A one-line field
   (`inlineOnly`) has none; a field with `hidePencil` keeps the shortcut
   without the button.
 - **Mermaid** fences draw as diagrams, always (pan, zoom, the
@@ -89,8 +87,13 @@ set**, and a surface never builds its own:
   so a README shown inside a commit page carries nothing of that page.
 - **Headings** are `h2`/`h3` under `.oxplow-md`: a page's Contents rail
   lists them (either mode).
-- **Comments**: the editor's own layer (`comments` prop, below); the
-  viewer's text through its page's DOM layer (`data-ref`).
+- **Add to Context** on a selection: the editor's right-click menu has
+  Add Selection to Context, the text from the URI the owner gives
+  (`contextUri`; a page's `markdown` viz gives the page's, from
+  `PageViewContext`). The viewer's text is page text: the page's own
+  selection toolbar (`SelectionContextToolbar`, mounted by `PageHost`)
+  floats Add to Context over it. See `.context/agent-model.md` "The
+  context basket".
 
 The editor reads and writes markdown **as stored**: the component runs
 `preprocessWikilinks` on the way in and `postprocessWikilinks` on the
@@ -107,8 +110,7 @@ never reset.
   (a late echo mustn't clobber typing).
 - **`onChange`**: every edit. For an owner that keeps a draft and saves
   on a button: a form's markdown field (`SchemaForm`, a schema property
-  with `contentMediaType: text/markdown`), the comment composer, a page's
-  markdown editor. A value from outside is applied even while focused: the
+  with `contentMediaType: text/markdown`), a page's markdown editor. A value from outside is applied even while focused: the
   owner echoes exactly what it heard, so anything else is a reset it
   means (Discard, Escape).
 - **A click in the text keeps its caret.** Clicking the field around the
@@ -155,8 +157,7 @@ headings.
 Every markdown surface: the `markdown` viz and markdown nodes of a
 page's view, and `oxplow-page` fenced blocks (an inline page, read-only,
 drawn live in the knowledge page body), foundation's `markdown` page (a `.md` file
-read as a document, View as → Markdown), the knowledge page body (the knowledge page's `markdown` viz), a task's body (the task page's `markdown` viz), comment messages (`CommentPopover`) and the
-comment composer (`CommentComposer`), a form's markdown field
+read as a document, View as → Markdown), the knowledge page body (the knowledge page's `markdown` viz), a task's body (the task page's `markdown` viz), a form's markdown field
 (`SchemaForm`: stream and thread prompts, a handoff's body). A
 dashboard's `TextTile` is plain text by its own decision (its file says
 why).
@@ -207,10 +208,9 @@ why).
   `RichTextField`'s own keys stand aside. `refOptions.ts` is what it lists
   (pure), `refLinkOf` (`MarkdownView.tsx`) what a pick puts in, tested
   against `postprocessWikilinks` for each kind.
-- **`SelectionToolbar.tsx`** — the selection toolbar, its gate
-  (`selectionToolbarVisible`) and the link box's reading (`linkHref`).
-  The plain-DOM comment layer keeps its own one-button
-  `SelectionCommentToolbar` (`components/Comments/`).
+- **`SelectionToolbar.tsx`** — the editor's format toolbar and the link
+  box's reading (`linkHref`). Page text outside the editor has the page's
+  one-button Add to Context toolbar (`components/Context/SelectionContextToolbar.tsx`).
 - **`refPaste.ts`** — what a paste is (pure); `RichTextField`'s
   `handlePaste` acts on it.
 - **`RefTitles.tsx`** — the title widget a bare ref link gets in the
@@ -385,90 +385,14 @@ In `apps/desktop/index.html`:
   `data-placeholder` attribute).
 - `.task-section-heading`, `.task-title-field` — task page specifics.
 
-## Comments
+## The right-click menu
 
-The editor becomes comment-enabled when given a `comments`
-config (`{ streamId, threadId, target, author? }`, `target` a URI).
-The `wiki-page` page entry says `comments: true`, so the page's URI is the comment target (a knowledge page isn't thread-bound) and the page wraps its body in the URI as a context node
-(`contextNodeProps`), so plain-DOM selections around the editor
-resolve to the page too; TaskPage passes
-`{ target: <the item's URI>, threadId:
-item.threadId }`.
-
-- **`CommentDecorations.ts`** is a ProseMirror **plugin extension**,
-  NOT a stored mark. This is the load-bearing rule: a stored mark
-  would serialize into the markdown that round-trips to disk and
-  pollute the file. Highlights are inline **decorations** computed
-  from the comment list and pushed in via a transaction meta
-  (`commentDecorationsKey`); between pushes the set maps through doc
-  edits so highlights track typing. (`InternalLink` is a stored mark
-  — use it as a structural reference only, not the comment mechanism.)
-- **Re-anchoring.** `findCommentRange(doc, quote, { hintFrom, hintTo,
-  prefix, suffix })` re-resolves each comment's `quote` to a
-  `{ from, to, approx }`: stored-hint fast path, then `flatten(doc)` +
-  the shared `resolveAnchor` (`components/Comments/anchor.ts`) — exact
-  (disambiguated by context + proximity) then bounded fuzzy — mapped back
-  to doc positions. `flatten` now inserts a `BLOCK_SEP` between blocks
-  (with a synthetic map entry so `map` stays 1:1 with text), so
-  **cross-block selections match** (capture uses the same flatten, so
-  stored quote/context agree). `buildAnchorJson` re-persists the enriched
-  anchor (from/to + textOffset + prefix/suffix + `approx`) via
-  `relocateComment` (`oxplow.comment.relocate`; the stored anchor
-  then equals the recomputed one, so the re-read stops); fuzzy matches get the dashed
-  `--approx` highlight.
-- **Typed context on create.** When composing a comment,
-  `startCommentForSelection` captures `referencedRefs` from the live DOM
-  selection via `refsInRange` (`components/Comments/domAnchor.ts`) — any
-  rendered `<a>` inside the quote (e.g. an `InternalLink` wikilink)
-  becomes a canonical `(kind,id)` ref so the agent sees what the
-  highlighted prose links to. The backend additionally unions refs it can
-  parse out of the quote *text* at create time, so plain mentions are
-  covered too. `context_chain` stays empty: a knowledge page/task editor is its own
-  root, with no typed ancestors above it. The in-content `{from,to,…}`
-  anchor stays the surface coordinate fast-path (not migrated to the W3C
-  selector array — the resolver tolerates both, and the legacy shape is
-  what the re-anchor fast path reads).
-- **Live un-orphan.** The re-anchor effect also keys on a debounced
-  `docVersion` bumped from `editor.on("update")`, so retyping a deleted
-  quote re-attaches its highlight promptly instead of waiting for the
-  blur/commit that updates `value`.
-- **Anchors are stored when the document settles**: every
-  re-anchor queues the moved anchors (`pendingAnchorsRef`), and
-  `flushAnchors` stores them — at once when the editor isn't focused, on
-  blur, and on unmount — never per typing pause, since each
-  `oxplow.comment.relocate` is a command run (an audit row and events)
-  on the person's behalf. A store that fails (the comment deleted
-  meanwhile) is caught; the bus audited it.
-- **Relinking.** When a selection is active, the editor context menu
-  lists "Relink orphaned: …" entries that re-attach an orphaned comment
-  to the current selection via `relink_comment` (rewrites quote +
-  anchor, clears orphaned).
-- **Authoring: selection toolbar + right-click.** A selection floats the
-  editor's toolbar (above), whose Add comment opens the composer —
-  mirroring the plain-DOM surfaces' button, which this contenteditable
-  region is deliberately carved out of (`useDomAnnotations` skips
-  contenteditable). *Opening* an
-  existing comment stays right-click-only (click-to-open would fight
-  cursor placement). The wrapper's `onContextMenu` **always** fires and
-  `preventDefault`s, so the native webview menu never appears in the
-  editor. It builds a shared `ContextMenu` with Cut / Copy / Paste (via
-  `navigator.clipboard` + ProseMirror commands, using positions
-  captured at menu-open so they survive the click moving focus) plus,
-  when comment-enabled, "Add Comment" (selection non-empty) and "Open
-  Comment" (right-click target's `closest("[data-comment-id]")` hits a
-  decoration). "Add Comment" opens `NewCommentPopover` (composer
-  anchored to the selection-end caret via `coordsAtPos`); "Open
-  Comment" opens `CommentPopover`. Both live in `components/Comments/`
-  and `stopPropagation` their pointer events so the wrapper's
-  editor-focus `onClick` doesn't steal focus. The highlight CSS class
-  is `.oxplow-comment-highlight` (`--comment-highlight*` tokens).
-- **Cross-page reveal.** The field subscribes to `comment-reveal-bus.ts`.
-  When the comment navigator (`CommentNavigator`) fires
-  `requestCommentReveal(id)` and navigation lands on this knowledge page, the
-  field finds the decoration's rendered `[data-comment-id]` node,
-  `scrollIntoView`s it, opens its `CommentPopover`, and clears the bus.
-  The request stays pending until the node exists, so the async mount +
-  threads fetch after navigation still resolves.
+The wrapper's `onContextMenu` **always** fires and `preventDefault`s, so
+the native webview menu never appears in the editor. It builds a shared
+`ContextMenu`: on a link, the viewer's link menu first; then Cut / Copy /
+Paste (via `navigator.clipboard` + ProseMirror commands, using positions
+captured at menu-open so they survive the click moving focus) and, on a
+selection, Add Selection to Context (the text, from `contextUri`).
 
 ## Related
 

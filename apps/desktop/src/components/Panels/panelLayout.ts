@@ -19,7 +19,7 @@ export function extensionPanelId(panel: ExtensionPanel): string {
 }
 
 /** What an extension panel's header opens: the page it names (`open`,
- *  as Comments opens the inbox), else its body page. */
+ *  as Alerts opens its page), else its body page. */
 export function panelOpenRef(panel: ExtensionPanel, extensions: Extension[] | null = null): TabRef {
   const named = panel.open ? refFromTabId(panel.open) : null;
   if (named) return named;

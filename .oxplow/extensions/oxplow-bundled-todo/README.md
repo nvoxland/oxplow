@@ -15,10 +15,9 @@ extension" has the rules for a move.
   With (`file-co-change`, on a diff's file header).
 - **Pages**: Agent Interface and Command Errors, Extension runs and
   Extension Run Detail, Job Runs and Job Run Output, Merge Readiness,
-  Remote Branches, Comment thread and Hand Off Work.
+  Remote Branches and Hand Off Work.
 - **Custom components**: Explore Data, Timeline and the history graph
   (replaces Git History's plain list at `vcs.history.graph`).
-- **Panel**: Comments (`comments-panel`).
 - **Thread parts** with no mount: Plan, Handoffs to and from this thread.
 - **Advisories**: `hint-never-fires`, and `shared-files` /
   `shared-files-agent` (two threads changed the same file recently).

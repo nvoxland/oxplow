@@ -25,8 +25,6 @@ mock.module("../../api.js", () => ({
     saved.push(layout);
   },
   listExtensions: async () => [],
-  listCommentsForStream: async () => [],
-  subscribeCommentEvents: () => () => {},
   subscribeOxplowEvents: () => () => {},
   readEventContent: async (id: string, body: string) =>
     id === "e-push" && body === "output" ? { text: JSON.stringify({ stderr: "rejected" }), size: 20, truncated: false } : null,

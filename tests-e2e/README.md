@@ -25,10 +25,10 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
   in and kept equal to the fake's declarations by
   `the_suite_fixture_declares_what_the_fake_does`), an effect, a dataset, a
   page, and a resource. Private, since `providers` is still
-  experimental. The effect comments on each created task; a title with
-  `[fail]` makes it fail (Delivery, Retry: it comments in a stream that
+  experimental. The effect bookmarks each created task; a title with
+  `[fail]` makes it fail (Delivery, Retry: it bookmarks in a stream that
   doesn't exist) and one with `[delete]` makes it delete the project's
-  `doomed.txt` (a proposal). The effect uses core commands (`oxplow.comment.add`,
+  `doomed.txt` (a proposal). The effect uses core commands (`oxplow.bookmark.set`,
   `oxplow.file.delete`), since an effect can't compose a task store's own
   `oxtask.task.*`: they write outside the transaction. Nothing in it is approved until a spec
   approves it. A spec that needs a model's answer (triage) points a
@@ -162,7 +162,7 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
 
 ## What the specs cover
 
-`shell/` boot and connecting with a token; `work/` Go To and launcher search; `knowledge/` the comments inbox, the knowledge page's editor (links, toolbar, Save, Source view, inline page fences) and
+`shell/` boot and connecting with a token; `work/` Go To and launcher search; `knowledge/` the knowledge page's editor (links, toolbar, Save, Source view, inline page fences) and
 an extension's resource; `code/` a commit's diff (file watching over a real daemon is a Rust test, `real_watch_tests.rs`); `data/` extension pages; `settings/`
 Programs approval and the settings pages; `integrations/` the fake provider's
 Integrations frame (the config form, Check, Enable, the task-tracker choice, Sync Now; the data side is `providers/tests.rs`), Delivery (a failed reaction,

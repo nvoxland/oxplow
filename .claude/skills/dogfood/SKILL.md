@@ -74,7 +74,7 @@ selectors; screenshot when looks matter, and read the image.
    **Monitor** that emits one line per thread when both hold; the
    dot/status alone lies (see death, step 7).
 3. **Work concurrently while it runs.** Explore other surfaces, file
-   bugs, test features (comments, search, dashboards), brief a second
+   bugs, test features (the context basket, search, dashboards), brief a second
    thread, or run a second stream in parallel. Useful IPC for
    inspection: `oxplow_query_sql` over `v_oxplow_task` / `v_request` (a thread's
    work, a task's requests via `v_oxplow_request_link`), `list_threads` (`{"streamId":"str1"}`),
@@ -152,17 +152,17 @@ selectors; screenshot when looks matter, and read the image.
 
 Drive these like a user would, not just the agent terminal:
 
-- **Comments are the human's voice.** Anchor a comment to a task/page
-  (`knowledge.add_comment`; intent `followup` = "agent, act on this" vs `note`
-  = private). It surfaces in the **Comments Dashboard** and bumps the
-  **"For me"** badge. A *different* thread's agent (even a different
-  runtime, e.g. opencode) answers it via `oxplow_list_comments` →
-  `knowledge.reply_comment` → `knowledge.update_comment {status: resolved}`. Exercise this cross-thread,
-  cross-agent Q&A loop — it's a core collaboration primitive and it works.
+- **The context basket is the human's voice.** Add a page (its ☰ →
+  **Add to Context**) or select text and press the floating **Add to
+  Context** button. Each add opens a note prompt: write what the agent
+  should do about it. Edit the note in the **Context** panel (the @ icon),
+  then prompt the agent: its next prompt carries the item with the note
+  (the `<context-basket>` block), the agent answers by item number, and the
+  basket empties. Check the Context page lists it as Delivered.
 - **Query/investigation threads + wiki.** Point a second thread at a
   question ("trace subsystem X end to end") and have it write a wiki
   page; verify it saved (`.oxplow/wiki/<slug>.md`) and that **⌘K BM25
-  search** surfaces it across tasks/comments/wiki/files.
+  search** surfaces it across tasks/wiki/files.
 - **The observed turn model.** A turn's files (`v_turn_file`) are claimed
   (an edit tool named them) or observed (they changed in the stream's
   snapshot line during the turn); test runs are the turn's whose tool

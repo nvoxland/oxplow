@@ -287,7 +287,7 @@ the same with no reason of their own.
 Every externally-visible entity id is a SQLite **autoincrement INTEGER**
 rendered with a fixed **3-letter type prefix** at the application boundary,
 e.g. `str5` (stream), `thr21` (thread), `tsk42` (task), `req4` (request),
-`not3` (note), `trn9` (agent-turn), `ses4` (agent session), `cmt2` (comment),
+`not3` (note), `trn9` (agent-turn), `ses4` (agent session),
 `trm3` (terminal).
 The prefix lives only in Rust (`Display`/serde) and in the TypeScript
 bindings (each id type is a `string`); **DB columns and the FKs that point
@@ -1644,7 +1644,7 @@ in (`turn_id`, FK `agent_turn`, SET NULL; NULL when no turn produced it).
 > and a whole-second `…20Z` after everything in its second — inverting
 > `ORDER BY …_at` and window comparisons. The first fix (`canonical_ts`, used
 > by six stores) left the other twelve trimmed; the flaky
-> `thread_grows_and_orders_oldest_first` was two comment messages inside one
+> `thread_grows_and_orders_oldest_first` was two thread messages inside one
 > trimmed prefix. Now `Timestamp` itself serializes to the fixed-width
 > `YYYY-MM-DDTHH:MM:SS.ffffffZ` (27 chars; `Timestamp::to_text`,
 > `oxplow-domain/src/time.rs`), every store writes through the one
@@ -2061,101 +2061,12 @@ store holds the task) and the knowledge pages it wrote (`v_oxplow_knowledge_touc
 `finished_cleared` model reads, so entries closed before it are hidden
 until something newer lands.
 
-### `comment` + `comment_message` — `SqliteCommentStore` (`crates/oxplow-db/src/comment_store.rs`, migrations `V22__comments.sql`, `V23__comment_resolved_at.sql`)
+### Comments — dropped (`V45__drop_comments.sql`)
 
-Threaded annotations the user anchors to a text selection on any page
-(knowledge page body, code file lines, task detail). The user collects notes
-across many points; the agent reviews/responds **only when asked**
-(never force-triggered — no Stop-hook branch, no synthesized tasks).
-
-`comment` is the thread anchor + metadata; `comment_message` holds
-every message in the thread including the first. **Integer PK ids
-(`INTEGER PRIMARY KEY AUTOINCREMENT`) — no UUIDs.**
-
-`comment` columns: `id, stream_id (NOT NULL, FK streams ON DELETE
-CASCADE), thread_id (nullable, FK threads ON DELETE SET NULL),
-target_resource, target_uri, quote, selectors_json, context_chain_json (V24),
-referenced_json (V24, renamed in V99), intent ('note' | 'followup'), status ('open'
-| 'resolved'), orphaned (0/1), author, created_at, updated_at,
-last_activity_at, resolved_at (nullable, V23)`. Indexes on `(stream_id,
-status, last_activity_at DESC)`, `(thread_id, last_activity_at DESC)`,
-`(target_uri)`.
-
-- **`resolved_at`** is stamped by `set_status` on `→resolved` and
-  cleared on `→open`. It exists because neither `updated_at` (bumped by
-  auto re-anchoring via `set_anchor`) nor `last_activity_at` (messages
-  only) reliably marks *when* a comment was resolved — the Comments
-  Dashboard's "resolved in the last N days" buckets read this column.
-  V23 backfills pre-existing resolved rows from `updated_at`
-  (best-effort).
-
-- **Scope.** `stream_id` is the hard scope so the agent can list every
-  comment in a stream regardless of which thread authored it;
-  `thread_id` is the origin agent thread and is nullable (SET NULL) so
-  content comments survive the thread being archived/deleted. Reads
-  support per-target, per-stream, and per-thread queries; the agent's
-  MCP `oxplow_list_comments` queries by thread or stream (never cross-stream).
-- **Anchoring is resilient, not positional.** `quote` (the selected
-  text) is the durable anchor + the context handed to the agent;
-  `selectors_json` (renamed from `anchor_json` in V24) is an opaque,
-  schemaless per-surface hint the renderer re-validates on load and may
-  rewrite through `set_anchor`. It holds a W3C-Web-Annotation selectors
-  array — a TextQuoteSelector (`exact` + surrounding `prefix`/`suffix`
-  context), a TextPositionSelector (`textOffset`), an `approx` flag, and
-  an optional per-surface coordinate selector (Monaco line/col,
-  ProseMirror from/to, terminal buffer coords). The shared resolver
-  (`apps/desktop/src/components/Comments/anchor.ts`, `resolveAnchor`)
-  tiers exact-quote (disambiguated by context + proximity) then a bounded
-  fuzzy fallback; a fuzzy re-attach sets `approx` (shown as a dashed
-  highlight + "approx" badge). Only when even fuzzy fails is the comment
-  `orphaned` — still listed, no highlight. Rust never parses
-  `selectors_json`, so enriching it needs no migration.
-- **Typed context (V24).** Beyond the quote, a comment carries the typed
-  context it was made in. `context_chain_json` is a JSON array of
-  URIs — the nesting of page regions the selection sat inside
-  (innermost→outermost, excluding the primary target; e.g. a file row
-  under a commit yields `["oxplow:oxplow/commit?sha=…"]`). `referenced_json` is
-  the canonical URIs found INSIDE the selection (rendered links + inline
-  mentions), so highlighting a filename tells the agent it is a file.
-  The store's `create` is the single source of truth for "what's
-  referenced": it unions the FE-supplied URIs (DOM `<a>` links inside the
-  Range) with `oxplow_domain::uri::extract(resources, quote)` over the durable
-  quote, deduped on the URI. So inline mentions (`tsk42`,
-  `src/x.rs`, `[[slug]]`) become typed URIs even on surfaces that never
-  rendered them as links, and no frontend reimplements URI parsing.
-  Both reuse the canonical `page_ref` URI vocabulary. Unlike
-  `selectors_json` these ARE parsed in Rust (into `Vec<String>` on
-  `Comment`: `context_chain`, `referenced`) because the backend ref-resolver hydrates them into typed
-  summaries for the agent. The store serializes/parses them; a malformed
-  value degrades to an empty list rather than failing the row load.
-- **Relinking.** `relink(id, quote, selectors_json)` (store) /
-  `relink_comment` (IPC) is the escape hatch for a comment whose quote
-  drifted past fuzzy tolerance: it rewrites BOTH the quote and the anchor
-  and clears `orphaned`. Triggered from the editor's selection
-  context-menu ("Relink orphaned: …"). Unlike `set_anchor` (a passive
-  re-validation sync, no event) it emits a changed event.
-- **"Answered" is derived, not stored.** `CommentThread::needs_response`
-  (in `oxplow-domain`) returns true for an `open` `followup` whose
-  latest message author isn't `"agent"`. Messages are stored
-  oldest-first, so a user reply after an agent response re-opens the
-  follow-up. The MCP `oxplow_list_comments(status:"needs_response")` filters on
-  this.
-
-`comment_message` columns: `id, comment_id (FK comment ON DELETE
-CASCADE), author (free-form, e.g. 'user' / 'agent'), body, created_at`.
-Index on `(comment_id, created_at)`. `add_message` bumps the parent's
-`last_activity_at`.
-
-**Garbage collection.** `SqliteCommentStore::cleanup(retention_days)`
-deletes `resolved` and `orphaned` threads whose `last_activity_at` is
-older than the cutoff (`retention_days <= 0` disables pruning). The host
-binary (`apps/desktop/src-tauri/src/main.rs`) runs it at boot and every
-24h with a 14-day window, mirroring the snapshot cleanup loop. Open
-comments are never swept.
-
-Change fan-out: a comment's writes are the `oxplow.comment.*`
-commands (P8.A6); the renderer re-reads the comment models on
-`DatasetsChanged` — there is no comment-specific event.
+V45 drops the `comment` and `comment_message` tables and their indexes. The
+anchored-comment feature is gone; the person's remark for the agent is the
+note on a context-basket item (`context_item.note`, V44).
+(A shared model's child comments, such as a task's, are not these tables.)
 
 ### `search_entry` + `search_fts` — `SqliteSearchStore` (`crates/oxplow-db/src/search_store.rs`, migration `V25__search_index.sql`)
 
@@ -2167,7 +2078,7 @@ or removed in place (a `UNIQUE` index over `(kind, uri, COALESCE(stream_id,''))`
 enforces identity, treating global rows' `NULL` stream as `''`).
 
 - `kind` holds a resource (`oxplow/knowledge`) that `v_resource` lists as
-  `searchable` (oxplow's `oxplow/task`, `oxplow/comment`,
+  `searchable` (oxplow's `oxplow/task`,
   `oxplow/knowledge`, `oxplow/thread`,
   `oxplow/agent_session`, `oxplow/turn`,
   `oxplow/commit`, `oxplow/page`; an
@@ -2178,7 +2089,7 @@ enforces identity, treating global rows' `NULL` stream as `''`).
   — the feed's own `version` column, else its title-and-body hash; V77
   renamed V164's `content_hash` — and `apply_restate_tx` writes only
   entries added, changed or gone); bundled's read `v_oxplow_search_task`
-  (every store's tasks) / `v_search_comment` / `v_oxplow_search_knowledge` and the feeds for the other resources named above
+  (every store's tasks) / `v_oxplow_search_knowledge` and the feeds for the other resources named above
   (`models/search_<kind>.sql`; `.context/extensions-events.md` "Resources" says
   how a resource gets one, and the models' docs say
   what each indexes and whether archived work is included). Files are upserted by the `search.index` pump consumer from

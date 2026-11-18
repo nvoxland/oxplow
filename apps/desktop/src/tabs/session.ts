@@ -117,7 +117,7 @@ export function modeOf(id: string): string {
 
 /** What a tab shows, for matching tabs: the identity in its display mode.
  *  A page (with its mode) shows once; the same resource in another mode is
- *  another tab. Anything about the resource itself (bookmarks, comments,
+ *  another tab. Anything about the resource itself (bookmarks,
  *  backlinks) keeps `identityOf`. */
 export function showingOf(id: string): string {
   const mode = modeOf(id);

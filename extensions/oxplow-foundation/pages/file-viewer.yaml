@@ -7,7 +7,6 @@ for: oxplow/file
 accepts:
   content: elsewhere
 default: true
-comments: true
 params:
 - name: uri
 - name: path

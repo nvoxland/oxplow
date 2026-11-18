@@ -5,6 +5,9 @@ import { createContext } from "react";
 export interface PageViewScope {
   streamId: string | null;
   threadId: string | null;
+  /** The page's URI (its tab's identity): what text selected on it is
+   *  added to the context basket on. */
+  uri?: string | null;
 }
 
 export const PageViewContext = createContext<PageViewScope | null>(null);

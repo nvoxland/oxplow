@@ -10,8 +10,7 @@
   declare `needs: [config.read]` and read with
   `scope("config.read", {"key": "oxplow.agents"})`.
 - Tasks `task.*` (when a list is active); test
-  evidence `oxplow.test.record_run`, `oxplow.collector.sync`; comments
-  `oxplow.comment.reply`, ….
+  evidence `oxplow.test.record_run`, `oxplow.collector.sync`, ….
 
 ## Handing work to another thread
 

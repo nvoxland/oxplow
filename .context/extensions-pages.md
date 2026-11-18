@@ -67,7 +67,7 @@ a typo is an error at the line):
 
 - **Metadata**: `title` (required), `description`, `label`, `icon`,
   `category`, `keywords`, `params`, `for` / `accepts` / `default` /
-  `pinned` (a renderer), `comments`, `refresh`, `needs`,
+  `pinned` (a renderer), `refresh`, `needs`,
   `actions`, `alert`, `tool`, `answers`, `badge`, `see_also` (a part and a
   query take a subset: "Three kinds, by folder" above).
   A page's `description` says what the page is (what it shows, for
@@ -170,8 +170,7 @@ Where it lives, and what is loaded:
   resource stays declared.
 - `for` / `accepts` / `default` / `pinned`: a renderer, see
   [pages-and-tabs.md](./pages-and-tabs.md) (`renderer_problem` checks
-  them at load). `comments: true`: the person
-  may comment on the page's text. `refresh: true`: a Refresh button.
+  them at load). `refresh: true`: a Refresh button.
 
 ### Params
 

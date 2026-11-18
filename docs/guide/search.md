@@ -36,9 +36,9 @@ and Shift+Tab jump between sections.
 
 The point isn't finding a filename you already knew. It's answering
 "have we been here before?" — the decision captured in a knowledge page
-six weeks ago, the task where this same bug was filed, the comment
+six weeks ago, the task where this same bug was filed, the note
 someone left on that function. Those live in different stores;
 searching them separately is how you fail to find them.
 
 See [Knowledge pages](wiki.md) for the durable side of that, and
-[Comments](comments.md) for the anchored side.
+[Collecting context](context.md) for handing places to an agent.

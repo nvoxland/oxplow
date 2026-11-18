@@ -1183,7 +1183,6 @@ fn describe_op(services: ServicesSlot) -> Op {
                         "category": page.category,
                         "tool": page.tool,
                         "refresh": page.refresh,
-                        "comments": page.comments,
                         "needs": page.needs,
                         "params": params,
                         "loaders": loaders,

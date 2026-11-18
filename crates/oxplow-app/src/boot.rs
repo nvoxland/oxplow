@@ -304,23 +304,6 @@ pub async fn run_boot_orchestration(
         });
     }
 
-    // Comment cleanup loop — prunes resolved/orphaned comment threads
-    // whose last activity is older than the retention window. Runs at
-    // boot and every 24h.
-    {
-        use oxplow_domain::stores::CommentStore;
-        const COMMENT_RETENTION_DAYS: i64 = 14;
-        let comment_store = state.comment_store.clone();
-        tokio::spawn(async move {
-            loop {
-                if let Err(e) = comment_store.cleanup(COMMENT_RETENTION_DAYS).await {
-                    tracing::warn!("comment cleanup failed: {e}");
-                }
-                tokio::time::sleep(std::time::Duration::from_secs(24 * 60 * 60)).await;
-            }
-        });
-    }
-
     // The project root coming under, or leaving, version control.
     {
         let watches = state.stream_watches.clone();

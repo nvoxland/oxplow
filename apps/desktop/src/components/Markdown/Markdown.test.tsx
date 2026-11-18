@@ -104,7 +104,7 @@ test("Source shows the text as stored; an edit there is the owner's, and the ric
   fireEvent.click(view.getByTestId("markdown-source-toggle"));
   const source = view.getByTestId("markdown-source") as HTMLTextAreaElement;
   expect(source.value).toBe("See [[local-snapshots]].");
-  // The editor is gone, and its comments with it, while Source shows.
+  // The rich editor is gone while Source shows.
   expect(view.container.querySelector("[contenteditable]")).toBeNull();
   fireEvent.change(source, { target: { value: "See [[other-page]]." } });
   expect(changes.at(-1)).toBe("See [[other-page]].");

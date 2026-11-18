@@ -4,8 +4,7 @@
 // agent picker). Surfaces that can't reach it directly — the command
 // palette's "New Thread…", keyboard shortcuts — dispatch here; the
 // Navigator subscribes, opens its overlay, and shows the inline
-// creator for the requested stream. Same fan-out shape as
-// comment-compose-bus.
+// creator for the requested stream.
 
 type Listener = (streamId: string) => void;
 const listeners = new Set<Listener>();

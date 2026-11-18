@@ -85,7 +85,6 @@ import { openHandlerFor, type OpenHandlers } from "./tabs/openHandlers.js";
 import { PanelRunsProvider } from "./components/Panels/PanelRunsContext.js";
 import { useAlerts } from "./components/Alerts/useAlerts.js";
 import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
-import { DomCommentLayer } from "./components/Comments/DomCommentLayer.js";
 import { agentSessionRef, diskFilePath, fileOf, refFromTabId, directoryRef, externalUrlRef, fileRef, gitCommitRef, pagePayload, recordedPageKind, isPage, diffRef, newSessionRef, newStreamRef, alertsRef, knowledgePageRef, streamSettingsRef, threadSettingsRef, viewParamsOf, withViewParams, fileRefAt } from "./tabs/pageRefs.js";
 import { requestNewThread } from "./new-thread-bus.js";
 import { setAssistantScope } from "./components/Assistant/assistantSession.js";
@@ -2119,17 +2118,6 @@ export function App() {
               onReorder={handleReorderCenterTabs}
             />
           ) : <TabLoading />}
-          {/* Generic comment layer for every plain-DOM page. Mounted once
-              here (not per page): captureSelection only fires inside a
-              data-ref-* region and skips editor/terminal surfaces, so a
-              single instance serves the tasks list, commit pages, finding
-              pages, etc. without per-page wiring. */}
-          {stream ? (
-            <DomCommentLayer
-              streamId={stream.id}
-              threadId={currentThreadState.selectedThreadId ?? null}
-            />
-          ) : null}
         </div>
         </div>
         <Dock streamId={stream?.id ?? null} onOpenPage={handleOpenPage}>

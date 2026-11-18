@@ -12,9 +12,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use super::comment::author_of;
 use super::thread::acting_thread_of;
-use super::util::{parse, schema};
+use super::util::{author_of, parse, schema};
 use super::{Handler, HandlerOutput, Invocation};
 use crate::collection::CollectionService;
 

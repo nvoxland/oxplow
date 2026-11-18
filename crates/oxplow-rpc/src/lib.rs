@@ -277,8 +277,6 @@ macro_rules! oxplow_command_table {
                 assistant_close => $crate::commands::assistant::assistant_close { id: String } -> (),
                 report_tabs => $crate::commands::tabs::report_tabs { report: oxplow_app::client_reports::TabReport } -> oxplow_app::client_reports::TabReportAnswer,
                 // comments
-                list_comments_for_target => $crate::commands::comments::list_comments_for_target { target: String } -> Vec<::oxplow_domain::CommentThread>,
-                list_comments_for_stream => $crate::commands::comments::list_comments_for_stream { stream_id: ::oxplow_domain::StreamId } -> Vec<::oxplow_domain::CommentThread>,
                 // page_visit
                 record_page_visit => $crate::commands::page_visit::record_page_visit { page_kind: String, page_id: String, label: Option<String>, thread_id: Option<String> } -> ::oxplow_db::PageVisit,
                 finish_page_visit => $crate::commands::page_visit::finish_page_visit { id: String, duration_ms: u32 } -> (),

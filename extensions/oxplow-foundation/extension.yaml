@@ -56,9 +56,6 @@ intent:
     - name: settings-search-narrows-by-key-doc-or-value
       input: { page: settings, params: { q: snapshotretention } }
       expect: a search narrows the settings; one matching nothing leaves none
-    - name: comments-inbox-lists-threads-by-target-and-a-picked-one-reads-in-order
-      input: { page: comments, params: { stream_id: 1, days: "0" } }
-      expect: open threads under their target, a resolved one only when the filter reaches back, a picked thread as its messages in order
     - name: alerts-operation-reads-how-a-failure-ended
       input: { part: alerts-operation, params: { event_id: "<a failure's event>" } }
       expect: a failure's command and stderr; one that captured nothing says so
@@ -614,14 +611,6 @@ resources:
     resolve: symbol
     title: name
     icon: list-tree
-  - name: comment
-    description: "A comment a person left on a page or a record."
-    label: Comment
-    params: { id: { required: true, pattern: '^cmt[0-9]+$' } }
-    resolve: comment
-    title: body
-    searchable: search_comment
-    icon: message-square
   - name: event
     description: "A recorded event, such as a request finishing."
     label: Event
@@ -1349,38 +1338,6 @@ commands:
     scope: hints.write
     op: dismiss_all
     example: {}
-  - name: comment.list
-    summary: "List comments. Threaded annotations the user anchored to a text selection in a page (knowledge page body, code file line, task detail). `id` is a thread (`thr…`) or stream (`str…`) id; `scope` is inferred from its prefix, so usually pass only `id`. `status` filters: \"all\" (default), \"open\", or \"needs_response\" (open follow-ups whose latest message isn't yours — what the user wants you to act on). Each result carries the anchored `quote`, the message thread, and `intent` (note vs followup). Reply with `oxplow.knowledge.reply_comment { comment, body }`; resolve with `oxplow.knowledge.update_comment { comment, status: \"resolved\" }`."
-    scope: comment.read
-    op: list
-    tool: list_comments
-    example: {"id": "str1", "status": "needs_response"}
-  - name: comment.add
-    summary: "Comment on a span of a page (its `target`), with a first message. `intent`: `note` (the agent leaves it alone) or `followup` (the agent should act on it). An agent comments on its own stream, in its own thread."
-    scope: comment.write
-    op: add
-    example: {"stream": "str1", "target": "oxplow:oxplow/knowledge?id=vcs-capability&store=oxwiki", "quote": "Every provider implements Vcs", "intent": "followup", "body": "This is out of date: GitProvider also implements WorkspaceFiles."}
-  - name: comment.delete
-    summary: "Delete a comment and its messages (`cmt12`). A person is asked first."
-    scope: comment.write
-    op: delete
-    confirm: destructive
-    example: {"comment": "cmt12"}
-  - name: comment.relocate
-    summary: "Store where a comment's quote (`cmt12`) sits in its page's content now (`selectors_json`), or that it is gone (`orphaned`). The renderer's, after it re-finds the quote."
-    scope: comment.write
-    op: relocate
-    example: {"comment": "cmt12", "selectors_json": "[]", "orphaned": false}
-  - name: comment.reply
-    summary: "Reply on a comment (`cmt12`)."
-    scope: comment.write
-    op: reply
-    example: {"comment": "cmt4", "body": "Fixed in the page."}
-  - name: comment.update
-    summary: "Change a comment (`cmt12`): its `intent`, its `status` (`open` / `resolved`), or re-attach it to a new span (`quote` and `selectors_json` together)."
-    scope: comment.write
-    op: update
-    example: {"comment": "cmt4", "status": "resolved"}
   - name: lsp.restart_server
     summary: "Restart a stream's language server for a language: the session is torn down and started again with the open documents replayed."
     scope: lsp.control
@@ -1593,7 +1550,7 @@ commands:
     example: {"uri": "oxplow:oxplow/knowledge?id=architecture&store=oxwiki", "path": "src/app/main.py"}
   # search.read
   - name: search.find
-    summary: "Site-wide BM25 search across every searchable resource (`v_resource.searchable`: tasks, knowledge pages, comments, an extension's) and file contents. Tokens match as stemmed prefixes. `stream_id` scopes file/stream-bound hits to one worktree (knowledge pages etc. always included); omit it to search everything. `resources` optionally restricts to some of those (`oxplow/knowledge`), or `oxplow/file`. Each hit names the `uri` it found and its `resource` (read it with `oxplow_read`, show it with `oxplow_navigate`); best first."
+    summary: "Site-wide BM25 search across every searchable resource (`v_resource.searchable`: tasks, knowledge pages, an extension's) and file contents. Tokens match as stemmed prefixes. `stream_id` scopes file/stream-bound hits to one worktree (knowledge pages etc. always included); omit it to search everything. `resources` optionally restricts to some of those (`oxplow/knowledge`), or `oxplow/file`. Each hit names the `uri` it found and its `resource` (read it with `oxplow_read`, show it with `oxplow_navigate`); best first."
     scope: search.read
     op: search
     tool: search

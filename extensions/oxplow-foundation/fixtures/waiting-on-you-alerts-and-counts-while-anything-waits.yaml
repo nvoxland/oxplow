@@ -1,15 +1,17 @@
 # Waiting on you raises its alert and counts in its panel's header while
-# anything waits on the person: here an open note-to-self. (Tasks assigned
-# to the person are the Assigned to you panel's, not counted here.)
+# anything waits on the person: here work handed to a thread with no agent.
+# (Tasks assigned to the person are the Assigned to you panel's, not counted
+# here.)
 when: { page: oxplow/waiting-on-you }
 expect:
   loaders: { waiting_on_me: { rows: 0 } }
   alert: { firing: false }
 steps:
   - given:
-      - { command: oxplow.comment.add, input: { stream: str1, target: "oxplow:oxplow/thread?id=thr1", intent: note, body: Check the release notes } }
+      - { command: oxplow.thread.create, input: { stream: str1, title: Docs } }
+      - { command: oxplow.handoff.send, input: { from_thread: thr1, to_thread: thr2, about: "oxplow:oxplow/thread?id=thr1", body: Check the release notes } }
   - expect:
-      loaders: { waiting_on_me: { rows: [{ what: Open note, title: Check the release notes }] } }
+      loaders: { waiting_on_me: { rows: [{ what: Handed to a thread with no agent, title: Check the release notes }] } }
       alert: { firing: true, message: "Waiting on you: 1" }
   - when: { part: oxplow/waiting-count }
     expect: { badge: 1 }

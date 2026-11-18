@@ -22,7 +22,7 @@ the user guide is `docs/guide/pages.md`.
   - `pages/<slug>.yaml` is one page: metadata (`title`, `description`,
     `label`, `icon`, `category`, `keywords`, `params`, `answers`, `actions`,
     `alert`, `badge`, `needs`, `for` / `accepts` / `default` / `pinned`,
-    `comments`, `refresh`, `tool`), `loaders:` (named loaders: `sql`,
+    `refresh`, `tool`), `loaders:` (named loaders: `sql`,
     `command`, `page`, `rows`) and `view:` (a tree of nodes, with an optional
     `rail:`). `parts/<slug>.yaml` is a part (drawn only inside a host) and
     `queries/<slug>.yaml` a query (rows only); each takes a subset of the
@@ -263,13 +263,6 @@ the user guide is `docs/guide/pages.md`.
       extension that renders another's resource adds a renderer to pick
       ("Open with"), never the default.
     - `pinned: true` makes its tabs pinned.
-    - `comments: true` makes the page's text take comments: its URI (its
-      tab id) is their target, the nav bar gets the comment navigator, and
-      a selection in its text starts one — plain text and the markdown
-      viewer through the app's DOM layer (the body carries `data-ref`),
-      the markdown editor and a `code` viz through their own layers
-      (usability.md "Comments are a page's"). Comments name one URI, so
-      `true` is the whole declaration.
     - `default`, `pinned` and `accepts` without `for` are a load error.
     - A page with `for` takes no `category`, `keywords` or `badge`,
       declares `params: [{ name: uri }]`, and is handed the `content` loader
@@ -289,8 +282,8 @@ the user guide is `docs/guide/pages.md`.
     icon with the count as its badge that opens the body above the bar,
     and the rail does not draw it). `body`, `badge`, `collapsed` and
     `count` name **pages of the same extension, by slug**. `open`, a
-    `page` URI, is the page its header opens — a core page it summarizes,
-    as Comments opens the inbox; absent, the body page. `collapsed` is the
+    `page` URI, is the page its header opens — a core page it summarizes;
+    absent, the body page. `collapsed` is the
     extension's own page shown while the panel is collapsed: the same view,
     smaller (Go To's is its pages as `viz: icons`); absent, a collapsed panel
     is just its header. A body with more rows than the rail shows ends in

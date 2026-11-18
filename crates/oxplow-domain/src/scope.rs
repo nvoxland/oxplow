@@ -173,20 +173,6 @@ pub const SCOPES: &[Scope] = &[
         summary: "Run the project's and extensions' collectors now, syncing what they read.",
     },
     Scope {
-        id: "comment.read",
-        access: Access::Read,
-        host: Host::Daemon,
-        spends: false,
-        summary: "Read the comments people anchored to text in pages, files and tasks.",
-    },
-    Scope {
-        id: "comment.write",
-        access: Access::Record,
-        host: Host::Daemon,
-        spends: false,
-        summary: "Write comments: add, reply, change, relocate and delete them.",
-    },
-    Scope {
         id: "config.read",
         access: Access::Read,
         host: Host::Daemon,

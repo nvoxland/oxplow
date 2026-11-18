@@ -24,7 +24,6 @@ pub const BRANCH: &str = "oxplow/branch";
 pub const FILE: &str = "oxplow/file";
 pub const DIR: &str = "oxplow/dir";
 pub const SYMBOL: &str = "oxplow/symbol";
-pub const COMMENT: &str = "oxplow/comment";
 pub const EVENT: &str = "oxplow/event";
 pub const PAGE: &str = "oxplow/page";
 pub const METRIC: &str = "oxplow/metric";

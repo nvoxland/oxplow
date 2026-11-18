@@ -31,11 +31,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::comment::author_of;
 use super::compose::{Compose, Composer, Composing, Composition};
 use super::ops::Op;
 use super::thread::acting_thread;
-use super::util::{bare_id, invalid, parse, schema, sql};
+use super::util::{author_of, bare_id, invalid, parse, schema, sql};
 use super::{Handler, HandlerOutput, TxCtx};
 use crate::link_check::LinkDeps;
 

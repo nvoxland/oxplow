@@ -137,7 +137,6 @@ export function fakePage(view: Node, over: Partial<Page> = {}): Page {
     acceptsContent: null,
     default: false,
     pinned: false,
-    comments: false,
     refresh: false,
     needs: [],
     actions: [],

@@ -49,7 +49,7 @@ test("a rejected inline spec shows its source and daemon's validation error", as
 test("a restored knowledge page view binds the inline page's declared picks without leaking host view keys", async () => {
   const { runs, calls } = fakePageRuns(run());
   const source = "title: Picked\nparams: [{ name: selected, role: selection }]\nview: { markdown: Ready }";
-  const nav = { viewParams: { selected: "kept-row", comment: "cmt3" } } as unknown as PageNavigation;
+  const nav = { viewParams: { selected: "kept-row", lines: "3-4" } } as unknown as PageNavigation;
   render(<PageNavigationContext.Provider value={nav}><PageRunsContext.Provider value={runs}>
     <InlineView specYaml={source} />
   </PageRunsContext.Provider></PageNavigationContext.Provider>);

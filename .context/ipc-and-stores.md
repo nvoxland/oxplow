@@ -266,8 +266,7 @@ every `Both` row:
   answers for both. `tests/parity.rs` checks the adapter's source names
   the command. `search` and `vcs_blame` are these.
 - **`both_shaped`** — the person's call has another shape (an open run a
-  window holds, the explorer's `raw` switch, the comment layer's own
-  drawing) and both call the one service; the row says what differs.
+  window holds, the explorer's `raw` switch) and both call the one service; the row says what differs.
 
 An IPC read with no UI caller is deleted, not kept beside the agent's:
 `validate_extension`, `vcs_log`, `vcs_branches` and `ensure_change` are the
@@ -820,36 +819,12 @@ When you add one, put it on this no-`Services` footing **and add it to
 to the window's daemon, which doesn't serve it. Everything else uses
 the flow above.
 
-## Comments
-
-Threaded annotations anchored to a text selection on any page
-(`crates/oxplow-db/src/comment_store.rs`; schema in
-[data-model.md](./data-model.md)). Every write is a `knowledge.*` comment
-command (`commands/comment.rs`, P8.A6 — see [commands.md](./commands.md)):
-the store keeps its reads plus the `_tx` cores the handlers call, and the
-desktop's `createComment` / `addCommentMessage` / `setComment*` /
-`relinkComment` / `deleteComment` helpers run them through `runCommand`
-(`deleteComment` confirmed — the popover's `InlineConfirm` is the
-person's confirmation). The author is whoever runs the command, so no
-surface passes one. The reads stay RPCs (`list_comments_for_target`,
-`list_comments_for_stream`; MCP `oxplow_list_comments`).
-
-Views re-read on `DatasetsChanged` naming `v_comment` (comments and their
-messages) — `subscribeCommentEvents` in `api.ts`. The renderer's
-re-anchor after it re-finds a quote is `oxplow.comment.relocate`
-(`relocateComment`): recorded when the anchor moved; one already
-where it was is `HandlerOutput::unchanged` and leaves no audit row and no
-event (commands.md step 5), so the re-read it causes ends the loop. The
-field stores anchors only once the document settles (blur, leaving, not
-focused), so typing above N comments doesn't run N commands per
-pause.
-
 ## Search index (read dataset + indexer)
 
 The `search` command/tool is a read over `SqliteSearchStore`
 (`crates/oxplow-db/src/search_store.rs`) — a unified FTS5/BM25 index, not a
 per-domain store. It is **fed**, not written by its callers. Tasks,
-comments, thread notes and knowledge pages are searchable resources derived from a dataset
+thread notes and knowledge pages are searchable resources derived from a dataset
 (`v_search_<kind>`): an asset per kind (`kind_search.rs`)
 restates the kind whole when a table behind its dataset commits — a move, a
 soft delete, a thread delete included — writing nothing when the rows are
@@ -920,7 +895,7 @@ authority.
 
 The result is the page as the runner parsed it, flat: its metadata (`file`,
 `for`, `default`, `category`, `hidden`, `pinned`, `tool`, `refresh`,
-`comments`, `needs`, `label`, `description`, origin), `params` (each with
+`needs`, `label`, `description`, origin), `params` (each with
 the value this run used), `loaders` (each with its kind and source, the
 loaders it `uses`, the datasets it `reads`, and the rows it gave or its
 error), `nodes` (parent, depth, page, source file, viz, loader kind and

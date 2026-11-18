@@ -5,8 +5,8 @@ import { deploy, extensionSource, fileTask, ipc, run, type Daemon } from "../../
 import { expect, test } from "../../support/fixtures.js";
 import { open, taskIdOf } from "../../support/ui.js";
 
-// The test extension's effect comments on each created task; a title with
-// "[fail]" makes it comment in a stream that doesn't exist.
+// The test extension's effect bookmarks each created task under its title;
+// a title with "[fail]" makes it bookmark in a stream that doesn't exist.
 
 const EFFECT = "oxplow:oxplow/effect?effect=e2e/note-created";
 
@@ -20,12 +20,12 @@ async function refOf(daemon: Daemon, title: string): Promise<string> {
   return String(rows[0]?.[0]);
 }
 
-/** The effect's comments on the task titled `title`. */
+/** The effect's bookmarks of the task titled `title`, under that title. */
 async function notesOn(daemon: Daemon, title: string): Promise<number> {
   const rows = await sql(
     daemon,
-    `SELECT count(*) FROM v_comment c JOIN v_oxplow_task w ON w.uri = c.target
-      WHERE w.title = '${title}' AND c.body = 'Noted by the suite''s effect.'`,
+    `SELECT count(*) FROM v_bookmark b JOIN v_oxplow_task w ON w.uri = b.uri
+      WHERE w.title = '${title}' AND b.label = w.title`,
   );
   return Number(rows[0]?.[0]);
 }
@@ -46,7 +46,7 @@ test("a failed reaction is in Delivery, and a person's Retry composes it afresh"
 });
 
 test("a person's Backfill reaches what was logged before the effect was deployed", async ({ page, daemon }) => {
-  // Logged first; then an extension whose effect comments on created
+  // Logged first; then an extension whose effect bookmarks created
   // tasks is deployed: it starts after what was already logged.
   await fileTask(daemon, "Fig");
   const dir = extensionSource(daemon, "late");
@@ -54,12 +54,12 @@ test("a person's Backfill reaches what was logged before the effect was deployed
   writeFileSync(
     join(dir, "extension.yaml"),
     "manifest: 2\nname: late\nintent:\n  purpose: An effect deployed after the event it backfills.\n" +
-      "requires: [oxtask]\npermissions: [sql.read, commands:oxplow.comment.add]\n" +
+      "requires: [oxtask]\npermissions: [sql.read, commands:oxplow.bookmark.set]\n" +
       "effects:\n  - { id: note, summary: Notes a created task., on: [oxplow.task_record.changed], where: { cause: trigger }, entry: effects/note.star, needs: [sql.read] }\n",
   );
   writeFileSync(
     join(dir, "effects", "note.star"),
-    'def transform(x):\n    p = x["event"]["payload"]\n    if "state" not in p.get("changed", []) or "state" in (p.get("before") or {}):\n        return {"skip": "not a filing"}\n    rows = scope("sql.read", {"sql": "SELECT \'str\' || id AS stream FROM v_stream LIMIT 1", "params": {}})\n    return {"commands": [{"name": "oxplow.comment.add", "input": {"stream": rows[0]["stream"], "target": p["uri"], "body": "Noted late."}}]}\n',
+    'def transform(x):\n    p = x["event"]["payload"]\n    if "state" not in p.get("changed", []) or "state" in (p.get("before") or {}):\n        return {"skip": "not a filing"}\n    rows = scope("sql.read", {"sql": "SELECT \'str\' || id AS stream FROM v_stream LIMIT 1", "params": {}})\n    return {"commands": [{"name": "oxplow.bookmark.set", "input": {"uri": p["uri"], "page_kind": "oxplow/task", "label": "Noted late.", "scope": "stream", "stream": rows[0]["stream"]}}]}\n',
   );
   await deploy(daemon, "late");
   const late = async () =>
@@ -67,7 +67,7 @@ test("a person's Backfill reaches what was logged before the effect was deployed
       (
         await sql(
           daemon,
-          "SELECT count(*) FROM v_comment c JOIN v_oxplow_task w ON w.uri = c.target WHERE w.title = 'Fig' AND c.body = 'Noted late.'",
+          "SELECT count(*) FROM v_bookmark b JOIN v_oxplow_task w ON w.uri = b.uri WHERE w.title = 'Fig' AND b.label = 'Noted late.'",
         )
       )[0]?.[0],
     );

@@ -77,8 +77,9 @@ Add to Context puts things in a thread's context basket:
 - A page's ☰ menu → **Add to Context** adds the page. A right-click
   anywhere on a page with nothing selected opens the same menu.
 - A selection in an editor, a diff or a terminal, a page row's right-click
-  menu, and the **Add to Context** button over selected text on a
-  commentable page add that text (or row). In the editor with nothing
+  menu, and the **Add to Context** button over selected text on any
+  page add that text (or row). Each add opens a prompt for an optional note
+  that goes with the item. In the editor with nothing
   selected, **Add File to Context** adds the file.
 
 Every entry carries the @ icon, the same as the **Context** icon in the
@@ -89,7 +90,7 @@ delivered.
 
 The next prompt to any agent in the thread carries the basket. Then it is
 empty. An item you removed is not sent. Add to Context needs a selected
-thread.
+thread. See [Collecting context](context.md).
 
 ## Input
 

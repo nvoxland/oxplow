@@ -4,7 +4,7 @@ name: oxplow-bundled-todo
 namespace: oxplow
 # The datasets and event types it reads are oxplow-bundled's.
 requires: [oxplow-bundled]
-description: Oxplow's own contributions that haven't been reviewed yet, off and not shipped; each moves to oxplow-bundled once it is cleaned up, and this goes away when none are left. Holds the request review (Change Analysis, Tests Weakened, co-change), the agent-interface, extension-run, job-run, merge and branch pages, Explore Data, Timeline, the history graph, the Comments panel and the shared-files advisories.
+description: Oxplow's own contributions that haven't been reviewed yet, off and not shipped; each moves to oxplow-bundled once it is cleaned up, and this goes away when none are left. Holds the request review (Change Analysis, Tests Weakened, co-change), the agent-interface, extension-run, job-run, merge and branch pages, Explore Data, Timeline, the history graph and the shared-files advisories.
 engine: ">=0.7"
 # What it reaches beyond the baseline: its effects and commands read with
 # their own SQL, its jobs and effects ask models, and its advisories and skills speak to the agent.
@@ -32,9 +32,6 @@ intent:
     - name: extension runs over the last week
       input: { page: runs, params: {} }
       expect: each extension's runs, failures, denials, mean CPU and model calls, the ones needing attention first
-    - name: comments-panel-counts-open-comments-by-who-acts
-      input: { part: oxplow/comments-panel, params: { stream_id: 1 } }
-      expect: open notes for the person and followups for the agent, a resolved one not counted, none for another stream
     - name: the-interest-dataset-scores-a-change-like-the-old-formula
       input: { sql: v_oxplow_change_interest }
       expect: size, complexity spikes, parameter growth and long new functions multiply into a score and its reasons
@@ -97,8 +94,6 @@ custom_components:
   # (vis-timeline, which the kit has no viz for).
   - { id: timeline, title: Timeline, bundle: dist/timeline, sql: read, description: "Requests, sessions, threads and commits on a zoomable time axis." }
   - { id: history-graph, title: History graph, description: "The commits of the project drawn as lanes by branch, with filters by message, author and branch." }
-panels:
-  - { id: comments, title: Comments, icon: message-square, scope: stream, body: comments-panel, open: 'oxplow:oxplow/page?page=comments' }
 advisories:
   # A hint that ran a hundred times and never once spoke is dead weight, or
   # watching for something that can't happen here. Once per hint; this one

@@ -35,10 +35,6 @@ import type {
   HarnessListing,
   PanelPlacement,
   UiPreference,
-  CommentIntent,
-  CommentMessage,
-  CommentStatus,
-  CommentThread,
   Extension,
   VizConfig,
   VizRun,
@@ -844,95 +840,6 @@ export async function setThreadPrompt(
 export interface RemoteBranchTarget {
   remote: string;
   branch: string;
-}
-
-// ---- Comments ----
-
-/** A comment, written as the person (`oxplow.comment.add`, P8.A6). */
-export async function createComment(input: {
-  streamId: string;
-  threadId: string | null;
-  /** The URI the comment is on. */
-  target: string;
-  quote: string;
-  /** W3C selectors array, serialized. */
-  selectorsJson: string;
-  /** Ancestor regions' URIs (innermost→outermost, excluding the target). */
-  contextChain?: string[];
-  /** URIs found inside the selection. */
-  referenced?: string[];
-  intent: CommentIntent;
-  body: string;
-}): Promise<CommentThread> {
-  const outcome = await runCommand("oxplow.comment.add", {
-    stream: input.streamId,
-    ...(input.threadId ? { thread: input.threadId } : {}),
-    target: input.target,
-    quote: input.quote,
-    selectors_json: input.selectorsJson,
-    context_chain: input.contextChain ?? [],
-    referenced: input.referenced ?? [],
-    intent: input.intent,
-    body: input.body,
-  });
-  return outcome.result as CommentThread;
-}
-
-export async function addCommentMessage(commentId: string, body: string): Promise<CommentMessage> {
-  return (await runCommand("oxplow.comment.reply", { comment: commentId, body })).result as CommentMessage;
-}
-
-export async function listCommentsForTarget(target: string): Promise<CommentThread[]> {
-  return unwrap(await commands.listCommentsForTarget(target));
-}
-
-export async function listCommentsForStream(streamId: string): Promise<CommentThread[]> {
-  return unwrap(await commands.listCommentsForStream(streamId));
-}
-
-export async function setCommentIntent(commentId: string, intent: CommentIntent): Promise<void> {
-  await runCommand("oxplow.comment.update", { comment: commentId, intent });
-}
-
-export async function setCommentStatus(commentId: string, status: CommentStatus): Promise<void> {
-  await runCommand("oxplow.comment.update", { comment: commentId, status });
-}
-
-/// Store where the renderer re-found a comment's quote (or that it is
-/// gone). An anchor already where it was leaves no record.
-export async function relocateComment(
-  commentId: string,
-  selectorsJson: string,
-  orphaned: boolean,
-): Promise<void> {
-  await runCommand("oxplow.comment.relocate", { comment: commentId, selectors_json: selectorsJson, orphaned });
-}
-
-/// Re-attach an orphaned comment to a freshly-selected span: rewrites
-/// both quote + anchor and clears the orphan flag.
-export async function relinkComment(
-  commentId: string,
-  quote: string,
-  selectorsJson: string,
-): Promise<void> {
-  await runCommand("oxplow.comment.update", { comment: commentId, quote, selectors_json: selectorsJson });
-}
-
-/** The popover's delete sits behind an `InlineConfirm`, the person's
- *  confirmation (`oxplow.comment.delete` is destructive). */
-export async function deleteComment(commentId: string): Promise<void> {
-  await runCommand("oxplow.comment.delete", { comment: commentId }, true);
-}
-
-/// Subscribe to comment changes: a commit touched `v_comment` (a comment
-/// or one of its messages), whoever wrote it. A view re-reads its list.
-export function subscribeCommentEvents(onChange: () => void): () => void {
-  return subscribeOxplowEvents((event) => {
-    const datasets = (event as { datasets?: unknown }).datasets;
-    if (event.kind === "datasetsChanged" && Array.isArray(datasets) && datasets.includes("v_comment")) {
-      onChange();
-    }
-  });
 }
 
 export async function recordUsage(input: {

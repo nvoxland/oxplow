@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { commentUri, fileUri, resourceUri, streamUri, threadUri, knowledgeUri, taskUri } from "../uri/uri.js";
+import { eventUri, fileUri, resourceUri, streamUri, threadUri, knowledgeUri, taskUri } from "../uri/uri.js";
 import { fileRef, knowledgePageRef, taskTabRef } from "./pageRefs.js";
 import { refTarget, refTargetNow } from "./refOpener.js";
 
@@ -20,8 +20,8 @@ test("a URI opens as itself, a thread's or a stream's selects", () => {
 
 test("an oxplow resource with no declared page opens as itself too", () => {
   // Intent moved: a resource no longer names a page that it opens with a `uri`.
-  const comment = commentUri("cmt7");
-  expect(refTargetNow(comment)).toEqual({ tab: { id: comment } });
+  const event = eventUri("0190");
+  expect(refTargetNow(event)).toEqual({ tab: { id: event } });
 });
 
 test("before the registry is read, a URI opens as itself", () => {

@@ -139,7 +139,7 @@ Logs, tab reports and the socket use the same lightweight `uiClientId.ts` identi
   (`loadInitialAppState` in `App.tsx`: streams, current stream + its
   threads, workspace context), the core-store
   subscriptions (`useBackendSubscriptions`: config, agent
-  statuses), and comment threads (`useCommentsForTarget`) all register
+  statuses) all register
   `onRemoteReconnect` handlers. The daemon health probe (App.tsx, 2s
   `/ipc/ping` poll) used to `window.location.reload()` on recovery;
   it now `triggerRemoteResync()`s instead, so an HTTP-level recovery

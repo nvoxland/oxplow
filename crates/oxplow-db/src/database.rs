@@ -2283,6 +2283,55 @@ mod tests {
         assert_eq!(kept, (1, 1));
     }
 
+    /// V45 drops the comment tables, the refs to and from a comment, the
+    /// comment events and the `oxplow.comment.*` audit rows; a task
+    /// comment's mentions (a model's child markdown) stay.
+    #[test]
+    fn v45_drops_comments_and_what_named_them() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(44))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys = OFF;
+             INSERT INTO comment (id, stream_id, target_resource, target_uri, quote, selectors_json, author, created_at, updated_at, last_activity_at)
+               VALUES (5, 1, 'oxplow/file', 'oxplow:oxplow/file?path=a.rs', 'q', '{}', 'user', 'a', 'a', 'a');
+             INSERT INTO comment_message (comment_id, author, body, created_at) VALUES (5, 'user', 'hi', 'a');
+             INSERT INTO page_ref (source_uri, target_uri, source_resource, target_resource, ref_type)
+               VALUES ('oxplow:oxplow/comment?id=cmt5', 'oxplow:oxplow/file?path=a.rs', 'oxplow/comment', 'oxplow/file', 'comment_file_ref'),
+                      ('oxplow:oxplow/task?id=tsk1&provider=oxtask', 'oxplow:oxplow/file?path=a.rs', 'oxplow/task', 'oxplow/file', 'comment_file_ref');
+             INSERT INTO event_log (id, type, v, at, source, subject, payload)
+               VALUES ('e1', 'comment.written', 1, 'a', 's', '[]', '{}'),
+                      ('e2', 'comment.deleted', 1, 'a', 's', '[]', '{}'),
+                      ('e3', 'config.changed', 2, 'a', 's', '[]', '{}');
+             INSERT INTO command_audit (id, at, command, actor_kind, input_json, outcome)
+               VALUES (1, 'a', 'oxplow.comment.add', 'human', '{}', 'ok'),
+                      (2, 'a', 'oxplow.context.add', 'human', '{}', 'ok');",
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let count = |sql: &str| -> i64 { conn.query_row(sql, [], |r| r.get(0)).unwrap() };
+        assert_eq!(
+            count("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name IN ('comment', 'comment_message')"),
+            0
+        );
+        assert_eq!(
+            count("SELECT count(*) FROM page_ref WHERE source_resource = 'oxplow/comment'"),
+            0
+        );
+        assert_eq!(
+            count("SELECT count(*) FROM page_ref WHERE source_resource = 'oxplow/task'"),
+            1
+        );
+        assert_eq!(
+            count("SELECT count(*) FROM event_log WHERE type LIKE 'comment.%'"),
+            0
+        );
+        assert_eq!(count("SELECT count(*) FROM event_log"), 1);
+        assert_eq!(count("SELECT count(*) FROM command_audit"), 1);
+    }
+
     #[test]
     fn v40_and_v42_preserve_settings_events_at_the_new_level_versions() {
         let mut conn = Connection::open_in_memory().unwrap();
@@ -2941,8 +2990,6 @@ mod tests {
             "model_store_decl",
             "model_quarantine",
             "page_ref",
-            "comment",
-            "comment_message",
             // V43 — the durable atomic fact layer (the sole metric substrate
             // since T-E3 dropped the V38 cluster, V49). The `subject` hierarchy
             // table was dropped in V52 — never read/written.
@@ -2977,6 +3024,9 @@ mod tests {
         // `effort_observation` was dropped in V39; the V38
         // `metric_*` cluster was dropped in V49 (T-E3) — assert gone.
         let expected_absent = [
+            // V45: comments are gone (the context basket's notes do their job).
+            "comment",
+            "comment_message",
             // The dead per-task audit table is gone.
             "task_event",
             "hook_event",

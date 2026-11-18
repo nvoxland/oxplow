@@ -39,7 +39,6 @@ pub const CORE_NAMESPACES: &[&str] = &[
     "snapshot",
     "vcs",
     "knowledge",
-    "comment",
     "record",
     "handoff",
     "test",
@@ -190,8 +189,6 @@ impl EventSchemaRegistry {
         r.register::<HandoffSettled>().expect("core type registers");
         r.register::<ThreadClosed>().expect("core type registers");
         r.register::<StreamArchived>().expect("core type registers");
-        r.register::<CommentWritten>().expect("core type registers");
-        r.register::<CommentDeleted>().expect("core type registers");
         r.register::<CodeDiagnosticsChanged>()
             .expect("core type registers");
         r.register::<ContributionEnabled>()
@@ -1909,41 +1906,6 @@ impl EventType for StreamArchived {
     type Payload = StreamArchivedV1;
 }
 
-/// `comment.written@1`: a comment (a threaded annotation on a
-/// page) was created or changed — a reply, its intent, status or anchor.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct CommentWrittenV1 {
-    /// The comment (`cmt5`).
-    pub comment: String,
-    /// What it annotates: a URI.
-    pub target: String,
-}
-
-pub struct CommentWritten;
-impl EventType for CommentWritten {
-    const TYPE: &'static str = "comment.written";
-    const V: u32 = 1;
-    type Payload = CommentWrittenV1;
-}
-
-/// `comment.deleted@1`: a comment is gone, its messages with it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct CommentDeletedV1 {
-    /// The comment (`cmt5`).
-    pub comment: String,
-    /// What it annotated: a URI.
-    pub target: String,
-}
-
-pub struct CommentDeleted;
-impl EventType for CommentDeleted {
-    const TYPE: &'static str = "comment.deleted";
-    const V: u32 = 1;
-    type Payload = CommentDeletedV1;
-}
-
 /// Whether `event_type` is one of core's types (any version) — what a
 /// collector's `on:` trigger may name besides its own extension's
 /// declared types. Built once.
@@ -2004,8 +1966,6 @@ mod tests {
                 ("command.declined", 2),
                 ("command.executed", 5),
                 ("command.proposed", 4),
-                ("comment.deleted", 1),
-                ("comment.written", 1),
                 ("config.changed", 3),
                 ("contribution.disabled", 1),
                 ("contribution.enabled", 1),

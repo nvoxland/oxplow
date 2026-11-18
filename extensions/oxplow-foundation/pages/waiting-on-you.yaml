@@ -1,5 +1,5 @@
 title: Waiting on you
-description: "What only you can move: a question an agent is waiting on, work handed to a thread with no agent, and your open notes. Tasks assigned to you are on Assigned to you."
+description: "What only you can move: a question an agent is waiting on, and work handed to a thread with no agent. Tasks assigned to you are on Assigned to you."
 icon: bell
 category: Work
 loaders:
@@ -18,11 +18,6 @@ loaders:
       WHERE h.state = 'open' AND t.closed_at IS NULL
         AND NOT EXISTS (SELECT 1 FROM v_agent_session s
                          WHERE s.thread_id = h.to_thread_id AND s.closed_at IS NULL)
-      UNION ALL
-      SELECT 'Open note', coalesce(c.body, c.quote), c.uri, t.title, c.last_activity_at
-      FROM v_comment c
-      LEFT JOIN v_thread t ON t.id = c.thread_id
-      WHERE c.status = 'open' AND c.intent = 'note'
       )
       ORDER BY what = 'Waiting for your answer' DESC, since DESC
   open_count:

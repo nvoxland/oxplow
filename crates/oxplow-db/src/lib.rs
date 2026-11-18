@@ -19,7 +19,6 @@ pub mod change_store;
 pub mod changes;
 pub mod collector_store;
 pub mod command_audit_store;
-pub mod comment_store;
 pub mod commit_request_store;
 pub mod contribution_health_store;
 pub mod contribution_store;
@@ -90,7 +89,6 @@ pub use collector_store::{
     StoredType,
 };
 pub use command_audit_store::{CommandAudit, NewCommandAudit, SqliteCommandAuditStore};
-pub use comment_store::SqliteCommentStore;
 pub use contribution_health_store::{
     ContributionHealthRow, ContributionKey, SqliteContributionHealthStore,
 };

@@ -2,15 +2,14 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 import type { Editor } from "@tiptap/core";
 import { useEditorState } from "@tiptap/react";
-import { Bold, Code, Heading2, Heading3, Italic, Link2, MessageSquarePlus } from "lucide-react";
+import { Bold, Code, Heading2, Heading3, Italic, Link2 } from "lucide-react";
 
 import { preprocessWikilinks } from "./markdownLinks.js";
 
 /**
  * The editor's selection toolbar (`.context/markdown.md`): floated over a
  * fresh selection, it formats it — Bold, Italic, Code, Link and the
- * headings (none in a one-line field) — and, where the text takes
- * comments, adds one. Each button says whether it is on. Buttons act on
+ * headings (none in a one-line field). Each button says whether it is on. Buttons act on
  * the press, so the selection never collapses first. Link opens a box: a
  * web URL or an oxplow URI as it is, anything else read as a wikilink's
  * target (`local-snapshots`, `src/a.ts:12`, `tsk42`); Enter applies it,
@@ -20,12 +19,10 @@ export function SelectionToolbar({
   editor,
   rect,
   inlineOnly,
-  onComment,
 }: {
   editor: Editor;
   rect: DOMRect;
   inlineOnly: boolean;
-  onComment?: () => void;
 }) {
   const on = useEditorState({
     editor,
@@ -56,7 +53,6 @@ export function SelectionToolbar({
   return (
     <div
       data-testid="selection-toolbar"
-      data-selection-comment-ui
       role="toolbar"
       aria-label="Format"
       className="ox-selection-toolbar"
@@ -114,12 +110,6 @@ export function SelectionToolbar({
               </ToolButton>
             </>
           )}
-          {onComment ? (
-            <ToolButton id="comment" label="Add comment" active={false} onPress={onComment}>
-              <MessageSquarePlus size={14} />
-              <span style={{ marginLeft: 4 }}>Comment</span>
-            </ToolButton>
-          ) : null}
         </>
       )}
     </div>
@@ -168,22 +158,4 @@ export function linkHref(value: string): string | null {
   const interior = v.replace(/^\[\[/, "").replace(/\]\]$/, "");
   const md = preprocessWikilinks(`[[${interior}]]`);
   return /\]\(([^)]+)\)$/.exec(md)?.[1] ?? null;
-}
-
-/// Gating for the editor's floating selection toolbar (`SelectionToolbar`)
-/// over a fresh text selection. The Tiptap surface is deliberately carved
-/// out of the plain-DOM selection layer (`useDomAnnotations` skips
-/// contenteditable), so the field shows its own — this predicate keeps the
-/// rules in one testable spot.
-export interface SelectionToolbarInput {
-  /// The editor selection is collapsed.
-  selectionEmpty: boolean;
-  /// The new-comment composer is open for a pending selection.
-  composerOpen: boolean;
-  /// An existing comment-thread popover is open.
-  popoverOpen: boolean;
-}
-
-export function selectionToolbarVisible(input: SelectionToolbarInput): boolean {
-  return !input.selectionEmpty && !input.composerOpen && !input.popoverOpen;
 }

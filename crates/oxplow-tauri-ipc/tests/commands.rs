@@ -244,27 +244,6 @@ async fn thread_reads_over_default_thread() {
         .unwrap();
 }
 
-// ---- comment + note reads (writes are the knowledge.* commands) ----
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn comment_and_note_reads_over_fresh_project() {
-    let app = TestApp::build().await;
-    let (stream, _) = primary_and_thread(&app).await;
-    assert!(
-        commands::generated::list_comments_for_stream(app.state(), stream.id)
-            .await
-            .unwrap()
-            .is_empty()
-    );
-    assert!(commands::generated::list_comments_for_target(
-        app.state(),
-        "oxplow:oxplow/knowledge?id=some-page&store=oxwiki".to_string()
-    )
-    .await
-    .unwrap()
-    .is_empty());
-}
-
 // ---- page-ref + search reads ----
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]

@@ -1,5 +1,5 @@
 import { expect, test } from "../../support/fixtures.js";
-import { open } from "../../support/ui.js";
+import { open, shown } from "../../support/ui.js";
 
 // A page's ☰ → Add to Context offers a note, then puts the page in the
 // selected thread's basket: the dock's Context icon counts it, its panel
@@ -10,7 +10,7 @@ test("a page added from its ☰ is counted in the dock and removed from its pane
   await page.getByTestId("menu-item-page-add-to-context").click();
   await page.getByTestId("context-note-field").fill("Check the greeting.");
   await page.getByTestId("context-note-add").click();
-  await expect(page.getByTestId("context-note-prompt")).toHaveCount(0);
+  await expect(page.getByTestId("context-note-prompt")).not.toBeVisible();
 
   const badge = page.getByTestId("dock-context-badge");
   await expect(badge).toHaveText("1");
@@ -22,4 +22,17 @@ test("a page added from its ☰ is counted in the dock and removed from its pane
   await expect(page.getByTestId("context-panel-item")).not.toBeVisible();
   await expect(badge).toHaveCount(0);
   await expect(page.getByTestId("context-panel-empty")).toBeVisible();
+});
+
+// Text selected on any page floats Add to Context over it: a press offers a
+// note, then puts the text in the basket, from the page it was on.
+test("text selected on a page goes in the basket from the selection's toolbar", async ({ page, daemon }) => {
+  await open(page, daemon, "oxplow:oxplow/page?page=e2e/home");
+  await shown(page).getByText("Suite home in plain mode").click({ clickCount: 3 });
+  await page.getByTestId("selection-context-button").click();
+  await page.getByTestId("context-note-add").click();
+  await expect(page.getByTestId("context-note-prompt")).not.toBeVisible();
+  await expect(page.getByTestId("dock-context-badge")).toHaveText("1");
+  await page.getByTestId("dock-context").click();
+  await expect(page.getByTestId("context-panel-item")).toContainText("Suite home in plain mode");
 });

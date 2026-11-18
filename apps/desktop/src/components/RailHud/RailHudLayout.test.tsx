@@ -31,8 +31,6 @@ mock.module("../../api.js", () => ({
       ui: { slots: [], commands: [], decorators: [], replacements: [] },
     },
   ],
-  listCommentsForStream: async () => [],
-  subscribeCommentEvents: () => () => {},
   subscribeOxplowEvents: () => () => {},
   querySql: async () => ({ columns: [], rows: [], truncated: false, reads: { datasets: [], tables: [], measures: [] }, freshness: {} }),
 }));

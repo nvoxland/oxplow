@@ -11,7 +11,7 @@
  * Save keeps the page.
  */
 import { InlineError } from "../kit/InlineError.js";
-import { useState } from "react";
+import { useContext, useState } from "react";
 
 import type { VizRun } from "../api.js";
 import { useVizActionRunner } from "./vizActionRunner.js";
@@ -23,7 +23,7 @@ import { useOptionalPageNavigation, useTabEditing, type PageNavigation } from ".
 import { RENDERER_VIEW_KEY, pickRenderer } from "../pages/renderers.js";
 import { identityOf, withUriView } from "../uri/uri.js";
 import { rowRecord } from "./vizActions.js";
-import { usePageComments } from "./pageComments.js";
+import { PageViewContext } from "../pages/PageViewContext.js";
 import { useFormSubmit } from "./useFormSubmit.js";
 
 /** The text a markdown viz shows: its `text` column of the first row,
@@ -66,7 +66,8 @@ export function MarkdownViz({ run, streamId }: { run: VizRun; streamId: string |
 }
 
 function MarkdownEditor({ run, streamId, action, saved }: { run: VizRun; streamId: string | null; action: PageAction; saved: string }) {
-  const comments = usePageComments();
+  // The page the text is on: what a selection added to the context names.
+  const pageUri = useContext(PageViewContext)?.uri ?? null;
   // What the person typed, this step of the tab's; null: untouched, the
   // editor shows the saved text, whatever it is now.
   const [draft, setDraft, clearDraft] = useDraft<string | null>(`markdown:${run.config.id}`, null);
@@ -111,7 +112,7 @@ function MarkdownEditor({ run, streamId, action, saved }: { run: VizRun; streamI
         value={draft ?? shownSaved}
         testId="viz-markdown-editor"
         placeholder="Write here…"
-        comments={comments ?? undefined}
+        contextUri={pageUri}
         onChange={note}
         onSaveShortcut={(md) => {
           note(md);

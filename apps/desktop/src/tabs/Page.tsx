@@ -52,9 +52,6 @@ export interface PageNavBarConfig {
    *  when they want to surface what they point AT in addition to
    *  what points at them. */
   outbound?: { count: number; body: ReactNode };
-  /** Optional comment navigator node (count + prev/next + orphaned
-   *  list) for comment-bearing pages. */
-  comments?: ReactNode;
   /** The pages that render the URI shown, when there are several. */
   openWith?: import("./pageMenuItems.js").OpenWithProps;
 }
@@ -99,10 +96,6 @@ export interface PageProps {
    *  sibling dropdown next to Backlinks in the nav bar. Sibling to
    *  backlinks; same shape. */
   outbound?: { count: number; body: ReactNode };
-  /** Optional comment navigator node, rendered in the nav bar before
-   *  Backlinks. Comment-bearing pages (file/knowledge/task) pass a
-   *  `<CommentNavigator targetKind targetId />`. */
-  commentsNav?: ReactNode;
   /** Optional nav-bar config. When supplied, the browser-style nav bar
    *  renders between header and body, and (if it carries a `backlinks`
    *  block) suppresses the footer panel. */
@@ -143,7 +136,7 @@ const DETAILS_RAIL_THRESHOLD_PX = 960;
  * The chrome reads only semantic CSS variables. Both light and dark
  * themes are styled by `public/index.html`.
  */
-export function Page({ title, titleIcon, chips: ownChips, actions, pin, seeAlso, children, backlinks, outbound, commentsNav, navBar, testId, width = "full", fill = false, rightRail, rightRailTitle }: PageProps) {
+export function Page({ title, titleIcon, chips: ownChips, actions, pin, seeAlso, children, backlinks, outbound, navBar, testId, width = "full", fill = false, rightRail, rightRailTitle }: PageProps) {
   const [backlinksOpen, setBacklinksOpen] = useState(false);
   // Pages that don't pass an explicit `navBar` prop still get one
   // when rendered inside a PageNavigationContext provider — that's
@@ -224,7 +217,6 @@ export function Page({ title, titleIcon, chips: ownChips, actions, pin, seeAlso,
             ? { count: backlinksCount ?? 0, body: backlinksBody }
             : undefined),
         outbound: baseNavBar.outbound ?? outbound,
-        comments: baseNavBar.comments ?? commentsNav,
       }
     : undefined;
   const [modalHost, setModalHost] = useState<HTMLDivElement | null>(null);
@@ -267,7 +259,6 @@ export function Page({ title, titleIcon, chips: ownChips, actions, pin, seeAlso,
           bookmark={effectiveNavBar.bookmark}
           backlinks={effectiveNavBar.backlinks}
           outbound={effectiveNavBar.outbound}
-          comments={effectiveNavBar.comments}
           actions={actions}
           pin={pin}
           ask={effectiveNavBar.ask}

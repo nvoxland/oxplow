@@ -109,7 +109,7 @@ harness only delivers them.
 | Preamble | How to work in oxplow: turns are observed and tracking work as tasks is the active tracker's skill's business, end with the question, reading the errors a person saw, the references oxplow puts in a prompt (`@<path>`, `[oxplow uri <uri>]`, `[oxplow <task uri>: …]`, `[oxplow page …]`) | `oxplow_agent_text::WORKING_IN_OXPLOW` (`crates/oxplow-agent-text/assets/working-in-oxplow.md`) |
 | Launch prompt | The preamble; the session context only for a harness without `prompt_context`; the thread's and stream's custom prompts; `agentPromptAppend`; the testing hint (`testing.agentHint`); the skill index only for a harness without `runtime_text` | `agent_prompt::assemble_system_prompt(config, stream, thread, around, harness, skills)`, given the session's declared harness (`crates/oxplow-app/src/agent_prompt.rs`) |
 | Skills | Core's (`oxplow-runtime`, `-knowledge`, `-mermaid`, `-collection`, `-metrics`, `-extension`, `-codebase`) and the active extensions' (one with `when:` only while its extension's setting holds it, `extensions-commands.md` "Skills") | `AgentText` (`oxplow_agent_text::core_text` + `capabilities::agent_text`, which reads the settings that offer skills) |
-| Slash commands | Core's (`review-comments`, `configure`, `new-metric`, `note`: keep what was just worked out as a knowledge page) and the active extensions' | Same |
+| Slash commands | Core's (`configure`, `new-metric`, `note`: keep what was just worked out as a knowledge page) and the active extensions' | Same |
 | Session context | Stream, worktree, branch, thread, the other live agents in the worktree, the count of open handoffs to the thread | Prompt-time context |
 | Extension context | What an enabled extension says the agent should know now (`context:`), each as `<context from="<namespace>/<id>">`, once, then on change; 1,500 characters each, 3,000 in all | Prompt-time context (extensions-commands.md "Agent context") |
 | Handoffs | Work another thread handed this one, once, at the first prompt that takes it ("Handoffs and native messaging") | Prompt-time context |
@@ -250,14 +250,14 @@ Every tool foundation declares is named below
 
 | Purpose | Tools |
 |---|---|
-| Read oxplow's data | `oxplow_catalog` (every model with its owner, what it holds and its columns; one model's column docs), `oxplow_query_sql` (one read-only statement over the `v_*` models, live models included — [semantic-layer.md](./semantic-layer.md) "Live models"; its result is also structured content, typed by its output schema), `oxplow_read { uri }`, `oxplow_search` (BM25 over every searchable kind — tasks, comments, thread notes, knowledge pages, an extension's — and file contents; each hit is a URI) |
+| Read oxplow's data | `oxplow_catalog` (every model with its owner, what it holds and its columns; one model's column docs), `oxplow_query_sql` (one read-only statement over the `v_*` models, live models included — [semantic-layer.md](./semantic-layer.md) "Live models"; its result is also structured content, typed by its output schema), `oxplow_read { uri }`, `oxplow_search` (BM25 over every searchable kind — tasks, thread notes, knowledge pages, an extension's — and file contents; each hit is a URI) |
 | Code and revisions | `oxplow_vcs_log` (a stream's history from any revision, paged, past the index), `oxplow_vcs_status`, `oxplow_vcs_branches`, `oxplow_diff` (versions `working`, `snap:<id>`, `git:<rev>`; `since_fork`), `oxplow_vcs_blame` (through the `Vcs` provider; `working`, `snap:<id>` or `git:<rev>`), `oxplow_code_definition`, `oxplow_code_references`, `oxplow_code_hover`, `oxplow_code_call_hierarchy`, `oxplow_code_symbols` (a file's symbols from its language server, else oxplow's tree-sitter reading of the live file, saying which), `oxplow_code_workspace_symbols` (the editor's language servers, [lsp.md](./lsp.md)), `oxplow_ensure_change` (a change's analysis, then `v_change_*` through `oxplow_query_sql`) |
 | Write | `run_command`, after `list_commands` |
 | Ask a model | `oxplow_ai_decide` (typed questions about some text, on the `decide` role), `oxplow_ai_summarize` (on `summarize`): recorded computations paid with the person's key, as the asking thread ([ai-providers.md](./ai-providers.md)) |
 | Pages | `oxplow_show_page` (shows the person a page beside the conversation — a page with params, or a `spec` of your own, written as a page file on `oxplow:temp` and shown as `oxplow:oxplow/page?page=temp/<id>`; returns its text and whether a window opened it), `oxplow_find_page` (the pages that answer a question, best first, each with its params; `about` a uri keeps the pages that show that kind of thing and binds its uri), `oxplow_run_page` (a page's text, each node under `[node <id>]`, or its loaders' rows; `page` or an inline `spec`), `oxplow_run_page_action` (a page's action as the page acting for you; a row action on one of the node's rows); `oxplow.page.describe { uri, text?, params? }` through `run_command` (what a page file is made of and where each node comes from; `uri` is the page's file on `oxplow:extensions`, `oxplow:temp` or the worktree; a file that is no page gives no rows) — [pages-and-tabs.md](./pages-and-tabs.md) "Page files" |
 | Show the person | `oxplow_navigate` (takes them to any URI's page, switching stream when needed; by default the shown tab goes there, pushed; `replace` rewrites its entry, `new_tab` opens another) |
 | Common questions, typed | foundation pages with `tool:`: `oxplow_thread_tasks`, `oxtask_next_task` (oxtask's page), `oxplow_catalog`, `oxplow_request_summary { request }` (a request at a glance: its facts, tasks, files, tests and coverage, metric changes and commits; foundation's `request-summary`) (each runs `oxplow.page.run` on its page, its params the tool's input: `agent_tools::ToolTarget::Page`). Every other page is `oxplow_find_page` → `oxplow_run_page` (`file-history`, `recent-commits`, `snapshots`, `thread-sessions`, `session-transcript`) |
-| What the person has | `oxplow_list_tabs` (the tabs each of their windows shows, per thread, stream or project: selected, on screen, stale), `oxplow_get_open_page` (the page open in a thread in the window they were in last, the others' beside it, or one listed tab: `page` is its identity, `view` its `#`; the page's run as a tree with their params, and the focused node), `oxplow_list_comments` (their anchored comments, hydrated) |
+| What the person has | `oxplow_list_tabs` (the tabs each of their windows shows, per thread, stream or project: selected, on screen, stale), `oxplow_get_open_page` (the page open in a thread in the window they were in last, the others' beside it, or one listed tab: `page` is its identity, `view` its `#`; the page's run as a tree with their params, and the focused node) |
 | Pinned refs | `oxplow_ref_drift { uri, path }` (one pinned file ref of any model row: its diff against its pin) |
 | Extension authoring | `oxplow_validate_extension`, `oxplow_preview_collector`; its tests run in a process of their own, `$OXPLOW_BIN extension test <name>` (`OXPLOW_BIN`: the daemon's binary, set for every agent session) |
 | oxplow's guidance | `oxplow_get_skill { name, reference? }` |
@@ -337,57 +337,11 @@ none), so the tool list never changes with a switch. What an
 implementation owns is commands, offered only while it's active
 (`capabilities::Active::refusal`).
 
-**Comments.** `oxplow_list_comments({ id, scope?, status? })`: `id` is a thread
-(`thr…`) or a stream (`str…`); `scope` is inferred from the prefix
-(`resolve_comment_scope`; pass it only to assert the kind); `status` is
-`all`, `open` or `needs_response`. Each row is an `EnrichedCommentThread
-{ thread, primary, context_chain, referenced }` — the anchor target, the
-page regions it sat inside (innermost first) and the URIs inside the
-selection, each resolved by `oxplow_app::ref_resolver` — so the agent
-gets what the highlighted thing is in one call. Replies and resolution
-are `oxplow.comment.reply` / `update` (`comment: "cmt12"`);
-a reply is authored by the actor and clears `needs_response`. oxplow
-never prompts for comments: the person runs the `review-comments`
-command.
-
-**Code tools.** With no server for a language the error names the Mason
-package and both fixes: `oxplow.lsp.install_server { package }`
-or an `lsp.servers` entry in `.oxplow/project.yaml`. `v_lsp_server` says
-what's configured, installed and running.
-
-**Knowledge and links.** Knowledge reads are `oxplow_query_sql` over
-`v_oxplow_knowledge_page` / `v_oxplow_knowledge_ref` (stale pins) and `v_page_ref` (the
-backlinks graph, both directions), plus `oxplow_search` with `resources: ["oxplow/knowledge"]`;
-`oxplow_ref_drift({ uri, path })` returns one stale ref's unified diff
-(`status` drifted, unchanged, not_a_ref, no_pin, binary or no_contents).
-Writes are a store's own commands ([knowledge.md](./knowledge.md): oxwiki's
-are `oxwiki.page.write` / `delete`). A store's write checks the `[[…]]` links in
-the text it keeps (`links.check`, `oxplow_app::link_check`) and refuses a page
-whose links don't resolve. What counts as a link is `oxplow_domain::uri::classify_wikilinks`
-([resources.md](./resources.md)).
-
-**Id checks at the boundary.** A tool taking a thread or stream id calls
-`expect_id_kind(tool, param, value, expected)` (`IdPrefix`, `ID_STREAM`,
-`ID_THREAD`), so a stream id where a thread id belongs is an
-`invalid_params` naming the tool, the parameter, the value and what was
-expected, not a downstream foreign-key failure. Add the call to any new
-tool taking an id.
-
-### Param casing is lenient (camelCase aliases tolerated)
-
-Param structs are snake_case, and that stays the advertised schema. But
-tool outputs are camelCase and weak models (opencode's default) send
-`threadId` and hit an opaque `-32602 missing field`.
-`lenient_params::Parameters` (`crates/oxplow-mcp/src/lenient_params.rs`)
-is a drop-in for rmcp's `Parameters<T>` on core's two tools (same name,
-so `#[tool]` still derives the schema from `T`): before deserializing it
-adds a snake_case copy of any camelCase or kebab key, recursively, never
-removing the original, and a genuinely missing field is a clear
 `McpError` (`lenient_from_object`, `to_snake_case`). A declared tool's
 input reaches a command whose schema refuses unknown keys, so there a
 top-level camelCase key is *renamed* to the schema property it stands for
 (`fold_to_schema`). Inferable fields are optional and inferred in the
-handler where safe (`oxplow_list_comments`' `scope`).
+handler where safe.
 
 ### The ServerHandler is hand-rolled — re-diff it on every rmcp bump
 
@@ -1056,9 +1010,8 @@ numbered items, each page as `[oxplow uri …]` with its label, each piece of
 text quoted (up to `BASKET_TEXT_IN_CONTEXT` characters) with where it came
 from, and the person's note on an item (`note`, never cut) indented under it.
 When any item has a note, the header tells the agent to act on each and
-answer by number. A note is the person's remark about a place, the job
-comments once tried to do; it is delivered with the item, so it never has to
-follow its quote as the code moves.
+answer by number. A note is the person's remark about a place; it is
+delivered with the item, so it never has to follow its quote as the code moves.
 `commit` stamps the items it carried delivered to the session, which
 empties the basket; a delivered item stays as a record. Claude Code and
 opencode get it at prompt submit. Codex gets it by injection while no turn
@@ -1079,7 +1032,7 @@ page's canonical ref and title; disabled with a reason when no thread is
 selected) and on selections: an editor's and a diff's right-side selection
 (**Add Selection to Context**, text plus the `#lines=` URI), a page row's
 menu (**Add to Context**: the row's first linked page, else the row as
-text) and the floating toolbar over a selection on a commentable page.
+text) and the floating toolbar over a selection on any page.
 Each toasts with Undo. The **Context** dock panel (`@`, badge = waiting
 items) lists what waits with × per item (`oxplow.context.remove`), each
 item's note under it, edited in place (`oxplow.context.note`), Clear
@@ -1448,7 +1401,7 @@ Everything else is open to every thread: its own stream's worktree, files
 outside every stream, the shared knowledge pages (through the store's command:
 `oxwiki.page.write`, or directly in the primary checkout), and oxplow's own
 objects —
-tasks, notes, comments. The bus's `WriteGate` asks only that
+tasks, notes. The bus's `WriteGate` asks only that
 a `Write` command's thread be open; `Record` commands skip it
 ([commands.md](./commands.md) "The pipeline").
 **An agent may open a sibling agent session** in its own stream

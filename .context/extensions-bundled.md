@@ -304,7 +304,7 @@ screens and the holder's add the review and analysis:
   step, no `package.json` and no `node_modules`; its only custom component
   is the hand-written `integrations`.
 - **The app's screens.** foundation's `alerts`,
-  `catalog`, `comments`, `commit`,
+  `catalog`, `commit`,
   `diff`, `directory`, `file-viewer`, `markdown` (a `.md` file drawn), `media` (an image or a PDF shown), `csv` and `tsv` (a CSV or TSV file as a table), `data-file` (a JSON or YAML file as a tree of its values), `diagram` (a mermaid file drawn), `files` (the launcher's way into `directory`), `git-dashboard`,
   `settings` (an `area` param: overview, agents, lsp, extensions, data,
   integrations, ai), `uncommitted-changes`, and more. Metrics in [metrics.md](./metrics.md).
@@ -373,7 +373,7 @@ screens and the holder's add the review and analysis:
   store's command: how an agent uses tasks is oxtask's opinion (below).
   The Work panel is `oxplow-bundled`'s, beside its
   `thread_tasks` dataset and `tasks.clear_finished` command, with a `panel:`
-  fixture. Still in the holder: Comments (`comments-panel`). Each moves the same way: its parts, a
+  fixture. A panel moves the same way: its parts, a
   `panel:` fixture, and any rule it repeats with a foundation page made one
   query. Only the UI moved: stores, commands and views stay core. Each
   panel's `body` is a part.

@@ -3,13 +3,10 @@
 ## Find the data
 
 - `v_dataset` lists every queryable view (`v_stream`, `v_thread`, `v_oxplow_task`,
-  `v_request`, `v_comment`, `v_oxplow_knowledge_page`, `v_snapshot`, `v_measure`,
+  `v_request`, `v_oxplow_knowledge_page`, `v_snapshot`, `v_measure`,
   `v_capture`, `v_fact`, …) with its doc, and `v_field` documents
   every field (column): `SELECT view, name, sql_type, doc FROM v_field WHERE
   view = 'v_oxplow_task'`. **Read them first**; don't guess column names.
-- Comment threads on pages are `v_comment`, and each one's messages
-  `v_comment_message` (`WHERE comment = <the thread's uri> ORDER BY
-  position`).
 - What the Alerts page shows beside undelivered events: `v_op_error`
   (operations that failed in front of the person — a merge, a save, a
   query — with `read_event_content(event_id, output)` for what they
@@ -65,7 +62,7 @@ Carry URIs; never assemble or dissect them:
   measure, not for every measure. Use it on every `v_fact`/`v_capture` read
   of the query.
 - **A field named for one resource is a bare id, not a URI**: a command
-  input `thread` is `thr3`, `comment` is the integer `7`.
+  input `thread` is `thr3`, `snapshot` is the integer `7`.
   Select `uri_param(t.uri, 'id')` to feed one; `{{param.x.id}}` does the
   same in an action's input. A URI goes only where a field can name anything
   (`uri`, `target`, `subject`) and for tasks.

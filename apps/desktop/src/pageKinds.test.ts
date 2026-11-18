@@ -73,7 +73,6 @@ describe("core kinds a search hit can be", () => {
       commit: "commit",
       dashboard: "dashboard",
       handoff: "handoff",
-      comment: "comment",
       task: "task",
       knowledge: "knowledge page",
     };

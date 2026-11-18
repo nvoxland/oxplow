@@ -31,7 +31,6 @@ expect:
         - { line: "It is a display mode of `oxplow/commit` (View as)." }
         - { line: $any }
         - { line: "It runs again when its data changes." }
-        - { line: "People can't comment on it." }
         - { line: "An agent reads it with `oxplow_run_page`; it isn't offered as a tool of its own." }
         - { line: "Agents find it for \"What did this commit change?\"" }
     params:

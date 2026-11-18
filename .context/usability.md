@@ -72,10 +72,10 @@ links. Concretely:
 ## Markdown is one component
 
 Wherever markdown is read or written — a knowledge page, a task's body,
-a comment and its composer, a form's markdown field,
+a form's markdown field,
 a page's `markdown` viz — it is the one `Markdown` component
 (`.context/markdown.md`), so links, mermaid, code blocks with Copy,
-tables and comments behave the same everywhere. A surface never renders
+tables behave the same everywhere. A surface never renders
 markdown itself, nor edits it in a `<textarea>`.
 
 ## Forms
@@ -857,77 +857,15 @@ mounts the kit's, so a page moving to the kit's viz (`viz: approvals`, params
   `<prefix>-section-toggle-<id>` / `-section-body-<id>` / `-group-<id>`. An
   all-button is **disabled when it would do nothing**.
 
-## Commenting on any surface
+## Selecting text on any page
 
-Comments are not editor-only. Any page region can be commentable by
-declaring *what it is* and mounting the generic layer.
-
-- **Comments are a page's.** A page file says `comments: true` and core
-  does the rest (`PageHost`, `viz/pageComments.ts`):
-  its URI (its tab's identity) is the comments' target, the nav bar gets
-  the `CommentNavigator`, the body carries `data-ref` (so plain text and
-  the markdown viewer take selections through the app-level layer), a
-  markdown editor anchors comments in its own layer, and a `code` viz's
-  files take them on their URI at their revision (Monaco's menu has Add
-  Comment; a click on a highlight opens its thread). A page that doesn't
-  declare it is not commentable. Text inside an editor (Tiptap, Monaco)
-  is painted by that editor's layer only: the app-level layer skips it, as
-  it skips its selections. The terminal takes no comments (its buffer has
-  nothing stable to anchor to), and the app-level layer skips it too.
-
-- **`data-ref` marks a region as a typed "context node."** Its value is
-  the canonical URI of the thing, the same as tab ids and the `page_ref`
-  graph use ([resources.md](./resources.md)): a file, directory, knowledge page,
-  task, commit or finding. Stamp it on the element that *is*
-  that thing (e.g. a task row carries
-  `data-ref="oxplow:oxplow/task?id=tsk42&provider=oxtask"`). Nesting is
-  meaningful: a file row inside a commit card yields the chain
-  `[file URI, commit URI, …]`, innermost first. Treat
-  this as a first-class seam like `data-testid` — spread
-  `contextNodeProps(uri)` from
-  `apps/desktop/src/components/Comments/contextNodes.tsx`.
-- **Selecting text on a context node shows a floating "Add comment"
-  button** (`SelectionCommentToolbar`), driven by `useDomAnnotations`.
-  It is additive and non-destructive (so a floating affordance is fine,
-  unlike destructive actions which stay on the right-click menu), dismisses on a new
-  selection or Escape, and reuses the **same** `shouldSuppressContextMenu`
-  carve-out so it never appears inside Monaco / Tiptap / inputs / the
-  terminal — those own their own comment UX.
-- **`DomCommentLayer` is mounted once, at the app level** (`App.tsx`,
-  beside the center tab outlet) — NOT per page. A selection only becomes
-  a comment when it lands inside a `data-ref` region and outside the
-  editor/terminal carve-out, so a single instance safely serves every
-  plain-DOM page; a page with no context nodes simply never captures.
-  Adding commenting to a new surface is therefore just "stamp
-  `data-ref` on the regions" — no per-page wiring. The layer captures
-  selections, paints existing comments back onto their context node's
-  text via the **CSS Custom Highlight API** (no DOM mutation — critical
-  for live React lists), and opens a thread popover when a highlight is
-  clicked. The quote is re-resolved against the element's `textContent`
-  each repaint (debounced to one per frame), so reordering /
-  virtualization just re-anchors. The Highlight API is feature-detected;
-  where it's absent the comment still works, just without an inline
-  highlight. Surfaces opted in so far: task rows (`TaskGroupList`), the
-  commit page (`GitCommitPage` meta → `commit`), and commit-graph rows (`CommitGraphTable` → `commit`, under the
-  `git-dashboard` root). The **terminal** takes no comments
-  (`.context/terminal.md` "Terminals are rows").
-- **Make the text selectable.** Rows are often `userSelect: none` for
-  clean drag — set `userSelect: "text"` on the specific label span you
-  want commentable (e.g. the task title) so a quote can be anchored
-  without re-enabling selection on the whole row.
-- **Draggable rows can't be drag-selected** (a mousedown starts the
-  drag), so a floating toolbar never appears on them. For those — task
-  rows (`TaskGroupList`) — add a
-  **"Comment…" item to the row's existing right-click menu** instead. Its
-  handler calls `composeForElement(el, label, rect)` (in
-  `useDomAnnotations.ts`) to build a `PendingComment` anchored to the
-  row's label within its `data-ref` element, then dispatches it via
-  `requestCommentCompose` (`comment-compose-bus.ts`). The single
-  app-level `DomCommentLayer` subscribes and opens its composer — so the
-  create/anchor/paint path stays in one place regardless of whether the
-  comment came from a selection or a menu.
-- `data-testid`s on the affordances: `selection-comment-button`,
-  `new-comment-popover`, `comment-popover-<id>`.
+A text selection on any page shows a floating **Add to Context** button
+(`SelectionContextToolbar`, no page flag). It opens the note prompt, and
+the item, with the person's optional note, goes with the thread's next
+prompt (`.context/agent-model.md` "The context basket"). Editors and
+diffs offer **Add Selection to Context** on the right-click menu, so the
+button skips them and the terminal. A draggable row can't be
+drag-selected, so it carries **Add to Context** on its right-click menu.
 
 ## Dock panels
 
@@ -1047,7 +985,7 @@ declaring *what it is* and mounting the generic layer.
   alias shortcuts; extend the launcher. See
   `.context/pages-and-tabs.md` → "One Search".
 - **Launcher search behavior (the pass).** The launcher searches
-  the **whole project** for tasks/knowledge pages/notes/comments (cross-stream), but
+  the **whole project** for tasks/knowledge pages/notes (cross-stream), but
   scopes file-body hits to the current stream — another worktree's files
   aren't openable here. Implemented as `searchSite(q, null)` +
   a client-side file-hit stream filter in `buildQuickOpenResults`
@@ -1344,8 +1282,8 @@ caller may bypass the bus to write to the terminal.
   page row's menu, a backlink's menu, the terminal's menu (**Add Selection
   to Context**, else **Add to Context** for the session; `terminalMenu.ts`,
   which also carries Copy and Paste — the OS menu is suppressed there now)
-  and the floating toolbar on a commentable page's selection (**Add to
-  Context** beside Add comment). Every entry wears the basket's `at-sign`
+  and the floating toolbar on a page's selection (**Add to
+  Context**). Every entry wears the basket's `at-sign`
   icon (`MenuItem.icon`), the dock's Context icon, so it reads the same
   everywhere. It puts the page or text in the selected thread's
   basket (`oxplow.context.add`, toast with Undo); the next prompt to any

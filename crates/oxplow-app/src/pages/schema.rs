@@ -132,7 +132,6 @@ pub struct Page {
     pub accepts_content: Option<String>,
     pub default: bool,
     pub pinned: bool,
-    pub comments: bool,
     pub refresh: bool,
     pub needs: Vec<String>,
     /// Its whole-page actions (a row action goes on the viz node that
@@ -607,8 +606,6 @@ struct PageFile {
     #[serde(default)]
     pinned: bool,
     #[serde(default)]
-    comments: bool,
-    #[serde(default)]
     refresh: bool,
     #[serde(default)]
     needs: Vec<String>,
@@ -959,7 +956,6 @@ pub fn parse_page(
         accepts_content,
         default: file.default,
         pinned: file.pinned,
-        comments: file.comments,
         refresh: file.refresh,
         needs: file.needs,
         actions,
@@ -997,7 +993,6 @@ const KIND_KEYS: &[KindKey] = &[
     ("tool", |f| f.tool.is_some(), [true, false, true]),
     ("see_also", |f| !f.see_also.is_empty(), [true, false, false]),
     ("rail", |f| f.rail.is_some(), [true, false, false]),
-    ("comments", |f| f.comments, [true, false, false]),
     ("refresh", |f| f.refresh, [true, false, false]),
     ("actions", |f| !f.actions.is_empty(), [true, true, false]),
     ("alert", |f| f.alert.is_some(), [true, true, false]),

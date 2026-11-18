@@ -5,7 +5,8 @@ import { useState, type ReactElement, type ReactNode } from "react";
 import type { PageAction, VizRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { VizActionRunnerContext, type VizActionRunner } from "./vizActionRunner.js";
 import { PageNavigationContext, type PageNavigation, type TabEditing } from "../tabs/PageNavigationContext.js";
-import { PageCommentsContext } from "./pageComments.js";
+import { PageViewContext } from "../pages/PageViewContext.js";
+import type { ContextWhat } from "../contextBasket.js";
 
 // A markdown viz with an edit action is an editor whose Save is that
 // action: the draft is the tab's, Save only when changed, Discard puts
@@ -13,15 +14,17 @@ import { PageCommentsContext } from "./pageComments.js";
 
 const realApi = { ...(await import("../api.js")) }; // a copy: `mock.module` patches a loaded module in place
 const saves: { action: string; row: unknown; input: unknown }[] = [];
-const targets: string[] = [];
 mock.module("../api.js", () => ({
   ...realApi,
-  listCommentsForTarget: async (target: string) => {
-    targets.push(target);
-    return [];
-  },
-  subscribeCommentEvents: () => () => {},
   listExtensions: async () => [],
+}));
+const added: ContextWhat[] = [];
+const realBasket = { ...(await import("../contextBasket.js")) };
+mock.module("../contextBasket.js", () => ({
+  ...realBasket,
+  addToContext: async (what: ContextWhat) => {
+    added.push(what);
+  },
 }));
 const { VizView } = await import("./VizView.js");
 
@@ -36,7 +39,7 @@ const render = (ui: ReactElement) => rtlRender(ui, { wrapper });
 afterEach(() => {
   cleanup();
   saves.length = 0;
-  targets.length = 0;
+  added.length = 0;
 });
 
 const save = {
@@ -173,14 +176,21 @@ test("a re-read keeps a draft; a clean editor follows the saved text", async () 
   await waitFor(() => expect(second.textContent).toBe("Saved two."));
 });
 
-test("on a page that takes comments, the editor's comments are on the page's URI", async () => {
+test("the editor's Add Selection to Context names the page's URI", async () => {
+  const uri = "oxplow:oxplow/knowledge?id=notes&store=oxwiki";
   const view = render(
-    <PageCommentsContext.Provider value={{ target: "oxplow:oxplow/knowledge?id=notes&store=oxwiki", streamId: "str1", threadId: null }}>
+    <PageViewContext.Provider value={{ streamId: "str1", threadId: null, uri }}>
       <VizView run={runOf("Some text.")} onOpenPage={() => {}} />
-    </PageCommentsContext.Provider>,
+    </PageViewContext.Provider>,
   );
-  await editorOf(view);
-  await waitFor(() => expect(targets).toContain("oxplow:oxplow/knowledge?id=notes&store=oxwiki"));
+  const editor = (await editorOf(view)) as Editable & { editor?: { commands: { setTextSelection(r: { from: number; to: number }): boolean } } };
+  await waitFor(() => expect(editor.textContent).toBe("Some text."));
+  act(() => {
+    editor.editor?.commands.setTextSelection({ from: 1, to: 5 });
+  });
+  fireEvent.contextMenu(editor);
+  fireEvent.click(await waitFor(() => view.getByTestId("menu-item-context.add")));
+  await waitFor(() => expect(added).toEqual([{ uri, text: "Some" }]));
 });
 
 test("a draft makes its tab dirty, and the tab's Save saves it", async () => {
@@ -263,4 +273,5 @@ test("a document's link to a sibling of its kind opens with the page that draws 
 // `mock.module` outlives this file: put the real modules back for the files that run after it.
 afterAll(() => {
   mock.module("../api.js", () => realApi);
+  mock.module("../contextBasket.js", () => realBasket);
 });

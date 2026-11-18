@@ -4,7 +4,6 @@ description: One knowledge page, with its store, kind, author, when it was last 
 label: '{{row.title}}'
 for: oxplow/knowledge
 default: true
-comments: true
 needs:
 - model:oxplow/knowledge_record
 params:

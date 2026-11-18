@@ -52,7 +52,7 @@ loaders:
   description:
     sql: SELECT description AS text FROM definition WHERE description <> ''
   # How it is used, a line each: what it draws, how it is opened, its
-  # tab, when it updates, comments, how an agent reads it, and the
+  # tab, when it updates, how an agent reads it, and the
   # questions an agent finds it by.
   usage:
     sql: |
@@ -76,12 +76,10 @@ loaders:
         SELECT 4, CASE WHEN refresh THEN 'It runs again when its data changes, and has a Refresh button.'
                        ELSE 'It runs again when its data changes.' END FROM p
         UNION ALL
-        SELECT 5, CASE WHEN comments THEN 'People can comment on it.' ELSE 'People can''t comment on it.' END FROM p
-        UNION ALL
-        SELECT 6, CASE WHEN tool IS NOT NULL THEN 'Agents get it as the tool `' || tool || '`, and read it with `oxplow_run_page`.'
+        SELECT 5, CASE WHEN tool IS NOT NULL THEN 'Agents get it as the tool `' || tool || '`, and read it with `oxplow_run_page`.'
                        ELSE 'An agent reads it with `oxplow_run_page`; it isn''t offered as a tool of its own.' END FROM p
         UNION ALL
-        SELECT 7 + j.key, 'Agents find it for "' || (j.value ->> '$.question') || '"' FROM definition, json_each(definition.answers) j
+        SELECT 6 + j.key, 'Agents find it for "' || (j.value ->> '$.question') || '"' FROM definition, json_each(definition.answers) j
       )
       SELECT line FROM lines WHERE line IS NOT NULL ORDER BY n
   usage_text:

@@ -15,7 +15,7 @@ In the worktree of the stream you're working in:
 `<name>` and `<slug>` are lowercase-with-dashes; the id is `<name>/<slug>`
 whichever folder it is in, and a slug lives in one folder only. A part
 takes no `category`, `keywords`, `label`, `icon`, `for`, `answers`, `tool`,
-`see_also`, `rail`, `comments` or `refresh`; a query takes only `title`,
+`see_also`, `rail` or `refresh`; a query takes only `title`,
 `description`, `params`, `loaders`, `tool` and `needs`, and its last loader
 is what a reference to it means. Which kind do I write?
 
@@ -92,8 +92,7 @@ examples.
   Reopen puts one back on the rail; drag to reorder."
 - A page with no `category` opens only from elsewhere (a link, a form, an agent). Something never opened on its own is a part or a query, not a page.
   `refresh: true`: a Refresh button, for pages reading outside oxplow.
-  `comments: true`: the person may comment on its text. `needs:
-  [capability]`: what it can't run without (it says so instead of failing).
+  `needs: [capability]`: what it can't run without (it says so instead of failing).
 - `tool: <name>`: also offered to agents as a typed MCP tool.
 - `badge: { loader, column? }`: a count on its nav entry from that loader's
   first row (else its row count; on a part a panel names as `count` or `badge`, the header count). `alert`: `{ min_rows: 1 }` or `{ column,

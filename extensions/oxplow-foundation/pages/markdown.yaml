@@ -6,7 +6,6 @@ for: oxplow/file
 accepts:
   path: '^[\w./ -]+\.md$'
 content: { text: true, max_bytes: 1048576 }
-comments: true
 params:
 - name: uri
 - name: path

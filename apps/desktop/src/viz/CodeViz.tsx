@@ -1,12 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import { readAt, statFile } from "../api.js";
-import { MonacoCommentLayer, type MonacoCommentHandle } from "../components/Comments/MonacoCommentLayer.js";
-import { fileUri } from "../uri/uri.js";
-import { usePageComments } from "./pageComments.js";
 import { languageForPath } from "../editor-language.js";
 import { fsRevLabel, unshownReason } from "../filesystem.js";
-import { revisionSlot, WORKING, type Revision } from "../revision.js";
+import { WORKING, type Revision } from "../revision.js";
 import { useMonacoViewState } from "../components/useMonacoViewState.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import { fileRef } from "../tabs/pageRefs.js";
@@ -19,10 +16,7 @@ import type { CodeRow } from "./vizModel.js";
  * (neither: the working tree) — side by side, at
  * the height its place gives (a page's whole body on a viz page). A row's
  * `lines` are marked and revealed; with `sync` the editors scroll
- * together from their marks (`codeScrollSync.ts`). On a page that takes
- * comments, each file's text takes them, on its URI at its revision:
- * "Add Comment" on Monaco's menu, a click on a highlight opens its thread.
- * See
+ * together from their marks (`codeScrollSync.ts`). See
  * `.context/editor-and-monaco.md` "Read-only code and diff vizes".
  */
 export function CodeViz({ rows, streamId, sync, onOpenPage, isPage = false }: { rows: CodeRow[]; streamId: string | null; sync: boolean; onOpenPage?(ref: TabRef): void; isPage?: boolean }) {
@@ -68,28 +62,6 @@ function CodeEditorView({
   // Scroll and cursor stay with the tab's entry, unless lines are marked:
   // the mark is where the page lands.
   const attachViewState = useMonacoViewState(`code:${filesystem ?? ""}:${path}@${revision ?? ""}`);
-  const pageComments = usePageComments();
-  const commentTarget = fileUri(path, revisionSlot((revision ?? WORKING) as Revision), filesystem);
-  const commentLayer = useRef<MonacoCommentHandle | null>(null);
-  useEffect(() => {
-    const editor = editorRef.current;
-    if (!ready || !pageComments || !editor) return;
-    const add = editor.addAction({
-      id: "oxplow.comment.add",
-      label: "Add Comment",
-      contextMenuGroupId: "9_comments",
-      run: () => commentLayer.current?.addCommentForSelection(),
-    });
-    const click = editor.onMouseDown((e: { target?: { position?: unknown } }) => {
-      const position = e.target?.position;
-      const id = position ? commentLayer.current?.commentIdAt(position) : null;
-      if (id) commentLayer.current?.openComment(id);
-    });
-    return () => {
-      add.dispose();
-      click.dispose();
-    };
-  }, [ready, pageComments]);
 
   useEffect(() => {
     let cancelled = false;
@@ -207,17 +179,6 @@ function CodeEditorView({
         )}
       </div>
       <div ref={hostRef} style={{ flex: 1, minHeight: 0 }} />
-      {pageComments && ready ? (
-        <MonacoCommentLayer
-          ref={commentLayer}
-          editor={editorRef.current}
-          monaco={monacoRef.current}
-          ready={ready}
-          streamId={pageComments.streamId}
-          threadId={pageComments.threadId}
-          target={commentTarget}
-        />
-      ) : null}
     </div>
   );
 }

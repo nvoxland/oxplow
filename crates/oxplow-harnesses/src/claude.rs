@@ -1728,7 +1728,6 @@ mod tests {
         for file in [
             ".claude-plugin/plugin.json",
             "hooks/hooks.json",
-            "commands/review-comments.md",
             "commands/configure.md",
         ] {
             assert!(dir.join(file).exists(), "missing {file}");

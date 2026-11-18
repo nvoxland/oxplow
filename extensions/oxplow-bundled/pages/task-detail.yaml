@@ -3,7 +3,6 @@ description: "One task, whichever list it is on: what it is and what can be done
 label: '{{row.title}}'
 for: oxplow/task
 default: true
-comments: true
 needs:
 - model:oxplow/task_record
 params:

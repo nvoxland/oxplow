@@ -27,7 +27,6 @@ import {
   Glasses,
   LayoutDashboard,
   type LucideIcon,
-  MessageSquareText,
   MessagesSquare,
 } from "lucide-react";
 import type { ComponentProps, ReactElement } from "react";
@@ -85,8 +84,6 @@ export function pageKindIconComponent(kind: string, extensions: Extension[] | nu
       return MessagesSquare;
     case "handoff":
       return Forward;
-    case "comment":
-      return MessageSquareText;
 
     case "metric":
       return Gauge;

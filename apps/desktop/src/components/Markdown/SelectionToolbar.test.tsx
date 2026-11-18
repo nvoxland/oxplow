@@ -1,15 +1,13 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { Editor } from "@tiptap/core";
 
 import { knowledgeUri } from "../../uri/uri.js";
 import { getMarkdown } from "./richTextExtensions.js";
 import { RichTextField } from "./RichTextField.js";
-import { selectionToolbarVisible } from "./SelectionToolbar.js";
 
 // A selection in the editor floats the format toolbar: Bold, Italic, Code,
-// Link and the headings (not in a one-line field); Add comment only where
-// the text takes comments.
+// Link and the headings (not in a one-line field).
 
 // A selected editor leaves the window's selection behind: clear it, or a later
 // file's right-click lands on "selected text".
@@ -76,36 +74,14 @@ test("Escape in the link box leaves the text as it was", async () => {
   expect(getMarkdown(editor)).toBe("Hello world");
 });
 
-test("headings only where blocks are; Add comment only where comments are", async () => {
+test("headings only where blocks are", async () => {
   const view = render(<RichTextField value="Hello world" onChange={() => {}} />);
   const editor = await selectHello(view);
   act(() => press("h2"));
   expect(getMarkdown(editor)).toBe("## Hello world");
-  expect(document.querySelector("[data-testid='selection-toolbar-comment']")).toBeNull();
   cleanup();
   const one = render(<RichTextField value="Hello world" onChange={() => {}} inlineOnly />);
   await selectHello(one);
   expect(document.querySelector("[data-testid='selection-toolbar-h2']")).toBeNull();
   expect(document.querySelector("[data-testid='selection-toolbar-bold']")).not.toBeNull();
-});
-
-describe("selectionToolbarVisible", () => {
-  const base = {
-    selectionEmpty: false,
-    composerOpen: false,
-    popoverOpen: false,
-  };
-
-  test("shows for a non-empty selection", () => {
-    expect(selectionToolbarVisible(base)).toBe(true);
-  });
-
-  test("hidden for a collapsed selection", () => {
-    expect(selectionToolbarVisible({ ...base, selectionEmpty: true })).toBe(false);
-  });
-
-  test("hidden while the composer or a thread popover is open", () => {
-    expect(selectionToolbarVisible({ ...base, composerOpen: true })).toBe(false);
-    expect(selectionToolbarVisible({ ...base, popoverOpen: true })).toBe(false);
-  });
 });

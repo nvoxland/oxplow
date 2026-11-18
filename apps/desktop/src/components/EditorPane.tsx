@@ -20,10 +20,8 @@ import { gitRevision } from "../revision.js";
 import { editorContextEntry, selectionUri } from "../agent-context-ref.js";
 import { addToContext } from "../contextBasket.js";
 import { askAssistant } from "./Assistant/assistantSession.js";
-import { MonacoCommentLayer, type MonacoCommentHandle } from "./Comments/MonacoCommentLayer.js";
 import { getPageDetailStore } from "../tabs/openPageDetail.js";
 import { fileRef } from "../tabs/pageRefs.js";
-import { fileUri } from "../uri/uri.js";
 
 interface Props {
   stream: Stream;
@@ -106,10 +104,6 @@ export function EditorPane({
   onRevealCommitRef.current = onRevealCommit;
   const headByPathRef = useRef<Map<string, string | null>>(new Map());
   const diffDecoIdsRef = useRef<string[]>([]);
-  const commentLayerRef = useRef<MonacoCommentHandle | null>(null);
-  // Comment id under the last right-click (drives the "Open Comment"
-  // menu item); set in onContextMenu before the menu opens.
-  const ctxCommentIdRef = useRef<string | null>(null);
   // Monaco loads asynchronously, so the model-binding effect below needs a
   // signal to retry once it lands — otherwise the first file opened arrives
   // before the editor instance exists and the effect's early return makes
@@ -183,10 +177,6 @@ export function EditorPane({
           editor.setPosition(position);
         }
         editor.focus();
-        // Is the right-click on commented text? Drives "Open Comment".
-        ctxCommentIdRef.current = position
-          ? (commentLayerRef.current?.commentIdAt(position) ?? null)
-          : null;
         const browserEvent = event.event?.browserEvent as MouseEvent | undefined;
         // Suppress the webview's native context menu (Reload / Inspect /
         // AutoFill) so only our custom menu shows — Monaco with
@@ -532,29 +522,6 @@ export function EditorPane({
         void addToContext(editorContextEntry(filePath, sel, sel && model ? model.getValueInRange(sel) : null).what);
       },
     },
-    {
-      id: "editor.add-comment",
-      label: "Add Comment",
-      enabled: !!filePath && hasEditorSelection(editorRef.current),
-      run: () => commentLayerRef.current?.addCommentForSelection(),
-    },
-    {
-      id: "editor.open-comment",
-      label: "Open Comment",
-      enabled: ctxCommentIdRef.current != null,
-      run: () => {
-        const id = ctxCommentIdRef.current;
-        if (id != null) commentLayerRef.current?.openComment(id);
-      },
-    },
-    // Re-attach orphaned comments to the current selection — the escape
-    // hatch when a quote drifted past fuzzy tolerance.
-    ...(commentLayerRef.current?.relinkTargets() ?? []).map((t) => ({
-      id: `editor.relink-${t.id}`,
-      label: `Relink orphaned: “${t.quote.length > 24 ? `${t.quote.slice(0, 24)}…` : t.quote}”`,
-      enabled: !!filePath && hasEditorSelection(editorRef.current),
-      run: () => commentLayerRef.current?.relinkToSelection(t.id),
-    })),
   ];
 
   const showBlame = blame && blame.path === filePath;
@@ -575,17 +542,6 @@ export function EditorPane({
         }}
       >
         <div ref={hostRef} data-testid="monaco-host" data-file-path={filePath ?? ""} style={{ width: "100%", height: "100%", minHeight: 0 }} />
-        {monacoReady && ready ? (
-          <MonacoCommentLayer
-            ref={commentLayerRef}
-            editor={editorRef.current}
-            monaco={monacoRef.current}
-            ready={monacoReady}
-            streamId={stream.id}
-            threadId={null}
-            target={fileUri(filePath)}
-          />
-        ) : null}
         {showBlame ? (
           <BlameOverlay
             entries={blame!.entries}

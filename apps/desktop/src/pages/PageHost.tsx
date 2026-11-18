@@ -7,10 +7,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import { CommandConfirm } from "../components/CommandConfirm.js";
-import { CommentNavigator } from "../components/Comments/CommentNavigator.js";
-import { contextNodeProps } from "../components/Comments/contextNodes.js";
-import { requestCommentReveal } from "../comment-reveal-bus.js";
-import { PageCommentsContext, type PageComments } from "../viz/pageComments.js";
+import { SelectionContextToolbar } from "../components/Context/SelectionContextToolbar.js";
 import { BacklinksList } from "../tabs/BacklinksList.js";
 import { getPageDetailStore } from "../tabs/openPageDetail.js";
 import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
@@ -210,18 +207,13 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
     },
   });
 
-  // Comments are the page's when it declares them, on its URI (its tab's
-  // identity): the nav bar steps through them, its vizes anchor them, and
-  // `#comment=<id>` reveals one.
-  const commentTarget = page?.comments && nav?.ref ? (identityOf(nav.ref.id) ?? nav.ref.id) : null;
-  const pageComments: PageComments | null = useMemo(
-    () => (commentTarget && streamId ? { target: commentTarget, streamId, threadId: pageKey.threadId } : null),
-    [commentTarget, streamId, pageKey.threadId],
+  // The page's URI (its tab's identity, without the view part): what text
+  // selected on it is added to the context basket on.
+  const pageUri = nav?.ref ? (identityOf(nav.ref.id) ?? nav.ref.id) : null;
+  const pageView = useMemo(
+    () => ({ streamId: pageKey.streamId, threadId: pageKey.threadId, uri: pageUri }),
+    [pageKey.streamId, pageKey.threadId, pageUri],
   );
-  const reveal = page?.comments ? nav?.viewParams?.comment : null;
-  useEffect(() => {
-    if (typeof reveal === "string" && reveal !== "") requestCommentReveal(reveal);
-  }, [reveal]);
   // A page showing a resource lists what links to it and what it links to.
   const linksIn = useBacklinks({ id: renders ?? "" });
   const linksOut = usePageOutbound({ id: renders ?? "" });
@@ -265,12 +257,10 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
       }
       backlinks={linksIn.length > 0 ? { count: linksIn.length, body: <BacklinksList entries={linksIn} /> } : undefined}
       outbound={linksOut.length > 0 ? { count: linksOut.length, body: <BacklinksList entries={linksOut} /> } : undefined}
-      commentsNav={pageComments ? <CommentNavigator target={pageComments.target} /> : undefined}
     >
       <NodeRegistryContext.Provider value={registry}>
-      <PageViewContext.Provider value={{ streamId: pageKey.streamId, threadId: pageKey.threadId }}>
+      <PageViewContext.Provider value={pageView}>
       <VizStreamContext.Provider value={stream}>
-      <PageCommentsContext.Provider value={pageComments}>
         {about && page ? (
           <TabModal title="About this page" onClose={() => setAbout(false)} testId="page-about-modal">
             <PageAbout id={page.id} uri={nav?.ref?.id ?? null} description={page.description} origin={page.origin} params={run?.params ?? {}} outOfDate={outOfDate} onOpenPage={onOpenPage ? (ref) => { setAbout(false); onOpenPage(ref); } : undefined} testPrefix="page" />
@@ -282,7 +272,6 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
           data-stale={stale ? "true" : undefined}
           aria-busy={stale || undefined}
           style={fills ? fillStyle : undefined}
-          {...(pageComments ? contextNodeProps(pageComments.target) : {})}
         >
           {actions.pending ? (
             <CommandConfirm
@@ -317,7 +306,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
             <LoadingScreen />
           ) : null}
         </div>
-      </PageCommentsContext.Provider>
+        <SelectionContextToolbar root={body} uri={pageUri} />
       </VizStreamContext.Provider>
       </PageViewContext.Provider>
       </NodeRegistryContext.Provider>

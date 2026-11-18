@@ -17,9 +17,7 @@
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
-use crate::ids::{
-    AgentSessionId, AgentTurnId, CommentId, HandoffId, RequestId, StreamId, ThreadId,
-};
+use crate::ids::{AgentSessionId, AgentTurnId, HandoffId, RequestId, StreamId, ThreadId};
 use crate::uri::oxplow_uri::{OxplowUri, ResourceName};
 use crate::uri::resources as r;
 
@@ -312,10 +310,6 @@ pub fn symbol_uri_at(path: &str, id: &str, rev: Option<&str>) -> String {
     let mut params = vec![("path", path), ("symbol", id)];
     params.extend(rev.map(|rev| ("rev", rev)));
     of(r::SYMBOL, &params)
-}
-
-pub fn comment_uri(id: CommentId) -> String {
-    keyed(r::COMMENT, &id.to_string())
 }
 
 /// A logged event, by its public id (UUIDv7).

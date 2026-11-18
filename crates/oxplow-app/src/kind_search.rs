@@ -1306,55 +1306,6 @@ mod core_tests {
         .await;
     }
 
-    /// Thread notes and comments: written, replied to, gone when deleted.
-    #[tokio::test]
-    async fn notes_and_comments_are_indexed() {
-        let (svc, _dir) = services().await;
-        let stream = svc.streams.ensure_primary().await.unwrap();
-        let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
-        change_loop(&svc);
-        let out = run(
-            &svc,
-            crate::commands::comment::ADD,
-            serde_json::json!({
-                "stream": stream.id.to_string(),
-                "thread": thread.id.to_string(),
-                "target": oxplow_domain::uri::build::file_uri("src/lib.rs"),
-                "quote": "quoted text", "body": "this mentions the doohickey",
-            }),
-        )
-        .await;
-        let comment = out["comment"]["id"].as_str().unwrap().to_string();
-        eventually("the comment is found", || {
-            found(&svc, "doohickey", Some(stream.id), "oxplow/comment")
-        })
-        .await;
-        assert!(
-            found(&svc, "quoted", Some(stream.id), "oxplow/comment").await,
-            "by its quote too"
-        );
-        run(
-            &svc,
-            crate::commands::comment::REPLY,
-            serde_json::json!({ "comment": comment, "body": "and the thingamajig" }),
-        )
-        .await;
-        eventually("a reply is found", || {
-            found(&svc, "thingamajig", Some(stream.id), "oxplow/comment")
-        })
-        .await;
-        run(
-            &svc,
-            crate::commands::comment::DELETE,
-            serde_json::json!({ "comment": comment }),
-        )
-        .await;
-        eventually("the deleted comment leaves", || async {
-            entries(&svc, "oxplow/comment").await.is_empty()
-        })
-        .await;
-    }
-
     /// Setup the commands don't offer: one batch of SQL, committed.
     async fn exec(svc: &Services, sql: &'static str) {
         svc.db

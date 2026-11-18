@@ -279,7 +279,7 @@ pub struct ExtensionPanel {
     /// The badge viz, which declares an `alert`.
     pub badge: Option<String>,
     /// The page its header opens (`oxplow:oxplow/page?page=<kind>`, a canonical ref): a core
-    /// page the panel summarizes, as Comments opens the inbox.
+    /// page the panel summarizes, as Waiting on you opens its page.
     /// Absent, the body viz's own page.
     pub open: Option<String>,
     /// The viz shown, compact, while the panel is collapsed: its one-line
@@ -9512,19 +9512,19 @@ commands:
             }]
         );
         // A panel may name the page its header opens (a core page,
-        // as the Comments panel opens the inbox); without one, its body page.
+        // as the Context panel opens the Context page); without one, its body page.
         let (_d, ext) = load_x(
             &pages,
-            "manifest: 2\nintent:\n  purpose: p\npanels:\n  - { id: c, title: C, scope: project, body: quiet, open: 'oxplow:oxplow/page?page=comments' }\n",
+            "manifest: 2\nintent:\n  purpose: p\npanels:\n  - { id: c, title: C, scope: project, body: quiet, open: 'oxplow:oxplow/page?page=problems' }\n",
         );
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         assert_eq!(
             ext.panels[0].open.as_deref(),
-            Some("oxplow:oxplow/page?page=comments")
+            Some("oxplow:oxplow/page?page=problems")
         );
         for (panel, says) in [
             (
-                "{ id: a, title: A, scope: project, body: quiet, open: comments }",
+                "{ id: a, title: A, scope: project, body: quiet, open: problems }",
                 "`open` must be a page URI",
             ),
             (
@@ -10098,7 +10098,7 @@ commands:
                 (
                     "a",
                     &viz_page(
-                        "category: Activity\nkeywords: pull requests\nicon: git-pull-request\ncomments: true\n",
+                        "category: Activity\nkeywords: pull requests\nicon: git-pull-request\n",
                         "SELECT 1",
                         "",
                     ),
@@ -10114,7 +10114,6 @@ commands:
         assert_eq!(a.category, Some(LauncherCategory::Activity));
         assert_eq!(a.keywords.as_deref(), Some("pull requests"));
         assert_eq!(a.icon.as_deref(), Some("git-pull-request"));
-        assert!(a.comments);
         assert!(page("b").unwrap().category.is_none());
         assert!(page("c").is_none() && page("d").is_none());
         let errs = shown_errors(&ext);

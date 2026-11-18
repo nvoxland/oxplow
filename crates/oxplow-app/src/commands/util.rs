@@ -5,7 +5,7 @@
 
 use std::sync::{Arc, OnceLock, Weak};
 
-use oxplow_domain::CommandError;
+use oxplow_domain::{Actor, CommandError};
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -18,6 +18,21 @@ pub fn parse<T: DeserializeOwned>(input: Value) -> Result<T, CommandError> {
         field: None,
         message: e.to_string(),
     })
+}
+
+/// Who wrote something, as a record says it: a person `user`, an agent
+/// `agent` (a page writes as the one it acts for), the system `system`.
+pub fn author_of(actor: &Actor) -> &'static str {
+    match actor {
+        Actor::Human => "user",
+        Actor::Agent { .. } => "agent",
+        Actor::Page { on_behalf_of, .. } | Actor::Component { on_behalf_of, .. } => {
+            author_of(on_behalf_of)
+        }
+        Actor::System => "system",
+        Actor::Effect { .. } => "effect",
+        Actor::Job { .. } => "job",
+    }
 }
 
 /// A refusal of the input at `field` (a JSON pointer: `/thread`).

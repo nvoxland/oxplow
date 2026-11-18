@@ -205,9 +205,9 @@ use std::sync::RwLock;
 use oxplow_config::OxplowConfig;
 use oxplow_db::{
     Database, SqliteAgentNudgeStore, SqliteAgentSessionStore, SqliteAgentTurnStore,
-    SqliteCodeQualityStore, SqliteCommentStore, SqliteEventLogStore, SqliteFactStore,
-    SqlitePageRefStore, SqlitePageVisitStore, SqliteSearchStore, SqliteSnapshotStore,
-    SqliteStreamStore, SqliteThreadStore, SqliteTokenUsageStore, SqliteUsageStore,
+    SqliteCodeQualityStore, SqliteEventLogStore, SqliteFactStore, SqlitePageRefStore,
+    SqlitePageVisitStore, SqliteSearchStore, SqliteSnapshotStore, SqliteStreamStore,
+    SqliteThreadStore, SqliteTokenUsageStore, SqliteUsageStore,
 };
 use oxplow_domain::stores::AgentStatusStore;
 use oxplow_session::{StreamService, ThreadService, WorkspaceLayout};
@@ -641,7 +641,6 @@ pub struct Services {
     /// at write time; the reader IPC (`list_backlinks` /
     /// `list_outbound`) exposes the inverse view.
     pub page_ref_store: Arc<SqlitePageRefStore>,
-    pub comment_store: Arc<SqliteCommentStore>,
     pub hook_ingest: HookIngestService,
     pub background_tasks: BackgroundTaskStore,
     pub pty: oxplow_pty::PtyManager,
@@ -947,7 +946,6 @@ impl Services {
             db.clone(),
             vocabulary.clone(),
         ));
-        let comment_store = Arc::new(SqliteCommentStore::new(db.clone(), vocabulary.clone()));
         let handoff_store = Arc::new(oxplow_db::SqliteHandoffStore::new(db.clone()));
         let event_log_store = Arc::new(SqliteEventLogStore::new(db.clone(), vocabulary.clone()));
         let extension_activation =
@@ -1474,7 +1472,6 @@ impl Services {
                 terminal_store.clone(),
                 terminal_sessions.clone(),
             ))
-            .chain(commands::comment::ops())
             .chain(commands::ui::ops())
             .chain(commands::op_error::ops())
             .chain(commands::handoff::ops(link_deps.clone()))
@@ -1823,7 +1820,6 @@ impl Services {
             token_usage,
             otlp_ingest,
             page_ref_store,
-            comment_store,
             hook_ingest,
             background_tasks,
             pty,
@@ -2195,7 +2191,6 @@ mod tests {
                 "oxplow.collector.set_credential",
                 // The collector's own program or script (P7.B3).
                 "oxplow.collector.sync",
-                "oxplow.comment.list",
                 // Shared settings use files/keychain outside the DB transaction.
                 "oxplow.config.set",
                 "oxplow.config.unset",

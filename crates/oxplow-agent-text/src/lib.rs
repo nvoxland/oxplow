@@ -41,10 +41,6 @@ pub fn core_text() -> AgentText {
 
 /// Core's slash commands, as `(name, markdown)`: `/oxplow:<name>`.
 const CORE_COMMANDS: &[(&str, &str)] = &[
-    (
-        "review-comments",
-        include_str!("../assets/review-comments.md"),
-    ),
     ("configure", include_str!("../assets/configure.md")),
     ("new-metric", include_str!("../assets/new-metric.md")),
 ];

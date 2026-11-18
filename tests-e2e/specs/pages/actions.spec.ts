@@ -13,7 +13,7 @@ import { open, shown } from "../../support/ui.js";
 // options is a submenu of them, the row's own checked.
 
 const manifest = `requires: [oxplow-bundled, oxtask]
-permissions: [sql.read, commands:oxtask.task.create, commands:oxtask.task.delete, commands:oxplow.comment.add]
+permissions: [sql.read, commands:oxtask.task.create, commands:oxtask.task.delete, commands:oxplow.bookmark.set]
 commands:
   - name: secret.save
     summary: Notes a wallaby named by the label, with a secret token that is never kept.
@@ -29,10 +29,10 @@ commands:
 `;
 
 // A task store's own commands write outside the transaction, so a command of
-// an extension can't compose one: this one notes the wallaby as a comment.
+// an extension can't compose one: this one notes the wallaby as a bookmark.
 const handler = `def transform(x):
     stream = scope("sql.read", {"sql": "SELECT 'str' || id AS stream FROM v_stream LIMIT 1", "params": {}})[0]["stream"]
-    return {"commands": [{"name": "oxplow.comment.add", "input": {"stream": stream, "target": "oxplow:oxplow/file?path=wallabies", "body": "Wallaby " + x["input"]["label"]}}]}
+    return {"commands": [{"name": "oxplow.bookmark.set", "input": {"uri": "oxplow:oxplow/file?path=wallabies%2F" + x["input"]["label"], "page_kind": "file", "label": "Wallaby " + x["input"]["label"], "scope": "stream", "stream": stream}}]}
 `;
 
 const pageYaml = `title: Action Wallaby
@@ -40,7 +40,7 @@ category: Data
 loaders:
   rows:
     sql: SELECT uri, native_id AS id, title, stage, title NOT LIKE '%locked%' AS can_rename FROM v_oxplow_task WHERE title LIKE 'Wallaby %'
-      UNION ALL SELECT uri, NULL, body, NULL, 1 FROM v_comment WHERE body LIKE 'Wallaby %'
+      UNION ALL SELECT uri, NULL, label, NULL, 1 FROM v_bookmark WHERE label LIKE 'Wallaby %'
       ORDER BY title
   marks:
     sql: SELECT 'ready' AS value, 'Ready' AS label UNION ALL SELECT 'in_progress', 'Started' UNION ALL SELECT 'done', 'Finished'
@@ -98,7 +98,7 @@ category: Data
 loaders:
   rows:
     sql: SELECT '' AS label, uri, title FROM v_oxplow_task WHERE title LIKE 'Wallaby %'
-      UNION ALL SELECT '', uri, body FROM v_comment WHERE body LIKE 'Wallaby %'
+      UNION ALL SELECT '', uri, label FROM v_bookmark WHERE label LIKE 'Wallaby %'
       ORDER BY title
 view:
   stack:

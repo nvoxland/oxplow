@@ -168,8 +168,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::assistant_close,
             // notes (task / thread)
             // comments
-            commands::generated::list_comments_for_target,
-            commands::generated::list_comments_for_stream,
             // events (dead-letter queue)
             // page refs (unified backlinks/outbound)
             commands::generated::list_backlinks,

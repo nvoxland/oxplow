@@ -834,7 +834,6 @@ fn a_part_takes_no_listing_or_tab_keys() {
         ("tool", "tool: busy"),
         ("see_also", "see_also: [{ page: other }]"),
         ("rail", "rail: { viz: table, from: q }"),
-        ("comments", "comments: true"),
         ("refresh", "refresh: true"),
     ] {
         let why = of_kind(

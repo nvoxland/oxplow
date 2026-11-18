@@ -96,10 +96,10 @@ caught via `editor.onContextMenu`, which:
 Menu items live in a per-render `MenuItem[]` array — `Cut`, `Copy`,
 `Paste` (via `navigator.clipboard` + `editor.executeEdits`), `Save`,
 `Find`, `Go to Definition`, `Format Document`, `Copy Path`,
-`Annotate with Git Blame`, `Compare with Clipboard`, `Add Comment`,
-`Open Comment`. Items are gated on `enabled` based on file path, language
-LSP support, selection presence, and (for `Open Comment`) whether the
-right-click landed on a commented range. The right-click handler
+`Annotate with Git Blame`, `Compare with Clipboard`, `Ask the
+Assistant`, and Add Selection to Context (Add File to Context with no
+selection; `editorContextEntry`). Items are gated on `enabled` based on
+file path, language LSP support and selection presence. The right-click handler
 `preventDefault`s the native event (and the editor container has a
 belt-and-suspenders `onContextMenu={e => e.preventDefault()}`) so the
 webview's native menu never shows.
@@ -116,7 +116,7 @@ returning `{ blame, blameScrollTop, blameLineHeight, toggleBlame }`).
 EditorPane renders the `BlameOverlay` from that state and wires the
 "Annotate with Blame" menu item to `toggleBlame`. (`useMonacoEditor` was
 intentionally NOT extracted: the editor-setup effect is the component's
-core and is tightly coupled to its menu / comment-layer / focus-push /
+core and is tightly coupled to its menu / focus-push /
 LSP-provider wiring — a hook would need ~8 injected callbacks and read
 *less* cohesively than leaving it inline.)
 
@@ -280,58 +280,6 @@ working-tree text file so has one mode and no View as, a `.md` file the
 Markdown mode too; the first default in the list opens a file several
 take. The file-viewer, media and duplicate-block pages draw
 these vizes; `DiffPane` stays (it is the `hunks` viz's and `diff`'s).
-
-## Comment overlay
-
-`MonacoCommentLayer` (`apps/desktop/src/components/Comments/MonacoCommentLayer.tsx`)
-is mounted inside `EditorPane`'s relative container once `monacoReady`
-and `filePath` are set (its `target` is `oxplow:oxplow/file?path=<repo-relative path>`, stream-scoped
-— files aren't thread-bound, so `threadId` is null). The `code` viz mounts
-it too, per file, on a page that takes comments (`comments: true`), with
-the file's URI at its revision as `target`, "Add Comment" on Monaco's
-own menu and a click on a highlight opening the thread. It mirrors the
-rich-text integration:
-
-- **Highlights** are inline `deltaDecorations`
-  (`inlineClassName: "oxplow-comment-highlight"`, its own id ref —
-  separate from `diffDecoIdsRef`), recomputed when the thread list
-  changes. A parallel `decoId → commentId` map drives hit-testing.
-- **Re-anchoring** tries the stored `{ startLine, startColumn, endLine,
-  endColumn }` first (quote still matches → reuse), else runs the shared
-  `resolveAnchor` (`components/Comments/anchor.ts`) over
-  `model.getValue()` — exact (disambiguated by stored `prefix`/`suffix`
-  context + `textOffset` proximity) then bounded fuzzy — and maps the
-  offset back via `model.getPositionAt`. `buildAnchorJson` re-persists the
-  enriched anchor (line/col + textOffset + prefix/suffix + `approx`) from
-  the resolved location so hints/context self-heal and old comments
-  upgrade in place; fuzzy matches paint the dashed
-  `.oxplow-comment-highlight--approx` variant. Corrected/orphaned anchors
-  persist through `relocateComment` (`oxplow.comment.relocate`; an
-  anchor already where it was records nothing, so the re-read stops).
-- **Relinking.** The `MonacoCommentHandle` exposes `relinkTargets()` +
-  `relinkToSelection(id)`; EditorPane's context menu lists "Relink
-  orphaned: …" entries that re-attach an orphaned comment to the current
-  selection via `relink_comment`.
-- **Right-click-driven**, not click/selection (those fight cursor
-  placement). `MonacoCommentLayer` exposes a `MonacoCommentHandle`
-  (`forwardRef` + `useImperativeHandle`): `commentIdAt(position)`,
-  `addCommentForSelection()`, `openComment(id)`. `EditorPane`'s existing
-  `onContextMenu` captures the comment-at-position into a ref and adds
-  "Add Comment" (enabled when there's a selection) + "Open Comment"
-  (enabled when over a commented range) to its `contextMenuItems`,
-  delegating to the handle. The layer renders `NewCommentPopover` /
-  `CommentPopover` from its own state.
-- **Popover/composer coords:** Monaco renders its own selection (not the
-  native DOM one), so the rect comes from
-  `editor.getScrolledVisiblePosition` + the editor DOM node's bounding
-  rect — NOT `window.getSelection()`.
-- **Cross-page reveal:** the layer subscribes to `comment-reveal-bus.ts`.
-  When the comment navigator (`CommentNavigator`) fires
-  `requestCommentReveal(id)` and navigation lands on this file, the layer
-  (once its decoration is painted) calls `editor.revealRangeInCenter` on
-  the matching decoration range, opens the popover, and clears the bus.
-  The request survives the async mount + threads fetch because it stays
-  pending until consumed.
 
 ## LSP bridge
 

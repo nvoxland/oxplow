@@ -319,12 +319,6 @@ pub const MANIFEST: &[Capability] = &[
     agent("oxplow_list_tabs"),
     // ---- both (names diverge across surfaces) ----
     dataset("list_threads", &["v_thread"]),
-    both_shaped(
-        "comment.list",
-        "list_comments_for_stream",
-        "oxplow_list_comments",
-        "the comment layer draws a stream's threads itself; an agent's read filters by status and resolves what each names; both read the one store",
-    ),
     // ---- agent-only (orchestration / agent affordances) ----
     // One reader for anything a ref names.
     agent("oxplow_read"),
@@ -389,8 +383,6 @@ pub const MANIFEST: &[Capability] = &[
         "get_thread_state",
         "the person's selected and active thread; an agent reads threads in `v_thread` and has no selection",
     ),
-    // ---- comments (writes are knowledge.*) ----
-    dataset("list_comments_for_target", &["v_comment"]),
     // ---- page visits ----
     ui(
         "record_page_visit",

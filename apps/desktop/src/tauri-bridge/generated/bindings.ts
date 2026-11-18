@@ -366,16 +366,6 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listCommentsForTarget: (target: string) => typedError<CommentThread[], IpcError_Serialize>(__TAURI_INVOKE("list_comments_for_target", { target })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
-	listCommentsForStream: (streamId: StreamId) => typedError<CommentThread[], IpcError_Serialize>(__TAURI_INVOKE("list_comments_for_stream", { streamId })),
-	/**
-	 *  Generated from the command table in `oxplow-rpc`; the
-	 *  implementation and its docs live on the core.
-	 */
 	listBacklinks: (target: string, limit: number | null) => typedError<BacklinkEdge[], IpcError_Serialize>(__TAURI_INVOKE("list_backlinks", { target, limit })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -1835,84 +1825,6 @@ export type CommandUi = {
 	when?: string | null,
 };
 
-/**
- *  The thread anchor + metadata. The conversation lives in
- *  [`CommentMessage`] rows keyed by `id`.
- */
-export type Comment = {
-	id: CommentId,
-	/**
-	 *  Hard scope — comments are queryable per stream regardless of
-	 *  which thread authored them.
-	 */
-	stream_id: StreamId,
-	/**
-	 *  The agent thread the comment was first added in. Nullable so a
-	 *  content comment survives the thread being archived.
-	 */
-	thread_id: ThreadId | null,
-	/**
-	 *  What the comment is on: a URI (`oxplow:oxplow/knowledge?id=intro&store=oxwiki`,
-	 *  a file's, a task's) — the same the `page_ref` graph and tabs
-	 *  use.
-	 */
-	target: string,
-	quote: string,
-	/**  W3C selectors array (opaque to the store; the renderer parses it). */
-	selectors_json: string,
-	/**
-	 *  Ancestor regions the selection sat inside, innermost→outermost,
-	 *  EXCLUDING the primary target. Empty for a top-level selection.
-	 */
-	context_chain: string[],
-	/**  The URIs found inside the selection (links + mentions). */
-	referenced: string[],
-	intent: CommentIntent,
-	status: CommentStatus,
-	orphaned: boolean,
-	author: string,
-	created_at: Timestamp,
-	updated_at: Timestamp,
-	last_activity_at: Timestamp,
-	/**
-	 *  When the comment was last moved to `resolved`, or `None` while
-	 *  open. Cleared on reopen. Distinct from `updated_at` (which auto
-	 *  re-anchoring bumps) and `last_activity_at` (messages only), so it
-	 *  is the only reliable "when resolved" signal.
-	 */
-	resolved_at: Timestamp | null,
-};
-
-export type CommentId = string;
-
-/**  Why the comment exists — drives what the agent acts on. */
-export type CommentIntent =
-/**  A private thinking note; the agent leaves it alone unless asked. */
-"note" |
-/**  The user wants the agent to do something about this. */
-"followup";
-
-/**  One message in a comment thread (the first message included). */
-export type CommentMessage = {
-	id: CommentMessageId,
-	comment_id: CommentId,
-	/**  Free-form, e.g. `"user"` or `"agent"`. */
-	author: string,
-	body: string,
-	created_at: Timestamp,
-};
-
-export type CommentMessageId = string;
-
-/**  Lifecycle of a comment thread. */
-export type CommentStatus = "open" | "resolved";
-
-/**  A comment plus its full message thread, oldest-first. */
-export type CommentThread = {
-	comment: Comment,
-	messages: CommentMessage[],
-};
-
 export type CommitRefLabel = {
 	kind: CommitRefLabelKind,
 	name: string,
@@ -2648,7 +2560,7 @@ export type ExtensionPanel = {
 	badge: string | null,
 	/**
 	 *  The page its header opens (`oxplow:oxplow/page?page=<kind>`, a canonical ref): a core
-	 *  page the panel summarizes, as Comments opens the inbox.
+	 *  page the panel summarizes, as Waiting on you opens its page.
 	 *  Absent, the body viz's own page.
 	 */
 	open: string | null,
@@ -5492,7 +5404,6 @@ export type Page_Deserialize = {
 	acceptsContent: string | null,
 	default: boolean,
 	pinned: boolean,
-	comments: boolean,
 	refresh: boolean,
 	needs: string[],
 	/**
@@ -5558,7 +5469,6 @@ export type Page_Serialize = {
 	acceptsContent: string | null,
 	default: boolean,
 	pinned: boolean,
-	comments: boolean,
 	refresh: boolean,
 	needs: string[],
 	/**

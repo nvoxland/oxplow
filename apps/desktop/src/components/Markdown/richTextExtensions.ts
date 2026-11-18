@@ -7,7 +7,6 @@ import { InternalLink } from "./InternalLink.js";
 import { RefTitles } from "./RefTitles.js";
 import { RefCompletion, type RefCompletionOptions } from "./RefCompletion.js";
 import { FencedBlock } from "./FencedBlock.js";
-import { CommentDecorations } from "./CommentDecorations.js";
 
 // tiptap-markdown doesn't augment Tiptap 3's typed `Storage`, so
 // `editor.storage.markdown` would otherwise be unknown.
@@ -58,8 +57,6 @@ export function richTextExtensions({
     // the standard table nodes is all the round-trip needs. Without these the
     // editor flattens any table in a knowledge page to run-on text on autosave.
     ...(inlineOnly ? [] : [Table.configure({ resizable: true }), TableRow, TableHeader, TableCell]),
-    // Decorations only — opening is via the right-click menu, not click.
-    CommentDecorations.configure({ onClickComment: null }),
     Placeholder.configure({ placeholder }),
     Markdown.configure({
       html: false,

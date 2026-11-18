@@ -520,7 +520,7 @@ mod tests {
             .sql
             .query_sql(
                 "SELECT resource, resolve, searchable FROM v_resource \
-                 WHERE resource IN ('oxplow/task', 'oxplow/decision', 'oxplow/comment', 'oxplow/file', 'oxplow/event') \
+                 WHERE resource IN ('oxplow/task', 'oxplow/decision', 'oxplow/file', 'oxplow/event') \
                  ORDER BY resource",
                 vec![],
                 None,
@@ -532,11 +532,6 @@ mod tests {
         assert_eq!(
             rows,
             vec![
-                vec![
-                    text("oxplow/comment"),
-                    text("v_comment"),
-                    text("v_search_comment")
-                ],
                 vec![text("oxplow/event"), text("v_event"), SqlCell::Null(())],
                 vec![text("oxplow/file"), SqlCell::Null(()), SqlCell::Null(())],
                 vec![

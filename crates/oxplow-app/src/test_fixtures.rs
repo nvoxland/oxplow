@@ -586,8 +586,6 @@ pub async fn run_as_page_in(
         ("oxplow/uncommitted-files", "uncommitted-changes", "files"),
         ("oxplow/local-history-recent", "local-history", "recent"),
         ("oxplow/local-history-commits", "local-history", "by-commit"),
-        ("oxplow/comments-threads", "comments", "threads"),
-        ("oxplow/comments-conversation", "comments", "conversation"),
         ("oxplow/settings-overview", "settings", "overview"),
         (
             "oxplow/settings-proposals",

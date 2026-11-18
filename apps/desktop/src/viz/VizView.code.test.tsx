@@ -13,8 +13,6 @@ const reads: { path: string; revision: string | undefined; filesystem?: string }
 const models: string[] = [];
 const decorations: { startLineNumber: number; endLineNumber: number }[] = [];
 const diffModels: number[] = [];
-const actions: string[] = [];
-const commentTargets: string[] = [];
 
 function fakeEditor() {
   let model: { lines: number } | null = null;
@@ -36,10 +34,7 @@ function fakeEditor() {
     onDidScrollChange: () => ({ dispose() {} }),
     onDidChangeCursorPosition: () => ({ dispose() {} }),
     onMouseDown: () => ({ dispose() {} }),
-    addAction(a: { id: string }) {
-      actions.push(a.id);
-      return { dispose() {} };
-    },
+    addAction: () => ({ dispose() {} }),
     saveViewState: () => null,
     setScrollTop() {},
     setScrollLeft() {},
@@ -81,13 +76,7 @@ mock.module("../api.js", () => ({
     reads.push({ path, revision: at.rev, ...(at.filesystem ? { filesystem: at.filesystem } : {}) });
     return Array.from({ length: 50 }, (_, i) => `line ${i + 1}`).join("\n");
   },
-  listCommentsForTarget: async (target: string) => {
-    commentTargets.push(target);
-    return [];
-  },
-  subscribeCommentEvents: () => () => {},
 }));
-const { PageCommentsContext } = await import("./pageComments.js");
 
 const { VizView } = await import("./VizView.js");
 
@@ -97,27 +86,6 @@ afterEach(() => {
   models.length = 0;
   decorations.length = 0;
   diffModels.length = 0;
-  actions.length = 0;
-  commentTargets.length = 0;
-});
-
-// On a page that takes comments, a code viz's file takes them on its URI
-// at its revision (Monaco's menu has Add Comment); elsewhere it doesn't.
-test("a code viz's file takes comments on its URI at its revision, on a page that takes them", async () => {
-  const vizRun = run({ viz: "code", code: { path: "p", revision: "r", lines: null, sync: false } }, ["p", "r"], [["src/a.rs", "git:abc1234"]]);
-  const plain = render(<VizView run={vizRun} streamId="str1" onOpenPage={() => {}} />);
-  await waitFor(() => expect(reads).toHaveLength(1));
-  expect(actions).toEqual([]);
-  expect(commentTargets).toEqual([]);
-  plain.unmount();
-  render(
-    <PageCommentsContext.Provider value={{ target: "oxplow:oxplow/file?path=src%2Fa.rs&rev=git%3Aabc1234", streamId: "str1", threadId: null }}>
-      <VizView run={vizRun} streamId="str1" onOpenPage={() => {}} />
-    </PageCommentsContext.Provider>,
-  );
-  await waitFor(() => expect(actions).toEqual(["oxplow.comment.add"]));
-  const { fileUri } = await import("../uri/uri.js");
-  await waitFor(() => expect(commentTargets).toEqual([fileUri("src/a.rs", "git:abc1234")]));
 });
 
 const base = {

@@ -5,7 +5,7 @@
  * an unknown name draws no icon, an unknown tone leaves the cell plain.
  * See `.context/extensions-pages.md` → Viz nodes.
  */
-import { Layers, MessageSquare, type LucideIcon } from "lucide-react";
+import { Layers, type LucideIcon } from "lucide-react";
 import type { CSSProperties, ReactElement } from "react";
 
 import { pageKindIconComponent, pageKindLabel } from "../pageKinds.js";
@@ -67,7 +67,6 @@ const KINDS: Record<string, { Icon: LucideIcon | null; label: string }> = {
   viz: { Icon: pageKindIconComponent("viz"), label: "Viz" },
   metric: { Icon: pageKindIconComponent("metric"), label: "Metric" },
   dashboard: { Icon: pageKindIconComponent("dashboard"), label: "Dashboard" },
-  comment: { Icon: MessageSquare, label: "Comment" },
 };
 
 /** Every name a column's `icon` may give: the status glyphs, the kinds,

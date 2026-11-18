@@ -28,8 +28,6 @@ pub enum EntityKind {
     Note,
     AgentTurn,
     Request,
-    Comment,
-    CommentMessage,
     PageVisit,
     UsageEvent,
     AgentSession,
@@ -39,14 +37,12 @@ pub enum EntityKind {
 
 impl EntityKind {
     /// Every kind, for reverse lookups.
-    pub const ALL: [EntityKind; 12] = [
+    pub const ALL: [EntityKind; 10] = [
         EntityKind::Stream,
         EntityKind::Thread,
         EntityKind::Note,
         EntityKind::AgentTurn,
         EntityKind::Request,
-        EntityKind::Comment,
-        EntityKind::CommentMessage,
         EntityKind::PageVisit,
         EntityKind::UsageEvent,
         EntityKind::AgentSession,
@@ -62,8 +58,6 @@ impl EntityKind {
             EntityKind::Note => "not",
             EntityKind::AgentTurn => "trn",
             EntityKind::Request => "req",
-            EntityKind::Comment => "cmt",
-            EntityKind::CommentMessage => "cmg",
             EntityKind::PageVisit => "pgv",
             EntityKind::UsageEvent => "usg",
             EntityKind::AgentSession => "ses",
@@ -81,8 +75,6 @@ impl EntityKind {
             EntityKind::Note => "note id (not…)",
             EntityKind::AgentTurn => "agent-turn id (trn…)",
             EntityKind::Request => "request id (req…)",
-            EntityKind::Comment => "comment id (cmt…)",
-            EntityKind::CommentMessage => "comment-message id (cmg…)",
             EntityKind::PageVisit => "page-visit id (pgv…)",
             EntityKind::UsageEvent => "usage-event id (usg…)",
             EntityKind::AgentSession => "agent-session id (ses…)",
@@ -294,8 +286,6 @@ id_type!(ThreadId, Thread);
 id_type!(NoteId, Note);
 id_type!(AgentTurnId, AgentTurn);
 id_type!(RequestId, Request);
-id_type!(CommentId, Comment);
-id_type!(CommentMessageId, CommentMessage);
 id_type!(PageVisitId, PageVisit);
 id_type!(UsageEventId, UsageEvent);
 id_type!(AgentSessionId, AgentSession);

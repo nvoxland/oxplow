@@ -57,7 +57,7 @@ nav:
   - Guide:
       - Tasks: guide/tasks.md
       - Wiki pages: guide/wiki.md
-      - Comments: guide/comments.md
+      - Context: guide/context.md
       - Search: guide/search.md
       - Local History: guide/local-history.md
       - Change Analysis: guide/change-analysis.md

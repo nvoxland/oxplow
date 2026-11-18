@@ -39,7 +39,8 @@ describe("shouldSuppressContextMenu", () => {
 });
 
 // A selection starts in a text node: its chain is its element's, so a
-// selection inside an editor is the editor's (the comment layer stays out).
+// selection inside an editor is the editor's (the page's Add to Context
+// toolbar stays out).
 test("describeChain from a text node starts at its element", () => {
   const host = document.createElement("div");
   host.contentEditable = "true";

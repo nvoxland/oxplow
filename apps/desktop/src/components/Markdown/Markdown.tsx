@@ -1,13 +1,13 @@
 /**
  * Markdown, the one component every surface draws or edits markdown with
  * (`.context/markdown.md`): a knowledge page, a task's body, a request's
- * summary, a comment, a form's markdown field, a page's `markdown` viz.
+ * summary, a form's markdown field, a page's `markdown` viz.
  * Given `onChange` or `onCommit` it is the editor, else the viewer; both
  * have the one feature set — wikilinks and ref links that open through
  * the page (Cmd/Ctrl-click: a new tab; right-click: Open, Open in new
  * tab, Copy), web links in the app when the allowlist takes them, mermaid
- * diagrams, GFM tables, code blocks with Copy, the headings a page's
- * Contents lists, and comments on the text.
+ * diagrams, GFM tables, code blocks with Copy, and the headings a page's
+ * Contents lists.
  *
  * The editor reads and writes markdown as it is stored: `[[…]]` links go
  * in as links and come out as `[[…]]` again, so an owner never sees the
@@ -27,13 +27,9 @@ import { readWorkspaceIndex } from "../../workspaceFiles.js";
 import { useRecordStores } from "../../recordStoresLoader.js";
 import { MarkdownView } from "./MarkdownView.js";
 import { postprocessWikilinks, preprocessWikilinks } from "./markdownLinks.js";
-import { RichTextField, type RichTextCommentConfig } from "./RichTextField.js";
+import { RichTextField } from "./RichTextField.js";
 import { isStoreFile } from "../../recordStores.js";
 import { fileOptions, mergeRefOptions, type RefSearch } from "./refOptions.js";
-
-/** Comments on the editor's text: the page they are on (`target`, a URI),
- *  the stream they belong to and the thread they come from. */
-export type MarkdownComments = RichTextCommentConfig;
 
 export interface MarkdownProps {
   /** The markdown, as stored. */
@@ -57,9 +53,9 @@ export interface MarkdownProps {
   autofocus?: boolean;
   /** Edit: no pencil (a field whose frame already says it's editable). */
   hidePencil?: boolean;
-  /** Edit: its text takes comments (the viewer's text takes them through
-   *  its page: `data-ref`). */
-  comments?: MarkdownComments;
+  /** Edit: the URI its text is on (the page it edits): what Add Selection
+   *  to Context names with the selected text. */
+  contextUri?: string | null;
   /** `data-testid` on the editable surface, or the viewer's root. */
   testId?: string;
   /** View: the URI of the file the markdown came from (a `.md` drawn as a
@@ -92,7 +88,7 @@ function MarkdownEditor({
   inlineOnly,
   autofocus,
   hidePencil,
-  comments,
+  contextUri,
   testId,
   className,
   style,
@@ -171,7 +167,7 @@ function MarkdownEditor({
       inlineOnly={inlineOnly}
       autofocus={autofocus}
       hidePencil={hidePencil || canSource}
-      comments={comments}
+      contextUri={contextUri}
       refSearch={refSearch}
       testId={testId}
       className={className}

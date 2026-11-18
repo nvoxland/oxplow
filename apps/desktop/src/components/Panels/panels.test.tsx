@@ -69,10 +69,10 @@ test("the alerts are the badges that fire, from the same runs", () => {
   expect(alerts).toEqual([{ id: "x/q-badge", title: "x/q-badge", message: "2 rows", open: "oxplow:oxplow/page?page=x/q-badge" }]);
 });
 
-// A panel's header opens the page it names (Comments opens the inbox),
-// else its body page.
+// A panel's header opens the page it names (Alerts opens its page), else
+// its body page.
 test("a panel's header opens the page it names, else its body page", () => {
-  expect(panelOpenRef(panel("stream", { open: "oxplow:oxplow/page?page=comments" })).id).toBe("oxplow:oxplow/page?page=comments");
+  expect(panelOpenRef(panel("stream", { open: "oxplow:oxplow/page?page=alerts" })).id).toBe("oxplow:oxplow/page?page=alerts");
   expect(panelOpenRef(panel("stream"))).toEqual({ id: extPageUri("x", "body") });
 });
 

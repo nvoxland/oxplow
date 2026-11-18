@@ -1222,7 +1222,7 @@ console.log(JSON.stringify(posts));
             v["plugin"][0],
             "/proj/.oxplow/runtime/opencode-plugin/plugin/oxplow-hooks.js"
         );
-        assert!(v["command"]["oxplow-review-comments"]["template"]
+        assert!(v["command"]["oxplow-configure"]["template"]
             .as_str()
             .is_some());
         assert_eq!(
@@ -1302,11 +1302,7 @@ console.log(JSON.stringify(posts));
     #[test]
     fn command_definitions_carry_description_and_template() {
         let defs = command_definitions(&oxplow_agent_text::core_text());
-        for name in [
-            "oxplow-review-comments",
-            "oxplow-configure",
-            "oxplow-new-metric",
-        ] {
+        for name in ["oxplow-configure", "oxplow-new-metric"] {
             let def = &defs[name];
             let template = def["template"].as_str().unwrap_or_default();
             assert!(!template.is_empty(), "{name} template empty");
