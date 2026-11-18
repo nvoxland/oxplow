@@ -10,7 +10,7 @@ mock.module("../../api.js", () => ({
   ...realApi,
   querySql: async () =>
     ({
-      columns: ["id", "kind", "source_uri", "label", "text", "delivered_at"],
+      columns: ["id", "kind", "source_uri", "label", "text", "note", "delivered_at"],
       rows,
       truncated: false,
       reads: { datasets: [], tables: [], measures: [] },
@@ -33,9 +33,9 @@ afterEach(() => {
 test("it lists what waits, takes an item out and clears the lot", async () => {
   setSelectedThread("thr7");
   rows = [
-    [1, "page", "oxplow:oxplow/commit?sha=abc1234", "abc1234", null, null],
-    [2, "text", "oxplow:oxplow/file?path=a.rs", null, "fn main() {}", null],
-    [3, "page", "oxplow:oxplow/page?page=tasks", "Tasks", null, "2026-10-24T10:00:00Z"],
+    [1, "page", "oxplow:oxplow/commit?sha=abc1234", "abc1234", null, null, null],
+    [2, "text", "oxplow:oxplow/file?path=a.rs", null, "fn main() {}", null, null],
+    [3, "page", "oxplow:oxplow/page?page=tasks", "Tasks", null, null, "2026-10-24T10:00:00Z"],
   ];
   const opened: string[] = [];
   const view = render(<ContextDockBody streamId={null} onOpenPage={(r) => opened.push(r.id)} />);
@@ -57,10 +57,34 @@ test("it lists what waits, takes an item out and clears the lot", async () => {
 // title, so every × lines up at the left.
 test("an item's × is at the left of its line", async () => {
   setSelectedThread("thr7");
-  rows = [[1, "page", "oxplow:oxplow/commit?sha=abc1234", "abc1234", null, null]];
+  rows = [[1, "page", "oxplow:oxplow/commit?sha=abc1234", "abc1234", null, null, null]];
   const view = render(<ContextDockBody streamId={null} onOpenPage={() => {}} />);
   const item = await waitFor(() => view.getByTestId("context-panel-item"));
   expect(item.firstElementChild?.getAttribute("data-testid")).toBe("context-panel-remove");
+});
+
+// A waiting item's note shows under it and is edited in place: the edit
+// is `oxplow.context.note`, and an item with none offers "Add a note…".
+test("an item's note shows under it and is edited in place", async () => {
+  setSelectedThread("thr7");
+  rows = [
+    [1, "text", "oxplow:oxplow/file?path=a.rs", null, "fn main() {}", "Handle the empty case.", null],
+    [2, "page", "oxplow:oxplow/page?page=tasks", "Tasks", null, null, null],
+  ];
+  const view = render(<ContextDockBody streamId={null} onOpenPage={() => {}} />);
+  await waitFor(() => expect(view.getAllByTestId("context-panel-item").length).toBe(2));
+  const notes = view.getAllByTestId("context-panel-note");
+  expect(notes[0]!.textContent).toBe("Handle the empty case.");
+  expect(notes[1]!.textContent).toBe("Add a note…");
+  fireEvent.click(notes[1]!);
+  const field = await waitFor(() => {
+    const el = view.container.querySelector('textarea[data-testid="context-panel-note"]');
+    if (!el) throw new Error("no note field yet");
+    return el;
+  });
+  fireEvent.change(field, { target: { value: "Is this list right?" } });
+  fireEvent.keyDown(field, { key: "Enter", metaKey: true });
+  await waitFor(() => expect(ran).toContainEqual(["oxplow.context.note", { item: 2, note: "Is this list right?" }]));
 });
 
 test("an empty basket says how things get in", async () => {

@@ -347,6 +347,9 @@ intent:
     - name: the-context-pages-clear-empties-the-threads-basket
       input: { page: context, params: { thread_id: 1 } }
       expect: the waiting section lists what was collected; Clear empties it
+    - name: the-context-page-shows-an-items-note-and-edits-it
+      input: { page: context, params: { thread_id: 1 } }
+      expect: each waiting item's note beside it; Edit Note… changes or clears it
     - name: session-transcript-lists-turns-and-handbacks
       input: { page: session-transcript }
       expect: a session's turns oldest first, a hand-back marked, tool calls counted, start at a turn, paged by 50
@@ -989,15 +992,20 @@ commands:
     example: {"uri": "oxplow:oxplow/page?page=git-dashboard", "thread": "thr3"}
   # context.write — the person's context basket for a thread's agents.
   - name: context.add
-    summary: "Put a page (`uri`) or a piece of text (`text`, from `uri` when known) in a thread's context basket. The next prompt to any agent in that thread carries everything waiting there, then the basket is empty. The person's: an agent can't add to it."
+    summary: "Put a page (`uri`) or a piece of text (`text`, from `uri` when known) in a thread's context basket, with an optional `note` of what the person wants done about it. The next prompt to any agent in that thread carries everything waiting there, each note with its item, then the basket is empty. The person's: an agent can't add to it."
     scope: context.write
     op: add
-    example: {"thread": "thr1", "uri": "oxplow:oxplow/commit?sha=abc1234", "label": "abc1234"}
+    example: {"thread": "thr1", "uri": "oxplow:oxplow/file?path=src/a.rs#lines=10-20", "text": "fn a() {}", "note": "This should handle an empty list."}
   - name: context.remove
     summary: "Take an item (`v_thread_context.id`) out of its thread's context basket."
     scope: context.write
     op: remove
     example: {"item": 12}
+  - name: context.note
+    summary: "Set or clear (an empty `note`) the note on an item still waiting in its thread's context basket (`v_thread_context.id`). A delivered item's note is part of what went out and can't change."
+    scope: context.write
+    op: note
+    example: {"item": 12, "note": "Rename this to match the others."}
   - name: context.clear
     summary: "Empty a thread's context basket of everything still waiting; what was delivered stays as a record."
     scope: context.write

@@ -708,24 +708,33 @@ async fn context_basket(svc: &Services, thread: ThreadId) -> Option<(String, Vec
     Some((basket_block(&items), ids))
 }
 
-/// The `<context-basket>` block for `items`: each page as a mention the
-/// agent reads with `oxplow_read`, each piece of text quoted with where it
-/// came from.
+/// The `<context-basket>` block for `items`, numbered so the agent can
+/// answer each: each page as a mention the agent reads with `oxplow_read`,
+/// each piece of text quoted with where it came from, and the person's note
+/// on it, if any, indented under it (never cut: they typed it).
 pub fn basket_block(items: &[oxplow_db::thread_context_store::ContextItem]) -> String {
     use oxplow_db::thread_context_store::ContextKind;
     let mut s = String::from(
         "<context-basket>\nThe person collected these for this prompt while exploring. \
-         Read a `[oxplow uri …]` with `oxplow_read`.\n",
+         Read a `[oxplow uri …]` with `oxplow_read`.",
     );
+    if items.iter().any(|i| i.note.is_some()) {
+        s.push_str(
+            " Their notes say what they want done about an item: act on each, and say \
+             what you did by its number.",
+        );
+    }
+    s.push('\n');
+    let mut n = 0;
     for item in items {
         let label = item
             .label
             .as_deref()
             .map(|l| format!(" ({l})"))
             .unwrap_or_default();
-        match (item.kind, &item.source_uri, &item.text) {
+        let entry = match (item.kind, &item.source_uri, &item.text) {
             (ContextKind::Page, Some(uri), _) => {
-                s.push_str(&format!("- {}{label}\n", prompt_refs::uri_mention(uri)));
+                format!("{}{label}\n", prompt_refs::uri_mention(uri))
             }
             (_, source, Some(text)) => {
                 let from = source
@@ -742,9 +751,18 @@ pub fn basket_block(items: &[oxplow_db::thread_context_store::ContextItem]) -> S
                     text.push_str("\n… (cut; read the rest where it came from)");
                 }
                 let fence = if text.contains("```") { "````" } else { "```" };
-                s.push_str(&format!("- Text{from}{label}:\n{fence}\n{text}\n{fence}\n"));
+                format!("Text{from}{label}:\n{fence}\n{text}\n{fence}\n")
             }
-            _ => {}
+            _ => continue,
+        };
+        n += 1;
+        s.push_str(&format!("{n}. {entry}"));
+        if let Some(note) = &item.note {
+            // Every line under the item, so a note never reads as the next one.
+            for (i, line) in note.lines().enumerate() {
+                let lead = if i == 0 { "   Note: " } else { "   " };
+                s.push_str(&format!("{lead}{line}\n"));
+            }
         }
     }
     s.push_str("</context-basket>");
@@ -1187,11 +1205,11 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            text.contains("- [oxplow uri oxplow:oxplow/commit?sha=abc] (Fix the parser)"),
+            text.contains("1. [oxplow uri oxplow:oxplow/commit?sha=abc] (Fix the parser)"),
             "{text}"
         );
         assert!(
-            text.contains("- Text from [oxplow uri oxplow:oxplow/file?path=src/a.rs#lines=3-4]:\n```\nfn a() {}\n```"),
+            text.contains("2. Text from [oxplow uri oxplow:oxplow/file?path=src/a.rs#lines=3-4]:\n```\nfn a() {}\n```"),
             "{text}"
         );
         assert_eq!(waiting(svc, fx.thread).await, 0);
@@ -1200,6 +1218,72 @@ mod tests {
             .await
             .unwrap_or_default();
         assert!(!again.contains("<context-basket>"), "{again}");
+    }
+
+    /// The basket's items are numbered, so an agent can answer each; a
+    /// note follows its item, every line of it indented under it, and the
+    /// header says the notes are what the person wants done.
+    #[test]
+    fn a_basket_items_note_follows_it() {
+        use oxplow_db::thread_context_store::{ContextItem, ContextKind};
+        let item =
+            |id, kind, uri: &str, label: Option<&str>, text: Option<&str>, note: Option<&str>| {
+                ContextItem {
+                    id,
+                    thread_id: 1,
+                    kind,
+                    source_uri: Some(uri.into()),
+                    label: label.map(Into::into),
+                    text: text.map(Into::into),
+                    note: note.map(Into::into),
+                    added_at: "2026-11-18T00:00:00Z".into(),
+                    delivered_at: None,
+                }
+            };
+        let block = basket_block(&[
+            item(
+                1,
+                ContextKind::Page,
+                "oxplow:oxplow/commit?sha=abc",
+                Some("Fix the parser"),
+                None,
+                None,
+            ),
+            item(
+                2,
+                ContextKind::Text,
+                "oxplow:oxplow/file?path=src/a.rs#lines=3-4",
+                None,
+                Some("fn a() {}"),
+                Some("Handle the empty case.\nThen rename it."),
+            ),
+        ]);
+        assert!(
+            block.contains("Their notes say what they want done"),
+            "{block}"
+        );
+        assert!(
+            block.contains("1. [oxplow uri oxplow:oxplow/commit?sha=abc] (Fix the parser)\n2. "),
+            "{block}"
+        );
+        assert!(
+            block.contains(
+                "2. Text from [oxplow uri oxplow:oxplow/file?path=src/a.rs#lines=3-4]:\n```\nfn a() {}\n```\n   Note: Handle the empty case.\n   Then rename it.\n</context-basket>"
+            ),
+            "{block}"
+        );
+        let plain = basket_block(&[item(
+            1,
+            ContextKind::Page,
+            "oxplow:oxplow/commit?sha=abc",
+            None,
+            None,
+            None,
+        )]);
+        assert!(
+            !plain.contains("notes"),
+            "no note, no word about notes: {plain}"
+        );
     }
 
     /// A handoff to a thread reaches its agent once, at the next prompt —

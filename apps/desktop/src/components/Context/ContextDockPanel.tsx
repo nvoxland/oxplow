@@ -1,11 +1,13 @@
 /// The Context dock panel: what the person collected for the selected
 /// thread's agents and not yet sent, each led by a × to take it out, and
 /// Clear, a button at the foot as the Alerts panel's; the Context page is the panel header's arrow. The icon's badge
-/// is how many wait.
+/// is how many wait. Each item's note is under it, edited in place
+/// (Ctrl/Cmd+Enter saves, empty removes it).
 
 import { FileText, Quote, X } from "lucide-react";
 
-import { clearContext, removeFromContext, useBasket, useSelectedThreadId, waiting, type BasketItem } from "../../contextBasket.js";
+import { InlineEdit } from "../InlineEdit.js";
+import { clearContext, removeFromContext, setContextNote, useBasket, useSelectedThreadId, waiting, type BasketItem } from "../../contextBasket.js";
 import type { DockBadge, DockBodyProps } from "../Dock/dockPanels.js";
 import { dockButtonStyle } from "../Dock/dockStyle.js";
 
@@ -40,6 +42,18 @@ export function ContextDockBody(_props: DockBodyProps) {
               {item.kind === "text" && item.text ? (
                 <div style={{ color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.text.slice(0, 200)}</div>
               ) : null}
+              <InlineEdit
+                value={item.note ?? ""}
+                multiline
+                allowEmpty
+                placeholder="Add a note…"
+                ariaLabel="Note"
+                testId="context-panel-note"
+                displayStyle={{ color: item.note ? "var(--text-secondary)" : "var(--text-muted)", whiteSpace: "pre-wrap", cursor: "text" }}
+                onCommit={(next) => {
+                  if (next.trim() !== (item.note ?? "")) void setContextNote(item.id, next);
+                }}
+              />
             </span>
           </div>
         ))

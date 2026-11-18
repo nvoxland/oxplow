@@ -51,11 +51,13 @@ export interface BasketItem {
   sourceUri: string | null;
   label: string | null;
   text: string | null;
+  /** The person's note on it: what they want done about it. */
+  note: string | null;
   delivered: boolean;
 }
 
 export const BASKET_SQL = `
-  SELECT id, kind, source_uri, label, text, delivered_at
+  SELECT id, kind, source_uri, label, text, note, delivered_at
   FROM v_thread_context
   WHERE thread_id = ?1
   ORDER BY id`;
@@ -69,6 +71,7 @@ export function basketFromResult(result: SqlQueryResult): BasketItem[] {
     sourceUri: str(at(row, "source_uri")),
     label: str(at(row, "label")),
     text: str(at(row, "text")),
+    note: str(at(row, "note")),
     delivered: at(row, "delivered_at") != null,
   }));
 }
@@ -112,22 +115,82 @@ export function addDisabledReason(threadId: string | null): string | null {
   return threadId ? null : "Select a thread first";
 }
 
-/** What `oxplow.context.add` takes for a page, or for text (from a page). */
-export function addInput(threadId: string, what: { uri?: string | null; label?: string | null; text?: string | null }) {
+/** What goes in the basket: a page (`uri`), or a piece of text from one. */
+export interface ContextWhat {
+  uri?: string | null;
+  label?: string | null;
+  text?: string | null;
+}
+
+/** What `oxplow.context.add` takes for a page, or for text (from a page),
+ *  with the person's note when they wrote one. */
+export function addInput(threadId: string, what: ContextWhat, note?: string | null) {
+  const trimmed = note?.trim();
   return {
     thread: threadId,
     ...(what.uri ? { uri: what.uri } : {}),
     ...(what.label ? { label: what.label } : {}),
     ...(what.text ? { text: what.text } : {}),
+    ...(trimmed ? { note: trimmed } : {}),
   };
 }
 
-/** Put a page (`uri`) or a piece of text in the selected thread's basket;
- *  the toast offers Undo. Does nothing without a thread. */
-export async function addToContext(what: { uri?: string | null; label?: string | null; text?: string | null }): Promise<void> {
+// ---- the note prompt --------------------------------------------------------
+//
+// Every Add to Context offers a note before it adds: `addToContext` opens the
+// one app-level `ContextNotePrompt` with what is being added, and that prompt
+// adds it (`submitToContext`) or drops it.
+
+/** An add waiting on the person's note. */
+export interface PendingAdd {
+  thread: string;
+  what: ContextWhat;
+}
+
+let pending: PendingAdd | null = null;
+const pendingListeners = new Set<() => void>();
+
+function setPending(next: PendingAdd | null): void {
+  pending = next;
+  for (const l of pendingListeners) l();
+}
+
+/** The add the note prompt is open for, or null. */
+export function usePendingAdd(): PendingAdd | null {
+  return useSyncExternalStore(
+    (cb) => {
+      pendingListeners.add(cb);
+      return () => {
+        pendingListeners.delete(cb);
+      };
+    },
+    () => pending,
+  );
+}
+
+/** Offer a note, then put a page (`uri`) or a piece of text in the selected
+ *  thread's basket. Does nothing without a thread. */
+export async function addToContext(what: ContextWhat): Promise<void> {
   const thread = selected;
   if (!thread) return;
-  await personCommands.run("Add to Context", "oxplow.context.add", addInput(thread, what));
+  setPending({ thread, what });
+}
+
+/** Add the pending item with `note` (none when blank); the toast offers Undo. */
+export async function submitToContext(add: PendingAdd, note: string): Promise<void> {
+  setPending(null);
+  await personCommands.run("Add to Context", "oxplow.context.add", addInput(add.thread, add.what, note));
+}
+
+/** Close the note prompt without adding. */
+export function cancelAddToContext(): void {
+  setPending(null);
+}
+
+/** Set (or, blank, clear) the note of an item still waiting. */
+export async function setContextNote(item: number, note: string): Promise<void> {
+  const trimmed = note.trim();
+  await personCommands.run("Change Context Note", "oxplow.context.note", trimmed ? { item, note: trimmed } : { item });
 }
 
 export async function removeFromContext(item: number): Promise<void> {

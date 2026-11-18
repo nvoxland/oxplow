@@ -5,11 +5,11 @@ import { selectionUri } from "./agent-context-ref.js";
 import type { SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
 
 const result = {
-  columns: ["id", "kind", "source_uri", "label", "text", "delivered_at"],
+  columns: ["id", "kind", "source_uri", "label", "text", "note", "delivered_at"],
   rows: [
-    [1, "page", "oxplow:oxplow/commit?sha=abc1234", "abc1234", null, null],
-    [2, "text", "oxplow:oxplow/file?path=a.rs", null, "fn main() {}", null],
-    [3, "page", "oxplow:oxplow/page?page=tasks", "Tasks", null, "2026-10-24T10:00:00Z"],
+    [1, "page", "oxplow:oxplow/commit?sha=abc1234", "abc1234", null, null, null],
+    [2, "text", "oxplow:oxplow/file?path=a.rs", null, "fn main() {}", "Handle the empty case.", null],
+    [3, "page", "oxplow:oxplow/page?page=tasks", "Tasks", null, null, "2026-10-24T10:00:00Z"],
   ],
   truncated: false,
   reads: { datasets: [], tables: [], measures: [] },
@@ -24,12 +24,16 @@ test("the basket reads its rows; only the undelivered ones wait", () => {
     [3, "page", true],
   ]);
   expect(waiting(items).map((i) => i.id)).toEqual([1, 2]);
-  expect(items[1]).toMatchObject({ sourceUri: "oxplow:oxplow/file?path=a.rs", text: "fn main() {}", label: null });
+  expect(items[1]).toMatchObject({ sourceUri: "oxplow:oxplow/file?path=a.rs", text: "fn main() {}", label: null, note: "Handle the empty case." });
+  expect(items[0]!.note).toBeNull();
 });
 
 test("a page and a text are both one add, with only what is set", () => {
   expect(addInput("thr1", { uri: "oxplow:oxplow/page?page=tasks", label: "Tasks" })).toEqual({ thread: "thr1", uri: "oxplow:oxplow/page?page=tasks", label: "Tasks" });
   expect(addInput("thr1", { uri: "u", text: "t", label: "" })).toEqual({ thread: "thr1", uri: "u", text: "t" });
+  // A note goes with it when there is one, trimmed; a blank one is none.
+  expect(addInput("thr1", { uri: "u" }, "  Rename it.  ")).toEqual({ thread: "thr1", uri: "u", note: "Rename it." });
+  expect(addInput("thr1", { uri: "u" }, "   ")).toEqual({ thread: "thr1", uri: "u" });
 });
 
 test("without a thread there is nowhere to add, and it says so", () => {

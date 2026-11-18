@@ -8,7 +8,9 @@
 
 use std::sync::Arc;
 
-use oxplow_db::thread_context_store::{add_tx, clear_tx, remove_tx, ContextItem, NewItem};
+use oxplow_db::thread_context_store::{
+    add_tx, clear_tx, remove_tx, set_note_tx, ContextItem, NewItem,
+};
 use oxplow_domain::{CommandCall, CommandError, ThreadId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -23,6 +25,7 @@ pub const CAPABILITY: &str = "context.write";
 /// The commands that undo them.
 pub const ADD: &str = "oxplow.context.add";
 pub const REMOVE: &str = "oxplow.context.remove";
+pub const NOTE: &str = "oxplow.context.note";
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -38,6 +41,19 @@ pub struct AddInput {
     /// A piece of text: with it the item is text, from `uri` when given.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    /// The person's note: what they want done about it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NoteInput {
+    /// The item (`v_thread_context.id`), still waiting.
+    pub item: i64,
+    /// Its note; empty or absent clears it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -75,12 +91,17 @@ fn re_add(item: &ContextItem) -> CommandCall {
         name: ADD.into(),
         input: json!({
             "thread": ThreadId::new(item.thread_id).to_string(),
-            "uri": item.source_uri, "label": item.label, "text": item.text,
+            "uri": item.source_uri, "label": item.label, "text": item.text, "note": item.note,
         }),
     }
 }
 
-/// `add { thread, uri?, label?, text? }`.
+/// A note as stored: trimmed, and none when nothing is left.
+fn note_of(note: Option<String>) -> Option<String> {
+    note.map(|n| n.trim().to_string()).filter(|n| !n.is_empty())
+}
+
+/// `add { thread, uri?, label?, text?, note? }`.
 pub fn add_op() -> Op {
     Op::new(
         CAPABILITY,
@@ -98,6 +119,7 @@ pub fn add_op() -> Op {
                     source_uri: input.uri.filter(|u| !u.trim().is_empty()),
                     label: input.label.filter(|l| !l.trim().is_empty()),
                     text: input.text.filter(|t| !t.trim().is_empty()),
+                    note: note_of(input.note),
                 },
             )
             .map_err(|e| match e {
@@ -136,6 +158,36 @@ pub fn remove_op() -> Op {
     )
 }
 
+/// `note { item, note? }`: set or clear a waiting item's note; undoes to
+/// the note it had. A delivered item's note is part of what went out.
+pub fn note_op() -> Op {
+    Op::new(
+        CAPABILITY,
+        "note",
+        schema::<NoteInput>(),
+        true,
+        Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
+            person_only(ctx)?;
+            let input: NoteInput = parse(input)?;
+            let note = note_of(input.note);
+            let before = set_note_tx(ctx.conn, input.item, note.as_deref())
+                .map_err(|e| match e {
+                    oxplow_domain::DomainError::Invalid(m) => invalid("/item", m),
+                    other => CommandError::from(other),
+                })?
+                .ok_or_else(|| invalid("/item", format!("no context item {}", input.item)))?;
+            Ok(HandlerOutput {
+                result: json!({ "item": input.item, "note": note }),
+                inverse: (before.note != note).then(|| CommandCall {
+                    name: NOTE.into(),
+                    input: json!({ "item": input.item, "note": before.note }),
+                }),
+                ..HandlerOutput::default()
+            })
+        })),
+    )
+}
+
 /// `clear { thread }`: what still waits; delivered items stay.
 pub fn clear_op() -> Op {
     Op::new(
@@ -164,7 +216,7 @@ pub fn clear_op() -> Op {
 
 /// The context basket operations, for the bus.
 pub fn ops() -> Vec<Op> {
-    vec![add_op(), remove_op(), clear_op()]
+    vec![add_op(), remove_op(), note_op(), clear_op()]
 }
 
 #[cfg(test)]
@@ -266,6 +318,119 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(waiting(&fx).await.len(), 2);
+    }
+
+    /// A note rides an add; `note` changes it while the item waits and
+    /// undoes to the note before; removing an item and undoing that keeps
+    /// its note; a delivered item's note is refused.
+    #[tokio::test]
+    async fn an_items_note_is_set_on_add_changed_and_undone() {
+        let fx = services_with_thread().await;
+        let thread = fx.thread.to_string();
+        let added = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                ADD,
+                json!({ "thread": thread, "uri": "oxplow:oxplow/file?path=a.rs#lines=1-2",
+                        "text": "fn a() {}", "note": "  handle the empty case  " }),
+                false,
+            )
+            .await
+            .unwrap();
+        let item = added.result["item"].as_i64().unwrap();
+        let note = || async {
+            fx.svc
+                .db
+                .read(move |c| oxplow_db::thread_context_store::get_tx(c, item))
+                .await
+                .unwrap()
+                .and_then(|i| i.note)
+        };
+        assert_eq!(note().await.as_deref(), Some("handle the empty case"));
+        let changed = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                NOTE,
+                json!({ "item": item, "note": "rename it" }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(note().await.as_deref(), Some("rename it"));
+        fx.svc
+            .commands
+            .undo(&Actor::Human, changed.audit_id.unwrap(), false)
+            .await
+            .unwrap();
+        assert_eq!(note().await.as_deref(), Some("handle the empty case"));
+        fx.svc
+            .commands
+            .run(
+                &Actor::Human,
+                NOTE,
+                json!({ "item": item, "note": " " }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(note().await, None, "an empty note clears it");
+
+        let removed = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                NOTE,
+                json!({ "item": item, "note": "keep me" }),
+                false,
+            )
+            .await
+            .and(
+                fx.svc
+                    .commands
+                    .run(&Actor::Human, REMOVE, json!({ "item": item }), false)
+                    .await,
+            )
+            .unwrap();
+        fx.svc
+            .commands
+            .undo(&Actor::Human, removed.audit_id.unwrap(), false)
+            .await
+            .unwrap();
+        let thread_id = fx.thread;
+        let back = fx
+            .svc
+            .db
+            .read(move |c| oxplow_db::thread_context_store::undelivered_tx(c, thread_id))
+            .await
+            .unwrap();
+        assert_eq!(back.len(), 1);
+        assert_eq!(back[0].note.as_deref(), Some("keep me"));
+
+        let again = back[0].id;
+        fx.svc
+            .db
+            .transaction(move |tx| {
+                oxplow_db::thread_context_store::mark_delivered_tx(tx, &[again], None)
+            })
+            .await
+            .unwrap();
+        let err = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                NOTE,
+                json!({ "item": again, "note": "too late" }),
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("already delivered"), "{err}");
     }
 
     /// The basket is the person's: an agent's add is refused.

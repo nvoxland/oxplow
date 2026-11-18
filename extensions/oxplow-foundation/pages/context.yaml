@@ -1,8 +1,8 @@
 title: Context
-description: 'What you collected for this thread''s agents: pages from a page''s ☰ and text from a selection. The next prompt to any agent in the thread carries it.'
+description: 'What you collected for this thread''s agents: pages from a page''s ☰ and text from a selection, each with your note on it. The next prompt to any agent in the thread carries it.'
 icon: at-sign
 category: Work
-keywords: basket collected agent prompt
+keywords: basket collected agent prompt note review
 params:
 - name: thread_id
 loaders:
@@ -10,7 +10,7 @@ loaders:
     sql: |
       SELECT c.id, c.kind,
              coalesce(c.label, c.source_uri, substr(c.text, 1, 80)) AS what,
-             c.source_uri, substr(c.text, 1, 200) AS preview, c.added_at
+             c.source_uri, substr(c.text, 1, 200) AS preview, c.note, c.added_at
       FROM v_thread_context c
       WHERE c.thread_id = :thread_id AND c.delivered_at IS NULL
       ORDER BY c.id
@@ -18,7 +18,7 @@ loaders:
     sql: |
       SELECT c.id, c.kind,
              coalesce(c.label, c.source_uri, substr(c.text, 1, 80)) AS what,
-             c.source_uri, substr(c.text, 1, 200) AS preview, c.delivered_at
+             c.source_uri, substr(c.text, 1, 200) AS preview, c.note, c.delivered_at
       FROM v_thread_context c
       WHERE c.thread_id = :thread_id AND c.delivered_at IS NOT NULL
       ORDER BY c.delivered_at DESC, c.id DESC
@@ -40,12 +40,27 @@ view:
       width: 70
     - key: preview
       label: Text
+    - key: note
+      label: Note
     - key: added_at
       label: Added
       format: relative
       width: 110
-    empty: Nothing collected yet. Add a page from its ☰ and text from a selection's right-click; the next prompt to an agent in this thread carries it.
+    empty: Nothing collected yet. Add a page from its ☰ and text from a selection's right-click, with a note of what you want done about it; the next prompt to an agent in this thread carries it.
     actions:
+    - id: note
+      label: Edit Note…
+      command: oxplow.context.note
+      form: true
+      about: what
+      input:
+        item: '{{row.id}}'
+        note: '{{row.note}}'
+      fields:
+      - name: note
+        label: Note
+        help: What you want the agent to do about it. Leave it empty to remove the note.
+      row: true
     - id: remove
       label: Remove
       command: oxplow.context.remove
@@ -67,6 +82,8 @@ view:
       width: 70
     - key: preview
       label: Text
+    - key: note
+      label: Note
     - key: delivered_at
       label: Delivered
       format: relative

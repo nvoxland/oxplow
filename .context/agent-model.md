@@ -1052,8 +1052,13 @@ carries it.
 agents (`thread_context_item`, `v_thread_context`, the `oxplow.context.*`
 commands) rides the next prompt of *any* agent in the thread as a
 `<context-basket>` block after the handoffs (`agent_context::basket_block`):
-each page as `[oxplow uri …]` with its label, each piece of text quoted
-(up to `BASKET_TEXT_IN_CONTEXT` characters) with where it came from.
+numbered items, each page as `[oxplow uri …]` with its label, each piece of
+text quoted (up to `BASKET_TEXT_IN_CONTEXT` characters) with where it came
+from, and the person's note on an item (`note`, never cut) indented under it.
+When any item has a note, the header tells the agent to act on each and
+answer by number. A note is the person's remark about a place, the job
+comments once tried to do; it is delivered with the item, so it never has to
+follow its quote as the code moves.
 `commit` stamps the items it carried delivered to the session, which
 empties the basket; a delivered item stays as a record. Claude Code and
 opencode get it at prompt submit. Codex gets it by injection while no turn
@@ -1063,7 +1068,12 @@ person prompts. The basket is the person's: an agent's `context.*` run is
 refused. Pinned by `the_context_basket_reaches_the_next_prompt_once`.
 
 *The UI* (`apps/desktop/src/contextBasket.ts`, the window's selected thread
-from `setSelectedThread`): **Add to Context** is on every page's ☰
+from `setSelectedThread`): every add goes through one note prompt
+(`components/Context/ContextNotePrompt.tsx`, mounted once in `App`):
+`addToContext` opens it where the person last pressed, with an optional
+multiline note; Ctrl/Cmd+Enter or Add adds (with no note too), Escape or
+Cancel adds nothing. There are no separate "with note" items: the existing
+ones always offer it. **Add to Context** is on every page's ☰
 (`menu-item-page-add-to-context`, beside Ask; `oxplow.context.add` with the
 page's canonical ref and title; disabled with a reason when no thread is
 selected) and on selections: an editor's and a diff's right-side selection
@@ -1071,10 +1081,11 @@ selected) and on selections: an editor's and a diff's right-side selection
 menu (**Add to Context**: the row's first linked page, else the row as
 text) and the floating toolbar over a selection on a commentable page.
 Each toasts with Undo. The **Context** dock panel (`@`, badge = waiting
-items) lists what waits with × per item (`oxplow.context.remove`), Clear
+items) lists what waits with × per item (`oxplow.context.remove`), each
+item's note under it, edited in place (`oxplow.context.note`), Clear
 (`oxplow.context.clear`) and a link to the **Context** page (foundation page
-`context`: Waiting and Delivered (last 20) over `v_thread_context`, row
-action Remove, Clear in the nav bar).
+`context`: Waiting and Delivered (last 20) over `v_thread_context` with
+their notes, row actions Edit Note… and Remove, Clear in the nav bar).
 
 **Building takes nothing; delivery commits.** `build_context` returns a
 `PendingContext` and changes no state: no baseline moves, no handoff or

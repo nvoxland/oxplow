@@ -1,0 +1,23 @@
+# The Context page: a note rides its item in Waiting, and Edit Note… on a
+# waiting row changes it (`oxplow.context.note`); an empty note clears it.
+given:
+  - { command: oxplow.context.add, input: { thread: thr1, uri: "oxplow:oxplow/file?path=src/a.rs#lines=3-4", text: "fn a() {}", note: "Handle the empty case." } }
+  - { command: oxplow.context.add, input: { thread: thr1, uri: "oxplow:oxplow/page?page=problems", label: Problems } }
+when: { page: oxplow/context, params: { thread_id: 1 } }
+expect:
+  loaders:
+    waiting:
+      rows:
+        - { what: "oxplow:oxplow/file?path=src/a.rs#lines=3-4", note: "Handle the empty case." }
+        - { what: Problems, note: null }
+steps:
+  - press: { action: note, node: waiting, row: { what: Problems }, input: { note: "Is this list still right?" } }
+    expect: { ok: true }
+  - press: { action: note, node: waiting, row: { what: "oxplow:oxplow/file?path=src/a.rs#lines=3-4" }, input: { note: "" } }
+    expect: { ok: true }
+  - expect:
+      loaders:
+        waiting:
+          rows:
+            - { what: "oxplow:oxplow/file?path=src/a.rs#lines=3-4", note: null }
+            - { what: Problems, note: "Is this list still right?" }

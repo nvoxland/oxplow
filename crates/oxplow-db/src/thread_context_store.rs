@@ -3,7 +3,7 @@
 //! to any agent in the thread carries every undelivered item and stamps it
 //! delivered (`oxplow_app::agent_context`). Read through
 //! `v_thread_context`; every write is an `oxplow.context.*` command over
-//! these `_tx` cores. See migration `V107__thread_context.sql`.
+//! these `_tx` cores. Its note is `V44__context_note.sql`'s.
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -47,6 +47,8 @@ pub struct ContextItem {
     pub source_uri: Option<String>,
     pub label: Option<String>,
     pub text: Option<String>,
+    /// What the person wants done about it, in their words.
+    pub note: Option<String>,
     pub added_at: String,
     pub delivered_at: Option<String>,
 }
@@ -57,6 +59,7 @@ pub struct NewItem {
     pub source_uri: Option<String>,
     pub label: Option<String>,
     pub text: Option<String>,
+    pub note: Option<String>,
 }
 
 fn row_to_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<ContextItem> {
@@ -68,6 +71,7 @@ fn row_to_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<ContextItem> {
         source_uri: row.get("source_uri")?,
         label: row.get("label")?,
         text: row.get("text")?,
+        note: row.get("note")?,
         added_at: row.get("added_at")?,
         delivered_at: row.get("delivered_at")?,
     })
@@ -86,14 +90,15 @@ pub fn add_tx(conn: &Connection, thread: ThreadId, item: &NewItem) -> Result<i64
         }
     };
     conn.execute(
-        "INSERT INTO thread_context_item (thread_id, kind, source_uri, label, text, added_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO thread_context_item (thread_id, kind, source_uri, label, text, note, added_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
             thread.value(),
             kind.as_str(),
             item.source_uri,
             item.label,
             item.text,
+            item.note,
             ts_to_string(Timestamp::now())
         ],
     )
@@ -118,6 +123,30 @@ pub fn remove_tx(conn: &Connection, id: i64) -> Result<Option<ContextItem>, Doma
     conn.execute("DELETE FROM thread_context_item WHERE id = ?1", params![id])
         .map_err(map_sql_err)?;
     Ok(before)
+}
+
+/// Set or clear (`None`) the note of item `id` while it waits; what the
+/// item was, `None` when there is no such item. A delivered item's note is
+/// part of the record of what the agent was given, so it is refused.
+pub fn set_note_tx(
+    conn: &Connection,
+    id: i64,
+    note: Option<&str>,
+) -> Result<Option<ContextItem>, DomainError> {
+    let Some(before) = get_tx(conn, id)? else {
+        return Ok(None);
+    };
+    if before.delivered_at.is_some() {
+        return Err(DomainError::Invalid(
+            "the item was already delivered: its note is what the agent was given".into(),
+        ));
+    }
+    conn.execute(
+        "UPDATE thread_context_item SET note = ?2 WHERE id = ?1",
+        params![id, note],
+    )
+    .map_err(map_sql_err)?;
+    Ok(Some(before))
 }
 
 /// `thread`'s undelivered items, oldest first.
@@ -271,7 +300,7 @@ mod tests {
                     &NewItem {
                         source_uri: Some("oxplow:oxplow/commit?sha=abc".into()),
                         label: Some("abc".into()),
-                        text: None,
+                        ..NewItem::default()
                     },
                 )?;
                 let text = add_tx(
@@ -279,8 +308,8 @@ mod tests {
                     thread,
                     &NewItem {
                         source_uri: Some("oxplow:oxplow/file?path=a.rs#lines=1-2".into()),
-                        label: None,
                         text: Some("fn a() {}".into()),
+                        ..NewItem::default()
                     },
                 )?;
                 Ok((page, text))
@@ -296,6 +325,51 @@ mod tests {
             .transaction(move |tx| add_tx(tx, thread, &NewItem::default()))
             .await;
         assert!(empty.is_err());
+    }
+
+    /// A note rides its item; it can be set, changed and cleared while the
+    /// item waits, and not once it was delivered.
+    #[tokio::test]
+    async fn a_waiting_items_note_can_be_set_and_cleared() {
+        let (db, thread) = with_thread().await;
+        let id = db
+            .transaction(move |tx| {
+                add_tx(
+                    tx,
+                    thread,
+                    &NewItem {
+                        source_uri: Some("oxplow:oxplow/file?path=a.rs#lines=1-2".into()),
+                        text: Some("fn a() {}".into()),
+                        note: Some("handle the empty case".into()),
+                        ..NewItem::default()
+                    },
+                )
+            })
+            .await
+            .unwrap();
+        let note = |db: &Database| {
+            let db = db.clone();
+            async move { db.read(move |c| get_tx(c, id)).await.unwrap().unwrap().note }
+        };
+        assert_eq!(note(&db).await.as_deref(), Some("handle the empty case"));
+        let before = db
+            .transaction(move |tx| set_note_tx(tx, id, Some("rename it")))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(before.note.as_deref(), Some("handle the empty case"));
+        assert_eq!(note(&db).await.as_deref(), Some("rename it"));
+        db.transaction(move |tx| set_note_tx(tx, id, None))
+            .await
+            .unwrap();
+        assert_eq!(note(&db).await, None);
+        db.transaction(move |tx| mark_delivered_tx(tx, &[id], None))
+            .await
+            .unwrap();
+        let delivered = db
+            .transaction(move |tx| set_note_tx(tx, id, Some("too late")))
+            .await;
+        assert!(delivered.is_err(), "a delivered item's note is a record");
     }
 
     /// Delivered items leave the basket; clear and remove take only what
