@@ -1,2 +1,2 @@
-SELECT change_id, path, module, direction, start_line, from_zone, to_zone, cross_zone
+SELECT change_id, path, module, direction, start_line
 FROM source('change_import')

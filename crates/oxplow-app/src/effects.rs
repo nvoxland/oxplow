@@ -664,7 +664,7 @@ effects:
                         "config.changed",
                         3,
                         "test",
-                        serde_json::json!({ "key": "zones", "before": null, "after": [], "layer": "project" }),
+                        serde_json::json!({ "key": "oxplow.snapshots.retentionDays", "before": null, "after": 7, "layer": "project" }),
                     )
                     .unwrap(),
                 )

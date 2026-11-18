@@ -16,7 +16,7 @@ extension" has the rules for a move.
 - **Pages**: Agent Interface and Command Errors, Extension runs and
   Extension Run Detail, Job Runs and Job Run Output, Merge Readiness,
   Remote Branches, Metrics (`metrics-recorded`, with `metrics-slices`),
-  Code Quality Findings, Quality, Review, Zones, Comment thread and Hand
+  Code Quality Findings, Quality, Review, Comment thread and Hand
   Off Work.
 - **Custom components**: Explore Data, Timeline and the history graph
   (replaces Git History's plain list at `vcs.history.graph`).

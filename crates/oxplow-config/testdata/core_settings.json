@@ -576,20 +576,5 @@
       21,
       22
     ]
-  },
-  {
-    "key": "oxplow.zones",
-    "title": "Zones",
-    "description": "Architectural zones: an ORDERED rule table, first match wins; `other`/`external` are reserved labels.",
-    "category": "project",
-    "default": [],
-    "secret": false,
-    "order": 0,
-    "ui": {},
-    "owner": "core",
-    "accepts": [
-      0,
-      17
-    ]
   }
 ]

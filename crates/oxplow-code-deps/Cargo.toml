@@ -7,8 +7,6 @@ license.workspace = true
 
 [dependencies]
 oxplow-code-metrics = { workspace = true }
-oxplow-config = { workspace = true }
-globset = { workspace = true }
 tree-sitter = { workspace = true }
 serde = { workspace = true }
 specta = { workspace = true }

@@ -7049,17 +7049,16 @@ commands:
     }
 
     /// Foundation keeps data, resource views, the basic git screens and the
-    /// agent's tools. Screens a person opens by choice (Zones, Dashboards,
-    /// Timeline) aren't here, and the only custom component
+    /// agent's tools. Screens a person opens by choice (Dashboards,
+    /// Timeline, the Metrics list) aren't here, and the only custom component
     /// foundation keeps is the hand-written Integrations area.
     #[test]
-    fn foundation_has_no_zones_dashboards_index_timeline_or_metrics_list() {
+    fn foundation_has_no_dashboards_index_timeline_or_metrics_list() {
         let dir = tempfile::tempdir().unwrap();
         let exts = load_extensions(dir.path());
         let ext = |name: &str| exts.iter().find(|e| e.name == name).unwrap();
         let foundation = ext("oxplow-foundation");
         for slug in [
-            "zones",
             "dashboards",
             "timeline",
             "metrics-recorded",
@@ -7669,8 +7668,8 @@ commands:
                     "map",
                     &viz_page(
                         "",
-                        "SELECT 'p' AS path, 3 AS churn, 'core' AS zone",
-                        "viz: treemap\nchart: { label: path, size: churn, group: zone }\n",
+                        "SELECT 'p' AS path, 3 AS churn, 'core' AS area",
+                        "viz: treemap\nchart: { label: path, size: churn, group: area }\n",
                     ),
                 ),
                 ("nobar", &viz_page("", "SELECT 1", "viz: bar\n")),
@@ -7695,7 +7694,7 @@ commands:
         );
         assert_eq!(
             viz("map").unwrap().chart.as_ref().unwrap().group.as_deref(),
-            Some("zone")
+            Some("area")
         );
         assert!(viz("nobar").is_none());
         let errs = shown_errors(&ext);

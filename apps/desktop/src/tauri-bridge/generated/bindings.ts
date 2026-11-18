@@ -4516,13 +4516,6 @@ export type OxplowConfig = {
 	 */
 	metrics?: MetricEntry[],
 	/**
-	 *  Project-declared architectural zones (the `zones:` block) — an
-	 *  ORDERED table, first match wins. Empty (the default) means oxplow
-	 *  classifies nothing: every file is `other` and the Change-analysis
-	 *  zone surfaces stay empty until the project declares its own.
-	 */
-	zones?: ZoneRuleConfig[],
-	/**
 	 *  Each harness's configuration, by its key: what its `launch` reads,
 	 *  e.g. `agentConfig: { opencode: { model: "github-copilot/gpt-5-mini" } }`.
 	 */
@@ -7479,35 +7472,6 @@ export type WorkspaceContext = {
 export type WorkspaceFile = {
 	path: string,
 	content: string,
-};
-
-/**
- *  One row of the project's `zones:` table: the globs that select files
- *  and the zone label they belong to.
- *
- *  Zones are entirely project-defined — oxplow ships no rule
- *  table of its own, because a file's architectural role follows from
- *  how *this* project lays out its repo. Order in the table is
- *  load-bearing: [`ZoneRules`](../oxplow_code_deps/zones/struct.ZoneRules.html)
- *  takes the FIRST matching rule, so specific patterns must precede
- *  catch-alls.
- */
-export type ZoneRuleConfig = {
-	/**
-	 *  Globs selecting the files in this zone (any-of). In YAML `match`
-	 *  accepts a single string or a list; both land here as a list.
-	 *  Matched against the full repo-relative path with `*` stopping at
-	 *  `/` — `**` is the only way to span directories.
-	 */
-	match: string[],
-	/**  The zone label. Free-form; `other` and `external` are reserved. */
-	zone: string,
-	/**
-	 *  Optional display colour (`#rrggbb` or `#rgb`). The first rule to
-	 *  name a label wins; labels with no colour get a palette entry
-	 *  assigned by order of first appearance.
-	 */
-	color?: string | null,
 };
 
 /* Tauri Specta runtime */

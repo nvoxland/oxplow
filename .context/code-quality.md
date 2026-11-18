@@ -1,7 +1,7 @@
 # Code quality: duplication + change-analysis
 
 Native, in-process duplicate-block detection plus the Change-Analysis
-function/zone/co-change tooling. Everything runs directly inside the Rust
+function/import/co-change tooling. Everything runs directly inside the Rust
 process via tree-sitter — no subprocess, no Python or Node dependency, nothing
 for the user to install.
 
@@ -256,17 +256,16 @@ apart); base-only functions count toward
 explainable "edited both ways" signal. The diff is
 `similar::TextDiff::from_lines` (`crates/oxplow-app/src/churn.rs`).
 
-## Architectural-change overlay: zones, import deltas, co-change surprise
+## Change overlay: import deltas, co-change surprise
 
-A second axis of analysis sits on top of the function-level metrics:
-"what does this change *mean* architecturally?" Three pieces compose
-it.
+A second axis of analysis sits on top of the function-level metrics: what
+a change added to what each file reaches, and which files history says
+usually change together.
 
 ### `oxplow-code-deps`
 
-Tree-sitter-based import extractor + zone classifier. Same
-languages as `oxplow-code-metrics` (it depends on that crate's
-grammar table). Public API:
+Tree-sitter-based import extractor. Same languages as `oxplow-code-metrics`
+(it depends on that crate's grammar table). Public API:
 
 - `extract_imports(path, source) -> Vec<ImportEdge>` — one
   `ImportEdge { from_path, raw, module, kind, start_line, end_line }`
@@ -274,85 +273,15 @@ grammar table). Public API:
   unresolved (`std::fs`, `./Foo`, `<stdio.h>`, `foo.bar`).
 - `diff_edges(before, after) -> (added, removed)` — set diff keyed on
   `(kind, module)`.
-- `ZoneRules` — the PROJECT's zone table, compiled from the `zones:`
-  block in `.oxplow/project.yaml` (`oxplow_config::ZoneRuleConfig`).
-  `classify(path) -> String` takes the first rule whose glob matches;
-  no match (and no table at all) yields `ZONE_OTHER`.
-- `zone_for_module(name) -> Option<String>` — resolves a Rust `use
-  foo::*` to a zone by looking for `foo` (or its `-`-spelled form) as a
-  path SEGMENT of some rule's pattern, so `oxplow_db` finds
-  `crates/oxplow-db/**`. The one heuristic here; it is what lets the
-  project's own table resolve first-party imports without oxplow
-  reading Cargo/npm manifests. `None` ⇒ the caller reports
-  `ZONE_EXTERNAL`.
-- `ZonedImportEdge { edge, from_zone, to_zone }` with
-  `is_cross_zone()` — true only when target is in-repo, known, and
-  different from the source. `ZONE_EXTERNAL` targets never trip
-  cross-zone (importing serde isn't a layer violation).
 
-**Oxplow ships no rule table**. What makes a file "the store
-layer" follows from how a particular repo is laid out, and oxplow runs
-on any repo — the old built-in table hardcoded ~25 `crates/oxplow-*` /
-`apps/desktop/*` / `.context/` prefixes, so every other project's files
-fell through to `other` and these surfaces were inert. A project with no
-`zones:` block classifies everything as `other` and the zone surfaces
-stay empty rather than guessing.
-
-Zone labels are free-form strings; `other` and `external` are computed
-sentinels and are rejected as declared labels. Config shape, ordering
-semantics, and the MCP authoring tools are below.
-
-The UI has its own matcher at
-`apps/desktop/src/components/ChangedFiles/zones.ts` (so the changed-files
-tree's zone badges need no backend roundtrip); it reads the same rules off
-`get_config`.
-The two glob implementations are pinned by the shared fixture
-`fixtures/zone-globs.json`, which both test suites run — that is what
-keeps them from drifting.
-
-### Declaring zones (`zones:` in `.oxplow/project.yaml`)
-
-```yaml
-zones:
-- match: ["**/Cargo.toml", "**/package.json"]   # one glob or a list
-  zone: meta
-- match: ["**/*_test.rs", "**/tests/**"]
-  zone: test
-- match: crates/oxplow-db/**
-  zone: store
-  color: "#ea580c"        # optional; else a palette entry by first use
-- match: "**/*.toml"       # catch-all — deliberately last
-  zone: meta
-```
-
-**Order is load-bearing: first match wins.** Role-by-filename rules
-(tests, docs) go above the package rules so a test file inside a crate
-reads as `test`; catch-alls go last. Globs match the full repo-relative
-path with `*` stopping at `/` — `**` is the only way to span
-directories. Bad globs, empty labels, reserved labels and malformed
-colours are config errors at load (`validate_zone_rules`), so a broken
-rule is visible rather than silently never matching.
-
-This repo's own table lives in its `.oxplow/project.yaml` and is the
-worked example.
-
-### Reading and writing the table
-
-The agent owns this table. It reads the rules with `oxplow.config.get
-{ key: "zones" }`, what they do to the worktree from `v_zone` (a live
-model: one row per rule in order with the files it claims, then an `other`
-row) and `v_zone_unmatched` (up to 20 paths no rule matched), and a changed
-file's zone from `v_change_file.zone`. A large `other` share, or real source
-in `v_zone_unmatched`, is the signal that the table has gone stale as the
-repo grew. Writing it is the `oxplow.config.set { key:
-"zones", value: [rules] }` command ([commands.md](./commands.md)) — the
-WHOLE ordered table, validated by the loader's rules (reserved labels,
-glob shapes), written to `.oxplow/project.yaml` (committed, so a team
-shares one vocabulary), logged as `config.changed`, undoable.
-
-No IPC of its own — `zones` rides on `get_config`, and the config
-watcher hot-reloads file edits, so a write repaints an open
-changed-files tree without a restart.
+**There are no zones.** oxplow once classified a change's files and
+imports by a project-written glob table (`oxplow.zones`) and flagged imports
+that crossed from one zone to another. It was removed (2026-11, migration
+V43): every project had to write and keep the table by hand, a project
+without one got nothing, and this repo's own table had drifted to a third
+of its files unclassified. A project that wants its own architectural
+layers writes them as a dataset in its own extension, over `v_change_file`
+and `v_change_import`.
 
 ### Co-change (oxplow-bundled, P7.B5)
 
@@ -369,29 +298,17 @@ repo's history (2,351 commits, 19k file rows): the pairs compute in
 
 ### Import deltas
 
-`analyze_files` also returns `import_deltas: Vec<ImportDelta>`
-(`added` / `removed` / `cross_zone_added` zoned edges per file), stored as
-`v_change_import` rows with `cross_zone` set for new boundary crossings.
-The resolver is intentionally minimal:
-
-- Rust `use crate::*` / `self` / `super` → importer's own zone.
-- Rust `use foo::*` → `ZoneRules::zone_for_module`; missing → External.
-- TS `./foo` / `../foo` → lexical relative-path normalization
-  through `ZoneRules::classify`.
-- Bare specifiers (`react`, `@scope/x`, `node:fs`) → External.
-- Everything else → unresolved (`to_zone: null`); cross-zone logic
-  ignores it.
-
-Better to underflag than overflag — a missed cross-zone touch is a
-quieter UI; a false-positive is a wrong "wrong layer" callout.
+`analyze_files` also returns `import_deltas: Vec<ImportDelta>` (the
+`added` and `removed` edges of each file whose imports changed), stored as
+`v_change_import` rows (`path`, `module` as written, `direction`,
+`start_line`). Nothing resolves a module to a file.
 
 ### Where it shows
 
-The oxplow-bundled `change-review` document (commit, uncommitted and
-`oxplow/changes.sections` slots): summary, look-here-first, a churn treemap grouped
-by zone, function changes, test changes, co-change surprises,
-duplication (with compare links) and new cross-zone imports. Zone badges
-also render in the core changed-files tree (`ChangedFilesTree`).
+The holder's `change-review` part (commit, uncommitted and Changes
+sections; not shipped yet): summary, look-here-first, a churn treemap,
+function changes, test changes, co-change surprises and duplication (with
+compare links).
 
 ## Adding a new code/quality signal
 

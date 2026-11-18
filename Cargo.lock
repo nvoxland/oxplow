@@ -4615,9 +4615,7 @@ dependencies = [
 name = "oxplow-code-deps"
 version = "0.8.0"
 dependencies = [
- "globset",
  "oxplow-code-metrics",
- "oxplow-config",
  "oxplow-workspace-hack",
  "serde",
  "serde_json",

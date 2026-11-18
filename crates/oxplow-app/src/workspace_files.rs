@@ -126,7 +126,7 @@ impl WorkspaceFiles {
     }
 
     /// Every file, pruned by the stream's filter ([`Self::filter_for`]),
-    /// which also bounds the walk (the zone table reads it).
+    /// which also bounds the walk.
     pub async fn list_files(
         &self,
         stream_id: Option<&str>,

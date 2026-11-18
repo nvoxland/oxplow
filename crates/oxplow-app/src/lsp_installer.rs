@@ -258,7 +258,6 @@ mod tests {
             testing: Default::default(),
             scripts: Default::default(),
             metrics: Default::default(),
-            zones: Default::default(),
             agent_config: Default::default(),
             agent_enabled: Default::default(),
             extension_instances: Default::default(),

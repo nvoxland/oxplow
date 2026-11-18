@@ -1,5 +1,5 @@
 //! The live datasets: `v_ai_role`, `v_ai_provider`, `v_lsp_server`,
-//! `v_collector_state`, `v_collector_credential`, `v_zone` and `v_zone_unmatched` read state that has no
+//! `v_collector_state` and `v_collector_credential` read state that has no
 //! change hook (a keychain, a yaml file, a process table, the worktree's files), so the gateway
 //! reads it when a query names them (`crate::live_datasets`).
 
@@ -224,71 +224,6 @@ fn every_live_dataset_reads_the_columns_it_declares() {
         let declared: Vec<&str> = decl.fields.iter().map(|c| c.name.as_str()).collect();
         assert_eq!(declared, crate::live_datasets::columns(name), "{name}");
     }
-}
-
-/// The zone table with the effect it has on this worktree: each rule's
-/// matched files (first match wins), what fell through to `other`, and
-/// the paths that did. A rule added to project.yaml, or a file added to
-/// the worktree, shows in the next query with no event announcing either.
-#[tokio::test]
-async fn zones_show_what_each_rule_matches_in_the_worktree() {
-    let fx = services_with_thread().await;
-    let zone =
-        "SELECT position, zone, patterns, files FROM v_zone ORDER BY position IS NULL, position";
-    // No table declared: everything is `other`.
-    for (path, body) in [
-        ("src/a.rs", "a"),
-        ("src/b.rs", "b"),
-        ("docs/x.md", "x"),
-        ("tools/y.sh", "y"),
-    ] {
-        let file = fx._dir.path().join(path);
-        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-        std::fs::write(file, body).unwrap();
-    }
-    let none = rows(&fx, zone).await;
-    assert_eq!(none.len(), 1, "{none:?}");
-    assert_eq!(none[0][1], json!("other"));
-    assert!(none[0][3].as_i64().unwrap() >= 4, "{none:?}");
-
-    {
-        let mut config = fx.svc.config.write().unwrap();
-        let rule = |pattern: &str, zone: &str| oxplow_config::ZoneRuleConfig {
-            patterns: vec![pattern.into()],
-            zone: zone.into(),
-            color: None,
-        };
-        config.zones = vec![
-            rule("src/**", "core"),
-            rule("docs/**", "docs"),
-            rule("src/a.rs", "shadowed"),
-        ];
-    }
-    let table = rows(&fx, zone).await;
-    assert_eq!(
-        table[..3],
-        [
-            vec![json!(1), json!("core"), json!("[\"src/**\"]"), json!(2)],
-            vec![json!(2), json!("docs"), json!("[\"docs/**\"]"), json!(1)],
-            // First match wins: `src/a.rs` never reaches this rule.
-            vec![
-                json!(3),
-                json!("shadowed"),
-                json!("[\"src/a.rs\"]"),
-                json!(0)
-            ],
-        ]
-    );
-    // `other` closes the table, with no position.
-    let other = table.last().unwrap();
-    assert_eq!((&other[0], &other[1]), (&Value::Null, &json!("other")));
-
-    let unmatched = rows(&fx, "SELECT path FROM v_zone_unmatched").await;
-    assert!(
-        unmatched.contains(&vec![json!("tools/y.sh")])
-            && !unmatched.contains(&vec![json!("src/a.rs")]),
-        "{unmatched:?}"
-    );
 }
 
 /// The scopes a command can need, read from the table core ships: what
@@ -882,11 +817,11 @@ async fn a_query_over_a_live_dataset_reads_it() {
     let out = fx
         .svc
         .sql
-        .query_sql("SELECT zone FROM v_zone", vec![], None)
+        .query_sql("SELECT id FROM v_scope", vec![], None)
         .await
         .unwrap();
     assert!(
-        out.reads.datasets.contains(&"v_zone".to_string()),
+        out.reads.datasets.contains(&"v_scope".to_string()),
         "{:?}",
         out.reads
     );
@@ -900,7 +835,8 @@ fn a_change_names_the_live_datasets_that_follow_it() {
     let after = |e: OxplowEvent| crate::datasets_changed::live_datasets_after(&e);
     let config = after(OxplowEvent::ConfigChanged);
     assert!(
-        config.contains(&"v_config_value".to_string()) && config.contains(&"v_zone".to_string()),
+        config.contains(&"v_config_value".to_string())
+            && config.contains(&"v_lsp_server".to_string()),
         "{config:?}"
     );
     let files = after(OxplowEvent::WorkspaceChanged {
@@ -909,7 +845,7 @@ fn a_change_names_the_live_datasets_that_follow_it() {
         overflow: false,
     });
     assert!(
-        files.contains(&"v_file".to_string()) && files.contains(&"v_zone_unmatched".to_string()),
+        files.contains(&"v_file".to_string()) && files.contains(&"v_extension_source".to_string()),
         "{files:?}"
     );
     assert!(after(OxplowEvent::BackgroundTasksChanged).is_empty());

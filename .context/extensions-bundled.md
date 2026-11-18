@@ -154,7 +154,7 @@ With oxplow-bundled off, a task or knowledge page link opens core's generic
 resource page. That is intended. Foundation must never link to a bundled
 page, because it cannot name oxplow-bundled. The Rust test
 `foundation_has_no_task_or_wiki_ui` and
-`foundation_has_no_zones_dashboards_index_timeline_or_metrics_list` guard this.
+`foundation_has_no_dashboards_index_timeline_or_metrics_list` guard this.
 
 ## Example extensions (`examples/extensions/`)
 
@@ -260,7 +260,7 @@ screens and the holder's add the review and analysis:
   renderer, because the bare URI opens the data view.
 - **Review.** `review` and `quality`;
   the code-quality `findings`; the `change-review` page (treemap,
-  look-here-first, functions, co-change, zones) mounted in the
+  look-here-first, functions, co-change) mounted in the
   `oxplow/diff-view.sections`, `commit.sections` and
   `uncommitted-changes.sections` slots. The duplicate scan runs in core's
   change analysis; the compare page is foundation's `duplicate-block`.
@@ -296,8 +296,6 @@ screens and the holder's add the review and analysis:
   the list names it as `oxplow/metrics-dimensions`). People find
   a metric from the launcher instead: `metric` and `measure` are
   `searchable:` ([metrics.md](./metrics.md) "UI").
-- **Zones.** The `zones` page (no category) holds the questions about the zone
-  rules (`v_zone`, `v_zone_unmatched`); nothing links to it.
 - **The app's screens.** foundation's `alerts`,
   `catalog`, `comments`, `commit`,
   `diff`, `directory`, `file-viewer`, `markdown` (a `.md` file drawn), `media` (an image or a PDF shown), `csv` and `tsv` (a CSV or TSV file as a table), `data-file` (a JSON or YAML file as a tree of its values), `diagram` (a mermaid file drawn), `files` (the launcher's way into `directory`), `git-dashboard`,

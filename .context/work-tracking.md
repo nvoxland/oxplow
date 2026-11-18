@@ -227,7 +227,7 @@ or operational limits, not a view of what good work is:
   `is_test_function`) and the assertion and skip counting
   (`test_signals`): conventions the change analysis records as columns.
 - Function metrics, clone detection and its `min_lines` / `min_nodes`
-  floors, diff-coverage math, zone matching, `threshold_state`.
+  floors, diff-coverage math, `threshold_state`.
 - Advisory muting after three deliveries, stall detection (15 / 5
   minutes), contribution disabling after three failures.
 

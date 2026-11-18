@@ -20,12 +20,6 @@
   a particular store's own tables.
 - `oxplow_query_sql` runs one read-only `SELECT`/`WITH`. Iterate on the query
   here until the rows are what the user wants, before writing any files.
-- The project's architectural zones are `v_zone` (each rule of the `oxplow.zones` setting
-  in `.oxplow/project.yaml`, in order, with the files it claims in the worktree,
-  then a closing `other` row) and `v_zone_unmatched` (paths no rule matched);
-  both are read live. Read the rules with `oxplow.config.get { key: "oxplow.zones" }`,
-  change them with `oxplow.config.set { key: "oxplow.zones", value: […], level: "project" }`
-  (the whole ordered table).
 - Also read live, for the stream a page runs for (its `stream_id`; the
   primary checkout's without one): `v_file` (the files and folders
   of a filesystem: the worktree's by default, with each file's change;

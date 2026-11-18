@@ -45,8 +45,6 @@ pub const NAMES: &[&str] = &[
     "collector_credential",
     "extension_secret",
     "extension_source",
-    "zone",
-    "zone_unmatched",
     "scope",
     "config_value",
     "agent_conversation",
@@ -104,8 +102,6 @@ pub fn columns(name: &str) -> &'static [&'static str] {
         "collector_credential" => &["collector", "name", "is_set"],
         "extension_secret" => &["extension", "provider", "name", "reference", "is_set"],
         "extension_source" => &["name", "path", "hash"],
-        "zone" => &["position", "zone", "patterns", "color", "files"],
-        "zone_unmatched" => &["path"],
         "scope" => &["id", "access", "host", "spends", "summary"],
         "config_value" => &[
             "key",
@@ -344,9 +340,6 @@ pub fn follows(name: &str, change: &Change<'_>) -> bool {
                 event,
                 E::CredentialChanged { .. } | E::ExtensionsChanged | E::ConfigChanged
             ),
-            "zone" | "zone_unmatched" => {
-                matches!(event, E::ConfigChanged | E::WorkspaceChanged { .. })
-            }
             // A source is files in the checkout, and where it lives is config.
             "extension_source" => matches!(
                 event,
@@ -455,10 +448,6 @@ pub async fn harness_conversations(
     };
     harness.conversations(&query).await
 }
-
-/// How many unmatched paths `v_zone_unmatched` lists: enough to see the
-/// shape of what's missing, few enough to read.
-const UNMATCHED_SAMPLE: usize = 20;
 
 /// The most files of one folder `v_file` reads a size and time for; the
 /// rest of a bigger folder have NULL, and `STAT_PARALLEL` of them are
@@ -599,8 +588,6 @@ impl LiveDatasets {
             "collector_credential" => sources.collector_credentials().await,
             "extension_secret" => sources.extension_secrets().await,
             "extension_source" => sources.extension_sources().await,
-            "zone" => Ok(sources.zones().await?.0),
-            "zone_unmatched" => Ok(sources.zones().await?.1),
             "config_value" => sources.config_values().await,
             "agent_conversation" => sources.agent_conversations(stream).await,
             "vcs_workspace" => sources.vcs_workspaces().await,
@@ -834,65 +821,6 @@ impl LiveSources {
         })
         .await
         .map_err(|e| DomainError::Invariant(format!("reading extension sources: {e}")))
-    }
-
-    /// The zone table's rows and the unmatched sample, from one pass over
-    /// the primary worktree's files. Each rule is compiled alone, so a
-    /// file is claimed by the first rule that matches it, as
-    /// `ZoneRules::classify` decides.
-    async fn zones(&self) -> Result<(Vec<Vec<SqlCell>>, Vec<Vec<SqlCell>>), DomainError> {
-        let (rules, generated) = {
-            let config = self.config.read().unwrap_or_else(|e| e.into_inner());
-            (config.zones.clone(), config.generated.clone())
-        };
-        let files = self
-            .workspace_files
-            .list_files(None, &generated)
-            .await
-            .map_err(|e| DomainError::Invalid(e.to_string()))?;
-        let singles: Vec<oxplow_code_deps::ZoneRules> = rules
-            .iter()
-            .map(|r| oxplow_code_deps::ZoneRules::from_config(std::slice::from_ref(r)))
-            .collect();
-        let mut claimed = vec![0_i64; rules.len()];
-        let mut unmatched = Vec::new();
-        let mut other = 0_i64;
-        for file in &files {
-            let hit = singles
-                .iter()
-                .position(|r| r.classify(&file.path) != oxplow_code_deps::ZONE_OTHER);
-            match hit {
-                Some(i) => claimed[i] += 1,
-                None => {
-                    other += 1;
-                    if unmatched.len() < UNMATCHED_SAMPLE {
-                        unmatched.push(vec![text(file.path.clone())]);
-                    }
-                }
-            }
-        }
-        let mut table: Vec<Vec<SqlCell>> = rules
-            .iter()
-            .zip(&claimed)
-            .enumerate()
-            .map(|(i, (rule, files))| {
-                vec![
-                    SqlCell::Int(i as i64 + 1),
-                    text(rule.zone.clone()),
-                    json(&rule.patterns),
-                    opt(rule.color.clone()),
-                    SqlCell::Int(*files),
-                ]
-            })
-            .collect();
-        table.push(vec![
-            SqlCell::Null(()),
-            text(oxplow_code_deps::ZONE_OTHER),
-            text("[]"),
-            SqlCell::Null(()),
-            SqlCell::Int(other),
-        ]);
-        Ok((table, unmatched))
     }
 
     /// The stream a query runs for: `stream`, else the primary.

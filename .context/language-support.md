@@ -43,7 +43,7 @@ just share the one identity:
 | Static-analysis tables (`LanguageSpec`: decision kinds, parameters, visibility; function-like syntax for the duplication detector) | `oxplow-code-metrics/src/spec.rs` | drives complexity/markers metrics and `oxplow-code-dup` |
 | Symbol queries (`symbols.scm`, optional `symbols.yaml`) | `oxplow-code-metrics/languages/<lang>/` | data, not code: what a file defines and how each definition is named (see Symbols) |
 | AST-merge tables (`MergeSpec`, `KeyStrategy`) | `oxplow-git/src/ast_merge.rs` (`merge_spec(lang) -> Option<&MergeSpec>`) | merge-specific identity keys; `None` ⇒ language analysed but not merged (e.g. C#) |
-| Import/zone extraction | `oxplow-code-deps` | depends on the code-metrics grammar table |
+| Import extraction | `oxplow-code-deps` | depends on the code-metrics grammar table |
 | Idiom metrics (`oxplow.<lang>.*` fact collectors of oxplow-foundation) | `extensions/oxplow-foundation/collectors/<lang>/*.star` | need the Starlark runtime; key off `Language` |
 | Editor language id, file icons | `apps/desktop/src/editor-language.ts` (Monaco ids) | renderer-only; Monaco's own id space |
 | LSP suggestion mirror | `apps/desktop/src/lspSuggestions.ts` | hand-mirrored from `language::mason_suggestion` |

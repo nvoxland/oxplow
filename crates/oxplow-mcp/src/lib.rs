@@ -1384,7 +1384,7 @@ mod tests {
                 &McpCaller::default(),
                 RunCommandParams {
                     id: "oxplow.config.set".into(),
-                    input: serde_json::json!({"key": "zones", "value": []}),
+                    input: serde_json::json!({"key": "oxplow.snapshots.retentionDays", "value": 7}),
                 },
             )
             .await
@@ -1590,11 +1590,10 @@ mod tests {
         assert!(err.to_string().contains("thread identity"), "{err}");
     }
 
-    /// The zones write path after `set_zones`: the agent runs
-    /// `oxplow.config.set` through `run_command`, and the run is audited to the
-    /// calling thread.
+    /// A setting write: the agent runs `oxplow.config.set` through
+    /// `run_command`, and the run is audited to the calling thread.
     #[tokio::test]
-    async fn run_command_sets_zones_as_the_calling_thread() {
+    async fn run_command_sets_a_setting_as_the_calling_thread() {
         use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
         let (proj, services, server) = boot().await;
         let stream = services.stream_store.list().await.unwrap().pop().unwrap();
@@ -1613,8 +1612,8 @@ mod tests {
                 Parameters(RunCommandParams {
                     id: "oxplow.config.set".into(),
                     input: serde_json::json!({
-                        "key": "oxplow.zones",
-                        "value": [{"match": "src/**", "zone": "core"}],
+                        "key": "oxplow.snapshots.retentionDays",
+                        "value": 21,
                         "level": "project"
                     }),
                 }),
@@ -1626,8 +1625,11 @@ mod tests {
         assert_eq!(outcome["result"]["changed"], true);
         assert!(outcome["audit_id"].is_number());
         let yaml = std::fs::read_to_string(proj.path().join(".oxplow/project.yaml")).unwrap();
-        assert!(yaml.contains("zone: core"), "{yaml}");
-        assert_eq!(services.config.read().unwrap().zones.len(), 1);
+        assert!(
+            yaml.contains("oxplow.snapshots.retentionDays: 21"),
+            "{yaml}"
+        );
+        assert_eq!(services.config.read().unwrap().snapshot_retention_days, 21);
         let events = services.event_log_store.read_after(0, 20).await.unwrap();
         let executed = events
             .iter()

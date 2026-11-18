@@ -217,7 +217,7 @@ async fn run_command_over_http_is_audited_to_the_bearers_thread() {
             "jsonrpc": "2.0", "id": 2, "method": "tools/call",
             "params": {"name": "run_command", "arguments": {
                 "id": "oxplow.config.set",
-                "input": {"key": "oxplow.zones", "value": [{"match": "src/**", "zone": "core"}], "level": "project"}
+                "input": {"key": "oxplow.snapshots.retentionDays", "value": 21, "level": "project"}
             }}
         }),
     )
@@ -225,7 +225,10 @@ async fn run_command_over_http_is_audited_to_the_bearers_thread() {
     let call = call.unwrap();
     assert_ne!(call["result"]["isError"], true, "{call}");
     let yaml = std::fs::read_to_string(root.join(".oxplow/project.yaml")).unwrap();
-    assert!(yaml.contains("zone: core"), "{yaml}");
+    assert!(
+        yaml.contains("oxplow.snapshots.retentionDays: 21"),
+        "{yaml}"
+    );
     let events = services.event_log_store.read_after(0, 20).await.unwrap();
     let executed = events
         .iter()

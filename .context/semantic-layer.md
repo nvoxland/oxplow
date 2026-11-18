@@ -585,9 +585,7 @@ from: whether a key is in the keychain (`v_ai_provider.key_set`,
 hand), which language servers run and whose binary is on disk
 (`v_lsp_server`), and a machine's collector standing and credentials
 (`v_collector_state`, `v_collector_credential`; per machine, outside the
-repo), what the zone table does to the worktree (`v_zone`,
-`v_zone_unmatched`: `project.yaml` edited by hand, and the files on disk),
-every setting's effective value (`v_config_value`), the files of a filesystem (`v_file`: the stream's worktree by default), the harnesses' saved conversations
+repo), every setting's effective value (`v_config_value`), the files of a filesystem (`v_file`: the stream's worktree by default), the harnesses' saved conversations
 (`v_agent_conversation`: files the harness writes outside oxplow), the
 registered agent harnesses (`v_agent_harness`: which `agents:` enables, and the settings each declares), the
 repository's working copies (`v_vcs_workspace`) and how far two revisions
@@ -671,9 +669,8 @@ rows are read when a query names the dataset.
   failure to make it is logged; the query reads what is stored. A gateway
   with nothing bound (a check) makes nothing.
 - **Cheap, and current:** a read walks in-memory registries, a config file,
-  the keychain, the stream store, a worktree's files (`v_zone`, and
-  `v_file` unless the query names a folder, walk them on every
-  query) or each harness's conversation index;
+  the keychain, the stream store, a worktree's files (`v_file`, unless the query names a folder, walks
+  them on every query) or each harness's conversation index;
   it holds no lock while the query runs. Nothing is cached, so a result is
   as current as the query. A live read has no watermark, so a result's
   `freshness` doesn't mention it.
@@ -1416,7 +1413,7 @@ oxplow-bundled change cards) only read them.
   (shared with the `diff` IPC, `.context/vcs.md`), reads the
   first 200 changed files' contents, runs `code_analysis::analyze_files`
   (tree-sitter metrics per side, churn, import deltas), and builds rows:
-  - files: status, +/−, zone (project zone rules), `is_test` (the
+  - files: status, +/−, `is_test` (the
     built-in test-file conventions plus the project's `testing.testPaths`
     globs — `change_analysis::TestPaths`, read when the analysis runs, so
     a change in config applies to the next analysis and earlier stored
@@ -1433,8 +1430,8 @@ oxplow-bundled change cards) only read them.
     a build without);
   - functions: added / deleted / modified (signature and/or body), deltas,
     churn and churn share; unchanged ones aren't stored;
-  - imports: added/removed with zones, `cross_zone` for new boundary
-    crossings;
+  - imports: added/removed, the module as written (V43 dropped the
+    zone columns);
   - co-change left core (P7.B5, V138 dropped `change_co_change`):
     oxplow-bundled's `co_change_pair` (materialized over the commit
     index: pairs sharing ≥ 3 commits of ≤ 50 files in 180 days) and
@@ -1463,7 +1460,7 @@ oxplow-bundled change cards) only read them.
   or a live request's stored analysis, computing it the first time.
 - **Two stages.** Stage one is the file list alone:
   `refresh_files(target)` diffs through `Trees` and stores `change_file`
-  (status, +/−, zone, `is_test`) — no file is parsed — stamping
+  (status, +/−, `is_test`) — no file is parsed — stamping
   `v_change.files_at` / `files_events_to`, and for a working tree git's
   `in_progress` operation and `conflicted` count (`v_change` v2, migration
   V2). Stage two is everything else (functions, imports, tests,

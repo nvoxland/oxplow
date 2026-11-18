@@ -278,12 +278,12 @@ mod tests {
     #[test]
     fn a_grid_query_is_planned_and_bad_ones_are_named() {
         let p = plan(
-            "SELECT bucket, zone, MEASURE('a.b') AS a, measure('c') FROM metric_grid('week', 'zone') WHERE MEASURE('a.b') > 0",
+            "SELECT bucket, area, MEASURE('a.b') AS a, measure('c') FROM metric_grid('week', 'area') WHERE MEASURE('a.b') > 0",
         )
         .unwrap()
         .unwrap();
         assert_eq!(p.bucket, Some(TimeBucket::Week));
-        assert_eq!(p.dim.as_deref(), Some("zone"));
+        assert_eq!(p.dim.as_deref(), Some("area"));
         assert_eq!(p.keys, vec!["a.b".to_string(), "c".to_string()]);
         assert_eq!(plan("SELECT 1 FROM v_task").unwrap(), None);
         for (sql, says) in [
@@ -315,7 +315,7 @@ mod tests {
         serde_json::from_str(&format!("\"{s}\"")).unwrap()
     }
 
-    /// Facts on three days in two zones, and three metrics over them.
+    /// Facts on three days in two areas, and three metrics over them.
     async fn fixture() -> (SqlGateway, MetricEngine, SqliteFactStore) {
         use oxplow_domain::stores::StreamStore;
         let db = Database::in_memory();
@@ -368,8 +368,8 @@ mod tests {
             };
             let fs = [("api", values[0]), ("ui", values[1])]
                 .into_iter()
-                .map(|(zone, v)| NewFact {
-                    dims_json: Some(format!("{{\"acme.zone\":\"{zone}\"}}")),
+                .map(|(area, v)| NewFact {
+                    dims_json: Some(format!("{{\"acme.area\":\"{area}\"}}")),
                     ..NewFact::new(m, v)
                 })
                 .collect();
@@ -410,7 +410,7 @@ mod tests {
         let (gateway, engine, facts) = fixture().await;
         for key in ["acme.size_sum", "acme.size_max", "acme.size_count"] {
             let spec = facts.get_spec(key).await.unwrap().unwrap();
-            for dim in [None, Some("acme.zone")] {
+            for dim in [None, Some("acme.area")] {
                 let expected: Vec<Vec<serde_json::Value>> = engine
                     .series_for_spec_read(
                         &spec,

@@ -1,12 +1,11 @@
 //! The change-analysis producer: for one change (a commit, a turn, a request,
 //! a range or the working tree) it diffs the two endpoints, analyzes the changed files
-//! (function metrics, churn, imports, zones, co-change) and stores the rows
+//! (function metrics, churn, imports, co-change) and stores the rows
 //! behind `v_change*`, which the analytics pages read. See
 //! `.context/semantic-layer.md` → "Change analysis".
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use oxplow_code_deps::ZoneRules;
 use oxplow_db::{ChangeFileRow, ChangeFunctionRow, ChangeImportRow, ChangeResults};
 
 use crate::code_analysis::{
@@ -132,7 +131,6 @@ type BaseHead<'a> = (Option<&'a AnalyzedFunction>, Option<&'a AnalyzedFunction>)
 pub fn build_results(
     files: &[ChangedFile],
     analysis: &AnalyzeFunctionsResult,
-    zones: &ZoneRules,
     tests: &TestPaths,
 ) -> ChangeResults {
     // (path, symbol id) → (base, head): an overload or a same-named function
@@ -210,26 +208,17 @@ pub fn build_results(
         });
     }
 
-    let files = file_rows(files, zones, tests);
+    let files = file_rows(files, tests);
 
     let mut imports = Vec::new();
     for d in &analysis.import_deltas {
-        let cross: BTreeSet<(String, u32)> = d
-            .cross_zone_added
-            .iter()
-            .map(|e| (e.edge.module.clone(), e.edge.start_line))
-            .collect();
         for (direction, edges) in [("added", &d.added), ("removed", &d.removed)] {
             for e in edges {
                 imports.push(ChangeImportRow {
                     path: d.path.clone(),
-                    module: e.edge.module.clone(),
+                    module: e.module.clone(),
                     direction: direction.into(),
-                    start_line: Some(e.edge.start_line as i64),
-                    from_zone: Some(e.from_zone.clone()),
-                    to_zone: e.to_zone.clone(),
-                    cross_zone: direction == "added"
-                        && cross.contains(&(e.edge.module.clone(), e.edge.start_line)),
+                    start_line: Some(e.start_line as i64),
                 });
             }
         }
@@ -243,9 +232,9 @@ pub fn build_results(
     }
 }
 
-/// The stored row of each changed file: its status and line counts, its
-/// zone and whether it's a test — what both stages write.
-fn file_rows(files: &[ChangedFile], zones: &ZoneRules, tests: &TestPaths) -> Vec<ChangeFileRow> {
+/// The stored row of each changed file: its status and line counts and
+/// whether it's a test — what both stages write.
+fn file_rows(files: &[ChangedFile], tests: &TestPaths) -> Vec<ChangeFileRow> {
     files
         .iter()
         .map(|f| ChangeFileRow {
@@ -253,7 +242,6 @@ fn file_rows(files: &[ChangedFile], zones: &ZoneRules, tests: &TestPaths) -> Vec
             status: f.status.clone(),
             additions: f.additions,
             deletions: f.deletions,
-            zone: Some(zones.classify(&f.path)),
             is_test: tests.is_test(&f.path),
             staged: f.staged,
             untracked: f.untracked,
@@ -638,11 +626,7 @@ fn changed_rows(
         })
         .collect();
     let cfg = svc.config.read().unwrap_or_else(|e| e.into_inner());
-    file_rows(
-        &files,
-        &ZoneRules::from_config(&cfg.zones),
-        &TestPaths::from_config(&cfg.testing.test_paths),
-    )
+    file_rows(&files, &TestPaths::from_config(&cfg.testing.test_paths))
 }
 
 /// [`refresh_files`] when only `paths` changed: their rows alone, at a cost that
@@ -1345,12 +1329,9 @@ async fn compute(
     head: Revision,
     only: Option<std::collections::HashSet<String>>,
 ) -> Result<ChangeResults, String> {
-    let (zones, tests) = {
+    let tests = {
         let cfg = svc.config.read().unwrap_or_else(|e| e.into_inner());
-        (
-            ZoneRules::from_config(&cfg.zones),
-            TestPaths::from_config(&cfg.testing.test_paths),
-        )
+        TestPaths::from_config(&cfg.testing.test_paths)
     };
     let entries: Vec<_> = svc
         .trees
@@ -1395,7 +1376,7 @@ async fn compute(
                 head_content: h.clone(),
             })
             .collect();
-        let analysis = analyze_files(specs, &zones);
+        let analysis = analyze_files(specs);
         let files: Vec<ChangedFile> = entries
             .into_iter()
             .map(|e| ChangedFile {
@@ -1409,7 +1390,7 @@ async fn compute(
                 untracked: None,
             })
             .collect();
-        let mut results = build_results(&files, &analysis, &zones, &tests);
+        let mut results = build_results(&files, &analysis, &tests);
         results.test_files =
             test_file_rows(&analyzed, &base_contents, &head_contents, &analysis, &tests);
         Ok(results)
@@ -1714,9 +1695,8 @@ mod tests {
             file("src/a.test.ts"),
             file("src/lib.rb"),
         ];
-        let zones = ZoneRules::from_config(&[]);
         let is_test = |tests: &TestPaths| {
-            file_rows(&files, &zones, tests)
+            file_rows(&files, tests)
                 .iter()
                 .map(|f| f.is_test)
                 .collect::<Vec<_>>()
@@ -1823,20 +1803,13 @@ mod tests {
             staged: None,
             untracked: None,
         }];
-        let analysis = crate::code_analysis::analyze_files(
-            vec![crate::code_analysis::AnalyzeFileSpec {
+        let analysis =
+            crate::code_analysis::analyze_files(vec![crate::code_analysis::AnalyzeFileSpec {
                 path: "src/P.java".into(),
                 base_content: Some(base.into()),
                 head_content: Some(head.into()),
-            }],
-            &ZoneRules::from_config(&[]),
-        );
-        let r = build_results(
-            &files,
-            &analysis,
-            &ZoneRules::from_config(&[]),
-            &TestPaths::default(),
-        );
+            }]);
+        let r = build_results(&files, &analysis, &TestPaths::default());
         let mut refs: Vec<_> = r
             .functions
             .iter()
@@ -1954,12 +1927,7 @@ mod tests {
             deletions: 4,
             ..Default::default()
         }];
-        let r = build_results(
-            &files,
-            &analysis(),
-            &ZoneRules::from_config(&[]),
-            &TestPaths::default(),
-        );
+        let r = build_results(&files, &analysis(), &TestPaths::default());
         let by = |c: &str, n: &str| r.functions.iter().find(|f| f.container == c && f.name == n);
         assert!(
             by("", "alpha").is_none(),
@@ -2001,48 +1969,40 @@ mod tests {
     }
 
     #[test]
-    fn imports_and_zones_are_recorded() {
+    fn a_files_added_and_removed_imports_are_recorded() {
         use crate::code_analysis::ImportDelta;
-        use oxplow_code_deps::{ImportEdge, ImportKind, ZonedImportEdge};
-        let zones = ZoneRules::from_config(&[oxplow_config::ZoneRuleConfig {
-            patterns: vec!["src/ui/**".into()],
-            zone: "ui".into(),
-            color: None,
-        }]);
-        let edge = |module: &str| ZonedImportEdge {
-            edge: ImportEdge {
-                from_path: "src/ui/a.ts".into(),
-                raw: String::new(),
-                module: module.into(),
-                kind: ImportKind::Import,
-                start_line: 3,
-                end_line: 3,
-            },
-            from_zone: "ui".into(),
-            to_zone: Some("store".into()),
+        use oxplow_code_deps::{ImportEdge, ImportKind};
+        let edge = |module: &str| ImportEdge {
+            from_path: "src/ui/a.ts".into(),
+            raw: String::new(),
+            module: module.into(),
+            kind: ImportKind::Import,
+            start_line: 3,
+            end_line: 3,
         };
         let mut a = analysis();
         a.import_deltas = vec![ImportDelta {
             path: "src/ui/a.ts".into(),
             added: vec![edge("../store/x")],
             removed: vec![edge("./old")],
-            cross_zone_added: vec![edge("../store/x")],
         }];
         let files = vec![ChangedFile {
             path: "src/ui/a.ts".into(),
             status: "modified".into(),
             ..Default::default()
         }];
-        let r = build_results(&files, &a, &zones, &TestPaths::default());
-        assert_eq!(r.files[0].zone.as_deref(), Some("ui"));
-        let imports: Vec<(&str, &str, bool)> = r
+        let r = build_results(&files, &a, &TestPaths::default());
+        let imports: Vec<(&str, &str, Option<i64>)> = r
             .imports
             .iter()
-            .map(|i| (i.module.as_str(), i.direction.as_str(), i.cross_zone))
+            .map(|i| (i.module.as_str(), i.direction.as_str(), i.start_line))
             .collect();
         assert_eq!(
             imports,
-            vec![("../store/x", "added", true), ("./old", "removed", false)]
+            vec![
+                ("../store/x", "added", Some(3)),
+                ("./old", "removed", Some(3))
+            ]
         );
     }
 

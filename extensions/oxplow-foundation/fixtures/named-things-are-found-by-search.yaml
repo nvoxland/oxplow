@@ -51,11 +51,11 @@ steps:
           title: agent.turn.ended
           stream_id: null
   - when:
-      sql: "SELECT uri, title FROM v_search_config WHERE title = 'oxplow.zones'"
+      sql: "SELECT uri, title FROM v_search_config WHERE title = 'oxplow.snapshots.retentionDays'"
     expect:
       rows:
-        - uri: "oxplow:oxplow/config?key=oxplow.zones"
-          title: oxplow.zones
+        - uri: "oxplow:oxplow/config?key=oxplow.snapshots.retentionDays"
+          title: oxplow.snapshots.retentionDays
   # Kinds the throwaway has nothing of still read: the datasets exist and run.
   - when:
       sql: "SELECT (SELECT count(*) FROM v_search_branch) + (SELECT count(*) FROM v_search_job) + (SELECT count(*) FROM v_search_ai_profile) + (SELECT count(*) FROM v_search_advisory) + (SELECT count(*) FROM v_search_effect) + (SELECT count(*) FROM v_search_panel) + (SELECT count(*) FROM v_search_provider) >= 0 AS ok"

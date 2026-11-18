@@ -74,10 +74,10 @@ test("treemap viz nodes draw a tile per positive item and link through the viz's
       run={run(
         {
           viz: "treemap",
-          chart: { ...chart, label: "path", size: "churn", group: "zone" },
+          chart: { ...chart, label: "path", size: "churn", group: "area" },
           columns: [{ key: "path", label: null, link: { kind: "file", from: null, line: null } }],
         },
-        ["path", "churn", "zone"],
+        ["path", "churn", "area"],
         [
           ["a.rs", 5, "core"],
           ["b.rs", 2, "ui"],

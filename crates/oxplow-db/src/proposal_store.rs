@@ -338,12 +338,18 @@ mod tests {
     #[test]
     fn the_key_is_the_config_key_or_the_command_and_its_sorted_input() {
         assert_eq!(
-            proposal_key("oxplow.config.set", &json!({ "key": "zones", "value": [] })),
-            "oxplow:oxplow/config?key=zones"
+            proposal_key(
+                "oxplow.config.set",
+                &json!({ "key": "oxplow.snapshots.retentionDays", "value": 7 })
+            ),
+            "oxplow:oxplow/config?key=oxplow.snapshots.retentionDays"
         );
         assert_eq!(
-            proposal_key("oxplow.config.unset", &json!({ "key": "zones" })),
-            "oxplow:oxplow/config?key=zones"
+            proposal_key(
+                "oxplow.config.unset",
+                &json!({ "key": "oxplow.snapshots.retentionDays" })
+            ),
+            "oxplow:oxplow/config?key=oxplow.snapshots.retentionDays"
         );
         let a = proposal_key("oxplow.task.delete", &json!({ "ref": "r", "hard": true }));
         let b = proposal_key("oxplow.task.delete", &json!({ "hard": true, "ref": "r" }));
@@ -384,9 +390,9 @@ mod tests {
         let store = SqliteProposalStore::new(db.clone());
         let (old, other, new) = db
             .transaction(|tx| {
-                let old = insert_tx(tx, &config_set("zones", json!([])))?;
+                let old = insert_tx(tx, &config_set("oxplow.snapshots.retentionDays", json!(7)))?;
                 let other = insert_tx(tx, &config_set("agentPromptAppend", json!("x")))?;
-                let new = insert_tx(tx, &config_set("zones", json!(["a"])))?;
+                let new = insert_tx(tx, &config_set("oxplow.snapshots.retentionDays", json!(8)))?;
                 assert!(old.superseded.is_empty() && other.superseded.is_empty());
                 assert_eq!(new.superseded, vec![old.id], "it names what it replaced");
                 Ok((old.id, other.id, new.id))
@@ -425,7 +431,9 @@ mod tests {
         let db = seeded().await;
         let store = SqliteProposalStore::new(db.clone());
         let id = db
-            .transaction(|tx| insert_tx(tx, &config_set("zones", json!([]))))
+            .transaction(|tx| {
+                insert_tx(tx, &config_set("oxplow.snapshots.retentionDays", json!(7)))
+            })
             .await
             .unwrap()
             .id;
@@ -491,7 +499,7 @@ mod tests {
         let store = SqliteProposalStore::new(db.clone());
         let (approved, declined) = db
             .transaction(|tx| {
-                let a = insert_tx(tx, &config_set("zones", json!([])))?;
+                let a = insert_tx(tx, &config_set("oxplow.snapshots.retentionDays", json!(7)))?;
                 let d = insert_tx(tx, &config_set("agentPromptAppend", json!("x")))?;
                 Ok((a.id, d.id))
             })

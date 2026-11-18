@@ -604,38 +604,6 @@ pub struct GeneratedConfig {
     pub include: Vec<String>,
 }
 
-/// One row of the project's `zones:` table: the globs that select files
-/// and the zone label they belong to.
-///
-/// Zones are entirely project-defined — oxplow ships no rule
-/// table of its own, because a file's architectural role follows from
-/// how *this* project lays out its repo. Order in the table is
-/// load-bearing: [`ZoneRules`](../oxplow_code_deps/zones/struct.ZoneRules.html)
-/// takes the FIRST matching rule, so specific patterns must precede
-/// catch-alls.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, schemars::JsonSchema)]
-pub struct ZoneRuleConfig {
-    /// Globs selecting the files in this zone (any-of). In YAML `match`
-    /// accepts a single string or a list; both land here as a list.
-    /// Matched against the full repo-relative path with `*` stopping at
-    /// `/` — `**` is the only way to span directories.
-    #[serde(rename = "match")]
-    pub patterns: Vec<String>,
-    /// The zone label. Free-form; `other` and `external` are reserved.
-    pub zone: String,
-    /// Optional display colour (`#rrggbb` or `#rgb`). The first rule to
-    /// name a label wins; labels with no colour get a palette entry
-    /// assigned by order of first appearance.
-    #[serde(default)]
-    pub color: Option<String>,
-}
-
-/// Zone label for a file no rule matched.
-pub const ZONE_OTHER: &str = "other";
-/// Zone label for an import target outside the repo (a third-party
-/// crate / package), which is never a layer violation.
-pub const ZONE_EXTERNAL: &str = "external";
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct OxplowConfig {
     #[serde(rename = "agentEnabled", default)]
@@ -720,12 +688,6 @@ pub struct OxplowConfig {
     /// extension); see [`resolve_metrics`].
     #[serde(default)]
     pub metrics: Vec<MetricEntry>,
-    /// Project-declared architectural zones (the `zones:` block) — an
-    /// ORDERED table, first match wins. Empty (the default) means oxplow
-    /// classifies nothing: every file is `other` and the Change-analysis
-    /// zone surfaces stay empty until the project declares its own.
-    #[serde(default)]
-    pub zones: Vec<ZoneRuleConfig>,
     /// Each harness's configuration, by its key: what its `launch` reads,
     /// e.g. `agentConfig: { opencode: { model: "github-copilot/gpt-5-mini" } }`.
     #[serde(rename = "agentConfig")]
@@ -934,36 +896,6 @@ pub enum ConfigError {
     Instances(String),
 }
 
-/// Raw `zones:` row. `match` accepts a scalar or a sequence, so a
-/// single-pattern zone reads as `match: crates/db/**` rather than a
-/// one-element list.
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct RawZoneRule {
-    #[serde(rename = "match")]
-    patterns: StringOrList,
-    zone: String,
-    #[serde(default)]
-    color: Option<String>,
-}
-
-/// A YAML field that may be written as one string or a list of them.
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-#[serde(untagged)]
-enum StringOrList {
-    One(String),
-    Many(Vec<String>),
-}
-
-impl StringOrList {
-    fn into_vec(self) -> Vec<String> {
-        match self {
-            StringOrList::One(s) => vec![s],
-            StringOrList::Many(v) => v,
-        }
-    }
-}
-
 /// Split a hex colour into 8-bit RGB channels. Accepts `#rrggbb`, the
 /// `#rgb` shorthand (expanded the way CSS does, so `#abc` == `#aabbcc`), and
 /// either spelling without the leading `#`. `None` for anything else, which is
@@ -1091,7 +1023,6 @@ fn blank_config(project_name: &str) -> OxplowConfig {
         testing: TestingConfig::default(),
         scripts: ScriptsConfig::default(),
         metrics: Vec::new(),
-        zones: Vec::new(),
         agent_config: Default::default(),
         extension_instances: Default::default(),
         active_providers: Default::default(),
@@ -1527,87 +1458,6 @@ fn is_ai_profile_name(role: &str) -> bool {
                 .chars()
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
     })
-}
-
-/// Validate the `zones:` table. Each row needs at least one non-empty,
-/// compilable glob and a label that isn't one of the computed sentinels
-/// ([`ZONE_OTHER`] / [`ZONE_EXTERNAL`]) — declaring those would make a
-/// real zone indistinguishable from "couldn't classify this".
-///
-/// Globs are compiled here (and thrown away) purely to fail at LOAD
-/// time: a bad pattern in the file should be a config error the user
-/// sees, not a rule that silently never matches.
-fn validate_zones(raw: Vec<RawZoneRule>) -> Result<Vec<ZoneRuleConfig>, ConfigError> {
-    let rules: Vec<ZoneRuleConfig> = raw
-        .into_iter()
-        .map(|r| ZoneRuleConfig {
-            patterns: r.patterns.into_vec(),
-            zone: r.zone,
-            color: r.color,
-        })
-        .collect();
-    validate_zone_rules(&rules)
-}
-
-/// Validate a zone table that's already in [`ZoneRuleConfig`] shape —
-/// the path an agent's `set_zones` call takes, so a rule written over
-/// MCP is held to exactly the same rules as one typed into the file.
-/// Returns the trimmed table.
-pub fn validate_zone_rules(rules: &[ZoneRuleConfig]) -> Result<Vec<ZoneRuleConfig>, ConfigError> {
-    let mut out = Vec::with_capacity(rules.len());
-    for (i, rule) in rules.iter().enumerate() {
-        let zone = rule.zone.trim().to_string();
-        if zone.is_empty() {
-            return Err(ConfigError::Invalid(format!(
-                "zones[{i}].zone must be a non-empty label"
-            )));
-        }
-        if zone == ZONE_OTHER || zone == ZONE_EXTERNAL {
-            return Err(ConfigError::Invalid(format!(
-                "zones[{i}].zone \"{zone}\" is reserved (oxplow computes it for \
-                 unmatched files and out-of-repo import targets)"
-            )));
-        }
-        let patterns = &rule.patterns;
-        if patterns.is_empty() {
-            return Err(ConfigError::Invalid(format!(
-                "zones[{i}].match must name at least one glob"
-            )));
-        }
-        let mut cleaned = Vec::with_capacity(patterns.len());
-        for (j, pattern) in patterns.iter().enumerate() {
-            let trimmed = pattern.trim().to_string();
-            if trimmed.is_empty() {
-                return Err(ConfigError::Invalid(format!(
-                    "zones[{i}].match[{j}] must be a non-empty glob"
-                )));
-            }
-            globset::GlobBuilder::new(&trimmed)
-                .literal_separator(true)
-                .build()
-                .map_err(|e| {
-                    ConfigError::Invalid(format!(
-                        "zones[{i}].match[{j}] is not a valid glob (\"{trimmed}\"): {e}"
-                    ))
-                })?;
-            cleaned.push(trimmed);
-        }
-        let color = match rule.color.as_deref() {
-            Some(c) if parse_hex_rgb(c.trim()).is_none() => {
-                return Err(ConfigError::Invalid(format!(
-                    "zones[{i}].color must be a hex colour like #4f46e5 (got \"{c}\")"
-                )));
-            }
-            Some(c) => Some(c.trim().to_string()),
-            None => None,
-        };
-        out.push(ZoneRuleConfig {
-            patterns: cleaned,
-            zone,
-            color,
-        });
-    }
-    Ok(out)
 }
 
 /// Validate one `generated.exclude` / `generated.include` list: each
@@ -2716,7 +2566,7 @@ mod global_config_dir_tests {
 mod tests {
     use super::*;
 
-    /// Flat settings YAML (`oxplow.zones: …`) as the typed config, with no
+    /// Flat settings YAML (`oxplow.snapshots.retentionDays: …`) as the typed config, with no
     /// file and no layering: what a single level's values make.
     fn config_from_yaml(yaml: &str) -> Result<OxplowConfig, ConfigError> {
         let values: std::collections::BTreeMap<String, serde_json::Value> =
@@ -2820,8 +2670,17 @@ mod tests {
             config.active_providers.get("snapshots").map(String::as_str),
             Some("hashes")
         );
-        std::fs::write(oxplow.join("local.yaml"), "oxplow.zones: []\n").unwrap();
-        assert!(load_project_config(dir.path()).unwrap().zones.is_empty());
+        std::fs::write(
+            oxplow.join("local.yaml"),
+            "oxplow.snapshots.retentionDays: 9\n",
+        )
+        .unwrap();
+        assert_eq!(
+            load_project_config(dir.path())
+                .unwrap()
+                .snapshot_retention_days,
+            9
+        );
 
         assert!(config_from_yaml("oxplow.activeProviders.snapshots: hashes\n").is_ok());
         let err = config_from_yaml("oxplow.activeProviders.vcs: jj\n")
@@ -2857,8 +2716,12 @@ mod tests {
             .unwrap()
             .active_providers
             .is_empty());
-        settings::write_layer_key(&local_file(dir.path()), core_settings::keys::ZONES, None)
-            .unwrap();
+        settings::write_layer_key(
+            &local_file(dir.path()),
+            core_settings::keys::SNAPSHOT_RETENTION_DAYS,
+            None,
+        )
+        .unwrap();
     }
 
     /// `oxplow.eventRetention` sets a namespace's windows — a person's key.
@@ -3167,7 +3030,7 @@ dimensions:
             "oxplow.agents.claude.enabled: true\n\
              # Keep a week of history.\n\
              oxplow.snapshots.retentionDays: 7\n\
-             oxplow.zones: []   # none yet\n",
+             oxplow.metrics.retentionDays: 3   # for now\n",
         )
         .unwrap();
         settings::write_layer_key(
@@ -3178,7 +3041,7 @@ dimensions:
         .unwrap();
         assert_eq!(
             std::fs::read_to_string(cfg_path(dir.path())).unwrap(),
-            "oxplow.agents.claude.enabled: true\n# Keep a week of history.\noxplow.snapshots.retentionDays: 14\noxplow.zones: []   # none yet\n"
+            "oxplow.agents.claude.enabled: true\n# Keep a week of history.\noxplow.snapshots.retentionDays: 14\noxplow.metrics.retentionDays: 3   # for now\n"
         );
         settings::write_layer_key(
             &project_file(dir.path()),
@@ -3188,7 +3051,7 @@ dimensions:
         .unwrap();
         assert_eq!(
             std::fs::read_to_string(cfg_path(dir.path())).unwrap(),
-            "oxplow.agents.claude.enabled: true\noxplow.zones: []   # none yet\n"
+            "oxplow.agents.claude.enabled: true\noxplow.metrics.retentionDays: 3   # for now\n"
         );
     }
 
@@ -3244,7 +3107,6 @@ dimensions:
         assert_eq!(cfg.icon_tint, None);
         assert!(cfg.generated.exclude.is_empty());
         assert!(cfg.generated.include.is_empty());
-        assert!(cfg.zones.is_empty());
         assert_eq!(cfg.testing, TestingConfig::default());
         let parallelism = std::thread::available_parallelism().map_or(1, |n| n.get());
         assert_eq!(cfg.scripts.max_concurrent, parallelism.min(4));
@@ -3404,77 +3266,6 @@ oxplow.lsp.servers:
         .unwrap();
         let err = load_project_config(dir.path()).unwrap_err();
         assert!(matches!(err, ConfigError::Invalid(msg) if msg.contains("..")));
-    }
-
-    /// `zones:` is an ORDERED table — first match wins — so the
-    /// parsed order must be the file's order, and `match` takes either a
-    /// single glob or a list of them.
-    #[test]
-    fn zones_parse_in_order_with_scalar_or_list_match() {
-        let dir = tempdir().unwrap();
-        std::fs::write(
-            cfg_path(dir.path()),
-            "oxplow.zones:\n\
-             - match: [\"**/*_test.rs\", \"**/tests/**\"]\n  zone: test\n\
-             - match: crates/oxplow-db/**\n  zone: store\n  color: \"#ea580c\"\n",
-        )
-        .unwrap();
-        let cfg = load_project_config(dir.path()).unwrap();
-        assert_eq!(cfg.zones.len(), 2);
-        assert_eq!(cfg.zones[0].zone, "test");
-        assert_eq!(
-            cfg.zones[0].patterns,
-            vec!["**/*_test.rs".to_string(), "**/tests/**".to_string()]
-        );
-        assert_eq!(cfg.zones[0].color, None);
-        assert_eq!(cfg.zones[1].zone, "store");
-        assert_eq!(
-            cfg.zones[1].patterns,
-            vec!["crates/oxplow-db/**".to_string()]
-        );
-        assert_eq!(cfg.zones[1].color.as_deref(), Some("#ea580c"));
-    }
-
-    /// `other` and `external` are COMPUTED sentinels (unmatched file /
-    /// out-of-repo import target). Declaring one would make a real zone
-    /// indistinguishable from "we couldn't classify this".
-    #[test]
-    fn zones_reject_reserved_labels() {
-        for label in ["other", "external"] {
-            let dir = tempdir().unwrap();
-            std::fs::write(
-                cfg_path(dir.path()),
-                format!("oxplow.zones:\n- match: src/**\n  zone: {label}\n"),
-            )
-            .unwrap();
-            let err = load_project_config(dir.path()).unwrap_err();
-            assert!(
-                matches!(&err, ConfigError::Invalid(msg) if msg.contains("reserved")),
-                "{label} should be rejected as reserved, got {err:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn zones_reject_empty_and_unparseable_rules() {
-        let cases = [
-            ("oxplow.zones:\n- match: src/**\n  zone: \"  \"\n", "zone"),
-            ("oxplow.zones:\n- match: \"\"\n  zone: ui\n", "match"),
-            ("oxplow.zones:\n- match: \"src/[\"\n  zone: ui\n", "glob"),
-            (
-                "oxplow.zones:\n- match: src/**\n  zone: ui\n  color: nope\n",
-                "color",
-            ),
-        ];
-        for (yaml, needle) in cases {
-            let dir = tempdir().unwrap();
-            std::fs::write(cfg_path(dir.path()), yaml).unwrap();
-            let err = load_project_config(dir.path()).unwrap_err();
-            assert!(
-                matches!(&err, ConfigError::Invalid(msg) if msg.contains(needle)),
-                "expected a {needle} error for {yaml:?}, got {err:?}"
-            );
-        }
     }
 
     #[test]
@@ -4028,7 +3819,7 @@ oxplow.testing.analysisPatterns: [lint:collect]
             );
         }
         // `subject` is the raw-subject pseudo-dimension, not a catalog key.
-        metric("expression: \"SUM(value) FILTER (WHERE dim('acme.zone') = 'api')\", sliceableDims: [subject, oxplow.language]")
+        metric("expression: \"SUM(value) FILTER (WHERE dim('acme.area') = 'api')\", sliceableDims: [subject, oxplow.language]")
             .unwrap();
     }
 

@@ -870,7 +870,7 @@ async fn relist(root: &Path, edit: &Path, db: &Database, vcs: &Arc<GitProvider>,
         .unwrap()
         .to_string_lossy()
         .into_owned();
-    // As `change_analysis::changed_rows` makes them (without zones and tests).
+    // As `change_analysis::changed_rows` makes them (without tests).
     let rows = |entries: Vec<oxplow_app::trees::DiffEntry>, status: &WorkspaceStatus| {
         entries
             .into_iter()

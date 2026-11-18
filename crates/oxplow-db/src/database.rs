@@ -2228,6 +2228,61 @@ mod tests {
         assert_eq!(versions, vec![4, 4]);
     }
 
+    /// V43 drops the zone columns from a change's files and imports and
+    /// keeps the rows.
+    #[test]
+    fn v43_drops_the_zone_columns_and_keeps_the_rows() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(42))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys = OFF;
+             INSERT INTO change_file (change_id, path, status, additions, deletions, zone, is_test)
+               VALUES (1, 'src/a.rs', 'modified', 3, 1, 'core', 0);
+             INSERT INTO change_import (change_id, path, module, direction, start_line, from_zone, to_zone, cross_zone)
+               VALUES (1, 'src/a.rs', 'std::fs', 'added', 1, 'core', 'external', 0);",
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let columns = |table: &str| -> Vec<String> {
+            conn.prepare(&format!(
+                "SELECT name FROM pragma_table_info('{table}') ORDER BY cid"
+            ))
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+        };
+        assert_eq!(
+            columns("change_file"),
+            [
+                "change_id",
+                "path",
+                "status",
+                "additions",
+                "deletions",
+                "is_test",
+                "staged",
+                "untracked"
+            ]
+        );
+        assert_eq!(
+            columns("change_import"),
+            ["change_id", "path", "module", "direction", "start_line"]
+        );
+        let kept: (i64, i64) = conn
+            .query_row(
+                "SELECT (SELECT count(*) FROM change_file), (SELECT count(*) FROM change_import)",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(kept, (1, 1));
+    }
+
     #[test]
     fn v40_and_v42_preserve_settings_events_at_the_new_level_versions() {
         let mut conn = Connection::open_in_memory().unwrap();

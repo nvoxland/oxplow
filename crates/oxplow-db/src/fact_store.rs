@@ -4149,12 +4149,12 @@ mod tests {
         let err = store
             .record_facts(
                 NewMetricCapture::done(1, "acme", "gauge"),
-                vec![with_dims(r#"{"zone":"api"}"#)],
+                vec![with_dims(r#"{"area":"api"}"#)],
             )
             .await
             .unwrap_err();
         assert!(
-            matches!(&err, DomainError::Invalid(m) if m.contains("`zone`") && m.contains("namespace")),
+            matches!(&err, DomainError::Invalid(m) if m.contains("`area`") && m.contains("namespace")),
             "{err:?}"
         );
         assert!(store
@@ -4165,7 +4165,7 @@ mod tests {
         store
             .record_facts(
                 NewMetricCapture::done(1, "acme", "gauge"),
-                vec![with_dims(r#"{"oxplow.language":"rust","acme.zone":"api"}"#)],
+                vec![with_dims(r#"{"oxplow.language":"rust","acme.area":"api"}"#)],
             )
             .await
             .unwrap();

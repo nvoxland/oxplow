@@ -80,7 +80,7 @@ test("a config change summarizes as the key with its before and after", () => {
   expect(s.change).toEqual({ before: "(not set)", after: "be brief" });
   expect(s.children).toEqual([]);
   expect(s.destructive).toBe(false);
-  expect(summarizeProposal(proposal({ command: "oxplow.config.unset", input: { key: "zones" } })).title).toBe("Unset zones");
+  expect(summarizeProposal(proposal({ command: "oxplow.config.unset", input: { key: "oxplow.snapshots.retentionDays" } })).title).toBe("Unset oxplow.snapshots.retentionDays");
 });
 
 test("a composite lists its children; anything else uses its summary; destructive carries over", () => {

@@ -38,7 +38,7 @@ fn walk_csharp(node: Node<'_>, src: &[u8], path: &str, out: &mut Vec<ImportEdge>
         // `using System.Text;` / `using static Foo.Bar;` / `using Alias = Foo;`
         // — take the first qualified/identifier child as the namespace. The
         // alias target (RHS of `=`) is also a name child; the first one is the
-        // namespace being referenced, which is what matters for the zone graph.
+        // namespace being referenced, which is what the edge records.
         let mut c = node.walk();
         for child in node.named_children(&mut c) {
             if matches!(child.kind(), "qualified_name" | "identifier") {
@@ -73,8 +73,8 @@ fn walk_rust(node: Node<'_>, src: &[u8], path: &str, out: &mut Vec<ImportEdge>) 
             // common-prefixing the grouped tail. Simpler: emit the
             // full source text as `raw` and the leading path before
             // the `{` (or whole path) as `module`. Grouping isn't
-            // structurally important for zone-edge detection — what
-            // matters is which top-level crate is reached.
+            // structurally important for an import edge — what
+            // matters is which paths are reached.
             let raw = node_text(node, src);
             for module in rust_use_modules(node, src) {
                 let (start, end) = lines(node);
@@ -119,7 +119,7 @@ fn walk_rust(node: Node<'_>, src: &[u8], path: &str, out: &mut Vec<ImportEdge>) 
 /// `use foo::{a, b};` → `["foo::a", "foo::b"]`.
 /// `use foo::*;` → `["foo"]` (wildcard collapses to the prefix).
 /// `use foo as bar;` → `["foo"]` (the alias doesn't matter for
-/// zone-graph purposes).
+/// what is imported).
 fn rust_use_modules(use_node: Node<'_>, src: &[u8]) -> Vec<String> {
     // The single named child of a use_declaration is the path tree:
     // scoped_identifier, scoped_use_list, use_as_clause, use_wildcard,

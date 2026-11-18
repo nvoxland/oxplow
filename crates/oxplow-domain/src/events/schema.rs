@@ -2102,7 +2102,7 @@ mod tests {
             .validate(
                 "config.changed",
                 3,
-                &json!({"key": "zones", "before": null, "after": 1, "layer": "project", "oops": 1}),
+                &json!({"key": "oxplow.snapshots.retentionDays", "before": null, "after": 1, "layer": "project", "oops": 1}),
             )
             .unwrap_err();
         assert!(extra.to_string().contains("oops"), "{extra}");

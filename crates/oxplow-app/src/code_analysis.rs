@@ -1,11 +1,9 @@
 //! Per-function analysis of a change: tree-sitter metrics for both sides
-//! of each file, per-function churn, and import deltas zoned by the
-//! project's zone rules. Shared by the `analyze_functions_at_refs` IPC and
-//! the change-analysis producer.
+//! of each file, per-function churn, and the imports each file added or
+//! removed. Shared by the `analyze_functions_at_refs` IPC and the
+//! change-analysis producer.
 
-use oxplow_code_deps::{
-    diff_edges, extract_imports, ImportEdge, ZoneRules, ZonedImportEdge, ZONE_EXTERNAL,
-};
+use oxplow_code_deps::{diff_edges, extract_imports, ImportEdge};
 use oxplow_code_metrics::{analyze_file, FunctionMetrics, Visibility};
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -69,18 +67,13 @@ pub struct AnalyzedFileChurn {
     pub functions: Vec<AnalyzedFunctionChurn>,
 }
 
-/// Delta between the before- and after-revision import edges for a
-/// single file. `cross_zone_added` is the highlight signal — a new
-/// import that crosses an architectural zone boundary (e.g. `ui`
-/// suddenly reaches into `store`) is the "wrong layer" callout.
+/// The import edges a single file added or removed between the before-
+/// and after-revision, as written (module strings unresolved).
 #[derive(Debug, Clone, Serialize, Type)]
 pub struct ImportDelta {
     pub path: String,
-    pub added: Vec<ZonedImportEdge>,
-    pub removed: Vec<ZonedImportEdge>,
-    /// Subset of `added` whose `from_zone != to_zone` AND `to_zone`
-    /// is known (we never flag external/unresolved targets).
-    pub cross_zone_added: Vec<ZonedImportEdge>,
+    pub added: Vec<ImportEdge>,
+    pub removed: Vec<ImportEdge>,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -98,7 +91,7 @@ pub struct AnalyzeFunctionsResult {
     pub import_deltas: Vec<ImportDelta>,
 }
 
-pub fn analyze_files(files: Vec<AnalyzeFileSpec>, zones: &ZoneRules) -> AnalyzeFunctionsResult {
+pub fn analyze_files(files: Vec<AnalyzeFileSpec>) -> AnalyzeFunctionsResult {
     let mut sides: Vec<AnalyzedFileSide> = Vec::new();
     let mut churn: Vec<AnalyzedFileChurn> = Vec::new();
     let mut import_deltas: Vec<ImportDelta> = Vec::new();
@@ -160,32 +153,16 @@ pub fn analyze_files(files: Vec<AnalyzeFileSpec>, zones: &ZoneRules) -> AnalyzeF
                     .collect(),
             });
 
-            // Import delta on this file. We extract both sides and
-            // diff by (kind, module). Each edge gets zoned via the
-            // path-based resolver — for now a tiny built-in
-            // (Rust crate-name lookup + obvious external/relative
-            // shortcuts), with unresolved edges marked to_zone=None
-            // so they never contribute to `cross_zone_added`.
+            // Import delta on this file: both sides' edges, diffed by
+            // (kind, module).
             let base_edges = extract_imports(&spec.path, base);
             let head_edges = extract_imports(&spec.path, head);
-            let (added_raw, removed_raw) = diff_edges(&base_edges, &head_edges);
-            if !added_raw.is_empty() || !removed_raw.is_empty() {
-                let added: Vec<ZonedImportEdge> =
-                    added_raw.into_iter().map(|e| zone_edge(e, zones)).collect();
-                let removed: Vec<ZonedImportEdge> = removed_raw
-                    .into_iter()
-                    .map(|e| zone_edge(e, zones))
-                    .collect();
-                let cross_zone_added: Vec<ZonedImportEdge> = added
-                    .iter()
-                    .filter(|z| z.is_cross_zone())
-                    .cloned()
-                    .collect();
+            let (added, removed) = diff_edges(&base_edges, &head_edges);
+            if !added.is_empty() || !removed.is_empty() {
                 import_deltas.push(ImportDelta {
                     path: spec.path.clone(),
                     added,
                     removed,
-                    cross_zone_added,
                 });
             }
         }
@@ -198,121 +175,6 @@ pub fn analyze_files(files: Vec<AnalyzeFileSpec>, zones: &ZoneRules) -> AnalyzeF
         churn,
         import_deltas,
     }
-}
-
-/// Resolve an [`ImportEdge`] to a [`ZonedImportEdge`]. The resolver
-/// is intentionally minimal for v1:
-///
-/// - Rust `use foo::bar`: take the first path segment as a crate
-///   name. `crate` / `self` / `super` map back to the importer's
-///   own zone (same-zone). Other names go through
-///   [`ZoneRules::zone_for_module`], which looks the name up in the
-///   project's own zone patterns; no hit means the target is
-///   `external` (a real crate we don't host).
-/// - TS/JS `import "./foo"` / `"../bar"`: relative paths join with
-///   the importer's directory. The joined path goes through the
-///   path zone classifier. Non-relative ("react", "@scope/pkg")
-///   marks as `External`.
-/// - Everything else: unresolved (to_zone = None), so cross-zone
-///   logic ignores it. Better to underflag than overflag.
-fn zone_edge(edge: ImportEdge, zones: &ZoneRules) -> ZonedImportEdge {
-    if let Some(target) = resolve_target(&edge, zones) {
-        match target {
-            ResolveResult::RepoPath(path) => zones.zone_for_resolved_edge(edge, &path),
-            ResolveResult::Zone(zone) => {
-                let from_zone = zones.classify(&edge.from_path);
-                ZonedImportEdge {
-                    edge,
-                    from_zone,
-                    to_zone: Some(zone),
-                }
-            }
-            ResolveResult::External => {
-                // Build a synthetic edge whose to_zone is External.
-                let from_zone = zones.classify(&edge.from_path);
-                ZonedImportEdge {
-                    edge,
-                    from_zone,
-                    to_zone: Some(ZONE_EXTERNAL.to_string()),
-                }
-            }
-        }
-    } else {
-        zones.zone_for_unresolved_edge(edge)
-    }
-}
-
-enum ResolveResult {
-    /// In-repo file path.
-    RepoPath(String),
-    /// A zone resolved directly from a module name (no file path
-    /// involved) — see `ZoneRules::zone_for_module`.
-    Zone(String),
-    /// Definitely not in this repo (system lib, npm package, etc.).
-    External,
-}
-
-fn resolve_target(edge: &ImportEdge, zones: &ZoneRules) -> Option<ResolveResult> {
-    use oxplow_code_deps::ImportKind;
-    match edge.kind {
-        ImportKind::Use => resolve_rust(edge, zones),
-        ImportKind::Import => resolve_ts_like(edge),
-        ImportKind::PyImport
-        | ImportKind::GoImport
-        | ImportKind::JavaImport
-        | ImportKind::Include
-        | ImportKind::Using
-        | ImportKind::CljRequire => None,
-    }
-}
-
-fn resolve_rust(edge: &ImportEdge, zones: &ZoneRules) -> Option<ResolveResult> {
-    let first = edge.module.split("::").next().unwrap_or("");
-    if first.is_empty() {
-        return None;
-    }
-    if matches!(first, "crate" | "self" | "super") {
-        // Resolves back inside the importer's own crate — same zone
-        // by construction.
-        return Some(ResolveResult::RepoPath(edge.from_path.clone()));
-    }
-    if let Some(zone) = zones.zone_for_module(first) {
-        return Some(ResolveResult::Zone(zone));
-    }
-    Some(ResolveResult::External)
-}
-
-fn resolve_ts_like(edge: &ImportEdge) -> Option<ResolveResult> {
-    let module = edge.module.trim();
-    if module.starts_with("./") || module.starts_with("../") {
-        let from_dir = std::path::Path::new(&edge.from_path).parent()?;
-        let joined = from_dir.join(module);
-        // Lexical normalization — collapse `..` and `.`. We can't
-        // touch the filesystem from here (callers may be analyzing
-        // a git-ref content). Filesystem-aware resolution can come
-        // later if the heuristic is wrong too often.
-        let normalized = normalize_relative_path(&joined);
-        Some(ResolveResult::RepoPath(normalized))
-    } else {
-        // Bare specifier ("react", "@scope/x", "node:fs") → external.
-        Some(ResolveResult::External)
-    }
-}
-
-fn normalize_relative_path(path: &std::path::Path) -> String {
-    let mut out: Vec<String> = Vec::new();
-    for comp in path.components() {
-        match comp {
-            std::path::Component::ParentDir => {
-                out.pop();
-            }
-            std::path::Component::CurDir => {}
-            other => {
-                out.push(other.as_os_str().to_string_lossy().into_owned());
-            }
-        }
-    }
-    out.join("/")
 }
 
 fn to_analyzed(metrics: Vec<FunctionMetrics>) -> Vec<AnalyzedFunction> {
@@ -342,27 +204,6 @@ fn to_analyzed(metrics: Vec<FunctionMetrics>) -> Vec<AnalyzedFunction> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_code_deps::{ZONE_EXTERNAL, ZONE_OTHER};
-
-    /// A project zone table for the import tests — the same shape a
-    /// project writes into `.oxplow/project.yaml`. Oxplow has no
-    /// built-in table, so every zone assertion below is against THESE
-    /// rules, not oxplow's opinion of the repo.
-    fn zones() -> ZoneRules {
-        let config: Vec<oxplow_config::ZoneRuleConfig> = [
-            ("analysis", "crates/oxplow-code-deps/**"),
-            ("store", "crates/oxplow-db/**"),
-        ]
-        .into_iter()
-        .map(|(zone, pattern)| oxplow_config::ZoneRuleConfig {
-            patterns: vec![pattern.to_string()],
-            zone: zone.to_string(),
-            color: None,
-        })
-        .collect();
-        ZoneRules::from_config(&config)
-    }
-
     fn spec(path: &str, base: Option<&str>, head: Option<&str>) -> AnalyzeFileSpec {
         AnalyzeFileSpec {
             path: path.into(),
@@ -373,14 +214,11 @@ mod tests {
 
     #[test]
     fn each_side_gets_its_functions() {
-        let r = analyze_files(
-            vec![spec(
-                "src/foo.rs",
-                Some("fn a() {}"),
-                Some("fn a() { if true { 1; } }"),
-            )],
-            &zones(),
-        );
+        let r = analyze_files(vec![spec(
+            "src/foo.rs",
+            Some("fn a() {}"),
+            Some("fn a() { if true { 1; } }"),
+        )]);
         assert_eq!(r.sides.len(), 2);
         let head = r.sides.iter().find(|s| s.side == "head").unwrap();
         assert_eq!(head.functions.len(), 1);
@@ -389,74 +227,35 @@ mod tests {
 
     #[test]
     fn an_added_file_has_only_a_head_side() {
-        let r = analyze_files(
-            vec![spec("src/new.py", None, Some("def f(x):\n    return x\n"))],
-            &zones(),
-        );
+        let r = analyze_files(vec![spec(
+            "src/new.py",
+            None,
+            Some("def f(x):\n    return x\n"),
+        )]);
         assert_eq!(r.sides.len(), 1);
         assert_eq!(r.sides[0].side, "head");
     }
 
     #[test]
-    fn an_added_import_into_another_zone_is_cross_zone() {
-        let r = analyze_files(
-            vec![spec(
-                "crates/oxplow-code-deps/src/lib.rs",
-                Some("use std::fs;\nfn a() {}\n"),
-                Some("use std::fs;\nuse oxplow_db::Database;\nfn a() {}\n"),
-            )],
-            &zones(),
-        );
-        assert_eq!(r.import_deltas.len(), 1);
-        let cz = &r.import_deltas[0].cross_zone_added;
-        assert!(!cz.is_empty(), "expected cross-zone added; got {r:?}");
-        assert_eq!(cz[0].from_zone, "analysis");
-        assert_eq!(cz[0].to_zone.as_deref(), Some("store"));
-    }
-
-    /// No `zones:` block means no zone vocabulary, so nothing is
-    /// cross-zone; the import delta itself is still reported.
-    #[test]
-    fn without_a_zone_table_nothing_is_cross_zone() {
-        let r = analyze_files(
-            vec![spec(
-                "crates/oxplow-code-deps/src/lib.rs",
-                Some("use std::fs;\nfn a() {}\n"),
-                Some("use std::fs;\nuse oxplow_db::Database;\nfn a() {}\n"),
-            )],
-            &ZoneRules::from_config(&[]),
-        );
+    fn a_files_added_and_removed_imports_are_its_import_delta() {
+        let r = analyze_files(vec![spec(
+            "crates/oxplow-code-deps/src/lib.rs",
+            Some("use std::fs;\nuse std::io;\nfn a() {}\n"),
+            Some("use std::fs;\nuse oxplow_db::Database;\nfn a() {}\n"),
+        )]);
+        assert_eq!(r.import_deltas.len(), 1, "{r:?}");
         let delta = &r.import_deltas[0];
-        assert_eq!(delta.added.len(), 1);
-        assert_eq!(delta.added[0].from_zone, ZONE_OTHER);
-        assert!(delta.cross_zone_added.is_empty());
-    }
-
-    /// A store crate pulling in serde is not a layer violation.
-    #[test]
-    fn an_external_import_is_not_cross_zone() {
-        let r = analyze_files(
-            vec![spec(
-                "crates/oxplow-db/src/lib.rs",
-                Some("fn a() {}\n"),
-                Some("use serde::Serialize;\nfn a() {}\n"),
-            )],
-            &zones(),
-        );
-        let delta = &r.import_deltas[0];
-        assert_eq!(delta.added.len(), 1);
-        assert_eq!(delta.added[0].to_zone.as_deref(), Some(ZONE_EXTERNAL));
-        assert!(delta.cross_zone_added.is_empty());
+        let modules =
+            |edges: &[ImportEdge]| edges.iter().map(|e| e.module.clone()).collect::<Vec<_>>();
+        assert_eq!(modules(&delta.added), ["oxplow_db::Database"]);
+        assert_eq!(modules(&delta.removed), ["std::io"]);
     }
 
     /// Unsupported languages still get (empty) sides, so the caller can
     /// see the file was looked at.
     #[test]
     fn unsupported_languages_get_empty_sides() {
-        let r = analyze_files(
-            vec![spec("README.md", Some("# old"), Some("# new"))],
-            &zones(),
-        );
+        let r = analyze_files(vec![spec("README.md", Some("# old"), Some("# new"))]);
         assert_eq!(r.sides.len(), 2);
         assert!(r.sides[0].functions.is_empty());
     }
@@ -464,14 +263,11 @@ mod tests {
     #[test]
     fn a_modified_file_gets_its_functions_and_churn() {
         // The head changes alpha's body AND adds beta.
-        let r = analyze_files(
-            vec![spec(
-                "src/x.rs",
-                Some("fn alpha() -> i32 {\n    1\n}\n"),
-                Some("fn alpha() -> i32 {\n    2\n}\n\nfn beta() -> i32 {\n    3\n}\n"),
-            )],
-            &ZoneRules::from_config(&[]),
-        );
+        let r = analyze_files(vec![spec(
+            "src/x.rs",
+            Some("fn alpha() -> i32 {\n    1\n}\n"),
+            Some("fn alpha() -> i32 {\n    2\n}\n\nfn beta() -> i32 {\n    3\n}\n"),
+        )]);
         let side = |name: &str| r.sides.iter().find(|s| s.side == name).unwrap();
         assert!(side("base").functions.iter().any(|f| f.name == "alpha"));
         assert!(side("head").functions.iter().any(|f| f.name == "alpha"));
@@ -487,10 +283,7 @@ mod tests {
 
     #[test]
     fn an_added_file_has_no_churn() {
-        let r = analyze_files(
-            vec![spec("src/new.rs", None, Some("fn brand_new() {}\n"))],
-            &ZoneRules::from_config(&[]),
-        );
+        let r = analyze_files(vec![spec("src/new.rs", None, Some("fn brand_new() {}\n"))]);
         assert!(r.sides[0].functions.iter().any(|f| f.name == "brand_new"));
         assert!(r.churn.is_empty(), "no base content, no before→after churn");
     }

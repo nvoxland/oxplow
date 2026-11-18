@@ -156,9 +156,6 @@ pub const MANIFEST: &[Capability] = &[
     // Metrics read through SQL (`v_metric_spec`, `v_fact`, `metric_grid()`)
     // on both surfaces, and change through the `metric.*` commands
     // (`run_command`); nothing metric-specific is left on MCP (P4.8).
-    // Architectural zones — agent-only: the agent reads the table
-    // here and writes it with `oxplow.config.set`; the renderer only reads
-    // it (it rides on `get_config`), so there is no IPC counterpart.
     dataset("list_backlinks", &["v_page_ref"]),
     dataset("list_outbound", &["v_page_ref"]),
     // ---- the command bus (agent side; the UI reaches commands through

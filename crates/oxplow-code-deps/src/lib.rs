@@ -21,9 +21,6 @@ use specta::Type;
 use tree_sitter::{Node, Parser};
 
 mod extractors;
-mod zones;
-
-pub use zones::{ZoneRules, ZonedImportEdge, ZONE_EXTERNAL, ZONE_OTHER};
 
 #[cfg(test)]
 mod tests;

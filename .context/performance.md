@@ -1563,7 +1563,7 @@ or `refresh_paths` (only the paths the watch heard). The example times the
 real pieces they call, without building `Services`: for the whole list
 `vcs.status`, `Trees::diff_from_status` and `SqliteChangeStore::store_files`;
 for the paths `change_store.find` and `list_state`, `vcs.status_of`,
-`Trees::diff_paths` and `store_path_files`. It does not compute zones and test
+`Trees::diff_paths` and `store_path_files`. It does not compute test
 flags for the rows, which cost next to nothing for one file. Each is run three
 times after an edit of one tracked file, on a temp database. metabase was
 edited in a clone of it (`--copy-of`, `git clone --local`: the original is

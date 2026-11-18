@@ -571,9 +571,9 @@ mod tests {
         let e = Envelope::typed::<ConfigChanged>(
             "test",
             &ConfigChangedV3 {
-                key: "zones".into(),
+                key: "oxplow.snapshots.retentionDays".into(),
                 before: Value::Null,
-                after: json!([]),
+                after: json!(7),
                 layer: oxplow_domain::settings::Level::Project,
             },
         );
@@ -757,7 +757,7 @@ mod tests {
         let db = Database::in_memory();
         let store = store(&db);
         for bad in [
-            "zones",
+            "retentionDays",
             "config:",
             "nope:thing",
             "oxplow:oxplow/commit?sha=xyz",
@@ -772,7 +772,7 @@ mod tests {
         }
         store
             .append(env(None).with_subject([
-                "oxplow:oxplow/config?key=zones",
+                "oxplow:oxplow/config?key=oxplow.snapshots.retentionDays",
                 "oxplow:oxplow/stream?id=str1",
                 "oxplow:oxplow/thread?id=thr4",
             ]))

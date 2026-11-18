@@ -46,7 +46,6 @@ pub struct ChangeFileRow {
     pub status: String,
     pub additions: i64,
     pub deletions: i64,
-    pub zone: Option<String>,
     pub is_test: bool,
     /// For a working tree's file: its change is in the index. `None` leaves
     /// what was stored (a deep analysis lists files without asking git).
@@ -86,9 +85,6 @@ pub struct ChangeImportRow {
     pub module: String,
     pub direction: String,
     pub start_line: Option<i64>,
-    pub from_zone: Option<String>,
-    pub to_zone: Option<String>,
-    pub cross_zone: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -300,12 +296,9 @@ impl SqliteChangeStore {
                 }
                 for i in &results.imports {
                     tx.execute(
-                        "INSERT INTO change_import (change_id, path, module, direction, start_line, from_zone, to_zone, cross_zone)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                        rusqlite::params![
-                            id, i.path, i.module, i.direction, i.start_line, i.from_zone, i.to_zone,
-                            i64::from(i.cross_zone)
-                        ],
+                        "INSERT INTO change_import (change_id, path, module, direction, start_line)
+                         VALUES (?1, ?2, ?3, ?4, ?5)",
+                        rusqlite::params![id, i.path, i.module, i.direction, i.start_line],
                     )
                     .map_err(map_sql_err)?;
                 }
@@ -585,16 +578,15 @@ fn insert_file(
     untracked: Option<i64>,
 ) -> Result<(), DomainError> {
     tx.execute(
-        "INSERT INTO change_file (change_id, path, status, additions, deletions, zone, is_test,
+        "INSERT INTO change_file (change_id, path, status, additions, deletions, is_test,
                                   staged, untracked)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         rusqlite::params![
             id,
             f.path,
             f.status,
             f.additions,
             f.deletions,
-            f.zone,
             i64::from(f.is_test),
             staged,
             untracked,
@@ -686,7 +678,6 @@ mod tests {
             status: "modified".into(),
             additions,
             deletions: 0,
-            zone: None,
             is_test: false,
             staged,
             untracked: staged.map(|_| false),
@@ -862,7 +853,6 @@ mod tests {
                 status: "modified".into(),
                 additions: 3,
                 deletions: 1,
-                zone: Some("core".into()),
                 is_test: false,
                 ..Default::default()
             }],
@@ -881,8 +871,7 @@ mod tests {
                 path: path.into(),
                 module: "crate::db".into(),
                 direction: "added".into(),
-                cross_zone: true,
-                ..Default::default()
+                start_line: Some(2),
             }],
             test_files: Vec::new(),
         };
@@ -936,16 +925,16 @@ mod tests {
             }
         };
         assert_eq!(
-            q("SELECT path, zone, is_test FROM v_change_file").await,
-            json!([["b.rs", "core", 0]])
+            q("SELECT path, is_test FROM v_change_file").await,
+            json!([["b.rs", 0]])
         );
         assert_eq!(
             q("SELECT container, name, body_changed FROM v_change_function").await,
             json!([["Foo", "bar", 1]])
         );
         assert_eq!(
-            q("SELECT module, cross_zone FROM v_change_import").await,
-            json!([["crate::db", 1]])
+            q("SELECT module, direction, start_line FROM v_change_import").await,
+            json!([["crate::db", "added", 2]])
         );
         assert_eq!(
             q("SELECT peer_path, lines FROM v_change_duplicate").await,

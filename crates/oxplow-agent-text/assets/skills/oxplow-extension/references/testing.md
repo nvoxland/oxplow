@@ -226,7 +226,7 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      commit to the requests whose turns left the file so — a snapshot row
      with that `blob` — as `v_commit_request` reads), `{ observe: {
      change: { kind?, target, files?: [{ path, status?, additions?,
-     deletions?, zone?, is_test?, staged?, untracked? }], functions?: [{ path, symbol, status?,
+     deletions?, is_test?, staged?, untracked? }], functions?: [{ path, symbol, status?,
      body_changed?, length?, params_before?, params_after?, complexity?,
      complexity_delta?, … }] } } }` (what the change analysis stored for a
      change: `kind` is `commit` by default; the datasets over a change read it, and the

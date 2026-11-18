@@ -39,7 +39,6 @@ pub mod keys {
     pub const SCRIPTS_MAX_CONCURRENT: &str = "oxplow.scripts.maxConcurrent";
     pub const SCRIPTS_MEMORY_MB: &str = "oxplow.scripts.memoryMb";
     pub const LSP_SERVERS: &str = "oxplow.lsp.servers";
-    pub const ZONES: &str = "oxplow.zones";
     pub const EXTENSION_INSTANCES: &str = "oxplow.extensionInstances";
     pub const REPLACEMENTS: &str = "oxplow.replacements";
     pub const EVENT_RETENTION: &str = "oxplow.eventRetention";
@@ -173,7 +172,7 @@ fn message(error: ConfigError) -> String {
 /// Core's Settings categories, in the order the Settings index lists them.
 pub fn categories() -> Vec<crate::settings::SettingCategory> {
     [
-        ("project", "Project", "The project's name, icon colour and code zones."),
+        ("project", "Project", "The project's name and icon colour."),
         ("agents", "Agents", "Which agent harnesses run, how each one is set up, and what every agent is told."),
         ("ai", "AI", "AI providers, and which model each role uses."),
         ("files", "Files", "Which files are generated and left out of snapshots and changes."),
@@ -237,19 +236,6 @@ pub fn table(fallback_name: &str) -> Vec<CoreSetting> {
                         "must be a hex colour like \"#c2410c\" or \"#abc\"; got {tint:?}"
                     ));
                 }
-                Ok(())
-            },
-        ),
-        setting(
-            keys::ZONES,
-            "Zones",
-            "project",
-            "Architectural zones: an ORDERED rule table, first match wins; `other`/`external` are reserved labels.",
-            schema_of::<Option<Vec<RawZoneRule>>>(),
-            Some(json!([])),
-            |c, v| {
-                c.zones = validate_zones(de::<Option<Vec<RawZoneRule>>>(v)?.unwrap_or_default())
-                    .map_err(message)?;
                 Ok(())
             },
         ),
@@ -1013,7 +999,6 @@ mod tests {
                     keys::LSP_SERVERS,
                     json!([{"languageId": "rust", "extensions": [".RS"], "command": "ra"}]),
                 ),
-                (keys::ZONES, json!([{"match": "src/**", "zone": "core"}])),
                 (keys::REPLACEMENTS, json!({"task.board": "oxplow"})),
                 (keys::EXTENSION_SOURCES, json!({"oxtask": "../oxtask"})),
                 (
@@ -1040,7 +1025,6 @@ mod tests {
         assert_eq!(config.scripts.memory_bytes, 256 * 1024 * 1024);
         assert_eq!(config.metrics[0].use_key.as_deref(), Some("oxplow.loc"));
         assert_eq!(config.lsp_servers[0].extensions, [".rs"]);
-        assert_eq!(config.zones[0].patterns, ["src/**"]);
         assert_eq!(config.replacements["task.board"], "oxplow");
         assert_eq!(config.extension_sources["oxtask"], "../oxtask");
         assert!(config.extension_instances["acme/one"].enabled);
@@ -1054,7 +1038,6 @@ mod tests {
             (keys::GENERATED_EXCLUDE, json!(["/abs"])),
             (keys::TESTING_TEST_PATHS, json!(["[bad"])),
             (keys::TESTING_RUN_PATTERNS, json!([" "])),
-            (keys::ZONES, json!([{"match": "src/**", "zone": "other"}])),
             (keys::REPLACEMENTS, json!({"nope": "oxplow"})),
             (
                 keys::LSP_SERVERS,

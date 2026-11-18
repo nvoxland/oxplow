@@ -376,7 +376,7 @@ pub fn command_uri(name: &str) -> String {
     keyed(r::COMMAND, name)
 }
 
-/// A `.oxplow/project.yaml` key (`zones`, `metricRetentionDays`).
+/// A setting's key (`oxplow.snapshots.retentionDays`).
 pub fn config_uri(key: &str) -> String {
     keyed(r::CONFIG, key)
 }
