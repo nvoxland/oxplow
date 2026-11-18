@@ -144,7 +144,7 @@ test("a terminal selection goes in the basket with the lines around it", async (
   const terminal = page.locator(".xterm");
   await expect(terminal).toBeVisible();
   await terminal.click();
-  await page.keyboard.type("printf 'above\\n%s\\nbelow\\n' select-$((6*7))-here");
+  await page.keyboard.type("printf 'a1\\na2\\na3\\na4\\n%s\\nb1\\nb2\\nb3\\nb4\\n' select-$((6*7))-here");
   await page.keyboard.press("Enter");
   // A row is the output line (the typed command holds `$((6*7))`, not 42).
   const row = page.locator(".xterm-rows > div").filter({ hasText: /^\s*select-42-here\s*$/ });
@@ -160,7 +160,8 @@ test("a terminal selection goes in the basket with the lines around it", async (
   await until("the item", 15_000, async () => (await item()).length === 1);
   const [text, around] = (await item())[0] as [string, string];
   expect(text).toBe("select-42-here");
-  expect(around).toContain("above\nselect-42-here\nbelow");
+  // Three rows either side, exactly.
+  expect(around).toBe("a2\na3\na4\nselect-42-here\nb1\nb2\nb3");
 });
 
 // A right-click keeps the selection: the menu's Add Selection to

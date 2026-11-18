@@ -36,14 +36,15 @@ export function terminalSelectionWhat(term: Terminal, uri: string): { uri: strin
   const at = term.getSelectionPosition();
   if (!at) return { uri, text };
   const buffer = term.buffer.active;
-  // The position's rows are 1-based.
+  // The position's rows are buffer rows, 0-based (xterm's typings say
+  // 1-based; its selection service hands over its own 0-based rows).
   const around = linesAround(
     (y) => {
       const line = buffer.getLine(y);
       return line ? { text: line.translateToString(true), wrapped: line.isWrapped } : undefined;
     },
-    at.start.y - 1,
-    at.end.y - 1,
+    at.start.y,
+    at.end.y,
   );
   return around && around !== text.trim() ? { uri, text, around } : { uri, text };
 }
