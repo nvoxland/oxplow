@@ -302,8 +302,15 @@ drag, and draws a selection of its own that the terminal can't read, so
 Copy and Add Selection to Context have nothing. `macOptionClickForcesSelection`
 is on: Option+drag makes the terminal's own selection anyway (Shift+drag
 off macOS, xterm's default). With the mouse a program's
-(`term.modes.mouseTrackingMode`) and nothing selected, the menu leads with
-a greyed **Hold ⌥ and drag to select** (`select-hint`).
+(`term.modes.mouseTrackingMode`) and nothing selected, the menu is a
+greyed **Hold ⌥ and drag to select text to copy or add to context**
+(`select-hint`) and Paste: Copy and Add Selection to Context come with the
+selection. xterm reports a later move or right-click to the program, and a
+reported event (SGR-encoded, as Claude Code asks for) is input, which
+clears the selection; so while a selection is there and the program has
+the mouse, `TerminalSurface` stops moves and right presses before xterm
+(the menu still opens on `contextmenu`). A left press goes through and
+clears it.
 `rightClickSelectsWord` is off: xterm's macOS default replaces the
 selection with the word under the pointer when it judges the press outside
 the selection (it misjudged presses inside one in the app), so the menu

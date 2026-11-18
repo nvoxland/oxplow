@@ -5,9 +5,10 @@
 /// terminal's own page (the session) in the basket. The same entry, the
 /// same @, as everywhere else (`.context/usability.md` "Add to Context").
 /// A program that has the mouse (Claude Code) draws its own selection, which
-/// the terminal can't read: with nothing selected the menu first says how
-/// to make the terminal's own (Option+drag on macOS, `macOptionClickForcesSelection`;
-/// Shift+drag elsewhere, xterm's own).
+/// the terminal can't read: with nothing selected the menu says how to make
+/// the terminal's own (Option+drag on macOS, `macOptionClickForcesSelection`;
+/// Shift+drag elsewhere, xterm's own) and holds only Paste: Copy and Add
+/// Selection to Context come with that selection.
 import type { MenuItem } from "../menu.js";
 
 export interface TerminalMenuSources {
@@ -28,12 +29,13 @@ export interface TerminalMenuSources {
 
 export function terminalMenuItems({ selection, around, mouseCaptured, mac, uri, copy, paste, add }: TerminalMenuSources): MenuItem[] {
   const selected = selection.length > 0;
-  const hint: MenuItem[] =
-    mouseCaptured && !selected
-      ? [{ id: "select-hint", label: `Hold ${mac ? "⌥" : "Shift"} and drag to select`, enabled: false }]
-      : [];
+  if (mouseCaptured && !selected) {
+    return [
+      { id: "select-hint", label: `Hold ${mac ? "⌥" : "Shift"} and drag to select text to copy or add to context`, enabled: false },
+      { id: "paste", label: "Paste", enabled: true, run: paste },
+    ];
+  }
   return [
-    ...hint,
     { id: "copy", label: "Copy", enabled: selected, run: () => copy(selection) },
     { id: "paste", label: "Paste", enabled: true, run: paste },
     {

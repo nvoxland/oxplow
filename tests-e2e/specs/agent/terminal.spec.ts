@@ -202,16 +202,18 @@ test("a right-click adds the whole dragged selection, not the word under it", as
   expect(((await item())[0] as [string])[0]).toBe("drag-42-across-these-words");
 });
 
-// A program that has the mouse (Claude Code turns on mouse reporting) gets
-// a plain drag, so the terminal selects nothing and its menu says how to:
-// Option+drag on macOS (Shift elsewhere) makes the terminal's own
-// selection, which the menu adds.
+// A program that has the mouse (Claude Code turns on mouse reporting, every
+// motion, SGR-encoded) gets a plain drag, so the terminal selects nothing
+// and its menu says how to: Option+drag on macOS (Shift elsewhere) makes
+// the terminal's own selection. Moving the mouse and right-clicking after
+// the modifier is let go keep it (xterm would report them to the program,
+// which clears a selection), and the menu adds it.
 test("with the mouse a program's, Option+drag selects and the menu adds it", async ({ page, daemon }) => {
   await open(page, daemon, "oxplow:oxplow/page?page=terminal");
   const terminal = page.locator(".xterm");
   await expect(terminal).toBeVisible();
   await terminal.click();
-  await page.keyboard.type("printf '%s\\n\\033[?1000h' held-$((6*7))-by-a-program");
+  await page.keyboard.type("printf '%s\\n\\033[?1003h\\033[?1006h' held-$((6*7))-by-a-program");
   await page.keyboard.press("Enter");
   const row = page.locator(".xterm-rows > div").filter({ hasText: /^\s*held-42-by-a-program\s*$/ });
   await expect(row).toBeVisible();
@@ -236,6 +238,7 @@ test("with the mouse a program's, Option+drag selects and the menu adds it", asy
   await page.keyboard.down(modifier);
   await drag();
   await page.keyboard.up(modifier);
+  await page.mouse.move(box.x + 40, y + box.height * 2, { steps: 5 });
   await page.mouse.click(box.x + 10, y, { button: "right" });
   const add = page.getByTestId("menu-item-add-to-context");
   await expect(add).toHaveText(/Add Selection to Context/);

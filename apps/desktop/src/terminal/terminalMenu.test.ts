@@ -55,17 +55,16 @@ test("with no selection: Copy is greyed and Add to Context adds the terminal's p
 
 // A program that has the mouse (Claude Code) draws its own selection, which
 // the terminal can't read: with nothing selected, the menu says how to make
-// the terminal's own (Option+drag on macOS, Shift+drag elsewhere).
+// the terminal's own (Option+drag on macOS, Shift+drag elsewhere) and holds
+// only Paste; Copy and Add Selection to Context come with that selection.
 test("with the mouse a program's and nothing selected, the menu says how to select", () => {
   const items = (mac: boolean) =>
     terminalMenuItems({ selection: "", uri: URI, mouseCaptured: true, mac, copy: () => {}, paste: () => {}, add: () => {} });
   expect(items(true).map((i) => [i.id, i.label, i.enabled])).toEqual([
-    ["select-hint", "Hold ⌥ and drag to select", false],
-    ["copy", "Copy", false],
+    ["select-hint", "Hold ⌥ and drag to select text to copy or add to context", false],
     ["paste", "Paste", true],
-    ["add-to-context", "Add to Context", true],
   ]);
-  expect(items(false)[0]!.label).toBe("Hold Shift and drag to select");
+  expect(items(false)[0]!.label).toBe("Hold Shift and drag to select text to copy or add to context");
   // A selection, or a program that leaves the mouse alone: no hint.
   const selected = terminalMenuItems({ selection: "x", uri: URI, mouseCaptured: true, mac: true, copy: () => {}, paste: () => {}, add: () => {} });
   expect(selected.map((i) => i.id)).toEqual(["copy", "paste", "add-to-context"]);

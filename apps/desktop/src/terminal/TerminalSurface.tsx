@@ -268,6 +268,22 @@ export function TerminalSurface({
     });
     // A modified wheel is the page's (zoom), not the terminal's scroll.
     term.attachCustomWheelEventHandler((event) => !(event.ctrlKey || event.metaKey));
+    // A selection made with Option (Shift) while the program has the mouse
+    // stays until a left press: xterm would report a later move or
+    // right-click to the program, and a reported event (SGR, as Claude
+    // Code asks for) is input, which clears the selection. So with a
+    // selection there, they stop here; the menu still opens on the
+    // right-click's `contextmenu`.
+    const keepSelection = (e: globalThis.MouseEvent) => {
+      if (!term.hasSelection() || term.modes.mouseTrackingMode === "none") return;
+      if (e.type === "mousedown" ? e.button === 2 : e.buttons === 0) e.stopPropagation();
+    };
+    host.addEventListener("mousemove", keepSelection, true);
+    host.addEventListener("mousedown", keepSelection, true);
+    const stopKeeping = () => {
+      host.removeEventListener("mousemove", keepSelection, true);
+      host.removeEventListener("mousedown", keepSelection, true);
+    };
     const dataDisp = term.onData((data) => props.current.onData(data));
     const binaryDisp = term.onBinary((data) => props.current.onBinary(data));
 
@@ -334,6 +350,7 @@ export function TerminalSurface({
     return () => {
       disposed = true;
       cleanups.forEach((c) => c());
+      stopKeeping();
       ro?.disconnect();
       dataDisp.dispose();
       binaryDisp.dispose();
