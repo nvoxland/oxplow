@@ -92,6 +92,18 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
 
 - **The knowledge metrics** (in `oxplow-bundled`). The `oxplow.knowledge_pages` collector restates the page counts (`knowledge.pages`, `knowledge.stale_pages`, sliced by `oxplow.knowledge_store` and `oxplow.knowledge_kind`) when a page of the model changes (`oxplow.knowledge_record.changed`) and when a snapshot changes a file a page cites (`snapshot.ref_drifted`); the `oxplow.request_read_knowledge` collector records, per stopped request that changed files, whether an agent read a page (`knowledge.read_requests`). Metrics: `knowledge.pages`, `knowledge.stale_pct`, `knowledge.read_requests_pct`. See `metrics.md` (knowledge pages, request read knowledge).
 - **The tracking metric** (in `oxplow-bundled`). The `oxplow.request_tracked` collector records, per stopped request that changed files, whether it has a task linked; the `tasks.tracked_requests_pct` metric is the share. See `metrics.md` (request tracked).
+- **Dashboards and Usage** (pages in `oxplow-bundled`). `dashboards` is the
+  Dashboards index in the launcher's Data section: every dashboard page,
+  most recently opened first, with its extension, who sees it and its opens
+  ([dashboards.md](./dashboards.md)). New Dashboard… and Pin to Dashboard
+  stay in foundation. `usage` (Activity) is where the agents' tokens and the
+  person's attention went over a `range` (default 30 days): fresh tokens
+  (input, output, cache writes) with cache reads and the hit ratio apart, by
+  day, model, thread and request, oxplow's own model calls (`v_ai_call`) and
+  the most opened pages. Cache reads are kept out of every "fresh" sum: on a
+  long session they are most of the prompt, and a sum with them hides where
+  tokens really went. `v_page_visit.duration_ms` is never recorded today, so
+  the page counts opens, not time. Fixtures: `dashboards-*`, `usage-*`.
 - **The review packet**. Its pages, mounted in
   the `sections` slots of `oxplow/diff-view` (the Changes
   page), `commit` and `uncommitted-changes`. What deviated and Struggled
@@ -246,7 +258,7 @@ screens and the holder's add the review and analysis:
   definitions (the Extension page's tables, the definition pages' links to
   each other, the data catalog) links the same way, pinning the definition
   renderer, because the bare URI opens the data view.
-- **Dashboards and review.** `review`, `quality` and `usage`;
+- **Review.** `review` and `quality`;
   the code-quality `findings`; the `change-review` page (treemap,
   look-here-first, functions, co-change, zones) mounted in the
   `oxplow/diff-view.sections`, `commit.sections` and
@@ -276,9 +288,6 @@ screens and the holder's add the review and analysis:
   moved with the rest of the person-facing screens. Foundation has no build
   step, no `package.json` and no `node_modules`; its only custom component
   is the hand-written `integrations`.
-- **Dashboards index.** The `dashboards` page (launcher Data section), a
-  list the launcher's Dashboards section already gives. New Dashboard… and
-  Pin to Dashboard stay in foundation. See [dashboards.md](./dashboards.md).
 - **The Metrics list.** The `metrics-recorded` page (the grouped list of
   every catalogued metric with trend and latest value) and its row expander
   `metrics-slices`. Foundation keeps one metric's pages (`metric`,

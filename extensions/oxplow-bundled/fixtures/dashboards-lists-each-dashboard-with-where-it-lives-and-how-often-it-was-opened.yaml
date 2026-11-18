@@ -1,0 +1,27 @@
+# The Dashboards index lists the dashboard pages (not an ordinary page in
+# the same extension), most recently opened first, each with the extension
+# that holds it, how often it was opened in the last 30 days and when last;
+# a dashboard never opened comes after, by title. It offers New dashboard…
+# (a title form) and Build with Your Agent….
+given:
+  - command: oxplow.extension.write_page
+    input: { extension: my-pages, page: ordinary, spec: "title: Ordinary page\ncategory: Data\nview: { markdown: Overview }\n", deploy: true }
+    confirmed: true
+  - command: oxplow.extension.new_dashboard
+    input: { title: Alpha board }
+    confirmed: true
+  - command: oxplow.extension.new_dashboard
+    input: { title: Build health }
+    confirmed: true
+  - observe: { visit: { page: "oxplow:oxplow/page?page=my_pages/build-health", label: Build health } }
+  - observe: { visit: { page: "oxplow:oxplow/page?page=my_pages/build-health#range=7d", label: Build health } }
+when: { page: oxplow/dashboards }
+expect:
+  loaders:
+    dashboards:
+      rows:
+        - { title: Build health, extension: my-pages, opens: 2, editable: 1 }
+        - { title: Alpha board, extension: my-pages, opens: 0, last_opened: null }
+  actions:
+    - { id: new, form: true, prominent: true }
+    - { id: draft }

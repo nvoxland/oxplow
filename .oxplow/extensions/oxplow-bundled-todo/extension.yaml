@@ -4,7 +4,7 @@ name: oxplow-bundled-todo
 namespace: oxplow
 # The datasets and event types it reads are oxplow-bundled's.
 requires: [oxplow-bundled]
-description: What comes with oxplow and hasn't been cleaned up yet; contributions move to oxplow-bundled one piece at a time, and this goes away when none are left. The request review, and the usage, quality and change analysis pages.
+description: Oxplow's own contributions that haven't been reviewed yet, off and not shipped; each moves to oxplow-bundled once it is cleaned up, and this goes away when none are left. Holds the request review (Change Analysis, Tests Weakened, co-change), the code-quality metrics and their collectors, the agent-interface, extension-run, job-run, merge and branch pages, Explore Data, Timeline, the history graph, the Comments panel and the shared-files advisories.
 engine: ">=0.7"
 # What it reaches beyond the baseline: its effects and commands read with
 # their own SQL, its jobs and effects ask models, and its advisories and skills speak to the agent.
@@ -122,9 +122,6 @@ intent:
     - name: the-slot-page-says-what-it-is-in-a-paragraph-above-its-facts
       input: { page: slot, params: {uri:"oxplow:oxplow/slot?slot=oxplow/oxplow.task-detail.sections-0"} }
       expect: its description is a paragraph above the facts
-    - name: dashboards-list-the-dashboard-pages
-      input: { page: dashboards }
-      expect: the dashboards index lists the page-file dashboards and offers a title form
 ui:
   mounts:
     - { page: extension-runs, at: oxplow/extension.runs }
@@ -308,7 +305,7 @@ commands:
     summary: Set the advisories' project or personal settings (a compare-and-swap on the stamps `advisory_policy.read` returns).
     scope: extension_config.write
     op: compare_exchange
-    example: {"schema_version": 1, "project": {"expected": {"schema_version": 1, "revision": 2}, "values": {"largeUncommitted": {"files": 20}}}, "personal": null}
+    example: {"schema_version": 1, "project": {"expected": {"schema_version": 1, "revision": 2}, "values": {"sharedFiles": {"windowMinutes": 30}}}, "personal": null}
   # The person's menu entry for foundation's handoff command.
   # Foundation keeps the command (an agent runs it); this adds the
   # label, shortcut and form a person uses.

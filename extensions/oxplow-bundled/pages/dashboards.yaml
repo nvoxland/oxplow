@@ -1,0 +1,88 @@
+title: Dashboards
+description: "Your dashboards — pages that arrange other pages in a grid — most recently opened first, with the extension that holds each, who sees it and how often you opened it in the last 30 days."
+icon: layout-dashboard
+category: Data
+keywords: dashboard tiles grid overview
+answers:
+- question: Which dashboards can I open?
+- question: Which dashboards do I use, and which have I stopped opening?
+loaders:
+  # A visit's page is the tab's URI: the dashboard's own, or the same with
+  # its filters after `#`.
+  dashboards:
+    sql: |
+      WITH seen AS (
+        SELECT p.uri,
+               count(CASE WHEN v.visited_at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-30 days') THEN 1 END) AS opens,
+               max(v.visited_at) AS last_opened
+        FROM v_page p
+        JOIN v_page_visit v ON v.page_id = p.uri OR substr(v.page_id, 1, length(p.uri) + 1) = p.uri || '#'
+        WHERE p.category = 'Dashboards'
+        GROUP BY p.uri
+      )
+      SELECT p.title, p.description, p.uri, p.id, p.extension, 'dashboard' AS kind,
+             coalesce(s.opens, 0) AS opens, s.last_opened,
+             CASE WHEN e.shared THEN 'Team' ELSE 'You' END AS seen_by,
+             -- A bundled extension's pages are read-only.
+             CASE WHEN e.origin = 'bundled' THEN 0 ELSE 1 END AS editable,
+             CASE WHEN e.origin <> 'bundled' AND p.source IS NOT NULL
+                  THEN uri('oxplow/file', 'path', p.source) END AS source_uri
+      FROM v_page p
+      LEFT JOIN seen s ON s.uri = p.uri
+      LEFT JOIN v_extension e ON e.name = p.extension
+      WHERE p.category = 'Dashboards' AND p.kind = 'page'
+      ORDER BY s.last_opened IS NULL, s.last_opened DESC, p.title, p.id
+view:
+  from: dashboards
+  viz: table
+  columns:
+  - key: title
+    label: Dashboard
+    icon: kind
+    link:
+      kind: page
+      from: uri
+  - key: description
+    label: Description
+  - key: extension
+    label: Extension
+  - key: seen_by
+    label: Seen by
+  - key: opens
+    label: Opens (30 days)
+    format: integer
+  - key: last_opened
+    label: Last opened
+    format: relative
+  empty: No dashboards yet. Start one with New Dashboard…, ask your agent to build one, or use Pin to Dashboard… in any page's menu.
+  actions:
+  - id: change
+    label: Change with Your Agent…
+    row: true
+    when: editable
+    command: oxplow.page.draft_with_agent
+    input:
+      text: "Change my oxplow dashboard “{{row.title}}” (page {{row.id}}) so that it "
+  - id: source
+    label: Open Page File
+    row: true
+    open: source_uri
+    when: source_uri
+actions:
+- id: new
+  label: New Dashboard…
+  command: oxplow.extension.new_dashboard
+  prominent: true
+  icon: plus
+  form: true
+  input:
+    title: ''
+    extension: my-pages
+  fixed:
+  - extension
+- id: draft
+  label: Build One with Your Agent…
+  command: oxplow.page.draft_with_agent
+  icon: sparkles
+  input:
+    text: "Build me an oxplow dashboard (a page in category Dashboards: a grid of tiles, each an embed of a page or a chart) that shows "

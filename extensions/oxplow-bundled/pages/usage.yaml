@@ -1,0 +1,194 @@
+title: Usage
+description: Where your agents' tokens and your attention went over a time range — the agents' tokens in all, by day, model, thread and request, oxplow's own model calls, and the pages you opened most.
+icon: activity
+category: Activity
+keywords: tokens cost usage cache model spend attention visits
+params:
+- name: range
+  type: date_range
+  role: filter
+  label: Range
+  default: 30d
+  presets: [1d, 7d, 30d, 90d, all]
+answers:
+- question: How many tokens have my agents used, and how much came from the cache?
+  params: { range: 30d }
+- question: Which threads and requests used the most tokens?
+  params: { range: 7d }
+- question: Which pages do I open most?
+  params: { range: 30d }
+# "Fresh" tokens are the ones a turn paid for in full: input, output and
+# cache writes. Cache reads are counted apart: they are most of a long
+# session's prompt and cost a fraction of the rest, so a sum with them reads
+# as if every turn re-sent the whole conversation. A row's turn is its
+# turn_id; a row with none counts as a turn of its own.
+loaders:
+  totals:
+    sql: |
+      SELECT sum(input_tokens + output_tokens + cache_creation_input_tokens) AS fresh,
+             sum(input_tokens) AS input, sum(output_tokens) AS output,
+             sum(cache_creation_input_tokens) AS cache_write,
+             sum(cache_read_input_tokens) AS cache_read,
+             round(1.0 * sum(cache_read_input_tokens)
+                   / nullif(sum(input_tokens + cache_creation_input_tokens + cache_read_input_tokens), 0), 2) AS cache_hit,
+             count(DISTINCT coalesce('t' || turn_id, 'u' || id)) AS turns
+      FROM v_token_usage
+      WHERE (:range_from IS NULL OR recorded_at >= :range_from)
+        AND (:range_to IS NULL OR recorded_at <= :range_to)
+      HAVING count(*) > 0
+  by_day:
+    sql: |
+      SELECT substr(recorded_at, 1, 10) AS day, agent_kind AS agent,
+             sum(input_tokens + output_tokens + cache_creation_input_tokens) AS fresh
+      FROM v_token_usage
+      WHERE (:range_from IS NULL OR recorded_at >= :range_from)
+        AND (:range_to IS NULL OR recorded_at <= :range_to)
+      GROUP BY day, agent
+      ORDER BY day, agent
+  by_model:
+    sql: |
+      SELECT agent_kind AS agent, coalesce(model, '—') AS model,
+             sum(input_tokens + output_tokens + cache_creation_input_tokens) AS fresh,
+             sum(output_tokens) AS output,
+             sum(cache_read_input_tokens) AS cache_read,
+             round(1.0 * sum(cache_read_input_tokens)
+                   / nullif(sum(input_tokens + cache_creation_input_tokens + cache_read_input_tokens), 0), 2) AS cache_hit,
+             count(DISTINCT coalesce('t' || turn_id, 'u' || id)) AS turns
+      FROM v_token_usage
+      WHERE (:range_from IS NULL OR recorded_at >= :range_from)
+        AND (:range_to IS NULL OR recorded_at <= :range_to)
+      GROUP BY agent_kind, model
+      -- A harness that reports turns but no tokens (no model) is no use here.
+      HAVING sum(input_tokens + output_tokens + cache_creation_input_tokens + cache_read_input_tokens) > 0
+      ORDER BY fresh DESC
+  by_thread:
+    sql: |
+      SELECT th.title AS thread, th.uri AS thread_uri, s.title AS stream,
+             sum(u.input_tokens + u.output_tokens + u.cache_creation_input_tokens) AS fresh,
+             sum(u.output_tokens) AS output,
+             sum(u.cache_read_input_tokens) AS cache_read,
+             count(DISTINCT coalesce('t' || u.turn_id, 'u' || u.id)) AS turns,
+             max(u.recorded_at) AS last_used
+      FROM v_token_usage u
+      LEFT JOIN v_thread th ON th.id = u.thread_id
+      LEFT JOIN v_stream s ON s.id = u.stream_id
+      WHERE (:range_from IS NULL OR u.recorded_at >= :range_from)
+        AND (:range_to IS NULL OR u.recorded_at <= :range_to)
+      GROUP BY u.thread_id
+      ORDER BY fresh DESC
+      LIMIT 20
+  # Through each row's turn to its request; a row with no turn has none.
+  by_request:
+    sql: |
+      SELECT r.id AS request_id, first_sentence(r.prompt) AS prompt, th.title AS thread,
+             sum(u.input_tokens + u.output_tokens + u.cache_creation_input_tokens) AS fresh,
+             sum(u.cache_read_input_tokens) AS cache_read,
+             r.turns, r.started_at
+      FROM v_token_usage u
+      JOIN v_agent_turn t ON t.id = u.turn_id
+      JOIN v_request r ON r.id = t.request_id
+      LEFT JOIN v_thread th ON th.id = r.thread_id
+      WHERE (:range_from IS NULL OR u.recorded_at >= :range_from)
+        AND (:range_to IS NULL OR u.recorded_at <= :range_to)
+      GROUP BY r.id
+      ORDER BY fresh DESC
+      LIMIT 20
+  oxplow_calls:
+    sql: |
+      SELECT role, provider, model, count(*) AS calls,
+             sum(CASE WHEN ok THEN 0 ELSE 1 END) AS failed,
+             sum(input_tokens) AS input, sum(output_tokens) AS output,
+             CAST(avg(latency_ms) AS INTEGER) AS mean_latency_ms
+      FROM v_ai_call
+      WHERE (:range_from IS NULL OR at >= :range_from)
+        AND (:range_to IS NULL OR at <= :range_to)
+      GROUP BY role, provider, model
+      ORDER BY calls DESC
+  top_pages:
+    sql: |
+      SELECT page_id, max(label) AS page, page_kind AS kind, count(*) AS visits,
+             max(visited_at) AS last_visited
+      FROM v_page_visit
+      WHERE (:range_from IS NULL OR visited_at >= :range_from)
+        AND (:range_to IS NULL OR visited_at <= :range_to)
+      GROUP BY page_id
+      ORDER BY visits DESC, last_visited DESC
+      LIMIT 20
+view:
+  stack:
+  - title: Agent tokens
+    description: Fresh tokens are what turns paid for in full (input, output and cache writes); cache reads are counted apart, and the hit ratio is the share of prompt tokens read from the cache.
+    viz: detail
+    from: totals
+    columns:
+    - { key: fresh, label: Fresh tokens, format: integer }
+    - { key: input, label: Input, format: integer }
+    - { key: output, label: Output, format: integer }
+    - { key: cache_write, label: Cache writes, format: integer }
+    - { key: cache_read, label: Cache reads, format: integer }
+    - { key: cache_hit, label: Cache hit ratio, format: percent }
+    - { key: turns, label: Turns, format: integer }
+    empty: No agent tokens recorded in this range.
+  - title: Fresh tokens per day
+    viz: line
+    from: by_day
+    chart: { x: day, y: fresh, series: agent }
+    empty: No agent tokens recorded in this range.
+  - title: By model
+    viz: table
+    from: by_model
+    columns:
+    - { key: agent, label: Agent }
+    - { key: model, label: Model }
+    - { key: fresh, label: Fresh tokens, format: integer }
+    - { key: output, label: Output, format: integer }
+    - { key: cache_read, label: Cache reads, format: integer }
+    - { key: cache_hit, label: Cache hit, format: percent }
+    - { key: turns, label: Turns, format: integer }
+    empty: No agent tokens recorded in this range.
+  - title: Threads that used the most
+    viz: table
+    from: by_thread
+    columns:
+    - { key: thread, label: Thread, link: { kind: page, from: thread_uri } }
+    - { key: stream, label: Stream }
+    - { key: fresh, label: Fresh tokens, format: integer }
+    - { key: output, label: Output, format: integer }
+    - { key: cache_read, label: Cache reads, format: integer }
+    - { key: turns, label: Turns, format: integer }
+    - { key: last_used, label: Last used, format: relative }
+    empty: No agent tokens recorded in this range.
+  - title: Requests that used the most
+    viz: table
+    from: by_request
+    columns:
+    - { key: prompt, label: Request, link: { kind: request, from: request_id } }
+    - { key: thread, label: Thread }
+    - { key: fresh, label: Fresh tokens, format: integer }
+    - { key: cache_read, label: Cache reads, format: integer }
+    - { key: turns, label: Turns, format: integer }
+    - { key: started_at, label: Started, format: relative }
+    empty: No request's turns recorded tokens in this range.
+  - title: oxplow's own model calls
+    description: Calls oxplow made itself (summaries, decisions, extension jobs), not the coding agents'.
+    viz: table
+    from: oxplow_calls
+    columns:
+    - { key: role, label: Role }
+    - { key: provider, label: Provider }
+    - { key: model, label: Model }
+    - { key: calls, label: Calls, format: integer }
+    - { key: failed, label: Failed, format: integer }
+    - { key: input, label: Input, format: integer }
+    - { key: output, label: Output, format: integer }
+    - { key: mean_latency_ms, label: Mean latency, format: duration }
+    empty: oxplow made no model calls of its own in this range.
+  - title: Pages you opened most
+    viz: table
+    from: top_pages
+    columns:
+    - { key: page, label: Page, link: { kind: page, from: page_id } }
+    - { key: kind, label: Kind }
+    - { key: visits, label: Opens, format: integer }
+    - { key: last_visited, label: Last opened, format: relative }
+    empty: You opened no pages in this range.

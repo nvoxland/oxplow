@@ -1,0 +1,37 @@
+# Usage over a range: the agents' fresh tokens (input, output, cache
+# writes) with cache reads apart and the cache hit ratio, then the same by
+# model, by thread and by request, each with its turns; and the pages the
+# person opened most.
+given:
+  - command: oxplow.thread.create
+    input: { stream: str1, title: Second }
+  - observe: { turn: { prompt: fix the parser } }
+  - observe: { turn: { prompt: write docs, thread: thr2 } }
+  - observe: { token_usage: { turn: 1, model: big, input_tokens: 100, output_tokens: 900, cache_creation_input_tokens: 1000, cache_read_input_tokens: 8000 } }
+  - observe: { token_usage: { turn: 1, model: big, input_tokens: 100, output_tokens: 100, cache_read_input_tokens: 0 } }
+  - observe: { token_usage: { turn: 2, thread: thr2, agent: codex, model: small, input_tokens: 50, output_tokens: 50 } }
+  - observe: { visit: { page: "oxplow:oxplow/page?page=alerts", kind: alerts, label: Alerts } }
+  - observe: { visit: { page: "oxplow:oxplow/page?page=alerts", kind: alerts, label: Alerts } }
+  - observe: { visit: { page: "oxplow:oxplow/page?page=files", kind: files, label: Files } }
+when: { page: oxplow/usage, params: { range: 30d } }
+expect:
+  loaders:
+    totals:
+      rows:
+        - { fresh: 2300, input: 250, output: 1050, cache_write: 1000, cache_read: 8000, cache_hit: 0.86, turns: 2 }
+    by_model:
+      rows:
+        - { agent: claude, model: big, fresh: 2200, cache_read: 8000, turns: 1 }
+        - { agent: codex, model: small, fresh: 100, cache_read: 0, turns: 1 }
+    by_thread:
+      rows:
+        - { fresh: 2200, turns: 1 }
+        - { thread: Second, fresh: 100, turns: 1 }
+    by_request:
+      rows:
+        - { prompt: fix the parser, fresh: 2200 }
+        - { prompt: write docs, fresh: 100 }
+    top_pages:
+      rows:
+        - { page: Alerts, visits: 2 }
+        - { page: Files, visits: 1 }

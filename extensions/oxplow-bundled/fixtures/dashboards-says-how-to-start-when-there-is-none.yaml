@@ -1,0 +1,9 @@
+# With no dashboard the index says how to make one, and still offers both
+# ways to start.
+when: { page: oxplow/dashboards }
+expect:
+  loaders:
+    dashboards: { rows: [] }
+  actions:
+    - { id: new }
+    - { id: draft }

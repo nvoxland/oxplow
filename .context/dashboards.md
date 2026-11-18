@@ -13,12 +13,20 @@ them.
 
 oxplow-bundled's `pages/dashboards.yaml` is the **Dashboards** index in
 the launcher's **Data** section. It lists `v_page WHERE category =
-'Dashboards'`, ordered by title and id, and links each row through its
-stored page URI. The index is itself in Data so it never lists itself.
-It includes dashboard pages from every enabled extension, rather than
-only pages in the default personal extension.
+'Dashboards'` and links each row through its stored page URI. The index
+is itself in Data so it never lists itself. It includes dashboard pages
+from every enabled extension, rather than only pages in the default
+personal extension. Rows are most recently opened first, then the ones
+never opened by title. Each row shows its extension, who sees it (Team
+when the extension is shared, else You), its opens in the last 30 days
+and when it was last opened. Opens come from `v_page_visit`, matching the
+page's URI with or without a `#` fragment of filters. A dashboard in a
+non-bundled extension has two row actions: Change with Your Agent… (a
+draft in the agent's input, `oxplow.page.draft_with_agent`) and Open
+Page File.
 
-**New dashboard…** is a whole-page form action on
+Build One with Your Agent… drafts a prompt for a new dashboard in the
+agent's input. **New dashboard…** is a whole-page form action on
 `oxplow.extension.new_dashboard`. The index fixes `extension: my-pages`
 and asks for the title; the command derives the page slug, creates an
 empty grid, writes the page and deploys it. An existing slug is refused
