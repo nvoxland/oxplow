@@ -40,7 +40,7 @@ category: Data
 loaders:
   rows:
     sql: SELECT uri, native_id AS id, title, stage, title NOT LIKE '%locked%' AS can_rename FROM v_oxplow_task WHERE title LIKE 'Wallaby %'
-      UNION ALL SELECT uri, NULL, label, NULL, 1 FROM v_bookmark WHERE label LIKE 'Wallaby %'
+      UNION ALL SELECT uri, NULL, label, NULL, 1 FROM v_bookmark WHERE uri LIKE 'oxplow:oxplow/file?path=wallabies%'
       ORDER BY title
   marks:
     sql: SELECT 'ready' AS value, 'Ready' AS label UNION ALL SELECT 'in_progress', 'Started' UNION ALL SELECT 'done', 'Finished'
@@ -98,7 +98,7 @@ category: Data
 loaders:
   rows:
     sql: SELECT '' AS label, uri, title FROM v_oxplow_task WHERE title LIKE 'Wallaby %'
-      UNION ALL SELECT '', uri, label FROM v_bookmark WHERE label LIKE 'Wallaby %'
+      UNION ALL SELECT '', uri, label FROM v_bookmark WHERE uri LIKE 'oxplow:oxplow/file?path=wallabies%'
       ORDER BY title
 view:
   stack:
