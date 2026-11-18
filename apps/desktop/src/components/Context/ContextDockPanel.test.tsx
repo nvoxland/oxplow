@@ -11,7 +11,7 @@ mock.module("../../api.js", () => ({
   ...realApi,
   querySql: async (sql: string) =>
     ({
-      columns: sql.includes("v_context_basket") ? ["id", "name", "attached_thread_id"] : ["id", "kind", "source_uri", "label", "text", "note", "basket"],
+      columns: sql.includes("v_context_basket") ? ["id", "name", "next_thread_id"] : ["id", "kind", "source_uri", "label", "text", "note", "basket"],
       rows: sql.includes("v_context_basket") ? baskets : items,
       truncated: false,
       reads: { datasets: [], tables: [], measures: [] },
@@ -61,14 +61,16 @@ test("it lists This Thread's items, takes one out and clears the lot", async () 
   expect(opened).toEqual([]);
 });
 
-// The × that takes an item out leads its line, before the item's kind and
-// title, so every × lines up at the left.
-test("an item's × is at the left of its line", async () => {
+// A row reads: the name, the note mark, the text; the × that takes it out
+// ends the line, so every × lines up at the right.
+test("a row's note mark leads its text and its × is at the right", async () => {
   setSelectedThread("thr7");
   items = [[1, "page", "oxplow:oxplow/commit?sha=abc1234", "abc1234", null, null, null]];
   const view = render(<ContextDockBody streamId={null} onOpenPage={() => {}} />);
   const item = await waitFor(() => view.getByTestId("context-panel-item"));
-  expect(item.firstElementChild?.getAttribute("data-testid")).toBe("context-panel-remove");
+  expect(item.lastElementChild?.getAttribute("data-testid")).toBe("context-panel-remove");
+  const ids = Array.from(item.children).map((c) => c.getAttribute("data-testid")).filter(Boolean);
+  expect(ids).toEqual(["context-panel-title", "context-panel-note-mark", "context-panel-preview", "context-panel-remove"]);
 });
 
 // A row is the item's name, its text on one line and a note mark; its
@@ -117,10 +119,10 @@ test("an empty basket says how things get in; with no thread and no basket the p
   await waitFor(() => expect(none.getByTestId("context-panel-empty").textContent).toBe("No context added yet"));
 });
 
-// One tab per basket, with its count; a basket attached here wears a mark
-// and This Thread's bar names it. A named basket's tab shows its items and
-// its bar attaches or detaches it.
-test("each basket is a tab; a named basket's bar attaches and detaches it", async () => {
+// One tab per basket, with its count; the one the next prompt sends wears a
+// paper plane. Send Next on a named basket makes it the one; on, pressing it
+// sends This Thread again. An empty basket can't be sent.
+test("each basket is a tab, and Send Next picks the one the next prompt sends", async () => {
   setSelectedThread("thr7");
   items = [
     [1, "page", "oxplow:oxplow/commit?sha=a", "In Auth", null, null, "Auth"],
@@ -140,22 +142,23 @@ test("each basket is a tab; a named basket's bar attaches and detaches it", asyn
     ["Release", "false", "1"],
     ["Empty", "false", "0"],
   ]);
-  expect(tabs[1]!.querySelector('[aria-label="Attached"]')).toBeTruthy();
-  expect(view.getByTestId("context-tab-empty")).toBeTruthy();
-  fireEvent.click(view.getByTestId("context-attached-link"));
+  // One marker: Auth goes next, so This Thread's switch is off.
+  expect(tabs.map((t) => !!t.querySelector('[data-testid="context-tab-sending"]'))).toEqual([false, true, false, false]);
+  expect(view.getByTestId("context-send-next").getAttribute("aria-checked")).toBe("false");
+  fireEvent.click(view.getByTestId("context-send-next"));
+  await waitFor(() => expect(ran).toContainEqual(["oxplow.context.send_next", { thread: "thr7" }]));
+  fireEvent.click(tabs[1]!);
   await waitFor(() => expect(view.getByText("In Auth")).toBeTruthy());
-  // Attached here, the toggle is on; pressing it detaches.
-  expect(view.getByTestId("context-basket-attach").getAttribute("aria-checked")).toBe("true");
-  fireEvent.click(view.getByTestId("context-basket-attach"));
-  await waitFor(() => expect(ran).toContainEqual(["oxplow.context.detach", { basket: "Auth" }]));
+  expect(view.getByTestId("context-send-next").getAttribute("aria-checked")).toBe("true");
+  fireEvent.click(view.getByTestId("context-send-next"));
+  await waitFor(() => expect(ran.filter(([n]) => n === "oxplow.context.send_next").length).toBe(2));
   fireEvent.click(tabs[2]!);
   await waitFor(() => expect(view.getByText("In Release")).toBeTruthy());
-  expect(view.queryByText("In Auth")).toBeNull();
-  expect(view.getByTestId("context-basket-attach").getAttribute("aria-checked")).toBe("false");
-  fireEvent.click(view.getByTestId("context-basket-attach"));
-  await waitFor(() => expect(ran).toContainEqual(["oxplow.context.attach", { basket: "Release", thread: "thr7" }]));
+  expect(view.getByTestId("context-send-next").getAttribute("aria-checked")).toBe("false");
+  fireEvent.click(view.getByTestId("context-send-next"));
+  await waitFor(() => expect(ran).toContainEqual(["oxplow.context.send_next", { thread: "thr7", basket: "Release" }]));
   fireEvent.click(tabs[3]!);
-  await waitFor(() => expect((view.getByTestId("context-basket-attach") as HTMLButtonElement).disabled).toBe(true));
+  await waitFor(() => expect((view.getByTestId("context-send-next") as HTMLButtonElement).disabled).toBe(true));
 });
 
 // An item's right-click moves it to another basket; a tab's deletes its basket.

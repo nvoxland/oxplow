@@ -1,35 +1,38 @@
 /// The Context dock panel: what the person collected for agents, one tab per
 /// basket, drawn as the main area's tabs and nav bar are. **This Thread**
-/// (the selected thread's own) and each named basket, with its count; a
-/// basket attached to this thread wears a link mark. Under the tabs, a bar
-/// in the nav bar's colors holds the open tab's actions on the left — This
-/// Thread's Clear and the baskets attached to it; a named basket's **Attached
-/// to This Thread** toggle, Rename (in place), Clear and Delete, also on the
-/// tab's right-click. Its items are one row each: a × to take it out, its
-/// name, its text on one line (cut to fit) and a note mark (filled when it
-/// has one). A row's click (or its note mark) opens the item alone: its name
-/// (opening its source), its whole text, its note edited in place, Move to ▸
-/// and Remove; Back (or Escape) returns to the list. A row's right-click has
-/// Move to ▸ and Remove. While an add waits, its card (`ContextAddCard`) is
-/// all the panel shows, and the add opens the tab it went to. The open tab is
-/// remembered (an app preference). The icon's badge is how many items the
-/// thread's next prompt carries. The Context page is the panel header's arrow.
+/// (the selected thread's own) and each named basket, with its count; the
+/// one tab the thread's next prompt sends wears a paper plane (`sendingNext`).
+/// Under the tabs, a bar in the nav bar's colors holds the open tab's actions
+/// on the left: the **Send Next** switch (the same paper plane, icon only, its
+/// tooltip saying what happens; on for the basket that goes), then This
+/// Thread's Clear, or a named basket's Rename (in place), Clear and Delete —
+/// also on the tab's right-click. A send carries one basket and then sets the
+/// thread back to This Thread. Its items are one row each: the name, a note
+/// mark (filled when it has one), its text on one line (cut to fit) and a ×
+/// at the far right. A row's click (or its note mark) opens the item alone:
+/// its name (opening its source), its whole text, its note edited in place,
+/// Move to ▸ and Remove; Back (or Escape) returns to the list. A row's
+/// right-click has Move to ▸ and Remove. While an add waits, its card
+/// (`ContextAddCard`) is all the panel shows, and the add opens the tab it
+/// went to. The open tab is remembered (an app preference). The icon's badge
+/// is how many items the thread's next prompt carries. The Context page is
+/// the panel header's arrow.
 
-import { ArrowLeft, FileText, Link2, Quote, StickyNote, X } from "lucide-react";
+import { ArrowLeft, FileText, Quote, Send, StickyNote, X } from "lucide-react";
 import { useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 
 import { InlineEdit } from "../InlineEdit.js";
 import {
   THREAD_BASKET,
   THREAD_MARK,
-  attachBasket,
   clearContext,
   deleteBasket,
-  detachBasket,
   moveContextItem,
   nextPrompt,
   removeFromContext,
   renameBasket,
+  sendNext,
+  sendingNext,
   setContextNote,
   useBaskets,
   usePendingAdd,
@@ -62,8 +65,8 @@ export function itemTitle(item: BasketItem): string {
   return plainTitle({ label: item.label, uri: item.sourceUri, text: item.text });
 }
 
-/** Why a basket can't be attached to `thread` now, or null when it can. */
-export function attachDisabledReason(basket: NamedBasket, thread: string | null): string | null {
+/** Why a basket can't be sent next by `thread` now, or null when it can. */
+export function sendDisabledReason(basket: NamedBasket, thread: string | null): string | null {
   if (!thread) return "Select a thread first";
   if (basket.items.length === 0) return "Nothing in it yet";
   return null;
@@ -89,7 +92,7 @@ export function ContextDockBody({ onOpenPage }: DockBodyProps) {
   const names = baskets.named.map((b) => b.name);
   const tab = openTab(wanted, thread, names);
   const named = baskets.named.find((b) => b.name === tab) ?? null;
-  const attachedHere = baskets.named.filter((b) => thread != null && b.attachedTo === thread);
+  const sending = sendingNext(baskets, thread);
   const pick = (id: string) => {
     setFocused(null);
     setWanted(id);
@@ -129,12 +132,12 @@ export function ContextDockBody({ onOpenPage }: DockBodyProps) {
     <div data-testid="context-panel" style={bodyStyle}>
       <div role="tablist" aria-label="Baskets" style={tabStrip}>
         {thread ? (
-          <Tab key={THREAD_MARK} id={THREAD_MARK} on={tab === THREAD_MARK} count={baskets.own.length} onPick={pick}>
+          <Tab key={THREAD_MARK} id={THREAD_MARK} on={tab === THREAD_MARK} count={baskets.own.length} sending={sending === THREAD_MARK} onPick={pick}>
             {THREAD_BASKET}
           </Tab>
         ) : null}
         {baskets.named.map((b) => (
-          <Tab key={b.id} id={b.name} on={tab === b.name} count={b.items.length} attached={thread != null && b.attachedTo === thread} onPick={pick} onContextMenu={(e) => basketMenu(e, b)}>
+          <Tab key={b.id} id={b.name} on={tab === b.name} count={b.items.length} sending={sending === b.name} onPick={pick} onContextMenu={(e) => basketMenu(e, b)}>
             {b.name}
           </Tab>
         ))}
@@ -165,22 +168,19 @@ export function ContextDockBody({ onOpenPage }: DockBodyProps) {
           </>
         ) : tab === THREAD_MARK ? (
           <>
+            <SendToggle
+              on={sending === THREAD_MARK}
+              disabledReason={thread ? null : "Select a thread first"}
+              tip={
+                sending === THREAD_MARK
+                  ? "Sending next: this thread's next prompt carries This Thread, then empties it. Send Next on another basket to send it instead."
+                  : "Send Next: this thread's next prompt carries This Thread instead of the basket chosen now."
+              }
+              onPress={() => (thread && sending !== THREAD_MARK ? void sendNext(thread, null) : undefined)}
+            />
             <button type="button" className="ox-button" style={dockButtonStyle} data-testid="context-panel-clear" disabled={baskets.own.length === 0 || !thread} title="Take everything out of This Thread" onClick={() => thread && void clearContext({ thread })}>
               Clear
             </button>
-            {attachedHere.length > 0 ? (
-              <span style={{ color: "var(--text-muted)", marginLeft: 6 }}>
-                The next prompt also carries{" "}
-                {attachedHere.map((b, i) => (
-                  <span key={b.id}>
-                    {i > 0 ? ", " : null}
-                    <button type="button" data-testid="context-attached-link" onClick={() => pick(b.name)} style={linkButton}>
-                      {b.name}
-                    </button>
-                  </span>
-                ))}
-              </span>
-            ) : null}
           </>
         ) : named && renaming === named.name ? (
           <span style={{ flex: 1, minWidth: 0, maxWidth: 320 }}>
@@ -229,7 +229,7 @@ function Tab({
   id,
   on,
   count,
-  attached = false,
+  sending = false,
   onPick,
   onContextMenu,
   children,
@@ -237,7 +237,7 @@ function Tab({
   id: string;
   on: boolean;
   count: number;
-  attached?: boolean;
+  sending?: boolean;
   onPick(id: string): void;
   onContextMenu?(e: MouseEvent): void;
   children: ReactNode;
@@ -250,7 +250,7 @@ function Tab({
       aria-selected={on}
       data-testid="context-tab"
       data-basket={id}
-      title={attached ? "Attached: this thread's next prompt carries it" : undefined}
+      title={sending ? "This thread's next prompt sends this basket" : undefined}
       onClick={() => onPick(id)}
       onContextMenu={onContextMenu}
       onMouseEnter={() => setHover(true)}
@@ -272,7 +272,7 @@ function Tab({
         cursor: "pointer",
       }}
     >
-      {attached ? <Link2 size={12} aria-label="Attached" /> : null}
+      {sending ? <Send size={12} aria-label="Sends next" data-testid="context-tab-sending" /> : null}
       {children}
       <span data-testid="context-tab-count" style={{ color: "var(--text-muted)", fontWeight: 400 }}>
         {count}
@@ -283,48 +283,67 @@ function Tab({
 
 /** A named basket's actions, on its tab's right-click. */
 function basketActions(basket: NamedBasket, thread: string | null, rename: () => void): MenuItem[] {
-  const why = attachDisabledReason(basket, thread);
+  const why = sendDisabledReason(basket, thread);
+  const here = thread != null && basket.nextFor === thread;
   return [
-    basket.attachedTo
-      ? { id: "detach", label: "Detach", enabled: true, run: () => detachBasket(basket.name) }
-      : { id: "attach", label: "Attach to This Thread", enabled: why == null, hint: why ?? undefined, run: () => (thread ? attachBasket(basket.name, thread) : undefined) },
+    here
+      ? { id: "send-own", label: "Send This Thread Instead", enabled: true, run: () => sendNext(thread, null) }
+      : { id: "send-next", label: "Send Next", enabled: why == null, hint: why ?? undefined, run: () => (thread ? sendNext(thread, basket.name) : undefined) },
     { id: "rename", label: "Rename…", enabled: true, run: rename },
     { id: "clear", label: "Clear", enabled: basket.items.length > 0, run: () => clearContext({ basket: basket.name }) },
     { id: "delete", label: "Delete", enabled: true, run: () => deleteBasket(basket.name) },
   ];
 }
 
-/** A named basket's bar: the Attached toggle first, then Rename, Clear and
- *  Delete. On, the toggle is this thread's; pressing it detaches. Attached to
- *  another thread, it says so and pressing it moves the basket here. */
+/** The Send Next switch: the tab marker's paper plane, icon only; its
+ *  tooltip says what pressing it does. On for the basket that goes. */
+function SendToggle({ on, disabledReason, tip, onPress }: { on: boolean; disabledReason: string | null; tip: string; onPress(): void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label="Send Next"
+      data-testid="context-send-next"
+      disabled={disabledReason != null}
+      title={disabledReason ?? tip}
+      onClick={onPress}
+      style={{
+        ...dockButtonStyle,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        minWidth: 28,
+        border: `1px solid ${on ? "var(--accent)" : "var(--border-subtle)"}`,
+        background: on ? "var(--accent-soft-bg)" : "transparent",
+        color: disabledReason ? "var(--text-muted)" : on ? "var(--accent)" : "var(--text-secondary)",
+        borderRadius: 4,
+        cursor: disabledReason ? "default" : "pointer",
+      }}
+    >
+      <Send size={13} aria-hidden />
+    </button>
+  );
+}
+
+/** A named basket's bar: Send Next, then Rename, Clear and Delete. On, the
+ *  switch is this thread's choice; pressing it sends This Thread again. Sent
+ *  next by another thread, it says so, and pressing it moves it here. */
 function BasketBar({ basket, thread, onRename }: { basket: NamedBasket; thread: string | null; onRename(): void }) {
-  const here = thread != null && basket.attachedTo === thread;
-  const why = here ? null : attachDisabledReason(basket, thread);
+  const here = thread != null && basket.nextFor === thread;
+  const why = here ? null : sendDisabledReason(basket, thread);
   return (
     <>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={here}
-        data-testid="context-basket-attach"
-        disabled={why != null}
-        title={why ?? (here ? "This thread's next prompt carries it, then empties it. Press to detach." : "This thread's next prompt will carry it, then empty it")}
-        onClick={() => (here ? void detachBasket(basket.name) : thread ? void attachBasket(basket.name, thread) : undefined)}
-        style={{
-          ...dockButtonStyle,
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 5,
-          border: `1px solid ${here ? "var(--accent)" : "var(--border-subtle)"}`,
-          background: here ? "var(--accent-soft-bg)" : "transparent",
-          color: why ? "var(--text-muted)" : here ? "var(--accent)" : "var(--text-primary)",
-          borderRadius: 4,
-          cursor: why ? "default" : "pointer",
-        }}
-      >
-        <Link2 size={12} aria-hidden />
-        {here ? "Attached to This Thread" : "Attach to This Thread"}
-      </button>
+      <SendToggle
+        on={here}
+        disabledReason={why}
+        tip={
+          here
+            ? "Sending next: this thread's next prompt carries this basket instead of This Thread, then empties it. Click to send This Thread instead."
+            : "Send Next: this thread's next prompt carries this basket instead of This Thread, then empties it."
+        }
+        onPress={() => (thread ? void sendNext(thread, here ? null : basket.name) : undefined)}
+      />
       <button type="button" className="ox-button" style={dockButtonStyle} data-testid="context-basket-rename-button" onClick={onRename}>
         Rename
       </button>
@@ -334,9 +353,9 @@ function BasketBar({ basket, thread, onRename }: { basket: NamedBasket; thread: 
       <button type="button" className="ox-button" style={dockButtonStyle} data-testid="context-basket-delete" onClick={() => void deleteBasket(basket.name)}>
         Delete
       </button>
-      {basket.attachedTo && !here ? (
+      {basket.nextFor && !here ? (
         <span data-testid="context-basket-status" style={{ color: "var(--text-muted)", marginLeft: 6 }}>
-          Attached to another thread
+          Sent next by another thread
         </span>
       ) : null}
     </>
@@ -375,6 +394,21 @@ function ItemRow({ item, onOpen, onContextMenu }: { item: BasketItem; onOpen(): 
         minWidth: 0,
       }}
     >
+      <Icon size={13} aria-hidden style={{ flexShrink: 0, color: "var(--text-muted)" }} />
+      <span data-testid="context-panel-title" style={{ ...ellipsis, flex: "0 1 30%", fontWeight: 600 }}>
+        {title}
+      </span>
+      <span
+        data-testid="context-panel-note-mark"
+        aria-label={item.note ? `Note: ${item.note}` : "No note"}
+        title={item.note ?? "Open to add a note"}
+        style={{ display: "inline-flex", flexShrink: 0, color: item.note ? "var(--accent)" : "var(--text-muted)", opacity: item.note || hover ? 1 : 0.35 }}
+      >
+        <StickyNote size={13} aria-hidden />
+      </span>
+      <span data-testid="context-panel-preview" style={{ ...ellipsis, flex: "1 1 0", color: "var(--text-secondary)", fontFamily: "var(--font-mono, monospace)" }}>
+        {item.text ? item.text.replace(/\s+/g, " ").trim() : ""}
+      </span>
       <button
         type="button"
         data-testid="context-panel-remove"
@@ -388,21 +422,6 @@ function ItemRow({ item, onOpen, onContextMenu }: { item: BasketItem; onOpen(): 
       >
         <X size={14} aria-hidden />
       </button>
-      <Icon size={13} aria-hidden style={{ flexShrink: 0, color: "var(--text-muted)" }} />
-      <span data-testid="context-panel-title" style={{ ...ellipsis, flex: "0 1 30%", fontWeight: 600 }}>
-        {title}
-      </span>
-      <span data-testid="context-panel-preview" style={{ ...ellipsis, flex: "1 1 0", color: "var(--text-secondary)", fontFamily: "var(--font-mono, monospace)" }}>
-        {item.text ? item.text.replace(/\s+/g, " ").trim() : ""}
-      </span>
-      <span
-        data-testid="context-panel-note-mark"
-        aria-label={item.note ? `Note: ${item.note}` : "No note"}
-        title={item.note ?? "Open to add a note"}
-        style={{ display: "inline-flex", flexShrink: 0, color: item.note ? "var(--accent)" : "var(--text-muted)", opacity: item.note || hover ? 1 : 0.35 }}
-      >
-        <StickyNote size={13} aria-hidden />
-      </span>
     </div>
   );
 }

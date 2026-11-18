@@ -111,7 +111,18 @@ export function DockPanel({ streamId, onOpenPage }: { streamId: string | null; o
         onPointerCancel={onHandleUp}
         style={{ position: "absolute", top: -3, left: 0, right: 0, height: 6, cursor: "row-resize", userSelect: "none" }}
       />
-      <div style={{ display: "flex", alignItems: "center", padding: "4px 12px", borderBottom: "1px solid var(--border-strong)", flexShrink: 0 }}>
+      <div
+        data-testid="dock-panel-header"
+        // The rail panels' header blue (`RailHud`), so every docked panel reads as one.
+        style={{
+          display: "flex",
+          alignItems: "center",
+          padding: "4px 12px",
+          borderBottom: "1px solid var(--border-strong)",
+          flexShrink: 0,
+          background: "linear-gradient(var(--rail-panel-header-bg), var(--rail-panel-header-bg)), var(--surface-card)",
+        }}
+      >
         <span data-testid="dock-panel-icon" aria-hidden style={{ display: "inline-flex", marginRight: 6, color: "var(--text-secondary)" }}>
           <Icon size={14} />
         </span>

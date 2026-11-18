@@ -85,12 +85,13 @@ Thread**) or a named basket you keep for a topic.
 
 Every entry carries the @ icon, the same as the **Context** icon in the
 bottom bar, which shows how many items the thread's next prompt carries.
-Open it to see the baskets, take an item out with its ×, attach a named
-basket to the thread, or **Clear** This Thread. The arrow in the panel's
+Open it to see the baskets, take an item out with its ×, choose which
+basket the next prompt sends (**Send Next**), or **Clear** This Thread. The arrow in the panel's
 header opens the Context page.
 
-The next prompt to any agent in the thread carries This Thread's items and
-every basket attached to it. Then they are empty. An item you removed is
+The next prompt to any agent in the thread carries one basket: This Thread,
+or the one you chose with Send Next. Then it is empty, and the thread sends
+This Thread again. An item you removed is
 not sent. See [Collecting context](context.md).
 
 ## Input

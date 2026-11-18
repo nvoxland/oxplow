@@ -3,7 +3,7 @@
 //! A harness with no prompt hook (Codex) is given its context by
 //! injection, between turns. The context changes while no turn runs — a
 //! handoff sent to the thread, another agent arriving in its worktree, a
-//! decision recorded, something put in a context basket or a basket attached — and the agent should have it before the person's
+//! decision recorded, something put in a context basket or a basket set to go next — and the agent should have it before the person's
 //! next prompt, not after that turn ends. While an enabled extension
 //! declares an agent context (`context:`), whose query may read anything,
 //! every command counts as such a change. This pump consumer bumps
@@ -20,11 +20,11 @@ use crate::event_pump::AsyncEventConsumer;
 pub const NAME: &str = "agent.context_changes";
 
 /// The commands whose runs change what the context lists: an item put in
-/// or moved into a basket, a basket attached to a thread.
+/// or moved into a basket, a basket set to go with a thread's next prompt.
 const CHANGING_COMMANDS: &[&str] = &[
     crate::commands::context_basket::ADD,
     crate::commands::context_basket::MOVE,
-    crate::commands::context_basket::ATTACH,
+    crate::commands::context_basket::SEND_NEXT,
 ];
 
 /// The event types whose facts the context reads: the handoffs and their

@@ -406,7 +406,7 @@ pub struct PendingContext {
     handoffs: Vec<HandoffId>,
     nudges: Vec<i64>,
     /// The context items it carries (`context_item.id`): the thread's own
-    /// basket's and its attached baskets'.
+    /// basket's, or the named basket's set to go next.
     basket: Vec<i64>,
     agent_session: Option<AgentSessionId>,
     /// The thread it was built for (none for a double in tests).
@@ -677,10 +677,11 @@ async fn waiting_nudges(svc: &Services, thread_id: &ThreadId) -> Option<(String,
 pub const BASKET_TEXT_IN_CONTEXT: usize = 4_000;
 
 /// What the thread's next prompt carries of what the person collected —
-/// its own basket and every basket attached to it — as one
+/// one basket: its own, or the named basket set to go next for it — as one
 /// `<context-basket>` block and the items' ids, still there: they reach the
 /// first prompt of any agent in the thread, and [`AgentContext::commit`]
-/// deletes them once the agent has the text, which empties those baskets.
+/// deletes them once the agent has the text, which empties that basket and
+/// sets the thread back to sending its own.
 async fn context_basket(svc: &Services, thread: ThreadId) -> Option<(String, Vec<i64>)> {
     let read = svc
         .db
@@ -1261,12 +1262,12 @@ mod tests {
         assert!(!again.contains("<context-basket>"), "{again}");
     }
 
-    /// A named basket attached to a thread rides that thread's next prompt
-    /// after its own items, under its name; the prompt empties it and
-    /// detaches it, and the basket stays.
+    /// A named basket set to go next replaces the thread's own for one
+    /// prompt, under its name; the prompt empties it and the thread sends
+    /// its own again, the basket kept.
     #[tokio::test]
-    async fn an_attached_basket_rides_one_prompt_and_empties() {
-        use crate::commands::context_basket::{ADD, ATTACH};
+    async fn a_basket_sent_next_replaces_the_threads_own_for_one_prompt() {
+        use crate::commands::context_basket::{ADD, SEND_NEXT};
         use oxplow_domain::Actor;
         let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &*fx.svc;
@@ -1282,7 +1283,7 @@ mod tests {
                 serde_json::json!({ "thread": thread, "uri": "oxplow:oxplow/commit?sha=abc" }),
             ),
             (
-                ATTACH,
+                SEND_NEXT,
                 serde_json::json!({ "basket": "Auth", "thread": thread }),
             ),
         ] {
@@ -1297,11 +1298,10 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            text.contains(
-                "1. [oxplow uri oxplow:oxplow/commit?sha=abc]\nFrom your \"Auth\" basket:\n2. [oxplow uri oxplow:oxplow/commit?sha=def]\n"
-            ),
+            text.contains("From your \"Auth\" basket:\n1. [oxplow uri oxplow:oxplow/commit?sha=def]\n</context-basket>"),
             "{text}"
         );
+        assert!(!text.contains("sha=abc"), "This Thread waits: {text}");
         let basket = svc
             .db
             .read(|c| {
@@ -1314,7 +1314,16 @@ mod tests {
             })
             .await
             .unwrap();
-        assert_eq!((basket.0.attached_thread_id, basket.1), (None, 0));
+        assert_eq!((basket.0.next_thread_id, basket.1), (None, 0));
+        // The next prompt sends This Thread.
+        let after = ctx
+            .prompt_context(svc, &fx.thread, Some("s1"), Some(session), None)
+            .await
+            .unwrap();
+        assert!(
+            after.contains("1. [oxplow uri oxplow:oxplow/commit?sha=abc]"),
+            "{after}"
+        );
     }
 
     fn waiting_item(

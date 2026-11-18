@@ -39,10 +39,10 @@ test("text selected on a page goes in the basket from its right-click menu", asy
 });
 
 // An add can go to a named basket: To → + New basket takes its name. The
-// panel then opens that basket's tab with the item; the basket is not counted
-// for this thread's next prompt until it is attached, then its tab wears the
-// attached mark and the badge counts it.
-test("an add to a new basket is counted once the basket is attached", async ({ page, daemon }) => {
+// panel then opens that basket's tab with the item. This thread's next prompt
+// sends This Thread until Send Next picks the basket: then its tab wears the
+// paper plane and the badge counts its items.
+test("an add to a new basket is counted once it is sent next", async ({ page, daemon }) => {
   await open(page, daemon, "oxplow:oxplow/page?page=e2e/home");
   await page.locator('[data-testid="page-nav-menu"]:visible').click();
   await page.getByTestId("menu-item-page-add-to-context").click();
@@ -56,7 +56,7 @@ test("an add to a new basket is counted once the basket is attached", async ({ p
   await expect(page.getByTestId("context-panel-item")).toHaveCount(1);
   await expect(shown(page).getByTestId("dock-context-badge")).toHaveCount(0);
 
-  await page.getByTestId("context-basket-attach").click();
-  await expect(tab.getByLabel("Attached")).toBeVisible();
+  await page.getByTestId("context-send-next").click();
+  await expect(tab.getByTestId("context-tab-sending")).toBeVisible();
   await expect(page.getByTestId("dock-context-badge")).toHaveText("1");
 });

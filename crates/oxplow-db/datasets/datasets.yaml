@@ -563,8 +563,8 @@
     - { not_null: id }
     - { unique: id }
 - name: context_item
-  version: 1
-  description: "What the person collected for agents (`oxplow.context.add`): pages and pieces of text, each with an optional note of what they want done about it, in a basket — a thread's own (\"This Thread\") or a named basket (v_context_basket) collected into from any stream. The next prompt to any agent in a thread carries its own basket and every named basket attached to it, as a `<context-basket>` block, then deletes those items: what is here is what still waits."
+  version: 2
+  description: "What the person collected for agents (`oxplow.context.add`): pages and pieces of text, each with an optional note of what they want done about it, in a basket — a thread's own (\"This Thread\") or a named basket (v_context_basket) collected into from any stream. The next prompt to any agent in a thread carries one basket as a `<context-basket>` block — its own, or the named basket set to go next for it (`oxplow.context.send_next`) — then deletes those items: what is here is what still waits."
   fields:
     - { name: "id", type: "INTEGER", doc: "Item id (the `item` the `oxplow.context.*` commands take)." }
     - { name: "thread_id", type: "INTEGER", doc: "The thread whose own basket it is in; NULL when it is in a named basket." }
@@ -585,20 +585,20 @@
     - { relationships: { column: thread_id, to: thread, field: id } }
     - { relationships: { column: basket_id, to: context_basket, field: id } }
 - name: context_basket
-  version: 1
-  description: "The person's named context baskets: collections of pages and text (v_context_item) for agents, kept across every stream of the project. One is attached to a thread's next prompt (`oxplow.context.attach`), which carries its items and then empties it and detaches it; the basket stays until the person deletes it. A thread's own basket (\"This Thread\") is not a row here."
+  version: 2
+  description: "The person's named context baskets: collections of pages and text (v_context_item) for agents, kept across every stream of the project. One can be set to go with a thread's next prompt instead of the thread's own (`oxplow.context.send_next`); that prompt carries its items, empties it and sets the thread back to its own. The basket stays until the person deletes it. A thread's own basket (\"This Thread\") is not a row here."
   fields:
     - { name: "id", type: "INTEGER", doc: "Basket id." }
     - { name: "name", type: "TEXT", doc: "Its name, unique in any case (the `basket` the `oxplow.context.*` commands take)." }
-    - { name: "attached_thread_id", type: "INTEGER", doc: "The thread whose next prompt carries it (v_thread.id); NULL when attached to none." }
-    - { name: "attached_thread_uri", type: "TEXT", doc: "That thread's URI; NULL when attached to none." }
+    - { name: "next_thread_id", type: "INTEGER", doc: "The thread whose next prompt carries it instead of that thread's own basket (v_thread.id; at most one basket per thread); NULL when it goes with none." }
+    - { name: "next_thread_uri", type: "TEXT", doc: "That thread's URI; NULL when it goes with none." }
     - { name: "items", type: "INT", doc: "How many items wait in it." }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
   tests:
     - { not_null: id }
     - { unique: id }
     - { unique: name }
-    - { relationships: { column: attached_thread_id, to: thread, field: id } }
+    - { relationships: { column: next_thread_id, to: thread, field: id } }
 - name: diagnostic
   version: 1
   description: "Errors and warnings the language servers have published for open or indexed files, right now (cleared when a server restarts)."

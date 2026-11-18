@@ -1,12 +1,12 @@
-//! Context baskets (`context_item`, `context_basket`; V47): pages and
+//! Context baskets (`context_item`, `context_basket`; V47, V48): pages and
 //! pieces of text the person collected for agents. Each item is in one
 //! basket: a thread's own (shown as "This Thread") or a named basket of the
-//! project, collected into from any stream and attached to a thread's next
-//! prompt. The next prompt to any agent in a thread carries its own basket
-//! and every basket attached to it, then deletes what it carried and
-//! detaches those baskets (`oxplow_app::agent_context`). Read through
-//! `v_context_item` and `v_context_basket`; every write is an
-//! `oxplow.context.*` command over these `_tx` cores.
+//! project, collected into from any stream. A thread's next prompt carries
+//! one basket: its own, or the named basket set to go next for it (Send
+//! Next); then it deletes what it carried and the choice goes back to This
+//! Thread (`oxplow_app::agent_context`). Read through `v_context_item` and
+//! `v_context_basket`; every write is an `oxplow.context.*` command over
+//! these `_tx` cores.
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -128,8 +128,9 @@ impl NewItem {
 pub struct NamedBasket {
     pub id: i64,
     pub name: String,
-    /// The thread whose next prompt carries it, if any.
-    pub attached_thread_id: Option<i64>,
+    /// The thread whose next prompt carries it instead of the thread's own
+    /// basket (Send Next), if any.
+    pub next_thread_id: Option<i64>,
     pub created_at: String,
 }
 
@@ -171,7 +172,7 @@ fn row_to_basket(row: &rusqlite::Row<'_>) -> rusqlite::Result<NamedBasket> {
     Ok(NamedBasket {
         id: row.get("id")?,
         name: row.get("name")?,
-        attached_thread_id: row.get("attached_thread_id")?,
+        next_thread_id: row.get("next_thread_id")?,
         created_at: row.get("created_at")?,
     })
 }
@@ -417,26 +418,67 @@ pub fn delete_basket_tx(
     Ok(Some((basket, items)))
 }
 
-/// Attach basket `id` to `thread`'s next prompt (`None`: detach it); the
-/// thread it was attached to before. A basket is attached to one thread at
-/// a time.
-pub fn attach_tx(
-    conn: &Connection,
-    id: i64,
-    thread: Option<ThreadId>,
-) -> Result<Option<i64>, DomainError> {
-    let before =
-        get_basket_tx(conn, id)?.ok_or_else(|| DomainError::Invalid(format!("no basket {id}")))?;
-    conn.execute(
-        "UPDATE context_basket SET attached_thread_id = ?2 WHERE id = ?1",
-        params![id, thread.map(|t| t.value())],
-    )
-    .map_err(map_sql_err)?;
-    Ok(before.attached_thread_id)
+/// What [`set_next_tx`] changed, to put back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NextBefore {
+    /// The named basket that was next for the thread (none: This Thread).
+    pub basket: Option<i64>,
+    /// The thread the newly chosen basket was next for before, when it was
+    /// another one's.
+    pub basket_was_next_for: Option<i64>,
 }
 
-/// What `thread`'s next prompt would carry: its own items, then each
-/// attached basket's (by name), each oldest first.
+/// The named basket set to go with `thread`'s next prompt, if any.
+pub fn next_basket_tx(
+    conn: &Connection,
+    thread: ThreadId,
+) -> Result<Option<NamedBasket>, DomainError> {
+    conn.query_row(
+        "SELECT * FROM context_basket WHERE next_thread_id = ?1",
+        params![thread.value()],
+        row_to_basket,
+    )
+    .optional()
+    .map_err(map_sql_err)
+}
+
+/// Set what `thread`'s next prompt carries: the named basket `basket`, or
+/// (`None`) the thread's own. A basket is next for one thread at a time: one
+/// that was another thread's leaves it (that thread sends its own again).
+pub fn set_next_tx(
+    conn: &Connection,
+    thread: ThreadId,
+    basket: Option<i64>,
+) -> Result<NextBefore, DomainError> {
+    let was = next_basket_tx(conn, thread)?.map(|b| b.id);
+    let moved_from = match basket {
+        Some(id) => get_basket_tx(conn, id)?
+            .ok_or_else(|| DomainError::Invalid(format!("no basket {id}")))?
+            .next_thread_id
+            .filter(|t| *t != thread.value()),
+        None => None,
+    };
+    conn.execute(
+        "UPDATE context_basket SET next_thread_id = NULL WHERE next_thread_id = ?1",
+        params![thread.value()],
+    )
+    .map_err(map_sql_err)?;
+    if let Some(id) = basket {
+        conn.execute(
+            "UPDATE context_basket SET next_thread_id = ?2 WHERE id = ?1",
+            params![id, thread.value()],
+        )
+        .map_err(map_sql_err)?;
+    }
+    Ok(NextBefore {
+        basket: was,
+        basket_was_next_for: moved_from,
+    })
+}
+
+/// What `thread`'s next prompt would carry, oldest first: the items of the
+/// named basket set next for it, or — with none set, or that one empty — its
+/// own.
 pub fn waiting_for_thread_tx(
     conn: &Connection,
     thread: ThreadId,
@@ -447,8 +489,12 @@ pub fn waiting_for_thread_tx(
            FROM context_item c
            LEFT JOIN context_basket b ON b.id = c.basket_id
            LEFT JOIN streams s ON s.id = c.stream_id
-          WHERE c.thread_id = ?1 OR b.attached_thread_id = ?1
-          ORDER BY c.basket_id IS NOT NULL, b.name COLLATE NOCASE, c.added_at, c.id",
+          WHERE CASE WHEN EXISTS (SELECT 1 FROM context_item n
+                                     JOIN context_basket nb ON nb.id = n.basket_id
+                                    WHERE nb.next_thread_id = ?1)
+                     THEN b.next_thread_id = ?1
+                     ELSE c.thread_id = ?1 END
+          ORDER BY c.added_at, c.id",
     )
     .and_then(|mut stmt| {
         stmt.query_map(params![thread.value()], |row| {
@@ -475,8 +521,8 @@ pub fn waiting_for_thread_tx(
 /// the turn they landed in — the thread's open turn (of `session` when
 /// known), which the prompt opened or went into — on the handoffs, link
 /// that turn to what it was given (`prompt_mention`: each item's page or
-/// source, each handoff), then delete the items and detach the baskets
-/// they came from. With no turn open nothing is linked; the items still go.
+/// source, each handoff), then delete the items; a named basket they came
+/// from stops being next, so the thread sends its own again. With no turn open nothing is linked; the items still go.
 pub fn take_delivered_tx(
     conn: &Connection,
     thread: ThreadId,
@@ -534,8 +580,8 @@ pub fn take_delivered_tx(
             .map_err(map_sql_err)?;
         if let Some(basket) = item.basket_id {
             conn.execute(
-                "UPDATE context_basket SET attached_thread_id = NULL
-                  WHERE id = ?1 AND attached_thread_id = ?2",
+                "UPDATE context_basket SET next_thread_id = NULL
+                  WHERE id = ?1 AND next_thread_id = ?2",
                 params![basket, thread.value()],
             )
             .map_err(map_sql_err)?;
@@ -743,56 +789,58 @@ mod tests {
         assert!(db.read(move |c| get_tx(c, second)).await.unwrap().is_none());
     }
 
-    /// A thread's next prompt carries its own items first, then each basket
-    /// attached to it by name, with the stream each was collected in; a
-    /// basket attached elsewhere, or to nothing, isn't carried.
+    /// A thread's next prompt carries one basket: its own, or the named
+    /// basket set next for it, with the stream each item was collected in. A
+    /// basket is next for one thread at a time; an empty one set next sends
+    /// the thread's own instead.
     #[tokio::test]
-    async fn a_threads_next_prompt_carries_its_own_and_its_attached_baskets() {
+    async fn a_thread_sends_its_own_basket_or_the_one_set_next() {
         let (db, thread, other) = with_threads().await;
-        let (own, zed, alpha) = db
+        let (own, auth, auth_item, empty) = db
             .transaction(move |tx| {
-                let zed = create_basket_tx(tx, "Zed")?.id;
-                let alpha = create_basket_tx(tx, "alpha")?.id;
-                let elsewhere = create_basket_tx(tx, "Elsewhere")?.id;
-                let loose = create_basket_tx(tx, "Loose")?.id;
-                let zed_item = add_tx(
+                let auth = create_basket_tx(tx, "Auth")?.id;
+                let empty = create_basket_tx(tx, "Empty")?.id;
+                let auth_item = add_tx(
                     tx,
-                    Basket::Named(zed),
+                    Basket::Named(auth),
                     &NewItem {
                         stream_id: Some(2),
                         ..page("oxplow:oxplow/file?path=z.rs")
                     },
                 )?;
-                let alpha_item = add_tx(
-                    tx,
-                    Basket::Named(alpha),
-                    &page("oxplow:oxplow/commit?sha=a"),
-                )?;
-                add_tx(
-                    tx,
-                    Basket::Named(elsewhere),
-                    &page("oxplow:oxplow/commit?sha=e"),
-                )?;
-                add_tx(
-                    tx,
-                    Basket::Named(loose),
-                    &page("oxplow:oxplow/commit?sha=l"),
-                )?;
                 let own = add_tx(
                     tx,
                     Basket::Thread(thread),
-                    &NewItem {
-                        stream_id: Some(1),
-                        ..page("oxplow:oxplow/commit?sha=o")
-                    },
+                    &page("oxplow:oxplow/commit?sha=o"),
                 )?;
-                attach_tx(tx, zed, Some(thread))?;
-                attach_tx(tx, alpha, Some(thread))?;
-                attach_tx(tx, elsewhere, Some(other))?;
-                Ok((own, zed_item, alpha_item))
+                Ok((own, auth, auth_item, empty))
             })
             .await
             .unwrap();
+        let sends = |db: &Database| {
+            let db = db.clone();
+            async move {
+                db.read(move |c| waiting_for_thread_tx(c, thread))
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|w| (w.item.id, w.basket))
+                    .collect::<Vec<_>>()
+            }
+        };
+        assert_eq!(sends(&db).await, [(own, None)]);
+
+        let before = db
+            .transaction(move |tx| set_next_tx(tx, thread, Some(auth)))
+            .await
+            .unwrap();
+        assert_eq!(
+            before,
+            NextBefore {
+                basket: None,
+                basket_was_next_for: None
+            }
+        );
         let waiting = db
             .read(move |c| waiting_for_thread_tx(c, thread))
             .await
@@ -802,34 +850,62 @@ mod tests {
                 .iter()
                 .map(|w| (w.item.id, w.basket.clone()))
                 .collect::<Vec<_>>(),
-            [
-                (own, None),
-                (alpha, Some("alpha".to_string())),
-                (zed, Some("Zed".to_string())),
-            ]
+            [(auth_item, Some("Auth".to_string()))]
         );
         assert_eq!(
-            waiting[2].stream,
+            waiting[0].stream,
             Some(ItemStream {
                 id: 2,
                 title: "Feature".into(),
                 branch: "feature".into()
             })
         );
+
+        // Set next for the other thread, it leaves this one.
+        let moved = db
+            .transaction(move |tx| set_next_tx(tx, other, Some(auth)))
+            .await
+            .unwrap();
+        assert_eq!(
+            moved,
+            NextBefore {
+                basket: None,
+                basket_was_next_for: Some(thread.value())
+            }
+        );
+        assert_eq!(sends(&db).await, [(own, None)]);
+
+        // An empty basket set next: the thread's own goes.
+        let back = db
+            .transaction(move |tx| set_next_tx(tx, thread, Some(empty)))
+            .await
+            .unwrap();
+        assert_eq!(back.basket, None);
+        assert_eq!(sends(&db).await, [(own, None)]);
+        let cleared = db
+            .transaction(move |tx| set_next_tx(tx, thread, None))
+            .await
+            .unwrap();
+        assert_eq!(cleared.basket, Some(empty));
+        assert!(db
+            .read(move |c| next_basket_tx(c, thread))
+            .await
+            .unwrap()
+            .is_none());
     }
 
     /// Delivery records the turn on the handoffs, links the turn to what it
-    /// was given, deletes the items and detaches their baskets; an item
+    /// was given, deletes the items and sends the thread's own again; an item
     /// added after the build stays, and with no turn open the items still go.
     #[tokio::test]
-    async fn delivery_links_the_turn_deletes_the_items_and_detaches_their_baskets() {
+    async fn delivery_links_the_turn_deletes_the_items_and_resets_what_goes_next() {
         let (db, thread, _) = with_threads().await;
-        let (basket, own, attached, later) = db
+        let (basket, own, sent, later) = db
             .transaction(move |tx| {
                 let basket = create_basket_tx(tx, "Auth")?.id;
                 let own = add_tx(tx, Basket::Thread(thread), &page("oxplow:oxplow/commit?sha=abc1234"))?;
-                let attached = add_tx(tx, Basket::Named(basket), &page("oxplow:oxplow/commit?sha=def5678"))?;
-                attach_tx(tx, basket, Some(thread))?;
+                let sent = add_tx(tx, Basket::Named(basket), &page("oxplow:oxplow/commit?sha=def5678"))?;
+                set_next_tx(tx, thread, Some(basket))?;
                 tx.execute(
                     "INSERT INTO agent_turn (id, thread_id, prompt, started_at) VALUES (3, 1, 'p', 'a')",
                     [],
@@ -838,12 +914,12 @@ mod tests {
                 // Added after the prompt was built: not in what it carried.
                 let later = add_tx(tx, Basket::Thread(thread), &page("oxplow:oxplow/commit?sha=later"))?;
                 let handoff = oxplow_domain::HandoffId::new(7);
-                take_delivered_tx(tx, thread, None, &[handoff], &[own, attached])?;
-                Ok((basket, own, attached, later))
+                take_delivered_tx(tx, thread, None, &[handoff], &[own, sent])?;
+                Ok((basket, own, sent, later))
             })
             .await
             .unwrap();
-        let (edges, attached_to): (Vec<String>, Option<i64>) = db
+        let (edges, next_for): (Vec<String>, Option<i64>) = db
             .read(move |c| {
                 let mut stmt = c
                     .prepare("SELECT target_uri FROM page_ref WHERE source_uri = 'oxplow:oxplow/turn?id=trn3' ORDER BY target_uri")
@@ -853,7 +929,7 @@ mod tests {
                     .map_err(map_sql_err)?
                     .collect::<rusqlite::Result<Vec<_>>>()
                     .map_err(map_sql_err)?;
-                Ok((edges, get_basket_tx(c, basket)?.unwrap().attached_thread_id))
+                Ok((edges, get_basket_tx(c, basket)?.unwrap().next_thread_id))
             })
             .await
             .unwrap();
@@ -865,8 +941,8 @@ mod tests {
                 oxplow_domain::uri::build::handoff_uri(oxplow_domain::HandoffId::new(7)),
             ]
         );
-        assert_eq!(attached_to, None, "a basket is attached for one prompt");
-        for gone in [own, attached] {
+        assert_eq!(next_for, None, "Send Next lasts one send");
+        for gone in [own, sent] {
             assert!(db.read(move |c| get_tx(c, gone)).await.unwrap().is_none());
         }
         assert!(db.read(move |c| get_tx(c, later)).await.unwrap().is_some());
@@ -884,9 +960,9 @@ mod tests {
         assert!(db.read(move |c| get_tx(c, next)).await.unwrap().is_none());
     }
 
-    /// A thread's own items go with it; a basket attached to it is detached.
+    /// A thread's own items go with it; a basket set next for it stays, set for none.
     #[tokio::test]
-    async fn deleting_a_thread_takes_its_items_and_detaches_its_baskets() {
+    async fn deleting_a_thread_takes_its_items_and_frees_its_next_basket() {
         let (db, thread, _) = with_threads().await;
         let (basket, own) = db
             .transaction(move |tx| {
@@ -901,7 +977,7 @@ mod tests {
                     Basket::Thread(thread),
                     &page("oxplow:oxplow/commit?sha=b"),
                 )?;
-                attach_tx(tx, basket, Some(thread))?;
+                set_next_tx(tx, thread, Some(basket))?;
                 tx.execute("DELETE FROM threads WHERE id = 1", [])
                     .map_err(map_sql_err)?;
                 Ok((basket, own))
@@ -914,7 +990,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(kept.attached_thread_id, None);
+        assert_eq!(kept.next_thread_id, None);
         assert_eq!(
             db.read(move |c| items_tx(c, Basket::Named(basket)))
                 .await

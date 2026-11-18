@@ -31,7 +31,8 @@ To give the agent something to read, right-click a row, a backlink, a
 selection, or anywhere on a page, and choose **Add to Context** (the @
 entry), or use the page's ☰ menu. It goes in a context basket: the thread's
 own, or a named one you pick. The next prompt you send to any agent in the
-thread carries the thread's basket and any basket attached to it.
+thread carries one basket: the thread's own, or the one you chose with Send
+Next.
 Nothing is sent on its own.
 
 ## Shells

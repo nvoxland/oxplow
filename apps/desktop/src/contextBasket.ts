@@ -4,7 +4,7 @@
  * basket ("This Thread") or in a named basket of the project, read from
  * `v_context_item` and `v_context_basket` and written through the
  * `oxplow.context.*` commands. The next prompt to an agent in a thread
- * carries its own basket and every basket attached to it.
+ * carries one basket: its own, or the named basket sent next (Send Next).
  * `.context/agent-model.md` → "The context basket".
  */
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
@@ -70,8 +70,9 @@ export interface BasketItem {
 export interface NamedBasket {
   id: number;
   name: string;
-  /** The thread whose next prompt carries it (`thr<n>`), or null. */
-  attachedTo: string | null;
+  /** The thread whose next prompt carries it instead of its own (Send
+   *  Next; `thr<n>`), or null. */
+  nextFor: string | null;
   items: BasketItem[];
 }
 
@@ -90,7 +91,7 @@ export const ITEMS_SQL = `
   ORDER BY added_at, id`;
 
 export const BASKETS_SQL = `
-  SELECT id, name, attached_thread_id
+  SELECT id, name, next_thread_id
   FROM v_context_basket
   ORDER BY name COLLATE NOCASE`;
 
@@ -120,21 +121,32 @@ export function basketsFrom(items: readonly BasketItem[], baskets: SqlQueryResul
     own: items.filter((i) => i.basket == null),
     named: baskets.rows.map((row) => {
       const name = String(at(row, "name"));
-      const attached = at(row, "attached_thread_id");
+      const next = at(row, "next_thread_id");
       return {
         id: Number(at(row, "id")),
         name,
-        attachedTo: attached == null ? null : `thr${str(attached)}`,
+        nextFor: next == null ? null : `thr${str(next)}`,
         items: items.filter((i) => i.basket === name),
       };
     }),
   };
 }
 
-/** What `thread`'s next prompt will carry: its own items and those of every
- *  basket attached to it. */
+/** The basket `thread`'s next prompt sends: the named basket sent next
+ *  for it while it holds something, else This Thread (`THREAD_MARK`); null
+ *  with no thread. As `context_store::waiting_for_thread_tx` decides. */
+export function sendingNext(baskets: Baskets, thread: string | null): string | null {
+  if (!thread) return null;
+  const chosen = baskets.named.find((b) => b.nextFor === thread && b.items.length > 0);
+  return chosen ? chosen.name : THREAD_MARK;
+}
+
+/** What `thread`'s next prompt will carry: the items of the basket it sends. */
 export function nextPrompt(baskets: Baskets, thread: string | null): BasketItem[] {
-  return [...baskets.own, ...baskets.named.filter((b) => thread != null && b.attachedTo === thread).flatMap((b) => b.items)];
+  const sending = sendingNext(baskets, thread);
+  if (sending == null) return [];
+  if (sending === THREAD_MARK) return baskets.own;
+  return baskets.named.find((b) => b.name === sending)?.items ?? [];
 }
 
 /** The thread's own basket and every named basket, re-read as they change. */
@@ -305,12 +317,10 @@ export async function clearContext(which: Destination): Promise<void> {
   await personCommands.run("Clear Context", "oxplow.context.clear", which);
 }
 
-export async function attachBasket(basket: string, thread: string): Promise<void> {
-  await personCommands.run("Attach Basket", "oxplow.context.attach", { basket, thread });
-}
-
-export async function detachBasket(basket: string): Promise<void> {
-  await personCommands.run("Detach Basket", "oxplow.context.detach", { basket });
+/** Send `basket` with `thread`'s next prompt instead of its own; null:
+ *  send the thread's own. */
+export async function sendNext(thread: string, basket: string | null): Promise<void> {
+  await personCommands.run("Send Next", "oxplow.context.send_next", basket ? { thread, basket } : { thread });
 }
 
 export async function renameBasket(basket: string, name: string): Promise<void> {

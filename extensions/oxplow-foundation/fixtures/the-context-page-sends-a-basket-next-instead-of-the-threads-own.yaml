@@ -1,6 +1,6 @@
 # The Context page: a named basket is listed under Baskets with what it holds
-# under In other baskets; Attach to This Thread moves its items under Next
-# prompt, after the thread's own, and Detach puts them back.
+# under In other baskets. Send Next makes its items the next prompt's instead
+# of the thread's own; Send This Thread Instead puts the thread's own back.
 given:
   - { command: oxplow.context.add, input: { thread: thr1, uri: "oxplow:oxplow/page?page=problems", label: Problems } }
   - { command: oxplow.context.add, input: { basket: Auth, uri: "oxplow:oxplow/page?page=git-history", label: History, note: "Why did this change?" } }
@@ -12,20 +12,24 @@ expect:
         - { what: Problems, basket: This Thread }
     baskets:
       rows:
-        - { name: Auth, items: 1, attached_to: null }
+        - { name: Auth, items: 1, next_for: null }
     in_baskets:
       rows:
         - { what: History, basket: Auth, note: "Why did this change?" }
 steps:
-  - press: { action: attach, node: baskets, row: { name: Auth } }
+  - press: { action: send-next, node: baskets, row: { name: Auth } }
+    expect: { ok: true }
+  - expect:
+      loaders:
+        next:
+          rows:
+            - { what: History, basket: Auth }
+        in_baskets: { rows: 0 }
+  - press: { action: send-own, node: baskets, row: { name: Auth } }
     expect: { ok: true }
   - expect:
       loaders:
         next:
           rows:
             - { what: Problems, basket: This Thread }
-            - { what: History, basket: Auth }
-        in_baskets: { rows: 0 }
-  - press: { action: detach, node: baskets, row: { name: Auth } }
-    expect: { ok: true }
-  - expect: { loaders: { in_baskets: { rows: 1 } } }
+        in_baskets: { rows: 1 }

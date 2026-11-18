@@ -347,9 +347,9 @@ intent:
     - name: the-context-page-shows-an-items-note-and-edits-it
       input: { page: context, params: { thread_id: 1 } }
       expect: each item's note beside it; Edit Note… changes or clears it
-    - name: the-context-page-attaches-a-basket-to-the-threads-next-prompt
+    - name: the-context-page-sends-a-basket-next-instead-of-the-threads-own
       input: { page: context, params: { thread_id: 1 } }
-      expect: named baskets with their items; Attach to This Thread puts a basket's items in the next prompt, Detach takes them out
+      expect: named baskets with their items; Send Next makes a basket the next prompt's instead of This Thread, Send This Thread Instead puts it back
     - name: session-transcript-lists-turns-and-handbacks
       input: { page: session-transcript }
       expect: a session's turns oldest first, a hand-back marked, tool calls counted, start at a turn, paged by 50
@@ -982,9 +982,9 @@ commands:
     scope: bookmarks.write
     op: remove
     example: {"uri": "oxplow:oxplow/page?page=git-dashboard", "thread": "thr3"}
-  # context.write — the person's context baskets: each thread's own, and named baskets attached to a thread's next prompt.
+  # context.write — the person's context baskets: each thread's own, and named baskets; a thread's next prompt sends one.
   - name: context.add
-    summary: "Put a page (`uri`) or a piece of text (`text`, from `uri` when known, with the lines `around` it when `uri` has none to read back, as a terminal) in a basket: a `thread`'s own, or a named `basket` (made when there is none), with an optional `note` of what the person wants done about it. `stream` is where it was collected (default: the thread's), so a file it names is read in that worktree. The next prompt to any agent in a thread carries its own basket and every basket attached to it, each note with its item, then deletes those items. The person's: an agent can't add to it."
+    summary: "Put a page (`uri`) or a piece of text (`text`, from `uri` when known, with the lines `around` it when `uri` has none to read back, as a terminal) in a basket: a `thread`'s own, or a named `basket` (made when there is none), with an optional `note` of what the person wants done about it. `stream` is where it was collected (default: the thread's), so a file it names is read in that worktree. The next prompt to any agent in a thread carries one basket — its own, or the one set with `context.send_next` — each note with its item, then deletes those items. The person's: an agent can't add to it."
     scope: context.write
     op: add
     example: {"basket": "Auth rework", "stream": "str1", "uri": "oxplow:oxplow/file?path=src/a.rs#lines=10-20", "text": "fn a() {}", "note": "This should handle an empty list."}
@@ -1008,16 +1008,11 @@ commands:
     scope: context.write
     op: clear
     example: {"thread": "thr1"}
-  - name: context.attach
-    summary: "Attach a named `basket` to a `thread`: that thread's next prompt carries its items after the thread's own, then empties it and detaches it. A basket is attached to one thread at a time."
+  - name: context.send_next
+    summary: "Choose what a `thread`'s next prompt carries: the named `basket` instead of the thread's own, or (no `basket`) the thread's own again. It lasts one send: the prompt carries that basket, empties it, and the thread sends its own after. A basket goes next for one thread at a time."
     scope: context.write
-    op: attach
+    op: send_next
     example: {"basket": "Auth rework", "thread": "thr1"}
-  - name: context.detach
-    summary: "Detach a named `basket` from the thread it is attached to."
-    scope: context.write
-    op: detach
-    example: {"basket": "Auth rework"}
   - name: context.create_basket
     summary: "Make an empty named context basket (`name`: up to 60 characters, not \"This Thread\", unique in any case). Named baskets belong to the project, across all its streams."
     scope: context.write

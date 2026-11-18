@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { addInput, basketsFrom, defaultDestination, itemsFromResult, nextPrompt } from "./contextBasket.js";
+import { addInput, basketsFrom, defaultDestination, itemsFromResult, nextPrompt, sendingNext } from "./contextBasket.js";
 import { selectionUri } from "./agent-context-ref.js";
 import type { SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
 
@@ -20,7 +20,7 @@ const items = itemsFromResult(
 const baskets = basketsFrom(
   items,
   result(
-    ["id", "name", "attached_thread_id"],
+    ["id", "name", "next_thread_id"],
     [
       [1, "Auth", 7],
       [2, "Release", null],
@@ -30,17 +30,23 @@ const baskets = basketsFrom(
 
 test("the thread's own items and each named basket's are apart", () => {
   expect(baskets.own.map((i) => i.id)).toEqual([1]);
-  expect(baskets.named.map((b) => [b.name, b.attachedTo, b.items.map((i) => i.id)])).toEqual([
+  expect(baskets.named.map((b) => [b.name, b.nextFor, b.items.map((i) => i.id)])).toEqual([
     ["Auth", "thr7", [2]],
     ["Release", null, [3]],
   ]);
   expect(items[1]).toMatchObject({ sourceUri: "oxplow:oxplow/file?path=a.rs", text: "fn main() {}", label: null, note: "Handle the empty case." });
 });
 
-test("a thread's next prompt carries its own items and its attached baskets'", () => {
-  expect(nextPrompt(baskets, "thr7").map((i) => i.id)).toEqual([1, 2]);
+test("a thread's next prompt carries one basket: the one sent next, else its own", () => {
+  expect(sendingNext(baskets, "thr7")).toBe("Auth");
+  expect(nextPrompt(baskets, "thr7").map((i) => i.id)).toEqual([2]);
+  expect(sendingNext(baskets, "thr8")).toBe("@thread");
   expect(nextPrompt(baskets, "thr8").map((i) => i.id)).toEqual([1]);
-  expect(nextPrompt(baskets, null).map((i) => i.id)).toEqual([1]);
+  expect(sendingNext(baskets, null)).toBeNull();
+  expect(nextPrompt(baskets, null)).toEqual([]);
+  // An empty basket sent next: the thread's own goes.
+  const empty = { ...baskets, named: baskets.named.map((b) => (b.name === "Auth" ? { ...b, items: [] } : b)) };
+  expect(sendingNext(empty, "thr7")).toBe("@thread");
 });
 
 test("an add names its basket and stream, with only what is set", () => {

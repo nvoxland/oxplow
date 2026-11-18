@@ -1,8 +1,8 @@
 title: Context
-description: 'What you collected for agents, in this thread''s own basket and your named baskets. The next prompt here carries this thread''s basket and every basket attached to it.'
+description: 'What you collected for agents, in this thread''s own basket and your named baskets. The next prompt here carries one basket: this thread''s, or the one you send next.'
 icon: at-sign
 category: Work
-keywords: basket collected agent prompt note review attach
+keywords: basket collected agent prompt note review send next
 params:
 - name: thread_id
 loaders:
@@ -13,17 +13,17 @@ loaders:
              c.source_uri, substr(c.text, 1, 200) AS preview, c.note,
              coalesce(c.basket, 'This Thread') AS basket, c.added_at
       FROM v_context_item c
-      LEFT JOIN v_context_basket b ON b.id = c.basket_id
-      WHERE c.thread_id = :thread_id OR b.attached_thread_id = :thread_id
-      ORDER BY c.basket_id IS NOT NULL, c.basket, c.added_at, c.id
+      WHERE CASE WHEN EXISTS (SELECT 1 FROM v_context_basket n WHERE n.next_thread_id = :thread_id AND n.items > 0)
+                 THEN c.basket_id = (SELECT n.id FROM v_context_basket n WHERE n.next_thread_id = :thread_id)
+                 ELSE c.thread_id = :thread_id END
+      ORDER BY c.added_at, c.id
   baskets:
     sql: |
       SELECT b.id, b.name, b.items,
-             b.attached_thread_uri,
-             (SELECT t.title FROM v_thread t WHERE t.id = b.attached_thread_id) AS attached_to,
-             b.attached_thread_id = :thread_id AS attached_here,
-             b.attached_thread_id IS NOT NULL AS attached,
-             coalesce(b.attached_thread_id <> :thread_id, 1) AS attachable
+             b.next_thread_uri,
+             (SELECT t.title FROM v_thread t WHERE t.id = b.next_thread_id) AS next_for,
+             b.next_thread_id = :thread_id AS next_here,
+             coalesce(b.next_thread_id <> :thread_id, 1) AS sendable
       FROM v_context_basket b
       ORDER BY b.name
   in_baskets:
@@ -33,7 +33,7 @@ loaders:
              c.source_uri, substr(c.text, 1, 200) AS preview, c.note, c.basket, c.added_at
       FROM v_context_item c
       LEFT JOIN v_context_basket b ON b.id = c.basket_id
-      WHERE c.basket_id IS NOT NULL AND b.attached_thread_id IS NOT :thread_id
+      WHERE c.basket_id IS NOT NULL AND b.next_thread_id IS NOT :thread_id
       ORDER BY c.basket, c.added_at, c.id
 view:
   stack:
@@ -58,7 +58,7 @@ view:
       label: Added
       format: relative
       width: 110
-    empty: Nothing for this thread's next prompt yet. Add a page from its ☰ or text from a selection's right-click, with a note of what you want done about it, or attach one of your baskets.
+    empty: Nothing for this thread's next prompt yet. Add a page from its ☰ or text from a selection's right-click, with a note of what you want done about it, or send one of your baskets next.
     actions:
     - id: note
       label: Edit Note…
@@ -89,27 +89,27 @@ view:
     - key: items
       label: Items
       width: 70
-    - key: attached_to
-      label: Attached to
+    - key: next_for
+      label: Sent next by
       link:
         kind: page
-        from: attached_thread_uri
+        from: next_thread_uri
     empty: No named baskets. Pick "New basket…" when you add to context to start one.
     actions:
-    - id: attach
-      label: Attach to This Thread
-      command: oxplow.context.attach
-      when: attachable
+    - id: send-next
+      label: Send Next
+      command: oxplow.context.send_next
+      when: sendable
       input:
         basket: '{{row.name}}'
         thread: thr{{param.thread_id}}
       row: true
-    - id: detach
-      label: Detach
-      command: oxplow.context.detach
-      when: attached
+    - id: send-own
+      label: Send This Thread Instead
+      command: oxplow.context.send_next
+      when: next_here
       input:
-        basket: '{{row.name}}'
+        thread: thr{{param.thread_id}}
       row: true
     - id: rename
       label: Rename…
@@ -156,7 +156,7 @@ view:
       label: Added
       format: relative
       width: 110
-    empty: Nothing in a basket not attached here.
+    empty: Nothing in a basket that isn't going next here.
     actions:
     - id: note
       label: Edit Note…

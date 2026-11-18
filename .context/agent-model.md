@@ -1007,12 +1007,14 @@ carries it.
 **basket**: each thread has its own (the app calls it "This Thread"), and
 the person keeps **named baskets** (`context_basket`, `v_context_basket`)
 for the project, across every stream — collected into while reading, with
-no thread needed. A named basket is **attached** to a thread
-(`oxplow.context.attach`, one thread at a time). The next prompt of *any*
-agent in a thread carries a `<context-basket>` block after the handoffs
-(`agent_context::basket_block` over `context_store::waiting_for_thread_tx`):
-the thread's own items, then each attached basket's under a line
-`From your "<name>" basket:`, numbered through. Each page is
+no thread needed. A thread's next prompt sends **one** basket: its own, or
+the named basket set to go next for it (**Send Next**,
+`oxplow.context.send_next`; one per thread, a basket next for one thread at
+a time; a basket set next but empty sends the thread's own instead). The
+next prompt of *any* agent in the thread carries it as a `<context-basket>`
+block after the handoffs (`agent_context::basket_block` over
+`context_store::waiting_for_thread_tx`), a named basket's items under a line
+`From your "<name>" basket:`, numbered. Each page is
 `[oxplow uri …]` with its label; each piece of text is quoted (up to
 `BASKET_TEXT_IN_CONTEXT` characters) with where it came from; a text whose
 source has no lines to read back (a terminal) brings its `around` in a
@@ -1025,17 +1027,18 @@ reader's own worktree otherwise. The person's note on an item (`note`,
 never cut) is indented under it; when any item has one, the header tells
 the agent to act on each and answer by number. `commit` runs
 `take_delivered_tx`: it links the turn to every item (`prompt_mention`),
-**deletes** the items and detaches the baskets they came from (attachment
-is for one prompt; the basket stays, empty, until the person deletes it).
+**deletes** the items and clears the choice, so the thread sends its own
+again (Send Next lasts one send; the basket stays, empty, until the person
+deletes it).
 There is no delivered history: the turn's links and the transcript are the
 record. Claude Code and opencode get it at prompt submit. Codex gets it by
-injection while no turn runs (`context.add`, `move` and `attach` wake
+injection while no turn runs (`context.add`, `move` and `send_next` wake
 `context_watch`), so with two agents in a thread an idle Codex can take
 the baskets before the agent the person prompts. The baskets are the
 person's: an agent's `context.*` run is refused, but it can read
 `v_context_item` and `v_context_basket` ("look at my Auth basket"). Pinned
 by `the_context_basket_reaches_the_next_prompt_once` and
-`an_attached_basket_rides_one_prompt_and_empties`.
+`a_basket_sent_next_replaces_the_threads_own_for_one_prompt`.
 
 *The UI* (`apps/desktop/src/contextBasket.ts`, the window's selected thread
 and its stream from `setSelectedThread`): every add opens the **Context
@@ -1063,18 +1066,19 @@ toasts with Undo. The **Context** dock panel (`@`, badge = what this
 thread's next prompt carries, `nextPrompt`) has one tab per basket, drawn as
 the main area's tab strip (the panel-header tint, ruled tabs, the open one
 tinted and underlined in the accent): This Thread (with a thread) and each
-named basket with its count; a basket attached to this thread wears a link
-mark. Under it, a bar in the page nav bar's colors holds the open tab's
-actions on the left: This Thread's Clear and the baskets attached to it
-(links to their tabs); a named basket's **Attach to This Thread** switch
-(on: "Attached to This Thread", pressing it detaches; "Attached to another
-thread" beside it otherwise), Rename (in place), Clear, Delete — also on
-the tab's right-click. The open tab is the app preference
-`context.openTab`. Items are one row each: ×, the name, the text on one
-line (cut to fit) and a note mark (accent when there is a note, its text
-on hover); a row's right-click has **Move to ▸** and Remove. A row's click
-opens the item alone in the panel: its name (opening its source), its
-whole text, its note edited in place, and Back / Move to… / Remove in the
+named basket with its count; the one tab the next prompt sends wears a
+paper plane (`sendingNext`). Under it, a bar in the page nav bar's colors
+holds the open tab's actions on the left: the **Send Next** switch (the
+same paper plane, icon only, its tooltip saying what happens; on for the
+basket that goes, and pressing it on a named basket sends This Thread
+again), then This Thread's Clear, or a named basket's Rename (in place),
+Clear, Delete ("Sent next by another thread" beside them when so) — also
+on the tab's right-click. The open tab is the app preference
+`context.openTab`. Items are one row each: the name, a note mark (accent
+when there is a note, its text on hover), the text on one line (cut to
+fit) and a × at the far right; a row's right-click has **Move to ▸** and
+Remove. A row's click opens the item alone in the panel: its name (opening
+its source), its whole text, its note edited in place, and Back / Move to… / Remove in the
 bar; Escape outside the note goes back. While an add waits, its card is all the panel
 shows; the add then opens the tab it went to. The **Context** page (foundation page `context`) lists Next
 prompt, Baskets and In other baskets, with the same actions.

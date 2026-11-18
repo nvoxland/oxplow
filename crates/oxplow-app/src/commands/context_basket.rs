@@ -1,12 +1,12 @@
 //! Context basket operations (`context.write`; declared as commands in
 //! `extensions/oxplow-foundation`): the person collects pages and pieces of
 //! text for agents into a basket — a thread's own, or a named basket of the
-//! project — moves them between baskets, notes them, and attaches a named
-//! basket to a thread's next prompt. `Tx` over `oxplow_db::context_store`'s
-//! `_tx` cores; read back through `v_context_item` and `v_context_basket`.
-//! The next prompt to any agent in a thread carries its own basket and the
-//! baskets attached to it (`agent_context`). Each undoes; an agent's call is
-//! refused, since the baskets are what the person collected.
+//! project — moves them between baskets, notes them, and picks which basket
+//! a thread's next prompt carries (Send Next). `Tx` over
+//! `oxplow_db::context_store`'s `_tx` cores; read back through
+//! `v_context_item` and `v_context_basket`. The next prompt to any agent in a
+//! thread carries one basket (`agent_context`). Each undoes; an agent's call
+//! is refused, since the baskets are what the person collected.
 
 use std::sync::Arc;
 
@@ -29,8 +29,7 @@ pub const REMOVE: &str = "oxplow.context.remove";
 pub const NOTE: &str = "oxplow.context.note";
 pub const MOVE: &str = "oxplow.context.move";
 pub const CLEAR: &str = "oxplow.context.clear";
-pub const ATTACH: &str = "oxplow.context.attach";
-pub const DETACH: &str = "oxplow.context.detach";
+pub const SEND_NEXT: &str = "oxplow.context.send_next";
 pub const CREATE_BASKET: &str = "oxplow.context.create_basket";
 pub const RENAME_BASKET: &str = "oxplow.context.rename_basket";
 pub const DELETE_BASKET: &str = "oxplow.context.delete_basket";
@@ -109,11 +108,13 @@ pub struct WhichInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct AttachInput {
-    /// The named basket, by name.
-    pub basket: String,
-    /// The thread whose next prompt carries it (`thr1`).
+pub struct SendNextInput {
+    /// The thread whose next prompt it is (`thr1`).
     pub thread: String,
+    /// The named basket to send instead of the thread's own; absent: the
+    /// thread's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub basket: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -410,56 +411,57 @@ pub fn clear_op() -> Op {
     )
 }
 
-/// The call that puts `basket`'s attachment back to `thread` (none:
-/// detached).
-fn re_attach(basket: &str, thread: Option<i64>) -> CommandCall {
-    match thread {
-        Some(t) => CommandCall {
-            name: ATTACH.into(),
-            input: json!({ "basket": basket, "thread": ThreadId::new(t).to_string() }),
-        },
-        None => CommandCall {
-            name: DETACH.into(),
-            input: json!({ "basket": basket }),
-        },
+/// The call that sets `thread`'s next send back to `basket` (by id; none:
+/// its own).
+fn re_next(
+    conn: &Connection,
+    thread: i64,
+    basket: Option<i64>,
+) -> Result<CommandCall, CommandError> {
+    let mut input = json!({ "thread": ThreadId::new(thread).to_string() });
+    if let Some(id) = basket {
+        let b = store::get_basket_tx(conn, id)?
+            .ok_or_else(|| invalid("/basket", format!("no basket {id}")))?;
+        input["basket"] = json!(b.name);
     }
+    Ok(CommandCall {
+        name: SEND_NEXT.into(),
+        input,
+    })
 }
 
-/// `attach { basket, thread }`: the thread's next prompt carries the
-/// basket, then empties and detaches it. A basket is attached to one
-/// thread at a time.
-pub fn attach_op() -> Op {
+/// `send_next { thread, basket? }`: what the thread's next prompt carries —
+/// the named `basket` instead of the thread's own, or (none) the thread's
+/// own again. It lasts one send: then the thread sends its own. A basket
+/// goes next for one thread at a time; undoing puts back both the thread's
+/// choice and the basket's thread before.
+pub fn send_next_op() -> Op {
     op(
-        "attach",
-        schema::<AttachInput>(),
+        "send_next",
+        schema::<SendNextInput>(),
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             person_only(ctx)?;
-            let input: AttachInput = parse(input)?;
-            let basket = named(ctx.conn, &input.basket, "/basket")?;
+            let input: SendNextInput = parse(input)?;
             let thread = thread_of(&input.thread, "/thread")?;
-            let before = store::attach_tx(ctx.conn, basket.id, Some(thread))?;
+            let basket = match &input.basket {
+                Some(name) => Some(named(ctx.conn, name, "/basket")?),
+                None => None,
+            };
+            let before = store::set_next_tx(ctx.conn, thread, basket.as_ref().map(|b| b.id))?;
+            let mut calls = Vec::new();
+            if let (Some(other), Some(b)) = (before.basket_was_next_for, &basket) {
+                calls.push(re_next(ctx.conn, other, Some(b.id))?);
+            }
+            if before.basket != basket.as_ref().map(|b| b.id) {
+                calls.push(re_next(ctx.conn, thread.value(), before.basket)?);
+            }
             Ok(HandlerOutput {
-                result: json!({ "basket": basket.name, "thread": thread.to_string() }),
-                inverse: (before != Some(thread.value())).then(|| re_attach(&basket.name, before)),
-                ..HandlerOutput::default()
-            })
-        })),
-    )
-}
-
-/// `detach { basket }`: no thread's next prompt carries it.
-pub fn detach_op() -> Op {
-    op(
-        "detach",
-        schema::<BasketInput>(),
-        Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
-            person_only(ctx)?;
-            let input: BasketInput = parse(input)?;
-            let basket = named(ctx.conn, &input.basket, "/basket")?;
-            let before = store::attach_tx(ctx.conn, basket.id, None)?;
-            Ok(HandlerOutput {
-                result: json!({ "basket": basket.name }),
-                inverse: before.map(|t| re_attach(&basket.name, Some(t))),
+                result: json!({ "thread": thread.to_string(), "basket": basket.map(|b| b.name) }),
+                inverse: if calls.len() > 1 {
+                    sequence(calls)
+                } else {
+                    calls.pop()
+                },
                 ..HandlerOutput::default()
             })
         })),
@@ -513,7 +515,7 @@ pub fn rename_basket_op() -> Op {
 }
 
 /// `delete_basket { basket }`: the basket and what is in it; undoing makes
-/// it again with its items and its attachment.
+/// it again with its items and, when it was set to go next, that.
 pub fn delete_basket_op() -> Op {
     op(
         "delete_basket",
@@ -529,8 +531,11 @@ pub fn delete_basket_op() -> Op {
             for item in store::items_tx(ctx.conn, Basket::Named(basket.id))? {
                 calls.push(re_add(ctx.conn, &item)?);
             }
-            if let Some(t) = basket.attached_thread_id {
-                calls.push(re_attach(&basket.name, Some(t)));
+            if let Some(t) = basket.next_thread_id {
+                calls.push(CommandCall {
+                    name: SEND_NEXT.into(),
+                    input: json!({ "thread": ThreadId::new(t).to_string(), "basket": basket.name }),
+                });
             }
             let (_, items) =
                 store::delete_basket_tx(ctx.conn, basket.id)?.expect("the basket just read");
@@ -551,8 +556,7 @@ pub fn ops() -> Vec<Op> {
         note_op(),
         move_op(),
         clear_op(),
-        attach_op(),
-        detach_op(),
+        send_next_op(),
         create_basket_op(),
         rename_basket_op(),
         delete_basket_op(),
@@ -604,6 +608,10 @@ mod tests {
             })
             .await
             .unwrap()
+    }
+
+    async fn next(fx: &crate::test_fixtures::ThreadFixture, name: &str) -> Option<i64> {
+        basket(fx, name).await.unwrap().next_thread_id
     }
 
     async fn basket(fx: &crate::test_fixtures::ThreadFixture, name: &str) -> Option<NamedBasket> {
@@ -777,32 +785,49 @@ mod tests {
         assert!(err.to_string().contains("no basket named"), "{err}");
     }
 
-    /// Attach and detach undo to the attachment before.
+    /// Send Next picks the basket a thread sends; a basket goes next for one
+    /// thread at a time; undo puts back both the thread's choice and the
+    /// basket's thread before; no basket is the thread's own again.
     #[tokio::test]
-    async fn attach_detach_and_undo() {
+    async fn send_next_and_undo() {
         let fx = services_with_thread().await;
         let thread = fx.thread.to_string();
         run(&fx, CREATE_BASKET, json!({ "name": "Auth" })).await;
-        let attached = run(&fx, ATTACH, json!({ "basket": "Auth", "thread": thread })).await;
+        run(&fx, CREATE_BASKET, json!({ "name": "Release" })).await;
+        let auth = run(
+            &fx,
+            SEND_NEXT,
+            json!({ "basket": "Auth", "thread": thread }),
+        )
+        .await;
+        assert_eq!(next(&fx, "Auth").await, Some(fx.thread.value()));
+        let release = run(
+            &fx,
+            SEND_NEXT,
+            json!({ "basket": "Release", "thread": thread }),
+        )
+        .await;
         assert_eq!(
-            basket(&fx, "Auth").await.unwrap().attached_thread_id,
-            Some(fx.thread.value())
+            (next(&fx, "Auth").await, next(&fx, "Release").await),
+            (None, Some(fx.thread.value())),
+            "one basket per thread"
         );
-        undo(&fx, &attached).await;
-        assert_eq!(basket(&fx, "Auth").await.unwrap().attached_thread_id, None);
-        run(&fx, ATTACH, json!({ "basket": "Auth", "thread": thread })).await;
-        let detached = run(&fx, DETACH, json!({ "basket": "Auth" })).await;
-        assert_eq!(basket(&fx, "Auth").await.unwrap().attached_thread_id, None);
-        undo(&fx, &detached).await;
+        undo(&fx, &release).await;
         assert_eq!(
-            basket(&fx, "Auth").await.unwrap().attached_thread_id,
-            Some(fx.thread.value())
+            (next(&fx, "Auth").await, next(&fx, "Release").await),
+            (Some(fx.thread.value()), None)
         );
+        let own = run(&fx, SEND_NEXT, json!({ "thread": thread })).await;
+        assert_eq!(next(&fx, "Auth").await, None);
+        undo(&fx, &own).await;
+        assert_eq!(next(&fx, "Auth").await, Some(fx.thread.value()));
+        undo(&fx, &auth).await;
+        assert_eq!(next(&fx, "Auth").await, None);
     }
 
-    /// A basket is renamed and back; deleting an attached basket with items
-    /// takes them, and undoing it makes it again with its items, their
-    /// streams and its attachment.
+    /// A basket is renamed and back; deleting a basket set to go next, with
+    /// items, takes them, and undoing it makes it again with its items, their
+    /// streams and its place as next.
     #[tokio::test]
     async fn rename_and_delete_with_undo() {
         let fx = services_with_thread().await;
@@ -818,7 +843,7 @@ mod tests {
         assert!(basket(&fx, "Auth").await.is_some());
         run(
             &fx,
-            ATTACH,
+            SEND_NEXT,
             json!({ "basket": "Auth", "thread": fx.thread.to_string() }),
         )
         .await;
@@ -826,7 +851,7 @@ mod tests {
         assert!(basket(&fx, "Auth").await.is_none());
         undo(&fx, &deleted).await;
         let back = basket(&fx, "Auth").await.unwrap();
-        assert_eq!(back.attached_thread_id, Some(fx.thread.value()));
+        assert_eq!(back.next_thread_id, Some(fx.thread.value()));
         let in_it = items(&fx, Some("Auth")).await;
         assert_eq!(uris(&in_it), ["oxplow:oxplow/commit?sha=a"]);
         assert_eq!(

@@ -36,11 +36,13 @@ first and pick a thread later.
 Named baskets belong to the project, not to one stream or thread. Collect into
 one while you read in one stream, then send it to a thread in another.
 
-To send a named basket, **attach** it to a thread. Open the **Context** panel
-(the @ icon in the bottom bar) and choose **Attach** on the basket. The
-thread's next prompt carries This Thread's items and the attached basket's.
-After that the basket is empty and no longer attached. The basket itself stays
-until you delete it.
+Each message you send to an agent carries **one** basket. By default that is
+**This Thread**. To send a named basket instead, open it in the **Context** panel
+(the @ icon in the bottom bar) and press **Send Next** (the paper-plane button).
+That basket's tab gets the paper plane, and the thread's next prompt carries
+its items instead of This Thread's. After that the basket is empty, and the
+thread goes back to sending This Thread. The basket itself stays until you
+delete it. This Thread's items wait for a later prompt.
 
 Each item remembers the stream you collected it in. When it goes to a thread in
 another stream, the agent is told where it came from, so it reads the file from
@@ -49,18 +51,20 @@ the right worktree.
 ## Managing baskets
 
 The **Context** panel has a tab for each basket: **This Thread** and each named
-basket, with how many items it holds. A basket attached to this thread has a
-link mark on its tab, and This Thread's tab names it too.
+basket, with how many items it holds. The basket the thread's next prompt will
+send has a paper plane on its tab.
 
-- Each item is one row: its name, the start of its text and a note mark (blue
-  when it has a note). Take an item out with its ×.
+- Each item is one row: its name, a note mark (blue when it has a note), the
+  start of its text, and a × at the right to take it out.
 - Click a row to see the item alone: its whole text and its note. Click the
   note to add or change it, and click the name to open where it came from.
   **Back** returns to the list.
 - Right-click an item for **Move to**, to put it in another basket.
-- A named basket's tab has **Attach to This Thread** (it shows as **Attached to
-  This Thread** while it is on; click it again to detach), **Rename**,
-  **Clear** and **Delete**. Right-clicking its tab gives the same choices.
+- Each tab's bar starts with **Send Next**, the paper-plane button. Hover over it
+  to see what it does. On a named basket that is sending next, press it again
+  to send This Thread instead.
+- A named basket's bar also has **Rename**, **Clear** and **Delete**.
+  Right-clicking its tab gives the same choices.
 - **Clear** on This Thread's tab takes out all of its items.
 
 After you add something, the panel opens the tab of the basket it went to. The
@@ -69,8 +73,8 @@ tables.
 
 ## What the agent gets
 
-The next prompt to any agent in the thread carries This Thread's items and
-every basket attached to the thread, each with its note. Items from a named
+The next prompt to any agent in the thread carries one basket, with each
+note: This Thread, or the basket you chose with Send Next. Items from a named
 basket are listed under its name. Then those items are gone: the agent's
 transcript is the record of what it got.
 

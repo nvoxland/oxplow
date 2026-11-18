@@ -146,7 +146,8 @@ markdown itself, nor edits it in a `<textarea>`.
   **window-level** ones (branch picker, Quick Open, Navigator forms, the
   media lightbox; `Slideover` for the detail openings). The tab modal
   copies the dock panel's chrome (surface, border, header rule; its × is the
-  dock's _, since a dock panel hides rather than closes) so the
+  dock's _, since a dock panel hides rather than closes; the dock's header
+  wears the rail panels' header blue, `--rail-panel-header-bg`) so the
   two look alike; they are separate components because one anchors to the
   bottom bar and resizes, the other covers a tab.
 - **An action form is for a person** (rules for every `form: true`
@@ -1293,8 +1294,9 @@ caller may bypass the bus to write to the terminal.
   panel is one of the three kinds of dialog, as Ask the Assistant's): a
   note and **To**, the basket — This Thread (the selected thread's own), a
   named basket, or + New basket (`oxplow.context.add`, toast with Undo). The next prompt to any
-  agent in a thread carries its own basket and every basket attached to
-  it. The Context dock panel and page list them.
+  agent in a thread carries one basket: its own, or the named basket sent
+  next (Send Next), after which it sends its own again. The Context dock
+  panel and page list them.
 - **Repair with the Agent** (on Extension problems, on a disabled
   contribution with an open repair item) is the same gesture: it fills
   the input with `Repair the extension described in [oxplow uri <item>]

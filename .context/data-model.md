@@ -1860,12 +1860,15 @@ whose source has no lines to read back (a terminal's scrollback).
 in that worktree when it is delivered in another stream.
 
 `context_basket` holds the named baskets: `name` (unique, NOCASE; never
-"This Thread"), and `attached_thread_id`, the thread whose next prompt
-carries it (one at a time; SET NULL when the thread goes). They belong to
-the project, across every stream. The next prompt to any agent in a thread
-carries its own items and every attached basket's
-(`waiting_for_thread_tx`), then `take_delivered_tx` links the turn to them
-(`prompt_mention`), **deletes** them and detaches their baskets
+"This Thread"), and `next_thread_id` (V48), the thread whose next prompt
+carries it instead of the thread's own (Send Next; a unique partial index
+keeps one per thread, a basket is next for one thread at a time; SET NULL
+when the thread goes). They belong to the project, across every stream.
+The next prompt to any agent in a thread carries **one** basket — the one
+set next while it holds something, else the thread's own
+(`waiting_for_thread_tx`) — then `take_delivered_tx` links the turn to the
+items (`prompt_mention`), **deletes** them and clears `next_thread_id`, so
+the thread sends its own again
 (`agent-model.md` "The context basket"): there is no delivered history.
 Read through `v_context_item` and `v_context_basket`; every write is an
 `oxplow.context.*` command (commands.md).
