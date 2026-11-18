@@ -145,7 +145,8 @@ markdown itself, nor edits it in a `<textarea>`.
   through `dockPanels.tsx`, extension panels with `dock: true`) and the
   **window-level** ones (branch picker, Quick Open, Navigator forms, the
   media lightbox; `Slideover` for the detail openings). The tab modal
-  copies the dock panel's chrome (surface, border, header rule, ×) so the
+  copies the dock panel's chrome (surface, border, header rule; its × is the
+  dock's _, since a dock panel hides rather than closes) so the
   two look alike; they are separate components because one anchors to the
   bottom bar and resizes, the other covers a tab.
 - **An action form is for a person** (rules for every `form: true`

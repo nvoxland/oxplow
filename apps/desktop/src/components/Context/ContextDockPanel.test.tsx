@@ -71,20 +71,31 @@ test("an item's × is at the left of its line", async () => {
   expect(item.firstElementChild?.getAttribute("data-testid")).toBe("context-panel-remove");
 });
 
-// An item's note shows under it and is edited in place: the edit is
-// `oxplow.context.note`, and an item with none offers "Add a note…".
-test("an item's note shows under it and is edited in place", async () => {
+// A row is the item's name, its text on one line and a note mark; its
+// click opens the item alone, where the whole text shows, the name opens its
+// source and the note is edited in place (`oxplow.context.note`). Back
+// returns to the list.
+test("a row opens the item alone, with its whole text and its note", async () => {
   setSelectedThread("thr7");
   items = [
-    [1, "text", "oxplow:oxplow/file?path=a.rs", null, "fn main() {}", "Handle the empty case.", null],
+    [1, "text", "oxplow:oxplow/file?path=a.rs#lines=3-4", null, "fn main() {\n  run();\n}", "Handle the empty case.", null],
     [2, "page", "oxplow:oxplow/page?page=tasks", "Tasks", null, null, null],
   ];
-  const view = render(<ContextDockBody streamId={null} onOpenPage={() => {}} />);
+  const opened: string[] = [];
+  const view = render(<ContextDockBody streamId={null} onOpenPage={(r) => opened.push(r.id)} />);
   await waitFor(() => expect(view.getAllByTestId("context-panel-item").length).toBe(2));
-  const notes = view.getAllByTestId("context-panel-note");
-  expect(notes[0]!.textContent).toBe("Handle the empty case.");
-  expect(notes[1]!.textContent).toBe("Add a note…");
-  fireEvent.click(notes[1]!);
+  expect(view.getAllByTestId("context-panel-preview")[0]!.textContent).toBe("fn main() { run(); }");
+  expect(view.getAllByTestId("context-panel-note-mark").map((m) => m.getAttribute("aria-label"))).toEqual(["Note: Handle the empty case.", "No note"]);
+  fireEvent.click(view.getAllByTestId("context-panel-item")[0]!);
+  expect(view.getByTestId("context-item-text").textContent).toBe("fn main() {\n  run();\n}");
+  expect(view.getByTestId("context-panel-note").textContent).toBe("Handle the empty case.");
+  fireEvent.click(view.getByTestId("context-item-title"));
+  expect(opened).toEqual(["oxplow:oxplow/file?path=a.rs#lines=3-4"]);
+  fireEvent.click(view.getByTestId("context-item-back"));
+  fireEvent.click(view.getAllByTestId("context-panel-item")[1]!);
+  const note = view.getByTestId("context-panel-note");
+  expect(note.textContent).toBe("Add a note for the agent…");
+  fireEvent.click(note);
   const field = await waitFor(() => {
     const el = view.container.querySelector('textarea[data-testid="context-panel-note"]');
     if (!el) throw new Error("no note field yet");
@@ -99,7 +110,7 @@ test("an empty basket says how things get in; with no thread and no basket the p
   setSelectedThread("thr7");
   const view = render(<ContextDockBody streamId={null} onOpenPage={() => {}} />);
   await waitFor(() => expect(view.getByTestId("context-tab-empty").textContent).toContain("Add a page from its ☰"));
-  expect(view.queryByTestId("context-panel-clear")).toBeNull();
+  expect((view.getByTestId("context-panel-clear") as HTMLButtonElement).disabled).toBe(true);
   cleanup();
   setSelectedThread(null);
   const none = render(<ContextDockBody streamId={null} onOpenPage={() => {}} />);
@@ -133,29 +144,18 @@ test("each basket is a tab; a named basket's bar attaches and detaches it", asyn
   expect(view.getByTestId("context-tab-empty")).toBeTruthy();
   fireEvent.click(view.getByTestId("context-attached-link"));
   await waitFor(() => expect(view.getByText("In Auth")).toBeTruthy());
-  fireEvent.click(view.getByTestId("context-basket-detach"));
+  // Attached here, the toggle is on; pressing it detaches.
+  expect(view.getByTestId("context-basket-attach").getAttribute("aria-checked")).toBe("true");
+  fireEvent.click(view.getByTestId("context-basket-attach"));
   await waitFor(() => expect(ran).toContainEqual(["oxplow.context.detach", { basket: "Auth" }]));
   fireEvent.click(tabs[2]!);
   await waitFor(() => expect(view.getByText("In Release")).toBeTruthy());
   expect(view.queryByText("In Auth")).toBeNull();
+  expect(view.getByTestId("context-basket-attach").getAttribute("aria-checked")).toBe("false");
   fireEvent.click(view.getByTestId("context-basket-attach"));
   await waitFor(() => expect(ran).toContainEqual(["oxplow.context.attach", { basket: "Release", thread: "thr7" }]));
   fireEvent.click(tabs[3]!);
   await waitFor(() => expect((view.getByTestId("context-basket-attach") as HTMLButtonElement).disabled).toBe(true));
-});
-
-// A text item shows its whole text as a quote, and its name opens its source.
-test("an item's text is a quote and its name opens its source", async () => {
-  setSelectedThread("thr7");
-  items = [[1, "text", "oxplow:oxplow/file?path=a.rs#lines=3-4", null, "fn main() {\n  run();\n}", null, null]];
-  const opened: string[] = [];
-  const view = render(<ContextDockBody streamId={null} onOpenPage={(r) => opened.push(r.id)} />);
-  const quote = await waitFor(() => view.getByTestId("context-panel-quote"));
-  expect(quote.textContent).toBe("fn main() {\n  run();\n}");
-  const title = view.getByTestId("context-panel-title");
-  expect(title.textContent).toBe("a.rs:3-4");
-  fireEvent.click(title);
-  expect(opened).toEqual(["oxplow:oxplow/file?path=a.rs#lines=3-4"]);
 });
 
 // An item's right-click moves it to another basket; a tab's deletes its basket.

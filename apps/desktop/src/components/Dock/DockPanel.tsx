@@ -3,12 +3,14 @@
 /// tier with a strong top edge and a shadow, so it stands off a page of any
 /// darkness (a terminal's black). A header with the
 /// panel's icon (the one its bar button draws), its title, the arrow to
-/// its page when it has one (`DockPanelDef.page`) and ×, a drag
+/// its page when it has one (`DockPanelDef.page`) and _ to hide it (it is
+/// docked, not closed: its icon stays in the bar), a drag
 /// handle on the top edge, Escape closes and returns focus to the panel's
 /// icon; a press outside the dock closes it too (`Dock.tsx`). Opening a
 /// page from the panel closes it (the page would be behind it). Only the
 /// open panel's body is mounted.
 
+import { Minus } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, PointerEvent } from "react";
 
@@ -131,12 +133,12 @@ export function DockPanel({ streamId, onOpenPage }: { streamId: string | null; o
         <button
           type="button"
           data-testid="dock-panel-close"
-          aria-label={`Close ${panel.title}`}
-          title="Close (Esc)"
+          aria-label={`Hide ${panel.title}`}
+          title="Hide (Esc): it stays in the bar below"
           onClick={close}
-          style={{ background: "none", border: "none", color: "var(--text-secondary)", cursor: "pointer", fontSize: 16, lineHeight: 1 }}
+          style={{ background: "none", border: "none", color: "var(--text-secondary)", cursor: "pointer", display: "inline-flex", padding: 2 }}
         >
-          ×
+          <Minus size={14} aria-hidden />
         </button>
       </div>
       <div data-testid={`dock-panel-${panel.id}`} style={{ flex: 1, minHeight: 0, overflow: "auto" }}>

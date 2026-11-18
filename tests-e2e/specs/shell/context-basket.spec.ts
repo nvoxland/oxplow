@@ -16,7 +16,7 @@ test("a page added from its ☰ is counted in the dock and removed from its pane
   const badge = page.getByTestId("dock-context-badge");
   await expect(badge).toHaveText("1");
   await expect(page.getByTestId("context-panel-item")).toHaveCount(1);
-  await expect(page.getByTestId("context-panel-note")).toHaveText("Check the greeting.");
+  await expect(page.getByTestId("context-panel-note-mark")).toHaveAttribute("aria-label", "Note: Check the greeting.");
   await page.getByTestId("context-panel-remove").click();
   await expect(page.getByTestId("context-panel-item")).not.toBeVisible();
   await expect(badge).toHaveCount(0);

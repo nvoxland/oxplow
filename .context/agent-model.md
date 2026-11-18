@@ -1060,17 +1060,22 @@ too) and on selections: an editor's and a diff's right-side selection
 menu (**Add to Context**: the row's first linked page, else the row as
 text), the terminal's menu and a page's menu over its selected text. Each
 toasts with Undo. The **Context** dock panel (`@`, badge = what this
-thread's next prompt carries, `nextPrompt`) has one tab per basket: This
-Thread (with a thread) and each named basket, with its count; a basket
-attached to this thread wears a link mark, and This Thread's bar names the
-attached ones (each a link to its tab). The open tab (the app preference
-`context.openTab`) has a bar of its actions — This Thread's Clear; a named
-basket's status, Attach to This Thread / Detach, Rename (in place, in the
-bar), Clear, Delete, also on the tab's right-click — over its items. An
-item is its name (opening its source), its text as a quote (monospace,
-three lines at most) and its note (edited in place; "Add a note…" shows on
-hover or focus), led by a × and divided by a rule; its right-click has
-**Move to ▸** and Remove. While an add waits, its card is all the panel
+thread's next prompt carries, `nextPrompt`) has one tab per basket, drawn as
+the main area's tab strip (the panel-header tint, ruled tabs, the open one
+tinted and underlined in the accent): This Thread (with a thread) and each
+named basket with its count; a basket attached to this thread wears a link
+mark. Under it, a bar in the page nav bar's colors holds the open tab's
+actions on the left: This Thread's Clear and the baskets attached to it
+(links to their tabs); a named basket's **Attach to This Thread** switch
+(on: "Attached to This Thread", pressing it detaches; "Attached to another
+thread" beside it otherwise), Rename (in place), Clear, Delete — also on
+the tab's right-click. The open tab is the app preference
+`context.openTab`. Items are one row each: ×, the name, the text on one
+line (cut to fit) and a note mark (accent when there is a note, its text
+on hover); a row's right-click has **Move to ▸** and Remove. A row's click
+opens the item alone in the panel: its name (opening its source), its
+whole text, its note edited in place, and Back / Move to… / Remove in the
+bar; Escape outside the note goes back. While an add waits, its card is all the panel
 shows; the add then opens the tab it went to. The **Context** page (foundation page `context`) lists Next
 prompt, Baskets and In other baskets, with the same actions.
 

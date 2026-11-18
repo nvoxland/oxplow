@@ -1257,7 +1257,7 @@ right-click menu would be clipped by the rail.
 The dock is the row of panel icons justified to the right of the bottom
 bar, as a tray's; the background-task indicator sits at the left. An icon
 opens its panel above the bar, headed by that icon and its title; a press
-outside the dock, Escape, × or the icon again closes it. The Alerts bell
+outside the dock, Escape, _ (hide: the panel stays docked in the bar) or the icon again closes it. The Alerts bell
 is the Alerts panel's icon.
 
 - **Code:** `apps/desktop/src/components/Dock/`. `Dock.tsx` is the bottom

@@ -52,11 +52,14 @@ The **Context** panel has a tab for each basket: **This Thread** and each named
 basket, with how many items it holds. A basket attached to this thread has a
 link mark on its tab, and This Thread's tab names it too.
 
-- Each item shows its name (click it to open where it came from), the text you
-  selected, and your note. Hover over an item to add a note, or click the note
-  to change it. Take an item out with its ×.
+- Each item is one row: its name, the start of its text and a note mark (blue
+  when it has a note). Take an item out with its ×.
+- Click a row to see the item alone: its whole text and its note. Click the
+  note to add or change it, and click the name to open where it came from.
+  **Back** returns to the list.
 - Right-click an item for **Move to**, to put it in another basket.
-- A named basket's tab has **Attach to This Thread** or **Detach**, **Rename**,
+- A named basket's tab has **Attach to This Thread** (it shows as **Attached to
+  This Thread** while it is on; click it again to detach), **Rename**,
   **Clear** and **Delete**. Right-clicking its tab gives the same choices.
 - **Clear** on This Thread's tab takes out all of its items.
 
