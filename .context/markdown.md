@@ -91,8 +91,8 @@ set**, and a surface never builds its own:
   Add Selection to Context, the text from the URI the owner gives
   (`contextUri`; a page's `markdown` viz gives the page's, from
   `PageViewContext`). The viewer's text is page text: the page's own
-  selection toolbar (`SelectionContextToolbar`, mounted by `PageHost`)
-  floats Add to Context over it. See `.context/agent-model.md` "The
+  right-click menu over a selection (`useSelectionContextMenu`, mounted by
+  `PageHost`) offers Add Selection to Context. See `.context/agent-model.md` "The
   context basket".
 
 The editor reads and writes markdown **as stored**: the component runs
@@ -210,7 +210,7 @@ why).
   against `postprocessWikilinks` for each kind.
 - **`SelectionToolbar.tsx`** — the editor's format toolbar and the link
   box's reading (`linkHref`). Page text outside the editor has the page's
-  one-button Add to Context toolbar (`components/Context/SelectionContextToolbar.tsx`).
+  selected-text right-click menu (`components/Context/SelectionContextMenu.tsx`).
 - **`refPaste.ts`** — what a paste is (pure); `RichTextField`'s
   `handlePaste` acts on it.
 - **`RefTitles.tsx`** — the title widget a bare ref link gets in the

@@ -297,6 +297,13 @@ suppressor no longer exempts xterm, so the OS menu never shows): **Copy**
 around it: `terminal/terminalSelection.ts`) — or, with
 nothing selected, **Add to Context** for the terminal's own page (the
 session). The entry wears the `at-sign` icon as every Add to Context does.
+A program that turns on mouse reporting (Claude Code) gets every press and
+drag, and draws a selection of its own that the terminal can't read, so
+Copy and Add Selection to Context have nothing. `macOptionClickForcesSelection`
+is on: Option+drag makes the terminal's own selection anyway (Shift+drag
+off macOS, xterm's default). With the mouse a program's
+(`term.modes.mouseTrackingMode`) and nothing selected, the menu leads with
+a greyed **Hold ⌥ and drag to select** (`select-hint`).
 `rightClickSelectsWord` is off: xterm's macOS default replaces the
 selection with the word under the pointer when it judges the press outside
 the selection (it misjudged presses inside one in the app), so the menu
@@ -304,7 +311,7 @@ added a single word.
 
 Add to Context in the terminal is only this menu entry: no button floats
 over a terminal selection (a drag there is mostly a copy). The page's
-selection toolbar (`useTextSelection`) skips `.xterm`: xterm draws its rows
+selected-text menu (`textSelection.ts`) skips `.xterm`: xterm draws its rows
 as DOM text, but what the browser selects there is not the terminal's
 selection (it once added a stray word). The scrollback has no address an
 agent can read back, so a terminal selection always carries the rows around

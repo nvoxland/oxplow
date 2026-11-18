@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import { CommandConfirm } from "../components/CommandConfirm.js";
-import { SelectionContextToolbar } from "../components/Context/SelectionContextToolbar.js";
+import { useSelectionContextMenu } from "../components/Context/SelectionContextMenu.js";
 import { BacklinksList } from "../tabs/BacklinksList.js";
 import { getPageDetailStore } from "../tabs/openPageDetail.js";
 import { useBacklinks, usePageOutbound } from "../tabs/useBacklinks.js";
@@ -219,6 +219,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
   const linksOut = usePageOutbound({ id: renders ?? "" });
   // The body, for the rail's Contents.
   const [body, setBody] = useState<HTMLDivElement | null>(null);
+  const selectionMenu = useSelectionContextMenu(pageUri);
   const outOfDate = useOutOfDate(page?.origin.extension ?? null, page?.origin.deployment ?? null);
   const reading = useDelayed(!run && !error, LOADING_AFTER_MS);
   const dashboard = page?.category === "Dashboards" && page.view.kind === "grid" && !page.origin.bundled ? page.id : null;
@@ -268,6 +269,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
         ) : null}
         <div
           ref={setBody}
+          onContextMenuCapture={selectionMenu.onContextMenuCapture}
           data-testid="page-file"
           data-stale={stale ? "true" : undefined}
           aria-busy={stale || undefined}
@@ -306,7 +308,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
             <LoadingScreen />
           ) : null}
         </div>
-        <SelectionContextToolbar root={body} uri={pageUri} />
+        {selectionMenu.menu}
       </VizStreamContext.Provider>
       </PageViewContext.Provider>
       </NodeRegistryContext.Provider>

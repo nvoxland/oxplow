@@ -19,6 +19,7 @@ import { terminalSelectionWhat } from "./terminalSelection.js";
 import { subscribeAgentInput } from "../agent-input-bus.js";
 import { installFilePathLinkProvider, type FilePathLinkActivation } from "../terminal-link-provider.js";
 import { typingElsewhere } from "../typingElsewhere.js";
+import { isMacPlatform } from "../keybindings.js";
 
 /** The terminal's font size, px: its cells are measured in it. */
 const TERMINAL_FONT_SIZE = 13;
@@ -157,6 +158,8 @@ export function TerminalSurface({
       event,
       terminalMenuItems({
         selection: term.getSelection(),
+        mouseCaptured: term.modes.mouseTrackingMode !== "none",
+        mac: isMacPlatform(),
         ...(what?.around ? { around: what.around } : {}),
         uri,
         copy: (text) => void navigator.clipboard.writeText(text).catch(() => {}),
@@ -214,6 +217,9 @@ export function TerminalSurface({
       // default on macOS selects the word under the pointer when it judges
       // the press outside the selection, and the menu then added that word.
       rightClickSelectsWord: false,
+      // Option+drag selects in the terminal while its program has the mouse
+      // (Claude Code draws a selection of its own the terminal can't read).
+      macOptionClickForcesSelection: true,
     });
     termRef.current = term;
     const fit = new FitAddon();

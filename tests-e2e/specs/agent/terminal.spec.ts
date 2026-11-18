@@ -201,3 +201,48 @@ test("a right-click adds the whole dragged selection, not the word under it", as
   await until("the item", 15_000, async () => (await item()).length === 1);
   expect(((await item())[0] as [string])[0]).toBe("drag-42-across-these-words");
 });
+
+// A program that has the mouse (Claude Code turns on mouse reporting) gets
+// a plain drag, so the terminal selects nothing and its menu says how to:
+// Option+drag on macOS (Shift elsewhere) makes the terminal's own
+// selection, which the menu adds.
+test("with the mouse a program's, Option+drag selects and the menu adds it", async ({ page, daemon }) => {
+  await open(page, daemon, "oxplow:oxplow/page?page=terminal");
+  const terminal = page.locator(".xterm");
+  await expect(terminal).toBeVisible();
+  await terminal.click();
+  await page.keyboard.type("printf '%s\\n\\033[?1000h' held-$((6*7))-by-a-program");
+  await page.keyboard.press("Enter");
+  const row = page.locator(".xterm-rows > div").filter({ hasText: /^\s*held-42-by-a-program\s*$/ });
+  await expect(row).toBeVisible();
+  const box = (await row.boundingBox())!;
+  const charWidth = await row.evaluate((el) => {
+    const r = document.createRange();
+    r.selectNodeContents(el);
+    return r.getBoundingClientRect().width / Math.max(1, (el.textContent ?? "").length);
+  });
+  const y = box.y + box.height / 2;
+  const drag = async () => {
+    await page.mouse.move(box.x + 1, y);
+    await page.mouse.down();
+    await page.mouse.move(box.x + charWidth * "held-42-by-a-program".length - 1, y, { steps: 5 });
+    await page.mouse.up();
+  };
+  await drag();
+  await page.mouse.click(box.x + 10, y, { button: "right" });
+  await expect(page.getByTestId("menu-item-select-hint")).toBeVisible();
+  await page.keyboard.press("Escape");
+  const modifier = process.platform === "darwin" ? "Alt" : "Shift";
+  await page.keyboard.down(modifier);
+  await drag();
+  await page.keyboard.up(modifier);
+  await page.mouse.click(box.x + 10, y, { button: "right" });
+  const add = page.getByTestId("menu-item-add-to-context");
+  await expect(add).toHaveText(/Add Selection to Context/);
+  await add.click();
+  await page.getByTestId("context-note-add").click();
+  const item = async () =>
+    (await ipc<{ rows: unknown[][] }>(daemon, "query_sql", { sql: "SELECT text FROM v_thread_context" })).rows;
+  await until("the item", 15_000, async () => (await item()).length === 1);
+  expect(((await item())[0] as [string])[0]).toBe("held-42-by-a-program");
+});

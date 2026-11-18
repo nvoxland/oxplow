@@ -1,11 +1,11 @@
 import { afterAll, afterEach, expect, mock, test } from "bun:test";
-import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import type { ContextWhat } from "../contextBasket.js";
 import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigationContext.js";
 import { decl, fakePage, fakePageRuns, fakeRun, loader, node } from "./testing/fakeRun.js";
 
-// Any page's text takes Add to Context over a fresh selection, on the
+// Any page's selected text takes Add Selection to Context from its right-click, on the
 // page's URI (its tab's identity, without the view part); its markdown
 // headings are the rail's Contents.
 
@@ -49,7 +49,7 @@ function page() {
   );
 }
 
-test("a selection in a page's text offers Add to Context on the page's URI", async () => {
+test("a right-click on a page's selected text offers Add Selection to Context on the page's URI", async () => {
   const view = render(page());
   const body = await waitFor(() => view.getByTestId("viz-markdown"));
   const para = await waitFor(() => [...body.querySelectorAll("p")].find((p) => p.textContent === "Text.")!);
@@ -57,12 +57,9 @@ test("a selection in a page's text offers Add to Context on the page's URI", asy
   range.selectNodeContents(para);
   window.getSelection()!.removeAllRanges();
   window.getSelection()!.addRange(range);
-  await act(async () => {
-    fireEvent.mouseUp(para);
-    await new Promise((r) => setTimeout(r, 5));
-  });
-  fireEvent.mouseDown(await waitFor(() => view.getByTestId("selection-context-button")));
-  expect(added).toEqual([{ uri: URI, text: "Text." }]);
+  fireEvent.contextMenu(para);
+  fireEvent.click(await waitFor(() => view.getByTestId("menu-item-add-to-context")));
+  await waitFor(() => expect(added).toEqual([{ uri: URI, text: "Text." }]));
 });
 
 test("the body's markdown headings are the rail's Contents", async () => {

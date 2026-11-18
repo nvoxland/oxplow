@@ -859,13 +859,16 @@ mounts the kit's, so a page moving to the kit's viz (`viz: approvals`, params
 
 ## Selecting text on any page
 
-A text selection on any page shows a floating **Add to Context** button
-(`SelectionContextToolbar`, no page flag). It opens the note prompt, and
-the item, with the person's optional note, goes with the thread's next
-prompt (`.context/agent-model.md` "The context basket"). Editors and
-diffs offer **Add Selection to Context** on the right-click menu, so the
-button skips them and the terminal. A draggable row can't be
-drag-selected, so it carries **Add to Context** on its right-click menu.
+Selected text is added from the right-click menu, everywhere: nothing
+floats over a selection. A right-click on a page's selected text opens
+**Copy** and **Add Selection to Context** (`useSelectionContextMenu`, no
+page flag), ahead of a row's own menu; a right-click off the selection is
+the row's as before. Editors, diffs and the terminal have the same entry
+on their own menus, so the page's menu skips them. It opens the note
+prompt, and the item, with the person's optional note, goes with the
+thread's next prompt (`.context/agent-model.md` "The context basket"). A
+draggable row can't be drag-selected, so it carries **Add to Context** on
+its right-click menu.
 
 ## Dock panels
 
@@ -1282,8 +1285,8 @@ caller may bypass the bus to write to the terminal.
   page row's menu, a backlink's menu, the terminal's menu (**Add Selection
   to Context**, else **Add to Context** for the session; `terminalMenu.ts`,
   which also carries Copy and Paste — the OS menu is suppressed there now)
-  and the floating toolbar on a page's selection (**Add to
-  Context**). Every entry wears the basket's `at-sign`
+  and a page's menu over its selected text (**Add Selection to
+  Context**, with Copy). Every entry wears the basket's `at-sign`
   icon (`MenuItem.icon`), the dock's Context icon, so it reads the same
   everywhere. It puts the page or text in the selected thread's
   basket (`oxplow.context.add`, toast with Undo); the next prompt to any

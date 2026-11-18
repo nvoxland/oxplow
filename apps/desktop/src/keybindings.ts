@@ -51,6 +51,6 @@ export function formatShortcut(shortcut: string, mac: boolean = isMacPlatform())
   return [...others, ...ordered].join("") + key;
 }
 
-function isMacPlatform(): boolean {
+export function isMacPlatform(): boolean {
   return typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "");
 }

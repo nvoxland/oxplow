@@ -6,11 +6,11 @@ text and rows go in. Everything that waits goes with the thread's next prompt.
 ## Adding things
 
 - **A page.** Open its ☰ menu and choose **Add to Context**.
-- **Selected text on any page.** Select it and press the floating
-  **Add to Context** button.
-- **Selected text in an editor or a diff.** Right-click the selection and
-  choose **Add Selection to Context**. With nothing selected, **Add File to
-  Context** adds the file.
+- **Selected text on any page, in an editor, a diff or a terminal.**
+  Right-click the selection and choose **Add Selection to Context**. In an
+  editor with nothing selected, **Add File to Context** adds the file. In a
+  terminal where a program such as Claude Code has the mouse, hold Option (⌥)
+  while you drag to select.
 - **A row.** Right-click it and choose **Add to Context**.
 
 Add to Context needs a selected thread.

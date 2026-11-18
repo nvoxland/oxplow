@@ -41,8 +41,8 @@ export function shouldSuppressContextMenu(chain: ElementDescriptor[]): boolean {
 }
 
 /// Build the closest-first ancestor [`ElementDescriptor`] chain for an
-/// event target or a selection's start node. Exported so the page's Add to
-/// Context selection toolbar (`components/Context/useTextSelection.ts`) can reuse
+/// event target or a selection's start node. Exported so the page's
+/// selected-text menu (`components/Context/textSelection.ts`) can reuse
 /// the exact same exemption test (`shouldSuppressContextMenu`) — a
 /// region where the OS menu is suppressed is also where our own
 /// selection affordances belong, and editors/inputs/terminal are the
