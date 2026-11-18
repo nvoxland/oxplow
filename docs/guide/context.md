@@ -48,16 +48,21 @@ the right worktree.
 
 ## Managing baskets
 
-In the **Context** panel:
+The **Context** panel has a tab for each basket: **This Thread** and each named
+basket, with how many items it holds. A basket attached to this thread has a
+link mark on its tab, and This Thread's tab names it too.
 
-- Take an item out with its ×. Edit its note under it.
+- Each item shows its name (click it to open where it came from), the text you
+  selected, and your note. Hover over an item to add a note, or click the note
+  to change it. Take an item out with its ×.
 - Right-click an item for **Move to**, to put it in another basket.
-- Right-click a basket for **Attach to This Thread** or **Detach**,
-  **Rename…**, **Clear** and **Delete**.
-- **Clear** under This Thread takes out all of its items.
+- A named basket's tab has **Attach to This Thread** or **Detach**, **Rename**,
+  **Clear** and **Delete**. Right-clicking its tab gives the same choices.
+- **Clear** on This Thread's tab takes out all of its items.
 
-The **Context** page (open it from the panel's header) shows the same baskets
-as tables.
+After you add something, the panel opens the tab of the basket it went to. The
+**Context** page (open it from the panel's header) shows the same baskets as
+tables.
 
 ## What the agent gets
 

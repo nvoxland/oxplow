@@ -43,7 +43,7 @@ export function destinationOf(add: PendingAdd, choice: string): Destination | nu
   return { basket: choice };
 }
 
-export function ContextAddCard({ add, baskets }: { add: PendingAdd; baskets: Baskets }) {
+export function ContextAddCard({ add, baskets, onAdded }: { add: PendingAdd; baskets: Baskets; onAdded?(to: Destination): void }) {
   const [last, setLast] = useAppPreference<string | null>(LAST_BASKET_PREF, null);
   const field = useRef<HTMLTextAreaElement | null>(null);
   const nameField = useRef<HTMLInputElement | null>(null);
@@ -68,6 +68,7 @@ export function ContextAddCard({ add, baskets }: { add: PendingAdd; baskets: Bas
   const submit = () => {
     if (!to) return;
     setLast(rememberedAs(to));
+    onAdded?.(to);
     void submitToContext(add, to, resolved);
   };
   const keys = (e: KeyboardEvent) => {

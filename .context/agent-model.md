@@ -1060,14 +1060,18 @@ too) and on selections: an editor's and a diff's right-side selection
 menu (**Add to Context**: the row's first linked page, else the row as
 text), the terminal's menu and a page's menu over its selected text. Each
 toasts with Undo. The **Context** dock panel (`@`, badge = what this
-thread's next prompt carries, `nextPrompt`) shows **This Thread** (its
-items, × per item, each note edited in place, Clear) and under it each
-basket attached here (marked Attached, Detach); then **Baskets**, every
-other named basket collapsed to its name and count with **Attach**
-(disabled with a reason with no thread or nothing in it). A basket's
-header right-click: Attach to This Thread / Detach, Rename… (in place),
-Clear, Delete; an item's: **Move to ▸** (This Thread, each other basket),
-Remove. The **Context** page (foundation page `context`) lists Next
+thread's next prompt carries, `nextPrompt`) has one tab per basket: This
+Thread (with a thread) and each named basket, with its count; a basket
+attached to this thread wears a link mark, and This Thread's bar names the
+attached ones (each a link to its tab). The open tab (the app preference
+`context.openTab`) has a bar of its actions — This Thread's Clear; a named
+basket's status, Attach to This Thread / Detach, Rename (in place, in the
+bar), Clear, Delete, also on the tab's right-click — over its items. An
+item is its name (opening its source), its text as a quote (monospace,
+three lines at most) and its note (edited in place; "Add a note…" shows on
+hover or focus), led by a × and divided by a rule; its right-click has
+**Move to ▸** and Remove. While an add waits, its card is all the panel
+shows; the add then opens the tab it went to. The **Context** page (foundation page `context`) lists Next
 prompt, Baskets and In other baskets, with the same actions.
 
 **Building takes nothing; delivery commits.** `build_context` returns a

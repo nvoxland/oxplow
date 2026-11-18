@@ -1,5 +1,5 @@
 import { afterAll, afterEach, expect, mock, test } from "bun:test";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import type { SqlQueryResult } from "../../tauri-bridge/generated/bindings.js";
 
@@ -17,16 +17,21 @@ mock.module("../../api.js", () => ({
       reads: { datasets: [], tables: [], measures: [] },
       freshness: {},
     }) as unknown as SqlQueryResult,
+  getUiPreferences: async () => [],
+  setUiPreference: async () => {},
   runCommand: async (name: string, input: unknown) => {
     ran.push([name, input]);
     return { audit_id: 1, inverse: null, result: {} };
   },
 }));
-const { setSelectedThread } = await import("../../contextBasket.js");
+const { addToContext, cancelAddToContext, setSelectedThread } = await import("../../contextBasket.js");
 const { ContextDockBody } = await import("./ContextDockPanel.js");
+const { resetAppRememberedStore } = await import("../../prefs/remembered.js");
 
 afterEach(() => {
   cleanup();
+  cancelAddToContext();
+  resetAppRememberedStore();
   ran.length = 0;
   items = [];
   baskets = [];
@@ -42,7 +47,7 @@ test("it lists This Thread's items, takes one out and clears the lot", async () 
   const opened: string[] = [];
   const view = render(<ContextDockBody streamId={null} onOpenPage={(r) => opened.push(r.id)} />);
   await waitFor(() => expect(view.getAllByTestId("context-panel-item").length).toBe(2));
-  expect(view.getByTestId("context-panel-thread").textContent).toBe("This Thread");
+  expect(view.getAllByTestId("context-tab")[0]!.textContent).toBe("This Thread2");
   expect(view.getByText("abc1234")).toBeTruthy();
   expect(view.getByText("fn main() {}")).toBeTruthy();
   fireEvent.click(view.getAllByTestId("context-panel-remove")[0]!);
@@ -90,16 +95,21 @@ test("an item's note shows under it and is edited in place", async () => {
   await waitFor(() => expect(ran).toContainEqual(["oxplow.context.note", { item: 2, note: "Is this list right?" }]));
 });
 
-test("with nothing anywhere it says how things get in", async () => {
+test("an empty basket says how things get in; with no thread and no basket the panel does", async () => {
   setSelectedThread("thr7");
   const view = render(<ContextDockBody streamId={null} onOpenPage={() => {}} />);
-  await waitFor(() => expect(view.getByTestId("context-panel-empty").textContent).toBe("No context added yet"));
+  await waitFor(() => expect(view.getByTestId("context-tab-empty").textContent).toContain("Add a page from its ☰"));
   expect(view.queryByTestId("context-panel-clear")).toBeNull();
+  cleanup();
+  setSelectedThread(null);
+  const none = render(<ContextDockBody streamId={null} onOpenPage={() => {}} />);
+  await waitFor(() => expect(none.getByTestId("context-panel-empty").textContent).toBe("No context added yet"));
 });
 
-// A basket attached here is under This Thread, open, with Detach; another
-// is collapsed under Baskets with Attach, and opens to its items.
-test("an attached basket shows under This Thread; another attaches from Baskets", async () => {
+// One tab per basket, with its count; a basket attached here wears a mark
+// and This Thread's bar names it. A named basket's tab shows its items and
+// its bar attaches or detaches it.
+test("each basket is a tab; a named basket's bar attaches and detaches it", async () => {
   setSelectedThread("thr7");
   items = [
     [1, "page", "oxplow:oxplow/commit?sha=a", "In Auth", null, null, "Auth"],
@@ -111,22 +121,45 @@ test("an attached basket shows under This Thread; another attaches from Baskets"
     [3, "Empty", null],
   ];
   const view = render(<ContextDockBody streamId={null} onOpenPage={() => {}} />);
-  const attached = await waitFor(() => view.getByTestId("context-basket-attached"));
-  expect(attached.textContent).toContain("In Auth");
+  await waitFor(() => expect(view.getAllByTestId("context-tab").length).toBe(4));
+  const tabs = view.getAllByTestId("context-tab");
+  expect(tabs.map((t) => [t.dataset.basket, t.getAttribute("aria-selected"), t.querySelector('[data-testid="context-tab-count"]')!.textContent])).toEqual([
+    ["@thread", "true", "0"],
+    ["Auth", "false", "1"],
+    ["Release", "false", "1"],
+    ["Empty", "false", "0"],
+  ]);
+  expect(tabs[1]!.querySelector('[aria-label="Attached"]')).toBeTruthy();
+  expect(view.getByTestId("context-tab-empty")).toBeTruthy();
+  fireEvent.click(view.getByTestId("context-attached-link"));
+  await waitFor(() => expect(view.getByText("In Auth")).toBeTruthy());
   fireEvent.click(view.getByTestId("context-basket-detach"));
   await waitFor(() => expect(ran).toContainEqual(["oxplow.context.detach", { basket: "Auth" }]));
-  expect(view.queryByText("In Release")).toBeNull();
-  const release = view.getAllByTestId("context-basket").find((b) => b.dataset.basket === "Release")!;
-  fireEvent.click(release.querySelector('[data-testid="context-basket-toggle"]')!);
+  fireEvent.click(tabs[2]!);
   await waitFor(() => expect(view.getByText("In Release")).toBeTruthy());
-  const attach = view.getAllByTestId("context-basket-attach") as HTMLButtonElement[];
-  expect(attach.map((b) => b.disabled)).toEqual([false, true]);
-  fireEvent.click(attach[0]!);
+  expect(view.queryByText("In Auth")).toBeNull();
+  fireEvent.click(view.getByTestId("context-basket-attach"));
   await waitFor(() => expect(ran).toContainEqual(["oxplow.context.attach", { basket: "Release", thread: "thr7" }]));
+  fireEvent.click(tabs[3]!);
+  await waitFor(() => expect((view.getByTestId("context-basket-attach") as HTMLButtonElement).disabled).toBe(true));
 });
 
-// An item's right-click moves it to another basket; a basket's deletes it.
-test("an item moves from its right-click and a basket is deleted from its own", async () => {
+// A text item shows its whole text as a quote, and its name opens its source.
+test("an item's text is a quote and its name opens its source", async () => {
+  setSelectedThread("thr7");
+  items = [[1, "text", "oxplow:oxplow/file?path=a.rs#lines=3-4", null, "fn main() {\n  run();\n}", null, null]];
+  const opened: string[] = [];
+  const view = render(<ContextDockBody streamId={null} onOpenPage={(r) => opened.push(r.id)} />);
+  const quote = await waitFor(() => view.getByTestId("context-panel-quote"));
+  expect(quote.textContent).toBe("fn main() {\n  run();\n}");
+  const title = view.getByTestId("context-panel-title");
+  expect(title.textContent).toBe("a.rs:3-4");
+  fireEvent.click(title);
+  expect(opened).toEqual(["oxplow:oxplow/file?path=a.rs#lines=3-4"]);
+});
+
+// An item's right-click moves it to another basket; a tab's deletes its basket.
+test("an item moves from its right-click and a basket is deleted from its tab's", async () => {
   setSelectedThread("thr7");
   items = [[1, "page", "oxplow:oxplow/commit?sha=a", "Mine", null, null, null]];
   baskets = [[1, "Auth", null]];
@@ -135,9 +168,25 @@ test("an item moves from its right-click and a basket is deleted from its own", 
   fireEvent.click(await waitFor(() => view.getByTestId("menu-item-move")));
   fireEvent.click(await waitFor(() => view.getByTestId("menu-item-move-1")));
   await waitFor(() => expect(ran).toContainEqual(["oxplow.context.move", { item: 1, basket: "Auth" }]));
-  fireEvent.contextMenu(view.getByTestId("context-basket"));
+  const auth = view.getAllByTestId("context-tab").find((t) => t.dataset.basket === "Auth")!;
+  fireEvent.contextMenu(auth);
   fireEvent.click(await waitFor(() => view.getByTestId("menu-item-delete")));
   await waitFor(() => expect(ran).toContainEqual(["oxplow.context.delete_basket", { basket: "Auth" }]));
+});
+
+// While an add waits the card is all the panel shows; the add opens the tab
+// of the basket it went to.
+test("an add hides the tabs, then opens the tab it went to", async () => {
+  setSelectedThread("thr7");
+  baskets = [[1, "Auth", null]];
+  const view = render(<ContextDockBody streamId={null} onOpenPage={() => {}} />);
+  await waitFor(() => expect(view.getAllByTestId("context-tab").length).toBe(2));
+  act(() => void addToContext({ uri: "oxplow:oxplow/commit?sha=c", label: "C" }));
+  await waitFor(() => view.getByTestId("context-add-card"));
+  expect(view.queryByTestId("context-tab")).toBeNull();
+  fireEvent.click(view.getAllByTestId("context-add-to").find((c) => c.dataset.value === "Auth")!);
+  fireEvent.click(view.getByTestId("context-note-add"));
+  await waitFor(() => expect(view.getAllByTestId("context-tab").find((t) => t.dataset.basket === "Auth")!.getAttribute("aria-selected")).toBe("true"));
 });
 
 // `mock.module` outlives this file: put the real modules back for the files that run after it.
