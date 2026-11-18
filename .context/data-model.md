@@ -818,7 +818,7 @@ table. **Requests** (V11): `request` (`thread_id`, `first_turn_id`) and `agent_t
 the row change; **background jobs** (V7, `agent_job`) are written beside
 them by the hook ingest ([agent-model.md](./agent-model.md) "Background
 jobs");
-`event_log` has a `turn_id` index. A turn's `harness_turn_id` (the harness's own id; V13 indexes it with the thread) is set at the open or, for a harness that names the turn later, when it does. `handoff` and `thread_context_item` have `delivered_turn_id` (V14), the turn a delivery landed in.
+`event_log` has a `turn_id` index. A turn's `harness_turn_id` (the harness's own id; V13 indexes it with the thread) is set at the open or, for a harness that names the turn later, when it does. `handoff` has `delivered_turn_id` (V14), the turn a delivery landed in (a context item, once delivered, is deleted; V47).
 
 **Turns record the model and reasoning effort they ran on (V82).** Nullable TEXT
 `agent_turn.model` and `agent_turn.effort`, set by `close_turn_tx` from
@@ -1846,20 +1846,29 @@ bookmarking at another scope moves it. Read through `v_bookmark` (the UI's
 `oxplow.bookmark.remove` (commands.md). They used to live in webview localStorage, where neither pages nor the
 agent could see them; those weren't carried over.
 
-### `thread_context_item` — `thread_context_store` (`crates/oxplow-db/src/thread_context_store.rs`)
+### `context_item`, `context_basket` — `context_store` (`crates/oxplow-db/src/context_store.rs`)
 
-V107. A thread's context basket: what the person collected for the
-thread's agents while exploring. `kind` is `page` (`source_uri` the page's
-canonical URI) or `text` (`text`, from `source_uri` when known). `note`
-(V44) is the person's own words on it, what they want done about it; it
-can change only while the row waits (`set_note_tx`). `around` (V46) is
-the lines around a `text` whose source has no lines to read back (a
-terminal's scrollback), so the agent sees what the selection was part of. The next
-prompt to any agent in the thread carries every row with no
-`delivered_at` and stamps `delivered_at` / `delivered_session_id`
-(`agent-model.md` "The context basket"); delivered rows stay as a record.
-Read through `v_thread_context`; every write is an `oxplow.context.*`
-command (commands.md).
+V47 (rebuilt from V107's `thread_context_item`, keeping what still
+waited). What the person collected for agents while exploring, each item
+in one basket: a thread's own (`thread_id`, shown as "This Thread") or a
+named basket (`basket_id`; a CHECK keeps exactly one). `kind` is `page`
+(`source_uri` the page's canonical URI) or `text` (`text`, from
+`source_uri` when known). `note` (V44) is the person's own words on it,
+what they want done about it. `around` (V46) is the lines around a `text`
+whose source has no lines to read back (a terminal's scrollback).
+`stream_id` is the stream it was collected in, so a file it names is read
+in that worktree when it is delivered in another stream.
+
+`context_basket` holds the named baskets: `name` (unique, NOCASE; never
+"This Thread"), and `attached_thread_id`, the thread whose next prompt
+carries it (one at a time; SET NULL when the thread goes). They belong to
+the project, across every stream. The next prompt to any agent in a thread
+carries its own items and every attached basket's
+(`waiting_for_thread_tx`), then `take_delivered_tx` links the turn to them
+(`prompt_mention`), **deletes** them and detaches their baskets
+(`agent-model.md` "The context basket"): there is no delivered history.
+Read through `v_context_item` and `v_context_basket`; every write is an
+`oxplow.context.*` command (commands.md).
 
 ### `capability_provider` — `SqliteCapabilityStore` (`crates/oxplow-db/src/capability_store.rs`)
 

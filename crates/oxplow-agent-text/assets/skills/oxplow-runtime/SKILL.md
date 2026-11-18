@@ -42,7 +42,8 @@ finish.
   `references/commands.md`. A handoff may be `about` any record (a task, a
   page), by its URI. Nothing wakes the other agent.
 - **Context basket.** A `<context-basket>` block is what the person
-  collected for you; read each `[oxplow uri …]` with `oxplow_read`.
+  collected for you; read each `[oxplow uri …]` with `oxplow_read`. What
+  waits: `v_context_item`, `v_context_basket`.
 - **Hints.** oxplow may add short advisory guidance to your next prompt or
   tool result.
 

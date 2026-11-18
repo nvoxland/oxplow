@@ -191,7 +191,7 @@ pub const SCOPES: &[Scope] = &[
         access: Access::Record,
         host: Host::Daemon,
         spends: false,
-        summary: "Put a page or a piece of text in a thread's context basket for its agents, take one out, or empty it.",
+        summary: "Collect pages and pieces of text for agents in a thread's context basket or a named basket, move, note or remove them, and attach a named basket to a thread's next prompt.",
     },
     Scope {
         id: "credentials.write",

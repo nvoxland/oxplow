@@ -1002,25 +1002,40 @@ No polling. The launch prompt's `developerInstructions` leave the session
 context out (the harness declares `prompt_context`); the first injection
 carries it.
 
-**The context basket.** What the person collected for the thread's
-agents (`thread_context_item`, `v_thread_context`, the `oxplow.context.*`
-commands) rides the next prompt of *any* agent in the thread as a
-`<context-basket>` block after the handoffs (`agent_context::basket_block`):
-numbered items, each page as `[oxplow uri …]` with its label, each piece of
-text quoted (up to `BASKET_TEXT_IN_CONTEXT` characters) with where it came
-from; a text whose source has no lines to read back (a terminal) brings its
-`around` in a second fence under "Selected from these lines:", so the agent
-tells the selection from its surroundings; and the person's note on an item (`note`, never cut) indented under it.
-When any item has a note, the header tells the agent to act on each and
-answer by number. A note is the person's remark about a place; it is
-delivered with the item, so it never has to follow its quote as the code moves.
-`commit` stamps the items it carried delivered to the session, which
-empties the basket; a delivered item stays as a record. Claude Code and
-opencode get it at prompt submit. Codex gets it by injection while no turn
-runs (an `oxplow.context.add` run wakes `context_watch`), so with two
-agents in a thread an idle Codex can take the basket before the agent the
-person prompts. The basket is the person's: an agent's `context.*` run is
-refused. Pinned by `the_context_basket_reaches_the_next_prompt_once`.
+**The context basket.** What the person collects for agents
+(`context_item`, `v_context_item`, the `oxplow.context.*` commands) is in a
+**basket**: each thread has its own (the app calls it "This Thread"), and
+the person keeps **named baskets** (`context_basket`, `v_context_basket`)
+for the project, across every stream — collected into while reading, with
+no thread needed. A named basket is **attached** to a thread
+(`oxplow.context.attach`, one thread at a time). The next prompt of *any*
+agent in a thread carries a `<context-basket>` block after the handoffs
+(`agent_context::basket_block` over `context_store::waiting_for_thread_tx`):
+the thread's own items, then each attached basket's under a line
+`From your "<name>" basket:`, numbered through. Each page is
+`[oxplow uri …]` with its label; each piece of text is quoted (up to
+`BASKET_TEXT_IN_CONTEXT` characters) with where it came from; a text whose
+source has no lines to read back (a terminal) brings its `around` in a
+second fence under "Selected from these lines:", so the agent tells the
+selection from its surroundings. Each item records the stream it was
+collected in: one delivered into a thread of another stream says
+`Collected in stream str2 ("<title>", branch <b>): read it with oxplow_read
+and stream: "str2"`, since a file URI with no filesystem is read in the
+reader's own worktree otherwise. The person's note on an item (`note`,
+never cut) is indented under it; when any item has one, the header tells
+the agent to act on each and answer by number. `commit` runs
+`take_delivered_tx`: it links the turn to every item (`prompt_mention`),
+**deletes** the items and detaches the baskets they came from (attachment
+is for one prompt; the basket stays, empty, until the person deletes it).
+There is no delivered history: the turn's links and the transcript are the
+record. Claude Code and opencode get it at prompt submit. Codex gets it by
+injection while no turn runs (`context.add`, `move` and `attach` wake
+`context_watch`), so with two agents in a thread an idle Codex can take
+the baskets before the agent the person prompts. The baskets are the
+person's: an agent's `context.*` run is refused, but it can read
+`v_context_item` and `v_context_basket` ("look at my Auth basket"). Pinned
+by `the_context_basket_reaches_the_next_prompt_once` and
+`an_attached_basket_rides_one_prompt_and_empties`.
 
 *The UI* (`apps/desktop/src/contextBasket.ts`, the window's selected thread
 from `setSelectedThread`): every add goes through one note prompt

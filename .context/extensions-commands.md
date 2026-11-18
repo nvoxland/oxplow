@@ -880,7 +880,7 @@ teaches the format, the `v_*` contract and the loop "read `v_dataset` →
 oxplow_query_sql → write files → oxplow_validate_extension → oxplow_run_page".
 Its page references (`page-format.md`, `loaders.md`, `view-nodes.md`,
 `recipes.md`, …) describe the page file. Add to Context on a page puts
-the page's URI in the thread's basket.
+the page's URI in a context basket.
 
 **Getting newcomers there.** "New Page with Your Agent…"
 (`oxplow.page.draft_with_agent`, a Tasks command in the launcher; needs a

@@ -343,10 +343,13 @@ intent:
       expect: each capability's implementations and a default row; choosing writes the layer's choice
     - name: the-context-pages-clear-empties-the-threads-basket
       input: { page: context, params: { thread_id: 1 } }
-      expect: the waiting section lists what was collected; Clear empties it
+      expect: the next prompt section lists what was collected; Clear This Thread empties the thread's own basket
     - name: the-context-page-shows-an-items-note-and-edits-it
       input: { page: context, params: { thread_id: 1 } }
-      expect: each waiting item's note beside it; Edit Note… changes or clears it
+      expect: each item's note beside it; Edit Note… changes or clears it
+    - name: the-context-page-attaches-a-basket-to-the-threads-next-prompt
+      input: { page: context, params: { thread_id: 1 } }
+      expect: named baskets with their items; Attach to This Thread puts a basket's items in the next prompt, Detach takes them out
     - name: session-transcript-lists-turns-and-handbacks
       input: { page: session-transcript }
       expect: a session's turns oldest first, a hand-back marked, tool calls counted, start at a turn, paged by 50
@@ -979,27 +982,57 @@ commands:
     scope: bookmarks.write
     op: remove
     example: {"uri": "oxplow:oxplow/page?page=git-dashboard", "thread": "thr3"}
-  # context.write — the person's context basket for a thread's agents.
+  # context.write — the person's context baskets: each thread's own, and named baskets attached to a thread's next prompt.
   - name: context.add
-    summary: "Put a page (`uri`) or a piece of text (`text`, from `uri` when known, with the lines `around` it when `uri` has none to read back, as a terminal) in a thread's context basket, with an optional `note` of what the person wants done about it. The next prompt to any agent in that thread carries everything waiting there, each note with its item, then the basket is empty. The person's: an agent can't add to it."
+    summary: "Put a page (`uri`) or a piece of text (`text`, from `uri` when known, with the lines `around` it when `uri` has none to read back, as a terminal) in a basket: a `thread`'s own, or a named `basket` (made when there is none), with an optional `note` of what the person wants done about it. `stream` is where it was collected (default: the thread's), so a file it names is read in that worktree. The next prompt to any agent in a thread carries its own basket and every basket attached to it, each note with its item, then deletes those items. The person's: an agent can't add to it."
     scope: context.write
     op: add
-    example: {"thread": "thr1", "uri": "oxplow:oxplow/file?path=src/a.rs#lines=10-20", "text": "fn a() {}", "note": "This should handle an empty list."}
+    example: {"basket": "Auth rework", "stream": "str1", "uri": "oxplow:oxplow/file?path=src/a.rs#lines=10-20", "text": "fn a() {}", "note": "This should handle an empty list."}
   - name: context.remove
-    summary: "Take an item (`v_thread_context.id`) out of its thread's context basket."
+    summary: "Take an item (`v_context_item.id`) out of its basket."
     scope: context.write
     op: remove
     example: {"item": 12}
   - name: context.note
-    summary: "Set or clear (an empty `note`) the note on an item still waiting in its thread's context basket (`v_thread_context.id`). A delivered item's note is part of what went out and can't change."
+    summary: "Set or clear (an empty `note`) the note on an item in a context basket (`v_context_item.id`)."
     scope: context.write
     op: note
     example: {"item": 12, "note": "Rename this to match the others."}
+  - name: context.move
+    summary: "Move an item (`v_context_item.id`) into another basket: a `thread`'s own, or a named `basket` that exists."
+    scope: context.write
+    op: move
+    example: {"item": 12, "basket": "Auth rework"}
   - name: context.clear
-    summary: "Empty a thread's context basket of everything still waiting; what was delivered stays as a record."
+    summary: "Empty a basket: a `thread`'s own, or a named `basket` (which stays, empty)."
     scope: context.write
     op: clear
     example: {"thread": "thr1"}
+  - name: context.attach
+    summary: "Attach a named `basket` to a `thread`: that thread's next prompt carries its items after the thread's own, then empties it and detaches it. A basket is attached to one thread at a time."
+    scope: context.write
+    op: attach
+    example: {"basket": "Auth rework", "thread": "thr1"}
+  - name: context.detach
+    summary: "Detach a named `basket` from the thread it is attached to."
+    scope: context.write
+    op: detach
+    example: {"basket": "Auth rework"}
+  - name: context.create_basket
+    summary: "Make an empty named context basket (`name`: up to 60 characters, not \"This Thread\", unique in any case). Named baskets belong to the project, across all its streams."
+    scope: context.write
+    op: create_basket
+    example: {"name": "Auth rework"}
+  - name: context.rename_basket
+    summary: "Rename a named context `basket` to `name`."
+    scope: context.write
+    op: rename_basket
+    example: {"basket": "Auth rework", "name": "Login rework"}
+  - name: context.delete_basket
+    summary: "Delete a named context `basket` and every item in it."
+    scope: context.write
+    op: delete_basket
+    example: {"basket": "Auth rework"}
   # changes.read
   - name: change.ensure
     summary: "Analyze a change and return its row (`v_change`). A commit vs its parent, a request or a turn (first take → last take), or a stream's uncommitted work vs HEAD. Then read the analysis with oxplow_query_sql: v_change_file (files), v_oxplow_change_interest (look-here-first scores, when oxplow-bundled is on), v_change_function (added/deleted/modified functions, deltas, churn), v_change_import (imports added and removed), v_oxplow_change_co_change (files whose usual partners are missing, or that were dormant; oxplow-bundled), v_change_duplicate (copied blocks; arrives a little later). Cached: commits and ended requests are analyzed once. It fills a derived cache and changes no record."

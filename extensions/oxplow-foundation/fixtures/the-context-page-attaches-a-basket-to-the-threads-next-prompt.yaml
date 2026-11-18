@@ -1,0 +1,31 @@
+# The Context page: a named basket is listed under Baskets with what it holds
+# under In other baskets; Attach to This Thread moves its items under Next
+# prompt, after the thread's own, and Detach puts them back.
+given:
+  - { command: oxplow.context.add, input: { thread: thr1, uri: "oxplow:oxplow/page?page=problems", label: Problems } }
+  - { command: oxplow.context.add, input: { basket: Auth, uri: "oxplow:oxplow/page?page=git-history", label: History, note: "Why did this change?" } }
+when: { page: oxplow/context, params: { thread_id: 1 } }
+expect:
+  loaders:
+    next:
+      rows:
+        - { what: Problems, basket: This Thread }
+    baskets:
+      rows:
+        - { name: Auth, items: 1, attached_to: null }
+    in_baskets:
+      rows:
+        - { what: History, basket: Auth, note: "Why did this change?" }
+steps:
+  - press: { action: attach, node: baskets, row: { name: Auth } }
+    expect: { ok: true }
+  - expect:
+      loaders:
+        next:
+          rows:
+            - { what: Problems, basket: This Thread }
+            - { what: History, basket: Auth }
+        in_baskets: { rows: 0 }
+  - press: { action: detach, node: baskets, row: { name: Auth } }
+    expect: { ok: true }
+  - expect: { loaders: { in_baskets: { rows: 1 } } }

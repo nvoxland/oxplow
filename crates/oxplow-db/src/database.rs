@@ -2332,6 +2332,62 @@ mod tests {
         assert_eq!(count("SELECT count(*) FROM command_audit"), 1);
     }
 
+    /// V47 moves the waiting context items into `context_item`, each with
+    /// its thread's stream; the delivered ones go with the old table.
+    #[test]
+    fn v47_keeps_the_waiting_context_items_with_their_stream() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(46))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+               VALUES (4, 'primary', 'p', 'main', 'refs/heads/main', 'local', '/tmp/x', 'a', 'a');
+             INSERT INTO threads (id, stream_id, title, created_at, updated_at) VALUES (2, 4, 'T', 'a', 'a');
+             INSERT INTO thread_context_item (id, thread_id, kind, source_uri, text, around, note, added_at, delivered_at)
+               VALUES (7, 2, 'text', 'oxplow:oxplow/file?path=a.rs', 'fn a', 'x\nfn a\ny', 'look', 'a', NULL),
+                      (8, 2, 'page', 'oxplow:oxplow/commit?sha=abc', NULL, NULL, NULL, 'a', 'b');",
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let row: (i64, i64, Option<i64>, i64, String, String, String) = conn
+            .query_row(
+                "SELECT id, thread_id, basket_id, stream_id, text, around, note FROM context_item",
+                [],
+                |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                        r.get(6)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            row,
+            (
+                7,
+                2,
+                None,
+                4,
+                "fn a".into(),
+                "x\nfn a\ny".into(),
+                "look".into()
+            )
+        );
+        let count = |sql: &str| -> i64 { conn.query_row(sql, [], |r| r.get(0)).unwrap() };
+        assert_eq!(count("SELECT count(*) FROM context_item"), 1);
+        assert_eq!(
+            count("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'thread_context_item'"),
+            0
+        );
+    }
+
     #[test]
     fn v40_and_v42_preserve_settings_events_at_the_new_level_versions() {
         let mut conn = Connection::open_in_memory().unwrap();
@@ -3020,10 +3076,15 @@ mod tests {
             "event_consumer_checkpoint",
             "event_dead_letter",
             "command_audit",
+            // V47 — the context baskets.
+            "context_basket",
+            "context_item",
         ];
         // `effort_observation` was dropped in V39; the V38
         // `metric_*` cluster was dropped in V49 (T-E3) — assert gone.
         let expected_absent = [
+            // V47: the context items moved to `context_item`.
+            "thread_context_item",
             // V45: comments are gone (the context basket's notes do their job).
             "comment",
             "comment_message",

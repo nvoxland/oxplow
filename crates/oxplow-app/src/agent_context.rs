@@ -229,7 +229,8 @@ impl AgentContext {
             }
         }
         // The turn this prompt opened (or went into) took the handoffs and
-        // the basket: on the record, and linked from the turn.
+        // the baskets: on the record and linked from the turn; the items it
+        // carried are deleted and their baskets detached.
         if let (Some(thread), false) = (
             built.thread,
             built.handoffs.is_empty() && built.basket.is_empty(),
@@ -242,30 +243,18 @@ impl AgentContext {
             if let Err(err) = svc
                 .db
                 .transaction(move |tx| {
-                    oxplow_db::thread_context_store::link_delivered_tx(
+                    oxplow_db::context_store::take_delivered_tx(
                         tx, thread, session, &handoffs, &basket,
                     )
                 })
                 .await
             {
-                warn!(?err, "linking the delivered context to its turn failed");
+                warn!(?err, "taking the delivered context baskets failed");
             }
         }
         if !built.nudges.is_empty() {
             if let Err(err) = svc.nudge_store.mark_delivered(built.nudges).await {
                 warn!(?err, "marking the delivered nudges failed");
-            }
-        }
-        if !built.basket.is_empty() {
-            let (ids, session) = (built.basket, built.agent_session.map(|s| s.value()));
-            if let Err(err) = svc
-                .db
-                .transaction(move |tx| {
-                    oxplow_db::thread_context_store::mark_delivered_tx(tx, &ids, session)
-                })
-                .await
-            {
-                warn!(?err, "stamping the delivered context basket failed");
             }
         }
     }
@@ -416,7 +405,8 @@ pub struct PendingContext {
     contexts: Vec<(String, String, String)>,
     handoffs: Vec<HandoffId>,
     nudges: Vec<i64>,
-    /// The context basket's items it carries (`thread_context_item.id`).
+    /// The context items it carries (`context_item.id`): the thread's own
+    /// basket's and its attached baskets'.
     basket: Vec<i64>,
     agent_session: Option<AgentSessionId>,
     /// The thread it was built for (none for a double in tests).
@@ -686,39 +676,54 @@ async fn waiting_nudges(svc: &Services, thread_id: &ThreadId) -> Option<(String,
 /// carries; the rest is read through where it came from.
 pub const BASKET_TEXT_IN_CONTEXT: usize = 4_000;
 
-/// The thread's context basket — what the person collected for its
-/// agents and no agent was given yet — as one `<context-basket>` block and
-/// the items' ids, still undelivered: they reach the first prompt of any
-/// agent in the thread, and [`AgentContext::commit`] stamps them once the
-/// agent has the text, which empties the basket.
+/// What the thread's next prompt carries of what the person collected —
+/// its own basket and every basket attached to it — as one
+/// `<context-basket>` block and the items' ids, still there: they reach the
+/// first prompt of any agent in the thread, and [`AgentContext::commit`]
+/// deletes them once the agent has the text, which empties those baskets.
 async fn context_basket(svc: &Services, thread: ThreadId) -> Option<(String, Vec<i64>)> {
-    let items = match svc
+    let read = svc
         .db
-        .read(move |c| oxplow_db::thread_context_store::undelivered_tx(c, thread))
-        .await
-    {
-        Ok(items) if !items.is_empty() => items,
+        .read(move |c| {
+            let here: Option<i64> = c
+                .query_row(
+                    "SELECT stream_id FROM threads WHERE id = ?1",
+                    [thread.value()],
+                    |r| r.get(0),
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+            Ok((
+                oxplow_db::context_store::waiting_for_thread_tx(c, thread)?,
+                here,
+            ))
+        })
+        .await;
+    let (items, here) = match read {
+        Ok((items, here)) if !items.is_empty() => (items, here),
         Ok(_) => return None,
         Err(err) => {
-            warn!(?err, "reading the thread's context basket failed");
+            warn!(?err, "reading the thread's context baskets failed");
             return None;
         }
     };
-    let ids = items.iter().map(|i| i.id).collect();
-    Some((basket_block(&items), ids))
+    let ids = items.iter().map(|w| w.item.id).collect();
+    Some((basket_block(&items, here), ids))
 }
 
 /// The `<context-basket>` block for `items`, numbered so the agent can
 /// answer each: each page as a mention the agent reads with `oxplow_read`,
 /// each piece of text quoted with where it came from, and the person's note
-/// on it, if any, indented under it (never cut: they typed it).
-pub fn basket_block(items: &[oxplow_db::thread_context_store::ContextItem]) -> String {
-    use oxplow_db::thread_context_store::ContextKind;
+/// on it, if any, indented under it (never cut: they typed it). A named
+/// basket's items follow a line naming it (the person's topic); an item
+/// collected in a stream other than `here` says which, so the agent reads
+/// its file there.
+pub fn basket_block(items: &[oxplow_db::context_store::WaitingItem], here: Option<i64>) -> String {
+    use oxplow_db::context_store::ContextKind;
     let mut s = String::from(
         "<context-basket>\nThe person collected these for this prompt while exploring. \
          Read a `[oxplow uri …]` with `oxplow_read`.",
     );
-    if items.iter().any(|i| i.note.is_some()) {
+    if items.iter().any(|w| w.item.note.is_some()) {
         s.push_str(
             " Their notes say what they want done about an item: act on each, and say \
              what you did by its number.",
@@ -726,13 +731,15 @@ pub fn basket_block(items: &[oxplow_db::thread_context_store::ContextItem]) -> S
     }
     s.push('\n');
     let mut n = 0;
-    for item in items {
+    let mut basket: Option<&str> = None;
+    for waiting in items {
+        let item = &waiting.item;
         let label = item
             .label
             .as_deref()
             .map(|l| format!(" ({l})"))
             .unwrap_or_default();
-        let entry = match (item.kind, &item.source_uri, &item.text) {
+        let mut entry = match (item.kind, &item.source_uri, &item.text) {
             (ContextKind::Page, Some(uri), _) => {
                 format!("{}{label}\n", prompt_refs::uri_mention(uri))
             }
@@ -752,6 +759,22 @@ pub fn basket_block(items: &[oxplow_db::thread_context_store::ContextItem]) -> S
             }
             _ => continue,
         };
+        if let (Some(stream), Some(_)) = (&waiting.stream, &item.source_uri) {
+            if Some(stream.id) != here {
+                let id = oxplow_domain::StreamId::new(stream.id);
+                entry.push_str(&format!(
+                    "   Collected in stream {id} (\"{}\", branch {}): read it with \
+                     `oxplow_read` and `stream: \"{id}\"`.\n",
+                    stream.title, stream.branch
+                ));
+            }
+        }
+        if waiting.basket.as_deref() != basket {
+            basket = waiting.basket.as_deref();
+            if let Some(name) = basket {
+                s.push_str(&format!("From your \"{name}\" basket:\n"));
+            }
+        }
         n += 1;
         s.push_str(&format!("{n}. {entry}"));
         if let Some(note) = &item.note {
@@ -1211,7 +1234,7 @@ mod tests {
         drop(built);
         async fn waiting(svc: &crate::Services, thread: ThreadId) -> usize {
             svc.db
-                .read(move |c| oxplow_db::thread_context_store::undelivered_tx(c, thread))
+                .read(move |c| oxplow_db::context_store::waiting_for_thread_tx(c, thread))
                 .await
                 .unwrap()
                 .len()
@@ -1238,45 +1261,120 @@ mod tests {
         assert!(!again.contains("<context-basket>"), "{again}");
     }
 
+    /// A named basket attached to a thread rides that thread's next prompt
+    /// after its own items, under its name; the prompt empties it and
+    /// detaches it, and the basket stays.
+    #[tokio::test]
+    async fn an_attached_basket_rides_one_prompt_and_empties() {
+        use crate::commands::context_basket::{ADD, ATTACH};
+        use oxplow_domain::Actor;
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let svc = &*fx.svc;
+        let session = crate::test_fixtures::open_session(svc, fx.thread).await;
+        let thread = fx.thread.to_string();
+        for (name, input) in [
+            (
+                ADD,
+                serde_json::json!({ "basket": "Auth", "uri": "oxplow:oxplow/commit?sha=def" }),
+            ),
+            (
+                ADD,
+                serde_json::json!({ "thread": thread, "uri": "oxplow:oxplow/commit?sha=abc" }),
+            ),
+            (
+                ATTACH,
+                serde_json::json!({ "basket": "Auth", "thread": thread }),
+            ),
+        ] {
+            svc.commands
+                .run(&Actor::Human, name, input, false)
+                .await
+                .unwrap();
+        }
+        let ctx = AgentContext::default();
+        let text = ctx
+            .prompt_context(svc, &fx.thread, Some("s1"), Some(session), None)
+            .await
+            .unwrap();
+        assert!(
+            text.contains(
+                "1. [oxplow uri oxplow:oxplow/commit?sha=abc]\nFrom your \"Auth\" basket:\n2. [oxplow uri oxplow:oxplow/commit?sha=def]\n"
+            ),
+            "{text}"
+        );
+        let basket = svc
+            .db
+            .read(|c| {
+                let b = oxplow_db::context_store::basket_by_name_tx(c, "Auth")?.unwrap();
+                let items = oxplow_db::context_store::items_tx(
+                    c,
+                    oxplow_db::context_store::Basket::Named(b.id),
+                )?;
+                Ok((b, items.len()))
+            })
+            .await
+            .unwrap();
+        assert_eq!((basket.0.attached_thread_id, basket.1), (None, 0));
+    }
+
+    fn waiting_item(
+        id: i64,
+        kind: oxplow_db::context_store::ContextKind,
+        uri: &str,
+        label: Option<&str>,
+        text: Option<&str>,
+        note: Option<&str>,
+    ) -> oxplow_db::context_store::WaitingItem {
+        oxplow_db::context_store::WaitingItem {
+            item: oxplow_db::context_store::ContextItem {
+                id,
+                thread_id: Some(1),
+                basket_id: None,
+                stream_id: Some(1),
+                kind,
+                source_uri: Some(uri.into()),
+                label: label.map(Into::into),
+                text: text.map(Into::into),
+                around: None,
+                note: note.map(Into::into),
+                added_at: "2026-11-18T00:00:00Z".into(),
+            },
+            basket: None,
+            stream: Some(oxplow_db::context_store::ItemStream {
+                id: 1,
+                title: "oxplow".into(),
+                branch: "main".into(),
+            }),
+        }
+    }
+
     /// The basket's items are numbered, so an agent can answer each; a
     /// note follows its item, every line of it indented under it, and the
     /// header says the notes are what the person wants done.
     #[test]
     fn a_basket_items_note_follows_it() {
-        use oxplow_db::thread_context_store::{ContextItem, ContextKind};
-        let item =
-            |id, kind, uri: &str, label: Option<&str>, text: Option<&str>, note: Option<&str>| {
-                ContextItem {
-                    id,
-                    thread_id: 1,
-                    kind,
-                    source_uri: Some(uri.into()),
-                    label: label.map(Into::into),
-                    text: text.map(Into::into),
-                    around: None,
-                    note: note.map(Into::into),
-                    added_at: "2026-11-18T00:00:00Z".into(),
-                    delivered_at: None,
-                }
-            };
-        let block = basket_block(&[
-            item(
-                1,
-                ContextKind::Page,
-                "oxplow:oxplow/commit?sha=abc",
-                Some("Fix the parser"),
-                None,
-                None,
-            ),
-            item(
-                2,
-                ContextKind::Text,
-                "oxplow:oxplow/file?path=src/a.rs#lines=3-4",
-                None,
-                Some("fn a() {}"),
-                Some("Handle the empty case.\nThen rename it."),
-            ),
-        ]);
+        use oxplow_db::context_store::ContextKind;
+        let block = basket_block(
+            &[
+                waiting_item(
+                    1,
+                    ContextKind::Page,
+                    "oxplow:oxplow/commit?sha=abc",
+                    Some("Fix the parser"),
+                    None,
+                    None,
+                ),
+                waiting_item(
+                    2,
+                    ContextKind::Text,
+                    "oxplow:oxplow/file?path=src/a.rs#lines=3-4",
+                    None,
+                    Some("fn a() {}"),
+                    Some("Handle the empty case.\nThen rename it."),
+                ),
+            ],
+            Some(1),
+        );
         assert!(
             block.contains("Their notes say what they want done"),
             "{block}"
@@ -1291,14 +1389,17 @@ mod tests {
             ),
             "{block}"
         );
-        let plain = basket_block(&[item(
-            1,
-            ContextKind::Page,
-            "oxplow:oxplow/commit?sha=abc",
-            None,
-            None,
-            None,
-        )]);
+        let plain = basket_block(
+            &[waiting_item(
+                1,
+                ContextKind::Page,
+                "oxplow:oxplow/commit?sha=abc",
+                None,
+                None,
+                None,
+            )],
+            Some(1),
+        );
         assert!(
             !plain.contains("notes"),
             "no note, no word about notes: {plain}"
@@ -1309,24 +1410,73 @@ mod tests {
     /// the lines around it, fenced under the item before its note.
     #[test]
     fn a_text_items_lines_around_it_follow_it() {
-        use oxplow_db::thread_context_store::{ContextItem, ContextKind};
-        let block = basket_block(&[ContextItem {
-            id: 1,
-            thread_id: 1,
-            kind: ContextKind::Text,
-            source_uri: Some("oxplow:oxplow/agent_session?id=ses3".into()),
-            label: None,
-            text: Some("124 of 124".into()),
-            around: Some("Checks:\n- e2e: the full suite passes, 124 of 124".into()),
-            note: Some("Which suite?".into()),
-            added_at: "2026-11-18T00:00:00Z".into(),
-            delivered_at: None,
-        }]);
+        use oxplow_db::context_store::ContextKind;
+        let mut item = waiting_item(
+            1,
+            ContextKind::Text,
+            "oxplow:oxplow/agent_session?id=ses3",
+            None,
+            Some("124 of 124"),
+            Some("Which suite?"),
+        );
+        item.item.around = Some("Checks:\n- e2e: the full suite passes, 124 of 124".into());
+        let block = basket_block(&[item], Some(1));
         assert!(
             block.contains(
                 "1. Text from [oxplow uri oxplow:oxplow/agent_session?id=ses3]:\n```\n124 of 124\n```\n   \
                  Selected from these lines:\n   ```\n   Checks:\n   - e2e: the full suite passes, 124 of 124\n   ```\n   \
                  Note: Which suite?\n</context-basket>"
+            ),
+            "{block}"
+        );
+    }
+
+    /// A named basket's items follow a line naming it, numbered on from the
+    /// thread's own; one collected in another stream says which and how to
+    /// read it there, before its note.
+    #[test]
+    fn a_named_baskets_items_are_headed_and_say_their_stream() {
+        use oxplow_db::context_store::{ContextKind, ItemStream};
+        let own = waiting_item(
+            1,
+            ContextKind::Page,
+            "oxplow:oxplow/commit?sha=abc",
+            None,
+            None,
+            None,
+        );
+        let mut far = waiting_item(
+            2,
+            ContextKind::Page,
+            "oxplow:oxplow/file?path=src/a.rs#lines=3-4",
+            None,
+            None,
+            Some("Why is this here?"),
+        );
+        far.basket = Some("Auth".into());
+        far.stream = Some(ItemStream {
+            id: 2,
+            title: "Login rework".into(),
+            branch: "login".into(),
+        });
+        let mut near = waiting_item(
+            3,
+            ContextKind::Page,
+            "oxplow:oxplow/commit?sha=def",
+            None,
+            None,
+            None,
+        );
+        near.basket = Some("Auth".into());
+        let block = basket_block(&[own, far, near], Some(1));
+        assert!(
+            block.contains(
+                "1. [oxplow uri oxplow:oxplow/commit?sha=abc]\n\
+                 From your \"Auth\" basket:\n\
+                 2. [oxplow uri oxplow:oxplow/file?path=src/a.rs#lines=3-4]\n   \
+                 Collected in stream str2 (\"Login rework\", branch login): read it with `oxplow_read` and `stream: \"str2\"`.\n   \
+                 Note: Why is this here?\n\
+                 3. [oxplow uri oxplow:oxplow/commit?sha=def]\n</context-basket>"
             ),
             "{block}"
         );

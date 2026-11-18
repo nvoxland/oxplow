@@ -1300,8 +1300,8 @@ is the Alerts panel's icon.
   Context body's rows (`context-panel-item`) lead with their
   `context-panel-remove` ×, and `context-panel-clear` is its Clear.
 - **Clear:** both core panels end in a Clear button (`ox-button`, never a
-  link) while there is something to clear. The Context panel's takes every
-  waiting item out (`oxplow.context.clear`). The Alerts panel's puts away
+  link) while there is something to clear. The Context panel's empties This
+  Thread's basket (`oxplow.context.clear`). The Alerts panel's puts away
   what a person can put away: the notices (`oxplow.hint.dismiss_all`) and
   the failed operations (`oxplow.op_error.dismiss_all`); `clearable` in
   `alertsModel.ts` says when it shows. A decision is made, not cleared; an
