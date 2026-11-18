@@ -14,6 +14,7 @@ import { recordOpError } from "./opErrors.js";
 import { NO_READS, unionReads, useRerunOnChange } from "./viz/rerun.js";
 import { threadRowId } from "./modelIds.js";
 import { personCommands } from "./personCommands.js";
+import { dockStore } from "./components/Dock/dockStore.js";
 import type { Reads, SqlCell, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
 
 /** What the thread's own basket is called. */
@@ -212,11 +213,14 @@ export function addInput(to: Destination, stream: string | null, what: ContextWh
   };
 }
 
-// ---- the add prompt ---------------------------------------------------------
+// ---- the add card -----------------------------------------------------------
 //
 // Every Add to Context offers a note and a basket before it adds:
-// `addToContext` opens the one app-level `ContextNotePrompt` with what is
-// being added, and that prompt adds it (`submitToContext`) or drops it.
+// `addToContext` opens the Context dock panel, whose add card
+// (`components/Context/ContextAddCard.tsx`) shows what is being added and
+// adds it (`submitToContext`) or drops it. The draft — the note, the basket
+// picked, a new basket's name — is kept here, so the dock closing on a press
+// outside it loses nothing: opening the panel again shows the card as it was.
 
 /** An add waiting on the person's note and basket. */
 export interface PendingAdd {
@@ -225,7 +229,17 @@ export interface PendingAdd {
   /** The stream it is collected in. */
   stream: string | null;
   what: ContextWhat;
+  /** The note typed so far. */
+  note: string;
+  /** The basket picked: a name, `THREAD_MARK`, `NEW_MARK`; null until the
+   *  card sets its default. */
+  choice: string | null;
+  /** A new basket's name, typed so far. */
+  newName: string;
 }
+
+/** The add card's choice for a new basket. */
+export const NEW_MARK = "@new";
 
 let pending: PendingAdd | null = null;
 const pendingListeners = new Set<() => void>();
@@ -235,7 +249,7 @@ function setPending(next: PendingAdd | null): void {
   for (const l of pendingListeners) l();
 }
 
-/** The add the prompt is open for, or null. */
+/** The add the card is open for, or null. */
 export function usePendingAdd(): PendingAdd | null {
   return useSyncExternalStore(
     (cb) => {
@@ -248,18 +262,27 @@ export function usePendingAdd(): PendingAdd | null {
   );
 }
 
-/** Offer a note and a basket, then put a page (`uri`) or a piece of text in it. */
+/** Change the open add's draft. */
+export function updatePendingAdd(patch: Partial<Pick<PendingAdd, "note" | "choice" | "newName">>): void {
+  if (pending) setPending({ ...pending, ...patch });
+}
+
+/** Offer a note and a basket in the Context dock panel, then put a page
+ *  (`uri`) or a piece of text in it. */
 export async function addToContext(what: ContextWhat): Promise<void> {
-  setPending({ thread: selected, stream: selectedStream, what });
+  setPending({ thread: selected, stream: selectedStream, what, note: "", choice: null, newName: "" });
+  dockStore.open("context");
 }
 
-/** Add the pending item to `to` with `note` (none when blank); the toast offers Undo. */
-export async function submitToContext(add: PendingAdd, to: Destination, note: string): Promise<void> {
+/** Add the pending item to `to` with its note (none when blank) and, when
+ *  it has none, `label`; the toast offers Undo. */
+export async function submitToContext(add: PendingAdd, to: Destination, label?: string | null): Promise<void> {
   setPending(null);
-  await personCommands.run("Add to Context", "oxplow.context.add", addInput(to, add.stream, add.what, note));
+  const what = add.what.label || !label ? add.what : { ...add.what, label };
+  await personCommands.run("Add to Context", "oxplow.context.add", addInput(to, add.stream, what, add.note));
 }
 
-/** Close the prompt without adding. */
+/** Drop the open add. */
 export function cancelAddToContext(): void {
   setPending(null);
 }

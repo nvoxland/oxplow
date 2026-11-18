@@ -1,21 +1,20 @@
 import { expect, test } from "../../support/fixtures.js";
 import { open, shown } from "../../support/ui.js";
 
-// A page's ☰ → Add to Context offers a note, then puts the page in the
-// selected thread's basket: the dock's Context icon counts it, its panel
-// lists it with the note, and the × takes it out again.
+// A page's ☰ → Add to Context opens the Context panel's add card, then puts
+// the page in the selected thread's basket: the dock's Context icon counts
+// it, the panel lists it with the note, and the × takes it out again.
 test("a page added from its ☰ is counted in the dock and removed from its panel", async ({ page, daemon }) => {
   await open(page, daemon, "oxplow:oxplow/page?page=e2e/home");
   await page.locator('[data-testid="page-nav-menu"]:visible').click();
   await page.getByTestId("menu-item-page-add-to-context").click();
+  await expect(page.getByTestId("context-panel")).toBeVisible();
   await page.getByTestId("context-note-field").fill("Check the greeting.");
   await page.getByTestId("context-note-add").click();
-  await expect(page.getByTestId("context-note-prompt")).not.toBeVisible();
+  await expect(page.getByTestId("context-add-card")).not.toBeVisible();
 
   const badge = page.getByTestId("dock-context-badge");
   await expect(badge).toHaveText("1");
-
-  await page.getByTestId("dock-context").click();
   await expect(page.getByTestId("context-panel-item")).toHaveCount(1);
   await expect(page.getByTestId("context-panel-note")).toHaveText("Check the greeting.");
   await page.getByTestId("context-panel-remove").click();
@@ -34,13 +33,12 @@ test("text selected on a page goes in the basket from its right-click menu", asy
   await shown(page).getByText("Suite home in plain mode").click({ button: "right" });
   await page.getByTestId("menu-item-add-to-context").click();
   await page.getByTestId("context-note-add").click();
-  await expect(page.getByTestId("context-note-prompt")).not.toBeVisible();
+  await expect(page.getByTestId("context-add-card")).not.toBeVisible();
   await expect(page.getByTestId("dock-context-badge")).toHaveText("1");
-  await page.getByTestId("dock-context").click();
   await expect(page.getByTestId("context-panel-item")).toContainText("Suite home in plain mode");
 });
 
-// An add can go to a named basket: To → New basket… takes its name. The
+// An add can go to a named basket: To → + New basket takes its name. The
 // basket is listed under Baskets, collapsed, and not counted for this
 // thread's next prompt until it is attached; then it shows under This
 // Thread and the badge counts it.
@@ -48,12 +46,11 @@ test("an add to a new basket is counted once the basket is attached", async ({ p
   await open(page, daemon, "oxplow:oxplow/page?page=e2e/home");
   await page.locator('[data-testid="page-nav-menu"]:visible').click();
   await page.getByTestId("menu-item-page-add-to-context").click();
-  await page.getByTestId("context-note-basket").selectOption("@new");
+  await page.locator('[data-testid="context-add-to"][data-value="@new"]').click();
   await page.getByTestId("context-note-new-basket").fill("Greeting review");
   await page.getByTestId("context-note-new-basket").press("Enter");
-  await expect(page.getByTestId("context-note-prompt")).not.toBeVisible();
+  await expect(page.getByTestId("context-add-card")).not.toBeVisible();
 
-  await page.getByTestId("dock-context").click();
   const basket = page.locator('[data-testid="context-basket"][data-basket="Greeting review"]');
   await expect(basket).toContainText("Greeting review");
   await expect(page.getByTestId("context-panel-item")).not.toBeVisible();

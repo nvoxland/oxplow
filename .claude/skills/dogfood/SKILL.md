@@ -154,8 +154,9 @@ Drive these like a user would, not just the agent terminal:
 
 - **The context basket is the human's voice.** Add a page (its ☰ →
   **Add to Context**) or right-click selected text → **Add Selection to
-  Context**. Each add opens a prompt: write what the agent should do about
-  it, and pick the basket (This Thread, a named one, or New basket…). Edit
+  Context**. Each add opens the Context panel's add card: write what the agent
+  should do about it, and pick the basket (This Thread, a named one, or +
+  New basket). Edit
   the note in the **Context** panel (the @ icon), attach a named basket,
   then prompt the agent: its next prompt carries the items with their notes
   (the `<context-basket>` block), the agent answers by item number, and the

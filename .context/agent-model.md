@@ -1038,15 +1038,21 @@ by `the_context_basket_reaches_the_next_prompt_once` and
 `an_attached_basket_rides_one_prompt_and_empties`.
 
 *The UI* (`apps/desktop/src/contextBasket.ts`, the window's selected thread
-and its stream from `setSelectedThread`): every add goes through one
-prompt (`components/Context/ContextNotePrompt.tsx`, mounted once in `App`):
-`addToContext` opens it where the person last pressed, with an optional
-multiline note and **To**, the basket: This Thread (disabled with no thread
-selected), each named basket, or **New basket…**, which swaps in a name
-field (Enter adds; Escape goes back to the picker). To starts at the basket
-last added to (the app preference `context.lastBasket`), else This Thread, else
-the first named basket, else New basket…. Ctrl/Cmd+Enter or Add adds (with
-no note too) and names the window's stream; Escape or Cancel adds nothing.
+and its stream from `setSelectedThread`): every add opens the **Context
+dock panel** (`dockStore.open("context")`, as Ask the Assistant opens its
+panel) with an add card on top (`components/Context/ContextAddCard.tsx`):
+what is being added by its name (`contextTitle.ts`: the label, else its
+page's title from the one title cache — an agent session's display name —
+else a file's path and lines; never a raw URI, and a title found is sent
+as the item's `label`), an optional multiline note, and **To**, a row of
+choices: This Thread (disabled with no thread selected), each named basket,
+and **+ New basket**, which swaps in a name field (Enter adds; Escape goes
+back to the choices). To starts at the basket last added to (the app
+preference `context.lastBasket`), else This Thread, else the first named
+basket, else a new one. Ctrl/Cmd+Enter or Add adds (with no note too) and
+names the window's stream; Escape (not passed on, so the dock stays) or
+Cancel drops it. The draft (note, choice, new name) is kept in the add's
+store, so the dock closing on a press outside loses nothing.
 **Add to Context** is on every page's ☰ (`menu-item-page-add-to-context`,
 beside Ask; the page's canonical ref and title; offered with no thread
 too) and on selections: an editor's and a diff's right-side selection

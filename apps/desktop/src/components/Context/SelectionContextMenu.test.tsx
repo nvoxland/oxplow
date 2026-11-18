@@ -5,7 +5,7 @@ import type { ContextWhat } from "../../contextBasket.js";
 
 // A right-click on a page's selected text opens a menu of Copy and Add
 // Selection to Context: the text goes in the basket on the page's URI (the
-// note prompt it opens is `addToContext`'s). Nothing floats over a
+// add card it opens is `addToContext`'s). Nothing floats over a
 // selection. A right-click off the selection, or over an editor's, a
 // field's or a terminal's text, is not this menu's.
 

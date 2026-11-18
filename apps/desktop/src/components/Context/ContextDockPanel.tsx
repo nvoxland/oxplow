@@ -25,6 +25,7 @@ import {
   renameBasket,
   setContextNote,
   useBaskets,
+  usePendingAdd,
   useSelectedThreadId,
   type BasketItem,
   type Baskets,
@@ -32,6 +33,8 @@ import {
 } from "../../contextBasket.js";
 import type { MenuItem } from "../../menu.js";
 import { useContextMenu } from "../useRowContextMenu.js";
+import { ContextAddCard } from "./ContextAddCard.js";
+import { plainTitle, useContextTitle } from "./contextTitle.js";
 import type { DockBadge, DockBodyProps } from "../Dock/dockPanels.js";
 import { dockButtonStyle } from "../Dock/dockStyle.js";
 
@@ -41,9 +44,15 @@ export function useContextBadge(): DockBadge | null {
   return count > 0 ? { count } : null;
 }
 
-/** What a row says: the label, else the source page, else the text's start. */
+/** What a row says without reading anything: the label, else the source's
+ *  name, else the text's start. */
 export function itemTitle(item: BasketItem): string {
-  return item.label ?? item.sourceUri ?? (item.text ?? "").slice(0, 80);
+  return plainTitle({ label: item.label, uri: item.sourceUri, text: item.text });
+}
+
+/** A row's name: its page's title when it was added without a label. */
+function ItemTitle({ item }: { item: BasketItem }) {
+  return <>{useContextTitle({ label: item.label, uri: item.sourceUri, text: item.text })}</>;
 }
 
 /** Why a basket can't be attached to `thread` now, or null when it can. */
@@ -56,6 +65,7 @@ export function attachDisabledReason(basket: NamedBasket, thread: string | null)
 export function ContextDockBody(_props: DockBodyProps) {
   const thread = useSelectedThreadId();
   const baskets = useBaskets(thread);
+  const adding = usePendingAdd();
   const menu = useContextMenu();
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -89,7 +99,9 @@ export function ContextDockBody(_props: DockBodyProps) {
         </button>
         {item.kind === "text" ? <Quote size={14} aria-hidden /> : <FileText size={14} aria-hidden />}
         <span style={{ flex: 1, minWidth: 0 }}>
-          <div style={ellipsis}>{itemTitle(item)}</div>
+          <div style={ellipsis}>
+            <ItemTitle item={item} />
+          </div>
           {item.kind === "text" && item.text ? <div style={{ ...ellipsis, color: "var(--text-muted)" }}>{item.text.slice(0, 200)}</div> : null}
           <InlineEdit
             value={item.note ?? ""}
@@ -151,9 +163,10 @@ export function ContextDockBody(_props: DockBodyProps) {
     </div>
   );
 
-  const empty = baskets.own.length === 0 && baskets.named.length === 0;
+  const empty = !adding && baskets.own.length === 0 && baskets.named.length === 0;
   return (
     <div data-testid="context-panel" style={{ display: "flex", flexDirection: "column", gap: 6, padding: "8px 12px", fontSize: "var(--text-xs)" }}>
+      {adding ? <ContextAddCard add={adding} baskets={baskets} /> : null}
       {empty ? (
         <div data-testid="context-panel-empty" style={{ color: "var(--text-muted)" }}>
           No context added yet

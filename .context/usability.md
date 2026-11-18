@@ -1288,9 +1288,10 @@ caller may bypass the bus to write to the terminal.
   and a page's menu over its selected text (**Add Selection to
   Context**, with Copy). Every entry wears the basket's `at-sign`
   icon (`MenuItem.icon`), the dock's Context icon, so it reads the same
-  everywhere. Its prompt takes a note and **To**, the basket: This
-  Thread (the selected thread's own) or a named basket, New basket… for
-  one more (`oxplow.context.add`, toast with Undo). The next prompt to any
+  everywhere. It opens the Context dock panel with an add card (a dock
+  panel is one of the three kinds of dialog, as Ask the Assistant's): a
+  note and **To**, the basket — This Thread (the selected thread's own), a
+  named basket, or + New basket (`oxplow.context.add`, toast with Undo). The next prompt to any
   agent in a thread carries its own basket and every basket attached to
   it. The Context dock panel and page list them.
 - **Repair with the Agent** (on Extension problems, on a disabled

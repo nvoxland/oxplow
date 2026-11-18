@@ -1,6 +1,6 @@
 /// A page's right-click menu over its selected text: Copy, and Add
 /// Selection to Context (the text on the page's URI; `addToContext` opens
-/// the note prompt). As the editor's, the diff's and the terminal's menus
+/// the Context panel's add card). As the editor's, the diff's and the terminal's menus
 /// offer it; nothing floats over a selection. It answers a right-click
 /// only on the selection itself, and before a row's own menu: it is React's
 /// capture handler on the page's body, and React runs those from the

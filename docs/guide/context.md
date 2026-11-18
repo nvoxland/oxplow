@@ -16,13 +16,14 @@ baskets, one per topic, and send one to a thread when you are ready.
 
 ## The note and the basket
 
-Every add opens a small prompt:
+Every add opens the **Context** panel (the @ icon in the bottom bar) with a
+card for the new item:
 
 - **Note** (optional). Write what you want done about the item. The agent gets
   the note with the item and acts on it. Because it goes with the item, it
   stays right even when the code moves.
 - **To.** The basket it goes in: **This Thread**, one of your named baskets, or
-  **New basket…**, which asks for a name. To starts at the basket you used
+  **+ New basket**, which asks for a name. To starts at the basket you used
   last, so you can add several things to one basket in a row.
 
 Press Ctrl/Cmd+Enter or **Add** to add it. Escape or **Cancel** adds nothing.

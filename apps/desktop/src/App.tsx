@@ -40,7 +40,6 @@ import { TitleBar } from "./components/TitleBar.js";
 import { showToast } from "./components/toastStore.js";
 import { awaitGitOp, opErrorOf } from "./git-op.js";
 import { UndoToastStack } from "./components/UndoToast.js";
-import { ContextNotePrompt } from "./components/Context/ContextNotePrompt.js";
 import { identityOf, keyOf, knowledgeUri, pageUri, paramOf, parseUri, typeOf } from "./uri/uri.js";
 import { nextMode, openWithOf, shellView, tabHint, tabLabel } from "./pages/renderers.js";
 import { chooseRenderer, chooseRoute } from "./pages/pageFiles.js";
@@ -2146,7 +2145,6 @@ export function App() {
         <FoundationDownDialog key={foundationErrors.join("\n")} errors={foundationErrors} />
       ) : null}
       <UndoToastStack />
-      <ContextNotePrompt />
       <PersonCommandConfirm />
       <RemoteConnectionBanner />
     </div>
