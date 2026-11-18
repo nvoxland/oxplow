@@ -48,20 +48,27 @@ loaders:
       WHERE path < peer OR (path = peer AND start_line < peer_line)
       ORDER BY lines DESC, path, start_line
       LIMIT 200
+  # Counted over the whole scan, not the listed rows (`blocks` stops at
+  # 200): each block is two facts, one per side.
   summary:
     sql: |
-      SELECT (SELECT count(*) FROM blocks) AS blocks,
-             (SELECT coalesce(sum(lines), 0) FROM blocks) AS lines,
+      WITH total AS (
+        SELECT count(*) / 2 AS blocks, CAST(coalesce(sum(value), 0) / 2 AS INTEGER) AS lines
+        FROM v_fact
+        WHERE capture_id = (SELECT id FROM scan) AND measure_key = 'oxplow.duplicate_lines'
+      )
+      SELECT t.blocks, t.lines,
              CASE
                WHEN NOT EXISTS (SELECT 1 FROM scan)
                  THEN 'The whole-tree duplicate scan hasn''t run yet. It runs about a minute after the branch moves (a commit, a checkout or a pull), at most every 15 minutes, while the **Duplicated lines** metric is on.'
-               WHEN NOT EXISTS (SELECT 1 FROM blocks)
+               WHEN t.blocks = 0
                  THEN 'No duplicated blocks in the project, as of the scan ' || (SELECT captured_at FROM scan) || '.'
-               ELSE printf('%d duplicated block%s, %,d lines in all, as of the scan %s.',
-                           (SELECT count(*) FROM blocks),
-                           CASE (SELECT count(*) FROM blocks) WHEN 1 THEN '' ELSE 's' END,
-                           (SELECT sum(lines) FROM blocks), (SELECT captured_at FROM scan))
+               ELSE printf('%,d duplicated block%s, %,d lines in all, as of the scan %s.%s',
+                           t.blocks, CASE t.blocks WHEN 1 THEN '' ELSE 's' END, t.lines,
+                           (SELECT captured_at FROM scan),
+                           CASE WHEN t.blocks > 200 THEN ' The 200 biggest are listed.' ELSE '' END)
              END AS summary
+      FROM total t
 view:
   stack:
   - id: summary
