@@ -1,43 +1,67 @@
 title: Duplicated Code
-description: Blocks of code repeated elsewhere in the project, as the latest duplicate scans found them, the biggest first, each with the copy it repeats.
+description: The blocks of code the stream's latest whole-tree duplicate scan found repeated elsewhere in the project, the biggest first, each with the copy it repeats.
 icon: copy
 category: Code
 keywords: duplicate duplication copy paste clone quality
+params:
+- name: stream_id
 answers:
 - question: Which code is duplicated in this project?
 - question: What are the biggest copied blocks, and where are their copies?
 see_also:
 - { page: oxplow/metric, params: { metric: oxplow.duplicate_lines } }
 loaders:
-  # A scan records a block on both sides; each pair is listed once, from
-  # the side that sorts first.
+  # The latest whole-tree scan (the `oxplow.duplicate_lines` collector, run
+  # after the branch moves): its capture restates the tree, so its facts are
+  # the project's duplicates now. A change's own scans are its Change
+  # Analysis', not this page's.
+  scan:
+    sql: |
+      SELECT c.id, c.captured_at,
+             CASE WHEN c.snapshot_id IS NOT NULL THEN 'snap:' || c.snapshot_id
+                  WHEN c.closest_vcs_rev IS NOT NULL THEN 'git:' || c.closest_vcs_rev END AS version
+      FROM v_capture c
+      WHERE c.producer = 'oxplow.duplicate_lines' AND c.status = 'done'
+        AND (:stream_id IS NULL OR c.stream_id = :stream_id)
+      ORDER BY c.captured_at DESC, c.id DESC
+      LIMIT 1
+  # Each fact is one side of a block, its `detail` the other side
+  # (`path:start-end`); each pair is listed once, from the side that sorts first.
   blocks:
     sql: |
-      WITH found AS (
-        SELECT f.path, f.start_line, f.end_line,
-               json_extract(f.extra_json, '$.peerPath') AS peer,
-               json_extract(f.extra_json, '$.peerStartLine') AS peer_line,
-               json_extract(f.extra_json, '$.peerEndLine') AS peer_end,
-               s.revision AS version
-        FROM v_code_quality_finding f JOIN v_code_quality_scan s ON s.id = f.scan_id
-        WHERE f.kind = 'duplicate-block'
+      WITH side AS (
+        SELECT f.path, f.line AS start_line, CAST(f.value AS INTEGER) AS lines, f.detail,
+               replace(f.detail, rtrim(f.detail, '0123456789-'), '') AS peer_range
+        FROM v_fact f
+        WHERE f.capture_id = (SELECT id FROM scan) AND f.measure_key = 'oxplow.duplicate_lines'
+      ), pair AS (
+        SELECT path, start_line, lines,
+               substr(detail, 1, length(detail) - length(peer_range) - 1) AS peer,
+               CAST(substr(peer_range, 1, instr(peer_range, '-') - 1) AS INTEGER) AS peer_line,
+               peer_range
+        FROM side
       )
-      SELECT path, start_line, end_line - start_line + 1 AS lines, peer, peer_line,
-             path || ':' || start_line || '-' || end_line || '|' || peer || ':' || peer_line || '-' || peer_end AS pair,
-             version
-      FROM found
+      SELECT path, start_line, lines, peer, peer_line,
+             path || ':' || start_line || '-' || (start_line + lines - 1) || '|' || peer || ':' || peer_range AS pair,
+             (SELECT version FROM scan) AS version
+      FROM pair
       WHERE path < peer OR (path = peer AND start_line < peer_line)
-      GROUP BY path, start_line, peer, peer_line
       ORDER BY lines DESC, path, start_line
       LIMIT 200
   summary:
     sql: |
-      SELECT count(*) AS blocks, coalesce(sum(lines), 0) AS lines,
-             CASE WHEN count(*) = 0
-                  THEN 'No duplicated blocks found. oxplow scans the files of each change when it analyzes a change (a commit, a request, the uncommitted work), and lists here the blocks repeated elsewhere in the project.'
-                  ELSE printf('%d duplicated block%s, %,d lines in all.', count(*), CASE count(*) WHEN 1 THEN '' ELSE 's' END, sum(lines))
+      SELECT (SELECT count(*) FROM blocks) AS blocks,
+             (SELECT coalesce(sum(lines), 0) FROM blocks) AS lines,
+             CASE
+               WHEN NOT EXISTS (SELECT 1 FROM scan)
+                 THEN 'The whole-tree duplicate scan hasn''t run yet. It runs about a minute after the branch moves (a commit, a checkout or a pull), at most every 15 minutes, while the **Duplicated lines** metric is on.'
+               WHEN NOT EXISTS (SELECT 1 FROM blocks)
+                 THEN 'No duplicated blocks in the project, as of the scan ' || (SELECT captured_at FROM scan) || '.'
+               ELSE printf('%d duplicated block%s, %,d lines in all, as of the scan %s.',
+                           (SELECT count(*) FROM blocks),
+                           CASE (SELECT count(*) FROM blocks) WHEN 1 THEN '' ELSE 's' END,
+                           (SELECT sum(lines) FROM blocks), (SELECT captured_at FROM scan))
              END AS summary
-      FROM blocks
 view:
   stack:
   - id: summary

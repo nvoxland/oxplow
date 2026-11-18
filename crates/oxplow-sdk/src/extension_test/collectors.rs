@@ -82,7 +82,7 @@ pub(super) async fn fact_collector_example(
         )
         .collect();
     if let Some((path, want, got)) = compare(&ex.expect, &json!({ "facts": got })) {
-        report.errors.push(error(shown, ex.line("expect"), "fixture.compare", format!("collector `{id}` returned {got} at `{path}`, the example expects {want}")).fix("the script, or the example's `expect` (`{ facts: [{ measure, value?, path?, subject?, line?, rule?, dims? }] }`)").mismatch(path, want, got));
+        report.errors.push(error(shown, ex.line("expect"), "fixture.compare", format!("collector `{id}` returned {got} at `{path}`, the example expects {want}")).fix("the script, or the example's `expect` (`{ facts: [{ measure, value?, path?, subject?, line?, rule?, detail?, dims? }] }`)").mismatch(path, want, got));
     }
 }
 

@@ -7,7 +7,7 @@ shape** — one atomic fact per subject, NOT a pre-aggregated total:
 
 ```json
 { "facts": [ { "measure": "repo.todo_count", "value": <n>, "subject"?: "file:src/a.rs",
-               "path"?: "src/a.rs", "line"?: 12, "rule"?: "todo", "dims"?: { ... } } ] }
+               "path"?: "src/a.rs", "line"?: 12, "rule"?: "todo", "detail"?: "…", "dims"?: { ... } } ] }
 ```
 
 - `measure` (required) is the measure key — MUST be in the collector's `facts`.
@@ -19,6 +19,9 @@ shape** — one atomic fact per subject, NOT a pre-aggregated total:
   subject that is not a URI is refused (the run fails, naming the measure and the string).
 - `rule` is a conformed slice value read as the `oxplow.rule` dimension (so a spec
   can filter by it with `FILTER (WHERE dim('oxplow.rule') = '…')` or slice by it).
+- `detail` is free text about this one fact, read back as `v_fact.detail`
+  (oxplow's duplicate scan puts the copy there, `path:start-end`). It is not
+  a dimension: nothing slices or filters a metric by it.
 - `num`/`den` (optional) are ratio components — supply them when the measure is a
   ratio base so a `RATIO(num, den)` metric re-derives Σnum/Σden (coverage %,
   pass rate) instead of averaging pre-divided values.

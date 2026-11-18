@@ -1,4 +1,5 @@
-# both sides of a duplicate block are facts on their own block.
+# both sides of a duplicate block are facts on their own block, each naming
+# where its copy is (`detail`: path:start-end).
 when:
   collector: oxplow.duplicate_lines
   files:
@@ -7,5 +8,5 @@ when:
     "src/c.rs": "fn other() {}\n"
 expect:
   facts:
-    - {"measure": "oxplow.duplicate_lines", "value": 11, "subject": "oxplow:oxplow/block?lines=1-11&path=src/a.rs", "path": "src/a.rs", "line": 1}
-    - {"measure": "oxplow.duplicate_lines", "value": 11, "subject": "oxplow:oxplow/block?lines=2-12&path=src/b.rs", "path": "src/b.rs", "line": 2}
+    - {"measure": "oxplow.duplicate_lines", "value": 11, "subject": "oxplow:oxplow/block?lines=1-11&path=src/a.rs", "path": "src/a.rs", "line": 1, "detail": "src/b.rs:2-12"}
+    - {"measure": "oxplow.duplicate_lines", "value": 11, "subject": "oxplow:oxplow/block?lines=2-12&path=src/b.rs", "path": "src/b.rs", "line": 2, "detail": "src/a.rs:1-11"}

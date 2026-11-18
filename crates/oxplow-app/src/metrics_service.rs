@@ -2516,6 +2516,7 @@ impl MetricsService {
                 // The reported rule/idiom — the engine reads this column as the
                 // `oxplow.rule` dimension, so a spec can `dim_eq` on it.
                 rule: gf.rule.clone(),
+                detail: gf.detail.clone(),
                 // Ratio components — carried so a `ratio` spec re-derives Σnum/Σden.
                 numerator: gf.num,
                 denominator: gf.den,
@@ -3327,10 +3328,20 @@ mod tests {
     #[tokio::test]
     async fn a_burst_of_ref_moves_scans_duplicates_once_over_the_latest() {
         let (svc, _dir) = fixture().await;
-        svc.config.write().unwrap().metrics.push(MetricEntry {
-            use_key: Some("code_metrics.duplicate_lines".into()),
-            ..Default::default()
-        });
+        {
+            let mut config = svc.config.write().unwrap();
+            config.metrics.push(MetricEntry {
+                use_key: Some("code_metrics.duplicate_lines".into()),
+                ..Default::default()
+            });
+            // oxplow-bundled's own whole-tree scan is paced the same way;
+            // off, so the one due is the test data's.
+            config.metrics.push(MetricEntry {
+                use_key: Some("oxplow.duplicate_lines".into()),
+                enabled: Some(false),
+                ..Default::default()
+            });
+        }
         crate::test_fixtures::activate_with_problems(&svc).await;
         let consumer = crate::collector_triggers::CollectorTriggers::new(Arc::downgrade(&svc));
         use crate::event_pump::AsyncEventConsumer as _;

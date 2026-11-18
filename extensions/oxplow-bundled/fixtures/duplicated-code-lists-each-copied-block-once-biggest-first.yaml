@@ -1,20 +1,32 @@
-# Duplicated Code lists each block a scan found once (not once per side),
-# the biggest first, with the copy it repeats and a compare link, under a
-# line that says how many blocks and lines.
+# Duplicated Code lists the blocks the latest whole-tree duplicate scan
+# found, each once (the scan records both sides), the biggest first, with
+# the copy it repeats, under a line that says how many blocks and lines.
+# An earlier scan's blocks are gone: only the latest capture counts.
 given:
   - observe:
-      duplicates:
-        revision: abc1234
-        blocks:
-          - { path: src/a.rs, start_line: 10, end_line: 19, peer_path: src/b.rs, peer_start_line: 40, peer_end_line: 49 }
-          - { path: src/c.ts, start_line: 1, end_line: 30, peer_path: src/a.rs, peer_start_line: 100, peer_end_line: 129 }
+      facts:
+        measure: oxplow.duplicate_lines
+        producer: oxplow.duplicate_lines
+        items:
+          - { value: 8, path: src/old.rs, line: 1, subject: "oxplow:oxplow/block?lines=1-8&path=src/old.rs", detail: "src/x.rs:1-8" }
+          - { value: 8, path: src/x.rs, line: 1, subject: "oxplow:oxplow/block?lines=1-8&path=src/x.rs", detail: "src/old.rs:1-8" }
+  - observe:
+      facts:
+        measure: oxplow.duplicate_lines
+        producer: oxplow.duplicate_lines
+        items:
+          - { value: 10, path: src/a.rs, line: 10, subject: "oxplow:oxplow/block?lines=10-19&path=src/a.rs", detail: "src/b.rs:40-49" }
+          - { value: 10, path: src/b.rs, line: 40, subject: "oxplow:oxplow/block?lines=40-49&path=src/b.rs", detail: "src/a.rs:10-19" }
+          - { value: 30, path: src/c.ts, line: 1, subject: "oxplow:oxplow/block?lines=1-30&path=src/c.ts", detail: "src/a.rs:100-129" }
+          - { value: 30, path: src/a.rs, line: 100, subject: "oxplow:oxplow/block?lines=100-129&path=src/a.rs", detail: "src/c.ts:1-30" }
 when: { page: oxplow/duplicated-code }
 expect:
   loaders:
     summary:
       rows:
-        - { blocks: 2, lines: 40, summary: "2 duplicated blocks, 40 lines in all." }
+        - { blocks: 2, lines: 40 }
     blocks:
       rows:
-        - { path: src/a.rs, start_line: 100, lines: 30, peer: src/c.ts, peer_line: 1, pair: "src/a.rs:100-129|src/c.ts:1-30", version: abc1234 }
-        - { path: src/a.rs, start_line: 10, lines: 10, peer: src/b.rs, peer_line: 40 }
+        - { path: src/a.rs, start_line: 100, lines: 30, peer: src/c.ts, peer_line: 1, pair: "src/a.rs:100-129|src/c.ts:1-30" }
+        - { path: src/a.rs, start_line: 10, lines: 10, peer: src/b.rs, peer_line: 40, pair: "src/a.rs:10-19|src/b.rs:40-49" }
+  text: { contains: ["2 duplicated blocks, 40 lines in all"] }

@@ -1,0 +1,14 @@
+# Before the whole-tree duplicate scan has run, Duplicated Code says when it
+# runs; after a scan that found nothing, it says the tree has no copies.
+steps:
+  - when: { page: oxplow/duplicated-code }
+    expect:
+      loaders:
+        blocks: { rows: [] }
+      text: { contains: ["hasn't run yet"] }
+  - given:
+      - observe:
+          facts: { measure: oxplow.duplicate_lines, producer: oxplow.duplicate_lines, items: [] }
+  - when: { page: oxplow/duplicated-code }
+    expect:
+      text: { contains: ["No duplicated blocks in the project"] }

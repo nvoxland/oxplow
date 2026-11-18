@@ -34,10 +34,6 @@ use super::*;
 ///   heads the git indexer read (each replaces what was stored).
 /// - `visit: { page, kind?, label?, thread?, duration_ms? }`: a page the person
 ///   opened, as the shell records it.
-/// - `duplicates: { revision?, scope?, blocks: [{ path, start_line, end_line,
-///   peer_path, peer_start_line, peer_end_line }] }`: a finished duplicate-block
-///   scan, each block a finding on both of its sides, as the change analyzer's
-///   scan records it.
 /// - `facts: { measure, producer?, items?: [{ value?, path?, line?, rule?, severity?, detail?, subject?, dims? }] }`:
 ///   what a collector found, recorded as one capture of the measure.
 /// - `retention: { days }`: the log's retention sweep, run as it is `days`
@@ -71,7 +67,6 @@ pub(super) async fn observe(host: &Host, ext: &Extension, observed: &Value) -> R
         "detail_compaction" => observe_detail_compaction(host, body).await,
         "facts" => observe_facts(host, body).await,
         "visit" => observe_visit(host, body).await,
-        "duplicates" => observe_duplicates(host, body).await,
         "refs" => observe_refs(host, body).await,
         "analyze" => observe_analyze(host, body).await,
         "run" => observe_run(host, body).await,
@@ -786,69 +781,6 @@ pub(super) async fn observe_conversation(host: &Host, body: &Value) -> Result<()
         },
     );
     Ok(())
-}
-
-/// `duplicates: { revision?, scope?, blocks: [..] }`: a finished duplicate-block
-/// scan (`SqliteCodeQualityStore::finish_scan_with_findings`), each block one
-/// finding per side with the other side as its peer, as
-/// `code_quality_runner` records them.
-pub(super) async fn observe_duplicates(host: &Host, body: &Value) -> Result<(), String> {
-    let text = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).map(str::to_string);
-    let line = |v: &Value, k: &str| -> Result<i32, String> {
-        v.get(k)
-            .and_then(Value::as_i64)
-            .map(|n| n as i32)
-            .ok_or_else(|| format!("a duplicate block names its `{k}`"))
-    };
-    let store = &host.svc.code_quality_store;
-    let scan = store
-        .create_scan(
-            "duplication",
-            &text(body, "scope").unwrap_or_else(|| "all".into()),
-            &text(body, "revision").unwrap_or_else(|| "rev1".into()),
-            "all",
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-    let mut findings = Vec::new();
-    for b in body
-        .get("blocks")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        let side = |path: String, start: i32, end: i32, peer: (String, i32, i32)| {
-            oxplow_db::CodeQualityFinding {
-                id: 0,
-                scan_id: scan,
-                path,
-                start_line: start,
-                end_line: end,
-                kind: "duplicate-block".into(),
-                metric_value: f64::from(end - start + 1),
-                extra_json: Some(
-                    json!({ "peerPath": peer.0, "peerStartLine": peer.1, "peerEndLine": peer.2 })
-                        .to_string(),
-                ),
-            }
-        };
-        let a = (
-            text(b, "path").ok_or("a duplicate block names its `path`")?,
-            line(b, "start_line")?,
-            line(b, "end_line")?,
-        );
-        let z = (
-            text(b, "peer_path").ok_or("a duplicate block names its `peer_path`")?,
-            line(b, "peer_start_line")?,
-            line(b, "peer_end_line")?,
-        );
-        findings.push(side(a.0.clone(), a.1, a.2, z.clone()));
-        findings.push(side(z.0, z.1, z.2, a));
-    }
-    store
-        .finish_scan_with_findings(scan, findings)
-        .await
-        .map_err(|e| e.to_string())
 }
 
 pub(super) async fn observe_visit(host: &Host, body: &Value) -> Result<(), String> {

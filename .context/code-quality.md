@@ -171,8 +171,9 @@ in the background. `DuplicationRecorder::record`
 - a `code_quality_scan` row (tool `duplication`, scope `change <id>`, the
   `revision` it read — `working`, `snap:<id>`, `git:<rev>` — and a
   path-list fingerprint) and its findings, read through
-  `v_code_quality_scan` / `v_code_quality_finding` (oxplow-bundled's
-  Duplicated Code page, `duplicated-code`);
+  `v_code_quality_scan` / `v_code_quality_finding` (a change's own
+  duplicates; each change has its own scope, so these are never the
+  project's duplicates now);
 - **stored in one write** (`SqliteCodeQualityStore::finish_scan_with_findings`):
   the findings, their `finding → file` page refs and the scan's `done`
   status commit together, so a scan announces one `DatasetsChanged`, not
@@ -187,8 +188,10 @@ in the background. `DuplicationRecorder::record`
   (`oxplow_code_metrics::is_supported_path`), not every file in the tree;
 - **no facts**: a change scan anchors only its changed files, so a capture
   from it would restate the whole tree from a slice and zero out every
-  untouched file's duplicates. `oxplow.duplicate_lines` is
-  oxplow-bundled's whole-tree collector's: the
+  untouched file's duplicates. `oxplow.duplicate_lines` (on by default) is
+  oxplow-bundled's whole-tree collector's, and what its Duplicated Code page
+  (`duplicated-code`) lists: one fact per side of each block, its `detail`
+  the copy (`path:start-end`), read from the stream's latest capture. It runs the
   `duplicate_blocks(min_lines)` Starlark builtin over the whole tree after
   moves of the stream's HEAD (`vcs.head.moved`) — paced, so a burst
   of them (a commit, a rebase, a restart's catch-up) is one scan of the

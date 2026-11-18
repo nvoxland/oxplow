@@ -1,6 +1,0 @@
-# Before any scan, Duplicated Code says where its blocks come from.
-when: { page: oxplow/duplicated-code }
-expect:
-  loaders:
-    blocks: { rows: [] }
-  text: { contains: ["analyzes a change"] }

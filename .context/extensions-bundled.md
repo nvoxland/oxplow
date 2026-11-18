@@ -95,18 +95,19 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
 - **Code metrics, the Metrics list and Duplicated Code** (in
   `oxplow-bundled`). The 16 code metrics with their Starlark collectors
   (`collectors/{code,rust,ts,clojure,csharp}/`) and the measures only they
-  write ([metrics.md](./metrics.md)); four are on by default. The
+  write ([metrics.md](./metrics.md)); five are on by default. The
   `metrics-recorded` page (the grouped list of every catalogued metric with
   trend and latest value) and its row expander `metrics-slices`. Foundation
   keeps one metric's pages (`metric`, `metric-data`, `measure`), which do not
   link to the list, and the `metrics-dimensions` query (the `metric` page's
   Slice by reads it; the list names it as `oxplow/metrics-dimensions`).
-  `duplicated-code` (Code) lists each duplicate block the change analyzer's
-  scans found once, biggest first, with its copy and a compare link
-  (`v_code_quality_finding`); the holder's Findings and Review pages, which
-  showed the same rows, were dropped. Fixtures: the collectors' own,
-  `the-metrics-list-*`, `a-metric-with-no-recordings-*`, `duplicated-code-*`
-  (a scan made with the fixture step `observe: duplicates`).
+  `duplicated-code` (Code) lists each block the stream's latest whole-tree
+  duplicate scan found (the `oxplow.duplicate_lines` facts, each side's
+  `detail` its copy) once, biggest first, with a compare link; not the
+  change analyzer's scans, which are per change and never age out. The
+  holder's Findings and Review pages, which showed those per-change rows,
+  were dropped. Fixtures: the collectors' own, `the-metrics-list-*`,
+  `a-metric-with-no-recordings-*`, `duplicated-code-*`.
 - **Dashboards and Usage** (pages in `oxplow-bundled`). `dashboards` is the
   Dashboards index in the launcher's Data section: every dashboard page,
   most recently opened first, with its extension, who sees it and its opens

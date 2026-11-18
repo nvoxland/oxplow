@@ -95,6 +95,10 @@ pub struct CollectedFact {
     /// fact with the idiom slug here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rule: Option<String>,
+    /// Free text about this one fact, kept in its `detail` column (a
+    /// duplicate block's copy, `path:start-end`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
     /// Ratio components — when the measure is a ratio base, a fact
     /// may carry its own `num`/`den` so a `ratio` metric re-derives Σnum/Σden
     /// exactly (coverage %, pass rate) instead of averaging pre-divided values.

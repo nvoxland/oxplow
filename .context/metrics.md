@@ -1918,9 +1918,10 @@ The mechanics behind those controls (unchanged by):
   "always on" class is retired: producers/extensions can be enabled/disabled just
   like code metrics. `catalog()` reads each row's `enabled` from config
   (`config_state`): a metric that says `default: off` is on only when a non-disabled `use:`
-  resolves it; the four default-on bundled metrics (`oxplow.todos`,
+  resolves it; the five default-on bundled metrics (`oxplow.todos`,
   `fn_count`, `long_functions`, `high_complexity_fns`: what fills
-  `v_function`, so a new project can answer "which functions are longest")
+  `v_function`, so a new project can answer "which functions are longest";
+  and `duplicate_lines`, what the Duplicated Code page reads)
   are used unless the project mentions them. The catalog row's `trigger` for a
   metric that names a collector is that collector's trigger label
   (`trigger_label(&Trigger)`);
@@ -2120,8 +2121,8 @@ metrics:                              # the read SPEC (the chartable metric)
     the request-outcome collector's script (foundation's) is held by
     fixtures in oxplow-foundation. Each metric
     names its collector (`collector: <id>`) and the collector declares its
-    `facts:`. Four are on by default (`oxplow.todos`, `fn_count`,
-    `high_complexity_fns`, `long_functions`); the other 12 say `default: off`
+    `facts:`. Five are on by default (`oxplow.todos`, `fn_count`,
+    `high_complexity_fns`, `long_functions`, `duplicate_lines`); the other 11 say `default: off`
     and a project turns one on with `metrics: - use: oxplow.<lang>.<name>`. A
     collector that metrics name runs only while one of them is on
     (`MetricsService::fact_collectors`). A collector's trigger is its own
@@ -2164,7 +2165,7 @@ metrics:                              # the read SPEC (the chartable metric)
       delta there). A clean tree records an empty capture, which clears the
       metric.
 
-    The four default-on code metrics run in every project, this repo
+    The five default-on code metrics run in every project, this repo
     included; its `.oxplow/project.yaml` turns on none of the idiom sets.
     With oxplow-bundled off nothing records them, and core's `v_function`
     (which reads their facts) is empty.
