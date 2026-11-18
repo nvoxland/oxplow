@@ -254,7 +254,9 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      `oxplow.vcs.commit`, whose answer has the commit's `rev`), `{ observe: { refs: { branches?: [{ name, head, stream?, … }], tags?, heads? } } }`
      (what the git indexer read of branches, tags and the stream's head; a
      `snapshot` also takes `revision` and `branch`), `{ observe: { visit: { page, kind?, label?, thread?, duration_ms? } } }` (a
-     page the person opened, as the shell records it), `{ observe: { facts: { measure, items: [{ value?, path?, line?, rule?, severity?, dims? }] } } }`
+     page the person opened, as the shell records it), `{ observe: { duplicates: { revision?, blocks: [{ path,
+     start_line, end_line, peer_path, peer_start_line, peer_end_line }] } } }` (a
+     finished duplicate-block scan, a finding on each side of each block), `{ observe: { facts: { measure, items: [{ value?, path?, line?, rule?, severity?, dims? }] } } }`
      (findings of a measure, as a collector's capture records them) and `{ observe: { retention: { days } } }` (the log's retention
      sweep as it runs that many days from now: payloads expire, envelopes
      stay);

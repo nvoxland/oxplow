@@ -1,0 +1,26 @@
+# The Metrics list shows a code metric the snapshot's scripts recorded under
+# its language's section, with its latest value; sliced by language, its
+# row opens onto the groups.
+given:
+  - observe:
+      facts:
+        measure: oxplow.todo
+        producer: oxplow.todos
+        items:
+          - { value: 1, path: src/a.rs, line: 3, dims: { oxplow.language: rust } }
+          - { value: 1, path: src/a.rs, line: 9, dims: { oxplow.language: rust } }
+          - { value: 1, path: web/b.ts, line: 1, dims: { oxplow.language: typescript } }
+steps:
+  - when: { page: oxplow/metrics-recorded, params: { range: all, q: TODO } }
+    expect:
+      loaders:
+        metrics:
+          rows:
+            - { key: oxplow.todos, section: General, latest: 3, no_data: null }
+  - when: { part: oxplow/metrics-slices, params: { key: oxplow.todos, unit: count, slice: oxplow.language, range: all } }
+    expect:
+      loaders:
+        metrics_slices:
+          rows:
+            - { title: rust, latest: 2 }
+            - { title: typescript, latest: 1 }

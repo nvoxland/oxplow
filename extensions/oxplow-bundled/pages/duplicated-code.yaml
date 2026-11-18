@@ -1,0 +1,72 @@
+title: Duplicated Code
+description: Blocks of code repeated elsewhere in the project, as the latest duplicate scans found them, the biggest first, each with the copy it repeats.
+icon: copy
+category: Code
+keywords: duplicate duplication copy paste clone quality
+answers:
+- question: Which code is duplicated in this project?
+- question: What are the biggest copied blocks, and where are their copies?
+see_also:
+- { page: oxplow/metric, params: { metric: oxplow.duplicate_lines } }
+loaders:
+  # A scan records a block on both sides; each pair is listed once, from
+  # the side that sorts first.
+  blocks:
+    sql: |
+      WITH found AS (
+        SELECT f.path, f.start_line, f.end_line,
+               json_extract(f.extra_json, '$.peerPath') AS peer,
+               json_extract(f.extra_json, '$.peerStartLine') AS peer_line,
+               json_extract(f.extra_json, '$.peerEndLine') AS peer_end,
+               s.revision AS version
+        FROM v_code_quality_finding f JOIN v_code_quality_scan s ON s.id = f.scan_id
+        WHERE f.kind = 'duplicate-block'
+      )
+      SELECT path, start_line, end_line - start_line + 1 AS lines, peer, peer_line,
+             path || ':' || start_line || '-' || end_line || '|' || peer || ':' || peer_line || '-' || peer_end AS pair,
+             version
+      FROM found
+      WHERE path < peer OR (path = peer AND start_line < peer_line)
+      GROUP BY path, start_line, peer, peer_line
+      ORDER BY lines DESC, path, start_line
+      LIMIT 200
+  summary:
+    sql: |
+      SELECT count(*) AS blocks, coalesce(sum(lines), 0) AS lines,
+             CASE WHEN count(*) = 0
+                  THEN 'No duplicated blocks found. oxplow scans the files of each change when it analyzes a change (a commit, a request, the uncommitted work), and lists here the blocks repeated elsewhere in the project.'
+                  ELSE printf('%d duplicated block%s, %,d lines in all.', count(*), CASE count(*) WHEN 1 THEN '' ELSE 's' END, sum(lines))
+             END AS summary
+      FROM blocks
+view:
+  stack:
+  - id: summary
+    title: Summary
+    hide_title: true
+    viz: markdown
+    from: summary
+    markdown: { text: summary }
+  - id: blocks
+    title: Duplicate Blocks
+    from: blocks
+    viz: table
+    columns:
+    - key: path
+      label: File
+      link:
+        kind: compare
+        from: pair
+        head: version
+    - key: start_line
+      label: Line
+    - key: lines
+      label: Lines
+      format: integer
+    - key: peer
+      label: Copy Of
+      link:
+        kind: file
+        line: peer_line
+    - key: peer_line
+      label: At line
+    empty: No duplicated blocks.

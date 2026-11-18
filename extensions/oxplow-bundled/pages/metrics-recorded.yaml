@@ -2,7 +2,14 @@ title: Metrics
 description: Every metric this project can record, by section, with its trend and its latest value against its target, over a time range and a branch.
 icon: bar-chart-3
 category: Data
-keywords: recorded catalog
+keywords: recorded catalog metrics code quality trend target
+answers:
+- question: Which metrics does this project record, and how is each one trending?
+  params: { range: 7d }
+- question: Which metrics are off their target?
+  params: { range: 30d }
+- question: How many TODO markers, long functions or complex functions does the code have?
+  params: { range: all, q: function }
 params:
 - name: q
   type: search

@@ -1,0 +1,20 @@
+# Duplicated Code lists each block a scan found once (not once per side),
+# the biggest first, with the copy it repeats and a compare link, under a
+# line that says how many blocks and lines.
+given:
+  - observe:
+      duplicates:
+        revision: abc1234
+        blocks:
+          - { path: src/a.rs, start_line: 10, end_line: 19, peer_path: src/b.rs, peer_start_line: 40, peer_end_line: 49 }
+          - { path: src/c.ts, start_line: 1, end_line: 30, peer_path: src/a.rs, peer_start_line: 100, peer_end_line: 129 }
+when: { page: oxplow/duplicated-code }
+expect:
+  loaders:
+    summary:
+      rows:
+        - { blocks: 2, lines: 40, summary: "2 duplicated blocks, 40 lines in all." }
+    blocks:
+      rows:
+        - { path: src/a.rs, start_line: 100, lines: 30, peer: src/c.ts, peer_line: 1, pair: "src/a.rs:100-129|src/c.ts:1-30", version: abc1234 }
+        - { path: src/a.rs, start_line: 10, lines: 10, peer: src/b.rs, peer_line: 40 }

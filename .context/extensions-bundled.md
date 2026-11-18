@@ -92,6 +92,21 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
 
 - **The knowledge metrics** (in `oxplow-bundled`). The `oxplow.knowledge_pages` collector restates the page counts (`knowledge.pages`, `knowledge.stale_pages`, sliced by `oxplow.knowledge_store` and `oxplow.knowledge_kind`) when a page of the model changes (`oxplow.knowledge_record.changed`) and when a snapshot changes a file a page cites (`snapshot.ref_drifted`); the `oxplow.request_read_knowledge` collector records, per stopped request that changed files, whether an agent read a page (`knowledge.read_requests`). Metrics: `knowledge.pages`, `knowledge.stale_pct`, `knowledge.read_requests_pct`. See `metrics.md` (knowledge pages, request read knowledge).
 - **The tracking metric** (in `oxplow-bundled`). The `oxplow.request_tracked` collector records, per stopped request that changed files, whether it has a task linked; the `tasks.tracked_requests_pct` metric is the share. See `metrics.md` (request tracked).
+- **Code metrics, the Metrics list and Duplicated Code** (in
+  `oxplow-bundled`). The 16 code metrics with their Starlark collectors
+  (`collectors/{code,rust,ts,clojure,csharp}/`) and the measures only they
+  write ([metrics.md](./metrics.md)); four are on by default. The
+  `metrics-recorded` page (the grouped list of every catalogued metric with
+  trend and latest value) and its row expander `metrics-slices`. Foundation
+  keeps one metric's pages (`metric`, `metric-data`, `measure`), which do not
+  link to the list, and the `metrics-dimensions` query (the `metric` page's
+  Slice by reads it; the list names it as `oxplow/metrics-dimensions`).
+  `duplicated-code` (Code) lists each duplicate block the change analyzer's
+  scans found once, biggest first, with its copy and a compare link
+  (`v_code_quality_finding`); the holder's Findings and Review pages, which
+  showed the same rows, were dropped. Fixtures: the collectors' own,
+  `the-metrics-list-*`, `a-metric-with-no-recordings-*`, `duplicated-code-*`
+  (a scan made with the fixture step `observe: duplicates`).
 - **Dashboards and Usage** (pages in `oxplow-bundled`). `dashboards` is the
   Dashboards index in the launcher's Data section: every dashboard page,
   most recently opened first, with its extension, who sees it and its opens
@@ -258,8 +273,7 @@ screens and the holder's add the review and analysis:
   definitions (the Extension page's tables, the definition pages' links to
   each other, the data catalog) links the same way, pinning the definition
   renderer, because the bare URI opens the data view.
-- **Review.** `review` and `quality`;
-  the code-quality `findings`; the `change-review` page (treemap,
+- **Change review.** The `change-review` page (treemap,
   look-here-first, functions, co-change) mounted in the
   `oxplow/diff-view.sections`, `commit.sections` and
   `uncommitted-changes.sections` slots. The duplicate scan runs in core's
@@ -288,14 +302,6 @@ screens and the holder's add the review and analysis:
   moved with the rest of the person-facing screens. Foundation has no build
   step, no `package.json` and no `node_modules`; its only custom component
   is the hand-written `integrations`.
-- **The Metrics list.** The `metrics-recorded` page (the grouped list of
-  every catalogued metric with trend and latest value) and its row expander
-  `metrics-slices`. Foundation keeps one metric's pages (`metric`,
-  `metric-data`, `measure`), which do not link to the list, and the
-  `metrics-dimensions` query (the `metric` page's Slice by reads it;
-  the list names it as `oxplow/metrics-dimensions`). People find
-  a metric from the launcher instead: `metric` and `measure` are
-  `searchable:` ([metrics.md](./metrics.md) "UI").
 - **The app's screens.** foundation's `alerts`,
   `catalog`, `comments`, `commit`,
   `diff`, `directory`, `file-viewer`, `markdown` (a `.md` file drawn), `media` (an image or a PDF shown), `csv` and `tsv` (a CSV or TSV file as a table), `data-file` (a JSON or YAML file as a tree of its values), `diagram` (a mermaid file drawn), `files` (the launcher's way into `directory`), `git-dashboard`,

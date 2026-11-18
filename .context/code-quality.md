@@ -26,8 +26,9 @@ for the user to install.
 > `list_code_quality_findings`, `read_endpoint_files_content`) are gone.
 > `crates/oxplow-app/src/change_analysis.rs` computes and stores each change
 > behind `v_change*` ([semantic-layer.md](./semantic-layer.md) → "Change
-> analysis"), and the oxplow-bundled `change-review` page shows it in
-> the `oxplow/commit.sections`, `oxplow/uncommitted.sections` and `oxplow/changes.sections` slots.
+> analysis"), and the holder's `change-review` part shows it in the
+> `oxplow/commit.sections`, `oxplow/uncommitted-changes.sections` and
+> `oxplow/diff-view.sections` slots.
 
 ## Per-function metrics (change analysis, not a persisted scan)
 
@@ -170,8 +171,8 @@ in the background. `DuplicationRecorder::record`
 - a `code_quality_scan` row (tool `duplication`, scope `change <id>`, the
   `revision` it read — `working`, `snap:<id>`, `git:<rev>` — and a
   path-list fingerprint) and its findings, read through
-  `v_code_quality_scan` / `v_code_quality_finding` (the oxplow-bundled
-  `findings` and `duplicate-blocks` pages);
+  `v_code_quality_scan` / `v_code_quality_finding` (oxplow-bundled's
+  Duplicated Code page, `duplicated-code`);
 - **stored in one write** (`SqliteCodeQualityStore::finish_scan_with_findings`):
   the findings, their `finding → file` page refs and the scan's `done`
   status commit together, so a scan announces one `DatasetsChanged`, not

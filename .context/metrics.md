@@ -802,7 +802,7 @@ welded to collection.
   **Additive** beside the old `metric_definition` (still FK-referenced by the V38
   `metric_sample`/`metric_finding`); the retire migration drops the V38
   cluster once reads flip. The migration seeds no rows; the code-metric
-  specs come from oxplow-foundation's `metrics:` (`oxplow.high_complexity_fns` /
+  specs come from oxplow-bundled's `metrics:` (`oxplow.high_complexity_fns` /
   `long_functions` / `fn_count` / `todos` — a `count` over its measure,
   thresholds via `min_value` — and the per-language idiom specs such as
   `oxplow.rust.unsafe_blocks`, a `Sum(oxplow.ast_hit)` filtered by
@@ -1169,9 +1169,9 @@ Landed:
 | lint hits | `collection.rs::mirror_analysis_metrics` | one `oxplow.lint_hit` fact per finding (severity/rule/detail columns + file location) |
 | coverage | `collection.rs::observe_coverage` | one `oxplow.coverage` fact per file (value=line-%, num/den=covered/instrumented → engine re-derives Σcov/Σinstr). **Branch + function coverage ** ride the SAME capture as extra per-file facts on `oxplow.coverage.branch` / `oxplow.coverage.function` (num/den=hit/found), emitted only for files whose report carried the counts (`*_found > 0`) and only when their spec is enabled (per-measure gate via `active_coverage_measure`). Specs: `oxplow.coverage.branch_pct` / `oxplow.coverage.function_pct` (ratio %, higher-better). **Untested files ** is a read-only spec `oxplow.coverage.untested_files` — a `count` over `oxplow.coverage` filtered `max_value: 0` (the new upper-bound `FactFilter` field, cube-ineligible like `min_value`), `findings` display so the drill-in lists which files, lower-better — no new collection |
 | test cases | `collection.rs::record_test_run` → `SqliteFactStore::record_test_run` | **change-only** per-case facts on `oxplow.test_case` (status as the `oxplow.status` dim, + `oxplow.test_suite`) and `oxplow.test_duration`: every **failure**, every run; a pass or skip only when the test is new on the branch or changed status; a duration when it moved more than `DURATION_MOVE_RATIO` (50%) **and** `DURATION_MOVE_MIN_MS` (20 ms) from the last one written (constants, not settings — a compression tolerance that changes no pass/fail number). The per-subject fold carries an unchanged test's last fact forward, so every `oxplow.tests.*` number is the same as recording all cases (durations within the tolerance). In the same transaction it upserts each case's `test_case_stat` row (`v_test_case_stat`: last status and duration, runs, failures, flips, last failed / passed, max and mean duration) — where per-test history lives. A replayed run (same idempotency key) changes nothing. Measured on sample usage: ~2.6% of per-case results are written. The request-outcome collector takes the request's runs from its run records, not its facts, since an all-green repeat run writes none. MCP-asserted counts (no report) synthesize status-sliced facts (no case identity). A report-less, count-less run records its capture under the **`test-run`** producer — a run RECORD, not a measurement: an empty `tests` capture would read as "found 0 tests" to the zero-fill/currency logic and collapse the semi-additive `oxplow.tests.*` timeline |
-| duplication | oxplow-foundation's collector `oxplow.duplicate_lines` — whole tree, after ref moves (paced: one scan of the latest tree once they settle for 60 s, at most every 15 min); the change analyzer's scoped scans record findings but no facts | one `oxplow.duplicate_lines` fact per side of each duplicate block (value=line count, subject=`block:path:start-end`); a `full` capture on the snapshot's stream. A zero-hit scan still writes its EMPTY capture (currency) — else the last non-empty scan's blocks stay "current" forever |
-| foundation code collectors | `metrics_service.rs::run_one_collector` → `record_collector_facts` | oxplow-foundation's code collectors return `facts`: one fact **per function** on `oxplow.complexity` (high_complexity_fns) / `oxplow.fn_length` (long_functions) / `oxplow.parameter_count` (fn_count), and one per marker on `oxplow.todo` (todos) — the raw grain, for **every** item, not just the offenders |
-| per-language idiom collectors | same path | the ~10 idiom collectors (`oxplow.rust.unsafe_blocks`, `oxplow.ts.any_usage`, `oxplow.csharp.empty_catch`, …) emit one **per-file** `oxplow.ast_hit` fact (value=the file's count, `rule`=the idiom slug, dims carrying the conformed `oxplow.language`); the metric is a `Sum(oxplow.ast_hit)` spec filtered by `dim_eq(oxplow.rule, <slug>)` (the foundation's `metrics:` entries) |
+| duplication | oxplow-bundled's collector `oxplow.duplicate_lines` — whole tree, after ref moves (paced: one scan of the latest tree once they settle for 60 s, at most every 15 min); the change analyzer's scoped scans record findings but no facts | one `oxplow.duplicate_lines` fact per side of each duplicate block (value=line count, subject=`block:path:start-end`); a `full` capture on the snapshot's stream. A zero-hit scan still writes its EMPTY capture (currency) — else the last non-empty scan's blocks stay "current" forever |
+| bundled code collectors | `metrics_service.rs::run_one_collector` → `record_collector_facts` | oxplow-bundled's code collectors return `facts` (on foundation's measures, which core's change analysis records too): one fact **per function** on `oxplow.complexity` (high_complexity_fns) / `oxplow.fn_length` (long_functions) / `oxplow.parameter_count` (fn_count), and one per marker on `oxplow.todo` (todos) — the raw grain, for **every** item, not just the offenders |
+| per-language idiom collectors | same path | the ~10 idiom collectors (`oxplow.rust.unsafe_blocks`, `oxplow.ts.any_usage`, `oxplow.csharp.empty_catch`, …) emit one **per-file** `oxplow.ast_hit` fact (value=the file's count, `rule`=the idiom slug, dims carrying the conformed `oxplow.language`); the metric is a `Sum(oxplow.ast_hit)` spec filtered by `dim_eq(oxplow.rule, <slug>)` (oxplow-bundled's `metrics:` entries) |
 
 #### OTEL token tracking
 
@@ -1918,7 +1918,7 @@ The mechanics behind those controls (unchanged by):
   "always on" class is retired: producers/extensions can be enabled/disabled just
   like code metrics. `catalog()` reads each row's `enabled` from config
   (`config_state`): a metric that says `default: off` is on only when a non-disabled `use:`
-  resolves it; the four default-on foundation metrics (`oxplow.todos`,
+  resolves it; the four default-on bundled metrics (`oxplow.todos`,
   `fn_count`, `long_functions`, `high_complexity_fns`: what fills
   `v_function`, so a new project can answer "which functions are longest")
   are used unless the project mentions them. The catalog row's `trigger` for a
@@ -2108,15 +2108,15 @@ metrics:                              # the read SPEC (the chartable metric)
   each extension by key, with the project's `use:` layering thresholds
   (collectors' owner is always an extension name):
   - **oxplow's code metrics** live in the bundled extension
-    **oxplow-bundled** (`.oxplow/extensions/oxplow-bundled-todo/extension.yaml`,
+    **oxplow-bundled** (`extensions/oxplow-bundled/extension.yaml`,
     `collectors:` and `metrics:`; scripts under
-    `.oxplow/extensions/oxplow-bundled-todo/collectors/<lang>/*.star`, `<lang>` being
+    `extensions/oxplow-bundled/collectors/<lang>/*.star`, `<lang>` being
     rust, ts, clojure, csharp, or `code` for the language-agnostic ones,
     embedded through `bundled_extensions.rs` like any bundled extension file).
     Nothing is built in: oxplow's own are this extension's. Their scope is `extension:oxplow-bundled`, their collector refs
     `collector:oxplow/<id>`. Each is authored through the **public**
     surface (`files()`/`ast_query()`) — no privileged Rust path — and verified by
-    fixtures in the extension (`.oxplow/extensions/oxplow-bundled-todo/fixtures/`);
+    fixtures in the extension (`extensions/oxplow-bundled/fixtures/`);
     the request-outcome collector's script (foundation's) is held by
     fixtures in oxplow-foundation. Each metric
     names its collector (`collector: <id>`) and the collector declares its
@@ -2133,7 +2133,7 @@ metrics:                              # the read SPEC (the chartable metric)
       RATIO of documented-public ÷ public over `code_metrics()`'s `has_doc`;
       measure `oxplow.doc_coverage`, V69, per-path; spec is a `ratio` %,
       higher-better, not a count). Declared with no
-      `language:`; the scripts (under the foundation's `collectors/code/`) sweep the
+      `language:`; the scripts (under oxplow-bundled's `collectors/code/`) sweep the
       `source_files()` reader and call a capability (`code_metrics()` /
       `markers()`), so the per-language knowledge lives in `oxplow-code-metrics`,
       not the metric. See "Language-agnostic capability layer" below.
@@ -2164,10 +2164,10 @@ metrics:                              # the read SPEC (the chartable metric)
       delta there). A clean tree records an empty capture, which clears the
       metric.
 
-    This repo dogfoods the language-idiom Rust/TS sets + all four unified code
-    metrics through `use:` entries in its own `.oxplow/project.yaml`. The
-    complexity/`code_metrics()`-backed collectors and the C# grammar
-    (`tree-sitter-c-sharp` → `Language::CSharp` in `oxplow-code-metrics`) landed in.
+    The four default-on code metrics run in every project, this repo
+    included; its `.oxplow/project.yaml` turns on none of the idiom sets.
+    With oxplow-bundled off nothing records them, and core's `v_function`
+    (which reads their facts) is empty.
   - **user-global** — `global_config_dir()/{metrics,measures,dimensions}/*.yaml`,
     shared across projects, hot-reloaded by the config watcher. Global
     measures are active everywhere automatically; a global *metric* is enabled
