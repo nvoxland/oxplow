@@ -41,6 +41,10 @@ pub struct AddInput {
     /// A piece of text: with it the item is text, from `uri` when given.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    /// The lines around `text`, when `uri` has no lines to read them back
+    /// from (a terminal's scrollback).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub around: Option<String>,
     /// The person's note: what they want done about it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
@@ -91,7 +95,8 @@ fn re_add(item: &ContextItem) -> CommandCall {
         name: ADD.into(),
         input: json!({
             "thread": ThreadId::new(item.thread_id).to_string(),
-            "uri": item.source_uri, "label": item.label, "text": item.text, "note": item.note,
+            "uri": item.source_uri, "label": item.label, "text": item.text,
+            "around": item.around, "note": item.note,
         }),
     }
 }
@@ -101,7 +106,7 @@ fn note_of(note: Option<String>) -> Option<String> {
     note.map(|n| n.trim().to_string()).filter(|n| !n.is_empty())
 }
 
-/// `add { thread, uri?, label?, text?, note? }`.
+/// `add { thread, uri?, label?, text?, around?, note? }`.
 pub fn add_op() -> Op {
     Op::new(
         CAPABILITY,
@@ -119,6 +124,7 @@ pub fn add_op() -> Op {
                     source_uri: input.uri.filter(|u| !u.trim().is_empty()),
                     label: input.label.filter(|l| !l.trim().is_empty()),
                     text: input.text.filter(|t| !t.trim().is_empty()),
+                    around: input.around.filter(|a| !a.trim().is_empty()),
                     note: note_of(input.note),
                 },
             )
@@ -322,7 +328,8 @@ mod tests {
 
     /// A note rides an add; `note` changes it while the item waits and
     /// undoes to the note before; removing an item and undoing that keeps
-    /// its note; a delivered item's note is refused.
+    /// its note and the lines around its text; a delivered item's note is
+    /// refused.
     #[tokio::test]
     async fn an_items_note_is_set_on_add_changed_and_undone() {
         let fx = services_with_thread().await;
@@ -334,7 +341,8 @@ mod tests {
                 &Actor::Human,
                 ADD,
                 json!({ "thread": thread, "uri": "oxplow:oxplow/file?path=a.rs#lines=1-2",
-                        "text": "fn a() {}", "note": "  handle the empty case  " }),
+                        "text": "fn a() {}", "around": "// a\nfn a() {}\n",
+                        "note": "  handle the empty case  " }),
                 false,
             )
             .await
@@ -410,6 +418,7 @@ mod tests {
             .unwrap();
         assert_eq!(back.len(), 1);
         assert_eq!(back[0].note.as_deref(), Some("keep me"));
+        assert_eq!(back[0].around.as_deref(), Some("// a\nfn a() {}\n"));
 
         let again = back[0].id;
         fx.svc

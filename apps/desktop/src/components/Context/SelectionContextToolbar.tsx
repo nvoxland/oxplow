@@ -13,10 +13,24 @@ export function SelectionContextToolbar({ root, uri }: { root: Element | null; u
   const { selection, clear } = useTextSelection(root);
   if (!selection) return null;
   const { rect, text } = selection;
-  const left = Math.min(Math.max(8, rect.left), window.innerWidth - 160);
-  const top = Math.max(8, rect.top - 38);
   return (
-    <div {...{ [SELECTION_UI_ATTR]: "" }} style={{ position: "fixed", left, top, zIndex: 1000 }}>
+    <SelectionContextButton
+      left={rect.left}
+      top={rect.top}
+      onAdd={() => {
+        void addToContext({ uri, text });
+        clear();
+      }}
+    />
+  );
+}
+
+/// The floating "Add to Context" button itself, above (`left`, `top`) in
+/// the viewport, kept on screen; the page's toolbar and the terminal's
+/// own selection (`TerminalSurface`) both float it.
+export function SelectionContextButton({ left, top, onAdd }: { left: number; top: number; onAdd: () => void }) {
+  return (
+    <div {...{ [SELECTION_UI_ATTR]: "" }} style={{ position: "fixed", left: Math.min(Math.max(8, left), window.innerWidth - 160), top: Math.max(8, top - 38), zIndex: 1000 }}>
       <button
         type="button"
         {...{ [SELECTION_UI_ATTR]: "" }}
@@ -25,8 +39,7 @@ export function SelectionContextToolbar({ root, uri }: { root: Element | null; u
         onMouseDown={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          void addToContext({ uri, text });
-          clear();
+          onAdd();
         }}
         style={buttonStyle}
       >

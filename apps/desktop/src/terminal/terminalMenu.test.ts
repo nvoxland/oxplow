@@ -27,6 +27,20 @@ test("with a selection: Copy, Paste and Add Selection to Context", () => {
   expect(did).toEqual(["copy:echo hi", "paste", `add:{"uri":"${URI}","text":"echo hi"}`]);
 });
 
+test("a selection's lines around it go with it", () => {
+  const did: string[] = [];
+  const items = terminalMenuItems({
+    selection: "echo hi",
+    around: "$ echo hi\nhi",
+    uri: URI,
+    copy: () => {},
+    paste: () => {},
+    add: (what) => did.push(JSON.stringify(what)),
+  });
+  void items[2]!.run?.();
+  expect(did).toEqual([JSON.stringify({ uri: URI, text: "echo hi", around: "$ echo hi\nhi" })]);
+});
+
 test("with no selection: Copy is greyed and Add to Context adds the terminal's page", () => {
   const did: string[] = [];
   const items = terminalMenuItems({ selection: "", uri: URI, copy: () => {}, paste: () => {}, add: (what) => did.push(JSON.stringify(what)) });

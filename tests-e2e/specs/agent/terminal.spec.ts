@@ -134,3 +134,31 @@ test("a second terminal from the strip is picked, renamed and closed", async ({ 
   await until("the close", 15_000, async () => (await rows()).length === 1);
   await expect(shown(page).getByTestId("terminal-tab-strip")).toHaveCount(0);
 });
+
+// A selection in the terminal floats Add to Context over it: the basket
+// gets the terminal's own selection (not what the browser selected in
+// xterm's rows) and the lines around it, which the scrollback can't give
+// back later.
+test("a terminal selection goes in the basket with the lines around it", async ({ page, daemon }) => {
+  await open(page, daemon, "oxplow:oxplow/page?page=terminal");
+  const terminal = page.locator(".xterm");
+  await expect(terminal).toBeVisible();
+  await terminal.click();
+  await page.keyboard.type("printf 'above\\n%s\\nbelow\\n' select-$((6*7))-here");
+  await page.keyboard.press("Enter");
+  // A row is the output line (the typed command holds `$((6*7))`, not 42).
+  const row = page.locator(".xterm-rows > div").filter({ hasText: /^\s*select-42-here\s*$/ });
+  await expect(row).toBeVisible();
+  // xterm takes the mouse on a layer over its rows: press where the row is.
+  const box = (await row.boundingBox())!;
+  await page.mouse.dblclick(box.x + 10, box.y + box.height / 2);
+  await page.getByTestId("selection-context-button").click();
+  await page.getByTestId("context-note-add").click();
+  await expect(page.getByTestId("dock-context-badge")).toHaveText("1");
+  const item = async () =>
+    (await ipc<{ rows: unknown[][] }>(daemon, "query_sql", { sql: "SELECT text, around FROM v_thread_context" })).rows;
+  await until("the item", 15_000, async () => (await item()).length === 1);
+  const [text, around] = (await item())[0] as [string, string];
+  expect(text).toBe("select-42-here");
+  expect(around).toContain("above\nselect-42-here\nbelow");
+});

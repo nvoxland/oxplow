@@ -9,14 +9,16 @@ import type { MenuItem } from "../menu.js";
 export interface TerminalMenuSources {
   /** The selected text; empty when none. */
   selection: string;
+  /** The lines around it (`terminalSelection.ts`). */
+  around?: string;
   /** The terminal's URI: what Add to Context names without a selection. */
   uri: string;
   copy(text: string): void;
   paste(): void;
-  add(what: { uri: string; text?: string }): void;
+  add(what: { uri: string; text?: string; around?: string }): void;
 }
 
-export function terminalMenuItems({ selection, uri, copy, paste, add }: TerminalMenuSources): MenuItem[] {
+export function terminalMenuItems({ selection, around, uri, copy, paste, add }: TerminalMenuSources): MenuItem[] {
   const selected = selection.length > 0;
   return [
     { id: "copy", label: "Copy", enabled: selected, run: () => copy(selection) },
@@ -26,7 +28,7 @@ export function terminalMenuItems({ selection, uri, copy, paste, add }: Terminal
       label: selected ? "Add Selection to Context" : "Add to Context",
       enabled: true,
       icon: "at-sign",
-      run: () => add(selected ? { uri, text: selection } : { uri }),
+      run: () => add(selected ? { uri, text: selection, ...(around ? { around } : {}) } : { uri }),
     },
   ];
 }

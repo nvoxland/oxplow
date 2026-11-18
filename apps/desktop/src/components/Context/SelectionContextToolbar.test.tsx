@@ -98,6 +98,19 @@ test("no toolbar over an editor's text, or text outside the page", async () => {
   expect(view.queryByTestId("selection-context-button")).toBeNull();
 });
 
+// A terminal keeps its own selection (xterm draws rows as text, but what
+// the browser selects there is not what the person highlighted): its own
+// button adds it (`TerminalSurface`), never this one.
+test("no toolbar over a terminal's rows", async () => {
+  const view = setup(
+    <div className="xterm">
+      <span data-testid="row">note</span>
+    </div>,
+  );
+  await select(view.getByTestId("row"));
+  expect(view.queryByTestId("selection-context-button")).toBeNull();
+});
+
 // `mock.module` outlives this file: put the real module back for the files that run after it.
 afterAll(() => {
   mock.module("../../contextBasket.js", () => realBasket);

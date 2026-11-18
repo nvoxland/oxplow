@@ -293,9 +293,20 @@ opened by `TerminalSurface` on the surface's `contextmenu`; the global
 suppressor no longer exempts xterm, so the OS menu never shows): **Copy**
 (the selection; greyed without one), **Paste** (`readClipboard` →
 `term.paste`, the same path as Cmd+V) and **Add Selection to Context**
-(the selected text, with the terminal's URI as its source) — or, with
+(the selected text, with the terminal's URI as its source, and the lines
+around it: `terminal/terminalSelection.ts`) — or, with
 nothing selected, **Add to Context** for the terminal's own page (the
 session). The entry wears the `at-sign` icon as every Add to Context does.
+
+A selection also floats **Add to Context** where the press that made it
+let go (`SelectionContextButton`, the page toolbar's own button), adding
+the same thing. The page's selection toolbar (`useTextSelection`) skips
+`.xterm`: xterm draws its rows as DOM text, but what the browser selects
+there is not the terminal's selection (it once added a stray word). The
+scrollback has no address an agent can read back, so a terminal selection
+always carries the rows around it (`linesAround`: three either side, a
+wrapped row joined to the row it continues, blank edges dropped) as the
+item's `around`.
 
 ## Paste path and input ordering
 

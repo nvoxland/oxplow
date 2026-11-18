@@ -741,17 +741,14 @@ pub fn basket_block(items: &[oxplow_db::thread_context_store::ContextItem]) -> S
                     .as_deref()
                     .map(|u| format!(" from {}", prompt_refs::uri_mention(u)))
                     .unwrap_or_default();
-                let mut text = text.clone();
-                if text.len() > BASKET_TEXT_IN_CONTEXT {
-                    let mut end = BASKET_TEXT_IN_CONTEXT;
-                    while !text.is_char_boundary(end) {
-                        end -= 1;
-                    }
-                    text.truncate(end);
-                    text.push_str("\n… (cut; read the rest where it came from)");
+                let mut entry = format!("Text{from}{label}:\n{}", fenced(text, ""));
+                if let Some(around) = &item.around {
+                    entry.push_str(&format!(
+                        "   Selected from these lines:\n{}",
+                        fenced(around, "   ")
+                    ));
                 }
-                let fence = if text.contains("```") { "````" } else { "```" };
-                format!("Text{from}{label}:\n{fence}\n{text}\n{fence}\n")
+                entry
             }
             _ => continue,
         };
@@ -766,6 +763,27 @@ pub fn basket_block(items: &[oxplow_db::thread_context_store::ContextItem]) -> S
         }
     }
     s.push_str("</context-basket>");
+    s
+}
+
+/// `text` in a code fence, cut at `BASKET_TEXT_IN_CONTEXT`, every line
+/// led by `indent` (under a list item).
+fn fenced(text: &str, indent: &str) -> String {
+    let mut text = text.trim_end_matches('\n').to_string();
+    if text.len() > BASKET_TEXT_IN_CONTEXT {
+        let mut end = BASKET_TEXT_IN_CONTEXT;
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        text.truncate(end);
+        text.push_str("\n… (cut; read the rest where it came from)");
+    }
+    let fence = if text.contains("```") { "````" } else { "```" };
+    let mut s = format!("{indent}{fence}\n");
+    for line in text.lines() {
+        s.push_str(&format!("{indent}{line}\n"));
+    }
+    s.push_str(&format!("{indent}{fence}\n"));
     s
 }
 
@@ -1235,6 +1253,7 @@ mod tests {
                     source_uri: Some(uri.into()),
                     label: label.map(Into::into),
                     text: text.map(Into::into),
+                    around: None,
                     note: note.map(Into::into),
                     added_at: "2026-11-18T00:00:00Z".into(),
                     delivered_at: None,
@@ -1283,6 +1302,33 @@ mod tests {
         assert!(
             !plain.contains("notes"),
             "no note, no word about notes: {plain}"
+        );
+    }
+
+    /// A text from a place with no lines to read back (a terminal) brings
+    /// the lines around it, fenced under the item before its note.
+    #[test]
+    fn a_text_items_lines_around_it_follow_it() {
+        use oxplow_db::thread_context_store::{ContextItem, ContextKind};
+        let block = basket_block(&[ContextItem {
+            id: 1,
+            thread_id: 1,
+            kind: ContextKind::Text,
+            source_uri: Some("oxplow:oxplow/agent_session?id=ses3".into()),
+            label: None,
+            text: Some("124 of 124".into()),
+            around: Some("Checks:\n- e2e: the full suite passes, 124 of 124".into()),
+            note: Some("Which suite?".into()),
+            added_at: "2026-11-18T00:00:00Z".into(),
+            delivered_at: None,
+        }]);
+        assert!(
+            block.contains(
+                "1. Text from [oxplow uri oxplow:oxplow/agent_session?id=ses3]:\n```\n124 of 124\n```\n   \
+                 Selected from these lines:\n   ```\n   Checks:\n   - e2e: the full suite passes, 124 of 124\n   ```\n   \
+                 Note: Which suite?\n</context-basket>"
+            ),
+            "{block}"
         );
     }
 

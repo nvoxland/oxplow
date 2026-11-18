@@ -120,6 +120,8 @@ export interface ContextWhat {
   uri?: string | null;
   label?: string | null;
   text?: string | null;
+  /** The lines around `text`, when `uri` has none to read back (a terminal). */
+  around?: string | null;
 }
 
 /** What `oxplow.context.add` takes for a page, or for text (from a page),
@@ -131,6 +133,7 @@ export function addInput(threadId: string, what: ContextWhat, note?: string | nu
     ...(what.uri ? { uri: what.uri } : {}),
     ...(what.label ? { label: what.label } : {}),
     ...(what.text ? { text: what.text } : {}),
+    ...(what.text && what.around ? { around: what.around } : {}),
     ...(trimmed ? { note: trimmed } : {}),
   };
 }

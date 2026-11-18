@@ -1008,7 +1008,9 @@ commands) rides the next prompt of *any* agent in the thread as a
 `<context-basket>` block after the handoffs (`agent_context::basket_block`):
 numbered items, each page as `[oxplow uri …]` with its label, each piece of
 text quoted (up to `BASKET_TEXT_IN_CONTEXT` characters) with where it came
-from, and the person's note on an item (`note`, never cut) indented under it.
+from; a text whose source has no lines to read back (a terminal) brings its
+`around` in a second fence under "Selected from these lines:", so the agent
+tells the selection from its surroundings; and the person's note on an item (`note`, never cut) indented under it.
 When any item has a note, the header tells the agent to act on each and
 answer by number. A note is the person's remark about a place; it is
 delivered with the item, so it never has to follow its quote as the code moves.

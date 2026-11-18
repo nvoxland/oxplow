@@ -1852,7 +1852,9 @@ V107. A thread's context basket: what the person collected for the
 thread's agents while exploring. `kind` is `page` (`source_uri` the page's
 canonical URI) or `text` (`text`, from `source_uri` when known). `note`
 (V44) is the person's own words on it, what they want done about it; it
-can change only while the row waits (`set_note_tx`). The next
+can change only while the row waits (`set_note_tx`). `around` (V46) is
+the lines around a `text` whose source has no lines to read back (a
+terminal's scrollback), so the agent sees what the selection was part of. The next
 prompt to any agent in the thread carries every row with no
 `delivered_at` and stamps `delivered_at` / `delivered_session_id`
 (`agent-model.md` "The context basket"); delivered rows stay as a record.

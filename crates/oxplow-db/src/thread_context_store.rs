@@ -3,7 +3,8 @@
 //! to any agent in the thread carries every undelivered item and stamps it
 //! delivered (`oxplow_app::agent_context`). Read through
 //! `v_thread_context`; every write is an `oxplow.context.*` command over
-//! these `_tx` cores. Its note is `V44__context_note.sql`'s.
+//! these `_tx` cores. Its note is `V44__context_note.sql`'s, the lines
+//! around a text `V46__context_around.sql`'s.
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -47,6 +48,9 @@ pub struct ContextItem {
     pub source_uri: Option<String>,
     pub label: Option<String>,
     pub text: Option<String>,
+    /// The lines around `text`, when where it came from has no lines to
+    /// read back (a terminal).
+    pub around: Option<String>,
     /// What the person wants done about it, in their words.
     pub note: Option<String>,
     pub added_at: String,
@@ -59,6 +63,7 @@ pub struct NewItem {
     pub source_uri: Option<String>,
     pub label: Option<String>,
     pub text: Option<String>,
+    pub around: Option<String>,
     pub note: Option<String>,
 }
 
@@ -71,6 +76,7 @@ fn row_to_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<ContextItem> {
         source_uri: row.get("source_uri")?,
         label: row.get("label")?,
         text: row.get("text")?,
+        around: row.get("around")?,
         note: row.get("note")?,
         added_at: row.get("added_at")?,
         delivered_at: row.get("delivered_at")?,
@@ -90,14 +96,15 @@ pub fn add_tx(conn: &Connection, thread: ThreadId, item: &NewItem) -> Result<i64
         }
     };
     conn.execute(
-        "INSERT INTO thread_context_item (thread_id, kind, source_uri, label, text, note, added_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO thread_context_item (thread_id, kind, source_uri, label, text, around, note, added_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
             thread.value(),
             kind.as_str(),
             item.source_uri,
             item.label,
             item.text,
+            item.around,
             item.note,
             ts_to_string(Timestamp::now())
         ],
@@ -370,6 +377,33 @@ mod tests {
             .transaction(move |tx| set_note_tx(tx, id, Some("too late")))
             .await;
         assert!(delivered.is_err(), "a delivered item's note is a record");
+    }
+
+    /// A text item from a place with no lines to read back (a terminal)
+    /// keeps the lines around it.
+    #[tokio::test]
+    async fn a_text_item_keeps_the_lines_around_it() {
+        let (db, thread) = with_thread().await;
+        let id = db
+            .transaction(move |tx| {
+                add_tx(
+                    tx,
+                    thread,
+                    &NewItem {
+                        source_uri: Some("oxplow:oxplow/agent_session?id=ses1".into()),
+                        text: Some("124 of 124".into()),
+                        around: Some("Checks:\n- e2e: the full suite passes, 124 of 124\n".into()),
+                        ..NewItem::default()
+                    },
+                )
+            })
+            .await
+            .unwrap();
+        let item = db.read(move |c| get_tx(c, id)).await.unwrap().unwrap();
+        assert_eq!(
+            item.around.as_deref(),
+            Some("Checks:\n- e2e: the full suite passes, 124 of 124\n")
+        );
     }
 
     /// Delivered items leave the basket; clear and remove take only what

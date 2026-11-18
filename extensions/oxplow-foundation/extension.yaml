@@ -981,7 +981,7 @@ commands:
     example: {"uri": "oxplow:oxplow/page?page=git-dashboard", "thread": "thr3"}
   # context.write — the person's context basket for a thread's agents.
   - name: context.add
-    summary: "Put a page (`uri`) or a piece of text (`text`, from `uri` when known) in a thread's context basket, with an optional `note` of what the person wants done about it. The next prompt to any agent in that thread carries everything waiting there, each note with its item, then the basket is empty. The person's: an agent can't add to it."
+    summary: "Put a page (`uri`) or a piece of text (`text`, from `uri` when known, with the lines `around` it when `uri` has none to read back, as a terminal) in a thread's context basket, with an optional `note` of what the person wants done about it. The next prompt to any agent in that thread carries everything waiting there, each note with its item, then the basket is empty. The person's: an agent can't add to it."
     scope: context.write
     op: add
     example: {"thread": "thr1", "uri": "oxplow:oxplow/file?path=src/a.rs#lines=10-20", "text": "fn a() {}", "note": "This should handle an empty list."}

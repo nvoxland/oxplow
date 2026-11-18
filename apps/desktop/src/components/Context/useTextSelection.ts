@@ -6,7 +6,10 @@
 // empty, starts inside `root`, and is outside an editor or a field: text
 // in an input, a textarea, a contenteditable (the markdown editor) or
 // Monaco is that surface's own, with its own menu — the same carve-out as
-// the native context menu (`context-menu.ts`). Escape forgets it.
+// the native context menu (`context-menu.ts`). So is a terminal's: xterm
+// draws its rows as text, but what the browser selects there is not what
+// the person highlighted; the terminal's own button adds that
+// (`TerminalSurface`). Escape forgets it.
 
 import { useCallback, useEffect, useState } from "react";
 
@@ -32,7 +35,8 @@ export function readSelection(root: Element): TextSelection | null {
   if (!text) return null;
   const range = sel.getRangeAt(0);
   if (!root.contains(range.startContainer)) return null;
-  if (!shouldSuppressContextMenu(describeChain(range.startContainer))) return null;
+  const chain = describeChain(range.startContainer);
+  if (!shouldSuppressContextMenu(chain) || chain.some((n) => n.classes.includes("xterm"))) return null;
   return { text, rect: range.getBoundingClientRect() };
 }
 

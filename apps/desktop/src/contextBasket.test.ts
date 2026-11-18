@@ -31,6 +31,8 @@ test("the basket reads its rows; only the undelivered ones wait", () => {
 test("a page and a text are both one add, with only what is set", () => {
   expect(addInput("thr1", { uri: "oxplow:oxplow/page?page=tasks", label: "Tasks" })).toEqual({ thread: "thr1", uri: "oxplow:oxplow/page?page=tasks", label: "Tasks" });
   expect(addInput("thr1", { uri: "u", text: "t", label: "" })).toEqual({ thread: "thr1", uri: "u", text: "t" });
+  // A terminal's selection brings the lines around it.
+  expect(addInput("thr1", { uri: "u", text: "t", around: "a\nt\nb" })).toEqual({ thread: "thr1", uri: "u", text: "t", around: "a\nt\nb" });
   // A note goes with it when there is one, trimmed; a blank one is none.
   expect(addInput("thr1", { uri: "u" }, "  Rename it.  ")).toEqual({ thread: "thr1", uri: "u", note: "Rename it." });
   expect(addInput("thr1", { uri: "u" }, "   ")).toEqual({ thread: "thr1", uri: "u" });
