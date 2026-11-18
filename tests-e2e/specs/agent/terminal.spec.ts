@@ -162,3 +162,39 @@ test("a terminal selection goes in the basket with the lines around it", async (
   expect(text).toBe("select-42-here");
   expect(around).toContain("above\nselect-42-here\nbelow");
 });
+
+// A right-click keeps the selection: the menu's Add Selection to
+// Context adds what was dragged across, not the word under the pointer
+// (xterm's `rightClickSelectsWord`, on by default on macOS, is off).
+test("a right-click adds the whole dragged selection, not the word under it", async ({ page, daemon }) => {
+  await open(page, daemon, "oxplow:oxplow/page?page=terminal");
+  const terminal = page.locator(".xterm");
+  await expect(terminal).toBeVisible();
+  await terminal.click();
+  await page.keyboard.type("printf '%s\\n' drag-$((6*7))-across-these-words");
+  await page.keyboard.press("Enter");
+  const row = page.locator(".xterm-rows > div").filter({ hasText: /^\s*drag-42-across-these-words\s*$/ });
+  await expect(row).toBeVisible();
+  const box = (await row.boundingBox())!;
+  const text = await row.evaluate((el) => (el.textContent ?? "").trimEnd().length);
+  const charWidth = await row.evaluate((el) => {
+    const r = document.createRange();
+    r.selectNodeContents(el);
+    return r.getBoundingClientRect().width / Math.max(1, (el.textContent ?? "").length);
+  });
+  const y = box.y + box.height / 2;
+  await page.mouse.move(box.x + 1, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + charWidth * text - 1, y, { steps: 5 });
+  await page.mouse.up();
+  // Over a word of another row: xterm would select that word in its place
+  // when it judges the press outside the selection (as the app's zoom made
+  // it judge a press inside one).
+  await page.mouse.click(box.x + charWidth * 3, y - box.height, { button: "right" });
+  await page.getByTestId("menu-item-add-to-context").click();
+  await page.getByTestId("context-note-add").click();
+  const item = async () =>
+    (await ipc<{ rows: unknown[][] }>(daemon, "query_sql", { sql: "SELECT text FROM v_thread_context" })).rows;
+  await until("the item", 15_000, async () => (await item()).length === 1);
+  expect(((await item())[0] as [string])[0]).toBe("drag-42-across-these-words");
+});

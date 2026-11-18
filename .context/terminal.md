@@ -297,6 +297,10 @@ suppressor no longer exempts xterm, so the OS menu never shows): **Copy**
 around it: `terminal/terminalSelection.ts`) — or, with
 nothing selected, **Add to Context** for the terminal's own page (the
 session). The entry wears the `at-sign` icon as every Add to Context does.
+`rightClickSelectsWord` is off: xterm's macOS default replaces the
+selection with the word under the pointer when it judges the press outside
+the selection (it misjudged presses inside one in the app), so the menu
+added a single word.
 
 A selection also floats **Add to Context** where the press that made it
 let go (`SelectionContextButton`, the page toolbar's own button), adding

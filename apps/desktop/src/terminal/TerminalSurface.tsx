@@ -213,6 +213,10 @@ export function TerminalSurface({
       scrollSensitivity: 2,
       fastScrollSensitivity: 4,
       scrollOnUserInput: true,
+      // A right-click opens the menu over the selection as it is: xterm's
+      // default on macOS selects the word under the pointer when it judges
+      // the press outside the selection, and the menu then added that word.
+      rightClickSelectsWord: false,
     });
     termRef.current = term;
     const fit = new FitAddon();
