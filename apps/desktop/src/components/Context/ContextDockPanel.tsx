@@ -178,7 +178,7 @@ export function ContextDockBody(_props: DockBodyProps) {
               <div data-testid="context-panel-thread" style={sectionTitle}>
                 {THREAD_BASKET}
               </div>
-              {baskets.own.length === 0 ? <div style={{ color: "var(--text-muted)" }}>Nothing yet</div> : list(baskets.own)}
+              {baskets.own.length === 0 ? (adding ? null : <div style={{ color: "var(--text-muted)" }}>Nothing yet</div>) : list(baskets.own)}
               {baskets.own.length > 0 ? (
                 <div style={{ display: "flex", marginTop: 2 }}>
                   <button type="button" className="ox-button" style={dockButtonStyle} data-testid="context-panel-clear" title="Take everything out of This Thread" onClick={() => void clearContext({ thread })}>

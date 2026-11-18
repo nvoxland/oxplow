@@ -101,46 +101,46 @@ export function ContextAddCard({ add, baskets }: { add: PendingAdd; baskets: Bas
         onChange={(e) => updatePendingAdd({ note: e.target.value })}
         style={{ ...inputStyle, resize: "vertical" }}
       />
-      <div role="radiogroup" aria-label="To" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
-        <span style={{ color: "var(--text-muted)", marginRight: 2 }}>To</span>
-        <Chip value={THREAD_MARK} choice={choice} disabledReason={add.thread ? null : "Select a thread first"}>
-          {THREAD_BASKET}
-        </Chip>
-        {names.map((n) => (
-          <Chip key={n} value={n} choice={choice}>
-            {n}
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+        <div role="radiogroup" aria-label="To" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, flex: "1 1 auto", minWidth: 0 }}>
+          <span style={{ color: "var(--text-muted)", marginRight: 2 }}>To</span>
+          <Chip value={THREAD_MARK} choice={choice} disabledReason={add.thread ? null : "Select a thread first"}>
+            {THREAD_BASKET}
           </Chip>
-        ))}
-        {choice === NEW_MARK ? (
-          <input
-            ref={nameField}
-            data-testid="context-note-new-basket"
-            aria-label="New basket's name"
-            placeholder="New basket's name"
-            value={add.newName}
-            maxLength={60}
-            onChange={(e) => updatePendingAdd({ newName: e.target.value })}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) {
-                e.preventDefault();
-                submit();
-              } else if (e.key === "Escape" && names.length + (add.thread ? 1 : 0) > 0) {
-                // Back to the choices; with nothing else to pick, Escape drops the add.
-                e.preventDefault();
-                e.stopPropagation();
-                updatePendingAdd({ choice: start === NEW_MARK ? THREAD_MARK : start });
-              }
-            }}
-            style={{ ...inputStyle, flex: "1 1 140px", padding: "3px 8px" }}
-          />
-        ) : (
-          <Chip value={NEW_MARK} choice={choice}>
-            + New basket
-          </Chip>
-        )}
-      </div>
-      <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8 }}>
-        <span style={{ flex: 1, color: "var(--text-muted)" }}>{formatShortcut("Ctrl/Cmd+Enter")} adds</span>
+          {names.map((n) => (
+            <Chip key={n} value={n} choice={choice}>
+              {n}
+            </Chip>
+          ))}
+          {choice === NEW_MARK ? (
+            <input
+              ref={nameField}
+              data-testid="context-note-new-basket"
+              aria-label="New basket's name"
+              placeholder="New basket's name"
+              value={add.newName}
+              maxLength={60}
+              onChange={(e) => updatePendingAdd({ newName: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) {
+                  e.preventDefault();
+                  submit();
+                } else if (e.key === "Escape" && names.length + (add.thread ? 1 : 0) > 0) {
+                  // Back to the choices; with nothing else to pick, Escape drops the add.
+                  e.preventDefault();
+                  e.stopPropagation();
+                  updatePendingAdd({ choice: start === NEW_MARK ? THREAD_MARK : start });
+                }
+              }}
+              style={{ ...inputStyle, flex: "1 1 140px", padding: "3px 8px" }}
+            />
+          ) : (
+            <Chip value={NEW_MARK} choice={choice}>
+              + New basket
+            </Chip>
+          )}
+        </div>
+        <span style={{ color: "var(--text-muted)", marginLeft: "auto" }}>{formatShortcut("Ctrl/Cmd+Enter")} adds</span>
         <button type="button" className="ox-button" data-testid="context-note-cancel" onClick={() => cancelAddToContext()}>
           Cancel
         </button>
@@ -186,8 +186,10 @@ const cardStyle: CSSProperties = {
   gap: 8,
   padding: 10,
   marginBottom: 6,
+  // The panel keeps its full width; the card holds a note's worth.
+  maxWidth: 680,
   background: "var(--surface-card)",
-  border: "1px solid var(--accent)",
+  border: "1px solid var(--border-subtle)",
   borderRadius: 6,
   fontSize: "var(--text-xs)",
 };
