@@ -110,6 +110,10 @@ silently skipped.
    (so `oxplow.duplicate_lines` and a changed file's scoped scan lose
    no region); records share their file's path (`Arc<str>`) rather
    than each holding a copy.
+   A region inside a closure is in two functions at once (the closure
+   and the one around it), so two function pairs can hold the same two
+   ranges: the result keeps one block per pair of ranges
+   (`a_copy_inside_a_closure_is_one_block`).
 4. Filter by `min_lines` (default 5) and `min_nodes` (default 30
    AST nodes). The line floor is aggressive on purpose — function-
    anchoring + the node-count floor already filter top-level

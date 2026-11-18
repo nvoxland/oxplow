@@ -1378,7 +1378,10 @@ drain `oxplow.metric.rebuild` uses), so a file written a moment ago is in what
 the collector reads rather than waiting for the watcher's quiet trigger (3 s after
 the last change). Nothing changed since the latest snapshot → `request_snapshot`
 takes none and the latest is read. Pinned by `collector_sync_sees_a_file_written_just_before_it` (see
-"Producers" below and [commands.md](./commands.md)).
+"Producers" below and [commands.md](./commands.md)). A per-path collector reads that snapshot's own
+files; a `whole_tree: true` one reads the whole tree as of it and records a
+`full` capture, as its ref-move run does (it restates the tree, so a slice
+would read as everything else gone): `a_whole_tree_collector_run_by_hand_reads_the_whole_tree`.
 
 A stream defaults to the caller's, else the primary; an agent may only
 name its own.

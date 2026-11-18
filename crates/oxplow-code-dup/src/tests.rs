@@ -1135,3 +1135,37 @@ const PINNED_V1: &[(u64, u32, u32, u32)] = &[
     (12028981030681832557, 43, 7, 11),
     (378789080419906373, 41, 7, 11),
 ];
+
+/// A copy inside a closure sits in two functions at once (the closure and
+/// the function around it): it is still one block, reported once.
+#[test]
+fn a_copy_inside_a_closure_is_one_block() {
+    let body = |name: &str, before: &str| {
+        format!(
+            "async fn {name}() {{\n    {before}\n    let ctx = |snapshot_id: i64| CollectorRunContext {{\n        excluded: Arc::default(),\n        stream_val: 1,\n        thread_id: None,\n        trigger: \"on-snapshot\",\n        snapshot_id: Some(snapshot_id),\n        closest_vcs_rev: None,\n        vcs_rev_exact: false,\n        branch: None,\n        turn_id: None,\n        scan_kind: \"delta\",\n        event: None,\n        run: RunContext::core(Actor::System, Mode::External),\n    }};\n    run(ctx(1)).await;\n}}\n"
+        )
+    };
+    let files = vec![(
+        "src/a.rs".to_string(),
+        format!(
+            "{}\n{}\n{}",
+            body("first", "let a = fixture().await;"),
+            body("second", "seed(&svc, vec![1, 2], true).await;"),
+            body("third", "let b = other();"),
+        ),
+    )];
+    let blocks = detect_duplicates(files, detect_opts());
+    assert!(!blocks.is_empty(), "the copy is found");
+    let mut seen = std::collections::HashSet::new();
+    for b in &blocks {
+        let key = (
+            b.a_path.clone(),
+            b.a_start_line,
+            b.a_end_line,
+            b.b_path.clone(),
+            b.b_start_line,
+            b.b_end_line,
+        );
+        assert!(seen.insert(key), "reported twice: {b:?}");
+    }
+}

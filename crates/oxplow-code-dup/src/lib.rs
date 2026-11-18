@@ -625,6 +625,19 @@ fn pair_up(subtrees: Vec<SubtreeRef>, _opts: DupOptions) -> Vec<DuplicateBlock> 
             .then_with(|| x.a_start_line.cmp(&y.a_start_line))
             .then_with(|| x.b_path.cmp(&y.b_path))
             .then_with(|| x.b_start_line.cmp(&y.b_start_line))
+            .then_with(|| x.a_end_line.cmp(&y.a_end_line))
+            .then_with(|| x.b_end_line.cmp(&y.b_end_line))
+    });
+    // A region inside a closure is in two functions at once (the closure
+    // and the one around it), so two function pairs can hold the same two
+    // ranges: they are one block.
+    out.dedup_by(|x, y| {
+        x.a_path == y.a_path
+            && x.a_start_line == y.a_start_line
+            && x.a_end_line == y.a_end_line
+            && x.b_path == y.b_path
+            && x.b_start_line == y.b_start_line
+            && x.b_end_line == y.b_end_line
     });
     out
 }

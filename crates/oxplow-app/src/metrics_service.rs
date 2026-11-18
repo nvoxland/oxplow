@@ -1593,13 +1593,26 @@ impl MetricsService {
             .await
             .ok()
             .flatten();
-        let files = self.snapshot_files(snapshot_id, "collector run").await;
+        // A whole-tree collector restates the tree, so it reads all of it as
+        // of the snapshot, as its ref-move run does; the rest read the
+        // snapshot's own files.
+        let files = match snapshot_id {
+            Some(id) if metric.whole_tree => {
+                let corpus = self.build_full_file_map(id).await;
+                corpus.warn_if_excluded("collector run (whole tree)");
+                Arc::new(corpus.files)
+            }
+            _ => self.snapshot_files(snapshot_id, "collector run").await,
+        };
         // Asked for explicitly: say why it can't run (an unapproved program,
         // a missing script) instead of quietly recording nothing.
         let mut ctx = self
             .snapshot_context(stream_val, None, "manual", snapshot_id.unwrap_or(0))
             .await;
         ctx.run = run.clone();
+        if metric.whole_tree {
+            ctx.scan_kind = "full";
+        }
         let runner = match self.fact_runner(&metric) {
             Ok(r) => r,
             Err(e) => {
@@ -3320,6 +3333,59 @@ mod tests {
         let id = env.id.clone();
         svc.event_log_store.append(env).await.unwrap();
         svc.event_log_store.get(id).await.unwrap().unwrap()
+    }
+
+    /// A whole-tree collector run by hand (`oxplow.collector.sync`) reads the
+    /// whole tree as of the latest snapshot, as its ref-move run does, not
+    /// just the files that snapshot recorded: its capture restates the tree.
+    #[tokio::test]
+    async fn a_whole_tree_collector_run_by_hand_reads_the_whole_tree() {
+        const BODY: &str = "pub fn compute(input: &[i64]) -> i64 {\n\
+            \x20   let mut total = 0;\n\
+            \x20   for value in input {\n\
+            \x20       if *value > 0 {\n\
+            \x20           total += *value;\n\
+            \x20       } else {\n\
+            \x20           total -= *value;\n\
+            \x20       }\n\
+            \x20   }\n\
+            \x20   total * 2 + 1\n\
+            }\n";
+        let (svc, _dir) = fixture().await;
+        svc.config.write().unwrap().metrics.push(MetricEntry {
+            use_key: Some("code_metrics.duplicate_lines".into()),
+            ..Default::default()
+        });
+        crate::test_fixtures::activate_with_problems(&svc).await;
+        // The copy's two sides were recorded by different snapshots: the
+        // latest holds only one of them.
+        snapshot_with_content(&svc, &[("src/a.rs", Some(BODY))]).await;
+        snapshot_with_content(&svc, &[("src/b.rs", Some(BODY))]).await;
+        let facts = svc
+            .metrics
+            .run_collector_by_key(
+                crate::test_fixtures::CODE_METRICS_NS,
+                "code_metrics.duplicate_lines",
+                None,
+                &RunContext::core(Actor::Human, Mode::External),
+            )
+            .await
+            .unwrap();
+        assert_eq!(facts, 2, "both sides of the copy, across the whole tree");
+        let scan_kind: String = svc
+            .db
+            .read(|c| {
+                c.query_row(
+                    "SELECT scan_kind FROM metric_capture
+                      WHERE producer = 'code_metrics.duplicate_lines' ORDER BY id DESC LIMIT 1",
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(scan_kind, "full");
     }
 
     /// A burst of ref moves (a commit, a rebase, a restart's catch-up of
